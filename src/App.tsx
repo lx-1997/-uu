@@ -1,171 +1,224 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
+import './styles.css';
 
-type WidgetType = 'home' | 'hardware' | 'flash' | 'openclaw' | 'examples';
+// Mock Multi-Device Data
+const MOCK_DEVICES = [
+  { id: '1', name: 'RDK X3 - Local', status: 'online', ip: '192.168.1.100' },
+  { id: '2', name: 'RDK Ultra - Lab', status: 'offline', ip: '192.168.1.105' },
+];
 
 export default function App() {
-  const [activeWidget, setActiveWidget] = useState<WidgetType>('home');
-  const [inputVal, setInputVal] = useState('');
+  const [activeDevice, setActiveDevice] = useState(MOCK_DEVICES[0].id);
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'flasher', 'terminal', 'settings'
+  const [cmd, setCmd] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
 
-  const dispatchAction = (cmd: string) => {
+  // Handle AI Command (Contextual)
+  const handleCommand = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!cmd.trim()) return;
-    setInputVal('');
     
-    // Simulate natural AI thinking time
-    setLoadingMsg(`Processing: ${cmd}...`);
-    setActiveWidget('home'); // Clear current
+    setIsLoading(true);
+    setLoadingMsg('AI 正在介入分析需求...');
 
     setTimeout(() => {
-      setLoadingMsg('');
-      if (cmd.includes('烧录') || cmd.includes('镜像')) {
-        setActiveWidget('flash');
-      } else if (cmd.includes('openclaw') || cmd.includes('下发') || cmd.toLowerCase().includes('openclaw')) {
-        setActiveWidget('openclaw');
-      } else if (cmd.includes('示例应用') || cmd.includes('案例')) {
-        setActiveWidget('examples');
-      } else if (cmd.includes('连接') || cmd.includes('硬件')) {
-        setActiveWidget('hardware');
+      const lowerCmd = cmd.toLowerCase();
+      if (lowerCmd.includes('烧录') || lowerCmd.includes('镜像') || lowerCmd.includes('flash')) {
+        setActiveTab('flasher');
+      } else if (lowerCmd.includes('终端') || lowerCmd.includes('terminal') || lowerCmd.includes('ssh')) {
+        setActiveTab('terminal');
+      } else if (lowerCmd.includes('设备') || lowerCmd.includes('连接')) {
+         // No longer suddenly jumps to "flash". Now just highlights device manager conceptually.
+         alert('已选中设备管理上下文。AI 可以协助您扫描局域网中的 RDK 设备。');
       } else {
-        // default graceful fallback
-        setActiveWidget('hardware');
+        setActiveTab('dashboard');
       }
+      setIsLoading(false);
+      setCmd('');
     }, 800);
   };
 
-  const renderActiveWidget = () => {
-    if (loadingMsg) {
+  const currentDevice = MOCK_DEVICES.find(d => d.id === activeDevice);
+
+  // Center render logic
+  const renderMainContent = () => {
+    if (isLoading) {
       return (
-        <div className="center-stage loading-stage">
-          <div className="spinner"></div>
-          <p>{loadingMsg}</p>
+        <div className="center-stage" style={{ justifyContent: 'center', height: '100%', paddingBottom: '100px' }}>
+          <div className="loading-stage">
+            <div className="spinner"></div>
+            <div>{loadingMsg}</div>
+          </div>
         </div>
       );
     }
 
-    switch(activeWidget) {
-      case 'home':
-        return (
-          <div className="center-stage fade-in-scale">
-            <h1 className="hero-title">RDK AURA ENGINE</h1>
-            <p className="hero-subtitle">How can I assist your edge deployment today?</p>
-            <div className="quick-grid">
-              {[
-                { title: '📡 Device Radar', desc: 'Scan local network & SSH Connect', cmd: '设备连接' },
-                { title: '💾 Image Flasher', desc: 'Securely flash OS via SD/EMMC', cmd: '镜像烧录' },
-                { title: '🧠 OpenClaw', desc: 'Inject LLM Agent into edge node', cmd: '执行 OpenClaw下发' },
-                { title: '📦 Edge Examples', desc: 'Deploy YOLO, Whisper & more', cmd: '打开示例应用' }
-              ].map(item => (
-                <div key={item.cmd} className="startup-card" onClick={() => dispatchAction(item.cmd)}>
-                  <h3>{item.title}</h3>
-                  <p>{item.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-
-      case 'hardware':
-        return (
-          <div className="center-stage fade-in-scale">
-            <div className="minimal-widget max-w-lg">
-              <div className="widget-header">
-                 <span className="icon-glow">📡</span> Network Radar
-              </div>
-              <div className="clean-card">
-                <h4><span className="status-dot"></span>RDK-X5 Master</h4>
-                <p>IP: 192.168.1.108 | Latency: 4ms</p>
-                <p>Status: SSH Connectivity Verified & Key Shared.</p>
-              </div>
-              <button className="clean-btn btn-full mt-4" onClick={() => dispatchAction('打开镜像烧录')}>Proceed to Flashing</button>
-              <button className="clean-btn secondary btn-full mt-2" onClick={() => setActiveWidget('home')}>Back to Home</button>
-            </div>
-          </div>
-        );
-
-      case 'flash':
-        return (
-          <div className="center-stage fade-in-scale">
-            <div className="minimal-widget max-w-lg">
-               <div className="widget-header">
-                 <span className="icon-glow">💾</span> Base OS Flasher
-               </div>
-               <p className="desc-text">Select your target architecture and destination media to begin the erase and flash cycle.</p>
-               <select className="clean-input" defaultValue="ubuntu">
-                 <option value="ubuntu">Ubuntu 22.04 LTS (Standard Base Rootfs)</option>
-                 <option value="openclaw">OpenClaw Edge OS (Pre-configured)</option>
-               </select>
-               <select className="clean-input">
-                 <option>/dev/disk2 (Generic USB SD Reader)</option>
-                 <option>Over-The-Air (Requires Active Agent)</option>
-               </select>
-               <div className="btn-group mt-4">
-                 <button className="clean-btn flex-1" onClick={() => dispatchAction('执行 OpenClaw下发')}>Ignite Flash</button>
-                 <button className="clean-btn secondary flex-1" onClick={() => setActiveWidget('home')}>Cancel</button>
-               </div>
-            </div>
-          </div>
-        );
-
-      case 'openclaw':
-        return (
-          <div className="center-stage fade-in-scale">
-            <div className="minimal-widget max-w-lg">
-               <div className="widget-header">
-                 <span className="icon-glow">🧠</span> OpenClaw Core Injection
-               </div>
-               <p className="desc-text">Configure the Cognitive Agent endpoint for this edge device.</p>
-               <input className="clean-input" type="text" placeholder="LLM Base URL (e.g. https://api.openai.com/v1)" />
-               <input className="clean-input" type="password" placeholder="API Key Secret (sk-...)" />
-               <div className="btn-group mt-4">
-                 <button className="clean-btn flex-1">Inject & Restart Daemon</button>
-                 <button className="clean-btn secondary flex-1" onClick={() => setActiveWidget('home')}>Back</button>
-               </div>
-            </div>
-          </div>
-        );
-
-      case 'examples':
-        return (
-          <div className="center-stage fade-in-scale">
-             <div className="minimal-widget max-w-lg">
-               <div className="widget-header"><span className="icon-glow">🚀</span> Edge Application Templates</div>
-               <p className="desc-text">One-click native app deployments designed for BPU acceleration.</p>
-               <div className="clean-card" style={{cursor:'pointer', marginBottom:12}} onClick={() => alert('Deployed YOLO')}>
-                 <h4>👀 YOLO Stream Analytics</h4><p>FPS: 30 | Models: Yolov8n</p>
-               </div>
-               <div className="clean-card" style={{cursor:'pointer'}} onClick={() => alert('Deployed Whisper')}>
-                 <h4>🎙️ Whisper Voice Engine</h4><p>Offline Voice Activation Command Center</p>
-               </div>
-               <button className="clean-btn secondary btn-full mt-4" onClick={() => setActiveWidget('home')}>Return</button>
+    if (activeTab === 'flasher') {
+      return (
+        <div className="center-stage">
+          <div className="isolated-widget">
+             <div className="widget-header">💽 镜像烧录工具 (Target: {currentDevice?.name})</div>
+             <div className="desc-text">在这里进行隔离的镜像烧录工作流。此操作不会受到设备连接或终端状态的影响。</div>
+             
+             <div className="form-group">
+                <label>选择镜像源</label>
+                <select className="clean-input" defaultValue="ubuntu-22.04">
+                   <option value="ubuntu-22.04">Ubuntu 22.04 LTS (官方推荐)</option>
+                   <option value="ros2-humble">ROS2 Humble 预装版</option>
+                   <option value="local">浏览本地文件...</option>
+                </select>
              </div>
+             <div className="form-group">
+                <label>目标存储</label>
+                <select className="clean-input" defaultValue="sd">
+                   <option value="sd">SD Card ( /dev/mmcblk0 )</option>
+                   <option value="emmc">eMMC ( /dev/mmcblk1 )</option>
+                </select>
+             </div>
+             
+             <button className="clean-btn" style={{ width: '100%', marginTop: '10px' }}>开始烧录</button>
           </div>
-        );
-      default: return null;
+        </div>
+      );
     }
+
+    if (activeTab === 'terminal') {
+      return (
+        <div className="center-stage" style={{maxWidth: '90%'}}>
+           <div className="isolated-widget" style={{fontFamily: 'monospace', background: '#000'}}>
+             <div className="widget-header" style={{fontSize: '1rem', borderBottom: '1px solid #333', color: '#0f0'}}>
+                🟢 root@{currentDevice?.ip} ~
+             </div>
+             <div style={{color: '#aaa', marginTop: '10px', minHeight: '300px'}}>
+               Welcome to RDK OS.<br/>
+               Linux rdk 5.10.x aarch64<br/><br/>
+               root@rdk:~# <span style={{display:'inline-block', width: '8px', height: '15px', background: '#aaa', animation: 'blink 1s infinite'}}></span>
+             </div>
+           </div>
+        </div>
+      );
+    }
+
+    // Default: Dashboard
+    return (
+      <div className="center-stage">
+        <h2 className="hero-title">{currentDevice?.name || 'RDK Studio'}</h2>
+        <div className="hero-subtitle">管理、控制与扩展您的计算节点</div>
+
+        <div className="quick-grid">
+          <div className="startup-card" onClick={() => alert('触发环境检查...')}>
+            <h3>🏥 硬件诊断</h3>
+            <p>检查 NPU、CPU 及外设接口状态，定位可能的问题。</p>
+          </div>
+          <div className="startup-card" onClick={() => setActiveTab('flasher')}>
+            <h3>💽 固件与烧录</h3>
+            <p>通过独立工作流将最新 OS 或定制镜像刷写至设备中。</p>
+          </div>
+          <div className="startup-card" onClick={() => setActiveTab('terminal')}>
+            <h3>⚙️ 远程终端</h3>
+            <p>免密码通过内置 WebSocket 服务直接 SSH 进设备 Shell。</p>
+          </div>
+          <div className="startup-card" onClick={() => alert('载入 OpenClaw...')}>
+            <h3>🤖 机械臂控制 (OpenClaw)</h3>
+            <p>加载硬件抽象层，对机械臂进行运动学调试。</p>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
-    <div className="canvas-shell fixed-layout">
-      {/* Dynamic Centered Canvas */}
-      <div className="canvas-viewport">
-        {renderActiveWidget()}
-      </div>
+    <div className="canvas-shell">
+      <div className="layout-container">
+        
+        {/* Left Sidebar - Device Manager */}
+        <div className="app-sidebar">
+          <div className="sidebar-brand">RDK Studio</div>
+          
+          <div className="section-label">您的设备 (Workspace)</div>
+          <div className="device-list">
+            {MOCK_DEVICES.map(dev => (
+              <div 
+                key={dev.id} 
+                className={`device-item ${activeDevice === dev.id ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveDevice(dev.id);
+                  setActiveTab('dashboard');
+                }}
+              >
+                <div className="device-icon">🖧</div>
+                <div className="device-info">
+                  <h4 className="device-name">{dev.name}</h4>
+                  <div className="device-status">
+                    <span className={`status-dot ${dev.status === 'offline' ? 'offline' : ''}`}></span>
+                    {dev.status === 'online' ? dev.ip : 'Disconnected'}
+                  </div>
+                </div>
+              </div>
+            ))}
+            
+            <button className="clean-btn" style={{marginTop: '10px', padding: '10px', background: 'transparent', border: '1px dashed rgba(255,255,255,0.2)'}}>
+               + 扫描新设备
+            </button>
+          </div>
 
-      {/* Floating Input Dock */}
-      <div className="floating-dock">
-        <div className="input-box">
-          <input 
-            className="cmd-input" 
-            value={inputVal}
-            onChange={e => setInputVal(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && dispatchAction(inputVal)}
-            placeholder="Type 'Flash', 'OpenClaw' or ask any operation..."
-            autoFocus 
-          />
-          <button className="send-btn" onClick={() => dispatchAction(inputVal)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-          </button>
+          <div className="section-label">工具箱</div>
+          <div className="sidebar-tools">
+             <button className={`tool-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+               <span style={{fontSize:'1.2rem'}}>📊</span> 仪表盘
+             </button>
+             <button className={`tool-btn ${activeTab === 'flasher' ? 'active' : ''}`} onClick={() => setActiveTab('flasher')}>
+               <span style={{fontSize:'1.2rem'}}>💽</span> 系统镜像工具
+             </button>
+             <button className={`tool-btn ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>
+               <span style={{fontSize:'1.2rem'}}>💻</span> SSH 终端
+             </button>
+             <button className="tool-btn">
+               <span style={{fontSize:'1.2rem'}}>🧩</span> 配置与拓展
+             </button>
+          </div>
         </div>
+
+        {/* Main Area */}
+        <div className="main-area">
+          <div className="top-toolbar">
+             <div className="context-title">
+               {activeTab === 'flasher' && '系统镜像工具'}
+               {activeTab === 'dashboard' && '仪表盘'}
+               {activeTab === 'terminal' && '远程终端'}
+               <span style={{color: '#64748b', fontSize: '0.9rem', fontWeight: 'normal'}}> / {currentDevice?.name}</span>
+             </div>
+             <div className="toolbar-actions">
+                <button className="icon-btn" title="通知">🔔</button>
+                <button className="icon-btn" title="用户账号">👤</button>
+             </div>
+          </div>
+
+          <div className="canvas-viewport">
+            {renderMainContent()}
+          </div>
+
+          {/* Contextual AI Dock */}
+          <div className="floating-dock">
+            <form className="input-box" onSubmit={handleCommand}>
+              <span style={{marginRight: '12px', fontSize: '1.2rem'}}>✨</span>
+              <input 
+                type="text" 
+                className="cmd-input" 
+                placeholder={`让 AI 协助操作 ${currentDevice?.name} (例如 "帮我烧录最新的Ubuntu版本")...`}
+                value={cmd}
+                onChange={e => setCmd(e.target.value)}
+                disabled={isLoading}
+              />
+              <button type="submit" className="send-btn" disabled={isLoading}>
+                ➤
+              </button>
+            </form>
+          </div>
+
+        </div>
+
       </div>
     </div>
   );
