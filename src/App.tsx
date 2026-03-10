@@ -98,9 +98,9 @@ const FLOW_TEMPLATES = [
 ];
 
 const EXAMPLE_PRESETS = [
-  { id: 'follow', name: '视觉跟随', tag: 'TogetherROS.b', readiness: '需摄像头 + 电机控制链路' },
-  { id: 'gesture', name: '手势控制', tag: 'BPU Demo', readiness: '需 RGB 输入与动作映射' },
-  { id: 'stereo', name: '双摄测距', tag: 'Depth', readiness: '需双目标定与时间同步' },
+  { id: 'visual-follow', name: '视觉跟随', tag: 'TogetherROS.b', readiness: '需摄像头 + 电机控制链路' },
+  { id: 'gesture-ctrl', name: '手势控制', tag: 'BPU Demo', readiness: '需 RGB 输入与动作映射' },
+  { id: 'stereo-depth', name: '双摄测距', tag: 'Depth', readiness: '需双目标定与时间同步' },
 ];
 
 const ROS_TOPICS = ['/hobot_dnn/bbox', '/camera/color/image_raw', '/tf', '/cmd_vel'];
@@ -524,7 +524,12 @@ export default function App() {
   const renderDashboard = () => (
     <div className="center-stage">
       <h2 className="hero-title">{currentDevice?.name || 'RDK Workspace'}</h2>
-      <div className="hero-subtitle">基于 AI 驱动的边缘计算与开发节点</div>
+      <div className="hero-subtitle">
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: currentDevice ? '#22c55e' : '#94a3b8', display: 'inline-block' }}></span>
+          {currentDevice ? `已连接 · ${currentDevice.ip}` : '未连接设备'}
+        </span>
+      </div>
 
       <div className="stats-strip">
         <div className="stat-card">
@@ -543,6 +548,13 @@ export default function App() {
           <div className="stat-value">3d<span className="stat-unit"> 14h</span></div>
           <div className="stat-label">系统运行</div>
         </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, margin: '0 0 20px 0', flexWrap: 'wrap' }}>
+        <button className="clean-btn outline-btn" onClick={() => openWorkspace('terminal' as any, '')}>🖥️ 快速终端</button>
+        <button className="clean-btn outline-btn" onClick={() => openWorkspace('files' as any, '')}>📂 文件管理</button>
+        <button className="clean-btn outline-btn" onClick={() => openWorkspace('vnc' as any, '')}>🖵 远程桌面</button>
+        <button className="clean-btn outline-btn" onClick={() => addToast('系统诊断开始...', 'info')}>🩺 一键诊断</button>
       </div>
 
       <div className="quick-grid">
@@ -747,6 +759,7 @@ export default function App() {
                 onClick={() => setActiveSessionId(session.id)}
               >
                 {session.name}
+                <span style={{ marginLeft: 6, fontSize: '0.72rem', opacity: 0.6 }}>({session.lines.length})</span>
               </button>
             ))}
           </div>
@@ -775,14 +788,15 @@ export default function App() {
                 className="clean-input terminal-input"
                 value={terminalDraft}
                 onChange={(event) => setTerminalDraft(event.target.value)}
-                placeholder="输入模拟命令，例如 ros2 topic list"
+                placeholder="输入命令，例如 ros2 topic list"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runTerminalCommand(terminalDraft); } }}
               />
               <button className="clean-btn" onClick={() => runTerminalCommand(terminalDraft)}>执行</button>
             </div>
           </div>
 
           <div className="panel-card">
-            <div className="panel-title">会话策略与快捷动作</div>
+            <div className="panel-title">预设配置</div>
             <div className="usage-list">
               {TERMINAL_PROFILES.map((profile) => (
                 <div key={profile.id} className={`usage-item selectable ${terminalProfile === profile.id ? 'active' : ''}`} onClick={() => setTerminalProfile(profile.id)}>
@@ -791,12 +805,19 @@ export default function App() {
                 </div>
               ))}
             </div>
+            <div className="panel-title" style={{ marginTop: 16 }}>常用命令</div>
             <div className="chip-cloud">
               {COMMAND_SUGGESTIONS.map((suggestion) => (
                 <button key={suggestion} className="chip-btn" onClick={() => runTerminalCommand(suggestion)}>
                   {suggestion}
                 </button>
               ))}
+            </div>
+            <div className="panel-title" style={{ marginTop: 16 }}>快捷操作</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('终端输出已清空', 'info')}>🗑 清屏</button>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('输出已复制到剪贴板', 'success')}>📋 复制输出</button>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('日志已导出', 'info')}>💾 导出日志</button>
             </div>
           </div>
         </div>
@@ -809,6 +830,15 @@ export default function App() {
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">📁 文件资源与传输队列</div>
         <div className="desc-text">SFTP 文件浏览、上传下载与传输队列管理。</div>
+
+        <div style={{ display: 'flex', gap: 14, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="card-status-badge ok" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
+            <span className="card-status-dot"></span>
+            {transferProtocol.toUpperCase()} 已连接
+          </span>
+          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>root@{currentDevice?.ip}:/userdata</span>
+          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>队列: {transferQueue.length} 项</span>
+        </div>
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
@@ -827,10 +857,14 @@ export default function App() {
             <div className="mini-form">
               <input className="clean-input" value={currentDevice?.ip || ''} readOnly />
               <input className="clean-input" value="root" readOnly />
-              <input className="clean-input" value="站点已保存: 本地实验台 / 产线样机 / 社区样例板" readOnly />
             </div>
+            <div className="panel-title" style={{ marginTop: 12 }}>保存的站点</div>
             <div className="usage-list">
-              <div className="usage-item">保存站点配置可一键重连。</div>
+              {['本地实验台', '产线样机', '社区样例板'].map(site => (
+                <div key={site} className="usage-item selectable" style={{ padding: '8px 14px' }} onClick={() => addToast(`已切换到站点: ${site}`, 'info')}>
+                  <strong>{site}</strong>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -852,25 +886,28 @@ export default function App() {
               ))}
             </div>
             <button className="clean-btn" onClick={appendTransferTask}>加入传输队列</button>
-            <div className="warning-banner">主流远程工具会把传输队列显式展示出来，避免“点一下没反馈”的断层体验。</div>
+            <div className="warning-banner">拖拽文件到面板或点击按钮添加到传输队列。队列支持批量操作与断点续传。</div>
           </div>
         </div>
 
         <div className="workspace-grid three-column">
           <div className="panel-card file-pane">
-            <div className="panel-title">本地工作区</div>
+            <div className="panel-title">📂 本地工作区</div>
             {LOCAL_FILES.map((file) => (
-              <div key={file} className="file-row">📂 {file}</div>
+              <div key={file} className="file-row" style={{ cursor: 'pointer' }}>{file.endsWith('/') ? '📁' : '📄'} {file}</div>
             ))}
           </div>
           <div className="panel-card file-pane">
-            <div className="panel-title">远程目录</div>
+            <div className="panel-title">🛰️ 远程目录</div>
             {REMOTE_FILES.map((file) => (
-              <div key={file} className="file-row">🛰️ {file}</div>
+              <div key={file} className="file-row" style={{ cursor: 'pointer' }}>{file.endsWith('/') ? '📁' : '📄'} {file}</div>
             ))}
           </div>
           <div className="panel-card">
             <div className="panel-title">传输队列</div>
+            {transferQueue.length === 0 && (
+              <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: '0.88rem' }}>暂无传输任务</div>
+            )}
             <div className="queue-list">
               {transferQueue.map((item) => (
                 <div key={item.id} className="queue-item">
@@ -881,7 +918,7 @@ export default function App() {
                   <div className="progress-track thin">
                     <div className="progress-fill" style={{ width: `${item.progress}%` }}></div>
                   </div>
-                  <div className="queue-meta">{item.status === 'done' ? '已完成，可继续下一步操作' : `执行中 ${item.progress}%`}</div>
+                  <div className="queue-meta">{item.status === 'done' ? '✅ 已完成' : `执行中 ${item.progress}%`}</div>
                 </div>
               ))}
             </div>
@@ -896,6 +933,15 @@ export default function App() {
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🖥️ 可视化桌面 (VNC)</div>
         <div className="desc-text">远程桌面连接，支持画质切换与快捷工具。</div>
+
+        <div style={{ display: 'flex', gap: 14, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className={`card-status-badge ${vncConnected ? 'ok' : 'warn'}`} style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
+            <span className="card-status-dot"></span>
+            {vncConnected ? '会话已建立' : '未连接'}
+          </span>
+          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>目标: {currentDevice?.ip}:5900</span>
+          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>画质: {vncQuality === 'smooth' ? '流畅' : vncQuality === 'balanced' ? '平衡' : '清晰'}</span>
+        </div>
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
@@ -951,6 +997,12 @@ export default function App() {
             <div className="usage-list">
               <div className="usage-item">支持剪贴板共享、全屏与截屏。</div>
             </div>
+            <div className="panel-title" style={{ marginTop: 14 }}>会话工具</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('剪贴板已同步', 'success')}>📋 同步剪贴板</button>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('截屏已保存', 'success')}>📸 截屏</button>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('已切换全屏', 'info')}>⛶ 全屏</button>
+            </div>
           </div>
         </div>
 
@@ -963,11 +1015,16 @@ export default function App() {
               <div className="desktop-panel"></div>
               <div className="desktop-panel wide"></div>
             </div>
+            {!vncConnected && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(148,163,184,0.08)' }}>
+                <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>点击「发起连接」启动远程桌面</span>
+              </div>
+            )}
             {vncOverlay && (
               <div className="remote-overlay">
                 <span>Quality: {vncQuality}</span>
                 <span>Layout: {vncLayout}</span>
-                <span>{vncConnected ? 'Session Ready' : 'Idle'}</span>
+                <span>{vncConnected ? 'Latency: 12ms' : 'Idle'}</span>
               </div>
             )}
           </div>
@@ -1025,25 +1082,37 @@ export default function App() {
                 <div className="progress-fill" style={{ width: `${flowCheckProgress}%` }}></div>
               </div>
             </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px', flex: 1 }} onClick={() => addToast('流程已保存为 v1.2 草稿', 'success')}>💾 保存</button>
+              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px', flex: 1 }} onClick={() => addToast('已导出为 JSON', 'info')}>📤 导出</button>
+            </div>
           </div>
         </div>
 
         <div className="workspace-grid three-column">
           <div className="panel-card">
-            <div className="panel-title">节点素材区</div>
-            {['摄像头输入', 'AI 推理', 'Topic 订阅', '文件同步', '告警通知'].map((node) => (
-              <div key={node} className="file-row">◉ {node}</div>
+            <div className="panel-title">节点面板</div>
+            {['输入', '处理', '输出'].map(cat => (
+              <div key={cat} style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.5px', marginBottom: 6 }}>{cat}</div>
+                {cat === '输入' && ['📷 摄像头输入', '📡 Topic 订阅', '⏱️ 定时触发'].map(n => <div key={n} className="file-row" style={{ cursor: 'grab', marginBottom: 6 }}>{n}</div>)}
+                {cat === '处理' && ['🧠 AI 推理', '🔍 数据过滤'].map(n => <div key={n} className="file-row" style={{ cursor: 'grab', marginBottom: 6 }}>{n}</div>)}
+                {cat === '输出' && ['📂 文件同步', '🔔 告警通知', '🌐 HTTP 请求'].map(n => <div key={n} className="file-row" style={{ cursor: 'grab', marginBottom: 6 }}>{n}</div>)}
+              </div>
             ))}
           </div>
           <div className="panel-card flow-canvas-card">
             <div className="panel-title">流程画布</div>
             <div className="flow-canvas">
-              <div className="flow-node active">输入</div>
+              <div className="flow-node active">📷 输入</div>
               <div className="flow-link"></div>
-              <div className="flow-node">推理</div>
+              <div className="flow-node">🔍 过滤</div>
               <div className="flow-link"></div>
-              <div className="flow-node">发布</div>
+              <div className="flow-node">🧠 推理</div>
+              <div className="flow-link"></div>
+              <div className="flow-node">📡 发布</div>
             </div>
+            <div style={{ textAlign: 'center', marginTop: 10, fontSize: '0.78rem', color: '#94a3b8' }}>拖拽节点到画布 · 连线定义数据流</div>
           </div>
           <div className="panel-card">
             <div className="panel-title">部署说明</div>
@@ -1239,16 +1308,120 @@ export default function App() {
             </div>
           ))}
         </div>
+
+        <div className="workspace-grid two-column" style={{ marginTop: 18 }}>
+          <div className="panel-card">
+            <div className="panel-title">🌐 网络接口</div>
+            <div className="usage-list">
+              {[
+                { label: '以太网', iface: 'eth0', ip: currentDevice?.ip || '—', connected: true, speed: '1000 Mbps' },
+                { label: 'WiFi', iface: 'wlan0', ip: '—', connected: false, speed: '—' },
+              ].map(n => (
+                <div key={n.iface} className="usage-item">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong>{n.label} ({n.iface})</strong>
+                    <span className={`card-status-badge ${n.connected ? 'ok' : 'warn'}`} style={{ fontSize: '0.72rem', padding: '3px 8px' }}>
+                      <span className="card-status-dot"></span>
+                      {n.connected ? '已连接' : '未连接'}
+                    </span>
+                  </div>
+                  <span>IP: {n.ip} · 速度: {n.speed}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel-card">
+            <div className="panel-title">💾 存储分区</div>
+            <div className="usage-list">
+              {[
+                { label: '系统分区', used: 4.2, total: 16 },
+                { label: '数据分区', used: 1.8, total: 8 },
+                { label: '模型目录', used: 0.6, total: 2 },
+              ].map(s => (
+                <div key={s.label} className="usage-item">
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <strong>{s.label}</strong>
+                    <span style={{ fontSize: '0.82rem', color: '#64748b' }}>{s.used}/{s.total} GB</span>
+                  </div>
+                  <div className="progress-track thin" style={{ marginTop: 6 }}>
+                    <div className="progress-fill" style={{ width: `${(s.used / s.total) * 100}%` }}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="workspace-grid two-column" style={{ marginTop: 18 }}>
+          <div className="panel-card">
+            <div className="panel-title">📊 活跃进程 (Top 4)</div>
+            <table className="hw-process-table">
+              <thead>
+                <tr><th>进程名</th><th>CPU</th><th>内存</th><th>PID</th></tr>
+              </thead>
+              <tbody>
+                {[
+                  { name: 'hobot_dnn', cpu: '12.3%', mem: '180 MB', pid: 1024 },
+                  { name: 'ros2_daemon', cpu: '5.1%', mem: '96 MB', pid: 892 },
+                  { name: 'mipi_cam', cpu: '3.8%', mem: '64 MB', pid: 1156 },
+                  { name: 'nginx', cpu: '0.4%', mem: '22 MB', pid: 456 },
+                ].map(p => (
+                  <tr key={p.pid}>
+                    <td style={{ fontWeight: 600 }}>{p.name}</td>
+                    <td>{p.cpu}</td>
+                    <td>{p.mem}</td>
+                    <td style={{ color: '#94a3b8' }}>{p.pid}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="panel-card">
+            <div className="panel-title">🔧 快捷诊断</div>
+            <div className="usage-list">
+              <div className="usage-item selectable" onClick={() => addToast('温度异常检测完成：所有指标正常', 'success')}>
+                <strong>🌡️ 温度异常检测</strong>
+                <span>校验 BPU/CPU 温度是否超过安全阈值</span>
+              </div>
+              <div className="usage-item selectable" onClick={() => addToast('I/O 性能测试完成：读 180 MB/s 写 95 MB/s', 'info')}>
+                <strong>⚡ I/O 性能快测</strong>
+                <span>对存储设备执行 4K 随机读写基准测试</span>
+              </div>
+              <div className="usage-item selectable" onClick={() => addToast('系统日志已导出 (dmesg + journalctl)', 'info')}>
+                <strong>📋 导出系统日志</strong>
+                <span>收集 dmesg / journalctl 用于社区反馈</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 
-  const renderExamples = () => (
+  const EXAMPLE_DETAILS: Record<string, { deps: string[]; cmd: string; source: string; difficulty: string; desc: string }> = {
+    'visual-follow': { deps: ['hobot_dnn ✅', 'mipi_cam ✅', 'cv_bridge ✅'], cmd: 'ros2 launch visual_follow visual_follow.launch.py', source: '官方', difficulty: '⭐ 入门', desc: '使用 BPU 加速的目标检测驱动小车跟随目标移动。' },
+    'gesture-ctrl': { deps: ['hand_detection ✅', 'gesture_lib ✅', 'serial_driver ⚠️'], cmd: 'ros2 launch gesture_ctrl gesture.launch.py', source: '官方', difficulty: '⭐⭐ 进阶', desc: '手势识别控制机械臂/小车方向，支持 5 种手势映射。' },
+    'stereo-depth': { deps: ['stereo_usb_cam ✅', 'depth_estimation ✅', 'rviz2 ✅'], cmd: 'ros2 launch stereo_depth depth_display.launch.py', source: '社区', difficulty: '⭐⭐⭐ 高级', desc: '双目摄像头深度估计与 RViz2 点云可视化。' },
+  };
+
+  const renderExamples = () => {
+    const detail = EXAMPLE_DETAILS[examplePreset] || EXAMPLE_DETAILS['visual-follow'];
+    const currentPreset = EXAMPLE_PRESETS.find(p => p.id === examplePreset) || EXAMPLE_PRESETS[0];
+    return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">📦 示例应用</div>
         <div className="desc-text">官方与社区示例应用，含依赖检查与一键启动。</div>
-        <div className="workspace-grid two-column">
+
+        <div className="chip-cloud" style={{ marginBottom: 18 }}>
+          {['全部', '视觉感知', '运动控制', '传感器', '社区贡献'].map(cat => (
+            <button key={cat} className={`chip-btn ${cat === '全部' ? 'active' : ''}`}>{cat}</button>
+          ))}
+        </div>
+
+        <div className="workspace-grid" style={{ gridTemplateColumns: '1fr 1.6fr' }}>
           <div className="panel-card">
             <div className="panel-title">示例目录</div>
             <div className="option-list">
@@ -1258,63 +1431,114 @@ export default function App() {
                   className={`select-card ${examplePreset === preset.id ? 'active' : ''}`}
                   onClick={() => setExamplePreset(preset.id)}
                 >
-                  <strong>{preset.name}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong>{preset.name}</strong>
+                    <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{EXAMPLE_DETAILS[preset.id]?.difficulty}</span>
+                  </div>
                   <span>{preset.tag}</span>
                 </button>
               ))}
             </div>
           </div>
+
           <div className="panel-card">
-            <div className="panel-title">启动前检查</div>
-            <div className="usage-list">
-              {EXAMPLE_PRESETS.map((preset) => (
-                <div key={preset.id} className={`usage-item selectable ${examplePreset === preset.id ? 'active' : ''}`}>
-                  <strong>{preset.name}</strong>
-                  <span>{preset.readiness}</span>
-                </div>
-              ))}
+            <div className="panel-title">{currentPreset.name}</div>
+            <div className="desc-text" style={{ marginBottom: 14 }}>{detail.desc}</div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+              <span className="card-status-badge ok" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>来源: {detail.source}</span>
+              <span className="card-status-badge ok" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>难度: {detail.difficulty}</span>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <strong style={{ fontSize: '0.88rem', display: 'block', marginBottom: 8 }}>依赖检查</strong>
+              <div className="usage-list">
+                {detail.deps.map(dep => (
+                  <div key={dep} className="usage-item" style={{ padding: '8px 14px' }}>
+                    <span style={{ fontFamily: 'Consolas, monospace', fontSize: '0.85rem' }}>{dep}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <strong style={{ fontSize: '0.88rem', display: 'block', marginBottom: 8 }}>启动命令</strong>
+              <div className="terminal-screen" style={{ minHeight: 'auto', padding: '12px 16px', fontSize: '0.82rem', marginBottom: 0 }}>
+                <div className="terminal-line">$ {detail.cmd}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="clean-btn" onClick={() => addToast(`${currentPreset.name} 启动中...`, 'info')}>▶ 一键启动</button>
+              <button className="clean-btn outline-btn" onClick={() => addToast('已在终端中打开', 'info')}>在终端中运行</button>
             </div>
           </div>
         </div>
       </div>
     </div>
   );
+  };
 
-  const renderRos = () => (
+  const ROS_TOPIC_DETAILS: Record<string, { msgType: string; hz: string; publishers: number; vizType: string }> = {
+    '/camera/image_raw': { msgType: 'sensor_msgs/Image', hz: '30 Hz', publishers: 1, vizType: '图像' },
+    '/cmd_vel': { msgType: 'geometry_msgs/Twist', hz: '10 Hz', publishers: 2, vizType: '速度表盘' },
+    '/odom': { msgType: 'nav_msgs/Odometry', hz: '50 Hz', publishers: 1, vizType: '轨迹' },
+    '/scan': { msgType: 'sensor_msgs/LaserScan', hz: '15 Hz', publishers: 1, vizType: '雷达扇面' },
+  };
+
+  const renderRos = () => {
+    const detail = ROS_TOPIC_DETAILS[rosTopic] || Object.values(ROS_TOPIC_DETAILS)[0];
+    return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🕸️ ROS 话题可视化</div>
         <div className="desc-text">ROS2 话题订阅与数据流可视化。</div>
-        <div className="workspace-grid two-column">
+        <div className="workspace-grid" style={{ gridTemplateColumns: '1fr 1.6fr' }}>
           <div className="panel-card">
             <div className="panel-title">话题订阅</div>
-            <div className="chip-cloud">
+            <div className="option-list">
               {ROS_TOPICS.map((topic) => (
-                <button key={topic} className={`chip-btn ${rosTopic === topic ? 'active' : ''}`} onClick={() => setRosTopic(topic)}>
-                  {topic}
+                <button key={topic} className={`select-card ${rosTopic === topic ? 'active' : ''}`} onClick={() => setRosTopic(topic)}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ fontFamily: 'Consolas, monospace', fontSize: '0.85rem' }}>{topic}</strong>
+                    <span style={{ fontSize: '0.72rem', color: '#94a3b8', background: '#f1f5f9', padding: '2px 8px', borderRadius: 8 }}>{ROS_TOPIC_DETAILS[topic]?.hz}</span>
+                  </div>
+                  <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{ROS_TOPIC_DETAILS[topic]?.msgType}</span>
                 </button>
               ))}
             </div>
-            <label className="toggle-row">
+            <label className="toggle-row" style={{ marginTop: 12 }}>
               <input type="checkbox" checked={rosRecording} onChange={(event) => setRosRecording(event.target.checked)} />
-              <span>录制当前 Topic 数据流，供后续回放与诊断使用</span>
+              <span>录制当前 Topic 数据流</span>
             </label>
           </div>
           <div className="panel-card">
-            <div className="panel-title">视图联动</div>
+            <div className="panel-title">话题详情 — {rosTopic}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+              {[
+                { label: '消息类型', value: detail.msgType },
+                { label: '频率', value: detail.hz },
+                { label: '发布者', value: `${detail.publishers} 个节点` },
+                { label: '可视化', value: detail.vizType },
+              ].map(f => (
+                <div key={f.label} style={{ background: '#f8fafc', borderRadius: 10, padding: '10px 14px' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginBottom: 2 }}>{f.label}</div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 600 }}>{f.value}</div>
+                </div>
+              ))}
+            </div>
             <div className="scene-preview ros-preview">
               <div className="topic-card">{rosTopic}</div>
               <div className="bbox one"></div>
-              <div className="preview-caption">Bounding Boxes / Image / Telemetry Overlay</div>
+              <div className="preview-caption">{detail.vizType} 预览</div>
             </div>
-            <div className="usage-list">
-              <div className="usage-item">可转发到示例应用或流编排节点。</div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+              <button className="clean-btn outline-btn" onClick={() => addToast('已刷新话题列表', 'info')}>🔄 刷新话题</button>
+              <button className="clean-btn outline-btn" onClick={() => addToast(`${rosTopic} 已转发到流编排`, 'info')}>📡 转发到流编排</button>
+              <button className="clean-btn outline-btn" onClick={() => addToast('已在终端中打开 ros2 topic echo', 'info')}>🖥️ 终端查看</button>
             </div>
           </div>
         </div>
       </div>
     </div>
   );
+  };
 
   const MODEL_REPO = [
     { id: 'yolov5', name: 'YOLOv5s (BPU)', format: 'bin', size: '14.2 MB', status: 'deployed', fps: '30', desc: '通用目标检测，已优化为 BPU 推理格式' },

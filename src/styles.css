@@ -1334,3 +1334,39 @@ body {
     width: 100%;
   }
 }
+
+/* ============================================
+   Hardware Process Table
+   ============================================ */
+.hw-process-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.hw-process-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.hw-process-table td {
+  padding: 8px 12px;
+  color: #334155;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.hw-process-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ============================================
+   Chip Cloud Active & Category Chips
+   ============================================ */
+.chip-cloud .chip-btn.active {
+  background: #ff6b00;
+  color: white;
+}
