@@ -315,18 +315,40 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '/' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+      const isInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      // "/" to focus AI command bar
+      if (e.key === '/' && !isInput) {
         e.preventDefault();
         const input = document.querySelector('.cmd-input') as HTMLInputElement;
         input?.focus();
       }
-      if (e.key === 'Escape' && chatExpanded) {
-        setChatExpanded(false);
+      // Escape to close panels
+      if (e.key === 'Escape') {
+        if (chatExpanded) setChatExpanded(false);
+        if (showSettings) setShowSettings(false);
+        if (showAddDevice) setShowAddDevice(false);
+        if (diagnosticOpen) setDiagnosticOpen(false);
+      }
+      // Ctrl+K / Cmd+K to focus AI command bar
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        const input = document.querySelector('.cmd-input') as HTMLInputElement;
+        input?.focus();
+      }
+      // Ctrl+T / Cmd+T to create new terminal session
+      if ((e.ctrlKey || e.metaKey) && e.key === 't' && activeTab === 'terminal') {
+        e.preventDefault();
+        createSession();
+      }
+      // Ctrl+` to toggle terminal
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        setActiveTab(activeTab === 'terminal' ? 'dashboard' : 'terminal');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [chatExpanded]);
+  }, [chatExpanded, showSettings, showAddDevice, diagnosticOpen, activeTab]);
 
   useEffect(() => {
     const viewport = document.querySelector('.canvas-viewport');
@@ -533,10 +555,21 @@ export default function App() {
     const analysis = hasError
       ? ['🔍 检测到异常输出，可能原因:', '   • 权限不足 — 尝试 sudo 执行', '   • 依赖缺失 — 运行 apt install 安装', '   • 路径错误 — 检查文件是否存在', '💡 建议: sudo !! 重试上一条命令']
       : ['🔍 终端输出分析:', `   • 共 ${currentSession.lines.length} 行输出，无明显错误`, '   • 系统状态正常，BPU/内存/网络指标在安全范围', '   • 建议: 定期运行 hrut_smi 监控硬件状态', '💡 一切正常，可继续操作。'];
+    // Typing effect: add lines one by one
+    const allLines = ['🤖 ─── AI 分析 ───', ...analysis, '────────────', 'root@rdk:~#'];
     setTerminalSessions(prev => prev.map(s => s.id === activeSessionId ? {
-      ...s, lines: [...s.lines, '🤖 ─── AI 分析 ───', ...analysis, '────────────', 'root@rdk:~#']
+      ...s, lines: [...s.lines, '🤖 ─── AI 分析中... ───']
     } : s));
-    addToast('AI 分析完成', 'success');
+    allLines.forEach((line, i) => {
+      setTimeout(() => {
+        setTerminalSessions(prev => prev.map(s => s.id === activeSessionId ? {
+          ...s, lines: i === 0
+            ? [...s.lines.slice(0, -1), line]
+            : [...s.lines, line]
+        } : s));
+      }, (i + 1) * 200);
+    });
+    setTimeout(() => addToast('AI 分析完成', 'success'), allLines.length * 200 + 100);
   };
 
   const startVncSession = () => {
@@ -1653,56 +1686,38 @@ export default function App() {
   const renderMainContent = () => {
     if (isLoading) {
       return (
-        <div className="center-stage" style={{ justifyContent: 'center', height: '100%', paddingBottom: '100px' }}>
+        <div className="center-stage">
           <div className="loading-stage">
             <div className="spinner"></div>
-            <div>{loadingMsg}</div>
+            <div className="loading-msg">{loadingMsg}</div>
+            <div className="loading-skeleton">
+              <div className="skeleton-line wide"></div>
+              <div className="skeleton-line medium"></div>
+              <div className="skeleton-row">
+                <div className="skeleton-card"></div>
+                <div className="skeleton-card"></div>
+              </div>
+            </div>
           </div>
         </div>
       );
     }
 
-    if (activeTab === 'flasher') {
-      return renderFlasher();
-    }
-
-    if (activeTab === 'terminal') {
-      return renderTerminal();
-    }
-
-    if (activeTab === 'files') {
-      return renderFiles();
-    }
-
-    if (activeTab === 'vnc') {
-      return renderVnc();
-    }
-
-    if (activeTab === 'lowcode') {
-      return renderLowcode();
-    }
-
-    if (activeTab === 'openclaw') {
-      return renderOpenClaw();
-    }
-
-    if (activeTab === 'hardware') {
-      return renderHardware();
-    }
-
-    if (activeTab === 'examples') {
-      return renderExamples();
-    }
-
-    if (activeTab === 'ros') {
-      return renderRos();
-    }
-
-    if (activeTab === 'models') {
-      return renderModels();
-    }
-
-    return renderDashboard();
+    return (
+      <div className="page-transition" key={activeTab}>
+        {activeTab === 'flasher' && renderFlasher()}
+        {activeTab === 'terminal' && renderTerminal()}
+        {activeTab === 'files' && renderFiles()}
+        {activeTab === 'vnc' && renderVnc()}
+        {activeTab === 'lowcode' && renderLowcode()}
+        {activeTab === 'openclaw' && renderOpenClaw()}
+        {activeTab === 'hardware' && renderHardware()}
+        {activeTab === 'examples' && renderExamples()}
+        {activeTab === 'ros' && renderRos()}
+        {activeTab === 'models' && renderModels()}
+        {activeTab === 'dashboard' && renderDashboard()}
+      </div>
+    );
   };
 
   const renderToasts = () => (
