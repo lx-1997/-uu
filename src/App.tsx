@@ -190,12 +190,26 @@ export default function App() {
                <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>🧩</span> 流程编排
              </button>
           </div>
+          
+          <div className="sidebar-footer" style={{ marginTop: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+             <button className="tool-btn" onClick={() => window.open('https://developer.horizon.cc/', '_blank')}>
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>🍠</span> <span style={{color: '#ff6b00', fontWeight: 'bold'}}>地瓜开发者社区</span>
+             </button>
+             <button className="tool-btn">
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>⚙️</span> 客户端设置
+             </button>
+          </div>
         </div>
 
         {/* Main Area - Dynamic Apps & Copilot */}
         <div className="main-area">
-          <div className="top-toolbar">
-             <div className="context-title">
+          <div className="top-toolbar" style={{ height: '48px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', marginRight: '20px' }}>
+                <div style={{width:'12px', height:'12px', borderRadius:'50%', background:'#f87171'}}></div>
+                <div style={{width:'12px', height:'12px', borderRadius:'50%', background:'#facc15'}}></div>
+                <div style={{width:'12px', height:'12px', borderRadius:'50%', background:'#4ade80'}}></div>
+             </div>
+             <div className="context-title" style={{ flex: 1, justifyContent: 'center' }}>
                {activeTab === 'dashboard' && 'AI Copilot 工作台'}
                {activeTab === 'flasher' && '系统镜像工具'}
                {activeTab === 'terminal' && '终端环境'}

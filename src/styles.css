@@ -69,7 +69,8 @@ body {
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px rgba(16,185,129,0.5); }
 .status-dot.offline { background: #cbd5e1; box-shadow: none; }
 
-.sidebar-tools { border-top: 1px solid #f1f5f9; padding-top: 20px; display: flex; flex-direction: column; gap: 8px; }
+.sidebar-tools { border-top: 1px solid #f1f5f9; padding-top: 20px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.sidebar-footer { border-top: 1px solid #e2e8f0; padding-top: 16px; margin-top: auto; display: flex; flex-direction: column; gap: 8px;}
 .tool-btn { 
   display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px;
   background: transparent; color: #64748b; font-size: 0.95rem; cursor: pointer; transition: 0.2s; border: none; width: 100%; text-align: left; font-weight: 500;
