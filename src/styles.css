@@ -1722,3 +1722,49 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ============================================
+   AI Recommend Strip (Flasher, etc)
+   ============================================ */
+.ai-recommend-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #fffbf5 0%, #f0fdf4 100%);
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.ai-recommend-text {
+  font-size: 0.82rem;
+  color: #475569;
+  flex: 1;
+}
+
+.ai-recommend-text strong {
+  color: #ff6b00;
+}
+
+/* ============================================
+   VNC Phase Indicator
+   ============================================ */
+.vnc-phase {
+  color: #fbbf24 !important;
+  font-style: italic;
+  animation: pulse 1.5s infinite;
+}
+
+.vnc-toolbar .segment-btn.sm {
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-color: #475569;
+  color: #cbd5e1;
+}
+
+.vnc-toolbar .segment-btn.sm.active {
+  background: #ff6b00;
+  color: white;
+  border-color: #ff6b00;
+}

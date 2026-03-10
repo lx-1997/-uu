@@ -477,28 +477,66 @@ export default function App() {
 
   const runTerminalCommand = (commandText: string) => {
     if (!commandText.trim()) return;
+
+    // Natural language → command translation
+    const nlPatterns: Array<{ match: RegExp; cmd: string }> = [
+      { match: /查看.*话题|列出.*topic/i, cmd: 'ros2 topic list' },
+      { match: /温度|发热|散热/i, cmd: 'cat /sys/class/thermal/thermal_zone0/temp' },
+      { match: /内存|内存使用/i, cmd: 'free -h' },
+      { match: /磁盘|存储空间/i, cmd: 'df -h' },
+      { match: /进程|正在运行/i, cmd: 'top -bn1 | head -20' },
+      { match: /日志|系统日志/i, cmd: 'tail -f /var/log/syslog' },
+      { match: /网络|ip地址|ip 地址/i, cmd: 'ip addr show' },
+      { match: /bpu|推理|加速器/i, cmd: 'hrut_smi' },
+    ];
+    const isNL = /[\u4e00-\u9fff]/.test(commandText) && !commandText.startsWith('/') && !commandText.includes('--');
+    const nlHit = isNL ? nlPatterns.find(p => p.match.test(commandText)) : null;
+
     const responseMap: Record<string, string[]> = {
       'ros2 topic list': ['/camera/color/image_raw', '/hobot_dnn/bbox', '/tf', '/cmd_vel'],
       hrut_smi: ['BPU0 68%', 'DDR 43%', 'TEMP 61.8C'],
       'tail -f /var/log/syslog': ['[mock] rsyslog 已进入跟随模式', '[mock] AI runtime ready'],
       'ls /userdata': ['models', 'records', 'cache', 'workspace'],
       top: ['CPU 31%  MEM 44%  Tasks 128', '[mock] 仅展示交互，不连接真实设备'],
+      'cat /sys/class/thermal/thermal_zone0/temp': ['61800  (61.8°C)'],
+      'free -h': ['              total   used   free', 'Mem:          8.0G   5.2G   2.8G'],
+      'df -h': ['/dev/mmcblk0p3   28G  16G   12G  56%  /', '/dev/mmcblk0p4   32G  10G   22G  32%  /userdata'],
+      'ip addr show': ['eth0: 192.168.1.100/24  UP', 'wlan0: <NO-CARRIER>  DOWN'],
+      'ros2 node list': ['/hobot_dnn', '/mipi_cam', '/ros2_daemon', '/usb_cam_node'],
+      'ros2 topic echo /hobot_dnn/bbox': ['[ai_msgs.PerceptionTargets] targets: [{type: "person", score: 0.92, bbox: [120,80,340,420]}]'],
+      'ros2 bag record -a': ['[INFO] Subscribing to all topics... recording to rosbag2_2026_03_10/'],
+      'bputop': ['BPU0: 68%  |  Queue: 2  |  Freq: 1GHz  |  Temp: 61.8°C'],
+      'dmesg | tail': ['[  12.001] hobot_bpu: initialized', '[  12.340] mipi_cam: stream ready'],
+      'top -bn1 | head -20': ['PID  USER  CPU%  MEM%  CMD', '1284 root  23%   8%   hobot_dnn', '1301 root  12%   6%   mipi_cam'],
     };
 
-    const output = responseMap[commandText] ?? ['[mock] 已接收命令，建议切换为真实 SSH 执行器后接入。'];
-
-    setTerminalSessions((prev) =>
-      prev.map((session) =>
-        session.id === activeSessionId
-          ? {
-              ...session,
-              status: 'running',
-              lines: [...session.lines, `root@rdk:~# ${commandText}`, ...output, 'root@rdk:~#'],
-            }
-          : session,
-      ),
-    );
+    if (nlHit) {
+      const output = responseMap[nlHit.cmd] ?? ['[执行完成]'];
+      setTerminalSessions(prev => prev.map(s => s.id === activeSessionId ? {
+        ...s, lines: [...s.lines,
+          `✨ AI 翻译: "${commandText}" → ${nlHit.cmd}`,
+          `root@rdk:~# ${nlHit.cmd}`, ...output, 'root@rdk:~#']
+      } : s));
+    } else {
+      const output = responseMap[commandText] ?? ['[mock] 已接收命令，建议切换为真实 SSH 执行器后接入。'];
+      setTerminalSessions(prev => prev.map(s => s.id === activeSessionId ? {
+        ...s, status: 'running',
+        lines: [...s.lines, `root@rdk:~# ${commandText}`, ...output, 'root@rdk:~#']
+      } : s));
+    }
     setTerminalDraft('');
+  };
+
+  const runTerminalAIAnalysis = () => {
+    const lastLines = currentSession.lines.slice(-8).filter(l => !l.startsWith('root@') && !l.startsWith('🤖'));
+    const hasError = lastLines.some(l => /error|fail|denied|not found/i.test(l));
+    const analysis = hasError
+      ? ['🔍 检测到异常输出，可能原因:', '   • 权限不足 — 尝试 sudo 执行', '   • 依赖缺失 — 运行 apt install 安装', '   • 路径错误 — 检查文件是否存在', '💡 建议: sudo !! 重试上一条命令']
+      : ['🔍 终端输出分析:', `   • 共 ${currentSession.lines.length} 行输出，无明显错误`, '   • 系统状态正常，BPU/内存/网络指标在安全范围', '   • 建议: 定期运行 hrut_smi 监控硬件状态', '💡 一切正常，可继续操作。'];
+    setTerminalSessions(prev => prev.map(s => s.id === activeSessionId ? {
+      ...s, lines: [...s.lines, '🤖 ─── AI 分析 ───', ...analysis, '────────────', 'root@rdk:~#']
+    } : s));
+    addToast('AI 分析完成', 'success');
   };
 
   const startVncSession = () => {
@@ -659,9 +697,13 @@ export default function App() {
   const renderFlasher = () => (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">💽 镜像烧录工具 (Target: {currentDevice?.name})</div>
-        <div className="desc-text">
-          选择镜像、确认介质、设定策略，四步完成系统烧录。
+        <div className="widget-header">💽 智能烧录 (Target: {currentDevice?.name})</div>
+        <div className="desc-text">AI 推荐最佳镜像 · 四步完成系统烧录。</div>
+
+        <div className="ai-recommend-strip">
+          <span className="ai-suggest-label">🤖 AI 推荐</span>
+          <span className="ai-recommend-text">检测到 {currentDevice?.name}，推荐使用 <strong>ROS2 Humble 预装版</strong>（含 TogetherROS.b 与 BPU 工具链）</span>
+          <button className="clean-btn outline-btn sm-btn" onClick={() => { setFlashImage('ros2-humble'); addToast('已切换到 AI 推荐镜像', 'success'); }}>采纳</button>
         </div>
 
         <div className="stepper-row">
@@ -865,8 +907,8 @@ export default function App() {
           <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('输出已复制到剪贴板', 'success')}>📋 复制</button>
           <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('日志已导出', 'info')}>💾 导出</button>
           <div style={{ flex: 1 }}></div>
-          <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={() => addToast('AI 正在分析终端输出，识别异常与优化建议...', 'info')}>🤖 AI 分析输出</button>
-          <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={() => { setTerminalDraft(''); addToast('描述你要做的事，AI 将翻译为命令', 'info'); }}>💬 自然语言模式</button>
+          <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={runTerminalAIAnalysis}>🤖 AI 分析输出</button>
+          <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={() => addToast('自然语言模式已激活 — 直接输入中文描述即可，AI 会翻译为命令', 'info')}>💬 自然语言模式</button>
         </div>
       </div>
     </div>
@@ -948,8 +990,16 @@ export default function App() {
             </span>
             <span className="vnc-info">{currentDevice?.ip}:5900</span>
             {vncConnected && <span className="vnc-info vnc-latency">延迟 12ms</span>}
+            {vncConnected && vncProgress < 100 && <span className="vnc-info vnc-phase">⏳ {vncPhase}</span>}
           </div>
           <div className="vnc-toolbar-right">
+            {vncConnected && (
+              <>
+                <button className={`segment-btn sm ${vncLayout === 'fit' ? 'active' : ''}`} onClick={() => setVncLayout('fit')}>适配</button>
+                <button className={`segment-btn sm ${vncLayout === 'pixel' ? 'active' : ''}`} onClick={() => setVncLayout('pixel')}>1:1</button>
+                <span className="vnc-toolbar-divider"></span>
+              </>
+            )}
             {(['smooth', 'balanced', 'sharp'] as const).map((mode) => (
               <button key={mode} className={`segment-btn sm ${vncQuality === mode ? 'active' : ''}`} onClick={() => setVncQuality(mode)}>
                 {mode === 'smooth' ? '流畅' : mode === 'balanced' ? '平衡' : '清晰'}
@@ -1002,8 +1052,16 @@ export default function App() {
   const renderLowcode = () => (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🧩 流程编排</div>
-        <div className="desc-text">可视化流程编排，选择模板、拖拽节点、一键发布。</div>
+        <div className="widget-header">🧩 AI 流程编排</div>
+        <div className="desc-text">用自然语言描述流程，AI 自动生成节点编排 · 也可手动拖拽。</div>
+
+        <div className="ai-file-bar">
+          <div className="ai-file-input-wrap">
+            <span className="ai-file-icon">🤖</span>
+            <input className="clean-input ai-file-input" placeholder='描述你想要的流程，例如: "摄像头拍照 → AI 检测人脸 → 推送到飞书"' />
+          </div>
+          <button className="clean-btn" onClick={() => addToast('AI 正在生成流程编排...', 'info')}>生成</button>
+        </div>
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
@@ -1095,8 +1153,16 @@ export default function App() {
   const renderOpenClaw = () => (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">⚙️ OpenClaws Agent Gateway</div>
-        <div className="desc-text">大模型网关配置与渠道接入管理。</div>
+        <div className="widget-header">⚙️ OpenClaws AI Gateway</div>
+        <div className="desc-text">AI Agent 网关 — 大模型接入、飞书集成、智能路由与调用分析。</div>
+
+        <div className="ai-file-bar">
+          <div className="ai-file-input-wrap">
+            <span className="ai-file-icon">💬</span>
+            <input className="clean-input ai-file-input" placeholder='快速测试: 输入一段话让 AI 回复，验证网关连通性' />
+          </div>
+          <button className="clean-btn" onClick={() => addToast('网关测试请求已发送... 模型响应正常 (212ms)', 'success')}>测试</button>
+        </div>
 
         <div className="workspace-grid" style={{ gridTemplateColumns: '1fr 2fr' }}>
           
@@ -1517,7 +1583,15 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🤖 模型仓库与部署 (Target: {currentDevice?.name})</div>
-        <div className="desc-text">AI 模型管理，支持格式转换、基准测试与一键部署。</div>
+        <div className="desc-text">AI 模型管理 — 智能推荐、格式转换、基准测试与一键部署。</div>
+
+        <div className="ai-file-bar">
+          <div className="ai-file-input-wrap">
+            <span className="ai-file-icon">🤖</span>
+            <input className="clean-input ai-file-input" placeholder='描述你的场景，AI 推荐最佳模型: "我需要检测行人和车辆"' />
+          </div>
+          <button className="clean-btn" onClick={() => addToast('AI 推荐: YOLOv5s (BPU) — 通用目标检测，已适配当前设备，30FPS', 'info')}>推荐</button>
+        </div>
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
