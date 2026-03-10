@@ -9,7 +9,7 @@ const MOCK_DEVICES = [
 
 export default function App() {
   const [activeDevice, setActiveDevice] = useState(MOCK_DEVICES[0].id);
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'flasher', 'terminal', 'settings'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'flasher', 'terminal', 'files', 'vnc', 'lowcode'
   const [cmd, setCmd] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
@@ -28,9 +28,6 @@ export default function App() {
         setActiveTab('flasher');
       } else if (lowerCmd.includes('终端') || lowerCmd.includes('terminal') || lowerCmd.includes('ssh')) {
         setActiveTab('terminal');
-      } else if (lowerCmd.includes('设备') || lowerCmd.includes('连接')) {
-         // No longer suddenly jumps to "flash". Now just highlights device manager conceptually.
-         alert('已选中设备管理上下文。AI 可以协助您扫描局域网中的 RDK 设备。');
       } else {
         setActiveTab('dashboard');
       }
@@ -86,42 +83,53 @@ export default function App() {
     if (activeTab === 'terminal') {
       return (
         <div className="center-stage" style={{maxWidth: '90%'}}>
-           <div className="isolated-widget" style={{fontFamily: 'monospace', background: '#000'}}>
-             <div className="widget-header" style={{fontSize: '1rem', borderBottom: '1px solid #333', color: '#0f0'}}>
+           <div className="isolated-widget terminal-widget" style={{fontFamily: 'monospace'}}>
+             <div className="widget-header" style={{fontSize: '1rem'}}>
                 🟢 root@{currentDevice?.ip} ~
              </div>
-             <div style={{color: '#aaa', marginTop: '10px', minHeight: '300px'}}>
+             <div style={{color: '#94a3b8', marginTop: '10px', minHeight: '300px'}}>
                Welcome to RDK OS.<br/>
                Linux rdk 5.10.x aarch64<br/><br/>
-               root@rdk:~# <span style={{display:'inline-block', width: '8px', height: '15px', background: '#aaa', animation: 'blink 1s infinite'}}></span>
+               root@rdk:~# <span style={{display:'inline-block', width: '8px', height: '15px', background: '#94a3b8', animation: 'blink 1s infinite'}}></span>
              </div>
            </div>
         </div>
       );
     }
 
-    // Default: Dashboard
+    if (activeTab === 'files' || activeTab === 'vnc' || activeTab === 'lowcode') {
+      return (
+        <div className="center-stage" style={{ justifyContent: 'center', height: '100%' }}>
+          <div className="isolated-widget" style={{textAlign: 'center'}}>
+             <div className="widget-header" style={{justifyContent: 'center', borderBottom: 'none'}}>🚧 模块正在开发中</div>
+             <div className="desc-text">该基础工具 [{activeTab}] 的 UI 尚未在此原型中映射。</div>
+          </div>
+        </div>
+      );
+    }
+
+    // Default: Dashboard / Copilot Main Interface
     return (
       <div className="center-stage">
-        <h2 className="hero-title">{currentDevice?.name || 'RDK Studio'}</h2>
-        <div className="hero-subtitle">管理、控制与扩展您的计算节点</div>
+        <h2 className="hero-title">{currentDevice?.name || 'RDK Workspace'}</h2>
+        <div className="hero-subtitle">基于 AI 驱动的边缘计算与开发节点</div>
 
         <div className="quick-grid">
-          <div className="startup-card" onClick={() => alert('触发环境检查...')}>
-            <h3>🏥 硬件诊断</h3>
-            <p>检查 NPU、CPU 及外设接口状态，定位可能的问题。</p>
+          <div className="startup-card" onClick={() => alert('通信链接建立... 进入 OpenClaw 模块。')}>
+            <h3>🦞 OpenClaw (小龙虾)</h3>
+            <p>深度体验 RDK 社区超高人气生态项目，利用 BPU 进行小龙虾的智能识别、多目标追踪及姿态预估，展示无缝的端到端 AI 落地全流程。</p>
           </div>
-          <div className="startup-card" onClick={() => setActiveTab('flasher')}>
-            <h3>💽 固件与烧录</h3>
-            <p>通过独立工作流将最新 OS 或定制镜像刷写至设备中。</p>
+          <div className="startup-card" onClick={() => alert('调用 hrutools 和 bputop...')}>
+            <h3>🏥 硬件诊断监控</h3>
+            <p>集成 hrutools 与 bputop，实时监控 BPU 算力负载、CPU 占用、内存及芯片温度条形图。</p>
           </div>
-          <div className="startup-card" onClick={() => setActiveTab('terminal')}>
-            <h3>⚙️ 远程终端</h3>
-            <p>免密码通过内置 WebSocket 服务直接 SSH 进设备 Shell。</p>
+          <div className="startup-card" onClick={() => alert('获取地平线示例应用仓库...')}>
+            <h3>📦 示例应用</h3>
+            <p>全面汇聚 RDK 官方与生态节点，一键运行 TogetherROS.b 环境下的视觉跟随、手势控制、双摄测距等深度学习与机器视觉 Demo。</p>
           </div>
-          <div className="startup-card" onClick={() => alert('载入 OpenClaw...')}>
-            <h3>🤖 机械臂控制 (OpenClaw)</h3>
-            <p>加载硬件抽象层，对机械臂进行运动学调试。</p>
+          <div className="startup-card" onClick={() => alert('启动 Foxglove websocket / WebViz桥接 ...')}>
+            <h3>🕸️ ROS 话题可视化</h3>
+            <p>订阅并可视化设备上的 ROS2 话题 (如 /hobot_dnn/bbox)。直接在浏览器展示点云、图像帧及 AI 推理框。</p>
           </div>
         </div>
       </div>
@@ -132,11 +140,13 @@ export default function App() {
     <div className="canvas-shell">
       <div className="layout-container">
         
-        {/* Left Sidebar - Device Manager */}
+        {/* Left Sidebar - Infrastructure & Tools */}
         <div className="app-sidebar">
-          <div className="sidebar-brand">RDK Studio</div>
+          <div className="sidebar-brand cursor-pointer" onClick={() => setActiveTab('dashboard')} style={{cursor: 'pointer'}}>
+            RDK Studio
+          </div>
           
-          <div className="section-label">您的设备 (Workspace)</div>
+          <div className="section-label">我的设备</div>
           <div className="device-list">
             {MOCK_DEVICES.map(dev => (
               <div 
@@ -144,7 +154,7 @@ export default function App() {
                 className={`device-item ${activeDevice === dev.id ? 'active' : ''}`}
                 onClick={() => {
                   setActiveDevice(dev.id);
-                  setActiveTab('dashboard');
+                  setActiveTab('dashboard'); // Switch focus to dashboard when device changes
                 }}
               >
                 <div className="device-icon">🖧</div>
@@ -157,41 +167,49 @@ export default function App() {
                 </div>
               </div>
             ))}
-            
-            <button className="clean-btn" style={{marginTop: '10px', padding: '10px', background: 'transparent', border: '1px dashed rgba(255,255,255,0.2)'}}>
-               + 扫描新设备
+            <button className="clean-btn outline-btn" style={{marginTop: '10px', padding: '8px', fontSize: '0.85rem'}}>
+               + 扫描 / 添加设备
             </button>
           </div>
 
-          <div className="section-label">工具箱</div>
+          <div className="section-label">基础工具箱</div>
           <div className="sidebar-tools">
-             <button className={`tool-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-               <span style={{fontSize:'1.2rem'}}>📊</span> 仪表盘
-             </button>
              <button className={`tool-btn ${activeTab === 'flasher' ? 'active' : ''}`} onClick={() => setActiveTab('flasher')}>
-               <span style={{fontSize:'1.2rem'}}>💽</span> 系统镜像工具
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>💽</span> 镜像烧录
+             </button>
+             <button className={`tool-btn ${activeTab === 'files' ? 'active' : ''}`} onClick={() => setActiveTab('files')}>
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>📁</span> 文件资源
              </button>
              <button className={`tool-btn ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>
-               <span style={{fontSize:'1.2rem'}}>💻</span> SSH 终端
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>💻</span> SSH 终端
              </button>
-             <button className="tool-btn">
-               <span style={{fontSize:'1.2rem'}}>🧩</span> 配置与拓展
+             <button className={`tool-btn ${activeTab === 'vnc' ? 'active' : ''}`} onClick={() => setActiveTab('vnc')}>
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>🖥️</span> 远程桌面
+             </button>
+             <button className={`tool-btn ${activeTab === 'lowcode' ? 'active' : ''}`} onClick={() => setActiveTab('lowcode')}>
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>🧩</span> 流程编排
              </button>
           </div>
         </div>
 
-        {/* Main Area */}
+        {/* Main Area - Dynamic Apps & Copilot */}
         <div className="main-area">
           <div className="top-toolbar">
              <div className="context-title">
+               {activeTab === 'dashboard' && 'AI Copilot 工作台'}
                {activeTab === 'flasher' && '系统镜像工具'}
-               {activeTab === 'dashboard' && '仪表盘'}
-               {activeTab === 'terminal' && '远程终端'}
-               <span style={{color: '#64748b', fontSize: '0.9rem', fontWeight: 'normal'}}> / {currentDevice?.name}</span>
+               {activeTab === 'terminal' && '终端环境'}
+               {activeTab === 'files' && '文件管理器 (SFTP)'}
+               {activeTab === 'vnc' && '可视化桌面 (VNC)'}
+               {activeTab === 'lowcode' && 'Node-RED 编排'}
+               <span style={{color: '#94a3b8', fontSize: '0.9rem', fontWeight: 'normal', display: 'inline-flex', alignItems: 'center', marginLeft: '10px'}}> 
+                 <span style={{margin: '0 6px'}}>/</span> 
+                 <span className={`status-dot ${currentDevice?.status === 'offline' ? 'offline' : ''}`} style={{marginRight: '6px', width:'6px', height:'6px'}}></span> 
+                 {currentDevice?.name} ({currentDevice?.ip})
+               </span>
              </div>
              <div className="toolbar-actions">
-                <button className="icon-btn" title="通知">🔔</button>
-                <button className="icon-btn" title="用户账号">👤</button>
+                <button className="icon-btn" title="查看用户/许可证">👤</button>
              </div>
           </div>
 
@@ -202,17 +220,17 @@ export default function App() {
           {/* Contextual AI Dock */}
           <div className="floating-dock">
             <form className="input-box" onSubmit={handleCommand}>
-              <span style={{marginRight: '12px', fontSize: '1.2rem'}}>✨</span>
+              <span style={{marginRight: '12px', fontSize: '1.2rem', color: '#ff6b00'}}>✨</span>
               <input 
                 type="text" 
                 className="cmd-input" 
-                placeholder={`让 AI 协助操作 ${currentDevice?.name} (例如 "帮我烧录最新的Ubuntu版本")...`}
+                placeholder={`让 AI 协助开发 ${currentDevice?.name} (例如 "帮我用C++订阅一个ROS话题")...`}
                 value={cmd}
                 onChange={e => setCmd(e.target.value)}
                 disabled={isLoading}
               />
-              <button type="submit" className="send-btn" disabled={isLoading}>
-                ➤
+              <button type="submit" className="send-btn" disabled={isLoading} title="发送">
+                ↑
               </button>
             </form>
           </div>
