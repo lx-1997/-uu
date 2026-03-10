@@ -11,10 +11,9 @@ const MOCK_DEVICES = [
 const DASHBOARD_CARDS: Array<{ tab: Tab; title: string; description: string; loading: string }> = [
   {
     tab: 'openclaw',
-    title: '🦞 OpenClaw (小龙虾)',
-    description:
-      '深度体验 RDK 社区超高人气生态项目，利用 BPU 进行小龙虾的智能识别、多目标追踪及姿态预估，展示无缝的端到端 AI 落地全流程。',
-    loading: '正在载入 OpenClaw 场景编排与推理面板...',
+    title: '⚙️ OpenClaws Gateway',
+    description: '快速配置大模型与飞书/钉钉网关接入，提供接口地址与安装指南。',
+    loading: '正在载入 OpenClaws 网关配置...',
   },
   {
     tab: 'hardware',
@@ -112,7 +111,7 @@ export default function App() {
   const [flowMode, setFlowMode] = useState<'draft' | 'review' | 'staging'>('draft');
   const [flowCheckProgress, setFlowCheckProgress] = useState(0);
   const [isFlowChecking, setIsFlowChecking] = useState(false);
-  const [openclawMode, setOpenclawMode] = useState<'detect' | 'track' | 'harvest'>('detect');
+  const [openclawMode, setOpenclawMode] = useState<string>('model');
   const [openclawThreshold, setOpenclawThreshold] = useState(74);
   const [hardwareRange, setHardwareRange] = useState<'realtime' | '10m' | '1h'>('realtime');
   const [examplePreset, setExamplePreset] = useState('follow');
@@ -814,53 +813,146 @@ export default function App() {
   const renderOpenClaw = () => (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🦞 OpenClaw (小龙虾)</div>
-        <div className="desc-text">把热门社区项目从“卡片入口”延展成可操作场景。这里重点模拟源选择、阈值调整、模式切换和结果回看，不做真实推理接入。</div>
-        <div className="workspace-grid two-column">
-          <div className="panel-card preview-card">
-            <div className="panel-title">场景预览</div>
-            <div className="scene-preview">
-              <div className="bbox one"></div>
-              <div className="bbox two"></div>
-              <div className="preview-caption">Camera Stream / Inference Overlay</div>
-            </div>
-          </div>
-          <div className="panel-card">
-            <div className="panel-title">策略设置</div>
-            <div className="segmented-row">
-              {[
-                ['detect', '识别模式'],
-                ['track', '追踪模式'],
-                ['harvest', '采收辅助'],
-              ].map(([mode, label]) => (
-                <button
-                  key={mode}
-                  className={`segment-btn ${openclawMode === mode ? 'active' : ''}`}
-                  onClick={() => setOpenclawMode(mode as 'detect' | 'track' | 'harvest')}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="slider-block">
-              <div className="progress-meta">
-                <span>置信阈值</span>
-                <strong>{openclawThreshold}%</strong>
+        <div className="widget-header">⚙️ OpenClaws Agent Gateway</div>
+        <div className="desc-text">OpenClaws.io 大模型网关与 AI Agent 编排。接口直连大语言模型、飞书等渠道接入。提示：可通过页面底部“测试端”直接开启对话测试。</div>
+
+        <div className="workspace-grid" style={{ gridTemplateColumns: '1fr 2fr' }}>
+          
+          <div className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <div className="panel-title">网关基础与渠道配置</div>
+              <div className="usage-list">
+                <div onClick={() => setOpenclawMode('model')} className={`usage-item selectable ${openclawMode === 'model' ? 'active' : ''}`} style={openclawMode === 'model' ? {borderColor: '#ff7a00', background: '#fff9f5'} : {}}>
+                  <strong>🤖 模型配置 (Model Config)</strong>
+                  <span>OpenAI, Qwen 等 API 接口密钥录入</span>
+                </div>
+                <div onClick={() => setOpenclawMode('feishu')} className={`usage-item selectable ${openclawMode === 'feishu' ? 'active' : ''}`} style={openclawMode === 'feishu' ? {borderColor: '#ff7a00', background: '#fff9f5'} : {}}>
+                  <strong>🐦 飞书机器人 (Feishu Bot)</strong>
+                  <span>获取回调地址并绑定自定义机器人</span>
+                </div>
+                <div onClick={() => setOpenclawMode('gateway')} className={`usage-item selectable ${openclawMode === 'gateway' ? 'active' : ''}`} style={openclawMode === 'gateway' ? {borderColor: '#ff7a00', background: '#fff9f5'} : {}}>
+                  <strong>🌐 网关信息 (Gateway Info)</strong>
+                  <span>本地运行状态与限流调用详情</span>
+                </div>
+                <div onClick={() => setOpenclawMode('install')} className={`usage-item selectable ${openclawMode === 'install' ? 'active' : ''}`} style={openclawMode === 'install' ? {borderColor: '#ff7a00', background: '#fff9f5'} : {}}>
+                  <strong>📥 快速部署 (Installation)</strong>
+                  <span>Node.js 网关代码拉取与 Docker 宏配置</span>
+                </div>
               </div>
-              <input
-                className="range-input"
-                type="range"
-                min="50"
-                max="95"
-                value={openclawThreshold}
-                onChange={(event) => setOpenclawThreshold(Number(event.target.value))}
-              />
             </div>
-            <div className="usage-list">
-              <div className="usage-item">当前策略将优先突出小龙虾边界框、姿态标签和误检提醒。</div>
-              <div className="usage-item">后续真实实现时可串联相机标定、推理日志和抓取动作回放。</div>
-            </div>
+            
+            <button className="clean-btn" style={{ marginTop: 'auto', background: '#f1f5f9', color: '#334155' }}>
+              检查容器运行状态 (Health Check)
+            </button>
           </div>
+
+          <div className="panel-card" style={{ background: '#f8fafc', animation: 'fadeIn 0.3s ease-in-out' }}>
+            {openclawMode === 'model' && (
+              <div style={{ padding: '16px' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '1.2rem', color: '#1e293b' }}>大语言模型 (LLM) 密钥配置</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: '#64748b' }}>选择模型提供商</label>
+                    <select className="clean-input" style={{ width: '100%', background: 'white' }}>
+                      <option>OpenAI (或兼容接口如 DeepSeek)</option>
+                      <option>阿里云 Qwen (通义千问)</option>
+                      <option>本地 Ollama 服务</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: '#64748b' }}>API 访问地址 (Endpoint)</label>
+                    <input type="text" className="clean-input" defaultValue="https://api.openai.com/v1" style={{ width: '100%', background: 'white' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: '#64748b' }}>API 密钥 (API Key)</label>
+                    <input type="password" className="clean-input" placeholder="sk-..." style={{ width: '100%', background: 'white' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: '#64748b' }}>默认调用模型 (Model Name)</label>
+                    <input type="text" className="clean-input" defaultValue="gpt-4" style={{ width: '100%', background: 'white' }} />
+                  </div>
+                  <button className="clean-btn" style={{ background: '#ff7a00', color: 'white', marginTop: '12px' }} onClick={() => {  setTimeout(()=>window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'}), 100); }}>
+                    保存配置并前往底端对话框测试
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {openclawMode === 'feishu' && (
+              <div style={{ padding: '16px' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '1.2rem', color: '#1e293b' }}>应用集成：企业飞书机器人</h3>
+                <div style={{ background: 'white', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+                  <span style={{ color: '#ff6b00', fontWeight: 'bold', fontSize: '0.9rem' }}>步骤 1: 配置请求地址 (Webhook URL)</span>
+                  <div style={{ marginTop: '8px', padding: '8px', background: '#f1f5f9', borderRadius: '4px', fontFamily: 'monospace', color: '#334155' }}>
+                    http://192.168.1.100:8000/api/wechat/lark
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '8px', marginBottom: 0 }}>请复制上游地址，前往 飞书开放平台 → 事件订阅中按判验证。</p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <span style={{ color: '#ff6b00', fontWeight: 'bold', fontSize: '0.9rem' }}>步骤 2: 绑定 App 凭证</span>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: '#64748b' }}>应用凭证配置</label>
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      <input type="text" className="clean-input" placeholder="App ID (cli_...)" style={{ flex: 1, minWidth: '150px', background: 'white' }} />
+                      <input type="password" className="clean-input" placeholder="App Secret" style={{ flex: 1, minWidth: '150px', background: 'white' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', color: '#64748b' }}>Encrypt Key (事件加解密，可选)</label>
+                    <input type="password" className="clean-input" placeholder="输入密钥" style={{ width: '100%', background: 'white' }} />
+                  </div>
+                  <button className="clean-btn" style={{ background: '#ff7a00', color: 'white', marginTop: '12px' }}>模拟发送消息测试卡片</button>
+                </div>
+              </div>
+            )}
+
+            {openclawMode === 'gateway' && (
+              <div style={{ padding: '16px' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '1.2rem', color: '#1e293b' }}>本地服务信息监控</h3>
+                <div className="field-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                  <div className="metric-box" style={{ background: 'white', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <span style={{ color: '#64748b', fontSize: '0.85rem' }}>网关代理状态</span>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 600, marginTop: '4px', color: '#22c55e' }}>● Running</div>
+                  </div>
+                  <div className="metric-box" style={{ background: 'white', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <span style={{ color: '#64748b', fontSize: '0.85rem' }}>API 限流策略并发配置</span>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 600, marginTop: '4px' }}>120 QPS</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: '20px' }}>
+                  <strong style={{ display: 'block', marginBottom: '12px' }}>实时请求调用日志 (Mock)</strong>
+                  <div className="terminal-screen" style={{ minHeight: '160px', padding: '12px', background: '#0f172a', borderRadius: '8px', fontSize: '0.85rem' }}>
+                    <div className="terminal-line" style={{ color: '#94a3b8', marginBottom: '4px' }}>[10:45:01] OpenClaws Gateway initialized on port 8000</div>
+                    <div className="terminal-line" style={{ color: '#3b82f6', marginBottom: '4px' }}>[10:45:12] Model Endpoint linked & verified</div>
+                    <div className="terminal-line" style={{ color: '#22c55e', marginBottom: '4px' }}>[10:46:05] POST /v1/chat/completions - 200 OK (212ms) - 1.2k tokens</div>
+                    <div className="terminal-line" style={{ color: '#22c55e', marginBottom: '4px' }}>[10:46:06] POST /api/wechat/lark - 200 OK (89ms)</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {openclawMode === 'install' && (
+              <div style={{ padding: '16px' }}>
+                <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '1.2rem', color: '#1e293b' }}>快速安装与容器托管指南</h3>
+                <div style={{ background: '#0f172a', padding: '16px', borderRadius: '8px', color: 'white', fontFamily: 'monospace', marginBottom: '20px', fontSize: '0.85rem' }}>
+                  <div style={{ color: '#64748b', marginBottom: '8px' }}># 1. 下载构建源码并安装 Node.js 依赖</div>
+                  <div style={{ marginBottom: '16px' }}>git clone https://github.com/openclaws/openclaws.git<br/>cd openclaws && npm install</div>
+                  
+                  <div style={{ color: '#64748b', marginBottom: '8px' }}># 2. 启动代理和回调网关</div>
+                  <div style={{ marginBottom: '16px' }}>npm run start:gateway</div>
+                </div>
+
+                <div className="usage-item" style={{ background: 'white', border: '1px solid #e2e8f0' }}>
+                  想要利用 Docker 进行脱机部署？点击下方生成您的专属 Compose 文件可以关联自带 Redis 和 PostgreSQL 保存消息上下文。
+                </div>
+
+                <button className="clean-btn" style={{ background: '#ff7a00', color: 'white', marginTop: '16px' }}>
+                  获取 Docker-compose.yaml 初始化文件
+                </button>
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
     </div>
@@ -1110,7 +1202,7 @@ export default function App() {
                {activeTab === 'files' && '文件管理器 (SFTP)'}
                {activeTab === 'vnc' && '可视化桌面 (VNC)'}
                {activeTab === 'lowcode' && 'Node-RED 编排'}
-              {activeTab === 'openclaw' && 'OpenClaw 交互实验区'}
+              {activeTab === 'openclaw' && 'OpenClaws 网关配置'}
               {activeTab === 'hardware' && '硬件监控工作台'}
               {activeTab === 'examples' && '示例应用目录'}
               {activeTab === 'ros' && 'ROS2 可视化'}
