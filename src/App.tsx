@@ -148,6 +148,8 @@ export default function App() {
   const [examplePreset, setExamplePreset] = useState('follow');
   const [rosTopic, setRosTopic] = useState('/hobot_dnn/bbox');
   const [rosRecording, setRosRecording] = useState(false);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+  const [diagnosticStep, setDiagnosticStep] = useState(0);
 
   // Interactive system states
   const [devices, setDevices] = useState(MOCK_DEVICES);
@@ -550,12 +552,65 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, margin: '0 0 20px 0', flexWrap: 'wrap' }}>
+      <div className="dashboard-shortcuts">
         <button className="clean-btn outline-btn" onClick={() => openWorkspace('terminal' as any, '')}>🖥️ 快速终端</button>
         <button className="clean-btn outline-btn" onClick={() => openWorkspace('files' as any, '')}>📂 文件管理</button>
         <button className="clean-btn outline-btn" onClick={() => openWorkspace('vnc' as any, '')}>🖵 远程桌面</button>
-        <button className="clean-btn outline-btn" onClick={() => addToast('系统诊断开始...', 'info')}>🩺 一键诊断</button>
+        <button className={`clean-btn ${diagnosticOpen ? '' : 'outline-btn'}`} onClick={() => {
+          setDiagnosticOpen(!diagnosticOpen);
+          if (!diagnosticOpen) {
+            setDiagnosticStep(0);
+            let step = 0;
+            const timer = setInterval(() => {
+              step++;
+              setDiagnosticStep(step);
+              if (step >= 6) clearInterval(timer);
+            }, 500);
+          }
+        }}>🩺 {diagnosticOpen ? '收起诊断' : '一键诊断'}</button>
       </div>
+
+      {diagnosticOpen && (() => {
+        const checks = [
+          { name: '网络连通性', icon: '🌐', pass: true, detail: `ping ${currentDevice?.ip} — 正常 (2ms)` },
+          { name: '系统负载', icon: '⚡', pass: true, detail: 'CPU 23%, 内存 5.2/8G, 进程数 87' },
+          { name: '芯片温度', icon: '🌡️', pass: false, detail: '61.8°C — 建议 < 60°C，散热需关注' },
+          { name: 'BPU 状态', icon: '🧠', pass: true, detail: 'BPU0 在线, 负载 68%, 推理队列 2' },
+          { name: '存储空间', icon: '💾', pass: true, detail: '系统盘 56%, 数据盘 32%, 模型盘 18%' },
+          { name: 'ROS2 环境', icon: '🕸️', pass: true, detail: 'humble 运行中, 4 topics, 6 nodes' },
+        ];
+        return (
+          <div className="diagnostic-panel">
+            <div className="diagnostic-checks">
+              {checks.map((check, i) => (
+                <div key={check.name} className={`diagnostic-check ${i < diagnosticStep ? (check.pass ? 'pass' : 'warn') : 'pending'}`}>
+                  <span className="diagnostic-icon">{i < diagnosticStep ? (check.pass ? '✅' : '⚠️') : '⏳'}</span>
+                  <div className="diagnostic-info">
+                    <strong>{check.icon} {check.name}</strong>
+                    <span className="diagnostic-detail">{i < diagnosticStep ? check.detail : '等待检测...'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {diagnosticStep >= 6 && (
+              <div className="diagnostic-ai-summary">
+                <div className="diagnostic-ai-header">🤖 AI 诊断总结</div>
+                <p>设备 <strong>{currentDevice?.name}</strong> 整体运行正常。重点关注：</p>
+                <ul>
+                  <li><strong>芯片温度 61.8°C</strong> 略偏高，建议检查散热风扇或降低 BPU 推理负载，长期高温可能影响器件寿命。</li>
+                  <li>BPU 负载 68%，仍有余量但建议监控峰值时段，避免推理队列堆积。</li>
+                  <li>其余网络、存储、ROS 环境指标均在安全范围内，无需操作。</li>
+                </ul>
+                <div className="diagnostic-ai-actions">
+                  <button className="clean-btn outline-btn sm-btn" onClick={() => openWorkspace('hardware' as any, '')}>查看硬件详情</button>
+                  <button className="clean-btn outline-btn sm-btn" onClick={() => openWorkspace('terminal' as any, '')}>打开终端排查</button>
+                  <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={() => addToast('AI 已生成完整诊断报告', 'success')}>📄 导出报告</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="quick-grid">
         {DASHBOARD_CARDS.map((card) => (
@@ -747,8 +802,8 @@ export default function App() {
   const renderTerminal = () => (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget terminal-shell">
-        <div className="widget-header">💻 SSH 终端与多会话工作区</div>
-        <div className="desc-text">多会话管理，支持预设配置与命令建议。</div>
+        <div className="widget-header">💻 AI 终端</div>
+        <div className="desc-text">AI 增强的远程终端 — 智能补全、错误诊断、自然语言执行。</div>
 
         <div className="terminal-topbar">
           <div className="session-tabs">
@@ -759,67 +814,59 @@ export default function App() {
                 onClick={() => setActiveSessionId(session.id)}
               >
                 {session.name}
-                <span style={{ marginLeft: 6, fontSize: '0.72rem', opacity: 0.6 }}>({session.lines.length})</span>
               </button>
             ))}
+            <button className="session-tab add-tab" onClick={createSession}>+</button>
           </div>
-          <div className="profile-controls">
-            <select className="clean-input compact-input" value={terminalProfile} onChange={(event) => setTerminalProfile(event.target.value)}>
-              {TERMINAL_PROFILES.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.label}
-                </option>
-              ))}
-            </select>
-            <button className="clean-btn" onClick={createSession}>新建会话</button>
+          <select className="clean-input compact-input" value={terminalProfile} onChange={(event) => setTerminalProfile(event.target.value)}>
+            {TERMINAL_PROFILES.map((profile) => (
+              <option key={profile.id} value={profile.id}>{profile.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="panel-card terminal-screen-card">
+          <div className="terminal-screen" style={{ minHeight: 260 }}>
+            {currentSession.lines.map((line, index) => (
+              <div key={`${line}-${index}`} className="terminal-line">{line}</div>
+            ))}
+          </div>
+          <div className="terminal-input-row">
+            <span className="terminal-prompt">$</span>
+            <input
+              className="clean-input terminal-input"
+              value={terminalDraft}
+              onChange={(event) => setTerminalDraft(event.target.value)}
+              placeholder="输入命令 · Tab 触发 AI 补全 · 自然语言也行"
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runTerminalCommand(terminalDraft); } }}
+            />
+            <button className="clean-btn" onClick={() => runTerminalCommand(terminalDraft)}>执行</button>
           </div>
         </div>
 
-        <div className="workspace-grid two-column terminal-grid">
-          <div className="panel-card terminal-screen-card">
-            <div className="panel-title">当前输出缓冲</div>
-            <div className="terminal-screen">
-              {currentSession.lines.map((line, index) => (
-                <div key={`${line}-${index}`} className="terminal-line">{line}</div>
-              ))}
-            </div>
-            <div className="terminal-input-row">
-              <input
-                className="clean-input terminal-input"
-                value={terminalDraft}
-                onChange={(event) => setTerminalDraft(event.target.value)}
-                placeholder="输入命令，例如 ros2 topic list"
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runTerminalCommand(terminalDraft); } }}
-              />
-              <button className="clean-btn" onClick={() => runTerminalCommand(terminalDraft)}>执行</button>
-            </div>
+        <div className="ai-suggest-strip">
+          <span className="ai-suggest-label">✨ AI 建议</span>
+          <div className="chip-cloud" style={{ margin: 0 }}>
+            {(terminalProfile === 'ros'
+              ? ['ros2 topic list', 'ros2 node list', 'ros2 topic echo /hobot_dnn/bbox', 'ros2 bag record -a']
+              : terminalProfile === 'diag'
+              ? ['hrut_smi', 'cat /sys/class/thermal/thermal_zone0/temp', 'bputop', 'dmesg | tail']
+              : COMMAND_SUGGESTIONS
+            ).map((suggestion) => (
+              <button key={suggestion} className="chip-btn" onClick={() => runTerminalCommand(suggestion)}>
+                {suggestion}
+              </button>
+            ))}
           </div>
+        </div>
 
-          <div className="panel-card">
-            <div className="panel-title">预设配置</div>
-            <div className="usage-list">
-              {TERMINAL_PROFILES.map((profile) => (
-                <div key={profile.id} className={`usage-item selectable ${terminalProfile === profile.id ? 'active' : ''}`} onClick={() => setTerminalProfile(profile.id)}>
-                  <strong>{profile.label}</strong>
-                  <span>{profile.desc}</span>
-                </div>
-              ))}
-            </div>
-            <div className="panel-title" style={{ marginTop: 16 }}>常用命令</div>
-            <div className="chip-cloud">
-              {COMMAND_SUGGESTIONS.map((suggestion) => (
-                <button key={suggestion} className="chip-btn" onClick={() => runTerminalCommand(suggestion)}>
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-            <div className="panel-title" style={{ marginTop: 16 }}>快捷操作</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('终端输出已清空', 'info')}>🗑 清屏</button>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('输出已复制到剪贴板', 'success')}>📋 复制输出</button>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('日志已导出', 'info')}>💾 导出日志</button>
-            </div>
-          </div>
+        <div className="terminal-actions-bar">
+          <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('终端输出已清空', 'info')}>🗑 清屏</button>
+          <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('输出已复制到剪贴板', 'success')}>📋 复制</button>
+          <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('日志已导出', 'info')}>💾 导出</button>
+          <div style={{ flex: 1 }}></div>
+          <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={() => addToast('AI 正在分析终端输出，识别异常与优化建议...', 'info')}>🤖 AI 分析输出</button>
+          <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={() => { setTerminalDraft(''); addToast('描述你要做的事，AI 将翻译为命令', 'info'); }}>💬 自然语言模式</button>
         </div>
       </div>
     </div>
@@ -828,102 +875,61 @@ export default function App() {
   const renderFiles = () => (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">📁 文件资源与传输队列</div>
-        <div className="desc-text">SFTP 文件浏览、上传下载与传输队列管理。</div>
+        <div className="widget-header">📁 智能文件桥</div>
+        <div className="desc-text">AI 驱动的文件管理 — 支持自然语言指令、拖拽传输。</div>
 
-        <div style={{ display: 'flex', gap: 14, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="ai-file-bar">
+          <div className="ai-file-input-wrap">
+            <span className="ai-file-icon">🤖</span>
+            <input className="clean-input ai-file-input" placeholder='试试: "把 models/ 下模型上传到设备" 或 "同步远程日志到本地"' />
+          </div>
+          <button className="clean-btn" onClick={() => addToast('AI 正在解析文件操作指令...', 'info')}>执行</button>
+        </div>
+
+        <div className="file-status-strip">
           <span className="card-status-badge ok" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
             <span className="card-status-dot"></span>
-            {transferProtocol.toUpperCase()} 已连接
+            SFTP
           </span>
-          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>root@{currentDevice?.ip}:/userdata</span>
-          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>队列: {transferQueue.length} 项</span>
+          <span className="file-status-text">root@{currentDevice?.ip}:/userdata</span>
+          {transferQueue.filter(t => t.status !== 'done').length > 0 && (
+            <span className="file-status-text">{transferQueue.filter(t => t.status !== 'done').length} 项传输中</span>
+          )}
         </div>
 
         <div className="workspace-grid two-column">
-          <div className="panel-card">
-            <div className="panel-title">连接配置</div>
-            <div className="segmented-row">
-              {['sftp', 'scp', 'ftp'].map((protocol) => (
-                <button
-                  key={protocol}
-                  className={`segment-btn ${transferProtocol === protocol ? 'active' : ''}`}
-                  onClick={() => setTransferProtocol(protocol)}
-                >
-                  {protocol.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <div className="mini-form">
-              <input className="clean-input" value={currentDevice?.ip || ''} readOnly />
-              <input className="clean-input" value="root" readOnly />
-            </div>
-            <div className="panel-title" style={{ marginTop: 12 }}>保存的站点</div>
-            <div className="usage-list">
-              {['本地实验台', '产线样机', '社区样例板'].map(site => (
-                <div key={site} className="usage-item selectable" style={{ padding: '8px 14px' }} onClick={() => addToast(`已切换到站点: ${site}`, 'info')}>
-                  <strong>{site}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel-card">
-            <div className="panel-title">操作方式</div>
-            <div className="segmented-row">
-              {[
-                ['upload', '上传本地文件'],
-                ['download', '下载远程结果'],
-                ['sync', '目录同步'],
-              ].map(([action, label]) => (
-                <button
-                  key={action}
-                  className={`segment-btn ${fileAction === action ? 'active' : ''}`}
-                  onClick={() => setFileAction(action as 'upload' | 'download' | 'sync')}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button className="clean-btn" onClick={appendTransferTask}>加入传输队列</button>
-            <div className="warning-banner">拖拽文件到面板或点击按钮添加到传输队列。队列支持批量操作与断点续传。</div>
-          </div>
-        </div>
-
-        <div className="workspace-grid three-column">
           <div className="panel-card file-pane">
             <div className="panel-title">📂 本地工作区</div>
             {LOCAL_FILES.map((file) => (
-              <div key={file} className="file-row" style={{ cursor: 'pointer' }}>{file.endsWith('/') ? '📁' : '📄'} {file}</div>
+              <div key={file} className="file-row clickable">{file.endsWith('/') ? '📁' : '📄'} {file}</div>
             ))}
+            <button className="clean-btn outline-btn sm-btn" style={{ marginTop: 10 }} onClick={() => appendTransferTask()}>上传所选 →</button>
           </div>
           <div className="panel-card file-pane">
-            <div className="panel-title">🛰️ 远程目录</div>
+            <div className="panel-title">🛰️ 远程 ({currentDevice?.ip})</div>
             {REMOTE_FILES.map((file) => (
-              <div key={file} className="file-row" style={{ cursor: 'pointer' }}>{file.endsWith('/') ? '📁' : '📄'} {file}</div>
+              <div key={file} className="file-row clickable">{file.endsWith('/') ? '📁' : '📄'} {file}</div>
             ))}
-          </div>
-          <div className="panel-card">
-            <div className="panel-title">传输队列</div>
-            {transferQueue.length === 0 && (
-              <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: '0.88rem' }}>暂无传输任务</div>
-            )}
-            <div className="queue-list">
-              {transferQueue.map((item) => (
-                <div key={item.id} className="queue-item">
-                  <div className="queue-head">
-                    <strong>{item.name}</strong>
-                    <span>{item.direction}</span>
-                  </div>
-                  <div className="progress-track thin">
-                    <div className="progress-fill" style={{ width: `${item.progress}%` }}></div>
-                  </div>
-                  <div className="queue-meta">{item.status === 'done' ? '✅ 已完成' : `执行中 ${item.progress}%`}</div>
-                </div>
-              ))}
-            </div>
+            <button className="clean-btn outline-btn sm-btn" style={{ marginTop: 10 }} onClick={() => appendTransferTask()}>← 下载所选</button>
           </div>
         </div>
+
+        {transferQueue.length > 0 && (
+          <div className="transfer-strip">
+            <div className="panel-title">传输队列 ({transferQueue.length})</div>
+            {transferQueue.map((item) => (
+              <div key={item.id} className="transfer-item">
+                <div className="transfer-item-head">
+                  <span className="transfer-item-name">{item.direction === '上传' ? '⬆' : '⬇'} {item.name}</span>
+                  <span className="transfer-item-status">{item.status === 'done' ? '✅ 完成' : `${item.progress}%`}</span>
+                </div>
+                <div className="progress-track thin">
+                  <div className="progress-fill" style={{ width: `${item.progress}%` }}></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -931,83 +937,32 @@ export default function App() {
   const renderVnc = () => (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🖥️ 可视化桌面 (VNC)</div>
-        <div className="desc-text">远程桌面连接，支持画质切换与快捷工具。</div>
+        <div className="widget-header">🖥️ 远程桌面</div>
+        <div className="desc-text">基于 noVNC 的 HTML5 远程桌面 — 零插件、低延迟、浏览器直连。</div>
 
-        <div style={{ display: 'flex', gap: 14, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span className={`card-status-badge ${vncConnected ? 'ok' : 'warn'}`} style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
-            <span className="card-status-dot"></span>
-            {vncConnected ? '会话已建立' : '未连接'}
-          </span>
-          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>目标: {currentDevice?.ip}:5900</span>
-          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>画质: {vncQuality === 'smooth' ? '流畅' : vncQuality === 'balanced' ? '平衡' : '清晰'}</span>
-        </div>
-
-        <div className="workspace-grid two-column">
-          <div className="panel-card">
-            <div className="panel-title">连接预设</div>
-            <div className="segmented-row">
-              {[
-                ['smooth', '流畅优先'],
-                ['balanced', '平衡模式'],
-                ['sharp', '清晰优先'],
-              ].map(([mode, label]) => (
-                <button
-                  key={mode}
-                  className={`segment-btn ${vncQuality === mode ? 'active' : ''}`}
-                  onClick={() => setVncQuality(mode as 'smooth' | 'balanced' | 'sharp')}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="segmented-row">
-              {[
-                ['fit', '窗口适配'],
-                ['pixel', '1:1 像素'],
-                ['dual', '双屏准备'],
-              ].map(([mode, label]) => (
-                <button
-                  key={mode}
-                  className={`segment-btn ${vncLayout === mode ? 'active' : ''}`}
-                  onClick={() => setVncLayout(mode as 'fit' | 'pixel' | 'dual')}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <label className="toggle-row">
-              <input type="checkbox" checked={vncOverlay} onChange={(event) => setVncOverlay(event.target.checked)} />
-              <span>显示远程工具悬浮层与延迟提示</span>
-            </label>
-            <button className="clean-btn" onClick={startVncSession}>发起连接</button>
+        <div className="vnc-toolbar">
+          <div className="vnc-toolbar-left">
+            <span className={`card-status-badge ${vncConnected ? 'ok' : 'warn'}`} style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
+              <span className="card-status-dot"></span>
+              {vncConnected ? '已连接' : '未连接'}
+            </span>
+            <span className="vnc-info">{currentDevice?.ip}:5900</span>
+            {vncConnected && <span className="vnc-info vnc-latency">延迟 12ms</span>}
           </div>
-
-          <div className="panel-card">
-            <div className="panel-title">会话进度</div>
-            <div className="progress-box">
-              <div className="progress-meta">
-                <span>{vncPhase}</span>
-                <strong>{vncProgress}%</strong>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${vncProgress}%` }}></div>
-              </div>
-            </div>
-            <div className="usage-list">
-              <div className="usage-item">支持剪贴板共享、全屏与截屏。</div>
-            </div>
-            <div className="panel-title" style={{ marginTop: 14 }}>会话工具</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('剪贴板已同步', 'success')}>📋 同步剪贴板</button>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('截屏已保存', 'success')}>📸 截屏</button>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px' }} onClick={() => addToast('已切换全屏', 'info')}>⛶ 全屏</button>
-            </div>
+          <div className="vnc-toolbar-right">
+            {(['smooth', 'balanced', 'sharp'] as const).map((mode) => (
+              <button key={mode} className={`segment-btn sm ${vncQuality === mode ? 'active' : ''}`} onClick={() => setVncQuality(mode)}>
+                {mode === 'smooth' ? '流畅' : mode === 'balanced' ? '平衡' : '清晰'}
+              </button>
+            ))}
+            <span className="vnc-toolbar-divider"></span>
+            <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('截屏已保存', 'success')}>📸</button>
+            <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('剪贴板已同步', 'success')}>📋</button>
+            <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('已切换全屏', 'info')}>⛶</button>
           </div>
         </div>
 
-        <div className="panel-card remote-desktop-card">
-          <div className="panel-title">远程桌面视图</div>
+        <div className="panel-card remote-desktop-card vnc-viewport-card">
           <div className={`remote-desktop ${vncConnected ? 'active' : ''}`}>
             <div className="desktop-window"></div>
             <div className="desktop-sidebar"></div>
@@ -1016,18 +971,29 @@ export default function App() {
               <div className="desktop-panel wide"></div>
             </div>
             {!vncConnected && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(148,163,184,0.08)' }}>
-                <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>点击「发起连接」启动远程桌面</span>
+              <div className="vnc-empty-overlay">
+                <div className="vnc-empty-icon">🖥️</div>
+                <div className="vnc-empty-text">点击下方按钮连接远程桌面</div>
+                <div className="vnc-tech-badge">Powered by noVNC · WebSocket → RFB</div>
               </div>
             )}
-            {vncOverlay && (
+            {vncConnected && vncOverlay && (
               <div className="remote-overlay">
                 <span>Quality: {vncQuality}</span>
                 <span>Layout: {vncLayout}</span>
-                <span>{vncConnected ? 'Latency: 12ms' : 'Idle'}</span>
+                <span>Latency: 12ms</span>
               </div>
             )}
           </div>
+        </div>
+
+        {!vncConnected && (
+          <button className="clean-btn vnc-connect-btn" onClick={startVncSession}>发起连接</button>
+        )}
+
+        <div className="vnc-tech-note">
+          <strong>可选方案:</strong> noVNC（WebSocket → VNC，适合轻量直连）· Apache Guacamole（网关模式，支持 VNC/RDP/SSH 聚合）·
+          XPRA（单应用无缝远程）· RustDesk（P2P 穿透，适合公网场景）
         </div>
       </div>
     </div>
@@ -1476,10 +1442,10 @@ export default function App() {
   };
 
   const ROS_TOPIC_DETAILS: Record<string, { msgType: string; hz: string; publishers: number; vizType: string }> = {
-    '/camera/image_raw': { msgType: 'sensor_msgs/Image', hz: '30 Hz', publishers: 1, vizType: '图像' },
+    '/hobot_dnn/bbox': { msgType: 'ai_msgs/PerceptionTargets', hz: '30 Hz', publishers: 1, vizType: 'BBox 检测框' },
+    '/camera/color/image_raw': { msgType: 'sensor_msgs/Image', hz: '30 Hz', publishers: 1, vizType: '图像' },
+    '/tf': { msgType: 'tf2_msgs/TFMessage', hz: '100 Hz', publishers: 3, vizType: '坐标变换' },
     '/cmd_vel': { msgType: 'geometry_msgs/Twist', hz: '10 Hz', publishers: 2, vizType: '速度表盘' },
-    '/odom': { msgType: 'nav_msgs/Odometry', hz: '50 Hz', publishers: 1, vizType: '轨迹' },
-    '/scan': { msgType: 'sensor_msgs/LaserScan', hz: '15 Hz', publishers: 1, vizType: '雷达扇面' },
   };
 
   const renderRos = () => {
