@@ -1,38 +1,69 @@
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 
-type Tab = 'dashboard' | 'flasher' | 'terminal' | 'files' | 'vnc' | 'lowcode' | 'openclaw' | 'hardware' | 'examples' | 'ros';
+type Tab = 'dashboard' | 'flasher' | 'terminal' | 'files' | 'vnc' | 'lowcode' | 'openclaw' | 'hardware' | 'examples' | 'ros' | 'models';
 
 const MOCK_DEVICES = [
   { id: '1', name: 'RDK X3 - Local', status: 'online', ip: '192.168.1.100' },
   { id: '2', name: 'RDK Ultra - Lab', status: 'offline', ip: '192.168.1.105' },
 ];
 
-const DASHBOARD_CARDS: Array<{ tab: Tab; title: string; description: string; loading: string }> = [
+type DashboardCard = {
+  tab: Tab;
+  title: string;
+  description: string;
+  loading: string;
+  statusLabel: string;
+  statusOk: boolean;
+  miniStats: Array<{ label: string; value: string }>;
+  cta: string;
+  quickActions: Array<{ label: string; icon: string }>;
+};
+
+const DASHBOARD_CARDS: DashboardCard[] = [
   {
     tab: 'openclaw',
     title: '⚙️ OpenClaws Gateway',
-    description: '快速配置大模型与飞书/钉钉网关接入，提供接口地址与安装指南。',
+    description: '大模型网关与 AI Agent 编排，直连 OpenAI / Qwen，飞书一键接入。',
     loading: '正在载入 OpenClaws 网关配置...',
-  },
-  {
-    tab: 'hardware',
-    title: '🏥 硬件诊断监控',
-    description: '集成 hrutools 与 bputop，实时监控 BPU 算力负载、CPU 占用、内存及芯片温度条形图。',
-    loading: '正在汇总设备诊断数据与异常建议...',
+    statusLabel: 'Gateway Running',
+    statusOk: true,
+    miniStats: [{ label: '已接入渠道', value: '2' }, { label: '今日调用', value: '1,247' }],
+    cta: '管理网关配置 →',
+    quickActions: [{ label: '配置密钥', icon: '🔑' }, { label: '查看日志', icon: '📋' }],
   },
   {
     tab: 'examples',
-    title: '📦 示例应用',
-    description:
-      '全面汇聚 RDK 官方与生态节点，一键运行 TogetherROS.b 环境下的视觉跟随、手势控制、双摄测距等深度学习与机器视觉 Demo。',
+    title: '📦 示例应用中心',
+    description: '视觉跟随、手势控制、双摄测距等深度学习 Demo，含依赖检查。',
     loading: '正在准备示例应用目录与运行前检查...',
+    statusLabel: '3 个示例可用',
+    statusOk: true,
+    miniStats: [{ label: '可运行', value: '3' }, { label: '需配置', value: '1' }],
+    cta: '浏览示例目录 →',
+    quickActions: [{ label: '视觉跟随', icon: '👁️' }, { label: '手势控制', icon: '🖐️' }],
   },
   {
     tab: 'ros',
     title: '🕸️ ROS 话题可视化',
-    description: '订阅并可视化设备上的 ROS2 话题 (如 /hobot_dnn/bbox)。直接在浏览器展示点云、图像帧及 AI 推理框。',
+    description: '订阅 ROS2 话题，实时渲染点云、图像与 AI 推理框。',
     loading: '正在建立 ROS2 可视化工作区...',
+    statusLabel: '4 个话题活跃',
+    statusOk: true,
+    miniStats: [{ label: '活跃 Topic', value: '4' }, { label: '录包', value: 'OFF' }],
+    cta: '打开可视化面板 →',
+    quickActions: [{ label: '开始录包', icon: '⏺️' }, { label: '话题列表', icon: '📡' }],
+  },
+  {
+    tab: 'models',
+    title: '🤖 模型仓库与部署',
+    description: '管理 AI 推理模型，支持格式转换与 BPU 部署。',
+    loading: '正在扫描模型仓库与部署状态...',
+    statusLabel: '2 个模型已部署',
+    statusOk: true,
+    miniStats: [{ label: '已部署', value: '2' }, { label: '推理 FPS', value: '30' }],
+    cta: '管理模型 →',
+    quickActions: [{ label: '上传模型', icon: '⬆️' }, { label: '性能基准', icon: '📊' }],
   },
 ];
 
@@ -118,8 +149,97 @@ export default function App() {
   const [rosTopic, setRosTopic] = useState('/hobot_dnn/bbox');
   const [rosRecording, setRosRecording] = useState(false);
 
-  const currentDevice = MOCK_DEVICES.find((device) => device.id === activeDevice);
+  // Interactive system states
+  const [devices, setDevices] = useState(MOCK_DEVICES);
+  const [toasts, setToasts] = useState<Array<{id: number; message: string; type: 'success' | 'warning' | 'info'}>>([]);
+  const [showAddDevice, setShowAddDevice] = useState(false);
+  const [newDeviceName, setNewDeviceName] = useState('');
+  const [newDeviceIp, setNewDeviceIp] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [scannedDevices, setScannedDevices] = useState<Array<{name: string; ip: string}>>([]);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'general' | 'connection' | 'about'>('general');
+  const [autoReconnect, setAutoReconnect] = useState(true);
+  const [connectionTimeout, setConnectionTimeout] = useState(30);
+  const [language, setLanguage] = useState('zh-CN');
+  const [confirmDialog, setConfirmDialog] = useState<{show: boolean; title: string; message: string; onConfirm: () => void} | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Array<{id: number; role: 'user' | 'ai'; text: string; action?: { label: string; tab: Tab }}>>([]);
+  const [chatExpanded, setChatExpanded] = useState(false);
+  const [aiTyping, setAiTyping] = useState(false);
+  const [activities, setActivities] = useState([
+    { id: 1, text: '系统就绪，RDK Studio 启动完成', time: '刚刚' },
+    { id: 2, text: 'RDK X3 - Local 设备已连接', time: '2 分钟前' },
+    { id: 3, text: 'OpenClaws 网关服务运行中', time: '5 分钟前' },
+  ]);
+
+  const currentDevice = devices.find((device) => device.id === activeDevice);
   const currentSession = terminalSessions.find((session) => session.id === activeSessionId) ?? terminalSessions[0];
+
+  const toastCounter = React.useRef(0);
+
+  const addToast = (message: string, type: 'success' | 'warning' | 'info' = 'info') => {
+    const id = ++toastCounter.current;
+    setToasts(prev => [...prev, { id, message, type }]);
+    window.setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  };
+
+  const addActivity = (text: string) => {
+    setActivities(prev => [{ id: Date.now(), text, time: '刚刚' }, ...prev].slice(0, 10));
+  };
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmDialog({ show: true, title, message, onConfirm });
+  };
+
+  const scanForDevices = () => {
+    setIsScanning(true);
+    setScannedDevices([]);
+    window.setTimeout(() => {
+      setScannedDevices([
+        { name: 'RDK X3 (新发现)', ip: '192.168.1.110' },
+        { name: 'RDK Ultra - 测试台', ip: '192.168.1.120' },
+      ]);
+      setIsScanning(false);
+      addToast('局域网扫描完成，发现 2 台设备', 'success');
+    }, 2000);
+  };
+
+  const addNewDevice = () => {
+    if (!newDeviceName.trim() || !newDeviceIp.trim()) {
+      addToast('请填写设备名称和 IP 地址', 'warning');
+      return;
+    }
+    const id = String(devices.length + 1);
+    setDevices(prev => [...prev, { id, name: newDeviceName, status: 'online', ip: newDeviceIp }]);
+    setShowAddDevice(false);
+    setNewDeviceName('');
+    setNewDeviceIp('');
+    addToast(`设备 "${newDeviceName}" 已添加`, 'success');
+    addActivity(`添加设备: ${newDeviceName} (${newDeviceIp})`);
+  };
+
+  const addScannedDevice = (device: {name: string; ip: string}) => {
+    const id = String(devices.length + 1);
+    setDevices(prev => [...prev, { id, name: device.name, status: 'online', ip: device.ip }]);
+    addToast(`设备 "${device.name}" 已添加到列表`, 'success');
+    addActivity(`通过扫描添加设备: ${device.name}`);
+  };
+
+  const CMD_SUGGESTIONS = [
+    { icon: '💽', text: '帮我烧录最新系统镜像', keyword: '烧录' },
+    { icon: '💻', text: '打开SSH终端连接设备', keyword: '终端' },
+    { icon: '📁', text: '上传模型文件到设备', keyword: '文件' },
+    { icon: '🖥️', text: '连接VNC远程桌面', keyword: 'vnc' },
+    { icon: '🕸️', text: '查看ROS话题数据', keyword: 'ros' },
+    { icon: '🏥', text: '检查设备硬件温度', keyword: '温度' },
+    { icon: '📦', text: '运行视觉跟随示例应用', keyword: '示例' },
+    { icon: '⚙️', text: '配置OpenClaws AI网关', keyword: 'openclaw' },
+  ];
+
+  const filteredSuggestions = cmd.trim()
+    ? CMD_SUGGESTIONS.filter(s => s.text.includes(cmd) || s.keyword.includes(cmd.toLowerCase()))
+    : CMD_SUGGESTIONS;
 
   const openWorkspace = (nextTab: Tab, message: string) => {
     setIsLoading(true);
@@ -127,43 +247,89 @@ export default function App() {
     window.setTimeout(() => {
       setActiveTab(nextTab);
       setIsLoading(false);
-    }, 650);
+    }, 400);
   };
 
   const handleCommand = (e: React.FormEvent) => {
     e.preventDefault();
     if (!cmd.trim()) return;
 
-    setLoadingMsg('AI 正在介入分析需求...');
-    setIsLoading(true);
+    const userMsg = cmd.trim();
+    const msgId = Date.now();
+    setChatMessages(prev => [...prev, { id: msgId, role: 'user', text: userMsg }]);
+    setChatExpanded(true);
+    setCmd('');
+    setShowSuggestions(false);
+    setAiTyping(true);
 
     window.setTimeout(() => {
-      const lowerCmd = cmd.toLowerCase();
+      const lowerCmd = userMsg.toLowerCase();
+      let aiText = '';
+      let action: { label: string; tab: Tab } | undefined;
+
       if (lowerCmd.includes('烧录') || lowerCmd.includes('镜像') || lowerCmd.includes('flash')) {
-        setActiveTab('flasher');
+        aiText = `好的，为 ${currentDevice?.name} 准备镜像烧录工具。当前支持 Ubuntu 22.04、ROS2 Humble 和 TROS AI 三个镜像版本，建议先确认目标介质类型。`;
+        action = { label: '打开烧录工具', tab: 'flasher' };
       } else if (lowerCmd.includes('终端') || lowerCmd.includes('terminal') || lowerCmd.includes('ssh')) {
-        setActiveTab('terminal');
-      } else if (lowerCmd.includes('文件') || lowerCmd.includes('sftp')) {
-        setActiveTab('files');
+        aiText = `正在连接 ${currentDevice?.name} (${currentDevice?.ip})，已准备好 SSH 终端环境。可以选择系统 Shell、ROS2 调试会话或硬件诊断会话。`;
+        action = { label: '打开终端', tab: 'terminal' };
+      } else if (lowerCmd.includes('文件') || lowerCmd.includes('sftp') || lowerCmd.includes('上传')) {
+        aiText = `文件管理器已就绪，当前使用 SFTP 协议连接到 ${currentDevice?.ip}。支持上传、下载和目录同步三种模式。`;
+        action = { label: '打开文件管理器', tab: 'files' };
       } else if (lowerCmd.includes('vnc') || lowerCmd.includes('桌面')) {
-        setActiveTab('vnc');
+        aiText = '远程桌面准备就绪。建议在带宽受限时选择"流畅优先"模式，局域网环境下可使用"清晰优先"获得最佳画质。';
+        action = { label: '连接远程桌面', tab: 'vnc' };
       } else if (lowerCmd.includes('流程') || lowerCmd.includes('编排') || lowerCmd.includes('node-red')) {
-        setActiveTab('lowcode');
-      } else if (lowerCmd.includes('小龙虾') || lowerCmd.includes('openclaw')) {
-        setActiveTab('openclaw');
-      } else if (lowerCmd.includes('硬件') || lowerCmd.includes('bpu') || lowerCmd.includes('温度')) {
-        setActiveTab('hardware');
-      } else if (lowerCmd.includes('示例') || lowerCmd.includes('demo')) {
-        setActiveTab('examples');
-      } else if (lowerCmd.includes('ros') || lowerCmd.includes('topic')) {
-        setActiveTab('ros');
+        aiText = '流程编排工作台包含视觉感知、设备运维和社区示例三套模板。选好模板后可在画布上拖拽节点，发布前会自动执行环境检查。';
+        action = { label: '打开流程编排', tab: 'lowcode' };
+      } else if (lowerCmd.includes('小龙虾') || lowerCmd.includes('openclaw') || lowerCmd.includes('网关') || lowerCmd.includes('大模型')) {
+        aiText = 'OpenClaws 网关当前状态正常 (Running)，今日已处理 1,247 次 API 调用。可以配置模型密钥、飞书接入或查看实时日志。';
+        action = { label: '管理网关配置', tab: 'openclaw' };
+      } else if (lowerCmd.includes('硬件') || lowerCmd.includes('bpu') || lowerCmd.includes('温度') || lowerCmd.includes('cpu')) {
+        aiText = `${currentDevice?.name} 当前状态：BPU 占用 68%，芯片温度 61.8°C，内存 5.2/8 GB。整体运行正常，BPU 负载偏高建议保留余量。`;
+        action = { label: '查看详细诊断', tab: 'hardware' };
+      } else if (lowerCmd.includes('示例') || lowerCmd.includes('demo') || lowerCmd.includes('跟随')) {
+        aiText = '示例应用目录包含视觉跟随、手势控制和双摄测距三个 Demo。每个都会在启动前检查硬件依赖，缺失项可一键修复。';
+        action = { label: '浏览示例应用', tab: 'examples' };
+      } else if (lowerCmd.includes('ros') || lowerCmd.includes('topic') || lowerCmd.includes('话题')) {
+        aiText = '当前设备有 4 个活跃 ROS2 话题。推荐先订阅 /hobot_dnn/bbox 查看 AI 推理结果，也可以开启录包用于离线回放。';
+        action = { label: '打开 ROS 可视化', tab: 'ros' };
+      } else if (lowerCmd.includes('模型') || lowerCmd.includes('model') || lowerCmd.includes('推理')) {
+        aiText = `设备上已部署 2 个 BPU 优化模型 (YOLOv5s, FCOS)，推理帧率 25-30 FPS。还有 2 个待转换模型需要通过 hb_mapper 工具链处理。`;
+        action = { label: '管理模型仓库', tab: 'models' };
       } else {
-        setActiveTab('dashboard');
+        aiText = `收到！关于"${userMsg}"，我可以帮你在 ${currentDevice?.name} 上执行相关操作。你可以尝试更具体的描述，比如"帮我烧录镜像"、"查看 ROS 话题"或"检查硬件温度"。`;
       }
-      setIsLoading(false);
-      setCmd('');
-    }, 800);
+
+      setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: aiText, action }]);
+      setAiTyping(false);
+    }, 1200);
   };
+
+  useEffect(() => {
+    const el = document.querySelector('.chat-messages');
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chatMessages, aiTyping]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === '/' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault();
+        const input = document.querySelector('.cmd-input') as HTMLInputElement;
+        input?.focus();
+      }
+      if (e.key === 'Escape' && chatExpanded) {
+        setChatExpanded(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [chatExpanded]);
+
+  useEffect(() => {
+    const viewport = document.querySelector('.canvas-viewport');
+    if (viewport) viewport.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [activeTab]);
 
   useEffect(() => {
     if (!isFlashing) return;
@@ -183,6 +349,8 @@ export default function App() {
         } else {
           setFlashPhase('烧录流程完成，可进入首次启动向导');
           setIsFlashing(false);
+          addToast('🎉 烧录成功完成！可进入终端或文件管理器继续', 'success');
+          addActivity('系统镜像烧录完成');
         }
         return next;
       });
@@ -230,6 +398,8 @@ export default function App() {
           setVncPhase('连接已稳定，正在启用辅助控制层');
         } else {
           setVncPhase('远程桌面已接入');
+          addToast('🖥️ VNC 远程桌面连接成功', 'success');
+          addActivity('VNC 远程桌面连接就绪');
         }
         return next;
       });
@@ -255,10 +425,23 @@ export default function App() {
   }, [isFlowChecking]);
 
   const startFlash = () => {
-    setFlashProgress(0);
-    setFlashPhase('准备扫描目标介质与系统镜像');
-    setFlashStep(1);
-    setIsFlashing(true);
+    const doFlash = () => {
+      setFlashProgress(0);
+      setFlashPhase('准备扫描目标介质与系统镜像');
+      setFlashStep(1);
+      setIsFlashing(true);
+      addToast('烧录流程已启动', 'info');
+      addActivity(`开始烧录: ${FLASH_IMAGES.find(i => i.id === flashImage)?.label || flashImage}`);
+    };
+    if (flashTarget === 'emmc') {
+      showConfirm(
+        '⚠️ eMMC 烧录确认',
+        '当前目标为 eMMC 内置存储，写入后将覆盖原有系统。此操作不可撤销，建议先备份重要数据。确认继续？',
+        doFlash
+      );
+    } else {
+      doFlash();
+    }
   };
 
   const appendTransferTask = () => {
@@ -268,6 +451,8 @@ export default function App() {
       { id: `queue-${prev.length + 1}`, name, direction, progress: 0, status: 'running' },
       ...prev,
     ]);
+    addToast(`${direction}任务已加入队列: ${name}`, 'info');
+    addActivity(`新增${direction}任务: ${name}`);
   };
 
   const createSession = () => {
@@ -284,6 +469,8 @@ export default function App() {
       },
     ]);
     setActiveSessionId(nextId);
+    addToast(`终端会话 "${profileLabel}" 已创建`, 'success');
+    addActivity(`创建终端会话: ${profileLabel}`);
   };
 
   const runTerminalCommand = (commandText: string) => {
@@ -316,11 +503,15 @@ export default function App() {
     setVncConnected(true);
     setVncProgress(8);
     setVncPhase('正在发起远程桌面握手');
+    addToast('VNC 连接已发起', 'info');
+    addActivity('发起 VNC 远程桌面连接');
   };
 
   const runFlowValidation = () => {
     setFlowCheckProgress(0);
     setIsFlowChecking(true);
+    addToast('部署前检查已开始', 'info');
+    addActivity('执行流程编排部署前检查');
   };
 
   const metricCards = [
@@ -335,12 +526,63 @@ export default function App() {
       <h2 className="hero-title">{currentDevice?.name || 'RDK Workspace'}</h2>
       <div className="hero-subtitle">基于 AI 驱动的边缘计算与开发节点</div>
 
+      <div className="stats-strip">
+        <div className="stat-card">
+          <div className="stat-value">5.2<span className="stat-unit">/8G</span></div>
+          <div className="stat-label">内存使用</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">61.8<span className="stat-unit">°C</span></div>
+          <div className="stat-label">芯片温度</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">68<span className="stat-unit">%</span></div>
+          <div className="stat-label">BPU 负载</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">3d<span className="stat-unit"> 14h</span></div>
+          <div className="stat-label">系统运行</div>
+        </div>
+      </div>
+
       <div className="quick-grid">
         {DASHBOARD_CARDS.map((card) => (
           <div key={card.tab} className="startup-card" onClick={() => openWorkspace(card.tab, card.loading)}>
-            <h3>{card.title}</h3>
+            <div className="card-top-row">
+              <h3>{card.title}</h3>
+              <span className={`card-status-badge ${card.statusOk ? 'ok' : 'warn'}`}>
+                <span className="card-status-dot"></span>
+                {card.statusLabel}
+              </span>
+            </div>
             <p>{card.description}</p>
-            <div className="card-action">点击进入完整交互流</div>
+            <div className="card-mini-stats">
+              {card.miniStats.map(s => (
+                <div key={s.label} className="card-mini-stat">
+                  <span className="card-mini-value">{s.value}</span>
+                  <span className="card-mini-label">{s.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="card-quick-actions">
+              {card.quickActions.map(a => (
+                <span key={a.label} className="card-quick-action" onClick={(e) => { e.stopPropagation(); openWorkspace(card.tab, card.loading); }}>
+                  {a.icon} {a.label}
+                </span>
+              ))}
+            </div>
+            <div className="card-action">{card.cta}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="activity-feed">
+        <div className="section-label" style={{ margin: '24px 0 12px 0' }}>最近活动</div>
+        {activities.slice(0, 5).map(act => (
+          <div key={act.id} className="activity-item">
+            <span className="activity-dot"></span>
+            <span className="activity-text">{act.text}</span>
+            <span className="activity-time">{act.time}</span>
           </div>
         ))}
       </div>
@@ -352,7 +594,7 @@ export default function App() {
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">💽 镜像烧录工具 (Target: {currentDevice?.name})</div>
         <div className="desc-text">
-          参考 balenaEtcher 的三段式路径和桌面烧录器常见的风险兜底策略，这里把烧录流程拆成镜像选择、介质确认、策略校验、完成交付四个阶段。
+          选择镜像、确认介质、设定策略，四步完成系统烧录。
         </div>
 
         <div className="stepper-row">
@@ -466,12 +708,24 @@ export default function App() {
             </div>
           </div>
           <div className="panel-card">
-            <div className="panel-title">后续使用方式</div>
+            <div className="panel-title">烧录完成后</div>
             <div className="usage-list">
-              <div className="usage-item">首次启动向导会引导配置网络、SSH 与示例环境。</div>
-              <div className="usage-item">完成烧录后可一键跳转到终端、文件同步或示例应用部署。</div>
-              <div className="usage-item">后续接真实实现时，这里可输出烧录报告、校验摘要和失败回滚入口。</div>
+              <div className="usage-item">首次启动引导配置网络与 SSH。</div>
+              <div className="usage-item">可跳转到终端、文件管理或示例应用。</div>
             </div>
+            {flashProgress >= 100 && !isFlashing && (
+              <div className="action-row" style={{ marginTop: '16px' }}>
+                <button className="clean-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端，可开始配置设备', 'info'); }}>
+                  💻 打开终端
+                </button>
+                <button className="clean-btn outline-btn" onClick={() => { setActiveTab('files'); addToast('已跳转到文件管理器', 'info'); }}>
+                  📁 文件管理
+                </button>
+                <button className="clean-btn outline-btn" onClick={() => { setActiveTab('examples'); addToast('已跳转到示例应用', 'info'); }}>
+                  📦 示例应用
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -482,7 +736,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget terminal-shell">
         <div className="widget-header">💻 SSH 终端与多会话工作区</div>
-        <div className="desc-text">参考 VS Code 与 MobaXterm 的会话分组思路，终端不只是一个黑框，而是包含会话预设、命令建议、输出缓冲与后续动作的操作台。</div>
+        <div className="desc-text">多会话管理，支持预设配置与命令建议。</div>
 
         <div className="terminal-topbar">
           <div className="session-tabs">
@@ -544,10 +798,6 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div className="usage-list">
-              <div className="usage-item">后续可接入命令历史、错误高亮、文件链接跳转与 AI 命令修正。</div>
-              <div className="usage-item">支持把终端结果转成任务卡片，继续流转到文件同步或示例部署。</div>
-            </div>
           </div>
         </div>
       </div>
@@ -558,7 +808,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">📁 文件资源与传输队列</div>
-        <div className="desc-text">借鉴 WinSCP 的登录入口、站点管理与双栏文件操作方式，这里把“连接配置 + 文件浏览 + 传输队列 + 结果回看”放进同一个视图。</div>
+        <div className="desc-text">SFTP 文件浏览、上传下载与传输队列管理。</div>
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
@@ -580,8 +830,7 @@ export default function App() {
               <input className="clean-input" value="站点已保存: 本地实验台 / 产线样机 / 社区样例板" readOnly />
             </div>
             <div className="usage-list">
-              <div className="usage-item">保存站点后可一键重连，并在将来复用到终端和远程桌面。</div>
-              <div className="usage-item">后续接真实实现时可在这里扩展密钥认证、代理、端口与预同步策略。</div>
+              <div className="usage-item">保存站点配置可一键重连。</div>
             </div>
           </div>
 
@@ -646,7 +895,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🖥️ 可视化桌面 (VNC)</div>
-        <div className="desc-text">参考 RealVNC 的统一入口和远程协作工具的惯用方式，这个原型把连接质量、显示策略、快捷工具条和会话状态放到一个可持续操作的工作台中。</div>
+        <div className="desc-text">远程桌面连接，支持画质切换与快捷工具。</div>
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
@@ -700,8 +949,7 @@ export default function App() {
               </div>
             </div>
             <div className="usage-list">
-              <div className="usage-item">连接成功后可映射剪贴板、全屏、截屏和重连策略。</div>
-              <div className="usage-item">质量模式切换不应中断会话，而应即时反馈带宽与帧率变化。</div>
+              <div className="usage-item">支持剪贴板共享、全屏与截屏。</div>
             </div>
           </div>
         </div>
@@ -732,7 +980,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🧩 流程编排</div>
-        <div className="desc-text">借鉴 Node-RED 的可视化编排习惯，这里把模板选择、节点区、发布前检查和环境流转拆成清晰的交互层，不接任何真实执行器。</div>
+        <div className="desc-text">可视化流程编排，选择模板、拖拽节点、一键发布。</div>
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
@@ -798,11 +1046,10 @@ export default function App() {
             </div>
           </div>
           <div className="panel-card">
-            <div className="panel-title">后续使用方式</div>
+            <div className="panel-title">部署说明</div>
             <div className="usage-list">
-              <div className="usage-item">草稿阶段强调节点编排速度，待审核阶段突出差异与依赖变更。</div>
-              <div className="usage-item">真实接入后可在这里挂载节点参数面板、版本历史与一键回滚。</div>
-              <div className="usage-item">部署前检查建议覆盖环境变量、设备在线、Topic 可达性和资源阈值。</div>
+              <div className="usage-item">发布前自动检查环境变量与设备在线状态。</div>
+              <div className="usage-item">支持版本历史管理与一键回滚。</div>
             </div>
           </div>
         </div>
@@ -814,7 +1061,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">⚙️ OpenClaws Agent Gateway</div>
-        <div className="desc-text">OpenClaws.io 大模型网关与 AI Agent 编排。接口直连大语言模型、飞书等渠道接入。提示：可通过页面底部“测试端”直接开启对话测试。</div>
+        <div className="desc-text">大模型网关配置与渠道接入管理。</div>
 
         <div className="workspace-grid" style={{ gridTemplateColumns: '1fr 2fr' }}>
           
@@ -962,7 +1209,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🏥 硬件诊断监控</div>
-        <div className="desc-text">这个视图不只是显示几个数字，而是模拟“看板 + 异常解释 + 下一步建议”的诊断工作流。</div>
+        <div className="desc-text">实时硬件看板，异常检测与处置建议。</div>
         <div className="segmented-row hardware-mode-row">
           {[
             ['realtime', '实时窗口'],
@@ -1000,7 +1247,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">📦 示例应用</div>
-        <div className="desc-text">主流开发平台往往会把示例应用做成“可检索目录 + 依赖检查 + 启动方案”，这样用户不会只停留在看见卡片，而是能自然进入下一步。</div>
+        <div className="desc-text">官方与社区示例应用，含依赖检查与一键启动。</div>
         <div className="workspace-grid two-column">
           <div className="panel-card">
             <div className="panel-title">示例目录</div>
@@ -1026,7 +1273,6 @@ export default function App() {
                   <span>{preset.readiness}</span>
                 </div>
               ))}
-              <div className="usage-item">后续真实接入时可把依赖缺失项转为一键修复动作，如自动安装模型或拉起 ROS 节点。</div>
             </div>
           </div>
         </div>
@@ -1038,7 +1284,7 @@ export default function App() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🕸️ ROS 话题可视化</div>
-        <div className="desc-text">可视化场景重点不是画布本身，而是让用户明确知道当前订阅了什么、刷新策略如何、数据接下来还能去哪。</div>
+        <div className="desc-text">ROS2 话题订阅与数据流可视化。</div>
         <div className="workspace-grid two-column">
           <div className="panel-card">
             <div className="panel-title">话题订阅</div>
@@ -1062,9 +1308,78 @@ export default function App() {
               <div className="preview-caption">Bounding Boxes / Image / Telemetry Overlay</div>
             </div>
             <div className="usage-list">
-              <div className="usage-item">当前主题可转发到示例应用调试、终端诊断或流编排节点。</div>
-              <div className="usage-item">录包后续可接到离线回放与故障复现工作流。</div>
+              <div className="usage-item">可转发到示例应用或流编排节点。</div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const MODEL_REPO = [
+    { id: 'yolov5', name: 'YOLOv5s (BPU)', format: 'bin', size: '14.2 MB', status: 'deployed', fps: '30', desc: '通用目标检测，已优化为 BPU 推理格式' },
+    { id: 'fcos', name: 'FCOS Efficient', format: 'bin', size: '22.8 MB', status: 'deployed', fps: '25', desc: '全卷积单阶段检测器，适合密集目标' },
+    { id: 'mobilenet', name: 'MobileNetV2', format: 'onnx', size: '8.6 MB', status: 'pending', fps: '—', desc: '待转换为 BPU 格式，需运行 hb_mapper' },
+    { id: 'unet', name: 'U-Net Segmentation', format: 'caffe', size: '31.4 MB', status: 'pending', fps: '—', desc: '语义分割模型，需先通过工具链量化' },
+  ];
+
+  const renderModels = () => (
+    <div className="center-stage wide-stage">
+      <div className="isolated-widget workflow-widget">
+        <div className="widget-header">🤖 模型仓库与部署 (Target: {currentDevice?.name})</div>
+        <div className="desc-text">AI 模型管理，支持格式转换、基准测试与一键部署。</div>
+
+        <div className="workspace-grid two-column">
+          <div className="panel-card">
+            <div className="panel-title">模型列表</div>
+            <div className="option-list">
+              {MODEL_REPO.map(m => (
+                <div key={m.id} className="select-card" style={{ cursor: 'default' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong>{m.name}</strong>
+                    <span className={`card-status-badge ${m.status === 'deployed' ? 'ok' : 'warn'}`} style={{ fontSize: '0.75rem', padding: '4px 8px' }}>
+                      <span className="card-status-dot"></span>
+                      {m.status === 'deployed' ? '已部署' : '待转换'}
+                    </span>
+                  </div>
+                  <span>{m.desc}</span>
+                  <div style={{ display: 'flex', gap: '16px', marginTop: '6px', fontSize: '0.8rem', color: '#94a3b8' }}>
+                    <span>格式: {m.format}</span>
+                    <span>大小: {m.size}</span>
+                    {m.fps !== '—' && <span>推理: {m.fps} FPS</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel-card">
+            <div className="panel-title">模型操作</div>
+            <div className="usage-list">
+              <div className="usage-item">
+                <strong>📤 上传新模型</strong>
+                <span>支持 .onnx / .caffemodel / .bin 格式，上传后自动检测模型结构</span>
+              </div>
+              <div className="usage-item">
+                <strong>🔄 格式转换 (hb_mapper)</strong>
+                <span>将 ONNX/Caffe 模型量化并转换为 BPU 推理优化格式</span>
+              </div>
+              <div className="usage-item">
+                <strong>⚡ 推理基准测试</strong>
+                <span>在当前设备上跑 benchmark，获取 FPS、延迟与精度报告</span>
+              </div>
+              <div className="usage-item">
+                <strong>🚀 一键部署到 ROS 节点</strong>
+                <span>将模型关联到推理节点，发布到 /hobot_dnn 话题</span>
+              </div>
+            </div>
+
+            <button className="clean-btn" style={{ marginTop: '16px', width: '100%' }} onClick={() => addToast('模型上传入口已打开 (Mock)', 'info')}>
+              📤 上传模型文件
+            </button>
+            <button className="clean-btn outline-btn" style={{ marginTop: '8px', width: '100%' }} onClick={() => addToast('基准测试已启动 (Mock)', 'info')}>
+              ⚡ 运行 Benchmark
+            </button>
           </div>
         </div>
       </div>
@@ -1119,7 +1434,191 @@ export default function App() {
       return renderRos();
     }
 
+    if (activeTab === 'models') {
+      return renderModels();
+    }
+
     return renderDashboard();
+  };
+
+  const renderToasts = () => (
+    <div className="toast-container">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast ${t.type}`}>
+          <span>{t.type === 'success' ? '✅' : t.type === 'warning' ? '⚠️' : 'ℹ️'}</span>
+          {t.message}
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderAddDeviceModal = () => {
+    if (!showAddDevice) return null;
+    return (
+      <div className="modal-overlay" onClick={() => setShowAddDevice(false)}>
+        <div className="modal-card" onClick={e => e.stopPropagation()}>
+          <div className="modal-title">添加设备</div>
+          <div className="modal-desc">手动输入设备信息或扫描局域网自动发现</div>
+
+          <div style={{ marginBottom: '20px' }}>
+            <button className="clean-btn" onClick={scanForDevices} disabled={isScanning} style={{ width: '100%' }}>
+              {isScanning ? '🔍 扫描中...' : '🔍 扫描局域网'}
+            </button>
+          </div>
+
+          {isScanning && (
+            <div className="scan-animation">
+              <div className="scan-dot"></div>
+              <div className="scan-dot" style={{ animationDelay: '0.3s' }}></div>
+              <div className="scan-dot" style={{ animationDelay: '0.6s' }}></div>
+              <span>正在扫描 192.168.1.0/24 网段...</span>
+            </div>
+          )}
+
+          {scannedDevices.length > 0 && (
+            <div style={{ marginBottom: '20px' }}>
+              <div className="panel-title">发现的设备</div>
+              {scannedDevices.map((dev, i) => (
+                <div key={i} className="usage-item selectable" style={{ marginBottom: '8px', cursor: 'pointer' }} onClick={() => addScannedDevice(dev)}>
+                  <strong>{dev.name}</strong>
+                  <span>{dev.ip} — 点击添加</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '20px', marginTop: '12px' }}>
+            <div className="panel-title">手动添加</div>
+            <div className="mini-form">
+              <input className="clean-input" placeholder="设备名称 (如 RDK X5 - 工位3)" value={newDeviceName} onChange={e => setNewDeviceName(e.target.value)} />
+              <input className="clean-input" placeholder="IP 地址 (如 192.168.1.100)" value={newDeviceIp} onChange={e => setNewDeviceIp(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button className="clean-btn outline-btn" onClick={() => setShowAddDevice(false)}>取消</button>
+            <button className="clean-btn" onClick={addNewDevice}>添加设备</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSettingsPanel = () => {
+    if (!showSettings) return null;
+    return (
+      <>
+        <div className="settings-overlay" onClick={() => setShowSettings(false)}></div>
+        <div className="settings-panel">
+          <div className="settings-header">
+            <div className="settings-title">⚙️ 客户端设置</div>
+            <button className="settings-close" onClick={() => setShowSettings(false)}>×</button>
+          </div>
+
+          <div className="segmented-row" style={{ marginBottom: '24px' }}>
+            {([['general', '通用'], ['connection', '连接'], ['about', '关于']] as const).map(([key, label]) => (
+              <button key={key} className={`segment-btn ${settingsTab === key ? 'active' : ''}`} onClick={() => setSettingsTab(key)}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {settingsTab === 'general' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-section-title">界面</div>
+                <div className="settings-row">
+                  <span className="settings-label">界面语言</span>
+                  <select className="clean-input" style={{ width: '140px', padding: '8px' }} value={language} onChange={e => { setLanguage(e.target.value); addToast('语言偏好已保存', 'success'); }}>
+                    <option value="zh-CN">简体中文</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">主题配色</span>
+                  <span className="settings-value">白色 + 橙色 (默认)</span>
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">启动时自动连接上次设备</span>
+                  <input type="checkbox" checked={autoReconnect} onChange={e => { setAutoReconnect(e.target.checked); addToast('自动连接设置已更新', 'success'); }} style={{ accentColor: '#ff6b00', width: '18px', height: '18px' }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {settingsTab === 'connection' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-section-title">SSH / SFTP</div>
+                <div className="settings-row">
+                  <span className="settings-label">连接超时 (秒)</span>
+                  <input type="number" className="clean-input" style={{ width: '80px', padding: '8px' }} value={connectionTimeout} onChange={e => setConnectionTimeout(Number(e.target.value))} />
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">断线自动重连</span>
+                  <input type="checkbox" checked={autoReconnect} onChange={e => setAutoReconnect(e.target.checked)} style={{ accentColor: '#ff6b00', width: '18px', height: '18px' }} />
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">默认认证方式</span>
+                  <span className="settings-value">密码认证</span>
+                </div>
+              </div>
+              <div className="settings-section">
+                <div className="settings-section-title">VNC</div>
+                <div className="settings-row">
+                  <span className="settings-label">默认画质</span>
+                  <span className="settings-value">平衡模式</span>
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">自动适配分辨率</span>
+                  <input type="checkbox" checked={true} readOnly style={{ accentColor: '#ff6b00', width: '18px', height: '18px' }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {settingsTab === 'about' && (
+            <div>
+              <div className="settings-section">
+                <div className="settings-section-title">版本信息</div>
+                <div className="settings-row">
+                  <span className="settings-label">RDK Studio</span>
+                  <span className="settings-value">v0.1.0 (Preview)</span>
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">前端框架</span>
+                  <span className="settings-value">React 19 + Vite 6</span>
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">目标固件</span>
+                  <span className="settings-value">RDK OS 2.x</span>
+                </div>
+              </div>
+              <div className="usage-item" style={{ marginTop: '16px' }}>
+                <strong>开源地址</strong>
+                <span>github.com/RDKStudio — 欢迎反馈与贡献</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </>
+    );
+  };
+
+  const renderConfirmDialog = () => {
+    if (!confirmDialog?.show) return null;
+    return (
+      <div className="modal-overlay" onClick={() => setConfirmDialog(null)}>
+        <div className="modal-card" onClick={e => e.stopPropagation()}>
+          <div className="modal-title">{confirmDialog.title}</div>
+          <div className="modal-desc">{confirmDialog.message}</div>
+          <div className="modal-actions">
+            <button className="clean-btn outline-btn" onClick={() => setConfirmDialog(null)}>取消</button>
+            <button className="clean-btn" style={{ background: '#ef4444' }} onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}>确认执行</button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1134,7 +1633,7 @@ export default function App() {
           
           <div className="section-label">我的设备</div>
           <div className="device-list">
-            {MOCK_DEVICES.map(dev => (
+            {devices.map(dev => (
               <div 
                 key={dev.id} 
                 className={`device-item ${activeDevice === dev.id ? 'active' : ''}`}
@@ -1153,7 +1652,7 @@ export default function App() {
                 </div>
               </div>
             ))}
-            <button className="clean-btn outline-btn" style={{marginTop: '10px', padding: '8px', fontSize: '0.85rem'}}>
+            <button className="clean-btn outline-btn" style={{marginTop: '10px', padding: '8px', fontSize: '0.85rem'}} onClick={() => setShowAddDevice(true)}>
                + 扫描 / 添加设备
             </button>
           </div>
@@ -1175,13 +1674,16 @@ export default function App() {
              <button className={`tool-btn ${activeTab === 'lowcode' ? 'active' : ''}`} onClick={() => setActiveTab('lowcode')}>
                <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>🧩</span> 流程编排
              </button>
+             <button className={`tool-btn ${activeTab === 'hardware' ? 'active' : ''}`} onClick={() => setActiveTab('hardware')}>
+               <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>🏥</span> 硬件诊断
+             </button>
           </div>
           
           <div className="sidebar-footer" style={{ marginTop: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
              <button className="tool-btn" onClick={() => window.open('https://developer.horizon.cc/', '_blank')}>
                <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>🍠</span> <span style={{color: '#ff6b00', fontWeight: 'bold'}}>地瓜开发者社区</span>
              </button>
-             <button className="tool-btn">
+             <button className="tool-btn" onClick={() => setShowSettings(true)}>
                <span style={{fontSize:'1.2rem', width:'24px', textAlign:'center', display:'inline-block'}}>⚙️</span> 客户端设置
              </button>
           </div>
@@ -1206,6 +1708,7 @@ export default function App() {
               {activeTab === 'hardware' && '硬件监控工作台'}
               {activeTab === 'examples' && '示例应用目录'}
               {activeTab === 'ros' && 'ROS2 可视化'}
+              {activeTab === 'models' && '模型仓库与部署'}
                <span style={{color: '#94a3b8', fontSize: '0.9rem', fontWeight: 'normal', display: 'inline-flex', alignItems: 'center', marginLeft: '10px'}}> 
                  <span style={{margin: '0 6px'}}>/</span> 
                  <span className={`status-dot ${currentDevice?.status === 'offline' ? 'offline' : ''}`} style={{marginRight: '6px', width:'6px', height:'6px'}}></span> 
@@ -1222,26 +1725,79 @@ export default function App() {
           </div>
 
           {/* Contextual AI Dock */}
-          <div className="floating-dock">
-            <form className="input-box" onSubmit={handleCommand}>
-              <span style={{marginRight: '12px', fontSize: '1.2rem', color: '#ff6b00'}}>✨</span>
-              <input 
-                type="text" 
-                className="cmd-input" 
-                placeholder={`让 AI 协助开发 ${currentDevice?.name} (例如 "帮我用C++订阅一个ROS话题")...`}
-                value={cmd}
-                onChange={e => setCmd(e.target.value)}
-                disabled={isLoading}
-              />
-              <button type="submit" className="send-btn" disabled={isLoading} title="发送">
-                ↑
-              </button>
-            </form>
+          <div className={`floating-dock ${chatExpanded ? 'chat-open' : ''}`}>
+            <div className="dock-wrapper">
+              {/* Chat Panel */}
+              {chatExpanded && chatMessages.length > 0 && (
+                <div className="chat-panel">
+                  <div className="chat-panel-header">
+                    <span className="chat-panel-title">✨ AI 助手</span>
+                    <button className="chat-panel-close" onClick={() => setChatExpanded(false)} title="收起">✕</button>
+                  </div>
+                  <div className="chat-messages">
+                    {chatMessages.map(msg => (
+                      <div key={msg.id} className={`chat-message ${msg.role}`}>
+                        <div className={`chat-bubble ${msg.role}`}>
+                          <p>{msg.text}</p>
+                          {msg.action && (
+                            <button
+                              className="chat-action-btn"
+                              onClick={() => { setActiveTab(msg.action!.tab); }}
+                            >
+                              {msg.action.label} →
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {aiTyping && (
+                      <div className="chat-message ai">
+                        <div className="chat-bubble ai typing">
+                          <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Suggestions */}
+              {showSuggestions && !chatExpanded && filteredSuggestions.length > 0 && (
+                <div className="suggestions-dropdown">
+                  {filteredSuggestions.slice(0, 6).map((s, i) => (
+                    <div key={i} className="suggestion-item" onMouseDown={() => { setCmd(s.text); setShowSuggestions(false); }}>
+                      <span className="suggestion-icon">{s.icon}</span>
+                      {s.text}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <form className="input-box" onSubmit={handleCommand}>
+                <span style={{marginRight: '12px', fontSize: '1.2rem', color: '#ff6b00'}}>✨</span>
+                <input 
+                  type="text" 
+                  className="cmd-input" 
+                  placeholder={`向 AI 助手提问... (按 / 聚焦)`}
+                  value={cmd}
+                  onChange={e => setCmd(e.target.value)}
+                  onFocus={() => { if (!chatExpanded) setShowSuggestions(true); }}
+                  onBlur={() => window.setTimeout(() => setShowSuggestions(false), 200)}
+                />
+                <button type="submit" className="send-btn" title="发送">
+                  ↑
+                </button>
+              </form>
+            </div>
           </div>
 
         </div>
 
       </div>
+      {renderToasts()}
+      {renderAddDeviceModal()}
+      {renderSettingsPanel()}
+      {renderConfirmDialog()}
     </div>
   );
 }
