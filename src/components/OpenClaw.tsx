@@ -2,28 +2,22 @@ import { useState, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState';
 
 type InstallState = 'checking' | 'not-installed' | 'installing' | 'installed' | 'running';
+type ModelConfig = { id: string; provider: string; providerName: string; model: string; key: string; url: string };
 
-/* ── Skills from ClawHub ecosystem ── */
-const SKILLS = [
-  { id: 'device_control', name: '设备控制', icon: '🎛', builtin: true, desc: 'RDK 硬件指令' },
-  { id: 'ros_topic', name: 'ROS 话题', icon: '📡', builtin: true, desc: 'ROS pub/sub' },
-  { id: 'camera_stream', name: '摄像头', icon: '📷', builtin: true, desc: '视频流控制' },
-  { id: 'model_inference', name: '模型推理', icon: '🧠', builtin: true, desc: '端侧推理' },
-  { id: 'exec', name: '命令执行', icon: '⌘', builtin: false, desc: 'Shell 命令' },
-  { id: 'web_search', name: '网页搜索', icon: '🔍', builtin: false, desc: 'Exa / SerpAPI' },
-  { id: 'browser', name: '浏览器', icon: '🌐', builtin: false, desc: 'Playwright' },
-  { id: 'file_ops', name: '文件管理', icon: '📁', builtin: false, desc: 'Fast.io 存储' },
-  { id: 'home_assistant', name: '智能家居', icon: '🏠', builtin: false, desc: 'Home Assistant' },
-  { id: 'workflow', name: '工作流', icon: '⚡', builtin: false, desc: 'n8n 自动化' },
-  { id: 'github', name: 'GitHub', icon: '🐙', builtin: false, desc: 'Issues / PR' },
-  { id: 'whisper', name: '语音识别', icon: '🎤', builtin: false, desc: 'OpenAI Whisper' },
+/* ── Builtin skills (always installed) ── */
+const BUILTIN_SKILLS = [
+  { id: 'device_control', name: '设备控制', icon: '🎛', desc: 'RDK 硬件指令' },
+  { id: 'ros_topic', name: 'ROS 话题', icon: '📡', desc: 'ROS pub/sub' },
+  { id: 'camera_stream', name: '摄像头', icon: '📷', desc: '视频流控制' },
+  { id: 'model_inference', name: '模型推理', icon: '🧠', desc: '端侧推理' },
 ];
 
-const DEFAULTS: Record<string, boolean> = {
-  device_control: true, ros_topic: true, camera_stream: false, model_inference: true,
-  exec: true, web_search: true, browser: false, file_ops: true,
-  home_assistant: false, workflow: false, github: false, whisper: false,
-};
+/* ── Pre-installed community skills ── */
+const DEFAULT_COMMUNITY = [
+  { id: 'exec', name: '命令执行', icon: '⌘', desc: 'Shell 命令' },
+  { id: 'web_search', name: '网页搜索', icon: '🔍', desc: 'Exa / SerpAPI' },
+  { id: 'file_ops', name: '文件管理', icon: '📁', desc: 'Fast.io 存储' },
+];
 
 /* ── Model providers & models ── */
 const PROVIDERS = [
@@ -39,6 +33,18 @@ const PROVIDERS = [
     models: ['gemini-2.5-pro', 'gemini-2.5-flash'] },
   { id: 'ollama', name: 'Ollama (本地)', url: 'http://localhost:11434/v1',
     models: ['llama3', 'mistral', 'gemma2', 'qwen2.5'] },
+];
+
+/* ── Supported channels ── */
+const CHANNELS = [
+  { id: 'web', name: 'Web', icon: '💬' },
+  { id: 'feishu', name: '飞书', icon: '🐦' },
+  { id: 'telegram', name: 'Telegram', icon: '✈️' },
+  { id: 'wechat', name: '微信', icon: '💚' },
+  { id: 'slack', name: 'Slack', icon: '💜' },
+  { id: 'discord', name: 'Discord', icon: '🎮' },
+  { id: 'whatsapp', name: 'WhatsApp', icon: '📱' },
+  { id: 'teams', name: 'Teams', icon: '🟦' },
 ];
 
 /* Crayfish mascot SVG */
@@ -68,17 +74,29 @@ const Crayfish = ({ size = 88, className = '' }: { size?: number; className?: st
   </svg>
 );
 
+let _modelId = 0;
+const nextId = () => `m${++_modelId}`;
+
 export default function OpenClaw() {
   const { addToast, setActiveTab } = useAppState();
 
+  /* ── install ── */
   const [installState, setInstallState] = useState<InstallState>('checking');
   const [installProgress, setInstallProgress] = useState(0);
-  const [skillStates, setSkillStates] = useState<Record<string, boolean>>({ ...DEFAULTS });
-  const [provider, setProvider] = useState('qwen');
-  const [apiUrl, setApiUrl] = useState(PROVIDERS[2].url);
-  const [apiKey, setApiKey] = useState('');
-  const [modelName, setModelName] = useState('qwen3.5-plus');
-  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  /* ── models (multi-model library) ── */
+  const [models, setModels] = useState<ModelConfig[]>([]);
+  const [activeModelId, setActiveModelId] = useState<string | null>(null);
+  const [addingModel, setAddingModel] = useState(false);
+  const [newProv, setNewProv] = useState('qwen');
+  const [newModel, setNewModel] = useState('qwen3.5-plus');
+  const [newKey, setNewKey] = useState('');
+
+  /* ── skills (installed = active, no toggle) ── */
+  const [communitySkills, setCommunitySkills] = useState([...DEFAULT_COMMUNITY]);
+  const [skillInput, setSkillInput] = useState('');
+
+  /* ── channels ── */
   const [feishuAppId, setFeishuAppId] = useState('');
   const [feishuAppSecret, setFeishuAppSecret] = useState('');
   const [feishuBotName, setFeishuBotName] = useState('OpenClaw');
@@ -87,6 +105,8 @@ export default function OpenClaw() {
   const [telegramToken, setTelegramToken] = useState('');
   const [telegramConfigured, setTelegramConfigured] = useState(false);
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
+
+  /* ── install setup form ── */
   const [setupProvider, setSetupProvider] = useState('qwen');
   const [setupModel, setSetupModel] = useState('qwen3.5-plus');
   const [setupKey, setSetupKey] = useState('');
@@ -96,18 +116,24 @@ export default function OpenClaw() {
     return () => clearTimeout(t);
   }, []);
 
-  const currentProvObj = PROVIDERS.find(p => p.id === provider);
   const setupProvObj = PROVIDERS.find(p => p.id === setupProvider);
+  const newProvObj = PROVIDERS.find(p => p.id === newProv);
+  const activeModel = models.find(m => m.id === activeModelId);
+  const allSkills = [...BUILTIN_SKILLS, ...communitySkills];
 
+  const maskKey = (key: string) => {
+    if (key.length <= 6) return key ? '••••••' : '';
+    return key.slice(0, 3) + '•'.repeat(Math.min(key.length - 6, 20)) + key.slice(-3);
+  };
+
+  /* ── Install handler ── */
   const handleInstall = () => {
     if (!setupKey.trim()) { addToast('请填写 API Key', 'info'); return; }
-    setInstallState('installing');
-    setInstallProgress(0);
-    const p = setupProvObj || PROVIDERS[2];
-    setProvider(setupProvider);
-    setApiUrl(p.url);
-    setModelName(setupModel || p.models[0]);
-    setApiKey(setupKey);
+    setInstallState('installing'); setInstallProgress(0);
+    const p = PROVIDERS.find(x => x.id === setupProvider) || PROVIDERS[2];
+    const id = nextId();
+    const mc: ModelConfig = { id, provider: p.id, providerName: p.name, model: setupModel || p.models[0], key: setupKey, url: p.url };
+    setModels([mc]); setActiveModelId(id);
     addToast('环境诊断 + 依赖安装 + 程序部署 + 初始化...', 'info');
     const iv = setInterval(() => {
       setInstallProgress(prev => {
@@ -122,25 +148,44 @@ export default function OpenClaw() {
     setTimeout(() => { setInstallState('running'); addToast('OpenClaw 已启动 · port 18789', 'success'); }, 2000);
   };
 
-  const selectProvider = (id: string) => {
-    const p = PROVIDERS.find(x => x.id === id);
-    if (!p) return;
-    setProvider(id);
-    setApiUrl(p.url);
-    setModelName(p.models[0]);
+  /* ── Add model to library ── */
+  const handleAddModel = () => {
+    if (!newKey.trim()) { addToast('请填写 API Key', 'info'); return; }
+    const p = newProvObj || PROVIDERS[2];
+    const id = nextId();
+    const mc: ModelConfig = { id, provider: p.id, providerName: p.name, model: newModel || p.models[0], key: newKey, url: p.url };
+    setModels(prev => [...prev, mc]);
+    if (!activeModelId) setActiveModelId(id);
+    setNewKey(''); setAddingModel(false);
+    addToast(`已添加 ${p.name} / ${mc.model}`, 'success');
   };
 
-  const maskKey = (key: string) => {
-    if (key.length <= 6) return key ? '••••••' : '未配置';
-    return key.slice(0, 3) + '•'.repeat(Math.min(key.length - 6, 20)) + key.slice(-3);
+  const handleRemoveModel = (id: string) => {
+    setModels(prev => prev.filter(m => m.id !== id));
+    if (activeModelId === id) {
+      setActiveModelId(prev => { const rest = models.filter(m => m.id !== id); return rest.length ? rest[0].id : null; });
+    }
   };
 
-  const enabledCount = Object.values(skillStates).filter(Boolean).length;
+  /* ── Skills: install = add to list ── */
+  const handleAddSkill = () => {
+    const name = skillInput.trim();
+    if (!name) return;
+    const id = name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    if (allSkills.some(s => s.id === id)) { addToast(`技能 "${name}" 已存在`, 'info'); return; }
+    setCommunitySkills(prev => [...prev, { id, name, icon: '🧩', desc: `clawhub install ${name}` }]);
+    setSkillInput(''); addToast(`已安装 ${name}`, 'success');
+  };
 
-  // ─── Checking ───
+  const handleRemoveSkill = (id: string) => {
+    setCommunitySkills(prev => prev.filter(s => s.id !== id));
+    addToast('已卸载', 'info');
+  };
+
+  /* ─── Checking ─── */
   if (installState === 'checking') {
     return (
-      <div className="oc">
+      <div className="center-stage">
         <div className="oc-center">
           <div className="oc-spinner" />
           <div className="oc-center-t">正在检测 OpenClaw...</div>
@@ -149,19 +194,19 @@ export default function OpenClaw() {
     );
   }
 
-  // ─── Install (首次部署) ───
+  /* ─── Install (首次部署) ─── */
   if (installState === 'not-installed' || installState === 'installing') {
     return (
-      <div className="oc oc-install-page">
+      <div className="center-stage">
         <div className="oc-install-hero">
-          <Crayfish size={96} className="oc-crayfish-idle" />
-          <div className="oc-install-text">
+          <Crayfish size={100} className="oc-crayfish-idle" />
+          <div>
             <h1 className="oc-hero-title">OpenClaw</h1>
             <p className="oc-hero-sub">本地 AI Agent 网关 — 让聊天框成为你操控一切的入口</p>
           </div>
         </div>
 
-        <div className="oc-install-card">
+        <div className="isolated-widget" style={{ maxWidth: 580 }}>
           <div className="oc-setup-head">
             <span className="oc-setup-badge">首次部署</span>
             <span className="oc-setup-desc">环境诊断 + 依赖安装 + 程序部署 + 初始化</span>
@@ -169,12 +214,11 @@ export default function OpenClaw() {
           <div className="oc-setup-form">
             <div className="oc-setup-field">
               <label>供应商</label>
-              <select value={setupProvider}
-                onChange={e => {
-                  setSetupProvider(e.target.value);
-                  const p = PROVIDERS.find(x => x.id === e.target.value);
-                  if (p) setSetupModel(p.models[0]);
-                }}>
+              <select value={setupProvider} onChange={e => {
+                setSetupProvider(e.target.value);
+                const p = PROVIDERS.find(x => x.id === e.target.value);
+                if (p) setSetupModel(p.models[0]);
+              }}>
                 {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
@@ -186,8 +230,7 @@ export default function OpenClaw() {
             </div>
             <div className="oc-setup-field wide">
               <label>API Key</label>
-              <input type="password" placeholder="sk-..."
-                value={setupKey} onChange={e => setSetupKey(e.target.value)} />
+              <input type="password" placeholder="sk-..." value={setupKey} onChange={e => setSetupKey(e.target.value)} />
             </div>
           </div>
 
@@ -208,15 +251,15 @@ export default function OpenClaw() {
     );
   }
 
-  // ─── Dashboard (installed / running) ───
+  /* ─── Dashboard (installed / running) ─── */
   const isRunning = installState === 'running';
 
   return (
-    <div className="oc oc-dash">
-      {/* ── Slim status bar ── */}
+    <div className="center-stage wide-stage">
+      {/* ── Status header ── */}
       <div className={`oc-bar ${isRunning ? 'live' : ''}`}>
         <div className="oc-bar-left">
-          <Crayfish size={26} />
+          <Crayfish size={30} />
           <span className="oc-bar-name">OpenClaw</span>
           <span className="oc-bar-ver">v2026.3.8</span>
           <span className={`oc-bar-badge ${isRunning ? 'on' : ''}`}>
@@ -225,131 +268,173 @@ export default function OpenClaw() {
           </span>
         </div>
         <div className="oc-bar-right">
-          {isRunning && (
-            <span className="oc-bar-stat"><b>{enabledCount}</b> 技能 · <b>212ms</b></span>
-          )}
+          {isRunning && <span className="oc-bar-stat"><b>{allSkills.length}</b> 技能 · <b>212ms</b></span>}
           {!isRunning
             ? <button className="oc-bar-btn primary" onClick={handleStart}>启动</button>
             : <button className="oc-bar-btn" onClick={() => { setInstallState('installed'); addToast('网关已停止', 'info'); }}>停止</button>
           }
-          {isRunning && (
-            <button className="oc-bar-btn chat" onClick={() => setActiveTab('terminal')}>对话 →</button>
-          )}
+          {isRunning && <button className="oc-bar-btn chat" onClick={() => setActiveTab('terminal')}>对话 →</button>}
         </div>
       </div>
 
-      {/* ── Config summary ── */}
-      <div className="oc-config-bar">
-        <div className="oc-cfg-item">
-          <span className="oc-cfg-label">供应商</span>
-          <span className="oc-cfg-val">{currentProvObj?.name || provider}</span>
-        </div>
-        <div className="oc-cfg-sep" />
-        <div className="oc-cfg-item">
-          <span className="oc-cfg-label">模型</span>
-          <span className="oc-cfg-val mono">{modelName}</span>
-        </div>
-        <div className="oc-cfg-sep" />
-        <div className="oc-cfg-item">
-          <span className="oc-cfg-label">API Key</span>
-          <span className="oc-cfg-val mono">{maskKey(apiKey)}</span>
-        </div>
-        <div className="oc-cfg-sep" />
-        <div className="oc-cfg-item">
-          <span className="oc-cfg-label">飞书</span>
-          <span className={`oc-cfg-val ${feishuConfigured ? 'ok' : 'dim'}`}>
-            {feishuConfigured ? '已配置' : '未配置'}
-          </span>
-        </div>
-      </div>
+      {/* ── Main content widget ── */}
+      <div className="isolated-widget workflow-widget">
+        <div className="widget-header">Gateway 配置</div>
 
-      {/* ── Two-column body ── */}
-      <div className="oc-grid">
-        {/* Left: model config */}
-        <section className="oc-col">
-          <h2 className="oc-sec-title">模型配置</h2>
-          <div className="oc-model-selects">
-            <div className="oc-input-group">
-              <label>供应商</label>
-              <select value={provider} onChange={e => selectProvider(e.target.value)}>
-                {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+        {/* Config summary strip */}
+        <div className="oc-config-bar">
+          <div className="oc-cfg-item"><span className="oc-cfg-label">当前模型</span><span className="oc-cfg-val mono">{activeModel ? `${activeModel.providerName} / ${activeModel.model}` : '未配置'}</span></div>
+          <div className="oc-cfg-sep" />
+          <div className="oc-cfg-item"><span className="oc-cfg-label">已配置</span><span className="oc-cfg-val">{models.length} 个模型</span></div>
+          <div className="oc-cfg-sep" />
+          <div className="oc-cfg-item"><span className="oc-cfg-label">技能</span><span className="oc-cfg-val">{allSkills.length} 已安装</span></div>
+          <div className="oc-cfg-sep" />
+          <div className="oc-cfg-item"><span className="oc-cfg-label">飞书</span><span className={`oc-cfg-val ${feishuConfigured ? 'ok' : 'dim'}`}>{feishuConfigured ? '已配置' : '未配置'}</span></div>
+        </div>
+
+        {/* Two-column: Models + Skills */}
+        <div className="workspace-grid two-column" style={{ marginTop: 20 }}>
+          {/* ── Model library panel ── */}
+          <div className="panel-card">
+            <div className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              模型配置 <span className="oc-sec-count">{models.length} 个</span>
             </div>
-            <div className="oc-input-group">
-              <label>模型</label>
-              <select value={modelName} onChange={e => setModelName(e.target.value)}>
-                {(currentProvObj?.models || []).map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+
+            {/* Model list */}
+            <div className="oc-model-list">
+              {models.map(m => (
+                <div key={m.id} className={`oc-model-row ${m.id === activeModelId ? 'active' : ''}`}>
+                  <button className="oc-model-info" onClick={() => { setActiveModelId(m.id); addToast(`已切换到 ${m.providerName} / ${m.model}`, 'success'); }}>
+                    <span className="oc-model-prov">{m.providerName}</span>
+                    <span className="oc-model-name">{m.model}</span>
+                    <span className="oc-model-key">{maskKey(m.key)}</span>
+                  </button>
+                  <div className="oc-model-actions">
+                    {m.id === activeModelId && <span className="oc-model-active-tag">应用中</span>}
+                    <button className="oc-model-test" onClick={() => addToast(`${m.providerName} 连通成功 · 212ms`, 'success')}>测试</button>
+                    {models.length > 1 && (
+                      <button className="oc-model-rm" onClick={() => handleRemoveModel(m.id)}>✕</button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-          <div className="oc-input-group">
-            <label>API Key</label>
-            <input type="password" placeholder="sk-..." value={apiKey} onChange={e => setApiKey(e.target.value)} />
-          </div>
-          <div className="oc-form-row">
-            <button className="oc-save-btn" onClick={() => addToast('模型配置已保存', 'success')}>保存</button>
-            <button className="oc-test-btn" onClick={() => addToast(`${currentProvObj?.name} 连通成功 · 212ms`, 'success')}>测试</button>
-            <button className="oc-adv-toggle" onClick={() => setShowAdvanced(!showAdvanced)}>
-              {showAdvanced ? '收起 ↑' : '高级 ↓'}
-            </button>
-          </div>
-          {showAdvanced && (
-            <div className="oc-adv-fields">
-              <div className="oc-input-group">
-                <label>Base URL</label>
-                <input value={apiUrl} onChange={e => setApiUrl(e.target.value)} />
+
+            {/* Add model form */}
+            {addingModel ? (
+              <div className="oc-add-model-form">
+                <div className="oc-model-selects">
+                  <div className="oc-input-group">
+                    <label>供应商</label>
+                    <select value={newProv} onChange={e => { setNewProv(e.target.value); const p = PROVIDERS.find(x => x.id === e.target.value); if (p) setNewModel(p.models[0]); }}>
+                      {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="oc-input-group">
+                    <label>模型</label>
+                    <select value={newModel} onChange={e => setNewModel(e.target.value)}>
+                      {(newProvObj?.models || []).map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="oc-input-group">
+                  <label>API Key</label>
+                  <input type="password" placeholder="sk-..." value={newKey} onChange={e => setNewKey(e.target.value)} />
+                </div>
+                <div className="oc-form-row">
+                  <button className="oc-save-btn" onClick={handleAddModel}>添加</button>
+                  <button className="oc-test-btn" onClick={() => setAddingModel(false)}>取消</button>
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* Channels below model config */}
-          <h2 className="oc-sec-title" style={{ marginTop: 8 }}>渠道</h2>
-          <div className="oc-ch-row">
-            <div className="oc-ch-card active">
-              <span className="oc-ch-icon">💬</span><span className="oc-ch-name">Web</span>
-              <span className="oc-ch-dot on" />
-            </div>
-            <button className={`oc-ch-card ${feishuConfigured ? 'active' : ''}`}
-              onClick={() => setExpandedChannel(expandedChannel === 'feishu' ? null : 'feishu')}>
-              <span className="oc-ch-icon">🐦</span><span className="oc-ch-name">飞书</span>
-              <span className={`oc-ch-dot ${feishuConfigured ? 'on' : ''}`} />
-            </button>
-            <button className={`oc-ch-card ${telegramConfigured ? 'active' : ''}`}
-              onClick={() => setExpandedChannel(expandedChannel === 'telegram' ? null : 'telegram')}>
-              <span className="oc-ch-icon">✈️</span><span className="oc-ch-name">TG</span>
-              <span className={`oc-ch-dot ${telegramConfigured ? 'on' : ''}`} />
-            </button>
+            ) : (
+              <button className="oc-add-model-btn" onClick={() => setAddingModel(true)}>+ 添加模型</button>
+            )}
           </div>
-        </section>
 
-        {/* Right: skills */}
-        <section className="oc-col">
-          <h2 className="oc-sec-title">
-            技能 <span className="oc-sec-count">{enabledCount}/{SKILLS.length}</span>
-            <span className="oc-clawhub-link">ClawHub 500+</span>
-          </h2>
-          <div className="oc-skill-list">
-            {SKILLS.map(s => (
-              <button key={s.id}
-                className={`oc-skill-row ${skillStates[s.id] ? 'on' : ''}`}
-                onClick={() => setSkillStates(prev => ({ ...prev, [s.id]: !prev[s.id] }))}>
-                <span className="oc-skill-icon">{s.icon}</span>
-                <span className="oc-skill-info">
-                  <span className="oc-skill-name">{s.name}</span>
-                  <span className="oc-skill-desc">{s.desc}</span>
-                </span>
-                {s.builtin && <span className="oc-skill-tag">内置</span>}
-                <span className={`oc-skill-toggle ${skillStates[s.id] ? 'on' : ''}`} />
-              </button>
-            ))}
+          {/* ── Skills panel ── */}
+          <div className="panel-card">
+            <div className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              技能 <span className="oc-sec-count">{allSkills.length} 已安装</span>
+              <span className="oc-clawhub-link">ClawHub 500+</span>
+            </div>
+            <div className="oc-skill-add">
+              <input className="oc-skill-add-input" placeholder="输入技能名安装 (如 elevenlabs-agents)"
+                value={skillInput} onChange={e => setSkillInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddSkill()} />
+              <button className="oc-skill-add-btn" onClick={handleAddSkill}>安装</button>
+            </div>
+            <div className="oc-skill-list">
+              {allSkills.map(s => {
+                const isBuiltin = BUILTIN_SKILLS.some(b => b.id === s.id);
+                return (
+                  <div key={s.id} className="oc-skill-row on">
+                    <span className="oc-skill-icon">{s.icon}</span>
+                    <span className="oc-skill-info">
+                      <span className="oc-skill-name">{s.name}</span>
+                      <span className="oc-skill-desc">{s.desc}</span>
+                    </span>
+                    {isBuiltin
+                      ? <span className="oc-skill-tag">内置</span>
+                      : <button className="oc-skill-rm" onClick={() => handleRemoveSkill(s.id)}>卸载</button>
+                    }
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </section>
+        </div>
+
+        {/* Two-column: Channels + Tools */}
+        <div className="workspace-grid two-column lower-grid">
+          {/* ── Channels panel ── */}
+          <div className="panel-card">
+            <div className="panel-title">渠道</div>
+            <div className="oc-ch-grid">
+              {CHANNELS.map(ch => {
+                const isActive = ch.id === 'web' || (ch.id === 'feishu' && feishuConfigured) || (ch.id === 'telegram' && telegramConfigured);
+                const configurable = ch.id === 'feishu' || ch.id === 'telegram';
+                return (
+                  <button key={ch.id}
+                    className={`oc-ch-card ${isActive ? 'active' : ''} ${configurable ? 'clickable' : ''}`}
+                    onClick={() => configurable ? setExpandedChannel(expandedChannel === ch.id ? null : ch.id) : undefined}>
+                    <span className="oc-ch-icon">{ch.icon}</span>
+                    <span className="oc-ch-name">{ch.name}</span>
+                    {isActive && <span className="oc-ch-dot on" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Toolbox panel ── */}
+          <div className="panel-card">
+            <div className="panel-title">工具箱</div>
+            <div className="oc-tools-grid">
+              <button className="oc-tl" onClick={() => addToast('网关诊断: 正常 · 12ms', 'success')}>🔍 诊断</button>
+              <button className="oc-tl" onClick={() => { addToast('重启中...', 'info'); setInstallState('installed'); setTimeout(() => { setInstallState('running'); addToast('已重启', 'success'); }, 2000); }}>🔄 重启</button>
+              <button className="oc-tl" onClick={() => addToast('已是最新 v2026.3.8', 'success')}>⬆️ 更新</button>
+              <button className="oc-tl" onClick={() => addToast('配置已导出', 'success')}>💾 导出</button>
+              <button className="oc-tl" onClick={() => addToast('24h 无异常 · 1,247 调用', 'info')}>📋 日志</button>
+              <button className="oc-tl" onClick={() => setActiveTab('terminal')}>💻 终端</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Hint */}
+        <div className="oc-hint">
+          💡 试试在聊天框中输入
+          <button className="oc-hint-cmd" onClick={() => setActiveTab('terminal')}>"帮我切换到 DeepSeek 模型"</button>
+        </div>
       </div>
 
-      {/* ── Channel expanded (full-width) ── */}
+      {/* ── Channel modal overlay ── */}
+      {expandedChannel && <div className="oc-modal-mask" onClick={() => setExpandedChannel(null)} />}
       {expandedChannel === 'feishu' && (
-        <div className="oc-ch-expand">
-          <h3 className="oc-ch-expand-title">飞书配置说明</h3>
+        <div className="oc-modal">
+          <div className="oc-modal-head">
+            <h3 className="oc-modal-title">飞书配置说明</h3>
+            <button className="oc-modal-close" onClick={() => setExpandedChannel(null)}>✕</button>
+          </div>
           <div className="oc-steps">
             <div className="oc-step"><span className="oc-step-n">1</span>访问飞书开放平台 (open.feishu.cn) 并登录</div>
             <div className="oc-step"><span className="oc-step-n">2</span>创建「企业自建应用」</div>
@@ -379,8 +464,11 @@ export default function OpenClaw() {
         </div>
       )}
       {expandedChannel === 'telegram' && (
-        <div className="oc-ch-expand">
-          <h3 className="oc-ch-expand-title">Telegram 配置</h3>
+        <div className="oc-modal">
+          <div className="oc-modal-head">
+            <h3 className="oc-modal-title">Telegram 配置</h3>
+            <button className="oc-modal-close" onClick={() => setExpandedChannel(null)}>✕</button>
+          </div>
           <div className="oc-steps">
             <div className="oc-step"><span className="oc-step-n">1</span>在 Telegram 中找到 @BotFather</div>
             <div className="oc-step"><span className="oc-step-n">2</span>发送 /newbot 创建机器人</div>
@@ -395,24 +483,6 @@ export default function OpenClaw() {
           }}>保存 Telegram 配置</button>
         </div>
       )}
-
-      {/* ── Toolbox row ── */}
-      <div className="oc-tools-row">
-        <button className="oc-tl" onClick={() => addToast('网关诊断: 正常 · 12ms', 'success')}>🔍 诊断</button>
-        <button className="oc-tl" onClick={() => { addToast('重启中...', 'info'); setInstallState('installed'); setTimeout(() => { setInstallState('running'); addToast('已重启', 'success'); }, 2000); }}>🔄 重启</button>
-        <button className="oc-tl" onClick={() => addToast('已是最新 v2026.3.8', 'success')}>⬆️ 更新</button>
-        <button className="oc-tl" onClick={() => addToast('配置已导出', 'success')}>💾 导出</button>
-        <button className="oc-tl" onClick={() => addToast('24h 无异常 · 1,247 调用', 'info')}>📋 日志</button>
-        <button className="oc-tl" onClick={() => setActiveTab('terminal')}>💻 终端</button>
-      </div>
-
-      {/* ── Hint ── */}
-      <div className="oc-hint">
-        💡 试试在聊天框中输入
-        <button className="oc-hint-cmd" onClick={() => setActiveTab('terminal')}>
-          "帮我切换到 DeepSeek 模型"
-        </button>
-      </div>
     </div>
   );
 }
