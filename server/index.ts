@@ -187,6 +187,6 @@ app.post('/api/chat', async (request, response) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`RDK Studio server running on http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`RDK Studio server running on http://0.0.0.0:${port}`);
 });

@@ -51,7 +51,14 @@ export interface ChatMessage {
   role: 'user' | 'ai';
   text: string;
   action?: { label: string; tab: Tab };
+  blocks?: ChatBlock[];
 }
+
+export type ChatBlock =
+  | { type: 'code'; lang: string; content: string }
+  | { type: 'image'; src: string; caption?: string }
+  | { type: 'terminal'; lines: string[] }
+  | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }> };
 
 export interface DashboardCard {
   tab: Tab;

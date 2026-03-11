@@ -324,40 +324,108 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const lowerCmd = userMsg.toLowerCase();
       let aiText = '';
       let action: { label: string; tab: Tab } | undefined;
+      let blocks: ChatMessage['blocks'];
       if (lowerCmd.includes('烧录') || lowerCmd.includes('镜像') || lowerCmd.includes('flash')) {
-        aiText = `好的，为 ${currentDevice?.name} 准备镜像烧录工具。当前支持 Ubuntu 22.04、ROS2 Humble 和 TROS AI 三个镜像版本，建议先确认目标介质类型。`;
+        aiText = `好的，为 ${currentDevice?.name} 准备镜像烧录工具。当前支持以下镜像版本，建议先确认目标介质类型。`;
         action = { label: '打开烧录工具', tab: 'flasher' };
+        blocks = [
+          { type: 'status', items: [
+            { label: 'Ubuntu 22.04', value: '2.1 GB', ok: true },
+            { label: 'ROS2 Humble', value: '3.4 GB', ok: true },
+            { label: 'TROS AI', value: '4.2 GB', ok: true },
+          ]},
+        ];
       } else if (lowerCmd.includes('终端') || lowerCmd.includes('terminal') || lowerCmd.includes('ssh')) {
-        aiText = `正在连接 ${currentDevice?.name} (${currentDevice?.ip})，已准备好 SSH 终端环境。可以选择系统 Shell、ROS2 调试会话或硬件诊断会话。`;
+        aiText = `正在连接 ${currentDevice?.name} (${currentDevice?.ip})，SSH 终端已就绪。`;
         action = { label: '打开终端', tab: 'terminal' };
+        blocks = [
+          { type: 'terminal', lines: [
+            `$ ssh ${currentDevice?.ip}`,
+            `Welcome to Ubuntu 22.04.3 LTS (RDK X5)`,
+            `Last login: ${new Date().toLocaleString()}`,
+            `${currentDevice?.name}@rdk:~$ _`,
+          ]},
+        ];
       } else if (lowerCmd.includes('文件') || lowerCmd.includes('sftp') || lowerCmd.includes('上传')) {
-        aiText = `文件管理器已就绪，当前使用 SFTP 协议连接到 ${currentDevice?.ip}。支持上传、下载和目录同步三种模式。`;
+        aiText = `文件管理器已就绪，当前使用 SFTP 协议连接到 ${currentDevice?.ip}。`;
         action = { label: '打开文件管理器', tab: 'files' };
       } else if (lowerCmd.includes('vnc') || lowerCmd.includes('桌面')) {
         aiText = '远程桌面准备就绪。建议在带宽受限时选择"流畅优先"模式，局域网环境下可使用"清晰优先"获得最佳画质。';
         action = { label: '连接远程桌面', tab: 'vnc' };
       } else if (lowerCmd.includes('流程') || lowerCmd.includes('编排') || lowerCmd.includes('node-red')) {
-        aiText = '流程编排工作台包含视觉感知、设备运维和社区示例三套模板。选好模板后可在画布上拖拽节点，发布前会自动执行环境检查。';
+        aiText = '流程编排工作台包含三套模板，选好模板后可在画布上拖拽节点。';
         action = { label: '打开流程编排', tab: 'lowcode' };
+        blocks = [
+          { type: 'code', lang: 'json', content: '{\n  "templates": [\n    "视觉感知流水线",\n    "设备运维自动化",\n    "社区示例合集"\n  ]\n}' },
+        ];
       } else if (lowerCmd.includes('小龙虾') || lowerCmd.includes('openclaw') || lowerCmd.includes('网关') || lowerCmd.includes('大模型')) {
-        aiText = 'OpenClaws 网关当前状态正常 (Running)，今日已处理 1,247 次 API 调用。可以配置模型密钥、飞书接入或查看实时日志。';
+        aiText = 'OpenClaws 网关运行状态如下：';
         action = { label: '管理网关配置', tab: 'openclaw' };
+        blocks = [
+          { type: 'status', items: [
+            { label: '服务状态', value: 'Running', ok: true },
+            { label: '今日调用', value: '1,247 次', ok: true },
+            { label: '模型密钥', value: '已配置', ok: true },
+            { label: '飞书接入', value: '未连接', ok: false },
+          ]},
+        ];
       } else if (lowerCmd.includes('硬件') || lowerCmd.includes('bpu') || lowerCmd.includes('温度') || lowerCmd.includes('cpu')) {
-        aiText = `${currentDevice?.name} 当前状态：BPU 占用 68%，芯片温度 61.8°C，内存 5.2/8 GB。整体运行正常，BPU 负载偏高建议保留余量。`;
+        aiText = `${currentDevice?.name} 当前硬件状态：`;
         action = { label: '查看详细诊断', tab: 'hardware' };
+        blocks = [
+          { type: 'status', items: [
+            { label: 'BPU 占用', value: '68%', ok: true },
+            { label: '芯片温度', value: '61.8°C', ok: false },
+            { label: '内存使用', value: '5.2/8 GB', ok: true },
+            { label: '系统运行', value: '3d 14h', ok: true },
+          ]},
+          { type: 'terminal', lines: [
+            '$ cat /sys/class/thermal/thermal_zone0/temp',
+            '61800',
+            '$ cat /proc/meminfo | head -3',
+            'MemTotal:    8167040 kB',
+            'MemFree:     2982912 kB',
+            'MemAvailable: 3014656 kB',
+          ]},
+        ];
       } else if (lowerCmd.includes('示例') || lowerCmd.includes('demo') || lowerCmd.includes('跟随')) {
-        aiText = '示例应用目录包含视觉跟随、手势控制和双摄测距三个 Demo。每个都会在启动前检查硬件依赖，缺失项可一键修复。';
+        aiText = '示例应用目录包含三个 Demo，每个都会在启动前检查硬件依赖。';
         action = { label: '浏览示例应用', tab: 'examples' };
+        blocks = [
+          { type: 'status', items: [
+            { label: '视觉跟随', value: '可运行', ok: true },
+            { label: '手势控制', value: '可运行', ok: true },
+            { label: '双摄测距', value: '缺少依赖', ok: false },
+          ]},
+        ];
       } else if (lowerCmd.includes('ros') || lowerCmd.includes('topic') || lowerCmd.includes('话题')) {
-        aiText = '当前设备有 4 个活跃 ROS2 话题。推荐先订阅 /hobot_dnn/bbox 查看 AI 推理结果，也可以开启录包用于离线回放。';
+        aiText = '当前设备有 4 个活跃 ROS2 话题：';
         action = { label: '打开 ROS 可视化', tab: 'ros' };
+        blocks = [
+          { type: 'terminal', lines: [
+            '$ ros2 topic list',
+            '/hobot_dnn/bbox',
+            '/camera/image_raw',
+            '/imu/data',
+            '/odom',
+          ]},
+          { type: 'image', src: '', caption: '/hobot_dnn/bbox · 目标 3 个 · 29 FPS' },
+        ];
       } else if (lowerCmd.includes('模型') || lowerCmd.includes('model') || lowerCmd.includes('推理')) {
-        aiText = `设备上已部署 2 个 BPU 优化模型 (YOLOv5s, FCOS)，推理帧率 25-30 FPS。还有 2 个待转换模型需要通过 hb_mapper 工具链处理。`;
+        aiText = `设备上已部署 2 个 BPU 优化模型，推理帧率 25-30 FPS。`;
         action = { label: '管理模型仓库', tab: 'models' };
+        blocks = [
+          { type: 'status', items: [
+            { label: 'YOLOv5s', value: '已部署 · 30 FPS', ok: true },
+            { label: 'FCOS', value: '已部署 · 25 FPS', ok: true },
+            { label: 'ResNet50', value: '待转换', ok: false },
+            { label: 'MobileNetV2', value: '待转换', ok: false },
+          ]},
+        ];
       } else {
         aiText = `收到！关于"${userMsg}"，我可以帮你在 ${currentDevice?.name} 上执行相关操作。你可以尝试更具体的描述，比如"帮我烧录镜像"、"查看 ROS 话题"或"检查硬件温度"。`;
       }
-      setChatMessages((prev) => [...prev, { id: msgId + 1, role: 'ai', text: aiText, action }]);
+      setChatMessages((prev) => [...prev, { id: msgId + 1, role: 'ai', text: aiText, action, blocks }]);
       setAiTyping(false);
     }, 1200);
   };
@@ -469,6 +537,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ---- Effects ----
+  useEffect(() => {
+    if (chatExpanded) setChatExpanded(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   useEffect(() => {
     const el = document.querySelector('.chat-messages');
     if (el) el.scrollTop = el.scrollHeight;

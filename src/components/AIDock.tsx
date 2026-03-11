@@ -1,51 +1,139 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import type { ChatBlock } from '../app-types';
+
+/* ─── Inline SVG icons (avoid emoji, keep crisp) ─── */
+const Icon = {
+  spark: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v1m0 16v1m-7.07-2.93l.71-.71M4.22 4.22l.71.71M3 12h1m16 0h1m-2.93 7.07l-.71-.71M19.78 4.22l-.71.71"/>
+      <circle cx="12" cy="12" r="4"/>
+    </svg>
+  ),
+  send: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+    </svg>
+  ),
+  expand: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+      <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+    </svg>
+  ),
+  collapse: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+      <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+    </svg>
+  ),
+  close: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
+  robot: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/>
+      <line x1="12" y1="7" x2="12" y2="11"/>
+      <line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/>
+    </svg>
+  ),
+  user: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+      <circle cx="12" cy="7" r="4"/>
+    </svg>
+  ),
+};
+
+function BlockRenderer({ block }: { block: ChatBlock }) {
+  const [rosFrame, setRosFrame] = useState(0);
+
+  useEffect(() => {
+    if (block.type !== 'image') return;
+    const timer = window.setInterval(() => setRosFrame((p) => (p + 1) % 3), 1200);
+    return () => window.clearInterval(timer);
+  }, [block.type]);
+
+  if (block.type === 'terminal') {
+    return (
+      <div className="msg-block terminal-block">
+        <div className="terminal-block-header">
+          <span className="terminal-block-dots">
+            <span className="td red" /><span className="td yellow" /><span className="td green" />
+          </span>
+          <span className="terminal-block-label">Terminal</span>
+        </div>
+        <div className="terminal-block-body">
+          {block.lines.map((line, i) => (
+            <div key={i} className="terminal-block-line">{line}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'code') {
+    return (
+      <div className="msg-block code-block">
+        <div className="code-block-header">
+          <span className="code-block-lang">{block.lang}</span>
+        </div>
+        <pre className="code-block-body"><code>{block.content}</code></pre>
+      </div>
+    );
+  }
+
+  if (block.type === 'status') {
+    return (
+      <div className="msg-block status-block">
+        {block.items.map((item) => (
+          <div key={item.label} className="status-block-item">
+            <span className={`status-block-dot ${item.ok ? 'ok' : 'warn'}`} />
+            <span className="status-block-label">{item.label}</span>
+            <span className="status-block-value">{item.value}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (block.type === 'image') {
+    return (
+      <div className="msg-block image-block">
+        <div className={`image-block-preview frame-${rosFrame}`}>
+          <div className="ros-vision-overlay">
+            <span className="ros-bbox first" />
+            <span className="ros-bbox second" />
+          </div>
+          <div className="image-block-live">● LIVE</div>
+        </div>
+        {block.caption && <div className="image-block-caption">{block.caption}</div>}
+      </div>
+    );
+  }
+
+  return null;
+}
 
 export default function AIDock() {
   const {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, chatExpanded, setChatExpanded, aiTyping,
-    handleCommand, setActiveTab, currentSession, rosTopic,
+    handleCommand, setActiveTab,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
-  const [contextView, setContextView] = useState<'assistant' | 'logs' | 'ros'>('assistant');
-  const [autoFollowLogs, setAutoFollowLogs] = useState(true);
   const [showAllMessages, setShowAllMessages] = useState(false);
-  const [compactMode, setCompactMode] = useState(true);
-  const [rosFrame, setRosFrame] = useState(0);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
-  const logViewportRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  const maxVisibleMessages = workspaceMode ? 24 : 40;
+  const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
   const hiddenCount = Math.max(0, chatMessages.length - visibleMessages.length);
 
-  const terminalLines = useMemo(() => currentSession.lines.slice(-80), [currentSession.lines]);
-  const rosFrameHints = useMemo(
-    () => [
-      { id: 0, title: '实时目标框', subtitle: 'BBox overlay', value: '目标 3 个 · 29 FPS' },
-      { id: 1, title: '深度对齐层', subtitle: 'Depth alignment', value: '深度偏差 2.3%' },
-      { id: 2, title: '路径热力图', subtitle: 'Trajectory map', value: '跟踪稳定度 94%' },
-    ],
-    [],
-  );
-
-  useEffect(() => {
-    if (!workspaceMode || !autoFollowLogs || contextView !== 'logs') return;
-    const el = logViewportRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [workspaceMode, autoFollowLogs, contextView, terminalLines]);
-
-  useEffect(() => {
-    if (!workspaceMode || contextView !== 'ros') return;
-    const timer = window.setInterval(() => {
-      setRosFrame((prev) => (prev + 1) % 3);
-    }, 1200);
-    return () => window.clearInterval(timer);
-  }, [workspaceMode, contextView]);
-
+  /* Escape exits workspace mode */
   useEffect(() => {
     if (!workspaceMode) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -55,39 +143,31 @@ export default function AIDock() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [workspaceMode]);
 
+  /* Sync workspace mode with chat state */
   useEffect(() => {
-    if (chatExpanded) return;
-    setWorkspaceMode(false);
-    setContextOpen(false);
-    setContextView('assistant');
-  }, [chatExpanded]);
-
-  useEffect(() => {
-    if (showAllMessages) return;
-    if (hiddenCount > 0 && chatMessages.length > maxVisibleMessages) {
-      setShowAllMessages(false);
+    if (chatExpanded) {
+      if (chatMessages.length > 0) setWorkspaceMode(true);
+      return;
     }
-  }, [chatMessages.length, hiddenCount, maxVisibleMessages, showAllMessages]);
+    setWorkspaceMode(false);
+  }, [chatExpanded, chatMessages.length]);
+
+  /* Auto-scroll to newest message */
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages.length, aiTyping]);
 
   const quickPrompts = [
-    { id: 'diag', label: '分析最新异常日志', text: '请结合终端最近输出，帮我定位异常并给出修复步骤' },
-    { id: 'ros', label: '查看 ROS 视觉流', text: '切到 ROS 图像视角，并总结当前画面中的目标情况' },
-    { id: 'openclaw', label: '调用 OpenClaw 工作流', text: '使用 OpenClaw 执行一个自动化巡检流程' },
-    { id: 'plan', label: '给我任务执行计划', text: '把当前需求拆成 3 步并立即开始执行第一步' },
+    { id: 'diag', icon: '🔍', label: '分析异常日志',  text: '请结合终端最近输出，帮我定位异常并给出修复步骤' },
+    { id: 'ros',  icon: '📡', label: 'ROS 话题',     text: '切到 ROS 图像视角，并总结当前画面中的目标情况' },
+    { id: 'hw',   icon: '🌡️', label: '硬件状态',      text: '检查当前设备的 BPU 负载和芯片温度' },
+    { id: 'plan', icon: '📋', label: '执行计划',      text: '把当前需求拆成 3 步并立即开始执行第一步' },
   ];
 
   const closeDock = () => {
     setChatExpanded(false);
     setWorkspaceMode(false);
-    setContextOpen(false);
-    setContextView('assistant');
     setShowAllMessages(false);
-  };
-
-  const openContext = (view: 'assistant' | 'logs' | 'ros') => {
-    setWorkspaceMode(true);
-    setContextView(view);
-    setContextOpen(true);
   };
 
   return (
@@ -95,160 +175,73 @@ export default function AIDock() {
       <div className="dock-wrapper">
         {chatExpanded && chatMessages.length > 0 && (
           <div className={`chat-panel ${workspaceMode ? 'workspace' : ''}`}>
+            {/* ── Header ── */}
             <div className="chat-panel-header">
               <div className="chat-panel-title-wrap">
-                <span className="chat-panel-title">AI 协同工作台</span>
-                <span className="chat-panel-subtitle">对话 + 终端反馈 + ROS 可视流</span>
+                <span style={{ display: 'flex', alignItems: 'center', color: '#ff6b00' }}>{Icon.spark}</span>
+                <span className="chat-panel-title">AI 工作台</span>
               </div>
               <div className="chat-panel-controls">
                 <button
                   className="chat-panel-action"
-                  onClick={() => {
-                    setWorkspaceMode((prev) => !prev);
-                    if (!workspaceMode) {
-                      setContextOpen(false);
-                      setContextView('assistant');
-                    }
-                  }}
-                  title={workspaceMode ? '退出工作台' : '放大到工作台'}
+                  onClick={() => setWorkspaceMode(!workspaceMode)}
+                  title={workspaceMode ? '还原窗口' : '全屏模式'}
                 >
-                  {workspaceMode ? '还原' : '放大'}
+                  {workspaceMode ? Icon.collapse : Icon.expand}
+                  <span style={{ marginLeft: 4 }}>{workspaceMode ? '还原' : '放大'}</span>
                 </button>
-                {workspaceMode && (
-                  <>
-                    <button className="chat-panel-action" onClick={() => openContext('logs')}>日志</button>
-                    <button className="chat-panel-action" onClick={() => openContext('ros')}>ROS</button>
-                    <button
-                      className="chat-panel-action"
-                      onClick={() => {
-                        if (contextOpen && contextView === 'assistant') setContextOpen(false);
-                        else openContext('assistant');
-                      }}
-                    >
-                      助手侧栏
-                    </button>
-                  </>
-                )}
-                <button className="chat-panel-close" onClick={closeDock} title="关闭">✕</button>
+                <button className="chat-panel-close" onClick={closeDock} title="关闭">
+                  {Icon.close}
+                </button>
               </div>
             </div>
 
-            <div className={`chat-body ${workspaceMode ? 'workspace' : ''} ${contextOpen ? 'with-context' : 'no-context'}`}>
-              <div className="chat-main-column">
-                {workspaceMode && (
-                  <div className="conversation-toolbar">
-                    <div className="conversation-meta">消息 {chatMessages.length} 条</div>
-                    <button className="conversation-toggle" onClick={() => setCompactMode((prev) => !prev)}>
-                      {compactMode ? '宽松排版' : '紧凑排版'}
-                    </button>
-                  </div>
-                )}
-
-                <div className={`chat-messages ${compactMode ? 'compact' : ''}`}>
-                  {!showAllMessages && hiddenCount > 0 && (
-                    <button className="history-truncate" onClick={() => setShowAllMessages(true)}>
-                      查看更早的 {hiddenCount} 条消息
-                    </button>
-                  )}
-
-                  {visibleMessages.map((msg) => (
-                    <div key={msg.id} className={`chat-message ${msg.role}`}>
-                      <div className={`chat-bubble ${msg.role}`}>
-                        <p>{msg.text}</p>
-                        <span className="chat-msg-time">{new Date(msg.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        {msg.action && (
-                          <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
-                            {msg.action.label} →
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                  {aiTyping && (
-                    <div className="chat-message ai">
-                      <div className="chat-bubble ai typing">
-                        <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
-                      </div>
-                    </div>
-                  )}
-
-                  {showAllMessages && hiddenCount > 0 && (
-                    <button className="history-truncate" onClick={() => setShowAllMessages(false)}>
-                      收起历史，仅看最近 {maxVisibleMessages} 条
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {workspaceMode && contextOpen && (
-                <aside className="chat-context-column">
-                  <div className="chat-context-tabs">
-                    <button className={`context-tab ${contextView === 'assistant' ? 'active' : ''}`} onClick={() => setContextView('assistant')}>助手</button>
-                    <button className={`context-tab ${contextView === 'logs' ? 'active' : ''}`} onClick={() => setContextView('logs')}>终端日志</button>
-                    <button className={`context-tab ${contextView === 'ros' ? 'active' : ''}`} onClick={() => setContextView('ros')}>ROS 图像</button>
-                  </div>
-
-                  {contextView === 'assistant' && (
-                    <div className="context-panel">
-                      <div className="context-title">统一交互入口</div>
-                      <p className="context-copy">在这里提问会自动路由到终端、OpenClaw 或 ROS 工具链，适合纯对话驱动任务执行。</p>
-                      <div className="context-actions">
-                        <button className="context-chip" onClick={() => setActiveTab('openclaw')}>打开 OpenClaw</button>
-                        <button className="context-chip" onClick={() => setActiveTab('terminal')}>查看终端面板</button>
-                        <button className="context-chip" onClick={() => setActiveTab('ros')}>进入 ROS 可视化</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {contextView === 'logs' && (
-                    <div className="context-panel">
-                      <div className="context-top-row">
-                        <div className="context-title">设备反馈日志</div>
-                        <label className="context-toggle">
-                          <input type="checkbox" checked={autoFollowLogs} onChange={(e) => setAutoFollowLogs(e.target.checked)} />
-                          自动跟随
-                        </label>
-                      </div>
-                      <div className="context-log-view" ref={logViewportRef}>
-                        {terminalLines.map((line, index) => (
-                          <div key={`${line}-${index}`} className="context-log-line">{line}</div>
-                        ))}
-                      </div>
-                      <button className="context-link" onClick={() => setActiveTab('terminal')}>在终端中查看完整日志 →</button>
-                    </div>
-                  )}
-
-                  {contextView === 'ros' && (
-                    <div className="context-panel">
-                      <div className="context-title">ROS 实时图像流</div>
-                      <div className="ros-live-frame">
-                        <div className={`ros-vision-overlay frame-${rosFrame}`}>
-                          <span className="ros-bbox first" />
-                          <span className="ros-bbox second" />
-                        </div>
-                        <div className="ros-frame-meta">Topic: {rosTopic}</div>
-                      </div>
-                      <div className="ros-frame-list">
-                        {rosFrameHints.map((item) => (
-                          <button
-                            key={item.id}
-                            className={`ros-frame-item ${rosFrame === item.id ? 'active' : ''}`}
-                            onClick={() => setRosFrame(item.id)}
-                          >
-                            <strong>{item.title}</strong>
-                            <span>{item.subtitle}</span>
-                            <em>{item.value}</em>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </aside>
+            {/* ── Chat stream ── */}
+            <div className="chat-stream">
+              {!showAllMessages && hiddenCount > 0 && (
+                <button className="history-truncate" onClick={() => setShowAllMessages(true)}>
+                  查看更早的 {hiddenCount} 条消息
+                </button>
               )}
+
+              {visibleMessages.map((msg) => (
+                <div key={msg.id} className={`chat-message ${msg.role}`}>
+                  {/* Avatar */}
+                  <div className={`chat-avatar ${msg.role}`}>
+                    {msg.role === 'ai' ? Icon.robot : Icon.user}
+                  </div>
+                  {/* Bubble */}
+                  <div className={`chat-bubble ${msg.role}`}>
+                    <p>{msg.text}</p>
+                    {msg.blocks?.map((block, i) => (
+                      <BlockRenderer key={i} block={block} />
+                    ))}
+                    {msg.action && (
+                      <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
+                        {msg.action.label} →
+                      </button>
+                    )}
+                    <span className="chat-msg-time">
+                      {new Date(msg.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                </div>
+              ))}
+
+              {aiTyping && (
+                <div className="chat-message ai">
+                  <div className="chat-avatar ai">{Icon.robot}</div>
+                  <div className="chat-bubble ai typing">
+                    <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
             </div>
           </div>
         )}
 
+        {/* Suggestions overlay (idle state) */}
         {showSuggestions && !chatExpanded && filteredSuggestions.length > 0 && (
           <div className="suggestions-dropdown">
             {filteredSuggestions.slice(0, 6).map((s, i) => (
@@ -260,21 +253,23 @@ export default function AIDock() {
           </div>
         )}
 
+        {/* ── Input bar ── */}
         <form className="input-box" onSubmit={handleCommand}>
-          <span style={{ marginRight: '12px', fontSize: '1.2rem', color: '#ff6b00' }}>✨</span>
+          <span style={{ display: 'flex', alignItems: 'center', marginRight: 10, color: '#ff6b00', flexShrink: 0 }}>{Icon.spark}</span>
           <input
             type="text"
             className="cmd-input"
-            placeholder="向 AI 助手提问... (按 / 聚焦)"
+            placeholder="向 AI 助手提问..."
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}
             onFocus={() => { if (!chatExpanded) setShowSuggestions(true); }}
             onBlur={() => window.setTimeout(() => setShowSuggestions(false), 200)}
           />
-          <button type="submit" className="send-btn" title="发送">↑</button>
+          <button type="submit" className="send-btn" title="发送">{Icon.send}</button>
         </form>
 
+        {/* ── Quick prompt chips (workspace only) ── */}
         {workspaceMode && (
           <div className="quick-prompt-strip">
             {quickPrompts.map((prompt) => (
@@ -286,7 +281,8 @@ export default function AIDock() {
                   chatInputRef.current?.focus();
                 }}
               >
-                {prompt.label}
+                <span className="qp-icon">{prompt.icon}</span>
+                <span className="qp-label">{prompt.label}</span>
               </button>
             ))}
           </div>
