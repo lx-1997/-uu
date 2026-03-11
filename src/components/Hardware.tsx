@@ -2,13 +2,45 @@ import { useAppState } from '../hooks/useAppState';
 import { METRIC_CARDS } from '../constants';
 
 export default function Hardware() {
-  const { currentDevice, hardwareRange, setHardwareRange, addToast } = useAppState();
+  const { currentDevice, hardwareRange, setHardwareRange, addToast, setActiveTab } = useAppState();
+
+  // AI 健康评分计算
+  const bpuVal = 68, cpuVal = 34, memVal = 65, tempVal = 61.8;
+  const healthScore = Math.round(100 - (
+    (bpuVal > 80 ? 20 : bpuVal > 60 ? 8 : 0) +
+    (cpuVal > 80 ? 15 : cpuVal > 60 ? 5 : 0) +
+    (memVal > 85 ? 20 : memVal > 70 ? 8 : 0) +
+    (tempVal > 70 ? 25 : tempVal > 60 ? 10 : 0)
+  ));
+
+  const healthLevel = healthScore >= 85 ? { label: '优秀', color: '#16a34a', bg: '#f0fdf4' }
+    : healthScore >= 70 ? { label: '良好', color: '#d97706', bg: '#fffbeb' }
+    : { label: '需关注', color: '#dc2626', bg: '#fef2f2' };
 
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🏥 硬件诊断监控</div>
-        <div className="desc-text">实时硬件看板，异常检测与处置建议。</div>
+        <div className="desc-text">实时硬件看板，AI 异常检测与处置建议。</div>
+
+        {/* AI 健康评分总览 - 新增 */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 18, alignItems: 'center', padding: '14px 18px', background: healthLevel.bg, borderRadius: 12 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '2rem', fontWeight: 800, color: healthLevel.color, lineHeight: 1 }}>{healthScore}</div>
+            <div style={{ fontSize: '0.72rem', color: healthLevel.color, fontWeight: 600 }}>AI 健康分</div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.88rem', fontWeight: 600, marginBottom: 4 }}>设备状态: {healthLevel.label}</div>
+            <div style={{ fontSize: '0.78rem', color: '#475569', lineHeight: 1.5 }}>
+              {tempVal > 60 && <span>⚠️ 芯片温度 {tempVal}°C 略偏高，建议检查散热 · </span>}
+              {bpuVal > 60 && <span>BPU 负载 {bpuVal}% 中等偏高，留意推理队列 · </span>}
+              {cpuVal < 50 && memVal < 80 && <span>✅ CPU 与内存在安全范围 · </span>}
+              <span>整体适合继续运行当前工作负载</span>
+            </div>
+          </div>
+          <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('AI 已生成完整健康报告', 'success')}>📄 导出报告</button>
+        </div>
+
         <div className="segmented-row hardware-mode-row">
           {([['realtime', '实时窗口'], ['10m', '最近 10 分钟'], ['1h', '最近 1 小时']] as const).map(([range, label]) => (
             <button key={range} className={`segment-btn ${hardwareRange === range ? 'active' : ''}`} onClick={() => setHardwareRange(range)}>{label}</button>
@@ -90,7 +122,7 @@ export default function Hardware() {
             </table>
           </div>
           <div className="panel-card">
-            <div className="panel-title">🔧 快捷诊断</div>
+            <div className="panel-title">🔧 AI 智能诊断</div>
             <div className="usage-list">
               <div className="usage-item selectable" onClick={() => addToast('温度异常检测完成：所有指标正常', 'success')}>
                 <strong>🌡️ 温度异常检测</strong>
@@ -103,6 +135,17 @@ export default function Hardware() {
               <div className="usage-item selectable" onClick={() => addToast('系统日志已导出 (dmesg + journalctl)', 'info')}>
                 <strong>📋 导出系统日志</strong>
                 <span>收集 dmesg / journalctl 用于社区反馈</span>
+              </div>
+            </div>
+            {/* AI 预测性告警 - 新增 */}
+            <div style={{ marginTop: 12, padding: '10px 14px', background: '#fffbeb', borderRadius: 10, border: '1px dashed #fcd34d' }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#92400e', marginBottom: 4 }}>🔮 AI 预测性告警</div>
+              <div style={{ fontSize: '0.78rem', color: '#78350f', lineHeight: 1.5 }}>
+                按当前趋势，BPU 温度在持续推理负载下预计 2 小时后接近 70°C 警戒线。建议提前降频或增加散热。
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button className="chip-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端，可手动调节风扇', 'info'); }}>🖥️ 终端调节</button>
+                <button className="chip-btn" onClick={() => addToast('AI 已自动将 BPU 频率降至 800MHz', 'success')}>🤖 AI 自动降频</button>
               </div>
             </div>
           </div>

@@ -21,6 +21,22 @@ export default function Flasher() {
           <button className="clean-btn outline-btn sm-btn" onClick={() => { setFlashImage('ros2-humble'); addToast('已切换到 AI 推荐镜像', 'success'); }}>采纳</button>
         </div>
 
+        {/* AI 烧录预检 */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: '#16a34a' }}>
+            ✅ 设备连接正常 · USB 3.0
+          </div>
+          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: '#16a34a' }}>
+            ✅ 镜像校验通过 · SHA256 匹配
+          </div>
+          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: flashTarget === 'emmc' ? '#fffbeb' : '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: flashTarget === 'emmc' ? '#92400e' : '#16a34a' }}>
+            {flashTarget === 'emmc' ? '⚠️ eMMC 写入不可逆' : '✅ 存储介质可安全写入'}
+          </div>
+          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: '#16a34a' }}>
+            ✅ 预估耗时 ~3 分钟
+          </div>
+        </div>
+
         <div className="stepper-row">
           {['镜像选择', '介质确认', '写入策略', '交付完成'].map((label, index) => (
             <div key={label} className={`step-chip ${flashStep >= index + 1 ? 'active' : ''}`}>
@@ -99,11 +115,17 @@ export default function Flasher() {
               <div className="usage-item">可跳转到终端、文件管理或示例应用。</div>
             </div>
             {flashProgress >= 100 && !isFlashing && (
-              <div className="action-row" style={{ marginTop: '16px' }}>
-                <button className="clean-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端，可开始配置设备', 'info'); }}>💻 打开终端</button>
-                <button className="clean-btn outline-btn" onClick={() => { setActiveTab('files'); addToast('已跳转到文件管理器', 'info'); }}>📁 文件管理</button>
-                <button className="clean-btn outline-btn" onClick={() => { setActiveTab('examples'); addToast('已跳转到示例应用', 'info'); }}>📦 示例应用</button>
-              </div>
+              <>
+                <div style={{ padding: '10px 12px', background: '#f0fdf4', borderRadius: 8, marginTop: 12, fontSize: '0.78rem', color: '#16a34a' }}>
+                  🧠 AI 建议下一步: 1) 打开终端运行首次配置 → 2) 在示例应用中验证 BPU → 3) 部署您的模型
+                </div>
+                <div className="action-row" style={{ marginTop: '12px' }}>
+                  <button className="clean-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端，可开始配置设备', 'info'); }}>💻 打开终端</button>
+                  <button className="clean-btn outline-btn" onClick={() => { setActiveTab('files'); addToast('已跳转到文件管理器', 'info'); }}>📁 文件管理</button>
+                  <button className="clean-btn outline-btn" onClick={() => { setActiveTab('examples'); addToast('已跳转到示例应用', 'info'); }}>📦 示例应用</button>
+                  <button className="clean-btn outline-btn" onClick={() => { setActiveTab('hardware'); addToast('已跳转到硬件监控', 'info'); }}>📊 硬件检测</button>
+                </div>
+              </>
             )}
           </div>
         </div>
