@@ -1081,7 +1081,11 @@ body {
   padding: 28px; border-radius: 18px;
   background: #fff; border: 1px solid #e2e8f0;
   box-shadow: 0 12px 40px rgba(0,0,0,0.12);
-  animation: ocFadeUp 0.25s ease;
+  animation: ocModalIn 0.2s ease;
+}
+@keyframes ocModalIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 .oc-modal-head { display: flex; align-items: center; justify-content: space-between; }
 .oc-modal-title { font-size: 1.1rem; font-weight: 700; color: #1e293b; margin: 0; }
