@@ -27,16 +27,7 @@ export default function Models() {
         <div className="widget-header">� 模型仓库</div>
         <div className="desc-text">浏览、转换和部署 AI 模型到你的 RDK 开发板。</div>
 
-        {/* AI 智能推荐输入 */}
-        <div className="ai-file-bar">
-          <div className="ai-file-input-wrap">
-            <span className="ai-file-icon">🤖</span>
-            <input className="clean-input ai-file-input" placeholder='描述你的场景，AI 推荐最佳模型: "我需要检测行人和车辆"' />
-          </div>
-          <button className="clean-btn" onClick={() => addToast('AI 推荐: YOLOv5s (BPU) — 通用目标检测，已适配当前设备，30FPS', 'info')}>推荐</button>
-        </div>
-
-        {/* AI 兼容性总览 - 新增 */}
+        {/* AI 兼容性总览 */}
         <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
           <span className="ai-suggest-label">🧠 AI 评估</span>
           <span className="ai-recommend-text">

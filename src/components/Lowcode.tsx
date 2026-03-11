@@ -11,17 +11,9 @@ export default function Lowcode() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🧩 流程编排</div>
-        <div className="desc-text">用自然语言或拖拽方式搭建 AI 处理流水线。</div>
+        <div className="desc-text">基于 Node-RED 搭建 AI 处理流水线，也可通过底部聊天框用自然语言描述流程。</div>
 
-        <div className="ai-file-bar">
-          <div className="ai-file-input-wrap">
-            <span className="ai-file-icon">🤖</span>
-            <input className="clean-input ai-file-input" placeholder='描述你想要的流程，例如: "摄像头拍照 → AI 检测人脸 → 推送到飞书"' />
-          </div>
-          <button className="clean-btn" onClick={() => addToast('AI 正在生成流程编排...', 'info')}>生成</button>
-        </div>
-
-        {/* AI 智能模板推荐 - 新增 */}
+        {/* AI 智能模板推荐 */}
         <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
           <span className="ai-suggest-label">🧠 AI 推荐</span>
           <span className="ai-recommend-text">

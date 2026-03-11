@@ -41,11 +41,6 @@ export default function Hardware() {
           <button className="clean-btn outline-btn sm-btn" onClick={() => addToast('AI 已生成完整健康报告', 'success')}>📄 导出报告</button>
         </div>
 
-        <div className="segmented-row hardware-mode-row">
-          {([['realtime', '实时窗口'], ['10m', '最近 10 分钟'], ['1h', '最近 1 小时']] as const).map(([range, label]) => (
-            <button key={range} className={`segment-btn ${hardwareRange === range ? 'active' : ''}`} onClick={() => setHardwareRange(range)}>{label}</button>
-          ))}
-        </div>
         <div className="metric-grid">
           {METRIC_CARDS.map((metric) => (
             <div key={metric.label} className="metric-card">
@@ -56,7 +51,34 @@ export default function Hardware() {
           ))}
         </div>
 
-        <div className="workspace-grid two-column" style={{ marginTop: 18 }}>
+        {/* 连接后趋势折线图 */}
+        <div className="panel-card" style={{ marginTop: 14 }}>
+          <div className="panel-title">📈 连接后趋势 (最近 5 分钟)</div>
+          <div style={{ position: 'relative', height: 120, background: '#f8fafc', borderRadius: 8, overflow: 'hidden', padding: '8px 0' }}>
+            <svg viewBox="0 0 400 100" style={{ width: '100%', height: '100%' }} preserveAspectRatio="none">
+              {/* CPU 折线 */}
+              <polyline fill="none" stroke="#3b82f6" strokeWidth="1.5" points="0,70 40,68 80,55 120,60 160,45 200,50 240,65 280,34 320,38 360,36 400,34" />
+              {/* BPU 折线 */}
+              <polyline fill="none" stroke="#ff6b00" strokeWidth="1.5" points="0,40 40,38 80,42 120,35 160,30 200,32 240,28 280,68 320,65 360,60 400,68" />
+              {/* 温度折线 */}
+              <polyline fill="none" stroke="#ef4444" strokeWidth="1.5" strokeDasharray="4,3" points="0,50 40,48 80,45 120,42 160,40 200,38 240,38 280,30 320,32 360,35 400,38" />
+              {/* 异常标注点 */}
+              <circle cx="280" cy="68" r="4" fill="#ff6b00" />
+              <text x="282" y="80" fontSize="8" fill="#ff6b00">BPU↑</text>
+            </svg>
+            <div style={{ position: 'absolute', top: 6, right: 10, display: 'flex', gap: 12, fontSize: '0.68rem' }}>
+              <span style={{ color: '#3b82f6' }}>● CPU</span>
+              <span style={{ color: '#ff6b00' }}>● BPU</span>
+              <span style={{ color: '#ef4444' }}>● 温度</span>
+            </div>
+            {/* 异常批注 */}
+            <div style={{ position: 'absolute', bottom: 4, left: 10, fontSize: '0.66rem', color: '#f59e0b' }}>
+              ⚠ 14:32 BPU 负载骤升 → 推理任务启动 (hobot_dnn)
+            </div>
+          </div>
+        </div>
+
+        <div className="workspace-grid two-column" style={{ marginTop: 14 }}>
           <div className="panel-card">
             <div className="panel-title">🌐 网络接口</div>
             <div className="usage-list">

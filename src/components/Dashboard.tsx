@@ -58,10 +58,7 @@ export default function Dashboard() {
                       <div className="ob-spec"><span className="ob-spec-k">芯片</span><span className="ob-spec-v">{b.chip}</span></div>
                       <div className="ob-spec"><span className="ob-spec-k">内存</span><span className="ob-spec-v">{b.mem}</span></div>
                       <div className="ob-spec"><span className="ob-spec-k">存储</span><span className="ob-spec-v">{b.storage}</span></div>
-                      <div className="ob-spec"><span className="ob-spec-k">系统</span><span className="ob-spec-v">{b.os}</span></div>
-                      <div className="ob-spec"><span className="ob-spec-k">调试口</span><span className="ob-spec-v">{b.debug}</span></div>
                       <div className="ob-spec"><span className="ob-spec-k">网络</span><span className="ob-spec-v">{b.net}</span></div>
-                      <div className="ob-spec"><span className="ob-spec-k">扩展</span><span className="ob-spec-v">{b.extra}</span></div>
                     </div>
                     <div className="ob-board-footer">
                       <span className="ob-board-price">{b.price}</span>

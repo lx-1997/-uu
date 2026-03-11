@@ -66,9 +66,8 @@ export const STORAGE_TARGETS = [
 ];
 
 export const TERMINAL_PROFILES = [
-  { id: 'shell', label: '系统 Shell', desc: '适合常规巡检、日志查看与环境配置' },
-  { id: 'ros', label: 'ROS2 调试会话', desc: '默认加载 ROS2 环境变量与 Topic 快捷指令' },
-  { id: 'diag', label: '硬件诊断会话', desc: '预置 bputop、hrut_smi、dmesg 等命令建议' },
+  { id: 'shell', label: '系统 Shell', desc: '命令行操作、日志查看与环境配置' },
+  { id: 'openclaw', label: 'OpenClaw 对话', desc: 'AI 对话模式，用自然语言操控设备' },
 ];
 
 export const COMMAND_SUGGESTIONS = ['ros2 topic list', 'hrut_smi', 'tail -f /var/log/syslog', 'ls /userdata', 'top'];

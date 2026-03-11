@@ -48,7 +48,7 @@ export default function Flasher() {
 
         <div className="workspace-grid two-column">
           <div className="panel-card">
-            <div className="panel-title">镜像与目标</div>
+            <div className="panel-title">选择镜像</div>
             <div className="option-list">
               {FLASH_IMAGES.map((image) => (
                 <button key={image.id} className={`select-card ${flashImage === image.id ? 'active' : ''}`} onClick={() => setFlashImage(image.id)}>
@@ -57,6 +57,9 @@ export default function Flasher() {
                 </button>
               ))}
             </div>
+          </div>
+          <div className="panel-card">
+            <div className="panel-title">选择目标介质</div>
             <div className="field-grid">
               {STORAGE_TARGETS.map((target) => (
                 <button key={target.id} className={`select-card compact ${flashTarget === target.id ? 'active' : ''}`} onClick={() => setFlashTarget(target.id)}>
@@ -66,9 +69,11 @@ export default function Flasher() {
               ))}
             </div>
           </div>
+        </div>
 
+        <div className="workspace-grid two-column">
           <div className="panel-card">
-            <div className="panel-title">写入策略与风险兜底</div>
+            <div className="panel-title">写入设置</div>
             <div className="segmented-row">
               {([['safe', '安全模式'], ['fast', '极速模式'], ['recover', '恢复模式']] as const).map(([mode, label]) => (
                 <button key={mode} className={`segment-btn ${flashMode === mode ? 'active' : ''}`} onClick={() => setFlashMode(mode)}>{label}</button>

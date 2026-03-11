@@ -62,11 +62,14 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-footer" style={{ marginTop: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <button className="tool-btn" onClick={() => window.open('https://developer.horizon.cc/cloud', '_blank')}>
+          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>☁️</span> <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>具身云平台</span>
+        </button>
         <button className="tool-btn" onClick={() => window.open('https://developer.horizon.cc/', '_blank')}>
-          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>🍠</span> <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>地瓜开发者社区</span>
+          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>🍠</span> <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>开发者社区</span>
         </button>
         <button className="tool-btn" onClick={() => setShowSettings(true)}>
-          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>⚙️</span> 客户端设置
+          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>⚙️</span> 设置
         </button>
       </div>
     </div>

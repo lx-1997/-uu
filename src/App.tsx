@@ -59,13 +59,14 @@ function MainContent() {
 }
 
 function AppShell() {
+  const { activeTab } = useAppState();
   return (
     <div className="canvas-shell">
       <div className="layout-container">
         <Sidebar />
         <div className="main-area">
           <TopToolbar />
-          <div className="canvas-viewport">
+          <div className={`canvas-viewport ${activeTab === 'terminal' ? 'viewport-terminal' : ''}`}>
             <MainContent />
           </div>
           <AIDock />

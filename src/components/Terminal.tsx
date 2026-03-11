@@ -25,10 +25,8 @@ export default function Terminal() {
   const lineCount = currentSession.lines.length;
   const errorLines = currentSession.lines.filter(l => /error|fail|denied|not found/i.test(l)).length;
 
-  const quickCmds = terminalProfile === 'ros'
-    ? ['ros2 topic list', 'ros2 node list', 'ros2 topic echo /hobot_dnn/bbox', 'ros2 bag record -a']
-    : terminalProfile === 'diag'
-    ? ['hrut_smi', 'cat /sys/class/thermal/thermal_zone0/temp', 'bputop', 'dmesg | tail']
+  const quickCmds = terminalProfile === 'openclaw'
+    ? ['你好，帮我检查设备状态', '列出 ROS 话题', '查看 BPU 使用率', '打开摄像头']
     : COMMAND_SUGGESTIONS;
 
   return (

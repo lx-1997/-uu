@@ -11,17 +11,9 @@ export default function Files() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">� 文件管理</div>
-        <div className="desc-text">在本地和设备之间传输文件，支持用自然语言描述操作。</div>
+        <div className="desc-text">在本地和设备之间传输文件，也可以通过底部聊天框用自然语言操作。</div>
 
-        <div className="ai-file-bar">
-          <div className="ai-file-input-wrap">
-            <span className="ai-file-icon">🤖</span>
-            <input className="clean-input ai-file-input" placeholder='试试: "把 models/ 下模型上传到设备" 或 "同步远程日志到本地"' />
-          </div>
-          <button className="clean-btn" onClick={() => addToast('AI 正在解析文件操作指令...', 'info')}>执行</button>
-        </div>
-
-        {/* AI 智能操作建议 - 新增 */}
+        {/* AI 智能操作建议 */}
         <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
           <span className="ai-suggest-label">🧠 AI 建议</span>
           <span className="ai-recommend-text">
