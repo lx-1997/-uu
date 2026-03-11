@@ -1,68 +1,135 @@
+import { useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { DASHBOARD_CARDS } from '../constants';
 
 export default function Dashboard() {
   const { currentDevice, devices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab } = useAppState();
+  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect'>('board');
+  const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
 
-  /* ── Empty-state onboarding ── */
+  /* ── Empty-state onboarding wizard ── */
   if (devices.length === 0) {
+    const boards = [
+      { id: 'x3', name: 'RDK X3', emoji: '🟠', bpu: '5 TOPS', chip: 'Sunrise 3 · 4核 Cortex-A53', mem: '2GB DDR4', storage: 'SD 卡 / 8GB eMMC',
+        os: 'Ubuntu 20.04 / 22.04', debug: 'Micro USB', net: '百兆网口', extra: 'HDMI · MIPI CSI · 40PIN GPIO',
+        price: '¥299 起', desc: '入门级边缘 AI，适合教学和轻量推理', url: 'https://developer.horizon.cc/rdkx3' },
+      { id: 'x5', name: 'RDK X5', emoji: '🔴', bpu: '10 TOPS', chip: 'Sunrise 5 · 8核 Cortex-A55', mem: '4GB LPDDR4', storage: 'SD 卡 / 32GB eMMC',
+        os: 'Ubuntu 22.04 + ROS2 Humble', debug: 'Micro USB', net: '千兆网口 · WiFi 6', extra: 'HDMI · 双 MIPI CSI · USB 3.0 · 40PIN',
+        price: '¥499 起', desc: '主力开发板，多路摄像头 + 实时推理', url: 'https://developer.horizon.cc/rdkx5' },
+      { id: 's100', name: 'RDK S100', emoji: '🟣', bpu: '80 TOPS', chip: 'Journey 6 · CPU + BPU + MCU', mem: '16GB LPDDR5', storage: 'eMMC / NVMe SSD',
+        os: 'Ubuntu 22.04 + ROS2', debug: 'Type-C', net: '双千兆网口 · CAN 2.0', extra: '40PIN · PCIe 3.0 · MIPI CSI/DSI',
+        price: '¥1999 起', desc: '大算力行业板，自动驾驶 / 机器人首选', url: 'https://developer.horizon.cc/rdks100' },
+      { id: 'ultra', name: 'RDK Ultra', emoji: '⚫', bpu: '128 TOPS', chip: 'Journey 5 · 8核 A55', mem: '8GB LPDDR4x', storage: 'eMMC 64G / NVMe',
+        os: 'Ubuntu 22.04 + ROS2', debug: 'Micro USB', net: '双千兆网口', extra: 'USB 3.0 · PCIe 3.0 · HDMI · 40PIN',
+        price: '联系销售', desc: '旗舰算力平台，多模态融合与大模型推理', url: 'https://developer.horizon.cc/rdkultra' },
+    ];
+    const board = boards.find(b => b.id === selectedBoard);
+
     return (
       <div className="center-stage">
-        <div className="welcome-guide">
-          <div className="wg-hero">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-            </svg>
-            <h2 className="wg-title">欢迎使用 RDK Studio</h2>
-            <p className="wg-subtitle">还没有连接设备，请按以下步骤开始使用</p>
+        <div className="ob-wizard">
+          {/* Progress dots */}
+          <div className="ob-progress">
+            {(['board', 'flash', 'connect'] as const).map((s, i) => {
+              const idx = ['board','flash','connect'].indexOf(obStep);
+              return (
+                <div key={s} className={`ob-prog-item ${idx === i ? 'active' : ''} ${idx > i ? 'done' : ''}`}>
+                  <div className="ob-prog-dot">{idx > i ? '✓' : i + 1}</div>
+                  <span>{s === 'board' ? '选板卡' : s === 'flash' ? '烧镜像' : '连设备'}</span>
+                </div>
+              );
+            })}
           </div>
 
-          <div className="wg-steps">
-            <div className="wg-step-card">
-              <div className="wg-step-num">1</div>
-              <div className="wg-step-body">
-                <h3>准备开发板</h3>
-                <p>支持 RDK X3 / X5 / S100 / Ultra 全系列。确保有 SD 卡（≥16GB）、电源、网线或 USB 调试线。</p>
-                <a className="wg-link" href="https://developer.horizon.cc/rdkx5" target="_blank" rel="noreferrer">
-                  查看选购指南 →
-                </a>
+          {/* Step 1: Board */}
+          {obStep === 'board' && (
+            <>
+              <h2 className="ob-heading">选择你的 RDK 开发板</h2>
+              <div className="ob-board-grid">
+                {boards.map(b => (
+                  <div key={b.id} className={`ob-board ${selectedBoard === b.id ? 'selected' : ''}`} onClick={() => setSelectedBoard(b.id)}>
+                    <div className="ob-board-top">
+                      <span className="ob-board-emoji">{b.emoji}</span>
+                      <span className="ob-board-name">{b.name}</span>
+                      <span className="ob-board-bpu">{b.bpu}</span>
+                    </div>
+                    <div className="ob-board-desc">{b.desc}</div>
+                    <div className="ob-board-specs">
+                      <div className="ob-spec"><span className="ob-spec-k">芯片</span><span className="ob-spec-v">{b.chip}</span></div>
+                      <div className="ob-spec"><span className="ob-spec-k">内存</span><span className="ob-spec-v">{b.mem}</span></div>
+                      <div className="ob-spec"><span className="ob-spec-k">存储</span><span className="ob-spec-v">{b.storage}</span></div>
+                      <div className="ob-spec"><span className="ob-spec-k">系统</span><span className="ob-spec-v">{b.os}</span></div>
+                      <div className="ob-spec"><span className="ob-spec-k">调试口</span><span className="ob-spec-v">{b.debug}</span></div>
+                      <div className="ob-spec"><span className="ob-spec-k">网络</span><span className="ob-spec-v">{b.net}</span></div>
+                      <div className="ob-spec"><span className="ob-spec-k">扩展</span><span className="ob-spec-v">{b.extra}</span></div>
+                    </div>
+                    <div className="ob-board-footer">
+                      <span className="ob-board-price">{b.price}</span>
+                      <a className="ob-board-link" href={b.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>购买 →</a>
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
+              <div className="ob-nav">
+                <div />
+                <button className="ob-btn primary" disabled={!selectedBoard} onClick={() => setObStep('flash')}>
+                  下一步 →
+                </button>
+              </div>
+            </>
+          )}
 
-            <div className="wg-step-card">
-              <div className="wg-step-num">2</div>
-              <div className="wg-step-body">
-                <h3>烧录系统镜像</h3>
-                <p>下载官方镜像写入 SD 卡，推荐 Ubuntu 22.04 + ROS2 Humble 预装版。</p>
-                <button className="wg-action-btn" onClick={() => setActiveTab('flasher')}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {/* Step 2: Flash */}
+          {obStep === 'flash' && (
+            <>
+              <h2 className="ob-heading">为 {board?.name} 烧录系统</h2>
+              <p className="ob-sub">将系统镜像写入 SD 卡，插卡上电即可启动</p>
+              <div className="ob-flash-single">
+                <button className="ob-choice-card wide" onClick={() => setActiveTab('flasher')}>
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                   </svg>
-                  打开镜像烧录工具
+                  <strong>打开镜像烧录工具</strong>
+                  <span>选择镜像版本 → 选择目标存储 → 一键写入</span>
                 </button>
               </div>
-            </div>
+              <div className="ob-nav">
+                <button className="ob-btn ghost" onClick={() => setObStep('board')}>← 返回</button>
+                <button className="ob-btn primary" onClick={() => setObStep('connect')}>已烧录 / 跳过 →</button>
+              </div>
+            </>
+          )}
 
-            <div className="wg-step-card">
-              <div className="wg-step-num">3</div>
-              <div className="wg-step-body">
-                <h3>连接设备</h3>
-                <p>通过网线 SSH 连接（默认 root/root），或使用 USB 串口直连调试。</p>
-                <button className="wg-action-btn primary" onClick={() => setShowAddDevice(true)}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          {/* Step 3: Connect */}
+          {obStep === 'connect' && (
+            <>
+              <h2 className="ob-heading">连接 {board?.name}</h2>
+              <p className="ob-sub">确保板卡已上电，选择连接方式</p>
+              <div className="ob-choice-row">
+                <button className="ob-choice-card" onClick={() => setShowAddDevice(true)}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12.55a11 11 0 0114 0"/><path d="M1.42 9a16 16 0 0121.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
                   </svg>
-                  添加我的第一台设备
+                  <strong>SSH 网络连接</strong>
+                  <span>网线/WiFi · 输入 IP · root/root</span>
+                </button>
+                <button className="ob-choice-card" onClick={() => setShowAddDevice(true)}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 18v-6"/><path d="M8 18v-2"/><path d="M16 18v-4"/>
+                    <rect x="6" y="18" width="4" height="4" rx="1"/><rect x="14" y="18" width="4" height="4" rx="1"/>
+                    <circle cx="12" cy="8" r="2"/><path d="M12 2v4"/>
+                  </svg>
+                  <strong>USB 串口调试</strong>
+                  <span>{selectedBoard === 's100' ? 'Type-C' : 'Micro USB'} 直连 · 选串口 + 波特率</span>
                 </button>
               </div>
-            </div>
-          </div>
-
-          <div className="wg-footer">
-            <a className="wg-link" href="https://developer.horizon.cc/" target="_blank" rel="noreferrer">地瓜开发者社区</a>
-            <span className="wg-sep">·</span>
-            <a className="wg-link" href="https://developer.horizon.cc/documents_rdk" target="_blank" rel="noreferrer">RDK 文档中心</a>
-          </div>
+              <div className="ob-nav">
+                <button className="ob-btn ghost" onClick={() => setObStep('flash')}>← 返回</button>
+                <div />
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

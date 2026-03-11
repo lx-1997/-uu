@@ -121,7 +121,7 @@ export default function AIDock() {
   const {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, chatExpanded, setChatExpanded, aiTyping,
-    handleCommand, setActiveTab,
+    handleCommand, setActiveTab, activeTab,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
@@ -143,26 +143,63 @@ export default function AIDock() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [workspaceMode]);
 
-  /* Sync workspace mode with chat state */
+  /* Sync workspace mode with chat state — only auto-expand on dashboard, not sub-pages */
   useEffect(() => {
     if (chatExpanded) {
-      if (chatMessages.length > 0) setWorkspaceMode(true);
+      if (chatMessages.length > 0 && activeTab === 'dashboard') setWorkspaceMode(true);
       return;
     }
     setWorkspaceMode(false);
-  }, [chatExpanded, chatMessages.length]);
+  }, [chatExpanded, chatMessages.length, activeTab]);
 
   /* Auto-scroll to newest message */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages.length, aiTyping]);
 
-  const quickPrompts = [
-    { id: 'diag', icon: '🔍', label: '分析异常日志',  text: '请结合终端最近输出，帮我定位异常并给出修复步骤' },
-    { id: 'ros',  icon: '📡', label: 'ROS 话题',     text: '切到 ROS 图像视角，并总结当前画面中的目标情况' },
-    { id: 'hw',   icon: '🌡️', label: '硬件状态',      text: '检查当前设备的 BPU 负载和芯片温度' },
-    { id: 'plan', icon: '📋', label: '执行计划',      text: '把当前需求拆成 3 步并立即开始执行第一步' },
+  const promptsByTab: Record<string, typeof defaultPrompts> = {
+    dashboard: [
+      { id: 'diag', icon: '🩺', label: '一键体检', text: '帮我全面检查设备健康状态，包括温度、负载和网络' },
+      { id: 'stat', icon: '📊', label: '性能总结', text: '总结当前设备各项指标，判断是否适合跑多路推理' },
+    ],
+    terminal: [
+      { id: 'cmd', icon: '⌨️', label: '帮我写命令', text: '我想做什么操作，帮我生成终端命令' },
+      { id: 'err', icon: '🔍', label: '分析输出', text: '帮我分析终端最近的输出，定位问题并给修复建议' },
+      { id: 'nl', icon: '💬', label: '中文执行', text: '查看当前设备温度和BPU负载' },
+    ],
+    flasher: [
+      { id: 'pick', icon: '💿', label: '选镜像', text: '帮我推荐适合当前开发板的系统镜像版本' },
+      { id: 'check', icon: '✅', label: '烧录前检查', text: '帮我确认烧录前的准备工作是否就绪' },
+    ],
+    files: [
+      { id: 'sync', icon: '📁', label: '同步文件', text: '帮我把本地模型文件同步到设备 /userdata/models' },
+      { id: 'log', icon: '📋', label: '拉取日志', text: '从设备下载最新的系统日志到本地' },
+    ],
+    vnc: [
+      { id: 'opt', icon: '🖥️', label: '优化画质', text: '根据当前网络状况帮我调整VNC画质参数' },
+    ],
+    hardware: [
+      { id: 'hot', icon: '🌡️', label: '散热建议', text: '芯片温度偏高，帮我分析原因并给出降温方案' },
+      { id: 'perf', icon: '⚡', label: '性能优化', text: '帮我分析当前 BPU/CPU 使用情况，给出优化建议' },
+    ],
+    ros: [
+      { id: 'topic', icon: '📡', label: '话题巡检', text: '检查所有 ROS2 话题频率是否正常' },
+      { id: 'bbox', icon: '👁️', label: '查看推理', text: '查看 AI 推理结果 bbox 输出' },
+    ],
+    models: [
+      { id: 'pick', icon: '🧠', label: '选模型', text: '帮我推荐适合行人车辆检测的模型' },
+      { id: 'conv', icon: '🔄', label: '转换部署', text: '帮我把 ONNX 模型转成 BPU 可用格式' },
+    ],
+    lowcode: [
+      { id: 'flow', icon: '🧩', label: '生成流程', text: '帮我生成一个摄像头→AI检测→推送的工作流' },
+    ],
+  };
+  const defaultPrompts = [
+    { id: 'diag', icon: '🔍', label: '分析异常日志', text: '请结合终端最近输出，帮我定位异常并给出修复步骤' },
+    { id: 'hw', icon: '🌡️', label: '硬件状态', text: '检查当前设备的 BPU 负载和芯片温度' },
+    { id: 'plan', icon: '📋', label: '执行计划', text: '把当前需求拆成 3 步并立即开始执行第一步' },
   ];
+  const quickPrompts = promptsByTab[activeTab] ?? defaultPrompts;
 
   const closeDock = () => {
     setChatExpanded(false);
@@ -269,9 +306,8 @@ export default function AIDock() {
           <button type="submit" className="send-btn" title="发送">{Icon.send}</button>
         </form>
 
-        {/* ── Quick prompt chips (workspace only) ── */}
-        {workspaceMode && (
-          <div className="quick-prompt-strip">
+        {/* ── Quick prompt chips (contextual per tab) ── */}
+        <div className="quick-prompt-strip">
             {quickPrompts.map((prompt) => (
               <button
                 key={prompt.id}
@@ -286,7 +322,6 @@ export default function AIDock() {
               </button>
             ))}
           </div>
-        )}
       </div>
     </div>
   );
