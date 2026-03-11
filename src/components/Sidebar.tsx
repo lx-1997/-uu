@@ -8,7 +8,7 @@ export default function Sidebar() {
 
   return (
     <div className="app-sidebar">
-      <div className="sidebar-brand cursor-pointer" onClick={() => setActiveTab('dashboard')} style={{ cursor: 'pointer' }}>
+      <div className="sidebar-brand" onClick={() => setActiveTab('dashboard')}>
         RDK Studio
       </div>
 
@@ -40,7 +40,7 @@ export default function Sidebar() {
             </button>
           </div>
         ))}
-        <button className="clean-btn outline-btn" style={{ marginTop: '10px', padding: '8px', fontSize: '0.85rem' }} onClick={() => setShowAddDevice(true)}>
+        <button className="clean-btn outline-btn sidebar-add-btn" onClick={() => setShowAddDevice(true)}>
           + 扫描 / 添加设备
         </button>
       </div>
@@ -56,20 +56,20 @@ export default function Sidebar() {
           ['hardware', '📊', '硬件状态'],
         ] as const).map(([tab, icon, label]) => (
           <button key={tab} className={`tool-btn ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
-            <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>{icon}</span> {label}
+            <span className="tool-icon">{icon}</span> {label}
           </button>
         ))}
       </div>
 
-      <div className="sidebar-footer" style={{ marginTop: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="sidebar-footer">
         <button className="tool-btn" onClick={() => window.open('https://developer.d-robotics.cc/cloud', '_blank')}>
-          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>☁️</span> <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>具身云平台</span>
+          <span className="tool-icon">☁️</span> <span className="tool-highlight">具身云平台</span>
         </button>
         <button className="tool-btn" onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}>
-          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>🍠</span> <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>开发者社区</span>
+          <span className="tool-icon">🍠</span> <span className="tool-highlight">开发者社区</span>
         </button>
         <button className="tool-btn" onClick={() => setShowSettings(true)}>
-          <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>⚙️</span> 设置
+          <span className="tool-icon">⚙️</span> 设置
         </button>
       </div>
     </div>

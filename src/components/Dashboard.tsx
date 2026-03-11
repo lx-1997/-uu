@@ -4,7 +4,7 @@ import { DASHBOARD_CARDS } from '../constants';
 
 export default function Dashboard() {
   const { currentDevice, devices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab } = useAppState();
-  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect'>('board');
+  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect' | 'done'>('board');
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
 
   /* ── Empty-state onboarding wizard ── */
@@ -30,12 +30,12 @@ export default function Dashboard() {
         <div className="ob-wizard">
           {/* Progress dots */}
           <div className="ob-progress">
-            {(['board', 'flash', 'connect'] as const).map((s, i) => {
-              const idx = ['board','flash','connect'].indexOf(obStep);
+            {(['board', 'flash', 'connect', 'done'] as const).map((s, i) => {
+              const idx = ['board','flash','connect','done'].indexOf(obStep);
               return (
                 <div key={s} className={`ob-prog-item ${idx === i ? 'active' : ''} ${idx > i ? 'done' : ''}`}>
                   <div className="ob-prog-dot">{idx > i ? '✓' : i + 1}</div>
-                  <span>{s === 'board' ? '选板卡' : s === 'flash' ? '烧镜像' : '连设备'}</span>
+                  <span>{s === 'board' ? '选板卡' : s === 'flash' ? '烧镜像' : s === 'connect' ? '连设备' : '完成'}</span>
                 </div>
               );
             })}
@@ -123,7 +123,39 @@ export default function Dashboard() {
               </div>
               <div className="ob-nav">
                 <button className="ob-btn ghost" onClick={() => setObStep('flash')}>← 返回</button>
-                <div />
+                <button className="ob-btn primary" onClick={() => setObStep('done')}>设备已连接 →</button>
+              </div>
+            </>
+          )}
+
+          {/* Step 4: Done - Congratulations */}
+          {obStep === 'done' && (
+            <>
+              <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                <div style={{ fontSize: '3rem', marginBottom: 12 }}>🎉</div>
+                <h2 className="ob-heading" style={{ fontSize: '1.4rem' }}>恭喜！一切就绪</h2>
+                <p className="ob-sub" style={{ maxWidth: 420, margin: '8px auto 0' }}>
+                  你的 {board?.name || 'RDK'} 开发板已准备好，接下来可以探索 AI 推理、ROS 机器人开发和更多精彩功能。
+                </p>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, margin: '12px 0' }}>
+                {[
+                  { emoji: '📦', title: '运行示例应用', desc: '从 NodeHub 一键部署 AI 感知、手势识别等应用', tab: 'examples' as const },
+                  { emoji: '🧠', title: '部署 AI 模型', desc: '浏览 ModelZoo，把预训练模型部署到 BPU', tab: 'models' as const },
+                  { emoji: '💻', title: '打开终端', desc: '连接设备终端，开始编写你的第一行代码', tab: 'terminal' as const },
+                ].map(item => (
+                  <button key={item.tab} className="ob-choice-card" style={{ textAlign: 'center' }} onClick={() => setActiveTab(item.tab)}>
+                    <span style={{ fontSize: '1.6rem' }}>{item.emoji}</span>
+                    <strong>{item.title}</strong>
+                    <span>{item.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="ob-nav">
+                <button className="ob-btn ghost" onClick={() => setObStep('connect')}>← 返回</button>
+                <button className="ob-btn primary" onClick={() => setShowAddDevice(true)}>
+                  开始使用 🚀
+                </button>
               </div>
             </>
           )}
