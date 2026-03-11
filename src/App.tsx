@@ -12,7 +12,7 @@ import Flasher from './components/Flasher';
 import Terminal from './components/Terminal';
 import Files from './components/Files';
 import Vnc from './components/Vnc';
-import Lowcode from './components/Lowcode';
+import IDE from './components/IDE';
 import OpenClaw from './components/OpenClaw';
 import Hardware from './components/Hardware';
 import Examples from './components/Examples';
@@ -48,7 +48,7 @@ function MainContent() {
       {activeTab === 'terminal' && <Terminal />}
       {activeTab === 'files' && <Files />}
       {activeTab === 'vnc' && <Vnc />}
-      {activeTab === 'lowcode' && <Lowcode />}
+      {activeTab === 'ide' && <IDE />}
       {activeTab === 'openclaw' && <OpenClaw />}
       {activeTab === 'hardware' && <Hardware />}
       {activeTab === 'examples' && <Examples />}
@@ -66,7 +66,7 @@ function AppShell() {
         <Sidebar />
         <div className="main-area">
           <TopToolbar />
-          <div className={`canvas-viewport ${activeTab === 'terminal' ? 'viewport-terminal' : ''}`}>
+          <div className={`canvas-viewport ${activeTab === 'terminal' || activeTab === 'ide' ? 'viewport-terminal' : ''}`}>
             <MainContent />
           </div>
           <AIDock />

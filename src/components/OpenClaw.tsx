@@ -58,7 +58,7 @@ export default function OpenClaw() {
             <div style={{ padding: '10px 12px', background: '#f0f9ff', borderRadius: 10, border: '1px dashed #93c5fd' }}>
               <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6 }}>🔗 AI 联动</div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button className="chip-btn" onClick={() => setActiveTab('lowcode')}>🧩 接入流程编排</button>
+                <button className="chip-btn" onClick={() => setActiveTab('ide')}>📝 代码编辑</button>
                 <button className="chip-btn" onClick={() => setActiveTab('models')}>🤖 管理推理模型</button>
               </div>
             </div>

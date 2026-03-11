@@ -1,139 +1,175 @@
+import { useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { FLASH_IMAGES, STORAGE_TARGETS } from '../constants';
 
 export default function Flasher() {
   const {
     currentDevice, flashImage, setFlashImage, flashTarget, setFlashTarget,
-    flashMode, setFlashMode, flashVerify, setFlashVerify, flashBackup, setFlashBackup,
-    flashProgress, flashPhase, isFlashing, flashStep, setFlashStep, startFlash,
+    flashProgress, flashPhase, isFlashing, startFlash,
     setActiveTab, addToast,
   } = useAppState();
 
+  const [step, setStep] = useState<'image' | 'target' | 'wifi' | 'flash' | 'done'>('image');
+  const [wifiName, setWifiName] = useState('');
+  const [wifiPass, setWifiPass] = useState('');
+
+  const steps = ['选镜像', '选介质', 'WiFi 预配', '烧录'];
+  const stepKeys = ['image', 'target', 'wifi', 'flash'] as const;
+  const currentIdx = stepKeys.indexOf(step === 'done' ? 'flash' : step);
+
+  const selectedImage = FLASH_IMAGES.find(i => i.id === flashImage);
+  const selectedTarget = STORAGE_TARGETS.find(t => t.id === flashTarget);
+
   return (
-    <div className="center-stage wide-stage">
-      <div className="isolated-widget workflow-widget">
-        <div className="widget-header">💽 系统烧录</div>
-        <div className="desc-text">四步完成系统镜像写入，AI 自动推荐最匹配的镜像版本。</div>
-
-        <div className="ai-recommend-strip">
-          <span className="ai-suggest-label">🤖 AI 推荐</span>
-          <span className="ai-recommend-text">检测到 {currentDevice?.name}，推荐使用 <strong>ROS2 Humble 预装版</strong>（含 TogetherROS.b 与 BPU 工具链）</span>
-          <button className="clean-btn outline-btn sm-btn" onClick={() => { setFlashImage('ros2-humble'); addToast('已切换到 AI 推荐镜像', 'success'); }}>采纳</button>
-        </div>
-
-        {/* AI 烧录预检 */}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: '#16a34a' }}>
-            ✅ 设备连接正常 · USB 3.0
-          </div>
-          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: '#16a34a' }}>
-            ✅ 镜像校验通过 · SHA256 匹配
-          </div>
-          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: flashTarget === 'emmc' ? '#fffbeb' : '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: flashTarget === 'emmc' ? '#92400e' : '#16a34a' }}>
-            {flashTarget === 'emmc' ? '⚠️ eMMC 写入不可逆' : '✅ 存储介质可安全写入'}
-          </div>
-          <div style={{ flex: 1, minWidth: 140, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: '#16a34a' }}>
-            ✅ 预估耗时 ~3 分钟
-          </div>
-        </div>
-
-        <div className="stepper-row">
-          {['镜像选择', '介质确认', '写入策略', '交付完成'].map((label, index) => (
-            <div key={label} className={`step-chip ${flashStep >= index + 1 ? 'active' : ''}`}>
-              <span>{index + 1}</span>
-              {label}
+    <div className="center-stage">
+      <div className="ob-wizard" style={{ maxWidth: 600 }}>
+        {/* Progress */}
+        <div className="ob-progress">
+          {steps.map((s, i) => (
+            <div key={s} className={`ob-prog-item ${currentIdx === i ? 'active' : ''} ${currentIdx > i || step === 'done' ? 'done' : ''}`}>
+              <div className="ob-prog-dot">{currentIdx > i || step === 'done' ? '✓' : i + 1}</div>
+              <span>{s}</span>
             </div>
           ))}
         </div>
 
-        <div className="workspace-grid two-column">
-          <div className="panel-card">
-            <div className="panel-title">选择镜像</div>
-            <div className="option-list">
-              {FLASH_IMAGES.map((image) => (
-                <button key={image.id} className={`select-card ${flashImage === image.id ? 'active' : ''}`} onClick={() => setFlashImage(image.id)}>
-                  <strong>{image.label}</strong>
-                  <span>{image.detail}</span>
+        {/* Step 1: Select Image */}
+        {step === 'image' && (
+          <>
+            <h2 className="ob-heading">为 {currentDevice?.name} 选择系统镜像</h2>
+            <div className="ai-recommend-strip" style={{ marginBottom: 0 }}>
+              <span className="ai-suggest-label">🤖 AI 推荐</span>
+              <span className="ai-recommend-text">推荐 <strong>ROS2 Humble 预装版</strong>，已适配当前板卡</span>
+              <button className="clean-btn outline-btn sm-btn" onClick={() => { setFlashImage('ros2-humble'); addToast('已选择 AI 推荐镜像', 'success'); }}>采纳</button>
+            </div>
+            <div className="option-list" style={{ gap: 8 }}>
+              {FLASH_IMAGES.map(img => (
+                <button key={img.id} className={`select-card ${flashImage === img.id ? 'active' : ''}`} onClick={() => setFlashImage(img.id)}>
+                  <strong>{img.label}</strong>
+                  <span>{img.detail}</span>
                 </button>
               ))}
             </div>
-          </div>
-          <div className="panel-card">
-            <div className="panel-title">选择目标介质</div>
-            <div className="field-grid">
-              {STORAGE_TARGETS.map((target) => (
-                <button key={target.id} className={`select-card compact ${flashTarget === target.id ? 'active' : ''}`} onClick={() => setFlashTarget(target.id)}>
-                  <strong>{target.label} <span className="muted-inline">{target.path}</span></strong>
-                  <span>{target.safe}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="workspace-grid two-column">
-          <div className="panel-card">
-            <div className="panel-title">写入设置</div>
-            <div className="segmented-row">
-              {([['safe', '安全模式'], ['fast', '极速模式'], ['recover', '恢复模式']] as const).map(([mode, label]) => (
-                <button key={mode} className={`segment-btn ${flashMode === mode ? 'active' : ''}`} onClick={() => setFlashMode(mode)}>{label}</button>
-              ))}
-            </div>
-            <label className="toggle-row">
-              <input type="checkbox" checked={flashVerify} onChange={(e) => setFlashVerify(e.target.checked)} />
-              <span>写入后自动校验镜像完整性与启动扇区</span>
-            </label>
-            <label className="toggle-row">
-              <input type="checkbox" checked={flashBackup} onChange={(e) => setFlashBackup(e.target.checked)} />
-              <span>保留当前引导分区快照，便于失败时回滚</span>
-            </label>
-            <div className="warning-banner">
-              {flashTarget === 'emmc' ? '当前目标为 eMMC，默认启用双重确认并隐藏系统盘。' : '当前目标可安全替换，适合开发阶段快速迭代。'}
-            </div>
-            <div className="progress-box">
-              <div className="progress-meta"><span>{flashPhase}</span><strong>{flashProgress}%</strong></div>
-              <div className="progress-track"><div className="progress-fill" style={{ width: `${flashProgress}%` }}></div></div>
-            </div>
-            <div className="action-row">
-              <button className="clean-btn" onClick={startFlash}>{isFlashing ? '重新开始流程' : '开始烧录'}</button>
-              <button className="clean-btn outline-btn" onClick={() => setFlashStep(1)}>重置步骤</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="workspace-grid two-column lower-grid">
-          <div className="panel-card">
-            <div className="panel-title">过程反馈</div>
-            <div className="timeline-list">
-              {['扫描镜像元信息与校验码', '检测目标介质容量、分区表与设备类型', '写入引导分区、系统分区与配置覆盖层', '生成可分享的烧录结果摘要与首次启动建议'].map((item, index) => (
-                <div key={item} className={`timeline-item ${flashStep >= index + 1 ? 'active' : ''}`}>
-                  <span className="timeline-dot"></span>
-                  <div>{item}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="panel-card">
-            <div className="panel-title">烧录完成后</div>
-            <div className="usage-list">
-              <div className="usage-item">首次启动引导配置网络与 SSH。</div>
-              <div className="usage-item">可跳转到终端、文件管理或示例应用。</div>
-            </div>
-            {flashProgress >= 100 && !isFlashing && (
-              <>
-                <div style={{ padding: '10px 12px', background: '#f0fdf4', borderRadius: 8, marginTop: 12, fontSize: '0.78rem', color: '#16a34a' }}>
-                  🧠 AI 建议下一步: 1) 打开终端运行首次配置 → 2) 在示例应用中验证 BPU → 3) 部署您的模型
-                </div>
-                <div className="action-row" style={{ marginTop: '12px' }}>
-                  <button className="clean-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端，可开始配置设备', 'info'); }}>💻 打开终端</button>
-                  <button className="clean-btn outline-btn" onClick={() => { setActiveTab('files'); addToast('已跳转到文件管理器', 'info'); }}>📁 文件管理</button>
-                  <button className="clean-btn outline-btn" onClick={() => { setActiveTab('examples'); addToast('已跳转到示例应用', 'info'); }}>📦 示例应用</button>
-                  <button className="clean-btn outline-btn" onClick={() => { setActiveTab('hardware'); addToast('已跳转到硬件监控', 'info'); }}>📊 硬件检测</button>
-                </div>
-              </>
+            {selectedImage && (
+              <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: 8, fontSize: '0.78rem', color: '#475569' }}>
+                已选: <strong>{selectedImage.label}</strong> · {selectedImage.detail}
+              </div>
             )}
-          </div>
-        </div>
+            <div className="ob-nav">
+              <div />
+              <button className="ob-btn primary" disabled={!flashImage} onClick={() => setStep('target')}>下一步 →</button>
+            </div>
+          </>
+        )}
+
+        {/* Step 2: Select Target */}
+        {step === 'target' && (
+          <>
+            <h2 className="ob-heading">选择写入介质</h2>
+            <p className="ob-sub">镜像将写入到以下存储介质，原有数据会被覆盖</p>
+            <div className="option-list" style={{ gap: 8 }}>
+              {STORAGE_TARGETS.map(t => (
+                <button key={t.id} className={`select-card ${flashTarget === t.id ? 'active' : ''}`} onClick={() => setFlashTarget(t.id)}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong>{t.label}</strong>
+                    <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{t.path}</span>
+                  </div>
+                  <span>{t.safe}</span>
+                </button>
+              ))}
+            </div>
+            {flashTarget === 'emmc' && (
+              <div className="warning-banner">⚠ eMMC 写入不可逆，请确认已备份重要数据</div>
+            )}
+            <div className="ob-nav">
+              <button className="ob-btn ghost" onClick={() => setStep('image')}>← 返回</button>
+              <button className="ob-btn primary" disabled={!flashTarget} onClick={() => setStep('wifi')}>下一步 →</button>
+            </div>
+          </>
+        )}
+
+        {/* Step 3: WiFi Pre-config */}
+        {step === 'wifi' && (
+          <>
+            <h2 className="ob-heading">预配置 WiFi（可选）</h2>
+            <p className="ob-sub">提前写入 WiFi 信息，开机后自动连接网络</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: '0.78rem', color: '#475569', display: 'block', marginBottom: 4 }}>WiFi 名称</label>
+                <input className="clean-input" style={{ width: '100%' }} placeholder="例如: MyHome-5G" value={wifiName} onChange={e => setWifiName(e.target.value)} />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.78rem', color: '#475569', display: 'block', marginBottom: 4 }}>WiFi 密码</label>
+                <input className="clean-input" style={{ width: '100%' }} type="password" placeholder="留空则不预配置" value={wifiPass} onChange={e => setWifiPass(e.target.value)} />
+              </div>
+            </div>
+            <div style={{ padding: '8px 12px', background: '#f0f9ff', borderRadius: 8, fontSize: '0.78rem', color: '#1e40af' }}>
+              💡 跳过也可以，开机后在终端或桌面中手动配置 WiFi
+            </div>
+            <div className="ob-nav">
+              <button className="ob-btn ghost" onClick={() => setStep('target')}>← 返回</button>
+              <button className="ob-btn primary" onClick={() => setStep('flash')}>{wifiName ? '下一步 →' : '跳过，直接烧录 →'}</button>
+            </div>
+          </>
+        )}
+
+        {/* Step 4: Flash */}
+        {step === 'flash' && !isFlashing && flashProgress === 0 && (
+          <>
+            <h2 className="ob-heading">确认烧录</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: 10, fontSize: '0.82rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94a3b8' }}>镜像</span><strong>{selectedImage?.label}</strong></div>
+              </div>
+              <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: 10, fontSize: '0.82rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94a3b8' }}>写入到</span><strong>{selectedTarget?.label} ({selectedTarget?.path})</strong></div>
+              </div>
+              {wifiName && (
+                <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: 10, fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94a3b8' }}>WiFi</span><strong>{wifiName}</strong></div>
+                </div>
+              )}
+              <div style={{ padding: '10px 14px', background: '#f0fdf4', borderRadius: 10, fontSize: '0.78rem', color: '#16a34a' }}>
+                ✅ 预检通过 · 预估耗时 ~3 分钟
+              </div>
+            </div>
+            <button className="clean-btn" style={{ width: '100%', marginTop: 8, padding: '12px', fontSize: '0.95rem' }} onClick={() => { startFlash(); }}>
+              🔥 开始烧录
+            </button>
+            <div className="ob-nav">
+              <button className="ob-btn ghost" onClick={() => setStep('wifi')}>← 返回</button>
+              <div />
+            </div>
+          </>
+        )}
+
+        {/* Flashing in progress */}
+        {(isFlashing || (flashProgress > 0 && flashProgress < 100)) && (
+          <>
+            <h2 className="ob-heading">正在烧录...</h2>
+            <div className="progress-box" style={{ marginTop: 12 }}>
+              <div className="progress-meta"><span>{flashPhase}</span><strong>{flashProgress}%</strong></div>
+              <div className="progress-track"><div className="progress-fill" style={{ width: `${flashProgress}%`, transition: 'width 0.5s' }}></div></div>
+            </div>
+            <p className="ob-sub">请勿断开连接或移除存储卡</p>
+          </>
+        )}
+
+        {/* Done */}
+        {flashProgress >= 100 && !isFlashing && (
+          <>
+            <h2 className="ob-heading">🎉 烧录完成</h2>
+            <p className="ob-sub">系统已写入成功，拔卡插入设备后上电即可启动</p>
+            <div style={{ padding: '10px 14px', background: '#f0fdf4', borderRadius: 10, fontSize: '0.78rem', color: '#16a34a', textAlign: 'center' }}>
+              🧠 下一步: 打开终端进行首次配置 → 验证 BPU → 部署模型
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button className="clean-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端', 'info'); }}>💻 打开终端</button>
+              <button className="clean-btn outline-btn" onClick={() => { setActiveTab('hardware'); addToast('已跳转到硬件检测', 'info'); }}>📊 硬件检测</button>
+              <button className="clean-btn outline-btn" onClick={() => { setActiveTab('files'); addToast('已跳转到文件管理', 'info'); }}>📂 文件管理</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

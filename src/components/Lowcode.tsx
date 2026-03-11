@@ -1,121 +1,108 @@
+import { useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { FLOW_TEMPLATES } from '../constants';
 
 export default function Lowcode() {
   const {
-    flowTemplate, setFlowTemplate, flowMode, setFlowMode,
-    flowCheckProgress, isFlowChecking, runFlowValidation, addToast, setActiveTab,
+    flowTemplate, setFlowTemplate, addToast, setActiveTab, currentDevice,
   } = useAppState();
+  const [nodeRedReady, setNodeRedReady] = useState(false);
+  const nodeRedUrl = `http://${currentDevice?.ip || 'localhost'}:1880`;
 
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🧩 流程编排</div>
-        <div className="desc-text">基于 Node-RED 搭建 AI 处理流水线，也可通过底部聊天框用自然语言描述流程。</div>
+        <div className="widget-header">🧩 流程编排 · Node-RED</div>
+        <div className="desc-text">基于 Node-RED 的可视化流程编辑器，AI 辅助自动连线和节点配置。</div>
 
-        {/* AI 智能模板推荐 */}
-        <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
-          <span className="ai-suggest-label">🧠 AI 推荐</span>
-          <span className="ai-recommend-text">
-            检测到设备已部署 YOLOv5s 模型 + MIPI 摄像头 ·
-            推荐使用 <strong>视觉感知流水线</strong> 模板快速搭建 ·
-            预计部署后推理延迟 ~33ms
-          </span>
-          <button className="clean-btn outline-btn sm-btn" style={{ marginLeft: 8, fontSize: '0.75rem' }} onClick={() => { setFlowTemplate('vision'); addToast('已应用 AI 推荐模板', 'success'); }}>
-            采纳
-          </button>
-        </div>
+        {!nodeRedReady ? (
+          <>
+            {/* Setup guide */}
+            <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
+              <span className="ai-suggest-label">💡 提示</span>
+              <span className="ai-recommend-text">
+                Node-RED 需要在设备上运行。确认设备已安装后，点击下方连接按钮。
+              </span>
+            </div>
 
-        <div className="workspace-grid two-column">
-          <div className="panel-card">
-            <div className="panel-title">模板库</div>
-            <div className="option-list">
-              {FLOW_TEMPLATES.map((template) => (
-                <button key={template.id} className={`select-card ${flowTemplate === template.id ? 'active' : ''}`} onClick={() => setFlowTemplate(template.id)}>
-                  <strong>{template.name}</strong>
-                  <span>{template.desc}</span>
+            <div className="workspace-grid two-column">
+              <div className="panel-card">
+                <div className="panel-title">快速启动</div>
+                <div className="usage-list">
+                  <div className="usage-item">
+                    <strong>1. 安装 Node-RED</strong>
+                    <span>在终端中运行: <code style={{ background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, fontSize: '0.82rem' }}>sudo apt install nodered</code></span>
+                  </div>
+                  <div className="usage-item">
+                    <strong>2. 启动服务</strong>
+                    <span><code style={{ background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, fontSize: '0.82rem' }}>node-red-start</code></span>
+                  </div>
+                  <div className="usage-item">
+                    <strong>3. 连接编辑器</strong>
+                    <span>确认服务运行后，点击右侧按钮打开编辑器</span>
+                  </div>
+                </div>
+                <button className="clean-btn" style={{ width: '100%', marginTop: 12 }} onClick={() => setNodeRedReady(true)}>
+                  🔗 连接 Node-RED 编辑器
                 </button>
-              ))}
-            </div>
-          </div>
-          <div className="panel-card">
-            <div className="panel-title">发布阶段</div>
-            <div className="segmented-row">
-              {([['draft', '草稿'], ['review', '待审核'], ['staging', '预发布']] as const).map(([mode, label]) => (
-                <button key={mode} className={`segment-btn ${flowMode === mode ? 'active' : ''}`} onClick={() => setFlowMode(mode)}>{label}</button>
-              ))}
-            </div>
-            <button className="clean-btn" onClick={runFlowValidation}>执行部署前检查</button>
-            <div className="progress-box compact-box">
-              <div className="progress-meta"><span>{isFlowChecking ? '检查进行中' : '检查可重复触发'}</span><strong>{flowCheckProgress}%</strong></div>
-              <div className="progress-track"><div className="progress-fill" style={{ width: `${flowCheckProgress}%` }}></div></div>
-            </div>
-            {/* AI 检查结果洞察 - 新增 */}
-            {flowCheckProgress >= 100 && (
-              <div style={{ marginTop: 10, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: '0.78rem', color: '#16a34a' }}>
-                ✅ AI 检查通过: 环境变量完备 · 设备在线 · 依赖已满足 · 可安全发布
+                <button className="clean-btn outline-btn" style={{ width: '100%', marginTop: 8 }} onClick={() => window.open(nodeRedUrl, '_blank')}>
+                  ↗ 在新窗口中打开
+                </button>
               </div>
-            )}
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px', flex: 1 }} onClick={() => addToast('流程已保存为 v1.2 草稿', 'success')}>💾 保存</button>
-              <button className="clean-btn outline-btn" style={{ fontSize: '0.82rem', padding: '8px 14px', flex: 1 }} onClick={() => addToast('已导出为 JSON', 'info')}>📤 导出</button>
-            </div>
-          </div>
-        </div>
 
-        <div className="workspace-grid three-column">
-          <div className="panel-card">
-            <div className="panel-title">节点面板</div>
-            {['输入', '处理', '输出'].map(cat => (
-              <div key={cat} style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.5px', marginBottom: 6 }}>{cat}</div>
-                {cat === '输入' && ['📷 摄像头输入', '📡 Topic 订阅', '⏱️ 定时触发'].map(n => <div key={n} className="file-row" style={{ cursor: 'grab', marginBottom: 6 }}>{n}</div>)}
-                {cat === '处理' && ['🧠 AI 推理', '🔍 数据过滤', '📊 数据聚合'].map(n => <div key={n} className="file-row" style={{ cursor: 'grab', marginBottom: 6 }}>{n}</div>)}
-                {cat === '输出' && ['📂 文件同步', '🔔 告警通知', '🌐 HTTP 请求', '📡 ROS 发布'].map(n => <div key={n} className="file-row" style={{ cursor: 'grab', marginBottom: 6 }}>{n}</div>)}
-              </div>
-            ))}
-            {/* AI 推荐下一个节点 - 新增 */}
-            <div style={{ padding: '8px 10px', background: '#f0f9ff', borderRadius: 8, fontSize: '0.75rem', color: '#1e40af', marginTop: 8 }}>
-              💡 AI 建议添加: <strong>🧠 AI 推理</strong> 节点 (基于当前流程上下文)
-            </div>
-          </div>
-          <div className="panel-card flow-canvas-card">
-            <div className="panel-title">流程画布</div>
-            <div className="flow-canvas">
-              <div className="flow-node active">📷 输入</div>
-              <div className="flow-link"></div>
-              <div className="flow-node">🔍 过滤</div>
-              <div className="flow-link"></div>
-              <div className="flow-node">🧠 推理</div>
-              <div className="flow-link"></div>
-              <div className="flow-node">📡 发布</div>
-            </div>
-            <div style={{ textAlign: 'center', marginTop: 10, fontSize: '0.78rem', color: '#94a3b8' }}>拖拽节点到画布 · 连线定义数据流</div>
-            {/* AI 性能预估 - 新增 */}
-            <div style={{ marginTop: 12, padding: '8px 12px', background: '#f8fafc', borderRadius: 8, display: 'flex', gap: 16, justifyContent: 'center', fontSize: '0.75rem' }}>
-              <span>⚡ 预估延迟: <strong>33ms</strong></span>
-              <span>🔄 吞吐量: <strong>~30 FPS</strong></span>
-              <span>💾 内存开销: <strong>~256 MB</strong></span>
-            </div>
-          </div>
-          <div className="panel-card">
-            <div className="panel-title">部署说明</div>
-            <div className="usage-list">
-              <div className="usage-item">发布前自动检查环境变量与设备在线状态。</div>
-              <div className="usage-item">支持版本历史管理与一键回滚。</div>
-              <div className="usage-item">AI 自动监控部署后运行状态。</div>
-            </div>
-            {/* AI 页面联动 - 新增 */}
-            <div style={{ marginTop: 12, padding: '10px 12px', background: '#f0f9ff', borderRadius: 10, border: '1px dashed #93c5fd' }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6 }}>🔗 相关资源</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button className="chip-btn" onClick={() => setActiveTab('models')}>🤖 查看可用模型</button>
-                <button className="chip-btn" onClick={() => setActiveTab('ros')}>📡 ROS 话题</button>
-                <button className="chip-btn" onClick={() => setActiveTab('openclaw')}>⚙️ AI 网关</button>
+              <div className="panel-card">
+                <div className="panel-title">AI 流程模板</div>
+                <div className="option-list">
+                  {FLOW_TEMPLATES.map(t => (
+                    <button key={t.id} className={`select-card ${flowTemplate === t.id ? 'active' : ''}`} onClick={() => setFlowTemplate(t.id)}>
+                      <strong>{t.name}</strong>
+                      <span>{t.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <button className="clean-btn outline-btn" style={{ width: '100%', marginTop: 12 }} onClick={() => addToast('AI 已将模板导入 Node-RED', 'success')}>
+                  🤖 AI 导入选中模板
+                </button>
               </div>
             </div>
-          </div>
-        </div>
+
+            <div style={{ marginTop: 14, padding: '10px 14px', background: '#f0f9ff', borderRadius: 10, border: '1px dashed #93c5fd' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6 }}>🤖 AI 能帮你做什么？</div>
+              <div style={{ fontSize: '0.78rem', color: '#475569', lineHeight: 1.6 }}>
+                用底部聊天框描述你想要的流程（如"摄像头拍照 → 人脸检测 → 飞书推送"），AI 会自动生成 Node-RED 节点并完成连线。
+                也可以让 AI 帮你安装缺少的节点模块、调试流程错误、优化性能。
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              <button className="chip-btn" onClick={() => setActiveTab('models')}>🤖 模型仓库</button>
+              <button className="chip-btn" onClick={() => setActiveTab('ros')}>📡 ROS 话题</button>
+              <button className="chip-btn" onClick={() => setActiveTab('openclaw')}>⚙️ AI 网关</button>
+              <button className="chip-btn" onClick={() => setActiveTab('examples')}>📦 应用示例</button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Embedded Node-RED editor */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+              <span className="card-status-badge ok" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
+                <span className="card-status-dot"></span>已连接
+              </span>
+              <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{nodeRedUrl}</span>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                <button className="clean-btn outline-btn sm-btn" onClick={() => window.open(nodeRedUrl, '_blank')}>↗ 新窗口</button>
+                <button className="clean-btn outline-btn sm-btn" onClick={() => setNodeRedReady(false)}>✕ 断开</button>
+              </div>
+            </div>
+            <div className="panel-card" style={{ padding: 0, overflow: 'hidden', height: 'calc(100vh - 280px)', minHeight: 400 }}>
+              <iframe
+                src={nodeRedUrl}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                title="Node-RED Editor"
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

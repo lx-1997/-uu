@@ -370,7 +370,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         action = { label: '连接远程桌面', tab: 'vnc' };
       } else if (lowerCmd.includes('流程') || lowerCmd.includes('编排') || lowerCmd.includes('node-red')) {
         aiText = '流程编排工作台包含三套模板，选好模板后可在画布上拖拽节点。';
-        action = { label: '打开流程编排', tab: 'lowcode' };
+        action = { label: '打开代码编辑', tab: 'ide' };
         blocks = [
           { type: 'code', lang: 'json', content: '{\n  "templates": [\n    "视觉感知流水线",\n    "设备运维自动化",\n    "社区示例合集"\n  ]\n}' },
         ];

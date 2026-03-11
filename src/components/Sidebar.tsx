@@ -45,14 +45,14 @@ export default function Sidebar() {
         </button>
       </div>
 
-      <div className="section-label">基础工具箱</div>
+      <div className="section-label">基础工具</div>
       <div className="sidebar-tools">
         {([
           ['flasher', '💽', '系统烧录'],
           ['files', '📂', '文件管理'],
           ['terminal', '💻', '终端'],
+          ['ide', '📝', '代码编辑'],
           ['vnc', '🖥️', '远程桌面'],
-          ['lowcode', '🧩', '流程编排'],
           ['hardware', '📊', '硬件状态'],
         ] as const).map(([tab, icon, label]) => (
           <button key={tab} className={`tool-btn ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
@@ -62,10 +62,10 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-footer" style={{ marginTop: 'auto', borderTop: '1px solid #e2e8f0', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <button className="tool-btn" onClick={() => window.open('https://developer.horizon.cc/cloud', '_blank')}>
+        <button className="tool-btn" onClick={() => window.open('https://developer.d-robotics.cc/cloud', '_blank')}>
           <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>☁️</span> <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>具身云平台</span>
         </button>
-        <button className="tool-btn" onClick={() => window.open('https://developer.horizon.cc/', '_blank')}>
+        <button className="tool-btn" onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}>
           <span style={{ fontSize: '1.2rem', width: '24px', textAlign: 'center', display: 'inline-block' }}>🍠</span> <span style={{ color: '#ff6b00', fontWeight: 'bold' }}>开发者社区</span>
         </button>
         <button className="tool-btn" onClick={() => setShowSettings(true)}>
