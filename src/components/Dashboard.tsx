@@ -2,7 +2,71 @@ import { useAppState } from '../hooks/useAppState';
 import { DASHBOARD_CARDS } from '../constants';
 
 export default function Dashboard() {
-  const { currentDevice, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast } = useAppState();
+  const { currentDevice, devices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab } = useAppState();
+
+  /* ── Empty-state onboarding ── */
+  if (devices.length === 0) {
+    return (
+      <div className="center-stage">
+        <div className="welcome-guide">
+          <div className="wg-hero">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            <h2 className="wg-title">欢迎使用 RDK Studio</h2>
+            <p className="wg-subtitle">还没有连接设备，请按以下步骤开始使用</p>
+          </div>
+
+          <div className="wg-steps">
+            <div className="wg-step-card">
+              <div className="wg-step-num">1</div>
+              <div className="wg-step-body">
+                <h3>准备开发板</h3>
+                <p>支持 RDK X3 / X5 / S100 / Ultra 全系列。确保有 SD 卡（≥16GB）、电源、网线或 USB 调试线。</p>
+                <a className="wg-link" href="https://developer.horizon.cc/rdkx5" target="_blank" rel="noreferrer">
+                  查看选购指南 →
+                </a>
+              </div>
+            </div>
+
+            <div className="wg-step-card">
+              <div className="wg-step-num">2</div>
+              <div className="wg-step-body">
+                <h3>烧录系统镜像</h3>
+                <p>下载官方镜像写入 SD 卡，推荐 Ubuntu 22.04 + ROS2 Humble 预装版。</p>
+                <button className="wg-action-btn" onClick={() => setActiveTab('flasher')}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  打开镜像烧录工具
+                </button>
+              </div>
+            </div>
+
+            <div className="wg-step-card">
+              <div className="wg-step-num">3</div>
+              <div className="wg-step-body">
+                <h3>连接设备</h3>
+                <p>通过网线 SSH 连接（默认 root/root），或使用 USB 串口直连调试。</p>
+                <button className="wg-action-btn primary" onClick={() => setShowAddDevice(true)}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                  添加我的第一台设备
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="wg-footer">
+            <a className="wg-link" href="https://developer.horizon.cc/" target="_blank" rel="noreferrer">地瓜开发者社区</a>
+            <span className="wg-sep">·</span>
+            <a className="wg-link" href="https://developer.horizon.cc/documents_rdk" target="_blank" rel="noreferrer">RDK 文档中心</a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="center-stage">

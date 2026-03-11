@@ -121,6 +121,7 @@ export interface AppState {
   scanForDevices: () => void;
   addNewDevice: () => void;
   addScannedDevice: (dev: { name: string; ip: string }) => void;
+  removeDevice: (id: string) => void;
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
   settingsTab: 'general' | 'connection' | 'about';
@@ -297,6 +298,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setDevices((prev) => [...prev, { id, name: device.name, status: 'online', ip: device.ip }]);
     addToast(`设备 "${device.name}" 已添加到列表`, 'success');
     addActivity(`通过扫描添加设备: ${device.name}`);
+  };
+  const removeDevice = (id: string) => {
+    const dev = devices.find(d => d.id === id);
+    if (!dev) return;
+    showConfirm('删除设备', `确定要删除设备 "${dev.name}" 吗？`, () => {
+      setDevices(prev => {
+        const remaining = prev.filter(d => d.id !== id);
+        if (activeDevice === id && remaining.length > 0) {
+          setActiveDevice(remaining[0].id);
+        }
+        return remaining;
+      });
+      addToast(`设备 "${dev.name}" 已删除`, 'info');
+      addActivity(`删除设备: ${dev.name}`);
+    });
   };
 
   // ---- AI Chat ----
@@ -666,7 +682,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep,
     toasts, addToast, activities, addActivity,
     showAddDevice, setShowAddDevice, newDeviceName, setNewDeviceName, newDeviceIp, setNewDeviceIp,
-    isScanning, scannedDevices, scanForDevices, addNewDevice, addScannedDevice,
+    isScanning, scannedDevices, scanForDevices, addNewDevice, addScannedDevice, removeDevice,
     showSettings, setShowSettings, settingsTab, setSettingsTab,
     autoReconnect, setAutoReconnect, connectionTimeout, setConnectionTimeout,
     language, setLanguage, confirmDialog, setConfirmDialog, showConfirm,
