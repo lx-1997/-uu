@@ -24,8 +24,8 @@ export default function Ros() {
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🕸️ ROS 话题可视化</div>
-        <div className="desc-text">ROS2 话题订阅与数据流可视化 · AI 健康度分析。</div>
+        <div className="widget-header">� ROS 话题</div>
+        <div className="desc-text">订阅和查看设备上所有 ROS2 话题的数据和健康状态。</div>
 
         {/* AI 全局话题健康总览 - 新增 */}
         <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>

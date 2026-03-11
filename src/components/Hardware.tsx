@@ -20,8 +20,8 @@ export default function Hardware() {
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🏥 硬件诊断监控</div>
-        <div className="desc-text">实时硬件看板，AI 异常检测与处置建议。</div>
+        <div className="widget-header">📊 硬件状态</div>
+        <div className="desc-text">实时查看设备运行状况，AI 帮你发现潜在问题。</div>
 
         {/* AI 健康评分总览 - 新增 */}
         <div style={{ display: 'flex', gap: 16, marginBottom: 18, alignItems: 'center', padding: '14px 18px', background: healthLevel.bg, borderRadius: 12 }}>

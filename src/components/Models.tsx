@@ -24,8 +24,8 @@ export default function Models() {
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🤖 模型仓库与部署 (Target: {currentDevice?.name})</div>
-        <div className="desc-text">AI 模型管理 — 智能推荐、格式转换、基准测试与一键部署。</div>
+        <div className="widget-header">� 模型仓库</div>
+        <div className="desc-text">浏览、转换和部署 AI 模型到你的 RDK 开发板。</div>
 
         {/* AI 智能推荐输入 */}
         <div className="ai-file-bar">

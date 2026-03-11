@@ -10,8 +10,8 @@ export default function Files() {
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">📁 智能文件桥</div>
-        <div className="desc-text">AI 驱动的文件管理 — 支持自然语言指令、拖拽传输。</div>
+        <div className="widget-header">� 文件管理</div>
+        <div className="desc-text">在本地和设备之间传输文件，支持用自然语言描述操作。</div>
 
         <div className="ai-file-bar">
           <div className="ai-file-input-wrap">

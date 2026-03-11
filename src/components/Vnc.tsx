@@ -10,7 +10,7 @@ export default function Vnc() {
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
         <div className="widget-header">🖥️ 远程桌面</div>
-        <div className="desc-text">基于 noVNC 的 HTML5 远程桌面 — 零插件、低延迟、浏览器直连。</div>
+        <div className="desc-text">直接在浏览器中操作设备桌面，无需安装任何插件。</div>
 
         {/* AI 网络优化建议 - 新增 */}
         <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
@@ -106,8 +106,7 @@ export default function Vnc() {
         )}
 
         <div className="vnc-tech-note">
-          <strong>可选方案:</strong> noVNC（WebSocket → VNC，适合轻量直连）· Apache Guacamole（网关模式，支持 VNC/RDP/SSH 聚合）·
-          XPRA（单应用无缝远程）· RustDesk（P2P 穿透，适合公网场景）
+          基于 WebSocket 协议直连设备桌面，适合局域网内低延迟操作。
         </div>
       </div>
     </div>

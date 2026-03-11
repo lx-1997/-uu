@@ -6,8 +6,8 @@ export default function OpenClaw() {
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">⚙️ OpenClaws AI Gateway</div>
-        <div className="desc-text">AI Agent 网关 — 大模型接入、飞书集成、智能路由与调用分析。</div>
+        <div className="widget-header">⚙️ AI 网关</div>
+        <div className="desc-text">管理大模型接入、飞书机器人和 API 调用监控。</div>
 
         <div className="ai-file-bar">
           <div className="ai-file-input-wrap">

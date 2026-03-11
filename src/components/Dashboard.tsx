@@ -65,7 +65,7 @@ export default function Dashboard() {
                     </div>
                     <div className="ob-board-footer">
                       <span className="ob-board-price">{b.price}</span>
-                      <a className="ob-board-link" href={b.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>购买 →</a>
+                      <a className="ob-board-link" href={b.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>官网详情 →</a>
                     </div>
                   </div>
                 ))}
@@ -83,7 +83,7 @@ export default function Dashboard() {
           {obStep === 'flash' && (
             <>
               <h2 className="ob-heading">为 {board?.name} 烧录系统</h2>
-              <p className="ob-sub">将系统镜像写入 SD 卡，插卡上电即可启动</p>
+              <p className="ob-sub">RDK 开发板需要先将系统镜像写入 SD 卡，插卡上电后即可运行 Ubuntu 系统</p>
               <div className="ob-flash-single">
                 <button className="ob-choice-card wide" onClick={() => setActiveTab('flasher')}>
                   <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

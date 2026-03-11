@@ -296,7 +296,7 @@ export default function AIDock() {
           <input
             type="text"
             className="cmd-input"
-            placeholder="向 AI 助手提问..."
+            placeholder={activeTab === 'dashboard' ? '输入你想做的事，我来帮你推荐方案...' : '描述你的需求，AI 助手帮你操作...'}
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}

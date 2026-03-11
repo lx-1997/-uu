@@ -12,8 +12,8 @@ export default function Flasher() {
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">💽 智能烧录 (Target: {currentDevice?.name})</div>
-        <div className="desc-text">AI 推荐最佳镜像 · 四步完成系统烧录。</div>
+        <div className="widget-header">💽 系统烧录</div>
+        <div className="desc-text">四步完成系统镜像写入，AI 自动推荐最匹配的镜像版本。</div>
 
         <div className="ai-recommend-strip">
           <span className="ai-suggest-label">🤖 AI 推荐</span>

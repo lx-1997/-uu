@@ -10,8 +10,8 @@ export default function Lowcode() {
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🧩 AI 流程编排</div>
-        <div className="desc-text">用自然语言描述流程，AI 自动生成节点编排 · 也可手动拖拽。</div>
+        <div className="widget-header">🧩 流程编排</div>
+        <div className="desc-text">用自然语言或拖拽方式搭建 AI 处理流水线。</div>
 
         <div className="ai-file-bar">
           <div className="ai-file-input-wrap">
