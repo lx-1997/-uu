@@ -47,7 +47,7 @@ const Icon = {
   ),
 };
 
-function BlockRenderer({ block }: { block: ChatBlock }) {
+function BlockRenderer({ block, onConfirm, onDismiss }: { block: ChatBlock; onConfirm?: (id: string) => void; onDismiss?: (id: string) => void }) {
   const [rosFrame, setRosFrame] = useState(0);
 
   useEffect(() => {
@@ -114,6 +114,45 @@ function BlockRenderer({ block }: { block: ChatBlock }) {
     );
   }
 
+  if (block.type === 'confirm') {
+    return (
+      <div className="msg-block confirm-block">
+        <p className="confirm-block-text">{block.text}</p>
+        <div className="confirm-block-actions">
+          <button className="confirm-btn yes" onClick={() => onConfirm?.(block.confirmId)}>确认执行</button>
+          <button className="confirm-btn no" onClick={() => onDismiss?.(block.confirmId)}>取消</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'progress') {
+    return (
+      <div className="msg-block progress-block">
+        {block.steps.map((step, i) => (
+          <div key={i} className={`progress-step ${step.status}`}>
+            <span className="progress-step-icon">
+              {step.status === 'done' ? '✓' : step.status === 'running' ? '◉' : '○'}
+            </span>
+            <span className="progress-step-label">{step.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (block.type === 'task-result') {
+    return (
+      <div className={`msg-block task-result-block ${block.success ? 'success' : 'fail'}`}>
+        <div className="task-result-header">
+          <span className="task-result-icon">{block.success ? '✓' : '✗'}</span>
+          <span className="task-result-title">{block.title}</span>
+        </div>
+        {block.detail && <p className="task-result-detail">{block.detail}</p>}
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -122,6 +161,7 @@ export default function AIDock() {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, chatExpanded, setChatExpanded, aiTyping,
     handleCommand, setActiveTab, activeTab,
+    executeConfirm, dismissConfirm,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
@@ -251,7 +291,7 @@ export default function AIDock() {
                   <div className={`chat-bubble ${msg.role}`}>
                     <p>{msg.text}</p>
                     {msg.blocks?.map((block, i) => (
-                      <BlockRenderer key={i} block={block} />
+                      <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} />
                     ))}
                     {msg.action && (
                       <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>

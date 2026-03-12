@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState } from '../app-types';
 import { MOCK_DEVICES, TERMINAL_PROFILES, FLASH_IMAGES, CMD_SUGGESTIONS } from '../constants';
+import { fetchAIReply } from '../api';
 
 // ---- State shape ----
 export interface AppState {
@@ -147,6 +148,8 @@ export interface AppState {
   setChatExpanded: (v: boolean) => void;
   aiTyping: boolean;
   handleCommand: (e: React.FormEvent) => void;
+  executeConfirm: (confirmId: string) => void;
+  dismissConfirm: (confirmId: string) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -321,10 +324,66 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatExpanded, setChatExpanded] = useState(false);
   const [aiTyping, setAiTyping] = useState(false);
+  const pendingActionsRef = useRef<Record<string, () => void>>({});
 
   const filteredSuggestions = cmd.trim()
     ? CMD_SUGGESTIONS.filter((s) => s.text.includes(cmd) || s.keyword.includes(cmd.toLowerCase()))
     : CMD_SUGGESTIONS;
+
+  /* ── Simulate an inline task: progress → result ── */
+  const simulateTask = (steps: Array<{ label: string }>, resultTitle: string, resultDetail: string, extraBlocks?: ChatMessage['blocks']) => {
+    const progressSteps = steps.map((s, i) => ({ label: s.label, status: (i === 0 ? 'running' : 'pending') as 'done' | 'running' | 'pending' }));
+    const progressMsgId = Date.now() + 100;
+    setChatMessages(prev => [...prev, { id: progressMsgId, role: 'ai', text: '正在执行...', blocks: [{ type: 'progress', steps: progressSteps }] }]);
+
+    let step = 0;
+    const iv = setInterval(() => {
+      step++;
+      if (step < steps.length) {
+        const updated = steps.map((s, i) => ({ label: s.label, status: (i < step ? 'done' : i === step ? 'running' : 'pending') as 'done' | 'running' | 'pending' }));
+        setChatMessages(prev => prev.map(m => m.id === progressMsgId ? { ...m, blocks: [{ type: 'progress', steps: updated }] } : m));
+      } else {
+        clearInterval(iv);
+        const allDone = steps.map(s => ({ label: s.label, status: 'done' as const }));
+        setChatMessages(prev => prev.map(m => m.id === progressMsgId ? { ...m, text: '执行完成', blocks: [{ type: 'progress', steps: allDone }] } : m));
+        setTimeout(() => {
+          const resultBlocks: ChatMessage['blocks'] = [{ type: 'task-result', success: true, title: resultTitle, detail: resultDetail }];
+          if (extraBlocks) resultBlocks.push(...extraBlocks);
+          setChatMessages(prev => [...prev, { id: Date.now(), role: 'ai', text: '任务完成！以下是结果：', blocks: resultBlocks }]);
+          setAiTyping(false);
+        }, 400);
+      }
+    }, 800);
+  };
+
+  /* ── Execute a confirmed action ── */
+  const executeConfirm = (confirmId: string) => {
+    const action = pendingActionsRef.current[confirmId];
+    if (!action) return;
+    delete pendingActionsRef.current[confirmId];
+    // Replace confirm block with "已确认" marker
+    setChatMessages(prev => prev.map(msg => ({
+      ...msg,
+      blocks: msg.blocks?.map(b => b.type === 'confirm' && b.confirmId === confirmId
+        ? { type: 'task-result' as const, success: true, title: '已确认', detail: '正在执行...' }
+        : b
+      ),
+    })));
+    setAiTyping(true);
+    setTimeout(() => action(), 300);
+  };
+
+  /* ── Dismiss a confirmation ── */
+  const dismissConfirm = (confirmId: string) => {
+    delete pendingActionsRef.current[confirmId];
+    setChatMessages(prev => prev.map(msg => ({
+      ...msg,
+      blocks: msg.blocks?.map(b => b.type === 'confirm' && b.confirmId === confirmId
+        ? { type: 'task-result' as const, success: false, title: '已取消', detail: '操作已取消' }
+        : b
+      ),
+    })));
+  };
 
   const handleCommand = (e: React.FormEvent) => {
     e.preventDefault();
@@ -336,59 +395,137 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCmd('');
     setShowSuggestions(false);
     setAiTyping(true);
-    window.setTimeout(() => {
+
+    /* Fire async processing */
+    (async () => {
+      /* 1. Call AI API for intelligent text (runs in parallel with intent detection) */
+      const history = chatMessages.slice(-6).map((m) => ({
+        role: m.role as string,
+        content: m.text,
+      }));
+      history.push({ role: 'user', content: userMsg });
+
+      const aiReplyPromise = fetchAIReply(history, currentDevice?.name, currentDevice?.ip);
+
+      /* 2. Keyword-based intent detection for structured blocks */
       const lowerCmd = userMsg.toLowerCase();
-      let aiText = '';
-      let action: { label: string; tab: Tab } | undefined;
+      let fallbackText = '';
       let blocks: ChatMessage['blocks'];
+      type PostAction = 'simulateTask' | 'none';
+      let postAction: PostAction = 'none';
+      let taskSteps: Array<{ label: string }> = [];
+      let taskTitle = '';
+      let taskDetail = '';
+      let taskExtraBlocks: ChatMessage['blocks'];
+
+      /* ── Flashing: confirm → execute inline ── */
       if (lowerCmd.includes('烧录') || lowerCmd.includes('镜像') || lowerCmd.includes('flash')) {
-        aiText = `好的，为 ${currentDevice?.name} 准备镜像烧录工具。当前支持以下镜像版本，建议先确认目标介质类型。`;
-        action = { label: '打开烧录工具', tab: 'flasher' };
+        const cid = `flash-${msgId}`;
+        fallbackText = `好的，为 ${currentDevice?.name} 准备镜像烧录。以下是可用镜像版本：`;
         blocks = [
           { type: 'status', items: [
             { label: 'Ubuntu 22.04', value: '2.1 GB', ok: true },
             { label: 'ROS2 Humble', value: '3.4 GB', ok: true },
             { label: 'TROS AI', value: '4.2 GB', ok: true },
           ]},
+          { type: 'confirm', text: `确认烧录 Ubuntu 22.04 到 ${currentDevice?.name}？此操作将覆盖目标存储`, confirmId: cid },
         ];
-      } else if (lowerCmd.includes('终端') || lowerCmd.includes('terminal') || lowerCmd.includes('ssh')) {
-        aiText = `正在连接 ${currentDevice?.name} (${currentDevice?.ip})，SSH 终端已就绪。`;
-        action = { label: '打开终端', tab: 'terminal' };
+        pendingActionsRef.current[cid] = () => {
+          simulateTask(
+            [{ label: '检查存储介质' }, { label: '下载镜像' }, { label: '写入镜像' }, { label: '校验完整性' }],
+            '烧录完成', `${currentDevice?.name} 镜像烧录成功 · Ubuntu 22.04 · 2.1 GB`,
+          );
+        };
+
+      /* ── Terminal / SSH ── */
+      } else if (lowerCmd.includes('终端') || lowerCmd.includes('terminal') || lowerCmd.includes('ssh') || lowerCmd.includes('命令')) {
+        fallbackText = `正在连接 ${currentDevice?.name} (${currentDevice?.ip})，SSH 已就绪。`;
         blocks = [
           { type: 'terminal', lines: [
-            `$ ssh ${currentDevice?.ip}`,
+            `$ ssh root@${currentDevice?.ip}`,
             `Welcome to Ubuntu 22.04.3 LTS (RDK X5)`,
             `Last login: ${new Date().toLocaleString()}`,
-            `${currentDevice?.name}@rdk:~$ _`,
+            `${currentDevice?.name}@rdk:~$`,
           ]},
         ];
-      } else if (lowerCmd.includes('文件') || lowerCmd.includes('sftp') || lowerCmd.includes('上传')) {
-        aiText = `文件管理器已就绪，当前使用 SFTP 协议连接到 ${currentDevice?.ip}。`;
-        action = { label: '打开文件管理器', tab: 'files' };
+
+      /* ── File operations ── */
+      } else if (lowerCmd.includes('文件') || lowerCmd.includes('sftp') || lowerCmd.includes('上传') || lowerCmd.includes('下载') || lowerCmd.includes('同步')) {
+        const isUpload = lowerCmd.includes('上传') || lowerCmd.includes('同步');
+        fallbackText = isUpload ? `正在将文件同步到 ${currentDevice?.name}...` : `正在从 ${currentDevice?.name} 拉取文件...`;
+        postAction = 'simulateTask';
+        taskSteps = [{ label: '建立 SFTP 连接' }, { label: isUpload ? '上传文件' : '下载文件' }, { label: '校验' }];
+        taskTitle = isUpload ? '文件上传完成' : '文件下载完成';
+        taskDetail = `${currentDevice?.ip} · SFTP · 3 文件 · 12.4 MB`;
+        taskExtraBlocks = [{ type: 'terminal', lines: [`$ sftp root@${currentDevice?.ip}`, `Connected to ${currentDevice?.ip}`, `sftp> put ./models/*.bin /userdata/models/`, `Uploading... done (3 files, 12.4 MB)`] }];
+
+      /* ── VNC ── */
       } else if (lowerCmd.includes('vnc') || lowerCmd.includes('桌面')) {
-        aiText = '远程桌面准备就绪。建议在带宽受限时选择"流畅优先"模式，局域网环境下可使用"清晰优先"获得最佳画质。';
-        action = { label: '连接远程桌面', tab: 'vnc' };
-      } else if (lowerCmd.includes('流程') || lowerCmd.includes('编排') || lowerCmd.includes('node-red')) {
-        aiText = '流程编排工作台包含三套模板，选好模板后可在画布上拖拽节点。';
-        action = { label: '打开代码编辑', tab: 'ide' };
-        blocks = [
-          { type: 'code', lang: 'json', content: '{\n  "templates": [\n    "视觉感知流水线",\n    "设备运维自动化",\n    "社区示例合集"\n  ]\n}' },
-        ];
-      } else if (lowerCmd.includes('小龙虾') || lowerCmd.includes('openclaw') || lowerCmd.includes('网关') || lowerCmd.includes('大模型')) {
-        aiText = 'OpenClaws 网关运行状态如下：';
-        action = { label: '管理网关配置', tab: 'openclaw' };
-        blocks = [
-          { type: 'status', items: [
+        fallbackText = `正在连接 ${currentDevice?.name} 远程桌面...`;
+        postAction = 'simulateTask';
+        taskSteps = [{ label: '启动 VNC 服务' }, { label: '建立连接' }, { label: '渲染桌面' }];
+        taskTitle = '远程桌面已连接';
+        taskDetail = `${currentDevice?.ip}:5900 · 1280×720 · 清晰优先`;
+        taskExtraBlocks = [{ type: 'image', src: '', caption: `VNC · ${currentDevice?.ip}:5900 · 已连接` }];
+
+      /* ── OpenClaw ── */
+      } else if (lowerCmd.includes('小龙虾') || lowerCmd.includes('openclaw') || lowerCmd.includes('网关') || lowerCmd.includes('agent') || lowerCmd.includes('大模型')) {
+        if (lowerCmd.includes('启动') || lowerCmd.includes('start') || lowerCmd.includes('开启')) {
+          fallbackText = '正在启动 OpenClaw 网关...';
+          postAction = 'simulateTask';
+          taskSteps = [{ label: '加载配置' }, { label: '初始化 Agent' }, { label: '注册技能' }, { label: '启动服务' }];
+          taskTitle = 'OpenClaw 已启动';
+          taskDetail = 'port 18789 · 7 技能 · 通义千问 qwen3.5-plus';
+          taskExtraBlocks = [{ type: 'status', items: [
             { label: '服务状态', value: 'Running', ok: true },
-            { label: '今日调用', value: '1,247 次', ok: true },
-            { label: '模型密钥', value: '已配置', ok: true },
-            { label: '飞书接入', value: '未连接', ok: false },
-          ]},
-        ];
-      } else if (lowerCmd.includes('硬件') || lowerCmd.includes('bpu') || lowerCmd.includes('温度') || lowerCmd.includes('cpu')) {
-        aiText = `${currentDevice?.name} 当前硬件状态：`;
-        action = { label: '查看详细诊断', tab: 'hardware' };
-        blocks = [
+            { label: '端口', value: ':18789', ok: true },
+            { label: '模型', value: 'qwen3.5-plus', ok: true },
+            { label: '技能数', value: '7 已加载', ok: true },
+          ]}];
+        } else if (lowerCmd.includes('切换') || lowerCmd.includes('switch') || lowerCmd.includes('换')) {
+          const targetModel = lowerCmd.includes('deepseek') ? 'deepseek-chat' : lowerCmd.includes('gpt') ? 'gpt-4o' : lowerCmd.includes('claude') ? 'claude-sonnet-4-20250514' : 'deepseek-chat';
+          const cid = `switch-model-${msgId}`;
+          fallbackText = `检测到你想切换模型到 ${targetModel}，切换后当前会话将使用新模型。`;
+          blocks = [
+            { type: 'status', items: [
+              { label: '当前模型', value: 'qwen3.5-plus', ok: true },
+              { label: '目标模型', value: targetModel, ok: true },
+            ]},
+            { type: 'confirm', text: `确认切换到 ${targetModel}？`, confirmId: cid },
+          ];
+          pendingActionsRef.current[cid] = () => {
+            simulateTask(
+              [{ label: '验证 API Key' }, { label: '切换模型' }, { label: '重载配置' }],
+              '模型切换完成', `已切换到 ${targetModel}`,
+            );
+          };
+        } else {
+          fallbackText = 'OpenClaw 网关当前状态：';
+          blocks = [
+            { type: 'status', items: [
+              { label: '服务状态', value: 'Running', ok: true },
+              { label: '今日调用', value: '1,247 次', ok: true },
+              { label: '模型', value: 'qwen3.5-plus', ok: true },
+              { label: '技能', value: '7 已加载', ok: true },
+            ]},
+            { type: 'terminal', lines: [
+              '$ openclaw status',
+              '✓ Gateway running on :18789',
+              '✓ Agent: qwen3.5-plus (通义千问)',
+              '✓ Skills: device_control, ros_topic, exec, web_search, file_ops, model_inference, camera_stream',
+              `✓ Uptime: 3d 14h`,
+            ]},
+          ];
+        }
+
+      /* ── Hardware diagnostics ── */
+      } else if (lowerCmd.includes('硬件') || lowerCmd.includes('bpu') || lowerCmd.includes('温度') || lowerCmd.includes('cpu') || lowerCmd.includes('体检') || lowerCmd.includes('诊断') || lowerCmd.includes('检查')) {
+        fallbackText = `正在检测 ${currentDevice?.name} 硬件状态...`;
+        postAction = 'simulateTask';
+        taskSteps = [{ label: '读取芯片温度' }, { label: '检测 BPU 占用' }, { label: '检测内存' }, { label: '检测网络' }];
+        taskTitle = '诊断完成';
+        taskDetail = `${currentDevice?.name} · 整体健康`;
+        taskExtraBlocks = [
           { type: 'status', items: [
             { label: 'BPU 占用', value: '68%', ok: true },
             { label: '芯片温度', value: '61.8°C', ok: false },
@@ -398,52 +535,110 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           { type: 'terminal', lines: [
             '$ cat /sys/class/thermal/thermal_zone0/temp',
             '61800',
-            '$ cat /proc/meminfo | head -3',
-            'MemTotal:    8167040 kB',
-            'MemFree:     2982912 kB',
-            'MemAvailable: 3014656 kB',
+            '$ hrut_smi',
+            'BPU0: 68%  BPU1: 42%  DDR: 43%',
+            '$ free -h',
+            'total    used    free    available',
+            '7.8G     5.2G    1.4G    2.6G',
           ]},
         ];
-      } else if (lowerCmd.includes('示例') || lowerCmd.includes('demo') || lowerCmd.includes('跟随')) {
-        aiText = '示例应用目录包含三个 Demo，每个都会在启动前检查硬件依赖。';
-        action = { label: '浏览示例应用', tab: 'examples' };
+
+      /* ── ROS topics ── */
+      } else if (lowerCmd.includes('ros') || lowerCmd.includes('topic') || lowerCmd.includes('话题')) {
+        fallbackText = `正在扫描 ${currentDevice?.name} 上的 ROS2 话题...`;
+        postAction = 'simulateTask';
+        taskSteps = [{ label: '连接 ROS2 DDS' }, { label: '枚举话题' }, { label: '采样频率' }];
+        taskTitle = 'ROS2 话题扫描完成';
+        taskDetail = '4 个活跃话题 · DDS 正常';
+        taskExtraBlocks = [
+          { type: 'terminal', lines: [
+            '$ ros2 topic list',
+            '/hobot_dnn/bbox      [30 Hz]',
+            '/camera/image_raw    [25 Hz]',
+            '/imu/data            [100 Hz]',
+            '/odom                [50 Hz]',
+          ]},
+          { type: 'image', src: '', caption: '/hobot_dnn/bbox · 目标 3 个 · 29 FPS' },
+        ];
+
+      /* ── Models ── */
+      } else if (lowerCmd.includes('模型') || lowerCmd.includes('model') || lowerCmd.includes('推理') || lowerCmd.includes('yolo') || lowerCmd.includes('部署')) {
+        if (lowerCmd.includes('部署') || lowerCmd.includes('deploy') || lowerCmd.includes('转换')) {
+          const cid = `deploy-model-${msgId}`;
+          fallbackText = '检测到部署请求。以下是待部署模型：';
+          blocks = [
+            { type: 'status', items: [
+              { label: 'YOLOv5s', value: '已部署 · 30 FPS', ok: true },
+              { label: 'ResNet50', value: '待转换', ok: false },
+            ]},
+            { type: 'confirm', text: '确认将 ResNet50 转换并部署到 BPU？', confirmId: cid },
+          ];
+          pendingActionsRef.current[cid] = () => {
+            simulateTask(
+              [{ label: 'ONNX → Horizon' }, { label: '量化校准' }, { label: '编译 BPU bin' }, { label: '部署到设备' }],
+              '模型部署完成', 'ResNet50 · BPU 优化 · 推理 45 FPS',
+            );
+          };
+        } else {
+          fallbackText = `${currentDevice?.name} 上已部署的模型：`;
+          blocks = [
+            { type: 'status', items: [
+              { label: 'YOLOv5s', value: '已部署 · 30 FPS', ok: true },
+              { label: 'FCOS', value: '已部署 · 25 FPS', ok: true },
+              { label: 'ResNet50', value: '待转换', ok: false },
+              { label: 'MobileNetV2', value: '待转换', ok: false },
+            ]},
+          ];
+        }
+
+      /* ── Examples / Demos ── */
+      } else if (lowerCmd.includes('示例') || lowerCmd.includes('demo') || lowerCmd.includes('跟随') || lowerCmd.includes('运行')) {
+        const cid = `run-demo-${msgId}`;
+        fallbackText = '可用示例应用如下，选择一个运行：';
         blocks = [
           { type: 'status', items: [
             { label: '视觉跟随', value: '可运行', ok: true },
             { label: '手势控制', value: '可运行', ok: true },
             { label: '双摄测距', value: '缺少依赖', ok: false },
           ]},
+          { type: 'confirm', text: '确认运行「视觉跟随」示例？', confirmId: cid },
         ];
-      } else if (lowerCmd.includes('ros') || lowerCmd.includes('topic') || lowerCmd.includes('话题')) {
-        aiText = '当前设备有 4 个活跃 ROS2 话题：';
-        action = { label: '打开 ROS 可视化', tab: 'ros' };
+        pendingActionsRef.current[cid] = () => {
+          simulateTask(
+            [{ label: '检查依赖' }, { label: '启动摄像头' }, { label: '加载检测模型' }, { label: '运行跟随算法' }],
+            '视觉跟随已启动', '摄像头 0 · YOLOv5s · 29 FPS · 跟随中',
+            [{ type: 'image', src: '', caption: '视觉跟随 · 检测 2 个目标 · 跟随中' }],
+          );
+        };
+
+      /* ── Workflow / low-code ── */
+      } else if (lowerCmd.includes('流程') || lowerCmd.includes('编排') || lowerCmd.includes('node-red') || lowerCmd.includes('工作流')) {
+        fallbackText = '流程编排工作台包含三套模板：';
         blocks = [
-          { type: 'terminal', lines: [
-            '$ ros2 topic list',
-            '/hobot_dnn/bbox',
-            '/camera/image_raw',
-            '/imu/data',
-            '/odom',
-          ]},
-          { type: 'image', src: '', caption: '/hobot_dnn/bbox · 目标 3 个 · 29 FPS' },
-        ];
-      } else if (lowerCmd.includes('模型') || lowerCmd.includes('model') || lowerCmd.includes('推理')) {
-        aiText = `设备上已部署 2 个 BPU 优化模型，推理帧率 25-30 FPS。`;
-        action = { label: '管理模型仓库', tab: 'models' };
-        blocks = [
+          { type: 'code', lang: 'json', content: '{\n  "templates": [\n    "视觉感知流水线",\n    "设备运维自动化",\n    "社区示例合集"\n  ]\n}' },
           { type: 'status', items: [
-            { label: 'YOLOv5s', value: '已部署 · 30 FPS', ok: true },
-            { label: 'FCOS', value: '已部署 · 25 FPS', ok: true },
-            { label: 'ResNet50', value: '待转换', ok: false },
-            { label: 'MobileNetV2', value: '待转换', ok: false },
+            { label: '视觉感知', value: '7 节点', ok: true },
+            { label: '设备运维', value: '5 节点', ok: true },
+            { label: '社区合集', value: '12 节点', ok: true },
           ]},
         ];
-      } else {
-        aiText = `收到！关于"${userMsg}"，我可以帮你在 ${currentDevice?.name} 上执行相关操作。你可以尝试更具体的描述，比如"帮我烧录镜像"、"查看 ROS 话题"或"检查硬件温度"。`;
       }
-      setChatMessages((prev) => [...prev, { id: msgId + 1, role: 'ai', text: aiText, action, blocks }]);
+      /* Catch-all: no fallbackText, rely entirely on AI */
+
+      /* 3. Await AI reply */
+      const aiReply = await aiReplyPromise;
+
+      /* 4. Determine final text: AI reply > fallback > generic */
+      const aiText = aiReply || fallbackText || `收到！我可以直接在对话中帮你完成以下操作，无需切换页面：检查硬件温度、启动 OpenClaw、查看 ROS 话题、部署模型、烧录镜像、同步文件等。你想做什么？`;
+
+      /* 5. Emit message + optional post-action */
+      setChatMessages((prev) => [...prev, { id: msgId + 1, role: 'ai', text: aiText, blocks }]);
       setAiTyping(false);
-    }, 1200);
+
+      if (postAction === 'simulateTask' && taskSteps.length > 0) {
+        simulateTask(taskSteps, taskTitle, taskDetail, taskExtraBlocks);
+      }
+    })();
   };
 
   // ---- Handlers ----
@@ -688,6 +883,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     language, setLanguage, confirmDialog, setConfirmDialog, showConfirm,
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, chatExpanded, setChatExpanded, aiTyping, handleCommand,
+    executeConfirm, dismissConfirm,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

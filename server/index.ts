@@ -133,14 +133,57 @@ app.post('/api/chat', async (request, response) => {
     return;
   }
 
-  const { messages } = request.body as { messages?: ChatMessage[] };
+  const { messages, deviceName, deviceIp } = request.body as {
+    messages?: Array<{ role: string; content: string }>;
+    deviceName?: string;
+    deviceIp?: string;
+  };
 
   if (!messages?.length) {
     response.status(400).json({ error: '消息不能为空' });
     return;
   }
 
+  const systemPrompt = `你是「小地瓜」，RDK Studio 的 AI 助手。你运行在地平线机器人开发者套件工作站中，帮助开发者操作和管理 RDK 系列开发板。
+
+身份背景：
+- 你是一位经验丰富的嵌入式 AI 工程师朋友，精通地平线 RDK X3/X5 开发板、BPU（旭日处理器）、ROS2 机器人开发
+- 说话自然亲切简洁，像一个靠谱的技术伙伴
+- 你具备地平线工具链（hbdk、hrt_model_exec、hrut_smi、hobot_dnn 等）的深入知识
+
+当前环境：
+- 设备名称: ${deviceName ?? '未知设备'}
+- 设备 IP: ${deviceIp ?? '未知'}
+- 可直接操作: 镜像烧录、SSH终端、SFTP文件管理、VNC远程桌面、OpenClaw AI 网关管理、硬件诊断（BPU/温度/内存）、ROS2话题可视化、BPU模型部署、低代码流程编排
+
+技术知识要点（按需引用）：
+- RDK X5 使用 Sunrise 5 处理器，10 TOPS BPU 算力，双核 A55 CPU
+- RDK X3 使用 Sunrise 3 处理器，5 TOPS BPU，四核 A53
+- BPU 正常工作温度 45-75°C，超过 80°C 需散热优化
+- hrut_smi 查看 BPU 负载，hobot_dnn 做模型推理
+- ONNX 模型转 BPU 需先用 hb_mapper 工具链进行转换和量化
+- OpenClaw 是小龙虾 AI Agent 网关，端口 18789，支持多 LLM 后端切换和技能插件
+
+回复规范：
+1. 用中文自然回复，2-4句话。复杂问题可展开但不超过6句
+2. 绝对不要输出 markdown 格式标记（不要 **加粗**、# 标题、\`代码\`、\`\`\` 代码块、- 列表等），因为 UI 层自动渲染富文本和数据卡片
+3. 主动补充有价值的技术细节和你的判断
+4. 如果用户想执行某操作，语气上直接表达"帮你处理"或"正在执行"即可，系统会自动触发对应动作
+5. 表达自然有人情味，可以说"这个我来"、"没问题"、"搞定"这些口语化表达
+6. 不要重复用户已经说过的内容，直接给回应和补充信息`;
+
   try {
+    const apiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...messages.slice(-8).map((m) => ({
+        role: m.role === 'ai' ? 'assistant' : m.role,
+        content: m.content,
+      })),
+    ];
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
     const upstreamResponse = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -149,19 +192,18 @@ app.post('/api/chat', async (request, response) => {
       },
       body: JSON.stringify({
         model,
-        messages: messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
+        messages: apiMessages,
+        temperature: 0.7,
+        max_tokens: 300,
+        enable_thinking: false,
       }),
+      signal: controller.signal,
     });
 
+    clearTimeout(timeout);
+
     const payload = (await upstreamResponse.json()) as {
-      choices?: Array<{
-        message?: {
-          content?: string;
-        };
-      }>;
+      choices?: Array<{ message?: { content?: string } }>;
       error?: { message?: string };
     };
 
@@ -170,17 +212,16 @@ app.post('/api/chat', async (request, response) => {
       return;
     }
 
-    const content = payload.choices?.[0]?.message?.content?.trim();
+    const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
+    // Strip any <think>...</think> tags the model might produce
+    const cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
-    response.json({
-      message: {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: content || '模型返回了空结果。',
-        createdAt: new Date().toISOString(),
-      },
-    });
+    response.json({ reply: cleaned || '收到，请稍候。' });
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      response.status(504).json({ error: '模型响应超时' });
+      return;
+    }
     response.status(500).json({
       error: error instanceof Error ? `模型调用失败: ${error.message}` : '模型调用失败',
     });

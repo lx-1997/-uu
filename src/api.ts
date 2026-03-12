@@ -41,6 +41,31 @@ export function sendChat(messages: ChatMessage[]) {
   });
 }
 
+export function fetchAIReply(
+  messages: Array<{ role: string; content: string }>,
+  deviceName?: string,
+  deviceIp?: string,
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  return fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, deviceName, deviceIp }),
+    signal: controller.signal,
+  })
+    .then(async (r) => {
+      clearTimeout(timer);
+      if (!r.ok) throw new Error('API error');
+      const data = (await r.json()) as { reply: string };
+      return data.reply;
+    })
+    .catch(() => {
+      clearTimeout(timer);
+      return null;
+    });
+}
+
 export function runOpenClaw(deviceId: string, payload: OpenClawPayload, password: string) {
   return request<{ output: string; device: Device }>(`/api/devices/${deviceId}/openclaw`, {
     method: 'POST',
