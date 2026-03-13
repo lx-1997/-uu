@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently --kill-others-on-fail \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:client": "fuser -k 5173/tcp >/dev/null 2>&1 || true && vite --port 5173 --strictPort",
-    "dev:server": "fuser -k 8787/tcp >/dev/null 2>&1 || true && tsx watch server/index.ts",
+    "dev:client": "node scripts/dev-client.mjs",
+    "dev:server": "node scripts/dev-server.mjs",
     "build": "tsc --noEmit -p tsconfig.json && npm run build:server && vite build",
     "preview": "vite preview",
     "start": "node dist-server/index.js",
