@@ -41,6 +41,7 @@ const tsxBin = process.platform === 'win32' ? 'node_modules\\.bin\\tsx.cmd' : 'n
 const child = spawn(tsxBin, ['watch', 'server/index.ts'], {
   stdio: 'inherit',
   env: process.env,
+  shell: process.platform === 'win32',
 });
 
 child.on('exit', (code) => {

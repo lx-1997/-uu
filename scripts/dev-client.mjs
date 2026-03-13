@@ -41,6 +41,7 @@ const viteBin = process.platform === 'win32' ? 'node_modules\\.bin\\vite.cmd' : 
 const child = spawn(viteBin, ['--port', '5173', '--strictPort'], {
   stdio: 'inherit',
   env: process.env,
+  shell: process.platform === 'win32',
 });
 
 child.on('exit', (code) => {

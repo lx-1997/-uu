@@ -1,7 +1,11 @@
+import { useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import WifiConfigModal from './wifi/WifiConfigModal';
 
 export default function TopToolbar() {
   const { activeTab, currentDevice } = useAppState();
+  const [copied, setCopied] = useState(false);
+  const [showWifiModal, setShowWifiModal] = useState(false);
 
   const titles: Record<string, string> = {
     dashboard: 'AI Copilot 工作台',
@@ -18,22 +22,38 @@ export default function TopToolbar() {
     models: '模型仓库与部署',
   };
 
+  const handleCopyIp = () => {
+    if (currentDevice?.ip) {
+      navigator.clipboard.writeText(currentDevice.ip);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   return (
-    <div className="top-toolbar">
-      <div className="tt-traffic-lights">
-        <span className="tt-dot red" />
-        <span className="tt-dot yellow" />
-        <span className="tt-dot green" />
+    <>
+      <div className="top-toolbar">
+        <div className="tt-traffic-lights">
+          <span className="tt-dot red" />
+          <span className="tt-dot yellow" />
+          <span className="tt-dot green" />
+        </div>
+        <div className="tt-center">
+          <span className="tt-title">{titles[activeTab] || activeTab}</span>
+          <span className="tt-sep">/</span>
+          <span className={`status-dot ${currentDevice?.status === 'offline' ? 'offline' : ''}`} />
+          <span className="tt-device" title="点击复制IP" onClick={handleCopyIp} style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', background: 'rgba(0,0,0,0.05)', marginLeft: '4px' }}>
+            {currentDevice?.name} ({currentDevice?.ip}) {copied ? '✅' : '📋'}
+          </span>
+          <span className="tt-wifi" title="配置 WiFi" style={{ marginLeft: '8px', cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', background: 'rgba(255,107,0,0.1)', color: '#ff6b00', display: 'flex', alignItems: 'center' }} onClick={() => setShowWifiModal(true)}>
+            📶
+          </span>
+        </div>
+        <div className="toolbar-actions">
+          <button className="icon-btn" title="查看用户/许可证">👤</button>
+        </div>
       </div>
-      <div className="tt-center">
-        <span className="tt-title">{titles[activeTab] || activeTab}</span>
-        <span className="tt-sep">/</span>
-        <span className={`status-dot ${currentDevice?.status === 'offline' ? 'offline' : ''}`} />
-        <span className="tt-device">{currentDevice?.name} ({currentDevice?.ip})</span>
-      </div>
-      <div className="toolbar-actions">
-        <button className="icon-btn" title="查看用户/许可证">👤</button>
-      </div>
-    </div>
+      {showWifiModal && <WifiConfigModal onClose={() => setShowWifiModal(false)} />}
+    </>
   );
 }
