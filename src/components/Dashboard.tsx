@@ -3,7 +3,7 @@ import { useAppState } from '../hooks/useAppState';
 import { DASHBOARD_CARDS } from '../constants';
 
 export default function Dashboard() {
-  const { currentDevice, devices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab, obStep, setObStep, selectedBoard, setSelectedBoard } = useAppState();
+  const { currentDevice, devices, setDevices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab, obStep, setObStep, selectedBoard, setSelectedBoard } = useAppState();
   const [hideWizard, setHideWizard] = useState(false);
 
   useEffect(() => {
@@ -171,15 +171,23 @@ export default function Dashboard() {
 
   return (
     <div className="center-stage">
-      <h2 className="hero-title">{currentDevice?.name || 'RDK Workspace'}</h2>
-      <div className="hero-subtitle">
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: currentDevice ? '#22c55e' : '#94a3b8', display: 'inline-block' }}></span>
-          {currentDevice ? `已连接 · ${currentDevice.ip}` : '未连接设备'}
-        </span>
-      </div>
+      <h2 className="hero-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        {currentDevice?.name || 'RDK Workspace'}
+        {currentDevice && (
+          <span style={{ 
+            fontSize: '0.45em', 
+            background: 'rgba(34, 197, 94, 0.1)', 
+            color: '#4ade80', 
+            padding: '4px 10px', 
+            borderRadius: '12px',
+            border: '1px solid rgba(34, 197, 94, 0.2)'
+          }}>
+            已连接
+          </span>
+        )}
+      </h2>
 
-      <div className="stats-strip">
+      <div className="stats-strip" style={{ marginTop: '20px' }}>
         <div className="stat-card">
           <div className="stat-value">5.2<span className="stat-unit">/8G</span></div>
           <div className="stat-label">内存使用</div>

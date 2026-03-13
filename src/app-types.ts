@@ -16,6 +16,7 @@ export interface Device {
   name: string;
   status: string;
   ip: string;
+  description?: string;
 }
 
 export interface Toast {
