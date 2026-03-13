@@ -1,4 +1,5 @@
 import type { ChatMessage, Device, DevicePayload, OpenClawPayload } from './types';
+import type { AgentPlan } from './app-types';
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
@@ -63,6 +64,50 @@ export function fetchAIReply(
     .catch(() => {
       clearTimeout(timer);
       return null;
+    });
+}
+
+export function fetchAgentPlan(goal: string, deviceName?: string, deviceIp?: string) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  return fetch('/api/agent/plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goal, deviceName, deviceIp }),
+    signal: controller.signal,
+  })
+    .then(async (r) => {
+      clearTimeout(timer);
+      if (!r.ok) throw new Error('Agent plan API error');
+      return (await r.json()) as AgentPlan;
+    })
+    .catch(() => {
+      clearTimeout(timer);
+      return null;
+    });
+}
+
+export function runOpenClawAgentAction(
+  action: 'start' | 'status' | 'switch',
+  params?: { modelName?: string; host?: string; username?: string },
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  return fetch('/api/openclaw/agent-action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...params }),
+    signal: controller.signal,
+  })
+    .then(async (r) => {
+      clearTimeout(timer);
+      const payload = (await r.json().catch(() => ({}))) as { output?: string; error?: string; host?: string; username?: string };
+      if (!r.ok) throw new Error(payload.error ?? 'OpenClaw action error');
+      return payload;
+    })
+    .catch((err) => {
+      clearTimeout(timer);
+      return { error: err instanceof Error ? err.message : 'OpenClaw action error' };
     });
 }
 

@@ -60,7 +60,7 @@ export type ChatBlock =
   | { type: 'terminal'; lines: string[] }
   | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }> }
   | { type: 'confirm'; text: string; confirmId: string }
-  | { type: 'progress'; steps: Array<{ label: string; status: 'done' | 'running' | 'pending' }> }
+  | { type: 'progress'; steps: Array<{ label: string; status: 'done' | 'running' | 'pending' }>; taskId?: string }
   | { type: 'task-result'; success: boolean; title: string; detail: string };
 
 export interface DashboardCard {
@@ -80,4 +80,25 @@ export interface ConfirmDialogState {
   title: string;
   message: string;
   onConfirm: () => void;
+}
+
+export interface AgentPlanStep {
+  title: string;
+  intent: string;
+  param?: string;
+  reason: string;
+}
+
+export interface AgentPlan {
+  summary: string;
+  steps: AgentPlanStep[];
+  risk: string;
+  done: string;
+}
+
+export interface AgentExecutionState {
+  running: boolean;
+  currentStep: number;
+  totalSteps: number;
+  lastError?: string;
 }

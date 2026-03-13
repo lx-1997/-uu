@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import type { ChatBlock } from '../app-types';
+import { getCapability } from '../ai';
 
 /* ─── Inline SVG icons (avoid emoji, keep crisp) ─── */
 const Icon = {
@@ -47,7 +48,7 @@ const Icon = {
   ),
 };
 
-function BlockRenderer({ block, onConfirm, onDismiss }: { block: ChatBlock; onConfirm?: (id: string) => void; onDismiss?: (id: string) => void }) {
+function BlockRenderer({ block, onConfirm, onDismiss, onCancelTask }: { block: ChatBlock; onConfirm?: (id: string) => void; onDismiss?: (id: string) => void; onCancelTask?: (taskId: string) => void }) {
   const [rosFrame, setRosFrame] = useState(0);
 
   useEffect(() => {
@@ -127,6 +128,7 @@ function BlockRenderer({ block, onConfirm, onDismiss }: { block: ChatBlock; onCo
   }
 
   if (block.type === 'progress') {
+    const hasRunning = block.steps.some(s => s.status === 'running');
     return (
       <div className="msg-block progress-block">
         {block.steps.map((step, i) => (
@@ -137,6 +139,14 @@ function BlockRenderer({ block, onConfirm, onDismiss }: { block: ChatBlock; onCo
             <span className="progress-step-label">{step.label}</span>
           </div>
         ))}
+        {hasRunning && block.taskId && onCancelTask && (
+          <button className="task-cancel-btn" onClick={() => onCancelTask(block.taskId!)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+            取消任务
+          </button>
+        )}
       </div>
     );
   }
@@ -161,7 +171,9 @@ export default function AIDock() {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, chatExpanded, setChatExpanded, aiTyping,
     handleCommand, setActiveTab, activeTab,
-    executeConfirm, dismissConfirm,
+    executeConfirm, dismissConfirm, clearChatHistory,
+    agentMode, agentPlan, agentExecution,
+    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
@@ -257,8 +269,45 @@ export default function AIDock() {
               <div className="chat-panel-title-wrap">
                 <span style={{ display: 'flex', alignItems: 'center', color: '#ff6b00' }}>{Icon.spark}</span>
                 <span className="chat-panel-title">AI 工作台</span>
+                <span className={`agent-badge ${agentMode ? 'on' : 'off'} ${agentExecution.lastError ? 'error' : ''}`}>
+                  {agentMode
+                    ? agentExecution.running
+                      ? `Agent RUN ${agentExecution.currentStep}/${agentExecution.totalSteps}`
+                      : agentExecution.lastError
+                        ? 'Agent ERROR'
+                        : `Agent ON${agentPlan ? ` · ${agentPlan.steps.length}步` : ''}`
+                    : 'Agent OFF'}
+                </span>
               </div>
               <div className="chat-panel-controls">
+                {taskHistory.length > 0 && (
+                  <button
+                    className={`chat-panel-action ${showTaskPanel ? 'active' : ''}`}
+                    onClick={() => setShowTaskPanel(!showTaskPanel)}
+                    title="任务面板"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+                    </svg>
+                    <span style={{ marginLeft: 4 }}>
+                      任务{taskHistory.filter(t => t.status === 'running').length > 0
+                        ? ` (${taskHistory.filter(t => t.status === 'running').length})`
+                        : ''}
+                    </span>
+                  </button>
+                )}
+                {chatMessages.length > 0 && (
+                  <button
+                    className="chat-panel-action"
+                    onClick={clearChatHistory}
+                    title="清空对话"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                    </svg>
+                    <span style={{ marginLeft: 4 }}>清空</span>
+                  </button>
+                )}
                 <button
                   className="chat-panel-action"
                   onClick={() => setWorkspaceMode(!workspaceMode)}
@@ -273,8 +322,70 @@ export default function AIDock() {
               </div>
             </div>
 
+            {/* ── Task Panel (overlay) ── */}
+            {showTaskPanel && (
+              <div className="task-panel">
+                <div className="task-panel-title">任务列表</div>
+                {taskHistory.length === 0 ? (
+                  <div className="task-panel-empty">暂无任务记录</div>
+                ) : (
+                  <div className="task-panel-list">
+                    {taskHistory.map(task => (
+                      <div key={task.id} className={`task-item task-${task.status}`}>
+                        <div className="task-item-header">
+                          <span className={`task-dot task-dot-${task.status}`} />
+                          <span className="task-item-label">{getCapability(task.capabilityId)?.label ?? task.capabilityId}</span>
+                          <span className="task-item-status">
+                            {task.status === 'running' ? '执行中' : task.status === 'done' ? '已完成' : task.status === 'failed' ? '失败' : task.status === 'cancelled' ? '已取消' : '等待中'}
+                          </span>
+                        </div>
+                        {task.steps.length > 0 && (
+                          <div className="task-item-steps">
+                            {task.steps.map((s, i) => (
+                              <div key={i} className={`task-step-mini task-step-${s.status}`}>
+                                <span className="task-step-icon">
+                                  {s.status === 'done' ? '✓' : s.status === 'running' ? '◉' : '○'}
+                                </span>
+                                <span>{s.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {task.result && (
+                          <div className={`task-item-result ${task.result.success ? 'success' : 'fail'}`}>
+                            {task.result.title} — {task.result.detail}
+                          </div>
+                        )}
+                        {task.status === 'running' && (
+                          <button className="task-cancel-btn-panel" onClick={() => cancelRunningTask(task.id)}>
+                            取消
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── Chat stream ── */}
             <div className="chat-stream">
+              {/* Active tasks banner */}
+              {(() => {
+                const running = taskHistory.filter(t => t.status === 'running');
+                if (running.length < 2) return null;
+                return (
+                  <div className="active-tasks-banner">
+                    <span className="active-tasks-icon">⚡</span>
+                    <span>{running.length} 个任务并行中：</span>
+                    {running.map(t => (
+                      <span key={t.id} className="active-task-tag">
+                        {getCapability(t.capabilityId)?.label ?? t.capabilityId}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
               {!showAllMessages && hiddenCount > 0 && (
                 <button className="history-truncate" onClick={() => setShowAllMessages(true)}>
                   查看更早的 {hiddenCount} 条消息
@@ -291,7 +402,7 @@ export default function AIDock() {
                   <div className={`chat-bubble ${msg.role}`}>
                     <p>{msg.text}</p>
                     {msg.blocks?.map((block, i) => (
-                      <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} />
+                      <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} />
                     ))}
                     {msg.action && (
                       <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
