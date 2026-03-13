@@ -66,6 +66,9 @@ export default function AddDeviceModal() {
   const [sshPort, setSshPort] = useState('22');
   const [serialPort, setSerialPort] = useState('/dev/ttyUSB0');
   const [baudRate, setBaudRate] = useState('921600');
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPass, setWifiPass] = useState('');
+  const [showWifiConfig, setShowWifiConfig] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyOk, setVerifyOk] = useState(false);
 
@@ -80,6 +83,9 @@ export default function AddDeviceModal() {
     setSshUser('root');
     setSshPass('root');
     setSshPort('22');
+    setWifiSsid('');
+    setWifiPass('');
+    setShowWifiConfig(false);
   };
 
   const goToConfigure = (m: ConnMethod) => {
@@ -91,10 +97,14 @@ export default function AddDeviceModal() {
     setStep('verify');
     setVerifying(true);
     setVerifyOk(false);
+
     // Simulate connection verification
     window.setTimeout(() => {
       setVerifying(false);
       setVerifyOk(true);
+      if (showWifiConfig && method === 'usb') {
+        setNewDeviceIp('192.168.31.25'); // Simulate fetching IP if Wi-Fi was auto-configured
+      }
     }, 1800);
   };
 
@@ -198,7 +208,26 @@ export default function AddDeviceModal() {
                   />
                 </label>
                 <div className="adm-field-hint">
-                  首次连接建议修改默认密码 &nbsp;|&nbsp; 支持 RDK X3 / X5 / S100 / Ultra
+                  支持 RDK X3 / X5 / S100 / Ultra
+                </div>
+
+                <div style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#64748b', fontSize: '0.9rem' }}>
+                    <input type="checkbox" checked={showWifiConfig} onChange={e => setShowWifiConfig(e.target.checked)} />
+                    通过此连接配置设备 WiFi (可选)
+                  </label>
+                  {showWifiConfig && (
+                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', marginTop: '12px' }}>
+                      <label className="adm-field" style={{ marginBottom: '12px' }}>
+                        <span className="adm-field-label">WiFi 名称 (SSID)</span>
+                        <input className="adm-input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
+                      </label>
+                      <label className="adm-field">
+                        <span className="adm-field-label">密码 (Password)</span>
+                        <input className="adm-input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
+                      </label>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -258,6 +287,25 @@ export default function AddDeviceModal() {
                 <div className="adm-field-hint">
                   连接后将直接进入终端会话 &nbsp;|&nbsp; 数据位 8，停止位 1，无校验
                 </div>
+
+                <div style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#64748b', fontSize: '0.9rem' }}>
+                    <input type="checkbox" checked={showWifiConfig} onChange={e => setShowWifiConfig(e.target.checked)} />
+                    在此串口连接过程中同时配网 (可选)
+                  </label>
+                  {showWifiConfig && (
+                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', marginTop: '12px' }}>
+                      <label className="adm-field" style={{ marginBottom: '12px' }}>
+                        <span className="adm-field-label">WiFi 名称 (SSID)</span>
+                        <input className="adm-input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
+                      </label>
+                      <label className="adm-field">
+                        <span className="adm-field-label">密码 (Password)</span>
+                        <input className="adm-input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
+                      </label>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -283,20 +331,24 @@ export default function AddDeviceModal() {
             {verifying && (
               <div className="adm-verifying">
                 <div className="adm-verify-spinner" />
-                <div className="adm-verify-text">正在验证连接...</div>
+                <div className="adm-verify-text">
+                  {showWifiConfig ? '正在验证连接并配置网络...' : '正在验证连接...'}
+                </div>
                 <div className="adm-verify-sub">
-                  {method === 'usb' ? '检测串口设备...' : `尝试连接 ${newDeviceIp || selectedScan?.ip}:${sshPort}...`}
+                  {method === 'usb' ? '检测串口设备...' : `尝试连接 ${newDeviceIp}:${sshPort}...`}
                 </div>
               </div>
             )}
             {!verifying && verifyOk && (
               <div className="adm-verify-ok">
                 <div className="adm-verify-check">{Icons.check}</div>
-                <div className="adm-verify-title">连接成功</div>
+                <div className="adm-verify-title">
+                  {showWifiConfig ? '连接成功且已获取设备网络IP' : '连接成功'}
+                </div>
                 <div className="adm-verify-info">
                   <div className="adm-info-row"><span>设备</span><strong>{newDeviceName || 'RDK Device'}</strong></div>
-                  <div className="adm-info-row"><span>{method === 'usb' ? '串口' : 'IP'}</span><strong>{method === 'usb' ? `${serialPort} @ ${baudRate}` : newDeviceIp}</strong></div>
-                  <div className="adm-info-row"><span>型号</span><strong>RDK X5</strong></div>
+                  <div className="adm-info-row"><span>{method === 'usb' && !showWifiConfig ? '串口' : 'IP'}</span><strong>{method === 'usb' && !showWifiConfig ? `${serialPort} @ ${baudRate}` : newDeviceIp || '192.168.31.25'}</strong></div>
+                  <div className="adm-info-row"><span>{showWifiConfig ? '所连网络' : '型号'}</span><strong>{showWifiConfig ? wifiSsid : 'RDK X5'}</strong></div>
                   <div className="adm-info-row"><span>系统</span><strong>Ubuntu 22.04 (3.1.0)</strong></div>
                 </div>
                 <label className="adm-field" style={{ marginTop: 16 }}>

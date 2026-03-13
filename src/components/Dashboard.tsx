@@ -1,14 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { DASHBOARD_CARDS } from '../constants';
 
 export default function Dashboard() {
-  const { currentDevice, devices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab } = useAppState();
-  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect' | 'done'>('board');
-  const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
+  const { currentDevice, devices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab, obStep, setObStep, selectedBoard, setSelectedBoard } = useAppState();
+  const [hideWizard, setHideWizard] = useState(false);
 
-  /* ── Empty-state onboarding wizard ── */
-  if (devices.length === 0) {
+  useEffect(() => {
+    if (devices.length > 0 && obStep === 'connect') {
+      setObStep('done');
+    }
+  }, [devices.length, obStep, setObStep]);
+
+  /* ── Onboarding wizard ── */
+  if (!hideWizard && (devices.length === 0 || obStep === 'done')) {
     const boards = [
       { id: 'x3', name: 'RDK X3', emoji: '🟠', bpu: '5 TOPS', chip: 'Sunrise 3 · 4核 Cortex-A53', mem: '2GB DDR4', storage: 'SD 卡 / 8GB eMMC',
         os: 'Ubuntu 20.04 / 22.04', debug: 'Micro USB', net: '百兆网口', extra: 'HDMI · MIPI CSI · 40PIN GPIO',
@@ -144,7 +149,7 @@ export default function Dashboard() {
                   { emoji: '🧠', title: '部署 AI 模型', desc: '浏览 ModelZoo，把预训练模型部署到 BPU', tab: 'models' as const },
                   { emoji: '💻', title: '打开终端', desc: '连接设备终端，开始编写你的第一行代码', tab: 'terminal' as const },
                 ].map(item => (
-                  <button key={item.tab} className="ob-choice-card" style={{ textAlign: 'center' }} onClick={() => setActiveTab(item.tab)}>
+                  <button key={item.tab} className="ob-choice-card" style={{ textAlign: 'center' }} onClick={() => { setHideWizard(true); setActiveTab(item.tab); }}>
                     <span style={{ fontSize: '1.6rem' }}>{item.emoji}</span>
                     <strong>{item.title}</strong>
                     <span>{item.desc}</span>
@@ -153,8 +158,8 @@ export default function Dashboard() {
               </div>
               <div className="ob-nav">
                 <button className="ob-btn ghost" onClick={() => setObStep('connect')}>← 返回</button>
-                <button className="ob-btn primary" onClick={() => setShowAddDevice(true)}>
-                  开始使用 🚀
+                <button className="ob-btn primary" onClick={() => setHideWizard(true)}>
+                  进入工作台 🚀
                 </button>
               </div>
             </>

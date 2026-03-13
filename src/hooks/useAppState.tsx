@@ -18,6 +18,12 @@ export interface AppState {
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
 
+  // Onboarding
+  obStep: 'board' | 'flash' | 'connect' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'done') => void;
+  selectedBoard: string | null;
+  setSelectedBoard: (v: string | null) => void;
+
   // Loading
   isLoading: boolean;
   loadingMsg: string;
@@ -181,6 +187,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // ---- Navigation ----
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+
+  // ---- Onboarding ----
+  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect' | 'done'>('board');
+  const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
 
   // ---- Loading ----
   const [isLoading, setIsLoading] = useState(false);
@@ -1053,6 +1063,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value: AppState = {
     activeDevice, setActiveDevice, devices, setDevices, currentDevice,
     activeTab, setActiveTab,
+    obStep, setObStep,
+    selectedBoard, setSelectedBoard,
     isLoading, loadingMsg, openWorkspace,
     flashImage, setFlashImage, flashTarget, setFlashTarget, flashMode, setFlashMode,
     flashVerify, setFlashVerify, flashBackup, setFlashBackup, flashProgress, flashPhase,

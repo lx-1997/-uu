@@ -6,7 +6,7 @@ export default function Flasher() {
   const {
     currentDevice, flashImage, setFlashImage, flashTarget, setFlashTarget,
     flashProgress, flashPhase, isFlashing, startFlash,
-    setActiveTab, addToast,
+    setActiveTab, addToast, devices
   } = useAppState();
 
   const [step, setStep] = useState<'image' | 'target' | 'wifi' | 'flash' | 'done'>('image');
@@ -22,6 +22,17 @@ export default function Flasher() {
 
   return (
     <div className="center-stage">
+      {devices.length === 0 && (
+        <div style={{ width: '100%', maxWidth: 600, marginBottom: 16 }}>
+          <button 
+            className="ob-btn ghost" 
+            style={{ padding: '6px 12px', fontSize: '0.85rem' }} 
+            onClick={() => setActiveTab('dashboard')}
+          >
+            ← 返回新手指引
+          </button>
+        </div>
+      )}
       <div className="ob-wizard" style={{ maxWidth: 600 }}>
         {/* Progress */}
         <div className="ob-progress">
