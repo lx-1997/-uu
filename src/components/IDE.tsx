@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { executeDeviceCommand } from '../api';
 import { useAppState } from '../hooks/useAppState';
 
 type ServiceStatus = 'checking' | 'not-installed' | 'installed-stopped' | 'running';
@@ -8,40 +9,102 @@ export default function IDE() {
   const [connected, setConnected] = useState(false);
   const [port, setPort] = useState('8080');
   const [status, setStatus] = useState<ServiceStatus>('checking');
+  const [statusOutput, setStatusOutput] = useState('');
   const codeServerUrl = `http://${currentDevice?.ip || 'localhost'}:${port}/?folder=/root`;
 
-  // Simulate auto-detection of code-server service status
-  useEffect(() => {
+  const checkStatus = () => {
+    if (!currentDevice) {
+      setStatus('not-installed');
+      return;
+    }
+
     setStatus('checking');
-    const timer = setTimeout(() => {
-      // Mock: randomly pick a status for demo purposes
-      // In real implementation, this would call the backend API to check
-      const mockStatuses: ServiceStatus[] = ['running', 'installed-stopped', 'not-installed'];
-      setStatus(mockStatuses[Math.floor(Math.random() * mockStatuses.length)]);
-    }, 1200);
-    return () => clearTimeout(timer);
+    executeDeviceCommand(
+      currentDevice.id,
+      `bash -lc "if ! command -v code-server >/dev/null 2>&1; then echo not-installed; elif pgrep -af 'code-server.*--bind-addr.*:${port}' >/dev/null || ss -lntp 2>/dev/null | grep -q ':${port}'; then echo running; else echo installed-stopped; fi; (pgrep -af code-server || true); (ss -lntp 2>/dev/null | grep ':${port}' || true)"`,
+    )
+      .then((res) => {
+        setStatusOutput(res.output || '无输出');
+        const line = res.output.trim().split(/\r?\n/).find((item) => ['running', 'installed-stopped', 'not-installed'].includes(item.trim()))?.trim();
+        if (line === 'running' || line === 'installed-stopped' || line === 'not-installed') {
+          setStatus(line);
+          return;
+        }
+        setStatus('not-installed');
+      })
+      .catch((error) => {
+        setStatus('not-installed');
+        setStatusOutput(error instanceof Error ? error.message : '检测失败');
+      });
+  };
+
+  useEffect(() => {
+    checkStatus();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDevice?.ip]);
 
   const handleConnect = () => {
+    if (!currentDevice) {
+      addToast('请先连接真实设备', 'warning');
+      return;
+    }
+
     if (status === 'running') {
       setConnected(true);
     } else if (status === 'installed-stopped') {
       addToast('正在启动 code-server 服务...', 'info');
       setStatus('checking');
-      setTimeout(() => {
-        setStatus('running');
-        addToast('code-server 已启动', 'success');
-      }, 1500);
+      executeDeviceCommand(currentDevice.id, 'bash -lc "(systemctl start code-server || code-server --bind-addr 0.0.0.0:8080 >/tmp/code-server.log 2>&1 &)"')
+        .then(() => {
+          addToast('code-server 启动命令已执行', 'success');
+          checkStatus();
+        })
+        .catch((error) => {
+          addToast(error instanceof Error ? error.message : '启动失败', 'error');
+          checkStatus();
+        });
     }
   };
 
   const handleInstall = () => {
+    if (!currentDevice) {
+      addToast('请先连接真实设备', 'warning');
+      return;
+    }
+
     addToast('正在安装 code-server，请稍候...', 'info');
     setStatus('checking');
-    setTimeout(() => {
-      setStatus('installed-stopped');
-      addToast('code-server 安装完成！点击启动即可使用', 'success');
-    }, 3000);
+    executeDeviceCommand(currentDevice.id, 'bash -lc "curl -fsSL https://code-server.dev/install.sh | sh"')
+      .then(() => {
+        addToast('code-server 安装完成', 'success');
+        checkStatus();
+      })
+      .catch((error) => {
+        addToast(error instanceof Error ? error.message : '安装失败', 'error');
+        checkStatus();
+      });
+  };
+
+  const handleStartByPort = () => {
+    if (!currentDevice) {
+      addToast('请先连接真实设备', 'warning');
+      return;
+    }
+    addToast(`尝试在 ${port} 端口启动 code-server`, 'info');
+    setStatus('checking');
+    executeDeviceCommand(
+      currentDevice.id,
+      `bash -lc "nohup code-server --bind-addr 0.0.0.0:${port} --auth none >/tmp/code-server.log 2>&1 & sleep 1; (pgrep -af code-server || true); (ss -lntp 2>/dev/null | grep ':${port}' || true)"`,
+    )
+      .then((res) => {
+        setStatusOutput(res.output || '无输出');
+        checkStatus();
+      })
+      .catch((error) => {
+        setStatusOutput(error instanceof Error ? error.message : '启动失败');
+        addToast(error instanceof Error ? error.message : '启动失败', 'error');
+        checkStatus();
+      });
   };
 
   return (
@@ -95,6 +158,9 @@ export default function IDE() {
                 <button className="clean-btn" style={{ flex: 1 }} onClick={handleConnect}>
                   ▶ 启动服务并连接
                 </button>
+                <button className="clean-btn outline-btn" onClick={handleStartByPort}>
+                  指定端口启动
+                </button>
               </div>
             )}
 
@@ -117,9 +183,14 @@ export default function IDE() {
                 value={port}
                 onChange={e => setPort(e.target.value.replace(/\D/g, ''))}
               />
-              <button className="clean-btn outline-btn sm-btn" onClick={() => { setStatus('checking'); setTimeout(() => setStatus('running'), 1200); }}>
+              <button className="clean-btn outline-btn sm-btn" onClick={checkStatus}>
                 🔄 重新检测
               </button>
+            </div>
+            <div className="terminal-screen" style={{ minHeight: 100, marginTop: 10 }}>
+              {statusOutput.split(/\r?\n/).filter(Boolean).map((line, idx) => (
+                <div key={`${line}-${idx}`} className="terminal-line">{line}</div>
+              ))}
             </div>
           </div>
 

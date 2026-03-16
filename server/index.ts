@@ -4,9 +4,16 @@ import cors from 'cors';
 import { v4 as uuid } from 'uuid';
 import type { ChatMessage, Device } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
-import { runRemoteCommands, verifySshConnection } from './ssh.js';
+import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js';
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import { Client } from 'ssh2';
 
 const app = express();
+const httpServer = http.createServer(app);
+const io = new SocketIOServer(httpServer, {
+  cors: { origin: '*' }
+});
 const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://coding.dashscope.aliyuncs.com/v1';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
@@ -14,8 +21,100 @@ const model = process.env.OPENAI_MODEL ?? 'qwen3.5-plus';
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
 const devicePasswordCache = new Map<string, string>();
 
+const credentialCacheKey = (host: string, username: string, port = 22) => `${host}:${port}::${username}`;
+const shEscape = (raw: string) => `'${raw.replace(/'/g, `'"'"'`)}'`;
+const sanitizeDevice = (device: Device & { password?: string }) => {
+  const { password: _password, ...safe } = device;
+  return safe;
+};
+
+async function resolveDevice(request: express.Request, response: express.Response, id: string) {
+  const devices = await readDevices();
+  const device = devices.find((item) => item.id === id);
+  if (!device) {
+    response.status(404).json({ error: '设备不存在' });
+    return null;
+  }
+  return device;
+}
+
+function resolvePassword(request: express.Request, device: Device) {
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+  const cachedPassword = devicePasswordCache.get(key);
+  const providedPassword = request.header('x-device-password') ?? '';
+  const persistedPassword = (device as Device & { password?: string }).password ?? '';
+  const password = providedPassword || cachedPassword || persistedPassword || defaultSshPassword;
+  return { password, key };
+}
+
+function passwordCandidates(username: string) {
+  const candidates = [
+    username,
+    username === 'root' ? 'root' : '',
+    username === 'sunrise' ? 'sunrise' : '',
+    'root',
+    'sunrise',
+  ].filter(Boolean);
+  return Array.from(new Set(candidates));
+}
+
+function isTransientSshError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /timed out|timeout|handshake|econnreset|socket closed|connection reset|connect failed/.test(message);
+}
+
+async function runOnDevice(
+  request: express.Request,
+  response: express.Response,
+  id: string,
+  commands: string[],
+) {
+  const device = await resolveDevice(request, response, id);
+  if (!device) {
+    return null;
+  }
+
+  const { password, key } = resolvePassword(request, device);
+  const candidates = password ? [password] : passwordCandidates(device.username);
+  let lastError: unknown = null;
+
+  for (const pwd of candidates) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const output = await runRemoteCommands(
+          {
+            host: device.host,
+            port: device.port ?? 22,
+            username: device.username,
+            password: pwd,
+          },
+          commands,
+        );
+
+        devicePasswordCache.set(key, pwd);
+        return { device, output };
+      } catch (error) {
+        lastError = error;
+        if (!(attempt === 0 && isTransientSshError(error))) {
+          break;
+        }
+      }
+    }
+  }
+
+  if (!password) {
+    response.status(400).json({ error: '设备密码缺失或不正确，请在设备管理中重新连接并填写密码' });
+    return null;
+  }
+
+  response.status(500).json({
+    error: lastError instanceof Error ? `板端命令执行失败: ${lastError.message}` : '板端命令执行失败',
+  });
+  return null;
+}
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
@@ -23,12 +122,13 @@ app.get('/api/health', (_request, response) => {
 
 app.get('/api/devices', async (_request, response) => {
   const devices = await readDevices();
-  response.json({ devices });
+  response.json({ devices: devices.map((item) => sanitizeDevice(item as Device & { password?: string })) });
 });
 
 app.post('/api/devices/connect', async (request, response) => {
-  const { host, username, password } = request.body as {
+  const { host, port, username, password } = request.body as {
     host?: string;
+    port?: number;
     username?: string;
     password?: string;
   };
@@ -39,27 +139,30 @@ app.post('/api/devices/connect', async (request, response) => {
   }
 
   try {
-    await verifySshConnection({ host, username, password });
+    const normalizedPort = Number(port ?? 22);
+    await verifySshConnection({ host, port: normalizedPort, username, password });
 
     const devices = await readDevices();
     const now = new Date().toISOString();
-    const nextDevice: Device = {
-      id: devices.find((device) => device.host === host && device.username === username)?.id ?? uuid(),
+    const nextDevice: Device & { password?: string } = {
+      id: devices.find((device) => device.host === host && (device.port ?? 22) === normalizedPort && device.username === username)?.id ?? uuid(),
       host,
+      port: normalizedPort,
       username,
+      password,
       status: 'connected',
       lastCheckedAt: now,
     };
 
     const nextDevices = [
       nextDevice,
-      ...devices.filter((device) => !(device.host === host && device.username === username)),
+      ...devices.filter((device) => !(device.host === host && (device.port ?? 22) === normalizedPort && device.username === username)),
     ];
 
-    devicePasswordCache.set(`${host}::${username}`, password);
+    devicePasswordCache.set(credentialCacheKey(host, username, normalizedPort), password);
 
     await writeDevices(nextDevices);
-    response.json({ device: nextDevice });
+    response.json({ device: sanitizeDevice(nextDevice) });
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败',
@@ -67,16 +170,59 @@ app.post('/api/devices/connect', async (request, response) => {
   }
 });
 
+app.post('/api/devices/verify', async (request, response) => {
+  const { host, port, username, password } = request.body as {
+    host?: string;
+    port?: number;
+    username?: string;
+    password?: string;
+  };
+
+  if (!host || !username || !password) {
+    response.status(400).json({ error: 'host、username、password 均为必填项' });
+    return;
+  }
+
+  try {
+    await verifySshConnection({ host, port: Number(port ?? 22), username, password });
+    response.json({ ok: true });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败',
+    });
+  }
+});
+
+app.get('/api/devices/:id/ping', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const { password } = resolvePassword(request, device);
+  
+  try {
+    const client = new Client();
+    await new Promise<void>((resolve, reject) => {
+      client.on('ready', () => { client.end(); resolve(); })
+            .on('error', reject)
+            .connect({ host: device.host, port: device.port ?? 22, username: device.username, password: password || 'blank', readyTimeout: 3000 });
+    });
+    response.json({ ok: true, status: 'connected' });
+  } catch {
+    response.json({ ok: false, status: 'offline' });
+  }
+});
+
 app.post('/api/openclaw/agent-action', async (request, response) => {
   const { action, modelName, host, username } = request.body as {
-    action?: 'start' | 'status' | 'switch';
+    action?: 'start' | 'status' | 'switch' | 'install' | 'logs';
     modelName?: string;
     host?: string;
     username?: string;
   };
 
-  if (!action || !['start', 'status', 'switch'].includes(action)) {
-    response.status(400).json({ error: 'action 必须是 start/status/switch' });
+  if (!action || !['start', 'status', 'switch', 'install', 'logs'].includes(action)) {
+    response.status(400).json({ error: 'action 必须是 start/status/switch/install/logs' });
     return;
   }
 
@@ -91,47 +237,64 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   }
 
   const selectedUsername = username ?? target.username;
-  const passKey = `${target.host}::${selectedUsername}`;
+  const selectedPort = target.port ?? 22;
+  const passKey = credentialCacheKey(target.host, selectedUsername, selectedPort);
   const cachedPassword = devicePasswordCache.get(passKey);
   const providedPassword = request.header('x-device-password') ?? '';
   const password = providedPassword || cachedPassword || defaultSshPassword;
 
-  if (!password) {
-    response.status(400).json({ error: '缺少 SSH 密码，请先重新连接设备或配置 RDK_SSH_PASSWORD' });
-    return;
-  }
-
   const targetModel = modelName?.trim() || 'qwen3.5-plus';
-  const commandMap: Record<'start' | 'status' | 'switch', string> = {
+  const commandMap: Record<'start' | 'status' | 'switch' | 'install' | 'logs', string> = {
+    install: `bash -lc '(curl -fsSL https://openclaw.sh/install.sh | bash || curl -fsSL https://code-server.dev/install.sh | sh || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
     start: `bash -lc '(openclaw gateway start --port 18789 || openclaw start || clawctl start || true); (openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     status: `bash -lc '(openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     switch: `bash -lc '(openclaw model use "${targetModel}" || clawctl model use "${targetModel}" || echo "switch command unavailable"); (openclaw status || clawctl status || true)'`,
+    logs: `bash -lc '(journalctl -u openclaw --no-pager -n 120 || tail -n 120 /var/log/openclaw.log || echo "no openclaw logs found")'`,
   };
 
-  try {
-    const output = await runRemoteCommands(
-      {
-        host: target.host,
-        username: selectedUsername,
-        password,
-      },
-      [commandMap[action]],
-    );
+  const candidates = password ? [password] : passwordCandidates(selectedUsername);
+  let lastError: unknown = null;
 
-    devicePasswordCache.set(passKey, password);
+  for (const pwd of candidates) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const output = await runRemoteCommands(
+          {
+            host: target.host,
+            port: selectedPort,
+            username: selectedUsername,
+            password: pwd,
+          },
+          [commandMap[action]],
+        );
 
-    response.json({
-      ok: true,
-      action,
-      host: target.host,
-      username: selectedUsername,
-      output,
-    });
-  } catch (error) {
-    response.status(500).json({
-      error: error instanceof Error ? `OpenClaw 板端执行失败: ${error.message}` : 'OpenClaw 板端执行失败',
-    });
+        devicePasswordCache.set(passKey, pwd);
+
+        response.json({
+          ok: true,
+          action,
+          host: target.host,
+          username: selectedUsername,
+          output,
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!(attempt === 0 && isTransientSshError(error))) {
+          break;
+        }
+      }
+    }
   }
+
+  if (!password) {
+    response.status(400).json({ error: '设备密码缺失或不正确，请在设备管理中重新连接并填写密码' });
+    return;
+  }
+
+  response.status(500).json({
+    error: lastError instanceof Error ? `OpenClaw 板端执行失败: ${lastError.message}` : 'OpenClaw 板端执行失败',
+  });
 });
 
 app.delete('/api/devices/:id', async (request, response) => {
@@ -177,6 +340,7 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
     const output = await runRemoteCommands(
       {
         host: device.host,
+        port: device.port ?? 22,
         username: device.username,
         password: sshPassword,
       },
@@ -190,12 +354,310 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
     };
 
     await writeDevices(devices.map((item) => (item.id === nextDevice.id ? nextDevice : item)));
-    response.json({ output, device: nextDevice });
+    response.json({ output, device: sanitizeDevice(nextDevice as Device & { password?: string }) });
   } catch (error) {
     response.status(500).json({
       error: error instanceof Error ? `OpenClaw 执行失败: ${error.message}` : 'OpenClaw 执行失败',
     });
   }
+});
+
+app.post('/api/devices/:id/exec', async (request, response) => {
+  const { id } = request.params;
+  const { command } = request.body as { command?: string };
+
+  if (!command?.trim()) {
+    response.json({ ok: false, output: '', error: '空命令已忽略' });
+    return;
+  }
+
+  const executed = await runOnDevice(request, response, id, [command]);
+  if (!executed) return;
+
+  response.json({
+    ok: true,
+    output: executed.output,
+    device: sanitizeDevice(executed.device as Device & { password?: string }),
+    command,
+  });
+});
+
+app.post('/api/devices/:id/batch-exec', async (request, response) => {
+  const { id } = request.params;
+  const { commands } = request.body as { commands?: string[] };
+
+  if (!Array.isArray(commands) || commands.length === 0) {
+    response.json({ ok: false, output: '', error: '空命令批次已忽略' });
+    return;
+  }
+
+  const filtered = commands.map((item) => item?.trim()).filter(Boolean) as string[];
+  if (filtered.length === 0) {
+    response.json({ ok: false, output: '', error: '空命令批次已忽略' });
+    return;
+  }
+
+  const executed = await runOnDevice(request, response, id, filtered);
+  if (!executed) return;
+
+  response.json({
+    ok: true,
+    output: executed.output,
+    device: sanitizeDevice(executed.device as Device & { password?: string }),
+    commandCount: filtered.length,
+  });
+});
+
+app.get('/api/devices/:id/diagnostics', async (request, response) => {
+  const { id } = request.params;
+
+  const commands = [
+    'echo "###UPTIME###"; uptime',
+    'echo "###TEMP###"; cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo "N/A"',
+    'echo "###MEM###"; free -h',
+    'echo "###DISK###"; df -h',
+    'echo "###IP###"; ip -o -4 addr show',
+    'echo "###TOP###"; top -bn1 | head -20',
+    'echo "###BPU###"; (hrut_smi || bputop || echo "bpu command unavailable")',
+  ];
+
+  const executed = await runOnDevice(request, response, id, commands);
+  if (!executed) return;
+
+  response.json({
+    ok: true,
+    output: executed.output,
+    device: sanitizeDevice(executed.device as Device & { password?: string }),
+  });
+});
+
+app.get('/api/devices/:id/ros/topics', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, ['bash -lc "(command -v ros2 >/dev/null 2>&1 && ros2 topic list) || echo ROS2_NOT_INSTALLED"']);
+  if (!executed) return;
+
+  const topics = executed.output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('/'));
+
+  response.json({
+    ok: true,
+    topics,
+    output: executed.output,
+  });
+});
+
+app.post('/api/devices/:id/models/deploy', async (request, response) => {
+  const { id } = request.params;
+  const { command } = request.body as { command?: string };
+
+  if (!command?.trim()) {
+    response.status(400).json({ error: '缺少部署命令 command' });
+    return;
+  }
+
+  const executed = await runOnDevice(request, response, id, [command]);
+  if (!executed) return;
+
+  response.json({ ok: true, output: executed.output });
+});
+
+app.post('/api/devices/:id/examples/run', async (request, response) => {
+  const { id } = request.params;
+  const { command } = request.body as { command?: string };
+
+  if (!command?.trim()) {
+    response.status(400).json({ error: '缺少示例启动命令 command' });
+    return;
+  }
+
+  const executed = await runOnDevice(request, response, id, [command]);
+  if (!executed) return;
+
+  response.json({ ok: true, output: executed.output });
+});
+
+app.get('/api/devices/:id/services/node-red', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    ['bash -lc "(systemctl is-active nodered || pgrep -af node-red || echo inactive)"'],
+  );
+  if (!executed) return;
+
+  const active = /active|node-red/i.test(executed.output);
+  response.json({ ok: true, active, output: executed.output });
+});
+
+app.get('/api/devices/:id/services/vnc', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    ['bash -lc "(systemctl is-active vncserver || systemctl is-active x11vnc || pgrep -af \'x11vnc|Xtigervnc|vncserver\' || echo inactive)"'],
+  );
+  if (!executed) return;
+
+  const active = /active|vnc/i.test(executed.output);
+  response.json({ ok: true, active, output: executed.output });
+});
+
+app.get('/api/devices/:id/files/list', async (request, response) => {
+  const { id } = request.params;
+  const targetPath = String(request.query.path ?? '/userdata');
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    [`sudo bash -lc "ls -al ${shEscape(targetPath)} || true"`],
+  );
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output, path: targetPath });
+});
+
+app.get('/api/devices/:id/files/read', async (request, response) => {
+  const { id } = request.params;
+  const targetPath = String(request.query.path ?? '');
+  const lines = Number(request.query.lines ?? 200);
+
+  if (!targetPath.trim()) {
+    response.status(400).json({ error: 'path 不能为空' });
+    return;
+  }
+
+  // Use base64 to avoid JSON encoding issues with weird characters
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    [`sudo bash -lc "if [ -f ${shEscape(targetPath)} ]; then head -n ${Number.isFinite(lines) && lines > 0 ? Math.min(lines, 2000) : 200} ${shEscape(targetPath)} 2>/dev/null | base64 | tr -d '\\n'; else echo 'NOT_A_FILE'; fi || true"`],
+  );
+  if (!executed) return;
+  
+  if (executed.output.trim() === 'NOT_A_FILE') {
+    response.json({ ok: true, output: 'NOT_A_FILE', path: targetPath });
+    return;
+  }
+
+  const base64Str = executed.output.trim();
+  const decoded = Buffer.from(base64Str, 'base64').toString('utf-8');
+  response.json({ ok: true, output: decoded, contentBase64: base64Str, path: targetPath });
+});
+
+app.post('/api/devices/:id/files/write', async (request, response) => {
+  const { id } = request.params;
+  const { path: targetPath, content, append } = request.body as { path?: string; content?: string; append?: boolean };
+
+  if (!targetPath?.trim()) {
+    response.status(400).json({ error: 'path 不能为空' });
+    return;
+  }
+
+  // If appending, use bash base64. If overriding, use SFTP to support larger files.
+  if (!append) {
+    const device = await resolveDevice(request, response, id);
+    if (!device) return;
+    const { password } = resolvePassword(request, device);
+    const candidates = password ? [password] : passwordCandidates(device.username);
+    let lastError = null;
+    
+    for (const pwd of candidates) {
+      try {
+        await runRemoteCommands({ host: device.host, port: device.port ?? 22, username: device.username, password: pwd }, [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`]);
+        await uploadFileSftp({ host: device.host, port: device.port ?? 22, username: device.username, password: pwd }, targetPath, Buffer.from(content ?? '', 'utf-8'));
+        response.json({ ok: true, output: '写入完成', path: targetPath });
+        return;
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    response.status(500).json({ error: lastError instanceof Error ? lastError.message : '写入失败' });
+    return;
+  }
+
+  const base64Content = Buffer.from(content ?? '', 'utf-8').toString('base64');
+  const redirect = append ? '>>' : '>';
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    [`bash -lc "mkdir -p $(dirname ${shEscape(targetPath)}); echo ${shEscape(base64Content)} | base64 -d ${redirect} ${shEscape(targetPath)}"`],
+  );
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output || '写入完成', path: targetPath });
+});
+
+app.post('/api/devices/:id/files/upload', async (request, response) => {
+  const { id } = request.params;
+  const { path: targetPath, contentBase64 } = request.body as { path?: string; contentBase64?: string };
+
+  if (!targetPath?.trim() || !contentBase64) {
+    response.status(400).json({ error: 'path 和 contentBase64 不能为空' });
+    return;
+  }
+
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const { password } = resolvePassword(request, device);
+  const candidates = password ? [password] : passwordCandidates(device.username);
+  let lastError: unknown = null;
+
+  for (const pwd of candidates) {
+    try {
+      // Create folder if needed via exec first
+      await runRemoteCommands(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+        [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`]
+      );
+      
+      const buffer = Buffer.from(contentBase64, 'base64');
+      await uploadFileSftp(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+        targetPath,
+        buffer
+      );
+      
+      response.json({ ok: true, path: targetPath });
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  response.status(500).json({
+    error: lastError instanceof Error ? `长传失败: ${lastError.message}` : '文件上传失败'
+  });
+});
+
+app.get('/api/devices/:id/files/download', async (request, response) => {
+  const { id } = request.params;
+  const targetPath = String(request.query.path ?? '');
+
+  if (!targetPath.trim()) {
+    response.status(400).json({ error: 'path 不能为空' });
+    return;
+  }
+
+  // Support both file and directory download (tar.gz for directory).
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    [`sudo bash -lc "if [ -d ${shEscape(targetPath)} ]; then tar czf - ${shEscape(targetPath)} 2>/dev/null | base64 | tr -d '\\n'; elif [ -f ${shEscape(targetPath)} ]; then base64 ${shEscape(targetPath)} | tr -d '\\n'; else echo 'NOT_FOUND'; fi || true"`],
+  );
+  
+  if (!executed) return;
+  if (executed.output.trim() === 'NOT_FOUND') {
+    response.status(404).json({ error: '文件或目录不存在' });
+    return;
+  }
+  
+  response.json({ ok: true, path: targetPath, contentBase64: executed.output.trim(), isDir: true /* Frontend will check extension */ });
 });
 
 app.post('/api/agent/plan', async (request, response) => {
@@ -424,7 +886,8 @@ app.post('/api/chat', async (request, response) => {
 - 如果用户请求涉及执行某个具体 shell 命令（如 ls、cat、top、ros2、hrut_smi 等），使用 terminal_cmd 并带上完整命令
 - 如果用户说"帮我看看xxx"但不涉及具体命令执行，根据语义选择 hardware_check、ros_scan 或 model_list 等
 - 如果用户说的话模棱两可，选择最可能的意图，不要用 general 兜底
-- 对于「打开xxx页面」「去xxx」类请求，优先用 nav 而不是具体功能的 intent`;
+- 对于「打开xxx页面」「去xxx」类请求，优先用 nav 而不是具体功能的 intent
+- 仅当确实无法判断动作时才可使用 general；包含“ros/话题/vnc/ssh/node-red/openclaw/模型/示例/文件/烧录”等关键词时，必须路由到对应 intent`;
 
   try {
     const apiMessages = [
@@ -482,6 +945,68 @@ app.post('/api/chat', async (request, response) => {
   }
 });
 
-app.listen(port, '0.0.0.0', () => {
+io.on('connection', (socket) => {
+  let sshClient: Client | null = null;
+  let sshStream: any = null;
+
+  socket.on('init', async (config) => {
+    const { deviceId, password, cols, rows } = config;
+    try {
+      const devices = await readDevices();
+      const device = devices.find(d => d.id === deviceId);
+      if (!device) {
+        socket.emit('data', '\r\n\x1b[31m[Error] Device not found.\x1b[0m\r\n');
+        return;
+      }
+      
+      const pwd = password || devicePasswordCache.get(credentialCacheKey(device.host, device.username, device.port ?? 22)) || defaultSshPassword;
+
+      sshClient = new Client();
+      sshClient.on('ready', () => {
+        sshClient!.shell({ term: 'xterm-256color', cols: cols || 80, rows: rows || 24 }, (err, stream) => {
+          if (err) {
+            socket.emit('data', `\r\n\x1b[31m[Error] Shell error: ${err.message}\x1b[0m\r\n`);
+            sshClient?.end();
+            return;
+          }
+          sshStream = stream;
+          stream.on('data', (d: any) => socket.emit('data', d.toString('utf-8')));
+          stream.on('close', () => {
+            socket.emit('data', '\r\n\x1b[33m[Session closed]\x1b[0m\r\n');
+            sshClient?.end();
+          });
+        });
+      }).on('error', (err) => {
+        socket.emit('data', `\r\n\x1b[31m[SSH Error] ${err.message}\x1b[0m\r\n`);
+      }).connect({
+        host: device.host,
+        port: device.port ?? 22,
+        username: device.username,
+        password: pwd,
+        readyTimeout: 8000,
+      });
+
+    } catch (e: any) {
+      socket.emit('data', `\r\n\x1b[31m[Internal Error] ${e.message}\x1b[0m\r\n`);
+    }
+  });
+
+  socket.on('data', (d) => {
+    if (sshStream) sshStream.write(d);
+  });
+
+  socket.on('resize', ({ cols, rows }) => {
+    if (sshStream && sshStream.setWindow) {
+      sshStream.setWindow(rows, cols, 0, 0);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    sshStream?.end();
+    sshClient?.end();
+  });
+});
+
+httpServer.listen(port, '0.0.0.0', () => {
   console.log(`RDK Studio server running on http://0.0.0.0:${port}`);
 });

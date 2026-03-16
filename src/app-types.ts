@@ -4,6 +4,7 @@ export type Tab =
   | 'terminal'
   | 'files'
   | 'vnc'
+  | 'ide'
   | 'lowcode'
   | 'openclaw'
   | 'hardware'
@@ -16,6 +17,7 @@ export interface Device {
   name: string;
   status: string;
   ip: string;
+  port?: number;
   description?: string;
 }
 

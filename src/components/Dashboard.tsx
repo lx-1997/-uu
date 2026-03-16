@@ -1,16 +1,111 @@
 import { useState, useEffect } from 'react';
+import { fetchDeviceDiagnostics } from '../api';
 import { useAppState } from '../hooks/useAppState';
 import { DASHBOARD_CARDS } from '../constants';
 
 export default function Dashboard() {
-  const { currentDevice, devices, setDevices, openWorkspace, diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep, activities, addToast, setShowAddDevice, setActiveTab, obStep, setObStep, selectedBoard, setSelectedBoard } = useAppState();
+  const { currentDevice, devices, setDevices, openWorkspace, diagnosticOpen, setDiagnosticOpen, activities, addToast, setShowAddDevice, setActiveTab, obStep, setObStep, selectedBoard, setSelectedBoard } = useAppState();
   const [hideWizard, setHideWizard] = useState(false);
+  const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+  const [diagnosticOutput, setDiagnosticOutput] = useState<string[]>([]);
+  const [topMetrics, setTopMetrics] = useState({
+    memory: '--',
+    temp: '--',
+    bpu: '--',
+    uptime: '--',
+    tempValue: -1,
+    bpuValue: -1,
+    updatedAt: '--',
+  });
+
+  const parseMetrics = (output: string) => {
+    const lines = output.split(/\r?\n/).map((line) => line.trim());
+
+    const findAfter = (marker: string) => {
+      const idx = lines.findIndex((line) => line === marker);
+      if (idx < 0) return '';
+      return lines.slice(idx + 1).find((line) => line.length > 0 && !line.startsWith('###')) ?? '';
+    };
+
+    const uptimeLine = findAfter('###UPTIME###');
+    let uptime = '--';
+    if (uptimeLine) {
+      const match = uptimeLine.match(/up\s+(.*?)(?:,\s+\d+\s+user|,\s+load average)/);
+      if (match) uptime = match[1].trim();
+      else uptime = uptimeLine.length > 20 ? uptimeLine.slice(0, 20) + '...' : uptimeLine;
+    }
+    const tempRaw = findAfter('###TEMP###');
+    const tempNumber = Number(tempRaw);
+    const temp = Number.isFinite(tempNumber) && tempNumber > 0 ? `${(tempNumber / 1000).toFixed(1)}°C` : (tempRaw || '--');
+    const tempValue = Number.isFinite(tempNumber) && tempNumber > 0 ? tempNumber / 1000 : -1;
+
+    const memIdx = lines.findIndex((line) => line === '###MEM###');
+    let memory = '--';
+    if (memIdx >= 0) {
+      const memLine = lines.slice(memIdx + 1).find((line) => /^mem:/i.test(line));
+      if (memLine) {
+        const parts = memLine.split(/\s+/);
+        if (parts.length >= 3) {
+          memory = `${parts[2]}/${parts[1]}`;
+        }
+      }
+    }
+
+    const bpuIdx = lines.findIndex((line) => line === '###BPU###');
+    let bpu = '--';
+    let bpuValue = -1;
+    if (bpuIdx >= 0) {
+      const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 6).join(' ');
+      const m = bpuLines.match(/(\d{1,3})\s*%/);
+      if (m) {
+        bpu = `${m[1]}%`;
+        bpuValue = Number(m[1]);
+      }
+      else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
+    }
+
+    setTopMetrics({
+      memory,
+      temp,
+      bpu,
+      uptime,
+      tempValue,
+      bpuValue,
+      updatedAt: new Date().toLocaleTimeString(),
+    });
+  };
 
   useEffect(() => {
     if (devices.length > 0 && obStep === 'connect') {
       setObStep('done');
     }
   }, [devices.length, obStep, setObStep]);
+
+  useEffect(() => {
+    if (!currentDevice) return;
+
+    let cancelled = false;
+    const loadMetrics = () => {
+      fetchDeviceDiagnostics(currentDevice.id)
+        .then((res) => {
+          if (cancelled) return;
+          parseMetrics(res.output);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setTopMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempValue: -1, bpuValue: -1, updatedAt: '--' });
+        });
+    };
+
+    loadMetrics();
+    const timer = window.setInterval(loadMetrics, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDevice?.id]);
 
   /* ── Onboarding wizard ── */
   if (!hideWizard && (devices.length === 0 || obStep === 'done')) {
@@ -114,7 +209,7 @@ export default function Dashboard() {
                     <path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
                   </svg>
                   <strong>SSH 网络连接</strong>
-                  <span>网线/WiFi · 输入 IP · root/root</span>
+                  <span>网线/WiFi · 输入 IP · sunrise/sunrise（常见）</span>
                 </button>
                 <button className="ob-choice-card" onClick={() => setShowAddDevice(true)}>
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -189,21 +284,24 @@ export default function Dashboard() {
 
       <div className="stats-strip" style={{ marginTop: '20px' }}>
         <div className="stat-card">
-          <div className="stat-value">5.2<span className="stat-unit">/8G</span></div>
-          <div className="stat-label">内存使用</div>
+          <div className="stat-value">{topMetrics.memory}</div>
+          <div className="stat-label">内存使用(实时)</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">61.8<span className="stat-unit">°C</span></div>
-          <div className="stat-label">芯片温度</div>
+          <div className="stat-value">{topMetrics.temp}</div>
+          <div className="stat-label">芯片温度(实时){topMetrics.tempValue >= 85 ? ' · 高温' : ''}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">68<span className="stat-unit">%</span></div>
-          <div className="stat-label">BPU 负载</div>
+          <div className="stat-value">{topMetrics.bpu}</div>
+          <div className="stat-label">BPU 负载(实时){topMetrics.bpuValue >= 90 ? ' · 高负载' : ''}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">3d<span className="stat-unit"> 14h</span></div>
-          <div className="stat-label">系统运行</div>
+          <div className="stat-value">{topMetrics.uptime}</div>
+          <div className="stat-label">系统运行时长</div>
         </div>
+      </div>
+      <div style={{ textAlign: 'right', fontSize: '0.78rem', color: '#64748b', marginTop: 6 }}>
+        指标更新时间：{topMetrics.updatedAt}
       </div>
 
       <div className="dashboard-shortcuts">
@@ -211,60 +309,48 @@ export default function Dashboard() {
         <button className="clean-btn outline-btn" onClick={() => openWorkspace('files', '')}>📂 文件管理</button>
         <button className="clean-btn outline-btn" onClick={() => openWorkspace('vnc', '')}>🖵 远程桌面</button>
         <button className={`clean-btn ${diagnosticOpen ? '' : 'outline-btn'}`} onClick={() => {
-          setDiagnosticOpen(!diagnosticOpen);
-          if (!diagnosticOpen) {
-            setDiagnosticStep(0);
-            let step = 0;
-            const timer = setInterval(() => {
-              step++;
-              setDiagnosticStep(step);
-              if (step >= 6) clearInterval(timer);
-            }, 500);
+          const nextOpen = !diagnosticOpen;
+          setDiagnosticOpen(nextOpen);
+          if (!nextOpen) return;
+          if (!currentDevice) {
+            addToast('请先连接设备后再执行诊断', 'warning');
+            setDiagnosticOpen(false);
+            return;
           }
+          setDiagnosticLoading(true);
+          fetchDeviceDiagnostics(currentDevice.id)
+            .then((res) => {
+              const lines = res.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+              setDiagnosticOutput(lines);
+            })
+            .catch((error) => {
+              addToast(error instanceof Error ? error.message : '诊断失败', 'error');
+              setDiagnosticOutput(['诊断失败，请检查设备连接与权限']);
+            })
+            .finally(() => setDiagnosticLoading(false));
         }}>🩺 {diagnosticOpen ? '收起诊断' : '一键诊断'}</button>
       </div>
 
-      {diagnosticOpen && (() => {
-        const checks = [
-          { name: '网络连通性', icon: '🌐', pass: true, detail: `ping ${currentDevice?.ip} — 正常 (2ms)` },
-          { name: '系统负载', icon: '⚡', pass: true, detail: 'CPU 23%, 内存 5.2/8G, 进程数 87' },
-          { name: '芯片温度', icon: '🌡️', pass: false, detail: '61.8°C — 建议 < 60°C，散热需关注' },
-          { name: 'BPU 状态', icon: '🧠', pass: true, detail: 'BPU0 在线, 负载 68%, 推理队列 2' },
-          { name: '存储空间', icon: '💾', pass: true, detail: '系统盘 56%, 数据盘 32%, 模型盘 18%' },
-          { name: 'ROS2 环境', icon: '🕸️', pass: true, detail: 'humble 运行中, 4 topics, 6 nodes' },
-        ];
-        return (
-          <div className="diagnostic-panel">
-            <div className="diagnostic-checks">
-              {checks.map((check, i) => (
-                <div key={check.name} className={`diagnostic-check ${i < diagnosticStep ? (check.pass ? 'pass' : 'warn') : 'pending'}`}>
-                  <span className="diagnostic-icon">{i < diagnosticStep ? (check.pass ? '✅' : '⚠️') : '⏳'}</span>
-                  <div className="diagnostic-info">
-                    <strong>{check.icon} {check.name}</strong>
-                    <span className="diagnostic-detail">{i < diagnosticStep ? check.detail : '等待检测...'}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {diagnosticStep >= 6 && (
-              <div className="diagnostic-ai-summary">
-                <div className="diagnostic-ai-header">🤖 AI 诊断总结</div>
-                <p>设备 <strong>{currentDevice?.name}</strong> 整体运行正常。重点关注：</p>
-                <ul>
-                  <li><strong>芯片温度 61.8°C</strong> 略偏高，建议检查散热风扇或降低 BPU 推理负载，长期高温可能影响器件寿命。</li>
-                  <li>BPU 负载 68%，仍有余量但建议监控峰值时段，避免推理队列堆积。</li>
-                  <li>其余网络、存储、ROS 环境指标均在安全范围内，无需操作。</li>
-                </ul>
-                <div className="diagnostic-ai-actions">
-                  <button className="clean-btn outline-btn sm-btn" onClick={() => openWorkspace('hardware', '')}>查看硬件详情</button>
-                  <button className="clean-btn outline-btn sm-btn" onClick={() => openWorkspace('terminal', '')}>打开终端排查</button>
-                  <button className="clean-btn outline-btn sm-btn ai-action-btn" onClick={() => addToast('AI 已生成完整诊断报告', 'success')}>📄 导出报告</button>
-                </div>
+      {diagnosticOpen && (
+        <div className="diagnostic-panel">
+          <div className="diagnostic-ai-summary" style={{ width: '100%' }}>
+            <div className="diagnostic-ai-header">🩺 真实设备诊断输出</div>
+            {diagnosticLoading ? (
+              <p>正在执行诊断命令，请稍候...</p>
+            ) : (
+              <div className="terminal-screen" style={{ minHeight: 220 }}>
+                {diagnosticOutput.map((line, idx) => (
+                  <div key={`${line}-${idx}`} className="terminal-line">{line}</div>
+                ))}
               </div>
             )}
+            <div className="diagnostic-ai-actions">
+              <button className="clean-btn outline-btn sm-btn" onClick={() => openWorkspace('hardware', '')}>查看硬件详情</button>
+              <button className="clean-btn outline-btn sm-btn" onClick={() => openWorkspace('terminal', '')}>打开终端排查</button>
+            </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       <div className="quick-grid">
         {DASHBOARD_CARDS.map((card) => (

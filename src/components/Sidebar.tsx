@@ -25,7 +25,7 @@ export default function Sidebar() {
               <h4 className="device-name">{dev.name}</h4>
               <div className="device-status">
                 <span className={`status-dot ${dev.status === 'offline' ? 'offline' : ''}`}></span>
-                {dev.status === 'online' ? dev.ip : 'Disconnected'}
+                {dev.status === 'online' ? `${dev.ip}:${dev.port ?? 22}` : 'Disconnected'}
               </div>
             </div>
             <button

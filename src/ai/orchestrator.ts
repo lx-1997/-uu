@@ -92,8 +92,8 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('file_upload', [
         { label: '建立 SFTP 连接' }, { label: '上传文件' }, { label: '校验' },
       ]);
-      startTaskAnimation(task, '文件上传完成', `${actions.currentDeviceIp} · SFTP · 3 文件 · 12.4 MB`, [
-        { type: 'terminal', lines: [`$ sftp root@${actions.currentDeviceIp}`, 'Connected', 'sftp> put ./models/*.bin /userdata/models/', 'Uploading... done'] },
+      startTaskAnimation(task, '文件上传流程完成', `${actions.currentDeviceIp} · 请以设备端实际输出为准`, [
+        { type: 'terminal', lines: [`$ sftp root@${actions.currentDeviceIp}`, 'Connected', 'sftp> put <local-file> <remote-path>', '上传完成请在文件页核验实际结果'] },
       ]);
     },
   }),
@@ -104,8 +104,8 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('file_download', [
         { label: '建立 SFTP 连接' }, { label: '下载文件' }, { label: '校验' },
       ]);
-      startTaskAnimation(task, '文件下载完成', `${actions.currentDeviceIp} · SFTP · 2 文件 · 8.7 MB`, [
-        { type: 'terminal', lines: [`$ sftp root@${actions.currentDeviceIp}`, 'Connected', 'sftp> get /var/log/syslog ./', 'Downloading... done'] },
+      startTaskAnimation(task, '文件下载流程完成', `${actions.currentDeviceIp} · 请以设备端实际输出为准`, [
+        { type: 'terminal', lines: [`$ sftp root@${actions.currentDeviceIp}`, 'Connected', 'sftp> get <remote-file> <local-path>', '下载完成请核验文件内容与大小'] },
       ]);
     },
   }),
@@ -117,8 +117,8 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('vnc', [
         { label: '启动 VNC 服务' }, { label: '建立连接' }, { label: '渲染桌面' },
       ]);
-      startTaskAnimation(task, '远程桌面已连接', `${actions.currentDeviceIp}:5900 · 1280×720 · 清晰优先`, [
-        { type: 'image', src: '', caption: `VNC · ${actions.currentDeviceIp}:5900 · 已连接` },
+      startTaskAnimation(task, '远程桌面流程完成', `${actions.currentDeviceIp}:5900 · 连接状态以设备检测结果为准`, [
+        { type: 'status', items: [{ label: 'VNC 检查', value: '请查看设备服务输出', ok: true }] },
       ]);
     },
   }),
@@ -129,12 +129,12 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('openclaw_start', [
         { label: '加载配置' }, { label: '初始化 Agent' }, { label: '注册技能' }, { label: '启动服务' },
       ]);
-      startTaskAnimation(task, 'OpenClaw 已启动', 'port 18789 · 7 技能 · 通义千问 qwen3.5-plus', [
+      startTaskAnimation(task, 'OpenClaw 启动流程完成', '请以板端 openclaw/clawctl 输出为准', [
         { type: 'status', items: [
-          { label: '服务状态', value: 'Running', ok: true },
-          { label: '端口', value: ':18789', ok: true },
-          { label: '模型', value: 'qwen3.5-plus', ok: true },
-          { label: '技能数', value: '7 已加载', ok: true },
+          { label: '服务状态', value: '实时检查', ok: true },
+          { label: '端口', value: '以设备输出为准', ok: true },
+          { label: '模型', value: '以设备输出为准', ok: true },
+          { label: '技能', value: '以设备输出为准', ok: true },
         ]},
       ]);
       void actions.openClawStartOnBoard();
@@ -145,17 +145,14 @@ const handlers: Record<IntentId, HandlerFn> = {
     text: '',
     blocks: [
       { type: 'status', items: [
-        { label: '服务状态', value: 'Running', ok: true },
-        { label: '今日调用', value: '1,247 次', ok: true },
-        { label: '模型', value: 'qwen3.5-plus', ok: true },
-        { label: '技能', value: '7 已加载', ok: true },
+        { label: '服务状态', value: '实时检查中', ok: true },
+        { label: '调用统计', value: '以真实网关日志为准', ok: true },
+        { label: '当前模型', value: '以设备状态输出为准', ok: true },
+        { label: '技能状态', value: '以设备状态输出为准', ok: true },
       ]},
       { type: 'terminal', lines: [
-        '$ openclaw status',
-        '✓ Gateway running on :18789',
-        '✓ Agent: qwen3.5-plus (通义千问)',
-        '✓ Skills: device_control, ros_topic, exec, web_search, file_ops, model_inference, camera_stream',
-        '✓ Uptime: 3d 14h',
+        '$ openclaw status 或 clawctl status',
+        '请查看板端实时输出获取准确状态',
       ]},
     ],
     sideEffect: () => { void actions.openClawStatusOnBoard(); },
@@ -191,21 +188,18 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('hardware_check', [
         { label: '读取芯片温度' }, { label: '检测 BPU 占用' }, { label: '检测内存' }, { label: '检测网络' },
       ]);
-      startTaskAnimation(task, '诊断完成', `${actions.currentDeviceName} · 整体健康`, [
+      startTaskAnimation(task, '诊断流程完成', `${actions.currentDeviceName} · 结果以实时诊断输出为准`, [
         { type: 'status', items: [
-          { label: 'BPU 占用', value: '68%', ok: true },
-          { label: '芯片温度', value: '61.8°C', ok: false },
-          { label: '内存使用', value: '5.2/8 GB', ok: true },
-          { label: '系统运行', value: '3d 14h', ok: true },
+          { label: 'BPU 占用', value: '实时读取', ok: true },
+          { label: '芯片温度', value: '实时读取', ok: true },
+          { label: '内存使用', value: '实时读取', ok: true },
+          { label: '系统运行', value: '实时读取', ok: true },
         ]},
         { type: 'terminal', lines: [
           '$ cat /sys/class/thermal/thermal_zone0/temp',
-          '61800',
-          '$ hrut_smi',
-          'BPU0: 68%  BPU1: 42%  DDR: 43%',
+          '$ hrut_smi || bputop',
           '$ free -h',
-          'total    used    free    available',
-          '7.8G     5.2G    1.4G    2.6G',
+          '请以设备命令实时输出判定当前健康状态',
         ]},
       ]);
     },
@@ -217,15 +211,13 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('ros_scan', [
         { label: '连接 ROS2 DDS' }, { label: '枚举话题' }, { label: '采样频率' },
       ]);
-      startTaskAnimation(task, 'ROS2 话题扫描完成', '4 个活跃话题 · DDS 正常', [
+      startTaskAnimation(task, 'ROS2 话题扫描流程完成', '话题与频率请以 ros2 实时命令输出为准', [
         { type: 'terminal', lines: [
           '$ ros2 topic list',
-          '/hobot_dnn/bbox      [30 Hz]',
-          '/camera/image_raw    [25 Hz]',
-          '/imu/data            [100 Hz]',
-          '/odom                [50 Hz]',
+          '$ ros2 topic hz /<topic_name>',
+          '请查看设备端实时话题与频率输出',
         ]},
-        { type: 'image', src: '', caption: '/hobot_dnn/bbox · 目标 3 个 · 29 FPS' },
+        { type: 'status', items: [{ label: 'ROS 结果', value: '以设备实时输出为准', ok: true }] },
       ]);
     },
   }),
@@ -254,16 +246,16 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('model_deploy', [
         { label: 'ONNX → Horizon' }, { label: '量化校准' }, { label: '编译 BPU bin' }, { label: '部署到设备' },
       ]);
-      startTaskAnimation(task, '模型部署完成', 'ResNet50 · BPU 优化 · 推理 45 FPS');
+      startTaskAnimation(task, '模型部署流程完成', '模型精度与 FPS 请以设备侧测试结果为准');
     });
     return {
       text: '',
       blocks: [
         { type: 'status', items: [
-          { label: 'YOLOv5s', value: '已部署 · 30 FPS', ok: true },
-          { label: 'ResNet50', value: '待转换', ok: false },
+          { label: '模型部署', value: '将执行板端真实命令', ok: true },
+          { label: '执行结果', value: '以终端输出为准', ok: true },
         ]},
-        { type: 'confirm', text: '确认将 ResNet50 转换并部署到 BPU？', confirmId: cid },
+        { type: 'confirm', text: '确认执行当前模型部署命令？', confirmId: cid },
       ],
     };
   },
@@ -272,10 +264,8 @@ const handlers: Record<IntentId, HandlerFn> = {
     text: '',
     blocks: [
       { type: 'status', items: [
-        { label: 'YOLOv5s', value: '已部署 · 30 FPS', ok: true },
-        { label: 'FCOS', value: '已部署 · 25 FPS', ok: true },
-        { label: 'ResNet50', value: '待转换', ok: false },
-        { label: 'MobileNetV2', value: '待转换', ok: false },
+        { label: '模型列表', value: '请在模型页执行板端查询命令', ok: true },
+        { label: '状态来源', value: '实时设备输出', ok: true },
       ]},
     ],
   }),
@@ -286,19 +276,18 @@ const handlers: Record<IntentId, HandlerFn> = {
       const task = createTask('example_run', [
         { label: '检查依赖' }, { label: '启动摄像头' }, { label: '加载检测模型' }, { label: '运行跟随算法' },
       ]);
-      startTaskAnimation(task, '视觉跟随已启动', '摄像头 0 · YOLOv5s · 29 FPS · 跟随中', [
-        { type: 'image', src: '', caption: '视觉跟随 · 检测 2 个目标 · 跟随中' },
+      startTaskAnimation(task, '示例运行流程已触发', '请以设备端示例日志与视频输出为准', [
+        { type: 'status', items: [{ label: '结果来源', value: '以设备命令输出为准', ok: true }] },
       ]);
     });
     return {
       text: '',
       blocks: [
         { type: 'status', items: [
-          { label: '视觉跟随', value: '可运行', ok: true },
-          { label: '手势控制', value: '可运行', ok: true },
-          { label: '双摄测距', value: '缺少依赖', ok: false },
+          { label: '示例执行', value: '将下发板端真实启动命令', ok: true },
+          { label: '依赖状态', value: '以设备检测结果为准', ok: true },
         ]},
-        { type: 'confirm', text: '确认运行「视觉跟随」示例？', confirmId: cid },
+        { type: 'confirm', text: '确认运行所选示例命令？', confirmId: cid },
       ],
     };
   },
@@ -308,9 +297,9 @@ const handlers: Record<IntentId, HandlerFn> = {
     blocks: [
       { type: 'code', lang: 'json', content: '{\n  "templates": [\n    "视觉感知流水线",\n    "设备运维自动化",\n    "社区示例合集"\n  ]\n}' },
       { type: 'status', items: [
-        { label: '视觉感知', value: '7 节点', ok: true },
-        { label: '设备运维', value: '5 节点', ok: true },
-        { label: '社区合集', value: '12 节点', ok: true },
+        { label: '视觉感知', value: '节点数以实际流程为准', ok: true },
+        { label: '设备运维', value: '节点数以实际流程为准', ok: true },
+        { label: '社区合集', value: '节点数以实际流程为准', ok: true },
       ]},
     ],
     sideEffect: () => { actions.runFlowValidation(); },
@@ -396,6 +385,16 @@ export function orchestrate(params: OrchestrateParams): OrchestratorOutput {
   let parsed: IntentResult;
   if (aiResponse) {
     parsed = parseAIResponse(aiResponse);
+    if (parsed.intent === 'general') {
+      const keywordParsed = detectIntentByKeyword(userText);
+      if (keywordParsed.intent !== 'general') {
+        parsed = {
+          text: parsed.text,
+          intent: keywordParsed.intent,
+          param: keywordParsed.param,
+        };
+      }
+    }
   } else {
     parsed = detectIntentByKeyword(userText);
   }

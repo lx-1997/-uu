@@ -1,256 +1,320 @@
-import { useState, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import Editor from '@monaco-editor/react';
+import { Loader2, RefreshCw, Upload, ArrowLeft } from 'lucide-react';
+import { downloadDeviceFile, listDeviceFiles, readDeviceFile, writeDeviceFile, uploadDeviceFile } from '../api';
 import { useAppState } from '../hooks/useAppState';
 
-/* -- Mock file-system tree -- */
-interface FsNode {
-  name: string;
-  type: 'dir' | 'file';
-  size?: string;
-  modified?: string;
-  hint?: string;
-  children?: FsNode[];
-}
-
-const LOCAL_TREE: FsNode[] = [
-  { name: 'models', type: 'dir', hint: '2 个待上传', children: [
-    { name: 'yolov5s_nv12.bin', type: 'file', size: '14.2 MB', modified: '2024-06-10' },
-    { name: 'fcos_512x512.bin', type: 'file', size: '8.7 MB', modified: '2024-06-08' },
-  ]},
-  { name: 'records', type: 'dir', children: [
-    { name: 'rosbag_2024-06-10.bag', type: 'file', size: '120 MB', modified: '2024-06-10' },
-  ]},
-  { name: 'configs', type: 'dir', children: [
-    { name: 'camera.yaml', type: 'file', size: '1.2 KB', modified: '2024-06-09' },
-    { name: 'nav_params.yaml', type: 'file', size: '3.4 KB', modified: '2024-06-07' },
-  ]},
-  { name: 'launch.py', type: 'file', size: '2.1 KB', modified: '2024-06-10', hint: '启动脚本' },
-  { name: 'README.md', type: 'file', size: '0.8 KB', modified: '2024-06-05' },
-];
-
-const REMOTE_TREE: FsNode[] = [
-  { name: 'app', type: 'dir', children: [
-    { name: 'main_pipeline', type: 'file', size: '5.4 MB', modified: '2024-06-10' },
-    { name: 'config.json', type: 'file', size: '0.5 KB', modified: '2024-06-10' },
-  ]},
-  { name: 'userdata', type: 'dir', children: [
-    { name: 'models', type: 'dir', children: [
-      { name: 'yolov5s_nv12.bin', type: 'file', size: '14.2 MB', modified: '2024-06-08' },
-    ]},
-    { name: 'videos', type: 'dir', children: [] },
-  ]},
-  { name: 'logs', type: 'dir', hint: '有新内容', children: [
-    { name: 'syslog', type: 'file', size: '45 KB', modified: '2024-06-10' },
-    { name: 'ros2.log', type: 'file', size: '12 KB', modified: '2024-06-10' },
-  ]},
-  { name: 'claw_pipeline.yaml', type: 'file', size: '1.8 KB', modified: '2024-06-09', hint: 'OpenClaw 配置' },
-  { name: 'start_ros.sh', type: 'file', size: '0.3 KB', modified: '2024-06-06' },
-];
-
-/* -- File Pane with folder browsing -- */
-function FilePane({ title, rootPath, tree, selected, onSelect, onTransfer, transferLabel }: {
-  title: string; rootPath: string; tree: FsNode[];
-  selected: Set<string>; onSelect: (path: string) => void;
-  onTransfer: () => void; transferLabel: string;
-}) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [cwd, setCwd] = useState<string[]>([]);
-
-  const toggleExpand = useCallback((path: string) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      next.has(path) ? next.delete(path) : next.add(path);
-      return next;
-    });
-  }, []);
-
-  const navigateInto = useCallback((dirName: string) => {
-    setCwd(prev => [...prev, dirName]);
-  }, []);
-
-  const navigateTo = useCallback((index: number) => {
-    setCwd(prev => prev.slice(0, index));
-  }, []);
-
-  const resolveDir = (path: string[]): FsNode[] => {
-    let nodes = tree;
-    for (const seg of path) {
-      const dir = nodes.find(n => n.name === seg && n.type === 'dir');
-      if (dir?.children) nodes = dir.children;
-      else return [];
-    }
-    return nodes;
-  };
-
-  const currentNodes = resolveDir(cwd);
-  const fullPath = (name: string) => [...cwd, name].join('/');
-
-  const renderNode = (node: FsNode, depth: number = 0) => {
-    const path = fullPath(node.name);
-    const isSelected = selected.has(path);
-    const isDir = node.type === 'dir';
-    const isOpen = expanded.has(path);
-
-    return (
-      <div key={path}>
-        <div
-          className={`fm-row ${isSelected ? 'selected' : ''}`}
-          style={{ paddingLeft: depth * 16 + 8 }}
-          onClick={() => onSelect(path)}
-          onDoubleClick={() => isDir && navigateInto(node.name)}
-        >
-          <span className="fm-row-icon">
-            {isDir ? (
-              <span className="fm-folder-toggle" onClick={e => { e.stopPropagation(); toggleExpand(path); }}>
-                {isOpen ? '📂' : '📁'}
-              </span>
-            ) : '📄'}
-          </span>
-          <span className="fm-row-name">{node.name}</span>
-          {node.size && <span className="fm-row-meta">{node.size}</span>}
-          {node.hint && <span className="fm-row-hint">{node.hint}</span>}
-          {isDir && (
-            <button className="fm-row-enter" onClick={e => { e.stopPropagation(); navigateInto(node.name); }} title="进入目录">
-              →
-            </button>
-          )}
-        </div>
-        {isDir && isOpen && node.children?.map(child => renderNode(child, depth + 1))}
-      </div>
-    );
-  };
-
-  return (
-    <div className="panel-card fm-pane">
-      <div className="fm-pane-header">
-        <div className="fm-pane-title">{title}</div>
-        <div className="fm-breadcrumb">
-          <span className="fm-crumb-seg clickable" onClick={() => navigateTo(0)}>{rootPath}</span>
-          {cwd.map((seg, i) => (
-            <span key={i}>
-              <span className="fm-crumb-sep">/</span>
-              <span className="fm-crumb-seg clickable" onClick={() => navigateTo(i + 1)}>{seg}</span>
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="fm-file-list">
-        {cwd.length > 0 && (
-          <div className="fm-row" onClick={() => setCwd(prev => prev.slice(0, -1))}>
-            <span className="fm-row-icon">⬆️</span>
-            <span className="fm-row-name" style={{ color: '#94a3b8' }}>..</span>
-          </div>
-        )}
-        {currentNodes.length === 0 && (
-          <div className="fm-empty">空目录</div>
-        )}
-        {currentNodes.map(node => renderNode(node))}
-      </div>
-      <div className="fm-pane-footer">
-        <span className="fm-selected-count">{selected.size > 0 ? `${selected.size} 项已选` : '未选择'}</span>
-        <button className="clean-btn outline-btn sm-btn" onClick={onTransfer} disabled={selected.size === 0}>
-          {transferLabel}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* -- Main Files component -- */
 export default function Files() {
-  const { currentDevice, transferQueue, appendTransferTask, addToast, setActiveTab } = useAppState();
+  const { currentDevice, addToast } = useAppState();
+  const [currentPath, setCurrentPath] = useState('/root');
+  const [entries, setEntries] = useState<Array<{ name: string; isDir: boolean; size?: string; date?: string }>>([]);
+  const [running, setRunning] = useState(false);
+  const [editorFile, setEditorFile] = useState<{ path: string; content: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragActive, setDragActive] = useState(false);
 
-  const [localSelected, setLocalSelected] = useState<Set<string>>(new Set());
-  const [remoteSelected, setRemoteSelected] = useState<Set<string>>(new Set());
-
-  const completedCount = transferQueue.filter(t => t.status === 'done').length;
-  const runningCount = transferQueue.filter(t => t.status !== 'done').length;
-
-  const toggleSelect = (_set: Set<string>, setFn: React.Dispatch<React.SetStateAction<Set<string>>>, path: string) => {
-    setFn(prev => {
-      const next = new Set(prev);
-      next.has(path) ? next.delete(path) : next.add(path);
-      return next;
-    });
+  const ensureDevice = () => {
+    if (!currentDevice) {
+      addToast('请先连接真实设备', 'warning');
+      return false;
+    }
+    return true;
   };
 
+  const parseListOutput = (raw: string) => {
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('total '))
+      .map((line) => {
+        const parts = line.split(/\s+/);
+        const mode = parts[0] || '';
+        const size = parts[4] || '';
+        const date = parts.slice(5, 8).join(' ');
+        const name = parts.slice(8).join(' ');
+        return { name, isDir: mode.startsWith('d'), size, date };
+      })
+      .filter((item) => item.name && item.name !== '.' && item.name !== '..');
+  };
+
+  const refreshList = (path = currentPath) => {
+    if (!ensureDevice() || !currentDevice) return;
+    setRunning(true);
+    listDeviceFiles(currentDevice.id, path)
+      .then((res) => {
+        setEntries(parseListOutput(res.output || ''));
+        setCurrentPath(path);
+      })
+      .catch((err) => addToast(err instanceof Error ? err.message : '刷新目录失败', 'error'))
+      .finally(() => setRunning(false));
+  };
+
+  useEffect(() => {
+    if (currentDevice) {
+      refreshList(currentPath);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDevice?.id]);
+
+  const handleNavigate = (folderName: string) => {
+    const nextPath = currentPath === '/' ? `/${folderName}` : `${currentPath}/${folderName}`;
+    refreshList(nextPath);
+  };
+
+  const handleBreadcrumb = (index: number) => {
+    const parts = currentPath.split('/').filter(Boolean);
+    const nextPath = '/' + parts.slice(0, index + 1).join('/');
+    refreshList(nextPath);
+  };
+
+  const runDownload = (fileName: string, isFolder: boolean) => {
+    if (!ensureDevice() || !currentDevice) return;
+    const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
+    addToast(isFolder ? '开始压缩并下载...' : '开始下载...', 'info');
+    downloadDeviceFile(currentDevice.id, filePath)
+      .then((res) => {
+        if (!res.contentBase64) {
+          addToast('未获取到文件内容', 'warning');
+          return;
+        }
+        const binary = atob(res.contentBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes]);
+        const href = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = isFolder ? `${fileName}.tar.gz` : fileName;
+        link.click();
+        URL.revokeObjectURL(href);
+      })
+      .catch((err) => addToast(err instanceof Error ? err.message : '下载文件失败', 'error'));
+  };
+
+  const runEdit = (fileName: string) => {
+    if (!ensureDevice() || !currentDevice) return;
+    const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
+    setRunning(true);
+    readDeviceFile(currentDevice.id, filePath)
+      .then((res) => {
+         let text = res.output || '';
+         if (res.contentBase64) {
+           try {
+             // Safely decode UTF-8 from Base64
+             const binary = atob(res.contentBase64);
+             const bytes = new Uint8Array(binary.length);
+             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+             text = new TextDecoder('utf-8').decode(bytes);
+           } catch(e) { console.warn('Base64 decode failed', e); }
+         }
+         setEditorFile({ path: filePath, content: text });
+      })
+      .catch((err) => addToast(err instanceof Error ? err.message : '读取文件失败', 'error'))
+      .finally(() => setRunning(false));
+  };
+
+  const runSaveEdit = () => {
+    if (!ensureDevice() || !currentDevice || !editorFile) return;
+    setRunning(true);
+    writeDeviceFile(currentDevice.id, editorFile.path, editorFile.content)
+      .then(() => {
+        addToast('文件已保存', 'success');
+        setEditorFile(null);
+        refreshList();
+      })
+      .catch((err) => addToast(err instanceof Error ? err.message : '保存文件失败', 'error'))
+      .finally(() => setRunning(false));
+  };
+
+  const toBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const b64 = result.split(',')[1];
+      resolve(b64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const handleUpload = async (file: File) => {
+    if (!ensureDevice() || !currentDevice) return;
+    try {
+      setRunning(true);
+      addToast(`正在上传 ${file.name}...`, 'info');
+      const base64 = await toBase64(file);
+      const targetPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
+      await uploadDeviceFile(currentDevice.id, targetPath, base64);
+      addToast('上传成功', 'success');
+      refreshList();
+    } catch (err: any) {
+      addToast(err.message || '上传失败', 'error');
+    } finally {
+      setRunning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setDragActive(true); };
+  const onDragLeave = () => setDragActive(false);
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleUpload(e.dataTransfer.files[0]);
+    }
+  };
+
+  const parts = currentPath.split('/').filter(Boolean);
+
   return (
-    <div className="center-stage wide-stage">
-      <div className="isolated-widget workflow-widget">
-        <div className="widget-header">📁 文件管理</div>
-        <div className="desc-text">浏览本地和设备文件夹，双击进入目录，单击选择文件后传输。</div>
-
-        <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
-          <span className="ai-suggest-label">🧠 AI 建议</span>
-          <span className="ai-recommend-text">
-            检测到远程 <strong>logs/</strong> 目录有新日志 ·
-            <strong>models/</strong> 下有未同步的模型文件 ·
-            建议:
-          </span>
-          <button className="clean-btn outline-btn sm-btn" style={{ marginLeft: 8, fontSize: '0.75rem' }} onClick={() => { appendTransferTask(); addToast('AI 自动同步: 下载最新远程日志', 'info'); }}>
-            📥 同步日志
-          </button>
-          <button className="clean-btn outline-btn sm-btn" style={{ fontSize: '0.75rem' }} onClick={() => { appendTransferTask(); addToast('AI 自动同步: 上传本地模型', 'info'); }}>
-            📤 同步模型
-          </button>
+    <div className="center-stage wide-stage" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
+      <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+      <div className="isolated-widget workflow-widget" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="widget-header">
+          📁 资源管理器
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 13, fontWeight: 'normal' }}>
+            <button className="clean-btn outline-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, transition: 'background-color 0.2s' }} onClick={() => refreshList()} disabled={running} onMouseEnter={(e) => !running && (e.currentTarget.style.backgroundColor = '#f1f5f9')} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = ''}>
+              {running ? <Loader2 size={16} key="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+              刷新
+            </button>
+            <button className="clean-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, transition: 'background-color 0.2s', backgroundColor: '#0284c7', color: '#fff' }} onClick={() => fileInputRef.current?.click()} disabled={running} onMouseEnter={(e) => !running && (e.currentTarget.style.backgroundColor = '#0369a1')} onMouseLeave={(e) => !running && (e.currentTarget.style.backgroundColor = '#0284c7')}>
+              {running ? <Loader2 size={16} key="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={16} />}
+              上传文件
+            </button>
+            <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+          </div>
         </div>
-
-        <div className="file-status-strip">
-          <span className="card-status-badge ok" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
-            <span className="card-status-dot"></span>SFTP
-          </span>
-          <span className="file-status-text">root@{currentDevice?.ip}:/userdata</span>
-          {runningCount > 0 && (
-            <span className="file-status-text">{runningCount} 项传输中</span>
-          )}
-          {completedCount > 0 && (
-            <span className="file-status-text" style={{ color: '#16a34a' }}>✅ {completedCount} 项已完成</span>
-          )}
-        </div>
-
-        <div className="workspace-grid two-column">
-          <FilePane
-            title="📂 本地工作区"
-            rootPath="~/workspace"
-            tree={LOCAL_TREE}
-            selected={localSelected}
-            onSelect={p => toggleSelect(localSelected, setLocalSelected, p)}
-            onTransfer={() => { appendTransferTask(); setLocalSelected(new Set()); addToast(`上传 ${localSelected.size} 个文件到设备`, 'info'); }}
-            transferLabel="上传所选 →"
-          />
-          <FilePane
-            title={`🛰️ 远程 (${currentDevice?.ip})`}
-            rootPath="/userdata"
-            tree={REMOTE_TREE}
-            selected={remoteSelected}
-            onSelect={p => toggleSelect(remoteSelected, setRemoteSelected, p)}
-            onTransfer={() => { appendTransferTask(); setRemoteSelected(new Set()); addToast(`下载 ${remoteSelected.size} 个文件到本地`, 'info'); }}
-            transferLabel="← 下载所选"
-          />
-        </div>
-
-        {transferQueue.length > 0 && (
-          <div className="transfer-strip">
-            <div className="panel-title">传输队列 ({transferQueue.length})</div>
-            {transferQueue.map((item) => (
-              <div key={item.id} className="transfer-item">
-                <div className="transfer-item-head">
-                  <span className="transfer-item-name">{item.direction === '上传' ? '⬆️' : '⬇'} {item.name}</span>
-                  <span className="transfer-item-status">{item.status === 'done' ? '✅ 完成' : `${item.progress}%`}</span>
-                </div>
-                <div className="progress-track thin">
-                  <div className="progress-fill" style={{ width: `${item.progress}%` }}></div>
-                </div>
+        
+        {editorFile ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div className="panel-card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+              <button className="clean-btn outline-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }} onClick={() => setEditorFile(null)}>
+                <ArrowLeft size={16} /> 返回
+              </button>
+              <div style={{ width: 1, height: 20, background: '#cbd5e1' }}></div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: '#334155', display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ color: '#94a3b8' }}>{editorFile.path.substring(0, editorFile.path.lastIndexOf('/')) || '/'}</span>
+                <span style={{ color: '#94a3b8' }}>/</span>
+                <span>{editorFile.path.substring(editorFile.path.lastIndexOf('/') + 1)}</span>
               </div>
-            ))}
+            </div>
+            <div style={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+              <Editor
+                height="100%"
+                language={((): string => {
+                  const ext = editorFile.path.split('.').pop()?.toLowerCase();
+                  switch (ext) {
+                    case 'py': return 'python';
+                    case 'js':
+                    case 'jsx': return 'javascript';
+                    case 'ts':
+                    case 'tsx': return 'typescript';
+                    case 'json': return 'json';
+                    case 'md': return 'markdown';
+                    case 'html': return 'html';
+                    case 'css': return 'css';
+                    default: return 'shell';
+                  }
+                })()}
+                theme="vs-light" 
+                value={editorFile.content}
+                onChange={(val) => setEditorFile({ ...editorFile, content: val || '' })}
+                options={{ minimap: { enabled: false }, fontSize: 14, wordWrap: 'on' }}
+              />
+            </div>
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+              <button className="clean-btn" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: '#0284c7', color: '#fff', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
+                {running ? '保存中...' : '💾 保存修改'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div className="panel-card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 Home</button>
+              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>/ 根目录</button>
+              <div style={{ flex: 1, marginLeft: 10, display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+                <span style={{ cursor: 'pointer', color: '#0284c7', fontWeight: 500 }} onClick={() => refreshList('/')}>Root</span>
+                {parts.map((p, i) => (
+                  <React.Fragment key={i}>
+                    <span style={{ color: '#94a3b8' }}>/</span>
+                    <span style={{ cursor: 'pointer', color: '#0284c7', fontWeight: 500 }} onClick={() => handleBreadcrumb(i)}>{p}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+
+            <div 
+              className="panel-card" 
+              style={{ 
+                flex: 1, 
+                minHeight: 0,
+                overflow: 'auto', 
+                padding: 0, 
+                position: 'relative', 
+                border: '1px solid #cbd5e1',
+                backgroundColor: dragActive ? '#f0f9ff' : '#ffffff'
+              }}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+            >
+              {dragActive && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(240, 249, 255, 0.8)', zIndex: 10, fontSize: 20, color: '#0284c7', fontWeight: 600, pointerEvents: 'none' }}>
+                  松开鼠标以长传文件至此目录
+                </div>
+              )}
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 5, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                  <tr>
+                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '50%' }}>文件名称</th>
+                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '15%' }}>大小</th>
+                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '20%' }}>修改日期</th>
+                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '15%', textAlign: 'right' }}>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentPath !== '/' && (
+                    <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '14px 16px', cursor: 'pointer', color: '#1e293b', fontWeight: 500 }} onClick={() => handleNavigate('..')}>
+                        <span style={{ marginRight: 10, fontSize: 18 }}>📂</span>.. (上一级)
+                      </td>
+                      <td></td><td></td><td></td>
+                    </tr>
+                  )}
+                  {entries.map((entry) => (
+                    <tr key={entry.name} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: '#ffffff' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}>
+                      <td 
+                        style={{ padding: '14px 16px', cursor: entry.isDir ? 'pointer' : 'default', color: entry.isDir ? '#0f172a' : '#334155', fontWeight: entry.isDir ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} 
+                        onClick={() => entry.isDir && handleNavigate(entry.name)}
+                        title={entry.name}
+                      >
+                        <span style={{ marginRight: 10, fontSize: 18 }}>{entry.isDir ? '📁' : '📄'}</span>
+                        {entry.name}
+                      </td>
+                      <td style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.isDir ? '-' : entry.size}</td>
+                      <td style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.date}</td>
+                      <td style={{ padding: '14px 16px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          {!entry.isDir && (
+                            <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runEdit(entry.name)}>编辑</button>
+                          )}
+                          <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runDownload(entry.name, entry.isDir)}>下载</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {entries.length === 0 && !running && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>此文件夹为空，您可以拖拽文件到此处上传</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
-
-        <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-          <button className="chip-btn" onClick={() => addToast('AI 正在同步所有模型文件到设备...', 'info')}>🤖 AI 一键同步模型</button>
-          <button className="chip-btn" onClick={() => addToast('AI 正在下载并打包远程日志...', 'info')}>📋 下载全部日志</button>
-          <button className="chip-btn" onClick={() => addToast('AI 正在备份远程配置文件...', 'info')}>💾 备份远程配置</button>
-          <button className="chip-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端，可用 scp/rsync 手动操作', 'info'); }}>🖥️ 终端手动操作</button>
-        </div>
       </div>
     </div>
   );

@@ -8,18 +8,26 @@
     "dev:client": "node scripts/dev-client.mjs",
     "dev:server": "node scripts/dev-server.mjs",
     "build": "tsc --noEmit -p tsconfig.json && npm run build:server && vite build",
+    "verify:modules": "node scripts/verify-real-modules.mjs",
     "preview": "vite preview",
     "start": "node dist-server/index.js",
     "build:server": "tsc -p tsconfig.server.json"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "lucide-react": "^0.577.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "ssh2": "^1.16.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "xterm": "^5.3.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -27,6 +35,8 @@
     "@types/node": "^22.13.10",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "@types/socket.io": "^3.0.1",
+    "@types/socket.io-client": "^1.4.36",
     "@types/ssh2": "^1.15.5",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",

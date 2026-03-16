@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState, ChatBlock, AgentPlan, AgentExecutionState } from '../app-types';
-import { MOCK_DEVICES, TERMINAL_PROFILES, FLASH_IMAGES, CMD_SUGGESTIONS } from '../constants';
-import { fetchAIReply, fetchAgentPlan, runOpenClawAgentAction } from '../api';
+import { TERMINAL_PROFILES, FLASH_IMAGES, CMD_SUGGESTIONS } from '../constants';
+import { connectDevice, checkDevicePing, executeDeviceCommand, fetchAIReply, fetchAgentPlan, fetchDevices, fetchNodeRedStatus, fetchRosTopics, fetchVncStatus, forgetDevicePassword, rememberDevicePassword, removeDevice as removeDeviceApi, runOpenClawAgentAction } from '../api';
 import { orchestrate } from '../ai';
 import type { AppActions, Task, IntentId } from '../ai';
 
@@ -57,7 +57,7 @@ export interface AppState {
   setActiveSessionId: (v: string) => void;
   currentSession: TerminalSession;
   createSession: () => void;
-  runTerminalCommand: (cmd: string) => void;
+  runTerminalCommand: (cmd: string, password?: string) => void;
   runTerminalAIAnalysis: () => void;
 
   // Files / Transfer
@@ -128,7 +128,7 @@ export interface AppState {
   isScanning: boolean;
   scannedDevices: Array<{ name: string; ip: string }>;
   scanForDevices: () => void;
-  addNewDevice: () => void;
+  addNewDevice: (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => void;
   addScannedDevice: (dev: { name: string; ip: string }) => void;
   removeDevice: (id: string) => void;
   showSettings: boolean;
@@ -181,8 +181,8 @@ export function useAppState() {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   // ---- Device ----
-  const [activeDevice, setActiveDevice] = useState(MOCK_DEVICES[0].id);
-  const [devices, setDevices] = useState<Device[]>(MOCK_DEVICES);
+  const [activeDevice, setActiveDevice] = useState('');
+  const [devices, setDevices] = useState<Device[]>([]);
   const currentDevice = devices.find((d) => d.id === activeDevice);
 
   // ---- Navigation ----
@@ -224,10 +224,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ---- File Transfer ----
   const [transferProtocol] = useState('sftp');
   const [fileAction, setFileAction] = useState<'upload' | 'download' | 'sync'>('upload');
-  const [transferQueue, setTransferQueue] = useState<TransferItem[]>([
-    { id: 'queue-1', name: 'models/yolov5.bin', direction: '上传', progress: 100, status: 'done' },
-    { id: 'queue-2', name: 'logs/run-2026-03-10.tar.gz', direction: '下载', progress: 42, status: 'running' },
-  ]);
+  const [transferQueue, setTransferQueue] = useState<TransferItem[]>([]);
 
   // ---- VNC ----
   const [vncQuality, setVncQuality] = useState<'smooth' | 'balanced' | 'sharp'>('balanced');
@@ -271,8 +268,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
   const [activities, setActivities] = useState<Activity[]>([
     { id: 1, text: '系统就绪，RDK Studio 启动完成', time: '刚刚' },
-    { id: 2, text: 'RDK X3 - Local 设备已连接', time: '2 分钟前' },
-    { id: 3, text: 'OpenClaws 网关服务运行中', time: '5 分钟前' },
+    { id: 2, text: '等待连接真实设备', time: '1 分钟前' },
+    { id: 3, text: '可通过设备管理添加 RDK 开发板', time: '2 分钟前' },
   ]);
   const addActivity = (text: string) => {
     setActivities((prev) => [{ id: Date.now(), text, time: '刚刚' }, ...prev].slice(0, 10));
@@ -295,29 +292,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setConfirmDialog({ show: true, title, message, onConfirm });
   };
   const scanForDevices = () => {
-    setIsScanning(true);
+    setIsScanning(false);
     setScannedDevices([]);
-    window.setTimeout(() => {
-      setScannedDevices([
-        { name: 'RDK X3 (新发现)', ip: '192.168.1.110' },
-        { name: 'RDK Ultra - 测试台', ip: '192.168.1.120' },
-      ]);
-      setIsScanning(false);
-      addToast('局域网扫描完成，发现 2 台设备', 'success');
-    }, 2000);
+    addToast('请手动输入设备 IP 进行真实 SSH 连接', 'info');
   };
-  const addNewDevice = () => {
-    if (!newDeviceName.trim() || !newDeviceIp.trim()) {
-      addToast('请填写设备名称和 IP 地址', 'warning');
+  const addNewDevice = (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => {
+    const host = payload?.host ?? newDeviceIp;
+    const port = payload?.port ?? 22;
+    const username = payload?.username ?? 'root';
+    const password = payload?.password ?? '';
+    const alias = payload?.name?.trim() || newDeviceName.trim();
+
+    if (!host.trim() || !username.trim() || !password.trim()) {
+      addToast('请填写设备 IP、用户名和密码', 'warning');
       return;
     }
-    const id = String(devices.length + 1);
-    setDevices((prev) => [...prev, { id, name: newDeviceName, status: 'online', ip: newDeviceIp }]);
-    setShowAddDevice(false);
-    setNewDeviceName('');
-    setNewDeviceIp('');
-    addToast(`设备 "${newDeviceName}" 已添加`, 'success');
-    addActivity(`添加设备: ${newDeviceName} (${newDeviceIp})`);
+
+    connectDevice({ host: host.trim(), port, username: username.trim(), password: password.trim() })
+      .then((res) => {
+        rememberDevicePassword(res.device.id, password.trim());
+        const device: Device = {
+          id: res.device.id,
+          name: alias || `${res.device.username}@${res.device.host}:${res.device.port ?? 22}`,
+          status: res.device.status === 'connected' ? 'online' : 'offline',
+          ip: res.device.host,
+          port: res.device.port ?? 22,
+          description: `SSH ${res.device.username}:${res.device.port ?? 22}`,
+        };
+        setDevices((prev) => {
+          const next = [device, ...prev.filter((item) => item.id !== device.id)];
+          return next;
+        });
+        setActiveDevice(device.id);
+        setShowAddDevice(false);
+        setNewDeviceName('');
+        setNewDeviceIp('');
+        addToast(`设备 "${device.name}" 已连接`, 'success');
+        addActivity(`连接设备: ${device.name} (${device.ip})`);
+      })
+      .catch((error) => {
+        addToast(error instanceof Error ? error.message : '设备连接失败', 'error');
+      });
   };
   const addScannedDevice = (device: { name: string; ip: string }) => {
     const id = String(devices.length + 1);
@@ -329,15 +344,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const dev = devices.find(d => d.id === id);
     if (!dev) return;
     showConfirm('删除设备', `确定要删除设备 "${dev.name}" 吗？`, () => {
-      setDevices(prev => {
-        const remaining = prev.filter(d => d.id !== id);
-        if (activeDevice === id && remaining.length > 0) {
-          setActiveDevice(remaining[0].id);
-        }
-        return remaining;
-      });
-      addToast(`设备 "${dev.name}" 已删除`, 'info');
-      addActivity(`删除设备: ${dev.name}`);
+      removeDeviceApi(id)
+        .then(() => {
+          forgetDevicePassword(id);
+          setDevices(prev => {
+            const remaining = prev.filter(d => d.id !== id);
+            if (activeDevice === id) {
+              setActiveDevice(remaining[0]?.id ?? '');
+            }
+            return remaining;
+          });
+          addToast(`设备 "${dev.name}" 已删除`, 'info');
+          addActivity(`删除设备: ${dev.name}`);
+        })
+        .catch((error) => {
+          addToast(error instanceof Error ? error.message : '删除设备失败', 'error');
+        });
     });
   };
 
@@ -676,8 +698,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           openClawStartOnBoard, openClawStatusOnBoard, openClawSwitchOnBoard,
           setShowSettings,
           addToast, addActivity,
-          currentDeviceName: currentDevice?.name ?? 'RDK X5',
-          currentDeviceIp: currentDevice?.ip ?? '192.168.1.100',
+          currentDeviceName: currentDevice?.name ?? '未连接设备',
+          currentDeviceIp: currentDevice?.ip ?? 'N/A',
         };
 
         if (agentMode) {
@@ -796,11 +818,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const startFlash = () => {
     const doFlash = () => {
       setFlashProgress(0);
-      setFlashPhase('准备扫描目标介质与系统镜像');
+      setFlashPhase('请在本机执行烧录工具（balenaEtcher / dd / rpi-imager）后回到此页确认');
       setFlashStep(1);
-      setIsFlashing(true);
-      addToast('烧录流程已启动', 'info');
-      addActivity(`开始烧录: ${FLASH_IMAGES.find((i) => i.id === flashImage)?.label || flashImage}`);
+      setIsFlashing(false);
+      addToast('已进入真实烧录流程引导', 'info');
+      addActivity(`烧录准备: ${FLASH_IMAGES.find((i) => i.id === flashImage)?.label || flashImage}`);
     };
     if (flashTarget === 'emmc') {
       showConfirm('⚠️ eMMC 烧录确认', '当前目标为 eMMC 内置存储，写入后将覆盖原有系统。此操作不可撤销，建议先备份重要数据。确认继续？', doFlash);
@@ -811,10 +833,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const appendTransferTask = () => {
     const direction = fileAction === 'upload' ? '上传' : fileAction === 'download' ? '下载' : '同步';
-    const name = fileAction === 'upload' ? 'configs/device-profile.yaml' : fileAction === 'download' ? 'userdata/trace.log' : 'workspace/rdk-demo/';
+    const name = fileAction === 'upload' ? '用户选择文件' : fileAction === 'download' ? '用户选择远程文件' : '用户选择同步目录';
     setTransferQueue((prev) => [{ id: `queue-${prev.length + 1}`, name, direction, progress: 0, status: 'running' }, ...prev]);
-    addToast(`${direction}任务已加入队列: ${name}`, 'info');
-    addActivity(`新增${direction}任务: ${name}`);
+    addToast(`${direction}任务已记录，请在文件页执行真实命令`, 'info');
+    addActivity(`新增${direction}任务`);
   };
 
   const createSession = () => {
@@ -826,8 +848,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addActivity(`创建终端会话: ${profileLabel}`);
   };
 
-  const runTerminalCommand = (commandText: string) => {
+  const runTerminalCommand = (commandText: string, password?: string) => {
     if (!commandText.trim()) return;
+    if (!currentDevice) {
+      addToast('请先连接真实设备', 'warning');
+      return;
+    }
     const nlPatterns: Array<{ match: RegExp; cmd: string }> = [
       { match: /查看.*话题|列出.*topic/i, cmd: 'ros2 topic list' },
       { match: /温度|发热|散热/i, cmd: 'cat /sys/class/thermal/thermal_zone0/temp' },
@@ -840,30 +866,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ];
     const isNL = /[\u4e00-\u9fff]/.test(commandText) && !commandText.startsWith('/') && !commandText.includes('--');
     const nlHit = isNL ? nlPatterns.find((p) => p.match.test(commandText)) : null;
-    const responseMap: Record<string, string[]> = {
-      'ros2 topic list': ['/camera/color/image_raw', '/hobot_dnn/bbox', '/tf', '/cmd_vel'],
-      hrut_smi: ['BPU0 68%', 'DDR 43%', 'TEMP 61.8C'],
-      'tail -f /var/log/syslog': ['[mock] rsyslog 已进入跟随模式', '[mock] AI runtime ready'],
-      'ls /userdata': ['models', 'records', 'cache', 'workspace'],
-      top: ['CPU 31%  MEM 44%  Tasks 128', '[mock] 仅展示交互，不连接真实设备'],
-      'cat /sys/class/thermal/thermal_zone0/temp': ['61800  (61.8°C)'],
-      'free -h': ['              total   used   free', 'Mem:          8.0G   5.2G   2.8G'],
-      'df -h': ['/dev/mmcblk0p3   28G  16G   12G  56%  /', '/dev/mmcblk0p4   32G  10G   22G  32%  /userdata'],
-      'ip addr show': ['eth0: 192.168.1.100/24  UP', 'wlan0: <NO-CARRIER>  DOWN'],
-      'ros2 node list': ['/hobot_dnn', '/mipi_cam', '/ros2_daemon', '/usb_cam_node'],
-      'ros2 topic echo /hobot_dnn/bbox': ['[ai_msgs.PerceptionTargets] targets: [{type: "person", score: 0.92, bbox: [120,80,340,420]}]'],
-      'ros2 bag record -a': ['[INFO] Subscribing to all topics... recording to rosbag2_2026_03_10/'],
-      bputop: ['BPU0: 68%  |  Queue: 2  |  Freq: 1GHz  |  Temp: 61.8°C'],
-      'dmesg | tail': ['[  12.001] hobot_bpu: initialized', '[  12.340] mipi_cam: stream ready'],
-      'top -bn1 | head -20': ['PID  USER  CPU%  MEM%  CMD', '1284 root  23%   8%   hobot_dnn', '1301 root  12%   6%   mipi_cam'],
-    };
-    if (nlHit) {
-      const output = responseMap[nlHit.cmd] ?? ['[执行完成]'];
-      setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: [...s.lines, `✨ AI 翻译: "${commandText}" → ${nlHit.cmd}`, `root@rdk:~# ${nlHit.cmd}`, ...output, 'root@rdk:~#'] } : s));
-    } else {
-      const output = responseMap[commandText] ?? ['[mock] 已接收命令，建议切换为真实 SSH 执行器后接入。'];
-      setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, status: 'running', lines: [...s.lines, `root@rdk:~# ${commandText}`, ...output, 'root@rdk:~#'] } : s));
+
+    const actualCommand = nlHit?.cmd ?? commandText;
+
+    if (activeTab === 'terminal') {
+      window.dispatchEvent(new CustomEvent('xterm-send', { detail: actualCommand }));
+      return;
     }
+
+    if (actualCommand.trim() === 'clear') {
+      setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
+        ? { ...s, status: 'attached', lines: [] }
+        : s));
+      setTerminalDraft('');
+      return;
+    }
+
+    const prepend = nlHit ? [`✨ AI 翻译: "${commandText}" → ${actualCommand}`] : [];
+    setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
+      ? { ...s, status: 'running', lines: [...s.lines, ...prepend, `root@rdk:~# ${actualCommand}`] }
+      : s));
+
+    executeDeviceCommand(currentDevice.id, actualCommand, password)
+      .then((result) => {
+        if (password?.trim()) {
+          rememberDevicePassword(currentDevice.id, password.trim());
+        }
+        const outputLines = result.output
+          .split(/\r?\n/)
+          .map((line) => line.trimEnd())
+          .filter((line) => line.length > 0);
+        setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
+          ? { ...s, status: 'attached', lines: [...s.lines, ...(outputLines.length ? outputLines : ['[无输出]']), 'root@rdk:~#'] }
+          : s));
+      })
+      .catch((error) => {
+        const rawMessage = error instanceof Error ? error.message : '命令执行失败';
+        const message = /设备密码缺失|缺少 SSH 密码|Authentication failure/i.test(rawMessage)
+          ? '设备认证失败，请在设备管理中重新连接并更新账号密码'
+          : rawMessage;
+        setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
+          ? { ...s, status: 'attached', lines: [...s.lines, `ERROR: ${message}`, 'root@rdk:~#'] }
+          : s));
+        addToast(message, 'error');
+        if (/设备认证失败/.test(message)) {
+          setShowAddDevice(true);
+        }
+      });
+
     setTerminalDraft('');
   };
 
@@ -871,8 +921,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const lastLines = currentSession.lines.slice(-8).filter((l) => !l.startsWith('root@') && !l.startsWith('🤖'));
     const hasError = lastLines.some((l) => /error|fail|denied|not found/i.test(l));
     const analysis = hasError
-      ? ['🔍 检测到异常输出，可能原因:', '   • 权限不足 — 尝试 sudo 执行', '   • 依赖缺失 — 运行 apt install 安装', '   • 路径错误 — 检查文件是否存在', '💡 建议: sudo !! 重试上一条命令']
-      : ['🔍 终端输出分析:', `   • 共 ${currentSession.lines.length} 行输出，无明显错误`, '   • 系统状态正常，BPU/内存/网络指标在安全范围', '   • 建议: 定期运行 hrut_smi 监控硬件状态', '💡 一切正常，可继续操作。'];
+      ? ['🔍 检测到异常输出，可能原因:', '   • 权限不足（sudo）', '   • 依赖缺失（安装对应软件包）', '   • 路径或命令拼写错误', '💡 建议: 根据上方真实报错逐条排查']
+      : ['🔍 终端输出分析:', `   • 共 ${currentSession.lines.length} 行历史输出`, '   • 当前片段未检测到明显错误关键字', '   • 如需精确结论，请继续执行诊断命令（如 hrut_smi/free -h/df -h）'];
     const allLines = ['🤖 ─── AI 分析 ───', ...analysis, '────────────', 'root@rdk:~#'];
     setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: [...s.lines, '🤖 ─── AI 分析中... ───'] } : s));
     allLines.forEach((line, i) => {
@@ -884,18 +934,85 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const startVncSession = () => {
-    setVncConnected(true);
-    setVncProgress(8);
-    setVncPhase('正在发起远程桌面握手');
-    addToast('VNC 连接已发起', 'info');
-    addActivity('发起 VNC 远程桌面连接');
+    if (!currentDevice) {
+      addToast('请先连接真实设备', 'warning');
+      return;
+    }
+
+    setVncConnected(false);
+    setVncProgress(0);
+    setVncPhase('正在检查设备 VNC 服务状态');
+
+    fetchVncStatus(currentDevice.id)
+      .then((result) => {
+        if (result.active) {
+          setVncConnected(true);
+          setVncProgress(100);
+          setVncPhase('设备 VNC 服务已运行');
+          addToast('VNC 服务可用', 'success');
+          addActivity('设备 VNC 服务状态: active');
+        } else {
+          setVncConnected(false);
+          setVncProgress(0);
+          setVncPhase('设备未检测到 VNC 服务，请先在板端启动');
+          addToast('未检测到 VNC 服务，请先在设备上启动 x11vnc/vncserver', 'warning');
+        }
+      })
+      .catch((error) => {
+        setVncConnected(false);
+        setVncProgress(0);
+        setVncPhase('VNC 状态检查失败');
+        addToast(error instanceof Error ? error.message : 'VNC 状态检查失败', 'error');
+      });
   };
 
   const runFlowValidation = () => {
+    if (!currentDevice) {
+      addToast('请先连接真实设备', 'warning');
+      return;
+    }
     setFlowCheckProgress(0);
     setIsFlowChecking(true);
     addToast('部署前检查已开始', 'info');
     addActivity('执行流程编排部署前检查');
+
+    (async () => {
+      try {
+        setFlowCheckProgress(20);
+        const nodeRed = await fetchNodeRedStatus(currentDevice.id);
+
+        setFlowCheckProgress(50);
+        const ros = await fetchRosTopics(currentDevice.id);
+
+        setFlowCheckProgress(80);
+        const health = await executeDeviceCommand(
+          currentDevice.id,
+          'bash -lc "(openclaw status || clawctl status || echo openclaw-unavailable); (systemctl is-active nodered || echo nodered-inactive)"',
+        );
+
+        setFlowCheckProgress(100);
+        addToast('流程编排部署前检查完成', 'success');
+        addActivity(`Node-RED: ${nodeRed.active ? 'active' : 'inactive'} · ROS topics: ${ros.topics.length}`);
+        setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
+          ? {
+            ...s,
+            lines: [
+              ...s.lines,
+              '🤖 ─── Flow Validation (Real Device) ───',
+              `Node-RED: ${nodeRed.active ? 'active' : 'inactive'}`,
+              `ROS topics: ${ros.topics.length}`,
+              ...(health.output ? health.output.split(/\r?\n/).filter(Boolean) : []),
+              '────────────',
+              'root@rdk:~#',
+            ],
+          }
+          : s));
+      } catch (error) {
+        addToast(error instanceof Error ? error.message : '流程部署前检查失败', 'error');
+      } finally {
+        setIsFlowChecking(false);
+      }
+    })();
   };
 
   const openClawStartOnBoard = async () => {
@@ -905,9 +1022,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addActivity(`OpenClaw 板端启动失败: ${result.error}`);
       return { ok: false, error: result.error };
     }
+    const output = 'output' in result ? result.output : '';
     addToast('OpenClaw 板端启动完成', 'success');
     addActivity('OpenClaw 板端启动完成');
-    return { ok: true, output: result.output };
+    return { ok: true, output };
   };
 
   const openClawStatusOnBoard = async () => {
@@ -917,9 +1035,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addActivity(`OpenClaw 状态读取失败: ${result.error}`);
       return { ok: false, error: result.error };
     }
+    const output = 'output' in result ? result.output : '';
     addToast('OpenClaw 状态已刷新', 'success');
     addActivity('OpenClaw 状态刷新完成');
-    return { ok: true, output: result.output };
+    return { ok: true, output };
   };
 
   const openClawSwitchOnBoard = async (modelName: string) => {
@@ -929,12 +1048,72 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addActivity(`OpenClaw 模型切换失败: ${result.error}`);
       return { ok: false, error: result.error };
     }
+    const output = 'output' in result ? result.output : '';
     addToast(`OpenClaw 已切换到 ${modelName}`, 'success');
     addActivity(`OpenClaw 模型切换完成: ${modelName}`);
-    return { ok: true, output: result.output };
+    return { ok: true, output };
   };
 
   // ---- Effects ----
+
+  useEffect(() => {
+    fetchDevices()
+      .then((res) => {
+        const next = res.devices.map((device) => ({
+          id: device.id,
+          name: `${device.username}@${device.host}:${device.port ?? 22}`,
+          status: device.status === 'connected' ? 'online' : 'offline',
+          ip: device.host,
+          port: device.port ?? 22,
+          description: `SSH ${device.username}:${device.port ?? 22}`,
+        }));
+        setDevices(next);
+        setActiveDevice((prev) => (prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? '')));
+      })
+      .catch(() => {
+        addToast('设备列表读取失败，请检查后端服务', 'warning');
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Background ping process
+  useEffect(() => {
+    if (devices.length === 0) return;
+    
+    let cancelled = false;
+    const pingAll = async () => {
+      if (cancelled) return;
+      
+      const newDevices = await Promise.all(devices.map(async (dev) => {
+        try {
+          const res = await checkDevicePing(dev.id);
+          return { ...dev, status: res.status === 'connected' ? 'online' : 'offline' };
+        } catch {
+          return { ...dev, status: 'offline' };
+        }
+      }));
+      
+      if (!cancelled) {
+        setDevices(prev => {
+          return prev.map(p => {
+            const up = newDevices.find(n => n.id === p.id);
+            if (up && p.status !== up.status) {
+              return { ...p, status: up.status };
+            }
+            return p;
+          });
+        });
+      }
+    };
+
+    const timer = setInterval(pingAll, 10000);
+    pingAll();
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [devices.length]);
 
   // Persist chat history to localStorage
   useEffect(() => {
@@ -965,7 +1144,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      const target = e.target as HTMLElement;
+      const isInput = target instanceof HTMLInputElement || 
+                      target instanceof HTMLTextAreaElement || 
+                      target.isContentEditable ||
+                      target.closest('.monaco-editor') !== null ||
+                      target.closest('.xterm') !== null;
       if (e.key === '/' && !isInput) {
         e.preventDefault();
         const input = document.querySelector('.cmd-input') as HTMLInputElement;
@@ -1002,62 +1186,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isFlashing) return;
-    const timer = window.setInterval(() => {
-      setFlashProgress((prev) => {
-        const next = Math.min(prev + 12, 100);
-        if (next < 20) { setFlashPhase('校验镜像与目标介质'); setFlashStep(2); }
-        else if (next < 65) { setFlashPhase('写入系统分区与启动项'); setFlashStep(3); }
-        else if (next < 100) { setFlashPhase(flashVerify ? '执行写后校验与启动检查' : '整理烧录报告与建议'); setFlashStep(4); }
-        else { setFlashPhase('烧录流程完成，可进入首次启动向导'); setIsFlashing(false); addToast('🎉 烧录成功完成！可进入终端或文件管理器继续', 'success'); addActivity('系统镜像烧录完成'); }
-        return next;
-      });
-    }, 700);
-    return () => window.clearInterval(timer);
-  }, [flashVerify, isFlashing]);
-
-  useEffect(() => {
-    const hasRunning = transferQueue.some((item) => item.status === 'running');
-    if (!hasRunning) return;
-    const timer = window.setInterval(() => {
-      setTransferQueue((prev) => {
-        let bumped = false;
-        return prev.map((item) => {
-          if (bumped || item.status !== 'running') return item;
-          bumped = true;
-          const next = Math.min(item.progress + 9, 100);
-          return { ...item, progress: next, status: next >= 100 ? 'done' : 'running' };
-        });
-      });
-    }, 900);
-    return () => window.clearInterval(timer);
-  }, [transferQueue]);
-
-  useEffect(() => {
-    if (!vncConnected || vncProgress >= 100) return;
-    const timer = window.setInterval(() => {
-      setVncProgress((prev) => {
-        const next = Math.min(prev + 18, 100);
-        if (next < 35) setVncPhase('协商分辨率与编码协议');
-        else if (next < 75) setVncPhase('同步桌面帧缓冲与快捷键映射');
-        else if (next < 100) setVncPhase('连接已稳定，正在启用辅助控制层');
-        else { setVncPhase('远程桌面已接入'); addToast('🖥️ VNC 远程桌面连接成功', 'success'); addActivity('VNC 远程桌面连接就绪'); }
-        return next;
-      });
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [vncConnected, vncProgress]);
-
-  useEffect(() => {
-    if (!isFlowChecking) return;
-    const timer = window.setInterval(() => {
-      setFlowCheckProgress((prev) => {
-        const next = Math.min(prev + 20, 100);
-        if (next >= 100) setIsFlowChecking(false);
-        return next;
-      });
-    }, 450);
-    return () => window.clearInterval(timer);
-  }, [isFlowChecking]);
+    setFlashPhase('真实烧录请在本机完成，完成后手动确认状态');
+  }, [isFlashing]);
 
   // ---- Context Value ----
   const value: AppState = {

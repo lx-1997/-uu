@@ -1,9 +1,4 @@
-import type { DashboardCard, Device } from './app-types';
-
-export const MOCK_DEVICES: Device[] = [
-  { id: '1', name: 'RDK X3 - Local', status: 'online', ip: '192.168.1.100' },
-  { id: '2', name: 'RDK Ultra - Lab', status: 'offline', ip: '192.168.1.105' },
-];
+import type { DashboardCard } from './app-types';
 
 export const DASHBOARD_CARDS: DashboardCard[] = [
   {
@@ -11,9 +6,9 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
     title: '⚙️ OpenClaws Gateway',
     description: '大模型网关与 AI Agent 编排，直连 OpenAI / Qwen，飞书一键接入。',
     loading: '正在载入 OpenClaws 网关配置...',
-    statusLabel: 'Gateway Running',
+    statusLabel: '状态实时检测',
     statusOk: true,
-    miniStats: [{ label: '已接入渠道', value: '2' }, { label: '今日调用', value: '1,247' }],
+    miniStats: [{ label: '已接入渠道', value: '--' }, { label: '调用次数', value: '--' }],
     cta: '管理网关配置 →',
     quickActions: [{ label: '配置密钥', icon: '🔑' }, { label: '查看日志', icon: '📋' }],
   },
@@ -22,9 +17,9 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
     title: '📦 应用示例 · NodeHub',
     description: '来自地瓜机器人 NodeHub 的示例应用，一键部署到开发板。',
     loading: '正在加载 NodeHub 应用列表...',
-    statusLabel: '6 个应用可用',
+    statusLabel: '按设备实时检测',
     statusOk: true,
-    miniStats: [{ label: '可部署', value: '6' }, { label: '已安装', value: '2' }],
+    miniStats: [{ label: '可部署', value: '--' }, { label: '已安装', value: '--' }],
     cta: '浏览 NodeHub →',
     quickActions: [{ label: '人体检测', icon: '👁️' }, { label: '视觉跟随', icon: '🖐️' }],
   },
@@ -33,9 +28,9 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
     title: '� ROS 话题分析',
     description: '话题监控、节点图谱、TF 坐标树，AI 辅助诊断。',
     loading: '正在扫描 ROS2 话题...',
-    statusLabel: '4 个话题活跃',
+    statusLabel: '实时扫描',
     statusOk: true,
-    miniStats: [{ label: '活跃 Topic', value: '4' }, { label: '分析工具', value: '6' }],
+    miniStats: [{ label: '活跃 Topic', value: '--' }, { label: '分析工具', value: '实时命令' }],
     cta: '打开分析面板 →',
     quickActions: [{ label: '话题监听', icon: '📡' }, { label: '分析工具', icon: '🔧' }],
   },
@@ -44,9 +39,9 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
     title: '� 模型仓库 · ModelZoo',
     description: '浏览地瓜机器人 ModelZoo 模型，转换部署到开发板。',
     loading: '正在连接 ModelZoo...',
-    statusLabel: '8 个模型可用',
+    statusLabel: '按板端命令执行',
     statusOk: true,
-    miniStats: [{ label: '已部署', value: '2' }, { label: 'ModelZoo', value: '8' }],
+    miniStats: [{ label: '已部署', value: '--' }, { label: 'ModelZoo', value: '官方仓库' }],
     cta: '浏览 ModelZoo →',
     quickActions: [{ label: '一键部署', icon: '🚀' }, { label: 'Benchmark', icon: '⚡' }],
   },
@@ -121,8 +116,8 @@ export const CMD_SUGGESTIONS = [
 ];
 
 export const METRIC_CARDS = [
-  { label: 'BPU 占用', value: '68%', bar: 68, hint: '推理负载较高，建议保留 20% 峰值余量' },
-  { label: 'CPU 占用', value: '34%', bar: 34, hint: '适合继续运行视觉与终端诊断任务' },
-  { label: '内存使用', value: '5.2 / 8 GB', bar: 65, hint: '建议清理历史录包后再跑双摄应用' },
-  { label: '芯片温度', value: '61.8°C', bar: 58, hint: '温度正常，可开启持续监控窗口' },
+  { label: 'BPU 占用', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
+  { label: 'CPU 占用', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
+  { label: '内存使用', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
+  { label: '芯片温度', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
 ];

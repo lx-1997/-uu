@@ -17,6 +17,41 @@ npm run dev
 
 后端默认地址：`http://localhost:8787`
 
+## 实机联调（推荐流程）
+
+1. 打开设备添加弹窗，优先尝试官方常见 SSH 账户：`sunrise/sunrise`（串口常见 `root/root`）。
+2. 默认有线网络常见 IP 为 `192.168.127.10`，若不通请先确认 PC 与板卡同网段。
+3. 连接成功后先在终端执行：
+
+```bash
+cat /etc/version
+rdkos_info
+ip addr
+```
+
+4. 再进入各模块验证：ROS、Node-RED、VNC、Files、OpenClaw。
+
+## 全模块验证
+
+项目内置一键验证脚本：
+
+```powershell
+npm run verify:modules
+```
+
+可选环境变量：
+
+- `RDK_API_BASE_URL`：后端地址（默认 `http://127.0.0.1:8787`）
+- `RDK_DEVICE_ID`：指定验证设备
+- `RDK_DEVICE_PASSWORD`：需要密码的接口校验
+
+## 常见问题排查
+
+- SSH 连接失败：优先检查用户名密码（`sunrise/sunrise`）、端口（默认 `22`）、同网段配置。
+- ROS 无话题：如果输出 `ROS2_NOT_INSTALLED`，请先在设备安装 ROS2 基础包后重试。
+- VNC 不可用：先在板端用 `srpi-config -> Interface Options -> VNC` 使能，再检查 `x11vnc/vncserver` 服务。
+- Node-RED 不可用：先看服务状态，再执行启动命令并复查状态。
+
 ## 环境变量
 
 当前项目通过后端代理调用 OpenAI 兼容协议接口，避免把模型密钥暴露到浏览器。
@@ -32,7 +67,7 @@ npm run dev
 
 设备连接接口会实际尝试 SSH 登录校验，成功后把设备基本信息写入 `data/devices.json`。
 
-OpenClaw 功能当前提供的是“远程命令执行入口”，默认命令是占位值。你需要按自己环境替换成真实的 OpenClaw 下载命令和配置命令。
+OpenClaw 相关功能已接入真实板端命令（install/start/status/switch/logs），执行结果以设备返回输出为准。
 
 ## 构建
 

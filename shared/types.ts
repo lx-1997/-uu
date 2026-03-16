@@ -10,6 +10,7 @@ export interface ChatMessage {
 export interface Device {
   id: string;
   host: string;
+  port?: number;
   username: string;
   status: 'connected' | 'disconnected';
   lastCheckedAt: string;
@@ -17,6 +18,7 @@ export interface Device {
 
 export interface DevicePayload {
   host: string;
+  port?: number;
   username: string;
   password: string;
 }

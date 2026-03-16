@@ -1,63 +1,100 @@
+import { useEffect, useState } from 'react';
+import { executeDeviceCommand, fetchVncStatus } from '../api';
 import { useAppState } from '../hooks/useAppState';
 
 export default function Vnc() {
   const {
-    currentDevice, vncConnected, startVncSession, addToast,
+    currentDevice, vncConnected, vncPhase, startVncSession, addToast,
   } = useAppState();
+  const [statusOutput, setStatusOutput] = useState('');
+  const [repairing, setRepairing] = useState(false);
+  const [noVncReady, setNoVncReady] = useState(false);
 
-  const tools = [
-    { name: 'noVNC (内置)', desc: '基于 WebSocket 的浏览器直连方案，零安装、局域网低延迟', tag: '推荐局域网', action: () => startVncSession(), btnText: '启动连接' },
-    { name: 'RustDesk', desc: '开源远程桌面，支持 P2P 穿透，适合公网场景', tag: '推荐公网', action: () => window.open('https://rustdesk.com/', '_blank'), btnText: '前往下载' },
-    { name: 'Guacamole', desc: 'Apache 网关模式，浏览器中同时管理 VNC/RDP/SSH', tag: '多设备', action: () => window.open('https://guacamole.apache.org/', '_blank'), btnText: '了解更多' },
-    { name: 'XPRA', desc: '单应用无缝远程，只转发指定窗口而非整个桌面', tag: '轻量', action: () => window.open('https://xpra.org/', '_blank'), btnText: '了解更多' },
-  ];
+  useEffect(() => {
+    if (!currentDevice) return;
+    fetchVncStatus(currentDevice.id)
+      .then((res) => setStatusOutput(res.output))
+      .catch(() => setStatusOutput('VNC 状态读取失败'));
+
+    executeDeviceCommand(currentDevice.id, "bash -lc \"ss -lntp 2>/dev/null | grep ':6080' || pgrep -af 'websockify|novnc' || echo NOVNC_NOT_FOUND\"")
+      .then((res) => {
+        setNoVncReady(!/NOVNC_NOT_FOUND/.test(res.output));
+      })
+      .catch(() => setNoVncReady(false));
+  }, [currentDevice]);
 
   return (
     <div className="center-stage wide-stage">
       <div className="isolated-widget workflow-widget">
-        <div className="widget-header">🖥️ 远程桌面</div>
-        <div className="desc-text">选择合适的方式访问设备桌面环境。</div>
+        <div className="widget-header">🖥️ 远程桌面（真实设备）</div>
+        <div className="desc-text">先检查板端 VNC 服务状态，再按真实地址连接，不再渲染模拟桌面。</div>
 
-        {vncConnected && (
-          <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
-            <span className="ai-suggest-label">🧠 连接状态</span>
-            <span className="ai-recommend-text">
-              noVNC 已连接 · 延迟 <strong>12ms</strong> · 帧率 30fps · 连接稳定
-            </span>
-          </div>
-        )}
-
-        {vncConnected && (
-          <div className="panel-card remote-desktop-card vnc-viewport-card">
-            <div className="remote-desktop active">
-              <div className="desktop-window"></div>
-              <div className="desktop-sidebar"></div>
-              <div className="desktop-content">
-                <div className="desktop-panel"></div>
-                <div className="desktop-panel wide"></div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: vncConnected ? 14 : 0 }}>
-          {tools.map(t => (
-            <div key={t.name} className="panel-card" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong style={{ fontSize: '0.92rem' }}>{t.name}</strong>
-                <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: 6, background: '#f0f9ff', color: '#1e40af' }}>{t.tag}</span>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: '#64748b', lineHeight: 1.5, flex: 1 }}>{t.desc}</div>
-              <button className="clean-btn outline-btn" style={{ width: '100%', fontSize: '0.82rem' }} onClick={t.action}>{t.btnText}</button>
-            </div>
-          ))}
+        <div className="ai-recommend-strip" style={{ marginBottom: 14 }}>
+          <span className="ai-suggest-label">状态</span>
+          <span className="ai-recommend-text">{vncConnected ? 'VNC 服务在线' : 'VNC 服务未就绪'} · {vncPhase}</span>
+          <button className="clean-btn outline-btn sm-btn" onClick={startVncSession}>检查服务</button>
         </div>
 
-        <div className="ai-recommend-strip" style={{ marginTop: 14 }}>
-          <span className="ai-suggest-label">💡 提示</span>
-          <span className="ai-recommend-text">
-            局域网环境推荐使用内置 noVNC 即可满足需求；如果设备在公网，推荐 RustDesk 的 P2P 穿透方案。
-          </span>
+        <div className="panel-card" style={{ marginBottom: 12 }}>
+          <div className="panel-title">连接步骤</div>
+          <div className="usage-list">
+            <div className="usage-item"><strong>1. 板端启用 VNC</strong><span>可通过 srpi-config → Interface Options → VNC 打开</span></div>
+            <div className="usage-item"><strong>2. 本机连接</strong><span>优先使用 VNC Viewer 连接 {currentDevice?.ip || '设备IP'}:5900</span></div>
+            <div className="usage-item"><strong>3. 密码说明</strong><span>若提示认证失败，请在板端重设 VNC 密码（需 8 位）</span></div>
+          </div>
+          <button
+            className="clean-btn outline-btn"
+            style={{ marginTop: 10, marginRight: 8 }}
+            onClick={() => {
+              if (!currentDevice) {
+                addToast('请先连接设备', 'warning');
+                return;
+              }
+              setRepairing(true);
+              executeDeviceCommand(
+                currentDevice.id,
+                'bash -lc "(systemctl start vncserver || systemctl start x11vnc || true); (systemctl is-active vncserver || systemctl is-active x11vnc || pgrep -af \'x11vnc|Xtigervnc|vncserver\' || echo inactive)"',
+              )
+                .then((res) => {
+                  setStatusOutput(res.output || '无输出');
+                  addToast('已执行 VNC 服务启动/检测', 'info');
+                  startVncSession();
+                })
+                .catch((error) => addToast(error instanceof Error ? error.message : 'VNC 修复执行失败', 'error'))
+                .finally(() => setRepairing(false));
+            }}
+            disabled={repairing || !currentDevice}
+          >
+            {repairing ? '执行中...' : '一键启动并检测 VNC'}
+          </button>
+          <button
+            className="clean-btn"
+            style={{ marginTop: 10 }}
+            onClick={() => {
+              if (!currentDevice) {
+                addToast('请先连接设备', 'warning');
+                return;
+              }
+              window.open(`http://${currentDevice.ip}:6080/vnc.html`, '_blank');
+            }}
+            disabled={!noVncReady}
+          >
+            {noVncReady ? '打开 noVNC 地址' : 'noVNC 未部署'}
+          </button>
+          {!noVncReady && (
+            <div style={{ marginTop: 8, fontSize: '0.76rem', color: '#64748b' }}>
+              当前设备未检测到 noVNC（6080）。建议使用 VNC Viewer 连接 {currentDevice?.ip || '设备IP'}:5900。
+            </div>
+          )}
+        </div>
+
+        <div className="panel-card">
+          <div className="panel-title">服务探测输出</div>
+          <div className="terminal-screen" style={{ minHeight: 180 }}>
+            {statusOutput.split(/\r?\n/).filter(Boolean).map((line, index) => (
+              <div key={`${line}-${index}`} className="terminal-line">{line}</div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

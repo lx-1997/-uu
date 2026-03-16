@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import { verifyDeviceConnection } from '../api';
 
 type ConnMethod = 'manual' | 'usb';
 type Step = 'method' | 'configure' | 'verify';
@@ -47,7 +48,7 @@ const Icons = {
   ),
 };
 
-const METHODS: { key: ConnMethod; icon: JSX.Element; title: string; desc: string }[] = [
+const METHODS: { key: ConnMethod; icon: ReactNode; title: string; desc: string }[] = [
   { key: 'manual', icon: Icons.edit, title: 'SSH 网络连接', desc: '输入 IP 地址，通过有线网络或 WiFi 远程连接' },
   { key: 'usb',    icon: Icons.usb,  title: 'USB 串口调试', desc: '通过 Micro USB / Type-C 调试口直连' },
 ];
@@ -61,8 +62,8 @@ export default function AddDeviceModal() {
 
   const [step, setStep] = useState<Step>('method');
   const [method, setMethod] = useState<ConnMethod>('manual');
-  const [sshUser, setSshUser] = useState('root');
-  const [sshPass, setSshPass] = useState('root');
+  const [sshUser, setSshUser] = useState('sunrise');
+  const [sshPass, setSshPass] = useState('sunrise');
   const [sshPort, setSshPort] = useState('22');
   const [serialPort, setSerialPort] = useState('/dev/ttyUSB0');
   const [baudRate, setBaudRate] = useState('921600');
@@ -80,8 +81,8 @@ export default function AddDeviceModal() {
     setVerifyOk(false);
     setNewDeviceName('');
     setNewDeviceIp('');
-    setSshUser('root');
-    setSshPass('root');
+    setSshUser('sunrise');
+    setSshPass('sunrise');
     setSshPort('22');
     setWifiSsid('');
     setWifiPass('');
@@ -98,19 +99,28 @@ export default function AddDeviceModal() {
     setVerifying(true);
     setVerifyOk(false);
 
-    // Simulate connection verification
-    window.setTimeout(() => {
-      setVerifying(false);
-      setVerifyOk(true);
-      if (showWifiConfig && method === 'usb') {
-        setNewDeviceIp('192.168.31.25'); // Simulate fetching IP if Wi-Fi was auto-configured
-      }
-    }, 1800);
+    const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
+    verifyDeviceConnection({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'sunrise', password: sshPass.trim() })
+      .then(() => {
+        setVerifying(false);
+        setVerifyOk(true);
+      })
+      .catch(() => {
+        setVerifying(false);
+        setVerifyOk(false);
+        addToast('连接验证失败，请检查 IP/账号/密码', 'error');
+      });
   };
 
   const confirmAdd = () => {
-    addNewDevice();
-    close();
+    const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
+    addNewDevice({
+      host,
+      port: Number(sshPort || '22'),
+      username: sshUser.trim() || 'sunrise',
+      password: sshPass.trim(),
+      name: newDeviceName,
+    });
     if (method === 'usb') {
       setActiveTab('terminal');
       addToast(`串口 ${serialPort} 已连接，进入终端会话`, 'success');
@@ -208,7 +218,15 @@ export default function AddDeviceModal() {
                   />
                 </label>
                 <div className="adm-field-hint">
-                  支持 RDK X3 / X5 / S100 / Ultra
+                  官方常用默认：SSH 为 sunrise/sunrise（串口常见 root/root）；默认有线 IP 常见为 192.168.127.10
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                  <button type="button" className="clean-btn outline-btn sm-btn" onClick={() => { setSshUser('sunrise'); setSshPass('sunrise'); }}>
+                    使用 sunrise 默认
+                  </button>
+                  <button type="button" className="clean-btn outline-btn sm-btn" onClick={() => { setSshUser('root'); setSshPass('root'); }}>
+                    使用 root 默认
+                  </button>
                 </div>
 
                 <div style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
@@ -285,7 +303,7 @@ export default function AddDeviceModal() {
                   />
                 </label>
                 <div className="adm-field-hint">
-                  连接后将直接进入终端会话 &nbsp;|&nbsp; 数据位 8，停止位 1，无校验
+                  连接后将直接进入终端会话 &nbsp;|&nbsp; X5 常见波特率 115200 &nbsp;|&nbsp; X3 常见波特率 921600
                 </div>
 
                 <div style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
@@ -317,7 +335,7 @@ export default function AddDeviceModal() {
               <button
                 className="adm-nav-btn primary"
                 onClick={goToVerify}
-                disabled={method === 'manual' ? !newDeviceIp.trim() : false}
+                disabled={method === 'manual' ? (!newDeviceIp.trim() || !sshPass.trim()) : !sshPass.trim()}
               >
                 下一步 {Icons.arrow}
               </button>

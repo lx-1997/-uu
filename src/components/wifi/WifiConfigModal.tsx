@@ -1,16 +1,35 @@
 import { useState } from 'react';
+import { executeDeviceCommand } from '../../api';
+import { useAppState } from '../../hooks/useAppState';
 
 export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
+  const { currentDevice, addToast } = useAppState();
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
   const [connecting, setConnecting] = useState(false);
 
   const handleConnect = async () => {
+    if (!currentDevice) {
+      addToast('请先连接设备', 'warning');
+      return;
+    }
+
     setConnecting(true);
-    // TODO: 调用后端接口进行真实的 WiFi 连接
-    await new Promise(res => setTimeout(res, 2000));
-    setConnecting(false);
-    onClose();
+    const escapedSsid = ssid.replace(/"/g, '\\"');
+    const escapedPass = password.replace(/"/g, '\\"');
+    const cmd = password.trim()
+      ? `bash -lc "nmcli dev wifi connect \"${escapedSsid}\" password \"${escapedPass}\" || (wpa_passphrase \"${escapedSsid}\" \"${escapedPass}\" | sudo tee /etc/wpa_supplicant/wpa_supplicant.conf >/dev/null && sudo wpa_cli -i wlan0 reconfigure)"`
+      : `bash -lc "nmcli dev wifi connect \"${escapedSsid}\" || sudo nmcli dev wifi connect \"${escapedSsid}\""`;
+
+    executeDeviceCommand(currentDevice.id, cmd)
+      .then(() => {
+        addToast('WiFi 配置命令已执行', 'success');
+        onClose();
+      })
+      .catch((error) => {
+        addToast(error instanceof Error ? error.message : 'WiFi 配置失败', 'error');
+      })
+      .finally(() => setConnecting(false));
   };
 
   return (

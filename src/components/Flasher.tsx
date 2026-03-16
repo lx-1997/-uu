@@ -5,13 +5,15 @@ import { FLASH_IMAGES, STORAGE_TARGETS } from '../constants';
 export default function Flasher() {
   const {
     currentDevice, flashImage, setFlashImage, flashTarget, setFlashTarget,
-    flashProgress, flashPhase, isFlashing, startFlash,
+    flashPhase, startFlash,
     setActiveTab, addToast, devices
   } = useAppState();
 
   const [step, setStep] = useState<'image' | 'target' | 'wifi' | 'flash' | 'done'>('image');
   const [wifiName, setWifiName] = useState('');
   const [wifiPass, setWifiPass] = useState('');
+  const [confirmWritten, setConfirmWritten] = useState(false);
+  const [confirmVerified, setConfirmVerified] = useState(false);
 
   const steps = ['选镜像', '选介质', 'WiFi 预配', '烧录'];
   const stepKeys = ['image', 'target', 'wifi', 'flash'] as const;
@@ -66,6 +68,9 @@ export default function Flasher() {
                 已选: <strong>{selectedImage.label}</strong> · {selectedImage.detail}
               </div>
             )}
+            <div style={{ padding: '8px 12px', background: '#fefce8', borderRadius: 8, fontSize: '0.75rem', color: '#92400e' }}>
+              参考官方文档：<a href="https://developer.d-robotics.cc/rdk_doc/Quick_start" target="_blank" rel="noreferrer">快速开始 / 系统烧录</a>
+            </div>
             <div className="ob-nav">
               <div />
               <button className="ob-btn primary" disabled={!flashImage} onClick={() => setStep('target')}>下一步 →</button>
@@ -125,9 +130,9 @@ export default function Flasher() {
         )}
 
         {/* Step 4: Flash */}
-        {step === 'flash' && !isFlashing && flashProgress === 0 && (
+        {step === 'flash' && (
           <>
-            <h2 className="ob-heading">确认烧录</h2>
+            <h2 className="ob-heading">执行真实烧录</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: 10, fontSize: '0.82rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94a3b8' }}>镜像</span><strong>{selectedImage?.label}</strong></div>
@@ -140,12 +145,42 @@ export default function Flasher() {
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#94a3b8' }}>WiFi</span><strong>{wifiName}</strong></div>
                 </div>
               )}
-              <div style={{ padding: '10px 14px', background: '#f0fdf4', borderRadius: 10, fontSize: '0.78rem', color: '#16a34a' }}>
-                ✅ 预检通过 · 预估耗时 ~3 分钟
+              <div style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: 10, fontSize: '0.78rem', color: '#334155' }}>
+                推荐流程：
+                <div>1) 下载官方镜像并校验 SHA256</div>
+                <div>2) 使用 balenaEtcher 或 rpi-imager 写入 {selectedTarget?.label}</div>
+                <div>3) 首次启动后在设备端执行 rdkos_info / cat /etc/version</div>
               </div>
             </div>
-            <button className="clean-btn" style={{ width: '100%', marginTop: 8, padding: '12px', fontSize: '0.95rem' }} onClick={() => { startFlash(); }}>
-              🔥 开始烧录
+
+            <div style={{ padding: '10px 12px', background: '#f8fafc', borderRadius: 10, marginTop: 10 }}>
+              <div style={{ fontSize: '0.76rem', color: '#64748b', marginBottom: 6 }}>Windows PowerShell 示例：</div>
+              <div className="terminal-screen" style={{ minHeight: 'auto', padding: '8px 10px' }}>
+                <div className="terminal-line"># 仅示例：请按实际盘符操作，避免误写系统盘</div>
+                <div className="terminal-line"># 建议优先使用 balenaEtcher 图形界面</div>
+              </div>
+            </div>
+
+            <label className="toggle-row" style={{ marginTop: 10 }}>
+              <input type="checkbox" checked={confirmWritten} onChange={(e) => setConfirmWritten(e.target.checked)} />
+              <span>我已完成镜像写入</span>
+            </label>
+            <label className="toggle-row">
+              <input type="checkbox" checked={confirmVerified} onChange={(e) => setConfirmVerified(e.target.checked)} />
+              <span>我已在设备上验证版本与启动状态</span>
+            </label>
+
+            <button
+              className="clean-btn"
+              style={{ width: '100%', marginTop: 8, padding: '12px', fontSize: '0.95rem' }}
+              disabled={!(confirmWritten && confirmVerified)}
+              onClick={() => {
+                startFlash();
+                setStep('done');
+                addToast('已记录真实烧录完成状态', 'success');
+              }}
+            >
+              ✅ 标记烧录完成
             </button>
             <div className="ob-nav">
               <button className="ob-btn ghost" onClick={() => setStep('wifi')}>← 返回</button>
@@ -154,25 +189,13 @@ export default function Flasher() {
           </>
         )}
 
-        {/* Flashing in progress */}
-        {(isFlashing || (flashProgress > 0 && flashProgress < 100)) && (
-          <>
-            <h2 className="ob-heading">正在烧录...</h2>
-            <div className="progress-box" style={{ marginTop: 12 }}>
-              <div className="progress-meta"><span>{flashPhase}</span><strong>{flashProgress}%</strong></div>
-              <div className="progress-track"><div className="progress-fill" style={{ width: `${flashProgress}%`, transition: 'width 0.5s' }}></div></div>
-            </div>
-            <p className="ob-sub">请勿断开连接或移除存储卡</p>
-          </>
-        )}
-
         {/* Done */}
-        {flashProgress >= 100 && !isFlashing && (
+        {step === 'done' && (
           <>
             <h2 className="ob-heading">🎉 烧录完成</h2>
             <p className="ob-sub">系统已写入成功，拔卡插入设备后上电即可启动</p>
             <div style={{ padding: '10px 14px', background: '#f0fdf4', borderRadius: 10, fontSize: '0.78rem', color: '#16a34a', textAlign: 'center' }}>
-              🧠 下一步: 打开终端进行首次配置 → 验证 BPU → 部署模型
+              {flashPhase || '下一步: 打开终端进行首次配置 → 验证 BPU → 部署模型'}
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
               <button className="clean-btn" onClick={() => { setActiveTab('terminal'); addToast('已跳转到终端', 'info'); }}>💻 打开终端</button>
