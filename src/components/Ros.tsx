@@ -1,387 +1,501 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import { executeDeviceCommand, fetchRosTopics, getRememberedDevicePassword } from '../api';
 
-/* ── ROS 话题分析 ── */
+/* ── Types ── */
+interface RosTopic { name: string; type: string; hz: number; }
+interface RosNode { name: string; status: 'active' | 'inactive'; }
+interface DisplayItem {
+  id: string; name: string; icon: string; enabled: boolean;
+  type: string; expanded: boolean;
+  properties?: { key: string; value: string }[];
+}
+type ToolId = 'move' | 'select' | 'pose' | 'goal' | 'point' | 'measure';
+type PanelTab = 'displays' | 'topics' | 'nodes' | 'services' | 'params';
 
-interface TopicInfo {
-  name: string;
-  type: string;
-  hz: number;
-  publishers: number;
-  subscribers: number;
-  active: boolean;
+/* ═══════════════════════════════════════
+   Sub-components (defined before main)
+   ═══════════════════════════════════════ */
+
+/* ── 3D Viewport ── */
+function Viewport3D({ gridVisible, tfVisible, topics, nodes, activeTool, selectedTopic }: {
+  gridVisible: boolean; tfVisible: boolean; topics: RosTopic[]; nodes: RosNode[];
+  activeTool: string; selectedTopic: string;
+}) {
+  return (
+    <div className="rv2-viewport">
+      <svg className="rv2-grid-svg" viewBox="-500 -500 1000 1000" preserveAspectRatio="xMidYMid meet">
+        {gridVisible && (
+          <g opacity="0.3">
+            {Array.from({ length: 21 }, (_, i) => {
+              const pos = (i - 10) * 50;
+              return (
+                <React.Fragment key={i}>
+                  <line x1={pos} y1={-500} x2={pos} y2={500} stroke="#555" strokeWidth="0.5" />
+                  <line x1={-500} y1={pos} x2={500} y2={pos} stroke="#555" strokeWidth="0.5" />
+                </React.Fragment>
+              );
+            })}
+            <line x1="0" y1="0" x2="120" y2="0" stroke="#e74c3c" strokeWidth="2" />
+            <line x1="0" y1="0" x2="0" y2="-120" stroke="#2ecc71" strokeWidth="2" />
+            <text x="125" y="5" fill="#e74c3c" fontSize="12">X</text>
+            <text x="5" y="-125" fill="#2ecc71" fontSize="12">Y</text>
+          </g>
+        )}
+        {tfVisible && (
+          <g>
+            <circle cx="0" cy="0" r="6" fill="#f39c12" opacity="0.8" />
+            <text x="10" y="4" fill="#f39c12" fontSize="10" opacity="0.7">map</text>
+            <line x1="0" y1="0" x2="60" y2="-40" stroke="#f39c12" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
+            <circle cx="60" cy="-40" r="4" fill="#3498db" opacity="0.8" />
+            <text x="68" y="-36" fill="#3498db" fontSize="10" opacity="0.7">base_link</text>
+            <line x1="60" y1="-40" x2="120" y2="-80" stroke="#3498db" strokeWidth="1" strokeDasharray="4" opacity="0.5" />
+            <circle cx="120" cy="-80" r="3" fill="#9b59b6" opacity="0.8" />
+            <text x="128" y="-76" fill="#9b59b6" fontSize="9" opacity="0.7">camera_link</text>
+          </g>
+        )}
+      </svg>
+      <div className="rv2-viewport-info">
+        <div className="rv2-vp-badge">Tool: {activeTool}</div>
+        {selectedTopic && <div className="rv2-vp-badge active">Echo: {selectedTopic}</div>}
+        <div className="rv2-vp-badge">Topics: {topics.length} | Nodes: {nodes.length}</div>
+      </div>
+      <div className="rv2-viewport-hint">Scroll to zoom · Right-drag to pan · Left-drag to rotate</div>
+    </div>
+  );
 }
 
-interface NodeInfo {
-  name: string;
-  type: 'publisher' | 'subscriber' | 'service';
-  topics: string[];
+/* ── Views Panel ── */
+function ViewsPanel() {
+  const rows = [
+    ['Type', 'rviz_default_plugins/Orbit'], ['Target Frame', '<Fixed Frame>'],
+    ['Distance', '10.0'], ['Yaw', '0.785'], ['Pitch', '0.785'],
+    ['Focal Point', '0; 0; 0'], ['Near Clip', '0.01'], ['Focal Shape Size', '0.05'],
+  ];
+  return (
+    <div className="rv2-views-body">
+      {rows.map(([k, v], i) => (
+        <div key={i} className="rv2-tree-row rv2-tree-global">
+          <span className="rv2-tree-key">{k}</span>
+          <span className="rv2-tree-val">{v}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-const MOCK_TOPICS: TopicInfo[] = [
-  { name: '/hobot_dnn/bbox', type: 'ai_msgs/PerceptionTargets', hz: 30, publishers: 1, subscribers: 2, active: true },
-  { name: '/camera/color/image_raw', type: 'sensor_msgs/Image', hz: 30, publishers: 1, subscribers: 1, active: true },
-  { name: '/tf', type: 'tf2_msgs/TFMessage', hz: 100, publishers: 3, subscribers: 5, active: true },
-  { name: '/cmd_vel', type: 'geometry_msgs/Twist', hz: 10, publishers: 2, subscribers: 1, active: true },
-  { name: '/odom', type: 'nav_msgs/Odometry', hz: 50, publishers: 1, subscribers: 2, active: true },
-  { name: '/scan', type: 'sensor_msgs/LaserScan', hz: 10, publishers: 1, subscribers: 1, active: false },
-  { name: '/imu/data', type: 'sensor_msgs/Imu', hz: 200, publishers: 1, subscribers: 1, active: true },
-  { name: '/joint_states', type: 'sensor_msgs/JointState', hz: 50, publishers: 1, subscribers: 2, active: false },
+/* ── Displays Panel ── */
+function DisplaysPanel({ displays, toggleDisplay, toggleExpand }: {
+  displays: DisplayItem[]; toggleDisplay: (id: string) => void; toggleExpand: (id: string) => void;
+}) {
+  return (
+    <div className="rv2-display-tree">
+      <div className="rv2-tree-header"><span>Global Options</span></div>
+      <div className="rv2-tree-row rv2-tree-global">
+        <span className="rv2-tree-key">Fixed Frame</span><span className="rv2-tree-val">map</span>
+      </div>
+      <div className="rv2-tree-row rv2-tree-global">
+        <span className="rv2-tree-key">Background Color</span>
+        <span className="rv2-tree-val rv2-color-swatch" style={{ background: '#303030' }} />
+      </div>
+      <div className="rv2-tree-row rv2-tree-global">
+        <span className="rv2-tree-key">Frame Rate</span><span className="rv2-tree-val">30</span>
+      </div>
+      <div className="rv2-tree-sep" />
+      {displays.map(d => (
+        <div key={d.id} className="rv2-display-item">
+          <div className="rv2-display-row" onClick={() => toggleExpand(d.id)}>
+            <span className={`rv2-tree-arrow ${d.expanded ? 'open' : ''}`}>▶</span>
+            <input type="checkbox" checked={d.enabled} className="rv2-display-check"
+              onChange={() => toggleDisplay(d.id)} onClick={e => e.stopPropagation()} />
+            <span className="rv2-display-icon">{d.icon}</span>
+            <span className={`rv2-display-name ${d.enabled ? '' : 'disabled'}`}>{d.name}</span>
+            <span className="rv2-display-type">{d.type.split('/')[1]}</span>
+          </div>
+          {d.expanded && d.properties && (
+            <div className="rv2-display-props">
+              {d.properties.map((p, i) => (
+                <div key={i} className="rv2-tree-row rv2-prop-row">
+                  <span className="rv2-tree-key">{p.key}</span>
+                  <span className="rv2-tree-val">{p.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      <button className="rv2-add-display-btn">+ Add Display</button>
+    </div>
+  );
+}
+
+/* ── Topic List Panel ── */
+function TopicListPanel({ topics, selectedTopic, echoTopic, loading }: {
+  topics: RosTopic[]; selectedTopic: string; echoTopic: (t: string) => void; loading: boolean;
+}) {
+  const [filter, setFilter] = useState('');
+  const filtered = topics.filter(t => t.name.toLowerCase().includes(filter.toLowerCase()));
+  return (
+    <div className="rv2-list-panel">
+      <div className="rv2-list-search">
+        <input className="rv2-list-search-input" placeholder="Filter topics..."
+          value={filter} onChange={e => setFilter(e.target.value)} />
+      </div>
+      <div className="rv2-list-body">
+        {filtered.length === 0 && !loading && <div className="rv2-list-empty">No topics found</div>}
+        {loading && filtered.length === 0 && <div className="rv2-list-empty">Scanning...</div>}
+        {filtered.map(t => (
+          <div key={t.name} className={`rv2-list-item ${selectedTopic === t.name ? 'active' : ''}`}
+            onClick={() => echoTopic(t.name)}>
+            <span className="rv2-list-icon">📡</span>
+            <div className="rv2-list-info">
+              <div className="rv2-list-name">{t.name}</div>
+              <div className="rv2-list-meta">{t.type}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Node List Panel ── */
+function NodeListPanel({ nodes }: { nodes: RosNode[] }) {
+  return (
+    <div className="rv2-list-panel">
+      <div className="rv2-list-body">
+        {nodes.length === 0 && <div className="rv2-list-empty">No active nodes</div>}
+        {nodes.map(n => (
+          <div key={n.name} className="rv2-list-item">
+            <span className="rv2-list-icon">🔗</span>
+            <div className="rv2-list-info">
+              <div className="rv2-list-name">{n.name}</div>
+              <div className="rv2-list-meta">{n.status}</div>
+            </div>
+            <span className={`rv2-node-dot ${n.status}`} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ── Service List Panel ── */
+function ServiceListPanel({ services, deviceId, pw }: { services: string[]; deviceId: string; pw: string }) {
+  const [info, setInfo] = useState('');
+  const queryType = async (svc: string) => {
+    try {
+      const res = await executeDeviceCommand(deviceId,
+        `ros2 service type ${svc} 2>/dev/null || rosservice type ${svc} 2>/dev/null`, pw);
+      setInfo(`${svc}\nType: ${res.output.trim()}`);
+    } catch (_) { setInfo('Query failed'); }
+  };
+  return (
+    <div className="rv2-list-panel">
+      <div className="rv2-list-body">
+        {services.length === 0 && <div className="rv2-list-empty">No services</div>}
+        {services.map((s, i) => (
+          <div key={i} className="rv2-list-item" onClick={() => queryType(s)}>
+            <span className="rv2-list-icon">🔧</span>
+            <div className="rv2-list-info"><div className="rv2-list-name">{s}</div></div>
+          </div>
+        ))}
+      </div>
+      {info && <pre className="rv2-list-info-box">{info}</pre>}
+    </div>
+  );
+}
+
+/* ── Param List Panel ── */
+function ParamListPanel({ params }: { params: string[] }) {
+  return (
+    <div className="rv2-list-panel">
+      <div className="rv2-list-body">
+        {params.length === 0 && <div className="rv2-list-empty">No parameters</div>}
+        {params.map((p, i) => (
+          <div key={i} className="rv2-list-item">
+            <span className="rv2-list-icon">⚙️</span>
+            <div className="rv2-list-info"><div className="rv2-list-name">{p}</div></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════
+   Default display items
+   ═══════════════════════════════════════ */
+const DEFAULT_DISPLAYS: DisplayItem[] = [
+  { id: 'grid', name: 'Grid', icon: '▦', enabled: true, type: 'rviz_default_plugins/Grid', expanded: false,
+    properties: [
+      { key: 'Reference Frame', value: '<Fixed Frame>' }, { key: 'Plane Cell Count', value: '10' },
+      { key: 'Cell Size', value: '1' }, { key: 'Color', value: '160; 160; 164' }, { key: 'Line Style', value: 'Lines' },
+    ]},
+  { id: 'tf', name: 'TF', icon: '🔀', enabled: true, type: 'rviz_default_plugins/TF', expanded: false,
+    properties: [
+      { key: 'Show Names', value: 'true' }, { key: 'Show Axes', value: 'true' },
+      { key: 'Show Arrows', value: 'true' }, { key: 'Marker Scale', value: '1' },
+    ]},
+  { id: 'robotmodel', name: 'RobotModel', icon: '🤖', enabled: false, type: 'rviz_default_plugins/RobotModel', expanded: false,
+    properties: [
+      { key: 'Description Source', value: 'Topic' }, { key: 'Description Topic', value: '/robot_description' },
+    ]},
+  { id: 'pointcloud', name: 'PointCloud2', icon: '☁️', enabled: false, type: 'rviz_default_plugins/PointCloud2', expanded: false,
+    properties: [
+      { key: 'Topic', value: '/points' }, { key: 'Size (m)', value: '0.01' }, { key: 'Style', value: 'Flat Squares' },
+    ]},
+  { id: 'image', name: 'Image', icon: '🖼️', enabled: false, type: 'rviz_default_plugins/Image', expanded: false,
+    properties: [{ key: 'Topic', value: '/image_raw' }, { key: 'Transport Hint', value: 'raw' }]},
+  { id: 'laserscan', name: 'LaserScan', icon: '📡', enabled: false, type: 'rviz_default_plugins/LaserScan', expanded: false,
+    properties: [{ key: 'Topic', value: '/scan' }, { key: 'Size (m)', value: '0.05' }]},
+  { id: 'map', name: 'Map', icon: '🗺️', enabled: false, type: 'rviz_default_plugins/Map', expanded: false,
+    properties: [{ key: 'Topic', value: '/map' }, { key: 'Alpha', value: '0.7' }]},
+  { id: 'marker', name: 'MarkerArray', icon: '📌', enabled: false, type: 'rviz_default_plugins/MarkerArray', expanded: false,
+    properties: [{ key: 'Topic', value: '/visualization_marker_array' }]},
 ];
 
-const MOCK_NODES: NodeInfo[] = [
-  { name: '/hobot_dnn', type: 'publisher', topics: ['/hobot_dnn/bbox'] },
-  { name: '/mipi_cam', type: 'publisher', topics: ['/camera/color/image_raw'] },
-  { name: '/robot_state_publisher', type: 'publisher', topics: ['/tf', '/joint_states'] },
-  { name: '/nav2_controller', type: 'subscriber', topics: ['/cmd_vel', '/odom'] },
-  { name: '/rviz2', type: 'subscriber', topics: ['/tf', '/scan'] },
+const TOOLS: { id: ToolId; icon: string; label: string; shortcut?: string }[] = [
+  { id: 'move', icon: '🖱️', label: 'Move Camera', shortcut: 'M' },
+  { id: 'select', icon: '⬜', label: 'Select', shortcut: 'S' },
+  { id: 'pose', icon: '🟢', label: '2D Pose Estimate', shortcut: 'P' },
+  { id: 'goal', icon: '🔴', label: '2D Nav Goal', shortcut: 'G' },
+  { id: 'point', icon: '📍', label: 'Publish Point' },
+  { id: 'measure', icon: '📏', label: 'Measure' },
 ];
 
-const MSG_FIELDS: Record<string, Array<{ type: string; name: string }>> = {
-  'ai_msgs/PerceptionTargets': [
-    { type: 'std_msgs/Header', name: 'header' },
-    { type: 'int32', name: 'fps' },
-    { type: 'Target[]', name: 'targets' },
-  ],
-  'sensor_msgs/Image': [
-    { type: 'std_msgs/Header', name: 'header' },
-    { type: 'uint32', name: 'height' },
-    { type: 'uint32', name: 'width' },
-    { type: 'string', name: 'encoding' },
-    { type: 'uint8[]', name: 'data' },
-  ],
-  'geometry_msgs/Twist': [
-    { type: 'Vector3', name: 'linear' },
-    { type: 'Vector3', name: 'angular' },
-  ],
-};
-
+/* ═══════════════════════════════════════
+   Main RViz2 Component
+   ═══════════════════════════════════════ */
 export default function Ros() {
-  const { currentDevice, addToast, runTerminalCommand } = useAppState();
-  const [topics, setTopics] = useState<TopicInfo[]>([]);
-  const [nodes] = useState<NodeInfo[]>(MOCK_NODES);
-  const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'topics' | 'graph' | 'monitor' | 'tools'>('topics');
-  const [search, setSearch] = useState('');
-  const [scanning, setScanning] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [output, setOutput] = useState<string[]>([]);
+  const { currentDevice } = useAppState();
+  const [topics, setTopics] = useState<RosTopic[]>([]);
+  const [nodes, setNodes] = useState<RosNode[]>([]);
+  const [services, setServices] = useState<string[]>([]);
+  const [params, setParams] = useState<string[]>([]);
+  const [selectedTopic, setSelectedTopic] = useState('');
+  const [echoLines, setEchoLines] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [activeTool, setActiveTool] = useState<ToolId>('move');
+  const [leftTab, setLeftTab] = useState<PanelTab>('displays');
+  const [showViews, setShowViews] = useState(true);
+  const [cmdOutput, setCmdOutput] = useState('');
   const [customCmd, setCustomCmd] = useState('');
-  const [hzHistory, setHzHistory] = useState<Record<string, number[]>>({});
-  const intervalRef = useRef<number | null>(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [gridVisible] = useState(true);
+  const [tfVisible] = useState(true);
+  const [statusMsg, setStatusMsg] = useState('Ready');
+  const [displays, setDisplays] = useState<DisplayItem[]>(DEFAULT_DISPLAYS);
+  const echoRef = useRef<HTMLPreElement>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
-  const detail = topics.find(t => t.name === selectedTopic);
-  const activeTopics = topics.filter(t => t.active);
-  const totalHz = activeTopics.reduce((s, t) => s + t.hz, 0);
+  const deviceId = currentDevice?.id ?? '';
+  const pw = deviceId ? getRememberedDevicePassword(deviceId) : '';
 
-  // 扫描话题
-  const scanTopics = () => {
-    if (!currentDevice) { addToast('请先连接设备', 'warning'); return; }
-    setScanning(true);
-    setOutput(prev => [...prev, `$ ros2 topic list`]);
-    setTimeout(() => {
-      setTopics(MOCK_TOPICS);
-      setScanning(false);
-      addToast(`发现 ${MOCK_TOPICS.length} 个话题`, 'success');
-      setOutput(prev => [...prev, ...MOCK_TOPICS.map(t => t.name), '']);
-      // 初始化频率历史
-      const hist: Record<string, number[]> = {};
-      MOCK_TOPICS.forEach(t => { hist[t.name] = Array.from({ length: 20 }, () => t.hz * (0.8 + Math.random() * 0.4)); });
-      setHzHistory(hist);
-    }, 1500);
-  };
+  const toggleDisplay = (id: string) => setDisplays(ds => ds.map(d => d.id === id ? { ...d, enabled: !d.enabled } : d));
+  const toggleExpand = (id: string) => setDisplays(ds => ds.map(d => d.id === id ? { ...d, expanded: !d.expanded } : d));
 
-  // 自动刷新
+  /* ── Data fetching ── */
+  const scanTopics = useCallback(async () => {
+    if (!deviceId) return;
+    setLoading(true);
+    try {
+      const res = await fetchRosTopics(deviceId, pw);
+      if (res.ok && res.topics) {
+        setTopics(res.topics.map(t => {
+          const parts = t.split(/\s+/);
+          return { name: parts[0] || t, type: parts[1] || 'unknown', hz: 0 };
+        }));
+      }
+    } catch (_) {}
+    setLoading(false);
+  }, [deviceId, pw]);
+
+  const scanNodes = useCallback(async () => {
+    if (!deviceId) return;
+    try {
+      const res = await executeDeviceCommand(deviceId, 'ros2 node list 2>/dev/null || rosnode list 2>/dev/null', pw);
+      if (res.ok) setNodes(res.output.split('\n').filter(l => l.trim().startsWith('/')).map(n => ({ name: n.trim(), status: 'active' as const })));
+    } catch (_) {}
+  }, [deviceId, pw]);
+
+  const loadServices = useCallback(async () => {
+    if (!deviceId) return;
+    try {
+      const res = await executeDeviceCommand(deviceId, 'ros2 service list 2>/dev/null || rosservice list 2>/dev/null', pw);
+      if (res.ok) setServices(res.output.split('\n').filter(Boolean));
+    } catch (_) {}
+  }, [deviceId, pw]);
+
+  const loadParams = useCallback(async () => {
+    if (!deviceId) return;
+    try {
+      const res = await executeDeviceCommand(deviceId, 'ros2 param list 2>/dev/null || rosparam list 2>/dev/null', pw);
+      if (res.ok) setParams(res.output.split('\n').filter(Boolean));
+    } catch (_) {}
+  }, [deviceId, pw]);
+
+  const echoTopic = useCallback(async (topicName: string) => {
+    if (!deviceId || !topicName) return;
+    setSelectedTopic(topicName); setEchoLines(['# Subscribing...']); setShowTerminal(true);
+    try {
+      const res = await executeDeviceCommand(deviceId,
+        `timeout 2 ros2 topic echo ${topicName} --once 2>/dev/null || timeout 2 rostopic echo ${topicName} -n 1 2>/dev/null`, pw);
+      setEchoLines(res.ok ? res.output.split('\n') : ['# No messages received']);
+    } catch (_) { setEchoLines(['# Echo failed']); }
+  }, [deviceId, pw]);
+
+  const runCustom = useCallback(async () => {
+    if (!deviceId || !customCmd.trim()) return;
+    setCmdOutput('$ ' + customCmd + '\n\nExecuting...');
+    try {
+      const res = await executeDeviceCommand(deviceId, customCmd, pw);
+      setCmdOutput('$ ' + customCmd + '\n\n' + (res.output || (res.ok ? '(no output)' : 'Command failed')));
+    } catch (_) { setCmdOutput('$ ' + customCmd + '\n\nExecution failed'); }
+  }, [deviceId, pw, customCmd]);
+
   useEffect(() => {
-    if (autoRefresh && topics.length > 0) {
-      intervalRef.current = window.setInterval(() => {
-        setTopics(prev => prev.map(t => ({
-          ...t,
-          hz: Math.max(0, t.hz + Math.round((Math.random() - 0.5) * 4)),
-        })));
-        setHzHistory(prev => {
-          const next = { ...prev };
-          Object.keys(next).forEach(k => {
-            const t = topics.find(t => t.name === k);
-            if (t) next[k] = [...(next[k] || []).slice(-19), t.hz * (0.8 + Math.random() * 0.4)];
-          });
-          return next;
-        });
-      }, 2000);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [autoRefresh, topics.length]);
+    if (!deviceId) return;
+    scanTopics(); scanNodes(); loadServices(); loadParams();
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [deviceId, scanTopics, scanNodes, loadServices, loadParams]);
 
-  // 执行命令
-  const runCmd = (cmd: string) => {
-    if (!currentDevice) { addToast('请先连接设备', 'warning'); return; }
-    setOutput(prev => [...prev, `$ ${cmd}`]);
-    runTerminalCommand(cmd);
-    addToast(`执行: ${cmd}`, 'info');
-  };
+  useEffect(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (autoRefresh && deviceId) timerRef.current = setInterval(scanTopics, 5000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [autoRefresh, deviceId, scanTopics]);
 
-  // 空状态
+  useEffect(() => {
+    if (echoRef.current) echoRef.current.scrollTop = echoRef.current.scrollHeight;
+  }, [echoLines]);
+
   if (!currentDevice) {
     return (
-      <div className="center-stage">
-        <div className="ros-empty">
-          <span className="ros-empty-icon">🤖</span>
-          <h2 className="ros-empty-title">ROS2 话题分析</h2>
-          <p className="ros-empty-desc">话题监控、节点图谱、频率分析与 AI 辅助诊断。<br/>请先连接设备以开始扫描。</p>
+      <div className="rv2-shell">
+        <div className="rv2-empty">
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🤖</div>
+          <h2 style={{ color: '#d4d4d4', margin: '0 0 8px' }}>RViz2</h2>
+          <p style={{ color: '#808080', fontSize: 14, maxWidth: 400, textAlign: 'center', lineHeight: 1.6 }}>
+            请先在左侧连接一台 RDK 设备，即可使用 RViz 风格的 ROS 诊断与可视化工具
+          </p>
         </div>
       </div>
     );
   }
 
+  const now = new Date();
+  const rosTime = `${Math.floor(now.getTime() / 1000)}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+  const wallTime = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
   return (
-    <div className="ros-page">
-      {/* 顶栏 */}
-      <div className="ros-header">
-        <div className="ros-header-left">
-          <div className="ros-header-icon">🤖</div>
-          <div>
-            <h2 className="ros-title">ROS2 话题分析</h2>
-            <span className="ros-subtitle">{currentDevice.name} · {topics.length} 话题</span>
-          </div>
+    <div className="rv2-shell">
+      {/* Menu Bar */}
+      <div className="rv2-menubar">
+        <div className="rv2-menu-items">
+          <span className="rv2-menu-item">File</span>
+          <span className="rv2-menu-item">Panels</span>
+          <span className="rv2-menu-item">Help</span>
         </div>
-        <div className="ros-header-right">
-          <label className="ros-auto-toggle">
-            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
-            自动刷新
+        <div className="rv2-menu-right">
+          <span className="rv2-menu-device"><span className="rv2-device-dot-sm" /> {currentDevice.name} ({currentDevice.ip})</span>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="rv2-toolbar">
+        <div className="rv2-toolbar-group">
+          {TOOLS.map(t => (
+            <button key={t.id} className={`rv2-tool-btn ${activeTool === t.id ? 'active' : ''}`}
+              onClick={() => setActiveTool(t.id)} title={t.label + (t.shortcut ? ` (${t.shortcut})` : '')}>
+              <span className="rv2-tool-icon">{t.icon}</span>
+              <span className="rv2-tool-label">{t.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="rv2-toolbar-sep" />
+        <div className="rv2-toolbar-group">
+          <label className="rv2-auto-check">
+            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> Auto Refresh
           </label>
-          <button className={`ros-scan-btn ${scanning ? 'loading' : ''}`} onClick={scanTopics} disabled={scanning}>
-            {scanning ? '扫描中...' : '🔍 扫描话题'}
-          </button>
+          <button className="rv2-tool-btn" onClick={() => { scanTopics(); scanNodes(); loadServices(); loadParams(); setStatusMsg('Refreshed'); }}
+            disabled={loading} title="Refresh All">{loading ? '⏳' : '🔄'} Refresh</button>
         </div>
       </div>
 
-      {/* 统计 */}
-      <div className="ros-stats">
-        <div className="ros-stat-card">
-          <div className="ros-stat-icon" style={{ background: '#eff6ff', color: '#3b82f6' }}>📡</div>
-          <span className="ros-stat-value" style={{ color: '#3b82f6' }}>{topics.length}</span>
-          <span className="ros-stat-label">话题总数</span>
-        </div>
-        <div className="ros-stat-card">
-          <div className="ros-stat-icon" style={{ background: '#f0fdf4', color: '#22c55e' }}>✅</div>
-          <span className="ros-stat-value" style={{ color: '#22c55e' }}>{activeTopics.length}</span>
-          <span className="ros-stat-label">活跃话题</span>
-        </div>
-        <div className="ros-stat-card">
-          <div className="ros-stat-icon" style={{ background: '#faf5ff', color: '#8b5cf6' }}>🔗</div>
-          <span className="ros-stat-value" style={{ color: '#8b5cf6' }}>{nodes.length}</span>
-          <span className="ros-stat-label">节点数</span>
-        </div>
-        <div className="ros-stat-card">
-          <div className="ros-stat-icon" style={{ background: '#fff7ed', color: '#f97316' }}>⚡</div>
-          <span className="ros-stat-value" style={{ color: '#f97316' }}>{totalHz}</span>
-          <span className="ros-stat-label">总频率 Hz</span>
-        </div>
-      </div>
-
-      {/* Tab */}
-      <div className="ros-tabs">
-        {([['topics', '📡 话题监控', topics.length], ['graph', '🔗 节点图谱', nodes.length], ['monitor', '📊 性能监控', activeTopics.length], ['tools', '🔧 诊断工具', 0]] as const).map(([id, label, count]) => (
-          <button key={id} className={`ros-tab ${activeTab === id ? 'active' : ''}`} onClick={() => setActiveTab(id)}>
-            {label}
-            {count > 0 && <span className="ros-tab-badge">{count}</span>}
-          </button>
-        ))}
-      </div>
-
-      {/* 话题监控 */}
-      {activeTab === 'topics' && (
-        <div className="ros-topics-layout">
-          <div className="ros-topics-left">
-            <div className="ros-search-box">
-              <span>🔍</span>
-              <input className="ros-search-input" placeholder="搜索话题..." value={search} onChange={e => setSearch(e.target.value)} />
-            </div>
-            <div className="ros-topic-list">
-              {topics.filter(t => !search || t.name.includes(search)).map(t => (
-                <div key={t.name} className={`ros-topic-item ${selectedTopic === t.name ? 'active' : ''}`}
-                  onClick={() => setSelectedTopic(t.name)}>
-                  <div className="ros-topic-name">{t.name}</div>
-                  <div className="ros-topic-meta">
-                    <span className="ros-topic-type">{t.type.split('/')[1]}</span>
-                    <span className="ros-topic-hz" style={{
-                      color: t.active ? '#22c55e' : '#94a3b8',
-                      background: t.active ? '#f0fdf4' : '#f8fafc',
-                    }}>{t.hz} Hz</span>
-                  </div>
-                </div>
-              ))}
-              {topics.length === 0 && <div className="ros-topic-empty">点击「扫描话题」开始</div>}
-            </div>
-          </div>
-
-          <div className="ros-topics-right">
-            {detail ? (
-              <div className="ros-topic-detail">
-                <div className="ros-detail-title">{detail.name}</div>
-                <div className="ros-detail-grid">
-                  <div className="ros-detail-cell"><div className="ros-detail-label">消息类型</div><div className="ros-detail-value">{detail.type}</div></div>
-                  <div className="ros-detail-cell"><div className="ros-detail-label">频率</div><div className="ros-detail-value">{detail.hz} Hz</div></div>
-                  <div className="ros-detail-cell"><div className="ros-detail-label">发布者</div><div className="ros-detail-value">{detail.publishers}</div></div>
-                  <div className="ros-detail-cell"><div className="ros-detail-label">订阅者</div><div className="ros-detail-value">{detail.subscribers}</div></div>
-                </div>
-
-                {/* 频率趋势 */}
-                {hzHistory[detail.name] && (
-                  <div className="ros-hz-chart">
-                    <div className="ros-section-title" style={{ marginBottom: 6 }}>频率趋势</div>
-                    <div className="ros-hz-bars">
-                      {hzHistory[detail.name].map((v, i) => (
-                        <div key={i} className="ros-hz-bar" style={{
-                          height: `${Math.min(100, (v / (detail.hz * 1.5)) * 100)}%`,
-                          background: v > detail.hz * 0.7 ? '#22c55e' : '#f59e0b',
-                        }} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 消息结构 */}
-                {MSG_FIELDS[detail.type] && (
-                  <div className="ros-msg-structure">
-                    <div className="ros-section-title" style={{ marginBottom: 6 }}>消息结构</div>
-                    <div className="ros-msg-fields">
-                      {MSG_FIELDS[detail.type].map((f, i) => (
-                        <div key={i} className="ros-msg-field">
-                          <span className="ros-field-type">{f.type}</span>
-                          <span className="ros-field-name">{f.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="ros-detail-actions">
-                  <button className="ros-btn-primary" onClick={() => runCmd(`ros2 topic echo ${detail.name} --once`)}>📡 Echo</button>
-                  <button className="ros-btn-ghost" onClick={() => runCmd(`ros2 topic hz ${detail.name}`)}>Hz 测量</button>
-                  <button className="ros-btn-ghost" onClick={() => runCmd(`ros2 topic info ${detail.name}`)}>详细信息</button>
-                </div>
-              </div>
-            ) : (
-              <div className="ros-detail-empty">
-                <span className="ros-detail-empty-icon">📡</span>
-                <p>选择左侧话题查看详情</p>
-              </div>
-            )}
-
-            {/* 输出面板 */}
-            {output.length > 0 && (
-              <div className="ros-output">
-                <div className="ros-output-header">
-                  <span>终端输出</span>
-                  <button className="ros-output-clear" onClick={() => setOutput([])}>清空</button>
-                </div>
-                <pre className="ros-output-content">{output.join('\n')}</pre>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 节点图谱 */}
-      {activeTab === 'graph' && (
-        <div className="ros-graph-section">
-          <div className="ros-section-title">节点列表</div>
-          <div className="ros-nodes-grid">
-            {nodes.map(n => (
-              <div key={n.name} className="ros-node-card">
-                <span className="ros-node-icon">{n.type === 'publisher' ? '📤' : n.type === 'subscriber' ? '📥' : '⚙️'}</span>
-                <div>
-                  <div className="ros-node-name">{n.name}</div>
-                  <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: 2 }}>{n.topics.length} 话题</div>
-                </div>
-              </div>
+      {/* Main Area */}
+      <div className="rv2-main">
+        <div className="rv2-left">
+          <div className="rv2-panel-tabs">
+            {(['displays','topics','nodes','services','params'] as PanelTab[]).map(k => (
+              <button key={k} className={`rv2-ptab ${leftTab === k ? 'active' : ''}`}
+                onClick={() => setLeftTab(k)}>{k.charAt(0).toUpperCase() + k.slice(1)}</button>
             ))}
           </div>
-          <div className="ros-output" style={{ marginTop: 12 }}>
-            <div className="ros-output-header"><span>节点关系</span></div>
-            <pre className="ros-output-content">{nodes.map(n => `${n.name} (${n.type})\n  └─ ${n.topics.join(', ')}`).join('\n\n')}</pre>
+          <div className="rv2-left-body">
+            {leftTab === 'displays' && <DisplaysPanel displays={displays} toggleDisplay={toggleDisplay} toggleExpand={toggleExpand} />}
+            {leftTab === 'topics' && <TopicListPanel topics={topics} selectedTopic={selectedTopic} echoTopic={echoTopic} loading={loading} />}
+            {leftTab === 'nodes' && <NodeListPanel nodes={nodes} />}
+            {leftTab === 'services' && <ServiceListPanel services={services} deviceId={deviceId} pw={pw} />}
+            {leftTab === 'params' && <ParamListPanel params={params} />}
           </div>
         </div>
-      )}
 
-      {/* 性能监控 */}
-      {activeTab === 'monitor' && (
-        <div className="ros-monitor-section">
-          <div className="ros-monitor-header">
-            <span className="ros-section-title">实时频率监控</span>
-            <span className="ros-monitor-hint">{autoRefresh ? '自动刷新中' : '开启自动刷新以实时监控'}</span>
-          </div>
-          <div className="ros-monitor-grid">
-            {activeTopics.map(t => (
-              <div key={t.name} className="ros-monitor-card">
-                <div className="ros-monitor-name">{t.name.split('/').pop()}</div>
-                <div className="ros-monitor-hz" style={{ color: t.hz > 0 ? '#22c55e' : '#ef4444' }}>{t.hz} Hz</div>
-                <span className="ros-monitor-status" style={{
-                  color: t.active ? '#22c55e' : '#f59e0b',
-                  background: t.active ? '#f0fdf4' : '#fffbeb',
-                }}>
-                  {t.active ? 'Active' : 'Idle'}
-                </span>
-                {hzHistory[t.name] && (
-                  <div className="ros-mini-chart">
-                    {hzHistory[t.name].slice(-12).map((v, i) => (
-                      <div key={i} className="ros-mini-bar" style={{
-                        height: `${Math.min(100, (v / (t.hz * 1.5)) * 100)}%`,
-                        background: v > t.hz * 0.7 ? '#22c55e' : '#f59e0b',
-                      }} />
-                    ))}
-                  </div>
-                )}
+        <div className="rv2-center">
+          <Viewport3D gridVisible={gridVisible} tfVisible={tfVisible} topics={topics} nodes={nodes} activeTool={activeTool} selectedTopic={selectedTopic} />
+          {showTerminal && (
+            <div className="rv2-terminal-drawer">
+              <div className="rv2-terminal-head">
+                <span>{selectedTopic ? `Echo: ${selectedTopic}` : 'Terminal Output'}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="rv2-term-btn" onClick={() => setEchoLines([])}>Clear</button>
+                  <button className="rv2-term-btn" onClick={() => setShowTerminal(false)}>✕</button>
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 诊断工具 */}
-      {activeTab === 'tools' && (
-        <div className="ros-tools-section">
-          <div className="ros-section-title" style={{ marginBottom: 12 }}>快捷命令</div>
-          <div className="ros-quick-tools">
-            {[
-              { icon: '📡', name: '话题列表', cmd: 'ros2 topic list', color: '#3b82f6' },
-              { icon: '🔗', name: '节点列表', cmd: 'ros2 node list', color: '#8b5cf6' },
-              { icon: '⚙️', name: '服务列表', cmd: 'ros2 service list', color: '#f97316' },
-              { icon: '📊', name: '参数列表', cmd: 'ros2 param list', color: '#22c55e' },
-              { icon: '🌳', name: 'TF 树', cmd: 'ros2 run tf2_tools view_frames', color: '#ec4899' },
-              { icon: '📦', name: '包列表', cmd: 'ros2 pkg list', color: '#6366f1' },
-            ].map(tool => (
-              <button key={tool.cmd} className="ros-quick-tool" style={{ '--tool-color': tool.color } as React.CSSProperties}
-                onClick={() => runCmd(tool.cmd)}>
-                <span className="ros-quick-icon">{tool.icon}</span>
-                <span className="ros-quick-name">{tool.name}</span>
-                <span className="ros-quick-cmd">{tool.cmd}</span>
-              </button>
-            ))}
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <div className="ros-section-title" style={{ marginBottom: 8 }}>自定义命令</div>
-            <div className="ros-custom-cmd">
-              <input className="ros-cmd-input" placeholder="输入 ROS2 命令..." value={customCmd}
-                onChange={e => setCustomCmd(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && customCmd.trim()) { runCmd(customCmd.trim()); setCustomCmd(''); } }} />
-              <button className="ros-btn-primary" onClick={() => { if (customCmd.trim()) { runCmd(customCmd.trim()); setCustomCmd(''); } }}>执行</button>
-            </div>
-          </div>
-
-          {output.length > 0 && (
-            <div className="ros-output" style={{ marginTop: 16 }}>
-              <div className="ros-output-header">
-                <span>命令输出</span>
-                <button className="ros-output-clear" onClick={() => setOutput([])}>清空</button>
+              <pre className="rv2-terminal-body" ref={echoRef}>{echoLines.length > 0 ? echoLines.join('\n') : cmdOutput || '# Ready'}</pre>
+              <div className="rv2-cmd-row">
+                <span className="rv2-cmd-prompt">$</span>
+                <input className="rv2-cmd-input" placeholder="ros2 topic list ..." value={customCmd}
+                  onChange={e => setCustomCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runCustom(); }} />
+                <button className="rv2-cmd-run" onClick={runCustom}>Run</button>
               </div>
-              <pre className="ros-output-content">{output.join('\n')}</pre>
             </div>
           )}
         </div>
-      )}
+
+        {showViews && (
+          <div className="rv2-right">
+            <div className="rv2-panel-head-bar">
+              <span className="rv2-panel-label">Views</span>
+              <button className="rv2-panel-close" onClick={() => setShowViews(false)}>✕</button>
+            </div>
+            <ViewsPanel />
+          </div>
+        )}
+      </div>
+
+      {/* Status Bar */}
+      <div className="rv2-statusbar" role="status">
+        <div className="rv2-status-left">
+          <span className="rv2-status-item">{statusMsg}</span>
+          <span className="rv2-status-sep">|</span>
+          <span className="rv2-status-item">Topics: {topics.length}</span>
+          <span className="rv2-status-sep">|</span>
+          <span className="rv2-status-item">Nodes: {nodes.length}</span>
+          <span className="rv2-status-sep">|</span>
+          <span className="rv2-status-item"><span className="rv2-status-dot connected" /> ROS2</span>
+        </div>
+        <div className="rv2-status-right">
+          <button className="rv2-status-toggle" onClick={() => setShowTerminal(t => !t)}>{showTerminal ? '▼' : '▲'} Terminal</button>
+          <span className="rv2-status-sep">|</span>
+          <span className="rv2-status-item rv2-time-label">ROS Time:</span>
+          <span className="rv2-status-item rv2-time-val">{rosTime}</span>
+          <span className="rv2-status-sep">|</span>
+          <span className="rv2-status-item rv2-time-label">Wall Time:</span>
+          <span className="rv2-status-item rv2-time-val">{wallTime}</span>
+        </div>
+      </div>
     </div>
   );
 }

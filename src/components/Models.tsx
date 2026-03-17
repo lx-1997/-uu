@@ -1,354 +1,261 @@
 import { useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import { executeDeviceCommand, getRememberedDevicePassword } from '../api';
 
-/* ── ModelZoo 模型仓库 ── */
+/* ── ModelZoo 模型仓库（苹果风格 · 真实接入）── */
 
 interface ModelItem {
-  id: string;
-  name: string;
-  category: string;
-  framework: string;
-  task: string;
-  desc: string;
-  size: string;
-  accuracy: string;
-  latency: string;
-  boards: string[];
-  deployed: boolean;
-  version: string;
-  downloads: number;
+  id: string; name: string; icon: string; desc: string; category: string;
+  format: string; size: string; boards: string[];
+  deployCmd: string; runCmd: string; removeCmd: string;
+  repo: string; deployed: boolean; running: boolean; custom?: boolean;
+  fps?: string; latency?: string;
 }
 
-const MODELS: ModelItem[] = [
-  {
-    id: 'yolov5s', name: 'YOLOv5s', category: '检测', framework: 'ONNX → BPU',
-    task: '目标检测', desc: '轻量级实时目标检测模型，支持 80 类 COCO 目标，适合边缘部署。',
-    size: '14.1 MB', accuracy: 'mAP 37.4', latency: '8.2ms', boards: ['RDK X3', 'RDK X5'],
-    deployed: false, version: '1.0.2', downloads: 3420,
-  },
-  {
-    id: 'fcos', name: 'FCOS', category: '检测', framework: 'PyTorch → BPU',
-    task: '目标检测', desc: '无锚框目标检测，精度更高，适合复杂场景。',
-    size: '32.5 MB', accuracy: 'mAP 41.0', latency: '15.6ms', boards: ['RDK X5'],
-    deployed: true, version: '2.1.0', downloads: 1856,
-  },
-  {
-    id: 'mobilenetv2', name: 'MobileNetV2', category: '分类', framework: 'TFLite → BPU',
-    task: '图像分类', desc: '高效图像分类模型，ImageNet Top-1 精度 72%，极低延迟。',
-    size: '6.9 MB', accuracy: 'Top1 72.0%', latency: '3.1ms', boards: ['RDK X3', 'RDK X5'],
-    deployed: true, version: '1.3.1', downloads: 2890,
-  },
-  {
-    id: 'deeplabv3', name: 'DeepLabV3+', category: '分割', framework: 'ONNX → BPU',
-    task: '语义分割', desc: '高精度语义分割模型，支持 21 类 VOC 分割。',
-    size: '43.2 MB', accuracy: 'mIoU 78.5', latency: '22.4ms', boards: ['RDK X5'],
-    deployed: false, version: '1.0.0', downloads: 945,
-  },
-  {
-    id: 'hand-lmk', name: 'HandLandmark', category: '关键点', framework: 'TFLite → BPU',
-    task: '手部关键点', desc: '21 个手部关键点检测，支持手势识别与交互控制。',
-    size: '5.8 MB', accuracy: 'PCK 94.2%', latency: '4.7ms', boards: ['RDK X3', 'RDK X5'],
-    deployed: false, version: '1.1.0', downloads: 1567,
-  },
-  {
-    id: 'whisper-tiny', name: 'Whisper Tiny', category: '语音', framework: 'ONNX → BPU',
-    task: '语音识别', desc: 'OpenAI Whisper 轻量版，支持中英文语音转文字。',
-    size: '72.1 MB', accuracy: 'WER 8.2%', latency: '120ms', boards: ['RDK X5'],
-    deployed: false, version: '0.9.0', downloads: 678,
-  },
+const BUILTIN_MODELS: ModelItem[] = [
+  { id: 'yolov5', name: 'YOLOv5s', icon: '🎯', desc: '高效目标检测模型，支持 80 类物体识别', category: '检测',
+    format: 'BIN', size: '14MB', boards: ['RDK X3', 'RDK X5'], fps: '30fps', latency: '33ms',
+    repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/detect/yolov5',
+    deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh yolov5s',
+    runCmd: 'cd /opt/rdk_model_zoo && python3 demos/detect/yolov5/yolov5_detect.py',
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/yolov5s*', deployed: false, running: false },
+  { id: 'fcos', name: 'FCOS', icon: '📦', desc: '无锚框目标检测，适合密集场景', category: '检测',
+    format: 'BIN', size: '22MB', boards: ['RDK X3', 'RDK X5'], fps: '25fps', latency: '40ms',
+    repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/detect/fcos',
+    deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh fcos',
+    runCmd: 'cd /opt/rdk_model_zoo && python3 demos/detect/fcos/fcos_detect.py',
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/fcos*', deployed: false, running: false },
+  { id: 'mobilenetv2', name: 'MobileNetV2', icon: '🏷️', desc: '轻量级图像分类模型', category: '分类',
+    format: 'BIN', size: '8MB', boards: ['RDK X3', 'RDK X5', 'RDK Ultra'], fps: '60fps', latency: '16ms',
+    repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/classify/mobilenetv2',
+    deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh mobilenetv2',
+    runCmd: 'cd /opt/rdk_model_zoo && python3 demos/classify/mobilenetv2/mobilenetv2_cls.py',
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/mobilenetv2*', deployed: false, running: false },
+  { id: 'deeplabv3', name: 'DeepLabV3+', icon: '🎨', desc: '语义分割模型，像素级场景理解', category: '分割',
+    format: 'BIN', size: '18MB', boards: ['RDK X3', 'RDK X5'], fps: '15fps', latency: '66ms',
+    repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/segment/deeplabv3',
+    deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh deeplabv3plus',
+    runCmd: 'cd /opt/rdk_model_zoo && python3 demos/segment/deeplabv3/deeplabv3_seg.py',
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/deeplabv3*', deployed: false, running: false },
+  { id: 'yolov8pose', name: 'YOLOv8-Pose', icon: '🏃', desc: '人体姿态估计，17 关键点检测', category: '姿态',
+    format: 'BIN', size: '12MB', boards: ['RDK X5'], fps: '20fps', latency: '50ms',
+    repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/pose/yolov8_pose',
+    deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh yolov8_pose',
+    runCmd: 'cd /opt/rdk_model_zoo && python3 demos/pose/yolov8_pose/yolov8_pose.py',
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/yolov8_pose*', deployed: false, running: false },
+  { id: 'whisper', name: 'Whisper-tiny', icon: '🎙️', desc: '语音识别模型，支持中英文', category: '语音',
+    format: 'ONNX', size: '39MB', boards: ['RDK X5', 'RDK Ultra'], fps: '--', latency: '200ms',
+    repo: 'https://github.com/D-Robotics/rdk_model_zoo',
+    deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh whisper_tiny',
+    runCmd: 'cd /opt/rdk_model_zoo && python3 demos/audio/whisper/whisper_asr.py',
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/whisper*', deployed: false, running: false },
 ];
 
-const CATEGORIES = ['全部', '检测', '分类', '分割', '关键点', '语音'];
+const CATEGORIES = ['全部', '检测', '分类', '分割', '姿态', '语音', '自定义'];
 
 export default function Models() {
-  const { currentDevice, addToast, runTerminalCommand } = useAppState();
-  const [category, setCategory] = useState('全部');
+  const { currentDevice, addToast } = useAppState();
+  const [models, setModels] = useState<ModelItem[]>(BUILTIN_MODELS);
+  const [filter, setFilter] = useState('全部');
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState<'downloads' | 'name'>('downloads');
   const [selected, setSelected] = useState<string | null>(null);
-  const [models, setModels] = useState(MODELS);
-  const [deploying, setDeploying] = useState<string | null>(null);
-  const [converting, setConverting] = useState<string | null>(null);
-  const [convertStep, setConvertStep] = useState(0);
-
-  const filtered = models
-    .filter(m => category === '全部' || m.category === category)
-    .filter(m => !search || m.name.toLowerCase().includes(search.toLowerCase()) || m.desc.includes(search))
-    .sort((a, b) => sortBy === 'downloads' ? b.downloads - a.downloads : a.name.localeCompare(b.name));
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [showLog, setShowLog] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newModel, setNewModel] = useState({ name: '', desc: '', format: 'BIN', deployCmd: '', runCmd: '', removeCmd: '' });
 
   const detail = models.find(m => m.id === selected);
+  const filtered = models.filter(m => (filter === '全部' || m.category === filter) && (!search || m.name.toLowerCase().includes(search.toLowerCase()) || m.desc.includes(search)));
+  const deployedCount = models.filter(m => m.deployed).length;
 
-  const handleDeploy = (model: ModelItem) => {
-    if (!currentDevice) { addToast('请先连接设备', 'warning'); return; }
-    setDeploying(model.id);
-    setTimeout(() => {
-      setDeploying(null);
-      setModels(prev => prev.map(m => m.id === model.id ? { ...m, deployed: true } : m));
-      addToast(`${model.name} 部署成功`, 'success');
-    }, 2500);
+  const exec = async (id: string, cmd: string, label: string) => {
+    if (!currentDevice) { addToast('请先连接设备', 'warning'); return null; }
+    setBusyId(id);
+    setLogs(p => [...p.slice(-40), `[${label}] ${new Date().toLocaleTimeString()}`, `$ ${cmd}`]);
+    setShowLog(true);
+    try {
+      const pwd = getRememberedDevicePassword(currentDevice.id);
+      const r = await executeDeviceCommand(currentDevice.id, `bash -lc "${cmd}"`, pwd);
+      setLogs(p => [...p, r.output || '(无输出)', '']);
+      return r.output || '';
+    } catch {
+      setLogs(p => [...p, 'ERROR: 执行失败', '']);
+      addToast(`${label}失败`, 'error');
+      return null;
+    } finally { setBusyId(null); }
   };
 
-  const handleConvert = (model: ModelItem) => {
-    if (!currentDevice) { addToast('请先连接设备', 'warning'); return; }
-    setConverting(model.id);
-    setConvertStep(0);
-    const steps = ['解析模型结构', '量化校准', 'BPU 编译', '验证输出'];
-    let step = 0;
-    const iv = setInterval(() => {
-      step++;
-      setConvertStep(step);
-      if (step >= steps.length) {
-        clearInterval(iv);
-        setTimeout(() => {
-          setConverting(null);
-          setConvertStep(0);
-          addToast(`${model.name} 转换完成`, 'success');
-        }, 800);
-      }
-    }, 1200);
+  const handleDeploy = async (m: ModelItem) => {
+    addToast(`正在部署 ${m.name}...`, 'info');
+    // 先检查 model_zoo 是否存在
+    await exec(m.id, 'test -d /opt/rdk_model_zoo || (cd /opt && git clone https://github.com/D-Robotics/rdk_model_zoo.git)', '检查 ModelZoo');
+    const out = await exec(m.id, m.deployCmd, `部署 ${m.name}`);
+    if (out !== null) { setModels(p => p.map(x => x.id === m.id ? { ...x, deployed: true } : x)); addToast(`${m.name} 部署完成`, 'success'); }
   };
 
-  const handleRun = (model: ModelItem) => {
-    if (!currentDevice) { addToast('请先连接设备', 'warning'); return; }
-    runTerminalCommand(`cd /opt/models && python3 run_${model.id.replace(/-/g, '_')}.py`);
-    addToast(`正在运行 ${model.name}`, 'info');
+  const handleRun = async (m: ModelItem) => {
+    addToast(`正在运行 ${m.name}...`, 'info');
+    const out = await exec(m.id, m.runCmd, `运行 ${m.name}`);
+    if (out !== null) { setModels(p => p.map(x => x.id === m.id ? { ...x, running: true } : x)); addToast(`${m.name} 已启动`, 'success'); }
   };
 
-  // 空状态
+  const handleStop = async (m: ModelItem) => {
+    await exec(m.id, `pkill -f "${m.name.toLowerCase()}" || true`, `停止 ${m.name}`);
+    setModels(p => p.map(x => x.id === m.id ? { ...x, running: false } : x));
+    addToast(`${m.name} 已停止`, 'info');
+  };
+
+  const handleRemove = async (m: ModelItem) => {
+    if (!confirm(`确定移除 ${m.name}？`)) return;
+    const out = await exec(m.id, m.removeCmd, `移除 ${m.name}`);
+    if (out !== null) { setModels(p => p.map(x => x.id === m.id ? { ...x, deployed: false, running: false } : x)); addToast(`${m.name} 已移除`, 'info'); }
+  };
+
+  const handleRemoveCustom = (id: string) => { setModels(p => p.filter(m => m.id !== id)); addToast('已删除', 'info'); };
+
+  const handleAddModel = () => {
+    if (!newModel.name || !newModel.deployCmd) { addToast('请填写名称和部署命令', 'warning'); return; }
+    setModels(p => [...p, { id: `custom-${Date.now()}`, icon: '🧠', category: '自定义', size: '--', boards: [], repo: '', deployed: false, running: false, custom: true, ...newModel, removeCmd: newModel.removeCmd || `echo "请手动移除"` }]);
+    setNewModel({ name: '', desc: '', format: 'BIN', deployCmd: '', runCmd: '', removeCmd: '' });
+    setShowAdd(false);
+    addToast('模型已添加', 'success');
+  };
+
   if (!currentDevice) {
     return (
       <div className="center-stage">
-        <div className="mdl-empty">
-          <div className="mdl-empty-icon">🧠</div>
-          <h2 className="mdl-empty-title">ModelZoo 模型仓库</h2>
-          <p className="mdl-empty-desc">
-            地瓜机器人 BPU 加速模型库，支持一键部署与模型转换。
-            <br/>请先连接设备以浏览和部署模型。
-          </p>
+        <div className="oc-install-hero">
+          <span style={{ fontSize: '4rem' }}>🧠</span>
+          <div>
+            <h1 className="oc-hero-title">ModelZoo</h1>
+            <p className="oc-hero-sub">RDK 模型仓库 · BPU 加速推理<br/>一键部署、运行 AI 模型到开发板</p>
+          </div>
+        </div>
+        <div className="isolated-widget" style={{ marginTop: 24 }}>
+          <div className="widget-header">快速开始</div>
+          <p className="desc-text">ModelZoo 提供经过 BPU 优化的 AI 模型，支持目标检测、分类、分割、姿态估计等任务。</p>
+          <div className="oc-steps">
+            <div className="oc-step"><span className="oc-step-n">1</span>连接 RDK 开发板</div>
+            <div className="oc-step"><span className="oc-step-n">2</span>选择模型并一键部署到设备</div>
+            <div className="oc-step"><span className="oc-step-n">3</span>运行推理，查看实时效果</div>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <a href="https://github.com/D-Robotics/rdk_model_zoo" target="_blank" rel="noopener noreferrer" className="oc-ext-link">🔗 访问 ModelZoo</a>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="mdl-page">
-      {/* 顶栏 */}
-      <div className="mdl-header">
-        <div className="mdl-header-left">
-          <div className="mdl-header-icon">🧠</div>
-          <div>
-            <h2 className="mdl-title">ModelZoo 模型仓库</h2>
-            <span className="mdl-subtitle">
-              {filtered.length} 个模型 · {models.filter(m => m.deployed).length} 已部署
-            </span>
-          </div>
+    <div className="center-stage wide-stage">
+      {/* 状态栏 */}
+      <div className="oc-bar">
+        <div className="oc-bar-left">
+          <span style={{ fontSize: '1.4rem' }}>🧠</span>
+          <span className="oc-bar-name">ModelZoo</span>
+          <a href="https://github.com/D-Robotics/rdk_model_zoo" target="_blank" rel="noopener noreferrer" className="oc-ext-link" style={{ marginLeft: 8, fontSize: '0.75rem' }}>GitHub ↗</a>
         </div>
-        <div className="mdl-header-right">
-          <div className="mdl-search-box">
-            <span>🔍</span>
-            <input className="mdl-search-input" placeholder="搜索模型..."
-              value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
-          <select className="mdl-sort-select" value={sortBy}
-            onChange={e => setSortBy(e.target.value as 'downloads' | 'name')}>
-            <option value="downloads">按热度</option>
-            <option value="name">按名称</option>
-          </select>
+        <div className="oc-bar-right">
+          <span className="oc-bar-stat"><b>{deployedCount}</b> 已部署</span>
+          <span className="oc-bar-stat"><b>{models.filter(m => m.running).length}</b> 运行中</span>
+          <button className="oc-bar-btn" onClick={() => setShowAdd(true)}>+ 添加模型</button>
         </div>
       </div>
 
-      {/* 分类筛选 */}
-      <div className="mdl-filters">
+      {/* 概览 */}
+      <div className="isolated-widget" style={{ marginTop: 16 }}>
+        <div className="oc-config-bar">
+          <div className="oc-cfg-item"><span className="oc-cfg-label">设备</span><span className="oc-cfg-val ok">{currentDevice.ip}</span></div>
+          <span className="oc-cfg-sep" />
+          <div className="oc-cfg-item"><span className="oc-cfg-label">模型总数</span><span className="oc-cfg-val mono">{models.length}</span></div>
+          <span className="oc-cfg-sep" />
+          <div className="oc-cfg-item"><span className="oc-cfg-label">已部署</span><span className="oc-cfg-val">{deployedCount}</span></div>
+          <span className="oc-cfg-sep" />
+          <div className="oc-cfg-item"><span className="oc-cfg-label">运行中</span><span className={`oc-cfg-val ${models.some(m => m.running) ? 'ok' : 'dim'}`}>{models.filter(m => m.running).length}</span></div>
+        </div>
+      </div>
+
+      {/* 筛选 */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         {CATEGORIES.map(c => (
-          <button key={c} className={`mdl-filter-btn ${category === c ? 'active' : ''}`}
-            onClick={() => setCategory(c)}>{c}</button>
+          <button key={c} className={`oc-bar-btn ${filter === c ? 'primary' : ''}`} onClick={() => setFilter(c)}>{c}</button>
+        ))}
+        <div style={{ marginLeft: 'auto' }}>
+          <input className="oc-skill-add-input" placeholder="搜索模型..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 180 }} />
+        </div>
+      </div>
+
+      {/* 模型卡片 */}
+      <div className="workspace-grid three-column" style={{ marginTop: 16 }}>
+        {filtered.map(m => (
+          <div key={m.id} className="panel-card" style={{ cursor: 'pointer', borderColor: selected === m.id ? '#ff6b00' : undefined }} onClick={() => setSelected(m.id)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: '1.5rem' }}>{m.icon}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#1e293b' }}>{m.name}</div>
+                <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{m.category} · {m.format} · {m.size}</div>
+              </div>
+              {m.running && <span className="oc-bar-badge on" style={{ fontSize: '0.66rem' }}><span className="oc-live-dot" />运行中</span>}
+              {m.deployed && !m.running && <span className="oc-bar-badge" style={{ fontSize: '0.66rem', background: '#f0fdf4', color: '#16a34a', borderColor: '#bbf7d0' }}>已部署</span>}
+            </div>
+            <p style={{ margin: '0 0 8px', fontSize: '0.78rem', color: '#64748b', lineHeight: 1.5 }}>{m.desc}</p>
+            {(m.fps || m.latency) && (
+              <div style={{ display: 'flex', gap: 12, marginBottom: 10, fontSize: '0.72rem', color: '#94a3b8' }}>
+                {m.fps && <span>⚡ {m.fps}</span>}
+                {m.latency && <span>⏱ {m.latency}</span>}
+                {m.boards.length > 0 && <span>📋 {m.boards.join(', ')}</span>}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {!m.deployed && <button className="oc-bar-btn primary" style={{ fontSize: '0.78rem', padding: '5px 14px' }} disabled={busyId === m.id} onClick={e => { e.stopPropagation(); handleDeploy(m); }}>{busyId === m.id ? '部署中...' : '部署'}</button>}
+              {m.deployed && !m.running && <button className="oc-bar-btn primary" style={{ fontSize: '0.78rem', padding: '5px 14px' }} disabled={busyId === m.id} onClick={e => { e.stopPropagation(); handleRun(m); }}>▶ 运行</button>}
+              {m.running && <button className="oc-bar-btn" style={{ fontSize: '0.78rem', padding: '5px 14px', color: '#ef4444', borderColor: '#fca5a5' }} onClick={e => { e.stopPropagation(); handleStop(m); }}>⏹ 停止</button>}
+              {m.deployed && <button className="oc-bar-btn" style={{ fontSize: '0.78rem', padding: '5px 14px', color: '#ef4444', borderColor: '#fca5a5' }} onClick={e => { e.stopPropagation(); handleRemove(m); }}>移除</button>}
+              {m.custom && <button className="oc-bar-btn" style={{ fontSize: '0.78rem', padding: '5px 14px' }} onClick={e => { e.stopPropagation(); handleRemoveCustom(m.id); }}>删除</button>}
+              {m.repo && <a href={m.repo} target="_blank" rel="noopener noreferrer" className="oc-ext-link" style={{ fontSize: '0.72rem' }} onClick={e => e.stopPropagation()}>详情 ↗</a>}
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* 主体 */}
-      <div className="mdl-body" style={{ gridTemplateColumns: detail ? '1fr 340px' : '1fr' }}>
-        <div className="mdl-grid">
-          {filtered.map(model => (
-            <div key={model.id}
-              className={`mdl-card ${selected === model.id ? 'selected' : ''}`}
-              onClick={() => setSelected(model.id)}>
-              <div className="mdl-card-top">
-                <div>
-                  <div className="mdl-card-name">{model.name}</div>
-                  <div className="mdl-card-tags">
-                    {model.deployed && <span className="mdl-tag deployed">已部署</span>}
-                    <span className="mdl-tag format">{model.framework}</span>
-                  </div>
-                </div>
-              </div>
-              <p className="mdl-card-desc">{model.desc}</p>
-              <div className="mdl-card-meta">
-                <span>{model.task}</span>
-                <span>{model.size}</span>
-                <span>v{model.version}</span>
-                <span>📥 {model.downloads}</span>
-              </div>
-              <div className="mdl-card-boards">
-                {model.boards.map(b => <span key={b} className="mdl-board-tag">{b}</span>)}
-              </div>
-              <div className="mdl-card-bench">
-                <span>精度: {model.accuracy}</span>
-                <span>延迟: {model.latency}</span>
-              </div>
-              <div className="mdl-card-actions">
-                <div className="mdl-action-main">
-                  {model.deployed ? (
-                    <button className="mdl-btn-primary"
-                      onClick={e => { e.stopPropagation(); handleRun(model); }}>
-                      ▶ 运行
-                    </button>
-                  ) : (
-                    <button className="mdl-btn-primary"
-                      disabled={deploying === model.id}
-                      onClick={e => { e.stopPropagation(); handleDeploy(model); }}>
-                      {deploying === model.id ? '部署中...' : '🚀 部署'}
-                    </button>
-                  )}
-                </div>
-                <button className="mdl-btn-convert"
-                  onClick={e => { e.stopPropagation(); handleConvert(model); }}>
-                  🔄 转换
-                </button>
-                <button className="mdl-btn-ghost"
-                  onClick={e => { e.stopPropagation(); setSelected(model.id); }}>
-                  详情
-                </button>
-              </div>
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <div className="mdl-empty-list">没有匹配的模型</div>
-          )}
-        </div>
-
-        {/* 详情面板 */}
-        {detail && (
-          <div className="mdl-detail">
-            <div className="mdl-detail-header">
-              <h3 className="mdl-detail-name">{detail.name}</h3>
-              <button className="mdl-detail-close" onClick={() => setSelected(null)}>✕</button>
-            </div>
-            <div className="mdl-detail-body">
-              <p className="mdl-detail-desc">{detail.desc}</p>
-
-              <div className="mdl-detail-grid">
-                <div className="mdl-detail-cell">
-                  <div className="mdl-detail-label">任务类型</div>
-                  <div className="mdl-detail-value">{detail.task}</div>
-                </div>
-                <div className="mdl-detail-cell">
-                  <div className="mdl-detail-label">框架</div>
-                  <div className="mdl-detail-value">{detail.framework}</div>
-                </div>
-                <div className="mdl-detail-cell">
-                  <div className="mdl-detail-label">模型大小</div>
-                  <div className="mdl-detail-value">{detail.size}</div>
-                </div>
-                <div className="mdl-detail-cell">
-                  <div className="mdl-detail-label">版本</div>
-                  <div className="mdl-detail-value">v{detail.version}</div>
-                </div>
-              </div>
-
-              <div className="mdl-bench-section">
-                <div className="mdl-detail-label" style={{ marginBottom: 6 }}>性能基准</div>
-                <div className="mdl-bench-cards">
-                  <div className="mdl-bench-card">
-                    <div className="mdl-bench-val">{detail.accuracy}</div>
-                    <div className="mdl-bench-label">精度</div>
-                  </div>
-                  <div className="mdl-bench-card">
-                    <div className="mdl-bench-val">{detail.latency}</div>
-                    <div className="mdl-bench-label">推理延迟</div>
-                  </div>
-                  <div className="mdl-bench-card">
-                    <div className="mdl-bench-val">{detail.downloads}</div>
-                    <div className="mdl-bench-label">下载量</div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="mdl-detail-label" style={{ marginBottom: 6 }}>支持板卡</div>
-                <div className="mdl-detail-boards">
-                  {detail.boards.map(b => (
-                    <span key={b} className="mdl-board-chip">{b}</span>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="mdl-detail-label" style={{ marginBottom: 6 }}>部署命令</div>
-                <div className="mdl-terminal">
-{`# 下载模型
-wget https://model.d-robotics.cc/${detail.id}/latest.bin
-
-# 部署到 BPU
-hb_model_deploy --model ${detail.id}.bin --target bpu
-
-# 运行推理
-python3 run_${detail.id.replace(/-/g, '_')}.py`}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                {detail.deployed ? (
-                  <button className="mdl-btn-primary" style={{ flex: 1 }}
-                    onClick={() => handleRun(detail)}>▶ 运行模型</button>
-                ) : (
-                  <button className="mdl-btn-primary" style={{ flex: 1 }}
-                    disabled={deploying === detail.id}
-                    onClick={() => handleDeploy(detail)}>
-                    {deploying === detail.id ? '部署中...' : '🚀 一键部署'}
-                  </button>
-                )}
-                <button className="mdl-btn-convert"
-                  onClick={() => handleConvert(detail)}>🔄 转换</button>
-              </div>
+      {/* 日志 */}
+      {showLog && logs.length > 0 && (
+        <div className="isolated-widget" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span className="widget-header" style={{ margin: 0 }}>📋 执行日志</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button className="oc-bar-btn" onClick={() => setLogs([])}>清空</button>
+              <button className="oc-bar-btn" onClick={() => setShowLog(false)}>收起</button>
             </div>
           </div>
-        )}
-      </div>
-
-      {/* 转换流水线弹窗 */}
-      {converting && (
-        <div className="mdl-convert-overlay" onClick={() => { setConverting(null); setConvertStep(0); }}>
-          <div className="mdl-convert-modal" onClick={e => e.stopPropagation()}>
-            <h3 className="mdl-convert-title">
-              🔄 模型转换 — {models.find(m => m.id === converting)?.name}
-            </h3>
-            <p className="mdl-convert-desc">正在将模型转换为 BPU 可执行格式</p>
-            <div className="mdl-convert-steps">
-              {['解析模型结构', '量化校准', 'BPU 编译', '验证输出'].map((step, i) => (
-                <div key={i} className={`mdl-convert-step ${i < convertStep ? 'done' : i === convertStep ? 'running' : ''}`}>
-                  <div className={`mdl-step-circle ${i < convertStep ? 'done' : i === convertStep ? 'running' : ''}`}>
-                    {i < convertStep ? '✓' : i + 1}
-                  </div>
-                  <div>
-                    <div className="mdl-step-label">{step}</div>
-                    <div className="mdl-step-desc">
-                      {i < convertStep ? '完成' : i === convertStep ? '进行中...' : '等待中'}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {convertStep >= 4 && (
-              <div className="mdl-convert-done">
-                <span className="mdl-convert-done-text">✅ 转换完成</span>
-                <button className="mdl-btn-primary"
-                  onClick={() => { setConverting(null); setConvertStep(0); }}>
-                  关闭
-                </button>
-              </div>
-            )}
-          </div>
+          <pre className="ros-output-content" style={{ maxHeight: 200, overflow: 'auto' }}>{logs.join('\n')}</pre>
         </div>
+      )}
+
+      {/* 添加模型弹窗 */}
+      {showAdd && (
+        <>
+          <div className="oc-modal-mask" onClick={() => setShowAdd(false)} />
+          <div className="oc-modal">
+            <div className="oc-modal-head">
+              <h3 className="oc-modal-title">🧠 添加自定义模型</h3>
+              <button className="oc-modal-close" onClick={() => setShowAdd(false)}>✕</button>
+            </div>
+            <div className="oc-input-group"><label>模型名称</label><input placeholder="MyModel" value={newModel.name} onChange={e => setNewModel(p => ({ ...p, name: e.target.value }))} /></div>
+            <div className="oc-input-group"><label>描述</label><input placeholder="模型描述..." value={newModel.desc} onChange={e => setNewModel(p => ({ ...p, desc: e.target.value }))} /></div>
+            <div className="oc-input-group"><label>格式</label>
+              <select value={newModel.format} onChange={e => setNewModel(p => ({ ...p, format: e.target.value }))}>
+                <option>BIN</option><option>ONNX</option><option>PyTorch</option><option>其他</option>
+              </select>
+            </div>
+            <div className="oc-input-group"><label>部署命令</label><input placeholder="bash download.sh ..." value={newModel.deployCmd} onChange={e => setNewModel(p => ({ ...p, deployCmd: e.target.value }))} /></div>
+            <div className="oc-input-group"><label>运行命令</label><input placeholder="python3 infer.py ..." value={newModel.runCmd} onChange={e => setNewModel(p => ({ ...p, runCmd: e.target.value }))} /></div>
+            <div className="oc-input-group"><label>移除命令</label><input placeholder="rm -rf /path/to/model" value={newModel.removeCmd} onChange={e => setNewModel(p => ({ ...p, removeCmd: e.target.value }))} /></div>
+            <button className="oc-save-btn wide" onClick={handleAddModel}>添加模型</button>
+          </div>
+        </>
       )}
     </div>
   );
