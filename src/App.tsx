@@ -66,7 +66,7 @@ function AppShell() {
         <Sidebar />
         <div className="main-area">
           <TopToolbar />
-          <div className={`canvas-viewport ${activeTab === 'terminal' || activeTab === 'ide' ? 'viewport-terminal' : ''}`}>
+          <div className={`canvas-viewport ${activeTab === 'terminal' || activeTab === 'ide' || activeTab === 'vnc' ? 'viewport-terminal' : ''}`}>
             <MainContent />
           </div>
           <AIDock />

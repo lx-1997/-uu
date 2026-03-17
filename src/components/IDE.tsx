@@ -1,275 +1,469 @@
-import { useState, useEffect } from 'react';
-import { executeDeviceCommand } from '../api';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import Editor, { loader } from '@monaco-editor/react';
+import { listDeviceFiles, readDeviceFile, writeDeviceFile } from '../api';
 import { useAppState } from '../hooks/useAppState';
 
-type ServiceStatus = 'checking' | 'not-installed' | 'installed-stopped' | 'running';
+loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
+
+// ── 文件图标映射 ──
+const EXT_ICONS: Record<string, string> = {
+  py: '🐍', js: '📜', ts: '📘', tsx: '⚛️', jsx: '⚛️',
+  json: '📋', md: '📝', html: '🌐', css: '🎨', sh: '⚙️',
+  yaml: '📄', yml: '📄', toml: '📄', txt: '📄', log: '📃',
+  c: '🔧', cpp: '🔧', h: '🔧', rs: '🦀', go: '🐹',
+};
+const getFileIcon = (name: string, isDir: boolean) => {
+  if (isDir) return '📁';
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  return EXT_ICONS[ext] || '📄';
+};
+
+// ── 语言检测 ──
+const detectLang = (path: string): string => {
+  const ext = path.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    py: 'python', js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
+    json: 'json', md: 'markdown', html: 'html', css: 'css', scss: 'scss',
+    sh: 'shell', bash: 'shell', yaml: 'yaml', yml: 'yaml', toml: 'ini',
+    xml: 'xml', sql: 'sql', c: 'c', cpp: 'cpp', h: 'c', rs: 'rust', go: 'go',
+    java: 'java', rb: 'ruby', lua: 'lua', dockerfile: 'dockerfile',
+  };
+  return map[ext || ''] || 'plaintext';
+};
+
+// ── 文件条目类型 ──
+interface FileEntry {
+  name: string;
+  isDir: boolean;
+  size?: string;
+  date?: string;
+}
+
+// ── 编辑标签页 ──
+interface EditorTab {
+  path: string;
+  content: string;
+  originalContent: string; // 用于检测是否修改
+  lang: string;
+}
 
 export default function IDE() {
-  const { currentDevice, addToast, setActiveTab } = useAppState();
-  const [connected, setConnected] = useState(false);
-  const [port, setPort] = useState('8080');
-  const [status, setStatus] = useState<ServiceStatus>('checking');
-  const [statusOutput, setStatusOutput] = useState('');
-  const codeServerUrl = `http://${currentDevice?.ip || 'localhost'}:${port}/?folder=/root`;
+  const { currentDevice, addToast } = useAppState();
 
-  const checkStatus = () => {
-    if (!currentDevice) {
-      setStatus('not-installed');
-      return;
-    }
+  // 文件树状态
+  const [currentPath, setCurrentPath] = useState('/root');
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [treeWidth, setTreeWidth] = useState(260);
 
-    setStatus('checking');
-    executeDeviceCommand(
-      currentDevice.id,
-      `bash -lc "if ! command -v code-server >/dev/null 2>&1; then echo not-installed; elif pgrep -af 'code-server.*--bind-addr.*:${port}' >/dev/null || ss -lntp 2>/dev/null | grep -q ':${port}'; then echo running; else echo installed-stopped; fi; (pgrep -af code-server || true); (ss -lntp 2>/dev/null | grep ':${port}' || true)"`,
-    )
-      .then((res) => {
-        setStatusOutput(res.output || '无输出');
-        const line = res.output.trim().split(/\r?\n/).find((item) => ['running', 'installed-stopped', 'not-installed'].includes(item.trim()))?.trim();
-        if (line === 'running' || line === 'installed-stopped' || line === 'not-installed') {
-          setStatus(line);
-          return;
-        }
-        setStatus('not-installed');
-      })
-      .catch((error) => {
-        setStatus('not-installed');
-        setStatusOutput(error instanceof Error ? error.message : '检测失败');
-      });
+  // 编辑器标签页
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
+  const activeTab = tabs.find(t => t.path === activeTabPath) || null;
+
+  // 搜索
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // 拖拽调整面板宽度
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
+
+  const handleDragStart = (e: React.MouseEvent) => {
+    isDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = treeWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
   };
 
   useEffect(() => {
-    checkStatus();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDevice?.ip]);
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      const delta = e.clientX - dragStartX.current;
+      setTreeWidth(Math.max(180, Math.min(450, dragStartWidth.current + delta)));
+    };
+    const handleMouseUp = () => {
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
-  const handleConnect = () => {
-    if (!currentDevice) {
-      addToast('请先连接真实设备', 'warning');
-      return;
-    }
+  // ── 解析 ls -la 输出 ──
+  const parseListOutput = (raw: string): FileEntry[] => {
+    return raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('total '))
+      .map(line => {
+        const parts = line.split(/\s+/);
+        const mode = parts[0] || '';
+        const size = parts[4] || '';
+        const date = parts.slice(5, 8).join(' ');
+        const name = parts.slice(8).join(' ');
+        return { name, isDir: mode.startsWith('d'), size, date };
+      })
+      .filter(item => item.name && item.name !== '.' && item.name !== '..');
+  };
 
-    if (status === 'running') {
-      setConnected(true);
-    } else if (status === 'installed-stopped') {
-      addToast('正在启动 code-server 服务...', 'info');
-      setStatus('checking');
-      executeDeviceCommand(currentDevice.id, 'bash -lc "(systemctl start code-server || code-server --bind-addr 0.0.0.0:8080 >/tmp/code-server.log 2>&1 &)"')
-        .then(() => {
-          addToast('code-server 启动命令已执行', 'success');
-          checkStatus();
-        })
-        .catch((error) => {
-          addToast(error instanceof Error ? error.message : '启动失败', 'error');
-          checkStatus();
+  // ── 刷新目录 ──
+  const refreshList = useCallback((path = currentPath) => {
+    if (!currentDevice) return;
+    setLoading(true);
+    listDeviceFiles(currentDevice.id, path)
+      .then(res => {
+        const parsed = parseListOutput(res.output || '');
+        // 排序：文件夹在前，然后按名称
+        parsed.sort((a, b) => {
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+          return a.name.localeCompare(b.name);
         });
-    }
-  };
+        setEntries(parsed);
+        setCurrentPath(path);
+      })
+      .catch(err => addToast(err instanceof Error ? err.message : '刷新失败', 'error'))
+      .finally(() => setLoading(false));
+  }, [currentDevice, currentPath, addToast]);
 
-  const handleInstall = () => {
-    if (!currentDevice) {
-      addToast('请先连接真实设备', 'warning');
+  useEffect(() => {
+    if (currentDevice) refreshList(currentPath);
+  }, [currentDevice?.id]);
+
+  // ── 打开文件 ──
+  const openFile = (name: string, isDir: boolean) => {
+    const fullPath = currentPath === '/' ? '/' + name : currentPath + '/' + name;
+    if (isDir) {
+      refreshList(fullPath);
       return;
     }
+    // 检查是否已打开
+    const existing = tabs.find(t => t.path === fullPath);
+    if (existing) {
+      setActiveTabPath(fullPath);
+      return;
+    }
+    setLoading(true);
+    readDeviceFile(currentDevice!.id, fullPath, 5000)
+      .then(res => {
+        let text = res.output || '';
+        if (res.contentBase64) {
+          try {
+            const binary = atob(res.contentBase64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            text = new TextDecoder('utf-8').decode(bytes);
+          } catch { /* ignore */ }
+        }
+        const newTab: EditorTab = {
+          path: fullPath,
+          content: text,
+          originalContent: text,
+          lang: detectLang(fullPath),
+        };
+        setTabs(prev => [...prev, newTab]);
+        setActiveTabPath(fullPath);
+      })
+      .catch(err => addToast(err instanceof Error ? err.message : '读取失败', 'error'))
+      .finally(() => setLoading(false));
+  };
 
-    addToast('正在安装 code-server，请稍候...', 'info');
-    setStatus('checking');
-    executeDeviceCommand(currentDevice.id, 'bash -lc "curl -fsSL https://code-server.dev/install.sh | sh"')
+  // ── 关闭标签页 ──
+  const closeTab = (path: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setTabs(prev => {
+      const next = prev.filter(t => t.path !== path);
+      if (activeTabPath === path) {
+        const idx = prev.findIndex(t => t.path === path);
+        const newActive = next[Math.min(idx, next.length - 1)]?.path || null;
+        setActiveTabPath(newActive);
+      }
+      return next;
+    });
+  };
+
+  // ── 保存文件 ──
+  const saveFile = () => {
+    if (!currentDevice || !activeTab) return;
+    setLoading(true);
+    writeDeviceFile(currentDevice.id, activeTab.path, activeTab.content)
       .then(() => {
-        addToast('code-server 安装完成', 'success');
-        checkStatus();
+        addToast(`已保存 ${activeTab.path.split('/').pop()}`, 'success');
+        setTabs(prev => prev.map(t =>
+          t.path === activeTab.path ? { ...t, originalContent: t.content } : t
+        ));
       })
-      .catch((error) => {
-        addToast(error instanceof Error ? error.message : '安装失败', 'error');
-        checkStatus();
-      });
+      .catch(err => addToast(err instanceof Error ? err.message : '保存失败', 'error'))
+      .finally(() => setLoading(false));
   };
 
-  const handleStartByPort = () => {
-    if (!currentDevice) {
-      addToast('请先连接真实设备', 'warning');
-      return;
-    }
-    addToast(`尝试在 ${port} 端口启动 code-server`, 'info');
-    setStatus('checking');
-    executeDeviceCommand(
-      currentDevice.id,
-      `bash -lc "nohup code-server --bind-addr 0.0.0.0:${port} --auth none >/tmp/code-server.log 2>&1 & sleep 1; (pgrep -af code-server || true); (ss -lntp 2>/dev/null | grep ':${port}' || true)"`,
-    )
-      .then((res) => {
-        setStatusOutput(res.output || '无输出');
-        checkStatus();
-      })
-      .catch((error) => {
-        setStatusOutput(error instanceof Error ? error.message : '启动失败');
-        addToast(error instanceof Error ? error.message : '启动失败', 'error');
-        checkStatus();
-      });
+  // ── 更新编辑器内容 ──
+  const updateContent = (val: string | undefined) => {
+    if (!activeTabPath) return;
+    setTabs(prev => prev.map(t =>
+      t.path === activeTabPath ? { ...t, content: val || '' } : t
+    ));
+  };
+
+  // ── 快捷键 ──
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        saveFile();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+        e.preventDefault();
+        setShowSearch(true);
+        setTimeout(() => searchRef.current?.focus(), 50);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeTab, currentDevice]);
+
+  // ── 面包屑 ──
+  const pathParts = currentPath.split('/').filter(Boolean);
+
+  // ── 过滤文件列表 ──
+  const filteredEntries = searchQuery
+    ? entries.filter(e => e.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    : entries;
+
+  const isModified = (path: string) => {
+    const tab = tabs.find(t => t.path === path);
+    return tab ? tab.content !== tab.originalContent : false;
   };
 
   return (
-    <div className={connected ? 'ide-fullscreen' : 'center-stage wide-stage'}>
-      {!connected ? (
-        <div className="isolated-widget workflow-widget">
-          <div className="widget-header">📝 代码编辑器 · code-server</div>
-          <div className="desc-text">在浏览器中使用 VS Code，直接在设备上编写和调试代码。AI 通过底部聊天框辅助开发。</div>
-
-          {/* Service status card */}
-          <div className="panel-card" style={{ marginBottom: 16, padding: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <span style={{ fontSize: '1.2rem' }}>
-                {status === 'checking' ? '⏳' : status === 'running' ? '✅' : status === 'installed-stopped' ? '⏸️' : '📦'}
-              </span>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-                  {status === 'checking' && '正在检测 code-server 服务...'}
-                  {status === 'running' && 'code-server 已就绪'}
-                  {status === 'installed-stopped' && 'code-server 已安装，未启动'}
-                  {status === 'not-installed' && 'code-server 尚未安装'}
-                </div>
-                <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>
-                  {status === 'checking' && `正在检测 ${currentDevice?.ip || 'localhost'}:${port} ...`}
-                  {status === 'running' && `服务运行在 ${currentDevice?.ip || 'localhost'}:${port}，点击打开编辑器`}
-                  {status === 'installed-stopped' && '点击启动服务后即可连接编辑器'}
-                  {status === 'not-installed' && '需要在设备上安装 code-server，安装后即可使用浏览器编码'}
-                </div>
-              </div>
-            </div>
-
-            {status === 'checking' && (
-              <div style={{ height: 36, borderRadius: 8, background: '#f1f5f9', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: '60%', background: 'linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9)', animation: 'shimmer 1.5s infinite' }} />
-              </div>
-            )}
-
-            {status === 'running' && (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="clean-btn" style={{ flex: 1 }} onClick={handleConnect}>
-                  ▶ 打开编辑器
-                </button>
-                <button className="clean-btn outline-btn" onClick={() => window.open(codeServerUrl, '_blank')}>
-                  ↗ 新窗口
-                </button>
-              </div>
-            )}
-
-            {status === 'installed-stopped' && (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="clean-btn" style={{ flex: 1 }} onClick={handleConnect}>
-                  ▶ 启动服务并连接
-                </button>
-                <button className="clean-btn outline-btn" onClick={handleStartByPort}>
-                  指定端口启动
-                </button>
-              </div>
-            )}
-
-            {status === 'not-installed' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button className="clean-btn" style={{ width: '100%' }} onClick={handleInstall}>
-                  📥 一键安装 code-server
-                </button>
-                <div style={{ fontSize: '0.72rem', color: '#94a3b8', textAlign: 'center' }}>
-                  将在设备上执行: <code style={{ background: '#f1f5f9', padding: '1px 6px', borderRadius: 4 }}>curl -fsSL https://code-server.dev/install.sh | sh</code>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
-              <span style={{ fontSize: '0.78rem', color: '#64748b', whiteSpace: 'nowrap' }}>端口:</span>
-              <input
-                className="clean-input"
-                style={{ width: 72, fontSize: '0.82rem', textAlign: 'center' }}
-                value={port}
-                onChange={e => setPort(e.target.value.replace(/\D/g, ''))}
-              />
-              <button className="clean-btn outline-btn sm-btn" onClick={checkStatus}>
-                🔄 重新检测
-              </button>
-            </div>
-            <div className="terminal-screen" style={{ minHeight: 100, marginTop: 10 }}>
-              {statusOutput.split(/\r?\n/).filter(Boolean).map((line, idx) => (
-                <div key={`${line}-${idx}`} className="terminal-line">{line}</div>
-              ))}
-            </div>
-          </div>
-
-          {/* AI assist info */}
-          <div className="workspace-grid two-column">
-            <div className="panel-card">
-              <div className="panel-title">AI 如何协助开发？</div>
-              <div className="usage-list">
-                <div className="usage-item">
-                  <strong>🤖 自然语言编程</strong>
-                  <span>在底部聊天框描述需求，AI 自动生成代码并写入设备文件</span>
-                </div>
-                <div className="usage-item">
-                  <strong>🐛 调试诊断</strong>
-                  <span>遇到错误时粘贴日志，AI 分析原因并建议修复</span>
-                </div>
-                <div className="usage-item">
-                  <strong>📦 依赖管理</strong>
-                  <span>"帮我安装 opencv-python" → AI 在终端自动执行</span>
-                </div>
-                <div className="usage-item">
-                  <strong>🔧 ROS 开发</strong>
-                  <span>"创建一个人脸检测的 ROS 节点" → AI 生成完整 launch 文件与代码</span>
-                </div>
-              </div>
-            </div>
-            <div className="panel-card">
-              <div className="panel-title">连接后你可以</div>
-              <div className="usage-list">
-                <div className="usage-item">
-                  <strong>📂 浏览设备文件</strong>
-                  <span>默认打开 /root 目录，直接编辑设备上的文件</span>
-                </div>
-                <div className="usage-item">
-                  <strong>🔌 安装扩展</strong>
-                  <span>Python、C++、ROS 扩展一键安装，和本地 VS Code 一样</span>
-                </div>
-                <div className="usage-item">
-                  <strong>▶ 内置终端</strong>
-                  <span>code-server 内置终端已自动连接 SSH，可直接运行命令</span>
-                </div>
-                <div className="usage-item">
-                  <strong>🔗 Git 集成</strong>
-                  <span>版本管理、代码对比、提交推送全部在浏览器中完成</span>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-                <button className="chip-btn" onClick={() => setActiveTab('terminal')}>💻 终端</button>
-                <button className="chip-btn" onClick={() => setActiveTab('files')}>📂 文件管理</button>
-                <button className="chip-btn" onClick={() => setActiveTab('examples')}>📦 应用示例</button>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 14, padding: '10px 14px', background: '#f0f9ff', borderRadius: 10, border: '1px dashed #93c5fd' }}>
-            <div style={{ fontSize: '0.78rem', color: '#475569', lineHeight: 1.6 }}>
-              💡 OpenClaw 支持通过自然语言直接操控设备和编写程序。如果你不想手动编码，可以在底部聊天框用自然语言描述你要实现的功能，AI 会自动完成代码编写、文件创建和运行。
-            </div>
+    <div className="ide-container">
+      {/* ── 文件树面板 ── */}
+      <div className="ide-sidebar" style={{ width: treeWidth }}>
+        {/* 侧栏头部 */}
+        <div className="ide-sidebar-header">
+          <span className="ide-sidebar-title">资源管理器</span>
+          <div className="ide-sidebar-actions">
+            <button
+              className="ide-icon-btn"
+              onClick={() => refreshList()}
+              disabled={loading}
+              title="刷新"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+              </svg>
+            </button>
+            <button
+              className="ide-icon-btn"
+              onClick={() => { setShowSearch(!showSearch); setTimeout(() => searchRef.current?.focus(), 50); }}
+              title="搜索文件"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </button>
           </div>
         </div>
-      ) : (
-        <>
-          <div style={{ display: 'flex', gap: 8, padding: '8px 12px', alignItems: 'center', background: '#fff', borderBottom: '1px solid #e2e8f0' }}>
-            <span className="card-status-badge ok" style={{ fontSize: '0.75rem', padding: '4px 10px' }}>
-              <span className="card-status-dot"></span>已连接
+
+        {/* 搜索框 */}
+        {showSearch && (
+          <div className="ide-search-box">
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="搜索文件..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') { setShowSearch(false); setSearchQuery(''); } }}
+              className="ide-search-input"
+            />
+          </div>
+        )}
+
+        {/* 面包屑导航 */}
+        <div className="ide-breadcrumb">
+          <span className="ide-crumb" onClick={() => refreshList('/')}>~</span>
+          {pathParts.map((part, i) => (
+            <span key={i}>
+              <span className="ide-crumb-sep">/</span>
+              <span
+                className="ide-crumb"
+                onClick={() => refreshList('/' + pathParts.slice(0, i + 1).join('/'))}
+              >
+                {part}
+              </span>
             </span>
-            <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{codeServerUrl}</span>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-              <button className="clean-btn outline-btn sm-btn" onClick={() => window.open(codeServerUrl, '_blank')}>↗ 新窗口</button>
-              <button className="clean-btn outline-btn sm-btn" onClick={() => setConnected(false)}>✕ 断开</button>
+          ))}
+        </div>
+
+        {/* 文件列表 */}
+        <div className="ide-file-list">
+          {currentPath !== '/' && (
+            <div
+              className="ide-file-item"
+              onClick={() => {
+                const parts = currentPath.split('/').filter(Boolean);
+                parts.pop();
+                refreshList('/' + parts.join('/'));
+              }}
+            >
+              <span className="ide-file-icon">📂</span>
+              <span className="ide-file-name">..</span>
+            </div>
+          )}
+          {filteredEntries.map(entry => {
+            const fullPath = currentPath === '/' ? '/' + entry.name : currentPath + '/' + entry.name;
+            const isActive = activeTabPath === fullPath;
+            const isOpen = tabs.some(t => t.path === fullPath);
+            return (
+              <div
+                key={entry.name}
+                className={`ide-file-item ${isActive ? 'active' : ''} ${isOpen ? 'open' : ''}`}
+                onClick={() => openFile(entry.name, entry.isDir)}
+                title={`${entry.name}${entry.size ? ` · ${entry.size}` : ''}`}
+              >
+                <span className="ide-file-icon">{getFileIcon(entry.name, entry.isDir)}</span>
+                <span className="ide-file-name">{entry.name}</span>
+                {entry.size && !entry.isDir && (
+                  <span className="ide-file-size">{entry.size}</span>
+                )}
+              </div>
+            );
+          })}
+          {filteredEntries.length === 0 && !loading && (
+            <div className="ide-empty">
+              {searchQuery ? '无匹配文件' : '空目录'}
+            </div>
+          )}
+          {loading && (
+            <div className="ide-loading">
+              <div className="ide-loading-spinner" />
+              <span>加载中...</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 拖拽分隔条 ── */}
+      <div className="ide-resizer" onMouseDown={handleDragStart} />
+
+      {/* ── 编辑器主区域 ── */}
+      <div className="ide-main">
+        {/* 标签栏 */}
+        {tabs.length > 0 && (
+          <div className="ide-tabs">
+            <div className="ide-tabs-scroll">
+              {tabs.map(tab => {
+                const fileName = tab.path.split('/').pop() || tab.path;
+                const modified = isModified(tab.path);
+                return (
+                  <div
+                    key={tab.path}
+                    className={`ide-tab ${tab.path === activeTabPath ? 'active' : ''} ${modified ? 'modified' : ''}`}
+                    onClick={() => setActiveTabPath(tab.path)}
+                    title={tab.path}
+                  >
+                    <span className="ide-tab-icon">{getFileIcon(fileName, false)}</span>
+                    <span className="ide-tab-name">{fileName}</span>
+                    {modified && <span className="ide-tab-dot" />}
+                    <button
+                      className="ide-tab-close"
+                      onClick={e => closeTab(tab.path, e)}
+                      title="关闭"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {/* 工具栏 */}
+            <div className="ide-toolbar">
+              {activeTab && isModified(activeTab.path) && (
+                <button className="ide-save-btn" onClick={saveFile} disabled={loading}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+                    <polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+                  </svg>
+                  保存
+                </button>
+              )}
+              <span className="ide-shortcut-hint">Ctrl+S 保存 · Ctrl+P 搜索</span>
             </div>
           </div>
-          <iframe
-            src={codeServerUrl}
-            style={{ width: '100%', flex: 1, border: 'none' }}
-            title="code-server"
-          />
-        </>
-      )}
+        )}
+
+        {/* 编辑器区域 */}
+        {activeTab ? (
+          <div className="ide-editor-wrap">
+            {/* 文件路径栏 */}
+            <div className="ide-path-bar">
+              {activeTab.path.split('/').filter(Boolean).map((seg, i, arr) => (
+                <span key={i}>
+                  {i > 0 && <span className="ide-path-sep">›</span>}
+                  <span className={i === arr.length - 1 ? 'ide-path-current' : 'ide-path-seg'}>{seg}</span>
+                </span>
+              ))}
+              <span className="ide-lang-badge">{activeTab.lang}</span>
+            </div>
+            <div className="ide-editor">
+              <Editor
+                height="100%"
+                language={activeTab.lang}
+                theme="vs-dark"
+                value={activeTab.content}
+                onChange={updateContent}
+                options={{
+                  minimap: { enabled: true, maxColumn: 80 },
+                  fontSize: 14,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+                  fontLigatures: true,
+                  wordWrap: 'on',
+                  lineNumbers: 'on',
+                  renderLineHighlight: 'all',
+                  scrollBeyondLastLine: false,
+                  smoothScrolling: true,
+                  cursorBlinking: 'smooth',
+                  cursorSmoothCaretAnimation: 'on',
+                  bracketPairColorization: { enabled: true },
+                  padding: { top: 12 },
+                  suggest: { showKeywords: true },
+                }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="ide-welcome">
+            <div className="ide-welcome-icon">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+              </svg>
+            </div>
+            <h3 className="ide-welcome-title">RDK Code Editor</h3>
+            <p className="ide-welcome-sub">从左侧文件树选择文件开始编辑</p>
+            <div className="ide-welcome-shortcuts">
+              <div className="ide-shortcut-item">
+                <kbd>Ctrl</kbd>+<kbd>S</kbd>
+                <span>保存文件</span>
+              </div>
+              <div className="ide-shortcut-item">
+                <kbd>Ctrl</kbd>+<kbd>P</kbd>
+                <span>搜索文件</span>
+              </div>
+              <div className="ide-shortcut-item">
+                <kbd>Ctrl</kbd>+<kbd>`</kbd>
+                <span>切换终端</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
