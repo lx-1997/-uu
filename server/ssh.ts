@@ -57,7 +57,7 @@ export function runRemoteCommands(credentials: SshCredentials, commands: string[
                 return;
               }
 
-              resolve(stdout || 'Command completed without output.');
+              resolve(stdout);
             })
             .on('data', (chunk: Buffer) => {
               stdout += chunk.toString();

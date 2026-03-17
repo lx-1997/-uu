@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Editor from '@monaco-editor/react';
+import Editor, { loader } from '@monaco-editor/react';
 import { Loader2, RefreshCw, Upload, ArrowLeft } from 'lucide-react';
-import { downloadDeviceFile, listDeviceFiles, readDeviceFile, writeDeviceFile, uploadDeviceFile } from '../api';
+
+// 使用国内极速镜像源，避免因为 unpkg 无法连接导致「代码编辑」模块卡白屏加载不到一直启动不了的问题
+loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
+
+import { downloadDeviceFile, listDeviceFiles, readDeviceFile, writeDeviceFile, uploadDeviceFile, executeDeviceCommand } from '../api';
 import { useAppState } from '../hooks/useAppState';
 
 export default function Files() {
@@ -12,6 +16,64 @@ export default function Files() {
   const [editorFile, setEditorFile] = useState<{ path: string; content: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [searchMatches, setSearchMatches] = useState<Array<{path: string; isDir: boolean}>>([]);
+
+  const runDownloadRef = useRef<any>(null);
+
+  const deviceRef = useRef(currentDevice);
+  useEffect(() => { deviceRef.current = currentDevice; }, [currentDevice]);
+
+  useEffect(() => {
+    const handleUploadEvent = () => fileInputRef.current?.click();
+    const handleDownloadEvent = async (e: any) => {
+      const rawName = e.detail?.trim() || '';
+      const fileName = rawName.split('/').pop() || rawName; // 提取纯文件名，忽略包含的路径或波浪号
+      if (!fileName) {
+        addToast('请指定要下载的文件名，例如：下载 test.txt', 'warning');
+        return;
+      }
+      const target = entriesRef.current.find((en) => en.name === fileName);
+      if (target) {
+        runDownloadRef.current?.(target.name, target.isDir);
+      } else {
+        if (!deviceRef.current) {
+          addToast('请先连接设备获取文件', 'warning');
+          return;
+        }
+        addToast(`当前目录未找到，正在全盘深入搜索 ${fileName}...`, 'info');
+        try {
+          const res = await executeDeviceCommand(deviceRef.current.id, `for p in $(find /userdata /root /home/sunrise /var/log /etc -name "${fileName}" 2>/dev/null | head -n 10); do if [ -d "$p" ]; then echo "DIR:$p"; else echo "FILE:$p"; fi; done`);
+          const lines = res.output.split(/\\r?\\n/).map(l => l.trim().replace(/Command completed without output\\.?/i, '')).filter(l => l && (l.startsWith('DIR:/') || l.startsWith('FILE:/')));
+          
+          if (lines.length === 1) {
+            const isDir = lines[0].startsWith('DIR:');
+            const foundPath = lines[0].substring(lines[0].indexOf('/'));
+            addToast(`🔍 自动获取匹配项：${foundPath}`, 'success');
+            runDownloadRef.current?.(foundPath, isDir);
+          } else if (lines.length > 1) {
+            addToast(`🔍 找到 ${lines.length} 个结果，请手动选择`, 'info');
+            setSearchMatches(lines.map(l => ({
+               path: l.substring(l.indexOf('/')),
+               isDir: l.startsWith('DIR:')
+            })));
+          } else {
+            addToast(`全盘搜索失败，未找到: ${fileName}`, 'error');
+          }
+        } catch (err) {
+          addToast('全盘搜索发生错误', 'error');
+        }
+      }
+    };
+    window.addEventListener('AI_FILE_UPLOAD', handleUploadEvent);
+    window.addEventListener('AI_FILE_DOWNLOAD', handleDownloadEvent);
+    return () => {
+      window.removeEventListener('AI_FILE_UPLOAD', handleUploadEvent);
+      window.removeEventListener('AI_FILE_DOWNLOAD', handleDownloadEvent);
+    };
+  }, []);
+
+  const entriesRef = useRef(entries);
+  useEffect(() => { entriesRef.current = entries; }, [entries]);
 
   const ensureDevice = () => {
     if (!currentDevice) {
@@ -69,7 +131,8 @@ export default function Files() {
 
   const runDownload = (fileName: string, isFolder: boolean) => {
     if (!ensureDevice() || !currentDevice) return;
-    const filePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
+    const filePath = fileName.startsWith('/') ? fileName : (currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`);
+    const actualName = fileName.split('/').pop() || 'download';
     addToast(isFolder ? '开始压缩并下载...' : '开始下载...', 'info');
     downloadDeviceFile(currentDevice.id, filePath)
       .then((res) => {
@@ -84,12 +147,14 @@ export default function Files() {
         const href = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = href;
-        link.download = isFolder ? `${fileName}.tar.gz` : fileName;
+        link.download = isFolder ? `${actualName}.tar.gz` : actualName;
         link.click();
         URL.revokeObjectURL(href);
       })
       .catch((err) => addToast(err instanceof Error ? err.message : '下载文件失败', 'error'));
   };
+
+  runDownloadRef.current = runDownload;
 
   const runEdit = (fileName: string) => {
     if (!ensureDevice() || !currentDevice) return;
@@ -316,6 +381,35 @@ export default function Files() {
           </div>
         )}
       </div>
+
+      {searchMatches.length > 0 && (
+        <div className="modal-overlay" onClick={() => setSearchMatches([])}>
+          <div className="modal-card" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
+            <div className="modal-title">发现同名文件/文件夹</div>
+            <div className="modal-desc" style={{ marginBottom: 16 }}>在设备中全盘搜寻到了共 {searchMatches.length} 个结果，请选择您需要下载的具体路径：</div>
+            <div style={{ maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+              {searchMatches.map((m, i) => (
+                <button
+                  key={i}
+                  className="clean-btn outline-btn"
+                  style={{ textAlign: 'left', display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: '#f8fafc' }}
+                  onClick={() => {
+                     setSearchMatches([]);
+                     runDownloadRef.current?.(m.path, m.isDir);
+                  }}
+                >
+                  <span style={{ wordBreak: 'break-all' }}>📄 {m.path}</span>
+                  <span style={{ fontSize: 12, color: '#64748b', flexShrink: 0 }}>{m.isDir ? '文件夹' : '文件'}</span>
+                </button>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="clean-btn outline-btn" style={{ width: '100%' }} onClick={() => setSearchMatches([])}>取消下载</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

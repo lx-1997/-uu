@@ -8,12 +8,52 @@ import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { Client } from 'ssh2';
+import { WebSocketServer } from 'ws';
+import * as net from 'net';
 
 const app = express();
 const httpServer = http.createServer(app);
 const io = new SocketIOServer(httpServer, {
   cors: { origin: '*' }
 });
+
+const wss = new WebSocketServer({ noServer: true });
+httpServer.on('upgrade', (request, socket, head) => {
+  if (request.url?.startsWith('/websockify')) {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  }
+});
+
+wss.on('connection', (ws, req) => {
+  // e.g. /websockify?target=192.168.1.10:5900
+  const urlParams = new URLSearchParams(req.url?.split('?')[1] || '');
+  const target = urlParams.get('target');
+  if (!target) {
+    ws.close();
+    return;
+  }
+  const [host, targetPort] = target.split(':');
+  
+  const tcpSocket = net.connect(Number(targetPort || 5900), host, () => {
+    console.log(`[noVNC] proxied to ${host}:${targetPort}`);
+  });
+
+  tcpSocket.on('data', (data) => {
+    if (ws.readyState === ws.OPEN) ws.send(data);
+  });
+  
+  ws.on('message', (msg: Buffer) => {
+    if (!tcpSocket.destroyed) tcpSocket.write(msg);
+  });
+  
+  tcpSocket.on('close', () => ws.close());
+  tcpSocket.on('error', () => ws.close());
+  ws.on('close', () => tcpSocket.destroy());
+  ws.on('error', () => tcpSocket.destroy());
+});
+
 const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://coding.dashscope.aliyuncs.com/v1';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
@@ -115,6 +155,7 @@ async function runOnDevice(
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
+app.use('/vnc', express.static(process.cwd() + '/node_modules/@novnc/novnc'));
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
@@ -701,7 +742,7 @@ app.post('/api/agent/plan', async (request, response) => {
 }
 2) steps 最少 1 步，最多 5 步。
 3) intent 只能是以下之一：flash, terminal, terminal_cmd, file_upload, file_download, vnc, openclaw_start, openclaw_status, openclaw_switch, hardware_check, ros_scan, ros_record_start, ros_record_stop, model_deploy, model_list, example_run, workflow, device_scan, nav, settings, general
-4) param 仅在 terminal_cmd / openclaw_switch / nav 场景填写。
+4) param 仅在 terminal_cmd / openclaw_switch / nav / file_download 场景填写。下载文件时填写需要下载的具体文件名。
 5) 如果用户目标不需要实际操作，使用 general。
 6) 不要使用 markdown，不要代码块，只返回 JSON。
 7) 当目标涉及“板端 OpenClaw + 软件内能力联动”时，steps 必须同时包含 openclaw_* 与软件能力（如 hardware_check/terminal/model_* 等）步骤。`;
@@ -868,7 +909,7 @@ app.post('/api/chat', async (request, response) => {
 用户: "启动小龙虾" → "正在启动 OpenClaw AI 网关服务。[[intent:openclaw_start]]"
 用户: "切换到 deepseek" → "好的，准备切换到 deepseek 模型。[[intent:openclaw_switch|deepseek-chat]]"
 用户: "把模型传到板子上" → "这就帮你同步模型文件到设备。[[intent:file_upload]]"
-用户: "下载日志" → "好的，帮你从设备拉取日志文件。[[intent:file_download]]"
+用户: "下载 aaa.txt" → "好的，帮你从设备拉取该文件。[[intent:file_download|aaa.txt]]"
 用户: "扫描一下有哪些ROS话题" → "开始扫描 ROS2 DDS 域内的活跃话题。[[intent:ros_scan]]"
 用户: "开始录制话题" → "好的，开始录制 ROS2 话题数据。[[intent:ros_record_start]]"
 用户: "停止录制" → "已停止 ROS2 录制。[[intent:ros_record_stop]]"

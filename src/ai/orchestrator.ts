@@ -88,6 +88,7 @@ const handlers: Record<IntentId, HandlerFn> = {
   file_upload: (_p, actions, _rc, startTaskAnimation) => ({
     text: '',
     sideEffect: () => {
+      window.dispatchEvent(new CustomEvent('AI_FILE_UPLOAD'));
       actions.appendTransferTask();
       const task = createTask('file_upload', [
         { label: '建立 SFTP 连接' }, { label: '上传文件' }, { label: '校验' },
@@ -101,11 +102,12 @@ const handlers: Record<IntentId, HandlerFn> = {
   file_download: (_p, actions, _rc, startTaskAnimation) => ({
     text: '',
     sideEffect: () => {
+      window.dispatchEvent(new CustomEvent('AI_FILE_DOWNLOAD', { detail: _p }));
       const task = createTask('file_download', [
         { label: '建立 SFTP 连接' }, { label: '下载文件' }, { label: '校验' },
       ]);
       startTaskAnimation(task, '文件下载流程完成', `${actions.currentDeviceIp} · 请以设备端实际输出为准`, [
-        { type: 'terminal', lines: [`$ sftp root@${actions.currentDeviceIp}`, 'Connected', 'sftp> get <remote-file> <local-path>', '下载完成请核验文件内容与大小'] },
+        { type: 'terminal', lines: [`$ sftp root@${actions.currentDeviceIp}`, 'Connected', `sftp> get ${_p || '<remote-file>'} <local-path>`, '下载完成请核验文件内容与大小'] },
       ]);
     },
   }),
