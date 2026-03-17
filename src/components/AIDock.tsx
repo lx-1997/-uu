@@ -253,10 +253,34 @@ export default function AIDock() {
   ];
   const quickPrompts = promptsByTab[activeTab] ?? defaultPrompts;
 
+  /* 直接提交快捷提示 */
+  const submitQuickPrompt = (text: string) => {
+    setCmd(text);
+    // 下一帧自动提交
+    requestAnimationFrame(() => {
+      const form = document.querySelector('.input-box') as HTMLFormElement;
+      form?.requestSubmit();
+    });
+  };
+
   const closeDock = () => {
     setChatExpanded(false);
     setWorkspaceMode(false);
     setShowAllMessages(false);
+  };
+
+  /* 简易 Markdown 渲染：**粗体**、`代码`、换行 */
+  const renderMarkdown = (text: string) => {
+    if (!text) return null;
+    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\n)/g);
+    return parts.map((part, i) => {
+      if (part === '\n') return <br key={i} />;
+      if (part.startsWith('**') && part.endsWith('**'))
+        return <strong key={i} style={{ fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
+      if (part.startsWith('`') && part.endsWith('`'))
+        return <code key={i} style={{ background: 'rgba(0,0,0,0.06)', padding: '1px 5px', borderRadius: 4, fontSize: '0.82em', fontFamily: "'JetBrains Mono', Consolas, monospace" }}>{part.slice(1, -1)}</code>;
+      return <span key={i}>{part}</span>;
+    });
   };
 
   return (
@@ -400,7 +424,7 @@ export default function AIDock() {
                   </div>
                   {/* Bubble */}
                   <div className={`chat-bubble ${msg.role}`}>
-                    <p>{msg.text}</p>
+                    <p>{msg.role === 'ai' ? renderMarkdown(msg.text) : msg.text}</p>
                     {msg.blocks?.map((block, i) => (
                       <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} />
                     ))}
@@ -463,10 +487,7 @@ export default function AIDock() {
               <button
                 key={prompt.id}
                 className="quick-prompt-chip"
-                onClick={() => {
-                  setCmd(prompt.text);
-                  chatInputRef.current?.focus();
-                }}
+                onClick={() => submitQuickPrompt(prompt.text)}
               >
                 <span className="qp-icon">{prompt.icon}</span>
                 <span className="qp-label">{prompt.label}</span>
