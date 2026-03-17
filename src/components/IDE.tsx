@@ -1,9 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Editor, { loader } from '@monaco-editor/react';
-import { listDeviceFiles, readDeviceFile, writeDeviceFile } from '../api';
+import { listDeviceFiles, readDeviceFile, writeDeviceFile, executeDeviceCommand } from '../api';
 import { useAppState } from '../hooks/useAppState';
+import { getRememberedDevicePassword } from '../api';
+import { Terminal as XTerm } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import io from 'socket.io-client';
+import '@xterm/xterm/css/xterm.css';
 
 loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
+
+// ── 右键菜单类型 ──
+interface ContextMenu {
+  x: number;
+  y: number;
+  entry: FileEntry;
+  fullPath: string;
+}
 
 // ── 文件图标映射 ──
 const EXT_ICONS: Record<string, string> = {
@@ -50,6 +63,17 @@ interface EditorTab {
 export default function IDE() {
   const { currentDevice, addToast } = useAppState();
 
+  // 内嵌终端状态
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(220);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const xtermRef = useRef<XTerm | null>(null);
+  const socketRef = useRef<any>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const termDragging = useRef(false);
+  const termDragStartY = useRef(0);
+  const termDragStartH = useRef(0);
+
   // 文件树状态
   const [currentPath, setCurrentPath] = useState('/root');
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -65,6 +89,35 @@ export default function IDE() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // 新建文件/文件夹
+  const [showNewInput, setShowNewInput] = useState<'file' | 'folder' | null>(null);
+  const [newName, setNewName] = useState('');
+  const newInputRef = useRef<HTMLInputElement>(null);
+
+  // 光标位置（状态栏用）
+  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const editorRef = useRef<any>(null);
+
+  // ── 新建文件/文件夹 ──
+  const handleCreateNew = () => {
+    if (!currentDevice || !newName.trim()) { setShowNewInput(null); return; }
+    const fullPath = currentPath === '/' ? '/' + newName.trim() : currentPath + '/' + newName.trim();
+    if (showNewInput === 'folder') {
+      // mkdir via writeDeviceFile trick: write empty file then remove, or use exec
+      import('../api').then(({ executeDeviceCommand }) => {
+        executeDeviceCommand(currentDevice.id, `mkdir -p "${fullPath}"`)
+          .then(() => { addToast(`已创建文件夹 ${newName.trim()}`, 'success'); refreshList(); })
+          .catch(err => addToast(err instanceof Error ? err.message : '创建失败', 'error'));
+      });
+    } else {
+      writeDeviceFile(currentDevice.id, fullPath, '')
+        .then(() => { addToast(`已创建文件 ${newName.trim()}`, 'success'); refreshList(); })
+        .catch(err => addToast(err instanceof Error ? err.message : '创建失败', 'error'));
+    }
+    setShowNewInput(null);
+    setNewName('');
+  };
 
   // 拖拽调整面板宽度
   const isDragging = useRef(false);
@@ -210,6 +263,73 @@ export default function IDE() {
     ));
   };
 
+  // ── 内嵌终端初始化 ──
+  useEffect(() => {
+    if (!showTerminal || !terminalRef.current || !currentDevice) return;
+
+    const term = new XTerm({
+      fontFamily: "'JetBrains Mono', 'Menlo', 'Consolas', monospace",
+      fontSize: 13,
+      theme: { background: '#1a1a2e', foreground: '#f8fafc', cursor: '#ff6b00' },
+      cursorBlink: true,
+    });
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(terminalRef.current);
+    fitAddon.fit();
+    xtermRef.current = term;
+    fitAddonRef.current = fitAddon;
+
+    let socketUrl = window.location.origin;
+    if ((import.meta as any).env?.DEV) socketUrl = 'http://localhost:8787';
+
+    const remembered = getRememberedDevicePassword(currentDevice.id);
+    const socket = io(socketUrl);
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      term.clear();
+      term.writeln('\x1b[38;5;208m[IDE Terminal]\x1b[0m 已连接');
+      socket.emit('init', {
+        deviceId: currentDevice.id,
+        password: remembered || undefined,
+        cols: term.cols,
+        rows: term.rows,
+      });
+    });
+    socket.on('data', (data: string) => term.write(data));
+    socket.on('disconnect', () => term.writeln('\x1b[31m\r\n[断开连接]\x1b[0m'));
+    term.onData((data) => socket.emit('data', data));
+
+    const ro = new ResizeObserver(() => {
+      try { fitAddon.fit(); socket.emit('resize', { cols: term.cols, rows: term.rows }); } catch {}
+    });
+    ro.observe(terminalRef.current);
+
+    return () => { ro.disconnect(); socket.disconnect(); term.dispose(); };
+  }, [showTerminal, currentDevice?.id]);
+
+  // ── 终端面板拖拽调整高度 ──
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!termDragging.current) return;
+      const delta = termDragStartY.current - e.clientY;
+      setTerminalHeight(Math.max(100, Math.min(500, termDragStartH.current + delta)));
+    };
+    const onUp = () => { termDragging.current = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  const handleTermDragStart = (e: React.MouseEvent) => {
+    termDragging.current = true;
+    termDragStartY.current = e.clientY;
+    termDragStartH.current = terminalHeight;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+  };
+
   // ── 快捷键 ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -221,6 +341,10 @@ export default function IDE() {
         e.preventDefault();
         setShowSearch(true);
         setTimeout(() => searchRef.current?.focus(), 50);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        setShowTerminal(prev => !prev);
       }
     };
     window.addEventListener('keydown', handler);
@@ -248,22 +372,23 @@ export default function IDE() {
         <div className="ide-sidebar-header">
           <span className="ide-sidebar-title">资源管理器</span>
           <div className="ide-sidebar-actions">
-            <button
-              className="ide-icon-btn"
-              onClick={() => refreshList()}
-              disabled={loading}
-              title="刷新"
-            >
+            <button className="ide-icon-btn" onClick={() => { setShowNewInput('file'); setNewName(''); setTimeout(() => newInputRef.current?.focus(), 50); }} title="新建文件">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+              </svg>
+            </button>
+            <button className="ide-icon-btn" onClick={() => { setShowNewInput('folder'); setNewName(''); setTimeout(() => newInputRef.current?.focus(), 50); }} title="新建文件夹">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>
+              </svg>
+            </button>
+            <button className="ide-icon-btn" onClick={() => refreshList()} disabled={loading} title="刷新">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
                 <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
               </svg>
             </button>
-            <button
-              className="ide-icon-btn"
-              onClick={() => { setShowSearch(!showSearch); setTimeout(() => searchRef.current?.focus(), 50); }}
-              title="搜索文件"
-            >
+            <button className="ide-icon-btn" onClick={() => { setShowSearch(!showSearch); setTimeout(() => searchRef.current?.focus(), 50); }} title="搜索文件 (Ctrl+P)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
@@ -301,6 +426,25 @@ export default function IDE() {
             </span>
           ))}
         </div>
+
+        {/* 新建文件/文件夹输入 */}
+        {showNewInput && (
+          <div className="ide-new-input-row">
+            <span className="ide-file-icon">{showNewInput === 'folder' ? '📁' : '📄'}</span>
+            <input
+              ref={newInputRef}
+              className="ide-new-input"
+              placeholder={showNewInput === 'folder' ? '文件夹名称...' : '文件名称...'}
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleCreateNew();
+                if (e.key === 'Escape') { setShowNewInput(null); setNewName(''); }
+              }}
+              onBlur={() => { if (!newName.trim()) { setShowNewInput(null); setNewName(''); } }}
+            />
+          </div>
+        )}
 
         {/* 文件列表 */}
         <div className="ide-file-list">
@@ -419,6 +563,12 @@ export default function IDE() {
                 theme="vs-dark"
                 value={activeTab.content}
                 onChange={updateContent}
+                onMount={(editor) => {
+                  editorRef.current = editor;
+                  editor.onDidChangeCursorPosition((e) => {
+                    setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+                  });
+                }}
                 options={{
                   minimap: { enabled: true, maxColumn: 80 },
                   fontSize: 14,
@@ -463,6 +613,58 @@ export default function IDE() {
             </div>
           </div>
         )}
+
+        {/* ── 内嵌终端面板 ── */}
+        {showTerminal && (
+          <>
+            <div className="ide-term-resizer" onMouseDown={handleTermDragStart} />
+            <div className="ide-term-panel" style={{ height: terminalHeight }}>
+              <div className="ide-term-header">
+                <span className="ide-term-title">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                  终端
+                </span>
+                <button className="ide-icon-btn" onClick={() => setShowTerminal(false)} title="关闭终端">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div ref={terminalRef} style={{ flex: 1, overflow: 'hidden' }} />
+            </div>
+          </>
+        )}
+
+        {/* 终端切换按钮 */}
+        {!showTerminal && (
+          <div className="ide-term-toggle" onClick={() => setShowTerminal(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span>终端</span>
+            <kbd style={{ fontSize: '0.7rem', opacity: 0.6, marginLeft: 'auto' }}>Ctrl+`</kbd>
+          </div>
+        )}
+
+        {/* ── 底部状态栏 ── */}
+        <div className="ide-statusbar">
+          <div className="ide-statusbar-left">
+            {currentDevice && (
+              <span className="ide-statusbar-item">
+                <span className="ide-statusbar-dot connected" />
+                {currentDevice.name}
+              </span>
+            )}
+            <span className="ide-statusbar-item">{currentPath}</span>
+          </div>
+          <div className="ide-statusbar-right">
+            {activeTab && (
+              <>
+                <span className="ide-statusbar-item">行 {cursorPos.line}, 列 {cursorPos.col}</span>
+                <span className="ide-statusbar-item">{activeTab.lang}</span>
+                <span className="ide-statusbar-item">UTF-8</span>
+                {isModified(activeTab.path) && <span className="ide-statusbar-item modified">● 已修改</span>}
+              </>
+            )}
+            <span className="ide-statusbar-item">{tabs.length} 个文件</span>
+          </div>
+        </div>
       </div>
     </div>
   );

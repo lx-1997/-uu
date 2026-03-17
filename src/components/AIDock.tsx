@@ -178,6 +178,7 @@ export default function AIDock() {
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
   const [showAllMessages, setShowAllMessages] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -227,8 +228,14 @@ export default function AIDock() {
       { id: 'sync', icon: '📁', label: '同步文件', text: '帮我把本地模型文件同步到设备 /userdata/models' },
       { id: 'log', icon: '📋', label: '拉取日志', text: '从设备下载最新的系统日志到本地' },
     ],
+    ide: [
+      { id: 'edit', icon: '✏️', label: '代码补全', text: '帮我分析当前打开的文件，给出优化建议' },
+      { id: 'run', icon: '▶️', label: '运行脚本', text: '在终端中运行当前编辑的脚本文件' },
+      { id: 'fmt', icon: '🧹', label: '格式化', text: '帮我格式化当前文件并检查语法错误' },
+    ],
     vnc: [
       { id: 'opt', icon: '🖥️', label: '优化画质', text: '根据当前网络状况帮我调整VNC画质参数' },
+      { id: 'vnc-start', icon: '🔌', label: '启动VNC', text: '帮我在设备上启动VNC服务并连接' },
     ],
     hardware: [
       { id: 'hot', icon: '🌡️', label: '散热建议', text: '芯片温度偏高，帮我分析原因并给出降温方案' },
@@ -269,16 +276,95 @@ export default function AIDock() {
     setShowAllMessages(false);
   };
 
-  /* 简易 Markdown 渲染：**粗体**、`代码`、换行 */
+  /* Markdown 渲染：**粗体**、`代码`、换行、- 列表、### 标题、```代码块``` */
   const renderMarkdown = (text: string) => {
     if (!text) return null;
-    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\n)/g);
+
+    // 先按代码块分割
+    const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
+    const segments: React.ReactNode[] = [];
+    let lastIdx = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        segments.push(...renderInlineMarkdown(text.slice(lastIdx, match.index), segments.length));
+      }
+      const lang = match[1] || '';
+      const code = match[2].trim();
+      segments.push(
+        <div key={`cb-${segments.length}`} className="md-code-block">
+          <div className="md-code-header">
+            <span className="md-code-lang">{lang || 'code'}</span>
+            <button className="md-code-copy" onClick={() => { navigator.clipboard.writeText(code); }}>复制</button>
+          </div>
+          <pre className="md-code-body"><code>{code}</code></pre>
+        </div>
+      );
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx < text.length) {
+      segments.push(...renderInlineMarkdown(text.slice(lastIdx), segments.length));
+    }
+    return segments;
+  };
+
+  const renderInlineMarkdown = (text: string, keyOffset: number): React.ReactNode[] => {
+    const lines = text.split('\n');
+    const result: React.ReactNode[] = [];
+    let listItems: string[] = [];
+
+    const flushList = () => {
+      if (listItems.length === 0) return;
+      result.push(
+        <ul key={`ul-${keyOffset}-${result.length}`} className="md-list">
+          {listItems.map((item, j) => <li key={j}>{renderInline(item)}</li>)}
+        </ul>
+      );
+      listItems = [];
+    };
+
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
+      // 列表项
+      if (/^[-*•]\s+/.test(trimmed)) {
+        listItems.push(trimmed.replace(/^[-*•]\s+/, ''));
+        return;
+      }
+      // 有序列表
+      if (/^\d+\.\s+/.test(trimmed)) {
+        listItems.push(trimmed.replace(/^\d+\.\s+/, ''));
+        return;
+      }
+      flushList();
+      // 标题
+      if (trimmed.startsWith('### ')) {
+        result.push(<h4 key={`h-${keyOffset}-${i}`} className="md-h4">{renderInline(trimmed.slice(4))}</h4>);
+        return;
+      }
+      if (trimmed.startsWith('## ')) {
+        result.push(<h3 key={`h-${keyOffset}-${i}`} className="md-h3">{renderInline(trimmed.slice(3))}</h3>);
+        return;
+      }
+      // 空行
+      if (!trimmed) {
+        result.push(<br key={`br-${keyOffset}-${i}`} />);
+        return;
+      }
+      // 普通行
+      result.push(<span key={`l-${keyOffset}-${i}`}>{renderInline(trimmed)}{i < lines.length - 1 ? <br /> : null}</span>);
+    });
+    flushList();
+    return result;
+  };
+
+  const renderInline = (text: string): React.ReactNode => {
+    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
     return parts.map((part, i) => {
-      if (part === '\n') return <br key={i} />;
       if (part.startsWith('**') && part.endsWith('**'))
         return <strong key={i} style={{ fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
       if (part.startsWith('`') && part.endsWith('`'))
-        return <code key={i} style={{ background: 'rgba(0,0,0,0.06)', padding: '1px 5px', borderRadius: 4, fontSize: '0.82em', fontFamily: "'JetBrains Mono', Consolas, monospace" }}>{part.slice(1, -1)}</code>;
+        return <code key={i} className="md-inline-code">{part.slice(1, -1)}</code>;
       return <span key={i}>{part}</span>;
     });
   };

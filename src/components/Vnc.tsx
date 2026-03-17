@@ -21,10 +21,11 @@ export default function Vnc() {
   const getVncUrl = useCallback(() => {
     if (!currentDevice) return '';
     const host = window.location.hostname;
-    const backendPort = window.location.port === '5173' ? 8787 : Number(window.location.port) || 80;
+    const backendPort = (import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80);
     const qualityParam = quality === 'high' ? '&quality=9' : quality === 'low' ? '&quality=3' : '';
-    const wsPath = encodeURIComponent('websockify?target=' + currentDevice.ip + ':5900');
-    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&path=${wsPath}${qualityParam}`;
+    // noVNC expects path relative to ws:// origin, not URL-encoded
+    const wsPath = `websockify?target=${currentDevice.ip}:5900`;
+    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=${encodeURIComponent(wsPath)}${qualityParam}`;
   }, [currentDevice, quality]);
 
   // ── 初始化检查 VNC 状态 ──

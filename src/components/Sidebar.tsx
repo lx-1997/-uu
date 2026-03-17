@@ -45,15 +45,15 @@ export default function Sidebar() {
         </button>
       </div>
 
-      <div className="section-label">基础工具</div>
+      <div className="section-label">开发工具</div>
       <div className="sidebar-tools">
         {([
-          ['flasher', '💽', '系统烧录'],
-          ['files', '📂', '文件管理'],
           ['terminal', '💻', '终端'],
           ['ide', '📝', '代码编辑'],
+          ['files', '📂', '文件管理'],
           ['vnc', '🖥️', '远程桌面'],
-          ['hardware', '📊', '硬件状态'],
+          ['hardware', '📊', '硬件监控'],
+          ['flasher', '💽', '系统烧录'],
         ] as const).map(([tab, icon, label]) => (
           <button key={tab} className={`tool-btn ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
             <span className="tool-icon">{icon}</span> {label}
