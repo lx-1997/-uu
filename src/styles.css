@@ -5432,3 +5432,249 @@ select.adm-input {
   .dash-cards { grid-template-columns: 1fr; }
   .ob-done-grid { grid-template-columns: 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════
+   Models · ModelZoo
+   ═══════════════════════════════════════════════════ */
+.mdl-page { display: flex; flex-direction: column; gap: 16px; max-width: 1100px; margin: 0 auto; width: 100%; padding: 0 4px 80px 4px; }
+.mdl-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 24px; gap: 16px; }
+.mdl-empty-icon { width: 56px; height: 56px; border-radius: 16px; background: #fff7ed; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; }
+.mdl-empty-title { margin: 0; font-size: 1.2rem; font-weight: 700; color: #111827; }
+.mdl-empty-desc { margin: 0; color: #6b7280; font-size: 0.85rem; text-align: center; max-width: 360px; line-height: 1.6; }
+.mdl-empty-list { grid-column: 1 / -1; text-align: center; padding: 40px; color: #9ca3af; font-size: 0.85rem; }
+
+/* 顶栏 */
+.mdl-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.mdl-header-left { display: flex; align-items: center; gap: 10px; }
+.mdl-header-icon { width: 36px; height: 36px; border-radius: 10px; background: #fff7ed; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; }
+.mdl-title { margin: 0; font-size: 1.1rem; font-weight: 700; color: #111827; }
+.mdl-subtitle { font-size: 0.75rem; color: #9ca3af; }
+.mdl-header-right { display: flex; align-items: center; gap: 8px; }
+.mdl-search-box { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; }
+.mdl-search-input { border: none; outline: none; font-size: 0.8rem; font-family: inherit; width: 160px; background: transparent; }
+.mdl-sort-select { padding: 7px 12px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; font-size: 0.78rem; font-family: inherit; color: #374151; cursor: pointer; }
+
+/* 分类筛选 */
+.mdl-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mdl-filter-btn { padding: 7px 16px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; color: #374151; font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.mdl-filter-btn.active { border-color: #f97316; background: #fff7ed; color: #ea580c; }
+.mdl-filter-btn:hover:not(.active) { border-color: #d1d5db; background: #f9fafb; }
+
+/* 主体布局 */
+.mdl-body { display: grid; gap: 16px; }
+.mdl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; align-content: start; }
+
+/* 模型卡片 */
+.mdl-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px 20px; cursor: pointer; transition: all 0.15s; }
+.mdl-card:hover { border-color: #d1d5db; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.mdl-card.selected { border-color: #f97316; box-shadow: 0 0 0 2px rgba(249,115,22,0.12); }
+.mdl-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.mdl-card-name { font-size: 0.9rem; font-weight: 700; color: #111827; margin-bottom: 4px; }
+.mdl-card-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.mdl-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; }
+.mdl-tag.deployed { color: #22c55e; background: #f0fdf4; }
+.mdl-tag.pending { color: #f59e0b; background: #fffbeb; }
+.mdl-tag.format { color: #6366f1; background: #eef2ff; }
+.mdl-card-desc { margin: 0 0 10px; font-size: 0.78rem; color: #6b7280; line-height: 1.5; }
+.mdl-card-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.mdl-card-meta span { font-size: 0.72rem; color: #9ca3af; }
+.mdl-card-boards { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+.mdl-board-tag { padding: 1px 8px; border-radius: 4px; background: #f3f4f6; font-size: 0.68rem; color: #6b7280; }
+.mdl-card-bench { display: flex; gap: 12px; padding: 8px 0; border-top: 1px solid #f3f4f6; font-size: 0.72rem; color: #6b7280; }
+.mdl-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+.mdl-action-main { flex: 1; }
+.mdl-btn-primary { padding: 8px 20px; border-radius: 8px; border: none; background: #f97316; color: #fff; font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.mdl-btn-primary:hover { background: #ea580c; }
+.mdl-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.mdl-btn-convert { padding: 8px 20px; border-radius: 8px; border: none; background: #8b5cf6; color: #fff; font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.mdl-btn-convert:hover { background: #7c3aed; }
+.mdl-btn-ghost { padding: 7px 16px; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff; color: #374151; font-size: 0.78rem; font-weight: 500; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.mdl-btn-ghost:hover { border-color: #d1d5db; background: #f9fafb; }
+
+/* 右侧详情面板 */
+.mdl-detail { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; position: sticky; top: 16px; max-height: calc(100vh - 120px); overflow-y: auto; display: flex; flex-direction: column; }
+.mdl-detail-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #f3f4f6; }
+.mdl-detail-name { margin: 0; font-size: 0.95rem; font-weight: 700; color: #111827; }
+.mdl-detail-close { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: #9ca3af; padding: 4px 8px; border-radius: 6px; transition: all 0.15s; }
+.mdl-detail-close:hover { color: #374151; background: #f3f4f6; }
+.mdl-detail-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+.mdl-detail-desc { margin: 0; font-size: 0.8rem; color: #374151; line-height: 1.6; }
+.mdl-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mdl-detail-cell { padding: 8px 12px; border-radius: 8px; background: #f9fafb; }
+.mdl-detail-label { font-size: 0.75rem; color: #6b7280; font-weight: 500; }
+.mdl-detail-value { font-size: 0.85rem; color: #111827; font-weight: 600; margin-top: 2px; }
+.mdl-bench-section { display: flex; flex-direction: column; gap: 6px; }
+.mdl-bench-cards { display: flex; gap: 10px; }
+.mdl-bench-card { flex: 1; padding: 10px 14px; border-radius: 8px; background: #fff7ed; text-align: center; }
+.mdl-bench-val { font-size: 0.9rem; font-weight: 700; color: #ea580c; }
+.mdl-bench-label { font-size: 0.7rem; color: #9ca3af; margin-top: 2px; }
+.mdl-detail-boards { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.mdl-board-chip { padding: 3px 12px; border-radius: 6px; background: #f3f4f6; font-size: 0.75rem; color: #374151; font-weight: 500; }
+.mdl-device-models { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.mdl-device-model-item { font-family: 'JetBrains Mono', Menlo, monospace; font-size: 0.75rem; color: #6b7280; }
+.mdl-terminal { background: #1e1e2e; border-radius: 8px; padding: 12px 16px; max-height: 180px; overflow-y: auto; color: #cdd6f4; font-family: 'JetBrains Mono', Menlo, monospace; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; margin-top: 6px; }
+
+/* 转换流水线弹窗 */
+.mdl-convert-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.mdl-convert-modal { background: #fff; border-radius: 16px; padding: 28px 32px; width: 420px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+.mdl-convert-title { margin: 0 0 4px; font-size: 1rem; font-weight: 700; color: #111827; }
+.mdl-convert-desc { margin: 0 0 20px; font-size: 0.8rem; color: #6b7280; }
+.mdl-convert-steps { display: flex; flex-direction: column; gap: 12px; }
+.mdl-convert-step { display: flex; align-items: center; gap: 12px; }
+.mdl-step-circle { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; background: #f9fafb; color: #9ca3af; border: 2px solid #e5e7eb; transition: all 0.3s; }
+.mdl-step-circle.done { background: #f0fdf4; color: #22c55e; border-color: #22c55e; }
+.mdl-step-circle.running { background: #fff7ed; color: #f97316; border-color: #f97316; }
+.mdl-step-label { font-size: 0.82rem; font-weight: 600; color: #9ca3af; transition: color 0.3s; }
+.mdl-convert-step.done .mdl-step-label { color: #22c55e; }
+.mdl-convert-step.running .mdl-step-label { color: #f97316; }
+.mdl-step-desc { font-size: 0.72rem; color: #9ca3af; }
+.mdl-convert-done { margin-top: 20px; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-radius: 10px; background: #f0fdf4; }
+.mdl-convert-done-text { font-size: 0.82rem; font-weight: 600; color: #22c55e; }
+
+@media (max-width: 768px) {
+  .mdl-grid { grid-template-columns: 1fr; }
+  .mdl-body { grid-template-columns: 1fr !important; }
+}
+
+/* ═══════════════════════════════════════════════════
+   ROS 话题分析
+   ═══════════════════════════════════════════════════ */
+.ros-page { display: flex; flex-direction: column; gap: 16px; max-width: 1100px; margin: 0 auto; width: 100%; padding: 0 4px; }
+
+/* 空状态 */
+.ros-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 24px; gap: 16px; }
+.ros-empty-icon { font-size: 3rem; }
+.ros-empty-title { margin: 0; font-size: 1.3rem; font-weight: 700; color: #1e293b; }
+.ros-empty-desc { margin: 0; color: #64748b; font-size: 0.88rem; text-align: center; line-height: 1.6; }
+
+/* 顶部标题栏 */
+.ros-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.ros-header-left { display: flex; align-items: center; gap: 12px; }
+.ros-header-icon { width: 38px; height: 38px; border-radius: 10px; background: #eff6ff; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+.ros-title { margin: 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; }
+.ros-subtitle { font-size: 0.75rem; color: #94a3b8; }
+.ros-header-right { display: flex; align-items: center; gap: 10px; }
+.ros-auto-toggle { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #64748b; cursor: pointer; }
+.ros-auto-toggle input { accent-color: #ff6b00; }
+.ros-scan-btn { padding: 8px 18px; border-radius: 8px; border: 1.5px solid #e2e8f0; background: #fff; color: #475569; font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+.ros-scan-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+.ros-scan-btn.loading { opacity: 0.6; cursor: not-allowed; }
+
+/* 统计卡片 */
+.ros-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.ros-stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; transition: all 0.2s; }
+.ros-stat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.ros-stat-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
+.ros-stat-value { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ros-stat-label { font-size: 0.7rem; color: #94a3b8; font-weight: 500; }
+
+/* Tab 切换 */
+.ros-tabs { display: flex; gap: 4px; background: #f1f5f9; border-radius: 10px; padding: 4px; }
+.ros-tab { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; border: none; background: transparent; color: #64748b; font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+.ros-tab:hover { color: #334155; background: rgba(255,255,255,0.6); }
+.ros-tab.active { background: #fff; color: #1e293b; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.ros-tab-badge { background: #3b82f6; color: #fff; font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 10px; }
+
+/* 话题监控布局 */
+.ros-topics-layout { display: grid; grid-template-columns: 280px 1fr; gap: 14px; min-height: 400px; }
+.ros-topics-left { display: flex; flex-direction: column; gap: 8px; }
+.ros-topics-right { display: flex; flex-direction: column; gap: 12px; }
+
+/* 搜索框 */
+.ros-search-box { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; }
+.ros-search-input { border: none; outline: none; font-size: 0.8rem; font-family: inherit; flex: 1; background: transparent; color: #1e293b; }
+.ros-search-input::placeholder { color: #94a3b8; }
+
+/* 话题列表 */
+.ros-topic-list { flex: 1; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; max-height: 480px; }
+.ros-topic-list::-webkit-scrollbar { width: 4px; }
+.ros-topic-list::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 2px; }
+.ros-topic-item { padding: 10px 12px; border-radius: 8px; border: 1.5px solid transparent; background: #f8fafc; cursor: pointer; transition: all 0.15s; }
+.ros-topic-item:hover { background: #f1f5f9; border-color: #e2e8f0; }
+.ros-topic-item.active { background: #eff6ff; border-color: #93c5fd; }
+.ros-topic-name { font-size: 0.78rem; font-weight: 600; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; word-break: break-all; }
+.ros-topic-meta { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.ros-topic-type { font-size: 0.66rem; color: #6366f1; background: #eef2ff; padding: 1px 6px; border-radius: 4px; font-weight: 500; }
+.ros-topic-hz { font-size: 0.66rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+.ros-topic-empty { text-align: center; padding: 24px; color: #94a3b8; font-size: 0.82rem; }
+
+/* 话题详情 */
+.ros-topic-detail { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; }
+.ros-detail-title { margin: 0 0 12px; font-size: 0.88rem; font-weight: 700; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; word-break: break-all; }
+.ros-detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
+.ros-detail-cell { padding: 8px 12px; border-radius: 8px; background: #f8fafc; border: 1px solid #f1f5f9; }
+.ros-detail-label { font-size: 0.68rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.3px; }
+.ros-detail-value { font-size: 0.82rem; font-weight: 600; color: #1e293b; margin-top: 2px; font-family: 'JetBrains Mono', Consolas, monospace; }
+.ros-detail-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; gap: 10px; color: #94a3b8; }
+.ros-detail-empty-icon { font-size: 2rem; opacity: 0.5; }
+.ros-detail-empty p { margin: 0; font-size: 0.85rem; }
+.ros-detail-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+
+/* 消息结构 */
+.ros-msg-structure { margin-top: 12px; }
+.ros-msg-fields { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; background: #1e1e2e; border-radius: 8px; padding: 10px 14px; }
+.ros-msg-field { display: flex; gap: 10px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.75rem; }
+.ros-field-type { color: #7dd3fc; min-width: 80px; }
+.ros-field-name { color: #e2e8f0; }
+
+/* 频率趋势图 */
+.ros-hz-chart { margin-top: 12px; }
+.ros-hz-bars { display: flex; align-items: flex-end; gap: 3px; height: 48px; background: #f8fafc; border-radius: 6px; padding: 6px 8px; }
+.ros-hz-bar { flex: 1; border-radius: 2px; min-height: 2px; transition: height 0.3s ease; }
+
+/* 输出面板 */
+.ros-output { background: #1e1e2e; border-radius: 10px; overflow: hidden; }
+.ros-output-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: #16162a; border-bottom: 1px solid #2a2a3e; font-size: 0.75rem; font-weight: 600; color: #94a3b8; }
+.ros-output-clear { background: none; border: none; color: #64748b; font-size: 0.72rem; cursor: pointer; font-family: inherit; transition: color 0.15s; }
+.ros-output-clear:hover { color: #ef4444; }
+.ros-output-content { margin: 0; padding: 12px 14px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.75rem; line-height: 1.6; color: #cdd6f4; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+/* 关系图谱 */
+.ros-graph-section { display: flex; flex-direction: column; gap: 12px; }
+.ros-graph-toolbar { display: flex; gap: 8px; }
+.ros-graph-content { display: flex; flex-direction: column; gap: 12px; }
+.ros-nodes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.ros-node-card { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #fff; cursor: pointer; transition: all 0.15s; }
+.ros-node-card:hover { border-color: #8b5cf6; background: #faf5ff; }
+.ros-node-icon { font-size: 0.9rem; }
+.ros-node-name { font-size: 0.78rem; font-weight: 600; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 性能监控 */
+.ros-monitor-section { display: flex; flex-direction: column; gap: 12px; }
+.ros-monitor-header { display: flex; align-items: center; justify-content: space-between; }
+.ros-monitor-hint { font-size: 0.75rem; color: #94a3b8; }
+.ros-monitor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.ros-monitor-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.ros-monitor-name { font-size: 0.78rem; font-weight: 600; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ros-monitor-hz { font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ros-monitor-status { font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; align-self: flex-start; }
+.ros-mini-chart { display: flex; align-items: flex-end; gap: 2px; height: 32px; margin-top: 6px; }
+.ros-mini-bar { flex: 1; border-radius: 1px; min-height: 2px; }
+
+/* 诊断工具 */
+.ros-tools-section { display: flex; flex-direction: column; gap: 0; }
+.ros-quick-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ros-quick-tool { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 14px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #fff; cursor: pointer; font-family: inherit; transition: all 0.2s; text-align: left; }
+.ros-quick-tool:hover { border-color: var(--tool-color, #3b82f6); background: #f8fafc; transform: translateY(-1px); }
+.ros-quick-icon { font-size: 1.1rem; }
+.ros-quick-name { font-size: 0.82rem; font-weight: 600; color: #1e293b; }
+.ros-quick-cmd { font-size: 0.68rem; color: #94a3b8; font-family: 'JetBrains Mono', Consolas, monospace; background: none; }
+.ros-custom-cmd { display: flex; gap: 8px; }
+.ros-cmd-input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1.5px solid #e2e8f0; background: #fff; font-size: 0.85rem; font-family: 'JetBrains Mono', Consolas, monospace; color: #1e293b; outline: none; transition: border-color 0.15s; }
+.ros-cmd-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.08); }
+.ros-cmd-input::placeholder { color: #94a3b8; font-family: inherit; }
+
+/* 通用按钮 */
+.ros-btn-primary { padding: 8px 18px; border-radius: 8px; border: none; background: #3b82f6; color: #fff; font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.ros-btn-primary:hover { background: #2563eb; }
+.ros-btn-ghost { padding: 6px 12px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; color: #475569; font-size: 0.78rem; font-weight: 500; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.ros-btn-ghost:hover { border-color: #cbd5e1; background: #f8fafc; }
+
+/* 通用 section 标题 */
+.ros-section-title { font-size: 0.78rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+
+@media (max-width: 900px) {
+  .ros-topics-layout { grid-template-columns: 1fr; }
+  .ros-stats { grid-template-columns: repeat(2, 1fr); }
+  .ros-quick-tools { grid-template-columns: repeat(2, 1fr); }
+}

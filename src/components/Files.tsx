@@ -234,17 +234,16 @@ export default function Files() {
 
   return (
     <div className="center-stage wide-stage" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
-      <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
       <div className="isolated-widget workflow-widget" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div className="widget-header">
+        <div className="widget-header" style={{ display: 'flex', alignItems: 'center' }}>
           📁 资源管理器
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 13, fontWeight: 'normal' }}>
-            <button className="clean-btn outline-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, transition: 'background-color 0.2s' }} onClick={() => refreshList()} disabled={running} onMouseEnter={(e) => !running && (e.currentTarget.style.backgroundColor = '#f1f5f9')} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = ''}>
-              {running ? <Loader2 size={16} key="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+          <div className="files-header-actions">
+            <button className="clean-btn outline-btn files-header-btn" onClick={() => refreshList()} disabled={running}>
+              {running ? <Loader2 size={16} className="spinner" /> : <RefreshCw size={16} />}
               刷新
             </button>
-            <button className="clean-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, transition: 'background-color 0.2s', backgroundColor: '#0284c7', color: '#fff' }} onClick={() => fileInputRef.current?.click()} disabled={running} onMouseEnter={(e) => !running && (e.currentTarget.style.backgroundColor = '#0369a1')} onMouseLeave={(e) => !running && (e.currentTarget.style.backgroundColor = '#0284c7')}>
-              {running ? <Loader2 size={16} key="spin" style={{ animation: 'spin 1s linear infinite' }} /> : <Upload size={16} />}
+            <button className="clean-btn files-header-btn files-upload-btn" onClick={() => fileInputRef.current?.click()} disabled={running}>
+              {running ? <Loader2 size={16} className="spinner" /> : <Upload size={16} />}
               上传文件
             </button>
             <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />

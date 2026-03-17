@@ -71,20 +71,20 @@ function parseMetrics(output: string) {
   return { temp, tempC, memUsed, memTotal, memPercent, bpu, bpuValue, cpuLoad, uptime, diskUsed, diskTotal, diskPercent };
 }
 
-/* ── 环形进度条 ── */
+/* ── 环形进度条（白底浅色主题） ── */
 function RingGauge({ value, max = 100, color, label, display }: { value: number; max?: number; color: string; label: string; display: string }) {
   const pct = value < 0 ? 0 : Math.min(value / max, 1);
-  const r = 38, c = 2 * Math.PI * r;
+  const r = 34, c = 2 * Math.PI * r;
   const offset = c * (1 - pct);
   const warn = pct > 0.85;
 
   return (
     <div className="hw-gauge">
-      <svg width="96" height="96" viewBox="0 0 96 96">
-        <circle cx="48" cy="48" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" />
-        <circle cx="48" cy="48" r={r} fill="none" stroke={warn ? '#ef4444' : color} strokeWidth="7"
+      <svg width="80" height="80" viewBox="0 0 80 80">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="#f1f5f9" strokeWidth="6" />
+        <circle cx="40" cy="40" r={r} fill="none" stroke={warn ? '#ef4444' : color} strokeWidth="6"
           strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
-          transform="rotate(-90 48 48)" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
+          transform="rotate(-90 40 40)" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
       </svg>
       <div className="hw-gauge-text">
         <span className="hw-gauge-value" style={{ color: warn ? '#ef4444' : color }}>{display}</span>

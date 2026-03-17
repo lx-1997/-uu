@@ -17,16 +17,28 @@ export default function Vnc() {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // VNC URL 版本号，用于强制刷新 iframe
+  const [urlVersion, setUrlVersion] = useState(0);
+
   // ── 构建 VNC URL ──
   const getVncUrl = useCallback(() => {
     if (!currentDevice) return '';
     const host = window.location.hostname;
     const backendPort = (import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80);
-    const qualityParam = quality === 'high' ? '&quality=9' : quality === 'low' ? '&quality=3' : '';
-    // noVNC expects path relative to ws:// origin, not URL-encoded
+    const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
     const wsPath = `websockify?target=${currentDevice.ip}:5900`;
-    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=${encodeURIComponent(wsPath)}${qualityParam}`;
-  }, [currentDevice, quality]);
+    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
+  }, [currentDevice, quality, urlVersion]);
+
+  // 画质切换时强制刷新 iframe
+  const handleQualityChange = (q: 'auto' | 'high' | 'low') => {
+    if (q === quality) return;
+    setQuality(q);
+    if (showIframe) {
+      setUrlVersion(v => v + 1);
+      addToast(`画质已切换为${q === 'auto' ? '自动' : q === 'high' ? '高清' : '流畅'}`, 'info');
+    }
+  };
 
   // ── 初始化检查 VNC 状态 ──
   useEffect(() => {
@@ -168,7 +180,7 @@ export default function Vnc() {
                   <button
                     key={q}
                     className={`vnc-quality-btn ${quality === q ? 'active' : ''}`}
-                    onClick={() => setQuality(q)}
+                    onClick={() => handleQualityChange(q)}
                   >
                     {q === 'auto' ? '自动' : q === 'high' ? '高清' : '流畅'}
                   </button>

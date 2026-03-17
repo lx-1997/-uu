@@ -561,10 +561,18 @@ export default function AIDock() {
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}
-            onFocus={() => { if (!chatExpanded) setShowSuggestions(true); }}
-            onBlur={() => window.setTimeout(() => setShowSuggestions(false), 200)}
+            onFocus={() => { setInputFocused(true); if (!chatExpanded) setShowSuggestions(true); }}
+            onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && chatExpanded) { closeDock(); e.preventDefault(); }
+            }}
           />
-          <button type="submit" className="send-btn" title="发送">{Icon.send}</button>
+          {cmd.trim() && (
+            <button type="button" className="input-clear-btn" onClick={() => setCmd('')} title="清空">
+              {Icon.close}
+            </button>
+          )}
+          <button type="submit" className={`send-btn ${cmd.trim() ? 'ready' : ''}`} disabled={!cmd.trim() && !aiTyping} title="发送">{Icon.send}</button>
         </form>
 
         {/* ── Quick prompt chips (contextual per tab) ── */}

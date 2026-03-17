@@ -99,6 +99,70 @@ export default function IDE() {
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const editorRef = useRef<any>(null);
 
+  // 右键菜单
+  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // 关闭右键菜单
+  useEffect(() => {
+    const handler = () => setContextMenu(null);
+    if (contextMenu) window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [contextMenu]);
+
+  // 右键菜单操作
+  const handleContextAction = (action: string) => {
+    if (!contextMenu || !currentDevice) return;
+    const { entry, fullPath } = contextMenu;
+    setContextMenu(null);
+
+    if (action === 'copy-path') {
+      navigator.clipboard.writeText(fullPath);
+      addToast(`已复制路径: ${fullPath}`, 'success');
+    } else if (action === 'rename') {
+      setRenameTarget(fullPath);
+      setRenameValue(entry.name);
+      setTimeout(() => renameInputRef.current?.focus(), 50);
+    } else if (action === 'delete') {
+      const cmd = entry.isDir ? `rm -rf "${fullPath}"` : `rm -f "${fullPath}"`;
+      executeDeviceCommand(currentDevice.id, cmd)
+        .then(() => {
+          addToast(`已删除 ${entry.name}`, 'success');
+          closeTab(fullPath);
+          refreshList();
+        })
+        .catch(err => addToast(err instanceof Error ? err.message : '删除失败', 'error'));
+    } else if (action === 'open-terminal') {
+      setShowTerminal(true);
+      // 发送 cd 命令到终端
+      const dir = entry.isDir ? fullPath : currentPath;
+      setTimeout(() => socketRef.current?.emit('data', `cd "${dir}"\n`), 300);
+    }
+  };
+
+  const handleRename = () => {
+    if (!renameTarget || !renameValue.trim() || !currentDevice) {
+      setRenameTarget(null);
+      return;
+    }
+    const dir = renameTarget.split('/').slice(0, -1).join('/');
+    const newPath = dir + '/' + renameValue.trim();
+    executeDeviceCommand(currentDevice.id, `mv "${renameTarget}" "${newPath}"`)
+      .then(() => {
+        addToast(`已重命名为 ${renameValue.trim()}`, 'success');
+        // 更新已打开的标签页路径
+        setTabs(prev => prev.map(t =>
+          t.path === renameTarget ? { ...t, path: newPath } : t
+        ));
+        if (activeTabPath === renameTarget) setActiveTabPath(newPath);
+        refreshList();
+      })
+      .catch(err => addToast(err instanceof Error ? err.message : '重命名失败', 'error'))
+      .finally(() => setRenameTarget(null));
+  };
+
   // ── 新建文件/文件夹 ──
   const handleCreateNew = () => {
     if (!currentDevice || !newName.trim()) { setShowNewInput(null); return; }
@@ -470,10 +534,30 @@ export default function IDE() {
                 key={entry.name}
                 className={`ide-file-item ${isActive ? 'active' : ''} ${isOpen ? 'open' : ''}`}
                 onClick={() => openFile(entry.name, entry.isDir)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ x: e.clientX, y: e.clientY, entry, fullPath });
+                }}
                 title={`${entry.name}${entry.size ? ` · ${entry.size}` : ''}`}
               >
                 <span className="ide-file-icon">{getFileIcon(entry.name, entry.isDir)}</span>
-                <span className="ide-file-name">{entry.name}</span>
+                {renameTarget === fullPath ? (
+                  <input
+                    ref={renameInputRef}
+                    className="ide-rename-input"
+                    value={renameValue}
+                    onChange={e => setRenameValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleRename();
+                      if (e.key === 'Escape') setRenameTarget(null);
+                      e.stopPropagation();
+                    }}
+                    onBlur={handleRename}
+                    onClick={e => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="ide-file-name">{entry.name}</span>
+                )}
                 {entry.size && !entry.isDir && (
                   <span className="ide-file-size">{entry.size}</span>
                 )}
@@ -643,6 +727,34 @@ export default function IDE() {
         )}
 
         {/* ── 底部状态栏 ── */}
+        {/* 右键菜单 */}
+        {contextMenu && (
+          <div
+            className="ide-context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={e => e.stopPropagation()}
+          >
+            {!contextMenu.entry.isDir && (
+              <div className="ide-ctx-item" onClick={() => { openFile(contextMenu.entry.name, false); setContextMenu(null); }}>
+                <span className="ide-ctx-icon">📄</span>打开文件
+              </div>
+            )}
+            <div className="ide-ctx-item" onClick={() => handleContextAction('rename')}>
+              <span className="ide-ctx-icon">✏️</span>重命名
+            </div>
+            <div className="ide-ctx-item" onClick={() => handleContextAction('copy-path')}>
+              <span className="ide-ctx-icon">📋</span>复制路径
+            </div>
+            <div className="ide-ctx-item" onClick={() => handleContextAction('open-terminal')}>
+              <span className="ide-ctx-icon">⌨️</span>在终端中打开
+            </div>
+            <div className="ide-ctx-sep" />
+            <div className="ide-ctx-item danger" onClick={() => handleContextAction('delete')}>
+              <span className="ide-ctx-icon">🗑️</span>删除
+            </div>
+          </div>
+        )}
+
         <div className="ide-statusbar">
           <div className="ide-statusbar-left">
             {currentDevice && (
