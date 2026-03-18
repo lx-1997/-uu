@@ -20,9 +20,6 @@ import Examples from './components/Examples';
 import Ros from './components/Ros';
 import Models from './components/Models';
 
-// 需要保持状态的 tab（切换时不卸载组件）
-const PERSISTENT_TABS = ['vnc', 'ide', 'terminal'];
-
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
 
@@ -45,25 +42,20 @@ function MainContent() {
     );
   }
 
-  // 非持久化 tab：按需渲染
-  if (!PERSISTENT_TABS.includes(activeTab)) {
-    return (
-      <div className="page-transition">
-        {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'flasher' && <Flasher />}
-        {activeTab === 'files' && <Files />}
-        {activeTab === 'openclaw' && <OpenClaw />}
-        {activeTab === 'hardware' && <Hardware />}
-        {activeTab === 'examples' && <Examples />}
-        {activeTab === 'ros' && <Ros />}
-        {activeTab === 'models' && <Models />}
-      </div>
-    );
-  }
-
-  // 持久化 tab：始终挂载，用 CSS display 控制可见性，保留连接状态
+  // 持久化组件（terminal/vnc/ide）始终挂载，用 CSS display 控制可见性，保留连接状态
+  // 非持久化组件按需渲染
   return (
     <>
+      {/* 非持久化 tab */}
+      {activeTab === 'dashboard' && <div className="page-transition"><Dashboard /></div>}
+      {activeTab === 'flasher' && <div className="page-transition"><Flasher /></div>}
+      {activeTab === 'files' && <div className="page-transition"><Files /></div>}
+      {activeTab === 'openclaw' && <div className="page-transition"><OpenClaw /></div>}
+      {activeTab === 'hardware' && <div className="page-transition"><Hardware /></div>}
+      {activeTab === 'examples' && <div className="page-transition"><Examples /></div>}
+      {activeTab === 'ros' && <div className="page-transition"><Ros /></div>}
+      {activeTab === 'models' && <div className="page-transition"><Models /></div>}
+      {/* 持久化 tab：始终挂载 */}
       <div style={{ display: activeTab === 'terminal' ? 'contents' : 'none' }}><Terminal /></div>
       <div style={{ display: activeTab === 'vnc' ? 'contents' : 'none' }}><Vnc /></div>
       <div style={{ display: activeTab === 'ide' ? 'contents' : 'none' }}><IDE /></div>
