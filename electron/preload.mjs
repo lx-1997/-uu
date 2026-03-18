@@ -29,4 +29,7 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   onUrlLoaded: (cb) => {
     ipcRenderer.on('rdk:url-loaded', (_event, { url }) => cb(url));
   },
+
+  // 通知主进程当前活跃的嵌入 URL（tab 切换时调用，null 表示无嵌入视图）
+  setActiveUrl: (url) => ipcRenderer.send('rdk:set-active-url', { url }),
 });

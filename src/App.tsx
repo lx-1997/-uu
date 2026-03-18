@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import './styles.css';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import Sidebar from './components/Sidebar';
@@ -58,8 +59,22 @@ function MainContent() {
   );
 }
 
+/* ── 桌面端 tab 切换时同步 WebContentsView 可见性 ── */
+function useDesktopTabSync(activeTab: string) {
+  useEffect(() => {
+    const rdk = (window as any).rdkDesktop;
+    if (!rdk?.setActiveUrl) return;
+    // VNC 和 IDE tab 有可能存在活跃的嵌入视图，其他 tab 时全部隐藏
+    if (activeTab !== 'vnc' && activeTab !== 'ide') {
+      rdk.setActiveUrl(null);
+    }
+    // VNC/IDE 自身组件会在 connect 时调用 openUrl，这里只处理离开时隐藏
+  }, [activeTab]);
+}
+
 function AppShell() {
   const { activeTab } = useAppState();
+  useDesktopTabSync(activeTab);
   return (
     <div className="canvas-shell">
       <div className="layout-container">

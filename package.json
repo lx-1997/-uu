@@ -55,8 +55,7 @@
           "target": "portable",
           "arch": ["x64"]
         }
-      ],
-      "icon": "public/icon.ico"
+      ]
     },
     "portable": {
       "artifactName": "${productName}-${version}-portable.exe"
@@ -68,7 +67,6 @@
           "arch": ["x64", "arm64"]
         }
       ],
-      "icon": "public/icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
@@ -82,7 +80,6 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "public/icon.png",
       "category": "Development"
     },
     "nsis": {

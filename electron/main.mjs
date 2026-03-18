@@ -205,6 +205,24 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
   viewsMap[url] = view;
 });
 
+// ── IPC: Tab 切换时同步 WebContentsView 可见性 ──
+// 渲染层切换 tab 时发送当前活跃的 url（或 null 表示无嵌入视图）
+ipcMain.on('rdk:set-active-url', (_event, { url }) => {
+  for (const u in viewsMap) {
+    const view = viewsMap[u];
+    if (!view || view.webContents.isDestroyed()) continue;
+    if (u === url) {
+      view.setVisible(true);
+      // 确保在最顶层
+      mainWin?.contentView.removeChildView(view);
+      mainWin?.contentView.addChildView(view);
+      view.setBounds(calcViewBounds(mainWin));
+    } else {
+      view.setVisible(false);
+    }
+  }
+});
+
 // ── IPC: 隐藏嵌入页面 ──
 ipcMain.on('rdk:hide-url', (_event, { url }) => {
   if (viewsMap[url]) {
