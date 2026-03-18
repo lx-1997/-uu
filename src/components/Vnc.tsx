@@ -68,8 +68,9 @@ export default function Vnc() {
     const isDesktopMode = !!(window as any).rdkDesktop?.isDesktop;
     const backendPort = isDesktopMode ? 8787 : ((import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80));
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
-    const wsPath = `websockify?target=${currentDevice.ip}:5900`;
-    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
+    const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;
+    const wsPath = `websockify?target=${hostOrIp}:5900`;
+    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
   }, [currentDevice, quality, urlVersion]);
 
   // 画质切换时强制刷新 iframe
@@ -124,7 +125,7 @@ export default function Vnc() {
 
     executeDeviceCommand(
       currentDevice.id,
-      'bash -lc "(systemctl start vncserver || systemctl start x11vnc || true); sleep 1; (ss -lntp 2>/dev/null | grep -q \':5900\' && echo VNC_READY || echo VNC_FAILED)"'
+      `bash -lc "mkdir -p ~/.vnc && (echo -e '88888888\\n88888888' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true); sudo mkdir -p /etc/.vnc && sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd 2>/dev/null || true; (systemctl is-active x11vnc >/dev/null 2>&1 && sudo systemctl restart x11vnc || sudo systemctl start x11vnc || sudo systemctl restart vncserver || sudo systemctl start vncserver || true); sleep 4; echo VNC_READY"`
     ).then(res => {
       const output = res.output || '';
       setLogLines(prev => [...prev, ...output.split(/\r?\n/).filter(Boolean)]);
@@ -206,7 +207,7 @@ export default function Vnc() {
           <span className="vnc-topbar-title">远程桌面</span>
           {currentDevice && (
             <span className="vnc-topbar-device">
-              {currentDevice.name} · {currentDevice.ip}
+              {(currentDevice as any).username || (currentDevice as any).name}@{(currentDevice as any).host || (currentDevice as any).ip}
             </span>
           )}
         </div>
