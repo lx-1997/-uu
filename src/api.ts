@@ -287,6 +287,37 @@ export function uploadDeviceFile(deviceId: string, path: string, contentBase64: 
   });
 }
 
+// ── Flash / System Update APIs ──
+export function flashCheck(deviceId: string, password?: string) {
+  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/flash/check`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+  });
+}
+
+export function flashDownload(deviceId: string, imageUrl: string, targetPath?: string, password?: string) {
+  return request<{ ok: boolean; output: string; path: string }>(`/api/devices/${deviceId}/flash/download`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+    body: JSON.stringify({ imageUrl, targetPath }),
+  });
+}
+
+export function flashWrite(deviceId: string, imagePath: string, target: string, password?: string) {
+  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/flash/write`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+    body: JSON.stringify({ imagePath, target }),
+  });
+}
+
+export function flashVerify(deviceId: string, password?: string) {
+  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/flash/verify`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+  });
+}
+
 export function downloadDeviceFile(deviceId: string, path: string, password?: string) {
   const qp = new URLSearchParams({ path }).toString();
   return request<DeviceFileOpResult>(`/api/devices/${deviceId}/files/download?${qp}`, {

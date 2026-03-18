@@ -472,6 +472,60 @@ app.get('/api/devices/:id/diagnostics', async (request, response) => {
   });
 });
 
+/* ── Flash / System Update API ── */
+app.post('/api/devices/:id/flash/check', async (request, response) => {
+  const { id } = request.params;
+  // 检查设备当前系统版本、存储空间、可用介质
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "echo ===VERSION===; cat /etc/version 2>/dev/null || cat /etc/os-release 2>/dev/null | head -5 || echo unknown; echo ===STORAGE===; df -h / /userdata 2>/dev/null || df -h; echo ===EMMC===; ls -la /dev/mmcblk* 2>/dev/null || echo no-emmc; echo ===BOARD===; cat /sys/class/socinfo/board_id 2>/dev/null || cat /proc/device-tree/model 2>/dev/null || echo unknown-board; echo ===HBUPDATE===; which hbupdate 2>/dev/null && echo hbupdate-available || echo no-hbupdate"',
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output });
+});
+
+app.post('/api/devices/:id/flash/download', async (request, response) => {
+  const { id } = request.params;
+  const { imageUrl, targetPath } = request.body as { imageUrl?: string; targetPath?: string };
+  if (!imageUrl?.trim()) {
+    response.status(400).json({ error: '缺少镜像下载地址 imageUrl' });
+    return;
+  }
+  const dest = targetPath?.trim() || '/tmp/rdk_image.img';
+  // 在设备上下载镜像
+  const executed = await runOnDevice(request, response, id, [
+    `bash -lc "echo 'Downloading image...'; wget -q --show-progress -O ${shEscape(dest)} ${shEscape(imageUrl)} 2>&1 || curl -fSL -o ${shEscape(dest)} ${shEscape(imageUrl)} 2>&1; echo DONE; ls -lh ${shEscape(dest)}"`,
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output, path: dest });
+});
+
+app.post('/api/devices/:id/flash/write', async (request, response) => {
+  const { id } = request.params;
+  const { imagePath, target } = request.body as { imagePath?: string; target?: string };
+  if (!imagePath?.trim()) {
+    response.status(400).json({ error: '缺少镜像路径 imagePath' });
+    return;
+  }
+  // target: emmc (/dev/mmcblk0), sd (/dev/mmcblk1), 或自定义路径
+  const targetDev = target === 'emmc' ? '/dev/mmcblk0' : target === 'sd' ? '/dev/mmcblk1' : (target || '/dev/mmcblk0');
+  // 使用 hbupdate 或 dd 写入
+  const executed = await runOnDevice(request, response, id, [
+    `bash -lc "if command -v hbupdate >/dev/null 2>&1; then echo 'Using hbupdate...'; hbupdate ${shEscape(imagePath)} 2>&1; else echo 'Using dd...'; dd if=${shEscape(imagePath)} of=${shEscape(targetDev)} bs=4M status=progress 2>&1; sync; fi; echo FLASH_COMPLETE"`,
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output });
+});
+
+app.post('/api/devices/:id/flash/verify', async (request, response) => {
+  const { id } = request.params;
+  // 验证烧录后的系统状态
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "echo ===POST_FLASH===; cat /etc/version 2>/dev/null || echo no-version; uname -a; echo ===BOOT===; systemctl is-system-running 2>/dev/null || echo unknown; echo ===BPU===; hrut_smi 2>/dev/null | head -5 || echo bpu-check-unavailable"',
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output });
+});
+
 app.get('/api/devices/:id/ros/topics', async (request, response) => {
   const { id } = request.params;
   const executed = await runOnDevice(request, response, id, ['bash -lc "(command -v ros2 >/dev/null 2>&1 && ros2 topic list) || echo ROS2_NOT_INSTALLED"']);

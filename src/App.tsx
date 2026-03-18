@@ -18,6 +18,7 @@ import Hardware from './components/Hardware';
 import Examples from './components/Examples';
 import Ros from './components/Ros';
 import Models from './components/Models';
+import Lowcode from './components/Lowcode';
 
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
@@ -54,6 +55,7 @@ function MainContent() {
       {activeTab === 'examples' && <Examples />}
       {activeTab === 'ros' && <Ros />}
       {activeTab === 'models' && <Models />}
+      {activeTab === 'lowcode' && <Lowcode />}
     </div>
   );
 }
@@ -66,7 +68,7 @@ function AppShell() {
         <Sidebar />
         <div className="main-area">
           <TopToolbar />
-          <div className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros'].includes(activeTab) ? 'viewport-terminal' : ''}`}>
+          <div className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros','lowcode'].includes(activeTab) ? 'viewport-terminal' : ''}`}>
             <MainContent />
           </div>
           <AIDock />

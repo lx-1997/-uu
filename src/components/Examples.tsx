@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { executeDeviceCommand, getRememberedDevicePassword } from '../api';
 
-/* ── NodeHub 应用示例（苹果风格 · 真实接入）── */
+/* ── NodeHub 应用示例 ── */
 
 interface AppItem {
   id: string; name: string; icon: string; desc: string; category: string;
@@ -44,19 +44,21 @@ export default function Examples() {
   const [apps, setApps] = useState<AppItem[]>(BUILTIN_APPS);
   const [filter, setFilter] = useState('全部');
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [showLog, setShowLog] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [newApp, setNewApp] = useState({ name: '', desc: '', installCmd: '', runCmd: '', uninstallCmd: '' });
 
-  const detail = apps.find(a => a.id === selected);
-  const filtered = apps.filter(a => (filter === '全部' || a.category === filter) && (!search || a.name.includes(search) || a.desc.includes(search)));
+  const filtered = apps.filter(a =>
+    (filter === '全部' || a.category === filter) &&
+    (!search || a.name.includes(search) || a.desc.includes(search))
+  );
   const installedCount = apps.filter(a => a.installed).length;
+  const runningCount = apps.filter(a => a.running).length;
 
   const exec = async (id: string, cmd: string, label: string) => {
-    if (!currentDevice) { addToast('请先连接设备', 'warning'); return; }
+    if (!currentDevice) { addToast('请先连接设备', 'warning'); return null; }
     setBusyId(id);
     setLogs(p => [...p.slice(-40), `[${label}] ${new Date().toLocaleTimeString()}`, `$ ${cmd}`]);
     setShowLog(true);
@@ -112,80 +114,112 @@ export default function Examples() {
     await exec('deps', 'dpkg -l | grep tros | head -20 && echo "---" && ros2 pkg list 2>/dev/null | head -20 || echo "ROS2 未安装"', '依赖检查');
   };
 
+  /* ── 未连接设备 ── */
   if (!currentDevice) {
     return (
-      <div className="center-stage">
-        <div className="oc-install-hero">
-          <span style={{ fontSize: '4rem' }}>📦</span>
-          <div>
-            <h1 className="oc-hero-title">NodeHub 应用示例</h1>
-            <p className="oc-hero-sub">地瓜机器人 NodeHub 应用商店<br/>一键安装、运行、管理 RDK 应用</p>
+      <div className="nh-page">
+        <div className="nh-empty-state">
+          <div className="nh-empty-icon-wrap">
+            <span className="nh-empty-glow" />
+            <span style={{ fontSize: '3rem' }}>📦</span>
           </div>
-        </div>
-        <div className="isolated-widget" style={{ marginTop: 24 }}>
-          <div className="widget-header">快速开始</div>
-          <p className="desc-text">NodeHub 提供丰富的 RDK 应用示例，涵盖视觉检测、SLAM 导航、语音交互等场景。</p>
-          <div className="oc-steps">
-            <div className="oc-step"><span className="oc-step-n">1</span>连接 RDK 开发板</div>
-            <div className="oc-step"><span className="oc-step-n">2</span>浏览并安装感兴趣的应用</div>
-            <div className="oc-step"><span className="oc-step-n">3</span>一键运行，实时查看效果</div>
+          <h2 className="nh-empty-title">NodeHub · 应用商店</h2>
+          <p className="nh-empty-desc">地瓜机器人 NodeHub 应用商店，一键安装、运行、管理 RDK 应用</p>
+          <div className="nh-empty-steps">
+            <div className="nh-empty-step"><span className="nh-step-num">1</span>连接 RDK 开发板</div>
+            <div className="nh-empty-step"><span className="nh-step-num">2</span>浏览并安装感兴趣的应用</div>
+            <div className="nh-empty-step"><span className="nh-step-num">3</span>一键运行，实时查看效果</div>
           </div>
-          <div style={{ marginTop: 16 }}>
-            <a href="https://developer.d-robotics.cc/nodehub" target="_blank" rel="noopener noreferrer" className="oc-ext-link">🔗 访问 NodeHub</a>
-          </div>
+          <a href="https://developer.d-robotics.cc/nodehub" target="_blank" rel="noopener noreferrer" className="nh-ext-link">
+            访问 NodeHub ↗
+          </a>
         </div>
       </div>
     );
   }
 
+  /* ── 主页面 ── */
   return (
-    <div className="center-stage wide-stage">
-      {/* 状态栏 */}
-      <div className="oc-bar">
-        <div className="oc-bar-left">
-          <span style={{ fontSize: '1.4rem' }}>📦</span>
-          <span className="oc-bar-name">NodeHub 应用</span>
-          <a href="https://developer.d-robotics.cc/nodehub" target="_blank" rel="noopener noreferrer" className="oc-ext-link" style={{ marginLeft: 8, fontSize: '0.75rem' }}>NodeHub ↗</a>
+    <div className="nh-page">
+      {/* 顶部状态栏 */}
+      <div className="nh-topbar">
+        <div className="nh-topbar-left">
+          <span className="nh-topbar-icon">📦</span>
+          <span className="nh-topbar-name">NodeHub</span>
+          <span className="nh-topbar-badge">{apps.length} 应用</span>
         </div>
-        <div className="oc-bar-right">
-          <span className="oc-bar-stat"><b>{installedCount}</b> 已安装</span>
-          <span className="oc-bar-stat"><b>{apps.filter(a => a.running).length}</b> 运行中</span>
-          <button className="oc-bar-btn" onClick={handleCheckDeps} disabled={!!busyId}>依赖检查</button>
-          <button className="oc-bar-btn" onClick={() => setShowAdd(true)}>+ 添加应用</button>
+        <div className="nh-topbar-right">
+          <div className="nh-stat-chips">
+            <span className="nh-stat-chip"><span className="nh-stat-num">{installedCount}</span>已安装</span>
+            <span className="nh-stat-chip live"><span className="nh-stat-num">{runningCount}</span>运行中</span>
+          </div>
+          <button className="nh-btn ghost" onClick={handleCheckDeps} disabled={!!busyId}>依赖检查</button>
+          <button className="nh-add-btn" onClick={() => setShowAdd(true)}>+ 添加应用</button>
         </div>
       </div>
 
+      {/* 设备信息条 */}
+      <div className="nh-device-bar">
+        <div className="nh-device-item"><span className="nh-device-label">设备</span><span className="nh-device-val">{currentDevice.name}</span></div>
+        <span className="nh-device-sep" />
+        <div className="nh-device-item"><span className="nh-device-label">IP</span><span className="nh-device-val mono">{currentDevice.ip}</span></div>
+        <span className="nh-device-sep" />
+        <div className="nh-device-item"><span className="nh-device-label">已安装</span><span className="nh-device-val">{installedCount}</span></div>
+        <span className="nh-device-sep" />
+        <div className="nh-device-item"><span className="nh-device-label">运行中</span><span className={`nh-device-val ${runningCount > 0 ? 'ok' : ''}`}>{runningCount}</span></div>
+      </div>
+
       {/* 筛选栏 */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        {CATEGORIES.map(c => (
-          <button key={c} className={`oc-bar-btn ${filter === c ? 'primary' : ''}`} onClick={() => setFilter(c)}>{c}</button>
-        ))}
-        <div style={{ marginLeft: 'auto' }}>
-          <input className="oc-skill-add-input" placeholder="搜索应用..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 180 }} />
+      <div className="nh-filter-bar">
+        <div className="nh-filter-tabs">
+          {CATEGORIES.map(c => (
+            <button key={c} className={`nh-tab-btn ${filter === c ? 'active' : ''}`} onClick={() => setFilter(c)}>{c}</button>
+          ))}
+        </div>
+        <div className="nh-search-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input className="nh-search" placeholder="搜索应用..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
       </div>
 
       {/* 应用卡片网格 */}
-      <div className="workspace-grid three-column" style={{ marginTop: 16 }}>
+      <div className="nh-grid">
+        {filtered.length === 0 && <div className="nh-no-result">没有匹配的应用</div>}
         {filtered.map(app => (
-          <div key={app.id} className={`panel-card ${selected === app.id ? '' : ''}`} style={{ cursor: 'pointer', borderColor: selected === app.id ? '#ff6b00' : undefined }} onClick={() => setSelected(app.id)}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={{ fontSize: '1.6rem' }}>{app.icon}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#1e293b' }}>{app.name}</div>
-                <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{app.category}</div>
+          <div key={app.id} className={`nh-card ${app.running ? 'running' : app.installed ? 'installed' : ''}`}>
+            <div className="nh-card-head">
+              <span className="nh-card-icon">{app.icon}</span>
+              <div className="nh-card-info">
+                <span className="nh-card-name">{app.name}</span>
+                <span className="nh-card-cat">{app.category}</span>
               </div>
-              {app.running && <span className="oc-bar-badge on" style={{ fontSize: '0.68rem' }}><span className="oc-live-dot" />运行中</span>}
-              {app.installed && !app.running && <span className="oc-bar-badge" style={{ fontSize: '0.68rem', background: '#f0fdf4', color: '#16a34a', borderColor: '#bbf7d0' }}>已安装</span>}
+              {app.running && <span className="nh-badge running"><span className="nh-badge-dot" />运行中</span>}
+              {app.installed && !app.running && <span className="nh-badge installed">已安装</span>}
             </div>
-            <p style={{ margin: '0 0 12px', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.5 }}>{app.desc}</p>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {!app.installed && <button className="oc-bar-btn primary" style={{ fontSize: '0.78rem', padding: '5px 14px' }} disabled={busyId === app.id} onClick={e => { e.stopPropagation(); handleInstall(app); }}>{busyId === app.id ? '安装中...' : '安装'}</button>}
-              {app.installed && !app.running && <button className="oc-bar-btn primary" style={{ fontSize: '0.78rem', padding: '5px 14px' }} disabled={busyId === app.id} onClick={e => { e.stopPropagation(); handleRun(app); }}>▶ 运行</button>}
-              {app.running && <button className="oc-bar-btn" style={{ fontSize: '0.78rem', padding: '5px 14px', color: '#ef4444', borderColor: '#fca5a5' }} onClick={e => { e.stopPropagation(); handleStop(app); }}>⏹ 停止</button>}
-              {app.installed && <button className="oc-bar-btn" style={{ fontSize: '0.78rem', padding: '5px 14px', color: '#ef4444', borderColor: '#fca5a5' }} onClick={e => { e.stopPropagation(); handleUninstall(app); }}>卸载</button>}
-              {app.custom && <button className="oc-bar-btn" style={{ fontSize: '0.78rem', padding: '5px 14px' }} onClick={e => { e.stopPropagation(); handleRemoveCustom(app.id); }}>移除</button>}
-              {app.repo && <a href={app.repo} target="_blank" rel="noopener noreferrer" className="oc-ext-link" style={{ fontSize: '0.72rem' }} onClick={e => e.stopPropagation()}>详情 ↗</a>}
+            <p className="nh-card-desc">{app.desc}</p>
+            <div className="nh-card-actions">
+              {!app.installed && (
+                <button className="nh-btn primary" disabled={busyId === app.id} onClick={() => handleInstall(app)}>
+                  {busyId === app.id ? '安装中...' : '安装'}
+                </button>
+              )}
+              {app.installed && !app.running && (
+                <button className="nh-btn primary" disabled={busyId === app.id} onClick={() => handleRun(app)}>▶ 运行</button>
+              )}
+              {app.running && (
+                <button className="nh-btn danger" onClick={() => handleStop(app)}>⏹ 停止</button>
+              )}
+              {app.installed && (
+                <button className="nh-btn ghost" onClick={() => handleUninstall(app)}>卸载</button>
+              )}
+              {app.custom && (
+                <button className="nh-btn ghost" onClick={() => handleRemoveCustom(app.id)}>移除</button>
+              )}
+              {app.repo && (
+                <a href={app.repo} target="_blank" rel="noopener noreferrer" className="nh-btn link">详情 ↗</a>
+              )}
             </div>
           </div>
         ))}
@@ -193,33 +227,35 @@ export default function Examples() {
 
       {/* 日志面板 */}
       {showLog && logs.length > 0 && (
-        <div className="isolated-widget" style={{ marginTop: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span className="widget-header" style={{ margin: 0 }}>📋 执行日志</span>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button className="oc-bar-btn" onClick={() => setLogs([])}>清空</button>
-              <button className="oc-bar-btn" onClick={() => setShowLog(false)}>收起</button>
+        <div className="nh-log-panel">
+          <div className="nh-log-header">
+            <span>📋 执行日志</span>
+            <div className="nh-log-actions">
+              <button className="nh-btn ghost sm" onClick={() => setLogs([])}>清空</button>
+              <button className="nh-btn ghost sm" onClick={() => setShowLog(false)}>收起</button>
             </div>
           </div>
-          <pre className="ros-output-content" style={{ maxHeight: 200, overflow: 'auto' }}>{logs.join('\n')}</pre>
+          <pre className="nh-log-body">{logs.join('\n')}</pre>
         </div>
       )}
 
       {/* 添加应用弹窗 */}
       {showAdd && (
         <>
-          <div className="oc-modal-mask" onClick={() => setShowAdd(false)} />
-          <div className="oc-modal">
-            <div className="oc-modal-head">
-              <h3 className="oc-modal-title">📦 添加自定义应用</h3>
-              <button className="oc-modal-close" onClick={() => setShowAdd(false)}>✕</button>
+          <div className="nh-overlay" onClick={() => setShowAdd(false)} />
+          <div className="nh-modal">
+            <div className="nh-modal-head">
+              <h3 className="nh-modal-title">📦 添加自定义应用</h3>
+              <button className="nh-modal-close" onClick={() => setShowAdd(false)}>✕</button>
             </div>
-            <div className="oc-input-group"><label>应用名称</label><input placeholder="我的应用" value={newApp.name} onChange={e => setNewApp(p => ({ ...p, name: e.target.value }))} /></div>
-            <div className="oc-input-group"><label>描述</label><input placeholder="应用描述..." value={newApp.desc} onChange={e => setNewApp(p => ({ ...p, desc: e.target.value }))} /></div>
-            <div className="oc-input-group"><label>安装命令</label><input placeholder="sudo apt install -y ..." value={newApp.installCmd} onChange={e => setNewApp(p => ({ ...p, installCmd: e.target.value }))} /></div>
-            <div className="oc-input-group"><label>运行命令</label><input placeholder="ros2 launch ..." value={newApp.runCmd} onChange={e => setNewApp(p => ({ ...p, runCmd: e.target.value }))} /></div>
-            <div className="oc-input-group"><label>卸载命令</label><input placeholder="sudo apt remove -y ..." value={newApp.uninstallCmd} onChange={e => setNewApp(p => ({ ...p, uninstallCmd: e.target.value }))} /></div>
-            <button className="oc-save-btn wide" onClick={handleAddApp}>添加应用</button>
+            <div className="nh-modal-body">
+              <div className="nh-field"><label>应用名称</label><input placeholder="我的应用" value={newApp.name} onChange={e => setNewApp(p => ({ ...p, name: e.target.value }))} /></div>
+              <div className="nh-field"><label>描述</label><input placeholder="应用描述..." value={newApp.desc} onChange={e => setNewApp(p => ({ ...p, desc: e.target.value }))} /></div>
+              <div className="nh-field"><label>安装命令</label><input placeholder="sudo apt install -y ..." value={newApp.installCmd} onChange={e => setNewApp(p => ({ ...p, installCmd: e.target.value }))} /></div>
+              <div className="nh-field"><label>运行命令</label><input placeholder="ros2 launch ..." value={newApp.runCmd} onChange={e => setNewApp(p => ({ ...p, runCmd: e.target.value }))} /></div>
+              <div className="nh-field"><label>卸载命令</label><input placeholder="sudo apt remove -y ..." value={newApp.uninstallCmd} onChange={e => setNewApp(p => ({ ...p, uninstallCmd: e.target.value }))} /></div>
+              <button className="nh-btn primary full" onClick={handleAddApp}>添加应用</button>
+            </div>
           </div>
         </>
       )}

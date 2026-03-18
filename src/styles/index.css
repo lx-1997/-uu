@@ -5,9 +5,11 @@
 @import './hardware.css';
 @import './ide.css';
 @import './layout.css';
+@import './lowcode.css';
 @import './markdown.css';
 @import './modal.css';
 @import './models.css';
+@import './nodehub.css';
 @import './onboarding.css';
 @import './openclaw.css';
 @import './ros.css';

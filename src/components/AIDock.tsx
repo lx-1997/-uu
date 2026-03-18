@@ -242,8 +242,12 @@ export default function AIDock() {
       { id: 'perf', icon: '⚡', label: '性能优化', text: '帮我分析当前 BPU/CPU 使用情况，给出优化建议' },
     ],
     ros: [
-      { id: 'topic', icon: '📡', label: '话题巡检', text: '检查所有 ROS2 话题频率是否正常' },
-      { id: 'bbox', icon: '👁️', label: '查看推理', text: '查看 AI 推理结果 bbox 输出' },
+      { id: 'rosbridge', icon: '🌉', label: 'Rosbridge', text: '帮我检查 rosbridge_websocket 服务状态，如果未运行请启动它并确认端口 9090 可用' },
+      { id: 'topic', icon: '📡', label: '话题巡检', text: '帮我检查所有 ROS2 话题的发布频率，找出异常的话题并给出修复建议' },
+      { id: 'tf', icon: '🌳', label: 'TF 诊断', text: '检查 TF 坐标树是否完整，分析 frame 之间的变换关系是否正常' },
+      { id: 'node', icon: '🔗', label: '节点健康', text: '列出所有 ROS2 节点，检查哪些节点异常退出或未启动，给出重启命令' },
+      { id: 'nav', icon: '🗺️', label: '导航调试', text: '帮我检查导航栈状态，包括 costmap、planner、controller 是否正常工作' },
+      { id: 'launch', icon: '🚀', label: '启动文件', text: '帮我生成一个 ROS2 launch 文件，启动摄像头和 AI 推理节点' },
     ],
     models: [
       { id: 'pick', icon: '🧠', label: '选模型', text: '帮我推荐适合行人车辆检测的模型' },
