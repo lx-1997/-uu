@@ -1,0 +1,35 @@
+{
+    "name": "filemanager",
+    "type": "interactive shell",
+    "needsInstall": true,
+    "needsCheck": true,
+    "check": {
+        "cmd": "hash vsftpd > /dev/null 2>&1 && echo installed || echo uninstall",
+        "keyword": "uninstall"
+    },
+    "install": [
+        "echo 'start installing'",
+        "apt show vsftpd > /dev/null 2>&1 || (sudo apt update && sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y)",
+        "sudo apt install vsftpd -y",
+        "sudo sed -i 's/#write_enable=YES/write_enable=YES/' /etc/vsftpd.conf",
+        "sudo sed -i 's/#anon_upload_enable=YES/anon_upload_enable=YES' /etc/vsftpd.conf",
+        "sudo sed -i 's/#anon_mkdir_write_enable=YES/anon_mkdir_write_enable=YES/' /etc/vsftpd.conf",
+        "sudo systemctl restart vsftpd"
+    ],
+    "uninstall": "sudo apt remove vsftpd -y",
+    "launch": "systemctl is-active vsftpd > /dev/null 2>&1 || sudo systemctl start vsftpd",
+    "host": "localhost",
+    "port": 20,
+    "additional":  {
+        "win": "explorer ftp://$user:$password@$ip",
+        "mac": "open ftp://$user:$password@$ip",
+        "linux": "gnome-terminal -x bash -c 'ssh -N -L localhost:9888:localhost:9888 $user@$ip'"
+    },
+    "quit": {
+
+    },
+    "description": {
+        "zh": "文件管理器：可以使用电脑端的文件管理器管理RDK设备中的各类文件。",
+        "en": "File Manager: Manage files on RDK device using PC file explorer."
+    }
+}

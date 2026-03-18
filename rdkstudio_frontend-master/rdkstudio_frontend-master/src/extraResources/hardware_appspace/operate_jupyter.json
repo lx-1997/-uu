@@ -1,0 +1,35 @@
+{
+    "name": "jupyter notebook",
+    "type": "interactive shell",
+    "needsInstall": true,
+    "needsCheck": true,
+    "check": {
+        "cmd": "export PATH=\"$HOME/.local/bin:$PATH\" && hash jupyter > /dev/null 2>&1 && echo installed || echo uninstall",
+        "keyword": "uninstall"
+    },
+    "install": [
+        "echo 'start installing'",
+        "pip install notebook -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com",
+        "sync"
+    ],
+    "uninstall": "",
+    "launch": "export PATH=\"$HOME/.local/bin:$PATH\" && jupyter notebook --no-browser --ip='0.0.0.0' --port=8888",
+    "host": "localhost",
+    "port": 8888,
+    "additional":  {
+        "win": "start powershell ssh -N -L localhost:8888:localhost:8888 $user@$ip",
+        "mac": "osascript -e 'tell application \"Terminal\" to activate' -e 'tell application \"Terminal\" to do script \"ssh -N -L localhost:8888:localhost:8888 $user@$ip\"'",
+        "linux": "gnome-terminal -x bash -c 'ssh -N -L localhost:8888:localhost:8888 $user@$ip'"
+    },
+    "quit": {
+
+    },
+    "description": {
+        "zh": "Jupyter记事本：可以使用浏览器页面进行交互式Python编程。",
+        "en": "Jupyter Notebook: This is the original web application for creating and sharing computational documents. It offers a simple, streamlined, document-centric experience."
+    },
+    "videoTutorial": {
+        "zh": "https://www.bilibili.com/video/BV1Y86PYgE78/?share_source=copy_web&vd_source=d7a3dcf73103b07f664eecd90dd4020e",
+        "en": "https://www.bilibili.com/video/BV1Y86PYgE78/?share_source=copy_web&vd_source=d7a3dcf73103b07f664eecd90dd4020e"
+    }
+}

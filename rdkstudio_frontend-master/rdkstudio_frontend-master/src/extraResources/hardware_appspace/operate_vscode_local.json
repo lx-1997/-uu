@@ -1,0 +1,37 @@
+{
+    "name": "vscode local",
+    "type": "local command",
+    "needsInstall": false,
+    "needsCheck": true,
+    "check": {
+        "win": {
+            "cmd": "powershell Get-Command code",
+            "keyword": "uninstall"
+        },
+        "mac": {
+            "cmd": "hash code > /dev/null 2>&1 && echo installed || [ -e /Applications/Visual\\ Studio\\ Code.app/Contents/Resources/app/bin ] && echo installed || echo uninstall",
+            "keyword": "uninstall",
+            "terminalCmd": "hash code > /dev/null 2>&1 && echo installed || echo uninstall",
+            "createCmd": "ln -s /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code /usr/local/bin/code"
+        },
+        "linux": {
+            "cmd": "hash code > /dev/null 2>&1 && echo installed || echo uninstall",
+            "keyword": "uninstall"
+        }
+    },
+    "install": [],
+    "uninstall": "",
+    "launch": {
+        "win": "code --remote ssh-remote+$user@$ip /app",
+        "mac": "code --remote ssh-remote+$user@$ip /app",
+        "linux": "code --remote ssh-remote+$user@$ip /app"
+    },
+    "quit": {
+
+    },
+    "description": {
+        "zh": "本地VS Code：使用VS Code的SSH Remote插件打开RDK设备中的实例工程。",
+        "en": "Local VS Code: Use SSH Remote plugin to open project on RDK device."
+    },
+    "downloadUrl": "https://code.visualstudio.com/Download"
+}

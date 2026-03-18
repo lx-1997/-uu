@@ -1,0 +1,26 @@
+{
+    "name": "plexmediaserver",
+    "type": "interactive shell",
+    "needsInstall": true,
+    "needsCheck": true,
+    "check": {
+        "cmd": "snap info plexmediaserver | grep installed > /dev/null 2>&1 && echo installed || echo uninstall",
+        "keyword": "uninstall"
+    },
+    "install": [
+        "echo 'start installing'",
+        "hash snap > /dev/null 2>&1 || sudo apt update && sudo apt install snapd -y",
+        "sudo snap install plexmediaserver"
+    ],
+    "uninstall": "sudo snap remove plexmediaserver",
+    "launch": "plexmediaserver.pms-web",
+    "host": "$ip",
+    "port": "32400/manage",
+    "quit": {
+
+    },
+    "description": {
+        "zh": "Plex Media Server: 用于组织视频、图片及音频文件。",
+        "en": "Plex Media Server is a software application that allows you to organize and stream your collection of videos, music, and photos."
+    }
+}

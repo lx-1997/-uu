@@ -1,27 +1,105 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, WebContentsView, ipcMain, shell } from 'electron';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-function getRendererUrl() {
-  if (process.env.RDK_STUDIO_RENDERER_URL) {
-    return process.env.RDK_STUDIO_RENDERER_URL;
-  }
-  if (!app.isPackaged) {
-    return 'http://localhost:5173';
-  }
-  return `file://${path.join(__dirname, '../dist/index.html')}`;
-}
 
 // 侧边栏宽度 + 顶部工具栏高度（与 src/styles/layout.css 保持一致）
 const SIDEBAR_W = 260;
 const TOPBAR_H = 48;
 
 let mainWin = null;
+let serverProcess = null;
 // url -> WebContentsView 映射
 const viewsMap = {};
+
+/* ── 判断是否打包模式 ── */
+const isPacked = app.isPackaged;
+
+/* ── 获取资源根目录 ── */
+function getResourcesPath() {
+  if (isPacked) {
+    return process.resourcesPath;
+  }
+  return path.join(__dirname, '..');
+}
+
+/* ── 启动内嵌 Express 服务器（仅生产模式） ── */
+function startEmbeddedServer() {
+  if (!isPacked) return Promise.resolve(8787);
+
+  return new Promise((resolve, reject) => {
+    const serverPath = path.join(getResourcesPath(), 'dist-server', 'index.js');
+    const dataPath = path.join(getResourcesPath(), 'data');
+
+    console.log('[server] starting embedded server:', serverPath);
+
+    serverProcess = spawn(process.execPath, [serverPath], {
+      env: {
+        ...process.env,
+        PORT: '8787',
+        NODE_ENV: 'production',
+        // 数据目录指向 resources/data
+        RDK_DATA_DIR: dataPath,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    serverProcess.stdout?.on('data', (data) => {
+      const msg = data.toString();
+      console.log('[server]', msg.trim());
+      if (msg.includes('running on')) {
+        resolve(8787);
+      }
+    });
+
+    serverProcess.stderr?.on('data', (data) => {
+      console.error('[server:err]', data.toString().trim());
+    });
+
+    serverProcess.on('error', (err) => {
+      console.error('[server] failed to start:', err);
+      reject(err);
+    });
+
+    // 5s 超时兜底
+    setTimeout(() => resolve(8787), 5000);
+  });
+}
+
+/* ── 等待服务器就绪 ── */
+async function waitForServer(port, maxRetries = 20) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const res = await fetch(`http://localhost:${port}/api/health`, {
+        signal: AbortSignal.timeout(1000),
+      });
+      if (res.ok) {
+        console.log(`[server] ready on port ${port}`);
+        return true;
+      }
+    } catch {
+      // 还没就绪
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  console.warn('[server] did not respond in time, continuing anyway');
+  return false;
+}
+
+/* ── 获取渲染层 URL ── */
+function getRendererUrl() {
+  if (process.env.RDK_STUDIO_RENDERER_URL) {
+    return process.env.RDK_STUDIO_RENDERER_URL;
+  }
+  if (isPacked) {
+    return `file://${path.join(__dirname, '../dist/index.html')}`;
+  }
+  return 'http://localhost:5173';
+}
 
 function calcViewBounds(win) {
   const [w, h] = win.getContentSize();
@@ -82,10 +160,8 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
   if (!mainWin) return;
 
   if (viewsMap[url]) {
-    // 已存在则重新置顶并显示
     const existing = viewsMap[url];
     existing.setVisible(true);
-    // 重新 add 以确保在最顶层
     mainWin.contentView.removeChildView(existing);
     mainWin.contentView.addChildView(existing);
     existing.setBounds(calcViewBounds(mainWin));
@@ -99,7 +175,6 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
     },
   });
 
-  // 忽略证书错误（设备自签名证书）
   view.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
 
   const bounds = calcViewBounds(mainWin);
@@ -108,13 +183,11 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
 
   console.log(`[rdk:open-url] loading ${url}, bounds:`, bounds);
 
-  // 加载失败通知渲染层
   view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
     console.error(`[rdk:open-url] did-fail-load ${url}: ${errorCode} ${errorDescription}`);
     event.sender.send('rdk:url-load-failed', { url, errorCode, errorDescription });
   });
 
-  // 加载成功通知渲染层
   view.webContents.on('did-finish-load', () => {
     console.log(`[rdk:open-url] did-finish-load ${url}`);
     event.sender.send('rdk:url-loaded', { url });
@@ -124,7 +197,6 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
     console.error(`[rdk:open-url] failed to load ${url}:`, err.message);
   });
 
-  // 子页面弹出的新窗口，通知渲染层处理
   view.webContents.setWindowOpenHandler((details) => {
     event.sender.send('rdk:sub-url-open', details.url);
     return { action: 'deny' };
@@ -151,6 +223,16 @@ ipcMain.on('rdk:close-url', (_event, { url }) => {
 });
 
 app.whenReady().then(async () => {
+  // 生产模式：先启动内嵌服务器
+  if (isPacked) {
+    try {
+      await startEmbeddedServer();
+      await waitForServer(8787);
+    } catch (err) {
+      console.error('[main] server startup failed:', err);
+    }
+  }
+
   await createMainWindow();
 
   app.on('activate', async () => {
@@ -161,7 +243,19 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  // 关闭内嵌服务器
+  if (serverProcess) {
+    serverProcess.kill();
+    serverProcess = null;
+  }
   if (process.platform !== 'darwin') {
     app.quit();
+  }
+});
+
+app.on('before-quit', () => {
+  if (serverProcess) {
+    serverProcess.kill();
+    serverProcess = null;
   }
 });

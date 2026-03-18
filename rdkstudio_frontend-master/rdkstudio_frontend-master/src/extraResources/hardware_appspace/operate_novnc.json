@@ -1,0 +1,31 @@
+{
+    "name": "novnc",
+    "type": "interactive shell",
+    "needsInstall": true,
+    "needsCheck": true,
+    "check": {
+        "cmd": "hash x11vnc > /dev/null 2>&1 && [ -d ~/.novnc ] && [ -d ~/.vnc ] && echo installed || echo uninstall",
+        "keyword": "uninstall"
+    },
+    "install": [
+        "echo 'start installing'",
+        "[ -d ~/.novnc ] || git clone https://gitee.com/JunQiangPan/noVNC.git .novnc",
+        "[ -d ~/.novnc ] || git clone https://github.com/novnc/noVNC.git .novnc",
+        "[ -d ~/.novnc/utils/websockify ] || git clone https://gitee.com/wangxinbing/websockify.git ~/.novnc/utils/websockify",
+        "[ -d ~/.novnc/utils/websockify ] || git clone https://github.com/novnc/websockify ~/.novnc/utils/websockify",
+        "[ -d ~/.vnc ] || mkdir -p ~/.vnc",
+        "echo -e \"88888888\\n88888888\" | vncpasswd -f > ~/.vnc/passwd",
+        "sudo cp --parents -f ~/.vnc/passwd /etc/.vnc/passwd"
+    ],
+    "uninstall": "sudo rm -rf ~/.novnc",
+    "launch": "echo -e \"88888888\\n88888888\" | vncpasswd -f > ~/.vnc/passwd && sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd && ( systemctl is-active x11vnc > /dev/null 2>&1 && sudo systemctl restart x11vnc || sudo systemctl start x11vnc) && sleep 6 && ~/.novnc/utils/novnc_proxy",
+    "host": "$ip",
+    "port": 6080,
+    "quit": {
+
+    },
+    "description": {
+        "zh": "远程桌面：可以登陆RDK设备桌面进行操作（密码8个8）",
+        "en": "noVNC: Use VNC in RDK Studio (Password: 88888888)"
+    }
+}

@@ -1,0 +1,75 @@
+{
+    "list": [
+        {
+            "name": "node-red",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-nodered.png",
+            "local": "./hardware_appspace/operate_nodered.json",
+            "cloud": ""
+        },
+        {
+            "name": "jupyter",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-jupyter.png",
+            "local": "./hardware_appspace/operate_jupyter.json",
+            "cloud": ""
+        },
+        {
+            "name": "vscode-web",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-vscode-local.png",
+            "local": "./hardware_appspace/operate_vscode_server.json",
+            "cloud": ""
+        },
+        {
+            "name": "noVNC",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-novnc.png",
+            "local": "./hardware_appspace/operate_novnc.json",
+            "cloud": ""
+        },
+        {
+            "name": "video-streamer",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-videostream.png",
+            "local": "./hardware_appspace/operate_videostream.json",
+            "cloud": ""
+        },
+        {
+            "name": "image-browser",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-imagebrowser.png",
+            "local": "./hardware_appspace/operate_imagebrowser.json",
+            "could": ""
+        },
+        {
+            "name": "files",
+            "type": "server/client",
+            "icon": "./hardware_appspace/icons/icon-filemanager.png",
+            "local": "./hardware_appspace/operate_filemanager.json",
+            "cloud": ""
+        },
+        {
+            "name": "terminal",
+            "type": "local",
+            "icon": "./hardware_appspace/icons/icon-terminal.png",
+            "local": "./hardware_appspace/operate_terminal.json",
+            "cloud": ""
+        },
+        {
+            "name": "vscode",
+            "type": "local",
+            "icon": "./hardware_appspace/icons/icon-vscode.png",
+            "local": "./hardware_appspace/operate_vscode_local.json",
+            "cloud": ""
+        },
+        {
+            "name": "performance",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-performance.png",
+            "local": "./hardware_appspace/operate_performance.json",
+            "cloud": ""
+        }
+    ]
+    
+}

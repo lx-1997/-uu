@@ -1,0 +1,32 @@
+{
+    "list": [
+        {
+            "name": "minio",
+            "type": "server/web",
+            "icon": "./hardware_appspace/icons/icon-minio.png",
+            "local": "./hardware_appspace/operate_minio.json",
+            "cloud": ""
+        },
+        {
+            "name": "plexmediaserver",
+            "type": "server/web/withoutlaunch",
+            "icon": "./hardware_appspace/icons/icon-plexserver.png",
+            "local": "./hardware_appspace/operate_plexmediaserver.json",
+            "cloud": ""
+        },
+        {
+            "name": "streamsheets",
+            "type": "server/web/withoutlaunch",
+            "icon": "./hardware_appspace/icons/icon-streamsheets.png",
+            "local": "./hardware_appspace/operate_streamsheets.json",
+            "cloud": ""
+        },
+        {
+            "name": "nextcloud",
+            "type": "server/web/withoutlaunch",
+            "icon": "./hardware_appspace/icons/icon-nextcloud.png",
+            "local": "./hardware_appspace/operate_nextcloud.json",
+            "cloud": ""
+        }
+    ]
+}

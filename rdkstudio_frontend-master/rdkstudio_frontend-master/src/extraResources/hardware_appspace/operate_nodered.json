@@ -1,0 +1,46 @@
+{
+    "name": "node-red",
+    "type": "interactive shell",
+    "needsInstall": true,
+    "needsCheck": true,
+    "check": {
+        "cmd": "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && hash node-red > /dev/null 2>&1 && echo installed || echo uninstall",
+        "keyword": "uninstall"
+    },
+    "install": [
+        "echo 'start installing'",
+        "cd ~ && [ -d .nvm ] || (cd ~ && bash -c \"$(curl -fsSL https://gitee.com/RubyMetric/nvm-cn/raw/main/install.sh)\")",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && export NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node && hash node > /dev/null 2>&1 || nvm install --lts",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && hash npm > /dev/null 2>&1 && npm config set registry https://registry.npmmirror.com",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && hash node-red > /dev/null 2>&1 || npm install -g --unsafe-perm node-red",
+        "cd ~ && [ -d .node-red ] || mkdir .node-red",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && cd ~/.node-red && npm i node-red-node-rdk-camera node-red-node-rdk-vision node-red-contrib-image-tools node-red-node-rdk-gpio node-red-node-alibaba-llms node-red-node-rdk-tools"
+    ],
+    "install-en": [
+        "echo 'start installing'",
+        "cd ~ && [ -d .nvm ] || (cd ~ && bash -c \"$(curl -fsSL https://gitee.com/RubyMetric/nvm-cn/raw/main/install.sh)\")",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && export NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node && hash node > /dev/null 2>&1 || nvm install --lts",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && hash npm > /dev/null 2>&1 && npm config set registry https://registry.npmmirror.com",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && hash node-red > /dev/null 2>&1 || npm install -g --unsafe-perm node-red",
+        "cd ~ && [ -d .node-red ] || mkdir .node-red",
+        "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && cd ~/.node-red && npm i node-red-node-rdk-camera node-red-node-rdk-vision node-red-contrib-image-tools node-red-node-rdk-gpio node-red-node-alibaba-llms node-red-node-rdk-tools",
+        "[ -d .node-red/node_modules/node-red-node-rdk-camera/examples-en ] && sudo cp -rf .node-red/node_modules/node-red-node-rdk-camera/examples-en/* .node-red/node_modules/node-red-node-rdk-camera/examples",
+        "[ -d .node-red/node_modules/node-red-node-rdk-tools/examples-en ] && sudo cp -rf .node-red/node_modules/node-red-node-rdk-tools/examples-en/* .node-red/node_modules/node-red-node-rdk-tools/examples",
+        "[ -d .node-red/node_modules/node-red-node-alibaba-llms/examples-en ] && sudo cp -rf .node-red/node_modules/node-red-node-alibaba-llms/examples-en/* .node-red/node_modules/node-red-node-alibaba-llms/examples"
+    ],
+    "uninstall": "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && npm uninstall -g node-red && bash -c \"$(curl -fsSL https://gitee.com/RubyMetric/nvm-cn/raw/main/uninstall.sh)\" && [ -d ~/.node-red ] && sudo rm -rf ~/.node-red",
+    "launch": "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\" && echo $PATH && node-red",
+    "host": "$ip",
+    "port": 1880,
+    "quit": {
+
+    },
+    "description": {
+        "zh": "Node-RED：低代码流式可视化编程工具。",
+        "en": "Node-RED is a flow-based, low-code development tool for visual programming."
+    },
+    "videoTutorial": {
+        "zh": "https://www.bilibili.com/video/BV1Y86PYgELw/?share_source=copy_web&vd_source=d7a3dcf73103b07f664eecd90dd4020e",
+        "en": "https://www.bilibili.com/video/BV1Y86PYgELw/?share_source=copy_web&vd_source=d7a3dcf73103b07f664eecd90dd4020e"
+    }
+}

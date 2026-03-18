@@ -11,10 +11,84 @@
     "dev:client": "node scripts/dev-client.mjs",
     "dev:server": "node scripts/dev-server.mjs",
     "build": "tsc --noEmit -p tsconfig.json && npm run build:server && vite build",
+    "build:desktop": "npm run build && npm run build:server && electron-builder",
+    "build:desktop:win": "npm run build && npm run build:server && electron-builder --win",
+    "build:desktop:mac": "npm run build && npm run build:server && electron-builder --mac",
+    "build:desktop:linux": "npm run build && npm run build:server && electron-builder --linux",
     "verify:modules": "node scripts/verify-real-modules.mjs",
     "preview": "vite preview",
     "start": "node dist-server/index.js",
     "build:server": "tsc -p tsconfig.server.json"
+  },
+  "build": {
+    "appId": "com.rdk.studio",
+    "productName": "RDK Studio",
+    "copyright": "Copyright © 2025 RDK",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/ssh2/**",
+      "node_modules/cpu-features/**",
+      "node_modules/nan/**"
+    ],
+    "files": [
+      "dist/**",
+      "dist-server/**",
+      "electron/**",
+      "public/**",
+      "data/**",
+      "node_modules/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "data",
+        "to": "data"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "public/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icon.png",
+      "category": "Development"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "RDK Studio"
+    },
+    "directories": {
+      "output": "release",
+      "buildResources": "build-resources"
+    }
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -47,6 +121,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "electron": "^35.1.5",
+    "electron-builder": "^26.8.1",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "vite": "^6.2.0"

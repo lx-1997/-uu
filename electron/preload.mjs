@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('rdkDesktop', {
   isDesktop: true,
   platform: process.platform,
+  // 打包后前端通过此字段拼接 API base URL（file:// 协议下相对路径失效）
+  apiBase: 'http://localhost:8787',
 
   // 在主窗口内嵌入一个 WebContentsView（用于 code-server / noVNC）
   openUrl: (url) => ipcRenderer.send('rdk:open-url', { url }),

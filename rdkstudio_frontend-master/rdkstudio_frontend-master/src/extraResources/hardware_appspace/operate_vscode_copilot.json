@@ -1,0 +1,35 @@
+{
+    "name": "vscode local",
+    "type": "local command",
+    "needsInstall": false,
+    "needsCheck": true,
+    "check": {
+        "win": {
+            "cmd": "powershell Get-Command code",
+            "keyword": "uninstall"
+        },
+        "mac": {
+            "cmd": "hash code > /dev/null 2>&1 && echo installed || echo uninstall",
+            "keyword": "uninstall"
+        },
+        "linux": {
+            "cmd": "hash code > /dev/null 2>&1 && echo installed || echo uninstall",
+            "keyword": "uninstall"
+        }
+    },
+    "install": [],
+    "uninstall": "",
+    "launch": {
+        "win": "(code --list-extensions | findstr \"d-robotics.copilot\" >nul || code --install-extension $path\\hardware_appspace\\extensions\\copilot-1.1.1.vsix) && code --remote ssh-remote+$user@$ip /app",
+        "mac": "code --remote ssh-remote+$user@$ip /app",
+        "linux": "code --remote ssh-remote+$user@$ip /app"
+    },
+    "quit": {
+
+    },
+    "description": {
+        "zh": "RDK AI助手：结合VS Code使用的RDK Copilot插件",
+        "en": "RDK Copilot: Use RDK Copilot plugin to master RDK usages."
+    },
+    "downloadUrl": "https://code.visualstudio.com/Download"
+}

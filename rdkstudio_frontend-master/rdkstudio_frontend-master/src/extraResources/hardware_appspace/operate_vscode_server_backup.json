@@ -1,0 +1,33 @@
+{
+    "name": "vscode server",
+    "type": "interactive shell",
+    "needsInstall": true,
+    "needsCheck": true,
+    "check": {
+        "cmd": "hash code-server > /dev/null 2>&1 && echo installed || echo uninstall",
+        "keyword": "uninstall"
+    },
+    "install": [
+        "echo 'start installing'",
+        "mkdir -p ~/.cache/code-server",
+        "curl -fsSL https://api.github.com/repos/coder/code-server/releases | awk 'match($0,/.*\"html_url\": \"(.*\\/releases\\/tag\\/.*)\".*/)' | head -n 1 | awk -F '\"' '{print $4}' | awk -F '/v' '{print $2}' | xargs -I {} bash -c 'curl -#fL -o ~/.cache/code-server/code-server_{}_arm64.deb -C - https://github.com/coder/code-server/releases/download/v{}/code-server_{}_arm64.deb' - {}",
+        "sudo dpkg -i ~/.cache/code-server/code-server*.deb",
+        "rm -f ~/.cache/code-server/code-server*.deb"
+    ],
+    "uninstall": "sudo dpkg -P code-server",
+    "launch": "code-server --auth none --bind-addr 0.0.0.0:9888 --ignore-last-opened",
+    "host": "localhost",
+    "port": 9888,
+    "additional":  {
+        "win": "start powershell ssh -N -L localhost:9888:localhost:9888 $user@$ip",
+        "mac": "osascript -e 'tell application \"Terminal\" to activate' -e 'tell application \"Terminal\" to do script \"ssh -N -L localhost:9888:localhost:9888 $user@$ip\"'",
+        "linux": "gnome-terminal -x bash -c 'ssh -N -L localhost:9888:localhost:9888 $user@$ip'"
+    },
+    "quit": {
+
+    },
+    "description": {
+        "zh": "VS Code Server：可以使用Web版本的VS Code查看、编辑远端的代码。",
+        "en": "VS Code Server is a service you can run on a remote development machine, like your desktop PC or a virtual machine (VM)."
+    }
+}

@@ -60,7 +60,9 @@ export default function Vnc() {
   const getVncUrl = useCallback(() => {
     if (!currentDevice) return '';
     const host = window.location.hostname;
-    const backendPort = (import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80);
+    // 桌面端（file:// 协议）直接用 8787；开发模式也用 8787；Web 模式用当前端口
+    const isDesktopMode = !!(window as any).rdkDesktop?.isDesktop;
+    const backendPort = isDesktopMode ? 8787 : ((import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80));
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
     const wsPath = `websockify?target=${currentDevice.ip}:5900`;
     return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;

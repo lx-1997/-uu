@@ -49,7 +49,18 @@ function extractDeviceId(input: RequestInfo) {
   return match?.[1] ?? '';
 }
 
+/* 桌面端（file:// 协议）下相对路径失效，需拼接绝对 URL */
+function resolveUrl(path: string): string {
+  const apiBase = (window as any).rdkDesktop?.apiBase;
+  if (apiBase) return `${apiBase}${path}`;
+  return path;
+}
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  // 将相对路径转为绝对 URL（桌面端）
+  if (typeof input === 'string' && input.startsWith('/')) {
+    input = resolveUrl(input);
+  }
   const headers = new Headers(init?.headers ?? {});
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
@@ -125,7 +136,7 @@ export function fetchAIReply(
 ) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
-  return fetch('/api/chat', {
+  return fetch(resolveUrl('/api/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, deviceName, deviceIp }),
@@ -146,7 +157,7 @@ export function fetchAIReply(
 export function fetchAgentPlan(goal: string, deviceName?: string, deviceIp?: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
-  return fetch('/api/agent/plan', {
+  return fetch(resolveUrl('/api/agent/plan'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ goal, deviceName, deviceIp }),
@@ -169,7 +180,7 @@ export function runOpenClawAgentAction(
 ) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
-  return fetch('/api/openclaw/agent-action', {
+  return fetch(resolveUrl('/api/openclaw/agent-action'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...params }),
