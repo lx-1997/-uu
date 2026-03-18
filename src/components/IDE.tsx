@@ -130,14 +130,17 @@ export default function IDE() {
     return () => window.removeEventListener('keydown', handler);
   }, [showIframe]);
 
-  // 组件卸载时关闭 WebContentsView
+  // 桌面端：tab 切换时同步 WebContentsView 可见性（IDE 是持久化组件，不会卸载）
+  const { activeTab } = useAppState();
   useEffect(() => {
-    return () => {
-      if (isDesktop() && activeUrlRef.current) {
-        (window as any).rdkDesktop.hideUrl(activeUrlRef.current);
-      }
-    };
-  }, []);
+    if (!isDesktop() || !activeUrlRef.current) return;
+    const rdk = (window as any).rdkDesktop;
+    if (activeTab === 'ide') {
+      rdk.setActiveUrl?.(activeUrlRef.current);
+    } else {
+      rdk.hideUrl?.(activeUrlRef.current);
+    }
+  }, [activeTab]);
 
   const desktop = isDesktop();
   const editorLabel = desktop && currentDevice ? `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}` : 'VS Code Web';

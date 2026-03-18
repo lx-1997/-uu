@@ -20,6 +20,9 @@ import Examples from './components/Examples';
 import Ros from './components/Ros';
 import Models from './components/Models';
 
+// 需要保持状态的 tab（切换时不卸载组件）
+const PERSISTENT_TABS = ['vnc', 'ide', 'terminal'];
+
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
 
@@ -42,20 +45,29 @@ function MainContent() {
     );
   }
 
+  // 非持久化 tab：按需渲染
+  if (!PERSISTENT_TABS.includes(activeTab)) {
+    return (
+      <div className="page-transition">
+        {activeTab === 'dashboard' && <Dashboard />}
+        {activeTab === 'flasher' && <Flasher />}
+        {activeTab === 'files' && <Files />}
+        {activeTab === 'openclaw' && <OpenClaw />}
+        {activeTab === 'hardware' && <Hardware />}
+        {activeTab === 'examples' && <Examples />}
+        {activeTab === 'ros' && <Ros />}
+        {activeTab === 'models' && <Models />}
+      </div>
+    );
+  }
+
+  // 持久化 tab：始终挂载，用 CSS display 控制可见性，保留连接状态
   return (
-    <div className="page-transition" key={activeTab}>
-      {activeTab === 'dashboard' && <Dashboard />}
-      {activeTab === 'flasher' && <Flasher />}
-      {activeTab === 'terminal' && <Terminal />}
-      {activeTab === 'files' && <Files />}
-      {activeTab === 'vnc' && <Vnc />}
-      {activeTab === 'ide' && <IDE />}
-      {activeTab === 'openclaw' && <OpenClaw />}
-      {activeTab === 'hardware' && <Hardware />}
-      {activeTab === 'examples' && <Examples />}
-      {activeTab === 'ros' && <Ros />}
-      {activeTab === 'models' && <Models />}
-    </div>
+    <>
+      <div style={{ display: activeTab === 'terminal' ? 'contents' : 'none' }}><Terminal /></div>
+      <div style={{ display: activeTab === 'vnc' ? 'contents' : 'none' }}><Vnc /></div>
+      <div style={{ display: activeTab === 'ide' ? 'contents' : 'none' }}><IDE /></div>
+    </>
   );
 }
 

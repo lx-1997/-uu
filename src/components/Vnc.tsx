@@ -26,14 +26,18 @@ export default function Vnc() {
   // 当前打开的 VNC URL（桌面端用于 close/hide）
   const activeUrlRef = useRef<string>('');
 
-  // 组件卸载时隐藏 WebContentsView
+  // 桌面端：tab 切换时同步 WebContentsView 可见性
+  // 由于 Vnc 是持久化组件（不卸载），需要监听 activeTab 变化
+  const { activeTab } = useAppState();
   useEffect(() => {
-    return () => {
-      if (isDesktop() && activeUrlRef.current) {
-        (window as any).rdkDesktop.hideUrl(activeUrlRef.current);
-      }
-    };
-  }, []);
+    if (!isDesktop() || !activeUrlRef.current) return;
+    const rdk = (window as any).rdkDesktop;
+    if (activeTab === 'vnc') {
+      rdk.setActiveUrl?.(activeUrlRef.current);
+    } else {
+      rdk.hideUrl?.(activeUrlRef.current);
+    }
+  }, [activeTab]);
 
   // 监听 WebContentsView 加载事件
   useEffect(() => {
