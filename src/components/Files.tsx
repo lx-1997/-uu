@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Editor, { loader } from '@monaco-editor/react';
 import { Loader2, RefreshCw, Upload, ArrowLeft } from 'lucide-react';
 
@@ -17,6 +17,11 @@ export default function Files() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [searchMatches, setSearchMatches] = useState<Array<{path: string; isDir: boolean}>>([]);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [sortBy, setSortBy] = useState<'type' | 'name' | 'date'>('type');
+  const [showHidden, setShowHidden] = useState(true);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const runDownloadRef = useRef<any>(null);
 
@@ -106,6 +111,7 @@ export default function Files() {
       .then((res) => {
         setEntries(parseListOutput(res.output || ''));
         setCurrentPath(path);
+        setSelectedName(null);
       })
       .catch((err) => addToast(err instanceof Error ? err.message : '刷新目录失败', 'error'))
       .finally(() => setRunning(false));
@@ -120,6 +126,13 @@ export default function Files() {
 
   const handleNavigate = (folderName: string) => {
     const nextPath = currentPath === '/' ? `/${folderName}` : `${currentPath}/${folderName}`;
+    refreshList(nextPath);
+  };
+
+  const handleGoUp = () => {
+    const parts = currentPath.split('/').filter(Boolean);
+    if (parts.length === 0) return;
+    const nextPath = parts.length === 1 ? '/' : `/${parts.slice(0, -1).join('/')}`;
     refreshList(nextPath);
   };
 
@@ -231,6 +244,94 @@ export default function Files() {
   };
 
   const parts = currentPath.split('/').filter(Boolean);
+  const inHomePath = currentPath === '/root' || currentPath.startsWith('/root/');
+  const displayParts = inHomePath ? parts.slice(1) : parts;
+
+  const visibleEntries = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    const base = showHidden ? entries : entries.filter((entry) => !entry.name.startsWith('.'));
+    const filtered = q
+      ? base.filter((entry) => entry.name.toLowerCase().includes(q))
+      : base;
+
+    const parseDate = (value?: string) => {
+      if (!value) return 0;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    };
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'type') {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+      }
+      if (sortBy === 'name') {
+        return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+      }
+      return parseDate(b.date) - parseDate(a.date);
+    });
+  }, [entries, searchText, sortBy, showHidden]);
+
+  const selectedEntry = selectedName ? entries.find((entry) => entry.name === selectedName) || null : null;
+
+  const shellSafe = (value: string) => value.replace(/"/g, '\\"');
+
+  const createFolder = async () => {
+    if (!ensureDevice() || !currentDevice) return;
+    const folderName = window.prompt('请输入新文件夹名称')?.trim();
+    if (!folderName) return;
+    const targetPath = currentPath === '/' ? `/${folderName}` : `${currentPath}/${folderName}`;
+    setRunning(true);
+    try {
+      await executeDeviceCommand(currentDevice.id, `mkdir -p "${shellSafe(targetPath)}"`);
+      addToast('文件夹创建成功', 'success');
+      refreshList();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : '创建文件夹失败', 'error');
+      setRunning(false);
+    }
+  };
+
+  const renameEntry = async (entryName: string) => {
+    if (!ensureDevice() || !currentDevice) return;
+    const nextName = window.prompt('请输入新的名称', entryName)?.trim();
+    if (!nextName || nextName === entryName) return;
+    const from = currentPath === '/' ? `/${entryName}` : `${currentPath}/${entryName}`;
+    const to = currentPath === '/' ? `/${nextName}` : `${currentPath}/${nextName}`;
+    setRunning(true);
+    try {
+      await executeDeviceCommand(currentDevice.id, `mv "${shellSafe(from)}" "${shellSafe(to)}"`);
+      addToast('重命名成功', 'success');
+      refreshList();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : '重命名失败', 'error');
+      setRunning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (editorFile) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (!selectedEntry) return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (selectedEntry.isDir) handleNavigate(selectedEntry.name);
+        else runEdit(selectedEntry.name);
+        return;
+      }
+      if (event.key === 'F2') {
+        event.preventDefault();
+        renameEntry(selectedEntry.name);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editorFile, selectedEntry]);
 
   return (
     <div className="center-stage wide-stage files-page" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
@@ -245,6 +346,9 @@ export default function Files() {
             <button className="clean-btn files-header-btn files-upload-btn" onClick={() => fileInputRef.current?.click()} disabled={running}>
               {running ? <Loader2 size={16} className="spinner" /> : <Upload size={16} />}
               上传文件
+            </button>
+            <button className="clean-btn outline-btn files-header-btn" onClick={createFolder} disabled={running}>
+              新建文件夹
             </button>
             <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
           </div>
@@ -296,18 +400,61 @@ export default function Files() {
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div className="panel-card files-path-toolbar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
-              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 Home</button>
+              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 ~/ 主目录</button>
               <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>/ 根目录</button>
+              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => setShowHidden((v) => !v)} disabled={running}>{showHidden ? '隐藏 .文件' : '显示 .文件'}</button>
+              <div className="files-shortcuts" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                {['/root', '/userdata', '/var/log', '/etc'].map((quickPath) => (
+                  <button key={quickPath} className="clean-btn outline-btn files-shortcut-btn" style={{ padding: '5px 9px', fontSize: 12 }} onClick={() => refreshList(quickPath)} disabled={running}>
+                    {quickPath === '/root' ? '~/' : quickPath}
+                  </button>
+                ))}
+              </div>
               <div className="files-breadcrumbs" style={{ flex: 1, marginLeft: 10, display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
-                <span className="files-breadcrumb-link" style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }} onClick={() => refreshList('/')}>Root</span>
-                {parts.map((p, i) => (
+                <span className="files-breadcrumb-link" style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }} onClick={() => refreshList(inHomePath ? '/root' : '/')}>
+                  {inHomePath ? '~' : '/'}
+                </span>
+                {displayParts.map((p, i) => (
                   <React.Fragment key={i}>
                     <span style={{ color: '#94a3b8' }}>/</span>
-                    <span className="files-breadcrumb-link" style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }} onClick={() => handleBreadcrumb(i)}>{p}</span>
+                    <span
+                      className="files-breadcrumb-link"
+                      style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }}
+                      onClick={() => handleBreadcrumb(inHomePath ? i + 1 : i)}
+                    >
+                      {p}
+                    </span>
                   </React.Fragment>
                 ))}
               </div>
+              <input
+                className="clean-input files-inline-search"
+                ref={searchInputRef}
+                placeholder="搜索当前目录..."
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
+              <select className="clean-input files-sort-select" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'type' | 'name' | 'date')}>
+                <option value="type">按类型</option>
+                <option value="name">按名称</option>
+                <option value="date">按时间</option>
+              </select>
             </div>
+
+            {selectedEntry && (
+              <div className="panel-card files-selection-bar" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', flexShrink: 0 }}>
+                <span>已选择：{selectedEntry.isDir ? '📁' : '📄'} {selectedEntry.name} <span style={{ color: '#94a3b8' }}>(Enter 打开 / F2 重命名 / Ctrl+F 搜索)</span></span>
+                <div className="files-selection-actions" style={{ display: 'flex', gap: 8 }}>
+                  {selectedEntry.isDir ? (
+                    <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => handleNavigate(selectedEntry.name)}>打开目录</button>
+                  ) : (
+                    <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runEdit(selectedEntry.name)}>编辑</button>
+                  )}
+                  <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runDownload(selectedEntry.name, selectedEntry.isDir)}>下载</button>
+                  <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => renameEntry(selectedEntry.name)}>重命名</button>
+                </div>
+              </div>
+            )}
 
             <div 
               className={`panel-card files-dropzone ${dragActive ? 'is-drag-active' : ''}`}
@@ -341,14 +488,22 @@ export default function Files() {
                 <tbody>
                   {currentPath !== '/' && (
                     <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '14px 16px', cursor: 'pointer', color: '#1e293b', fontWeight: 500 }} onClick={() => handleNavigate('..')}>
+                      <td style={{ padding: '14px 16px', cursor: 'pointer', color: '#1e293b', fontWeight: 500 }} onClick={handleGoUp}>
                         <span style={{ marginRight: 10, fontSize: 18 }}>📂</span>.. (上一级)
                       </td>
                       <td></td><td></td><td></td>
                     </tr>
                   )}
-                  {entries.map((entry) => (
-                    <tr key={entry.name} className="files-row" style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: '#ffffff' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}>
+                  {visibleEntries.map((entry) => (
+                    <tr
+                      key={entry.name}
+                      className={`files-row ${selectedName === entry.name ? 'is-selected' : ''}`}
+                      style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: '#ffffff' }}
+                      onClick={() => setSelectedName(entry.name)}
+                      onDoubleClick={() => entry.isDir ? handleNavigate(entry.name) : runEdit(entry.name)}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = selectedName === entry.name ? '#fff7ed' : '#ffffff'}
+                    >
                       <td 
                         style={{ padding: '14px 16px', cursor: entry.isDir ? 'pointer' : 'default', color: entry.isDir ? '#0f172a' : '#334155', fontWeight: entry.isDir ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} 
                         onClick={() => entry.isDir && handleNavigate(entry.name)}
@@ -364,14 +519,17 @@ export default function Files() {
                           {!entry.isDir && (
                             <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runEdit(entry.name)}>编辑</button>
                           )}
+                          <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => renameEntry(entry.name)}>重命名</button>
                           <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runDownload(entry.name, entry.isDir)}>下载</button>
                         </div>
                       </td>
                     </tr>
                   ))}
-                  {entries.length === 0 && !running && (
+                  {visibleEntries.length === 0 && !running && (
                     <tr>
-                      <td colSpan={4} style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>此文件夹为空，您可以拖拽文件到此处上传</td>
+                      <td colSpan={4} style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>
+                        {searchText.trim() ? '未找到匹配文件，请调整搜索关键词' : '此文件夹为空，您可以拖拽文件到此处上传'}
+                      </td>
                     </tr>
                   )}
                 </tbody>
