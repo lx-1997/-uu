@@ -331,6 +331,35 @@ ipcMain.handle('rdk:flash:write-local', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('rdk:flash:launch-xburn', async (_event, payload) => {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'xburn 启动当前仅支持 Windows 客户端' };
+  }
+
+  let exePath = payload?.exePath;
+  if (!exePath) {
+    const picked = await dialog.showOpenDialog(mainWin ?? undefined, {
+      properties: ['openFile'],
+      filters: [{ name: 'xburn', extensions: ['exe'] }],
+      title: '选择 xburn-gui.exe',
+    });
+    if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true };
+    exePath = picked.filePaths[0];
+  }
+
+  try {
+    const child = spawn(exePath, [], {
+      detached: true,
+      windowsHide: false,
+      stdio: 'ignore',
+    });
+    child.unref();
+    return { ok: true, path: exePath };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '启动 xburn 失败' };
+  }
+});
+
 app.whenReady().then(async () => {
   // 生产模式：先启动内嵌服务器
   if (isPacked) {

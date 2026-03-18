@@ -207,7 +207,7 @@ export default function Examples() {
                 <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>安装命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.installCmd}</code></div>
                 <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>运行命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.runCmd}</code></div>
                 <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>卸载命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.uninstallCmd}</code></div>
-                {app.repo && <div><span style={{ color: '#94a3b8' }}>NodeHub:</span> <a href={app.repo} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>{app.repo}</a></div>}
+                {app.repo && <div><span style={{ color: '#94a3b8' }}>NodeHub:</span> <a href={app.repo} target="_blank" rel="noopener noreferrer" style={{ color: '#ff6b00' }}>{app.repo}</a></div>}
               </div>
             )}
             <div className="nh-card-actions">

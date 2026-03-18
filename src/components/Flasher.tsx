@@ -127,6 +127,7 @@ export default function Flasher() {
 
   const imageCandidates = IMAGE_LIST[getBaseDeviceKey(selectedDeviceKey)];
   const selectedImage = useMemo(() => imageCandidates.find((item) => item.key === selectedImageKey) ?? imageCandidates[0], [imageCandidates, selectedImageKey]);
+  const requiresXburn = selectedDeviceKey === 's100' || selectedDeviceKey.endsWith('-emmc');
 
   const appendLog = (text: string) => setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${text}`]);
   const setStage = (key: StageKey, value: StageState[StageKey]) => setStages((prev) => ({ ...prev, [key]: value }));
@@ -143,6 +144,9 @@ export default function Flasher() {
     setSelectedDeviceKey(key);
     const first = IMAGE_LIST[getBaseDeviceKey(key)][0];
     if (first) setSelectedImageKey(first.key);
+    if (key === 's100' || key.endsWith('-emmc')) {
+      addToast('已识别为 xburn 推荐机型，将优先引导 xburn 烧录流程', 'info');
+    }
   };
 
   const scanLocalDrives = useCallback(async () => {
@@ -164,9 +168,10 @@ export default function Flasher() {
   useEffect(() => {
     if (step !== 2) return;
     if (!isDesktop) return;
+    if (requiresXburn) return;
     if (localDrives.length > 0) return;
     scanLocalDrives();
-  }, [step, isDesktop, localDrives.length, scanLocalDrives]);
+  }, [step, isDesktop, localDrives.length, scanLocalDrives, requiresXburn]);
 
   const checkEnvironment = async () => {
     if (!currentDevice) {
@@ -197,8 +202,8 @@ export default function Flasher() {
   };
 
   const goToDriveStep = () => {
-    if (!customImagePath.trim()) {
-      setError('请先选择本机镜像文件（真实写盘必须使用本机文件）');
+    if (!requiresXburn && !customImagePath.trim()) {
+      setError('请先选择本机镜像文件（普通设备真实写盘必须使用本机文件）');
       return;
     }
     setError('');
@@ -218,6 +223,10 @@ export default function Flasher() {
   };
 
   const runLocalFlashing = async () => {
+    if (requiresXburn) {
+      setError('当前设备建议使用 xburn 进行烧录，请点击“启动 xburn 工具”执行');
+      return;
+    }
     if (!isDesktop || !window.rdkDesktop?.flashWriteLocal) {
       setError('真实写盘仅支持桌面客户端');
       return;
@@ -272,6 +281,24 @@ export default function Flasher() {
   const requestCancel = () => {
     abortRef.current = true;
     addToast('已请求取消，当前步骤结束后停止', 'warning');
+  };
+
+  const launchXburn = async () => {
+    if (!window.rdkDesktop?.launchXburn) {
+      setError('当前客户端未启用 xburn 启动能力，请升级桌面端');
+      return;
+    }
+    const result = await window.rdkDesktop.launchXburn({ imagePath: customImagePath.trim() || undefined });
+    if (result.ok) {
+      addToast('xburn 已启动，请在工具中选择镜像与目标设备', 'success');
+      appendLog(`已启动 xburn: ${result.path || '已选择可执行文件'}`);
+      return;
+    }
+    if (result.canceled) {
+      addToast('已取消选择 xburn 可执行文件', 'info');
+      return;
+    }
+    setError(result.error || '启动 xburn 失败');
   };
 
   return (
@@ -340,12 +367,17 @@ export default function Flasher() {
               </div>
 
               <div className="flx-card">
-                <div className="flx-card-title">本机镜像文件（必选）</div>
+                <div className="flx-card-title">本机镜像文件（普通设备必选）</div>
                 <div className="flx-form">
                   <div className="flx-inline">
                     <input className="clean-input" placeholder="本机镜像文件路径（.img/.xz 解压后 .img）" value={customImagePath} onChange={(e) => setCustomImagePath(e.target.value)} />
                     <button className="clean-btn outline-btn sm-btn" onClick={pickLocalImage}>选择文件</button>
                   </div>
+                  {requiresXburn && (
+                    <div className="warning-banner">
+                      ⚠ 当前设备走 xburn 流程，本机镜像文件不是必填项（可在 xburn 内选择镜像）。
+                    </div>
+                  )}
                   {!isDesktop && <div className="warning-banner">⚠ 当前不是桌面端，无法执行真实写盘</div>}
                 </div>
               </div>
@@ -361,36 +393,60 @@ export default function Flasher() {
         {step === 2 && (
           <section className="flx-body">
             <div className="flx-card-grid">
-              <div className="flx-card">
-                <div className="flx-card-title">真实物理磁盘</div>
-                <div className="flx-list">
-                  {localDrives.map((item) => (
-                    <button key={item.path} className={`flx-list-item ${localDrivePath === item.path ? 'active' : ''}`} onClick={() => setLocalDrivePath(item.path)}>
-                      <strong>{item.label} · {item.path}</strong>
-                      <span>{item.bus} · {item.size}</span>
-                    </button>
-                  ))}
+              {requiresXburn ? (
+                <div className="flx-card" style={{ borderColor: 'rgba(255,107,0,0.45)', boxShadow: '0 0 0 2px rgba(255,107,0,0.12)' }}>
+                  <div className="flx-card-title">推荐流程：使用 xburn</div>
+                  <div className="warning-banner">
+                    ⚠ 检测到 S100/eMMC 机型，建议使用 xburn 完成烧录（官方推荐路径）。
+                  </div>
+                  <div className="flx-action-row">
+                    <button className="clean-btn" onClick={launchXburn}>启动 xburn 工具</button>
+                    <button className="clean-btn outline-btn sm-btn" onClick={() => openExternal('https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.8/')}>下载 xburn</button>
+                  </div>
+                  <div style={{ fontSize: '0.76rem', color: '#64748b', lineHeight: 1.65 }}>
+                    启动后可在 xburn 内选择镜像与设备，无需本页先选本机物理盘。
+                  </div>
                 </div>
-                <button className="clean-btn outline-btn sm-btn" onClick={scanLocalDrives}>刷新磁盘列表</button>
-              </div>
+              ) : (
+                <div className="flx-card">
+                  <div className="flx-card-title">真实物理磁盘</div>
+                  <div className="flx-list">
+                    {localDrives.map((item) => (
+                      <button key={item.path} className={`flx-list-item ${localDrivePath === item.path ? 'active' : ''}`} onClick={() => setLocalDrivePath(item.path)}>
+                        <strong>{item.label} · {item.path}</strong>
+                        <span>{item.bus} · {item.size}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button className="clean-btn outline-btn sm-btn" onClick={scanLocalDrives}>刷新磁盘列表</button>
+                </div>
+              )}
 
               <div className="flx-card">
                 <div className="flx-card-title">执行确认</div>
                 <div className="flx-confirm-grid">
                   <div><span>设备</span><strong>{DEVICE_LIST.find((d) => d.key === selectedDeviceKey)?.name}</strong></div>
                   <div><span>镜像</span><strong>{selectedImage?.name}</strong></div>
-                  <div><span>本机镜像</span><strong>{customImagePath || '未选择'}</strong></div>
+                  <div><span>本机镜像</span><strong>{customImagePath || (requiresXburn ? '可在 xburn 内选择' : '未选择')}</strong></div>
                   <div><span>目标磁盘</span><strong>{localDrivePath || '未选择'}</strong></div>
                 </div>
                 <div className="warning-banner" style={{ marginTop: 8 }}>
                   ⚠ 写盘将清空目标磁盘全部数据，请再次确认路径和容量。
                 </div>
+                {requiresXburn && (
+                  <div className="warning-banner" style={{ marginTop: 8 }}>
+                    ⚠ 当前设备建议使用 xburn（尤其是 S100/eMMC）。请通过下方按钮启动 xburn 完成烧录。
+                  </div>
+                )}
+                {requiresXburn && (
+                  <button className="clean-btn" onClick={launchXburn}>启动 xburn 工具</button>
+                )}
               </div>
             </div>
             {error && <div className="warning-banner">⚠ {error}</div>}
             <div className="ob-nav">
               <button className="ob-btn ghost" onClick={() => setStep(1)}>← 上一步</button>
-              <button className="ob-btn primary" disabled={loading} onClick={runLocalFlashing}>{loading ? '执行中...' : '开始真实写盘'}</button>
+              <button className="ob-btn primary" disabled={loading || requiresXburn} onClick={runLocalFlashing}>{loading ? '执行中...' : requiresXburn ? '请使用 xburn' : '开始真实写盘'}</button>
             </div>
           </section>
         )}

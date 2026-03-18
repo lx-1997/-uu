@@ -233,7 +233,7 @@ export default function Files() {
   const parts = currentPath.split('/').filter(Boolean);
 
   return (
-    <div className="center-stage wide-stage" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="center-stage wide-stage files-page" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
       <div className="isolated-widget workflow-widget" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="widget-header" style={{ display: 'flex', alignItems: 'center' }}>
           📁 资源管理器
@@ -251,9 +251,9 @@ export default function Files() {
         </div>
         
         {editorFile ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div className="panel-card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
-              <button className="clean-btn outline-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }} onClick={() => setEditorFile(null)}>
+          <div className="files-editor-wrap" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div className="panel-card files-editor-toolbar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+              <button className="clean-btn outline-btn files-back-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }} onClick={() => setEditorFile(null)}>
                 <ArrowLeft size={16} /> 返回
               </button>
               <div style={{ width: 1, height: 20, background: '#cbd5e1' }}></div>
@@ -263,7 +263,7 @@ export default function Files() {
                 <span>{editorFile.path.substring(editorFile.path.lastIndexOf('/') + 1)}</span>
               </div>
             </div>
-            <div style={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+            <div className="files-editor-surface" style={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
               <Editor
                 height="100%"
                 language={((): string => {
@@ -287,30 +287,30 @@ export default function Files() {
                 options={{ minimap: { enabled: false }, fontSize: 14, wordWrap: 'on' }}
               />
             </div>
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
-              <button className="clean-btn" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: '#0284c7', color: '#fff', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
+            <div className="files-editor-actions" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+              <button className="clean-btn files-save-btn" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: '#ff6b00', color: '#fff', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
                 {running ? '保存中...' : '💾 保存修改'}
               </button>
             </div>
           </div>
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div className="panel-card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+            <div className="panel-card files-path-toolbar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
               <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 Home</button>
               <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>/ 根目录</button>
-              <div style={{ flex: 1, marginLeft: 10, display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
-                <span style={{ cursor: 'pointer', color: '#0284c7', fontWeight: 500 }} onClick={() => refreshList('/')}>Root</span>
+              <div className="files-breadcrumbs" style={{ flex: 1, marginLeft: 10, display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+                <span className="files-breadcrumb-link" style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }} onClick={() => refreshList('/')}>Root</span>
                 {parts.map((p, i) => (
                   <React.Fragment key={i}>
                     <span style={{ color: '#94a3b8' }}>/</span>
-                    <span style={{ cursor: 'pointer', color: '#0284c7', fontWeight: 500 }} onClick={() => handleBreadcrumb(i)}>{p}</span>
+                    <span className="files-breadcrumb-link" style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }} onClick={() => handleBreadcrumb(i)}>{p}</span>
                   </React.Fragment>
                 ))}
               </div>
             </div>
 
             <div 
-              className="panel-card" 
+              className={`panel-card files-dropzone ${dragActive ? 'is-drag-active' : ''}`}
               style={{ 
                 flex: 1, 
                 minHeight: 0,
@@ -318,19 +318,19 @@ export default function Files() {
                 padding: 0, 
                 position: 'relative', 
                 border: '1px solid #cbd5e1',
-                backgroundColor: dragActive ? '#f0f9ff' : '#ffffff'
+                backgroundColor: dragActive ? '#fff7ed' : '#ffffff'
               }}
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
             >
               {dragActive && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(240, 249, 255, 0.8)', zIndex: 10, fontSize: 20, color: '#0284c7', fontWeight: 600, pointerEvents: 'none' }}>
-                  松开鼠标以长传文件至此目录
+                <div className="files-drop-overlay" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255, 247, 237, 0.86)', zIndex: 10, fontSize: 20, color: '#c2410c', fontWeight: 600, pointerEvents: 'none' }}>
+                  松开鼠标以上传文件至此目录
                 </div>
               )}
-              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
-                <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 5, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <table className="files-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
+                <thead className="files-table-head" style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 5, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                   <tr>
                     <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '50%' }}>文件名称</th>
                     <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '15%' }}>大小</th>
@@ -348,7 +348,7 @@ export default function Files() {
                     </tr>
                   )}
                   {entries.map((entry) => (
-                    <tr key={entry.name} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: '#ffffff' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}>
+                    <tr key={entry.name} className="files-row" style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: '#ffffff' }} onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'} onMouseLeave={(e) => e.currentTarget.style.background = '#ffffff'}>
                       <td 
                         style={{ padding: '14px 16px', cursor: entry.isDir ? 'pointer' : 'default', color: entry.isDir ? '#0f172a' : '#334155', fontWeight: entry.isDir ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} 
                         onClick={() => entry.isDir && handleNavigate(entry.name)}
@@ -360,7 +360,7 @@ export default function Files() {
                       <td style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.isDir ? '-' : entry.size}</td>
                       <td style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.date}</td>
                       <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <div className="files-row-actions" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                           {!entry.isDir && (
                             <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runEdit(entry.name)}>编辑</button>
                           )}

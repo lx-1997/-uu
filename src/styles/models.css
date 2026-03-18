@@ -79,6 +79,18 @@
   background: #fff; border: 1px solid var(--border);
   box-shadow: 0 2px 8px rgba(0,0,0,0.03);
   flex-wrap: wrap; gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mdl-topbar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(255,107,0,0.75), rgba(255,107,0,0.15));
 }
 
 .mdl-topbar-left {
@@ -214,7 +226,7 @@
   transform: translateY(-1px);
 }
 .mdl-card.running { border-color: #bbf7d0; }
-.mdl-card.deployed { border-color: #bfdbfe; }
+.mdl-card.deployed { border-color: #fed7aa; background: linear-gradient(180deg, #fffdfa, #ffffff); }
 
 .mdl-card-head {
   display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
@@ -245,7 +257,7 @@
   color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0;
 }
 .mdl-badge.deployed {
-  color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe;
+  color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa;
 }
 
 .mdl-badge-dot {

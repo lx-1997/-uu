@@ -27,7 +27,7 @@
   gap: 18px;
   padding: 24px;
   border-radius: 24px;
-  background: linear-gradient(135deg, #fff7ed 0%, #ffffff 38%, #eff6ff 100%);
+  background: linear-gradient(135deg, #fff7ed 0%, #ffffff 38%, #fffbeb 100%);
   border: 1px solid rgba(255, 107, 0, 0.12);
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
 }
@@ -191,8 +191,8 @@
 }
 
 .flasher-card-tag.soft {
-  background: rgba(59, 130, 246, 0.1);
-  color: #2563eb;
+  background: rgba(255, 107, 0, 0.1);
+  color: #c2410c;
 }
 
 .flasher-checklist,

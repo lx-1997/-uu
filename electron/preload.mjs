@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   flashListDrives: () => ipcRenderer.invoke('rdk:flash:list-drives'),
   flashPickImage: () => ipcRenderer.invoke('rdk:flash:pick-image'),
   flashWriteLocal: (payload) => ipcRenderer.invoke('rdk:flash:write-local', payload),
+  launchXburn: (payload) => ipcRenderer.invoke('rdk:flash:launch-xburn', payload),
   onFlashProgress: (cb) => {
     ipcRenderer.on('rdk:flash:progress', (_event, payload) => cb(payload));
   },

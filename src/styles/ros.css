@@ -1,31 +1,41 @@
 /* ============================================
-   ROS — Webviz 沉浸式可视化
+   ROS — Webviz 可视化工作台（统一橙色主题）
    ============================================ */
+
 .ros-container {
   display: flex;
   flex-direction: column;
   height: calc(100% - 32px);
   width: calc(100% - 32px);
   margin: 16px;
-  background: var(--bg-card);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10);
 }
 
-/* ── 顶部工具栏 ── */
 .ros-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 42px;
+  height: 44px;
   padding: 0 14px;
-  background: var(--bg-card);
+  background: #ffffff;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   user-select: none;
+  position: relative;
+}
+
+.ros-topbar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(255,107,0,0.75), rgba(255,107,0,0.14));
 }
 
 .ros-topbar-left,
@@ -40,65 +50,58 @@
 .ros-topbar-center { flex: 0 0 auto; }
 .ros-topbar-right { flex: 1; justify-content: flex-end; }
 
-.ros-topbar-dots { display: flex; gap: 6px; margin-right: 8px; }
-
-.ros-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-.ros-dot.red { background: #ff5f57; }
-.ros-dot.yellow { background: #febc2e; }
-.ros-dot.green { background: #28c840; }
-
 .ros-topbar-title {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.84rem;
+  font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.2px;
 }
 
 .ros-topbar-badge {
   font-size: 0.68rem;
-  font-weight: 600;
+  font-weight: 700;
   color: #ff6b00;
-  background: rgba(255,107,0,0.1);
-  border: 1px solid rgba(255,107,0,0.2);
+  background: rgba(255, 107, 0, 0.10);
+  border: 1px solid rgba(255, 107, 0, 0.20);
   padding: 2px 8px;
-  border-radius: 10px;
-  letter-spacing: 0.3px;
+  border-radius: 999px;
 }
 
-/* 状态标识 */
+.ros-topbar-device {
+  font-size: 0.72rem;
+  color: #64748b;
+  padding-left: 8px;
+  border-left: 1px solid #e2e8f0;
+}
+
 .ros-status-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 3px 12px;
-  border-radius: 20px;
+  border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 600;
-  background: var(--bg-surface);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
 }
 
 .ros-status-badge.live {
-  background: rgba(34,197,94,0.1);
-  color: #22c55e;
-  border-color: rgba(34,197,94,0.3);
+  background: #ecfdf5;
+  color: #15803d;
+  border-color: #bbf7d0;
 }
 
 .ros-status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #555;
+  background: #94a3b8;
 }
 
 .ros-status-badge.live .ros-status-dot {
   background: #22c55e;
-  box-shadow: 0 0 6px rgba(34,197,94,0.5);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.45);
   animation: rosLivePulse 1.5s infinite;
 }
 
@@ -107,14 +110,13 @@
   50% { opacity: 0.4; }
 }
 
-/* 工具按钮 */
 .ros-tool-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
   cursor: pointer;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -122,17 +124,40 @@
 }
 
 .ros-tool-btn:hover {
-  color: #fff;
-  border-color: #cbd5e1;
-  background: var(--bg-surface);
+  color: #ff6b00;
+  border-color: #fed7aa;
+  background: #fff7ed;
 }
 
-/* ── 主视口 ── */
+.ros-topbar-sep {
+  width: 1px;
+  height: 18px;
+  background: #e2e8f0;
+  margin: 0 2px;
+}
+
+.ros-disconnect-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 4px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.ros-disconnect-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+}
+
 .ros-viewport {
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: #f0f4f8;
+  background: #f8fafc;
   min-height: 0;
 }
 
@@ -140,10 +165,9 @@
   width: 100%;
   height: 100%;
   border: none;
-  background: #0a0a0a;
+  background: #0b1220;
 }
 
-/* ── 加载遮罩 ── */
 .ros-loading-overlay {
   position: absolute;
   inset: 0;
@@ -152,7 +176,7 @@
   align-items: center;
   justify-content: center;
   gap: 14px;
-  background: rgba(255,255,255,0.92);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(8px);
   z-index: 5;
 }
@@ -160,74 +184,22 @@
 .ros-loading-spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid #333;
+  border: 3px solid #f1f5f9;
   border-top-color: #ff6b00;
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  animation: rosSpin 0.7s linear infinite;
 }
 
-@keyframes spin {
+@keyframes rosSpin {
   to { transform: rotate(360deg); }
 }
 
 .ros-loading-text {
   font-size: 0.88rem;
-  color: var(--text-muted);
+  color: #64748b;
   font-weight: 500;
 }
 
-.ros-reload-btn {
-  margin-top: 4px;
-  padding: 8px 24px;
-  border-radius: 8px;
-  border: 1px solid #ff6b00;
-  background: rgba(255,107,0,0.1);
-  color: #ff6b00;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
-}
-
-.ros-reload-btn:hover {
-  background: rgba(255,107,0,0.2);
-}
-
-/* ── 设备标签 ── */
-.ros-topbar-device {
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  padding-left: 8px;
-  border-left: 1px solid var(--border);
-}
-
-.ros-topbar-sep {
-  width: 1px;
-  height: 18px;
-  background: #333;
-  margin: 0 2px;
-}
-
-.ros-disconnect-btn {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #ef4444;
-  background: rgba(239,68,68,0.08);
-  border: 1px solid rgba(239,68,68,0.25);
-  padding: 4px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: inherit;
-}
-
-.ros-disconnect-btn:hover {
-  background: rgba(239,68,68,0.18);
-  border-color: rgba(239,68,68,0.4);
-}
-
-/* ── 欢迎/连接界面 ── */
 .ros-welcome {
   display: flex;
   flex-direction: column;
@@ -257,7 +229,7 @@
   width: 100px;
   height: 100px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,107,0,0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(255, 107, 0, 0.15) 0%, transparent 70%);
   animation: rosGlow 3s ease-in-out infinite;
 }
 
@@ -271,14 +243,13 @@
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
-  letter-spacing: -0.3px;
 }
 
 .ros-welcome-desc {
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: #64748b;
   max-width: 420px;
-  line-height: 1.5;
+  line-height: 1.6;
   margin: 0;
 }
 
@@ -296,13 +267,13 @@
   cursor: pointer;
   transition: all 0.2s;
   font-family: inherit;
-  box-shadow: 0 4px 16px rgba(255,107,0,0.25);
+  box-shadow: 0 4px 16px rgba(255, 107, 0, 0.25);
   margin-top: 8px;
 }
 
 .ros-connect-main-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 24px rgba(255,107,0,0.35);
+  box-shadow: 0 8px 24px rgba(255, 107, 0, 0.30);
 }
 
 .ros-connect-main-btn:disabled {
@@ -314,51 +285,49 @@
 
 .ros-no-device {
   font-size: 0.78rem;
-  color: #555;
+  color: #94a3b8;
   margin: 0;
 }
 
-/* 阶段指示器 */
 .ros-phase-indicator {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 20px;
-  border-radius: 8px;
-  background: rgba(255,107,0,0.06);
-  border: 1px solid rgba(255,107,0,0.15);
-  color: var(--text-primary);
+  border-radius: 10px;
+  background: rgba(255, 107, 0, 0.08);
+  border: 1px solid rgba(255, 107, 0, 0.18);
+  color: #1e293b;
   font-size: 0.82rem;
 }
 
 .ros-phase-spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid #444;
+  border: 2px solid #f1f5f9;
   border-top-color: #ff6b00;
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  animation: rosSpin 0.7s linear infinite;
 }
 
-/* 错误横幅 */
 .ros-error-banner {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 10px 18px;
-  border-radius: 8px;
-  background: rgba(239,68,68,0.08);
-  border: 1px solid rgba(239,68,68,0.2);
-  color: #f87171;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  color: #dc2626;
   font-size: 0.82rem;
 }
 
 .ros-retry-btn {
   padding: 4px 14px;
-  border-radius: 6px;
-  border: 1px solid rgba(239,68,68,0.3);
-  background: rgba(239,68,68,0.1);
-  color: #f87171;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.30);
+  background: rgba(239, 68, 68, 0.10);
+  color: #dc2626;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
@@ -367,10 +336,9 @@
 }
 
 .ros-retry-btn:hover {
-  background: rgba(239,68,68,0.2);
+  background: rgba(239, 68, 68, 0.16);
 }
 
-/* 提示区域 */
 .ros-welcome-hints {
   display: flex;
   gap: 20px;
@@ -382,16 +350,16 @@
   align-items: center;
   gap: 6px;
   font-size: 0.72rem;
-  color: #555;
+  color: #64748b;
 }
 
 .ros-hint-item kbd {
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   font-size: 0.68rem;
-  color: var(--text-muted);
+  color: #94a3b8;
   font-family: inherit;
 }
 
@@ -399,19 +367,18 @@
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #555;
+  background: #94a3b8;
 }
 
-/* ── 日志抽屉 ── */
 .ros-log-drawer {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
   height: 180px;
-  background: rgba(15,15,15,0.95);
+  background: rgba(15, 23, 42, 0.96);
   backdrop-filter: blur(8px);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid #334155;
   display: flex;
   flex-direction: column;
   z-index: 10;
@@ -422,34 +389,61 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: #cbd5e1;
 }
 
 .ros-log-close {
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: #94a3b8;
   font-size: 1.1rem;
   cursor: pointer;
   padding: 0 4px;
 }
 
-.ros-log-close:hover { color: #fff; }
+.ros-log-close:hover { color: #ffffff; }
 
 .ros-log-body {
   flex: 1;
   overflow-y: auto;
   padding: 8px 14px;
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
   font-size: 0.72rem;
   line-height: 1.6;
 }
 
 .ros-log-line {
-  color: var(--text-muted);
+  color: #cbd5e1;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+@media (max-width: 900px) {
+  .ros-container {
+    width: calc(100% - 16px);
+    height: calc(100% - 16px);
+    margin: 8px;
+  }
+
+  .ros-topbar {
+    height: auto;
+    min-height: 44px;
+    padding: 8px 10px;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .ros-topbar-left,
+  .ros-topbar-right,
+  .ros-topbar-center {
+    flex-wrap: wrap;
+  }
+
+  .ros-welcome-hints {
+    flex-direction: column;
+    gap: 8px;
+  }
 }

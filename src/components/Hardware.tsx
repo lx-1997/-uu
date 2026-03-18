@@ -123,13 +123,27 @@ export default function Hardware() {
 
   const m = useMemo(() => parseMetrics(output), [output]);
   const lines = useMemo(() => output.split(/\r?\n/).filter(Boolean), [output]);
+  const alertMessages = useMemo(() => {
+    const alerts: string[] = [];
+    if (m.tempC >= 85) alerts.push('芯片温度偏高');
+    if (m.memPercent >= 90) alerts.push('内存占用过高');
+    if (m.bpuValue >= 90) alerts.push('BPU 持续高负载');
+    if (m.diskPercent >= 90) alerts.push('磁盘空间不足');
+    return alerts;
+  }, [m]);
+
+  const healthTone = alertMessages.length === 0 ? 'ok' : alertMessages.length >= 2 ? 'danger' : 'warn';
+  const healthText = alertMessages.length === 0 ? '运行稳定' : `发现 ${alertMessages.length} 个风险项`;
 
   return (
-    <div className="hw-container">
+    <div className="hw-container hw-page">
       {/* 顶部栏 */}
       <div className="hw-header">
         <div className="hw-header-left">
-          <h2 className="hw-title">硬件监控</h2>
+          <div>
+            <h2 className="hw-title">硬件监控</h2>
+            <div className="hw-subtitle">实时展示温度、负载、内存和磁盘状态</div>
+          </div>
           {currentDevice && (
             <span className="hw-device-tag">
               <span className="hw-device-dot" />
@@ -148,12 +162,44 @@ export default function Hardware() {
         </div>
       </div>
 
-      {/* 指标环形图 */}
-      <div className="hw-gauges">
-        <RingGauge value={m.tempC} max={105} color="#ff6b00" label="芯片温度" display={m.temp} />
-        <RingGauge value={m.memPercent} max={100} color="#3b82f6" label="内存使用" display={m.memPercent >= 0 ? `${m.memPercent}%` : '--'} />
-        <RingGauge value={m.bpuValue} max={100} color="#a855f7" label="BPU 负载" display={m.bpu} />
-        <RingGauge value={m.diskPercent} max={100} color="#22c55e" label="磁盘使用" display={m.diskPercent >= 0 ? `${m.diskPercent}%` : '--'} />
+      {/* 总览区 */}
+      <div className="hw-overview-grid">
+        <section className="hw-panel hw-gauges-panel">
+          <div className="hw-panel-title">核心指标</div>
+          <div className="hw-gauges">
+            <RingGauge value={m.tempC} max={105} color="#ff6b00" label="芯片温度" display={m.temp} />
+            <RingGauge value={m.memPercent} max={100} color="#3b82f6" label="内存使用" display={m.memPercent >= 0 ? `${m.memPercent}%` : '--'} />
+            <RingGauge value={m.bpuValue} max={100} color="#a855f7" label="BPU 负载" display={m.bpu} />
+            <RingGauge value={m.diskPercent} max={100} color="#22c55e" label="磁盘使用" display={m.diskPercent >= 0 ? `${m.diskPercent}%` : '--'} />
+          </div>
+        </section>
+
+        <section className="hw-panel hw-health-panel">
+          <div className="hw-panel-title">运行状态</div>
+          <div className={`hw-health-pill ${healthTone}`}>
+            <span className="hw-health-dot" />
+            {healthText}
+          </div>
+          <div className="hw-health-list">
+            {alertMessages.length > 0 ? (
+              alertMessages.map((msg) => (
+                <div key={msg} className="hw-health-item">⚠ {msg}</div>
+              ))
+            ) : (
+              <div className="hw-health-item ok">✅ 关键资源状态正常</div>
+            )}
+          </div>
+          <div className="hw-quick-metrics">
+            <div className="hw-quick-metric">
+              <span>CPU(1m)</span>
+              <strong>{m.cpuLoad}</strong>
+            </div>
+            <div className="hw-quick-metric">
+              <span>运行时长</span>
+              <strong>{m.uptime}</strong>
+            </div>
+          </div>
+        </section>
       </div>
 
       {/* 详细指标卡片 */}
@@ -200,7 +246,7 @@ export default function Hardware() {
             {lines.map((line, i) => (
               <div key={`${line}-${i}`} className="terminal-line">{line}</div>
             ))}
-            {lines.length === 0 && <div className="terminal-line" style={{ color: '#64748b' }}>暂无数据</div>}
+            {lines.length === 0 && <div className="terminal-line hw-raw-empty">暂无数据</div>}
           </div>
         )}
       </div>

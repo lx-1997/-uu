@@ -5426,12 +5426,28 @@ select.adm-input {
   margin-bottom: 28px;
 }
 .dash-card {
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
-  padding: 20px; cursor: pointer; transition: all 0.25s;
+  background: linear-gradient(180deg, #ffffff 0%, #fffdfa 100%);
+  border: 1px solid #dbe4ee;
+  border-radius: 20px;
+  padding: 24px;
+  cursor: pointer;
+  transition: all 0.25s;
+  position: relative;
+  overflow: hidden;
+}
+.dash-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(255,107,0,0.68), rgba(255,107,0,0.10));
 }
 .dash-card:hover {
-  border-color: rgba(255,107,0,0.25); transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(255,107,0,0.06);
+  border-color: rgba(255,107,0,0.28);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(255,107,0,0.08);
 }
 .dash-card:active { transform: translateY(0); }
 .dash-card-head {
@@ -5439,27 +5455,33 @@ select.adm-input {
   margin-bottom: 8px;
 }
 .dash-card-title {
-  margin: 0; font-size: 0.95rem; font-weight: 700; color: #1e293b;
+  margin: 0; font-size: 0.95rem; font-weight: 750; color: #1e293b;
 }
 .dash-card-badge {
-  font-size: 0.65rem; padding: 2px 8px; border-radius: 8px;
+  font-size: 0.72rem; padding: 5px 12px; border-radius: 999px;
   font-weight: 600; white-space: nowrap; flex-shrink: 0;
 }
-.dash-card-badge.ok { background: #ecfdf5; color: #059669; }
+.dash-card-badge.ok { background: #e7f6ee; color: #059669; }
 .dash-card-badge.warn { background: #fff7ed; color: #ea580c; }
 .dash-card-desc {
-  margin: 0 0 14px 0; font-size: 0.82rem; color: #64748b; line-height: 1.55;
+  margin: 2px 0 16px 0; font-size: 0.82rem; color: #64748b; line-height: 1.6;
 }
 .dash-card-foot {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .dash-card-tag {
-  font-size: 0.72rem; padding: 3px 8px; background: #f1f5f9;
-  border-radius: 6px; color: #475569; cursor: pointer; transition: all 0.15s;
+  font-size: 0.72rem;
+  padding: 5px 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s;
 }
-.dash-card-tag:hover { background: #fff7ed; color: #ff6b00; }
+.dash-card-tag:hover { background: #fff7ed; border-color: #fed7aa; color: #ff6b00; }
 .dash-card-cta {
-  margin-left: auto; font-size: 0.78rem; color: #ff6b00; font-weight: 700;
+  margin-left: auto; font-size: 0.84rem; color: #ff6b00; font-weight: 750;
 }
 
 /* Activity section */
