@@ -114,9 +114,12 @@
 .vnc-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  width: 100%;
-  background: #0f0f0f;
+  height: calc(100% - 32px);
+  width: calc(100% - 32px);
+  margin: 16px;
+  background: var(--bg-card);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0,0,0,0.3);
@@ -129,8 +132,8 @@
   justify-content: space-between;
   height: 42px;
   padding: 0 14px;
-  background: #1a1a1a;
-  border-bottom: 1px solid #2a2a2a;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   user-select: none;
 }
@@ -156,13 +159,13 @@
 .vnc-topbar-title {
   font-size: 0.82rem;
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--text-primary);
   letter-spacing: -0.2px;
 }
 
 .vnc-topbar-device {
   font-size: 0.72rem;
-  color: #666;
+  color: var(--text-secondary);
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 
@@ -182,9 +185,9 @@
   border-radius: 20px;
   font-size: 0.72rem;
   font-weight: 600;
-  background: #2a2a2a;
-  color: #888;
-  border: 1px solid #333;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
 }
 
 .vnc-status-badge.live {
@@ -227,7 +230,7 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.7rem;
   font-weight: 600;
   cursor: pointer;
@@ -235,7 +238,7 @@
   font-family: inherit;
 }
 
-.vnc-quality-btn:hover { color: #ccc; }
+.vnc-quality-btn:hover { color: var(--text-primary); }
 .vnc-quality-btn.active {
   background: #ff6b00;
   color: #fff;
@@ -245,8 +248,8 @@
 /* Tool buttons */
 .vnc-tool-btn {
   background: none;
-  border: 1px solid #333;
-  color: #888;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
   cursor: pointer;
   padding: 5px 8px;
   border-radius: 6px;
@@ -258,8 +261,8 @@
 
 .vnc-tool-btn:hover {
   color: #fff;
-  border-color: #555;
-  background: #2a2a2a;
+  border-color: #cbd5e1;
+  background: var(--bg-surface);
 }
 
 .vnc-disconnect-btn {
@@ -284,7 +287,7 @@
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: #000;
+  background: #f0f4f8;
   min-height: 0;
 }
 
@@ -292,7 +295,7 @@
   width: 100%;
   height: 100%;
   border: none;
-  background: #000;
+  background: #f0f4f8;
 }
 
 /* ── Log drawer ── */
@@ -321,16 +324,16 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--border);
   font-size: 0.8rem;
   font-weight: 600;
-  color: #ccc;
+  color: var(--text-primary);
 }
 
 .vnc-log-close {
   background: none;
   border: none;
-  color: #666;
+  color: var(--text-secondary);
   font-size: 1.1rem;
   cursor: pointer;
   padding: 2px 6px;
@@ -350,7 +353,7 @@
 }
 
 .vnc-log-line {
-  color: #888;
+  color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -364,7 +367,7 @@
   height: 100%;
   gap: 16px;
   padding: 40px;
-  background: linear-gradient(180deg, #111 0%, #0a0a0a 100%);
+  background: var(--bg-surface);
 }
 
 .vnc-welcome-visual {
@@ -376,7 +379,7 @@
   width: 200px;
   height: 130px;
   border-radius: 12px;
-  background: #1a1a1a;
+  background: var(--bg-card);
   border: 1px solid #2a2a2a;
   overflow: hidden;
   position: relative;
@@ -386,7 +389,7 @@
 .vnc-screen-titlebar {
   height: 16px;
   background: #222;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--border);
 }
 
 .vnc-screen-sidebar {
@@ -439,14 +442,14 @@
 .vnc-welcome-title {
   font-size: 1.4rem;
   font-weight: 700;
-  color: #e0e0e0;
+  color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.5px;
 }
 
 .vnc-welcome-desc {
   font-size: 0.88rem;
-  color: #666;
+  color: var(--text-secondary);
   margin: 0;
   text-align: center;
   max-width: 360px;
@@ -458,7 +461,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 
@@ -556,10 +559,10 @@
 .vnc-hint-item kbd {
   padding: 2px 6px;
   background: #222;
-  border: 1px solid #333;
+  border: 1px solid var(--border);
   border-radius: 3px;
   font-size: 0.7rem;
-  color: #888;
+  color: var(--text-muted);
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 
