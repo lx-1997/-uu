@@ -1,3 +1,0 @@
-# 设置 askpass 脚本文件为可执行
-src/extraResources/flash/darwin/arm64/sudo-askpass.osascript-*.js linguist-vendored=true
-
