@@ -48,6 +48,7 @@ export default function Examples() {
   const [logs, setLogs] = useState<string[]>([]);
   const [showLog, setShowLog] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newApp, setNewApp] = useState({ name: '', desc: '', installCmd: '', runCmd: '', uninstallCmd: '' });
 
   const filtered = apps.filter(a =>
@@ -188,8 +189,8 @@ export default function Examples() {
       <div className="nh-grid">
         {filtered.length === 0 && <div className="nh-no-result">没有匹配的应用</div>}
         {filtered.map(app => (
-          <div key={app.id} className={`nh-card ${app.running ? 'running' : app.installed ? 'installed' : ''}`}>
-            <div className="nh-card-head">
+          <div key={app.id} className={`nh-card ${app.running ? 'running' : app.installed ? 'installed' : ''} ${expandedId === app.id ? 'expanded' : ''}`}>
+            <div className="nh-card-head" onClick={() => setExpandedId(expandedId === app.id ? null : app.id)} style={{ cursor: 'pointer' }}>
               <span className="nh-card-icon">{app.icon}</span>
               <div className="nh-card-info">
                 <span className="nh-card-name">{app.name}</span>
@@ -197,8 +198,18 @@ export default function Examples() {
               </div>
               {app.running && <span className="nh-badge running"><span className="nh-badge-dot" />运行中</span>}
               {app.installed && !app.running && <span className="nh-badge installed">已安装</span>}
+              <span className="nh-expand-arrow" style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#94a3b8', transition: 'transform 0.2s', transform: expandedId === app.id ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
             </div>
             <p className="nh-card-desc">{app.desc}</p>
+            {/* 内联详情面板 */}
+            {expandedId === app.id && (
+              <div className="nh-card-detail" style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.02)', borderRadius: 8, margin: '6px 0 10px', fontSize: '0.78rem', color: '#475569', lineHeight: 1.7 }}>
+                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>安装命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.installCmd}</code></div>
+                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>运行命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.runCmd}</code></div>
+                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>卸载命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.uninstallCmd}</code></div>
+                {app.repo && <div><span style={{ color: '#94a3b8' }}>NodeHub:</span> <a href={app.repo} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>{app.repo}</a></div>}
+              </div>
+            )}
             <div className="nh-card-actions">
               {!app.installed && (
                 <button className="nh-btn primary" disabled={busyId === app.id} onClick={() => handleInstall(app)}>
@@ -216,9 +227,6 @@ export default function Examples() {
               )}
               {app.custom && (
                 <button className="nh-btn ghost" onClick={() => handleRemoveCustom(app.id)}>移除</button>
-              )}
-              {app.repo && (
-                <a href={app.repo} target="_blank" rel="noopener noreferrer" className="nh-btn link">详情 ↗</a>
               )}
             </div>
           </div>

@@ -48,14 +48,62 @@ export default function Dashboard() {
       }
     }
 
-    const bpuIdx = lines.findIndex((line) => line === '###BPU###');
+    // 解析 hrut_somstatus 输出获取 BPU 数据
+    const somIdx = lines.findIndex((line) => line === '###SOMSTATUS###');
     let bpu = '--';
     let bpuValue = -1;
-    if (bpuIdx >= 0) {
-      const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 6).join(' ');
-      const m = bpuLines.match(/(\d{1,3})\s*%/);
-      if (m) { bpu = `${m[1]}%`; bpuValue = Number(m[1]); }
-      else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
+    let cpuFreq = '--';
+    if (somIdx >= 0) {
+      const somLines = lines.slice(somIdx + 1);
+      // 解析 CPU 温度 (优先使用 somstatus 的温度)
+      const cpuTempLine = somLines.find(l => /CPU\s*:\s*[\d.]+/.test(l));
+      if (cpuTempLine) {
+        const tm = cpuTempLine.match(/CPU\s*:\s*([\d.]+)/);
+        if (tm) {
+          const tv = parseFloat(tm[1]);
+          if (tv > 0) {
+            // 覆盖之前的温度值
+            Object.assign({ temp: `${tv.toFixed(1)}°C`, tempValue: tv });
+          }
+        }
+      }
+      // 解析 BPU 频率和负载率
+      const bpuLine = somLines.find(l => /bpu0/.test(l));
+      if (bpuLine) {
+        const parts = bpuLine.trim().split(/\s+/);
+        // 格式: bpu0: min cur max ratio
+        if (parts.length >= 5) {
+          const curFreq = Number(parts[2]);
+          const maxFreq = Number(parts[3]);
+          const ratio = Number(parts[4]);
+          if (Number.isFinite(curFreq) && curFreq > 0) {
+            const freqGHz = (curFreq / 1e9).toFixed(1);
+            bpu = ratio > 0 ? `${ratio}% · ${freqGHz}GHz` : `${freqGHz}GHz`;
+            bpuValue = ratio;
+          }
+        }
+      }
+      // 解析 CPU 频率
+      const cpuLine = somLines.find(l => /cpu0/.test(l));
+      if (cpuLine) {
+        const parts = cpuLine.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          const cur = Number(parts[2]);
+          if (Number.isFinite(cur) && cur > 0) {
+            cpuFreq = `${(cur / 1000).toFixed(0)}MHz`;
+          }
+        }
+      }
+    }
+    // 回退到 hrut_smi 解析
+    if (bpu === '--') {
+      const bpuIdx = lines.findIndex((line) => line === '###BPU###');
+      if (bpuIdx >= 0) {
+        const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 6).join(' ');
+        const m = bpuLines.match(/(\d{1,3})\s*%/);
+        if (m) { bpu = `${m[1]}%`; bpuValue = Number(m[1]); }
+        else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
+      }
     }
 
     setTopMetrics({ memory, temp, bpu, uptime, tempValue, bpuValue, updatedAt: new Date().toLocaleTimeString() });
