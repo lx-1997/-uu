@@ -1,3 +1,8 @@
+const fs = require('fs');
+
+const path = 'src/styles/dashboard.css';
+
+const css = `
 .dashboard-container {
   padding: 24px 32px;
   max-width: 1400px;
@@ -108,3 +113,7 @@
   color: var(--text-primary);
   margin: 32px 0 16px;
 }
+`;
+
+fs.writeFileSync(path, css.trim());
+console.log('Dashboard CSS updated!');

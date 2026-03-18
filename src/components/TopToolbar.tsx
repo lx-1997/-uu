@@ -32,24 +32,28 @@ export default function TopToolbar() {
   return (
     <>
       <div className="top-toolbar">
-        <div className="tt-traffic-lights">
-          <span className="tt-dot red" />
-          <span className="tt-dot yellow" />
-          <span className="tt-dot green" />
-        </div>
+        
         <div className="tt-center">
           <span className="tt-title">{titles[activeTab] || activeTab}</span>
           <span className="tt-sep">/</span>
           <span className={`status-dot ${currentDevice?.status === 'offline' ? 'offline' : ''}`} />
           <span className="tt-device" title="点击复制IP" onClick={handleCopyIp} style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', background: 'rgba(0,0,0,0.05)', marginLeft: '4px' }}>
-            {currentDevice?.name} ({currentDevice?.ip}) {copied ? '✅' : '📋'}
+            {currentDevice?.name} ({currentDevice?.ip}) 
+  <span className="material-symbols-outlined" style={{ fontSize: '14px', marginLeft: '4px' }}>
+    {copied ? 'check' : 'content_copy'}
+  </span>
+
           </span>
           <span className="tt-wifi" title="配置 WiFi" style={{ marginLeft: '8px', cursor: 'pointer', padding: '4px 8px', borderRadius: '4px', background: 'rgba(255,107,0,0.1)', color: '#ff6b00', display: 'flex', alignItems: 'center' }} onClick={() => setShowWifiModal(true)}>
             📶
           </span>
         </div>
         <div className="toolbar-actions">
-          <button className="icon-btn" title="查看用户/许可证">👤</button>
+          
+  <button className="icon-btn" title="查看用户/许可证">
+    <span className="material-symbols-outlined">person</span>
+  </button>
+
         </div>
       </div>
       {showWifiModal && <WifiConfigModal onClose={() => setShowWifiModal(false)} />}

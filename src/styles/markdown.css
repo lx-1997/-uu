@@ -1,16 +1,16 @@
 /* ── Markdown in AI bubbles ── */
 .md-code-block {
   margin: 8px 0; border-radius: 8px; overflow: hidden;
-  border: 1px solid #e2e8f0; background: #f8fafc;
+  border: 1px solid var(--border); background: #f8fafc;
 }
 .md-code-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 4px 12px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0;
+  padding: 4px 12px; background: #f1f5f9; border-bottom: 1px solid var(--border);
 }
 .md-code-lang { font-size: 0.66rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
 .md-code-copy {
-  background: none; border: 1px solid #e2e8f0; border-radius: 4px;
-  padding: 1px 8px; font-size: 0.66rem; color: #94a3b8; cursor: pointer;
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 8px; font-size: 0.66rem; color: var(--text-muted); cursor: pointer;
   transition: all 0.15s; font-family: inherit;
 }
 .md-code-copy:hover { color: #ff6b00; border-color: #ff6b00; }
@@ -21,7 +21,7 @@
 }
 .md-code-body code { font-family: inherit; }
 .md-inline-code {
-  background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px;
+  background: #f1f5f9; border: 1px solid var(--border); border-radius: 4px;
   padding: 1px 5px; font-family: 'JetBrains Mono', Consolas, monospace;
   font-size: 0.82em; color: #c2410c;
 }

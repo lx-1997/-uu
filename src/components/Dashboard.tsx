@@ -233,12 +233,12 @@ export default function Dashboard() {
               </div>
               <div className="ob-done-grid">
                 {[
-                  { emoji: '📦', title: '运行示例', desc: '一键部署 AI 感知应用', tab: 'examples' as const },
-                  { emoji: '🧠', title: '部署模型', desc: '预训练模型部署到 BPU', tab: 'models' as const },
-                  { emoji: '💻', title: '打开终端', desc: '开始编写第一行代码', tab: 'terminal' as const },
+                  { emoji: 'inventory_2', title: '运行示例', desc: '一键部署 AI 感知应用', tab: 'examples' as const },
+                  { emoji: 'memory', title: '部署模型', desc: '预训练模型部署到 BPU', tab: 'models' as const },
+                  { emoji: 'terminal', title: '打开终端', desc: '开始编写第一行代码', tab: 'terminal' as const },
                 ].map(item => (
                   <button key={item.tab} className="ob-choice-card compact" onClick={() => { setHideWizard(true); setActiveTab(item.tab); }}>
-                    <span style={{ fontSize: '1.4rem' }}>{item.emoji}</span>
+                    <div style={{color:"var(--brand-primary)", display:"flex", marginBottom: "8px"}}><svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></div>
                     <strong>{item.title}</strong>
                     <span>{item.desc}</span>
                   </button>

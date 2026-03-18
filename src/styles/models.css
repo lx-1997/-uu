@@ -76,7 +76,7 @@
 .mdl-topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 22px; border-radius: 16px;
-  background: #fff; border: 1px solid #e2e8f0;
+  background: #fff; border: 1px solid var(--border);
   box-shadow: 0 2px 8px rgba(0,0,0,0.03);
   flex-wrap: wrap; gap: 12px;
 }
@@ -93,7 +93,7 @@
 }
 
 .mdl-topbar-badge {
-  font-size: 0.72rem; font-weight: 600; color: #94a3b8;
+  font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
   background: #f1f5f9; padding: 3px 10px; border-radius: 8px;
 }
 
@@ -109,7 +109,7 @@
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 0.78rem; color: #64748b;
   padding: 4px 12px; border-radius: 8px;
-  background: #f8fafc; border: 1px solid #e2e8f0;
+  background: #f8fafc; border: 1px solid var(--border);
 }
 
 .mdl-stat-chip.live { color: #16a34a; background: #f0fdf4; border-color: #bbf7d0; }
@@ -140,7 +140,7 @@
 }
 
 .mdl-device-label {
-  font-size: 0.68rem; font-weight: 500; color: #94a3b8;
+  font-size: 0.68rem; font-weight: 500; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.5px;
 }
 
@@ -168,7 +168,7 @@
 
 .mdl-tab-btn {
   padding: 7px 16px; border-radius: 8px;
-  border: 1px solid #e2e8f0; background: #fff;
+  border: 1px solid var(--border); background: #fff;
   color: #64748b; font-size: 0.8rem; font-weight: 600;
   cursor: pointer; font-family: inherit; transition: all 0.15s;
 }
@@ -182,7 +182,7 @@
 .mdl-search-wrap {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 14px; border-radius: 8px;
-  border: 1px solid #e2e8f0; background: #fff;
+  border: 1px solid var(--border); background: #fff;
 }
 
 .mdl-search {
@@ -201,11 +201,11 @@
 
 .mdl-no-result {
   grid-column: 1 / -1; text-align: center;
-  padding: 60px 20px; color: #94a3b8; font-size: 0.88rem;
+  padding: 60px 20px; color: var(--text-muted); font-size: 0.88rem;
 }
 
 .mdl-card {
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+  background: #fff; border: 1px solid var(--border); border-radius: 14px;
   padding: 18px 20px; transition: all 0.2s;
 }
 .mdl-card:hover {
@@ -233,7 +233,7 @@
 }
 
 .mdl-card-meta {
-  display: block; font-size: 0.72rem; color: #94a3b8; margin-top: 2px;
+  display: block; font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;
 }
 
 .mdl-badge {
@@ -266,7 +266,7 @@
 
 .mdl-card-perf {
   display: flex; gap: 14px; margin-bottom: 8px;
-  font-size: 0.74rem; color: #94a3b8;
+  font-size: 0.74rem; color: var(--text-muted);
 }
 
 .mdl-card-boards {
@@ -288,7 +288,7 @@
   padding: 7px 16px; border-radius: 8px;
   font-size: 0.8rem; font-weight: 600;
   cursor: pointer; font-family: inherit;
-  transition: all 0.15s; border: 1px solid #e2e8f0;
+  transition: all 0.15s; border: 1px solid var(--border);
   background: #fff; color: #64748b;
   text-decoration: none; display: inline-flex; align-items: center;
 }
@@ -313,7 +313,7 @@
 
 /* ── 日志面板 ── */
 .mdl-log-panel {
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+  background: #fff; border: 1px solid var(--border); border-radius: 14px;
   overflow: hidden;
 }
 
@@ -345,7 +345,7 @@
   position: fixed; top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   z-index: 910; width: 480px; max-width: 92vw;
-  background: #fff; border: 1px solid #e2e8f0;
+  background: #fff; border: 1px solid var(--border);
   border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,0.12);
   animation: mdlModalIn 0.25s ease;
 }
@@ -366,7 +366,7 @@
 
 .mdl-modal-close {
   background: none; border: none; font-size: 1.1rem;
-  color: #94a3b8; cursor: pointer; padding: 4px 8px;
+  color: var(--text-muted); cursor: pointer; padding: 4px 8px;
   border-radius: 6px; transition: all 0.15s; font-family: inherit;
 }
 .mdl-modal-close:hover { color: #1e293b; background: #f1f5f9; }

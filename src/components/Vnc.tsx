@@ -199,11 +199,7 @@ export default function Vnc() {
       {/* ── 顶部工具栏 ── */}
       <div className="vnc-topbar">
         <div className="vnc-topbar-left">
-          <div className="vnc-topbar-dots">
-            <span className="vnc-dot-sm red" />
-            <span className="vnc-dot-sm yellow" />
-            <span className="vnc-dot-sm green" />
-          </div>
+          
           <span className="vnc-topbar-title">远程桌面</span>
           {currentDevice && (
             <span className="vnc-topbar-device">

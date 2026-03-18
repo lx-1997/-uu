@@ -5,7 +5,7 @@
 /* Isolated Widget Panels */
 .isolated-widget {
   background: #ffffff;
-  border: 1px solid #e2e8f0; border-radius: 22px; padding: 34px;
+  border: 1px solid var(--border); border-radius: 22px; padding: 34px;
   width: 100%; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.05);
   animation: widgetIn 0.35s ease;
 }
@@ -21,7 +21,7 @@
 .lower-grid { margin-top: 0; }
 
 .panel-card {
-  background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px;
+  background: #ffffff; border: 1px solid var(--border); border-radius: 14px;
   padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.02);
   transition: box-shadow 0.2s;
 }
@@ -36,7 +36,7 @@
 
 .select-card {
   display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left;
-  border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 14px;
+  border: 1px solid var(--border); background: #f8fafc; border-radius: 14px;
   padding: 14px; cursor: pointer; transition: all 0.2s ease; color: #334155;
 }
 .select-card strong { font-size: 0.92rem; }
@@ -46,7 +46,7 @@
 .select-card.compact { min-height: 88px; justify-content: center; }
 .select-card:hover { transform: translateX(3px); }
 
-.muted-inline { font-size: 0.8rem; color: #94a3b8; font-weight: 500; }
+.muted-inline { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }
 
 .segmented-row, .action-row, .profile-controls, .stepper-row, .chip-cloud,
 .terminal-topbar, .terminal-input-row, .queue-head, .progress-meta {
@@ -81,7 +81,7 @@
 .progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ff6b00 0%, #fb923c 100%); transition: width 0.4s ease; }
 
 .usage-item, .file-row, .queue-item {
-  border: 1px solid #e2e8f0; background: #ffffff; border-radius: 14px;
+  border: 1px solid var(--border); background: #ffffff; border-radius: 14px;
   padding: 12px 14px; color: #475569; font-size: 0.88rem;
 }
 .usage-item strong, .usage-item span { display: block; }
@@ -92,7 +92,7 @@
 .stepper-row { flex-wrap: wrap; margin-bottom: 20px; }
 .step-chip {
   display: inline-flex; align-items: center; gap: 10px;
-  border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 999px;
+  border: 1px solid var(--border); background: #f8fafc; border-radius: 999px;
   padding: 8px 12px; color: #64748b; font-size: 0.84rem; font-weight: 700;
 }
 .step-chip span {
@@ -112,7 +112,7 @@
 /* Chip cloud */
 .chip-cloud { flex-wrap: wrap; margin-top: 10px; }
 .chip-btn {
-  border: 1px solid #e2e8f0; background: #fff; border-radius: 999px;
+  border: 1px solid var(--border); background: #fff; border-radius: 999px;
   padding: 8px 12px; color: #475569; font-size: 0.82rem; cursor: pointer;
 }
 .chip-btn.active, .chip-btn:hover {
@@ -126,7 +126,7 @@
 
 /* Metric grid */
 .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.metric-card { border: 1px solid #e2e8f0; background: #ffffff; border-radius: 18px; padding: 18px; }
+.metric-card { border: 1px solid var(--border); background: #ffffff; border-radius: 18px; padding: 18px; }
 .metric-hint { margin-top: 10px; color: #64748b; font-size: 0.84rem; line-height: 1.5; }
 .hardware-mode-row { margin-bottom: 18px; }
 
@@ -135,7 +135,7 @@
 .wg-link:hover { text-decoration: underline; }
 
 /* Terminal widget override */
-.terminal-widget { background: #0f172a; color: #e2e8f0; border: none; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+.terminal-widget { background: var(--bg-card); color: #e2e8f0; border: none; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
 .terminal-widget .widget-header { border-bottom-color: #1e293b; color: #fff; }
 
 /* Scan animation */

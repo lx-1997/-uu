@@ -201,11 +201,7 @@ export default function Ros() {
       {/* ── 顶部工具栏 ── */}
       <div className="ros-topbar">
         <div className="ros-topbar-left">
-          <div className="ros-topbar-dots">
-            <span className="ros-dot red" />
-            <span className="ros-dot yellow" />
-            <span className="ros-dot green" />
-          </div>
+          
           <span className="ros-topbar-title">ROS 可视化</span>
           <span className="ros-topbar-badge">Webviz</span>
           {currentDevice && (

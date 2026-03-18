@@ -1,4 +1,7 @@
+const fs = require('fs');
 
+const layoutPath = 'src/styles/layout.css';
+const layoutCss = `
 /* "Wow" Level Google/Material Layout */
 
 .canvas-shell {
@@ -263,3 +266,7 @@ button.outline-btn:hover {
   color: var(--brand-primary);
   background: var(--brand-dim);
 }
+`;
+
+fs.writeFileSync(layoutPath, layoutCss);
+console.log('Layout upgraded to premium Glassmorphism Material Level.');

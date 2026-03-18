@@ -150,11 +150,7 @@ export default function IDE() {
       {/* ── 顶部工具栏 ── */}
       <div className="ros-topbar">
         <div className="ros-topbar-left">
-          <div className="ros-topbar-dots">
-            <span className="ros-dot red" />
-            <span className="ros-dot yellow" />
-            <span className="ros-dot green" />
-          </div>
+          
           <span className="ros-topbar-title">代码编辑器</span>
           <span className="ros-topbar-badge">{desktop ? 'code-server' : 'VS Code'}</span>
           {currentDevice && (

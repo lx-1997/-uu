@@ -3,7 +3,7 @@
   min-height: 300px; display: flex; flex-direction: column;
 }
 .fm-pane-header {
-  padding: 10px 12px 8px; border-bottom: 1px solid #e2e8f0;
+  padding: 10px 12px 8px; border-bottom: 1px solid var(--border);
 }
 .fm-pane-title {
   font-weight: 600; font-size: 0.88rem; margin-bottom: 4px;
@@ -36,22 +36,22 @@
 .fm-row-icon { flex-shrink: 0; font-size: 0.9rem; }
 .fm-folder-toggle { cursor: pointer; }
 .fm-row-name { flex: 1; color: #1e293b; font-weight: 500; }
-.fm-row-meta { color: #94a3b8; font-size: 0.72rem; flex-shrink: 0; }
+.fm-row-meta { color: var(--text-muted); font-size: 0.72rem; flex-shrink: 0; }
 .fm-row-hint {
   color: #f59e0b; font-size: 0.68rem; flex-shrink: 0;
   background: rgba(245,158,11,0.08); padding: 1px 6px; border-radius: 4px;
 }
 .fm-row-enter {
-  background: none; border: none; color: #94a3b8; cursor: pointer;
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
   font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
 }
 .fm-row-enter:hover { color: #3b82f6; background: rgba(59,130,246,0.08); }
 .fm-empty {
-  text-align: center; padding: 24px; color: #94a3b8; font-size: 0.82rem;
+  text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.82rem;
 }
 .fm-pane-footer {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 12px; border-top: 1px solid #e2e8f0;
+  padding: 8px 12px; border-top: 1px solid var(--border);
 }
 .fm-selected-count { font-size: 0.75rem; color: #64748b; }
 
@@ -102,7 +102,7 @@
 
 .file-status-text {
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .file-row.clickable {

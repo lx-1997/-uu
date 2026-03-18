@@ -199,7 +199,7 @@
   font-size: 0.7rem;
   color: var(--text-secondary);
   padding-left: 8px;
-  border-left: 1px solid #333;
+  border-left: 1px solid var(--border);
 }
 
 .ros-topbar-sep {
@@ -276,7 +276,7 @@
 
 .ros-welcome-desc {
   font-size: 0.85rem;
-  color: #777;
+  color: var(--text-muted);
   max-width: 420px;
   line-height: 1.5;
   margin: 0;
@@ -388,7 +388,7 @@
 .ros-hint-item kbd {
   padding: 2px 6px;
   border-radius: 4px;
-  background: #222;
+  background: var(--bg-card);
   border: 1px solid var(--border);
   font-size: 0.68rem;
   color: var(--text-muted);
@@ -411,7 +411,7 @@
   height: 180px;
   background: rgba(15,15,15,0.95);
   backdrop-filter: blur(8px);
-  border-top: 1px solid #2a2a2a;
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   z-index: 10;
@@ -422,7 +422,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 14px;
-  border-bottom: 1px solid #222;
+  border-bottom: 1px solid var(--border);
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
@@ -449,7 +449,7 @@
 }
 
 .ros-log-line {
-  color: #777;
+  color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-all;
 }
