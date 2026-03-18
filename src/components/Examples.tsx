@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { executeDeviceCommand, getRememberedDevicePassword } from '../api';
 
@@ -8,39 +8,41 @@ interface AppItem {
   id: string; name: string; icon: string; desc: string; category: string;
   repo: string; installCmd: string; runCmd: string; uninstallCmd: string;
   installed: boolean; running: boolean; custom?: boolean;
+  pkgName?: string; processKey?: string;
+  scenario?: string;
 }
 
 const BUILTIN_APPS: AppItem[] = [
   { id: 'yolo', name: 'YOLO 目标检测', icon: '🎯', desc: '基于 hobot_dnn 的实时目标检测', category: '视觉',
     repo: 'https://developer.d-robotics.cc/nodehub/detail/168', installCmd: 'sudo apt install -y tros-hobot-dnn && sudo apt install -y tros-dnn-node-example',
     runCmd: 'source /opt/tros/humble/setup.bash && ros2 launch dnn_node_example dnn_node_example.launch.py',
-    uninstallCmd: 'sudo apt remove -y tros-dnn-node-example', installed: false, running: false },
+    uninstallCmd: 'sudo apt remove -y tros-dnn-node-example', installed: false, running: false, pkgName: 'tros-dnn-node-example', processKey: 'dnn_node_example', scenario: '适合巡检、安防、视觉触发控制场景' },
   { id: 'body', name: '人体骨骼点检测', icon: '🏃', desc: '人体关键点检测与姿态估计', category: '视觉',
     repo: 'https://developer.d-robotics.cc/nodehub/detail/169', installCmd: 'sudo apt install -y tros-hobot-body-det',
     runCmd: 'source /opt/tros/humble/setup.bash && ros2 launch hobot_body_det hobot_body_det.launch.py',
-    uninstallCmd: 'sudo apt remove -y tros-hobot-body-det', installed: false, running: false },
+    uninstallCmd: 'sudo apt remove -y tros-hobot-body-det', installed: false, running: false, pkgName: 'tros-hobot-body-det', processKey: 'hobot_body_det', scenario: '适合人体跟随、互动识别与姿态分析' },
   { id: 'slam', name: 'ORB-SLAM3', icon: '🗺️', desc: '视觉 SLAM 建图与定位', category: '导航',
     repo: 'https://developer.d-robotics.cc/nodehub/detail/170', installCmd: 'sudo apt install -y tros-orb-slam3',
     runCmd: 'source /opt/tros/humble/setup.bash && ros2 launch orb_slam3 orb_slam3.launch.py',
-    uninstallCmd: 'sudo apt remove -y tros-orb-slam3', installed: false, running: false },
+    uninstallCmd: 'sudo apt remove -y tros-orb-slam3', installed: false, running: false, pkgName: 'tros-orb-slam3', processKey: 'orb_slam3', scenario: '适合建图定位、路径规划前置能力' },
   { id: 'nav2', name: 'Nav2 导航', icon: '🧭', desc: 'ROS2 自主导航框架', category: '导航',
     repo: 'https://developer.d-robotics.cc/nodehub/detail/171', installCmd: 'sudo apt install -y tros-nav2-bringup',
     runCmd: 'source /opt/tros/humble/setup.bash && ros2 launch nav2_bringup navigation_launch.py',
-    uninstallCmd: 'sudo apt remove -y tros-nav2-bringup', installed: false, running: false },
+    uninstallCmd: 'sudo apt remove -y tros-nav2-bringup', installed: false, running: false, pkgName: 'tros-nav2-bringup', processKey: 'nav2_bringup|navigation_launch', scenario: '适合室内导航、巡线与自动回充场景' },
   { id: 'tts', name: '语音合成 TTS', icon: '🔊', desc: '文本转语音输出', category: '语音',
     repo: 'https://developer.d-robotics.cc/nodehub/detail/172', installCmd: 'sudo apt install -y tros-hobot-tts',
     runCmd: 'source /opt/tros/humble/setup.bash && ros2 launch hobot_tts hobot_tts.launch.py',
-    uninstallCmd: 'sudo apt remove -y tros-hobot-tts', installed: false, running: false },
+    uninstallCmd: 'sudo apt remove -y tros-hobot-tts', installed: false, running: false, pkgName: 'tros-hobot-tts', processKey: 'hobot_tts', scenario: '适合语音播报、对话反馈与提示音场景' },
   { id: 'hand', name: '手势识别', icon: '✋', desc: '实时手势检测与分类', category: '视觉',
     repo: 'https://developer.d-robotics.cc/nodehub/detail/173', installCmd: 'sudo apt install -y tros-hand-gesture-det',
     runCmd: 'source /opt/tros/humble/setup.bash && ros2 launch hand_gesture_det hand_gesture_det.launch.py',
-    uninstallCmd: 'sudo apt remove -y tros-hand-gesture-det', installed: false, running: false },
+    uninstallCmd: 'sudo apt remove -y tros-hand-gesture-det', installed: false, running: false, pkgName: 'tros-hand-gesture-det', processKey: 'hand_gesture_det', scenario: '适合非接触式交互与手势控制场景' },
 ];
 
 const CATEGORIES = ['全部', '视觉', '导航', '语音', '自定义'];
 
 export default function Examples() {
-  const { currentDevice, addToast } = useAppState();
+  const { currentDevice, addToast, setActiveTab, setChatExpanded, setCmd } = useAppState();
   const [apps, setApps] = useState<AppItem[]>(BUILTIN_APPS);
   const [filter, setFilter] = useState('全部');
   const [search, setSearch] = useState('');
@@ -50,6 +52,74 @@ export default function Examples() {
   const [showAdd, setShowAdd] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newApp, setNewApp] = useState({ name: '', desc: '', installCmd: '', runCmd: '', uninstallCmd: '' });
+
+  const pushToMainChat = (text: string) => {
+    setActiveTab('dashboard');
+    setChatExpanded(true);
+    setCmd(text);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const form = document.querySelector('.input-box') as HTMLFormElement | null;
+        form?.requestSubmit();
+      });
+    });
+  };
+
+  const writeEcosystemSnapshot = (nextApps: AppItem[]) => {
+    const installed = nextApps.filter((a) => a.installed).map((a) => a.name);
+    const running = nextApps.filter((a) => a.running).map((a) => a.name);
+    const current = JSON.parse(localStorage.getItem('rdk-ecosystem-sync') || '{}') as Record<string, unknown>;
+    const payload = {
+      ...current,
+      nodehub: {
+        installed,
+        running,
+        deviceIp: currentDevice?.ip,
+        updatedAt: new Date().toISOString(),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem('rdk-ecosystem-sync', JSON.stringify(payload));
+  };
+
+  const syncFromBoard = async () => {
+    if (!currentDevice) {
+      addToast('请先连接设备', 'warning');
+      return;
+    }
+    setBusyId('sync-board');
+    try {
+      const pwd = getRememberedDevicePassword(currentDevice.id);
+      const command = 'bash -lc "dpkg -l 2>/dev/null | awk \'/^ii/{print $2}\' | grep \'^tros-\' || true; echo __PROC__; ps -ef | grep -E \'ros2 launch|hobot_|nav2|orb_slam3|gesture|tts|dnn_node\' | grep -v grep || true"';
+      const result = await executeDeviceCommand(currentDevice.id, command, pwd);
+      const output = result.output || '';
+      setLogs((prev) => [...prev.slice(-60), `[板端同步] ${new Date().toLocaleTimeString()}`, output, '']);
+      setShowLog(true);
+
+      const [pkgPart, procPart = ''] = output.split('__PROC__');
+      const installedSet = new Set(
+        pkgPart
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean),
+      );
+
+      const nextApps = apps.map((item) => {
+        if (item.custom) return item;
+        const installed = item.pkgName ? installedSet.has(item.pkgName) : item.installed;
+        const running = item.processKey ? new RegExp(item.processKey, 'i').test(procPart) : false;
+        return { ...item, installed, running };
+      });
+
+      setApps(nextApps);
+      writeEcosystemSnapshot(nextApps);
+      addToast('NodeHub 板端状态同步完成', 'success');
+    } catch {
+      addToast('NodeHub 板端同步失败', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const filtered = apps.filter(a =>
     (filter === '全部' || a.category === filter) &&
@@ -78,19 +148,37 @@ export default function Examples() {
   const handleInstall = async (app: AppItem) => {
     addToast(`正在安装 ${app.name}...`, 'info');
     const out = await exec(app.id, app.installCmd, `安装 ${app.name}`);
-    if (out !== null) { setApps(p => p.map(a => a.id === app.id ? { ...a, installed: true } : a)); addToast(`${app.name} 安装完成`, 'success'); }
+    if (out !== null) {
+      setApps((prev) => {
+        const next = prev.map((a) => a.id === app.id ? { ...a, installed: true } : a);
+        writeEcosystemSnapshot(next);
+        return next;
+      });
+      addToast(`${app.name} 安装完成`, 'success');
+    }
   };
 
   const handleRun = async (app: AppItem) => {
     addToast(`正在启动 ${app.name}...`, 'info');
     const out = await exec(app.id, app.runCmd, `运行 ${app.name}`);
-    if (out !== null) { setApps(p => p.map(a => a.id === app.id ? { ...a, running: true } : a)); addToast(`${app.name} 已启动`, 'success'); }
+    if (out !== null) {
+      setApps((prev) => {
+        const next = prev.map((a) => a.id === app.id ? { ...a, running: true } : a);
+        writeEcosystemSnapshot(next);
+        return next;
+      });
+      addToast(`${app.name} 已启动`, 'success');
+    }
   };
 
   const handleStop = async (app: AppItem) => {
     const cmd = `pkill -f "${app.runCmd.split('&&').pop()?.trim().split(' ')[2] || app.name}" || true`;
     await exec(app.id, cmd, `停止 ${app.name}`);
-    setApps(p => p.map(a => a.id === app.id ? { ...a, running: false } : a));
+    setApps((prev) => {
+      const next = prev.map((a) => a.id === app.id ? { ...a, running: false } : a);
+      writeEcosystemSnapshot(next);
+      return next;
+    });
     addToast(`${app.name} 已停止`, 'info');
   };
 
@@ -98,7 +186,14 @@ export default function Examples() {
     if (!confirm(`确定卸载 ${app.name}？`)) return;
     addToast(`正在卸载 ${app.name}...`, 'info');
     const out = await exec(app.id, app.uninstallCmd, `卸载 ${app.name}`);
-    if (out !== null) { setApps(p => p.map(a => a.id === app.id ? { ...a, installed: false, running: false } : a)); addToast(`${app.name} 已卸载`, 'info'); }
+    if (out !== null) {
+      setApps((prev) => {
+        const next = prev.map((a) => a.id === app.id ? { ...a, installed: false, running: false } : a);
+        writeEcosystemSnapshot(next);
+        return next;
+      });
+      addToast(`${app.name} 已卸载`, 'info');
+    }
   };
 
   const handleRemoveCustom = (id: string) => { setApps(p => p.filter(a => a.id !== id)); addToast('已移除', 'info'); };
@@ -114,6 +209,21 @@ export default function Examples() {
   const handleCheckDeps = async () => {
     await exec('deps', 'dpkg -l | grep tros | head -20 && echo "---" && ros2 pkg list 2>/dev/null | head -20 || echo "ROS2 未安装"', '依赖检查');
   };
+
+  const handleOfficialReadyCheck = async () => {
+    await exec(
+      'rdk-ready',
+      'cat /etc/os-release 2>/dev/null | head -6; echo "---"; python3 --version; echo "---"; command -v ros2 >/dev/null 2>&1 && ros2 --help >/dev/null && echo ROS2_READY || echo ROS2_MISSING; echo "---"; python3 -c "import importlib.util; print(\"BPU_LIB_READY\" if (importlib.util.find_spec(\"hobot_dnn\") or importlib.util.find_spec(\"hobot_dnn_rdkx5\") or importlib.util.find_spec(\"bpu_infer_lib_x5\")) else \"BPU_LIB_MISSING\")" 2>/dev/null || echo BPU_LIB_MISSING; echo "---"; dpkg -l 2>/dev/null | grep -E "tros-|hobot" | head -30 || true',
+      '官方环境检查',
+    );
+  };
+
+  useEffect(() => {
+    if (currentDevice) {
+      syncFromBoard();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDevice?.id]);
 
   /* ── 未连接设备 ── */
   if (!currentDevice) {
@@ -154,6 +264,10 @@ export default function Examples() {
             <span className="nh-stat-chip"><span className="nh-stat-num">{installedCount}</span>已安装</span>
             <span className="nh-stat-chip live"><span className="nh-stat-num">{runningCount}</span>运行中</span>
           </div>
+          <button className="nh-btn ghost" onClick={syncFromBoard} disabled={busyId === 'sync-board'}>
+            {busyId === 'sync-board' ? '同步中...' : '板端同步'}
+          </button>
+          <button className="nh-btn ghost" onClick={handleOfficialReadyCheck} disabled={!!busyId}>官方环境检查</button>
           <button className="nh-btn ghost" onClick={handleCheckDeps} disabled={!!busyId}>依赖检查</button>
           <button className="nh-add-btn" onClick={() => setShowAdd(true)}>+ 添加应用</button>
         </div>
@@ -204,9 +318,17 @@ export default function Examples() {
             {/* 内联详情面板 */}
             {expandedId === app.id && (
               <div className="nh-card-detail" style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.02)', borderRadius: 8, margin: '6px 0 10px', fontSize: '0.78rem', color: '#475569', lineHeight: 1.7 }}>
-                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>安装命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.installCmd}</code></div>
-                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>运行命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.runCmd}</code></div>
-                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>卸载命令:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem' }}>{app.uninstallCmd}</code></div>
+                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>功能说明:</span> {app.desc}</div>
+                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>适用场景:</span> {app.scenario || '通用机器人开发场景'}</div>
+                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>执行结果:</span> 安装后可在板端启动节点并输出实时结果，支持系统同步状态。</div>
+                <details>
+                  <summary style={{ cursor: 'pointer', color: '#64748b', fontSize: '0.74rem' }}>查看执行命令</summary>
+                  <div style={{ marginTop: 8, fontSize: '0.72rem' }}>
+                    <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>安装:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{app.installCmd}</code></div>
+                    <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>运行:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{app.runCmd}</code></div>
+                    <div><span style={{ color: '#94a3b8' }}>卸载:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{app.uninstallCmd}</code></div>
+                  </div>
+                </details>
                 {app.repo && <div><span style={{ color: '#94a3b8' }}>NodeHub:</span> <a href={app.repo} target="_blank" rel="noopener noreferrer" style={{ color: '#ff6b00' }}>{app.repo}</a></div>}
               </div>
             )}

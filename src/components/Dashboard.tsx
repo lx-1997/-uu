@@ -273,12 +273,12 @@ export default function Dashboard() {
       <div className="dash-hero">
         <div className="dash-hero-text">
           <h1 className="dash-hero-title">
-            {currentDevice ? currentDevice.name : 'RDK Studio'}
+            {currentDevice ? `${currentDevice.name} · 开发工作台` : 'RDK Studio · 机器人开发平台'}
           </h1>
           <p className="dash-hero-sub">
             {currentDevice
-              ? <>设备在线 · <span className="dash-hero-ip">{currentDevice.ip}</span> · 运行 {topMetrics.uptime}</>
-              : '连接你的 RDK 开发板，开始 AI 开发之旅'}
+              ? <>设备在线 · <span className="dash-hero-ip">{currentDevice.ip}</span> · 运行 {topMetrics.uptime} · 最近更新 {topMetrics.updatedAt}</>
+                : '连接你的 RDK 开发板，从能力安装到应用运行形成完整链路'}
           </p>
         </div>
         {currentDevice && (

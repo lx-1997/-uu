@@ -213,7 +213,8 @@ export default function AIDock() {
   const promptsByTab: Record<string, typeof defaultPrompts> = {
     dashboard: [
       { id: 'diag', icon: '🩺', label: '一键体检', text: '帮我全面检查设备健康状态，包括温度、负载和网络' },
-      { id: 'stat', icon: '📊', label: '性能总结', text: '总结当前设备各项指标，判断是否适合跑多路推理' },
+      { id: 'stat', icon: '📊', label: '能力盘点', text: '同步 NodeHub 和 ModelZoo 板端状态，汇总当前可编排能力' },
+      { id: 'appgen', icon: '✨', label: '生成应用', text: '基于当前设备能力，生成一个可部署机器人应用并立即执行第一步' },
     ],
     terminal: [
       { id: 'cmd', icon: '⌨️', label: '帮我写命令', text: '我想做什么操作，帮我生成终端命令' },

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { executeDeviceCommand, getRememberedDevicePassword } from '../api';
 
@@ -10,6 +10,7 @@ interface ModelItem {
   deployCmd: string; runCmd: string; removeCmd: string;
   repo: string; deployed: boolean; running: boolean; custom?: boolean;
   fps?: string; latency?: string;
+  modelPathPattern?: string; processKey?: string;
 }
 
 const BUILTIN_MODELS: ModelItem[] = [
@@ -18,43 +19,43 @@ const BUILTIN_MODELS: ModelItem[] = [
     repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/detect/yolov5',
     deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh yolov5s',
     runCmd: 'cd /opt/rdk_model_zoo && python3 demos/detect/yolov5/yolov5_detect.py',
-    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/yolov5s*', deployed: false, running: false },
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/yolov5s*', deployed: false, running: false, modelPathPattern: 'yolov5', processKey: 'yolov5_detect.py' },
   { id: 'fcos', name: 'FCOS', icon: '📦', desc: '无锚框目标检测，适合密集场景', category: '检测',
     format: 'BIN', size: '22MB', boards: ['RDK X3', 'RDK X5'], fps: '25fps', latency: '40ms',
     repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/detect/fcos',
     deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh fcos',
     runCmd: 'cd /opt/rdk_model_zoo && python3 demos/detect/fcos/fcos_detect.py',
-    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/fcos*', deployed: false, running: false },
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/fcos*', deployed: false, running: false, modelPathPattern: 'fcos', processKey: 'fcos_detect.py' },
   { id: 'mobilenetv2', name: 'MobileNetV2', icon: '🏷️', desc: '轻量级图像分类模型', category: '分类',
     format: 'BIN', size: '8MB', boards: ['RDK X3', 'RDK X5', 'RDK Ultra'], fps: '60fps', latency: '16ms',
     repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/classify/mobilenetv2',
     deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh mobilenetv2',
     runCmd: 'cd /opt/rdk_model_zoo && python3 demos/classify/mobilenetv2/mobilenetv2_cls.py',
-    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/mobilenetv2*', deployed: false, running: false },
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/mobilenetv2*', deployed: false, running: false, modelPathPattern: 'mobilenetv2', processKey: 'mobilenetv2_cls.py' },
   { id: 'deeplabv3', name: 'DeepLabV3+', icon: '🎨', desc: '语义分割模型，像素级场景理解', category: '分割',
     format: 'BIN', size: '18MB', boards: ['RDK X3', 'RDK X5'], fps: '15fps', latency: '66ms',
     repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/segment/deeplabv3',
     deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh deeplabv3plus',
     runCmd: 'cd /opt/rdk_model_zoo && python3 demos/segment/deeplabv3/deeplabv3_seg.py',
-    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/deeplabv3*', deployed: false, running: false },
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/deeplabv3*', deployed: false, running: false, modelPathPattern: 'deeplab', processKey: 'deeplabv3_seg.py' },
   { id: 'yolov8pose', name: 'YOLOv8-Pose', icon: '🏃', desc: '人体姿态估计，17 关键点检测', category: '姿态',
     format: 'BIN', size: '12MB', boards: ['RDK X5'], fps: '20fps', latency: '50ms',
     repo: 'https://github.com/D-Robotics/rdk_model_zoo/tree/main/demos/pose/yolov8_pose',
     deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh yolov8_pose',
     runCmd: 'cd /opt/rdk_model_zoo && python3 demos/pose/yolov8_pose/yolov8_pose.py',
-    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/yolov8_pose*', deployed: false, running: false },
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/yolov8_pose*', deployed: false, running: false, modelPathPattern: 'yolov8_pose', processKey: 'yolov8_pose.py' },
   { id: 'whisper', name: 'Whisper-tiny', icon: '🎙️', desc: '语音识别模型，支持中英文', category: '语音',
     format: 'ONNX', size: '39MB', boards: ['RDK X5', 'RDK Ultra'], fps: '--', latency: '200ms',
     repo: 'https://github.com/D-Robotics/rdk_model_zoo',
     deployCmd: 'cd /opt/rdk_model_zoo && bash scripts/download_model.sh whisper_tiny',
     runCmd: 'cd /opt/rdk_model_zoo && python3 demos/audio/whisper/whisper_asr.py',
-    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/whisper*', deployed: false, running: false },
+    removeCmd: 'rm -rf /opt/rdk_model_zoo/models/whisper*', deployed: false, running: false, modelPathPattern: 'whisper', processKey: 'whisper_asr.py' },
 ];
 
 const CATEGORIES = ['全部', '检测', '分类', '分割', '姿态', '语音', '自定义'];
 
 export default function Models() {
-  const { currentDevice, addToast } = useAppState();
+  const { currentDevice, addToast, setActiveTab, setChatExpanded, setCmd } = useAppState();
   const [models, setModels] = useState<ModelItem[]>(BUILTIN_MODELS);
   const [filter, setFilter] = useState('全部');
   const [search, setSearch] = useState('');
@@ -63,6 +64,76 @@ export default function Models() {
   const [showLog, setShowLog] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [newModel, setNewModel] = useState({ name: '', desc: '', format: 'BIN', deployCmd: '', runCmd: '', removeCmd: '' });
+
+  const pushToMainChat = (text: string) => {
+    setActiveTab('dashboard');
+    setChatExpanded(true);
+    setCmd(text);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const form = document.querySelector('.input-box') as HTMLFormElement | null;
+        form?.requestSubmit();
+      });
+    });
+  };
+
+  const writeEcosystemSnapshot = (nextModels: ModelItem[]) => {
+    const deployed = nextModels.filter((m) => m.deployed).map((m) => m.name);
+    const running = nextModels.filter((m) => m.running).map((m) => m.name);
+    const current = JSON.parse(localStorage.getItem('rdk-ecosystem-sync') || '{}') as Record<string, unknown>;
+    const payload = {
+      ...current,
+      modelzoo: {
+        deployed,
+        running,
+        deviceIp: currentDevice?.ip,
+        updatedAt: new Date().toISOString(),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem('rdk-ecosystem-sync', JSON.stringify(payload));
+  };
+
+  const syncFromBoard = async () => {
+    if (!currentDevice) {
+      addToast('请先连接设备', 'warning');
+      return;
+    }
+    setBusyId('sync-board');
+    try {
+      const pwd = getRememberedDevicePassword(currentDevice.id);
+      const cmd = 'bash -lc "ls -1 /opt/rdk_model_zoo/models 2>/dev/null || true; echo __PROC__; ps -ef | grep -E \'yolov5_detect.py|fcos_detect.py|mobilenetv2_cls.py|deeplabv3_seg.py|yolov8_pose.py|whisper_asr.py\' | grep -v grep || true"';
+      const result = await executeDeviceCommand(currentDevice.id, cmd, pwd);
+      const output = result.output || '';
+      setLogs((prev) => [...prev.slice(-60), `[板端同步] ${new Date().toLocaleTimeString()}`, output, '']);
+      setShowLog(true);
+
+      const [modelPart, procPart = ''] = output.split('__PROC__');
+      const modelText = modelPart.toLowerCase();
+      const nextModels = models.map((model) => {
+        if (model.custom) return model;
+        const deployed = model.modelPathPattern ? modelText.includes(model.modelPathPattern.toLowerCase()) : model.deployed;
+        const running = model.processKey ? new RegExp(model.processKey, 'i').test(procPart) : false;
+        return { ...model, deployed, running };
+      });
+
+      setModels(nextModels);
+      writeEcosystemSnapshot(nextModels);
+      addToast('ModelZoo 板端状态同步完成', 'success');
+    } catch {
+      addToast('ModelZoo 板端同步失败', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleOfficialReadyCheck = async () => {
+    await exec(
+      'rdk-modelzoo-ready',
+      'cat /etc/os-release 2>/dev/null | head -6; echo "---"; python3 --version; echo "---"; pip3 show bpu_infer_lib_x5 2>/dev/null || pip3 show bpu_infer_lib_x3 2>/dev/null || echo BPU_INFER_LIB_NOT_FOUND; echo "---"; test -d /opt/rdk_model_zoo && echo MODELZOO_DIR_READY || echo MODELZOO_DIR_MISSING; echo "---"; command -v hrt_model_exec >/dev/null 2>&1 && echo HRT_MODEL_EXEC_READY || echo HRT_MODEL_EXEC_MISSING',
+      '官方环境检查',
+    );
+  };
 
   const filtered = models.filter(m =>
     (filter === '全部' || m.category === filter) &&
@@ -92,25 +163,50 @@ export default function Models() {
     addToast(`正在部署 ${m.name}...`, 'info');
     await exec(m.id, 'test -d /opt/rdk_model_zoo || (cd /opt && git clone https://github.com/D-Robotics/rdk_model_zoo.git)', '检查 ModelZoo');
     const out = await exec(m.id, m.deployCmd, `部署 ${m.name}`);
-    if (out !== null) { setModels(p => p.map(x => x.id === m.id ? { ...x, deployed: true } : x)); addToast(`${m.name} 部署完成`, 'success'); }
+    if (out !== null) {
+      setModels((prev) => {
+        const next = prev.map((x) => x.id === m.id ? { ...x, deployed: true } : x);
+        writeEcosystemSnapshot(next);
+        return next;
+      });
+      addToast(`${m.name} 部署完成`, 'success');
+    }
   };
 
   const handleRun = async (m: ModelItem) => {
     addToast(`正在运行 ${m.name}...`, 'info');
     const out = await exec(m.id, m.runCmd, `运行 ${m.name}`);
-    if (out !== null) { setModels(p => p.map(x => x.id === m.id ? { ...x, running: true } : x)); addToast(`${m.name} 已启动`, 'success'); }
+    if (out !== null) {
+      setModels((prev) => {
+        const next = prev.map((x) => x.id === m.id ? { ...x, running: true } : x);
+        writeEcosystemSnapshot(next);
+        return next;
+      });
+      addToast(`${m.name} 已启动`, 'success');
+    }
   };
 
   const handleStop = async (m: ModelItem) => {
     await exec(m.id, `pkill -f "${m.name.toLowerCase()}" || true`, `停止 ${m.name}`);
-    setModels(p => p.map(x => x.id === m.id ? { ...x, running: false } : x));
+    setModels((prev) => {
+      const next = prev.map((x) => x.id === m.id ? { ...x, running: false } : x);
+      writeEcosystemSnapshot(next);
+      return next;
+    });
     addToast(`${m.name} 已停止`, 'info');
   };
 
   const handleRemove = async (m: ModelItem) => {
     if (!confirm(`确定移除 ${m.name}？`)) return;
     const out = await exec(m.id, m.removeCmd, `移除 ${m.name}`);
-    if (out !== null) { setModels(p => p.map(x => x.id === m.id ? { ...x, deployed: false, running: false } : x)); addToast(`${m.name} 已移除`, 'info'); }
+    if (out !== null) {
+      setModels((prev) => {
+        const next = prev.map((x) => x.id === m.id ? { ...x, deployed: false, running: false } : x);
+        writeEcosystemSnapshot(next);
+        return next;
+      });
+      addToast(`${m.name} 已移除`, 'info');
+    }
   };
 
   const handleRemoveCustom = (id: string) => { setModels(p => p.filter(m => m.id !== id)); addToast('已删除', 'info'); };
@@ -122,6 +218,13 @@ export default function Models() {
     setShowAdd(false);
     addToast('模型已添加', 'success');
   };
+
+  useEffect(() => {
+    if (currentDevice) {
+      syncFromBoard();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDevice?.id]);
 
   /* ── 未连接设备 ── */
   if (!currentDevice) {
@@ -162,6 +265,10 @@ export default function Models() {
             <span className="mdl-stat-chip"><span className="mdl-stat-num">{deployedCount}</span>已部署</span>
             <span className="mdl-stat-chip live"><span className="mdl-stat-num">{runningCount}</span>运行中</span>
           </div>
+          <button className="mdl-btn ghost" onClick={syncFromBoard} disabled={busyId === 'sync-board'}>
+            {busyId === 'sync-board' ? '同步中...' : '板端同步'}
+          </button>
+          <button className="mdl-btn ghost" onClick={handleOfficialReadyCheck} disabled={!!busyId}>官方环境检查</button>
           <button className="mdl-add-btn" onClick={() => setShowAdd(true)}>+ 添加模型</button>
         </div>
       </div>
