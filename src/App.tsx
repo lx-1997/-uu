@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
 import './styles.css';
+import './styles/openclaw.css';
+import './styles/nodehub.css';
+import './styles/models.css';
+import './styles/ros.css';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import Sidebar from './components/Sidebar';
 import TopToolbar from './components/TopToolbar';
@@ -79,6 +83,38 @@ function useDesktopTabSync(activeTab: string) {
 function AppShell() {
   const { activeTab } = useAppState();
   useDesktopTabSync(activeTab);
+
+  useEffect(() => {
+    const rdk = window.rdkDesktop;
+    if (!rdk?.updateViewBounds) return;
+
+    let rafId = 0;
+    const reportBounds = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const viewport = document.querySelector('.canvas-viewport') as HTMLElement | null;
+        if (!viewport) return;
+        const rect = viewport.getBoundingClientRect();
+        rdk.updateViewBounds?.({
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        });
+      });
+    };
+
+    reportBounds();
+    const delayTimer = window.setTimeout(reportBounds, 80);
+    window.addEventListener('resize', reportBounds);
+
+    return () => {
+      window.clearTimeout(delayTimer);
+      window.removeEventListener('resize', reportBounds);
+      cancelAnimationFrame(rafId);
+    };
+  }, [activeTab]);
+
   return (
     <div className="canvas-shell">
       <div className="layout-container">

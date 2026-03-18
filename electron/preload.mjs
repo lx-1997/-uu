@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
 
   // 通知主进程当前活跃的嵌入 URL（tab 切换时调用，null 表示无嵌入视图）
   setActiveUrl: (url) => ipcRenderer.send('rdk:set-active-url', { url }),
+  updateViewBounds: (bounds) => ipcRenderer.send('rdk:update-view-bounds', { bounds }),
 
   // 本机真实烧录能力（桌面端）
   flashListDrives: () => ipcRenderer.invoke('rdk:flash:list-drives'),

@@ -13,14 +13,15 @@
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10);
+  margin-top: 4px;
 }
 
 .ros-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 44px;
-  padding: 0 14px;
+  min-height: 56px;
+  padding: 8px 16px;
   background: #ffffff;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;

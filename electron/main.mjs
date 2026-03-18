@@ -10,11 +10,29 @@ const __dirname = path.dirname(__filename);
 // 侧边栏宽度 + 顶部工具栏高度（与 src/styles/layout.css 保持一致）
 const SIDEBAR_W = 260;
 const TOPBAR_H = 48;
+const DOCK_RESERVED_H = 170;
 
 let mainWin = null;
 let serverProcess = null;
 // url -> WebContentsView 映射
 const viewsMap = {};
+let latestRendererBounds = null;
+
+function normalizeRendererBounds(win, raw) {
+  const [cw, ch] = win.getContentSize();
+  const x = Math.max(0, Math.min(Math.round(raw?.x ?? 0), Math.max(0, cw - 10)));
+  const y = Math.max(0, Math.min(Math.round(raw?.y ?? 0), Math.max(0, ch - 10)));
+  const width = Math.max(100, Math.min(Math.round(raw?.width ?? 0), Math.max(100, cw - x)));
+  const height = Math.max(120, Math.min(Math.round(raw?.height ?? 0), Math.max(120, ch - y)));
+  return { x, y, width, height };
+}
+
+function getViewBounds(win) {
+  if (latestRendererBounds) {
+    return normalizeRendererBounds(win, latestRendererBounds);
+  }
+  return calcViewBounds(win);
+}
 function runPowerShell(script) {
   return new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
@@ -165,11 +183,13 @@ function getRendererUrl() {
 
 function calcViewBounds(win) {
   const [w, h] = win.getContentSize();
+  const width = Math.max(100, w - SIDEBAR_W);
+  const height = Math.max(120, h - TOPBAR_H - DOCK_RESERVED_H);
   return {
     x: SIDEBAR_W,
     y: TOPBAR_H,
-    width: w - SIDEBAR_W,
-    height: h - TOPBAR_H,
+    width,
+    height,
   };
 }
 
@@ -203,7 +223,7 @@ async function createMainWindow() {
   mainWin.on('resize', () => {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      const bounds = calcViewBounds(mainWin);
+      const bounds = getViewBounds(mainWin);
       for (const url in viewsMap) {
         const view = viewsMap[url];
         if (view && !view.webContents.isDestroyed()) {
@@ -226,7 +246,7 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
     existing.setVisible(true);
     mainWin.contentView.removeChildView(existing);
     mainWin.contentView.addChildView(existing);
-    existing.setBounds(calcViewBounds(mainWin));
+    existing.setBounds(getViewBounds(mainWin));
     return;
   }
 
@@ -239,7 +259,7 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
 
   view.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
 
-  const bounds = calcViewBounds(mainWin);
+  const bounds = getViewBounds(mainWin);
   view.setBounds(bounds);
   mainWin.contentView.addChildView(view);
 
@@ -278,9 +298,22 @@ ipcMain.on('rdk:set-active-url', (_event, { url }) => {
       // 确保在最顶层
       mainWin?.contentView.removeChildView(view);
       mainWin?.contentView.addChildView(view);
-      view.setBounds(calcViewBounds(mainWin));
+      if (mainWin) view.setBounds(getViewBounds(mainWin));
     } else {
       view.setVisible(false);
+    }
+  }
+});
+
+// ── IPC: 渲染层上报 canvas-viewport 的真实像素边界（用于精确贴合 WebContentsView） ──
+ipcMain.on('rdk:update-view-bounds', (_event, { bounds }) => {
+  if (!mainWin || !bounds) return;
+  latestRendererBounds = bounds;
+  const nextBounds = getViewBounds(mainWin);
+  for (const url in viewsMap) {
+    const view = viewsMap[url];
+    if (view && !view.webContents.isDestroyed()) {
+      view.setBounds(nextBounds);
     }
   }
 });

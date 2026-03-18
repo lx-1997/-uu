@@ -5,7 +5,7 @@
 .nh-page {
   display: flex; flex-direction: column; gap: 16px;
   max-width: 1100px; margin: 0 auto; width: 100%;
-  padding: 0 4px 80px 4px;
+  padding: 4px 4px 80px 4px;
   animation: nhFadeUp 0.35s ease;
 }
 
@@ -51,7 +51,8 @@
 /* ── 顶部状态栏 ── */
 .nh-topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 22px; border-radius: 16px;
+  min-height: 56px;
+  padding: 14px 20px; border-radius: 18px;
   background: #fff; border: 1px solid var(--border);
   box-shadow: 0 2px 8px rgba(0,0,0,0.03);
   flex-wrap: wrap; gap: 12px;

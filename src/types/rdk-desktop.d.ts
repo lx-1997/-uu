@@ -10,6 +10,7 @@ declare global {
       hideUrl?: (url: string) => void;
       closeUrl?: (url: string) => void;
       setActiveUrl?: (url: string | null) => void;
+      updateViewBounds?: (bounds: { x: number; y: number; width: number; height: number }) => void;
       onSubUrlOpen?: (cb: (url: string) => void) => void;
       onUrlLoadFailed?: (cb: (url: string, errorCode: number, errorDescription: string) => void) => void;
       onUrlLoaded?: (cb: (url: string) => void) => void;

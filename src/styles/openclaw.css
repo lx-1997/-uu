@@ -106,7 +106,8 @@
 /* ── Status bar ── */
 .oc-bar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 22px; border-radius: 16px;
+  min-height: 56px;
+  padding: 14px 20px; border-radius: 18px;
   background: #fff; border: 1px solid var(--border);
   box-shadow: 0 2px 8px rgba(0,0,0,0.04);
   gap: 14px; flex-wrap: wrap;

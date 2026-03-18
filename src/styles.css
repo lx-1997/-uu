@@ -2816,6 +2816,10 @@ body {
   box-sizing: border-box;
 }
 
+.canvas-viewport:not(.viewport-terminal) > .page-transition {
+  padding-top: 4px;
+}
+
 @keyframes pageIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -4796,10 +4800,10 @@ select.adm-input {
   flex-direction: column;
   height: 100%;
   width: 100%;
-  background: #0f0f0f;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  box-shadow: 0 10px 28px rgba(15,23,42,0.12);
 }
 
 /* ── Top bar ── */
@@ -4807,12 +4811,23 @@ select.adm-input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 42px;
-  padding: 0 14px;
-  background: #1a1a1a;
-  border-bottom: 1px solid #2a2a2a;
+  min-height: 56px;
+  padding: 8px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
   flex-shrink: 0;
   user-select: none;
+  position: relative;
+}
+
+.vnc-topbar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(255,107,0,0.75), rgba(255,107,0,0.14));
 }
 
 .vnc-topbar-left,
@@ -4835,21 +4850,21 @@ select.adm-input {
 
 .vnc-topbar-title {
   font-size: 0.82rem;
-  font-weight: 600;
-  color: #e0e0e0;
+  font-weight: 700;
+  color: #1e293b;
   letter-spacing: -0.2px;
 }
 
 .vnc-topbar-device {
   font-size: 0.72rem;
-  color: #666;
+  color: #64748b;
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 
 .vnc-topbar-sep {
   width: 1px;
   height: 18px;
-  background: #333;
+  background: #e2e8f0;
   flex-shrink: 0;
 }
 
@@ -4862,9 +4877,9 @@ select.adm-input {
   border-radius: 20px;
   font-size: 0.72rem;
   font-weight: 600;
-  background: #2a2a2a;
-  color: #888;
-  border: 1px solid #333;
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
 }
 
 .vnc-status-badge.live {
@@ -4877,7 +4892,7 @@ select.adm-input {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #555;
+  background: #94a3b8;
 }
 
 .vnc-status-badge.live .vnc-status-dot {
@@ -4897,8 +4912,9 @@ select.adm-input {
 .vnc-quality-group {
   display: flex;
   gap: 2px;
-  background: #222;
-  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   padding: 2px;
 }
 
@@ -4907,7 +4923,7 @@ select.adm-input {
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: #888;
+  color: #64748b;
   font-size: 0.7rem;
   font-weight: 600;
   cursor: pointer;
@@ -4915,7 +4931,7 @@ select.adm-input {
   font-family: inherit;
 }
 
-.vnc-quality-btn:hover { color: #ccc; }
+.vnc-quality-btn:hover { color: #334155; }
 .vnc-quality-btn.active {
   background: #ff6b00;
   color: #fff;
@@ -4924,9 +4940,9 @@ select.adm-input {
 
 /* Tool buttons */
 .vnc-tool-btn {
-  background: none;
-  border: 1px solid #333;
-  color: #888;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
   cursor: pointer;
   padding: 5px 8px;
   border-radius: 6px;
@@ -4937,14 +4953,14 @@ select.adm-input {
 }
 
 .vnc-tool-btn:hover {
-  color: #fff;
-  border-color: #555;
-  background: #2a2a2a;
+  color: #ff6b00;
+  border-color: #fed7aa;
+  background: #fff7ed;
 }
 
 .vnc-disconnect-btn {
   padding: 4px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid #ef4444;
   background: rgba(239,68,68,0.1);
   color: #ef4444;
@@ -5296,6 +5312,14 @@ select.adm-input {
 .canvas-viewport.viewport-vnc .center-stage {
   max-width: 100% !important;
   height: 100% !important;
+}
+
+.canvas-viewport.viewport-vnc .vnc-container,
+.canvas-viewport.viewport-ide .ide-container {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 
 /* ── Flasher viewport override ── */
