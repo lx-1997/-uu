@@ -43,7 +43,9 @@ body {
   font-family: "Google Sans", "Inter", Roboto, "Helvetica Neue", sans-serif;
   background-color: var(--text-primary);
   color: #1e293b;
-  overflow: hidden;
+  /* Allow vertical scrolling for long pages */
+  overflow-x: hidden;
+  overflow-y: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

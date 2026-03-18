@@ -85,7 +85,9 @@ function AppShell() {
         <Sidebar />
         <div className="main-area">
           <TopToolbar />
-          <div className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros'].includes(activeTab) ? 'viewport-terminal' : ''}`}>
+          <div
+            className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros'].includes(activeTab) ? 'viewport-terminal' : ''} ${activeTab === 'vnc' ? 'viewport-vnc' : ''} ${activeTab === 'ide' ? 'viewport-ide' : ''} ${activeTab === 'flasher' ? 'viewport-flasher' : ''}`}
+          >
             <MainContent />
           </div>
           <AIDock />

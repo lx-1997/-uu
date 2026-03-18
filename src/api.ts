@@ -329,6 +329,26 @@ export function flashVerify(deviceId: string, password?: string) {
   });
 }
 
+export function flashExecute(
+  deviceId: string,
+  payload: {
+    imageUrl: string;
+    target: string;
+    board?: string;
+    mode?: 'network' | 'local';
+    wifiName?: string;
+    wifiPass?: string;
+    skipVerify?: boolean;
+  },
+  password?: string,
+) {
+  return request<{ ok: boolean; output: string; strategy: string; targetDevice: string }>(`/api/devices/${deviceId}/flash/execute`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+    body: JSON.stringify(payload),
+  });
+}
+
 export function downloadDeviceFile(deviceId: string, path: string, password?: string) {
   const qp = new URLSearchParams({ path }).toString();
   return request<DeviceFileOpResult>(`/api/devices/${deviceId}/files/download?${qp}`, {

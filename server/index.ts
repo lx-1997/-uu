@@ -527,6 +527,107 @@ app.post('/api/devices/:id/flash/verify', async (request, response) => {
   response.json({ ok: true, output: executed.output });
 });
 
+app.post('/api/devices/:id/flash/execute', async (request, response) => {
+  const { id } = request.params;
+  const {
+    imageUrl,
+    target,
+    board,
+    mode,
+    wifiName,
+    wifiPass,
+    skipVerify,
+  } = request.body as {
+    imageUrl?: string;
+    target?: string;
+    board?: string;
+    mode?: 'network' | 'local';
+    wifiName?: string;
+    wifiPass?: string;
+    skipVerify?: boolean;
+  };
+
+  if (!imageUrl?.trim()) {
+    response.status(400).json({ error: '缺少镜像地址 imageUrl' });
+    return;
+  }
+
+  const targetMap: Record<string, string> = {
+    emmc: '/dev/mmcblk0',
+    sd: '/dev/mmcblk1',
+    usb: '/dev/sda',
+  };
+  const targetDevice = targetMap[target ?? ''] ?? (target?.trim() || '/dev/mmcblk1');
+
+  if (mode === 'local') {
+    response.json({
+      ok: true,
+      strategy: 'local-guide',
+      targetDevice,
+      output: [
+        `BOARD=${board ?? 'unknown'}`,
+        `IMAGE=${imageUrl}`,
+        `TARGET=${targetDevice}`,
+        `WIFI=${wifiName ? `${wifiName}${wifiPass ? ' (已设置密码)' : ''}` : '未预配'}`,
+        '请在本机使用 balenaEtcher / Raspberry Pi Imager / dd 执行写盘。',
+      ].join('\n'),
+    });
+    return;
+  }
+
+  const imagePath = '/tmp/rdk_flash_image.img.xz';
+  const rawImagePath = '/tmp/rdk_flash_image.img';
+  const wifiScript = wifiName?.trim()
+    ? `mkdir -p /tmp/rdk_netplan && cat >/tmp/rdk_netplan/01-rdk-studio.yaml <<'NETCFG'\nnetwork:\n  version: 2\n  wifis:\n    wlan0:\n      dhcp4: true\n      access-points:\n        \"${wifiName.replace(/"/g, '\\"')}\":\n          password: \"${(wifiPass ?? '').replace(/"/g, '\\"')}\"\nNETCFG\n`
+    : 'echo "skip wifi pre-config"';
+
+  const command = `bash -lc '
+set -e
+echo "===FLASH_PLAN==="
+echo "board=${board ?? 'unknown'}"
+echo "image=${imageUrl}"
+echo "target=${targetDevice}"
+echo "mode=network"
+
+echo "===DOWNLOAD==="
+(wget -O ${shEscape(imagePath)} ${shEscape(imageUrl)} 2>&1 || curl -fL ${shEscape(imageUrl)} -o ${shEscape(imagePath)} 2>&1)
+ls -lh ${shEscape(imagePath)}
+
+echo "===PREPARE==="
+if file ${shEscape(imagePath)} | grep -qi "XZ compressed"; then
+  xz -dc ${shEscape(imagePath)} > ${shEscape(rawImagePath)}
+else
+  cp ${shEscape(imagePath)} ${shEscape(rawImagePath)}
+fi
+ls -lh ${shEscape(rawImagePath)}
+
+echo "===WRITE==="
+if command -v pv >/dev/null 2>&1; then
+  pv ${shEscape(rawImagePath)} | dd of=${shEscape(targetDevice)} bs=8M conv=fsync status=none
+else
+  dd if=${shEscape(rawImagePath)} of=${shEscape(targetDevice)} bs=8M conv=fsync status=progress
+fi
+sync
+
+echo "===WIFI==="
+${wifiScript}
+
+echo "===VERIFY==="
+if [ ${skipVerify ? '1' : '0'} -eq 1 ]; then
+  echo "skip verify"
+else
+  fdisk -l ${shEscape(targetDevice)} 2>/dev/null | head -20 || true
+fi
+
+echo "===FLASH_DONE==="
+'`;
+
+  const executed = await runOnDevice(request, response, id, [command]);
+  if (!executed) return;
+
+  response.json({ ok: true, output: executed.output, strategy: 'network-direct', targetDevice });
+});
+
 app.get('/api/devices/:id/ros/topics', async (request, response) => {
   const { id } = request.params;
   const executed = await runOnDevice(request, response, id, ['bash -lc "(command -v ros2 >/dev/null 2>&1 && ros2 topic list) || echo ROS2_NOT_INSTALLED"']);

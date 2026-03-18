@@ -15,12 +15,18 @@
   --radius-lg: 16px;
 }
 
+html, body {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: #f4f6f8;
   color: #1e293b;
-  overflow: hidden;
+  /* Allow vertical scrolling; horizontal overflow is still hidden for layout stability */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -127,6 +133,8 @@ body {
 /* Main Content Area */
 .main-area {
   flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden;
+  min-height: 0;
+  --dock-reserved-height: 170px;
 }
 
 /* Top Toolbar */
@@ -159,13 +167,16 @@ body {
 /* Canvas Viewport */
 .canvas-viewport {
   flex: 1; display: flex; align-items: flex-start; justify-content: center;
-  padding: 32px 48px 120px 48px; position: relative; overflow-y: auto;
+  padding: 32px 48px calc(120px + var(--dock-reserved-height)) 48px; position: relative; overflow-y: auto;
+  min-height: 0;
 }
 .canvas-viewport.viewport-terminal {
-  padding: 0; overflow: hidden; background: #f8f9fb;
+  padding: 0 0 var(--dock-reserved-height) 0;
+  overflow: hidden;
+  background: #f8f9fb;
 }
 .canvas-viewport.viewport-terminal > .page-transition {
-  width: 100%; height: calc(100% - 140px); display: flex; flex-direction: column;
+  width: 100%; height: 100%; display: flex; flex-direction: column;
 }
 
 .ide-fullscreen {
@@ -1611,6 +1622,20 @@ body {
   transition: all 0.4s cubic-bezier(0.22,1,0.36,1);
 }
 
+/* Flasher 页面允许内容区滚动穿透，仅保留底部控件可交互 */
+.floating-dock.flasher-passive .dock-wrapper {
+  pointer-events: none;
+}
+
+.floating-dock.flasher-passive .input-box,
+.floating-dock.flasher-passive .quick-prompt-strip,
+.floating-dock.flasher-passive .quick-prompt-chip,
+.floating-dock.flasher-passive .suggestions-dropdown,
+.floating-dock.flasher-passive .suggestion-item,
+.floating-dock.flasher-passive .chat-panel {
+  pointer-events: auto;
+}
+
 
 .dock-wrapper {
   pointer-events: auto;
@@ -2782,6 +2807,13 @@ body {
 /* Page transition */
 .page-transition {
   animation: pageIn 0.25s ease;
+  width: 100%;
+  min-height: 0;
+}
+
+.canvas-viewport > .page-transition {
+  padding-bottom: 24px;
+  box-sizing: border-box;
 }
 
 @keyframes pageIn {
@@ -4746,12 +4778,12 @@ select.adm-input {
 .ide-statusbar-item.modified { color: #ff6b00; }
 
 /* ── IDE viewport override ── */
-.canvas-viewport:has(.ide-container) {
+.canvas-viewport.viewport-ide {
   padding: 0 !important;
   overflow: hidden !important;
 }
 
-.center-stage:has(.ide-container) {
+.canvas-viewport.viewport-ide .center-stage {
   max-width: 100% !important;
   height: 100% !important;
 }
@@ -5256,14 +5288,42 @@ select.adm-input {
 .md-h4 { font-size: 0.9rem; font-weight: 700; color: #334155; margin: 8px 0 4px; }
 
 /* ── VNC viewport override ── */
-.canvas-viewport:has(.vnc-container) {
+.canvas-viewport.viewport-vnc {
   padding: 0 !important;
   overflow: hidden !important;
 }
 
-.center-stage:has(.vnc-container) {
+.canvas-viewport.viewport-vnc .center-stage {
   max-width: 100% !important;
   height: 100% !important;
+}
+
+/* ── Flasher viewport override ── */
+.canvas-viewport.viewport-flasher {
+  align-items: flex-start;
+  overflow-y: auto !important;
+  justify-content: flex-start;
+  padding: 24px 32px calc(var(--dock-reserved-height) + 160px) 32px;
+  min-height: 0;
+}
+
+.center-stage.flasher-stage {
+  width: 100%;
+  max-width: 1180px;
+  align-items: stretch;
+  margin: 0 auto;
+  padding-bottom: 0;
+  min-height: max-content;
+}
+
+.ob-wizard.flasher-wizard {
+  max-height: none !important;
+  min-height: max-content;
+  padding-bottom: 40px;
+}
+
+.ob-wizard.flasher-wizard > *:last-child {
+  margin-bottom: 48px;
 }
 
 /* ============================================
@@ -5271,7 +5331,7 @@ select.adm-input {
    ============================================ */
 .dash-page {
   width: 100%; max-width: 860px; display: flex; flex-direction: column;
-  gap: 0; animation: fadeIn 0.3s ease;
+  gap: 0; animation: fadeIn 0.3s ease; margin: 0 auto;
 }
 
 /* Hero */

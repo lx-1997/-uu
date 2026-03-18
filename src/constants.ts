@@ -55,8 +55,8 @@ export const FLASH_IMAGES = [
 ];
 
 export const STORAGE_TARGETS = [
-  { id: 'sd', label: 'SD Card', path: '/dev/mmcblk0', safe: '可热插拔适合开发调试' },
-  { id: 'emmc', label: 'eMMC', path: '/dev/mmcblk1', safe: '适合稳定部署需二次确认' },
+  { id: 'sd', label: 'SD Card', path: '/dev/mmcblk1', safe: '可热插拔适合开发调试' },
+  { id: 'emmc', label: 'eMMC', path: '/dev/mmcblk0', safe: '适合稳定部署需二次确认' },
   { id: 'usb', label: 'USB 启动盘', path: '/dev/sda', safe: '适合离线交付与系统恢复' },
 ];
 

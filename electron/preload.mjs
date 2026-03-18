@@ -32,4 +32,12 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
 
   // 通知主进程当前活跃的嵌入 URL（tab 切换时调用，null 表示无嵌入视图）
   setActiveUrl: (url) => ipcRenderer.send('rdk:set-active-url', { url }),
+
+  // 本机真实烧录能力（桌面端）
+  flashListDrives: () => ipcRenderer.invoke('rdk:flash:list-drives'),
+  flashPickImage: () => ipcRenderer.invoke('rdk:flash:pick-image'),
+  flashWriteLocal: (payload) => ipcRenderer.invoke('rdk:flash:write-local', payload),
+  onFlashProgress: (cb) => {
+    ipcRenderer.on('rdk:flash:progress', (_event, payload) => cb(payload));
+  },
 });

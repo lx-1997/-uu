@@ -2,7 +2,331 @@
    Onboarding Wizard
    ══════════════════════════════════════════ */
 
-.ob-wizard { width: 100%; max-width: 860px; display: flex; flex-direction: column; gap: 18px; padding: 16px 0; max-height: calc(100vh - 100px); }
+.ob-wizard { width: 100%; max-width: 860px; display: flex; flex-direction: column; gap: 18px; padding: 16px 0 32px; max-height: calc(100vh - 100px); }
+
+.flasher-stage {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  align-self: center;
+  align-items: flex-start;
+  min-height: max-content;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.flasher-wizard {
+  max-height: none;
+  min-height: max-content;
+  width: 100%;
+}
+
+.flasher-hero-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+  gap: 18px;
+  padding: 24px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #fff7ed 0%, #ffffff 38%, #eff6ff 100%);
+  border: 1px solid rgba(255, 107, 0, 0.12);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+}
+
+.flasher-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 107, 0, 0.1);
+  color: #ea580c;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.flasher-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.flasher-title {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+  color: #0f172a;
+}
+
+.flasher-subtitle {
+  margin: 0;
+  color: #475569;
+  font-size: 0.96rem;
+  line-height: 1.8;
+}
+
+.flasher-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.flasher-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #334155;
+  font-size: 0.78rem;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+}
+
+.flasher-hero-side,
+.flasher-side-panel {
+  height: 100%;
+}
+
+.flasher-side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+}
+
+.flasher-side-label {
+  font-size: 0.74rem;
+  color: rgba(226, 232, 240, 0.72);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.flasher-side-title {
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.flasher-side-meta {
+  font-size: 0.84rem;
+  line-height: 1.75;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.flasher-side-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.flasher-side-grid div {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flasher-side-grid span {
+  font-size: 0.72rem;
+  color: rgba(226, 232, 240, 0.66);
+}
+
+.flasher-side-grid strong {
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: #fff;
+}
+
+.flasher-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.flasher-overview-card {
+  padding: 20px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.flasher-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.flasher-card-head h3 {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.flasher-card-kicker {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #f97316;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.flasher-card-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.flasher-card-tag.soft {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+}
+
+.flasher-checklist,
+.flasher-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.flasher-check-item,
+.flasher-profile-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: #fff;
+}
+
+.flasher-check-item.ok {
+  border-color: rgba(34, 197, 94, 0.24);
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.8), #fff);
+}
+
+.flasher-check-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.flasher-check-item.ok .flasher-check-icon {
+  background: rgba(34, 197, 94, 0.14);
+  color: #16a34a;
+}
+
+.flasher-check-item strong,
+.flasher-profile-top strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+}
+
+.flasher-check-item span,
+.flasher-profile-card p,
+.flasher-profile-meta span,
+.flasher-profile-top span {
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.65;
+}
+
+.flasher-profile-card {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flasher-profile-card.active {
+  border-color: rgba(249, 115, 22, 0.36);
+  box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.08);
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.9), #fff);
+}
+
+.flasher-profile-top,
+.flasher-profile-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flasher-summary-panel {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
+  border: 1px solid rgba(255, 107, 0, 0.14);
+}
+
+.flasher-summary-head {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #c2410c;
+  margin-bottom: 8px;
+}
+
+.flasher-summary-panel ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.8;
+}
+
+@media (max-width: 960px) {
+  .flasher-hero-card,
+  .flasher-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .flasher-side-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .ob-wizard.flasher-wizard {
+    gap: 14px;
+  }
+
+  .flasher-hero-card,
+  .flasher-overview-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .flasher-title {
+    font-size: 1.48rem;
+  }
+
+  .ob-progress {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+}
 
 .ob-progress { display: flex; align-items: center; justify-content: center; gap: 32px; }
 .ob-prog-item { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-muted); }

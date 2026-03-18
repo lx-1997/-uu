@@ -263,6 +263,7 @@ export default function AIDock() {
     { id: 'plan', icon: '📋', label: '执行计划', text: '把当前需求拆成 3 步并立即开始执行第一步' },
   ];
   const quickPrompts = promptsByTab[activeTab] ?? defaultPrompts;
+  const isFlasherTab = activeTab === 'flasher';
 
   /* 直接提交快捷提示 */
   const submitQuickPrompt = (text: string) => {
@@ -374,7 +375,7 @@ export default function AIDock() {
   };
 
   return (
-    <div className={`floating-dock ${chatExpanded ? 'chat-open' : ''} ${workspaceMode ? 'workspace-mode' : ''}`}>
+    <div className={`floating-dock ${chatExpanded ? 'chat-open' : ''} ${workspaceMode ? 'workspace-mode' : ''} ${isFlasherTab ? 'flasher-passive' : ''}`}>
       <div className="dock-wrapper">
         {chatExpanded && chatMessages.length > 0 && (
           <div className={`chat-panel ${workspaceMode ? 'workspace' : ''}`}>

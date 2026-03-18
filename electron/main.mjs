@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, WebContentsView, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog } from 'electron';
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
+import fs from 'node:fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +15,68 @@ let mainWin = null;
 let serverProcess = null;
 // url -> WebContentsView 映射
 const viewsMap = {};
+function runPowerShell(script) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve(stdout.trim());
+      else reject(new Error((stderr || stdout || `powershell exit ${code}`).trim()));
+    });
+  });
+}
+
+async function listWindowsFlashDrives() {
+  const script = `$drives = Get-CimInstance Win32_DiskDrive | Where-Object { $_.MediaType -match 'Removable|External' -or $_.InterfaceType -in @('USB','SD') } | Select-Object Index,Model,Size,InterfaceType,DeviceID; $drives | ConvertTo-Json -Depth 3`;
+  const output = await runPowerShell(script);
+  if (!output) return [];
+  const parsed = JSON.parse(output);
+  const arr = Array.isArray(parsed) ? parsed : [parsed];
+  return arr.map((item) => ({
+    id: String(item.Index),
+    path: item.DeviceID,
+    label: item.Model || `PhysicalDrive${item.Index}`,
+    size: item.Size || '',
+    bus: item.InterfaceType || '',
+  }));
+}
+
+function emitFlashProgress(payload) {
+  mainWin?.webContents.send('rdk:flash:progress', payload);
+}
+
+async function writeImageToDriveWindows(imagePath, drivePath) {
+  const stat = fs.statSync(imagePath);
+  const total = stat.size;
+  emitFlashProgress({ stage: 'prepare', message: '开始打开镜像文件', percent: 2 });
+
+  const imageFd = fs.openSync(imagePath, 'r');
+  const targetFd = fs.openSync(drivePath, 'r+');
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  let readBytes = 0;
+  let offset = 0;
+
+  try {
+    emitFlashProgress({ stage: 'write', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
+    while ((readBytes = fs.readSync(imageFd, buffer, 0, buffer.length, offset)) > 0) {
+      fs.writeSync(targetFd, buffer, 0, readBytes, offset);
+      offset += readBytes;
+      const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
+      emitFlashProgress({ stage: 'write', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
+    }
+    fs.fsyncSync(targetFd);
+    emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
+  } finally {
+    fs.closeSync(imageFd);
+    fs.closeSync(targetFd);
+  }
+}
 
 /* ── 判断是否打包模式 ── */
 const isPacked = app.isPackaged;
@@ -238,6 +300,35 @@ ipcMain.on('rdk:close-url', (_event, { url }) => {
   view.webContents.removeAllListeners();
   view.webContents.destroy();
   delete viewsMap[url];
+});
+
+ipcMain.handle('rdk:flash:list-drives', async () => {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: '当前仅实现 Windows 桌面端本机真实烧录能力' };
+  }
+  const drives = await listWindowsFlashDrives();
+  return { ok: true, drives };
+});
+
+ipcMain.handle('rdk:flash:pick-image', async () => {
+  const result = await dialog.showOpenDialog(mainWin ?? undefined, {
+    properties: ['openFile'],
+    filters: [{ name: 'Image Files', extensions: ['img', 'bin', 'wic', 'wic.gz', 'img.xz', 'xz'] }],
+  });
+  if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true };
+  return { ok: true, path: result.filePaths[0] };
+});
+
+ipcMain.handle('rdk:flash:write-local', async (_event, payload) => {
+  const { imagePath, drivePath } = payload ?? {};
+  if (!imagePath || !drivePath) return { ok: false, error: '缺少镜像路径或目标磁盘' };
+  if (process.platform !== 'win32') return { ok: false, error: '当前仅实现 Windows 桌面端本机真实烧录能力' };
+  try {
+    await writeImageToDriveWindows(imagePath, drivePath);
+    return { ok: true, output: `镜像已写入 ${drivePath}` };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '本机烧录失败' };
+  }
 });
 
 app.whenReady().then(async () => {

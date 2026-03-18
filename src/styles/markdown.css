@@ -36,12 +36,12 @@
 .md-h4 { font-size: 0.9rem; font-weight: 700; color: #334155; margin: 8px 0 4px; }
 
 /* ── VNC viewport override ── */
-.canvas-viewport:has(.vnc-container) {
+.canvas-viewport.viewport-vnc {
   padding: 0 !important;
   overflow: hidden !important;
 }
 
-.center-stage:has(.vnc-container) {
+.canvas-viewport.viewport-vnc .center-stage {
   max-width: 100% !important;
   height: 100% !important;
 }
