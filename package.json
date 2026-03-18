@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently --kill-others-on-fail \"npm:dev:server\" \"npm:dev:client\"",
-    "desktop": "electron .",
+    "desktop": "concurrently --kill-others-on-fail \"npm:dev:server\" \"npm:dev:client\" \"npm:electron\"",
+    "electron": "node scripts/wait-and-launch.mjs",
     "dev:client": "node scripts/dev-client.mjs",
     "dev:server": "node scripts/dev-server.mjs",
     "build": "tsc --noEmit -p tsconfig.json && npm run build:server && vite build",
