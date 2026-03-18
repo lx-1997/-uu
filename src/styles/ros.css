@@ -1,142 +1,310 @@
 /* ═══════════════════════════════════════════════════
-   ROS 话题分析
+   RViz2 Web — Dark Theme (matching rviz2 desktop)
    ═══════════════════════════════════════════════════ */
-.ros-page { display: flex; flex-direction: column; gap: 16px; max-width: 1100px; margin: 0 auto; width: 100%; padding: 0 4px; }
-
-/* 空状态 */
-.ros-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 24px; gap: 16px; }
-.ros-empty-icon { font-size: 3rem; }
-.ros-empty-title { margin: 0; font-size: 1.3rem; font-weight: 700; color: #1e293b; }
-.ros-empty-desc { margin: 0; color: #64748b; font-size: 0.88rem; text-align: center; line-height: 1.6; }
-
-/* 顶部标题栏 */
-.ros-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.ros-header-left { display: flex; align-items: center; gap: 12px; }
-.ros-header-icon { width: 38px; height: 38px; border-radius: 10px; background: #eff6ff; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
-.ros-title { margin: 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; }
-.ros-subtitle { font-size: 0.75rem; color: #94a3b8; }
-.ros-header-right { display: flex; align-items: center; gap: 10px; }
-.ros-auto-toggle { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #64748b; cursor: pointer; }
-.ros-auto-toggle input { accent-color: #ff6b00; }
-.ros-scan-btn { padding: 8px 18px; border-radius: 8px; border: 1.5px solid #e2e8f0; background: #fff; color: #475569; font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
-.ros-scan-btn:hover { border-color: #3b82f6; color: #3b82f6; }
-.ros-scan-btn.loading { opacity: 0.6; cursor: not-allowed; }
-
-/* 统计卡片 */
-.ros-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.ros-stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; transition: all 0.2s; }
-.ros-stat-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-.ros-stat-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem; }
-.ros-stat-value { font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; }
-.ros-stat-label { font-size: 0.7rem; color: #94a3b8; font-weight: 500; }
-
-/* Tab 切换 */
-.ros-tabs { display: flex; gap: 4px; background: #f1f5f9; border-radius: 10px; padding: 4px; }
-.ros-tab { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; border: none; background: transparent; color: #64748b; font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.2s; }
-.ros-tab:hover { color: #334155; background: rgba(255,255,255,0.6); }
-.ros-tab.active { background: #fff; color: #1e293b; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
-.ros-tab-badge { background: #3b82f6; color: #fff; font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 10px; }
-
-/* 话题监控布局 */
-.ros-topics-layout { display: grid; grid-template-columns: 280px 1fr; gap: 14px; min-height: 400px; }
-.ros-topics-left { display: flex; flex-direction: column; gap: 8px; }
-.ros-topics-right { display: flex; flex-direction: column; gap: 12px; }
-
-/* 搜索框 */
-.ros-search-box { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; }
-.ros-search-input { border: none; outline: none; font-size: 0.8rem; font-family: inherit; flex: 1; background: transparent; color: #1e293b; }
-.ros-search-input::placeholder { color: #94a3b8; }
-
-/* 话题列表 */
-.ros-topic-list { flex: 1; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; max-height: 480px; }
-.ros-topic-list::-webkit-scrollbar { width: 4px; }
-.ros-topic-list::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 2px; }
-.ros-topic-item { padding: 10px 12px; border-radius: 8px; border: 1.5px solid transparent; background: #f8fafc; cursor: pointer; transition: all 0.15s; }
-.ros-topic-item:hover { background: #f1f5f9; border-color: #e2e8f0; }
-.ros-topic-item.active { background: #eff6ff; border-color: #93c5fd; }
-.ros-topic-name { font-size: 0.78rem; font-weight: 600; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; word-break: break-all; }
-.ros-topic-meta { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
-.ros-topic-type { font-size: 0.66rem; color: #6366f1; background: #eef2ff; padding: 1px 6px; border-radius: 4px; font-weight: 500; }
-.ros-topic-hz { font-size: 0.66rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
-.ros-topic-empty { text-align: center; padding: 24px; color: #94a3b8; font-size: 0.82rem; }
-
-/* 话题详情 */
-.ros-topic-detail { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; }
-.ros-detail-title { margin: 0 0 12px; font-size: 0.88rem; font-weight: 700; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; word-break: break-all; }
-.ros-detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px; }
-.ros-detail-cell { padding: 8px 12px; border-radius: 8px; background: #f8fafc; border: 1px solid #f1f5f9; }
-.ros-detail-label { font-size: 0.68rem; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.3px; }
-.ros-detail-value { font-size: 0.82rem; font-weight: 600; color: #1e293b; margin-top: 2px; font-family: 'JetBrains Mono', Consolas, monospace; }
-.ros-detail-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; gap: 10px; color: #94a3b8; }
-.ros-detail-empty-icon { font-size: 2rem; opacity: 0.5; }
-.ros-detail-empty p { margin: 0; font-size: 0.85rem; }
-.ros-detail-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
-
-/* 消息结构 */
-.ros-msg-structure { margin-top: 12px; }
-.ros-msg-fields { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; background: #1e1e2e; border-radius: 8px; padding: 10px 14px; }
-.ros-msg-field { display: flex; gap: 10px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.75rem; }
-.ros-field-type { color: #7dd3fc; min-width: 80px; }
-.ros-field-name { color: #e2e8f0; }
-
-/* 频率趋势图 */
-.ros-hz-chart { margin-top: 12px; }
-.ros-hz-bars { display: flex; align-items: flex-end; gap: 3px; height: 48px; background: #f8fafc; border-radius: 6px; padding: 6px 8px; }
-.ros-hz-bar { flex: 1; border-radius: 2px; min-height: 2px; transition: height 0.3s ease; }
-
-/* 输出面板 */
-.ros-output { background: #1e1e2e; border-radius: 10px; overflow: hidden; }
-.ros-output-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: #16162a; border-bottom: 1px solid #2a2a3e; font-size: 0.75rem; font-weight: 600; color: #94a3b8; }
-.ros-output-clear { background: none; border: none; color: #64748b; font-size: 0.72rem; cursor: pointer; font-family: inherit; transition: color 0.15s; }
-.ros-output-clear:hover { color: #ef4444; }
-.ros-output-content { margin: 0; padding: 12px 14px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.75rem; line-height: 1.6; color: #cdd6f4; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
-
-/* 关系图谱 */
-.ros-graph-section { display: flex; flex-direction: column; gap: 12px; }
-.ros-graph-toolbar { display: flex; gap: 8px; }
-.ros-graph-content { display: flex; flex-direction: column; gap: 12px; }
-.ros-nodes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
-.ros-node-card { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #fff; cursor: pointer; transition: all 0.15s; }
-.ros-node-card:hover { border-color: #8b5cf6; background: #faf5ff; }
-.ros-node-icon { font-size: 0.9rem; }
-.ros-node-name { font-size: 0.78rem; font-weight: 600; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* 性能监控 */
-.ros-monitor-section { display: flex; flex-direction: column; gap: 12px; }
-.ros-monitor-header { display: flex; align-items: center; justify-content: space-between; }
-.ros-monitor-hint { font-size: 0.75rem; color: #94a3b8; }
-.ros-monitor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.ros-monitor-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
-.ros-monitor-name { font-size: 0.78rem; font-weight: 600; color: #1e293b; font-family: 'JetBrains Mono', Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ros-monitor-hz { font-size: 1.1rem; font-weight: 800; font-variant-numeric: tabular-nums; }
-.ros-monitor-status { font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; align-self: flex-start; }
-.ros-mini-chart { display: flex; align-items: flex-end; gap: 2px; height: 32px; margin-top: 6px; }
-.ros-mini-bar { flex: 1; border-radius: 1px; min-height: 2px; }
-
-/* 诊断工具 */
-.ros-tools-section { display: flex; flex-direction: column; gap: 0; }
-.ros-quick-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.ros-quick-tool { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 14px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #fff; cursor: pointer; font-family: inherit; transition: all 0.2s; text-align: left; }
-.ros-quick-tool:hover { border-color: var(--tool-color, #3b82f6); background: #f8fafc; transform: translateY(-1px); }
-.ros-quick-icon { font-size: 1.1rem; }
-.ros-quick-name { font-size: 0.82rem; font-weight: 600; color: #1e293b; }
-.ros-quick-cmd { font-size: 0.68rem; color: #94a3b8; font-family: 'JetBrains Mono', Consolas, monospace; background: none; }
-.ros-custom-cmd { display: flex; gap: 8px; }
-.ros-cmd-input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1.5px solid #e2e8f0; background: #fff; font-size: 0.85rem; font-family: 'JetBrains Mono', Consolas, monospace; color: #1e293b; outline: none; transition: border-color 0.15s; }
-.ros-cmd-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.08); }
-.ros-cmd-input::placeholder { color: #94a3b8; font-family: inherit; }
-
-/* 通用按钮 */
-.ros-btn-primary { padding: 8px 18px; border-radius: 8px; border: none; background: #3b82f6; color: #fff; font-size: 0.82rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-.ros-btn-primary:hover { background: #2563eb; }
-.ros-btn-ghost { padding: 6px 12px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; color: #475569; font-size: 0.78rem; font-weight: 500; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-.ros-btn-ghost:hover { border-color: #cbd5e1; background: #f8fafc; }
-
-/* 通用 section 标题 */
-.ros-section-title { font-size: 0.78rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-
-@media (max-width: 900px) {
-  .ros-topics-layout { grid-template-columns: 1fr; }
-  .ros-stats { grid-template-columns: repeat(2, 1fr); }
-  .ros-quick-tools { grid-template-columns: repeat(2, 1fr); }
+.rv-shell {
+  display: flex; flex-direction: column; height: 100%; width: 100%;
+  background: #2d2d2d; color: #d4d4d4; font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px; overflow: hidden;
 }
+.rv-empty { display: flex; align-items: center; justify-content: center; flex: 1; color: #888; }
+.rv-empty-sm { padding: 16px; text-align: center; color: #666; font-size: 11px; }
+
+/* ── Menu Bar ── */
+.rv-menubar {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 26px; padding: 0 8px; background: #3c3c3c; border-bottom: 1px solid #2a2a2a;
+  font-size: 12px; flex-shrink: 0;
+}
+.rv-menu-left { display: flex; gap: 2px; }
+.rv-menu-item { padding: 2px 10px; border-radius: 2px; cursor: pointer; color: #ccc; }
+.rv-menu-item:hover { background: #505050; color: #fff; }
+.rv-menu-right { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #aaa; }
+.rv-menu-device { font-size: 11px; color: #999; }
+.rv-ros-badge {
+  padding: 1px 8px; border-radius: 3px; font-size: 10px; font-weight: 600;
+  background: #333; color: #888;
+}
+.rv-ros-badge.ros2 { background: #0e4429; color: #4caf50; }
+.rv-ros-badge.ros1 { background: #3b2e00; color: #f39c12; }
+.rv-conn-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.rv-conn-dot.on { background: #4caf50; }
+.rv-conn-dot.off { background: #f44336; }
+
+/* ── Toolbar ── */
+.rv-toolbar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 2px 6px; background: #3c3c3c; border-bottom: 1px solid #2a2a2a;
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.rv-toolbar-sep { width: 1px; height: 20px; background: #555; margin: 0 4px; }
+.rv-tool-btn {
+  padding: 3px 8px; border-radius: 2px; border: 1px solid transparent;
+  background: transparent; color: #bbb; font-size: 11px; cursor: pointer;
+  font-family: inherit; white-space: nowrap; transition: all 0.1s;
+}
+.rv-tool-btn:hover { background: #505050; color: #fff; }
+.rv-tool-btn.active { background: #094771; border-color: #1177bb; color: #fff; }
+.rv-tool-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Main 3-panel layout ── */
+.rv-main { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+
+/* Left Panel */
+.rv-left {
+  width: 280px; min-width: 200px; display: flex; flex-direction: column;
+  background: #252526; border-right: 1px solid #3c3c3c; flex-shrink: 0;
+}
+.rv-left-top { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.rv-left-top::-webkit-scrollbar { width: 6px; }
+.rv-left-top::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+.rv-left-bottom { border-top: 1px solid #3c3c3c; max-height: 220px; overflow-y: auto; }
+.rv-panel-title {
+  padding: 5px 10px; font-size: 11px; font-weight: 700; color: #ccc;
+  background: #2d2d2d; border-bottom: 1px solid #3c3c3c;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.rv-panel-tabs { display: flex; background: #2d2d2d; border-bottom: 1px solid #3c3c3c; }
+.rv-ptab {
+  padding: 4px 10px; font-size: 11px; color: #888; background: transparent;
+  border: none; border-bottom: 2px solid transparent; cursor: pointer; font-family: inherit;
+}
+.rv-ptab:hover { color: #ccc; }
+.rv-ptab.active { color: #fff; border-bottom-color: #1177bb; }
+
+/* Center */
+.rv-center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* Right Panel */
+.rv-right {
+  width: 220px; min-width: 160px; display: flex; flex-direction: column;
+  background: #252526; border-left: 1px solid #3c3c3c; flex-shrink: 0; overflow-y: auto;
+}
+.rv-right::-webkit-scrollbar { width: 6px; }
+.rv-right::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+/* ── 3D Viewport ── */
+.rv-viewport {
+  flex: 1; position: relative; background: #484848;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; min-height: 200px;
+}
+.rv-canvas { width: 100%; height: 100%; display: block; }
+.rv-vp-controls {
+  position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column;
+  gap: 2px; z-index: 2;
+}
+.rv-vp-btn {
+  width: 26px; height: 26px; border-radius: 3px; border: none;
+  background: rgba(0,0,0,0.45); color: #ccc; font-size: 15px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.rv-vp-btn:hover { background: rgba(0,0,0,0.65); color: #fff; }
+.rv-vp-zoom { text-align: center; font-size: 9px; color: #999; padding: 2px 0; }
+
+/* ── Displays Panel ── */
+.rv-displays { padding: 0; }
+.rv-tree-section { padding: 0; }
+.rv-tree-header {
+  padding: 4px 10px; font-size: 11px; font-weight: 700; color: #ccc;
+  background: #333; border-bottom: 1px solid #3c3c3c;
+}
+.rv-tree-divider { height: 1px; background: #3c3c3c; }
+.rv-prop-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 10px 2px 16px; font-size: 11px; min-height: 20px;
+}
+.rv-prop-row.sub { padding-left: 28px; background: #1e1e1e; }
+.rv-prop-row:hover { background: #2a2d2e; }
+.rv-prop-k { color: #9e9e9e; white-space: nowrap; margin-right: 8px; }
+.rv-prop-v { color: #d4d4d4; font-size: 11px; text-align: right; flex-shrink: 0; }
+.rv-prop-v.topic { color: #569cd6; font-family: 'JetBrains Mono', Consolas, monospace; }
+.rv-prop-v.status-ok { color: #4caf50; }
+.rv-prop-v.status-warn { color: #f39c12; }
+.rv-prop-v.status-error { color: #e74c3c; }
+.rv-color-chip {
+  display: inline-block; width: 14px; height: 14px; border-radius: 2px;
+  border: 1px solid #555; vertical-align: middle;
+}
+.rv-prop-select {
+  background: #1e1e1e; color: #d4d4d4; border: 1px solid #3c3c3c;
+  border-radius: 2px; font-size: 10px; padding: 1px 4px; outline: none; font-family: inherit;
+}
+.rv-prop-select:focus { border-color: #1177bb; }
+
+/* Display Items */
+.rv-display-item { border-bottom: 1px solid #2a2a2a; }
+.rv-display-item.off { opacity: 0.5; }
+.rv-display-head {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 10px; cursor: pointer; font-size: 11px;
+}
+.rv-display-head:hover { background: #2a2d2e; }
+.rv-arrow {
+  font-size: 8px; color: #888; display: inline-block; width: 12px;
+  text-align: center; flex-shrink: 0; transition: transform 0.15s;
+}
+.rv-arrow.open { transform: rotate(90deg); }
+.rv-check { width: 13px; height: 13px; accent-color: #1177bb; flex-shrink: 0; }
+.rv-check.sm { width: 11px; height: 11px; }
+.rv-status-ball { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.rv-status-ball.ok { background: #4caf50; }
+.rv-status-ball.warn { background: #f39c12; }
+.rv-status-ball.error { background: #e74c3c; }
+.rv-display-label { color: #d4d4d4; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-display-del {
+  background: none; border: none; color: #555; font-size: 10px; cursor: pointer;
+  padding: 0 2px; opacity: 0; transition: opacity 0.15s;
+}
+.rv-display-head:hover .rv-display-del { opacity: 1; }
+.rv-display-del:hover { color: #e74c3c; }
+.rv-display-props { padding-left: 0; }
+.rv-add-btn {
+  display: block; width: calc(100% - 16px); margin: 6px 8px;
+  padding: 4px; border-radius: 3px; border: 1px dashed #555;
+  background: transparent; color: #888; font-size: 11px;
+  cursor: pointer; font-family: inherit;
+}
+.rv-add-btn:hover { border-color: #1177bb; color: #1177bb; }
+
+/* ── Views Panel ── */
+.rv-views { padding: 0; }
+
+/* ── Topic / Node List (Right Panel) ── */
+.rv-topic-list { padding: 2px 0; }
+.rv-topic-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; cursor: pointer; font-size: 11px;
+}
+.rv-topic-item:hover { background: #2a2d2e; }
+.rv-topic-name {
+  font-size: 11px; color: #d4d4d4; font-family: 'JetBrains Mono', Consolas, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.rv-topic-type { font-size: 10px; color: #666; flex-shrink: 0; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-node-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.rv-node-dot.active { background: #4caf50; }
+.rv-node-dot.inactive { background: #f44336; }
+
+/* ── Echo / Terminal Drawer ── */
+.rv-echo-drawer {
+  height: 180px; display: flex; flex-direction: column;
+  background: #1e1e1e; border-top: 1px solid #3c3c3c; flex-shrink: 0;
+}
+.rv-echo-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 10px; background: #2d2d2d; border-bottom: 1px solid #3c3c3c;
+  font-size: 11px; color: #ccc; flex-shrink: 0;
+}
+.rv-echo-btn {
+  background: none; border: none; color: #888; font-size: 11px;
+  cursor: pointer; padding: 2px 6px; border-radius: 2px; font-family: inherit;
+}
+.rv-echo-btn:hover { background: #3c3c3c; color: #fff; }
+.rv-echo-body {
+  flex: 1; margin: 0; padding: 6px 10px; overflow-y: auto;
+  font-family: 'JetBrains Mono', Consolas, monospace; font-size: 11px;
+  line-height: 1.5; color: #d4d4d4; white-space: pre-wrap; word-break: break-all;
+}
+.rv-echo-body::-webkit-scrollbar { width: 6px; }
+.rv-echo-body::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+.rv-echo-cmd {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; background: #252526; border-top: 1px solid #3c3c3c; flex-shrink: 0;
+}
+.rv-cmd-prompt { color: #4caf50; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 12px; }
+
+/* ── Shared Controls ── */
+.rv-input {
+  flex: 1; padding: 4px 8px; border-radius: 3px;
+  border: 1px solid #3c3c3c; background: #1e1e1e; color: #d4d4d4;
+  font-size: 11px; font-family: inherit; outline: none; box-sizing: border-box;
+}
+.rv-input:focus { border-color: #1177bb; }
+.rv-input::placeholder { color: #666; }
+.rv-input.mono { font-family: 'JetBrains Mono', Consolas, monospace; }
+.rv-btn {
+  padding: 4px 12px; border-radius: 3px; border: none; font-size: 11px;
+  cursor: pointer; font-family: inherit;
+}
+.rv-btn.primary { background: #1177bb; color: #fff; }
+.rv-btn.primary:hover { background: #0e6aa8; }
+.rv-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.rv-btn.primary.sm { padding: 3px 10px; font-size: 10px; }
+.rv-btn.ghost { background: #3c3c3c; color: #ccc; }
+.rv-btn.ghost:hover { background: #4a4a4a; }
+
+/* ── Status Bar ── */
+.rv-statusbar {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 22px; padding: 0 10px; background: #007acc; color: #fff;
+  font-size: 11px; flex-shrink: 0;
+}
+.rv-status-left, .rv-status-right { display: flex; align-items: center; gap: 4px; }
+.rv-status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 3px; }
+.rv-status-dot.on { background: #4caf50; }
+.rv-status-dot.off { background: #f44336; }
+.rv-status-sep { color: rgba(255,255,255,0.3); margin: 0 2px; }
+.rv-status-toggle {
+  background: none; border: none; color: #fff; font-size: 11px;
+  cursor: pointer; padding: 0 4px; font-family: inherit; opacity: 0.8;
+}
+.rv-status-toggle:hover { opacity: 1; }
+
+/* ── Add Display Modal ── */
+.rv-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+.rv-modal {
+  width: 400px; max-height: 480px; background: #252526; border: 1px solid #3c3c3c;
+  border-radius: 6px; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.rv-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid #3c3c3c; font-size: 13px; font-weight: 600; color: #d4d4d4;
+}
+.rv-modal-close { background: none; border: none; color: #888; font-size: 14px; cursor: pointer; }
+.rv-modal-close:hover { color: #fff; }
+.rv-modal-search { padding: 8px 14px; border-bottom: 1px solid #3c3c3c; }
+.rv-modal-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+.rv-modal-list::-webkit-scrollbar { width: 6px; }
+.rv-modal-list::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+.rv-modal-item {
+  padding: 6px 14px; cursor: pointer; transition: background 0.1s;
+}
+.rv-modal-item:hover { background: #2a2d2e; }
+.rv-modal-item.sel { background: #094771; }
+.rv-modal-item-name { font-size: 12px; color: #d4d4d4; font-weight: 500; }
+.rv-modal-item-type { font-size: 10px; color: #888; margin-top: 1px; }
+.rv-modal-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-top: 1px solid #3c3c3c;
+}
+.rv-modal-desc { font-size: 10px; color: #888; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── FPS Indicator ── */
+.rv-vp-fps {
+  position: absolute; bottom: 8px; right: 8px;
+  font-size: 10px; color: rgba(255,255,255,0.4);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  pointer-events: none;
+}
+
+/* ── Recording Badge ── */
+.rv-rec-badge {
+  color: #ff4444; font-size: 11px; font-weight: 700;
+  animation: rv-blink 1s infinite;
+}
+@keyframes rv-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.rv-tool-btn.rec { color: #ff4444; }
+.rv-tool-btn.rec.active { background: #4a1111; border-color: #ff4444; color: #ff4444; }
+
+/* ── Tool Icon ── */
+.rv-tool-icon { margin-right: 2px; font-size: 12px; }
+
+/* ── Right Panel Tabs ── */
+.rv-right-tabs {
+  display: flex; background: #2d2d2d; border-bottom: 1px solid #3c3c3c;
+  flex-shrink: 0;
+}
+.rv-right-tabs .rv-ptab { flex: 1; text-align: center; font-size: 10px; padding: 4px 4px; }
