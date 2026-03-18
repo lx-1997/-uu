@@ -9,7 +9,7 @@
   max-width: 1180px;
   margin: 0 auto;
   align-self: center;
-  align-items: flex-start;
+  align-items: center;
   min-height: max-content;
   padding-left: 0;
   padding-right: 0;
@@ -296,10 +296,340 @@
   line-height: 1.8;
 }
 
+/* ── Refactored Flasher Workflow ── */
+.flx-shell {
+  gap: 14px;
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.flx-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,107,0,0.15);
+  background: linear-gradient(180deg, #fff7ed, #fff);
+}
+
+.flx-kicker {
+  color: #c2410c;
+  font-size: 0.74rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.flx-header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  color: #0f172a;
+}
+
+.flx-header p {
+  margin: 6px 0 0;
+  font-size: 0.84rem;
+  color: #64748b;
+}
+
+.flx-mode-switch {
+  display: inline-flex;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 3px;
+}
+
+.flx-seg {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.flx-seg.active {
+  color: #fff;
+  background: #ff6b00;
+}
+
+.flx-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.flx-step {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flx-step span {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f1f5f9;
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
+.flx-step.active {
+  border-color: #ff6b00;
+  color: #ea580c;
+}
+
+.flx-step.active span,
+.flx-step.done span {
+  background: #ff6b00;
+  color: #fff;
+}
+
+.flx-body,
+.flx-progress-wrap,
+.flx-done {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.flx-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.flx-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flx-card-title {
+  font-size: 0.84rem;
+  color: #334155;
+  font-weight: 700;
+}
+
+.flx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flx-list-item {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flx-list-item strong {
+  font-size: 0.86rem;
+  color: #0f172a;
+}
+
+.flx-list-item span {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.55;
+}
+
+.flx-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flx-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.flx-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #475569;
+  background: #eef2f7;
+  border: 1px solid #dbe4ee;
+}
+
+.flx-list-item.active {
+  border-color: #ff6b00;
+  box-shadow: 0 0 0 2px rgba(255,107,0,0.12);
+  background: #fff7ed;
+}
+
+.flx-row-end {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.flx-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flx-inline {
+  display: flex;
+  gap: 8px;
+}
+
+.flx-confirm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.flx-confirm-grid > div {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flx-confirm-grid span {
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
+.flx-confirm-grid strong {
+  color: #0f172a;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.flx-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.flx-progress-header h3 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.flx-stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flx-stage {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.flx-stage .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.flx-stage.run .dot { background: #f59e0b; }
+.flx-stage.done .dot { background: #22c55e; }
+.flx-stage.error .dot { background: #ef4444; }
+.flx-stage.skip .dot { background: #94a3b8; }
+
+.flx-stage .label { color: #334155; font-size: 0.8rem; }
+.flx-stage .status { color: #64748b; font-size: 0.76rem; }
+
+.flx-log-panel {
+  margin-top: 10px;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 12px;
+  padding: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.flx-log-empty { color: #94a3b8; }
+
+.flx-done {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.flx-done h2 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.flx-done p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+.flx-next-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 960px) {
+  .flx-card-grid,
   .flasher-hero-card,
   .flasher-overview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .flx-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .flx-inline {
+    flex-direction: column;
   }
 
   .flasher-side-grid {
