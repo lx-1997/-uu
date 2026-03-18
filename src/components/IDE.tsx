@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import { executeDeviceCommand } from '../api';
 
 /* ── 运行时判断是否在 Electron 桌面端 ── */
 const isDesktop = () => typeof window !== 'undefined' && !!(window as any).rdkDesktop?.isDesktop;
@@ -15,10 +16,10 @@ export default function IDE() {
 
   const [showIframe, setShowIframe] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-
   // 当前打开的 code-server URL（桌面端用于 close/hide）
   const activeUrlRef = useRef<string>('');
 
@@ -28,18 +29,60 @@ export default function IDE() {
     return `http://${currentDevice.ip}:${CODE_SERVER_PORT}/?folder=/root`;
   };
 
+  /* ── 监听 WebContentsView 加载事件 ── */
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const rdk = (window as any).rdkDesktop;
+    rdk.onUrlLoaded?.((url: string) => {
+      if (url === activeUrlRef.current) {
+        setIframeLoading(false);
+        setLoadError(null);
+      }
+    });
+    rdk.onUrlLoadFailed?.((url: string, _code: number, desc: string) => {
+      if (url === activeUrlRef.current) {
+        setIframeLoading(false);
+        setLoadError(desc || '连接失败');
+        addToast(`code-server 加载失败: ${desc}`, 'error');
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* ── 打开编辑器 ── */
-  const handleConnect = () => {
+  const handleConnect = async () => {
+    if (!currentDevice) {
+      addToast('请先连接设备', 'warning');
+      return;
+    }
     const url = getCodeServerUrl();
     setIframeLoading(true);
+    setLoadError(null);
     setShowIframe(true);
-    addToast('正在加载代码编辑器...', 'info');
+    addToast('正在启动 code-server...', 'info');
 
     if (isDesktop()) {
+      try {
+        // 先通过 SSH 启动 code-server（如果未运行）
+        const res = await executeDeviceCommand(
+          currentDevice.id,
+          `bash -lc "pgrep -f 'code-server' > /dev/null 2>&1 || (nohup code-server --auth none --bind-addr 0.0.0.0:${CODE_SERVER_PORT} --ignore-last-opened > /tmp/code-server.log 2>&1 &); sleep 2; ss -lntp 2>/dev/null | grep -q ':${CODE_SERVER_PORT}' && echo READY || echo NOT_READY"`
+        );
+        if (res.output?.includes('NOT_READY')) {
+          setIframeLoading(false);
+          setLoadError('code-server 未就绪，请确认设备上已安装 code-server');
+          addToast('code-server 未就绪，请先在设备上安装', 'warning');
+          setShowIframe(false);
+          return;
+        }
+      } catch {
+        // SSH 失败时仍尝试直连
+      }
       activeUrlRef.current = url;
       (window as any).rdkDesktop.openUrl(url);
-      // WebContentsView 加载完成无法直接感知，短暂延迟后清除 loading
-      setTimeout(() => setIframeLoading(false), 2000);
+      // 10s 超时兜底（用 ref 避免闭包旧值问题）
+      const t = setTimeout(() => setIframeLoading(false), 10000);
+      return () => clearTimeout(t);
     }
   };
 
@@ -181,10 +224,17 @@ export default function IDE() {
                 <span className="ros-loading-text">正在加载 {editorLabel}...</span>
               </div>
             )}
-            {/* 桌面端由 WebContentsView 渲染，此处只显示占位 */}
+            {/* 桌面端由 WebContentsView 渲染，此处只显示占位或错误 */}
             {desktop ? (
-              <div style={{ width: '100%', height: '100%', background: '#1e1e1e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ color: '#555', fontSize: 13 }}>code-server 已在独立视图中加载</span>
+              <div style={{ width: '100%', height: '100%', background: '#1e1e1e', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                {loadError ? (
+                  <>
+                    <span style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
+                    <button className="ros-connect-main-btn" style={{ background: '#007acc', marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
+                  </>
+                ) : (
+                  <span style={{ color: '#555', fontSize: 13 }}>code-server 已在独立视图中加载</span>
+                )}
               </div>
             ) : (
               <iframe

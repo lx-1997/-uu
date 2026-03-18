@@ -82,17 +82,47 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
   if (!mainWin) return;
 
   if (viewsMap[url]) {
-    // 已存在则显示
-    viewsMap[url].setVisible(true);
+    // 已存在则重新置顶并显示
+    const existing = viewsMap[url];
+    existing.setVisible(true);
+    // 重新 add 以确保在最顶层
+    mainWin.contentView.removeChildView(existing);
+    mainWin.contentView.addChildView(existing);
+    existing.setBounds(calcViewBounds(mainWin));
     return;
   }
 
-  const view = new WebContentsView();
+  const view = new WebContentsView({
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
   // 忽略证书错误（设备自签名证书）
   view.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
+
+  const bounds = calcViewBounds(mainWin);
+  view.setBounds(bounds);
   mainWin.contentView.addChildView(view);
-  view.setBounds(calcViewBounds(mainWin));
-  view.webContents.loadURL(url);
+
+  console.log(`[rdk:open-url] loading ${url}, bounds:`, bounds);
+
+  // 加载失败通知渲染层
+  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
+    console.error(`[rdk:open-url] did-fail-load ${url}: ${errorCode} ${errorDescription}`);
+    event.sender.send('rdk:url-load-failed', { url, errorCode, errorDescription });
+  });
+
+  // 加载成功通知渲染层
+  view.webContents.on('did-finish-load', () => {
+    console.log(`[rdk:open-url] did-finish-load ${url}`);
+    event.sender.send('rdk:url-loaded', { url });
+  });
+
+  view.webContents.loadURL(url).catch(err => {
+    console.error(`[rdk:open-url] failed to load ${url}:`, err.message);
+  });
 
   // 子页面弹出的新窗口，通知渲染层处理
   view.webContents.setWindowOpenHandler((details) => {

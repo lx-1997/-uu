@@ -17,4 +17,14 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   onSubUrlOpen: (cb) => {
     ipcRenderer.on('rdk:sub-url-open', (_event, url) => cb(url));
   },
+
+  // 监听嵌入页面加载失败事件
+  onUrlLoadFailed: (cb) => {
+    ipcRenderer.on('rdk:url-load-failed', (_event, { url, errorCode, errorDescription }) => cb(url, errorCode, errorDescription));
+  },
+
+  // 监听嵌入页面加载成功事件
+  onUrlLoaded: (cb) => {
+    ipcRenderer.on('rdk:url-loaded', (_event, { url }) => cb(url));
+  },
 });
