@@ -11,6 +11,7 @@ export default function Vnc() {
 
   const [phase, setPhase] = useState<'idle' | 'checking' | 'connecting' | 'connected' | 'error'>('idle');
   const [statusText, setStatusText] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showIframe, setShowIframe] = useState(false);
   const [quality, setQuality] = useState<'auto' | 'high' | 'low'>('auto');
   const [showLogs, setShowLogs] = useState(false);
@@ -32,6 +33,27 @@ export default function Vnc() {
         (window as any).rdkDesktop.hideUrl(activeUrlRef.current);
       }
     };
+  }, []);
+
+  // 监听 WebContentsView 加载事件
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const rdk = (window as any).rdkDesktop;
+    rdk.onUrlLoaded?.((url: string) => {
+      if (url === activeUrlRef.current) {
+        setLoadError(null);
+        setPhase('connected');
+      }
+    });
+    rdk.onUrlLoadFailed?.((url: string, _code: number, desc: string) => {
+      if (url === activeUrlRef.current) {
+        setLoadError(desc || '连接失败');
+        setPhase('error');
+        setStatusText(desc || '连接失败');
+        addToast(`noVNC 加载失败: ${desc}`, 'error');
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── 构建 VNC URL ──
@@ -110,6 +132,7 @@ export default function Vnc() {
         // 桌面端用 WebContentsView 嵌入 noVNC
         if (isDesktop()) {
           activeUrlRef.current = vncUrl;
+          setLoadError(null);
           (window as any).rdkDesktop.openUrl(vncUrl);
         }
       } else {
@@ -133,6 +156,7 @@ export default function Vnc() {
     setShowIframe(false);
     setPhase('idle');
     setLatency(null);
+    setLoadError(null);
   };
 
   // ── 全屏切换 ──
@@ -251,10 +275,17 @@ export default function Vnc() {
       <div className="vnc-viewport">
         {showIframe ? (
           <>
-            {/* 桌面端由 WebContentsView 渲染，React 层只显示占位 */}
+            {/* 桌面端由 WebContentsView 渲染，React 层只显示占位或错误 */}
             {isDesktop() ? (
-              <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ color: '#444', fontSize: 13 }}>noVNC 已在独立视图中加载</span>
+              <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                {loadError ? (
+                  <>
+                    <span style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
+                    <button className="vnc-connect-main-btn" style={{ marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
+                  </>
+                ) : (
+                  <span style={{ color: '#444', fontSize: 13 }}>noVNC 已在独立视图中加载</span>
+                )}
               </div>
             ) : (
               <iframe
