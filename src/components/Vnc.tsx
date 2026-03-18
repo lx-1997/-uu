@@ -2,6 +2,9 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { executeDeviceCommand, fetchVncStatus } from '../api';
 import { useAppState } from '../hooks/useAppState';
 
+/* ── 运行时判断是否在 Electron 桌面端 ── */
+const isDesktop = () => typeof window !== 'undefined' && !!(window as any).rdkDesktop?.isDesktop;
+
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
   const { currentDevice, vncConnected, startVncSession, addToast } = useAppState();
@@ -19,6 +22,17 @@ export default function Vnc() {
 
   // VNC URL 版本号，用于强制刷新 iframe
   const [urlVersion, setUrlVersion] = useState(0);
+  // 当前打开的 VNC URL（桌面端用于 close/hide）
+  const activeUrlRef = useRef<string>('');
+
+  // 组件卸载时隐藏 WebContentsView
+  useEffect(() => {
+    return () => {
+      if (isDesktop() && activeUrlRef.current) {
+        (window as any).rdkDesktop.hideUrl(activeUrlRef.current);
+      }
+    };
+  }, []);
 
   // ── 构建 VNC URL ──
   const getVncUrl = useCallback(() => {
@@ -88,10 +102,16 @@ export default function Vnc() {
       setLogLines(prev => [...prev, ...output.split(/\r?\n/).filter(Boolean)]);
 
       if (output.includes('VNC_READY')) {
+        const vncUrl = getVncUrl();
         setPhase('connected');
         setShowIframe(true);
         addToast('VNC 连接成功', 'success');
         startVncSession();
+        // 桌面端用 WebContentsView 嵌入 noVNC
+        if (isDesktop()) {
+          activeUrlRef.current = vncUrl;
+          (window as any).rdkDesktop.openUrl(vncUrl);
+        }
       } else {
         setPhase('error');
         setStatusText('端口 5900 未就绪');
@@ -106,6 +126,10 @@ export default function Vnc() {
 
   // ── 断开连接 ──
   const handleDisconnect = () => {
+    if (isDesktop() && activeUrlRef.current) {
+      (window as any).rdkDesktop.closeUrl(activeUrlRef.current);
+      activeUrlRef.current = '';
+    }
     setShowIframe(false);
     setPhase('idle');
     setLatency(null);
@@ -227,13 +251,20 @@ export default function Vnc() {
       <div className="vnc-viewport">
         {showIframe ? (
           <>
-            <iframe
-              ref={iframeRef}
-              src={getVncUrl()}
-              className="vnc-iframe"
-              title="VNC Remote Desktop"
-              allow="clipboard-read; clipboard-write"
-            />
+            {/* 桌面端由 WebContentsView 渲染，React 层只显示占位 */}
+            {isDesktop() ? (
+              <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: '#444', fontSize: 13 }}>noVNC 已在独立视图中加载</span>
+              </div>
+            ) : (
+              <iframe
+                ref={iframeRef}
+                src={getVncUrl()}
+                className="vnc-iframe"
+                title="VNC Remote Desktop"
+                allow="clipboard-read; clipboard-write"
+              />
+            )}
             {/* 日志抽屉 */}
             {showLogs && (
               <div className="vnc-log-drawer">

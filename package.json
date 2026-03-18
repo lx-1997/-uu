@@ -1,10 +1,12 @@
 {
   "name": "rdk-studio",
+  "main": "electron/main.mjs",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently --kill-others-on-fail \"npm:dev:server\" \"npm:dev:client\"",
+    "desktop": "electron .",
     "dev:client": "node scripts/dev-client.mjs",
     "dev:server": "node scripts/dev-server.mjs",
     "build": "tsc --noEmit -p tsconfig.json && npm run build:server && vite build",
@@ -43,6 +45,7 @@
     "@types/ssh2": "^1.15.5",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "electron": "^35.1.5",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "vite": "^6.2.0"

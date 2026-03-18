@@ -1,8 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState';
 
-/* ── 代码编辑器 — 内嵌 vscode.dev ── */
-const VSCODE_BASE = 'https://vscode.dev/?vscode-lang=zh-cn';
+/* ── 运行时判断是否在 Electron 桌面端 ── */
+const isDesktop = () => typeof window !== 'undefined' && !!(window as any).rdkDesktop?.isDesktop;
+
+/* ── code-server 默认端口（设备侧） ── */
+const CODE_SERVER_PORT = 9888;
+
+/* ── 浏览器模式回退：vscode.dev ── */
+const VSCODE_WEB_URL = 'https://vscode.dev/?vscode-lang=zh-cn';
 
 export default function IDE() {
   const { currentDevice, addToast } = useAppState();
@@ -13,29 +19,51 @@ export default function IDE() {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const handleConnect = () => {
-    setIframeLoading(true);
-    setShowIframe(true);
-    addToast('正在加载 VS Code 编辑器...', 'info');
+  // 当前打开的 code-server URL（桌面端用于 close/hide）
+  const activeUrlRef = useRef<string>('');
+
+  /* ── 构建 code-server URL ── */
+  const getCodeServerUrl = () => {
+    if (!currentDevice) return VSCODE_WEB_URL;
+    return `http://${currentDevice.ip}:${CODE_SERVER_PORT}/?folder=/root`;
   };
 
+  /* ── 打开编辑器 ── */
+  const handleConnect = () => {
+    const url = getCodeServerUrl();
+    setIframeLoading(true);
+    setShowIframe(true);
+    addToast('正在加载代码编辑器...', 'info');
+
+    if (isDesktop()) {
+      activeUrlRef.current = url;
+      (window as any).rdkDesktop.openUrl(url);
+      // WebContentsView 加载完成无法直接感知，短暂延迟后清除 loading
+      setTimeout(() => setIframeLoading(false), 2000);
+    }
+  };
+
+  /* ── 关闭编辑器 ── */
   const handleDisconnect = () => {
+    if (isDesktop() && activeUrlRef.current) {
+      (window as any).rdkDesktop.closeUrl(activeUrlRef.current);
+      activeUrlRef.current = '';
+    }
     setShowIframe(false);
     setIframeLoading(false);
   };
 
-  const handleIframeLoad = () => {
-    setIframeLoading(false);
-  };
-
+  /* ── 刷新（仅 iframe 模式） ── */
   const handleReload = () => {
     if (iframeRef.current) {
       setIframeLoading(true);
-      iframeRef.current.src = VSCODE_BASE;
+      iframeRef.current.src = iframeRef.current.src;
     }
   };
 
-  /* 全屏切换 */
+  const handleIframeLoad = () => setIframeLoading(false);
+
+  /* ── 全屏切换 ── */
   const toggleFullscreen = () => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
@@ -59,6 +87,18 @@ export default function IDE() {
     return () => window.removeEventListener('keydown', handler);
   }, [showIframe]);
 
+  // 组件卸载时关闭 WebContentsView
+  useEffect(() => {
+    return () => {
+      if (isDesktop() && activeUrlRef.current) {
+        (window as any).rdkDesktop.hideUrl(activeUrlRef.current);
+      }
+    };
+  }, []);
+
+  const desktop = isDesktop();
+  const editorLabel = desktop && currentDevice ? `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}` : 'VS Code Web';
+
   return (
     <div className="ide-container" ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* ── 顶部工具栏 ── */}
@@ -70,7 +110,7 @@ export default function IDE() {
             <span className="ros-dot green" />
           </div>
           <span className="ros-topbar-title">代码编辑器</span>
-          <span className="ros-topbar-badge">VS Code</span>
+          <span className="ros-topbar-badge">{desktop ? 'code-server' : 'VS Code'}</span>
           {currentDevice && (
             <span className="ros-topbar-device">{currentDevice.name} · {currentDevice.ip}</span>
           )}
@@ -88,29 +128,38 @@ export default function IDE() {
         <div className="ros-topbar-right">
           {showIframe && (
             <>
-              <button className="ros-tool-btn" onClick={handleReload} title="刷新">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
-                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-                </svg>
-              </button>
+              {/* 非桌面端才显示刷新按钮 */}
+              {!desktop && (
+                <button className="ros-tool-btn" onClick={handleReload} title="刷新">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                  </svg>
+                </button>
+              )}
 
-              <button className="ros-tool-btn" onClick={() => window.open(VSCODE_BASE, '_blank')} title="新窗口打开">
+              <button
+                className="ros-tool-btn"
+                onClick={() => window.open(getCodeServerUrl(), '_blank')}
+                title="新窗口打开"
+              >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
                   <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
                 </svg>
               </button>
 
-              <button className="ros-tool-btn" onClick={toggleFullscreen} title="全屏 (F11)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  {isFullscreen ? (
-                    <><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></>
-                  ) : (
-                    <><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></>
-                  )}
-                </svg>
-              </button>
+              {!desktop && (
+                <button className="ros-tool-btn" onClick={toggleFullscreen} title="全屏 (F11)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {isFullscreen ? (
+                      <><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></>
+                    ) : (
+                      <><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></>
+                    )}
+                  </svg>
+                </button>
+              )}
 
               <div className="ros-topbar-sep" />
 
@@ -129,18 +178,25 @@ export default function IDE() {
             {iframeLoading && (
               <div className="ros-loading-overlay">
                 <div className="ros-loading-spinner" />
-                <span className="ros-loading-text">正在加载 VS Code...</span>
+                <span className="ros-loading-text">正在加载 {editorLabel}...</span>
               </div>
             )}
-            <iframe
-              ref={iframeRef}
-              src={VSCODE_BASE}
-              className="ros-iframe"
-              title="VS Code Web Editor"
-              onLoad={handleIframeLoad}
-              allow="clipboard-read; clipboard-write; fullscreen"
-              style={{ width: '100%', height: '100%', border: 'none' }}
-            />
+            {/* 桌面端由 WebContentsView 渲染，此处只显示占位 */}
+            {desktop ? (
+              <div style={{ width: '100%', height: '100%', background: '#1e1e1e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: '#555', fontSize: 13 }}>code-server 已在独立视图中加载</span>
+              </div>
+            ) : (
+              <iframe
+                ref={iframeRef}
+                src={VSCODE_WEB_URL}
+                className="ros-iframe"
+                title="VS Code Web Editor"
+                onLoad={handleIframeLoad}
+                allow="clipboard-read; clipboard-write; fullscreen"
+                style={{ width: '100%', height: '100%', border: 'none' }}
+              />
+            )}
           </>
         ) : (
           <div className="ros-welcome">
@@ -153,30 +209,41 @@ export default function IDE() {
               <div className="ros-welcome-glow" />
             </div>
 
-            <h2 className="ros-welcome-title">VS Code Web 编辑器</h2>
+            <h2 className="ros-welcome-title">
+              {desktop ? 'code-server 编辑器' : 'VS Code Web 编辑器'}
+            </h2>
             <p className="ros-welcome-desc">
-              基于 vscode.dev 的在线代码编辑器，支持中文界面，可通过 Remote SSH 连接到设备 /root 目录进行开发
+              {desktop
+                ? `连接设备 ${currentDevice?.ip ?? ''} 上的 code-server，直接编辑 /root 目录代码`
+                : '基于 vscode.dev 的在线代码编辑器，支持中文界面，可通过 Remote SSH 连接到设备'}
             </p>
+
+            {desktop && !currentDevice && (
+              <p className="ros-welcome-desc" style={{ color: '#f59e0b' }}>请先在左侧连接一个设备</p>
+            )}
 
             <button
               className="ros-connect-main-btn"
               onClick={handleConnect}
+              disabled={desktop && !currentDevice}
               style={{ background: '#007acc' }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
               </svg>
-              打开 VS Code
+              {desktop ? '打开 code-server' : '打开 VS Code'}
             </button>
 
             <div className="ros-welcome-hints">
-              <div className="ros-hint-item">
-                <kbd>F11</kbd>
-                <span>全屏模式</span>
-              </div>
+              {!desktop && (
+                <div className="ros-hint-item">
+                  <kbd>F11</kbd>
+                  <span>全屏模式</span>
+                </div>
+              )}
               <div className="ros-hint-item">
                 <span className="ros-hint-dot" />
-                <span>支持 Remote SSH 连接设备</span>
+                <span>{desktop ? `设备端口 ${CODE_SERVER_PORT}` : '支持 Remote SSH 连接设备'}</span>
               </div>
               <div className="ros-hint-item">
                 <span className="ros-hint-dot" />
