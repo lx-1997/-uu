@@ -10,6 +10,8 @@ import { Server as SocketIOServer } from 'socket.io';
 import { Client } from 'ssh2';
 import { WebSocketServer } from 'ws';
 import * as net from 'net';
+import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
+import * as path from 'path';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -60,6 +62,10 @@ const apiKey = process.env.OPENAI_API_KEY ?? '';
 const model = process.env.OPENAI_MODEL ?? 'qwen3.5-plus';
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
 const devicePasswordCache = new Map<string, string>();
+
+// OpenClaw Manager
+const resourcesPath = path.join(process.cwd(), 'build-resources');
+const openClawManager = new OpenClawDeploymentManager(resourcesPath);
 
 const credentialCacheKey = (host: string, username: string, port = 22) => `${host}:${port}::${username}`;
 const shEscape = (raw: string) => `'${raw.replace(/'/g, `'"'"'`)}'`;
@@ -401,6 +407,186 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
       error: error instanceof Error ? `OpenClaw 执行失败: ${error.message}` : 'OpenClaw 执行失败',
     });
   }
+});
+
+// OpenClaw 部署 API
+app.post('/api/devices/:id/openclaw/check', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runCheck(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/prepare', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runPrepare(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/install', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runInstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/upgrade', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runUpgrade(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/uninstall', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runUninstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/onboard', async (request, response) => {
+  const { id } = request.params;
+  const { provider, apiKey, modelId } = request.body as { provider?: string; apiKey?: string; modelId?: string };
+  
+  if (!provider || !apiKey) {
+    response.status(400).json({ error: 'provider 和 apiKey 为必填项' });
+    return;
+  }
+
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runOnboard(deviceObj, provider, apiKey, modelId, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/config', async (request, response) => {
+  const { id } = request.params;
+  const { config } = request.body as { config?: any };
+
+  if (!config) {
+    response.status(400).json({ error: '缺少配置数据' });
+    return;
+  }
+
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.updateConfig(deviceObj, config, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.get('/api/devices/:id/openclaw/status', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  openClawManager.getGatewayStatus(deviceObj, (status) => {
+    response.json(status);
+  });
+});
+
+app.get('/api/devices/:id/openclaw/config', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  openClawManager.getCurrentConfig(deviceObj, (config, success) => {
+    if (success && config) {
+      response.json(config);
+    } else {
+      response.status(500).json({ error: '读取配置失败' });
+    }
+  });
+});
+
+app.post('/api/devices/:id/openclaw/restart-gateway', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runRestartGateway(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.get('/api/devices/:id/openclaw/version', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.runGetVersion(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, version: output.trim() });
+  });
+});
+
+app.get('/api/devices/:id/openclaw/wifi-list', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  openClawManager.getWifiList(deviceObj, (wifiNames, success) => {
+    response.json({ ok: success, wifiNames });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/wifi-connect', async (request, response) => {
+  const { id } = request.params;
+  const { wifiName, wifiPassword } = request.body as { wifiName?: string; wifiPassword?: string };
+
+  if (!wifiName) {
+    response.status(400).json({ error: 'wifiName 为必填项' });
+    return;
+  }
+
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  let output = '';
+  openClawManager.setWifiConnection(deviceObj, wifiName, wifiPassword || '', (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
 });
 
 app.post('/api/devices/:id/exec', async (request, response) => {
