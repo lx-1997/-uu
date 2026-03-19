@@ -33,6 +33,7 @@ interface ConfigData {
     label: string;
     hasKey: boolean;
   }>;
+  pluginsAllow?: string[];
 }
 
 interface OpenClawChatMessage {
@@ -40,6 +41,13 @@ interface OpenClawChatMessage {
   role: 'user' | 'assistant';
   text: string;
 }
+
+const OPENCLAW_QUICK_PROMPTS = [
+  '请先检查当前网关状态并给出一条结论',
+  '帮我总结当前设备可用的 OpenClaw 能力',
+  '我现在要做一个设备健康巡检，给我步骤',
+  '帮我诊断为什么会连接失败，并给修复命令',
+];
 
 export default function OpenClaw() {
   const { currentDevice, addToast } = useAppState();
@@ -49,6 +57,7 @@ export default function OpenClaw() {
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState('');
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'model' | 'feishu' | 'skill' | 'install'>('model');
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<OpenClawChatMessage[]>([]);
   const [chatConnected, setChatConnected] = useState(false);
@@ -69,6 +78,7 @@ export default function OpenClaw() {
     appId: '',
     appSecret: '',
   });
+  const [skillPluginsAllowText, setSkillPluginsAllowText] = useState('');
 
   useEffect(() => {
     if (currentDevice) {
@@ -178,11 +188,9 @@ export default function OpenClaw() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, chatStreaming]);
 
-  const sendOpenClawMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentDevice || !chatInput.trim() || !socketRef.current || !chatConnected || chatStreaming) return;
-
-    const userText = chatInput.trim();
+  const dispatchOpenClawMessage = (text: string) => {
+    if (!currentDevice || !text.trim() || !socketRef.current || !chatConnected || chatStreaming) return;
+    const userText = text.trim();
     const msgId = Date.now();
     setChatMessages((prev) => [
       ...prev,
@@ -196,6 +204,23 @@ export default function OpenClaw() {
       deviceId: currentDevice.id,
       message: userText,
     });
+  };
+
+  const sendOpenClawMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    dispatchOpenClawMessage(chatInput);
+  };
+
+  const handleReconnectChat = () => {
+    if (!currentDevice || !socketRef.current) return;
+    setChatConnected(false);
+    socketRef.current.emit('openclaw:stop', { deviceId: currentDevice.id });
+    socketRef.current.emit('openclaw:start', { deviceId: currentDevice.id });
+  };
+
+  const clearChatMessages = () => {
+    setChatMessages([]);
+    setChatStreaming(false);
   };
 
   const loadStatus = async () => {
@@ -220,6 +245,9 @@ export default function OpenClaw() {
       }
       if (data.feishu) {
         setFeishuConfig(data.feishu);
+      }
+      if (Array.isArray(data.pluginsAllow)) {
+        setSkillPluginsAllowText(data.pluginsAllow.join('\n'));
       }
     } catch (err) {
       console.error('加载配置失败:', err);
@@ -254,16 +282,57 @@ export default function OpenClaw() {
 
   const saveConfig = async () => {
     if (!currentDevice) return;
+
+    const pluginAllowList = skillPluginsAllowText
+      .split(/\r?\n|,/) 
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (settingsTab === 'model') {
+      if (!modelConfig.baseUrl.trim() || !modelConfig.apiKey.trim()) {
+        addToast?.('模型配置需要同时填写 Base URL 和 API Key', 'warning');
+        return;
+      }
+    }
+
+    if (settingsTab === 'feishu') {
+      const hasAppId = !!feishuConfig.appId.trim();
+      const hasSecret = !!feishuConfig.appSecret.trim();
+      if ((hasAppId && !hasSecret) || (!hasAppId && hasSecret)) {
+        addToast?.('飞书配置需要同时填写 App ID 和 App Secret', 'warning');
+        return;
+      }
+    }
+
+    if (settingsTab === 'skill') {
+      const invalid = pluginAllowList.find((id) => !/^[a-zA-Z0-9@/_-]+$/.test(id));
+      if (invalid) {
+        addToast?.(`无效插件 ID: ${invalid}`, 'warning');
+        return;
+      }
+    }
+
+    const configPayload: any = {};
+    if (settingsTab === 'model') {
+      configPayload.modelGateway = modelConfig;
+    } else if (settingsTab === 'feishu') {
+      if (feishuConfig.appId.trim() && feishuConfig.appSecret.trim()) {
+        configPayload.feishu = feishuConfig;
+      } else {
+        addToast?.('飞书配置为空，未提交更新', 'info');
+        return;
+      }
+    } else if (settingsTab === 'skill') {
+      configPayload.pluginsAllow = pluginAllowList;
+    }
+
     setLoading(true);
     try {
       await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          config: {
-            modelGateway: modelConfig,
-            feishu: feishuConfig,
-          },
+          config: configPayload,
         }),
       });
       setOutput('配置已保存并重启网关');
@@ -381,9 +450,15 @@ export default function OpenClaw() {
       <div className="openclaw-content">
         {activeTab === 'chat' && (
           <div className="openclaw-chat-panel">
-            <div className="openclaw-chat-status">
-              <span className={`chat-status-dot ${chatConnected ? 'online' : 'offline'}`} />
-              <span>{chatConnected ? '已连接 OpenClaw 会话' : '连接中 / 未连接'}</span>
+            <div className="openclaw-chat-toolbar">
+              <div className="openclaw-chat-status">
+                <span className={`chat-status-dot ${chatConnected ? 'online' : 'offline'}`} />
+                <span>{chatConnected ? '已连接 OpenClaw 会话' : '连接中 / 未连接'}</span>
+              </div>
+              <div className="openclaw-chat-actions">
+                <button className="btn-secondary" onClick={handleReconnectChat} disabled={!currentDevice || chatStreaming}>重连会话</button>
+                <button className="btn-secondary" onClick={clearChatMessages} disabled={chatMessages.length === 0 || chatStreaming}>清空对话</button>
+              </div>
             </div>
 
             {!status?.running && (
@@ -404,18 +479,48 @@ export default function OpenClaw() {
                 <div className="openclaw-empty">
                   <div className="empty-icon">💬</div>
                   <h3>OpenClaw 对话已就绪</h3>
-                  <p>输入问题后将直接通过本地 Socket 连接板端 Agent</p>
+                  <p>输入问题后会直接通过本地会话连接板端 Agent</p>
+                  <div className="openclaw-empty-prompts">
+                    {OPENCLAW_QUICK_PROMPTS.slice(0, 3).map((prompt) => (
+                      <button
+                        key={prompt}
+                        className="openclaw-prompt-chip"
+                        onClick={() => dispatchOpenClawMessage(prompt)}
+                        disabled={!chatConnected || chatStreaming}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 chatMessages.map((msg) => (
                   <div key={msg.id} className={`openclaw-chat-msg ${msg.role}`}>
-                    <div className="openclaw-chat-role">{msg.role === 'user' ? '你' : 'OpenClaw'}</div>
+                    <div className="openclaw-chat-meta">
+                      <div className="openclaw-chat-role">{msg.role === 'user' ? '你' : 'OpenClaw'}</div>
+                      <span className="openclaw-chat-time">{new Date(msg.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
                     <div className="openclaw-chat-text">{msg.text || (msg.role === 'assistant' && chatStreaming ? '思考中…' : '')}</div>
                   </div>
                 ))
               )}
               <div ref={chatEndRef} />
             </div>
+
+            {chatMessages.length > 0 && (
+              <div className="openclaw-chat-prompts">
+                {OPENCLAW_QUICK_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    className="openclaw-prompt-chip"
+                    onClick={() => dispatchOpenClawMessage(prompt)}
+                    disabled={!chatConnected || chatStreaming}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <form className="openclaw-chat-input" onSubmit={sendOpenClawMessage}>
               <input

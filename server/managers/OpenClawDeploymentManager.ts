@@ -53,6 +53,7 @@ export interface ConfigData {
     label: string;
     hasKey: boolean;
   }>;
+  pluginsAllow?: string[];
   allProviders?: Record<string, any>;
 }
 
@@ -325,7 +326,7 @@ print(json.dumps(result))`;
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {
     const pyScript = `import json,os
 p=os.path.expanduser('~/.openclaw/openclaw.json')
-result={"modelGateway":{"baseUrl":"","apiKey":"","api":"anthropic-messages","modelId":"qwen3.5-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"allProviders":{}}
+result={"modelGateway":{"baseUrl":"","apiKey":"","api":"anthropic-messages","modelId":"qwen3.5-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
 if os.path.exists(p):
   d=json.load(open(p))
   provider=((d.get('models') or {}).get('providers') or {}).get('custom-gateway') or {}
@@ -345,6 +346,9 @@ if os.path.exists(p):
   result["feishu"].update({"appId":feishu.get('appId','') or '',"appSecret":feishu.get('appSecret','') or ''})
   result["runtimeModel"].update({"provider":runtime_provider or '',"modelId":runtime_model_id or '',"apiKey":runtime_api_key or ''})
   result["primaryModel"]=primary or ''
+  plugins=((d.get('plugins') or {}).get('allow') or [])
+  if isinstance(plugins,list):
+    result["pluginsAllow"]=[str(x) for x in plugins if isinstance(x,(str,int,float)) and str(x).strip()]
 print(json.dumps(result,ensure_ascii=False))`;
     const b64 = Buffer.from(pyScript, 'utf8').toString('base64');
     const cmd = `echo '${b64}' | base64 -d > /tmp/oc_read_config.py && python3 /tmp/oc_read_config.py`;
@@ -386,7 +390,7 @@ print(json.dumps(result,ensure_ascii=False))`;
 
   updateConfig(
     device: Device,
-    config: { modelGateway?: any; feishu?: any },
+    config: { modelGateway?: any; feishu?: any; pluginsAllow?: string[] },
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void
   ): void {
@@ -414,6 +418,14 @@ print(json.dumps(result,ensure_ascii=False))`;
           appSecret: config.feishu.appSecret,
           enabled: true,
         },
+      };
+    }
+    if (Array.isArray(config.pluginsAllow)) {
+      const allow = config.pluginsAllow
+        .map((item) => String(item ?? '').trim())
+        .filter(Boolean);
+      patch.plugins = {
+        allow: Array.from(new Set(allow)),
       };
     }
     if (Object.keys(patch).length === 0) {
