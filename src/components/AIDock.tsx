@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import type { ChatBlock } from '../app-types';
 import { getCapability } from '../ai';
+import { io, Socket } from 'socket.io-client';
 
 /* ─── Inline SVG icons (avoid emoji, keep crisp) ─── */
 const Icon = {
@@ -174,6 +175,8 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, agentPlan, agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
+    openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
+    currentDevice,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
@@ -181,6 +184,7 @@ export default function AIDock() {
   const [inputFocused, setInputFocused] = useState(false);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
@@ -209,6 +213,64 @@ export default function AIDock() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages.length, aiTyping]);
+
+  /* OpenClaw Socket.IO connection */
+  useEffect(() => {
+    if (!openclawChatMode || !currentDevice) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        setOpenclawConnected(false);
+      }
+      return;
+    }
+
+    const socket = io('http://localhost:8787');
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setOpenclawConnected(true);
+      socket.emit('openclaw:start', { deviceId: currentDevice.id });
+    });
+
+    socket.on('openclaw:ready', () => {
+      setOpenclawConnected(true);
+    });
+
+    socket.on('openclaw:data', (data: { chunk: string }) => {
+      // Append chunk to last AI message
+      setChatMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'ai') {
+          return [...prev.slice(0, -1), { ...last, text: last.text + data.chunk }];
+        }
+        return prev;
+      });
+    });
+
+    socket.on('openclaw:complete', () => {
+      setAiTyping(false);
+    });
+
+    socket.on('openclaw:error', (data: { error: string }) => {
+      setChatMessages(prev => [...prev, {
+        id: Date.now(),
+        role: 'ai',
+        text: `❌ OpenClaw 错误: ${data.error}`,
+      }]);
+      setAiTyping(false);
+    });
+
+    socket.on('disconnect', () => {
+      setOpenclawConnected(false);
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+      setOpenclawConnected(false);
+    };
+  }, [openclawChatMode, currentDevice, setOpenclawConnected]);
 
   const promptsByTab: Record<string, typeof defaultPrompts> = {
     dashboard: [
@@ -273,6 +335,26 @@ export default function AIDock() {
     requestAnimationFrame(() => {
       const form = document.querySelector('.input-box') as HTMLFormElement;
       form?.requestSubmit();
+    });
+  };
+
+  /* OpenClaw 消息处理 */
+  const handleOpenClawCommand = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cmd.trim() || !socketRef.current || !openclawConnected) return;
+
+    const userMsg = cmd.trim();
+    const msgId = Date.now();
+    
+    setChatMessages(prev => [...prev, { id: msgId, role: 'user', text: userMsg }]);
+    setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '' }]);
+    setChatExpanded(true);
+    setCmd('');
+    setAiTyping(true);
+
+    socketRef.current.emit('openclaw:send', {
+      deviceId: currentDevice?.id,
+      message: userMsg,
     });
   };
 
@@ -385,15 +467,40 @@ export default function AIDock() {
               <div className="chat-panel-title-wrap">
                 <span style={{ display: 'flex', alignItems: 'center', color: '#ff6b00' }}>{Icon.spark}</span>
                 <span className="chat-panel-title">AI 工作台</span>
-                <span className={`agent-badge ${agentMode ? 'on' : 'off'} ${agentExecution.lastError ? 'error' : ''}`}>
-                  {agentMode
-                    ? agentExecution.running
-                      ? `Agent RUN ${agentExecution.currentStep}/${agentExecution.totalSteps}`
-                      : agentExecution.lastError
-                        ? 'Agent ERROR'
-                        : `Agent ON${agentPlan ? ` · ${agentPlan.steps.length}步` : ''}`
-                    : 'Agent OFF'}
-                </span>
+                
+                {/* Mode Switcher */}
+                <div className="ai-mode-switcher">
+                  <button
+                    className={`mode-btn ${!openclawChatMode ? 'active' : ''}`}
+                    onClick={() => setOpenclawChatMode(false)}
+                    title="AI 助手"
+                  >
+                    🤖 助手
+                  </button>
+                  <button
+                    className={`mode-btn ${openclawChatMode ? 'active' : ''}`}
+                    onClick={() => setOpenclawChatMode(true)}
+                    title="OpenClaw"
+                    disabled={!currentDevice}
+                  >
+                    🦞 OpenClaw
+                    {openclawChatMode && (
+                      <span className={`connection-dot ${openclawConnected ? 'connected' : 'disconnected'}`} />
+                    )}
+                  </button>
+                </div>
+
+                {!openclawChatMode && (
+                  <span className={`agent-badge ${agentMode ? 'on' : 'off'} ${agentExecution.lastError ? 'error' : ''}`}>
+                    {agentMode
+                      ? agentExecution.running
+                        ? `Agent RUN ${agentExecution.currentStep}/${agentExecution.totalSteps}`
+                        : agentExecution.lastError
+                          ? 'Agent ERROR'
+                          : `Agent ON${agentPlan ? ` · ${agentPlan.steps.length}步` : ''}`
+                      : 'Agent OFF'}
+                  </span>
+                )}
               </div>
               <div className="chat-panel-controls">
                 {taskHistory.length > 0 && (
@@ -558,12 +665,15 @@ export default function AIDock() {
         )}
 
         {/* ── Input bar ── */}
-        <form className="input-box" onSubmit={handleCommand}>
+        <form className="input-box" onSubmit={openclawChatMode ? handleOpenClawCommand : handleCommand}>
           <span style={{ display: 'flex', alignItems: 'center', marginRight: 10, color: '#ff6b00', flexShrink: 0 }}>{Icon.spark}</span>
           <input
             type="text"
             className="cmd-input"
-            placeholder={activeTab === 'dashboard' ? '输入你想做的事，我来帮你推荐方案...' : '描述你的需求，AI 助手帮你操作...'}
+            placeholder={openclawChatMode 
+              ? (openclawConnected ? '与 OpenClaw 对话...' : '等待连接 OpenClaw...') 
+              : (activeTab === 'dashboard' ? '输入你想做的事，我来帮你推荐方案...' : '描述你的需求，AI 助手帮你操作...')}
+            disabled={openclawChatMode && !openclawConnected}
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}

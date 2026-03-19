@@ -1331,6 +1331,92 @@ app.post('/api/chat', async (request, response) => {
 io.on('connection', (socket) => {
   let sshClient: Client | null = null;
   let sshStream: any = null;
+  let openclawChatSession: { abort: () => void } | null = null;
+
+  // OpenClaw Chat Events
+  socket.on('openclaw:start', async (config) => {
+    const { deviceId } = config;
+    try {
+      const devices = await readDevices();
+      const device = devices.find(d => d.id === deviceId);
+      if (!device) {
+        socket.emit('openclaw:error', { error: 'Device not found' });
+        return;
+      }
+
+      const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+      
+      openClawManager.startInteractiveChat(
+        deviceObj,
+        (data, err) => {
+          if (err) {
+            socket.emit('openclaw:error', { error: err });
+            return;
+          }
+          socket.emit('openclaw:ready', { status: 'connected' });
+        },
+        () => {
+          socket.emit('openclaw:disconnected', {});
+          openclawChatSession = null;
+        },
+        `session-${socket.id}`
+      );
+    } catch (e: any) {
+      socket.emit('openclaw:error', { error: e.message });
+    }
+  });
+
+  socket.on('openclaw:send', async (data) => {
+    const { deviceId, message } = data;
+    if (!message?.trim()) return;
+
+    try {
+      const devices = await readDevices();
+      const device = devices.find(d => d.id === deviceId);
+      if (!device) {
+        socket.emit('openclaw:error', { error: 'Device not found' });
+        return;
+      }
+
+      const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+      
+      openclawChatSession = openClawManager.sendAgentMessage(
+        message,
+        (chunk) => {
+          socket.emit('openclaw:data', { chunk });
+        },
+        (success) => {
+          socket.emit('openclaw:complete', { success });
+          openclawChatSession = null;
+        },
+        `session-${socket.id}`,
+        deviceObj
+      );
+    } catch (e: any) {
+      socket.emit('openclaw:error', { error: e.message });
+    }
+  });
+
+  socket.on('openclaw:stop', async (data) => {
+    const { deviceId } = data;
+    if (openclawChatSession) {
+      openclawChatSession.abort();
+      openclawChatSession = null;
+    }
+    
+    try {
+      const devices = await readDevices();
+      const device = devices.find(d => d.id === deviceId);
+      if (device) {
+        const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+        openClawManager.stopInteractiveChat(`session-${socket.id}`, deviceObj);
+      }
+    } catch (e: any) {
+      // Ignore errors on stop
+    }
+    
+    socket.emit('openclaw:stopped', {});
+  });
 
   socket.on('init', async (config) => {
     const { deviceId, password, cols, rows } = config;

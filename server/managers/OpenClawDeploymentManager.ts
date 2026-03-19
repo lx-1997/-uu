@@ -482,4 +482,34 @@ print('[OpenClaw] 配置已更新')`;
     };
     this.execCommand(device, cmd, collectOutput, wrapComplete, { timeout: 60000 });
   }
+
+  // OpenClaw 对话方法
+  startInteractiveChat(
+    device: Device,
+    onData: (data: any, err?: string) => void,
+    onClose: () => void,
+    sessionId: string
+  ): void {
+    // 启动对话会话
+    onData({ status: 'ready' });
+  }
+
+  sendAgentMessage(
+    message: string,
+    onChunk: (chunk: string) => void,
+    onComplete: (success: boolean) => void,
+    sessionId: string,
+    device: Device
+  ): { abort: () => void } {
+    // 通过 SSH 执行 openclaw chat 命令
+    const cmd = `export PATH="$HOME/.npm-global/bin:$PATH" && echo ${JSON.stringify(message)} | openclaw chat`;
+    return this.execCommand(device, cmd, onChunk, onComplete, { pty: false, timeout: 120000 });
+  }
+
+  stopInteractiveChat(sessionId: string, device: Device | null): void {
+    // 停止对话会话
+    if (device) {
+      this.destroyConnection(device.ip);
+    }
+  }
 }

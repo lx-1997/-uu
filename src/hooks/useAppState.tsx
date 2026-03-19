@@ -163,6 +163,12 @@ export interface AppState {
   setAgentMode: (v: boolean) => void;
   agentPlan: AgentPlan | null;
   agentExecution: AgentExecutionState;
+  
+  // OpenClaw Chat Mode
+  openclawChatMode: boolean;
+  setOpenclawChatMode: (v: boolean) => void;
+  openclawConnected: boolean;
+  setOpenclawConnected: (v: boolean) => void;
 
   // Task tracking
   taskHistory: Task[];
@@ -243,6 +249,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ---- OpenClaw ----
   const [openclawMode, setOpenclawMode] = useState('model');
   const [openclawThreshold] = useState(74);
+  const [openclawChatMode, setOpenclawChatMode] = useState(false);
+  const [openclawConnected, setOpenclawConnected] = useState(false);
 
   // ---- Hardware ----
   const [hardwareRange, setHardwareRange] = useState<'realtime' | '10m' | '1h'>('realtime');
@@ -1222,6 +1230,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     chatMessages, chatExpanded, setChatExpanded, aiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
+    openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
   };
 
