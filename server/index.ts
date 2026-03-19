@@ -93,6 +93,22 @@ function resolvePassword(request: express.Request, device: Device) {
   return { password, key };
 }
 
+function resolveStoredDevicePassword(device: Device) {
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+  const cachedPassword = devicePasswordCache.get(key);
+  const persistedPassword = (device as Device & { password?: string }).password ?? '';
+  return cachedPassword || persistedPassword || defaultSshPassword || device.username;
+}
+
+function toOpenClawDevice(device: Device, password?: string) {
+  return {
+    ip: device.host,
+    userName: device.username,
+    id: device.id,
+    password: password || resolveStoredDevicePassword(device),
+  };
+}
+
 function passwordCandidates(username: string) {
   const candidates = [
     username,
@@ -452,7 +468,8 @@ app.post('/api/devices/:id/openclaw/upgrade', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runUpgrade(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -464,7 +481,8 @@ app.post('/api/devices/:id/openclaw/uninstall', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runUninstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -483,7 +501,8 @@ app.post('/api/devices/:id/openclaw/onboard', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runOnboard(deviceObj, provider, apiKey, modelId, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -502,7 +521,8 @@ app.post('/api/devices/:id/openclaw/config', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.updateConfig(deviceObj, config, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -514,7 +534,8 @@ app.get('/api/devices/:id/openclaw/status', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   openClawManager.getGatewayStatus(deviceObj, (status) => {
     response.json(status);
   });
@@ -525,7 +546,8 @@ app.get('/api/devices/:id/openclaw/config', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   openClawManager.getCurrentConfig(deviceObj, (config, success) => {
     if (success && config) {
       response.json(config);
@@ -540,7 +562,8 @@ app.post('/api/devices/:id/openclaw/restart-gateway', async (request, response) 
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runRestartGateway(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -552,7 +575,8 @@ app.get('/api/devices/:id/openclaw/version', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runGetVersion(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, version: output.trim() });
@@ -564,7 +588,8 @@ app.get('/api/devices/:id/openclaw/wifi-list', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   openClawManager.getWifiList(deviceObj, (wifiNames, success) => {
     response.json({ ok: success, wifiNames });
   });
@@ -582,7 +607,8 @@ app.post('/api/devices/:id/openclaw/wifi-connect', async (request, response) => 
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.setWifiConnection(deviceObj, wifiName, wifiPassword || '', (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -1344,7 +1370,7 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+      const deviceObj = toOpenClawDevice(device);
       
       openClawManager.startInteractiveChat(
         deviceObj,
@@ -1378,14 +1404,29 @@ io.on('connection', (socket) => {
         return;
       }
 
-      const deviceObj = { ip: device.host, userName: device.username, id: device.id };
-      
+      const deviceObj = toOpenClawDevice(device);
+      let streamed = '';
+
       openclawChatSession = openClawManager.sendAgentMessage(
         message,
         (chunk) => {
+          streamed += chunk;
           socket.emit('openclaw:data', { chunk });
         },
         (success) => {
+          if (!success) {
+            const raw = (streamed || '').trim();
+            let msg = raw || 'OpenClaw 会话执行失败，请检查设备连接、密码或 Gateway 状态';
+            if (/__OPENCLAW_HTTP_FAILED__/i.test(raw)) {
+              msg = raw
+                .replace(/__OPENCLAW_HTTP_FAILED__/gi, '')
+                .trim() || 'OpenClaw Gateway HTTP 接口不可用，请检查 18789 端口与网关配置';
+            }
+            if (/plugins\.allow is empty/i.test(raw)) {
+              msg = 'OpenClaw 插件安全策略阻止加载本地插件（plugins.allow 为空）。请在 openclaw.json 中显式配置受信任插件 IDs，或移除未受信插件后重试。';
+            }
+            socket.emit('openclaw:error', { error: msg });
+          }
           socket.emit('openclaw:complete', { success });
           openclawChatSession = null;
         },
@@ -1408,7 +1449,7 @@ io.on('connection', (socket) => {
       const devices = await readDevices();
       const device = devices.find(d => d.id === deviceId);
       if (device) {
-        const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+        const deviceObj = toOpenClawDevice(device);
         openClawManager.stopInteractiveChat(`session-${socket.id}`, deviceObj);
       }
     } catch (e: any) {

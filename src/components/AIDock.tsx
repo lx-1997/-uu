@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import type { ChatBlock } from '../app-types';
 import { getCapability } from '../ai';
-import { io, Socket } from 'socket.io-client';
+import io from 'socket.io-client';
 
 /* ─── Inline SVG icons (avoid emoji, keep crisp) ─── */
 const Icon = {
@@ -170,7 +170,7 @@ function BlockRenderer({ block, onConfirm, onDismiss, onCancelTask }: { block: C
 export default function AIDock() {
   const {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
-    chatMessages, chatExpanded, setChatExpanded, aiTyping,
+    chatMessages, setChatMessages, chatExpanded, setChatExpanded, aiTyping, setAiTyping,
     handleCommand, setActiveTab, activeTab,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, agentPlan, agentExecution,
@@ -184,7 +184,18 @@ export default function AIDock() {
   const [inputFocused, setInputFocused] = useState(false);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<SocketIOClient.Socket | null>(null);
+
+  const resolveSocketUrl = () => {
+    const apiBase = (window as any).rdkDesktop?.apiBase as string | undefined;
+    if (!apiBase) return 'http://localhost:8787';
+    try {
+      const url = new URL(apiBase);
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return 'http://localhost:8787';
+    }
+  };
 
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
@@ -225,7 +236,14 @@ export default function AIDock() {
       return;
     }
 
-    const socket = io('http://localhost:8787');
+    const socket = io(resolveSocketUrl(), {
+      transports: ['polling'],
+      upgrade: false,
+      reconnection: true,
+      reconnectionAttempts: 8,
+      reconnectionDelay: 800,
+      timeout: 10000,
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -250,6 +268,13 @@ export default function AIDock() {
 
     socket.on('openclaw:complete', () => {
       setAiTyping(false);
+      setChatMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'ai' && !last.text.trim()) {
+          return [...prev.slice(0, -1), { ...last, text: '⚠️ OpenClaw 未返回有效内容，请检查网关状态或设备密码。' }];
+        }
+        return prev;
+      });
     });
 
     socket.on('openclaw:error', (data: { error: string }) => {
@@ -261,8 +286,18 @@ export default function AIDock() {
       setAiTyping(false);
     });
 
+    socket.on('openclaw:disconnected', () => {
+      setOpenclawConnected(false);
+      setAiTyping(false);
+    });
+
     socket.on('disconnect', () => {
       setOpenclawConnected(false);
+    });
+
+    socket.on('connect_error', () => {
+      setOpenclawConnected(false);
+      setAiTyping(false);
     });
 
     return () => {
@@ -346,8 +381,11 @@ export default function AIDock() {
     const userMsg = cmd.trim();
     const msgId = Date.now();
     
-    setChatMessages(prev => [...prev, { id: msgId, role: 'user', text: userMsg }]);
-    setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '' }]);
+    setChatMessages(prev => [
+      ...prev,
+      { id: msgId, role: 'user', text: userMsg },
+      { id: msgId + 1, role: 'ai', text: '' },
+    ]);
     setChatExpanded(true);
     setCmd('');
     setAiTyping(true);

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import io from 'socket.io-client';
 import '../styles/openclaw.css';
 
 interface GatewayStatus {
@@ -34,6 +35,12 @@ interface ConfigData {
   }>;
 }
 
+interface OpenClawChatMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  text: string;
+}
+
 export default function OpenClaw() {
   const { currentDevice, addToast } = useAppState();
   const [activeTab, setActiveTab] = useState<'chat' | 'settings'>('chat');
@@ -41,8 +48,13 @@ export default function OpenClaw() {
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState('');
-  const [gatewayUrl, setGatewayUrl] = useState('');
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<OpenClawChatMessage[]>([]);
+  const [chatConnected, setChatConnected] = useState(false);
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const socketRef = useRef<SocketIOClient.Socket | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   // 表单状态
   const [modelConfig, setModelConfig] = useState({
@@ -62,9 +74,129 @@ export default function OpenClaw() {
     if (currentDevice) {
       loadStatus();
       loadConfig();
-      setGatewayUrl(`http://${currentDevice.ip}:18789/chat?session=main`);
     }
   }, [currentDevice]);
+
+  const resolveSocketUrl = () => {
+    const apiBase = (window as any).rdkDesktop?.apiBase as string | undefined;
+    if (!apiBase) return 'http://localhost:8787';
+    try {
+      const url = new URL(apiBase);
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      return 'http://localhost:8787';
+    }
+  };
+
+  useEffect(() => {
+    if (!currentDevice) {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      setChatConnected(false);
+      setChatStreaming(false);
+      return;
+    }
+
+    const socket = io(resolveSocketUrl(), {
+      transports: ['polling'],
+      upgrade: false,
+      reconnection: true,
+      reconnectionAttempts: 8,
+      reconnectionDelay: 800,
+      timeout: 10000,
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setChatConnected(true);
+      socket.emit('openclaw:start', { deviceId: currentDevice.id });
+    });
+
+    socket.on('openclaw:ready', () => {
+      setChatConnected(true);
+    });
+
+    socket.on('openclaw:data', (data: { chunk: string }) => {
+      setChatMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant') {
+          return [...prev.slice(0, -1), { ...last, text: `${last.text}${data.chunk}` }];
+        }
+        return prev;
+      });
+    });
+
+    socket.on('openclaw:complete', () => {
+      setChatStreaming(false);
+      setChatMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && !last.text.trim()) {
+          return [...prev.slice(0, -1), { ...last, text: '⚠️ OpenClaw 未返回有效内容，请检查网关状态或设备密码。' }];
+        }
+        return prev;
+      });
+    });
+
+    socket.on('openclaw:error', (data: { error: string }) => {
+      setChatStreaming(false);
+      setChatMessages((prev) => [...prev, {
+        id: Date.now(),
+        role: 'assistant',
+        text: `❌ OpenClaw 错误：${data.error}`,
+      }]);
+      addToast?.(data.error || 'OpenClaw 对话异常', 'error');
+    });
+
+    socket.on('openclaw:disconnected', () => {
+      setChatConnected(false);
+      setChatStreaming(false);
+    });
+
+    socket.on('disconnect', () => {
+      setChatConnected(false);
+      setChatStreaming(false);
+    });
+
+    socket.on('connect_error', (err: any) => {
+      setChatConnected(false);
+      setChatStreaming(false);
+      addToast?.(`OpenClaw 连接失败: ${err?.message || 'socket error'}`, 'warning');
+    });
+
+    return () => {
+      socket.emit('openclaw:stop', { deviceId: currentDevice.id });
+      socket.disconnect();
+      socketRef.current = null;
+      setChatConnected(false);
+      setChatStreaming(false);
+    };
+  }, [currentDevice, addToast]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, chatStreaming]);
+
+  const sendOpenClawMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentDevice || !chatInput.trim() || !socketRef.current || !chatConnected || chatStreaming) return;
+
+    const userText = chatInput.trim();
+    const msgId = Date.now();
+    setChatMessages((prev) => [
+      ...prev,
+      { id: msgId, role: 'user', text: userText },
+      { id: msgId + 1, role: 'assistant', text: '' },
+    ]);
+    setChatInput('');
+    setChatStreaming(true);
+
+    socketRef.current.emit('openclaw:send', {
+      deviceId: currentDevice.id,
+      message: userText,
+    });
+  };
 
   const loadStatus = async () => {
     if (!currentDevice) return;
@@ -249,19 +381,16 @@ export default function OpenClaw() {
       <div className="openclaw-content">
         {activeTab === 'chat' && (
           <div className="openclaw-chat-panel">
-            {status?.running ? (
-              <iframe
-                src={gatewayUrl}
-                className="openclaw-iframe"
-                title="OpenClaw Chat"
-              />
-            ) : (
-              <div className="openclaw-empty">
-                <div className="empty-icon">🚀</div>
-                <h3>OpenClaw 网关未运行</h3>
-                <p>启动网关后即可开始对话</p>
+            <div className="openclaw-chat-status">
+              <span className={`chat-status-dot ${chatConnected ? 'online' : 'offline'}`} />
+              <span>{chatConnected ? '已连接 OpenClaw 会话' : '连接中 / 未连接'}</span>
+            </div>
+
+            {!status?.running && (
+              <div className="openclaw-chat-warning">
+                OpenClaw 网关未运行，建议先点击“启动网关”后再对话。
                 <button
-                  className="btn-primary btn-large"
+                  className="btn-secondary"
                   onClick={() => runAction('restart-gateway')}
                   disabled={loading}
                 >
@@ -269,6 +398,36 @@ export default function OpenClaw() {
                 </button>
               </div>
             )}
+
+            <div className="openclaw-chat-messages">
+              {chatMessages.length === 0 ? (
+                <div className="openclaw-empty">
+                  <div className="empty-icon">💬</div>
+                  <h3>OpenClaw 对话已就绪</h3>
+                  <p>输入问题后将直接通过本地 Socket 连接板端 Agent</p>
+                </div>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div key={msg.id} className={`openclaw-chat-msg ${msg.role}`}>
+                    <div className="openclaw-chat-role">{msg.role === 'user' ? '你' : 'OpenClaw'}</div>
+                    <div className="openclaw-chat-text">{msg.text || (msg.role === 'assistant' && chatStreaming ? '思考中…' : '')}</div>
+                  </div>
+                ))
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            <form className="openclaw-chat-input" onSubmit={sendOpenClawMessage}>
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder={chatConnected ? '给 OpenClaw 发送消息…' : '等待 OpenClaw 连接…'}
+                disabled={!chatConnected || chatStreaming}
+              />
+              <button type="submit" className="btn-primary" disabled={!chatConnected || !chatInput.trim() || chatStreaming}>
+                {chatStreaming ? '发送中…' : '发送'}
+              </button>
+            </form>
           </div>
         )}
 

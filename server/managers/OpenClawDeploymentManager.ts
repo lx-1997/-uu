@@ -9,6 +9,7 @@ import * as path from 'path';
 export interface Device {
   ip: string;
   userName: string;
+  password?: string;
   id?: string;
   name?: string;
   deviceType?: string;
@@ -107,7 +108,18 @@ export class OpenClawDeploymentManager {
   private async getClient(device: Device): Promise<Client> {
     const ip = device.ip;
     const cached = this.sshPool.get(ip);
-    if (cached) return cached;
+    if (cached) {
+      try {
+        const client = await cached;
+        const socket = (client as any)?._sock;
+        if (socket && !socket.destroyed && socket.writable) {
+          return client;
+        }
+      } catch (_) {
+        // stale cached promise, recreate below
+      }
+      this.sshPool.delete(ip);
+    }
 
     const promise = new Promise<Client>((resolve, reject) => {
       const client = new Client();
@@ -122,7 +134,7 @@ export class OpenClawDeploymentManager {
           host: device.ip,
           port: 22,
           username: device.userName,
-          password: device.userName,
+          password: device.password || device.userName,
           readyTimeout: 15000,
           keepaliveInterval: 30000,
           keepaliveCountMax: 3,
@@ -490,8 +502,14 @@ print('[OpenClaw] 配置已更新')`;
     onClose: () => void,
     sessionId: string
   ): void {
-    // 启动对话会话
-    onData({ status: 'ready' });
+    this.getClient(device)
+      .then(() => {
+        onData({ status: 'ready' });
+      })
+      .catch((error: any) => {
+        onData(null, error?.message || 'SSH connection failed');
+        onClose();
+      });
   }
 
   sendAgentMessage(
@@ -501,15 +519,143 @@ print('[OpenClaw] 配置已更新')`;
     sessionId: string,
     device: Device
   ): { abort: () => void } {
-    // 通过 SSH 执行 openclaw chat 命令
-    const cmd = `export PATH="$HOME/.npm-global/bin:$PATH" && echo ${JSON.stringify(message)} | openclaw chat`;
-    return this.execCommand(device, cmd, onChunk, onComplete, { pty: false, timeout: 120000 });
+    const messageBase64 = Buffer.from(message, 'utf8').toString('base64');
+    const sessionBase64 = Buffer.from(sessionId || 'main', 'utf8').toString('base64');
+    const pyScript = `import base64, json, os, sys, urllib.request, urllib.error, subprocess
+
+msg = base64.b64decode(sys.argv[1]).decode('utf-8', 'ignore')
+session = base64.b64decode(sys.argv[2]).decode('utf-8', 'ignore') or 'main'
+
+cfg = {}
+try:
+  p = os.path.expanduser('~/.openclaw/openclaw.json')
+  if os.path.exists(p):
+    with open(p, 'r', encoding='utf-8') as f:
+      cfg = json.load(f)
+except Exception:
+  cfg = {}
+
+token = ((cfg.get('gateway') or {}).get('auth') or {}).get('token') or ''
+headers = {
+  'Content-Type': 'application/json',
+  'x-openclaw-agent-id': 'main',
+  'x-openclaw-session-key': session,
+}
+if token:
+  headers['Authorization'] = f'Bearer {token}'
+
+def discover_local_plugin_ids():
+  ids = []
+  ext = os.path.expanduser('~/.openclaw/extensions')
+  if os.path.isdir(ext):
+    for name in os.listdir(ext):
+      full = os.path.join(ext, name)
+      if os.path.isdir(full):
+        ids.append(name)
+  return ids
+
+def patch_plugins_allow_and_restart():
+  p = os.path.expanduser('~/.openclaw/openclaw.json')
+  data = {}
+  if os.path.exists(p):
+    with open(p, 'r', encoding='utf-8') as f:
+      data = json.load(f)
+  plugins = data.setdefault('plugins', {})
+  allow = plugins.get('allow')
+  if not isinstance(allow, list):
+    allow = []
+  changed = False
+  for pid in discover_local_plugin_ids():
+    if pid not in allow:
+      allow.append(pid)
+      changed = True
+  plugins['allow'] = allow
+  if changed:
+    with open(p, 'w', encoding='utf-8') as f:
+      json.dump(data, f, indent=2, ensure_ascii=False)
+    subprocess.run('systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart >/dev/null 2>&1 || true', shell=True)
+  return changed, allow
+
+def post(path, payload):
+  req = urllib.request.Request(
+    'http://127.0.0.1:18789' + path,
+    data=json.dumps(payload).encode('utf-8'),
+    headers=headers,
+    method='POST',
+  )
+  with urllib.request.urlopen(req, timeout=120) as resp:
+    return resp.getcode(), resp.read().decode('utf-8', 'ignore')
+
+errors = []
+text = ''
+
+def request_once():
+  local_errors = []
+  local_text = ''
+  try:
+    _, body = post('/v1/chat/completions', {
+      'model': 'openclaw',
+      'stream': False,
+      'user': session,
+      'messages': [{'role': 'user', 'content': msg}],
+    })
+    payload = json.loads(body or '{}')
+    local_text = ((payload.get('choices') or [{}])[0].get('message') or {}).get('content') or ((payload.get('choices') or [{}])[0].get('text') or '')
+  except Exception as e:
+    local_errors.append(f'chat/completions failed: {e}')
+
+  if not local_text:
+    try:
+      _, body = post('/v1/responses', {
+        'model': 'openclaw',
+        'stream': False,
+        'user': session,
+        'input': msg,
+      })
+      payload = json.loads(body or '{}')
+      local_text = payload.get('output_text') or ''
+      if not local_text:
+        output = payload.get('output') or []
+        if isinstance(output, list) and output:
+          first = output[0] or {}
+          local_text = first.get('text') or ''
+    except Exception as e:
+      local_errors.append(f'responses failed: {e}')
+
+  return local_text, local_errors
+
+text, errors = request_once()
+
+if (not text) and any('plugins.allow is empty' in str(err) for err in errors):
+  changed, allow = patch_plugins_allow_and_restart()
+  if changed:
+    errors.append('plugins.allow auto-fixed: ' + ','.join(allow))
+  text, retry_errors = request_once()
+  errors.extend(retry_errors)
+
+if text:
+  print(text)
+  sys.exit(0)
+
+print('__OPENCLAW_HTTP_FAILED__')
+for err in errors:
+  print(err)
+sys.exit(1)
+`;
+    const scriptBase64 = Buffer.from(pyScript, 'utf8').toString('base64');
+    const cmd = [
+      'export PATH="$HOME/.npm-global/bin:$PATH"',
+      `echo '${scriptBase64}' | base64 -d > /tmp/oc_chat_http.py`,
+      `python3 /tmp/oc_chat_http.py '${messageBase64}' '${sessionBase64}'`,
+    ].join(' && ');
+
+    return this.execCommand(device, cmd, (chunk) => {
+      onChunk(chunk);
+    }, onComplete, { pty: false, timeout: 120000 });
   }
 
   stopInteractiveChat(sessionId: string, device: Device | null): void {
-    // 停止对话会话
-    if (device) {
-      this.destroyConnection(device.ip);
-    }
+    // 会话级 stop 不销毁共享 SSH 连接，避免多个页面/面板互相踢下线
+    // 连接由 close/error 事件或应用生命周期统一回收
   }
 }

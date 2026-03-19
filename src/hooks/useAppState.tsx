@@ -152,9 +152,11 @@ export interface AppState {
   setShowSuggestions: (v: boolean) => void;
   filteredSuggestions: typeof CMD_SUGGESTIONS;
   chatMessages: ChatMessage[];
+  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   chatExpanded: boolean;
   setChatExpanded: (v: boolean) => void;
   aiTyping: boolean;
+  setAiTyping: React.Dispatch<React.SetStateAction<boolean>>;
   handleCommand: (e: React.FormEvent) => void;
   executeConfirm: (confirmId: string) => void;
   dismissConfirm: (confirmId: string) => void;
@@ -1227,7 +1229,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     autoReconnect, setAutoReconnect, connectionTimeout, setConnectionTimeout,
     language, setLanguage, confirmDialog, setConfirmDialog, showConfirm,
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
-    chatMessages, chatExpanded, setChatExpanded, aiTyping, handleCommand,
+    chatMessages, setChatMessages, chatExpanded, setChatExpanded, aiTyping, setAiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
     openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
