@@ -540,168 +540,171 @@ export default function OpenClaw() {
           <div className="openclaw-settings-panel">
             <div className="settings-sidebar">
               <div className="settings-nav">
-                <button className="nav-item active">模型配置</button>
-                <button className="nav-item">飞书配置</button>
-                <button className="nav-item">安装管理</button>
+                <button className={`nav-item ${settingsTab === 'model' ? 'active' : ''}`} onClick={() => setSettingsTab('model')}>模型配置</button>
+                <button className={`nav-item ${settingsTab === 'feishu' ? 'active' : ''}`} onClick={() => setSettingsTab('feishu')}>飞书配置</button>
+                <button className={`nav-item ${settingsTab === 'skill' ? 'active' : ''}`} onClick={() => setSettingsTab('skill')}>技能配置</button>
+                <button className={`nav-item ${settingsTab === 'install' ? 'active' : ''}`} onClick={() => setSettingsTab('install')}>安装管理</button>
               </div>
             </div>
 
             <div className="settings-content">
-              <div className="settings-section">
-                <h3>模型网关配置</h3>
-                <p className="section-desc">配置自定义模型网关，支持 OpenAI 兼容接口</p>
-                
-                <div className="form-group">
-                  <label>Base URL</label>
-                  <input
-                    type="text"
-                    value={modelConfig.baseUrl}
-                    onChange={(e) => setModelConfig({ ...modelConfig, baseUrl: e.target.value })}
-                    placeholder="https://api.example.com/v1"
-                  />
-                </div>
+              {settingsTab === 'model' && (
+                <div className="settings-section">
+                  <h3>模型网关配置</h3>
+                  <p className="section-desc">配置模型网关参数并指定默认模型，提交后会自动重启 Gateway。</p>
 
-                <div className="form-group">
-                  <label>API Key</label>
-                  <input
-                    type="password"
-                    value={modelConfig.apiKey}
-                    onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })}
-                    placeholder="sk-..."
-                  />
-                </div>
-
-                <div className="form-row">
                   <div className="form-group">
-                    <label>API 类型</label>
-                    <select
-                      value={modelConfig.api}
-                      onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })}
-                    >
-                      <option value="anthropic-messages">Anthropic Messages</option>
-                      <option value="openai-chat">OpenAI Chat</option>
-                    </select>
+                    <label>Base URL</label>
+                    <input
+                      type="text"
+                      value={modelConfig.baseUrl}
+                      onChange={(e) => setModelConfig({ ...modelConfig, baseUrl: e.target.value })}
+                      placeholder="https://api.example.com/v1"
+                    />
                   </div>
 
                   <div className="form-group">
-                    <label>模型 ID</label>
+                    <label>API Key</label>
+                    <input
+                      type="password"
+                      value={modelConfig.apiKey}
+                      onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })}
+                      placeholder="sk-..."
+                    />
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>API 类型</label>
+                      <select
+                        value={modelConfig.api}
+                        onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })}
+                      >
+                        <option value="anthropic-messages">Anthropic Messages</option>
+                        <option value="openai-chat">OpenAI Chat</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label>模型 ID</label>
+                      <input
+                        type="text"
+                        value={modelConfig.modelId}
+                        onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })}
+                        placeholder="qwen3.5-plus"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>模型名称</label>
                     <input
                       type="text"
-                      value={modelConfig.modelId}
-                      onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })}
-                      placeholder="qwen3.5-plus"
+                      value={modelConfig.modelName}
+                      onChange={(e) => setModelConfig({ ...modelConfig, modelName: e.target.value })}
+                      placeholder="Custom Model"
                     />
                   </div>
                 </div>
+              )}
 
-                <div className="form-group">
-                  <label>模型名称</label>
-                  <input
-                    type="text"
-                    value={modelConfig.modelName}
-                    onChange={(e) => setModelConfig({ ...modelConfig, modelName: e.target.value })}
-                    placeholder="Custom Model"
-                  />
+              {settingsTab === 'feishu' && (
+                <div className="settings-section">
+                  <h3>飞书机器人配置</h3>
+                  <p className="section-desc">用于飞书机器人配对。请同时填写 App ID 与 App Secret。</p>
+
+                  <div className="form-group">
+                    <label>App ID</label>
+                    <input
+                      type="text"
+                      value={feishuConfig.appId}
+                      onChange={(e) => setFeishuConfig({ ...feishuConfig, appId: e.target.value })}
+                      placeholder="cli_..."
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>App Secret</label>
+                    <input
+                      type="password"
+                      value={feishuConfig.appSecret}
+                      onChange={(e) => setFeishuConfig({ ...feishuConfig, appSecret: e.target.value })}
+                      placeholder="..."
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="settings-section">
-                <h3>飞书机器人配置</h3>
-                <p className="section-desc">配置飞书应用凭证，启用飞书对话功能</p>
+              {settingsTab === 'skill' && (
+                <div className="settings-section">
+                  <h3>技能 / 插件白名单</h3>
+                  <p className="section-desc">每行一个插件 ID，保存后会写入 openclaw.json 的 plugins.allow 并重启 Gateway。</p>
 
-                <div className="form-group">
-                  <label>App ID</label>
-                  <input
-                    type="text"
-                    value={feishuConfig.appId}
-                    onChange={(e) => setFeishuConfig({ ...feishuConfig, appId: e.target.value })}
-                    placeholder="cli_..."
-                  />
+                  <div className="form-group">
+                    <label>plugins.allow</label>
+                    <textarea
+                      className="settings-textarea"
+                      value={skillPluginsAllowText}
+                      onChange={(e) => setSkillPluginsAllowText(e.target.value)}
+                      placeholder={'skillhub\nfeishu_doc\nfeishu_chat'}
+                    />
+                  </div>
                 </div>
+              )}
 
-                <div className="form-group">
-                  <label>App Secret</label>
-                  <input
-                    type="password"
-                    value={feishuConfig.appSecret}
-                    onChange={(e) => setFeishuConfig({ ...feishuConfig, appSecret: e.target.value })}
-                    placeholder="..."
-                  />
-                </div>
-              </div>
-
-              <div className="settings-actions">
-                <button
-                  className="btn-primary"
-                  onClick={saveConfig}
-                  disabled={loading}
-                >
-                  {loading ? '保存中...' : '保存配置'}
-                </button>
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    loadConfig();
-                    addToast?.('已重新加载配置', 'info');
-                  }}
-                >
-                  重新加载
-                </button>
-              </div>
-
-              <div className="settings-section">
-                <h3>安装管理</h3>
-                <div className="action-grid">
+              {settingsTab !== 'install' && (
+                <div className="settings-actions">
                   <button
-                    className="action-card"
-                    onClick={() => runAction('check')}
+                    className="btn-primary"
+                    onClick={saveConfig}
                     disabled={loading}
                   >
-                    <span className="action-icon">🔍</span>
-                    <span className="action-label">系统诊断</span>
+                    {loading ? '保存中...' : '保存当前配置'}
                   </button>
                   <button
-                    className="action-card"
-                    onClick={() => runAction('prepare')}
-                    disabled={loading}
+                    className="btn-secondary"
+                    onClick={() => {
+                      loadConfig();
+                      addToast?.('已重新加载配置', 'info');
+                    }}
                   >
-                    <span className="action-icon">📦</span>
-                    <span className="action-label">安装依赖</span>
-                  </button>
-                  <button
-                    className="action-card primary"
-                    onClick={() => runAction('install')}
-                    disabled={loading}
-                  >
-                    <span className="action-icon">⬇️</span>
-                    <span className="action-label">安装 OpenClaw</span>
-                  </button>
-                  <button
-                    className="action-card"
-                    onClick={() => runAction('upgrade')}
-                    disabled={loading}
-                  >
-                    <span className="action-icon">⬆️</span>
-                    <span className="action-label">升级版本</span>
-                  </button>
-                  <button
-                    className="action-card"
-                    onClick={() => runAction('restart-gateway')}
-                    disabled={loading}
-                  >
-                    <span className="action-icon">🔄</span>
-                    <span className="action-label">重启网关</span>
-                  </button>
-                  <button
-                    className="action-card danger"
-                    onClick={() => runAction('uninstall')}
-                    disabled={loading}
-                  >
-                    <span className="action-icon">🗑️</span>
-                    <span className="action-label">卸载</span>
+                    重新加载
                   </button>
                 </div>
-              </div>
+              )}
+
+              {settingsTab === 'install' && (
+                <div className="settings-section">
+                  <h3>安装管理</h3>
+                  <p className="section-desc">安装相关操作独立到该页面，避免与配置项混淆。</p>
+                  <div className="action-grid">
+                    <button className="action-card" onClick={() => runAction('check')} disabled={loading}>
+                      <span className="action-icon">🔍</span>
+                      <span className="action-label">系统诊断</span>
+                    </button>
+                    <button className="action-card" onClick={() => runAction('prepare')} disabled={loading}>
+                      <span className="action-icon">📦</span>
+                      <span className="action-label">安装依赖</span>
+                    </button>
+                    <button className="action-card primary" onClick={() => runAction('install')} disabled={loading}>
+                      <span className="action-icon">⬇️</span>
+                      <span className="action-label">安装 OpenClaw</span>
+                    </button>
+                    <button className="action-card" onClick={() => runAction('upgrade')} disabled={loading}>
+                      <span className="action-icon">⬆️</span>
+                      <span className="action-label">升级版本</span>
+                    </button>
+                    <button className="action-card" onClick={() => runAction('restart-gateway')} disabled={loading}>
+                      <span className="action-icon">🔄</span>
+                      <span className="action-label">重启网关</span>
+                    </button>
+                    <button className="action-card danger" onClick={() => runAction('uninstall')} disabled={loading}>
+                      <span className="action-icon">🗑️</span>
+                      <span className="action-label">卸载</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {output && (
                 <div className="output-box">
