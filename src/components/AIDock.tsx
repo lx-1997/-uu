@@ -217,7 +217,6 @@ export default function AIDock() {
       if (chatMessages.length > 0 && activeTab === 'dashboard') setWorkspaceMode(true);
       return;
     }
-    setWorkspaceMode(false);
   }, [chatExpanded, chatMessages.length, activeTab]);
 
   /* Auto-scroll to newest message */
@@ -247,7 +246,7 @@ export default function AIDock() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      setOpenclawConnected(true);
+      setOpenclawConnected(false);
       socket.emit('openclaw:start', { deviceId: currentDevice.id });
     });
 
@@ -283,6 +282,9 @@ export default function AIDock() {
         role: 'ai',
         text: `❌ OpenClaw 错误: ${data.error}`,
       }]);
+      if (/not connected/i.test(data.error || '')) {
+        socket.emit('openclaw:start', { deviceId: currentDevice?.id });
+      }
       setAiTyping(false);
     });
 
@@ -661,7 +663,9 @@ export default function AIDock() {
                   </div>
                   {/* Bubble */}
                   <div className={`chat-bubble ${msg.role}`}>
-                    <p>{msg.role === 'ai' ? renderMarkdown(msg.text) : msg.text}</p>
+                    {msg.role === 'ai'
+                      ? <div>{renderMarkdown(msg.text)}</div>
+                      : <p>{msg.text}</p>}
                     {msg.blocks?.map((block, i) => (
                       <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} />
                     ))}

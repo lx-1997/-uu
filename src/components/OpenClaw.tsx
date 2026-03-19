@@ -110,7 +110,7 @@ export default function OpenClaw() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      setChatConnected(true);
+      setChatConnected(false);
       socket.emit('openclaw:start', { deviceId: currentDevice.id });
     });
 
@@ -172,7 +172,7 @@ export default function OpenClaw() {
       setChatConnected(false);
       setChatStreaming(false);
     };
-  }, [currentDevice, addToast]);
+  }, [currentDevice]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
