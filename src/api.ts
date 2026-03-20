@@ -232,7 +232,7 @@ export function fetchAgentConfig() {
 export function saveAgentConfig(config: {
   provider: string;
   model: string;
-  apiKey: string;
+  apiKey?: string;
   baseUrl?: string;
 }) {
   return request<{ ok: boolean }>('/api/agent/config', {

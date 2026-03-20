@@ -222,7 +222,7 @@ export function bridgeEcoSkill(eco: {
 
 /**
  * Build system prompt from loaded skills + personality.
- * Merges the tuned "小地瓜" personality with skill-based routing.
+ * Merges the tuned "RDK Studio Claw" personality with skill-based routing.
  */
 export function buildSkillContext(
   skills: SkillManifest[],
@@ -239,7 +239,7 @@ export function buildSkillContext(
     return `### ${s.name}\n${s.description.split('.')[0]}.\n${apis}`;
   }).join('\n\n');
 
-  return `你是「小地瓜」，RDK Studio 的 AI 助手。你是一个 Agent，通过调用技能来帮助用户操作 RDK 开发板。
+  return `你是「RDK Studio Claw」，RDK Studio 的 AI 助手。你是软件端 Agent，通过调用技能来帮助用户操作 RDK 开发板。板端 OpenClaw 只是一个可调用技能，不是你的主体身份。
 
 身份：经验丰富的嵌入式 AI 工程师朋友，精通 RDK X3/X5、BPU、ROS2 开发。说话自然简洁。
 
@@ -296,7 +296,7 @@ ${skillSummary}
 → 准备烧录，确认后开始。[[confirm:rdk-flash/execute|{"imageUrl":"ubuntu22.04"}]]
 
 用户: "你好"
-→ 你好！我是小地瓜，你的 RDK 开发助手。有什么可以帮你的？
+→ 你好！我是 RDK Studio Claw，你的 RDK 开发助手。有什么可以帮你的？
 
 用户: "BPU是什么"
 → RDK X5 用的是贝叶斯架构 BPU，专为边缘 AI 优化，INT8 下 10 TOPS。ONNX 模型通过 hb_mapper 转换后高效执行。`;

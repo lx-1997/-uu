@@ -81,14 +81,19 @@ export function runRemoteCommands(credentials: SshCredentials, commands: string[
   });
 }
 export function uploadFileSftp(credentials: SshCredentials, remotePath: string, buffer: Buffer) {
-  // Use sudo tee via exec to bypass permissions AND ARG_MAX limits by piping to stdin
+  // Stream base64 over SSH stdin to avoid ARG_MAX limits.
+  // Keep command non-interactive to avoid sudo password prompts hanging the stream.
   return new Promise<void>((resolve, reject) => {
     const client = new Client();
     let resolved = false;
+    const timeout = setTimeout(() => {
+      doReject(new Error('文件上传超时（SSH 通道无响应）'));
+    }, 25000);
 
     const doResolve = (output?: string) => {
       if (!resolved) {
         resolved = true;
+        clearTimeout(timeout);
         client.end();
         resolve();
       }
@@ -97,6 +102,7 @@ export function uploadFileSftp(credentials: SshCredentials, remotePath: string, 
     const doReject = (err: Error) => {
       if (!resolved) {
         resolved = true;
+        clearTimeout(timeout);
         client.end();
         reject(err);
       }
@@ -107,8 +113,9 @@ export function uploadFileSftp(credentials: SshCredentials, remotePath: string, 
         // shEscape function logic inline
         const safePath = `'${remotePath.replace(/'/g, `'"'"'`)}'`;
         
-        // Pass base64 over stdin to avoid binary corruption during tee, then decode using sudo root
-        client.exec(`sudo bash -lc "base64 -d > ${safePath}"`, { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } }, (err, stream) => {
+        // Prefer direct write; create parent dir first.
+        // Do NOT use interactive sudo here, otherwise it may block waiting for password.
+        client.exec(`bash -lc "mkdir -p \\$(dirname ${safePath}) && base64 -d > ${safePath}"`, { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } }, (err, stream) => {
           if (err) return doReject(err);
           
           let stderr = '';

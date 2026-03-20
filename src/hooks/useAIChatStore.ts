@@ -277,23 +277,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Listen for AI_APPEND_CHAT events from orchestrator (skill execution results)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.text || detail?.blocks) {
-        setChatMessages(prev => [...prev, {
-          id: Date.now() + Math.random() * 10000,
-          role: 'ai',
-          text: detail.text ?? '',
-          blocks: detail.blocks,
-        }]);
-      }
-    };
-    window.addEventListener('AI_APPEND_CHAT', handler);
-    return () => window.removeEventListener('AI_APPEND_CHAT', handler);
-  }, []);
-
   // Auto-scroll chat
   useEffect(() => {
     const el = document.querySelector('.chat-messages');

@@ -214,7 +214,7 @@ export default function AIDock() {
     chatMessages, setChatMessages, chatExpanded, setChatExpanded, aiTyping, setAiTyping,
     handleCommand, setActiveTab, activeTab,
     executeConfirm, dismissConfirm, clearChatHistory,
-    agentMode, agentPlan, agentExecution,
+    agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
     openclawConnected, setOpenclawConnected,
     currentDevice,
@@ -365,38 +365,13 @@ export default function AIDock() {
       setOpenclawConnected(true);
     });
 
-    socket.on('openclaw:data', (data: { chunk: string }) => {
-      // Append chunk to last AI message
-      setChatMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === 'ai') {
-          return [...prev.slice(0, -1), { ...last, text: last.text + data.chunk }];
-        }
-        return prev;
-      });
-    });
-
-    socket.on('openclaw:complete', () => {
-      setAiTyping(false);
-      setChatMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last && last.role === 'ai' && !last.text.trim()) {
-          return [...prev.slice(0, -1), { ...last, text: '⚠️ OpenClaw 未返回有效内容，请检查网关状态或设备密码。' }];
-        }
-        return prev;
-      });
-    });
-
+    // 板端 OpenClaw 状态仅用于能力可用性展示，不直接写入聊天消息
+    socket.on('openclaw:data', () => {});
+    socket.on('openclaw:complete', () => {});
     socket.on('openclaw:error', (data: { error: string }) => {
-      setChatMessages(prev => [...prev, {
-        id: Date.now(),
-        role: 'ai',
-        text: `❌ OpenClaw 错误: ${data.error}`,
-      }]);
       if (/not connected/i.test(data.error || '')) {
         socket.emit('openclaw:start', { deviceId: currentDevice?.id });
       }
-      setAiTyping(false);
     });
 
     socket.on('openclaw:disconnected', () => {
@@ -486,35 +461,8 @@ export default function AIDock() {
     });
   };
 
-  /* OpenClaw 消息处理 */
-  const sendToOpenClaw = (userMsg: string) => {
-    if (!userMsg.trim() || !socketRef.current || !openclawConnected) return false;
-    const msgId = Date.now();
-    
-    setChatMessages(prev => [
-      ...prev,
-      { id: msgId, role: 'user', text: userMsg },
-      { id: msgId + 1, role: 'ai', text: '' },
-    ]);
-    setChatExpanded(true);
-    setCmd('');
-    setAiTyping(true);
-
-    socketRef.current.emit('openclaw:send', {
-      deviceId: currentDevice?.id,
-      message: userMsg,
-    });
-    return true;
-  };
-
-  const shouldRouteToOpenClaw = (text: string) => {
-    if (!openclawConnected || !socketRef.current || !currentDevice) return false;
-    if (/^\/openclaw\b/i.test(text)) return true;
-    if (/^\/(ai|assistant|task|agent)\b/i.test(text)) return false;
-
-    const localIntentPattern = /(烧录|终端|命令|上传|下载|vnc|ros|导航|模型部署|流程|扫描|设置|诊断|体检|flash|terminal|upload|download|workflow|deploy|settings)/i;
-    return !localIntentPattern.test(text);
-  };
+  // 说明：用户输入统一走 RDK Studio Claw 主链路（/api/agent/chat）
+  // 板端 OpenClaw 仅作为 RDK Studio Claw 在服务端可调用的能力，不在前端直连对话
 
   const handleUnifiedCommand = (e: React.FormEvent) => {
     e.preventDefault();
@@ -559,22 +507,9 @@ export default function AIDock() {
       return;
     }
 
-    const openclawForced = text.match(/^\/openclaw\s+([\s\S]+)/i);
-    if (openclawForced) {
-      const next = openclawForced[1].trim();
-      if (!next) return;
-      sendToOpenClaw(next);
-      return;
-    }
-
     if (forceLocalAssistantRef.current) {
       forceLocalAssistantRef.current = false;
       handleCommand(e);
-      return;
-    }
-
-    if (shouldRouteToOpenClaw(text)) {
-      sendToOpenClaw(text);
       return;
     }
 
@@ -598,14 +533,8 @@ export default function AIDock() {
                 <span style={{ display: 'flex', alignItems: 'center', color: '#ff6b00' }}>{Icon.spark}</span>
                 <span className="chat-panel-title">AI 工作台</span>
 
-                <span className={`agent-badge ${agentMode ? 'on' : 'off'} ${agentExecution.lastError ? 'error' : ''}`}>
-                  {agentMode
-                    ? agentExecution.running
-                      ? `Agent RUN ${agentExecution.currentStep}/${agentExecution.totalSteps}`
-                      : agentExecution.lastError
-                        ? 'Agent ERROR'
-                        : `Agent ON${agentPlan ? ` · ${agentPlan.steps.length}步` : ''}`
-                    : 'Agent OFF'}
+                <span className={`agent-badge on ${agentExecution.lastError ? 'error' : ''}`}>
+                  {agentExecution.lastError ? 'RDK Studio Claw ERROR' : 'RDK Studio Claw ON'}
                 </span>
                 <span className={`agent-badge ${openclawConnected ? 'on' : 'off'}`}>
                   {openclawConnected ? 'OpenClaw READY' : 'OpenClaw OFFLINE'}
@@ -853,7 +782,7 @@ export default function AIDock() {
               className="cmd-input"
               placeholder={openclawConnected
                 ? '输入消息，或上传图片/文件/语音...'
-                : '和小地瓜聊聊，或拖拽文件到这里...'}
+                : '和 RDK Studio Claw 聊聊，或拖拽文件到这里...'}
               ref={chatInputRef}
               value={cmd}
               onChange={(e) => setCmd(e.target.value)}

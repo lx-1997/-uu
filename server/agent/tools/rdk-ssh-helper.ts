@@ -76,12 +76,26 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
   const device = await getDevice(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
 
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
   const pwd = await getDevicePassword(device);
-  await uploadFileSftp(
-    { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-    filePath,
-    Buffer.from(content, 'utf-8'),
-  );
+  const candidates = [pwd, ...passwordCandidates(device.username)];
+  let lastError: unknown = null;
+
+  for (const p of [...new Set(candidates)]) {
+    try {
+      await uploadFileSftp(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+        filePath,
+        Buffer.from(content, 'utf-8'),
+      );
+      devicePasswordCache.set(key, p);
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('设备文件写入失败');
 }
 
 /**
