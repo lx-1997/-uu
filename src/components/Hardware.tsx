@@ -27,8 +27,19 @@ function parseMetrics(output: string) {
       if (parts.length >= 3) {
         memTotal = parts[1];
         memUsed = parts[2];
-        const t = parseInt(parts[1]), u = parseInt(parts[2]);
-        if (t > 0) memPercent = Math.round((u / t) * 100);
+        
+        // 转换为 MB 进行统一计算
+        const parseMemToMB = (str: string) => {
+          const num = parseFloat(str);
+          if (str.includes('Gi') || str.includes('G')) return num * 1024;
+          if (str.includes('Mi') || str.includes('M')) return num;
+          if (str.includes('Ki') || str.includes('K')) return num / 1024;
+          return num;
+        };
+        
+        const totalMB = parseMemToMB(parts[1]);
+        const usedMB = parseMemToMB(parts[2]);
+        if (totalMB > 0) memPercent = Math.round((usedMB / totalMB) * 100);
       }
     }
   }
