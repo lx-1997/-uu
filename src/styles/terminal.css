@@ -48,6 +48,14 @@
   color: #fff; background: #ff6b00; font-weight: 600;
   box-shadow: 0 2px 8px rgba(255,107,0,0.25);
 }
+.uterm-stab-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 6px; width: 16px; height: 16px;
+  border-radius: 50%; font-size: 0.7rem; line-height: 1;
+  opacity: 0.5; transition: all 0.15s;
+}
+.uterm-stab-close:hover { opacity: 1; background: rgba(0,0,0,0.15); }
+.uterm-stab.active .uterm-stab-close:hover { background: rgba(255,255,255,0.3); }
 .uterm-stab-add {
   color: #cbd5e1; font-size: 1rem; padding: 3px 10px;
   border: none; background: none; cursor: pointer; border-radius: 8px;

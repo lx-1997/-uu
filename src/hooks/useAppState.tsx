@@ -57,6 +57,7 @@ export interface AppState {
   setActiveSessionId: (v: string) => void;
   currentSession: TerminalSession;
   createSession: () => void;
+  removeSession: (id: string) => void;
   runTerminalCommand: (cmd: string, password?: string) => void;
   runTerminalAIAnalysis: () => void;
 
@@ -850,12 +851,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const createSession = () => {
-    const nextId = `session-${terminalSessions.length + 1}`;
+    const nextId = `session-${Date.now()}`;
     const profileLabel = TERMINAL_PROFILES.find((p) => p.id === terminalProfile)?.label ?? '系统 Shell';
-    setTerminalSessions((prev) => [...prev, { id: nextId, name: `${profileLabel} ${prev.length}`, profile: terminalProfile, status: 'warm', lines: [`${profileLabel} 已建立上下文。`, 'root@rdk:~#'] }]);
+    setTerminalSessions((prev) => [...prev, { id: nextId, name: `${profileLabel} ${prev.length + 1}`, profile: terminalProfile, status: 'warm', lines: [] }]);
     setActiveSessionId(nextId);
     addToast(`终端会话 "${profileLabel}" 已创建`, 'success');
     addActivity(`创建终端会话: ${profileLabel}`);
+  };
+
+  const removeSession = (id: string) => {
+    setTerminalSessions((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      if (next.length === 0) return prev;
+      if (activeSessionId === id) {
+        setActiveSessionId(next[next.length - 1].id);
+      }
+      return next;
+    });
   };
 
   const runTerminalCommand = (commandText: string, password?: string) => {
@@ -1211,7 +1223,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isFlashing, flashStep, setFlashStep, startFlash,
     terminalProfile, setTerminalProfile, terminalDraft, setTerminalDraft,
     terminalSessions, activeSessionId, setActiveSessionId, currentSession,
-    createSession, runTerminalCommand, runTerminalAIAnalysis,
+    createSession, removeSession, runTerminalCommand, runTerminalAIAnalysis,
     transferProtocol, fileAction, setFileAction, transferQueue, appendTransferTask,
     vncQuality, setVncQuality, vncLayout, setVncLayout, vncOverlay,
     vncConnected, vncProgress, vncPhase, startVncSession,

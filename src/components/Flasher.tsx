@@ -200,7 +200,9 @@ export default function Flasher() {
   };
 
   /* ── scan drives ── */
-  const scanDrives = useCallback(async () => {
+  const scannedRef = useRef(false);
+
+  const scanDrives = async () => {
     if (!window.rdkDesktop?.flashListDrives) {
       setError('当前环境不支持磁盘扫描，请在桌面客户端运行');
       return;
@@ -213,17 +215,21 @@ export default function Flasher() {
       }
       const list = result.drives ?? [];
       setDrives(list);
-      if (!selectedDrive && list[0]) setSelectedDrive(list[0].path);
-      addToast(`检测到 ${list.length} 个可写盘设备`, 'info');
+      if (list[0]) {
+        setSelectedDrive((prev) => prev || list[0].path);
+        addToast(`检测到 ${list.length} 个可写盘设备`, 'info');
+      }
     } catch (e: any) {
       setError(e?.message || '磁盘扫描异常');
     }
-  }, [addToast, selectedDrive]);
+  };
 
   useEffect(() => {
-    if (step !== 2 || !isDesktop || needsXburn || drives.length > 0) return;
+    if (step !== 2 || !isDesktop || needsXburn) return;
+    if (scannedRef.current) return;
+    scannedRef.current = true;
     scanDrives();
-  }, [step, isDesktop, needsXburn, drives.length, scanDrives]);
+  }, [step, isDesktop, needsXburn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── pick local image ── */
   const pickLocalImage = async () => {
@@ -773,6 +779,7 @@ export default function Flasher() {
                     setProgress(0);
                     setLogs([]);
                     setError('');
+                    scannedRef.current = false;
                   }}
                 >
                   重新开始
@@ -884,6 +891,7 @@ export default function Flasher() {
                 setError('');
                 setDrives([]);
                 setSelectedDrive('');
+                scannedRef.current = false;
               }}
             >
               重新写盘
