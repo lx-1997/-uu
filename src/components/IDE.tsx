@@ -1,9 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { executeDeviceCommand } from '../api';
-
-/* ── 运行时判断是否在 Electron 桌面端 ── */
-const isDesktop = () => typeof window !== 'undefined' && !!(window as any).rdkDesktop?.isDesktop;
+import { isDesktop } from '../utils/env';
 
 /* ── code-server 默认端口（设备侧） ── */
 const CODE_SERVER_PORT = 9888;

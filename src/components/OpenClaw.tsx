@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { renderMarkdown } from './MarkdownRenderer';
+import { resolveSocketUrl } from '../utils/socket';
 import io from 'socket.io-client';
 import '../styles/openclaw.css';
 
@@ -184,17 +185,6 @@ export default function OpenClaw() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showModelSelector]);
-
-  const resolveSocketUrl = () => {
-    const apiBase = (window as any).rdkDesktop?.apiBase as string | undefined;
-    if (!apiBase) return 'http://localhost:8787';
-    try {
-      const url = new URL(apiBase);
-      return `${url.protocol}//${url.host}`;
-    } catch {
-      return 'http://localhost:8787';
-    }
-  };
 
   // Socket.IO connection for chat
   useEffect(() => {

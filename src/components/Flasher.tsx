@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import { isDesktop as checkIsDesktop } from '../utils/env';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -148,7 +149,7 @@ export default function Flasher() {
   const [showWifiConfig, setShowWifiConfig] = useState(false);
   const [wifiConfig, setWifiConfig] = useState<WifiConfig>({ mode: 'station', ssid: '', password: '' });
 
-  const isDesktop = typeof window !== 'undefined' && !!window.rdkDesktop?.isDesktop;
+  const isDesktop = checkIsDesktop();
   const platform = window.rdkDesktop?.platform ?? 'unknown';
 
   const imageListKey = resolveImageKey(selectedDeviceKey);

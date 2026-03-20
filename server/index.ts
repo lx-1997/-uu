@@ -13,6 +13,13 @@ import * as net from 'net';
 import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
 import * as path from 'path';
 import { initEcosystem, createEcosystemRouter } from './ecosystem/index.js';
+import { shellEscape, isSafeName } from './utils/shell-escape.js';
+import {
+  DEFAULT_VNC_PORT, OPENCLAW_GATEWAY_PORT,
+  AI_REQUEST_TIMEOUT_MS,
+  FLASH_TMP_IMAGE_XZ, FLASH_TMP_IMAGE_RAW, FLASH_DEFAULT_DEST,
+  DIAGNOSTIC_COMMANDS, buildSystemPrompt,
+} from './constants.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -29,17 +36,24 @@ httpServer.on('upgrade', (request, socket, head) => {
   }
 });
 
+function isPrivateIp(ip: string): boolean {
+  return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost$)/.test(ip);
+}
+
 wss.on('connection', (ws, req) => {
-  // e.g. /websockify?target=192.168.1.10:5900
   const urlParams = new URLSearchParams(req.url?.split('?')[1] || '');
   const target = urlParams.get('target');
-  if (!target) {
+  if (!target) { ws.close(); return; }
+
+  const [host, portStr] = target.split(':');
+  const targetPort = Number(portStr || DEFAULT_VNC_PORT);
+  if (!isPrivateIp(host) || targetPort < 1 || targetPort > 65535) {
+    console.warn(`[noVNC] rejected proxy to non-private target: ${target}`);
     ws.close();
     return;
   }
-  const [host, targetPort] = target.split(':');
-  
-  const tcpSocket = net.connect(Number(targetPort || 5900), host, () => {
+
+  const tcpSocket = net.connect(targetPort, host, () => {
     console.log(`[noVNC] proxied to ${host}:${targetPort}`);
   });
 
@@ -296,7 +310,7 @@ app.get('/api/devices/:id/ping', async (request, response) => {
     const client = new Client();
     await new Promise<void>((resolve, reject) => {
       client.on('ready', () => { client.end(); resolve(); })
-            .on('error', reject)
+            .on('error', (err) => { client.destroy(); reject(err); })
             .connect({ host: device.host, port: device.port ?? 22, username: device.username, password: password || 'blank', readyTimeout: 3000 });
     });
     response.json({ ok: true, status: 'connected' });
@@ -336,11 +350,16 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   const password = providedPassword || cachedPassword || defaultSshPassword;
 
   const targetModel = modelName?.trim() || 'qwen3.5-plus';
+  if (!isSafeName(targetModel)) {
+    response.status(400).json({ ok: false, error: 'Invalid model name' });
+    return;
+  }
+  const safeModel = shellEscape(targetModel);
   const commandMap: Record<'start' | 'status' | 'switch' | 'install' | 'logs', string> = {
     install: `bash -lc '(curl -fsSL https://openclaw.sh/install.sh | bash || curl -fsSL https://code-server.dev/install.sh | sh || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
-    start: `bash -lc '(openclaw gateway start --port 18789 || openclaw start || clawctl start || true); (openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
+    start: `bash -lc '(openclaw gateway start --port ${OPENCLAW_GATEWAY_PORT} || openclaw start || clawctl start || true); (openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     status: `bash -lc '(openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
-    switch: `bash -lc '(openclaw model use "${targetModel}" || clawctl model use "${targetModel}" || echo "switch command unavailable"); (openclaw status || clawctl status || true)'`,
+    switch: `bash -lc '(openclaw model use ${safeModel} || clawctl model use ${safeModel} || echo "switch command unavailable"); (openclaw status || clawctl status || true)'`,
     logs: `bash -lc '(journalctl -u openclaw --no-pager -n 120 || tail -n 120 /var/log/openclaw.log || echo "no openclaw logs found")'`,
   };
 
@@ -694,18 +713,7 @@ app.post('/api/devices/:id/batch-exec', async (request, response) => {
 app.get('/api/devices/:id/diagnostics', async (request, response) => {
   const { id } = request.params;
 
-  const commands = [
-    'echo "###UPTIME###"; uptime',
-    'echo "###TEMP###"; cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo "N/A"',
-    'echo "###MEM###"; free -h',
-    'echo "###DISK###"; df -h',
-    'echo "###IP###"; ip -o -4 addr show',
-    'echo "###TOP###"; top -bn1 | head -20',
-    'echo "###BPU###"; (hrut_smi || bputop || echo "bpu command unavailable")',
-    'echo "###SOMSTATUS###"; (hrut_somstatus 2>/dev/null || sudo hrut_somstatus 2>/dev/null || echo "somstatus unavailable")',
-  ];
-
-  const executed = await runOnDevice(request, response, id, commands);
+  const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS);
   if (!executed) return;
 
   response.json({
@@ -733,7 +741,7 @@ app.post('/api/devices/:id/flash/download', async (request, response) => {
     response.status(400).json({ error: '缺少镜像下载地址 imageUrl' });
     return;
   }
-  const dest = targetPath?.trim() || '/tmp/rdk_image.img';
+  const dest = targetPath?.trim() || FLASH_DEFAULT_DEST;
   // 在设备上下载镜像
   const executed = await runOnDevice(request, response, id, [
     `bash -lc "echo 'Downloading image...'; wget -q --show-progress -O ${shEscape(dest)} ${shEscape(imageUrl)} 2>&1 || curl -fSL -o ${shEscape(dest)} ${shEscape(imageUrl)} 2>&1; echo DONE; ls -lh ${shEscape(dest)}"`,
@@ -817,8 +825,8 @@ app.post('/api/devices/:id/flash/execute', async (request, response) => {
     return;
   }
 
-  const imagePath = '/tmp/rdk_flash_image.img.xz';
-  const rawImagePath = '/tmp/rdk_flash_image.img';
+  const imagePath = FLASH_TMP_IMAGE_XZ;
+  const rawImagePath = FLASH_TMP_IMAGE_RAW;
   const wifiScript = wifiName?.trim()
     ? `mkdir -p /tmp/rdk_netplan && cat >/tmp/rdk_netplan/01-rdk-studio.yaml <<'NETCFG'\nnetwork:\n  version: 2\n  wifis:\n    wlan0:\n      dhcp4: true\n      access-points:\n        \"${wifiName.replace(/"/g, '\\"')}\":\n          password: \"${(wifiPass ?? '').replace(/"/g, '\\"')}\"\nNETCFG\n`
     : 'echo "skip wifi pre-config"';
@@ -1242,91 +1250,7 @@ app.post('/api/chat', async (request, response) => {
     return;
   }
 
-  const systemPrompt = `你是「小地瓜」，RDK Studio 的 AI 助手。你运行在地平线机器人开发者套件工作站中，帮助开发者操作和管理 RDK 系列开发板。
-
-身份背景：
-- 你是一位经验丰富的嵌入式 AI 工程师朋友，精通地平线 RDK X3/X5 开发板、BPU（旭日处理器）、ROS2 机器人开发
-- 说话自然亲切简洁，像一个靠谱的技术伙伴
-- 你具备地平线工具链（hbdk、hrt_model_exec、hrut_smi、hobot_dnn 等）的深入知识
-
-当前环境：
-- 设备名称: ${deviceName ?? '未知设备'}
-- 设备 IP: ${deviceIp ?? '未知'}
-- 可直接操作: 镜像烧录、SSH 终端、SFTP 文件管理、VNC 远程桌面、OpenClaw AI 网关管理、硬件诊断（BPU/温度/内存）、ROS2 话题可视化、BPU 模型部署、低代码流程编排、扫描设备
-
-技术知识要点（按需引用）：
-- RDK X5 使用 Sunrise 5 处理器，10 TOPS BPU 算力，双核 A55 CPU
-- RDK X3 使用 Sunrise 3 处理器，5 TOPS BPU，四核 A53
-- BPU 正常工作温度 45-75°C，超过 80°C 需散热优化
-- hrut_smi 查看 BPU 负载，hobot_dnn 做模型推理
-- ONNX 模型转 BPU 需先用 hb_mapper 工具链进行转换和量化
-- OpenClaw 是小龙虾 AI Agent 网关，端口 18789，支持多 LLM 后端切换和技能插件
-
-回复规范：
-1. 用中文自然回复，2-4 句话，不超过 100 字。复杂问题可展开但不超过 6 句
-2. 绝对不要输出 markdown 格式标记（不要 **加粗**、# 标题、\`代码\`、\`\`\` 代码块、- 列表等），因为 UI 层自动渲染
-3. 主动补充有价值的技术细节和你的判断
-4. 如果用户想执行操作，直接表达"帮你处理""正在执行"即可，系统会自动触发对应动作
-5. 表达自然有人情味，可以说"这个我来""没问题""搞定"
-6. 不要重复用户已经说过的内容，直接给回应和补充信息
-
-【关键】意图标签：
-每次回复末尾必须附加一个意图标签，格式严格为 [[intent:xxx]]，用于系统内部路由，不会显示给用户。
-可选意图：
-- flash — 烧录镜像
-- terminal — 打开/使用终端
-- terminal_cmd — 执行具体命令，格式 [[intent:terminal_cmd|命令内容]]
-- file_upload — 上传/同步文件到设备
-- file_download — 从设备下载文件
-- vnc — 连接远程桌面
-- openclaw_start — 启动 OpenClaw 网关
-- openclaw_status — 查看 OpenClaw 状态
-- openclaw_switch — 切换模型，格式 [[intent:openclaw_switch|模型名]]
-- hardware_check — 硬件诊断/温度/BPU/内存检查
-- ros_scan — 扫描 ROS2 话题
-- ros_record_start — 开始 ROS 录制
-- ros_record_stop — 停止 ROS 录制
-- model_deploy — 部署/转换模型到 BPU
-- model_list — 查看已部署模型
-- example_run — 运行示例应用
-- workflow — 流程编排
-- device_scan — 扫描局域网设备
-- nav — 用户只是想去某个页面（附加 tab 名），格式 [[intent:nav|terminal]]
-- settings — 打开设置
-- general — 一般对话/技术问答/无法归类
-
-示例：
-用户: "帮我查一下板子温度" → "没问题，正在读取 RDK X5 的芯片温度和 BPU 负载数据。X5 的 Sunrise 5 正常工作范围在 45-75°C。[[intent:hardware_check]]"
-用户: "执行一下 ls /userdata" → "好的，帮你跑一下看看 userdata 目录。[[intent:terminal_cmd|ls /userdata]]"
-用户: "运行 cat /proc/cpuinfo" → "这就查一下 CPU 信息。[[intent:terminal_cmd|cat /proc/cpuinfo]]"
-用户: "BPU 是什么架构？" → "RDK X5 用的是贝叶斯（Bernoulli）架构 BPU，专为边缘 AI 推理优化，INT8 下能跑到 10 TOPS。支持 ONNX 模型通过 hb_mapper 转换后高效执行。[[intent:general]]"
-用户: "打开终端" → "这就为你打开终端。[[intent:terminal]]"
-用户: "帮我连远程桌面" → "好的，正在连接 VNC 远程桌面。[[intent:vnc]]"
-用户: "烧录 Ubuntu 22.04" → "准备烧录 Ubuntu 22.04 到当前设备，确认后即刻开始。[[intent:flash]]"
-用户: "看看网关状态" → "帮你查一下 OpenClaw 网关运行情况。[[intent:openclaw_status]]"
-用户: "启动小龙虾" → "正在启动 OpenClaw AI 网关服务。[[intent:openclaw_start]]"
-用户: "切换到 deepseek" → "好的，准备切换到 deepseek 模型。[[intent:openclaw_switch|deepseek-chat]]"
-用户: "把模型传到板子上" → "这就帮你同步模型文件到设备。[[intent:file_upload]]"
-用户: "下载 aaa.txt" → "好的，帮你从设备拉取该文件。[[intent:file_download|aaa.txt]]"
-用户: "扫描一下有哪些ROS话题" → "开始扫描 ROS2 DDS 域内的活跃话题。[[intent:ros_scan]]"
-用户: "开始录制话题" → "好的，开始录制 ROS2 话题数据。[[intent:ros_record_start]]"
-用户: "停止录制" → "已停止 ROS2 录制。[[intent:ros_record_stop]]"
-用户: "部署 YOLOv5 到 BPU" → "准备将 YOLOv5 转换并部署到 BPU，需要确认后开始。[[intent:model_deploy]]"
-用户: "有哪些模型" → "帮你列一下设备上的模型。[[intent:model_list]]"
-用户: "跑一个示例" → "给你看看可用的示例应用。[[intent:example_run]]"
-用户: "扫描局域网设备" → "好的，帮你扫描一下局域网内的 RDK 设备。[[intent:device_scan]]"
-用户: "去设置页面" → "这就打开设置。[[intent:settings]]"
-用户: "去硬件监控页面" → "好的，帮你打开硬件监控。[[intent:nav|hardware]]"
-用户: "你好" → "你好！我是小地瓜，你的 RDK 开发助手。有什么可以帮你的？[[intent:general]]"
-
-重要注意：
-- 每条回复必须包含且只包含一个 [[intent:xxx]] 标签，放在最末尾
-- 标签格式必须严格，不要有空格或换行
-- 如果用户请求涉及执行某个具体 shell 命令（如 ls、cat、top、ros2、hrut_smi 等），使用 terminal_cmd 并带上完整命令
-- 如果用户说"帮我看看xxx"但不涉及具体命令执行，根据语义选择 hardware_check、ros_scan 或 model_list 等
-- 如果用户说的话模棱两可，选择最可能的意图，不要用 general 兜底
-- 对于「打开xxx页面」「去xxx」类请求，优先用 nav 而不是具体功能的 intent
-- 仅当确实无法判断动作时才可使用 general；包含“ros/话题/vnc/ssh/node-red/openclaw/模型/示例/文件/烧录”等关键词时，必须路由到对应 intent`;
+  const systemPrompt = buildSystemPrompt(deviceName, deviceIp);
 
   try {
     const apiMessages = [
@@ -1338,7 +1262,7 @@ app.post('/api/chat', async (request, response) => {
     ];
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
+    const timeout = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
 
     const upstreamResponse = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -1369,7 +1293,6 @@ app.post('/api/chat', async (request, response) => {
     }
 
     const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
-    // Strip any <think>...</think> tags the model might produce
     const cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
     response.json({ reply: cleaned || '收到，请稍候。' });
@@ -1450,7 +1373,7 @@ io.on('connection', (socket) => {
             if (/__OPENCLAW_HTTP_FAILED__/i.test(raw)) {
               msg = raw
                 .replace(/__OPENCLAW_HTTP_FAILED__/gi, '')
-                .trim() || 'OpenClaw Gateway HTTP 接口不可用，请检查 18789 端口与网关配置';
+                .trim() || `OpenClaw Gateway HTTP 接口不可用，请检查 ${OPENCLAW_GATEWAY_PORT} 端口与网关配置`;
             }
             if (/plugins\.allow is empty/i.test(raw)) {
               msg = 'OpenClaw 插件安全策略阻止加载本地插件（plugins.allow 为空）。请在 openclaw.json 中显式配置受信任插件 IDs，或移除未受信插件后重试。';

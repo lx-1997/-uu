@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { getRememberedDevicePassword } from '../api';
+import { resolveSocketUrl } from '../utils/socket';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import io from 'socket.io-client';
@@ -11,11 +12,6 @@ interface TermData {
   socket: ReturnType<typeof io>;
   fitAddon: FitAddon;
   el: HTMLDivElement;
-}
-
-function getSocketUrl() {
-  if ((import.meta as any).env?.DEV) return 'http://localhost:8787';
-  return window.location.origin;
 }
 
 function spawnTerm(
@@ -38,7 +34,7 @@ function spawnTerm(
   term.open(el);
   requestAnimationFrame(() => { try { fitAddon.fit(); } catch { /* noop */ } });
 
-  const socket = io(getSocketUrl());
+  const socket = io(resolveSocketUrl());
   socket.on('connect', () => {
     term.clear();
     term.writeln('\x1b[32m[Connected to RDK Server, initializing PTY...]\x1b[0m');
@@ -71,7 +67,7 @@ export default function Terminal() {
 
   const hostRef = useRef<HTMLDivElement>(null);
   const poolRef = useRef(new Map<string, TermData>());
-  const deviceIdRef = useRef<string | undefined>();
+  const deviceIdRef = useRef<string | undefined>(undefined);
   const passwordRef = useRef('');
   const [terminalPassword, setTerminalPassword] = useState('');
 

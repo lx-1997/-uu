@@ -54,54 +54,9 @@ export const FLASH_IMAGES = [
   { id: 'local', label: '浏览本地文件...', detail: '导入自定义镜像包并保留元数据校验' },
 ];
 
-export const STORAGE_TARGETS = [
-  { id: 'sd', label: 'SD Card', path: '/dev/mmcblk1', safe: '可热插拔适合开发调试' },
-  { id: 'emmc', label: 'eMMC', path: '/dev/mmcblk0', safe: '适合稳定部署需二次确认' },
-  { id: 'usb', label: 'USB 启动盘', path: '/dev/sda', safe: '适合离线交付与系统恢复' },
-];
-
 export const TERMINAL_PROFILES = [
   { id: 'shell', label: '系统 Shell', desc: '命令行操作日志查看与环境配置' },
   { id: 'openclaw', label: 'OpenClaw 对话', desc: 'AI 对话模式用自然语言操控设备' },
-];
-
-export const COMMAND_SUGGESTIONS = ['ros2 topic list', 'hrut_smi', 'tail -f /var/log/syslog', 'ls /userdata', 'top'];
-
-export const LOCAL_FILES = ['models/', 'records/', 'configs/', 'launch.py', 'README.md'];
-export const REMOTE_FILES = ['app/', 'userdata/', 'logs/', 'claw_pipeline.yaml', 'start_ros.sh'];
-
-export const FLOW_TEMPLATES = [
-  { id: 'vision', name: '视觉感知流水线', desc: '摄像头输入 -> AI 推理 -> 结果发布' },
-  { id: 'ops', name: '设备运维自动化', desc: 'SSH 指令 -> 结果判断 -> 报警与回滚' },
-  { id: 'demo', name: '社区示例编排', desc: '算法启动 -> 资源检测 -> 可视化页面联动' },
-];
-
-export const EXAMPLE_PRESETS = [
-  { id: 'visual-follow', name: '视觉跟随', tag: 'TogetherROS.b', readiness: '需摄像头 + 电机控制链路' },
-  { id: 'gesture-ctrl', name: '手势控制', tag: 'BPU Demo', readiness: '需 RGB 输入与动作映射' },
-  { id: 'stereo-depth', name: '双摄测距', tag: 'Depth', readiness: '需双目标定与时间同步' },
-];
-
-export const ROS_TOPICS = ['/hobot_dnn/bbox', '/camera/color/image_raw', '/tf', '/cmd_vel'];
-
-export const EXAMPLE_DETAILS: Record<string, { deps: string[]; cmd: string; source: string; difficulty: string; desc: string }> = {
-  'visual-follow': { deps: ['hobot_dnn ', 'mipi_cam ', 'cv_bridge '], cmd: 'ros2 launch visual_follow visual_follow.launch.py', source: '官方', difficulty: ' 入门', desc: '使用 BPU 加速的目标检测驱动小车跟随目标移动' },
-  'gesture-ctrl': { deps: ['hand_detection ', 'gesture_lib ', 'serial_driver '], cmd: 'ros2 launch gesture_ctrl gesture.launch.py', source: '官方', difficulty: ' 进阶', desc: '手势识别控制机械臂/小车方向支持 5 种手势映射' },
-  'stereo-depth': { deps: ['stereo_usb_cam ', 'depth_estimation ', 'rviz2 '], cmd: 'ros2 launch stereo_depth depth_display.launch.py', source: '社区', difficulty: ' 高级', desc: '双目摄像头深度估计与 RViz2 点云可视化' },
-};
-
-export const ROS_TOPIC_DETAILS: Record<string, { msgType: string; hz: string; publishers: number; vizType: string }> = {
-  '/hobot_dnn/bbox': { msgType: 'ai_msgs/PerceptionTargets', hz: '30 Hz', publishers: 1, vizType: 'BBox 检测框' },
-  '/camera/color/image_raw': { msgType: 'sensor_msgs/Image', hz: '30 Hz', publishers: 1, vizType: '图像' },
-  '/tf': { msgType: 'tf2_msgs/TFMessage', hz: '100 Hz', publishers: 3, vizType: '坐标变换' },
-  '/cmd_vel': { msgType: 'geometry_msgs/Twist', hz: '10 Hz', publishers: 2, vizType: '速度表盘' },
-};
-
-export const MODEL_REPO = [
-  { id: 'yolov5', name: 'YOLOv5s (BPU)', format: 'bin', size: '14.2 MB', status: 'deployed', fps: '30', desc: '通用目标检测已优化为 BPU 推理格式' },
-  { id: 'fcos', name: 'FCOS Efficient', format: 'bin', size: '22.8 MB', status: 'deployed', fps: '25', desc: '全卷积单阶段检测器适合密集目标' },
-  { id: 'mobilenet', name: 'MobileNetV2', format: 'onnx', size: '8.6 MB', status: 'pending', fps: '', desc: '待转换为 BPU 格式需运行 hb_mapper' },
-  { id: 'unet', name: 'U-Net Segmentation', format: 'caffe', size: '31.4 MB', status: 'pending', fps: '', desc: '语义分割模型需先通过工具链量化' },
 ];
 
 export const CMD_SUGGESTIONS = [
@@ -115,9 +70,3 @@ export const CMD_SUGGESTIONS = [
   { icon: '', text: '生成 OpenClaw 工作流模板并执行', keyword: 'openclaw' },
 ];
 
-export const METRIC_CARDS = [
-  { label: 'BPU 占用', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
-  { label: 'CPU 占用', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
-  { label: '内存使用', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
-  { label: '芯片温度', value: '--', bar: 0, hint: '请在硬件页执行实时诊断命令获取数据' },
-];

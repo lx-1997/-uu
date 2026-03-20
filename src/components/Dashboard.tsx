@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { fetchDeviceDiagnostics } from '../api';
 import { useAppState } from '../hooks/useAppState';
 import { DASHBOARD_CARDS } from '../constants';
+import { parseMetrics } from '../utils/diagnostics';
 
 export default function Dashboard() {
   const { currentDevice, devices, setDevices, openWorkspace, diagnosticOpen, setDiagnosticOpen, activities, addToast, setShowAddDevice, setActiveTab, obStep, setObStep, selectedBoard, setSelectedBoard } = useAppState();
@@ -18,95 +19,14 @@ export default function Dashboard() {
     updatedAt: '--',
   });
 
-  const parseMetrics = (output: string) => {
-    const lines = output.split(/\r?\n/).map((line) => line.trim());
-    const findAfter = (marker: string) => {
-      const idx = lines.findIndex((line) => line === marker);
-      if (idx < 0) return '';
-      return lines.slice(idx + 1).find((line) => line.length > 0 && !line.startsWith('###')) ?? '';
-    };
-
-    const uptimeLine = findAfter('###UPTIME###');
-    let uptime = '--';
-    if (uptimeLine) {
-      const match = uptimeLine.match(/up\s+(.*?)(?:,\s+\d+\s+user|,\s+load average)/);
-      if (match) uptime = match[1].trim();
-      else uptime = uptimeLine.length > 20 ? uptimeLine.slice(0, 20) + '...' : uptimeLine;
-    }
-    const tempRaw = findAfter('###TEMP###');
-    const tempNumber = Number(tempRaw);
-    let temp = Number.isFinite(tempNumber) && tempNumber > 0 ? `${(tempNumber / 1000).toFixed(1)}°C` : (tempRaw || '--');
-    let tempValue = Number.isFinite(tempNumber) && tempNumber > 0 ? tempNumber / 1000 : -1;
-
-    const memIdx = lines.findIndex((line) => line === '###MEM###');
-    let memory = '--';
-    if (memIdx >= 0) {
-      const memLine = lines.slice(memIdx + 1).find((line) => /^mem:/i.test(line));
-      if (memLine) {
-        const parts = memLine.split(/\s+/);
-        if (parts.length >= 3) memory = `${parts[2]}/${parts[1]}`;
-      }
-    }
-
-    // 解析 hrut_somstatus 输出获取 BPU 数据
-    const somIdx = lines.findIndex((line) => line === '###SOMSTATUS###');
-    let bpu = '--';
-    let bpuValue = -1;
-    if (somIdx >= 0) {
-      const somLines = lines.slice(somIdx + 1);
-      // 解析 CPU 温度 (优先使用 somstatus 的温度)
-      const cpuTempLine = somLines.find(l => /CPU\s*:\s*[\d.]+/.test(l));
-      if (cpuTempLine) {
-        const tm = cpuTempLine.match(/CPU\s*:\s*([\d.]+)/);
-        if (tm) {
-          const tv = parseFloat(tm[1]);
-          if (tv > 0) {
-            temp = `${tv.toFixed(1)}°C`;
-            tempValue = tv;
-          }
-        }
-      }
-      // 解析 BPU 频率和负载率
-      const bpuLine = somLines.find(l => /bpu\d+/i.test(l));
-      if (bpuLine) {
-        const parts = bpuLine.replace(':', ' ').trim().split(/\s+/);
-        const numbers = parts
-          .map((part) => Number(part.replace('%', '')))
-          .filter((num) => Number.isFinite(num));
-
-        const ratioMatch = bpuLine.match(/(ratio|load|util(?:ization)?)[^\d]*(\d{1,3})\s*%?/i);
-        const percentMatch = bpuLine.match(/(\d{1,3})\s*%/);
-        let ratio = ratioMatch ? Number(ratioMatch[2]) : (percentMatch ? Number(percentMatch[1]) : -1);
-        if (ratio < 0 || ratio > 100) {
-          const ratioCandidate = [...numbers].reverse().find((num) => num >= 0 && num <= 100);
-          ratio = ratioCandidate ?? -1;
-        }
-
-        const freqCandidate = numbers.find((num) => num > 1000000);
-        if (freqCandidate && ratio >= 0) {
-          const freqGHz = (freqCandidate / 1e9).toFixed(1);
-          bpu = `${ratio}% · ${freqGHz}GHz`;
-          bpuValue = ratio;
-        } else if (ratio >= 0) {
-          bpu = `${ratio}%`;
-          bpuValue = ratio;
-        } else if (freqCandidate) {
-          bpu = `${(freqCandidate / 1e9).toFixed(1)}GHz`;
-        }
-      }
-    }
-    // 回退到 hrut_smi 解析
-    if (bpu === '--') {
-      const bpuIdx = lines.findIndex((line) => line === '###BPU###');
-      if (bpuIdx >= 0) {
-        const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 6).join(' ');
-        const m = bpuLines.match(/(\d{1,3})\s*%/);
-        if (m) { bpu = `${m[1]}%`; bpuValue = Number(m[1]); }
-        else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
-      }
-    }
-
-    setTopMetrics({ memory, temp, bpu, uptime, tempValue, bpuValue, updatedAt: new Date().toLocaleTimeString() });
+  const updateMetrics = (output: string) => {
+    const m = parseMetrics(output);
+    const memory = m.memUsed !== '--' && m.memTotal !== '--' ? `${m.memUsed}/${m.memTotal}` : '--';
+    setTopMetrics({
+      memory, temp: m.temp, bpu: m.bpu, uptime: m.uptime,
+      tempValue: m.tempC, bpuValue: m.bpuValue,
+      updatedAt: new Date().toLocaleTimeString(),
+    });
   };
 
   useEffect(() => {
@@ -128,7 +48,7 @@ export default function Dashboard() {
     let cancelled = false;
     const loadMetrics = () => {
       fetchDeviceDiagnostics(currentDevice.id)
-        .then((res) => { if (!cancelled) parseMetrics(res.output); })
+        .then((res) => { if (!cancelled) updateMetrics(res.output); })
         .catch(() => { if (!cancelled) setTopMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempValue: -1, bpuValue: -1, updatedAt: '--' }); });
     };
     loadMetrics();

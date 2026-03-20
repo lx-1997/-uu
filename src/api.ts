@@ -1,4 +1,4 @@
-import type { ChatMessage, Device, DevicePayload, OpenClawPayload } from './types';
+import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
 
 export interface DeviceExecResult {
@@ -122,13 +122,6 @@ export function removeDevice(deviceId: string) {
   });
 }
 
-export function sendChat(messages: ChatMessage[]) {
-  return request<{ message: ChatMessage }>('/api/chat', {
-    method: 'POST',
-    body: JSON.stringify({ messages }),
-  });
-}
-
 export function fetchAIReply(
   messages: Array<{ role: string; content: string }>,
   deviceName?: string,
@@ -198,16 +191,6 @@ export function runOpenClawAgentAction(
     });
 }
 
-export function runOpenClaw(deviceId: string, payload: OpenClawPayload, password: string) {
-  return request<{ output: string; device: Device }>(`/api/devices/${deviceId}/openclaw`, {
-    method: 'POST',
-    headers: {
-      'x-device-password': password,
-    },
-    body: JSON.stringify(payload),
-  });
-}
-
 export function checkDevicePing(deviceId: string) {
   return request<{ ok: boolean; status: string }>(`/api/devices/${deviceId}/ping`, { method: 'GET' }).catch(() => ({ ok: false, status: 'offline' }));
 }
@@ -220,14 +203,6 @@ export function executeDeviceCommand(deviceId: string, command: string, password
   });
 }
 
-export function executeDeviceBatchCommands(deviceId: string, commands: string[], password?: string) {
-  return request<DeviceExecResult>(`/api/devices/${deviceId}/batch-exec`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-    body: JSON.stringify({ commands }),
-  });
-}
-
 export function fetchDeviceDiagnostics(deviceId: string, password?: string) {
   return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/diagnostics`, {
     headers: password ? { 'x-device-password': password } : undefined,
@@ -237,22 +212,6 @@ export function fetchDeviceDiagnostics(deviceId: string, password?: string) {
 export function fetchRosTopics(deviceId: string, password?: string) {
   return request<DeviceRosTopicsResult>(`/api/devices/${deviceId}/ros/topics`, {
     headers: password ? { 'x-device-password': password } : undefined,
-  });
-}
-
-export function deployModel(deviceId: string, command: string, password?: string) {
-  return request<DeviceExecResult>(`/api/devices/${deviceId}/models/deploy`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-    body: JSON.stringify({ command }),
-  });
-}
-
-export function runExample(deviceId: string, command: string, password?: string) {
-  return request<DeviceExecResult>(`/api/devices/${deviceId}/examples/run`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-    body: JSON.stringify({ command }),
   });
 }
 
@@ -295,57 +254,6 @@ export function uploadDeviceFile(deviceId: string, path: string, contentBase64: 
     method: 'POST',
     headers: password ? { 'x-device-password': password } : undefined,
     body: JSON.stringify({ path, contentBase64 }),
-  });
-}
-
-// ── Flash / System Update APIs ──
-export function flashCheck(deviceId: string, password?: string) {
-  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/flash/check`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-  });
-}
-
-export function flashDownload(deviceId: string, imageUrl: string, targetPath?: string, password?: string) {
-  return request<{ ok: boolean; output: string; path: string }>(`/api/devices/${deviceId}/flash/download`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-    body: JSON.stringify({ imageUrl, targetPath }),
-  });
-}
-
-export function flashWrite(deviceId: string, imagePath: string, target: string, password?: string) {
-  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/flash/write`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-    body: JSON.stringify({ imagePath, target }),
-  });
-}
-
-export function flashVerify(deviceId: string, password?: string) {
-  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/flash/verify`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-  });
-}
-
-export function flashExecute(
-  deviceId: string,
-  payload: {
-    imageUrl: string;
-    target: string;
-    board?: string;
-    mode?: 'network' | 'local';
-    wifiName?: string;
-    wifiPass?: string;
-    skipVerify?: boolean;
-  },
-  password?: string,
-) {
-  return request<{ ok: boolean; output: string; strategy: string; targetDevice: string }>(`/api/devices/${deviceId}/flash/execute`, {
-    method: 'POST',
-    headers: password ? { 'x-device-password': password } : undefined,
-    body: JSON.stringify(payload),
   });
 }
 

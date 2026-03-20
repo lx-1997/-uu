@@ -23,6 +23,7 @@ import Hardware from './components/Hardware';
 import Examples from './components/Examples';
 import Ros from './components/Ros';
 import Models from './components/Models';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
@@ -124,7 +125,9 @@ function AppShell() {
           <div
             className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros','openclaw'].includes(activeTab) ? 'viewport-terminal' : ''} ${activeTab === 'vnc' ? 'viewport-vnc' : ''} ${activeTab === 'ide' ? 'viewport-ide' : ''} ${activeTab === 'flasher' ? 'viewport-flasher' : ''}`}
           >
-            <MainContent />
+            <ErrorBoundary>
+              <MainContent />
+            </ErrorBoundary>
           </div>
           <AIDock />
         </div>

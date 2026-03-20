@@ -1,9 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { executeDeviceCommand, fetchVncStatus } from '../api';
 import { useAppState } from '../hooks/useAppState';
-
-/* ── 运行时判断是否在 Electron 桌面端 ── */
-const isDesktop = () => typeof window !== 'undefined' && !!(window as any).rdkDesktop?.isDesktop;
+import { isDesktop } from '../utils/env';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
@@ -70,7 +68,7 @@ export default function Vnc() {
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
     const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;
     const wsPath = `websockify?target=${hostOrIp}:5900`;
-    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=remote&reconnect=true&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
+    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
   }, [currentDevice, quality, urlVersion]);
 
   // 画质切换时强制刷新 iframe

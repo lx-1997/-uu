@@ -59,7 +59,7 @@ export interface ConfigData {
 
 // 常量定义
 const NPM_NVM_CLEANUP = 'echo "[OpenClaw] 清理 .npmrc 中与 nvm 冲突的配置" && (npm config delete prefix 2>/dev/null || true) && (npm config delete globalconfig 2>/dev/null || true)';
-const CLAWHUB_TOKEN = 'clh_atCjStuSUs_w3ty4zybJdwDfK-zk8k1kLKveuflrRfE';
+const CLAWHUB_TOKEN = process.env.CLAWHUB_TOKEN ?? '';
 const CLAWHUB_AUTO_LOGIN_CMD = [
   'echo "[OpenClaw] 正在自动登录 ClawHub..."',
   `clawhub login --token ${CLAWHUB_TOKEN} 2>&1 || echo "[OpenClaw] ClawHub 自动登录失败"`

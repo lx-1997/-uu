@@ -53,7 +53,7 @@
     "dependencies": [
       "tros-hobot-dnn"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.189Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.713Z"
   },
   {
     "id": "nodehub.vision.body-detection",
@@ -107,7 +107,7 @@
     "pkgName": "tros-hobot-body-det",
     "processKey": "hobot_body_det",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.nav.orb-slam3",
@@ -161,7 +161,7 @@
     "pkgName": "tros-orb-slam3",
     "processKey": "orb_slam3",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.nav.nav2",
@@ -213,7 +213,7 @@
     "pkgName": "tros-nav2-bringup",
     "processKey": "nav2_bringup|navigation_launch",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.audio.tts",
@@ -265,7 +265,7 @@
     "pkgName": "tros-hobot-tts",
     "processKey": "hobot_tts",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.vision.hand-gesture",
@@ -317,7 +317,7 @@
     "pkgName": "tros-hand-gesture-det",
     "processKey": "hand_gesture_det",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.vision.dosod",
@@ -366,7 +366,7 @@
     "pkgName": "tros-hobot-dosod",
     "processKey": "dosod",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.app.body-tracking",
@@ -420,7 +420,7 @@
     "dependencies": [
       "tros-mono2d-body-detection"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.app.gesture-control",
@@ -472,7 +472,7 @@
     "pkgName": "tros-gesture-control",
     "processKey": "gesture_control",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "nodehub.app.llm",
@@ -523,7 +523,7 @@
     "pkgName": "tros-hobot-llamacpp",
     "processKey": "hobot_llamacpp",
     "dependencies": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.190Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.715Z"
   },
   {
     "id": "modelzoo.detect.yolov5s",
@@ -579,7 +579,7 @@
     "modelPath": "yolov5",
     "samplePath": "/opt/rdk_model_zoo/demos/detect/yolov5",
     "processKey": "yolov5_detect.py",
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.716Z"
   },
   {
     "id": "modelzoo.detect.fcos",
@@ -633,7 +633,7 @@
     "modelPath": "fcos",
     "samplePath": "/opt/rdk_model_zoo/demos/detect/fcos",
     "processKey": "fcos_detect.py",
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.716Z"
   },
   {
     "id": "modelzoo.classify.mobilenetv2",
@@ -688,7 +688,7 @@
     "modelPath": "mobilenetv2",
     "samplePath": "/opt/rdk_model_zoo/demos/classify/mobilenetv2",
     "processKey": "mobilenetv2_cls.py",
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.716Z"
   },
   {
     "id": "modelzoo.segment.deeplabv3",
@@ -742,7 +742,7 @@
     "modelPath": "deeplab",
     "samplePath": "/opt/rdk_model_zoo/demos/segment/deeplabv3",
     "processKey": "deeplabv3_seg.py",
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.716Z"
   },
   {
     "id": "modelzoo.pose.yolov8pose",
@@ -797,7 +797,7 @@
     "modelPath": "yolov8_pose",
     "samplePath": "/opt/rdk_model_zoo/demos/pose/yolov8_pose",
     "processKey": "yolov8_pose.py",
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.716Z"
   },
   {
     "id": "modelzoo.audio.whisper",
@@ -850,7 +850,7 @@
     "modelPath": "whisper",
     "samplePath": "/opt/rdk_model_zoo/demos/audio/whisper",
     "processKey": "whisper_asr.py",
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.716Z"
   },
   {
     "id": "tros.sensor.mipi-cam",
@@ -896,7 +896,7 @@
       "/image_raw",
       "/camera_info"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.sensor.usb-cam",
@@ -941,7 +941,7 @@
     "rosTopics": [
       "/image_raw"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.sensor.audio",
@@ -985,7 +985,7 @@
     "rosTopics": [
       "/audio_raw"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.perception.dnn-node",
@@ -1032,7 +1032,7 @@
     "rosTopics": [
       "/ai_msg"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.perception.face-landmarks",
@@ -1077,7 +1077,7 @@
     "rosTopics": [
       "/ai_msg"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.perception.yolo-world",
@@ -1121,7 +1121,7 @@
     "rosTopics": [
       "/ai_msg"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.perception.mobilesam",
@@ -1165,7 +1165,7 @@
     "rosTopics": [
       "/ai_msg"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.perception.stereonet",
@@ -1209,7 +1209,7 @@
     "rosTopics": [
       "/depth"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.output.websocket",
@@ -1254,7 +1254,7 @@
       "websocket"
     ],
     "rosTopics": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.output.hdmi",
@@ -1296,7 +1296,7 @@
       "hobot_hdmi"
     ],
     "rosTopics": [],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.output.codec",
@@ -1343,7 +1343,7 @@
     "rosTopics": [
       "/image_mjpeg"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.app.audio-control",
@@ -1389,7 +1389,7 @@
     "rosTopics": [
       "/cmd_vel"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "tros.app.parking-search",
@@ -1433,7 +1433,7 @@
     "rosTopics": [
       "/parking_result"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.191Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "openclaw.rdk-x5-app",
@@ -1475,7 +1475,7 @@
     "requiredBins": [
       "python3"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.192Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "openclaw.rdk-x5-tros",
@@ -1517,7 +1517,7 @@
     "requiredBins": [
       "ros2"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.192Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "openclaw.rdk-x5-ai-detect",
@@ -1565,7 +1565,7 @@
     "requiredBins": [
       "ros2"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.192Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "openclaw.rdk-x5-camera",
@@ -1607,7 +1607,7 @@
     "requiredBins": [
       "python3"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.192Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "openclaw.rdk-x5-gpio",
@@ -1651,7 +1651,7 @@
     "requiredBins": [
       "python3"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.192Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   },
   {
     "id": "openclaw.rdk-x5-monitor",
@@ -1695,6 +1695,6 @@
     "requiredBins": [
       "hrut_smi"
     ],
-    "lastRefreshedAt": "2026-03-20T14:40:28.192Z"
+    "lastRefreshedAt": "2026-03-20T15:37:07.717Z"
   }
 ]
