@@ -21,6 +21,8 @@ import {
   DIAGNOSTIC_COMMANDS, buildSystemPrompt,
 } from './constants.js';
 import { loadAllSkills, getSkillByName, getRawSkillMd, buildSkillContext, bridgeEcoSkill } from './skill-loader.js';
+import { runRdkAgent } from './agent/rdk-agent.js';
+import { loadProviderConfig, saveProviderConfig, type ProviderConfig } from './agent/provider-setup.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -1427,6 +1429,134 @@ app.post('/api/agent/plan', async (request, response) => {
     });
   }
 });
+
+// ─── Agent Provider Config ───
+
+app.get('/api/agent/config', (_request, response) => {
+  const config = loadProviderConfig();
+  if (!config) {
+    response.json({ configured: false });
+    return;
+  }
+  response.json({
+    configured: true,
+    provider: config.provider,
+    model: config.model,
+    hasApiKey: !!config.apiKey,
+    baseUrl: config.baseUrl,
+  });
+});
+
+app.post('/api/agent/config', (request, response) => {
+  const { provider, model, apiKey: key, baseUrl } = request.body as Partial<ProviderConfig>;
+  if (!provider) {
+    response.status(400).json({ error: '缺少 provider' });
+    return;
+  }
+  const existing = loadProviderConfig();
+  if (!key && !existing?.apiKey) {
+    response.status(400).json({ error: '缺少 apiKey' });
+    return;
+  }
+  const config: ProviderConfig = {
+    provider: provider as ProviderConfig['provider'],
+    model: model || '',
+    apiKey: key || existing?.apiKey || '',
+    baseUrl,
+  };
+  saveProviderConfig(config);
+  response.json({ ok: true });
+});
+
+// ─── Agent Chat (SSE) ───
+
+app.post('/api/agent/chat', async (request, response) => {
+  const { message, deviceId, sessionId } = request.body as {
+    message?: string;
+    deviceId?: string;
+    sessionId?: string;
+  };
+
+  if (!message?.trim()) {
+    response.status(400).json({ error: '消息不能为空' });
+    return;
+  }
+
+  try {
+    const { stream, runId, sessionKey } = await runRdkAgent({
+      message: message.trim(),
+      deviceId,
+      sessionId,
+    });
+
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Run-Id': runId,
+      'X-Session-Key': sessionKey,
+    });
+
+    const sendEvent = (event: string, data: unknown) => {
+      response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    for await (const event of stream) {
+      switch (event.type) {
+        case 'message_delta':
+          sendEvent('text', { delta: event.delta });
+          break;
+        case 'message_end':
+          sendEvent('message_end', { text: event.text });
+          break;
+        case 'tool_execution_start':
+          sendEvent('tool_start', {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: event.args,
+          });
+          break;
+        case 'tool_execution_end':
+          sendEvent('tool_result', {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            result: event.result,
+            isError: event.isError,
+          });
+          break;
+        case 'turn_start':
+          sendEvent('turn_start', { turn: event.turn });
+          break;
+        case 'turn_end':
+          sendEvent('turn_end', { turn: event.turn });
+          break;
+        case 'agent_end':
+          sendEvent('done', { runId: event.runId });
+          break;
+        case 'agent_error':
+          sendEvent('error', { error: event.error });
+          break;
+        case 'retry':
+          sendEvent('retry', { attempt: event.attempt, delay: event.delay });
+          break;
+        default:
+          break;
+      }
+    }
+
+    response.end();
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : 'Agent 执行失败';
+    if (!response.headersSent) {
+      response.status(500).json({ error: errorMsg });
+    } else {
+      response.write(`event: error\ndata: ${JSON.stringify({ error: errorMsg })}\n\n`);
+      response.end();
+    }
+  }
+});
+
+// ─── Legacy Chat (kept as fallback) ───
 
 app.post('/api/chat', async (request, response) => {
   if (!apiKey) {

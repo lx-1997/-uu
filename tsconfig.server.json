@@ -12,5 +12,11 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.ts", "shared/**/*.ts"]
+  "include": ["server/**/*.ts", "shared/**/*.ts"],
+  "exclude": [
+    "server/agent/cli.ts",
+    "server/agent/channels/**",
+    "server/agent/gateway/**",
+    "server/agent/openclaw-index.ts"
+  ]
 }

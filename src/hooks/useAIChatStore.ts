@@ -1,13 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState } from '../app-types';
 import { CMD_SUGGESTIONS } from '../constants';
-import { fetchAIReply, fetchAgentPlan, runOpenClawAgentAction } from '../api';
-import { orchestrate } from '../ai';
-import type { AppActions, Task, IntentId } from '../ai';
+import { streamAgentChat, type AgentSSEEvent } from '../api';
+import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { useUIStore } from './useUIStore';
-import { useTerminalStore } from './useTerminalStore';
 
 export interface AIChatStoreState {
   cmd: string;
@@ -44,14 +42,9 @@ export function useAIChatStore(): AIChatStoreState {
 }
 
 export function AIChatProvider({ children }: { children: React.ReactNode }) {
-  const { addToast, addActivity } = useToastStore();
-  const { currentDevice, scanForDevices } = useDeviceStore();
-  const {
-    activeTab, setActiveTab, openWorkspace,
-    startFlash, appendTransferTask, startVncSession, runFlowValidation,
-    setDiagnosticOpen, setDiagnosticStep, setRosRecording, setShowSettings,
-  } = useUIStore();
-  const { createSession, runTerminalCommand } = useTerminalStore();
+  const { addToast } = useToastStore();
+  const { currentDevice } = useDeviceStore();
+  const { activeTab, setShowSettings } = useUIStore();
 
   // ── State ──
   const [cmd, setCmd] = useState('');
@@ -120,81 +113,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     addToast('对话记录已清空', 'info');
   };
 
-  // ── Task animation ──
-  const startTaskAnimation = (task: Task, resultTitle: string, resultDetail: string, extraBlocks?: ChatBlock[]) => {
-    const runningTask: Task = { ...task, status: 'running' };
-    setTaskHistory(prev => [runningTask, ...prev].slice(0, 20));
-    activeTaskCountRef.current++;
-
-    const progressMsgId = Date.now() + Math.random() * 1000;
-    const taskLabel = (() => {
-      const labels: Record<string, string> = {
-        flash: '镜像烧录', terminal: '终端', terminal_cmd: '执行命令',
-        file_upload: '文件上传', file_download: '文件下载', vnc: '远程桌面',
-        openclaw_start: 'OpenClaw', openclaw_status: 'OpenClaw 状态',
-        openclaw_switch: '切换模型', hardware_check: '硬件诊断',
-        ros_scan: 'ROS2 扫描', ros_record_start: 'ROS 录制',
-        model_deploy: '模型部署', model_list: '模型列表',
-        example_run: '运行示例', workflow: '流程编排',
-        device_scan: '设备扫描',
-      };
-      return labels[task.capabilityId] || task.capabilityId;
-    })();
-
-    setChatMessages(prev => [...prev, {
-      id: progressMsgId,
-      role: 'ai',
-      text: `⚡ ${taskLabel} — 正在执行...`,
-      blocks: [{ type: 'progress', steps: task.steps, taskId: task.id }],
-    }]);
-
-    let step = 0;
-    const totalSteps = task.steps.length;
-    const iv = window.setInterval(() => {
-      if (cancelledTasksRef.current.has(task.id)) {
-        clearInterval(iv);
-        return;
-      }
-      step++;
-      if (step < totalSteps) {
-        const updated = task.steps.map((s, i) => ({
-          label: s.label,
-          status: (i < step ? 'done' : i === step ? 'running' : 'pending') as 'done' | 'running' | 'pending',
-        }));
-        setChatMessages(prev => prev.map(m =>
-          m.id === progressMsgId ? { ...m, blocks: [{ type: 'progress', steps: updated, taskId: task.id }] } : m,
-        ));
-        setTaskHistory(prev => prev.map(t =>
-          t.id === task.id ? { ...t, steps: updated, status: 'running' } : t,
-        ));
-      } else {
-        clearInterval(iv);
-        delete taskIntervalsRef.current[task.id];
-        const allDone = task.steps.map(s => ({ label: s.label, status: 'done' as const }));
-        setChatMessages(prev => prev.map(m =>
-          m.id === progressMsgId ? { ...m, text: `✅ ${taskLabel} — 执行完成`, blocks: [{ type: 'progress', steps: allDone, taskId: task.id }] } : m,
-        ));
-        setTaskHistory(prev => prev.map(t =>
-          t.id === task.id ? { ...t, steps: allDone, status: 'done', result: { success: true, title: resultTitle, detail: resultDetail } } : t,
-        ));
-        activeTaskCountRef.current = Math.max(0, activeTaskCountRef.current - 1);
-        setTimeout(() => {
-          const resultBlocks: ChatMessage['blocks'] = [
-            { type: 'task-result', success: true, title: resultTitle, detail: resultDetail },
-          ];
-          if (extraBlocks) resultBlocks.push(...extraBlocks);
-          setChatMessages(prev => [...prev, {
-            id: Date.now() + Math.random() * 1000, role: 'ai', text: `${taskLabel}完成！`, blocks: resultBlocks,
-          }]);
-          if (activeTaskCountRef.current === 0) {
-            setAiTyping(false);
-          }
-        }, 400);
-      }
-    }, 800);
-    taskIntervalsRef.current[task.id] = iv;
-  };
-
   // ── Cancel task ──
   const cancelRunningTask = (taskId: string) => {
     if (taskIntervalsRef.current[taskId]) {
@@ -206,141 +124,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     setTaskHistory(prev => prev.map(t =>
       t.id === taskId ? { ...t, status: 'cancelled' } : t,
     ));
-    setChatMessages(prev => prev.map(m => {
-      const hasTask = m.blocks?.some(b => b.type === 'progress' && 'taskId' in b && b.taskId === taskId);
-      if (!hasTask) return m;
-      return {
-        ...m,
-        text: `⛔ ${m.text?.replace(/^⚡\s*/, '').replace(/ — .+$/, '')} — 已取消`,
-        blocks: m.blocks?.map(b =>
-          b.type === 'progress' && 'taskId' in b && b.taskId === taskId
-            ? { ...b, steps: b.steps.map(s => s.status === 'running' ? { ...s, status: 'pending' as const } : s) }
-            : b
-        ),
-      };
-    }));
     addToast('任务已取消', 'info');
   };
 
-  // ── OpenClaw board-side helpers ──
-  const openClawStartOnBoard = async () => {
-    const result = await runOpenClawAgentAction('start', { host: currentDevice?.ip, username: 'root' });
-    if (result.error) {
-      addToast(`OpenClaw 启动失败: ${result.error}`, 'error');
-      addActivity(`OpenClaw 板端启动失败: ${result.error}`);
-      return { ok: false, error: result.error };
-    }
-    const output = 'output' in result ? result.output : '';
-    addToast('OpenClaw 板端启动完成', 'success');
-    addActivity('OpenClaw 板端启动完成');
-    return { ok: true, output };
-  };
-
-  const openClawStatusOnBoard = async () => {
-    const result = await runOpenClawAgentAction('status', { host: currentDevice?.ip, username: 'root' });
-    if (result.error) {
-      addToast(`OpenClaw 状态读取失败: ${result.error}`, 'warning');
-      addActivity(`OpenClaw 状态读取失败: ${result.error}`);
-      return { ok: false, error: result.error };
-    }
-    const output = 'output' in result ? result.output : '';
-    addToast('OpenClaw 状态已刷新', 'success');
-    addActivity('OpenClaw 状态刷新完成');
-    return { ok: true, output };
-  };
-
-  const openClawSwitchOnBoard = async (modelName: string) => {
-    const result = await runOpenClawAgentAction('switch', { modelName, host: currentDevice?.ip, username: 'root' });
-    if (result.error) {
-      addToast(`OpenClaw 切换失败: ${result.error}`, 'error');
-      addActivity(`OpenClaw 模型切换失败: ${result.error}`);
-      return { ok: false, error: result.error };
-    }
-    const output = 'output' in result ? result.output : '';
-    addToast(`OpenClaw 已切换到 ${modelName}`, 'success');
-    addActivity(`OpenClaw 模型切换完成: ${modelName}`);
-    return { ok: true, output };
-  };
-
-  // ── Agent step runner ──
-  const intentWhitelist = new Set<IntentId>([
-    'flash', 'terminal', 'terminal_cmd', 'file_upload', 'file_download', 'vnc',
-    'openclaw_start', 'openclaw_status', 'openclaw_switch', 'hardware_check',
-    'ros_scan', 'ros_record_start', 'ros_record_stop', 'model_deploy', 'model_list',
-    'example_run', 'workflow', 'device_scan', 'nav', 'settings', 'general',
-  ]);
-
   const commandLockRef = useRef(false);
-
-  const buildActions = (): AppActions => ({
-    openWorkspace, setActiveTab,
-    startFlash, createSession, runTerminalCommand,
-    appendTransferTask, startVncSession, runFlowValidation,
-    setDiagnosticOpen, setDiagnosticStep,
-    setRosRecording, scanForDevices,
-    openClawStartOnBoard, openClawStatusOnBoard, openClawSwitchOnBoard,
-    setShowSettings,
-    addToast, addActivity,
-    currentDeviceName: currentDevice?.name ?? '未连接设备',
-    currentDeviceIp: currentDevice?.ip ?? 'N/A',
-    currentDeviceId: currentDevice?.id ?? '',
-  });
-
-  const runAgentStep = async (userMsg: string, step: { title: string; intent: string; param?: string; reason: string }, actions: AppActions, msgId: number) => {
-    const intent = intentWhitelist.has(step.intent as IntentId) ? (step.intent as IntentId) : 'general';
-
-    const emitStepResult = (ok: boolean, detail: string) => {
-      setChatMessages(prev => [...prev, {
-        id: msgId + Math.random() * 1000,
-        role: 'ai',
-        text: `${ok ? '✅' : '❌'} ${step.title}`,
-        blocks: [{ type: 'task-result', success: ok, title: step.title, detail }],
-      }]);
-    };
-
-    if (intent === 'openclaw_start' || intent === 'openclaw_status' || intent === 'openclaw_switch') {
-      let result = intent === 'openclaw_start'
-        ? await actions.openClawStartOnBoard()
-        : intent === 'openclaw_status'
-          ? await actions.openClawStatusOnBoard()
-          : await actions.openClawSwitchOnBoard(step.param || 'qwen3.5-plus');
-
-      if (!result.ok) {
-        result = intent === 'openclaw_start'
-          ? await actions.openClawStartOnBoard()
-          : intent === 'openclaw_status'
-            ? await actions.openClawStatusOnBoard()
-            : await actions.openClawSwitchOnBoard(step.param || 'qwen3.5-plus');
-      }
-
-      emitStepResult(!!result.ok, result.ok ? (result.output || '板端执行成功') : (result.error || '板端执行失败'));
-      return !!result.ok;
-    }
-
-    const aiResponse = `${step.title}[[intent:${intent}${step.param ? `|${step.param}` : ''}]]`;
-
-    const output = orchestrate({
-      aiResponse,
-      userText: userMsg,
-      actions,
-      registerConfirm: (confirmId, action) => {
-        pendingActionsRef.current[confirmId] = action;
-      },
-      startTaskAnimation,
-    });
-
-    setChatMessages(prev => [...prev, {
-      id: msgId + Math.random() * 1000,
-      role: 'ai',
-      text: output.text || `执行步骤：${step.title}`,
-      blocks: output.blocks,
-    }]);
-
-    if (output.sideEffect) {
-      setTimeout(() => output.sideEffect?.(), 200);
-    }
-    return true;
-  };
 
   // ── Main command handler ──
   const handleCommand = (e: React.FormEvent) => {
@@ -357,156 +144,109 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       try {
-        const lower = userMsg.toLowerCase();
-        const askEnableAgent = /(开启|启用|进入).*(agent|智能服务|自动调度)/i.test(userMsg) || lower === '/agent on';
-        const askDisableAgent = /(关闭|退出).*(agent|智能服务|自动调度)/i.test(userMsg) || lower === '/agent off';
-        const askStopAgent = /(停止|中止|取消).*(agent|计划|自动执行)/i.test(userMsg) || lower === '/agent stop';
-        const askAgentStatus = /(agent状态|当前计划|执行进度)/i.test(userMsg) || lower === '/agent status';
-
-        if (askEnableAgent) {
-          setAgentMode(true);
-          setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '已开启 Agent 模式。我会先规划再自动调度执行，并实时回传进度。' }]);
-          setAiTyping(false);
-          return;
-        }
-        if (askDisableAgent) {
-          setAgentMode(false);
-          setAgentPlan(null);
-          setAgentExecution({ running: false, currentStep: 0, totalSteps: 0 });
-          agentAbortRef.current = false;
-          setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: 'Agent 模式已关闭，恢复为普通对话执行模式。' }]);
-          setAiTyping(false);
-          return;
-        }
-        if (askStopAgent) {
-          agentAbortRef.current = true;
-          setAgentExecution(prev => ({ ...prev, running: false }));
-          setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '已收到中止指令，正在停止后续自动步骤。' }]);
-          setAiTyping(false);
-          return;
-        }
-        if (askAgentStatus) {
-          const running = taskHistory.filter(t => t.status === 'running').length;
-          const stepCount = agentPlan?.steps.length ?? 0;
-          setChatMessages(prev => [...prev, {
-            id: msgId + 1,
-            role: 'ai',
-            text: `Agent 状态：${agentMode ? '开启' : '关闭'}；当前计划 ${stepCount} 步；并行任务 ${running} 个。`,
-            blocks: agentPlan ? [{
-              type: 'status',
-              items: [
-                { label: '计划摘要', value: agentPlan.summary, ok: true },
-                { label: '风险提示', value: agentPlan.risk, ok: true },
-                { label: '完成判定', value: agentPlan.done, ok: true },
-              ],
-            }] : undefined,
-          }]);
+        // /settings — quick command to open settings
+        if (userMsg === '/settings') {
+          setShowSettings(true);
+          setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '已打开设置面板。' }]);
           setAiTyping(false);
           return;
         }
 
-        const actions = buildActions();
-
-        if (agentMode) {
-          const plan = await fetchAgentPlan(userMsg, currentDevice?.name, currentDevice?.ip);
-
-          if (plan?.steps?.length) {
-            agentAbortRef.current = false;
-            setAgentPlan(plan);
-            setAgentExecution({ running: true, currentStep: 0, totalSteps: plan.steps.length });
-
-            setChatMessages(prev => [...prev, {
-              id: msgId + 1,
-              role: 'ai',
-              text: `Agent 计划已生成：${plan.summary}`,
-              blocks: [{
-                type: 'status',
-                items: [
-                  { label: '步骤数', value: `${plan.steps.length} 步`, ok: true },
-                  { label: '风险', value: plan.risk, ok: true },
-                  { label: '完成标准', value: plan.done, ok: true },
-                ],
-              }],
-            }]);
-
-            for (let idx = 0; idx < plan.steps.length; idx++) {
-              if (agentAbortRef.current) {
-                setAgentExecution(prev => ({ ...prev, running: false, currentStep: idx }));
-                setChatMessages(prev => [...prev, { id: msgId + 2 + idx, role: 'ai', text: `Agent 已在第 ${idx + 1} 步前停止。` }]);
-                break;
-              }
-              const step = plan.steps[idx];
-              setAgentExecution(prev => ({ ...prev, currentStep: idx + 1, running: true }));
-              const ok = await runAgentStep(userMsg, step, actions, msgId + 1000 + idx * 100);
-              if (!ok) {
-                const err = `步骤失败：${step.title}`;
-                setAgentExecution(prev => ({ ...prev, running: false, lastError: err }));
-                setChatMessages(prev => [...prev, { id: msgId + 9000 + idx, role: 'ai', text: `Agent 已停止：${err}` }]);
-                agentAbortRef.current = true;
-                break;
-              }
-              await new Promise((resolve) => setTimeout(resolve, 450));
-            }
-
-            if (!agentAbortRef.current) {
-              setAgentExecution(prev => ({ ...prev, running: false, currentStep: prev.totalSteps }));
-              setChatMessages(prev => [...prev, { id: msgId + 9999, role: 'ai', text: 'Agent 自动调度已执行完当前计划。你可以继续下一个目标。' }]);
-            }
-
-            if (activeTaskCountRef.current === 0) {
-              setAiTyping(false);
-            }
-            return;
-          }
-
-          addToast('Agent 规划失败，已切换为普通执行', 'warning');
-        }
-
-        const history = chatMessages.slice(-6).map(m => ({
-          role: m.role as string,
-          content: m.text,
-        }));
-        history.push({ role: 'user', content: userMsg });
-        const aiRaw = await fetchAIReply(history, currentDevice?.name, currentDevice?.ip);
-
-        if (aiRaw === null) {
-          setChatMessages(prev => [...prev, {
-            id: msgId + 1,
-            role: 'ai',
-            text: '抱歉，AI 助手暂时无法连接。请检查网络连接后重试。',
-            blocks: [{
-              type: 'status',
-              items: [
-                { label: 'AI 服务', value: '离线', ok: false },
-                { label: '设备', value: currentDevice?.name ?? '未连接', ok: !!currentDevice },
-              ],
-            }],
-          }]);
-          setAiTyping(false);
-          return;
-        }
-
-        const output = orchestrate({
-          aiResponse: aiRaw,
-          userText: userMsg,
-          actions,
-          registerConfirm: (confirmId, action) => {
-            pendingActionsRef.current[confirmId] = action;
-          },
-          startTaskAnimation,
-        });
+        // ── Agent Loop (SSE) — primary path ──
+        const aiMsgId = msgId + 1;
+        let aiText = '';
+        const aiBlocks: ChatBlock[] = [];
 
         setChatMessages(prev => [...prev, {
-          id: msgId + 1, role: 'ai', text: output.text, blocks: output.blocks,
+          id: aiMsgId, role: 'ai', text: '', blocks: [],
         }]);
 
-        if (activeTaskCountRef.current === 0) {
-          setAiTyping(false);
-        }
+        const updateAiMessage = (text: string, blocks: ChatBlock[]) => {
+          setChatMessages(prev => prev.map(m =>
+            m.id === aiMsgId ? { ...m, text, blocks: [...blocks] } : m
+          ));
+        };
 
-        if (output.sideEffect) {
-          setTimeout(() => output.sideEffect!(), 300);
-        }
+        const { done } = streamAgentChat(
+          userMsg,
+          currentDevice?.id,
+          undefined,
+          (event: AgentSSEEvent) => {
+            switch (event.type) {
+              case 'text': {
+                aiText += (event.data.delta as string) || '';
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'tool_start': {
+                const toolName = event.data.toolName as string;
+                const args = event.data.args as Record<string, unknown>;
+                const argStr = Object.entries(args).map(([k, v]) => `${k}: ${String(v).slice(0, 80)}`).join(', ');
+                aiBlocks.push({
+                  type: 'status',
+                  items: [
+                    { label: toolName, value: `执行中... ${argStr}`, ok: true },
+                  ],
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'tool_result': {
+                const toolName = event.data.toolName as string;
+                const result = (event.data.result as string) || '';
+                const isError = event.data.isError as boolean;
+                const lastBlock = aiBlocks[aiBlocks.length - 1];
+                if (lastBlock?.type === 'status' && lastBlock.items?.[0]?.label === toolName) {
+                  aiBlocks.pop();
+                }
+                if (result.includes('\n') || result.length > 100) {
+                  aiBlocks.push({
+                    type: 'terminal',
+                    lines: result.split('\n').slice(0, 60),
+                    label: toolName,
+                  });
+                } else {
+                  aiBlocks.push({
+                    type: 'status',
+                    items: [{ label: toolName, value: result || (isError ? '失败' : '完成'), ok: !isError }],
+                  });
+                }
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'error': {
+                const errorMsg = (event.data.error as string) || 'Agent 执行出错';
+                let friendlyText = '';
+                let friendlyDetail = errorMsg;
+
+                if (errorMsg.includes('未配置 AI 模型')) {
+                  friendlyText = '请先配置 AI 模型。打开设置 → AI 模型，选择服务商并填写 API Key。';
+                  friendlyDetail = '点击右上角 ⚙️ 设置图标即可配置';
+                } else if (errorMsg.includes('401') || errorMsg.includes('Incorrect API key')) {
+                  friendlyText = 'API Key 无效或已过期，请在设置中重新配置。';
+                  friendlyDetail = '打开设置 → AI 模型，更新 API Key';
+                } else if (errorMsg.includes('Connection error') || errorMsg.includes('ECONNREFUSED')) {
+                  friendlyText = '无法连接到 AI 服务，请检查网络或 API 地址。';
+                  friendlyDetail = '如果使用通义千问 sk-sp- 开头的 Key，请确认 Base URL 是否正确';
+                } else {
+                  friendlyText = aiText || '请求出错，请稍后重试。';
+                }
+
+                aiBlocks.push({
+                  type: 'status',
+                  items: [{ label: '提示', value: friendlyDetail, ok: false }],
+                });
+                updateAiMessage(friendlyText, aiBlocks);
+                break;
+              }
+              case 'done':
+                break;
+            }
+          },
+        );
+
+        await done;
+        setAiTyping(false);
       } finally {
         commandLockRef.current = false;
       }

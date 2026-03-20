@@ -147,6 +147,100 @@ export function fetchAIReply(
     });
 }
 
+// ─── Agent SSE Chat ───
+
+export interface AgentSSEEvent {
+  type: 'text' | 'tool_start' | 'tool_result' | 'turn_start' | 'turn_end' | 'message_end' | 'done' | 'error' | 'retry';
+  data: Record<string, unknown>;
+}
+
+export type AgentEventCallback = (event: AgentSSEEvent) => void;
+
+export function streamAgentChat(
+  message: string,
+  deviceId?: string,
+  sessionId?: string,
+  onEvent?: AgentEventCallback,
+): { abort: () => void; done: Promise<void> } {
+  const controller = new AbortController();
+
+  const done = (async () => {
+    try {
+      const res = await fetch(resolveUrl('/api/agent/chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, deviceId, sessionId }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Agent 请求失败' }));
+        onEvent?.({ type: 'error', data: { error: (err as { error?: string }).error || 'Agent 请求失败' } });
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        onEvent?.({ type: 'error', data: { error: '无法读取响应流' } });
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done: readerDone, value } = await reader.read();
+        if (readerDone) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEventType = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEventType = line.slice(7).trim();
+          } else if (line.startsWith('data: ') && currentEventType) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              onEvent?.({ type: currentEventType as AgentSSEEvent['type'], data });
+            } catch { /* skip malformed JSON */ }
+            currentEventType = '';
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        onEvent?.({ type: 'error', data: { error: (err as Error).message } });
+      }
+    }
+  })();
+
+  return { abort: () => controller.abort(), done };
+}
+
+export function fetchAgentConfig() {
+  return request<{
+    configured: boolean;
+    provider?: string;
+    model?: string;
+    hasApiKey?: boolean;
+    baseUrl?: string;
+  }>('/api/agent/config');
+}
+
+export function saveAgentConfig(config: {
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+}) {
+  return request<{ ok: boolean }>('/api/agent/config', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
 export function fetchAgentPlan(goal: string, deviceName?: string, deviceIp?: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
