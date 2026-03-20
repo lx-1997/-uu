@@ -10,7 +10,8 @@ export type Tab =
   | 'hardware'
   | 'examples'
   | 'ros'
-  | 'models';
+  | 'models'
+  | 'skills';
 
 export interface Device {
   id: string;
@@ -49,12 +50,24 @@ export interface Activity {
   time: string;
 }
 
+export interface ChatAttachment {
+  id: string;
+  type: 'image' | 'file' | 'audio' | 'video';
+  name: string;
+  url: string;
+  mimeType?: string;
+  size?: number;
+  duration?: number;
+  thumbnailUrl?: string;
+}
+
 export interface ChatMessage {
   id: number;
   role: 'user' | 'ai';
   text: string;
   action?: { label: string; tab: Tab };
   blocks?: ChatBlock[];
+  attachments?: ChatAttachment[];
 }
 
 export type ChatBlock =

@@ -38,34 +38,26 @@ export function generateSkillMd(skill: EcoSkill): string {
     .filter(Boolean)
     .join(' ');
 
+  const binsJson = requiredBins.length > 0 ? `,"requires":{"bins":${JSON.stringify(requiredBins)}}` : '';
+  const metadataJson = `{"openclaw":{"emoji":"🔧"${binsJson}},"rdkstudio":{"category":"${skill.category}","source":"${skill.source}","originalId":"${skill.id}","platforms":${JSON.stringify(skill.platforms)}}}`;
+
   const lines = [
     '---',
     `name: ${safeName}`,
     `description: "${routingDesc}"`,
-    'license: MIT-0',
-    'metadata:',
-    '  openclaw:',
+    `version: 1.0.0`,
+    `metadata: ${metadataJson}`,
+    '---',
+    '',
+    `# ${skill.name}`,
+    '',
+    skill.description,
+    '',
+    '## When to Use',
+    `- ${skill.routingKeywords.join(', ')}`,
+    `- ${skill.scenario || `Use this ${skill.source} skill when relevant.`}`,
+    '',
   ];
-
-  if (requiredBins.length > 0) {
-    lines.push('    requires:');
-    lines.push('      bins:');
-    for (const bin of requiredBins) {
-      lines.push(`        - ${bin}`);
-    }
-  }
-
-  lines.push('    compatibility:');
-  lines.push(`      platform: ${platform}`);
-  lines.push('  provisioned_by: rdk-studio');
-  lines.push(`  source: ${skill.source}`);
-  lines.push(`  original_id: ${skill.id}`);
-  lines.push('---');
-  lines.push('');
-  lines.push(`# ${skill.name}`);
-  lines.push('');
-  lines.push(skill.description);
-  lines.push('');
 
   if (skill.installCmd) {
     lines.push('## 安装');

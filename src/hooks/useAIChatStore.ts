@@ -283,6 +283,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     addToast, addActivity,
     currentDeviceName: currentDevice?.name ?? '未连接设备',
     currentDeviceIp: currentDevice?.ip ?? 'N/A',
+    currentDeviceId: currentDevice?.id ?? '',
   });
 
   const runAgentStep = async (userMsg: string, step: { title: string; intent: string; param?: string; reason: string }, actions: AppActions, msgId: number) => {
@@ -469,7 +470,20 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const aiRaw = await fetchAIReply(history, currentDevice?.name, currentDevice?.ip);
 
         if (aiRaw === null) {
-          addToast('AI 助手暂时离线，使用本地匹配', 'warning');
+          setChatMessages(prev => [...prev, {
+            id: msgId + 1,
+            role: 'ai',
+            text: '抱歉，AI 助手暂时无法连接。请检查网络连接后重试。',
+            blocks: [{
+              type: 'status',
+              items: [
+                { label: 'AI 服务', value: '离线', ok: false },
+                { label: '设备', value: currentDevice?.name ?? '未连接', ok: !!currentDevice },
+              ],
+            }],
+          }]);
+          setAiTyping(false);
+          return;
         }
 
         const output = orchestrate({
@@ -522,6 +536,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     if (chatExpanded) setChatExpanded(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Listen for AI_APPEND_CHAT events from orchestrator (skill execution results)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.text || detail?.blocks) {
+        setChatMessages(prev => [...prev, {
+          id: Date.now() + Math.random() * 10000,
+          role: 'ai',
+          text: detail.text ?? '',
+          blocks: detail.blocks,
+        }]);
+      }
+    };
+    window.addEventListener('AI_APPEND_CHAT', handler);
+    return () => window.removeEventListener('AI_APPEND_CHAT', handler);
+  }, []);
 
   // Auto-scroll chat
   useEffect(() => {

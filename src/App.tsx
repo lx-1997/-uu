@@ -4,6 +4,7 @@ import './styles/openclaw.css';
 import './styles/nodehub.css';
 import './styles/models.css';
 import './styles/ros.css';
+import './styles/skills.css';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import Sidebar from './components/Sidebar';
 import TopToolbar from './components/TopToolbar';
@@ -23,6 +24,7 @@ import Hardware from './components/Hardware';
 import Examples from './components/Examples';
 import Ros from './components/Ros';
 import Models from './components/Models';
+import SkillBrowser from './components/SkillBrowser';
 import ErrorBoundary from './components/ErrorBoundary';
 
 function MainContent() {
@@ -60,6 +62,7 @@ function MainContent() {
       {activeTab === 'examples' && <div className="page-transition"><Examples /></div>}
       {activeTab === 'ros' && <div className="page-transition"><Ros /></div>}
       {activeTab === 'models' && <div className="page-transition"><Models /></div>}
+      {activeTab === 'skills' && <div className="page-transition"><SkillBrowser /></div>}
       {/* 持久化 tab：始终挂载 */}
       <div style={{ display: activeTab === 'terminal' ? 'contents' : 'none' }}><Terminal /></div>
       <div style={{ display: activeTab === 'vnc' ? 'contents' : 'none' }}><Vnc /></div>

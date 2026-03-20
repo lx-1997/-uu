@@ -183,8 +183,7 @@ export function matchCapabilityByKeyword(text: string): { id: IntentId; param?: 
   const lc = text.toLowerCase();
 
   // ─── Shell command detection (highest priority) ───
-  // If user types a raw shell command, route to terminal_cmd with the command
-  const shellCmdRe = /^(ls|cat|cd|top|free|df|ps|grep|tail|head|chmod|mkdir|rm|cp|mv|pip|apt|ros2|hrut_smi|hbdk|hobot|bputop|dmesg|ifconfig|ip |ping |ssh |scp )\b/i;
+  const shellCmdRe = /^(ls|cat|cd|top|free|df|ps|grep|tail|head|chmod|mkdir|rm|cp|mv|pip|apt|ros2|hrut_smi|hbdk|hobot|bputop|dmesg|ifconfig|ip |ping |ssh |scp |python|node |npm |systemctl|journalctl|uname|whoami|echo |touch |find )\b/i;
   const shellMatch = text.match(shellCmdRe);
   if (shellMatch) {
     return { id: 'terminal_cmd', param: text };
@@ -193,6 +192,13 @@ export function matchCapabilityByKeyword(text: string): { id: IntentId; param?: 
   const execMatch = text.match(/(?:执行|运行|跑一下|跑)\s+(.+)/);
   if (execMatch && /^[a-z/]/.test(execMatch[1].trim())) {
     return { id: 'terminal_cmd', param: execMatch[1].trim() };
+  }
+
+  // Task descriptions that require device execution (e.g. "创建文件夹并实现排序算法")
+  const taskVerbs = /创建|实现|编写|写一个|做一个|生成|搭建|安装|部署|配置|设置|下载并|新建/;
+  const taskObjects = /文件夹|文件|脚本|程序|代码|算法|服务|目录|项目|环境|package|server|app/;
+  if (taskVerbs.test(lc) && taskObjects.test(lc)) {
+    return { id: 'terminal_cmd', param: text };
   }
 
   // ─── Priority-ordered compound checks ───

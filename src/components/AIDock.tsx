@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
-import type { ChatBlock } from '../app-types';
+import type { ChatBlock, ChatAttachment } from '../app-types';
 import { getCapability } from '../ai';
 import { resolveSocketUrl } from '../utils/socket';
 import { renderMarkdown } from './MarkdownRenderer';
@@ -169,6 +169,45 @@ function BlockRenderer({ block, onConfirm, onDismiss, onCancelTask }: { block: C
   return null;
 }
 
+function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
+  if (attachment.type === 'image') {
+    return (
+      <div className="chat-attachment chat-attachment-image">
+        <img src={attachment.url} alt={attachment.name} loading="lazy" onClick={() => window.open(attachment.url, '_blank')} />
+      </div>
+    );
+  }
+  if (attachment.type === 'video') {
+    return (
+      <div className="chat-attachment chat-attachment-video">
+        <video src={attachment.url} controls preload="metadata" />
+      </div>
+    );
+  }
+  if (attachment.type === 'audio') {
+    return (
+      <div className="chat-attachment chat-attachment-audio">
+        <div className="audio-msg-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+        </div>
+        <audio src={attachment.url} controls preload="metadata" />
+      </div>
+    );
+  }
+  const sizeStr = attachment.size ? `${(attachment.size / 1024).toFixed(1)} KB` : '';
+  return (
+    <div className="chat-attachment chat-attachment-file">
+      <div className="file-attachment-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <div className="file-attachment-info">
+        <span className="file-attachment-name">{attachment.name}</span>
+        {sizeStr && <span className="file-attachment-size">{sizeStr}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function AIDock() {
   const {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
@@ -184,10 +223,89 @@ export default function AIDock() {
   const [workspaceMode, setWorkspaceMode] = useState(false);
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
   const forceLocalAssistantRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const addAttachment = useCallback((file: File) => {
+    const url = URL.createObjectURL(file);
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    const isAudio = file.type.startsWith('audio/');
+    const att: ChatAttachment = {
+      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type: isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'file',
+      name: file.name,
+      url,
+      mimeType: file.type,
+      size: file.size,
+    };
+    setPendingAttachments(prev => [...prev, att]);
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setPendingAttachments(prev => {
+      const removed = prev.find(a => a.id === id);
+      if (removed) URL.revokeObjectURL(removed.url);
+      return prev.filter(a => a.id !== id);
+    });
+  }, []);
+
+  const handleFilePick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach(addAttachment);
+    e.target.value = '';
+  }, [addAttachment]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    Array.from(files).forEach(addAttachment);
+  }, [addAttachment]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const toggleVoiceRecord = useCallback(async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+        addAttachment(file);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+    } catch {
+      // Microphone not available
+    }
+  }, [isRecording, addAttachment]);
 
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
@@ -203,13 +321,14 @@ export default function AIDock() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [workspaceMode]);
 
-  /* Sync workspace mode with chat state — only auto-expand on dashboard, not sub-pages */
+  /* Exit workspace mode when switching tabs or closing chat */
   useEffect(() => {
-    if (chatExpanded) {
-      if (chatMessages.length > 0 && activeTab === 'dashboard') setWorkspaceMode(true);
-      return;
-    }
-  }, [chatExpanded, chatMessages.length, activeTab]);
+    if (!chatExpanded) setWorkspaceMode(false);
+  }, [chatExpanded]);
+
+  useEffect(() => {
+    setWorkspaceMode(false);
+  }, [activeTab]);
 
   /* Auto-scroll to newest message */
   useEffect(() => {
@@ -400,7 +519,32 @@ export default function AIDock() {
   const handleUnifiedCommand = (e: React.FormEvent) => {
     e.preventDefault();
     const text = cmd.trim();
-    if (!text) return;
+    const hasAttachments = pendingAttachments.length > 0;
+    if (!text && !hasAttachments) return;
+
+    // Attach files to the message
+    if (hasAttachments) {
+      const msgId = Date.now();
+      const attachmentText = pendingAttachments
+        .map(a => a.type === 'image' ? `[图片: ${a.name}]` : a.type === 'audio' ? '[语音消息]' : `[文件: ${a.name}]`)
+        .join(' ');
+      const fullText = text ? `${text}\n${attachmentText}` : attachmentText;
+
+      setChatMessages(prev => [...prev, {
+        id: msgId,
+        role: 'user' as const,
+        text: fullText,
+        attachments: [...pendingAttachments],
+      }]);
+      setChatExpanded(true);
+      setPendingAttachments([]);
+      setCmd('');
+
+      if (text) {
+        setTimeout(() => handleCommand(e), 50);
+      }
+      return;
+    }
 
     const aiForced = text.match(/^\/ai\s+([\s\S]+)/i);
     if (aiForced) {
@@ -588,9 +732,20 @@ export default function AIDock() {
                   </div>
                   {/* Bubble */}
                   <div className={`chat-bubble ${msg.role}`}>
-                    {msg.role === 'ai'
-                      ? <div>{renderMarkdown(msg.text)}</div>
-                      : <p>{msg.text}</p>}
+                    {/* Attachments (images/files/audio/video) */}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className={`chat-attachments ${msg.attachments.length > 1 ? 'grid' : ''}`}>
+                        {msg.attachments.map(att => (
+                          <AttachmentRenderer key={att.id} attachment={att} />
+                        ))}
+                      </div>
+                    )}
+                    {/* Text content */}
+                    {msg.text && (
+                      msg.role === 'ai'
+                        ? <div className="msg-text">{renderMarkdown(msg.text)}</div>
+                        : <p className="msg-text">{msg.text}</p>
+                    )}
                     {msg.blocks?.map((block, i) => (
                       <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} />
                     ))}
@@ -631,31 +786,100 @@ export default function AIDock() {
           </div>
         )}
 
-        {/* ── Input bar ── */}
-        <form className="input-box" onSubmit={handleUnifiedCommand}>
-          <span style={{ display: 'flex', alignItems: 'center', marginRight: 10, color: '#ff6b00', flexShrink: 0 }}>{Icon.spark}</span>
-          <input
-            type="text"
-            className="cmd-input"
-            placeholder={openclawConnected
-              ? '描述目标，我会自动选择 RDK 能力或 OpenClaw 对话来执行...'
-              : (activeTab === 'dashboard' ? '输入你想做的事，我来帮你推荐方案...' : '描述你的需求，AI 助手帮你操作...')}
-            ref={chatInputRef}
-            value={cmd}
-            onChange={(e) => setCmd(e.target.value)}
-            onFocus={() => { setInputFocused(true); if (!chatExpanded) setShowSuggestions(true); }}
-            onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && chatExpanded) { closeDock(); e.preventDefault(); }
-            }}
-          />
-          {cmd.trim() && (
-            <button type="button" className="input-clear-btn" onClick={() => setCmd('')} title="清空">
-              {Icon.close}
-            </button>
+        {/* ── Input bar (multimodal) ── */}
+        <div
+          className={`input-area ${pendingAttachments.length > 0 ? 'has-attachments' : ''}`}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+        >
+          {/* Attachment preview strip */}
+          {pendingAttachments.length > 0 && (
+            <div className="attachment-preview-strip">
+              {pendingAttachments.map(att => (
+                <div key={att.id} className={`attachment-preview-item ${att.type}`}>
+                  {att.type === 'image' && <img src={att.url} alt={att.name} className="attachment-thumb" />}
+                  {att.type === 'video' && (
+                    <div className="attachment-icon-wrap video">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    </div>
+                  )}
+                  {att.type === 'audio' && (
+                    <div className="attachment-icon-wrap audio">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                    </div>
+                  )}
+                  {att.type === 'file' && (
+                    <div className="attachment-icon-wrap file">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                  )}
+                  <span className="attachment-name">{att.name}</span>
+                  <button type="button" className="attachment-remove" onClick={() => removeAttachment(att.id)}>
+                    {Icon.close}
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
-          <button type="submit" className={`send-btn ${cmd.trim() ? 'ready' : ''}`} disabled={!cmd.trim() && !aiTyping} title="发送">{Icon.send}</button>
-        </form>
+
+          <form className="input-box" onSubmit={handleUnifiedCommand}>
+            <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*,audio/*,.pdf,.zip,.tar,.gz,.py,.js,.ts,.json,.txt,.md,.csv" title="选择文件" className="sr-only" />
+
+            {/* Left action buttons */}
+            <div className="input-actions-left">
+              <button type="button" className="input-action-btn" onClick={handleFilePick} title="上传图片/文件">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`input-action-btn ${isRecording ? 'recording' : ''}`}
+                onClick={toggleVoiceRecord}
+                title={isRecording ? '停止录音' : '语音输入'}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+              </button>
+            </div>
+
+            {/* Text input */}
+            <input
+              type="text"
+              className="cmd-input"
+              placeholder={openclawConnected
+                ? '输入消息，或上传图片/文件/语音...'
+                : '和小地瓜聊聊，或拖拽文件到这里...'}
+              ref={chatInputRef}
+              value={cmd}
+              onChange={(e) => setCmd(e.target.value)}
+              onFocus={() => { setInputFocused(true); if (!chatExpanded) setShowSuggestions(true); }}
+              onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && chatExpanded) { closeDock(); e.preventDefault(); }
+              }}
+            />
+
+            {/* Right actions */}
+            {cmd.trim() && (
+              <button type="button" className="input-clear-btn" onClick={() => setCmd('')} title="清空">
+                {Icon.close}
+              </button>
+            )}
+            <button
+              type="submit"
+              className={`send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`}
+              disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping}
+              title="发送"
+            >
+              {Icon.send}
+            </button>
+          </form>
+        </div>
 
         {/* ── Quick prompt chips (contextual per tab) ── */}
         <div className="quick-prompt-strip">

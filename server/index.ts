@@ -20,6 +20,7 @@ import {
   FLASH_TMP_IMAGE_XZ, FLASH_TMP_IMAGE_RAW, FLASH_DEFAULT_DEST,
   DIAGNOSTIC_COMMANDS, buildSystemPrompt,
 } from './constants.js';
+import { loadAllSkills, getSkillByName, getRawSkillMd, buildSkillContext, bridgeEcoSkill } from './skill-loader.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -221,6 +222,63 @@ async function ecoRunOnDevice(deviceId: string, commands: string[]): Promise<{ o
 }
 
 app.use('/api/ecosystem', createEcosystemRouter(ecosystem, ecoRunOnDevice));
+
+// ─── Skill System ───
+const loadedSkills = loadAllSkills();
+
+// Bridge ecosystem skills into the unified skill registry
+try {
+  const ecoSkills = ecosystem.registry.getAllSkills();
+  for (const eco of ecoSkills) {
+    const bridged = bridgeEcoSkill(eco as any);
+    loadedSkills.push(bridged);
+  }
+  if (ecoSkills.length > 0) {
+    console.log(`[SkillLoader] bridged ${ecoSkills.length} ecosystem skills`);
+  }
+} catch (e) {
+  console.warn('[SkillLoader] ecosystem bridge skipped:', e);
+}
+
+app.get('/api/skills', (_request, response) => {
+  response.json({
+    ok: true,
+    skills: loadedSkills.map(s => ({
+      name: s.name,
+      description: s.description,
+      version: s.version,
+      metadata: s.metadata,
+      apis: s.apis,
+      clientActions: s.clientActions,
+    })),
+    total: loadedSkills.length,
+  });
+});
+
+app.get('/api/skills/:name', (request, response) => {
+  const skill = getSkillByName(loadedSkills, request.params.name);
+  if (!skill) {
+    response.status(404).json({ error: `Skill '${request.params.name}' not found` });
+    return;
+  }
+  response.json({ ok: true, skill });
+});
+
+app.get('/api/skills/:name/md', (request, response) => {
+  const md = getRawSkillMd(request.params.name);
+  if (!md) {
+    response.status(404).json({ error: `SKILL.md for '${request.params.name}' not found` });
+    return;
+  }
+  response.type('text/markdown').send(md);
+});
+
+app.post('/api/skills/reload', (_request, response) => {
+  const reloaded = loadAllSkills();
+  loadedSkills.length = 0;
+  loadedSkills.push(...reloaded);
+  response.json({ ok: true, total: loadedSkills.length });
+});
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
@@ -953,6 +1011,143 @@ app.get('/api/devices/:id/services/vnc', async (request, response) => {
   response.json({ ok: true, active, output: executed.output });
 });
 
+// ─── Service Start/Stop ───
+
+app.post('/api/devices/:id/services/vnc/start', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "if command -v x11vnc >/dev/null 2>&1; then nohup x11vnc -display :0 -rfbport 5900 -passwd 88888888 -shared -forever -bg 2>/dev/null; echo VNC_STARTED_X11VNC; elif command -v vncserver >/dev/null 2>&1; then vncserver :0 2>&1; echo VNC_STARTED_VNCSERVER; else echo VNC_NOT_INSTALLED; fi"',
+  ]);
+  if (!executed) return;
+  const started = /VNC_STARTED/i.test(executed.output);
+  response.json({ ok: started, output: executed.output });
+});
+
+app.post('/api/devices/:id/services/vnc/stop', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "(pkill x11vnc 2>/dev/null; vncserver -kill :0 2>/dev/null; echo VNC_STOPPED) || echo VNC_STOP_FAILED"',
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output });
+});
+
+app.post('/api/devices/:id/services/node-red/start', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "(systemctl start nodered 2>/dev/null || node-red -D 2>/dev/null &) && echo NODERED_STARTED || echo NODERED_START_FAILED"',
+  ]);
+  if (!executed) return;
+  const started = /NODERED_STARTED/i.test(executed.output);
+  response.json({ ok: started, output: executed.output });
+});
+
+app.post('/api/devices/:id/services/node-red/stop', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "(systemctl stop nodered 2>/dev/null; pkill -f node-red 2>/dev/null; echo NODERED_STOPPED) || echo NODERED_STOP_FAILED"',
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output });
+});
+
+// ─── ROS Extended ───
+
+app.get('/api/devices/:id/ros/nodes', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "source /opt/tros/humble/setup.bash 2>/dev/null; (command -v ros2 >/dev/null 2>&1 && ros2 node list 2>/dev/null) || echo ROS2_NOT_INSTALLED"',
+  ]);
+  if (!executed) return;
+  const nodes = executed.output.split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith('/'));
+  response.json({ ok: true, nodes, output: executed.output });
+});
+
+app.post('/api/devices/:id/ros/record/start', async (request, response) => {
+  const { id } = request.params;
+  const { topics, outputPath } = request.body as { topics?: string[]; outputPath?: string };
+  const dest = outputPath?.trim() || '/tmp/rosbag_recording';
+  const topicArgs = topics?.length ? topics.map(t => shEscape(t)).join(' ') : '-a';
+  const executed = await runOnDevice(request, response, id, [
+    `bash -lc "source /opt/tros/humble/setup.bash 2>/dev/null; nohup ros2 bag record ${topicArgs} -o ${shEscape(dest)} > /tmp/rosbag_record.log 2>&1 & echo ROSBAG_PID=\\$!; echo RECORDING_STARTED"`,
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output, path: dest });
+});
+
+app.post('/api/devices/:id/ros/record/stop', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "pkill -INT -f \'ros2 bag record\' 2>/dev/null && echo RECORDING_STOPPED || echo NO_RECORDING_FOUND"',
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output });
+});
+
+// ─── Models Extended ───
+
+app.get('/api/devices/:id/models/list', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "echo ===MODEL_ZOO===; ls -1 /opt/rdk_model_zoo/models/ 2>/dev/null || echo NO_MODEL_ZOO; echo ===BIN_MODELS===; find /userdata -name \'*.bin\' -o -name \'*.onnx\' 2>/dev/null | head -30 || echo NONE; echo ===RUNNING===; ps -eo args | grep -E \'python3.*demo|dnn_node\' | grep -v grep || echo NONE"',
+  ]);
+  if (!executed) return;
+  response.json({ ok: true, output: executed.output });
+});
+
+// ─── Device Scan ───
+
+app.post('/api/devices/scan', async (_request, response) => {
+  try {
+    const { networkInterfaces } = await import('os');
+    const nets = networkInterfaces();
+    const subnets: string[] = [];
+    for (const ifaces of Object.values(nets)) {
+      for (const iface of ifaces ?? []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          const parts = iface.address.split('.');
+          subnets.push(`${parts[0]}.${parts[1]}.${parts[2]}`);
+        }
+      }
+    }
+    const uniqueSubnets = [...new Set(subnets)];
+    const found: Array<{ ip: string; port: number }> = [];
+    const scanPromises: Promise<void>[] = [];
+
+    for (const subnet of uniqueSubnets) {
+      for (let i = 1; i <= 254; i++) {
+        const ip = `${subnet}.${i}`;
+        scanPromises.push(
+          new Promise<void>((resolve) => {
+            const sock = net.connect({ host: ip, port: 22, timeout: 800 });
+            sock.on('connect', () => {
+              found.push({ ip, port: 22 });
+              sock.destroy();
+              resolve();
+            });
+            sock.on('error', () => { sock.destroy(); resolve(); });
+            sock.on('timeout', () => { sock.destroy(); resolve(); });
+          }),
+        );
+      }
+    }
+
+    await Promise.all(scanPromises);
+    response.json({ ok: true, devices: found, subnets: uniqueSubnets });
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : 'Scan failed' });
+  }
+});
+
+// ─── Terminal Session (REST wrapper) ───
+
+app.post('/api/devices/:id/terminal/create', async (request, response) => {
+  const device = await resolveDevice(request, response, request.params.id);
+  if (!device) return;
+  const sessionId = `term-${uuid()}`;
+  response.json({ ok: true, sessionId, device: sanitizeDevice(device as Device & { password?: string }) });
+});
+
 app.get('/api/devices/:id/files/list', async (request, response) => {
   const { id } = request.params;
   const targetPath = String(request.query.path ?? '/userdata');
@@ -1250,7 +1445,16 @@ app.post('/api/chat', async (request, response) => {
     return;
   }
 
-  const systemPrompt = buildSystemPrompt(deviceName, deviceIp);
+  if (loadedSkills.length === 0) {
+    const reloaded = loadAllSkills();
+    if (reloaded.length > 0) {
+      loadedSkills.push(...reloaded);
+      console.log(`[Chat] lazy-loaded ${reloaded.length} skills`);
+    }
+  }
+  const systemPrompt = loadedSkills.length > 0
+    ? buildSkillContext(loadedSkills, deviceName, deviceIp)
+    : buildSystemPrompt(deviceName, deviceIp);
 
   try {
     const apiMessages = [
@@ -1274,7 +1478,7 @@ app.post('/api/chat', async (request, response) => {
         model,
         messages: apiMessages,
         temperature: 0.7,
-        max_tokens: 300,
+        max_tokens: 800,
         enable_thinking: false,
       }),
       signal: controller.signal,

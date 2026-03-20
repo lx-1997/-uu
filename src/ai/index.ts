@@ -1,24 +1,24 @@
 /**
  * AI Orchestrator Module
  *
- * Architecture:
- *   User Input → AI API → Intent Parser → Capability Registry
+ * Architecture (Skill-driven):
+ *   User Input → AI API (with SKILL.md context) → Tag Parser
  *                                ↓
- *                         Orchestrator → Task Executor → App Actions
- *                                ↓
- *                         Chat Blocks + Progress Sync
+ *   [[skill:...]] → API Call    |  [[action:...]] → Client Dispatch
+ *   [[intent:...]] → Legacy Handler (backward compat)
  */
 
 // Types
 export type { IntentId, IntentResult, Capability, CapabilityPhase } from './types';
 export type { Task, TaskStatus, TaskStep } from './types';
 export type { AppActions, OrchestratorOutput } from './types';
+export type { ParsedTag, ParsedAIResult } from './types';
 
-// Capabilities
+// Capabilities (legacy, kept for backward compat)
 export { CAPABILITIES, getCapability, matchCapabilityByKeyword } from './capabilities';
 
 // Intent
-export { parseAIResponse, detectIntentByKeyword } from './intent';
+export { parseAIResponse, parseAIResponseV2, detectIntentByKeyword } from './intent';
 
 // Executor
 export { createTask, transitionTask, requireConfirmation, advanceStep, completeTask, failTask, cancelTask, runTaskSteps } from './executor';

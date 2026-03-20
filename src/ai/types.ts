@@ -11,7 +11,7 @@ import type { ChatBlock, Tab } from '../app-types';
 
 // ───── Intent ─────
 
-/** All supported intent identifiers */
+/** All supported intent identifiers (kept for backward compat) */
 export type IntentId =
   | 'flash'
   | 'terminal'
@@ -43,6 +43,20 @@ export interface IntentResult {
   intent: IntentId;
   /** Optional parameter extracted from [[intent:xxx|param]] */
   param?: string;
+}
+
+// ───── Skill-based parsing (new) ─────
+
+export type ParsedTag =
+  | { type: 'skill'; skill: string; action: string; params?: Record<string, unknown> }
+  | { type: 'action'; actionType: string; target?: string }
+  | { type: 'confirm'; skill: string; action: string; params?: Record<string, unknown> }
+  | { type: 'legacy'; intent: IntentId; param?: string }
+  | { type: 'none' };
+
+export interface ParsedAIResult {
+  text: string;
+  tag: ParsedTag;
 }
 
 // ───── Capability ─────
@@ -160,4 +174,5 @@ export interface AppActions {
   // Current device info (read-only snapshot)
   currentDeviceName: string;
   currentDeviceIp: string;
+  currentDeviceId: string;
 }
