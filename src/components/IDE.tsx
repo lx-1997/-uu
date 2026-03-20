@@ -11,6 +11,35 @@ const CODE_SERVER_PORT = 9888;
 /* ── 浏览器模式回退：vscode.dev ── */
 const VSCODE_WEB_URL = 'https://vscode.dev/?vscode-lang=zh-cn';
 
+/* ── 安装 code-server 的远程命令（与旧版 operate_vscode_server.json 一致） ── */
+const INSTALL_CMD = [
+  "echo 'Installing code-server...'",
+  'mkdir -p ~/.cache/code-server',
+  'curl -#fL -o ~/.cache/code-server/code-server_arm64.deb -C - https://rdkstudio.bj.bcebos.com/appspace/codeserver/code-server_4.96.2_arm64.deb',
+  'sudo dpkg -i ~/.cache/code-server/code-server*.deb',
+  'rm -f ~/.cache/code-server/code-server*.deb',
+  'code-server --version',
+].join(' && ');
+
+/*
+ * 单条 SSH 命令：检查安装 → kill 旧进程 → 启动 → 轮询端口就绪（最多 ~15s）。
+ * 输出关键字：CS_NOT_FOUND / READY / NOT_READY
+ */
+const buildLaunchCmd = (port: number) =>
+  `bash -lc '` +
+  `command -v code-server >/dev/null 2>&1 || { echo CS_NOT_FOUND; exit 0; }; ` +
+  `(sudo lsof -t -i :${port} 2>/dev/null | xargs sudo kill -9 2>/dev/null) || true; ` +
+  `sleep 1; ` +
+  `nohup code-server --auth none --bind-addr 0.0.0.0:${port} --ignore-last-opened > /tmp/code-server.log 2>&1 & ` +
+  `for i in $(seq 1 30); do ` +
+  `  if ss -lntp 2>/dev/null | grep -q ":${port}" || netstat -tlnp 2>/dev/null | grep -q ":${port}"; then ` +
+  `    echo READY; exit 0; ` +
+  `  fi; ` +
+  `  sleep 0.5; ` +
+  `done; ` +
+  `echo NOT_READY` +
+  `'`;
+
 export default function IDE() {
   const { currentDevice, addToast } = useAppState();
 
@@ -18,9 +47,9 @@ export default function IDE() {
   const [iframeLoading, setIframeLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  // 当前打开的 code-server URL（桌面端用于 close/hide）
   const activeUrlRef = useRef<string>('');
 
   /* ── 构建 code-server URL ── */
@@ -29,7 +58,7 @@ export default function IDE() {
     return `http://${currentDevice.ip}:${CODE_SERVER_PORT}/?folder=/root`;
   };
 
-  /* ── 监听 WebContentsView 加载事件 ── */
+  /* ── 监听 WebContentsView 加载事件（桌面端） ── */
   useEffect(() => {
     if (!isDesktop()) return;
     const rdk = (window as any).rdkDesktop;
@@ -49,6 +78,26 @@ export default function IDE() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ── 一键安装 code-server ── */
+  const handleInstall = async () => {
+    if (!currentDevice) return;
+    setInstalling(true);
+    addToast('正在安装 code-server，可能需要几分钟...', 'info');
+    try {
+      const res = await executeDeviceCommand(currentDevice.id, INSTALL_CMD);
+      if (res.output?.includes('code-server')) {
+        addToast('code-server 安装成功！', 'success');
+        setLoadError(null);
+      } else {
+        addToast('安装可能未完成，请检查设备网络后重试', 'warning');
+      }
+    } catch {
+      addToast('安装失败，请检查设备连接和网络', 'error');
+    } finally {
+      setInstalling(false);
+    }
+  };
+
   /* ── 打开编辑器 ── */
   const handleConnect = async () => {
     if (!currentDevice) {
@@ -61,29 +110,41 @@ export default function IDE() {
     setShowIframe(true);
     addToast('正在启动 code-server...', 'info');
 
-    if (isDesktop()) {
-      try {
-        // 先通过 SSH 启动 code-server（如果未运行）
-        const res = await executeDeviceCommand(
-          currentDevice.id,
-          `bash -lc "pgrep -f 'code-server' > /dev/null 2>&1 || (nohup code-server --auth none --bind-addr 0.0.0.0:${CODE_SERVER_PORT} --ignore-last-opened > /tmp/code-server.log 2>&1 &); sleep 2; ss -lntp 2>/dev/null | grep -q ':${CODE_SERVER_PORT}' && echo READY || echo NOT_READY"`
-        );
-        if (res.output?.includes('NOT_READY')) {
-          setIframeLoading(false);
-          setLoadError('code-server 未就绪，请确认设备上已安装 code-server');
-          addToast('code-server 未就绪，请先在设备上安装', 'warning');
-          setShowIframe(false);
-          return;
-        }
-      } catch {
-        // SSH 失败时仍尝试直连
+    try {
+      const res = await executeDeviceCommand(
+        currentDevice.id,
+        buildLaunchCmd(CODE_SERVER_PORT),
+      );
+      const output = res.output ?? '';
+
+      if (output.includes('CS_NOT_FOUND')) {
+        setIframeLoading(false);
+        setLoadError('设备上未安装 code-server');
+        addToast('设备上未检测到 code-server，请先安装', 'warning');
+        setShowIframe(false);
+        return;
       }
+      if (output.includes('NOT_READY')) {
+        setIframeLoading(false);
+        setLoadError('code-server 启动超时，请检查设备日志 /tmp/code-server.log');
+        addToast('code-server 未能在 15 秒内就绪', 'warning');
+        setShowIframe(false);
+        return;
+      }
+    } catch (err) {
+      setIframeLoading(false);
+      const msg = err instanceof Error ? err.message : '设备连接失败';
+      setLoadError(msg);
+      addToast(`连接设备失败: ${msg}`, 'error');
+      setShowIframe(false);
+      return;
+    }
+
+    if (isDesktop()) {
       activeUrlRef.current = url;
       (window as any).rdkDesktop.openUrl(url);
-      // 10s 超时兜底（用 ref 避免闭包旧值问题）
-      const t = setTimeout(() => setIframeLoading(false), 10000);
-      return () => clearTimeout(t);
     }
+    setTimeout(() => setIframeLoading(false), 10000);
   };
 
   /* ── 关闭编辑器 ── */
@@ -143,7 +204,7 @@ export default function IDE() {
   }, [activeTab]);
 
   const desktop = isDesktop();
-  const editorLabel = desktop && currentDevice ? `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}` : 'VS Code Web';
+  const editorLabel = currentDevice ? `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}` : 'VS Code Web';
 
   return (
     <div className="ide-container" ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -152,7 +213,7 @@ export default function IDE() {
         <div className="ros-topbar-left">
           
           <span className="ros-topbar-title">代码编辑器</span>
-          <span className="ros-topbar-badge">{desktop ? 'code-server' : 'VS Code'}</span>
+          <span className="ros-topbar-badge">{currentDevice ? 'code-server' : 'VS Code'}</span>
           {currentDevice && (
             <span className="ros-topbar-device">{currentDevice.name} · {currentDevice.ip}</span>
           )}
@@ -229,6 +290,11 @@ export default function IDE() {
                 {loadError ? (
                   <>
                     <span style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
+                    {loadError.includes('未安装') && currentDevice && (
+                      <button className="ros-connect-main-btn" style={{ background: '#2563eb', marginTop: 8 }} disabled={installing} onClick={handleInstall}>
+                        {installing ? '正在安装...' : '一键安装 code-server'}
+                      </button>
+                    )}
                     <button className="ros-connect-main-btn" style={{ background: '#ff6b00', marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
                   </>
                 ) : (
@@ -238,9 +304,9 @@ export default function IDE() {
             ) : (
               <iframe
                 ref={iframeRef}
-                src={VSCODE_WEB_URL}
+                src={getCodeServerUrl()}
                 className="ros-iframe"
-                title="VS Code Web Editor"
+                title="code-server"
                 onLoad={handleIframeLoad}
                 allow="clipboard-read; clipboard-write; fullscreen"
                 style={{ width: '100%', height: '100%', border: 'none' }}
@@ -259,28 +325,42 @@ export default function IDE() {
             </div>
 
             <h2 className="ros-welcome-title">
-              {desktop ? 'code-server 编辑器' : 'VS Code Web 编辑器'}
+              {currentDevice ? 'code-server 编辑器' : 'VS Code Web 编辑器'}
             </h2>
             <p className="ros-welcome-desc">
-              {desktop
-                ? `连接设备 ${currentDevice?.ip ?? ''} 上的 code-server，直接编辑 /root 目录代码`
+              {currentDevice
+                ? `连接设备 ${currentDevice.ip} 上的 code-server，直接编辑 /root 目录代码`
                 : '基于 vscode.dev 的在线代码编辑器，支持中文界面，可通过 Remote SSH 连接到设备'}
             </p>
 
-            {desktop && !currentDevice && (
+            {!currentDevice && (
               <p className="ros-welcome-desc" style={{ color: '#f59e0b' }}>请先在左侧连接一个设备</p>
+            )}
+
+            {loadError?.includes('未安装') && currentDevice && (
+              <button
+                className="ros-connect-main-btn"
+                onClick={handleInstall}
+                disabled={installing}
+                style={{ background: '#2563eb', marginBottom: 8 }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                {installing ? '正在安装...' : '一键安装 code-server'}
+              </button>
             )}
 
             <button
               className="ros-connect-main-btn"
               onClick={handleConnect}
-              disabled={desktop && !currentDevice}
+              disabled={!currentDevice || installing}
               style={{ background: '#ff6b00' }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
               </svg>
-              {desktop ? '打开 code-server' : '打开 VS Code'}
+              {currentDevice ? '打开 code-server' : '打开 VS Code'}
             </button>
 
             <div className="ros-welcome-hints">
@@ -292,7 +372,7 @@ export default function IDE() {
               )}
               <div className="ros-hint-item">
                 <span className="ros-hint-dot" />
-                <span>{desktop ? `设备端口 ${CODE_SERVER_PORT}` : '支持 Remote SSH 连接设备'}</span>
+                <span>{currentDevice ? `设备端口 ${CODE_SERVER_PORT}` : '支持 Remote SSH 连接设备'}</span>
               </div>
               <div className="ros-hint-item">
                 <span className="ros-hint-dot" />

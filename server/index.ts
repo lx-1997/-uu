@@ -12,6 +12,7 @@ import { WebSocketServer } from 'ws';
 import * as net from 'net';
 import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
 import * as path from 'path';
+import { initEcosystem, createEcosystemRouter } from './ecosystem/index.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -178,6 +179,34 @@ async function runOnDevice(
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use('/vnc', express.static(process.cwd() + '/public/vnc'));
+
+// ─── Ecosystem Bridge ───
+const ecosystem = initEcosystem();
+
+async function ecoRunOnDevice(deviceId: string, commands: string[]): Promise<{ output: string } | null> {
+  const devices = await readDevices();
+  const device = devices.find((d) => d.id === deviceId);
+  if (!device) return null;
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+  const pwd = devicePasswordCache.get(key)
+    || (device as Device & { password?: string }).password
+    || defaultSshPassword
+    || device.username;
+  const candidates = [pwd, ...passwordCandidates(device.username)];
+  for (const p of [...new Set(candidates)]) {
+    try {
+      const output = await runRemoteCommands(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+        commands,
+      );
+      devicePasswordCache.set(key, p);
+      return { output };
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+app.use('/api/ecosystem', createEcosystemRouter(ecosystem, ecoRunOnDevice));
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
@@ -379,18 +408,19 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
     installCommand?: string;
     configureCommand?: string;
   };
-  const sshPassword = request.header('x-device-password');
-
-  if (!sshPassword) {
-    response.status(400).json({ error: '缺少设备密码，请补充当前设备密码后重试' });
-    return;
-  }
-
+  const providedPassword = request.header('x-device-password');
   const devices = await readDevices();
   const device = devices.find((item) => item.id === id);
 
   if (!device) {
     response.status(404).json({ error: '设备不存在' });
+    return;
+  }
+
+  const sshPassword = providedPassword || resolveStoredDevicePassword(device);
+
+  if (!sshPassword) {
+    response.status(400).json({ error: '缺少设备密码，请补充当前设备密码后重试' });
     return;
   }
 
