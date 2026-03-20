@@ -85,8 +85,6 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
   const apiKey = getApiKey(config);
   const baseUrl = getBaseUrl(config);
 
-  console.log('[RDK-Agent] baseUrl:', baseUrl, 'model:', modelDef.id, 'modelBaseUrl:', (modelDef as any).baseUrl);
-
   // Set env vars before any LLM call
   process.env.OPENAI_BASE_URL = baseUrl;
   process.env.OPENAI_API_KEY = apiKey;

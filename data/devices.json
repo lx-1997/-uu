@@ -1,11 +1,11 @@
 [
   {
-    "id": "e3e48906-d615-4671-a557-ef19eb6e8a89",
-    "host": "192.168.127.10",
+    "id": "fbe3f17c-da0d-4a4f-b773-01f40dde9e3c",
+    "host": "192.168.1.18",
     "port": 22,
     "username": "root",
     "password": "root",
     "status": "connected",
-    "lastCheckedAt": "2026-03-20T17:34:26.693Z"
+    "lastCheckedAt": "2026-03-20T18:15:47.046Z"
   }
 ]

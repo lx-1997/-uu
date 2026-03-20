@@ -76,6 +76,7 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
   const baseUrl = resolveQwenBaseUrl(config);
   const defaults = PROVIDER_DEFAULTS[config.provider];
   const modelId = config.model || defaults?.model || 'gpt-4o-mini';
+  const isQwenCodingEndpoint = config.provider === 'qwen' && baseUrl.includes('coding.dashscope.aliyuncs.com');
 
   return {
     api: 'openai-completions',
@@ -85,6 +86,9 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
     baseUrl,
     reasoning: false,
     input: ['text'] as const,
+    // Qwen coding endpoint 在流式模式下不兼容 stream_options.include_usage
+    // 关闭 usage-in-streaming，避免出现 Connection error / 挂起
+    ...(isQwenCodingEndpoint ? { compat: { supportsUsageInStreaming: false } } : {}),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
     maxTokens: 4096,
