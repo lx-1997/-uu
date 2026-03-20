@@ -122,7 +122,7 @@ function AppShell() {
         <div className="main-area">
           <TopToolbar />
           <div
-            className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros'].includes(activeTab) ? 'viewport-terminal' : ''} ${activeTab === 'vnc' ? 'viewport-vnc' : ''} ${activeTab === 'ide' ? 'viewport-ide' : ''} ${activeTab === 'flasher' ? 'viewport-flasher' : ''}`}
+            className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros','openclaw'].includes(activeTab) ? 'viewport-terminal' : ''} ${activeTab === 'vnc' ? 'viewport-vnc' : ''} ${activeTab === 'ide' ? 'viewport-ide' : ''} ${activeTab === 'flasher' ? 'viewport-flasher' : ''}`}
           >
             <MainContent />
           </div>

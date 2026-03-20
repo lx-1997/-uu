@@ -113,6 +113,16 @@ export default function Dashboard() {
     if (devices.length > 0 && obStep === 'connect') setObStep('done');
   }, [devices.length, obStep, setObStep]);
 
+  const showWizard = !hideWizard && (devices.length === 0 || (obStep !== 'done' && obStep !== 'board'));
+  const showDoneScreen = !hideWizard && devices.length > 0 && obStep === 'done';
+
+  useEffect(() => {
+    if (showDoneScreen) {
+      const timer = setTimeout(() => setHideWizard(true), 0);
+      return () => clearTimeout(timer);
+    }
+  }, [showDoneScreen]);
+
   useEffect(() => {
     if (!currentDevice) return;
     let cancelled = false;
@@ -127,7 +137,7 @@ export default function Dashboard() {
   }, [currentDevice?.id]);
 
   /* ── Onboarding wizard ── */
-  if (!hideWizard && (devices.length === 0 || obStep === 'done')) {
+  if (showWizard || (devices.length === 0 && !hideWizard)) {
     const boards = [
       { id: 'x3', name: 'RDK X3', emoji: '🟠', bpu: '5 TOPS', chip: 'Sunrise 3 · 4核 A53', mem: '2GB DDR4', storage: 'SD / 8GB eMMC', os: 'Ubuntu 20.04 / 22.04', net: '百兆网口', price: '¥299 起', desc: '入门级边缘 AI，适合教学和轻量推理', url: 'https://developer.horizon.cc/rdkx3' },
       { id: 'x5', name: 'RDK X5', emoji: '🔴', bpu: '10 TOPS', chip: 'Sunrise 5 · 8核 A55', mem: '4GB LPDDR4', storage: 'SD / 32GB eMMC', os: 'Ubuntu 22.04 + ROS2', net: '千兆 · WiFi 6', price: '¥499 起', desc: '主力开发板，多路摄像头 + 实时推理', url: 'https://developer.horizon.cc/rdkx5' },
@@ -136,120 +146,172 @@ export default function Dashboard() {
     ];
     const board = boards.find(b => b.id === selectedBoard);
 
+    const stepIdx = ['board','flash','connect','done'].indexOf(obStep);
+    const steps = [
+      { id: 'board', label: '选择板卡', icon: 'developer_board' },
+      { id: 'flash', label: '烧录系统', icon: 'system_update' },
+      { id: 'connect', label: '连接设备', icon: 'cable' },
+      { id: 'done', label: '开始使用', icon: 'check_circle' },
+    ] as const;
+
     return (
-      <div className="center-stage">
-        <div className="ob-wizard">
-          <div className="ob-progress">
-            {(['board', 'flash', 'connect', 'done'] as const).map((s, i) => {
-              const idx = ['board','flash','connect','done'].indexOf(obStep);
-              return (
-                <div key={s} className={`ob-prog-item ${idx === i ? 'active' : ''} ${idx > i ? 'done' : ''}`}>
-                  <div className="ob-prog-dot">{idx > i ? '✓' : i + 1}</div>
-                  <span>{s === 'board' ? '选板卡' : s === 'flash' ? '烧镜像' : s === 'connect' ? '连设备' : '完成'}</span>
+      <div className="ob-fullscreen">
+        <div className="ob-shell">
+          {/* ── Stepper ── */}
+          <nav className="ob-stepper">
+            {steps.map((s, i) => (
+              <div key={s.id} className={`ob-step ${stepIdx === i ? 'active' : ''} ${stepIdx > i ? 'done' : ''}`}>
+                <div className="ob-step-indicator">
+                  <span className="material-symbols-outlined ob-step-icon">
+                    {stepIdx > i ? 'check' : s.icon}
+                  </span>
                 </div>
-              );
-            })}
+                <span className="ob-step-label">{s.label}</span>
+                {i < steps.length - 1 && <div className="ob-step-line" />}
+              </div>
+            ))}
+          </nav>
+
+          {/* ── Step Content ── */}
+          <div className="ob-body">
+            {obStep === 'board' && (
+              <div className="ob-animate">
+                <div className="ob-title-group">
+                  <h1 className="ob-title">选择你的开发板</h1>
+                  <p className="ob-subtitle">RDK 全系列覆盖从入门教学到行业部署场景</p>
+                </div>
+                <div className="ob-board-grid">
+                  {boards.map(b => (
+                    <button key={b.id} className={`ob-board ${selectedBoard === b.id ? 'selected' : ''}`} onClick={() => setSelectedBoard(b.id)}>
+                      <div className="ob-board-header">
+                        <span className="ob-board-emoji">{b.emoji}</span>
+                        <div className="ob-board-title">
+                          <strong>{b.name}</strong>
+                          <span className="ob-board-bpu">{b.bpu}</span>
+                        </div>
+                      </div>
+                      <p className="ob-board-desc">{b.desc}</p>
+                      <div className="ob-board-specs">
+                        <span>{b.chip}</span>
+                        <span>{b.mem}</span>
+                        <span>{b.net}</span>
+                      </div>
+                      <div className="ob-board-price">{b.price}</div>
+                      {selectedBoard === b.id && (
+                        <div className="ob-board-check">
+                          <span className="material-symbols-outlined">check_circle</span>
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {obStep === 'flash' && (
+              <div className="ob-animate">
+                <div className="ob-title-group">
+                  <h1 className="ob-title">为 {board?.name} 烧录系统</h1>
+                  <p className="ob-subtitle">将系统镜像写入 SD 卡，插卡上电即可运行</p>
+                </div>
+                <div className="ob-action-center">
+                  <button className="ob-hero-card" onClick={() => setActiveTab('flasher')}>
+                    <div className="ob-hero-icon">
+                      <span className="material-symbols-outlined">download</span>
+                    </div>
+                    <div className="ob-hero-text">
+                      <strong>打开镜像烧录工具</strong>
+                      <span>选择镜像 → 选择存储 → 一键写入</span>
+                    </div>
+                    <span className="material-symbols-outlined ob-hero-arrow">arrow_forward</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {obStep === 'connect' && (
+              <div className="ob-animate">
+                <div className="ob-title-group">
+                  <h1 className="ob-title">连接 {board?.name}</h1>
+                  <p className="ob-subtitle">确保板卡已上电并接入网络</p>
+                </div>
+                <div className="ob-connect-grid">
+                  <button className="ob-connect-card" onClick={() => setShowAddDevice(true)}>
+                    <div className="ob-connect-icon">
+                      <span className="material-symbols-outlined">wifi</span>
+                    </div>
+                    <strong>SSH 网络连接</strong>
+                    <span>通过网线或 WiFi 连接设备</span>
+                  </button>
+                  <button className="ob-connect-card" onClick={() => setShowAddDevice(true)}>
+                    <div className="ob-connect-icon usb">
+                      <span className="material-symbols-outlined">usb</span>
+                    </div>
+                    <strong>USB 串口调试</strong>
+                    <span>{selectedBoard === 's100' ? 'Type-C' : 'Micro USB'} 直连</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {obStep === 'done' && (
+              <div className="ob-animate">
+                <div className="ob-done-celebration">
+                  <div className="ob-done-check">
+                    <span className="material-symbols-outlined">check_circle</span>
+                  </div>
+                  <h1 className="ob-title">一切就绪</h1>
+                  <p className="ob-subtitle">{board?.name || 'RDK'} 已准备好，选择你想做的事情</p>
+                </div>
+                <div className="ob-done-grid">
+                  {[
+                    { icon: 'hub', title: 'OpenClaw 工作台', desc: 'AI 网关对话与编排', tab: 'openclaw' as const },
+                    { icon: 'terminal', title: '终端环境', desc: '执行命令与运维操作', tab: 'terminal' as const },
+                    { icon: 'monitoring', title: '硬件监控', desc: 'CPU / BPU / 温度', tab: 'hardware' as const },
+                  ].map(item => (
+                    <button key={item.tab} className="ob-done-card" onClick={() => { setHideWizard(true); setActiveTab(item.tab); }}>
+                      <span className="material-symbols-outlined ob-done-card-icon">{item.icon}</span>
+                      <strong>{item.title}</strong>
+                      <span>{item.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {obStep === 'board' && (
-            <>
-              <h2 className="ob-heading">选择你的 RDK 开发板</h2>
-              <div className="ob-board-grid">
-                {boards.map(b => (
-                  <div key={b.id} className={`ob-board ${selectedBoard === b.id ? 'selected' : ''}`} onClick={() => setSelectedBoard(b.id)}>
-                    <div className="ob-board-top">
-                      <span className="ob-board-emoji">{b.emoji}</span>
-                      <span className="ob-board-name">{b.name}</span>
-                      <span className="ob-board-bpu">{b.bpu}</span>
-                    </div>
-                    <div className="ob-board-desc">{b.desc}</div>
-                    <div className="ob-board-specs">
-                      <div className="ob-spec"><span className="ob-spec-k">芯片</span><span className="ob-spec-v">{b.chip}</span></div>
-                      <div className="ob-spec"><span className="ob-spec-k">内存</span><span className="ob-spec-v">{b.mem}</span></div>
-                      <div className="ob-spec"><span className="ob-spec-k">存储</span><span className="ob-spec-v">{b.storage}</span></div>
-                      <div className="ob-spec"><span className="ob-spec-k">网络</span><span className="ob-spec-v">{b.net}</span></div>
-                    </div>
-                    <div className="ob-board-footer">
-                      <span className="ob-board-price">{b.price}</span>
-                      <a className="ob-board-link" href={b.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>详情 →</a>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="ob-nav">
-                <div />
-                <button className="ob-btn primary" disabled={!selectedBoard} onClick={() => setObStep('flash')}>下一步 →</button>
-              </div>
-            </>
-          )}
-
-          {obStep === 'flash' && (
-            <>
-              <h2 className="ob-heading">为 {board?.name} 烧录系统</h2>
-              <p className="ob-sub">将系统镜像写入 SD 卡，插卡上电即可运行</p>
-              <div className="ob-flash-single">
-                <button className="ob-choice-card wide" onClick={() => setActiveTab('flasher')}>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  <strong>打开镜像烧录工具</strong>
-                  <span>选择镜像 → 选择存储 → 一键写入</span>
-                </button>
-              </div>
-              <div className="ob-nav">
-                <button className="ob-btn ghost" onClick={() => setObStep('board')}>← 返回</button>
-                <button className="ob-btn primary" onClick={() => setObStep('connect')}>已烧录 / 跳过 →</button>
-              </div>
-            </>
-          )}
-
-          {obStep === 'connect' && (
-            <>
-              <h2 className="ob-heading">连接 {board?.name}</h2>
-              <p className="ob-sub">确保板卡已上电，选择连接方式</p>
-              <div className="ob-choice-row">
-                <button className="ob-choice-card" onClick={() => setShowAddDevice(true)}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.8"><path d="M5 12.55a11 11 0 0114 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-                  <strong>SSH 网络连接</strong>
-                  <span>网线/WiFi · 输入 IP</span>
-                </button>
-                <button className="ob-choice-card" onClick={() => setShowAddDevice(true)}>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="1.8"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-                  <strong>USB 串口调试</strong>
-                  <span>{selectedBoard === 's100' ? 'Type-C' : 'Micro USB'} 直连</span>
-                </button>
-              </div>
-              <div className="ob-nav">
-                <button className="ob-btn ghost" onClick={() => setObStep('flash')}>← 返回</button>
-                <button className="ob-btn primary" onClick={() => setObStep('done')}>设备已连接 →</button>
-              </div>
-            </>
-          )}
-
-          {obStep === 'done' && (
-            <>
-              <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                <div style={{ fontSize: '2.4rem', marginBottom: 12 }}>🎉</div>
-                <h2 className="ob-heading">一切就绪</h2>
-                <p className="ob-sub">{board?.name || 'RDK'} 已准备好，开始探索 AI 推理与机器人开发</p>
-              </div>
-              <div className="ob-done-grid">
-                {[
-                  { emoji: 'hub', title: 'OpenClaw 工作台', desc: '进入对话式编排与执行', tab: 'openclaw' as const },
-                  { emoji: 'terminal', title: '打开终端', desc: '执行诊断和运维命令', tab: 'terminal' as const },
-                  { emoji: 'monitoring', title: '硬件监控', desc: '查看 CPU/BPU/温度状态', tab: 'hardware' as const },
-                ].map(item => (
-                  <button key={item.tab} className="ob-choice-card compact" onClick={() => { setHideWizard(true); setActiveTab(item.tab); }}>
-                    <div style={{color:"var(--brand-primary)", display:"flex", marginBottom: "8px"}}><svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></div>
-                    <strong>{item.title}</strong>
-                    <span>{item.desc}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="ob-nav">
-                <button className="ob-btn ghost" onClick={() => setObStep('connect')}>← 返回</button>
-                <button className="ob-btn primary" onClick={() => setHideWizard(true)}>进入工作台</button>
-              </div>
-            </>
-          )}
+          {/* ── Footer Navigation ── */}
+          <footer className="ob-footer">
+            {obStep !== 'board' ? (
+              <button className="ob-nav-btn ghost" onClick={() => {
+                const prev = ['board','flash','connect','done'] as const;
+                const i = prev.indexOf(obStep);
+                if (i > 0) setObStep(prev[i - 1]);
+              }}>
+                <span className="material-symbols-outlined">arrow_back</span>
+                返回
+              </button>
+            ) : <div />}
+            {obStep === 'done' ? (
+              <button className="ob-nav-btn primary" onClick={() => setHideWizard(true)}>
+                进入工作台
+                <span className="material-symbols-outlined">arrow_forward</span>
+              </button>
+            ) : (
+              <button
+                className="ob-nav-btn primary"
+                disabled={obStep === 'board' && !selectedBoard}
+                onClick={() => {
+                  const next = ['board','flash','connect','done'] as const;
+                  const i = next.indexOf(obStep);
+                  if (i < next.length - 1) setObStep(next[i + 1]);
+                }}
+              >
+                {obStep === 'connect' ? '设备已连接' : obStep === 'flash' ? '已烧录 / 跳过' : '下一步'}
+                <span className="material-symbols-outlined">arrow_forward</span>
+              </button>
+            )}
+          </footer>
         </div>
       </div>
     );
