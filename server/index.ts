@@ -672,7 +672,7 @@ app.get('/api/devices/:id/diagnostics', async (request, response) => {
     'echo "###IP###"; ip -o -4 addr show',
     'echo "###TOP###"; top -bn1 | head -20',
     'echo "###BPU###"; (hrut_smi || bputop || echo "bpu command unavailable")',
-    'echo "###SOMSTATUS###"; (sudo hrut_somstatus 2>/dev/null || echo "somstatus unavailable")',
+    'echo "###SOMSTATUS###"; (hrut_somstatus 2>/dev/null || sudo hrut_somstatus 2>/dev/null || echo "somstatus unavailable")',
   ];
 
   const executed = await runOnDevice(request, response, id, commands);

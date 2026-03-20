@@ -35,8 +35,8 @@ export default function Dashboard() {
     }
     const tempRaw = findAfter('###TEMP###');
     const tempNumber = Number(tempRaw);
-    const temp = Number.isFinite(tempNumber) && tempNumber > 0 ? `${(tempNumber / 1000).toFixed(1)}°C` : (tempRaw || '--');
-    const tempValue = Number.isFinite(tempNumber) && tempNumber > 0 ? tempNumber / 1000 : -1;
+    let temp = Number.isFinite(tempNumber) && tempNumber > 0 ? `${(tempNumber / 1000).toFixed(1)}°C` : (tempRaw || '--');
+    let tempValue = Number.isFinite(tempNumber) && tempNumber > 0 ? tempNumber / 1000 : -1;
 
     const memIdx = lines.findIndex((line) => line === '###MEM###');
     let memory = '--';
@@ -52,7 +52,6 @@ export default function Dashboard() {
     const somIdx = lines.findIndex((line) => line === '###SOMSTATUS###');
     let bpu = '--';
     let bpuValue = -1;
-    let cpuFreq = '--';
     if (somIdx >= 0) {
       const somLines = lines.slice(somIdx + 1);
       // 解析 CPU 温度 (优先使用 somstatus 的温度)
@@ -62,36 +61,37 @@ export default function Dashboard() {
         if (tm) {
           const tv = parseFloat(tm[1]);
           if (tv > 0) {
-            // 覆盖之前的温度值
-            Object.assign({ temp: `${tv.toFixed(1)}°C`, tempValue: tv });
+            temp = `${tv.toFixed(1)}°C`;
+            tempValue = tv;
           }
         }
       }
       // 解析 BPU 频率和负载率
-      const bpuLine = somLines.find(l => /bpu0/.test(l));
+      const bpuLine = somLines.find(l => /bpu\d+/i.test(l));
       if (bpuLine) {
-        const parts = bpuLine.trim().split(/\s+/);
-        // 格式: bpu0: min cur max ratio
-        if (parts.length >= 5) {
-          const curFreq = Number(parts[2]);
-          const maxFreq = Number(parts[3]);
-          const ratio = Number(parts[4]);
-          if (Number.isFinite(curFreq) && curFreq > 0) {
-            const freqGHz = (curFreq / 1e9).toFixed(1);
-            bpu = ratio > 0 ? `${ratio}% · ${freqGHz}GHz` : `${freqGHz}GHz`;
-            bpuValue = ratio;
-          }
+        const parts = bpuLine.replace(':', ' ').trim().split(/\s+/);
+        const numbers = parts
+          .map((part) => Number(part.replace('%', '')))
+          .filter((num) => Number.isFinite(num));
+
+        const ratioMatch = bpuLine.match(/(ratio|load|util(?:ization)?)[^\d]*(\d{1,3})\s*%?/i);
+        const percentMatch = bpuLine.match(/(\d{1,3})\s*%/);
+        let ratio = ratioMatch ? Number(ratioMatch[2]) : (percentMatch ? Number(percentMatch[1]) : -1);
+        if (ratio < 0 || ratio > 100) {
+          const ratioCandidate = [...numbers].reverse().find((num) => num >= 0 && num <= 100);
+          ratio = ratioCandidate ?? -1;
         }
-      }
-      // 解析 CPU 频率
-      const cpuLine = somLines.find(l => /cpu0/.test(l));
-      if (cpuLine) {
-        const parts = cpuLine.trim().split(/\s+/);
-        if (parts.length >= 4) {
-          const cur = Number(parts[2]);
-          if (Number.isFinite(cur) && cur > 0) {
-            cpuFreq = `${(cur / 1000).toFixed(0)}MHz`;
-          }
+
+        const freqCandidate = numbers.find((num) => num > 1000000);
+        if (freqCandidate && ratio >= 0) {
+          const freqGHz = (freqCandidate / 1e9).toFixed(1);
+          bpu = `${ratio}% · ${freqGHz}GHz`;
+          bpuValue = ratio;
+        } else if (ratio >= 0) {
+          bpu = `${ratio}%`;
+          bpuValue = ratio;
+        } else if (freqCandidate) {
+          bpu = `${(freqCandidate / 1e9).toFixed(1)}GHz`;
         }
       }
     }
@@ -233,9 +233,9 @@ export default function Dashboard() {
               </div>
               <div className="ob-done-grid">
                 {[
-                  { emoji: 'inventory_2', title: '运行示例', desc: '一键部署 AI 感知应用', tab: 'examples' as const },
-                  { emoji: 'memory', title: '部署模型', desc: '预训练模型部署到 BPU', tab: 'models' as const },
-                  { emoji: 'terminal', title: '打开终端', desc: '开始编写第一行代码', tab: 'terminal' as const },
+                  { emoji: 'hub', title: 'OpenClaw 工作台', desc: '进入对话式编排与执行', tab: 'openclaw' as const },
+                  { emoji: 'terminal', title: '打开终端', desc: '执行诊断和运维命令', tab: 'terminal' as const },
+                  { emoji: 'monitoring', title: '硬件监控', desc: '查看 CPU/BPU/温度状态', tab: 'hardware' as const },
                 ].map(item => (
                   <button key={item.tab} className="ob-choice-card compact" onClick={() => { setHideWizard(true); setActiveTab(item.tab); }}>
                     <div style={{color:"var(--brand-primary)", display:"flex", marginBottom: "8px"}}><svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg></div>
@@ -324,7 +324,9 @@ export default function Dashboard() {
           ) : (
             <div className="dash-diag-output">
               {diagnosticOutput.map((line, idx) => (
-                <div key={idx} className="dash-diag-line">{line}</div>
+                <div key={idx} className={`dash-diag-line ${line.startsWith('###') ? 'dash-diag-line-title' : ''}`}>
+                  {line.startsWith('###') ? line.replace(/#/g, '') : line}
+                </div>
               ))}
             </div>
           )}

@@ -175,7 +175,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, agentPlan, agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
+    openclawConnected, setOpenclawConnected,
     currentDevice,
   } = useAppState();
 
@@ -185,6 +185,7 @@ export default function AIDock() {
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
+  const forceLocalAssistantRef = useRef(false);
 
   const resolveSocketUrl = () => {
     const apiBase = (window as any).rdkDesktop?.apiBase as string | undefined;
@@ -226,7 +227,7 @@ export default function AIDock() {
 
   /* OpenClaw Socket.IO connection */
   useEffect(() => {
-    if (!openclawChatMode || !currentDevice) {
+    if (!currentDevice) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -307,7 +308,7 @@ export default function AIDock() {
       socketRef.current = null;
       setOpenclawConnected(false);
     };
-  }, [openclawChatMode, currentDevice, setOpenclawConnected]);
+  }, [currentDevice, setOpenclawConnected]);
 
   const promptsByTab: Record<string, typeof defaultPrompts> = {
     dashboard: [
@@ -376,11 +377,8 @@ export default function AIDock() {
   };
 
   /* OpenClaw 消息处理 */
-  const handleOpenClawCommand = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cmd.trim() || !socketRef.current || !openclawConnected) return;
-
-    const userMsg = cmd.trim();
+  const sendToOpenClaw = (userMsg: string) => {
+    if (!userMsg.trim() || !socketRef.current || !openclawConnected) return false;
     const msgId = Date.now();
     
     setChatMessages(prev => [
@@ -396,6 +394,56 @@ export default function AIDock() {
       deviceId: currentDevice?.id,
       message: userMsg,
     });
+    return true;
+  };
+
+  const shouldRouteToOpenClaw = (text: string) => {
+    if (!openclawConnected || !socketRef.current || !currentDevice) return false;
+    if (/^\/openclaw\b/i.test(text)) return true;
+    if (/^\/(ai|assistant|task|agent)\b/i.test(text)) return false;
+
+    const localIntentPattern = /(烧录|终端|命令|上传|下载|vnc|ros|导航|模型部署|流程|扫描|设置|诊断|体检|flash|terminal|upload|download|workflow|deploy|settings)/i;
+    return !localIntentPattern.test(text);
+  };
+
+  const handleUnifiedCommand = (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = cmd.trim();
+    if (!text) return;
+
+    const aiForced = text.match(/^\/ai\s+([\s\S]+)/i);
+    if (aiForced) {
+      const next = aiForced[1].trim();
+      if (!next) return;
+      forceLocalAssistantRef.current = true;
+      setCmd(next);
+      requestAnimationFrame(() => {
+        const form = document.querySelector('.input-box') as HTMLFormElement;
+        form?.requestSubmit();
+      });
+      return;
+    }
+
+    const openclawForced = text.match(/^\/openclaw\s+([\s\S]+)/i);
+    if (openclawForced) {
+      const next = openclawForced[1].trim();
+      if (!next) return;
+      sendToOpenClaw(next);
+      return;
+    }
+
+    if (forceLocalAssistantRef.current) {
+      forceLocalAssistantRef.current = false;
+      handleCommand(e);
+      return;
+    }
+
+    if (shouldRouteToOpenClaw(text)) {
+      sendToOpenClaw(text);
+      return;
+    }
+
+    handleCommand(e);
   };
 
   const closeDock = () => {
@@ -507,40 +555,19 @@ export default function AIDock() {
               <div className="chat-panel-title-wrap">
                 <span style={{ display: 'flex', alignItems: 'center', color: '#ff6b00' }}>{Icon.spark}</span>
                 <span className="chat-panel-title">AI 工作台</span>
-                
-                {/* Mode Switcher */}
-                <div className="ai-mode-switcher">
-                  <button
-                    className={`mode-btn ${!openclawChatMode ? 'active' : ''}`}
-                    onClick={() => setOpenclawChatMode(false)}
-                    title="AI 助手"
-                  >
-                    🤖 助手
-                  </button>
-                  <button
-                    className={`mode-btn ${openclawChatMode ? 'active' : ''}`}
-                    onClick={() => setOpenclawChatMode(true)}
-                    title="OpenClaw"
-                    disabled={!currentDevice}
-                  >
-                    🦞 OpenClaw
-                    {openclawChatMode && (
-                      <span className={`connection-dot ${openclawConnected ? 'connected' : 'disconnected'}`} />
-                    )}
-                  </button>
-                </div>
 
-                {!openclawChatMode && (
-                  <span className={`agent-badge ${agentMode ? 'on' : 'off'} ${agentExecution.lastError ? 'error' : ''}`}>
-                    {agentMode
-                      ? agentExecution.running
-                        ? `Agent RUN ${agentExecution.currentStep}/${agentExecution.totalSteps}`
-                        : agentExecution.lastError
-                          ? 'Agent ERROR'
-                          : `Agent ON${agentPlan ? ` · ${agentPlan.steps.length}步` : ''}`
-                      : 'Agent OFF'}
-                  </span>
-                )}
+                <span className={`agent-badge ${agentMode ? 'on' : 'off'} ${agentExecution.lastError ? 'error' : ''}`}>
+                  {agentMode
+                    ? agentExecution.running
+                      ? `Agent RUN ${agentExecution.currentStep}/${agentExecution.totalSteps}`
+                      : agentExecution.lastError
+                        ? 'Agent ERROR'
+                        : `Agent ON${agentPlan ? ` · ${agentPlan.steps.length}步` : ''}`
+                    : 'Agent OFF'}
+                </span>
+                <span className={`agent-badge ${openclawConnected ? 'on' : 'off'}`}>
+                  {openclawConnected ? 'OpenClaw READY' : 'OpenClaw OFFLINE'}
+                </span>
               </div>
               <div className="chat-panel-controls">
                 {taskHistory.length > 0 && (
@@ -707,15 +734,14 @@ export default function AIDock() {
         )}
 
         {/* ── Input bar ── */}
-        <form className="input-box" onSubmit={openclawChatMode ? handleOpenClawCommand : handleCommand}>
+        <form className="input-box" onSubmit={handleUnifiedCommand}>
           <span style={{ display: 'flex', alignItems: 'center', marginRight: 10, color: '#ff6b00', flexShrink: 0 }}>{Icon.spark}</span>
           <input
             type="text"
             className="cmd-input"
-            placeholder={openclawChatMode 
-              ? (openclawConnected ? '与 OpenClaw 对话...' : '等待连接 OpenClaw...') 
+            placeholder={openclawConnected
+              ? '描述目标，我会自动选择 RDK 能力或 OpenClaw 对话来执行...'
               : (activeTab === 'dashboard' ? '输入你想做的事，我来帮你推荐方案...' : '描述你的需求，AI 助手帮你操作...')}
-            disabled={openclawChatMode && !openclawConnected}
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}

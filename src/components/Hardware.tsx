@@ -14,8 +14,8 @@ function parseMetrics(output: string) {
   // 温度
   const tempRaw = findAfter('###TEMP###');
   const tempNum = Number(tempRaw);
-  const tempC = Number.isFinite(tempNum) && tempNum > 0 ? tempNum / 1000 : -1;
-  const temp = tempC > 0 ? `${tempC.toFixed(1)}°C` : (tempRaw || '--');
+  let tempC = Number.isFinite(tempNum) && tempNum > 0 ? tempNum / 1000 : -1;
+  let temp = tempC > 0 ? `${tempC.toFixed(1)}°C` : (tempRaw || '--');
 
   // 内存
   const memIdx = lines.findIndex(l => l === '###MEM###');
@@ -33,14 +33,61 @@ function parseMetrics(output: string) {
     }
   }
 
-  // BPU
-  const bpuIdx = lines.findIndex(l => l === '###BPU###');
+  // BPU（优先从 SOMSTATUS 解析）
   let bpu = '--', bpuValue = -1;
-  if (bpuIdx >= 0) {
-    const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 6).join(' ');
-    const m = bpuLines.match(/(\d{1,3})\s*%/);
-    if (m) { bpu = `${m[1]}%`; bpuValue = Number(m[1]); }
-    else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
+  const somIdx = lines.findIndex(l => l === '###SOMSTATUS###');
+  if (somIdx >= 0) {
+    const somLines = lines.slice(somIdx + 1);
+
+    const cpuTempLine = somLines.find((line) => /CPU\s*:\s*[\d.]+/.test(line));
+    if (cpuTempLine) {
+      const tm = cpuTempLine.match(/CPU\s*:\s*([\d.]+)/);
+      if (tm) {
+        const value = parseFloat(tm[1]);
+        if (value > 0) {
+          tempC = value;
+          temp = `${value.toFixed(1)}°C`;
+        }
+      }
+    }
+
+    const bpuLine = somLines.find((line) => /bpu\d+/i.test(line));
+    if (bpuLine) {
+      const parts = bpuLine.replace(':', ' ').trim().split(/\s+/);
+      const numbers = parts
+        .map((part) => Number(part.replace('%', '')))
+        .filter((num) => Number.isFinite(num));
+
+      const ratioMatch = bpuLine.match(/(ratio|load|util(?:ization)?)[^\d]*(\d{1,3})\s*%?/i);
+      const percentMatch = bpuLine.match(/(\d{1,3})\s*%/);
+      let ratio = ratioMatch ? Number(ratioMatch[2]) : (percentMatch ? Number(percentMatch[1]) : -1);
+      if (ratio < 0 || ratio > 100) {
+        const ratioCandidate = [...numbers].reverse().find((num) => num >= 0 && num <= 100);
+        ratio = ratioCandidate ?? -1;
+      }
+
+      const freqCandidate = numbers.find((num) => num > 1000000);
+      if (freqCandidate && ratio >= 0) {
+        bpu = `${ratio}% · ${(freqCandidate / 1e9).toFixed(1)}GHz`;
+        bpuValue = ratio;
+      } else if (ratio >= 0) {
+        bpu = `${ratio}%`;
+        bpuValue = ratio;
+      } else if (freqCandidate) {
+        bpu = `${(freqCandidate / 1e9).toFixed(1)}GHz`;
+      }
+    }
+  }
+
+  // 回退到 hrut_smi / bputop 输出
+  if (bpu === '--') {
+    const bpuIdx = lines.findIndex(l => l === '###BPU###');
+    if (bpuIdx >= 0) {
+      const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 8).join(' ');
+      const m = bpuLines.match(/(\d{1,3})\s*%/);
+      if (m) { bpu = `${m[1]}%`; bpuValue = Number(m[1]); }
+      else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
+    }
   }
 
   // CPU (从 uptime load average)
