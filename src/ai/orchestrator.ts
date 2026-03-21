@@ -58,6 +58,10 @@ function resolveSkillAPIPath(skill: string, action: string, deviceId: string): {
     'rdk-flash/execute': { method: 'POST', path: `/api/devices/${d}/flash/execute` },
     'rdk-flash/verify': { method: 'POST', path: `/api/devices/${d}/flash/verify` },
     'rdk-flash/download': { method: 'POST', path: `/api/devices/${d}/flash/download` },
+    'rdk-flash/backup-check': { method: 'POST', path: `/api/devices/${d}/flash/backup/check` },
+    'rdk-flash/backup-start': { method: 'POST', path: `/api/devices/${d}/flash/backup/start` },
+    'rdk-flash/backup-status': { method: 'GET', path: `/api/devices/${d}/flash/backup/status` },
+    'rdk-flash/backup-download': { method: 'POST', path: `/api/devices/${d}/flash/backup/download` },
     'rdk-terminal/create': { method: 'POST', path: `/api/devices/${d}/terminal/create` },
     'rdk-terminal/exec': { method: 'POST', path: `/api/devices/${d}/exec` },
     'rdk-vnc/status': { method: 'GET', path: `/api/devices/${d}/services/vnc` },
@@ -408,6 +412,39 @@ const handlers: Record<IntentId, HandlerFn> = {
     };
   },
 
+  flash_backup: (param, actions, registerConfirm, startTaskAnimation) => {
+    const cid = `flash-backup-${Date.now()}`;
+    registerConfirm(cid, () => {
+      const task = createTask('flash_backup', [
+        { label: '检测 rdk-backup 可用性' },
+        { label: '执行镜像备份' },
+        { label: '返回备份结果' },
+      ]);
+      startTaskAnimation(task, '镜像备份流程已完成', '如需下载可继续执行备份下载');
+      callSkillAPI('POST', `/api/devices/${actions.currentDeviceId}/flash/backup/start`, {
+        outputPath: param?.trim() || undefined,
+      }).then((result) => {
+        const outputPath = result.data?.outputPath as string | undefined;
+        const output = result.data?.output as string | undefined;
+        window.dispatchEvent(new CustomEvent('AI_APPEND_CHAT', {
+          detail: {
+            text: result.ok ? '镜像备份已完成。' : (result.error || '镜像备份失败'),
+            blocks: [
+              { type: 'status', items: [{ label: '备份文件', value: outputPath || '未生成', ok: result.ok }] },
+              ...(output ? [{ type: 'terminal', lines: output.split(/\r?\n/).slice(0, 60) }] : []),
+            ],
+          },
+        }));
+      });
+    });
+    return {
+      text: '',
+      blocks: [
+        { type: 'confirm', text: `确认执行镜像备份？${param ? `输出路径: ${param}` : '将使用默认路径。'}`, confirmId: cid },
+      ],
+    };
+  },
+
   terminal: (_p, actions) => ({
     text: '',
     blocks: [
@@ -645,6 +682,7 @@ const handlers: Record<IntentId, HandlerFn> = {
 function getFallbackText(intent: IntentId, deviceName: string): string {
   const map: Record<string, string> = {
     flash: `好的，为 ${deviceName} 准备镜像烧录。`,
+    flash_backup: `收到，准备为 ${deviceName} 执行镜像备份。`,
     terminal: `正在连接 ${deviceName} 终端。`,
     terminal_cmd: '正在设备上执行命令。',
     file_upload: `正在同步文件到 ${deviceName}。`,

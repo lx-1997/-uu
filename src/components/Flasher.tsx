@@ -138,11 +138,15 @@ export default function Flasher() {
   const [selectedDrive, setSelectedDrive] = useState('');
 
   /* ── flash execution state ── */
-  const [phase, setPhase] = useState<'idle' | 'downloading' | 'decompressing' | 'flashing' | 'done' | 'error'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'backup' | 'downloading' | 'decompressing' | 'flashing' | 'verifying' | 'done' | 'error'>('idle');
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
+  const [backupBeforeFlash, setBackupBeforeFlash] = useState(true);
+  const [backupDestPath, setBackupDestPath] = useState('');
+  const [backupResultPath, setBackupResultPath] = useState('');
+  const [verifyDetail, setVerifyDetail] = useState('');
   const abortRef = useRef(false);
 
   /* ── wifi config state ── */
@@ -174,9 +178,11 @@ export default function Flasher() {
       if (payload.percent >= 0) setProgress(payload.percent);
       if (payload.message) appendLog(payload.message);
       if (payload.stage) {
-        if (payload.stage === 'downloading') setPhase('downloading');
+        if (payload.stage === 'backup') setPhase('backup');
+        else if (payload.stage === 'downloading') setPhase('downloading');
         else if (payload.stage === 'decompressing') setPhase('decompressing');
         else if (payload.stage === 'flashing') setPhase('flashing');
+        else if (payload.stage === 'verifying') setPhase('verifying');
       }
     };
     const unsub = window.rdkDesktop.onFlashProgress(handler);
@@ -322,19 +328,39 @@ export default function Flasher() {
     }
 
     abortRef.current = false;
+    setBackupResultPath('');
+    setVerifyDetail('');
     setPhase('flashing');
     setProgress(0);
     appendLog(`写盘目标: ${selectedDrive}`);
     appendLog(`镜像文件: ${imgPath}`);
 
     try {
+      if (backupBeforeFlash && window.rdkDesktop?.flashBackupLocal) {
+        setPhase('backup');
+        appendLog('开始备份目标盘（可恢复）...');
+        const backup = await window.rdkDesktop.flashBackupLocal({
+          drivePath: selectedDrive,
+          destPath: backupDestPath.trim() || undefined,
+        });
+        if (!backup.ok) throw new Error(backup.error || '备份失败');
+        const backupPath = backup.path || '';
+        setBackupResultPath(backupPath);
+        appendLog(`备份完成: ${backupPath}`);
+      }
+
       const result = await window.rdkDesktop!.flashWriteLocal!({
         imagePath: imgPath,
         drivePath: selectedDrive,
+        verifyMode: 'sample',
       });
       if (abortRef.current) throw new Error('用户取消');
       if (!result.ok) throw new Error(result.error || '写盘失败');
       appendLog(result.output || '写盘完成');
+      if (result.verify) {
+        setVerifyDetail(result.verify.detail);
+        appendLog(`校验结果: ${result.verify.detail}`);
+      }
       setProgress(100);
       setPhase('done');
       startFlash();
@@ -401,6 +427,7 @@ export default function Flasher() {
 
   const requestCancel = () => {
     abortRef.current = true;
+    window.rdkDesktop?.flashCancelLocal?.().catch(() => null);
     addToast('已请求取消', 'warning');
   };
 
@@ -665,6 +692,26 @@ export default function Flasher() {
                   </div>
                 </div>
                 {!needsXburn && (
+                  <div className="flx-form flx-mt-8">
+                    <label className="flx-radio-label">
+                      <input
+                        type="checkbox"
+                        checked={backupBeforeFlash}
+                        onChange={(e) => setBackupBeforeFlash(e.target.checked)}
+                      />
+                      写盘前先备份目标盘（推荐）
+                    </label>
+                    {backupBeforeFlash && (
+                      <input
+                        className="clean-input"
+                        placeholder="备份文件路径（可选，默认 Downloads）"
+                        value={backupDestPath}
+                        onChange={(e) => setBackupDestPath(e.target.value)}
+                      />
+                    )}
+                  </div>
+                )}
+                {!needsXburn && (
                   <div className="warning-banner flx-mt-8">
                     写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。
                   </div>
@@ -703,8 +750,10 @@ export default function Flasher() {
             <div className="flx-progress-header">
               <h3>
                 {phase === 'downloading' && '下载镜像中...'}
+                {phase === 'backup' && '备份目标盘中...'}
                 {phase === 'decompressing' && '解压镜像中...'}
                 {phase === 'flashing' && (needsXburn ? 'xburn 烧录中...' : '写盘执行中...')}
+                {phase === 'verifying' && '写后校验中...'}
                 {phase === 'done' && '烧录完成'}
                 {phase === 'error' && '烧录失败'}
                 {phase === 'idle' && '准备中...'}
@@ -727,18 +776,25 @@ export default function Flasher() {
 
             {/* Phase indicators */}
             <div className="flx-stage-list">
-              {(['downloading', 'decompressing', 'flashing'] as const).map((p) => {
-                const labels = { downloading: '下载镜像', decompressing: '解压镜像', flashing: needsXburn ? 'xburn 烧录' : '写盘' };
+              {(['backup', 'downloading', 'decompressing', 'flashing', 'verifying'] as const).map((p) => {
+                const labels = {
+                  backup: '备份目标盘',
+                  downloading: '下载镜像',
+                  decompressing: '解压镜像',
+                  flashing: needsXburn ? 'xburn 烧录' : '写盘',
+                  verifying: '写后校验',
+                };
                 let state: 'wait' | 'run' | 'done' | 'error' | 'skip' = 'wait';
-                const order: readonly string[] = ['downloading', 'decompressing', 'flashing', 'done', 'error'];
+                const order: readonly string[] = ['backup', 'downloading', 'decompressing', 'flashing', 'verifying', 'done', 'error'];
                 const ci = order.indexOf(phase);
                 const pi = order.indexOf(p);
                 if (ci === pi) state = 'run';
-                else if (ci > pi && ci < 4) state = 'done';
+                else if (ci > pi && ci < 6) state = 'done';
                 else if (phase === 'done') state = 'done';
                 else if (phase === 'error' && pi < ci) state = 'done';
                 else if (phase === 'error' && pi === ci) state = 'error';
 
+                if (p === 'backup' && !backupBeforeFlash) state = 'skip';
                 if (!useLocalImage && p === 'downloading' && useLocalImage) state = 'skip';
                 if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath)) state = 'skip';
                 if (p === 'downloading' && useLocalImage) state = 'skip';
@@ -769,6 +825,13 @@ export default function Flasher() {
             </div>
 
             {error && <div className="warning-banner flx-mt-8">{error}</div>}
+            {!error && (backupResultPath || verifyDetail) && (
+              <div className="warning-banner flx-mt-8">
+                {backupResultPath ? `备份文件: ${backupResultPath}` : ''}
+                {backupResultPath && verifyDetail ? ' | ' : ''}
+                {verifyDetail ? `校验: ${verifyDetail}` : ''}
+              </div>
+            )}
 
             {(phase === 'done' || phase === 'error') && (
               <div className="ob-nav flx-mt-12">

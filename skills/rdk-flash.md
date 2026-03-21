@@ -50,11 +50,38 @@ POST /api/devices/{deviceId}/flash/verify
 Response: { ok: boolean, output: string }
 ```
 
+### 检查板端备份能力
+```
+POST /api/devices/{deviceId}/flash/backup/check
+Response: { ok: boolean, available: boolean, output: string }
+```
+
+### 启动板端镜像备份（rdk-backup）
+```
+POST /api/devices/{deviceId}/flash/backup/start
+Body: { outputPath?: string, sourceDevice?: string }
+Response: { ok: boolean, jobId: string, outputPath: string, output?: string, error?: string }
+```
+
+### 查询备份任务状态
+```
+GET /api/devices/{deviceId}/flash/backup/status?jobId=xxx
+Response: { ok: boolean, job: { id, status, outputPath, output, error } }
+```
+
+### 下载备份镜像
+```
+POST /api/devices/{deviceId}/flash/backup/download
+Body: { outputPath: string }
+Response: { ok: boolean, path: string, contentBase64: string }
+```
+
 ## Client Actions
 - 打开烧录页面: `navigate:flasher`
 
 ## Safety
 - 执行烧录前必须获得用户明确确认
+- 执行备份前必须确认目标路径与磁盘空间
 - 不能在没有连接设备的情况下执行
 - 不要同时对多个设备烧录
 - 写入操作会覆盖目标存储上所有数据

@@ -36,8 +36,13 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
 
   // 本机真实烧录能力（桌面端）
   flashListDrives: () => ipcRenderer.invoke('rdk:flash:list-drives'),
-  flashPickImage: () => ipcRenderer.invoke('rdk:flash:pick-image'),
+  flashPickImage: (options) => ipcRenderer.invoke('rdk:flash:pick-image', options),
   flashWriteLocal: (payload) => ipcRenderer.invoke('rdk:flash:write-local', payload),
+  flashVerifyLocal: (payload) => ipcRenderer.invoke('rdk:flash:verify-local', payload),
+  flashBackupLocal: (payload) => ipcRenderer.invoke('rdk:flash:backup-local', payload),
+  flashCancelLocal: () => ipcRenderer.invoke('rdk:flash:cancel'),
+  flashDownloadImage: (payload) => ipcRenderer.invoke('rdk:flash:download-image', payload),
+  flashDecompressImage: (payload) => ipcRenderer.invoke('rdk:flash:decompress-image', payload),
   launchXburn: (payload) => ipcRenderer.invoke('rdk:flash:launch-xburn', payload),
   onFlashProgress: (cb) => {
     ipcRenderer.on('rdk:flash:progress', (_event, payload) => cb(payload));

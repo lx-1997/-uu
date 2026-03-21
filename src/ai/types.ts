@@ -14,6 +14,7 @@ import type { ChatBlock, Tab } from '../app-types';
 /** All supported intent identifiers (kept for backward compat) */
 export type IntentId =
   | 'flash'
+  | 'flash_backup'
   | 'terminal'
   | 'terminal_cmd'
   | 'file_upload'

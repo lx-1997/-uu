@@ -84,6 +84,17 @@ const apiKey = process.env.OPENAI_API_KEY ?? '';
 const model = process.env.OPENAI_MODEL ?? 'qwen3.5-plus';
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
 const devicePasswordCache = new Map<string, string>();
+type FlashBackupJob = {
+  id: string;
+  deviceId: string;
+  status: 'running' | 'done' | 'error';
+  outputPath?: string;
+  output?: string;
+  error?: string;
+  startedAt: number;
+  finishedAt?: number;
+};
+const flashBackupJobs = new Map<string, FlashBackupJob>();
 
 // OpenClaw Manager
 const resourcesPath = path.join(process.cwd(), 'build-resources');
@@ -851,6 +862,115 @@ app.post('/api/devices/:id/flash/verify', async (request, response) => {
   ]);
   if (!executed) return;
   response.json({ ok: true, output: executed.output });
+});
+
+app.post('/api/devices/:id/flash/backup/check', async (request, response) => {
+  const { id } = request.params;
+  const executed = await runOnDevice(request, response, id, [
+    'bash -lc "if command -v rdk-backup >/dev/null 2>&1; then echo RDK_BACKUP_AVAILABLE; rdk-backup --help 2>&1 | head -60; else echo RDK_BACKUP_NOT_FOUND; fi"',
+  ]);
+  if (!executed) return;
+  const available = /RDK_BACKUP_AVAILABLE/.test(executed.output);
+  response.json({ ok: true, available, output: executed.output });
+});
+
+app.post('/api/devices/:id/flash/backup/start', async (request, response) => {
+  const { id } = request.params;
+  const { outputPath, sourceDevice } = request.body as { outputPath?: string; sourceDevice?: string };
+  const jobId = uuid();
+  const outPath = outputPath?.trim() || `/userdata/rdk-backup-${Date.now()}.img`;
+  flashBackupJobs.set(jobId, {
+    id: jobId,
+    deviceId: id,
+    status: 'running',
+    outputPath: outPath,
+    startedAt: Date.now(),
+  });
+
+  const sourceArg = sourceDevice?.trim() ? ` --device ${shEscape(sourceDevice.trim())}` : '';
+  const command = `bash -lc '
+set -e
+if ! command -v rdk-backup >/dev/null 2>&1; then
+  echo "RDK_BACKUP_NOT_FOUND"
+  exit 127
+fi
+HELP="$(rdk-backup --help 2>&1 || true)"
+echo "$HELP" | head -60
+if echo "$HELP" | grep -q -- "--output"; then
+  rdk-backup --output ${shEscape(outPath)}${sourceArg}
+elif echo "$HELP" | grep -q "backup"; then
+  rdk-backup backup ${shEscape(outPath)}${sourceArg}
+else
+  rdk-backup ${shEscape(outPath)}${sourceArg}
+fi
+ls -lh ${shEscape(outPath)} 2>/dev/null || true
+'`;
+
+  const executed = await runOnDevice(request, response, id, [command]);
+  if (!executed) {
+    const job = flashBackupJobs.get(jobId);
+    if (job) {
+      job.status = 'error';
+      job.error = '板端命令执行失败';
+      job.finishedAt = Date.now();
+    }
+    return;
+  }
+
+  const failed = /RDK_BACKUP_NOT_FOUND/.test(executed.output);
+  const job = flashBackupJobs.get(jobId);
+  if (job) {
+    job.status = failed ? 'error' : 'done';
+    job.output = executed.output;
+    job.error = failed ? '板端缺少 rdk-backup 命令' : undefined;
+    job.finishedAt = Date.now();
+  }
+
+  response.json({
+    ok: !failed,
+    jobId,
+    outputPath: outPath,
+    output: executed.output,
+    error: failed ? '板端缺少 rdk-backup 命令' : undefined,
+  });
+});
+
+app.get('/api/devices/:id/flash/backup/status', async (request, response) => {
+  const { id } = request.params;
+  const { jobId } = request.query as { jobId?: string };
+  if (!jobId?.trim()) {
+    response.status(400).json({ error: '缺少 jobId' });
+    return;
+  }
+  const job = flashBackupJobs.get(jobId.trim());
+  if (!job || job.deviceId !== id) {
+    response.status(404).json({ error: '备份任务不存在' });
+    return;
+  }
+  response.json({ ok: true, job });
+});
+
+app.post('/api/devices/:id/flash/backup/download', async (request, response) => {
+  const { id } = request.params;
+  const { outputPath } = request.body as { outputPath?: string };
+  const targetPath = outputPath?.trim();
+  if (!targetPath) {
+    response.status(400).json({ error: '缺少 outputPath' });
+    return;
+  }
+
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    [`sudo bash -lc "if [ -f ${shEscape(targetPath)} ]; then base64 ${shEscape(targetPath)} | tr -d '\\n'; else echo NOT_FOUND; fi"`],
+  );
+  if (!executed) return;
+  if (executed.output.trim() === 'NOT_FOUND') {
+    response.status(404).json({ error: '备份文件不存在' });
+    return;
+  }
+  response.json({ ok: true, path: targetPath, contentBase64: executed.output.trim() });
 });
 
 app.post('/api/devices/:id/flash/execute', async (request, response) => {

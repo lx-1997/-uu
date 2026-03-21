@@ -18,6 +18,14 @@ export const CAPABILITIES: Capability[] = [
     tab: 'flasher',
   },
   {
+    id: 'flash_backup',
+    label: '镜像备份',
+    description: '备份当前存储介质为镜像文件（rdk-backup）',
+    phase: 'confirm',
+    keywords: ['备份镜像', '系统备份', 'rdk-backup', 'backup image', 'flash backup', '备份系统'],
+    tab: 'flasher',
+  },
+  {
     id: 'terminal',
     label: '打开终端',
     description: '创建新终端会话并连接设备',
@@ -202,6 +210,9 @@ export function matchCapabilityByKeyword(text: string): { id: IntentId; param?: 
   }
 
   // ─── Priority-ordered compound checks ───
+  if (/(备份|backup)/.test(lc) && /(镜像|系统|flash|刷机|烧录)/.test(lc)) {
+    return { id: 'flash_backup' };
+  }
 
   // Recording stop must come before general recording
   if ((lc.includes('录制') || lc.includes('record')) && (lc.includes('停') || lc.includes('stop') || lc.includes('结束'))) {

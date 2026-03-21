@@ -3,6 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog } from 'electron';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import crypto from 'node:crypto';
+import http from 'node:http';
+import https from 'node:https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +21,7 @@ let serverProcess = null;
 // url -> WebContentsView 映射
 const viewsMap = {};
 let latestRendererBounds = null;
+let activeFlashOp = null;
 
 function normalizeRendererBounds(win, raw) {
   const [cw, ch] = win.getContentSize();
@@ -51,7 +56,7 @@ function runPowerShell(script) {
 }
 
 async function listWindowsFlashDrives() {
-  const script = `$drives = Get-CimInstance Win32_DiskDrive | Where-Object { $_.MediaType -match 'Removable|External' -or $_.InterfaceType -in @('USB','SD') } | Select-Object Index,Model,Size,InterfaceType,DeviceID; $drives | ConvertTo-Json -Depth 3`;
+  const script = `$drives = Get-CimInstance Win32_DiskDrive | Select-Object Index,Model,Size,InterfaceType,DeviceID,MediaType; $drives | ConvertTo-Json -Depth 3`;
   const output = await runPowerShell(script);
   if (!output) return [];
   const parsed = JSON.parse(output);
@@ -61,7 +66,10 @@ async function listWindowsFlashDrives() {
     path: item.DeviceID,
     label: item.Model || `PhysicalDrive${item.Index}`,
     size: item.Size || '',
+    sizeBytes: Number(item.Size || 0),
     bus: item.InterfaceType || '',
+    mediaType: item.MediaType || '',
+    removable: /removable|external/i.test(String(item.MediaType || '')) || ['USB', 'SD'].includes(String(item.InterfaceType || '').toUpperCase()),
   }));
 }
 
@@ -69,32 +77,208 @@ function emitFlashProgress(payload) {
   mainWin?.webContents.send('rdk:flash:progress', payload);
 }
 
-async function writeImageToDriveWindows(imagePath, drivePath) {
+function buildDefaultBackupPath(drivePath) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const diskName = String(drivePath).replace(/[\\/.]/g, '_');
+  return path.join(os.homedir(), 'Downloads', `rdk-backup-${diskName}-${stamp}.img`);
+}
+
+async function isWindowsAdmin() {
+  try {
+    const out = await runPowerShell('([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)');
+    return String(out).trim().toLowerCase() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function readChunk(fd, position, size) {
+  const buf = Buffer.allocUnsafe(size);
+  const read = fs.readSync(fd, buf, 0, size, position);
+  return buf.subarray(0, read);
+}
+
+function verifyImageSample(imageFd, targetFd, totalBytes) {
+  const sampleSize = Math.min(1024 * 1024, totalBytes);
+  if (sampleSize <= 0) return { ok: false, detail: '镜像为空，无法校验' };
+  const imageHead = readChunk(imageFd, 0, sampleSize);
+  const targetHead = readChunk(targetFd, 0, sampleSize);
+  if (!imageHead.equals(targetHead)) return { ok: false, detail: '头部样本校验失败' };
+  const tailPos = Math.max(0, totalBytes - sampleSize);
+  const imageTail = readChunk(imageFd, tailPos, sampleSize);
+  const targetTail = readChunk(targetFd, tailPos, sampleSize);
+  if (!imageTail.equals(targetTail)) return { ok: false, detail: '尾部样本校验失败' };
+  return { ok: true, detail: `样本校验通过（${sampleSize}B 头尾抽样）` };
+}
+
+async function writeImageToDriveWindows(imagePath, drivePath, options = {}) {
+  const verifyMode = options.verifyMode || 'sample';
+  const driveMeta = await listWindowsFlashDrives().then((list) => list.find((d) => d.path === drivePath) || null);
+  if (!driveMeta) throw new Error('未找到目标磁盘，请刷新后重试');
+  if (!driveMeta.removable) throw new Error('安全策略阻止：目标磁盘不是可移动介质');
+
+  const admin = await isWindowsAdmin();
+  if (!admin) throw new Error('请以管理员权限启动桌面端后重试烧录');
+
   const stat = fs.statSync(imagePath);
   const total = stat.size;
+  if (Number.isFinite(driveMeta.sizeBytes) && driveMeta.sizeBytes > 0 && total > driveMeta.sizeBytes) {
+    throw new Error(`镜像体积超出目标盘容量：image=${total}B, drive=${driveMeta.sizeBytes}B`);
+  }
   emitFlashProgress({ stage: 'prepare', message: '开始打开镜像文件', percent: 2 });
 
+  activeFlashOp = { id: crypto.randomUUID(), cancelled: false };
   const imageFd = fs.openSync(imagePath, 'r');
   const targetFd = fs.openSync(drivePath, 'r+');
   const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
   let readBytes = 0;
   let offset = 0;
+  let verify = { ok: true, detail: '跳过校验' };
 
   try {
-    emitFlashProgress({ stage: 'write', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
+    emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
     while ((readBytes = fs.readSync(imageFd, buffer, 0, buffer.length, offset)) > 0) {
+      if (activeFlashOp?.cancelled) {
+        throw new Error('用户取消写盘');
+      }
       fs.writeSync(targetFd, buffer, 0, readBytes, offset);
       offset += readBytes;
       const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
-      emitFlashProgress({ stage: 'write', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
+      emitFlashProgress({ stage: 'flashing', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
     }
     fs.fsyncSync(targetFd);
+    if (verifyMode === 'sample') {
+      emitFlashProgress({ stage: 'verifying', message: '正在执行写后抽样校验', percent: 99 });
+      verify = verifyImageSample(imageFd, targetFd, total);
+      if (!verify.ok) throw new Error(verify.detail);
+    }
     emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
+    return {
+      output: `镜像已写入 ${drivePath}`,
+      verify,
+    };
   } finally {
     fs.closeSync(imageFd);
     fs.closeSync(targetFd);
+    activeFlashOp = null;
   }
 }
+
+async function backupDriveToImageWindows(drivePath, destPath) {
+  const driveMeta = await listWindowsFlashDrives().then((list) => list.find((d) => d.path === drivePath) || null);
+  if (!driveMeta) throw new Error('未找到目标磁盘，请刷新后重试');
+  if (!driveMeta.removable) throw new Error('安全策略阻止：仅允许备份可移动介质');
+  if (!driveMeta.sizeBytes || driveMeta.sizeBytes <= 0) throw new Error('无法获取磁盘容量，不能执行备份');
+
+  const admin = await isWindowsAdmin();
+  if (!admin) throw new Error('请以管理员权限启动桌面端后重试备份');
+
+  const outputPath = destPath?.trim() || buildDefaultBackupPath(drivePath);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  activeFlashOp = { id: crypto.randomUUID(), cancelled: false };
+  const sourceFd = fs.openSync(drivePath, 'r');
+  const targetFd = fs.openSync(outputPath, 'w');
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  let offset = 0;
+  try {
+    emitFlashProgress({ stage: 'backup', message: '开始备份磁盘镜像', percent: 2 });
+    while (offset < driveMeta.sizeBytes) {
+      if (activeFlashOp?.cancelled) throw new Error('用户取消备份');
+      const toRead = Math.min(buffer.length, driveMeta.sizeBytes - offset);
+      const read = fs.readSync(sourceFd, buffer, 0, toRead, offset);
+      if (read <= 0) break;
+      fs.writeSync(targetFd, buffer, 0, read, offset);
+      offset += read;
+      const percent = Math.min(99, Math.max(2, Math.round((offset / driveMeta.sizeBytes) * 98) + 1));
+      emitFlashProgress({ stage: 'backup', message: `已备份 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(driveMeta.sizeBytes / 1024 / 1024).toFixed(1)} MB`, percent });
+    }
+    fs.fsyncSync(targetFd);
+    emitFlashProgress({ stage: 'done', message: '备份完成', percent: 100 });
+    return { path: outputPath, bytes: offset };
+  } finally {
+    fs.closeSync(sourceFd);
+    fs.closeSync(targetFd);
+    activeFlashOp = null;
+  }
+}
+
+function downloadFile(url, destPath) {
+  const client = url.startsWith('https://') ? https : http;
+  return new Promise((resolve, reject) => {
+    const req = client.get(url, (res) => {
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        resolve(downloadFile(res.headers.location, destPath));
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`下载失败: HTTP ${res.statusCode || 'unknown'}`));
+        return;
+      }
+      const total = Number(res.headers['content-length'] || 0);
+      let done = 0;
+      const writer = fs.createWriteStream(destPath);
+      res.on('data', (chunk) => {
+        done += chunk.length;
+        if (total > 0) {
+          const percent = Math.min(98, Math.max(1, Math.round((done / total) * 96) + 1));
+          emitFlashProgress({ stage: 'downloading', message: `下载 ${(done / 1024 / 1024).toFixed(1)}MB / ${(total / 1024 / 1024).toFixed(1)}MB`, percent });
+        }
+      });
+      res.pipe(writer);
+      writer.on('finish', () => {
+        writer.close(() => resolve(destPath));
+      });
+      writer.on('error', reject);
+    });
+    req.on('error', reject);
+  });
+}
+
+async function decompressXzWithFallback(inputPath, outputPath) {
+  if (!inputPath.toLowerCase().endsWith('.xz')) return inputPath;
+  return new Promise((resolve, reject) => {
+    emitFlashProgress({ stage: 'decompressing', message: '正在解压 xz 镜像', percent: 3 });
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `if (Get-Command xz -ErrorAction SilentlyContinue) { xz -dc "${inputPath.replace(/"/g, '""')}" > "${outputPath.replace(/"/g, '""')}" } else { exit 127 }`], { windowsHide: true });
+    child.on('close', (code) => {
+      if (code === 0) {
+        emitFlashProgress({ stage: 'decompressing', message: '解压完成', percent: 100 });
+        resolve(outputPath);
+      } else {
+        reject(new Error('系统缺少 xz，无法自动解压 .xz 文件，请先手动解压为 .img'));
+      }
+    });
+    child.on('error', reject);
+  });
+}
+
+ipcMain.handle('rdk:flash:download-image', async (_event, payload) => {
+  const url = String(payload?.url || '').trim();
+  const destDir = String(payload?.destDir || path.join(os.homedir(), 'Downloads')).trim();
+  if (!url) return { ok: false, error: '缺少下载地址 url' };
+  try {
+    fs.mkdirSync(destDir, { recursive: true });
+    const fileName = path.basename(new URL(url).pathname || `rdk-${Date.now()}.img`);
+    const destPath = path.join(destDir, fileName);
+    await downloadFile(url, destPath);
+    emitFlashProgress({ stage: 'downloading', message: '下载完成', percent: 100 });
+    return { ok: true, path: destPath };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '下载失败' };
+  }
+});
+
+ipcMain.handle('rdk:flash:decompress-image', async (_event, payload) => {
+  const filePath = String(payload?.filePath || '').trim();
+  if (!filePath) return { ok: false, error: '缺少 filePath' };
+  if (!filePath.toLowerCase().endsWith('.xz')) return { ok: true, outputPath: filePath };
+  try {
+    const outputPath = filePath.replace(/\.xz$/i, '');
+    const resolved = await decompressXzWithFallback(filePath, outputPath);
+    return { ok: true, outputPath: resolved };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '解压失败' };
+  }
+});
 
 /* ── 判断是否打包模式 ── */
 const isPacked = app.isPackaged;
@@ -353,15 +537,49 @@ ipcMain.handle('rdk:flash:pick-image', async () => {
 });
 
 ipcMain.handle('rdk:flash:write-local', async (_event, payload) => {
-  const { imagePath, drivePath } = payload ?? {};
+  const { imagePath, drivePath, verifyMode } = payload ?? {};
   if (!imagePath || !drivePath) return { ok: false, error: '缺少镜像路径或目标磁盘' };
   if (process.platform !== 'win32') return { ok: false, error: '当前仅实现 Windows 桌面端本机真实烧录能力' };
   try {
-    await writeImageToDriveWindows(imagePath, drivePath);
-    return { ok: true, output: `镜像已写入 ${drivePath}` };
+    const result = await writeImageToDriveWindows(imagePath, drivePath, { verifyMode });
+    return { ok: true, output: result.output, verify: result.verify };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : '本机烧录失败' };
   }
+});
+
+ipcMain.handle('rdk:flash:verify-local', async (_event, payload) => {
+  const { imagePath, drivePath } = payload ?? {};
+  if (!imagePath || !drivePath) return { ok: false, error: '缺少镜像路径或目标磁盘' };
+  try {
+    const imageFd = fs.openSync(imagePath, 'r');
+    const driveFd = fs.openSync(drivePath, 'r');
+    const total = fs.statSync(imagePath).size;
+    const verify = verifyImageSample(imageFd, driveFd, total);
+    fs.closeSync(imageFd);
+    fs.closeSync(driveFd);
+    return { ok: verify.ok, detail: verify.detail };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '校验失败' };
+  }
+});
+
+ipcMain.handle('rdk:flash:backup-local', async (_event, payload) => {
+  const { drivePath, destPath } = payload ?? {};
+  if (!drivePath) return { ok: false, error: '缺少目标磁盘路径 drivePath' };
+  try {
+    const result = await backupDriveToImageWindows(drivePath, destPath);
+    return { ok: true, path: result.path, bytes: result.bytes };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '备份失败' };
+  }
+});
+
+ipcMain.handle('rdk:flash:cancel', async () => {
+  if (activeFlashOp) {
+    activeFlashOp.cancelled = true;
+  }
+  return { ok: true };
 });
 
 ipcMain.handle('rdk:flash:launch-xburn', async (_event, payload) => {

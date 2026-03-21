@@ -55,6 +55,7 @@ export function buildSystemPrompt(deviceName?: string, deviceIp?: string): strin
 每次回复末尾必须附加一个意图标签，格式严格为 [[intent:xxx]]，用于系统内部路由，不会显示给用户。
 可选意图：
 - flash — 烧录镜像
+- flash_backup — 备份当前存储介质镜像
 - terminal — 打开/使用终端
 - terminal_cmd — 执行具体命令，格式 [[intent:terminal_cmd|命令内容]]
 - file_upload — 上传/同步文件到设备
@@ -84,6 +85,7 @@ export function buildSystemPrompt(deviceName?: string, deviceIp?: string): strin
 用户: "打开终端" → "这就为你打开终端。[[intent:terminal]]"
 用户: "帮我连远程桌面" → "好的，正在连接 VNC 远程桌面。[[intent:vnc]]"
 用户: "烧录 Ubuntu 22.04" → "准备烧录 Ubuntu 22.04 到当前设备，确认后即刻开始。[[intent:flash]]"
+用户: "帮我备份当前系统镜像" → "开始执行镜像备份，完成后返回备份文件路径。[[intent:flash_backup]]"
 用户: "看看网关状态" → "帮你查一下 OpenClaw 网关运行情况。[[intent:openclaw_status]]"
 用户: "启动小龙虾" → "正在启动 OpenClaw AI 网关服务。[[intent:openclaw_start]]"
 用户: "切换到 deepseek" → "好的，准备切换到 deepseek 模型。[[intent:openclaw_switch|deepseek-chat]]"
