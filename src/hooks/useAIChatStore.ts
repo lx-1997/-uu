@@ -129,6 +129,21 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
   const commandLockRef = useRef(false);
 
+  const summarizeToolArgs = (args: Record<string, unknown>) => {
+    const entries = Object.entries(args || {});
+    if (entries.length === 0) return '无参数';
+    return entries.map(([k, v]) => {
+      if (typeof v === 'string') {
+        if (k === 'content') return `${k}: <${v.length} chars>`;
+        const compact = v.replace(/\s+/g, ' ').trim();
+        const limit = k === 'command' ? 120 : 80;
+        return `${k}: ${compact.slice(0, limit)}${compact.length > limit ? '...' : ''}`;
+      }
+      if (v && typeof v === 'object') return `${k}: [object]`;
+      return `${k}: ${String(v)}`;
+    }).join(' | ');
+  };
+
   // ── Main command handler ──
   const handleCommand = (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,7 +196,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               case 'tool_start': {
                 const toolName = event.data.toolName as string;
                 const args = event.data.args as Record<string, unknown>;
-                const argStr = Object.entries(args).map(([k, v]) => `${k}: ${String(v).slice(0, 80)}`).join(', ');
+                const argStr = summarizeToolArgs(args);
                 aiBlocks.push({
                   type: 'status',
                   items: [

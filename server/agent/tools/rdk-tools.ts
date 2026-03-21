@@ -14,7 +14,10 @@ import {
   readDeviceFile,
   writeDeviceFile,
   listDeviceFiles,
+  downloadDeviceFileToLocal,
+  uploadLocalFileToDevice,
 } from './rdk-ssh-helper.js';
+import * as path from 'node:path';
 
 export function createRdkTools(deviceId: string): Tool[] {
   const tools: Tool[] = [
@@ -22,6 +25,11 @@ export function createRdkTools(deviceId: string): Tool[] {
     deviceFileReadTool(deviceId),
     deviceFileWriteTool(deviceId),
     deviceFileListTool(deviceId),
+    deviceFileDownloadToLocalTool(deviceId),
+    deviceFileUploadFromLocalTool(deviceId),
+    boardOpenClawStatusTool(deviceId),
+    boardOpenClawReadConfigTool(deviceId),
+    boardOpenClawRestartGatewayTool(deviceId),
     deviceDiagnoseTool(deviceId),
     rosTopicsTool(deviceId),
     rosNodesTool(deviceId),
@@ -31,6 +39,49 @@ export function createRdkTools(deviceId: string): Tool[] {
     flashCheckTool(deviceId),
   ];
   return tools;
+}
+
+function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: string; localPath?: string }> {
+  return {
+    name: 'device_file_download_to_local',
+    description: '把设备上的文件下载到本机（RDK Studio 所在电脑）。可选 localPath，不填则下载到 workspace/downloads/。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        remotePath: { type: 'string', description: '设备文件绝对路径，如 /userdata/a.txt' },
+        localPath: { type: 'string', description: '本机保存路径（可选，相对路径基于 workspace）' },
+      },
+      required: ['remotePath'],
+    },
+    async execute(input, ctx) {
+      const fileName = path.basename(input.remotePath);
+      const target = input.localPath
+        ? path.resolve(ctx.workspaceDir, input.localPath)
+        : path.resolve(ctx.workspaceDir, 'downloads', fileName);
+      const result = await downloadDeviceFileToLocal(deviceId, input.remotePath, target);
+      return `已下载到本机: ${result.localPath} (${result.bytes} bytes)`;
+    },
+  };
+}
+
+function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: string; remotePath: string }> {
+  return {
+    name: 'device_file_upload_from_local',
+    description: '把本机文件上传到设备。localPath 基于 RDK Studio workspace。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        localPath: { type: 'string', description: '本机文件路径（相对 workspace 或绝对路径）' },
+        remotePath: { type: 'string', description: '设备目标绝对路径，如 /userdata/a.txt' },
+      },
+      required: ['localPath', 'remotePath'],
+    },
+    async execute(input, ctx) {
+      const localAbs = path.resolve(ctx.workspaceDir, input.localPath);
+      const result = await uploadLocalFileToDevice(deviceId, localAbs, input.remotePath);
+      return `已上传到设备: ${result.remotePath} (${result.bytes} bytes)`;
+    },
+  };
 }
 
 function deviceExecTool(deviceId: string): Tool<{ command: string }> {
@@ -120,6 +171,55 @@ function deviceDiagnoseTool(deviceId: string): Tool<Record<string, never>> {
         'echo "=== Uptime ===" && uptime',
       ].join(' && ');
       return execOnDevice(deviceId, [commands]);
+    },
+  };
+}
+
+function boardOpenClawStatusTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_status',
+    description: '查看板端 OpenClaw 状态（进程/服务/版本摘要）。',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+    async execute() {
+      return execOnDevice(deviceId, [
+        'bash -lc "(openclaw status || clawctl status || systemctl --user status openclaw-gateway --no-pager || ps -ef | grep -E \'openclaw|claw\' | grep -v grep || echo OpenClaw_NOT_FOUND)"',
+      ]);
+    },
+  };
+}
+
+function boardOpenClawReadConfigTool(deviceId: string): Tool<{ path?: string }> {
+  return {
+    name: 'board_openclaw_read_config',
+    description: '读取板端 OpenClaw 配置文件（默认 ~/.openclaw/openclaw.json）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '可选配置路径，默认 /root/.openclaw/openclaw.json' },
+      },
+    },
+    async execute(input) {
+      const configPath = input.path || '/root/.openclaw/openclaw.json';
+      return readDeviceFile(deviceId, configPath);
+    },
+  };
+}
+
+function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_restart_gateway',
+    description: '重启板端 OpenClaw gateway 服务。',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+    async execute() {
+      return execOnDevice(deviceId, [
+        'bash -lc "(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true) && (openclaw status || clawctl status || echo restarted)"',
+      ]);
     },
   };
 }

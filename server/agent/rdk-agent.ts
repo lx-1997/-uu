@@ -28,6 +28,7 @@ import {
   type ProviderConfig,
 } from './provider-setup.js';
 import { createRdkTools } from './tools/rdk-tools.js';
+import { createStudioTools } from './tools/studio-tools.js';
 
 const AGENT_DIR = path.join(process.cwd(), 'agent');
 const SESSION_DIR = path.join(os.homedir(), '.rdkstudio', 'sessions');
@@ -89,7 +90,7 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
   process.env.OPENAI_BASE_URL = baseUrl;
   process.env.OPENAI_API_KEY = apiKey;
 
-  const tools: Tool[] = [];
+  const tools: Tool[] = [...createStudioTools()];
   if (options.deviceId) {
     tools.push(...createRdkTools(options.deviceId));
   }

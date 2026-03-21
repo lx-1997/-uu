@@ -8,6 +8,8 @@
 import { readDevices } from '../../storage.js';
 import { runRemoteCommands, uploadFileSftp } from '../../ssh.js';
 import type { Device } from '../../../shared/types.js';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
 const devicePasswordCache = new Map<string, string>();
@@ -103,6 +105,61 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
  */
 export async function listDeviceFiles(deviceId: string, dirPath: string): Promise<string> {
   return execOnDevice(deviceId, [`ls -la ${shEscape(dirPath)}`]);
+}
+
+/**
+ * 从设备下载文件到本地（当前机器）
+ */
+export async function downloadDeviceFileToLocal(
+  deviceId: string,
+  remotePath: string,
+  localPath: string,
+): Promise<{ bytes: number; localPath: string }> {
+  const encoded = await execOnDevice(deviceId, [
+    `bash -lc "if [ -f ${shEscape(remotePath)} ]; then base64 -w 0 ${shEscape(remotePath)}; else echo __RDK_NOT_FOUND__; fi"`,
+  ]);
+  const data = encoded.trim();
+  if (!data || data === '__RDK_NOT_FOUND__') {
+    throw new Error(`设备文件不存在: ${remotePath}`);
+  }
+  const buffer = Buffer.from(data, 'base64');
+  await fs.mkdir(path.dirname(localPath), { recursive: true });
+  await fs.writeFile(localPath, buffer);
+  return { bytes: buffer.length, localPath };
+}
+
+/**
+ * 从本地上传文件到设备
+ */
+export async function uploadLocalFileToDevice(
+  deviceId: string,
+  localPath: string,
+  remotePath: string,
+): Promise<{ bytes: number; remotePath: string }> {
+  const device = await getDevice(deviceId);
+  if (!device) throw new Error(`设备 ${deviceId} 不存在`);
+
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+  const pwd = await getDevicePassword(device);
+  const candidates = [pwd, ...passwordCandidates(device.username)];
+  const buffer = await fs.readFile(localPath);
+  let lastError: unknown = null;
+
+  for (const p of [...new Set(candidates)]) {
+    try {
+      await uploadFileSftp(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+        remotePath,
+        buffer,
+      );
+      devicePasswordCache.set(key, p);
+      return { bytes: buffer.length, remotePath };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('本地文件上传到设备失败');
 }
 
 function shEscape(raw: string) {

@@ -16,10 +16,15 @@
 - `device_file_read`: 读取设备文件。路径用绝对路径。
 - `device_file_write`: 写入文件到设备。先创建目录（mkdir -p）再写文件。
 - `device_file_list`: 列出目录。默认列出 home 目录。
+- `device_file_download_to_local`: 从设备下载文件到本机。默认保存到 workspace/downloads。
+- `device_file_upload_from_local`: 从本机上传文件到设备。localPath 相对 workspace。
 - `device_diagnose`: 查看硬件状态。温度、BPU、内存、磁盘一次全查。
 - `ros_topics` / `ros_nodes`: ROS2 操作。设备可能未安装 ROS2。
 - `vnc_start` / `vnc_stop` / `vnc_status`: 远程桌面管理。
 - `flash_check`: 检查系统版本和烧录条件。
+- `board_openclaw_status`: 查看板端 OpenClaw 状态。
+- `board_openclaw_read_config`: 读取板端 OpenClaw 配置文件。
+- `board_openclaw_restart_gateway`: 重启板端 OpenClaw 网关。
 
 ## 安全规则
 
