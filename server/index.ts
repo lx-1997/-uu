@@ -24,6 +24,8 @@ import { loadAllSkills, getSkillByName, getRawSkillMd, buildSkillContext, bridge
 import { loadProviderConfig, saveProviderConfig, type ProviderConfig } from './agent/provider-setup.js';
 import { RDKClawApp } from './rdkclaw/app.js';
 import { FeishuChannelAdapter } from './rdkclaw/feishu-channel-adapter.js';
+import { FeishuApiClient } from './rdkclaw/feishu-api-client.js';
+import { FeishuAuthStore } from './rdkclaw/feishu-auth-store.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
@@ -102,11 +104,18 @@ const openClawManager = new OpenClawDeploymentManager(resourcesPath);
 const rdkclaw = new RDKClawApp(process.cwd(), openClawManager);
 const notificationHub = new NotificationHub(io);
 const feishuAdapter = new FeishuChannelAdapter(rdkclaw);
+const feishuApi = new FeishuApiClient();
+const feishuAuth = new FeishuAuthStore();
+const feishuEventSeen = new Map<string, number>();
 const autonomyScheduler = new AutonomyScheduler(rdkclaw, notificationHub);
+if (!feishuApi.isConfigured()) {
+  console.warn('[Feishu] FEISHU_APP_ID / FEISHU_APP_SECRET 未配置，Webhook 将无法主动回消息。');
+}
 rdkclaw.setAutonomyRuntime({
   listTasks: () => autonomyScheduler.list(),
   createTask: (input) => autonomyScheduler.create(input),
   pauseTask: (taskId) => autonomyScheduler.pause(taskId),
+  stopTask: (taskId) => autonomyScheduler.stop(taskId),
   resumeTask: (taskId) => autonomyScheduler.resume(taskId),
   approveTask: (taskId) => autonomyScheduler.approve(taskId),
 });
@@ -168,6 +177,28 @@ function passwordCandidates(username: string) {
 function isTransientSshError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return /timed out|timeout|handshake|econnreset|socket closed|connection reset|connect failed/.test(message);
+}
+
+function gcFeishuSeen() {
+  const ttl = 10 * 60 * 1000;
+  const nowTs = Date.now();
+  for (const [k, v] of feishuEventSeen.entries()) {
+    if (nowTs - v > ttl) feishuEventSeen.delete(k);
+  }
+}
+
+function markFeishuSeen(eventId: string) {
+  gcFeishuSeen();
+  if (!eventId) return false;
+  if (feishuEventSeen.has(eventId)) return true;
+  feishuEventSeen.set(eventId, Date.now());
+  return false;
+}
+
+function maskOpenId(openId: string) {
+  if (!openId) return '';
+  if (openId.length <= 8) return `${openId.slice(0, 2)}***${openId.slice(-2)}`;
+  return `${openId.slice(0, 4)}***${openId.slice(-4)}`;
 }
 
 async function runOnDevice(
@@ -1648,6 +1679,32 @@ app.post('/api/rdkclaw/runs/:runId/cancel', (request, response) => {
   response.json({ ok: true });
 });
 
+app.post('/api/rdkclaw/feishu/auth/bind', (request, response) => {
+  const code = String(request.body?.code || '').trim();
+  if (!/^\d{6}$/.test(code)) {
+    response.status(400).json({ error: '授权码格式错误，应为 6 位数字' });
+    return;
+  }
+  const result = feishuAuth.bindByCode(code);
+  if (!result.ok) {
+    response.status(400).json({ ok: false, error: result.reason || '绑定失败' });
+    return;
+  }
+  response.json({
+    ok: true,
+    openId: maskOpenId(result.openId || ''),
+    message: '飞书账号绑定成功，现在可以在飞书机器人里直接给 RDKClaw 下发命令。',
+  });
+});
+
+app.get('/api/rdkclaw/feishu/auth/bound', (_request, response) => {
+  const users = feishuAuth.listBound().map((item) => ({
+    openId: maskOpenId(item.openId),
+    boundAt: item.boundAt,
+  }));
+  response.json({ ok: true, users, total: users.length });
+});
+
 app.get('/api/rdkclaw/users/:userId', (request, response) => {
   const user = rdkclaw.getUserProfile(request.params.userId);
   response.json({ ok: true, user });
@@ -1716,6 +1773,11 @@ app.post('/api/rdkclaw/tasks/:id/pause', (request, response) => {
   response.json({ ok: true });
 });
 
+app.post('/api/rdkclaw/tasks/:id/stop', (request, response) => {
+  autonomyScheduler.stop(request.params.id);
+  response.json({ ok: true });
+});
+
 app.post('/api/rdkclaw/tasks/:id/resume', (request, response) => {
   autonomyScheduler.resume(request.params.id);
   response.json({ ok: true });
@@ -1724,11 +1786,18 @@ app.post('/api/rdkclaw/tasks/:id/resume', (request, response) => {
 // ─── Channel Adapter: Feishu (MVP webhook bridge) ───
 
 app.post('/api/channels/feishu/webhook', async (request, response) => {
+  const startedAt = Date.now();
   try {
     const body = request.body ?? {};
     const challenge = body.challenge;
     if (challenge) {
       response.json({ challenge });
+      return;
+    }
+
+    const eventId = String(body?.header?.event_id || body?.event_id || body?.event?.message?.message_id || '');
+    if (markFeishuSeen(eventId)) {
+      response.json({ ok: true, deduped: true });
       return;
     }
 
@@ -1745,17 +1814,37 @@ app.post('/api/channels/feishu/webhook', async (request, response) => {
     const userId = body?.event?.sender?.sender_id?.open_id
       || body?.userId
       || 'feishu-anonymous';
+    const chatId = body?.event?.message?.chat_id;
     if (!text || !String(text).trim()) {
       response.status(400).json({ error: '消息为空' });
       return;
     }
+
+    const openId = String(userId);
+    const msgText = String(text).trim();
+    if (!feishuAuth.isBound(openId)) {
+      const code = feishuAuth.issueCode(openId, chatId);
+      const authText = `RDKClaw 需要先绑定身份。\n授权码：${code}\n请在 RDK Studio 聊天框发送：绑定飞书 ${code}\n5 分钟内有效，仅可使用一次。`;
+      if (chatId && feishuApi.isConfigured()) {
+        await feishuApi.sendTextToChat(String(chatId), authText);
+      }
+      console.log(`[Feishu] unbound user=${maskOpenId(openId)} event=${eventId} issued_code`);
+      response.json({ ok: true, authorized: false, message: '已发送授权码' });
+      return;
+    }
+
     const result = await feishuAdapter.handleInbound({
-      userId: String(userId),
-      text: String(text),
-      chatId: body?.event?.message?.chat_id,
+      userId: openId,
+      text: msgText,
+      chatId,
     });
-    response.json({ ok: true, reply: result.text });
+    if (chatId && feishuApi.isConfigured()) {
+      await feishuApi.sendTextToChat(String(chatId), result.text || 'RDKClaw 已处理完成。');
+    }
+    console.log(`[Feishu] bound user=${maskOpenId(openId)} event=${eventId} cost_ms=${Date.now() - startedAt}`);
+    response.json({ ok: true, reply: result.text, authorized: true });
   } catch (error) {
+    console.error('[Feishu webhook] failed:', error instanceof Error ? error.message : error);
     response.status(500).json({
       error: error instanceof Error ? error.message : 'Feishu webhook 处理失败',
     });

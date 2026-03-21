@@ -92,6 +92,7 @@ export interface StudioAutonomyRuntime {
     requiresApproval?: boolean;
   }) => AutonomyTask;
   pauseTask: (taskId: string) => void;
+  stopTask: (taskId: string) => void;
   resumeTask: (taskId: string) => void;
   approveTask: (taskId: string) => void;
 }
@@ -186,6 +187,24 @@ function resumeAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{ taskId: 
   };
 }
 
+function stopAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{ taskId: string }> {
+  return {
+    name: 'rdkclaw_task_stop',
+    description: '立即停止指定定时任务：暂停后中断当前正在执行的一轮任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: '任务 ID' },
+      },
+      required: ['taskId'],
+    },
+    async execute(input) {
+      runtime.stopTask(input.taskId);
+      return `已停止任务: ${input.taskId}`;
+    },
+  };
+}
+
 function approveAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{ taskId: string }> {
   return {
     name: 'rdkclaw_task_approve',
@@ -275,6 +294,7 @@ export function createStudioTools(runtime?: StudioAutonomyRuntime): Tool[] {
       listAutonomyTasksTool(runtime),
       createAutonomyTaskTool(runtime),
       pauseAutonomyTaskTool(runtime),
+      stopAutonomyTaskTool(runtime),
       resumeAutonomyTaskTool(runtime),
       approveAutonomyTaskTool(runtime),
     );

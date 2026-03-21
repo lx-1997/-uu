@@ -59,7 +59,7 @@ export class FeishuChannelAdapter {
       }
     }
     return {
-      text: text.trim() || "RDKClaw 已处理完成。",
+      text: (text.trim() || "RDKClaw 已处理完成。").slice(0, 3500),
       events,
     };
   }

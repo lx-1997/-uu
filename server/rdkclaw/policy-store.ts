@@ -24,6 +24,11 @@ const DEFAULT_POLICY: RDKClawPolicy = {
     defaultChannel: "chat",
     allowSecondInterval: true,
   },
+  network: {
+    enabled: true,
+    maxFetchChars: 16000,
+    requireApproval: true,
+  },
 };
 
 function ensureDir() {
@@ -45,6 +50,7 @@ export class RDKClawPolicyStore {
         delegation: { ...DEFAULT_POLICY.delegation, ...(parsed.delegation ?? {}) },
         memory: { ...DEFAULT_POLICY.memory, ...(parsed.memory ?? {}) },
         scheduler: { ...DEFAULT_POLICY.scheduler, ...(parsed.scheduler ?? {}) },
+        network: { ...DEFAULT_POLICY.network, ...(parsed.network ?? {}) },
       };
     } catch {
       return DEFAULT_POLICY;
@@ -60,6 +66,7 @@ export class RDKClawPolicyStore {
       delegation: { ...prev.delegation, ...(patch.delegation ?? {}) },
       memory: { ...prev.memory, ...(patch.memory ?? {}) },
       scheduler: { ...prev.scheduler, ...(patch.scheduler ?? {}) },
+      network: { ...prev.network, ...(patch.network ?? {}) },
     };
     ensureDir();
     fs.writeFileSync(POLICY_FILE, JSON.stringify(next, null, 2), "utf-8");

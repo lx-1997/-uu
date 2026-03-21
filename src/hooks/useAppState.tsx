@@ -187,6 +187,7 @@ export interface AppState {
     action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run',
     runId?: string,
   ) => void;
+  stopCurrentRun: () => void;
 }
 
 const AppContext = createContext<AppState | null>(null);

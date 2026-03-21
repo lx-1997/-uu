@@ -17,6 +17,7 @@ import {
 } from "../agent/provider-setup.js";
 import { createRdkTools } from "../agent/tools/rdk-tools.js";
 import { createStudioTools, type StudioAutonomyRuntime } from "../agent/tools/studio-tools.js";
+import { createWebTools } from "../agent/tools/web-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { PersonaStore } from "./persona-store.js";
@@ -60,6 +61,8 @@ function buildPersonaPrompt(persona: PersonaProfile) {
     "若任务涉及真实设备操作、板端插件或板端上下文，请优先调用 board_openclaw_delegate。",
     `委派策略: delegationBias=${persona.delegationBias}, autonomy=${persona.autonomyLevel}, boundary=${persona.riskBoundary}。`,
     "若用户要求定时/周期/提醒/每秒推送，必须优先调用 rdkclaw_task_create 创建自治任务，而不是仅给方案说明。",
+    "若任务需要联网信息，优先使用 web_search/web_fetch/web_extract 工具链，并在回答中给出来源链接。",
+    "当联网结论对后续有长期价值时，先总结再调用 rdkclaw_memory_append_daily 写入 daily memory。",
     "输出简洁，明确给出执行结果与下一步建议。",
   ].join("\n");
 }
@@ -254,6 +257,8 @@ export class RDKClawApp {
   }
 
   private resolveToolRisk(toolName: string): RiskLevel {
+    if (toolName === "web_fetch") return "high";
+    if (toolName === "web_search" || toolName === "web_extract") return "medium";
     if (toolName === "board_openclaw_delegate") return "high";
     if (/write|exec|restart|flash|upload|set_/i.test(toolName)) return "high";
     if (/diagnose|status|read|list|topics|nodes/i.test(toolName)) return "low";
@@ -265,7 +270,8 @@ export class RDKClawApp {
     return map[risk] >= map[threshold];
   }
 
-  private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string): boolean {
+  private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string, toolName: string): boolean {
+    if (/^web_/i.test(toolName) && !policy.network.requireApproval) return false;
     if (this.sessionAutoApprove.get(sessionId)) return false;
     if (policy.approval.mode === "auto") return false;
     if (policy.approval.mode === "always") return true;
@@ -281,8 +287,11 @@ export class RDKClawApp {
     return {
       ...tool,
       execute: async (input, ctx) => {
+        if (tool.name.startsWith("web_") && !policy.network.enabled) {
+          throw new Error("联网工具已禁用，请在策略面板中开启网络能力。");
+        }
         const risk = this.resolveToolRisk(tool.name);
-        if (!this.shouldRequireApproval(policy, risk, base.sessionId)) {
+        if (!this.shouldRequireApproval(policy, risk, base.sessionId, tool.name)) {
           return tool.execute(input, ctx);
         }
         const approvalId = `approval-${crypto.randomUUID()}`;
@@ -349,7 +358,18 @@ export class RDKClawApp {
     decision: DelegateDecision,
     policy: RDKClawPolicy,
   ): Tool[] {
-    const tools: Tool[] = [...builtinTools, ...createStudioTools(this.autonomyRuntime)];
+    const tools: Tool[] = [
+      ...builtinTools,
+      ...createStudioTools(this.autonomyRuntime),
+    ];
+    if (policy.network.enabled) {
+      tools.push(
+        ...createWebTools({
+          maxFetchChars: policy.network.maxFetchChars,
+          timeoutMs: 15000,
+        }),
+      );
+    }
     if (req.deviceId) {
       if (!decision.forceBoard) {
         tools.push(...createRdkTools(req.deviceId));
@@ -419,6 +439,9 @@ export class RDKClawApp {
           confidence: decision.confidence,
           matched_skills: matchedSkills.map((s) => s.name),
           approval_mode: policy.approval.mode,
+          network_enabled: policy.network.enabled,
+          network_max_fetch_chars: policy.network.maxFetchChars,
+          network_require_approval: policy.network.requireApproval,
         },
       },
     ];

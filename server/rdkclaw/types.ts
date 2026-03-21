@@ -58,6 +58,11 @@ export interface RDKClawPolicy {
     defaultChannel: "chat" | "feishu";
     allowSecondInterval: boolean;
   };
+  network: {
+    enabled: boolean;
+    maxFetchChars: number;
+    requireApproval: boolean;
+  };
 }
 
 export interface ExecutorSelection {

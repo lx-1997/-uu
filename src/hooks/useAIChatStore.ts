@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState } from '../app-types';
 import { CMD_SUGGESTIONS } from '../constants';
-import { cancelRDKClawRun, decideRDKClawApproval, streamAgentChat, type AgentSSEEvent } from '../api';
+import { bindRDKClawFeishuCode, cancelRDKClawRun, decideRDKClawApproval, stopRDKClawTask, streamAgentChat, type AgentSSEEvent } from '../api';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
@@ -36,6 +36,7 @@ export interface AIChatStoreState {
     action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run',
     runId?: string,
   ) => void;
+  stopCurrentRun: () => void;
 }
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
@@ -133,6 +134,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const commandLockRef = useRef(false);
+  const currentRunIdRef = useRef('');
+  const streamAbortRef = useRef<null | (() => void)>(null);
   const toolTimelineRef = useRef<Record<string, {
     toolName: string;
     executor: string;
@@ -182,11 +185,54 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        const bindMatch = userMsg.match(/^(?:绑定飞书|飞书绑定|bind\s*feishu)\s+(\d{6})$/i);
+        if (bindMatch) {
+          const code = bindMatch[1];
+          try {
+            const result = await bindRDKClawFeishuCode(code);
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: result.message || `绑定成功，账号：${result.openId || '***'}`,
+            }]);
+          } catch (error) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `绑定失败：${error instanceof Error ? error.message : '授权码无效或已过期'}`,
+            }]);
+          }
+          setAiTyping(false);
+          return;
+        }
+
+        const stopTaskMatch = userMsg.match(/^(?:停止任务|暂停任务|stop\s*task)\s+([a-zA-Z0-9_-]+)$/i);
+        if (stopTaskMatch) {
+          const taskId = stopTaskMatch[1];
+          try {
+            await stopRDKClawTask(taskId);
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `已停止任务：${taskId}（当前轮次会被中断，状态切换为 paused）`,
+            }]);
+          } catch (error) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `停止任务失败：${error instanceof Error ? error.message : '未知错误'}`,
+            }]);
+          }
+          setAiTyping(false);
+          return;
+        }
+
         // ── Agent Loop (SSE) — primary path ──
         const aiMsgId = msgId + 1;
         let aiText = '';
         const aiBlocks: ChatBlock[] = [];
         let currentRunId = '';
+        currentRunIdRef.current = '';
         toolTimelineRef.current = {};
         latestBoardToolRef.current = null;
         approvalBlockRef.current = {};
@@ -214,7 +260,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return '执行中';
         };
 
-        const { done } = streamAgentChat(
+        const { done, abort } = streamAgentChat(
           userMsg,
           currentDevice?.id,
           sessionIdRef.current,
@@ -222,12 +268,22 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             switch (event.type) {
               case 'meta': {
                 currentRunId = String(event.data.runId || currentRunId || '');
+                currentRunIdRef.current = currentRunId;
                 const executor = String(event.data.executor || 'rdkclaw_local');
                 const phase = resolvePhase(event.data.phase);
                 const message = String(event.data.message || '开始处理请求');
+                const networkEnabled = Boolean(event.data.network_enabled);
+                const networkMaxFetchChars = Number(event.data.network_max_fetch_chars || 0);
                 aiBlocks.push({
                   type: 'status',
-                  items: [{ label: `执行主体: ${executorLabel(executor)}`, value: `${phase} · ${message}`, ok: true }],
+                  items: [
+                    { label: `执行主体: ${executorLabel(executor)}`, value: `${phase} · ${message}`, ok: true },
+                    {
+                      label: '联网能力',
+                      value: networkEnabled ? `已启用 · 上限 ${networkMaxFetchChars || 0} chars` : '已禁用',
+                      ok: networkEnabled,
+                    },
+                  ],
                 });
                 updateAiMessage(aiText, aiBlocks);
                 break;
@@ -395,10 +451,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             }
           },
         );
+        streamAbortRef.current = abort;
 
         await done;
         setAiTyping(false);
       } finally {
+        streamAbortRef.current = null;
+        currentRunIdRef.current = '';
         commandLockRef.current = false;
       }
     })();
@@ -434,6 +493,28 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         };
       }),
     })));
+  };
+
+  const stopCurrentRun = () => {
+    const runId = currentRunIdRef.current;
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    if (runId) {
+      cancelRDKClawRun(runId).catch(() => null);
+    }
+    setAiTyping(false);
+    commandLockRef.current = false;
+    setChatMessages((prev) => [...prev, {
+      id: Date.now(),
+      role: 'ai',
+      text: '',
+      blocks: [{
+        type: 'task-result',
+        success: false,
+        title: '已停止当前执行',
+        detail: runId ? `runId: ${runId}` : '已中断当前流式响应',
+      }],
+    }]);
   };
 
   // ── Effects ──
@@ -506,7 +587,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     aiTyping, setAiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
-    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction,
+    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, stopCurrentRun,
   };
 
   return React.createElement(AIChatContext.Provider, { value }, children);

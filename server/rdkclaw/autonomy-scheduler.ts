@@ -40,6 +40,8 @@ export class AutonomyScheduler {
   private tasks: AutonomyTask[] = [];
   private timer: NodeJS.Timeout | null = null;
   private running = new Set<string>();
+  private runIdByTaskId = new Map<string, string>();
+  private cancelledByUser = new Set<string>();
 
   constructor(app: RDKClawApp, notifications: NotificationHub) {
     this.app = app;
@@ -55,7 +57,7 @@ export class AutonomyScheduler {
     void this.tick();
   }
 
-  stop() {
+  shutdown() {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -120,6 +122,17 @@ export class AutonomyScheduler {
     this.tasks = this.tasks.map((t) => (t.id === taskId ? { ...t, status: "paused" } : t));
     this.saveTasks();
     this.audit({ type: "task_pause", taskId });
+  }
+
+  stop(taskId: string) {
+    this.cancelledByUser.add(taskId);
+    this.tasks = this.tasks.map((t) => (t.id === taskId ? { ...t, status: "paused" } : t));
+    const runId = this.runIdByTaskId.get(taskId);
+    if (runId) {
+      this.app.cancelRun(runId);
+    }
+    this.saveTasks();
+    this.audit({ type: "task_stop", taskId, runId: runId || "" });
   }
 
   resume(taskId: string) {
@@ -188,6 +201,7 @@ export class AutonomyScheduler {
   private async runTask(task: AutonomyTask) {
     let errorText = "";
     let textOut = "";
+    let wasCancelled = false;
     this.notifications.publish({
       type: "autonomy_start",
       title: `定时任务启动: ${task.name}`,
@@ -210,6 +224,12 @@ export class AutonomyScheduler {
         userId: "autonomy",
         mode: task.mode,
       })) {
+        if (event.type === "meta") {
+          const runId = String(event.data.runId || "");
+          if (runId) {
+            this.runIdByTaskId.set(task.id, runId);
+          }
+        }
         if (event.type === "text") {
           textOut += String(event.data.delta ?? "");
         }
@@ -219,6 +239,14 @@ export class AutonomyScheduler {
       }
     } catch (err) {
       errorText = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.runIdByTaskId.delete(task.id);
+    }
+
+    if (this.cancelledByUser.has(task.id)) {
+      this.cancelledByUser.delete(task.id);
+      wasCancelled = true;
+      errorText = "";
     }
 
     this.tasks = this.tasks.map((t) => {
@@ -226,6 +254,16 @@ export class AutonomyScheduler {
       const nextRunAt = t.scheduleType === "interval"
         ? Date.now() + ((t.intervalSeconds && t.intervalSeconds > 0) ? t.intervalSeconds * 1000 : (t.intervalMinutes ?? 1) * 60000)
         : Date.now() + 60000;
+      if (wasCancelled) {
+        return {
+          ...t,
+          failureCount: 0,
+          status: "paused",
+          lastError: "任务已手动停止",
+          lastRunAt: Date.now(),
+          nextRunAt,
+        };
+      }
       if (!errorText) {
         return {
           ...t,
@@ -253,7 +291,20 @@ export class AutonomyScheduler {
       taskId: task.id,
       ok: !errorText,
       error: errorText,
+      cancelled: wasCancelled,
     });
+    if (wasCancelled) {
+      this.notifications.publish({
+        type: "autonomy_result",
+        title: `定时任务已停止: ${task.name}`,
+        message: "已手动停止当前执行，并将任务状态切换为 paused。",
+        taskId: task.id,
+        level: "info",
+        sessionId: `auto:${task.id}`,
+        ts: Date.now(),
+      });
+      return;
+    }
     if (errorText) {
       this.notifications.publish({
         type: "autonomy_error",

@@ -161,6 +161,45 @@ export default function SkillBrowser() {
                 <option value="feishu">feishu</option>
               </select>
             </div>
+            <div className="skill-apis">
+              <h4>联网能力</h4>
+              <div className="skill-api-item">
+                <span className="skill-api-name">启用联网工具</span>
+                <input
+                  type="checkbox"
+                  title="启用联网工具"
+                  aria-label="启用联网工具"
+                  checked={policy.network.enabled}
+                  onChange={(e) => setPolicy({ ...policy, network: { ...policy.network, enabled: e.target.checked } })}
+                />
+              </div>
+              <div className="skill-api-item">
+                <span className="skill-api-name">联网工具默认走审批</span>
+                <input
+                  type="checkbox"
+                  title="联网工具默认走审批"
+                  aria-label="联网工具默认走审批"
+                  checked={policy.network.requireApproval}
+                  onChange={(e) => setPolicy({ ...policy, network: { ...policy.network, requireApproval: e.target.checked } })}
+                />
+              </div>
+              <div className="skill-api-item">
+                <span className="skill-api-name">单次抓取最大字符</span>
+                <input
+                  type="number"
+                  title="单次抓取最大字符"
+                  aria-label="单次抓取最大字符"
+                  min={2000}
+                  max={120000}
+                  step={500}
+                  value={policy.network.maxFetchChars}
+                  onChange={(e) => {
+                    const next = Number(e.target.value || 0);
+                    setPolicy({ ...policy, network: { ...policy.network, maxFetchChars: Math.max(2000, Math.min(120000, next || 16000)) } });
+                  }}
+                />
+              </div>
+            </div>
             <button className="skill-reload-btn" onClick={savePolicy} disabled={savingPolicy}>
               {savingPolicy ? '保存中...' : '保存策略'}
             </button>

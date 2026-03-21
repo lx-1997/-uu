@@ -185,6 +185,11 @@ export interface RDKClawPolicy {
     defaultChannel: 'chat' | 'feishu';
     allowSecondInterval: boolean;
   };
+  network: {
+    enabled: boolean;
+    maxFetchChars: number;
+    requireApproval: boolean;
+  };
 }
 
 export type AgentEventCallback = (event: AgentSSEEvent) => void;
@@ -284,6 +289,20 @@ export function cancelRDKClawRun(runId: string) {
   return request<{ ok: boolean }>(`/api/rdkclaw/runs/${runId}/cancel`, {
     method: 'POST',
     body: JSON.stringify({}),
+  });
+}
+
+export function stopRDKClawTask(taskId: string) {
+  return request<{ ok: boolean }>(`/api/rdkclaw/tasks/${taskId}/stop`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function bindRDKClawFeishuCode(code: string) {
+  return request<{ ok: boolean; openId?: string; message?: string }>('/api/rdkclaw/feishu/auth/bind', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
   });
 }
 

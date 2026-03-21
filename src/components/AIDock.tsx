@@ -259,7 +259,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    handleApprovalAction,
+    handleApprovalAction, stopCurrentRun,
     openclawConnected, setOpenclawConnected,
     currentDevice,
   } = useAppState();
@@ -750,6 +750,9 @@ export default function AIDock() {
                   <div className="chat-avatar ai">{Icon.robot}</div>
                   <div className="chat-bubble ai typing">
                     <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+                    <button type="button" className="task-cancel-btn" onClick={stopCurrentRun} title="停止当前执行">
+                      停止
+                    </button>
                   </div>
                 </div>
               )}
