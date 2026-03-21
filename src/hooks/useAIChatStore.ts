@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState } from '../app-types';
 import { CMD_SUGGESTIONS } from '../constants';
-import { bindRDKClawFeishuCode, cancelRDKClawRun, decideRDKClawApproval, stopRDKClawTask, streamAgentChat, type AgentSSEEvent } from '../api';
+import { bindRDKClawFeishuCode, cancelRDKClawRun, decideRDKClawApproval, setActiveRdkclawDevice, setActiveRdkclawSession, stopRDKClawTask, streamAgentChat, type AgentSSEEvent } from '../api';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
@@ -146,6 +146,40 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const latestBoardToolRef = useRef<string | null>(null);
   const approvalBlockRef = useRef<Record<string, number>>({});
   const sessionIdRef = useRef(`ui-${Date.now()}`);
+  const feishuMirrorSeenRef = useRef<Set<string>>(new Set());
+  const syncWarnAtRef = useRef<{ session: number; device: number }>({ session: 0, device: 0 });
+  const reportActiveSession = (reason: string) => {
+    const sessionId = String(sessionIdRef.current || '').trim();
+    if (!sessionId) return;
+    setActiveRdkclawSession(sessionId)
+      .then(() => {
+        console.debug(`[RDKClawSync] session reported (${reason}): ${sessionId.slice(0, 10)}...`);
+      })
+      .catch((error) => {
+        console.warn('[RDKClawSync] session report failed:', error instanceof Error ? error.message : error);
+        const ts = Date.now();
+        if (ts - syncWarnAtRef.current.session > 30_000) {
+          syncWarnAtRef.current.session = ts;
+          addToast('会话同步上报失败，飞书可能无法接入当前会话', 'warning');
+        }
+      });
+  };
+  const reportActiveDevice = (reason: string) => {
+    const deviceId = String(currentDevice?.id || '').trim();
+    if (!deviceId) return;
+    setActiveRdkclawDevice(deviceId)
+      .then(() => {
+        console.debug(`[RDKClawSync] device reported (${reason}): ${deviceId}`);
+      })
+      .catch((error) => {
+        console.warn('[RDKClawSync] device report failed:', error instanceof Error ? error.message : error);
+        const ts = Date.now();
+        if (ts - syncWarnAtRef.current.device > 30_000) {
+          syncWarnAtRef.current.device = ts;
+          addToast('设备同步上报失败，飞书可能无法复用当前设备', 'warning');
+        }
+      });
+  };
 
   const summarizeToolArgs = (args: Record<string, unknown>) => {
     const entries = Object.entries(args || {});
@@ -167,8 +201,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     e.preventDefault();
     if (!cmd.trim() || commandLockRef.current) return;
     const userMsg = cmd.trim();
+    reportActiveSession('user-command');
+    reportActiveDevice('user-command');
     const msgId = Date.now();
-    setChatMessages(prev => [...prev, { id: msgId, role: 'user', text: userMsg }]);
+    setChatMessages(prev => [...prev, { id: msgId, role: 'user', text: userMsg, source: 'studio' }]);
     setChatExpanded(true);
     setCmd('');
     setShowSuggestions(false);
@@ -189,17 +225,19 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         if (bindMatch) {
           const code = bindMatch[1];
           try {
-            const result = await bindRDKClawFeishuCode(code);
+            const result = await bindRDKClawFeishuCode(code, sessionIdRef.current);
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
               text: result.message || `绑定成功，账号：${result.openId || '***'}`,
+              source: 'studio',
             }]);
           } catch (error) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
               text: `绑定失败：${error instanceof Error ? error.message : '授权码无效或已过期'}`,
+              source: 'studio',
             }]);
           }
           setAiTyping(false);
@@ -215,12 +253,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               id: msgId + 1,
               role: 'ai',
               text: `已停止任务：${taskId}（当前轮次会被中断，状态切换为 paused）`,
+              source: 'studio',
             }]);
           } catch (error) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
               text: `停止任务失败：${error instanceof Error ? error.message : '未知错误'}`,
+              source: 'studio',
             }]);
           }
           setAiTyping(false);
@@ -238,7 +278,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         approvalBlockRef.current = {};
 
         setChatMessages(prev => [...prev, {
-          id: aiMsgId, role: 'ai', text: '', blocks: [],
+          id: aiMsgId, role: 'ai', text: '', blocks: [], source: 'studio',
         }]);
 
         const updateAiMessage = (text: string, blocks: ChatBlock[]) => {
@@ -520,6 +560,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   // ── Effects ──
 
   useEffect(() => {
+    reportActiveSession('init');
+    reportActiveDevice('init');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!currentDevice?.id) return;
+    reportActiveDevice('device-change');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDevice?.id]);
+
+  useEffect(() => {
     const onNotify = (evt: Event) => {
       const e = evt as CustomEvent<{
         type?: string;
@@ -527,12 +579,77 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         message?: string;
         level?: string;
         ts?: number;
+        payload?: {
+          channel?: string;
+          direction?: 'inbound' | 'ack' | 'outbound' | 'error';
+          openIdMasked?: string;
+          chatId?: string;
+          messageId?: string;
+          sessionId?: string;
+        };
       }>;
       const detail = e.detail ?? {};
       const ts = detail.ts ?? Date.now();
       const title = detail.title || '系统推送';
       const message = detail.message || '收到新的系统事件';
       const ok = detail.level !== 'error';
+      const payload = detail.payload || {};
+      const isFeishuMirror = detail.type?.startsWith('channel_message_') && payload.channel === 'feishu';
+      if (isFeishuMirror) {
+        if (payload.sessionId && payload.sessionId !== sessionIdRef.current) {
+          // 飞书会话优先作为统一上下文，自动接管当前 Studio 会话键
+          sessionIdRef.current = payload.sessionId;
+          reportActiveSession('feishu-mirror-switch');
+        }
+        const dedupKey = `${payload.messageId || ''}:${detail.type || ''}:${payload.direction || ''}`;
+        if (dedupKey !== '::' && feishuMirrorSeenRef.current.has(dedupKey)) return;
+        if (dedupKey !== '::') feishuMirrorSeenRef.current.add(dedupKey);
+        setChatExpanded(true);
+        if (payload.direction === 'ack' || payload.direction === 'error') {
+          const label = payload.direction === 'error' ? '飞书通道' : '飞书回执';
+          setChatMessages((prev) => [
+            ...prev,
+            {
+              id: ts + 1,
+              role: 'ai',
+              text: '',
+              source: 'studio',
+              blocks: [
+                {
+                  type: 'status',
+                  items: [{ label, value: message, ok: payload.direction !== 'error' }],
+                },
+              ],
+              channelMeta: {
+                channel: 'feishu',
+                direction: payload.direction,
+                openIdMasked: payload.openIdMasked,
+                chatId: payload.chatId,
+                messageId: payload.messageId,
+              },
+            },
+          ]);
+          return;
+        }
+        const role = payload.direction === 'inbound' ? 'user' : 'ai';
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: ts + (role === 'ai' ? 1 : 0),
+            role,
+            text: message,
+            source: 'studio',
+            channelMeta: {
+              channel: 'feishu',
+              direction: payload.direction,
+              openIdMasked: payload.openIdMasked,
+              chatId: payload.chatId,
+              messageId: payload.messageId,
+            },
+          },
+        ]);
+        return;
+      }
       setChatExpanded(true);
       setChatMessages((prev) => [
         ...prev,
@@ -540,6 +657,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           id: ts,
           role: 'ai',
           text: '',
+          source: 'studio',
           blocks: [
             {
               type: 'status',

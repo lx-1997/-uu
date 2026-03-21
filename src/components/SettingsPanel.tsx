@@ -41,6 +41,11 @@ export default function SettingsPanel() {
   const [feishuConnectionMode, setFeishuConnectionMode] = useState<'websocket' | 'webhook'>('websocket');
   const [feishuDomain, setFeishuDomain] = useState<'feishu' | 'lark'>('feishu');
   const [feishuDmPolicy, setFeishuDmPolicy] = useState<'pairing' | 'allowlist' | 'open'>('pairing');
+  const [feishuSyncWithStudio, setFeishuSyncWithStudio] = useState(true);
+  const [feishuMirrorToStudioChat, setFeishuMirrorToStudioChat] = useState(true);
+  const [feishuAckOnReceive, setFeishuAckOnReceive] = useState(true);
+  const [feishuAckOnRunning, setFeishuAckOnRunning] = useState(true);
+  const [feishuAckStyle, setFeishuAckStyle] = useState<'text' | 'emoji' | 'off'>('text');
   const [feishuMasks, setFeishuMasks] = useState({
     appSecretMasked: '',
     verificationTokenMasked: '',
@@ -70,6 +75,11 @@ export default function SettingsPanel() {
     setFeishuConnectionMode(cfgRes.config.connectionMode || 'websocket');
     setFeishuDomain(cfgRes.config.domain || 'feishu');
     setFeishuDmPolicy(cfgRes.config.dmPolicy || 'pairing');
+    setFeishuSyncWithStudio(typeof cfgRes.config.syncWithStudio === 'boolean' ? cfgRes.config.syncWithStudio : true);
+    setFeishuMirrorToStudioChat(typeof cfgRes.config.mirrorToStudioChat === 'boolean' ? cfgRes.config.mirrorToStudioChat : true);
+    setFeishuAckOnReceive(typeof cfgRes.config.ackOnReceive === 'boolean' ? cfgRes.config.ackOnReceive : true);
+    setFeishuAckOnRunning(typeof cfgRes.config.ackOnRunning === 'boolean' ? cfgRes.config.ackOnRunning : true);
+    setFeishuAckStyle(cfgRes.config.ackStyle || 'text');
     setFeishuMasks({
       appSecretMasked: cfgRes.config.appSecretMasked || '',
       verificationTokenMasked: cfgRes.config.verificationTokenMasked || '',
@@ -105,6 +115,11 @@ export default function SettingsPanel() {
         connectionMode: feishuConnectionMode,
         domain: feishuDomain,
         dmPolicy: feishuDmPolicy,
+        syncWithStudio: feishuSyncWithStudio,
+        mirrorToStudioChat: feishuMirrorToStudioChat,
+        ackOnReceive: feishuAckOnReceive,
+        ackOnRunning: feishuAckOnRunning,
+        ackStyle: feishuAckStyle,
         appId: feishuAppId,
         appSecret: feishuAppSecret || undefined,
         verificationToken: feishuVerificationToken || undefined,
@@ -369,6 +384,26 @@ export default function SettingsPanel() {
                     </span>
                   </div>
                   <div className="settings-row">
+                    <span className="settings-label">最近活跃 Studio 会话</span>
+                    <span className="settings-value">{feishuStatus?.latestUiSessionId || '暂无（请先在聊天框发一条消息）'}</span>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-label">最近活跃设备</span>
+                    <span className="settings-value">{feishuStatus?.latestUiDeviceId || '暂无（请先在 Studio 连接设备）'}</span>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-label">会话上报时间</span>
+                    <span className="settings-value">
+                      {feishuStatus?.latestUiSessionUpdatedAt ? new Date(feishuStatus.latestUiSessionUpdatedAt).toLocaleString() : '暂无'}
+                    </span>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-label">设备上报时间</span>
+                    <span className="settings-value">
+                      {feishuStatus?.latestUiDeviceUpdatedAt ? new Date(feishuStatus.latestUiDeviceUpdatedAt).toLocaleString() : '暂无'}
+                    </span>
+                  </div>
+                  <div className="settings-row">
                     <button className="segment-btn" onClick={() => handleFeishuRuntime('start')}>启动</button>
                     <button className="segment-btn" onClick={() => handleFeishuRuntime('stop')}>停止</button>
                     <button className="segment-btn" onClick={() => handleFeishuRuntime('restart')}>重启</button>
@@ -403,6 +438,30 @@ export default function SettingsPanel() {
                   <option value="pairing">pairing（默认）</option>
                   <option value="allowlist">allowlist</option>
                   <option value="open">open</option>
+                </select>
+              </div>
+              <div className="settings-row">
+                <span className="settings-label">统一会话上下文</span>
+                <input type="checkbox" title="统一会话上下文" aria-label="统一会话上下文" checked={feishuSyncWithStudio} onChange={(e) => setFeishuSyncWithStudio(e.target.checked)} style={{ accentColor: '#ff6b00', width: '18px', height: '18px' }} />
+              </div>
+              <div className="settings-row">
+                <span className="settings-label">飞书消息镜像到聊天框</span>
+                <input type="checkbox" title="飞书消息镜像到聊天框" aria-label="飞书消息镜像到聊天框" checked={feishuMirrorToStudioChat} onChange={(e) => setFeishuMirrorToStudioChat(e.target.checked)} style={{ accentColor: '#ff6b00', width: '18px', height: '18px' }} />
+              </div>
+              <div className="settings-row">
+                <span className="settings-label">收到即回执</span>
+                <input type="checkbox" title="收到即回执" aria-label="收到即回执" checked={feishuAckOnReceive} onChange={(e) => setFeishuAckOnReceive(e.target.checked)} style={{ accentColor: '#ff6b00', width: '18px', height: '18px' }} />
+              </div>
+              <div className="settings-row">
+                <span className="settings-label">处理中回执</span>
+                <input type="checkbox" title="处理中回执" aria-label="处理中回执" checked={feishuAckOnRunning} onChange={(e) => setFeishuAckOnRunning(e.target.checked)} style={{ accentColor: '#ff6b00', width: '18px', height: '18px' }} />
+              </div>
+              <div className="settings-row">
+                <span className="settings-label">回执样式</span>
+                <select className="clean-input" title="回执样式" aria-label="回执样式" value={feishuAckStyle} onChange={(e) => setFeishuAckStyle(e.target.value as 'text' | 'emoji' | 'off')}>
+                  <option value="text">文本</option>
+                  <option value="emoji">表情</option>
+                  <option value="off">关闭</option>
                 </select>
               </div>
               <div className="settings-row">

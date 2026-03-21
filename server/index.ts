@@ -115,6 +115,7 @@ const feishuChannel = new FeishuWebSocketChannel({
   rdkclaw,
   authStore: feishuAuth,
   getConfig: () => feishuConfig,
+  notificationHub,
 });
 const feishuEventSeen = new Map<string, number>();
 let feishuLastEventAt: number | null = null;
@@ -221,6 +222,13 @@ function maskSecret(raw: string) {
   if (!value) return '';
   if (value.length <= 8) return `${value.slice(0, 2)}***${value.slice(-2)}`;
   return `${value.slice(0, 4)}***${value.slice(-4)}`;
+}
+
+function auditKey(input: string) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const digest = crypto.createHash('sha1').update(raw).digest('hex').slice(0, 8);
+  return `${raw.slice(0, 6)}***#${digest}`;
 }
 
 function applyFeishuConfig(next: ReturnType<FeishuConfigStore['getConfig']>) {
@@ -1725,8 +1733,31 @@ app.post('/api/rdkclaw/runs/:runId/cancel', (request, response) => {
   response.json({ ok: true });
 });
 
+app.post('/api/rdkclaw/session/active', (request, response) => {
+  const sessionId = String(request.body?.sessionId || '').trim();
+  if (!sessionId) {
+    response.status(400).json({ error: '缺少 sessionId' });
+    return;
+  }
+  feishuAuth.setLatestUiSession(sessionId);
+  console.log(`[RDKClaw] latest-ui-session updated: ${auditKey(sessionId)}`);
+  response.json({ ok: true, sessionId });
+});
+
+app.post('/api/rdkclaw/device/active', (request, response) => {
+  const deviceId = String(request.body?.deviceId || '').trim();
+  if (!deviceId) {
+    response.status(400).json({ error: '缺少 deviceId' });
+    return;
+  }
+  feishuAuth.setLatestUiDevice(deviceId);
+  console.log(`[RDKClaw] latest-ui-device updated: ${auditKey(deviceId)}`);
+  response.json({ ok: true, deviceId });
+});
+
 app.post('/api/rdkclaw/feishu/auth/bind', (request, response) => {
   const code = String(request.body?.code || '').trim();
+  const studioSessionId = String(request.body?.sessionId || '').trim();
   if (!/^\d{6}$/.test(code)) {
     response.status(400).json({ error: '授权码格式错误，应为 6 位数字' });
     return;
@@ -1736,10 +1767,13 @@ app.post('/api/rdkclaw/feishu/auth/bind', (request, response) => {
     response.status(400).json({ ok: false, error: result.reason || '绑定失败' });
     return;
   }
+  if (studioSessionId && result.openId) {
+    feishuAuth.linkStudioSession(result.openId, studioSessionId);
+  }
   response.json({
     ok: true,
     openId: maskOpenId(result.openId || ''),
-    message: '飞书账号绑定成功，现在可以在飞书机器人里直接给 RDKClaw 下发命令。',
+    message: '飞书账号绑定成功，已与当前 RDK Studio 会话上下文打通。',
   });
 });
 
@@ -1800,6 +1834,11 @@ app.get('/api/rdkclaw/feishu/config', (_request, response) => {
       connectionMode: cfg.connectionMode,
       domain: cfg.domain,
       dmPolicy: cfg.dmPolicy,
+      syncWithStudio: cfg.syncWithStudio,
+      mirrorToStudioChat: cfg.mirrorToStudioChat,
+      ackOnReceive: cfg.ackOnReceive,
+      ackOnRunning: cfg.ackOnRunning,
+      ackStyle: cfg.ackStyle,
       appId: cfg.appId,
       appSecretMasked: maskSecret(cfg.appSecret),
       verificationTokenMasked: maskSecret(cfg.verificationToken),
@@ -1822,11 +1861,19 @@ app.post('/api/rdkclaw/feishu/config', (request, response) => {
   const dmPolicy = body.dmPolicy === 'pairing' || body.dmPolicy === 'allowlist' || body.dmPolicy === 'open'
     ? body.dmPolicy
     : undefined;
+  const ackStyle = body.ackStyle === 'text' || body.ackStyle === 'emoji' || body.ackStyle === 'off'
+    ? body.ackStyle
+    : undefined;
   const patch = {
     enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
     connectionMode,
     domain,
     dmPolicy,
+    syncWithStudio: typeof body.syncWithStudio === 'boolean' ? body.syncWithStudio : undefined,
+    mirrorToStudioChat: typeof body.mirrorToStudioChat === 'boolean' ? body.mirrorToStudioChat : undefined,
+    ackOnReceive: typeof body.ackOnReceive === 'boolean' ? body.ackOnReceive : undefined,
+    ackOnRunning: typeof body.ackOnRunning === 'boolean' ? body.ackOnRunning : undefined,
+    ackStyle,
     appId: typeof body.appId === 'string' ? body.appId : undefined,
     appSecret: typeof body.appSecret === 'string' ? body.appSecret : undefined,
     verificationToken: typeof body.verificationToken === 'string' ? body.verificationToken : undefined,
@@ -1857,6 +1904,7 @@ app.get('/api/rdkclaw/feishu/status', (request, response) => {
   const hasAppId = !!cfg.appId;
   const hasAppSecret = !!cfg.appSecret;
   const configured = hasAppId && hasAppSecret;
+  const latestUi = feishuAuth.getLatestUiMeta();
   response.json({
     ok: true,
     status: {
@@ -1865,6 +1913,11 @@ app.get('/api/rdkclaw/feishu/status', (request, response) => {
       connectionMode: cfg.connectionMode,
       dmPolicy: cfg.dmPolicy,
       domain: cfg.domain,
+      syncWithStudio: cfg.syncWithStudio,
+      mirrorToStudioChat: cfg.mirrorToStudioChat,
+      ackOnReceive: cfg.ackOnReceive,
+      ackOnRunning: cfg.ackOnRunning,
+      ackStyle: cfg.ackStyle,
       hasAppId,
       hasAppSecret,
       webhookPath,
@@ -1875,6 +1928,10 @@ app.get('/api/rdkclaw/feishu/status', (request, response) => {
       lastAuthorizedAt: feishuLastAuthorizedAt,
       dedupCacheSize: feishuEventSeen.size,
       runtime: feishuChannel.getStatus(),
+      latestUiSessionId: latestUi.latestUiSessionId || null,
+      latestUiDeviceId: latestUi.latestUiDeviceId || null,
+      latestUiSessionUpdatedAt: latestUi.latestUiSessionUpdatedAt,
+      latestUiDeviceUpdatedAt: latestUi.latestUiDeviceUpdatedAt,
     },
   });
 });
@@ -2086,6 +2143,14 @@ app.post('/api/agent/chat', async (request, response) => {
   if (!message?.trim()) {
     response.status(400).json({ error: '消息不能为空' });
     return;
+  }
+
+  // Studio 主聊天链路兜底回写：即使前端心跳偶发失败，也能以实际请求为准更新会话/设备。
+  if (sessionId?.trim()) {
+    feishuAuth.setLatestUiSession(sessionId.trim());
+  }
+  if (deviceId?.trim()) {
+    feishuAuth.setLatestUiDevice(deviceId.trim());
   }
 
   try {

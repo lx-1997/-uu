@@ -197,6 +197,11 @@ export interface FeishuRuntimeStatus {
   enabled: boolean;
   connectionMode: 'websocket' | 'webhook';
   dmPolicy: 'pairing' | 'allowlist' | 'open';
+  syncWithStudio: boolean;
+  mirrorToStudioChat: boolean;
+  ackOnReceive: boolean;
+  ackOnRunning: boolean;
+  ackStyle: 'text' | 'emoji' | 'off';
   domain: 'feishu' | 'lark';
   hasAppId: boolean;
   hasAppSecret: boolean;
@@ -207,6 +212,10 @@ export interface FeishuRuntimeStatus {
   lastEventAt: number | null;
   lastAuthorizedAt: number | null;
   dedupCacheSize: number;
+  latestUiSessionId?: string | null;
+  latestUiDeviceId?: string | null;
+  latestUiSessionUpdatedAt?: number | null;
+  latestUiDeviceUpdatedAt?: number | null;
   runtime?: {
     running: boolean;
     connected: boolean;
@@ -216,11 +225,30 @@ export interface FeishuRuntimeStatus {
   };
 }
 
+export function setActiveRdkclawSession(sessionId: string) {
+  return request<{ ok: boolean; sessionId: string }>('/api/rdkclaw/session/active', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId }),
+  });
+}
+
+export function setActiveRdkclawDevice(deviceId: string) {
+  return request<{ ok: boolean; deviceId: string }>('/api/rdkclaw/device/active', {
+    method: 'POST',
+    body: JSON.stringify({ deviceId }),
+  });
+}
+
 export interface FeishuConfigView {
   enabled: boolean;
   connectionMode: 'websocket' | 'webhook';
   domain: 'feishu' | 'lark';
   dmPolicy: 'pairing' | 'allowlist' | 'open';
+  syncWithStudio: boolean;
+  mirrorToStudioChat: boolean;
+  ackOnReceive: boolean;
+  ackOnRunning: boolean;
+  ackStyle: 'text' | 'emoji' | 'off';
   appId: string;
   appSecretMasked: string;
   verificationTokenMasked: string;
@@ -337,10 +365,10 @@ export function stopRDKClawTask(taskId: string) {
   });
 }
 
-export function bindRDKClawFeishuCode(code: string) {
+export function bindRDKClawFeishuCode(code: string, sessionId?: string) {
   return request<{ ok: boolean; openId?: string; message?: string }>('/api/rdkclaw/feishu/auth/bind', {
     method: 'POST',
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, sessionId }),
   });
 }
 
@@ -395,6 +423,11 @@ export function saveFeishuConfig(patch: {
   connectionMode?: 'websocket' | 'webhook';
   domain?: 'feishu' | 'lark';
   dmPolicy?: 'pairing' | 'allowlist' | 'open';
+  syncWithStudio?: boolean;
+  mirrorToStudioChat?: boolean;
+  ackOnReceive?: boolean;
+  ackOnRunning?: boolean;
+  ackStyle?: 'text' | 'emoji' | 'off';
   appId?: string;
   appSecret?: string;
   verificationToken?: string;

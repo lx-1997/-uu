@@ -16,11 +16,23 @@ type BoundUser = {
   openId: string;
   boundAt: number;
   viaCode: string;
+  studioSessionId?: string;
+  activeSessionId?: string;
+  lastSessionSyncAt?: number;
+  lastChatId?: string;
+  lastLinkedAt?: number;
 };
 
 type FeishuAuthData = {
   pending: PendingCode[];
   bound: BoundUser[];
+  meta?: {
+    latestUiSessionId?: string;
+    latestUiDeviceId?: string;
+    latestUiSessionUpdatedAt?: number;
+    latestUiDeviceUpdatedAt?: number;
+    updatedAt?: number;
+  };
 };
 
 const AUTH_DIR = path.join(os.homedir(), ".rdkstudio");
@@ -45,15 +57,35 @@ export class FeishuAuthStore {
 
   private read(): FeishuAuthData {
     try {
-      if (!fs.existsSync(AUTH_FILE)) return { pending: [], bound: [] };
+      if (!fs.existsSync(AUTH_FILE)) return { pending: [], bound: [], meta: {} };
       const raw = fs.readFileSync(AUTH_FILE, "utf-8");
       const parsed = JSON.parse(raw) as Partial<FeishuAuthData>;
       return {
         pending: Array.isArray(parsed.pending) ? parsed.pending : [],
-        bound: Array.isArray(parsed.bound) ? parsed.bound : [],
+        bound: Array.isArray(parsed.bound)
+          ? parsed.bound.map((item) => ({
+              openId: String((item as BoundUser).openId || ""),
+              boundAt: Number((item as BoundUser).boundAt || now()),
+              viaCode: String((item as BoundUser).viaCode || ""),
+              studioSessionId: (item as BoundUser).studioSessionId ? String((item as BoundUser).studioSessionId) : undefined,
+              activeSessionId: (item as BoundUser).activeSessionId ? String((item as BoundUser).activeSessionId) : undefined,
+              lastSessionSyncAt: (item as BoundUser).lastSessionSyncAt ? Number((item as BoundUser).lastSessionSyncAt) : undefined,
+              lastChatId: (item as BoundUser).lastChatId ? String((item as BoundUser).lastChatId) : undefined,
+              lastLinkedAt: (item as BoundUser).lastLinkedAt ? Number((item as BoundUser).lastLinkedAt) : undefined,
+            }))
+          : [],
+        meta: typeof parsed.meta === "object" && parsed.meta
+          ? {
+              latestUiSessionId: parsed.meta.latestUiSessionId ? String(parsed.meta.latestUiSessionId) : undefined,
+              latestUiDeviceId: parsed.meta.latestUiDeviceId ? String(parsed.meta.latestUiDeviceId) : undefined,
+              latestUiSessionUpdatedAt: parsed.meta.latestUiSessionUpdatedAt ? Number(parsed.meta.latestUiSessionUpdatedAt) : undefined,
+              latestUiDeviceUpdatedAt: parsed.meta.latestUiDeviceUpdatedAt ? Number(parsed.meta.latestUiDeviceUpdatedAt) : undefined,
+              updatedAt: parsed.meta.updatedAt ? Number(parsed.meta.updatedAt) : undefined,
+            }
+          : {},
       };
     } catch {
-      return { pending: [], bound: [] };
+      return { pending: [], bound: [], meta: {} };
     }
   }
 
@@ -74,9 +106,18 @@ export class FeishuAuthStore {
     this.save();
   }
 
+  private ensureMeta() {
+    if (!this.data.meta) this.data.meta = {};
+  }
+
   isBound(openId: string): boolean {
     this.gc();
     return this.data.bound.some((item) => item.openId === openId);
+  }
+
+  getBound(openId: string): BoundUser | undefined {
+    this.gc();
+    return this.data.bound.find((item) => item.openId === openId);
   }
 
   issueCode(openId: string, chatId?: string): string {
@@ -140,6 +181,91 @@ export class FeishuAuthStore {
     if (!token) return { ok: false, reason: "授权码不存在或已过期" };
     if (token.openId !== openId) return { ok: false, reason: "授权码与当前飞书账号不匹配" };
     return this.bindByCode(code);
+  }
+
+  linkStudioSession(openId: string, studioSessionId: string): { ok: boolean; reason?: string } {
+    this.gc();
+    const session = String(studioSessionId || "").trim();
+    if (!session) return { ok: false, reason: "sessionId 不能为空" };
+    const bound = this.data.bound.find((item) => item.openId === openId);
+    if (!bound) return { ok: false, reason: "飞书账号尚未绑定" };
+    bound.studioSessionId = session;
+    bound.activeSessionId = session;
+    bound.lastSessionSyncAt = now();
+    bound.lastLinkedAt = now();
+    this.ensureMeta();
+    this.data.meta!.latestUiSessionId = session;
+    this.data.meta!.latestUiSessionUpdatedAt = now();
+    this.data.meta!.updatedAt = now();
+    this.save();
+    return { ok: true };
+  }
+
+  resolveSession(openId: string, fallbackSessionId: string): string {
+    this.gc();
+    const fallback = String(fallbackSessionId || "").trim();
+    const bound = this.data.bound.find((item) => item.openId === openId);
+    if (!bound) return fallback;
+    return String(bound.activeSessionId || bound.studioSessionId || fallback).trim();
+  }
+
+  touchSession(openId: string, sessionId: string, chatId?: string): void {
+    this.gc();
+    const session = String(sessionId || "").trim();
+    if (!session) return;
+    const bound = this.data.bound.find((item) => item.openId === openId);
+    if (!bound) return;
+    bound.activeSessionId = session;
+    bound.lastSessionSyncAt = now();
+    if (chatId) bound.lastChatId = String(chatId);
+    this.save();
+  }
+
+  setLatestUiSession(sessionId: string): void {
+    this.gc();
+    const value = String(sessionId || "").trim();
+    if (!value) return;
+    this.ensureMeta();
+    this.data.meta!.latestUiSessionId = value;
+    this.data.meta!.latestUiSessionUpdatedAt = now();
+    this.data.meta!.updatedAt = now();
+    this.save();
+  }
+
+  setLatestUiDevice(deviceId: string): void {
+    this.gc();
+    const value = String(deviceId || "").trim();
+    if (!value) return;
+    this.ensureMeta();
+    this.data.meta!.latestUiDeviceId = value;
+    this.data.meta!.latestUiDeviceUpdatedAt = now();
+    this.data.meta!.updatedAt = now();
+    this.save();
+  }
+
+  getLatestUiSession(): string {
+    this.gc();
+    return String(this.data.meta?.latestUiSessionId || "").trim();
+  }
+
+  getLatestUiDevice(): string {
+    this.gc();
+    return String(this.data.meta?.latestUiDeviceId || "").trim();
+  }
+
+  getLatestUiMeta(): {
+    latestUiSessionId: string;
+    latestUiDeviceId: string;
+    latestUiSessionUpdatedAt: number | null;
+    latestUiDeviceUpdatedAt: number | null;
+  } {
+    this.gc();
+    return {
+      latestUiSessionId: String(this.data.meta?.latestUiSessionId || "").trim(),
+      latestUiDeviceId: String(this.data.meta?.latestUiDeviceId || "").trim(),
+      latestUiSessionUpdatedAt: this.data.meta?.latestUiSessionUpdatedAt || null,
+      latestUiDeviceUpdatedAt: this.data.meta?.latestUiDeviceUpdatedAt || null,
+    };
   }
 
   listBound() {

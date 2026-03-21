@@ -65,6 +65,14 @@ export interface ChatMessage {
   id: number;
   role: 'user' | 'ai';
   text: string;
+  source?: 'studio' | 'feishu';
+  channelMeta?: {
+    channel: 'feishu';
+    direction?: 'inbound' | 'ack' | 'outbound' | 'error';
+    openIdMasked?: string;
+    chatId?: string;
+    messageId?: string;
+  };
   action?: { label: string; tab: Tab };
   blocks?: ChatBlock[];
   attachments?: ChatAttachment[];

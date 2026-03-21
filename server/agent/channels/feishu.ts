@@ -2,11 +2,14 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { RDKClawApp } from "../../rdkclaw/app.js";
 import { FeishuAuthStore } from "../../rdkclaw/feishu-auth-store.js";
 import type { FeishuRuntimeConfig } from "../../rdkclaw/feishu-config-store.js";
+import type { NotificationHub } from "../../rdkclaw/notification-hub.js";
+import { readDevices } from "../../storage.js";
 
 type FeishuChannelOptions = {
   rdkclaw: RDKClawApp;
   authStore: FeishuAuthStore;
   getConfig: () => FeishuRuntimeConfig;
+  notificationHub?: NotificationHub;
 };
 
 type FeishuRuntimeStatus = {
@@ -43,6 +46,21 @@ function parseText(content: unknown): string {
   }
 }
 
+function normalizeForFeishu(text: string): string {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  // 飞书文本消息对复杂 markdown 支持有限，这里做轻量降噪与分段。
+  return raw
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, "").trim())
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*[-*]\s+/gm, "• ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function unwrapEventPayload(raw: any): any {
   if (raw?.event && typeof raw.event === "object") return raw.event;
   if (raw?.data?.event && typeof raw.data.event === "object") return raw.data.event;
@@ -62,6 +80,7 @@ export class FeishuWebSocketChannel {
   private readonly rdkclaw: RDKClawApp;
   private readonly authStore: FeishuAuthStore;
   private readonly getConfig: () => FeishuRuntimeConfig;
+  private readonly notificationHub?: NotificationHub;
   private client: Lark.Client | null = null;
   private wsClient: unknown | null = null;
   private status: FeishuRuntimeStatus = {
@@ -76,6 +95,7 @@ export class FeishuWebSocketChannel {
     this.rdkclaw = opts.rdkclaw;
     this.authStore = opts.authStore;
     this.getConfig = opts.getConfig;
+    this.notificationHub = opts.notificationHub;
   }
 
   getStatus(): FeishuRuntimeStatus {
@@ -196,9 +216,23 @@ export class FeishuWebSocketChannel {
       console.log(`[FeishuWS] skip message: chatId=${!!chatId} openId=${!!openId} text=${!!text}`);
       return;
     }
+    const msgId = String(message?.message_id || "");
+    const openIdMasked = `${openId.slice(0, 4)}***${openId.slice(-4)}`;
     console.log(`[FeishuWS] inbound chatType=${chatType || "unknown"} openId=${openId.slice(0, 6)}*** chatId=${chatId}`);
-
-    const sessionId = sessionKeyFor(chatType, openId, chatId);
+    const fallbackSessionId = sessionKeyFor(chatType, openId, chatId);
+    const latestUiSessionId = this.authStore.getLatestUiSession();
+    let latestUiDeviceId = this.authStore.getLatestUiDevice();
+    const boundSessionId = this.authStore.resolveSession(openId, "");
+    const sessionId = latestUiSessionId || boundSessionId || fallbackSessionId;
+    this.authStore.touchSession(openId, sessionId, chatId);
+    this.publishMirror("channel_message_inbound", "飞书消息", text, {
+      channel: "feishu",
+      direction: "inbound",
+      openIdMasked,
+      chatId,
+      messageId: msgId,
+      sessionId,
+    });
     const shouldRequirePairing = cfg.dmPolicy === "pairing";
     const isBound = this.authStore.isBound(openId);
 
@@ -211,9 +245,23 @@ export class FeishuWebSocketChannel {
       const bind = this.authStore.bindByCodeForOpenId(maybeCode, openId);
       if (bind.ok) {
         await this.sendText(chatId, "配对成功，已绑定当前飞书账号。现在可以直接和 RDKClaw 对话。");
+        this.publishMirror("channel_message_ack", "飞书配对", "配对成功，已建立统一会话上下文。", {
+          channel: "feishu",
+          direction: "ack",
+          openIdMasked,
+          chatId,
+          messageId: msgId,
+        });
         return;
       }
       await this.sendText(chatId, `配对失败：${bind.reason || "授权码无效"}`);
+      this.publishMirror("channel_message_error", "飞书配对", bind.reason || "授权码无效", {
+        channel: "feishu",
+        direction: "error",
+        openIdMasked,
+        chatId,
+        messageId: msgId,
+      });
       return;
     }
 
@@ -222,11 +270,95 @@ export class FeishuWebSocketChannel {
       return;
     }
 
+    if (!latestUiSessionId && !boundSessionId) {
+      const hint = "请先打开 RDK Studio 聊天窗口并发送一条消息，建立活跃会话后再继续。";
+      await this.sendText(chatId, hint);
+      this.publishMirror("channel_message_error", "飞书会话", hint, {
+        channel: "feishu",
+        direction: "error",
+        openIdMasked,
+        chatId,
+        messageId: msgId,
+      });
+      return;
+    }
+
+    if (!latestUiDeviceId) {
+      // 没有设备心跳时，尝试从设备清单挑选当前已连接设备，避免因一次心跳缺失导致飞书链路退化。
+      try {
+        const devices = await readDevices();
+        const connected = devices.find((item) => item.status === "connected");
+        if (connected?.id) {
+          latestUiDeviceId = connected.id;
+          this.authStore.setLatestUiDevice(connected.id);
+        }
+      } catch {
+        // ignore
+      }
+    } else {
+      // 有设备心跳但可能是过期/无效键（例如历史测试值），优先校验并自动回退到当前真实已连接设备。
+      try {
+        const devices = await readDevices();
+        const exact = devices.find((item) => item.id === latestUiDeviceId && item.status === "connected");
+        if (!exact) {
+          const connected = devices.find((item) => item.status === "connected");
+          if (connected?.id) {
+            latestUiDeviceId = connected.id;
+            this.authStore.setLatestUiDevice(connected.id);
+          } else {
+            latestUiDeviceId = "";
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!latestUiDeviceId) {
+      const hint = "请先在 RDK Studio 里连接目标设备，再通过飞书发起设备相关请求。";
+      await this.sendText(chatId, hint);
+      this.publishMirror("channel_message_error", "飞书设备", hint, {
+        channel: "feishu",
+        direction: "error",
+        openIdMasked,
+        chatId,
+        messageId: msgId,
+        sessionId,
+      });
+      return;
+    }
+
+    if (cfg.ackOnReceive && cfg.ackStyle !== "off") {
+      const ack = cfg.ackStyle === "emoji" ? "👌" : "已收到，正在同步到 RDK Studio 会话...";
+      await this.sendText(chatId, ack);
+      this.publishMirror("channel_message_ack", "飞书回执", ack, {
+        channel: "feishu",
+        direction: "ack",
+        openIdMasked,
+        chatId,
+        messageId: msgId,
+        sessionId,
+      });
+    }
+
     const chunks: string[] = [];
     let finalText = "";
+    if (cfg.ackOnRunning && cfg.ackStyle !== "off") {
+      const runningAck = cfg.ackStyle === "emoji" ? "⏳" : "正在执行，请稍候...";
+      await this.sendText(chatId, runningAck);
+      this.publishMirror("channel_message_ack", "飞书回执", runningAck, {
+        channel: "feishu",
+        direction: "ack",
+        openIdMasked,
+        chatId,
+        messageId: msgId,
+        sessionId,
+      });
+    }
     for await (const event of this.rdkclaw.streamChat({
       message: text,
       userId: openId,
+      deviceId: latestUiDeviceId,
       sessionId,
       mode: "auto",
     })) {
@@ -238,8 +370,17 @@ export class FeishuWebSocketChannel {
       }
     }
     const streamed = chunks.join("").trim();
-    const reply = (finalText || streamed).trim() || "我已经执行完成，但未提取到可显示的文本结果。请让我重试并返回详细过程。";
+    const replyRaw = (finalText || streamed).trim() || "我已经执行完成，但未提取到可显示的文本结果。请让我重试并返回详细过程。";
+    const reply = normalizeForFeishu(replyRaw);
     await this.sendText(chatId, reply);
+    this.publishMirror("channel_message_outbound", "飞书回复", reply, {
+      channel: "feishu",
+      direction: "outbound",
+      openIdMasked,
+      chatId,
+      messageId: msgId,
+      sessionId,
+    });
     console.log(`[FeishuWS] replied to ${openId.slice(0, 6)}***, chars=${reply.length}`);
   }
 
@@ -267,13 +408,40 @@ export class FeishuWebSocketChannel {
 
   private async issuePairingPrompt(openId: string, chatId: string, source: string): Promise<void> {
     const code = this.authStore.issueCode(openId, chatId);
-    await this.sendText(chatId, [
+    const text = [
       "RDKClaw 需要先完成配对授权。",
       `配对码：${code}`,
       "请在 RDK Studio 设置页的飞书配对列表中审批，或在聊天框发送：绑定飞书 <配对码>",
       "5 分钟内有效，仅可使用一次。",
-    ].join("\n"));
+    ].join("\n");
+    await this.sendText(chatId, text);
+    this.publishMirror("channel_message_ack", "飞书配对", `已下发配对码：${code}`, {
+      channel: "feishu",
+      direction: "ack",
+      openIdMasked: `${openId.slice(0, 4)}***${openId.slice(-4)}`,
+      chatId,
+    });
     console.log(`[FeishuWS] issued pairing code for ${openId.slice(0, 6)}*** source=${source}`);
+  }
+
+  private publishMirror(
+    type: "channel_message_inbound" | "channel_message_ack" | "channel_message_outbound" | "channel_message_error",
+    title: string,
+    message: string,
+    payload?: Record<string, unknown>,
+  ): void {
+    if (!this.notificationHub) return;
+    const cfg = this.getConfig();
+    if (!cfg.mirrorToStudioChat && type !== "channel_message_error") return;
+    this.notificationHub.publish({
+      type,
+      title,
+      message,
+      level: type === "channel_message_error" ? "error" : "info",
+      ts: Date.now(),
+      payload,
+      sessionId: typeof payload?.sessionId === "string" ? payload.sessionId : undefined,
+    });
   }
 
   private async sendText(chatId: string, text: string): Promise<void> {

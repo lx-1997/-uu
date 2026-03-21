@@ -1,7 +1,14 @@
 import type { Server as SocketIOServer } from "socket.io";
 
 export interface RDKClawNotification {
-  type: "autonomy_start" | "autonomy_result" | "autonomy_error";
+  type:
+    | "autonomy_start"
+    | "autonomy_result"
+    | "autonomy_error"
+    | "channel_message_inbound"
+    | "channel_message_ack"
+    | "channel_message_outbound"
+    | "channel_message_error";
   title: string;
   message: string;
   taskId?: string;
