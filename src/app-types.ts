@@ -73,9 +73,10 @@ export interface ChatMessage {
 export type ChatBlock =
   | { type: 'code'; lang: string; content: string }
   | { type: 'image'; src: string; caption?: string }
-  | { type: 'terminal'; lines: string[]; label?: string }
+  | { type: 'terminal'; lines: string[]; label?: string; collapsible?: boolean; previewLines?: number }
   | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }> }
   | { type: 'confirm'; text: string; confirmId: string }
+  | { type: 'approval'; text: string; approvalId: string; runId?: string; risk?: 'low' | 'medium' | 'high'; executor?: string }
   | { type: 'progress'; steps: Array<{ label: string; status: 'done' | 'running' | 'pending' }>; taskId?: string }
   | { type: 'task-result'; success: boolean; title: string; detail: string };
 

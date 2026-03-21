@@ -150,8 +150,41 @@ export function fetchAIReply(
 // ─── Agent SSE Chat ───
 
 export interface AgentSSEEvent {
-  type: 'text' | 'tool_start' | 'tool_result' | 'turn_start' | 'turn_end' | 'message_end' | 'done' | 'error' | 'retry';
+  type:
+    | 'text'
+    | 'tool_start'
+    | 'tool_progress'
+    | 'tool_result'
+    | 'approval_required'
+    | 'approval_decision'
+    | 'turn_start'
+    | 'turn_end'
+    | 'message_end'
+    | 'done'
+    | 'error'
+    | 'retry'
+    | 'meta';
   data: Record<string, unknown>;
+}
+
+export interface RDKClawPolicy {
+  approval: {
+    mode: 'always' | 'risk-based' | 'auto';
+    riskThreshold: 'low' | 'medium' | 'high';
+  };
+  delegation: {
+    strategy: 'local-first' | 'board-first' | 'hybrid';
+    allowBoardAuto: boolean;
+  };
+  memory: {
+    mainSessionReadsMemory: boolean;
+    sharedSessionBlocksMemory: boolean;
+    dailyMemoryDays: number;
+  };
+  scheduler: {
+    defaultChannel: 'chat' | 'feishu';
+    allowSecondInterval: boolean;
+  };
 }
 
 export type AgentEventCallback = (event: AgentSSEEvent) => void;
@@ -227,6 +260,31 @@ export function fetchAgentConfig() {
     hasApiKey?: boolean;
     baseUrl?: string;
   }>('/api/agent/config');
+}
+
+export function fetchRDKClawPolicy() {
+  return request<{ ok: boolean; policy: RDKClawPolicy }>('/api/rdkclaw/policy');
+}
+
+export function saveRDKClawPolicy(patch: Partial<RDKClawPolicy>) {
+  return request<{ ok: boolean; policy: RDKClawPolicy }>('/api/rdkclaw/policy', {
+    method: 'POST',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function decideRDKClawApproval(approvalId: string, decision: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny') {
+  return request<{ ok: boolean }>(`/api/rdkclaw/approvals/${approvalId}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  });
+}
+
+export function cancelRDKClawRun(runId: string) {
+  return request<{ ok: boolean }>(`/api/rdkclaw/runs/${runId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
 }
 
 export function saveAgentConfig(config: {

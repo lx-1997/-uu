@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState } from '../app-types';
 import { CMD_SUGGESTIONS } from '../constants';
-import { streamAgentChat, type AgentSSEEvent } from '../api';
+import { cancelRDKClawRun, decideRDKClawApproval, streamAgentChat, type AgentSSEEvent } from '../api';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
@@ -31,6 +31,11 @@ export interface AIChatStoreState {
   showTaskPanel: boolean;
   setShowTaskPanel: (v: boolean) => void;
   cancelRunningTask: (taskId: string) => void;
+  handleApprovalAction: (
+    approvalId: string,
+    action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run',
+    runId?: string,
+  ) => void;
 }
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
@@ -128,6 +133,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const commandLockRef = useRef(false);
+  const toolTimelineRef = useRef<Record<string, {
+    toolName: string;
+    executor: string;
+    startedAt: number;
+    statusIndex: number;
+    rawIndex?: number;
+  }>>({});
+  const latestBoardToolRef = useRef<string | null>(null);
+  const approvalBlockRef = useRef<Record<string, number>>({});
+  const sessionIdRef = useRef(`ui-${Date.now()}`);
 
   const summarizeToolArgs = (args: Record<string, unknown>) => {
     const entries = Object.entries(args || {});
@@ -171,6 +186,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const aiMsgId = msgId + 1;
         let aiText = '';
         const aiBlocks: ChatBlock[] = [];
+        let currentRunId = '';
+        toolTimelineRef.current = {};
+        latestBoardToolRef.current = null;
+        approvalBlockRef.current = {};
 
         setChatMessages(prev => [...prev, {
           id: aiMsgId, role: 'ai', text: '', blocks: [],
@@ -181,50 +200,167 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             m.id === aiMsgId ? { ...m, text, blocks: [...blocks] } : m
           ));
         };
+        const executorLabel = (executor: string) =>
+          executor === 'board_openclaw' ? '板端 OpenClaw' : 'RDK Studio Claw';
+        const resolveToolName = (data: Record<string, unknown>) =>
+          String(data.toolName || data.name || 'unknown_tool');
+        const resolveToolId = (data: Record<string, unknown>) =>
+          String(data.toolCallId || '');
+        const resolvePhase = (phase: unknown) => {
+          if (phase === 'start') return '准备中';
+          if (phase === 'running') return '执行中';
+          if (phase === 'end') return '已完成';
+          if (phase === 'error') return '失败';
+          return '执行中';
+        };
 
         const { done } = streamAgentChat(
           userMsg,
           currentDevice?.id,
-          undefined,
+          sessionIdRef.current,
           (event: AgentSSEEvent) => {
             switch (event.type) {
+              case 'meta': {
+                currentRunId = String(event.data.runId || currentRunId || '');
+                const executor = String(event.data.executor || 'rdkclaw_local');
+                const phase = resolvePhase(event.data.phase);
+                const message = String(event.data.message || '开始处理请求');
+                aiBlocks.push({
+                  type: 'status',
+                  items: [{ label: `执行主体: ${executorLabel(executor)}`, value: `${phase} · ${message}`, ok: true }],
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
               case 'text': {
                 aiText += (event.data.delta as string) || '';
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
               case 'tool_start': {
-                const toolName = event.data.toolName as string;
+                const toolName = resolveToolName(event.data);
                 const args = event.data.args as Record<string, unknown>;
+                const executor = String(event.data.executor || (toolName === 'board_openclaw_delegate' ? 'board_openclaw' : 'rdkclaw_local'));
+                const phase = resolvePhase(event.data.phase);
                 const argStr = summarizeToolArgs(args);
+                const statusIndex = aiBlocks.length;
                 aiBlocks.push({
                   type: 'status',
                   items: [
-                    { label: toolName, value: `执行中... ${argStr}`, ok: true },
+                    { label: `${toolName} · ${executorLabel(executor)}`, value: `${phase}... ${argStr}`, ok: true },
                   ],
                 });
+                const toolCallId = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
+                toolTimelineRef.current[toolCallId] = {
+                  toolName,
+                  executor,
+                  startedAt: Date.now(),
+                  statusIndex,
+                };
+                if (toolName === 'board_openclaw_delegate') {
+                  latestBoardToolRef.current = toolCallId;
+                }
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'tool_progress': {
+                const toolName = resolveToolName(event.data);
+                const chunk = String(event.data.chunk || '').trim();
+                if (!chunk) break;
+                const rawToolId = resolveToolId(event.data);
+                const fallbackId = latestBoardToolRef.current || '';
+                const toolId = rawToolId && toolTimelineRef.current[rawToolId] ? rawToolId : fallbackId;
+                if (!toolId || !toolTimelineRef.current[toolId]) break;
+                const state = toolTimelineRef.current[toolId];
+                const statusBlock = aiBlocks[state.statusIndex];
+                if (statusBlock?.type === 'status' && statusBlock.items[0]) {
+                  statusBlock.items[0].value = `执行中 · ${executorLabel(state.executor)} · 实时输出更新`;
+                }
+                const progressLines = chunk.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20);
+                if (progressLines.length === 0) break;
+                if (typeof state.rawIndex === 'number') {
+                  const rawBlock = aiBlocks[state.rawIndex];
+                  if (rawBlock?.type === 'terminal') {
+                    rawBlock.lines = [...rawBlock.lines, ...progressLines].slice(-240);
+                  }
+                } else {
+                  state.rawIndex = aiBlocks.length;
+                  aiBlocks.push({
+                    type: 'terminal',
+                    label: `${state.toolName} · 原始中间输出`,
+                    lines: progressLines,
+                    collapsible: true,
+                    previewLines: 10,
+                  });
+                }
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
               case 'tool_result': {
-                const toolName = event.data.toolName as string;
+                const toolName = resolveToolName(event.data);
                 const result = (event.data.result as string) || '';
                 const isError = event.data.isError as boolean;
-                const lastBlock = aiBlocks[aiBlocks.length - 1];
-                if (lastBlock?.type === 'status' && lastBlock.items?.[0]?.label === toolName) {
-                  aiBlocks.pop();
+                const toolCallId = resolveToolId(event.data);
+                const state = toolTimelineRef.current[toolCallId || ''];
+                const elapsedMs = state ? Date.now() - state.startedAt : 0;
+                if (state) {
+                  const statusBlock = aiBlocks[state.statusIndex];
+                  if (statusBlock?.type === 'status' && statusBlock.items[0]) {
+                    statusBlock.items[0] = {
+                      label: `${state.toolName} · ${executorLabel(state.executor)}`,
+                      value: `${isError ? '失败' : '完成'} · ${Math.max(1, elapsedMs)}ms`,
+                      ok: !isError,
+                    };
+                  }
                 }
                 if (result.includes('\n') || result.length > 100) {
                   aiBlocks.push({
                     type: 'terminal',
                     lines: result.split('\n').slice(0, 60),
-                    label: toolName,
+                    label: `${toolName} · 最终结果`,
+                    collapsible: true,
+                    previewLines: 10,
                   });
-                } else {
+                } else if (!state) {
                   aiBlocks.push({
                     type: 'status',
                     items: [{ label: toolName, value: result || (isError ? '失败' : '完成'), ok: !isError }],
                   });
+                }
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'approval_required': {
+                const approvalId = String(event.data.approvalId || '');
+                if (!approvalId) break;
+                const toolName = resolveToolName(event.data);
+                const risk = String(event.data.risk || 'medium') as 'low' | 'medium' | 'high';
+                const runId = String(event.data.runId || currentRunId || '');
+                const executor = String(event.data.executor || (toolName === 'board_openclaw_delegate' ? 'board_openclaw' : 'rdkclaw_local'));
+                const summary = `${toolName} · ${executorLabel(executor)} · 风险 ${risk.toUpperCase()}`;
+                approvalBlockRef.current[approvalId] = aiBlocks.length;
+                aiBlocks.push({
+                  type: 'approval',
+                  approvalId,
+                  runId,
+                  risk,
+                  executor,
+                  text: `需要你的确认后才能执行：${summary}`,
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'approval_decision': {
+                const approvalId = String(event.data.approvalId || '');
+                const decision = String(event.data.decision || 'allow_once');
+                const index = approvalBlockRef.current[approvalId];
+                if (typeof index === 'number') {
+                  aiBlocks[index] = {
+                    type: 'task-result',
+                    success: decision !== 'deny',
+                    title: decision === 'deny' ? '已拒绝执行' : '已确认执行',
+                    detail: `审批决策：${decision}`,
+                  };
                 }
                 updateAiMessage(aiText, aiBlocks);
                 break;
@@ -268,7 +404,73 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     })();
   };
 
+  const handleApprovalAction = (
+    approvalId: string,
+    action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run',
+    runId?: string,
+  ) => {
+    if (action === 'cancel_run') {
+      if (!runId) return;
+      cancelRDKClawRun(runId).catch(() => null);
+      setChatMessages((prev) => [...prev, {
+        id: Date.now(),
+        role: 'ai',
+        text: '',
+        blocks: [{ type: 'task-result', success: false, title: '已取消当前任务', detail: `runId: ${runId}` }],
+      }]);
+      return;
+    }
+    decideRDKClawApproval(approvalId, action).catch(() => null);
+    setChatMessages((prev) => prev.map((msg) => ({
+      ...msg,
+      blocks: msg.blocks?.map((b) => {
+        if (b.type !== 'approval' || b.approvalId !== approvalId) return b;
+        const ok = action !== 'deny';
+        return {
+          type: 'task-result',
+          success: ok,
+          title: ok ? '已提交审批决策' : '已拒绝执行',
+          detail: ok ? `策略：${action}` : '该步骤不会执行',
+        };
+      }),
+    })));
+  };
+
   // ── Effects ──
+
+  useEffect(() => {
+    const onNotify = (evt: Event) => {
+      const e = evt as CustomEvent<{
+        type?: string;
+        title?: string;
+        message?: string;
+        level?: string;
+        ts?: number;
+      }>;
+      const detail = e.detail ?? {};
+      const ts = detail.ts ?? Date.now();
+      const title = detail.title || '系统推送';
+      const message = detail.message || '收到新的系统事件';
+      const ok = detail.level !== 'error';
+      setChatExpanded(true);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: ts,
+          role: 'ai',
+          text: '',
+          blocks: [
+            {
+              type: 'status',
+              items: [{ label: title, value: message, ok }],
+            },
+          ],
+        },
+      ]);
+    };
+    window.addEventListener('rdkclaw-notify', onNotify as EventListener);
+    return () => window.removeEventListener('rdkclaw-notify', onNotify as EventListener);
+  }, []);
 
   // Persist chat history
   useEffect(() => {
@@ -304,7 +506,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     aiTyping, setAiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
-    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
+    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction,
   };
 
   return React.createElement(AIChatContext.Provider, { value }, children);

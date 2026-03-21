@@ -56,6 +56,7 @@ export interface RdkAgentRunOptions {
   deviceId?: string;
   sessionId?: string;
   providerConfig?: ProviderConfig;
+  systemPromptAppend?: string;
 }
 
 export interface RdkAgentRunResult {
@@ -95,7 +96,10 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
     tools.push(...createRdkTools(options.deviceId));
   }
 
-  const systemPrompt = buildSystemPrompt();
+  const systemPromptBase = buildSystemPrompt();
+  const systemPrompt = options.systemPromptAppend
+    ? `${systemPromptBase}\n\n---\n\n${options.systemPromptAppend}`
+    : systemPromptBase;
 
   const toolCtx: ToolContext = {
     workspaceDir: process.cwd(),

@@ -51,8 +51,21 @@ const Icon = {
   ),
 };
 
-function BlockRenderer({ block, onConfirm, onDismiss, onCancelTask }: { block: ChatBlock; onConfirm?: (id: string) => void; onDismiss?: (id: string) => void; onCancelTask?: (taskId: string) => void }) {
+function BlockRenderer({
+  block,
+  onConfirm,
+  onDismiss,
+  onCancelTask,
+  onApprovalAction,
+}: {
+  block: ChatBlock;
+  onConfirm?: (id: string) => void;
+  onDismiss?: (id: string) => void;
+  onCancelTask?: (taskId: string) => void;
+  onApprovalAction?: (approvalId: string, action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run', runId?: string) => void;
+}) {
   const [rosFrame, setRosFrame] = useState(0);
+  const [expandedTerminal, setExpandedTerminal] = useState(false);
 
   useEffect(() => {
     if (block.type !== 'image') return;
@@ -61,16 +74,31 @@ function BlockRenderer({ block, onConfirm, onDismiss, onCancelTask }: { block: C
   }, [block.type]);
 
   if (block.type === 'terminal') {
+    const previewLines = Math.max(3, block.previewLines ?? 10);
+    const collapsible = !!block.collapsible && block.lines.length > previewLines;
+    const visibleLines = collapsible && !expandedTerminal
+      ? block.lines.slice(-previewLines)
+      : block.lines;
     return (
       <div className="msg-block terminal-block">
         <div className="terminal-block-header">
           <span className="terminal-block-dots">
             <span className="td red" /><span className="td yellow" /><span className="td green" />
           </span>
-          <span className="terminal-block-label">Terminal</span>
+          <span className="terminal-block-label">{block.label || 'Terminal'}</span>
+          {collapsible && (
+            <button
+              type="button"
+              className="chat-panel-action"
+              onClick={() => setExpandedTerminal((prev) => !prev)}
+              title={expandedTerminal ? '收起输出' : '展开输出'}
+            >
+              {expandedTerminal ? '收起' : `展开 (${block.lines.length} 行)`}
+            </button>
+          )}
         </div>
         <div className="terminal-block-body">
-          {block.lines.map((line, i) => (
+          {visibleLines.map((line, i) => (
             <div key={i} className="terminal-block-line">{line}</div>
           ))}
         </div>
@@ -125,6 +153,21 @@ function BlockRenderer({ block, onConfirm, onDismiss, onCancelTask }: { block: C
         <div className="confirm-block-actions">
           <button className="confirm-btn yes" onClick={() => onConfirm?.(block.confirmId)}>确认执行</button>
           <button className="confirm-btn no" onClick={() => onDismiss?.(block.confirmId)}>取消</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'approval') {
+    return (
+      <div className="msg-block confirm-block">
+        <p className="confirm-block-text">{block.text}</p>
+        <div className="confirm-block-actions">
+          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_once', block.runId)}>本次允许</button>
+          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_session_auto', block.runId)}>本会话自动</button>
+          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_global_auto', block.runId)}>全局自动</button>
+          <button className="confirm-btn no" onClick={() => onApprovalAction?.(block.approvalId, 'deny', block.runId)}>拒绝</button>
+          <button className="confirm-btn no" onClick={() => onApprovalAction?.(block.approvalId, 'cancel_run', block.runId)}>取消当前任务</button>
         </div>
       </div>
     );
@@ -216,6 +259,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
+    handleApprovalAction,
     openclawConnected, setOpenclawConnected,
     currentDevice,
   } = useAppState();
@@ -377,6 +421,10 @@ export default function AIDock() {
     socket.on('openclaw:disconnected', () => {
       setOpenclawConnected(false);
       setAiTyping(false);
+    });
+
+    socket.on('rdkclaw:notify', (data: Record<string, unknown>) => {
+      window.dispatchEvent(new CustomEvent('rdkclaw-notify', { detail: data }));
     });
 
     socket.on('disconnect', () => {
@@ -676,7 +724,14 @@ export default function AIDock() {
                         : <p className="msg-text">{msg.text}</p>
                     )}
                     {msg.blocks?.map((block, i) => (
-                      <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} />
+                      <BlockRenderer
+                        key={i}
+                        block={block}
+                        onConfirm={executeConfirm}
+                        onDismiss={dismissConfirm}
+                        onCancelTask={cancelRunningTask}
+                        onApprovalAction={handleApprovalAction}
+                      />
                     ))}
                     {msg.action && (
                       <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import type { SkillManifest } from '../skills/types';
 import { fetchSkills, reloadSkills, fetchSkillMd } from '../skills/loader';
+import { fetchRDKClawPolicy, saveRDKClawPolicy, type RDKClawPolicy } from '../api';
 
 const CATEGORY_LABELS: Record<string, string> = {
   system: '系统',
@@ -29,6 +30,8 @@ export default function SkillBrowser() {
   const [selectedSkill, setSelectedSkill] = useState<SkillManifest | null>(null);
   const [skillMd, setSkillMd] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
+  const [policy, setPolicy] = useState<RDKClawPolicy | null>(null);
+  const [savingPolicy, setSavingPolicy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,6 +41,9 @@ export default function SkillBrowser() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetchRDKClawPolicy().then((res) => setPolicy(res.policy)).catch(() => null);
+  }, []);
 
   const handleReload = async () => {
     setLoading(true);
@@ -50,6 +56,17 @@ export default function SkillBrowser() {
     setSelectedSkill(skill);
     const md = await fetchSkillMd(skill.name);
     setSkillMd(md);
+  };
+
+  const savePolicy = async () => {
+    if (!policy) return;
+    setSavingPolicy(true);
+    try {
+      const res = await saveRDKClawPolicy(policy);
+      setPolicy(res.policy);
+    } finally {
+      setSavingPolicy(false);
+    }
   };
 
   const categories = [...new Set(skills.map(s => s.metadata?.rdkstudio?.category || 'general'))];
@@ -69,6 +86,87 @@ export default function SkillBrowser() {
 
   return (
     <div className="skill-browser">
+      {policy && (
+        <div className="skill-section">
+          <h3 className="skill-section-title">RDKClaw 策略面板</h3>
+          <div className="skill-detail-content">
+            <div className="skill-apis">
+              <h4>人格/记忆边界</h4>
+              <div className="skill-api-item">
+                <span className="skill-api-name">主会话读取 MEMORY</span>
+                <input
+                  type="checkbox"
+                  title="主会话读取 MEMORY"
+                  aria-label="主会话读取 MEMORY"
+                  checked={policy.memory.mainSessionReadsMemory}
+                  onChange={(e) => setPolicy({ ...policy, memory: { ...policy.memory, mainSessionReadsMemory: e.target.checked } })}
+                />
+              </div>
+              <div className="skill-api-item">
+                <span className="skill-api-name">共享会话屏蔽 MEMORY</span>
+                <input
+                  type="checkbox"
+                  title="共享会话屏蔽 MEMORY"
+                  aria-label="共享会话屏蔽 MEMORY"
+                  checked={policy.memory.sharedSessionBlocksMemory}
+                  onChange={(e) => setPolicy({ ...policy, memory: { ...policy.memory, sharedSessionBlocksMemory: e.target.checked } })}
+                />
+              </div>
+            </div>
+            <div className="skill-apis">
+              <h4>委派策略</h4>
+              <select
+                title="委派策略"
+                aria-label="委派策略"
+                value={policy.delegation.strategy}
+                onChange={(e) => setPolicy({ ...policy, delegation: { ...policy.delegation, strategy: e.target.value as RDKClawPolicy['delegation']['strategy'] } })}
+              >
+                <option value="local-first">local-first</option>
+                <option value="board-first">board-first</option>
+                <option value="hybrid">hybrid</option>
+              </select>
+            </div>
+            <div className="skill-apis">
+              <h4>审批策略</h4>
+              <select
+                title="审批模式"
+                aria-label="审批模式"
+                value={policy.approval.mode}
+                onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } })}
+              >
+                <option value="always">always</option>
+                <option value="risk-based">risk-based</option>
+                <option value="auto">auto</option>
+              </select>
+              <select
+                title="风险阈值"
+                aria-label="风险阈值"
+                value={policy.approval.riskThreshold}
+                onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } })}
+              >
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </div>
+            <div className="skill-apis">
+              <h4>定时模板/推送渠道</h4>
+              <select
+                title="默认推送渠道"
+                aria-label="默认推送渠道"
+                value={policy.scheduler.defaultChannel}
+                onChange={(e) => setPolicy({ ...policy, scheduler: { ...policy.scheduler, defaultChannel: e.target.value as RDKClawPolicy['scheduler']['defaultChannel'] } })}
+              >
+                <option value="chat">chat</option>
+                <option value="feishu">feishu</option>
+              </select>
+            </div>
+            <button className="skill-reload-btn" onClick={savePolicy} disabled={savingPolicy}>
+              {savingPolicy ? '保存中...' : '保存策略'}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="skill-browser-header">
         <h2>Skills</h2>
         <div className="skill-browser-controls">

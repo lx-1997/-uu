@@ -182,6 +182,11 @@ export interface AppState {
   showTaskPanel: boolean;
   setShowTaskPanel: (v: boolean) => void;
   cancelRunningTask: (taskId: string) => void;
+  handleApprovalAction: (
+    approvalId: string,
+    action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run',
+    runId?: string,
+  ) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);

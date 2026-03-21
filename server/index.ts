@@ -21,8 +21,12 @@ import {
   DIAGNOSTIC_COMMANDS, buildSystemPrompt,
 } from './constants.js';
 import { loadAllSkills, getSkillByName, getRawSkillMd, buildSkillContext, bridgeEcoSkill } from './skill-loader.js';
-import { runRdkAgent } from './agent/rdk-agent.js';
 import { loadProviderConfig, saveProviderConfig, type ProviderConfig } from './agent/provider-setup.js';
+import { RDKClawApp } from './rdkclaw/app.js';
+import { FeishuChannelAdapter } from './rdkclaw/feishu-channel-adapter.js';
+import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
+import { NotificationHub } from './rdkclaw/notification-hub.js';
+import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -84,6 +88,18 @@ const devicePasswordCache = new Map<string, string>();
 // OpenClaw Manager
 const resourcesPath = path.join(process.cwd(), 'build-resources');
 const openClawManager = new OpenClawDeploymentManager(resourcesPath);
+const rdkclaw = new RDKClawApp(process.cwd(), openClawManager);
+const notificationHub = new NotificationHub(io);
+const feishuAdapter = new FeishuChannelAdapter(rdkclaw);
+const autonomyScheduler = new AutonomyScheduler(rdkclaw, notificationHub);
+rdkclaw.setAutonomyRuntime({
+  listTasks: () => autonomyScheduler.list(),
+  createTask: (input) => autonomyScheduler.create(input),
+  pauseTask: (taskId) => autonomyScheduler.pause(taskId),
+  resumeTask: (taskId) => autonomyScheduler.resume(taskId),
+  approveTask: (taskId) => autonomyScheduler.approve(taskId),
+});
+autonomyScheduler.start();
 
 const credentialCacheKey = (host: string, username: string, port = 22) => `${host}:${port}::${username}`;
 const shEscape = (raw: string) => `'${raw.replace(/'/g, `'"'"'`)}'`;
@@ -1207,7 +1223,7 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
     if (!device) return;
     const { password } = resolvePassword(request, device);
     const candidates = password ? [password] : passwordCandidates(device.username);
-    let lastError = null;
+    let lastError: unknown = null;
     
     for (const pwd of candidates) {
       try {
@@ -1468,13 +1484,173 @@ app.post('/api/agent/config', (request, response) => {
   response.json({ ok: true });
 });
 
+// ─── RDKClaw Core Config ───
+
+app.get('/api/rdkclaw/persona', (_request, response) => {
+  response.json({ ok: true, persona: rdkclaw.getPersona() });
+});
+
+app.post('/api/rdkclaw/persona', (request, response) => {
+  const patch = request.body ?? {};
+  const persona = rdkclaw.updatePersona(patch);
+  response.json({ ok: true, persona });
+});
+
+app.get('/api/rdkclaw/policy', (_request, response) => {
+  response.json({ ok: true, policy: rdkclaw.getPolicy() });
+});
+
+app.post('/api/rdkclaw/policy', (request, response) => {
+  const patch = request.body ?? {};
+  response.json({ ok: true, policy: rdkclaw.savePolicy(patch) });
+});
+
+app.post('/api/rdkclaw/approvals/:approvalId/decision', (request, response) => {
+  const decision = String(request.body?.decision || '') as ApprovalDecisionMode;
+  if (!decision) {
+    response.status(400).json({ error: '缺少 decision' });
+    return;
+  }
+  const ok = rdkclaw.decideApproval(request.params.approvalId, decision);
+  if (!ok) {
+    response.status(404).json({ error: '审批请求不存在或已结束' });
+    return;
+  }
+  response.json({ ok: true });
+});
+
+app.post('/api/rdkclaw/runs/:runId/cancel', (request, response) => {
+  const ok = rdkclaw.cancelRun(request.params.runId);
+  if (!ok) {
+    response.status(404).json({ error: '运行不存在或已结束' });
+    return;
+  }
+  response.json({ ok: true });
+});
+
+app.get('/api/rdkclaw/users/:userId', (request, response) => {
+  const user = rdkclaw.getUserProfile(request.params.userId);
+  response.json({ ok: true, user });
+});
+
+app.post('/api/rdkclaw/users/:userId', (request, response) => {
+  const body = request.body ?? {};
+  const user = rdkclaw.saveUserProfile({
+    userId: request.params.userId,
+    preferredExecutor: body.preferredExecutor ?? 'auto',
+    preferredLanguage: body.preferredLanguage ?? 'zh-CN',
+    notes: body.notes ?? '',
+  });
+  response.json({ ok: true, user });
+});
+
+app.get('/api/rdkclaw/skills', (_request, response) => {
+  response.json({ ok: true, skills: rdkclaw.listSkills() });
+});
+
+app.post('/api/rdkclaw/skills/reload', (_request, response) => {
+  response.json({ ok: true, skills: rdkclaw.reloadSkills() });
+});
+
+// ─── RDKClaw Autonomy Tasks ───
+
+app.get('/api/rdkclaw/tasks', (_request, response) => {
+  response.json({ ok: true, tasks: autonomyScheduler.list() });
+});
+
+app.post('/api/rdkclaw/tasks', (request, response) => {
+  const {
+    name,
+    prompt,
+    intervalMinutes,
+    intervalSeconds,
+    cron,
+    timezone,
+    mode,
+    requiresApproval,
+  } = request.body ?? {};
+  if (!name || !prompt || (!intervalMinutes && !intervalSeconds && !cron)) {
+    response.status(400).json({ error: 'name、prompt 及 intervalMinutes/intervalSeconds/cron 至少其一为必填项' });
+    return;
+  }
+  const task = autonomyScheduler.create({
+    name: String(name),
+    prompt: String(prompt),
+    intervalMinutes: intervalMinutes ? Number(intervalMinutes) : undefined,
+    intervalSeconds: intervalSeconds ? Number(intervalSeconds) : undefined,
+    cron: cron ? String(cron) : undefined,
+    timezone: timezone ? String(timezone) : undefined,
+    mode: (mode || 'board-preferred') as RDKClawExecutionMode,
+    requiresApproval: !!requiresApproval,
+  });
+  response.json({ ok: true, task });
+});
+
+app.post('/api/rdkclaw/tasks/:id/approve', (request, response) => {
+  autonomyScheduler.approve(request.params.id);
+  response.json({ ok: true });
+});
+
+app.post('/api/rdkclaw/tasks/:id/pause', (request, response) => {
+  autonomyScheduler.pause(request.params.id);
+  response.json({ ok: true });
+});
+
+app.post('/api/rdkclaw/tasks/:id/resume', (request, response) => {
+  autonomyScheduler.resume(request.params.id);
+  response.json({ ok: true });
+});
+
+// ─── Channel Adapter: Feishu (MVP webhook bridge) ───
+
+app.post('/api/channels/feishu/webhook', async (request, response) => {
+  try {
+    const body = request.body ?? {};
+    const challenge = body.challenge;
+    if (challenge) {
+      response.json({ challenge });
+      return;
+    }
+
+    const text = body?.event?.message?.content
+      ? (() => {
+          try {
+            const parsed = JSON.parse(body.event.message.content);
+            return parsed.text || '';
+          } catch {
+            return '';
+          }
+        })()
+      : (body.text ?? '');
+    const userId = body?.event?.sender?.sender_id?.open_id
+      || body?.userId
+      || 'feishu-anonymous';
+    if (!text || !String(text).trim()) {
+      response.status(400).json({ error: '消息为空' });
+      return;
+    }
+    const result = await feishuAdapter.handleInbound({
+      userId: String(userId),
+      text: String(text),
+      chatId: body?.event?.message?.chat_id,
+    });
+    response.json({ ok: true, reply: result.text });
+  } catch (error) {
+    response.status(500).json({
+      error: error instanceof Error ? error.message : 'Feishu webhook 处理失败',
+    });
+  }
+});
+
 // ─── Agent Chat (SSE) ───
 
 app.post('/api/agent/chat', async (request, response) => {
-  const { message, deviceId, sessionId } = request.body as {
+  const { message, deviceId, sessionId, userId, mode } = request.body as {
     message?: string;
     deviceId?: string;
     sessionId?: string;
+    userId?: string;
+    mode?: RDKClawExecutionMode;
   };
 
   if (!message?.trim()) {
@@ -1483,65 +1659,28 @@ app.post('/api/agent/chat', async (request, response) => {
   }
 
   try {
-    const { stream, runId, sessionKey } = await runRdkAgent({
-      message: message.trim(),
-      deviceId,
-      sessionId,
-    });
+    const runId = uuid();
 
     response.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'X-Run-Id': runId,
-      'X-Session-Key': sessionKey,
+      'X-Session-Key': sessionId || '',
     });
 
     const sendEvent = (event: string, data: unknown) => {
       response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    for await (const event of stream) {
-      switch (event.type) {
-        case 'message_delta':
-          sendEvent('text', { delta: event.delta });
-          break;
-        case 'message_end':
-          sendEvent('message_end', { text: event.text });
-          break;
-        case 'tool_execution_start':
-          sendEvent('tool_start', {
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            args: event.args,
-          });
-          break;
-        case 'tool_execution_end':
-          sendEvent('tool_result', {
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            result: event.result,
-            isError: event.isError,
-          });
-          break;
-        case 'turn_start':
-          sendEvent('turn_start', { turn: event.turn });
-          break;
-        case 'turn_end':
-          sendEvent('turn_end', { turn: event.turn });
-          break;
-        case 'agent_end':
-          sendEvent('done', { runId: event.runId });
-          break;
-        case 'agent_error':
-          sendEvent('error', { error: event.error });
-          break;
-        case 'retry':
-          sendEvent('retry', { attempt: event.attempt, delay: event.delay });
-          break;
-        default:
-          break;
-      }
+    for await (const event of rdkclaw.streamChat({
+      message: message.trim(),
+      deviceId,
+      sessionId,
+      userId,
+      mode,
+    })) {
+      sendEvent(event.type, event.data);
     }
 
     response.end();

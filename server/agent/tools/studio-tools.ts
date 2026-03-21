@@ -1,9 +1,13 @@
 import type { Tool } from './types.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   loadProviderConfig,
   saveProviderConfig,
   type ProviderConfig,
 } from '../provider-setup.js';
+import type { RDKClawExecutionMode } from '../../rdkclaw/types.js';
+import type { AutonomyTask } from '../../rdkclaw/autonomy-scheduler.js';
 
 const ALLOWED_PROVIDERS = new Set<ProviderConfig['provider']>([
   'qwen',
@@ -75,10 +79,206 @@ function setStudioAgentConfigTool(): Tool<{
   };
 }
 
-export function createStudioTools(): Tool[] {
-  return [
+export interface StudioAutonomyRuntime {
+  listTasks: () => AutonomyTask[];
+  createTask: (input: {
+    name: string;
+    prompt: string;
+    intervalMinutes?: number;
+    intervalSeconds?: number;
+    cron?: string;
+    timezone?: string;
+    mode?: RDKClawExecutionMode;
+    requiresApproval?: boolean;
+  }) => AutonomyTask;
+  pauseTask: (taskId: string) => void;
+  resumeTask: (taskId: string) => void;
+  approveTask: (taskId: string) => void;
+}
+
+function listAutonomyTasksTool(runtime: StudioAutonomyRuntime): Tool<Record<string, never>> {
+  return {
+    name: 'rdkclaw_task_list',
+    description: '列出 RDKClaw 的定时任务，包括状态、调度类型和最近执行时间。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      return JSON.stringify(runtime.listTasks(), null, 2);
+    },
+  };
+}
+
+function createAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{
+  name: string;
+  prompt?: string;
+  intervalMinutes?: number;
+  intervalSeconds?: number;
+  cron?: string;
+  timezone?: string;
+  mode?: RDKClawExecutionMode;
+  requiresApproval?: boolean;
+}> {
+  return {
+    name: 'rdkclaw_task_create',
+    description: '创建 RDKClaw 定时任务。支持秒级、分钟级或 cron。用于无需用户触发的自治消息与巡检任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '任务名称' },
+        prompt: { type: 'string', description: '执行提示词。不填时默认每次推送 hello。' },
+        intervalMinutes: { type: 'number', description: '分钟级间隔' },
+        intervalSeconds: { type: 'number', description: '秒级间隔（如 1 表示每秒）' },
+        cron: { type: 'string', description: 'cron 表达式（5 段）' },
+        timezone: { type: 'string', description: '时区，默认 local' },
+        mode: { type: 'string', description: 'auto/local/board/board-preferred' },
+        requiresApproval: { type: 'boolean', description: '是否需要审批' },
+      },
+      required: ['name'],
+    },
+    async execute(input) {
+      const task = runtime.createTask({
+        name: input.name,
+        prompt: input.prompt?.trim() || '请只输出 hello',
+        intervalMinutes: input.intervalMinutes,
+        intervalSeconds: input.intervalSeconds,
+        cron: input.cron?.trim(),
+        timezone: input.timezone?.trim(),
+        mode: input.mode || 'local',
+        requiresApproval: !!input.requiresApproval,
+      });
+      return `已创建定时任务: ${task.id}\n${JSON.stringify(task, null, 2)}`;
+    },
+  };
+}
+
+function pauseAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{ taskId: string }> {
+  return {
+    name: 'rdkclaw_task_pause',
+    description: '暂停指定定时任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: '任务 ID' },
+      },
+      required: ['taskId'],
+    },
+    async execute(input) {
+      runtime.pauseTask(input.taskId);
+      return `已暂停任务: ${input.taskId}`;
+    },
+  };
+}
+
+function resumeAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{ taskId: string }> {
+  return {
+    name: 'rdkclaw_task_resume',
+    description: '恢复指定定时任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: '任务 ID' },
+      },
+      required: ['taskId'],
+    },
+    async execute(input) {
+      runtime.resumeTask(input.taskId);
+      return `已恢复任务: ${input.taskId}`;
+    },
+  };
+}
+
+function approveAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{ taskId: string }> {
+  return {
+    name: 'rdkclaw_task_approve',
+    description: '审批指定定时任务。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: '任务 ID' },
+      },
+      required: ['taskId'],
+    },
+    async execute(input) {
+      runtime.approveTask(input.taskId);
+      return `已审批任务: ${input.taskId}`;
+    },
+  };
+}
+
+function resolveAgentRoot(workspaceDir?: string): string {
+  const cwd = workspaceDir || process.cwd();
+  const roots = [cwd, path.join(cwd, 'agent')];
+  for (const base of roots) {
+    if (fs.existsSync(path.join(base, 'AGENTS.md'))) return base;
+  }
+  return path.join(cwd, 'agent');
+}
+
+function appendDailyMemoryTool(): Tool<{ note: string; date?: string }> {
+  return {
+    name: 'rdkclaw_memory_append_daily',
+    description: '将重要信息写入 daily memory（memory/YYYY-MM-DD.md）。用户说“记住这个”时使用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note: { type: 'string', description: '要记住的内容' },
+        date: { type: 'string', description: '可选，YYYY-MM-DD' },
+      },
+      required: ['note'],
+    },
+    async execute(input, ctx) {
+      const root = resolveAgentRoot(ctx.workspaceDir);
+      const token = (input.date || new Date().toISOString().slice(0, 10)).trim();
+      const memoryDir = path.join(root, 'memory');
+      const file = path.join(memoryDir, `${token}.md`);
+      if (!fs.existsSync(memoryDir)) fs.mkdirSync(memoryDir, { recursive: true });
+      const row = `- ${new Date().toISOString()} ${input.note.trim()}\n`;
+      fs.appendFileSync(file, row, 'utf-8');
+      return `已写入 daily memory: ${file}`;
+    },
+  };
+}
+
+function promoteLongTermMemoryTool(): Tool<{ summary: string }> {
+  return {
+    name: 'rdkclaw_memory_promote_longterm',
+    description: '将 daily memory 提炼结果写入 MEMORY.md（仅主会话）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: '提炼后的长期记忆内容' },
+      },
+      required: ['summary'],
+    },
+    async execute(input, ctx) {
+      const key = String(ctx.sessionKey || '');
+      if (key.startsWith('feishu-') || key.startsWith('feishu:') || key.startsWith('autonomy-') || key.startsWith('auto:') || key.startsWith('channel:')) {
+        return '共享会话禁止写入 MEMORY.md，请改写入 daily memory。';
+      }
+      const root = resolveAgentRoot(ctx.workspaceDir);
+      const file = path.join(root, 'MEMORY.md');
+      const row = `\n## ${new Date().toISOString()}\n- ${input.summary.trim()}\n`;
+      fs.appendFileSync(file, row, 'utf-8');
+      return `已更新长期记忆: ${file}`;
+    },
+  };
+}
+
+export function createStudioTools(runtime?: StudioAutonomyRuntime): Tool[] {
+  const tools: Tool[] = [
     getStudioAgentConfigTool(),
     setStudioAgentConfigTool(),
+    appendDailyMemoryTool(),
+    promoteLongTermMemoryTool(),
   ];
+  if (runtime) {
+    tools.push(
+      listAutonomyTasksTool(runtime),
+      createAutonomyTaskTool(runtime),
+      pauseAutonomyTaskTool(runtime),
+      resumeAutonomyTaskTool(runtime),
+      approveAutonomyTaskTool(runtime),
+    );
+  }
+  return tools;
 }
 
