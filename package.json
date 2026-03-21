@@ -106,6 +106,7 @@
     }
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@mariozechner/pi-ai": "^0.50.7",
     "@monaco-editor/react": "^4.7.0",
     "@novnc/novnc": "^1.6.0",

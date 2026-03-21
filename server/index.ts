@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
+import crypto from 'node:crypto';
 import type { ChatMessage, Device } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
 import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js';
@@ -26,6 +27,8 @@ import { RDKClawApp } from './rdkclaw/app.js';
 import { FeishuChannelAdapter } from './rdkclaw/feishu-channel-adapter.js';
 import { FeishuApiClient } from './rdkclaw/feishu-api-client.js';
 import { FeishuAuthStore } from './rdkclaw/feishu-auth-store.js';
+import { FeishuConfigStore } from './rdkclaw/feishu-config-store.js';
+import { FeishuWebSocketChannel } from './agent/channels/feishu.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
@@ -104,9 +107,18 @@ const openClawManager = new OpenClawDeploymentManager(resourcesPath);
 const rdkclaw = new RDKClawApp(process.cwd(), openClawManager);
 const notificationHub = new NotificationHub(io);
 const feishuAdapter = new FeishuChannelAdapter(rdkclaw);
-const feishuApi = new FeishuApiClient();
+const feishuConfigStore = new FeishuConfigStore();
+let feishuConfig = feishuConfigStore.getConfig();
+let feishuApi = new FeishuApiClient(feishuConfig.appId, feishuConfig.appSecret);
 const feishuAuth = new FeishuAuthStore();
+const feishuChannel = new FeishuWebSocketChannel({
+  rdkclaw,
+  authStore: feishuAuth,
+  getConfig: () => feishuConfig,
+});
 const feishuEventSeen = new Map<string, number>();
+let feishuLastEventAt: number | null = null;
+let feishuLastAuthorizedAt: number | null = null;
 const autonomyScheduler = new AutonomyScheduler(rdkclaw, notificationHub);
 if (!feishuApi.isConfigured()) {
   console.warn('[Feishu] FEISHU_APP_ID / FEISHU_APP_SECRET 未配置，Webhook 将无法主动回消息。');
@@ -120,6 +132,9 @@ rdkclaw.setAutonomyRuntime({
   approveTask: (taskId) => autonomyScheduler.approve(taskId),
 });
 autonomyScheduler.start();
+syncFeishuRuntime().catch((error) => {
+  console.error('[Feishu] websocket 初始化失败:', error instanceof Error ? error.message : error);
+});
 
 const credentialCacheKey = (host: string, username: string, port = 22) => `${host}:${port}::${username}`;
 const shEscape = (raw: string) => `'${raw.replace(/'/g, `'"'"'`)}'`;
@@ -199,6 +214,37 @@ function maskOpenId(openId: string) {
   if (!openId) return '';
   if (openId.length <= 8) return `${openId.slice(0, 2)}***${openId.slice(-2)}`;
   return `${openId.slice(0, 4)}***${openId.slice(-4)}`;
+}
+
+function maskSecret(raw: string) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value.length <= 8) return `${value.slice(0, 2)}***${value.slice(-2)}`;
+  return `${value.slice(0, 4)}***${value.slice(-4)}`;
+}
+
+function applyFeishuConfig(next: ReturnType<FeishuConfigStore['getConfig']>) {
+  feishuConfig = next;
+  feishuApi = new FeishuApiClient(feishuConfig.appId, feishuConfig.appSecret);
+}
+
+async function syncFeishuRuntime() {
+  const cfg = feishuConfigStore.getConfig();
+  applyFeishuConfig(cfg);
+  if (!cfg.enabled || cfg.connectionMode !== 'websocket') {
+    await feishuChannel.stop();
+    return;
+  }
+  await feishuChannel.restart();
+}
+
+function decodeFeishuEncrypt(encrypt: string, encryptKey: string) {
+  const key = crypto.createHash('sha256').update(encryptKey, 'utf8').digest();
+  const iv = key.subarray(0, 16);
+  const encrypted = Buffer.from(encrypt, 'base64');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  const plain = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+  return JSON.parse(plain) as Record<string, unknown>;
 }
 
 async function runOnDevice(
@@ -1705,6 +1751,156 @@ app.get('/api/rdkclaw/feishu/auth/bound', (_request, response) => {
   response.json({ ok: true, users, total: users.length });
 });
 
+app.get('/api/rdkclaw/feishu/pairing/requests', (_request, response) => {
+  const requests = feishuAuth.listPending().map((item) => ({
+    openId: maskOpenId(item.openId),
+    rawOpenId: item.openId,
+    chatId: item.chatId || '',
+    code: item.code,
+    expireAt: item.expireAt,
+    createdAt: item.createdAt,
+  }));
+  response.json({ ok: true, requests, total: requests.length });
+});
+
+app.post('/api/rdkclaw/feishu/pairing/approve', (request, response) => {
+  const code = String(request.body?.code || '').trim();
+  if (!/^\d{6}$/.test(code)) {
+    response.status(400).json({ error: '配对码格式错误，应为 6 位数字' });
+    return;
+  }
+  const result = feishuAuth.approveByCode(code);
+  if (!result.ok) {
+    response.status(400).json({ ok: false, error: result.reason || '审批失败' });
+    return;
+  }
+  response.json({ ok: true, openId: maskOpenId(result.openId || '') });
+});
+
+app.post('/api/rdkclaw/feishu/pairing/reject', (request, response) => {
+  const code = String(request.body?.code || '').trim();
+  if (!/^\d{6}$/.test(code)) {
+    response.status(400).json({ error: '配对码格式错误，应为 6 位数字' });
+    return;
+  }
+  const result = feishuAuth.rejectByCode(code);
+  if (!result.ok) {
+    response.status(400).json({ ok: false, error: result.reason || '拒绝失败' });
+    return;
+  }
+  response.json({ ok: true });
+});
+
+app.get('/api/rdkclaw/feishu/config', (_request, response) => {
+  const cfg = feishuConfigStore.getConfig();
+  response.json({
+    ok: true,
+    config: {
+      enabled: cfg.enabled,
+      connectionMode: cfg.connectionMode,
+      domain: cfg.domain,
+      dmPolicy: cfg.dmPolicy,
+      appId: cfg.appId,
+      appSecretMasked: maskSecret(cfg.appSecret),
+      verificationTokenMasked: maskSecret(cfg.verificationToken),
+      encryptKeyMasked: maskSecret(cfg.encryptKey),
+      hasAppSecret: !!cfg.appSecret,
+      hasVerificationToken: !!cfg.verificationToken,
+      hasEncryptKey: !!cfg.encryptKey,
+    },
+  });
+});
+
+app.post('/api/rdkclaw/feishu/config', (request, response) => {
+  const body = request.body ?? {};
+  const connectionMode = body.connectionMode === 'webhook' || body.connectionMode === 'websocket'
+    ? body.connectionMode
+    : undefined;
+  const domain = body.domain === 'lark' || body.domain === 'feishu'
+    ? body.domain
+    : undefined;
+  const dmPolicy = body.dmPolicy === 'pairing' || body.dmPolicy === 'allowlist' || body.dmPolicy === 'open'
+    ? body.dmPolicy
+    : undefined;
+  const patch = {
+    enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+    connectionMode,
+    domain,
+    dmPolicy,
+    appId: typeof body.appId === 'string' ? body.appId : undefined,
+    appSecret: typeof body.appSecret === 'string' ? body.appSecret : undefined,
+    verificationToken: typeof body.verificationToken === 'string' ? body.verificationToken : undefined,
+    encryptKey: typeof body.encryptKey === 'string' ? body.encryptKey : undefined,
+  };
+  const next = feishuConfigStore.saveConfig(patch);
+  syncFeishuRuntime()
+    .then(() => {
+      response.json({
+        ok: true,
+        configured: !!(next.appId && next.appSecret),
+        hasVerificationToken: !!next.verificationToken,
+        hasEncryptKey: !!next.encryptKey,
+        connectionMode: next.connectionMode,
+        enabled: next.enabled,
+      });
+    })
+    .catch((error) => {
+      response.status(500).json({ error: error instanceof Error ? error.message : '飞书配置应用失败' });
+    });
+});
+
+app.get('/api/rdkclaw/feishu/status', (request, response) => {
+  const proto = String(request.headers['x-forwarded-proto'] || request.protocol || 'https');
+  const host = String(request.headers['x-forwarded-host'] || request.headers.host || 'your-public-host');
+  const webhookPath = '/api/channels/feishu/webhook';
+  const cfg = feishuConfigStore.getConfig();
+  const hasAppId = !!cfg.appId;
+  const hasAppSecret = !!cfg.appSecret;
+  const configured = hasAppId && hasAppSecret;
+  response.json({
+    ok: true,
+    status: {
+      configured,
+      enabled: cfg.enabled,
+      connectionMode: cfg.connectionMode,
+      dmPolicy: cfg.dmPolicy,
+      domain: cfg.domain,
+      hasAppId,
+      hasAppSecret,
+      webhookPath,
+      webhookUrlTemplate: `${proto}://${host}${webhookPath}`,
+      boundUsers: feishuAuth.listBound().length,
+      pendingPairings: feishuAuth.listPending().length,
+      lastEventAt: feishuLastEventAt,
+      lastAuthorizedAt: feishuLastAuthorizedAt,
+      dedupCacheSize: feishuEventSeen.size,
+      runtime: feishuChannel.getStatus(),
+    },
+  });
+});
+
+app.get('/api/rdkclaw/feishu/runtime', (_request, response) => {
+  response.json({ ok: true, runtime: feishuChannel.getStatus() });
+});
+
+app.post('/api/rdkclaw/feishu/runtime/start', (_request, response) => {
+  syncFeishuRuntime()
+    .then(() => response.json({ ok: true, runtime: feishuChannel.getStatus() }))
+    .catch((error) => response.status(500).json({ error: error instanceof Error ? error.message : '启动失败' }));
+});
+
+app.post('/api/rdkclaw/feishu/runtime/stop', (_request, response) => {
+  feishuChannel.stop()
+    .then(() => response.json({ ok: true, runtime: feishuChannel.getStatus() }))
+    .catch((error) => response.status(500).json({ error: error instanceof Error ? error.message : '停止失败' }));
+});
+
+app.post('/api/rdkclaw/feishu/runtime/restart', (_request, response) => {
+  syncFeishuRuntime()
+    .then(() => response.json({ ok: true, runtime: feishuChannel.getStatus() }))
+    .catch((error) => response.status(500).json({ error: error instanceof Error ? error.message : '重启失败' }));
+});
+
 app.get('/api/rdkclaw/users/:userId', (request, response) => {
   const user = rdkclaw.getUserProfile(request.params.userId);
   response.json({ ok: true, user });
@@ -1787,8 +1983,32 @@ app.post('/api/rdkclaw/tasks/:id/resume', (request, response) => {
 
 app.post('/api/channels/feishu/webhook', async (request, response) => {
   const startedAt = Date.now();
+  feishuLastEventAt = startedAt;
   try {
-    const body = request.body ?? {};
+    const modeCfg = feishuConfigStore.getConfig();
+    if (modeCfg.connectionMode !== 'webhook') {
+      response.status(409).json({
+        ok: false,
+        error: '当前飞书连接模式为 websocket，webhook 仅兼容模式可用',
+      });
+      return;
+    }
+    const rawBody = request.body ?? {};
+    const cfg = modeCfg;
+    const body = (rawBody?.encrypt && cfg.encryptKey)
+      ? decodeFeishuEncrypt(String(rawBody.encrypt), cfg.encryptKey)
+      : rawBody;
+    if (rawBody?.encrypt && !cfg.encryptKey) {
+      response.status(400).json({ error: '收到加密事件但未配置 FEISHU_ENCRYPT_KEY' });
+      return;
+    }
+    if (cfg.verificationToken) {
+      const incomingToken = String((body as Record<string, unknown>)?.token || '');
+      if (!incomingToken || incomingToken !== cfg.verificationToken) {
+        response.status(401).json({ error: '飞书 token 校验失败' });
+        return;
+      }
+    }
     const challenge = body.challenge;
     if (challenge) {
       response.json({ challenge });
@@ -1838,6 +2058,7 @@ app.post('/api/channels/feishu/webhook', async (request, response) => {
       text: msgText,
       chatId,
     });
+    feishuLastAuthorizedAt = Date.now();
     if (chatId && feishuApi.isConfigured()) {
       await feishuApi.sendTextToChat(String(chatId), result.text || 'RDKClaw 已处理完成。');
     }

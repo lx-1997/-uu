@@ -8,6 +8,7 @@ type PendingCode = {
   code: string;
   expireAt: number;
   used: boolean;
+  rejected?: boolean;
   createdAt: number;
 };
 
@@ -80,6 +81,11 @@ export class FeishuAuthStore {
 
   issueCode(openId: string, chatId?: string): string {
     this.gc();
+    const existing = this.data.pending
+      .filter((item) => !item.used && !item.rejected && item.expireAt > now() && item.openId === openId)
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (existing) return existing.code;
+
     const code = String(Math.floor(100000 + Math.random() * 900000));
     this.data.pending.push({
       openId,
@@ -102,6 +108,9 @@ export class FeishuAuthStore {
     if (token.used) {
       return { ok: false, reason: "授权码已使用" };
     }
+    if (token.rejected) {
+      return { ok: false, reason: "该配对请求已被拒绝" };
+    }
     if (token.expireAt <= now()) {
       return { ok: false, reason: "授权码已过期" };
     }
@@ -114,13 +123,49 @@ export class FeishuAuthStore {
         viaCode: token.code,
       });
     }
+    // 同一用户完成绑定后，清理其它未使用的待配对码，避免重复干扰
+    this.data.pending = this.data.pending.map((item) => {
+      if (item.openId === token.openId && item.code !== token.code && !item.used && !item.rejected) {
+        return { ...item, rejected: true };
+      }
+      return item;
+    });
     this.save();
     return { ok: true, openId: token.openId };
+  }
+
+  bindByCodeForOpenId(code: string, openId: string): { ok: boolean; openId?: string; reason?: string } {
+    this.gc();
+    const token = this.data.pending.find((item) => item.code === code);
+    if (!token) return { ok: false, reason: "授权码不存在或已过期" };
+    if (token.openId !== openId) return { ok: false, reason: "授权码与当前飞书账号不匹配" };
+    return this.bindByCode(code);
   }
 
   listBound() {
     this.gc();
     return [...this.data.bound];
+  }
+
+  listPending() {
+    this.gc();
+    return this.data.pending
+      .filter((item) => !item.used && !item.rejected && item.expireAt > now())
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  approveByCode(code: string) {
+    return this.bindByCode(code);
+  }
+
+  rejectByCode(code: string): { ok: boolean; reason?: string } {
+    this.gc();
+    const token = this.data.pending.find((item) => item.code === code);
+    if (!token) return { ok: false, reason: "配对码不存在或已过期" };
+    if (token.used) return { ok: false, reason: "配对码已被使用" };
+    token.rejected = true;
+    this.save();
+    return { ok: true };
   }
 }
 

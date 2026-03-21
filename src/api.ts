@@ -192,6 +192,44 @@ export interface RDKClawPolicy {
   };
 }
 
+export interface FeishuRuntimeStatus {
+  configured: boolean;
+  enabled: boolean;
+  connectionMode: 'websocket' | 'webhook';
+  dmPolicy: 'pairing' | 'allowlist' | 'open';
+  domain: 'feishu' | 'lark';
+  hasAppId: boolean;
+  hasAppSecret: boolean;
+  webhookPath: string;
+  webhookUrlTemplate: string;
+  boundUsers: number;
+  pendingPairings: number;
+  lastEventAt: number | null;
+  lastAuthorizedAt: number | null;
+  dedupCacheSize: number;
+  runtime?: {
+    running: boolean;
+    connected: boolean;
+    lastError: string | null;
+    lastEventAt: number | null;
+    connectionMode: 'websocket' | 'webhook';
+  };
+}
+
+export interface FeishuConfigView {
+  enabled: boolean;
+  connectionMode: 'websocket' | 'webhook';
+  domain: 'feishu' | 'lark';
+  dmPolicy: 'pairing' | 'allowlist' | 'open';
+  appId: string;
+  appSecretMasked: string;
+  verificationTokenMasked: string;
+  encryptKeyMasked: string;
+  hasAppSecret: boolean;
+  hasVerificationToken: boolean;
+  hasEncryptKey: boolean;
+}
+
 export type AgentEventCallback = (event: AgentSSEEvent) => void;
 
 export function streamAgentChat(
@@ -301,6 +339,100 @@ export function stopRDKClawTask(taskId: string) {
 
 export function bindRDKClawFeishuCode(code: string) {
   return request<{ ok: boolean; openId?: string; message?: string }>('/api/rdkclaw/feishu/auth/bind', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
+export function fetchFeishuBoundUsers() {
+  return request<{ ok: boolean; users: Array<{ openId: string; boundAt: number }>; total: number }>('/api/rdkclaw/feishu/auth/bound');
+}
+
+export function fetchFeishuRuntimeStatus() {
+  return request<{ ok: boolean; status: FeishuRuntimeStatus }>('/api/rdkclaw/feishu/status');
+}
+
+export function fetchFeishuRuntime() {
+  return request<{
+    ok: boolean;
+    runtime: {
+      running: boolean;
+      connected: boolean;
+      lastError: string | null;
+      lastEventAt: number | null;
+      connectionMode: 'websocket' | 'webhook';
+    };
+  }>('/api/rdkclaw/feishu/runtime');
+}
+
+export function startFeishuRuntime() {
+  return request<{ ok: boolean; runtime: FeishuRuntimeStatus['runtime'] }>('/api/rdkclaw/feishu/runtime/start', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function stopFeishuRuntime() {
+  return request<{ ok: boolean; runtime: FeishuRuntimeStatus['runtime'] }>('/api/rdkclaw/feishu/runtime/stop', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function restartFeishuRuntime() {
+  return request<{ ok: boolean; runtime: FeishuRuntimeStatus['runtime'] }>('/api/rdkclaw/feishu/runtime/restart', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function fetchFeishuConfig() {
+  return request<{ ok: boolean; config: FeishuConfigView }>('/api/rdkclaw/feishu/config');
+}
+
+export function saveFeishuConfig(patch: {
+  enabled?: boolean;
+  connectionMode?: 'websocket' | 'webhook';
+  domain?: 'feishu' | 'lark';
+  dmPolicy?: 'pairing' | 'allowlist' | 'open';
+  appId?: string;
+  appSecret?: string;
+  verificationToken?: string;
+  encryptKey?: string;
+}) {
+  return request<{ ok: boolean; configured: boolean; hasVerificationToken: boolean; hasEncryptKey: boolean; connectionMode: 'websocket' | 'webhook'; enabled: boolean }>(
+    '/api/rdkclaw/feishu/config',
+    {
+      method: 'POST',
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export function fetchFeishuPairingRequests() {
+  return request<{
+    ok: boolean;
+    total: number;
+    requests: Array<{
+      openId: string;
+      rawOpenId: string;
+      chatId: string;
+      code: string;
+      expireAt: number;
+      createdAt: number;
+    }>;
+  }>('/api/rdkclaw/feishu/pairing/requests');
+}
+
+export function approveFeishuPairing(code: string) {
+  return request<{ ok: boolean; openId?: string }>('/api/rdkclaw/feishu/pairing/approve', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
+export function rejectFeishuPairing(code: string) {
+  return request<{ ok: boolean }>('/api/rdkclaw/feishu/pairing/reject', {
     method: 'POST',
     body: JSON.stringify({ code }),
   });
