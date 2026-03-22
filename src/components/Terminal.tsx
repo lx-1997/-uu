@@ -181,26 +181,20 @@ export default function Terminal() {
   };
 
   return (
-    <div className="uterm">
-      {/* Title bar */}
-      <div className="uterm-titlebar">
-        <div className="uterm-titlebar-left">
-          <div className="uterm-dots">
-            <span className="uterm-dot red" />
-            <span className="uterm-dot yellow" />
-            <span className="uterm-dot green" />
-          </div>
-          <div className="uterm-session-tabs">
+    <div className="immersive">
+      <div className="immersive-bar">
+        <div className="immersive-bar-left">
+          <div className="immersive-tabs">
             {terminalSessions.map(session => (
               <button
                 key={session.id}
-                className={`uterm-stab ${activeSessionId === session.id ? 'active' : ''}`}
+                className={`immersive-tab${activeSessionId === session.id ? ' active' : ''}`}
                 onClick={() => setActiveSessionId(session.id)}
               >
                 {session.name}
                 {terminalSessions.length > 1 && (
                   <span
-                    className="uterm-stab-close"
+                    className="immersive-tab-close"
                     onClick={(e) => { e.stopPropagation(); handleCloseSession(session.id); }}
                   >
                     ×
@@ -208,24 +202,23 @@ export default function Terminal() {
                 )}
               </button>
             ))}
-            <button className="uterm-stab uterm-stab-add" onClick={createSession} title="新建会话">+</button>
+            <button className="immersive-tab immersive-tab-add" onClick={createSession} title="新建会话">+</button>
           </div>
         </div>
-        <div className="uterm-titlebar-center">
-          <span className="uterm-title-text">{currentDevice ? currentDevice.name : '终端'}</span>
+        <div className="immersive-bar-center">
+          <span className={currentDevice ? 'immersive-bar-meta' : 'immersive-bar-title'}>{currentDevice ? currentDevice.name : '终端'}</span>
         </div>
-        <div className="uterm-titlebar-right">
-          <button className="uterm-icon-btn" title="复制选中" onClick={copySelection}>
+        <div className="immersive-bar-right">
+          <button className="btn-icon" title="复制选中" onClick={copySelection}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
           </button>
-          <button className="uterm-icon-btn" title="清屏" onClick={handleClear}>
+          <button className="btn-icon" title="清屏" onClick={handleClear}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
           </button>
         </div>
       </div>
 
-      {/* Terminal host — all session divs live here */}
-      <div className="uterm-body" ref={hostRef} style={{ padding: 0, overflow: 'hidden' }} />
+      <div className="immersive-viewport" ref={hostRef} style={{ padding: 0, overflow: 'hidden' }} />
     </div>
   );
 }

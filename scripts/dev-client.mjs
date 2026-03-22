@@ -9,7 +9,7 @@ function getWindowsPidsOnPort(port) {
     return String(output)
       .trim()
       .split(/\s+/)
-      .filter((pid) => /^\d+$/.test(pid));
+      .filter((pid) => /^\d+$/.test(pid) && pid !== '0');
   } catch {
     return [];
   }

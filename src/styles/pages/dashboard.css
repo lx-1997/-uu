@@ -1,0 +1,245 @@
+/* ═══════════════════════════════════════════════════════
+   Dashboard — Futuristic Minimal Landing
+   ═══════════════════════════════════════════════════════ */
+
+.dash {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  gap: 0;
+}
+
+/* ── Ambient glow background ── */
+.dash::before {
+  content: '';
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  max-width: 700px;
+  max-height: 700px;
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  background: radial-gradient(
+    circle,
+    var(--accent-glow) 0%,
+    transparent 70%
+  );
+  opacity: 0.6;
+  pointer-events: none;
+  animation: breathe 6s var(--ease-in-out) infinite;
+}
+
+[data-theme="cyber"] .dash::before {
+  opacity: 0.4;
+  background: radial-gradient(
+    circle,
+    rgba(0, 240, 255, 0.12) 0%,
+    rgba(0, 240, 255, 0.04) 40%,
+    transparent 70%
+  );
+}
+
+/* ── Center hero ── */
+.dash-hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 0 24px;
+}
+
+.dash-device-name {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-family: var(--font-display);
+}
+
+[data-theme="cyber"] .dash-device-name {
+  text-shadow: 0 0 20px var(--accent-glow), 0 0 40px rgba(0, 240, 255, 0.08);
+}
+
+.dash-brand {
+  font-size: 3rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-family: var(--font-display);
+}
+
+[data-theme="cyber"] .dash-brand {
+  background: linear-gradient(135deg, var(--accent), #06b6d4);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 0 16px var(--accent-glow));
+}
+
+.dash-tagline {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  max-width: 360px;
+}
+
+/* ── Status strip ── */
+.dash-status {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.dash-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.dash-stat-val {
+  font-size: 1.125rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.dash-stat-val.warn {
+  color: var(--warn);
+}
+
+[data-theme="cyber"] .dash-stat-val {
+  text-shadow: 0 0 8px var(--accent-glow);
+}
+
+.dash-stat-lbl {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dash-stat-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+}
+
+/* ── Quick actions ── */
+.dash-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 10px;
+  margin-top: 40px;
+}
+
+.dash-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: var(--radius-pill);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+.dash-action:hover {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+[data-theme="cyber"] .dash-action:hover {
+  box-shadow: 0 0 20px var(--accent-glow), var(--shadow-lg);
+  border-color: var(--accent);
+}
+
+.dash-action-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.dash-action-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.dash-action.primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: transparent;
+}
+
+.dash-action.primary:hover {
+  background: var(--accent-hover);
+}
+
+.dash-action.primary .dash-action-icon {
+  color: var(--text-on-accent);
+}
+
+[data-theme="cyber"] .dash-action.primary {
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+/* ── Bottom subtle info ── */
+.dash-footer {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.dash-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Empty state (no device) ── */
+.dash-empty-hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+}
+
+.dash-empty-hero .dash-brand {
+  font-size: 2.5rem;
+}

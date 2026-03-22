@@ -197,45 +197,45 @@ export default function Ros() {
   }, [currentDevice?.id]);
 
   return (
-    <div className="ros-container" ref={containerRef}>
+    <div className="immersive" ref={containerRef}>
       {/* ── 顶部工具栏 ── */}
-      <div className="ros-topbar">
-        <div className="ros-topbar-left">
+      <div className="immersive-bar">
+        <div className="immersive-bar-left">
           
-          <span className="ros-topbar-title">ROS 可视化</span>
-          <span className="ros-topbar-badge">Webviz</span>
+          <span className="immersive-bar-title">ROS 可视化</span>
+          <span className="badge badge-muted">Webviz</span>
           {currentDevice && (
-            <span className="ros-topbar-device">{currentDevice.name} · {currentDevice.ip}</span>
+            <span className="immersive-bar-meta">{currentDevice.name} · {currentDevice.ip}</span>
           )}
         </div>
 
-        <div className="ros-topbar-center">
+        <div className="immersive-bar-center">
           {showIframe && (
-            <span className={`ros-status-badge ${phase === 'connected' ? 'live' : ''}`}>
-              <span className="ros-status-dot" />
+            <span className="immersive-bar-status">
+              <span className={`status-dot ${phase === 'connected' ? 'online' : ''}`} />
               {phase === 'connected' ? '已连接' : phase === 'connecting' ? '连接中' : '未连接'}
             </span>
           )}
         </div>
 
-        <div className="ros-topbar-right">
+        <div className="immersive-bar-right">
           {showIframe && (
             <>
-              <button className="ros-tool-btn" onClick={handleReload} title="刷新">
+              <button className="btn-icon" onClick={handleReload} title="刷新">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
                   <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
                 </svg>
               </button>
 
-              <button className="ros-tool-btn" onClick={() => window.open(rosbridgeUrl, '_blank')} title="新窗口打开">
+              <button className="btn-icon" onClick={() => window.open(rosbridgeUrl, '_blank')} title="新窗口打开">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
                   <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
                 </svg>
               </button>
 
-              <button className="ros-tool-btn" onClick={toggleFullscreen} title="全屏 (F11)">
+              <button className="btn-icon" onClick={toggleFullscreen} title="全屏 (F11)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   {isFullscreen ? (
                     <><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></>
@@ -245,16 +245,16 @@ export default function Ros() {
                 </svg>
               </button>
 
-              <button className="ros-tool-btn" onClick={() => setShowLogs(!showLogs)} title="日志">
+              <button className="btn-icon" onClick={() => setShowLogs(!showLogs)} title="日志">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                   <polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" />
                 </svg>
               </button>
 
-              <div className="ros-topbar-sep" />
+              <div className="immersive-bar-sep" />
 
-              <button className="ros-disconnect-btn" onClick={handleStopRosbridge}>
+              <button className="btn btn-danger btn-sm" onClick={handleStopRosbridge}>
                 停止并断开
               </button>
             </>
@@ -263,31 +263,30 @@ export default function Ros() {
       </div>
 
       {/* ── 主视口 ── */}
-      <div className="ros-viewport">
+      <div className="immersive-viewport">
         {showIframe ? (
           <>
             {iframeLoading && (
-              <div className="ros-loading-overlay">
-                <div className="ros-loading-spinner" />
-                <span className="ros-loading-text">正在加载 Webviz...</span>
+              <div className="immersive-loading">
+                <div className="spinner" />
+                <span className="immersive-loading-text">正在加载 Webviz...</span>
               </div>
             )}
             <iframe
               ref={iframeRef}
               src={rosbridgeUrl}
-              className="ros-iframe"
               title="Webviz ROS Visualization"
               onLoad={handleIframeLoad}
               allow="clipboard-read; clipboard-write; fullscreen"
             />
             {/* 日志抽屉 */}
             {showLogs && (
-              <div className="ros-log-drawer">
-                <div className="ros-log-header">
+              <div className="immersive-logs">
+                <div className="immersive-logs-head">
                   <span>连接日志</span>
-                  <button className="ros-log-close" onClick={() => setShowLogs(false)}>×</button>
+                  <button className="btn-icon" onClick={() => setShowLogs(false)}>×</button>
                 </div>
-                <div className="ros-log-body">
+                <div className="immersive-logs-body">
                   {logLines.map((line, i) => (
                     <div key={i} className="ros-log-line">{line}</div>
                   ))}
@@ -300,9 +299,9 @@ export default function Ros() {
           </>
         ) : (
           /* ── 欢迎/连接界面 ── */
-          <div className="ros-welcome">
+          <div className="immersive-welcome">
             <div className="ros-welcome-visual">
-              <div className="ros-welcome-icon">
+              <div className="immersive-welcome-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
                   <circle cx="12" cy="4" r="1.5" /><circle cx="20" cy="12" r="1.5" />
@@ -314,35 +313,35 @@ export default function Ros() {
               <div className="ros-welcome-glow" />
             </div>
 
-            <h2 className="ros-welcome-title">ROS 可视化工作台</h2>
-            <p className="ros-welcome-desc">
+            <h2 className="immersive-welcome-title">ROS 可视化工作台</h2>
+            <p className="immersive-welcome-desc">
               自动启动 rosbridge_websocket 并通过 Webviz 实时可视化 ROS 话题、TF、点云等数据
             </p>
 
             {phase === 'checking' && (
-              <div className="ros-phase-indicator">
-                <div className="ros-phase-spinner" />
-                <span>{statusText}</span>
+              <div className="immersive-loading">
+                <div className="spinner" />
+                <span className="immersive-loading-text">{statusText}</span>
               </div>
             )}
 
             {phase === 'starting' && (
-              <div className="ros-phase-indicator">
-                <div className="ros-phase-spinner" />
-                <span>{statusText}</span>
+              <div className="immersive-loading">
+                <div className="spinner" />
+                <span className="immersive-loading-text">{statusText}</span>
               </div>
             )}
 
             {phase === 'error' && (
-              <div className="ros-error-banner">
+              <div className="immersive-error">
                 <span>⚠️ {statusText}</span>
-                <button className="ros-retry-btn" onClick={handleConnect}>重试</button>
+                <button className="btn btn-primary" onClick={handleConnect}>重试</button>
               </div>
             )}
 
             {(phase === 'idle' || phase === 'error') && (
               <button
-                className="ros-connect-main-btn"
+                className="btn btn-primary"
                 onClick={handleConnect}
                 disabled={!currentDevice}
               >

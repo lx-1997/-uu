@@ -1,0 +1,513 @@
+/* ═══════════════════════════════════════════════════════
+   Tool Pages — Files / Flasher / Hardware / NodeHub / ModelZoo
+   ═══════════════════════════════════════════════════════ */
+
+.tool-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Toolbar ── */
+.tool-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+  gap: 8px;
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
+}
+
+.tool-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tool-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.tool-bar-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.tool-bar-count {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.tool-bar-search {
+  max-width: 200px;
+}
+
+/* ── Stat chips ── */
+.tool-stats {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.tool-stat-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-inset);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.tool-stat-chip .num {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.tool-stat-chip.live .num {
+  color: var(--ok);
+}
+
+/* ── Content area ── */
+.tool-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ── Card grid (apps, models) ── */
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.tool-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.tool-card.running {
+  border-left: 3px solid var(--ok);
+}
+
+.tool-card.installed {
+  border-left: 3px solid var(--accent);
+}
+
+[data-theme="cyber"] .tool-card.running {
+  box-shadow: inset 2px 0 8px rgba(74, 222, 128, 0.1);
+}
+
+.tool-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-card-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.tool-card-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.tool-card-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tool-card-meta {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.tool-card-desc {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.tool-card-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: auto;
+}
+
+.tool-card-perf {
+  display: flex;
+  gap: 8px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.tool-card-boards {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tool-board-chip {
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-inset);
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+
+/* ── Filter bar ── */
+.tool-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.tool-filter::-webkit-scrollbar { height: 0; }
+
+.tool-filter-btn {
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: all var(--duration-fast);
+}
+
+.tool-filter-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-inset);
+}
+
+.tool-filter-btn.active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* ── Files: table ── */
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.file-table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface);
+  z-index: 2;
+}
+
+.file-table td {
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.file-table tr:hover td {
+  background: var(--bg-inset);
+}
+
+.file-table tr.selected td {
+  background: var(--accent-subtle);
+}
+
+.file-table .mono {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+/* ── Files: breadcrumb ── */
+.file-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-breadcrumb::-webkit-scrollbar { height: 0; }
+
+.file-crumb {
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--duration-fast);
+}
+
+.file-crumb:hover {
+  color: var(--accent);
+}
+
+.file-crumb-sep {
+  color: var(--border-strong);
+  font-size: 0.625rem;
+}
+
+/* ── Files: editor ── */
+.file-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+.file-editor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.file-editor-body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Hardware: gauges ── */
+.hw-gauges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+
+.hw-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+}
+
+.hw-gauge-ring {
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.hw-gauge-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.hw-gauge-ring .track {
+  fill: none;
+  stroke: var(--bg-inset);
+  stroke-width: 6;
+}
+
+.hw-gauge-ring .fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--duration-slow) var(--ease-out);
+}
+
+.hw-gauge-ring .fill.warn {
+  stroke: var(--warn);
+}
+
+.hw-gauge-ring .fill.danger {
+  stroke: var(--danger);
+}
+
+.hw-gauge-val {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+[data-theme="cyber"] .hw-gauge-val {
+  text-shadow: 0 0 6px var(--accent-glow);
+}
+
+.hw-gauge-label {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+/* ── Flasher: steps ── */
+.flash-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 16px 0;
+}
+
+.flash-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.flash-step.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.flash-step.done {
+  color: var(--ok);
+}
+
+.flash-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+}
+
+.flash-step.active .flash-step-num {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.flash-step.done .flash-step-num {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.flash-step-line {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+/* ── Flasher: progress ── */
+.flash-progress {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.flash-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+[data-theme="cyber"] .flash-progress-fill {
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* ── Log panel ── */
+.tool-log {
+  border-top: 1px solid var(--border);
+  max-height: 200px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.tool-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--bg-surface);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+}
+
+.tool-log-body {
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ── Add modal (for NodeHub/ModelZoo custom add) ── */
+.tool-add-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-add-field label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}

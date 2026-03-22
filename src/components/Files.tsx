@@ -334,20 +334,20 @@ export default function Files() {
   }, [editorFile, selectedEntry]);
 
   return (
-    <div className="center-stage wide-stage files-page" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="center-stage wide-stage tool-page" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
       <div className="isolated-widget workflow-widget" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div className="widget-header" style={{ display: 'flex', alignItems: 'center' }}>
-          📁 资源管理器
-          <div className="files-header-actions">
-            <button className="clean-btn outline-btn files-header-btn" onClick={() => refreshList()} disabled={running}>
+        <div className="tool-bar" style={{ display: 'flex', alignItems: 'center' }}>
+          <div className="tool-bar-left">📁 资源管理器</div>
+          <div className="tool-bar-right">
+            <button className="btn btn-ghost btn-sm" onClick={() => refreshList()} disabled={running}>
               {running ? <Loader2 size={16} className="spinner" /> : <RefreshCw size={16} />}
               刷新
             </button>
-            <button className="clean-btn files-header-btn files-upload-btn" onClick={() => fileInputRef.current?.click()} disabled={running}>
+            <button className="btn btn-primary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={running}>
               {running ? <Loader2 size={16} className="spinner" /> : <Upload size={16} />}
               上传文件
             </button>
-            <button className="clean-btn outline-btn files-header-btn" onClick={createFolder} disabled={running}>
+            <button className="btn btn-ghost btn-sm" onClick={createFolder} disabled={running}>
               新建文件夹
             </button>
             <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
@@ -355,9 +355,9 @@ export default function Files() {
         </div>
         
         {editorFile ? (
-          <div className="files-editor-wrap" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div className="panel-card files-editor-toolbar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
-              <button className="clean-btn outline-btn files-back-btn" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }} onClick={() => setEditorFile(null)}>
+          <div className="file-editor" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div className="file-editor-bar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+              <button className="btn btn-ghost btn-sm" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }} onClick={() => setEditorFile(null)}>
                 <ArrowLeft size={16} /> 返回
               </button>
               <div style={{ width: 1, height: 20, background: '#cbd5e1' }}></div>
@@ -367,7 +367,7 @@ export default function Files() {
                 <span>{editorFile.path.substring(editorFile.path.lastIndexOf('/') + 1)}</span>
               </div>
             </div>
-            <div className="files-editor-surface" style={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
+            <div className="file-editor-body" style={{ flex: 1, border: '1px solid #e2e8f0', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
               <Editor
                 height="100%"
                 language={((): string => {
@@ -391,73 +391,81 @@ export default function Files() {
                 options={{ minimap: { enabled: false }, fontSize: 14, wordWrap: 'on' }}
               />
             </div>
-            <div className="files-editor-actions" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
-              <button className="clean-btn files-save-btn" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: '#ff6b00', color: '#fff', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
-                {running ? '保存中...' : '💾 保存修改'}
-              </button>
+            <div className="tool-bar" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
+              <div className="tool-bar-right">
+                <button className="btn btn-primary btn-sm" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: '#ff6b00', color: '#fff', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
+                  {running ? '保存中...' : '💾 保存修改'}
+                </button>
+              </div>
             </div>
           </div>
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div className="panel-card files-path-toolbar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
-              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 ~/ 主目录</button>
-              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>/ 根目录</button>
-              <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => setShowHidden((v) => !v)} disabled={running}>{showHidden ? '隐藏 .文件' : '显示 .文件'}</button>
-              <div className="files-shortcuts" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                {['/root', '/userdata', '/var/log', '/etc'].map((quickPath) => (
-                  <button key={quickPath} className="clean-btn outline-btn files-shortcut-btn" style={{ padding: '5px 9px', fontSize: 12 }} onClick={() => refreshList(quickPath)} disabled={running}>
-                    {quickPath === '/root' ? '~/' : quickPath}
-                  </button>
-                ))}
+            <div className="tool-bar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: '#f8fafc', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+              <div className="tool-bar-left" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: 1 }}>
+                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 ~/ 主目录</button>
+                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>/ 根目录</button>
+                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => setShowHidden((v) => !v)} disabled={running}>{showHidden ? '隐藏 .文件' : '显示 .文件'}</button>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {['/root', '/userdata', '/var/log', '/etc'].map((quickPath) => (
+                    <button key={quickPath} className="btn btn-ghost btn-sm" style={{ padding: '5px 9px', fontSize: 12 }} onClick={() => refreshList(quickPath)} disabled={running}>
+                      {quickPath === '/root' ? '~/' : quickPath}
+                    </button>
+                  ))}
+                </div>
+                <div className="file-breadcrumb" style={{ flex: 1, marginLeft: 10, display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
+                  <span className="file-crumb" style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }} onClick={() => refreshList(inHomePath ? '/root' : '/')}>
+                    {inHomePath ? '~' : '/'}
+                  </span>
+                  {displayParts.map((p, i) => (
+                    <React.Fragment key={i}>
+                      <span className="file-crumb-sep" style={{ color: '#94a3b8' }}>/</span>
+                      <span
+                        className="file-crumb"
+                        style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }}
+                        onClick={() => handleBreadcrumb(inHomePath ? i + 1 : i)}
+                      >
+                        {p}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
-              <div className="files-breadcrumbs" style={{ flex: 1, marginLeft: 10, display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
-                <span className="files-breadcrumb-link" style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }} onClick={() => refreshList(inHomePath ? '/root' : '/')}>
-                  {inHomePath ? '~' : '/'}
-                </span>
-                {displayParts.map((p, i) => (
-                  <React.Fragment key={i}>
-                    <span style={{ color: '#94a3b8' }}>/</span>
-                    <span
-                      className="files-breadcrumb-link"
-                      style={{ cursor: 'pointer', color: '#ff6b00', fontWeight: 500 }}
-                      onClick={() => handleBreadcrumb(inHomePath ? i + 1 : i)}
-                    >
-                      {p}
-                    </span>
-                  </React.Fragment>
-                ))}
+              <div className="tool-bar-right" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  className="input tool-bar-search"
+                  ref={searchInputRef}
+                  placeholder="搜索当前目录..."
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                />
+                <select className="input" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'type' | 'name' | 'date')}>
+                  <option value="type">按类型</option>
+                  <option value="name">按名称</option>
+                  <option value="date">按时间</option>
+                </select>
               </div>
-              <input
-                className="clean-input files-inline-search"
-                ref={searchInputRef}
-                placeholder="搜索当前目录..."
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-              />
-              <select className="clean-input files-sort-select" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'type' | 'name' | 'date')}>
-                <option value="type">按类型</option>
-                <option value="name">按名称</option>
-                <option value="date">按时间</option>
-              </select>
             </div>
 
             {selectedEntry && (
-              <div className="panel-card files-selection-bar" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', flexShrink: 0 }}>
-                <span>已选择：{selectedEntry.isDir ? '📁' : '📄'} {selectedEntry.name} <span style={{ color: '#94a3b8' }}>(Enter 打开 / F2 重命名 / Ctrl+F 搜索)</span></span>
-                <div className="files-selection-actions" style={{ display: 'flex', gap: 8 }}>
+              <div className="tool-bar" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', flexShrink: 0 }}>
+                <div className="tool-bar-left">
+                  <span>已选择：{selectedEntry.isDir ? '📁' : '📄'} {selectedEntry.name} <span style={{ color: '#94a3b8' }}>(Enter 打开 / F2 重命名 / Ctrl+F 搜索)</span></span>
+                </div>
+                <div className="tool-bar-right" style={{ display: 'flex', gap: 8 }}>
                   {selectedEntry.isDir ? (
-                    <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => handleNavigate(selectedEntry.name)}>打开目录</button>
+                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => handleNavigate(selectedEntry.name)}>打开目录</button>
                   ) : (
-                    <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runEdit(selectedEntry.name)}>编辑</button>
+                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runEdit(selectedEntry.name)}>编辑</button>
                   )}
-                  <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runDownload(selectedEntry.name, selectedEntry.isDir)}>下载</button>
-                  <button className="clean-btn outline-btn" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => renameEntry(selectedEntry.name)}>重命名</button>
+                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runDownload(selectedEntry.name, selectedEntry.isDir)}>下载</button>
+                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => renameEntry(selectedEntry.name)}>重命名</button>
                 </div>
               </div>
             )}
 
             <div 
-              className={`panel-card files-dropzone ${dragActive ? 'is-drag-active' : ''}`}
+              className={`tool-content ${dragActive ? 'is-drag-active' : ''}`}
               style={{ 
                 flex: 1, 
                 minHeight: 0,
@@ -476,28 +484,28 @@ export default function Files() {
                   松开鼠标以上传文件至此目录
                 </div>
               )}
-              <table className="files-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
-                <thead className="files-table-head" style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 5, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <table className="file-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#f1f5f9', zIndex: 5, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                   <tr>
-                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '50%' }}>文件名称</th>
-                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '15%' }}>大小</th>
-                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '20%' }}>修改日期</th>
-                    <th style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '15%', textAlign: 'right' }}>操作</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '50%' }}>文件名称</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '15%' }}>大小</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '20%' }}>修改日期</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: '#475569', width: '15%', textAlign: 'right' }}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {currentPath !== '/' && (
                     <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '14px 16px', cursor: 'pointer', color: '#1e293b', fontWeight: 500 }} onClick={handleGoUp}>
+                      <td className="td" style={{ padding: '14px 16px', cursor: 'pointer', color: '#1e293b', fontWeight: 500 }} onClick={handleGoUp}>
                         <span style={{ marginRight: 10, fontSize: 18 }}>📂</span>.. (上一级)
                       </td>
-                      <td></td><td></td><td></td>
+                      <td className="td"></td><td className="td"></td><td className="td"></td>
                     </tr>
                   )}
                   {visibleEntries.map((entry) => (
                     <tr
                       key={entry.name}
-                      className={`files-row ${selectedName === entry.name ? 'is-selected' : ''}`}
+                      className={selectedName === entry.name ? 'selected' : ''}
                       style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: '#ffffff' }}
                       onClick={() => setSelectedName(entry.name)}
                       onDoubleClick={() => entry.isDir ? handleNavigate(entry.name) : runEdit(entry.name)}
@@ -505,6 +513,7 @@ export default function Files() {
                       onMouseLeave={(e) => e.currentTarget.style.background = selectedName === entry.name ? '#fff7ed' : '#ffffff'}
                     >
                       <td 
+                        className="td"
                         style={{ padding: '14px 16px', cursor: entry.isDir ? 'pointer' : 'default', color: entry.isDir ? '#0f172a' : '#334155', fontWeight: entry.isDir ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} 
                         onClick={() => entry.isDir && handleNavigate(entry.name)}
                         title={entry.name}
@@ -512,22 +521,22 @@ export default function Files() {
                         <span style={{ marginRight: 10, fontSize: 18 }}>{entry.isDir ? '📁' : '📄'}</span>
                         {entry.name}
                       </td>
-                      <td style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.isDir ? '-' : entry.size}</td>
-                      <td style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.date}</td>
-                      <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                        <div className="files-row-actions" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <td className="td mono" style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.isDir ? '-' : entry.size}</td>
+                      <td className="td mono" style={{ padding: '14px 16px', color: '#64748b', fontSize: 13 }}>{entry.date}</td>
+                      <td className="td" style={{ padding: '14px 16px', textAlign: 'right' }}>
+                        <div className="tool-bar-right" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                           {!entry.isDir && (
-                            <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runEdit(entry.name)}>编辑</button>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runEdit(entry.name)}>编辑</button>
                           )}
-                          <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => renameEntry(entry.name)}>重命名</button>
-                          <button className="clean-btn outline-btn" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runDownload(entry.name, entry.isDir)}>下载</button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => renameEntry(entry.name)}>重命名</button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12, background: '#fff' }} onClick={() => runDownload(entry.name, entry.isDir)}>下载</button>
                         </div>
                       </td>
                     </tr>
                   ))}
                   {visibleEntries.length === 0 && !running && (
                     <tr>
-                      <td colSpan={4} style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>
+                      <td colSpan={4} className="td" style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>
                         {searchText.trim() ? '未找到匹配文件，请调整搜索关键词' : '此文件夹为空，您可以拖拽文件到此处上传'}
                       </td>
                     </tr>
@@ -548,7 +557,7 @@ export default function Files() {
               {searchMatches.map((m, i) => (
                 <button
                   key={i}
-                  className="clean-btn outline-btn"
+                  className="btn btn-ghost btn-sm"
                   style={{ textAlign: 'left', display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: '#f8fafc' }}
                   onClick={() => {
                      setSearchMatches([]);
@@ -561,7 +570,7 @@ export default function Files() {
               ))}
             </div>
             <div className="modal-actions">
-              <button className="clean-btn outline-btn" style={{ width: '100%' }} onClick={() => setSearchMatches([])}>取消下载</button>
+              <button className="btn btn-ghost btn-sm" style={{ width: '100%' }} onClick={() => setSearchMatches([])}>取消下载</button>
             </div>
           </div>
         </div>

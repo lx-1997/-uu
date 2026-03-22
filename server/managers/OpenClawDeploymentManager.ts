@@ -590,6 +590,20 @@ print('[OpenClaw] 配置已更新')`;
     this.execCommand(device, cmd, onOutput, onComplete);
   }
 
+  runDoctor(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
+    const cmd = 'export PATH="$HOME/.npm-global/bin:$PATH" && (openclaw doctor 2>&1 || echo "[OpenClaw] doctor 命令不可用，可能未安装")';
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 30000 });
+  }
+
+  runScriptInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
+    const cmd = [
+      'echo "[OpenClaw] 使用官方安装脚本..."',
+      'curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH" && npm install -g openclaw@latest --loglevel info 2>&1)',
+      'echo "[OpenClaw] 安装完成"',
+    ].join(' && ');
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 0 });
+  }
+
   getWifiList(device: Device, onResult: (wifiNames: string[], success: boolean) => void): void {
     const cmd = 'sudo nmcli device wifi rescan 2>/dev/null; sleep 2; nmcli -f "SSID" device wifi list 2>/dev/null | awk \'NR>1 {gsub(/^[[:space:]]+|[[:space:]]+$/,""); if($0!="") print $0}\' | sort -u';
     let output = '';

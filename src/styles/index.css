@@ -1,20 +1,26 @@
-@import './ai-dock.css';
-@import '../styles.css';
-@import './base.css';
-@import './dashboard.css';
-@import './files.css';
-@import './hardware.css';
-@import './ide.css';
-@import './layout.css';
-@import './markdown.css';
-@import './modal.css';
-@import './models.css';
-@import './nodehub.css';
-@import './onboarding.css';
-@import './openclaw.css';
-@import './ros.css';
-@import './skills.css';
-@import './terminal.css';
-@import './vnc.css';
-@import './widgets.css';
-@import './redesign.css';
+/* RDK Studio — Style Entry Point (v2) */
+
+/* 1. Design tokens (dual theme) */
+@import './tokens.css';
+
+/* 2. Reset & typography */
+@import './reset.css';
+
+/* 3. Animations & keyframes */
+@import './animations.css';
+
+/* 4. Shell layout (Rail + TopBar + Content) */
+@import './shell.css';
+
+/* 5. Shared components */
+@import './components.css';
+
+/* 6. Page-specific */
+@import './pages/dashboard.css';
+@import './pages/chat.css';
+@import './pages/immersive.css';
+@import './pages/config.css';
+@import './pages/tools.css';
+
+/* 7. Theme enhancements + responsive */
+@import './pages/cyber-enhancements.css';

@@ -1020,6 +1020,32 @@ app.get('/api/devices/:id/openclaw/version', async (request, response) => {
   });
 });
 
+app.post('/api/devices/:id/openclaw/doctor', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runDoctor(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/script-install', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runScriptInstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
 app.get('/api/devices/:id/openclaw/wifi-list', async (request, response) => {
   const { id } = request.params;
   const device = await resolveDevice(request, response, id);

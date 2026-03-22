@@ -12,16 +12,16 @@ function RingGauge({ value, max = 100, color, label, display }: { value: number;
 
   return (
     <div className="hw-gauge">
-      <svg width="80" height="80" viewBox="0 0 80 80">
-        <circle cx="40" cy="40" r={r} fill="none" stroke="#f1f5f9" strokeWidth="6" />
-        <circle cx="40" cy="40" r={r} fill="none" stroke={warn ? '#ef4444' : color} strokeWidth="6"
-          strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
-          transform="rotate(-90 40 40)" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
-      </svg>
-      <div className="hw-gauge-text">
-        <span className="hw-gauge-value" style={{ color: warn ? '#ef4444' : color }}>{display}</span>
-        <span className="hw-gauge-label">{label}</span>
+      <div className="hw-gauge-ring">
+        <svg width="80" height="80" viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r={r} fill="none" stroke="#f1f5f9" strokeWidth="6" />
+          <circle cx="40" cy="40" r={r} fill="none" stroke={warn ? '#ef4444' : color} strokeWidth="6"
+            strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+            transform="rotate(-90 40 40)" style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
+        </svg>
+        <span className="hw-gauge-val" style={{ color: warn ? '#ef4444' : color }}>{display}</span>
       </div>
+      <span className="hw-gauge-label">{label}</span>
     </div>
   );
 }
@@ -67,120 +67,155 @@ export default function Hardware() {
   const healthTone = alertMessages.length === 0 ? 'ok' : alertMessages.length >= 2 ? 'danger' : 'warn';
   const healthText = alertMessages.length === 0 ? '运行稳定' : `发现 ${alertMessages.length} 个风险项`;
 
+  const toneColor = healthTone === 'ok' ? 'var(--ok)' : healthTone === 'danger' ? 'var(--danger)' : 'var(--warn)';
+
   return (
-    <div className="hw-container hw-page">
+    <div className="tool-page">
       {/* 顶部栏 */}
-      <div className="hw-header">
-        <div className="hw-header-left">
-          <div>
-            <h2 className="hw-title">硬件监控</h2>
-            <div className="hw-subtitle">实时展示温度、负载、内存和磁盘状态</div>
-          </div>
+      <div className="tool-bar">
+        <div className="tool-bar-left">
+          <span className="tool-bar-title">硬件监控</span>
           {currentDevice && (
-            <span className="hw-device-tag">
-              <span className="hw-device-dot" />
-              {currentDevice.name} · {currentDevice.ip}
+            <span className="tool-stat-chip live">
+              <span className="num">{currentDevice.name}</span>
+              {currentDevice.ip}
             </span>
           )}
         </div>
-        <div className="hw-header-right">
-          <label className="hw-auto-toggle">
+        <div className="tool-bar-right">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', cursor: 'pointer' }}>
             <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
             <span>自动刷新</span>
           </label>
-          <button className="hw-refresh-btn" onClick={refreshDiagnostics} disabled={loading}>
+          <button className="btn btn-ghost btn-sm" onClick={refreshDiagnostics} disabled={loading}>
             {loading ? '刷新中...' : '立即刷新'}
           </button>
         </div>
       </div>
 
-      {/* 总览区 */}
-      <div className="hw-overview-grid">
-        <section className="hw-panel hw-gauges-panel">
-          <div className="hw-panel-title">核心指标</div>
+      <div className="tool-content">
+        {/* 核心指标仪表盘 */}
+        <div className="config-section">
+          <div className="config-section-title">核心指标</div>
           <div className="hw-gauges">
             <RingGauge value={m.tempC} max={105} color="#ff6b00" label="芯片温度" display={m.temp} />
             <RingGauge value={m.memPercent} max={100} color="#3b82f6" label="内存使用" display={m.memPercent >= 0 ? `${m.memPercent}%` : '--'} />
             <RingGauge value={m.bpuValue} max={100} color="#a855f7" label="BPU 负载" display={m.bpu} />
             <RingGauge value={m.diskPercent} max={100} color="#22c55e" label="磁盘使用" display={m.diskPercent >= 0 ? `${m.diskPercent}%` : '--'} />
           </div>
-        </section>
+        </div>
 
-        <section className="hw-panel hw-health-panel">
-          <div className="hw-panel-title">运行状态</div>
-          <div className={`hw-health-pill ${healthTone}`}>
-            <span className="hw-health-dot" />
-            {healthText}
+        {/* 运行状态 */}
+        <div className="config-section" style={{ marginTop: 24 }}>
+          <div className="config-section-title">运行状态</div>
+
+          <div className="config-row">
+            <div className="config-label">健康状态</div>
+            <div className="config-value">
+              <span style={{ color: toneColor, fontWeight: 600 }}>● {healthText}</span>
+            </div>
           </div>
-          <div className="hw-health-list">
-            {alertMessages.length > 0 ? (
-              alertMessages.map((msg) => (
-                <div key={msg} className="hw-health-item">⚠ {msg}</div>
+
+          {alertMessages.length > 0
+            ? alertMessages.map(msg => (
+                <div className="config-row" key={msg}>
+                  <div className="config-label" style={{ color: 'var(--warn)' }}>⚠ {msg}</div>
+                  <div className="config-value" />
+                </div>
               ))
-            ) : (
-              <div className="hw-health-item ok">✅ 关键资源状态正常</div>
-            )}
-          </div>
-          <div className="hw-quick-metrics">
-            <div className="hw-quick-metric">
-              <span>CPU(1m)</span>
-              <strong>{m.cpuLoad}</strong>
-            </div>
-            <div className="hw-quick-metric">
-              <span>运行时长</span>
-              <strong>{m.uptime}</strong>
-            </div>
-          </div>
-        </section>
-      </div>
+            : (
+              <div className="config-row">
+                <div className="config-label" style={{ color: 'var(--ok)' }}>✅ 关键资源状态正常</div>
+                <div className="config-value" />
+              </div>
+            )
+          }
 
-      {/* 详细指标卡片 */}
-      <div className="hw-detail-grid">
-        <div className="hw-detail-card">
-          <div className="hw-detail-label">芯片温度</div>
-          <div className="hw-detail-value">{m.temp}</div>
-          <div className="hw-detail-hint">{m.tempC >= 85 ? '⚠️ 温度过高，建议检查散热' : m.tempC > 0 ? '温度正常' : '等待数据'}</div>
-        </div>
-        <div className="hw-detail-card">
-          <div className="hw-detail-label">内存</div>
-          <div className="hw-detail-value">{m.memUsed} / {m.memTotal}</div>
-          <div className="hw-detail-hint">{m.memPercent >= 90 ? '⚠️ 内存紧张' : m.memPercent >= 0 ? `使用率 ${m.memPercent}%` : '等待数据'}</div>
-        </div>
-        <div className="hw-detail-card">
-          <div className="hw-detail-label">BPU 负载</div>
-          <div className="hw-detail-value">{m.bpu}</div>
-          <div className="hw-detail-hint">{m.bpuValue >= 90 ? '⚠️ 高负载' : m.bpuValue >= 0 ? '运行正常' : '等待数据'}</div>
-        </div>
-        <div className="hw-detail-card">
-          <div className="hw-detail-label">CPU 负载</div>
-          <div className="hw-detail-value">{m.cpuLoad}</div>
-          <div className="hw-detail-hint">1分钟平均负载</div>
-        </div>
-        <div className="hw-detail-card">
-          <div className="hw-detail-label">磁盘</div>
-          <div className="hw-detail-value">{m.diskUsed} / {m.diskTotal}</div>
-          <div className="hw-detail-hint">{m.diskPercent >= 90 ? '⚠️ 磁盘空间不足' : m.diskPercent >= 0 ? `使用率 ${m.diskPercent}%` : '等待数据'}</div>
-        </div>
-        <div className="hw-detail-card">
-          <div className="hw-detail-label">运行时长</div>
-          <div className="hw-detail-value">{m.uptime}</div>
-          <div className="hw-detail-hint">自上次启动</div>
-        </div>
-      </div>
-
-      {/* 原始输出折叠 */}
-      <div className="hw-raw-section">
-        <button className="hw-raw-toggle" onClick={() => setShowRaw(!showRaw)}>
-          {showRaw ? '▼' : '▶'} 原始诊断输出
-        </button>
-        {showRaw && (
-          <div className="terminal-screen" style={{ marginTop: 8, minHeight: 200 }}>
-            {lines.map((line, i) => (
-              <div key={`${line}-${i}`} className="terminal-line">{line}</div>
-            ))}
-            {lines.length === 0 && <div className="terminal-line hw-raw-empty">暂无数据</div>}
+          <div className="config-row">
+            <div className="config-label">CPU 负载 (1m)</div>
+            <div className="config-value"><strong>{m.cpuLoad}</strong></div>
           </div>
-        )}
+          <div className="config-row">
+            <div className="config-label">运行时长</div>
+            <div className="config-value"><strong>{m.uptime}</strong></div>
+          </div>
+        </div>
+
+        {/* 详细指标 */}
+        <div className="config-section" style={{ marginTop: 24 }}>
+          <div className="config-section-title">详细指标</div>
+
+          <div className="config-row">
+            <div className="config-label">
+              芯片温度
+              <div className="config-label-hint">
+                {m.tempC >= 85 ? '⚠️ 温度过高，建议检查散热' : m.tempC > 0 ? '温度正常' : '等待数据'}
+              </div>
+            </div>
+            <div className="config-value">{m.temp}</div>
+          </div>
+
+          <div className="config-row">
+            <div className="config-label">
+              内存
+              <div className="config-label-hint">
+                {m.memPercent >= 90 ? '⚠️ 内存紧张' : m.memPercent >= 0 ? `使用率 ${m.memPercent}%` : '等待数据'}
+              </div>
+            </div>
+            <div className="config-value">{m.memUsed} / {m.memTotal}</div>
+          </div>
+
+          <div className="config-row">
+            <div className="config-label">
+              BPU 负载
+              <div className="config-label-hint">
+                {m.bpuValue >= 90 ? '⚠️ 高负载' : m.bpuValue >= 0 ? '运行正常' : '等待数据'}
+              </div>
+            </div>
+            <div className="config-value">{m.bpu}</div>
+          </div>
+
+          <div className="config-row">
+            <div className="config-label">
+              CPU 负载
+              <div className="config-label-hint">1分钟平均负载</div>
+            </div>
+            <div className="config-value">{m.cpuLoad}</div>
+          </div>
+
+          <div className="config-row">
+            <div className="config-label">
+              磁盘
+              <div className="config-label-hint">
+                {m.diskPercent >= 90 ? '⚠️ 磁盘空间不足' : m.diskPercent >= 0 ? `使用率 ${m.diskPercent}%` : '等待数据'}
+              </div>
+            </div>
+            <div className="config-value">{m.diskUsed} / {m.diskTotal}</div>
+          </div>
+
+          <div className="config-row">
+            <div className="config-label">
+              运行时长
+              <div className="config-label-hint">自上次启动</div>
+            </div>
+            <div className="config-value">{m.uptime}</div>
+          </div>
+        </div>
+
+        {/* 原始输出折叠 */}
+        <div className="config-section" style={{ marginTop: 24 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowRaw(!showRaw)}>
+            {showRaw ? '▼' : '▶'} 原始诊断输出
+          </button>
+          {showRaw && (
+            <div className="config-terminal" style={{ marginTop: 8, minHeight: 200, maxHeight: 320 }}>
+              {lines.map((line, i) => (
+                <div key={`${line}-${i}`}>{line}</div>
+              ))}
+              {lines.length === 0 && <div style={{ color: 'var(--text-muted)' }}>暂无数据</div>}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

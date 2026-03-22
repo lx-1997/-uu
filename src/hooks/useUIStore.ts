@@ -5,7 +5,14 @@ import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { fetchNodeRedStatus, fetchRosTopics, fetchVncStatus, executeDeviceCommand } from '../api';
 
+export type ThemeMode = 'aurora' | 'cyber';
+
 export interface UIStoreState {
+  // Theme
+  theme: ThemeMode;
+  setTheme: (t: ThemeMode) => void;
+  toggleTheme: () => void;
+
   // Navigation
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
@@ -124,6 +131,20 @@ export function useUIStore(): UIStoreState {
 export function UIProvider({ children }: { children: React.ReactNode }) {
   const { addToast, addActivity } = useToastStore();
   const { currentDevice } = useDeviceStore();
+
+  // ── Theme ──
+  const [theme, setThemeState] = useState<ThemeMode>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('rdk-theme') as ThemeMode) || 'aurora';
+    }
+    return 'aurora';
+  });
+  const setTheme = (t: ThemeMode) => {
+    setThemeState(t);
+    localStorage.setItem('rdk-theme', t);
+    document.documentElement.setAttribute('data-theme', t);
+  };
+  const toggleTheme = () => setTheme(theme === 'aurora' ? 'cyber' : 'aurora');
 
   // ── Navigation ──
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -293,6 +314,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   };
 
   const value: UIStoreState = {
+    theme, setTheme, toggleTheme,
     activeTab, setActiveTab,
     obStep, setObStep, selectedBoard, setSelectedBoard,
     isLoading, loadingMsg, openWorkspace,

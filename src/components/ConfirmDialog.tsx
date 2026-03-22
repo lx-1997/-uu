@@ -7,12 +7,14 @@ export default function ConfirmDialog() {
 
   return (
     <div className="modal-overlay" onClick={() => setConfirmDialog(null)}>
-      <div className="modal-card" onClick={e => e.stopPropagation()}>
-        <div className="modal-title">{confirmDialog.title}</div>
-        <div className="modal-desc">{confirmDialog.message}</div>
-        <div className="modal-actions">
-          <button className="clean-btn outline-btn" onClick={() => setConfirmDialog(null)}>取消</button>
-          <button className="clean-btn" style={{ background: '#ef4444' }} onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}>确认执行</button>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title">{confirmDialog.title}</div>
+        </div>
+        <div className="modal-body">{confirmDialog.message}</div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={() => setConfirmDialog(null)}>取消</button>
+          <button className="btn btn-primary" onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }}>确认执行</button>
         </div>
       </div>
     </div>

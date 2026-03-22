@@ -3,7 +3,6 @@ import { useAppState } from '../hooks/useAppState';
 import { renderMarkdown } from './MarkdownRenderer';
 import { resolveSocketUrl } from '../utils/socket';
 import io from 'socket.io-client';
-import '../styles/openclaw.css';
 
 /* ═══════════════════════════════════════════
    Types
@@ -612,13 +611,10 @@ export default function OpenClaw() {
 
   if (!currentDevice) {
     return (
-      <div className="oc-container">
-        <div className="oc-empty-state">
-          <div className="oc-empty-graphic">
-            {MI('hub', 'oc-empty-icon')}
-          </div>
-          <h3>请先连接设备</h3>
-          <p>选择一个 RDK 设备后即可管理 OpenClaw AI 网关</p>
+      <div className="config-page page-center">
+        <div className="empty-state">
+          <div className="empty-state-icon">{MI('hub')}</div>
+          <h3 className="empty-state-title">连接设备后管理 OpenClaw</h3>
         </div>
       </div>
     );
@@ -631,768 +627,362 @@ export default function OpenClaw() {
      ═══════════════════════════════════════════ */
 
   return (
-    <div className="oc-container">
-      {/* ─── Header ─── */}
-      <header className="oc-header">
-        <div className="oc-header-left">
-          <div className="oc-logo">
-            <div className="oc-logo-mark">{MI('hub')}</div>
-            <span className="oc-logo-text">OpenClaw</span>
-          </div>
-          <div className={`oc-status-pill ${status?.running ? 'running' : 'stopped'}`}>
-            <span className="oc-status-dot" />
-            <span>{statusLoading ? '检测中...' : status?.running ? '运行中' : '已停止'}</span>
-            {status?.version && <span className="oc-version-tag">v{status.version}</span>}
-          </div>
+    <div className="config-page">
+      {/* ── Header row ── */}
+      <div className="config-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="config-card-icon">{MI('hub')}</span>
+          <strong>OpenClaw</strong>
+          <span className={`badge ${status?.running ? 'badge-ok' : 'badge-warn'}`}>
+            {statusLoading ? '...' : status?.running ? '运行中' : '停止'}
+          </span>
+          {status?.version && <span className="badge badge-muted">v{status.version}</span>}
         </div>
 
-        <div className="oc-header-right">
-          <div className="oc-model-selector" ref={modelDropdownRef}>
-            <button className="oc-model-btn" onClick={() => setShowModelSelector(!showModelSelector)}>
-              {MI('smart_toy', 'oc-model-ico')}
-              <span className="oc-model-name">{getCurrentModel()}</span>
-              {MI('expand_more', `oc-expand-ico ${showModelSelector ? 'rotated' : ''}`)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div ref={modelDropdownRef} style={{ position: 'relative' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowModelSelector(!showModelSelector)}>
+              {getCurrentModel()} {MI('expand_more')}
             </button>
             {showModelSelector && (
-              <div className="oc-model-dropdown">
-                <div className="oc-dd-header">可用模型</div>
-                {getAvailableModels().length > 0 ? (
-                  getAvailableModels().map((m) => (
-                    <button
-                      key={m.modelId}
-                      className={`oc-dd-item ${config?.primaryModel === `${m.provider}/${m.modelId}` ? 'active' : ''}`}
-                      onClick={() => switchModel(m.provider, m.modelId)}
-                    >
-                      <span className="oc-dd-label">{m.label || m.modelId}</span>
-                      <span className="oc-dd-meta">
-                        {m.hasKey && <span className="oc-tag success">已配置</span>}
-                        {config?.primaryModel === `${m.provider}/${m.modelId}` && MI('check_circle', 'oc-check-ico')}
-                      </span>
+              <div className="card" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 50, minWidth: 200, marginTop: 4 }}>
+                <div className="section-label">可用模型</div>
+                {getAvailableModels().length > 0 ? getAvailableModels().map((m) => (
+                  <button key={m.modelId} className={`config-sidebar-item ${config?.primaryModel === `${m.provider}/${m.modelId}` ? 'active' : ''}`} onClick={() => switchModel(m.provider, m.modelId)}>
+                    {m.label || m.modelId}
+                    {m.hasKey && <span className="badge badge-ok">Key</span>}
+                  </button>
+                )) : <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', padding: '8px 0' }}>暂无模型</p>}
+                <div className="divider" />
+                <button className="config-sidebar-item" onClick={() => { setMainTab('config'); setConfigTab('model'); setShowModelSelector(false); }}>配置模型</button>
+              </div>
+            )}
+          </div>
+          <button className="btn-icon" onClick={loadStatus} title="刷新">{MI('refresh')}</button>
+        </div>
+      </div>
+
+      {/* ── Tabs ── */}
+      <nav className="config-tabs">
+        {([['chat', '对话'], ['config', '配置'], ['ops', '运维']] as [MainTab, string][]).map(([id, label]) => (
+          <button key={id} className={`config-tab ${mainTab === id ? 'active' : ''}`} onClick={() => setMainTab(id)}>{label}</button>
+        ))}
+      </nav>
+
+      {/* ════════════ Chat Tab ════════════ */}
+      {mainTab === 'chat' && (
+        <>
+          {/* Status strip */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {[
+              { label: '网关', val: status?.running ? '运行中' : '停止', ok: !!status?.running },
+              { label: '版本', val: status?.version || '--', ok: true },
+              { label: '模型', val: getCurrentModel(), ok: !!config?.primaryModel },
+              { label: '飞书', val: status?.feishuConnected ? '已连接' : '未连接', ok: !!status?.feishuConnected },
+            ].map((s) => (
+              <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem' }}>
+                <span className={`status-dot ${s.ok ? 'online' : ''}`} />
+                <span style={{ color: 'var(--text-muted)' }}>{s.label}</span>
+                <strong style={{ color: 'var(--text-primary)' }}>{s.val}</strong>
+              </div>
+            ))}
+            {!status?.running && (
+              <button className="btn btn-primary btn-sm" onClick={() => runAction('restart-gateway')} disabled={loading}>启动网关</button>
+            )}
+          </div>
+
+          {/* Chat area */}
+          <div className="config-chat" style={{ flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: '0.75rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span className={`status-dot ${chatConnected ? 'online' : ''}`} />
+                {chatConnected ? '已连接' : '连接中...'}
+              </span>
+              <span style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-ghost btn-sm" onClick={handleReconnect} disabled={chatStreaming}>重连</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setChatMessages([]); setChatStreaming(false); }} disabled={chatMessages.length === 0}>清空</button>
+              </span>
+            </div>
+
+            <div className="config-chat-stream" style={{ flex: 1, overflow: 'auto' }}>
+              {chatMessages.length === 0 ? (
+                <div className="empty-state" style={{ padding: '40px 20px' }}>
+                  <div className="empty-state-icon">{MI('hub')}</div>
+                  <strong>OpenClaw Agent 就绪</strong>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 12 }}>
+                    {QUICK_PROMPTS.map((item) => (
+                      <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming}>
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                chatMessages.map((msg) => (
+                  <div key={msg.id} className={`config-chat-msg ${msg.role === 'assistant' ? 'ai' : 'user'}`}>
+                    {msg.text ? (
+                      msg.role === 'assistant' ? renderMarkdown(msg.text) : msg.text
+                    ) : (
+                      msg.role === 'assistant' && chatStreaming ? (
+                        <span style={{ display: 'flex', gap: 3 }}><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></span>
+                      ) : null
+                    )}
+                  </div>
+                ))
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {chatMessages.length > 0 && (
+              <div style={{ display: 'flex', gap: 4, padding: '6px 12px', borderTop: '1px solid var(--border)', overflowX: 'auto' }}>
+                {QUICK_PROMPTS.map((item) => (
+                  <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming} style={{ flexShrink: 0 }}>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <form className="config-chat-input" onSubmit={sendMessage}>
+              <input className="input" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder={chatConnected ? '向 OpenClaw Agent 发送...' : '等待连接...'} disabled={!chatConnected} style={{ flex: 1 }} />
+              {chatStreaming ? (
+                <button type="button" className="btn btn-danger btn-sm" onClick={handleStopStream}>停止</button>
+              ) : (
+                <button type="submit" className="btn btn-primary btn-sm" disabled={!chatConnected || !chatInput.trim()}>发送</button>
+              )}
+            </form>
+          </div>
+        </>
+      )}
+
+      {/* ════════════ Config Tab ════════════ */}
+      {mainTab === 'config' && (
+        <div className="config-split">
+          <aside className="config-sidebar">
+            {([['model', '模型'], ['feishu', '飞书'], ['skills', '技能']] as [ConfigTab, string][]).map(([id, label]) => (
+              <button key={id} className={`config-sidebar-item ${configTab === id ? 'active' : ''}`} onClick={() => setConfigTab(id)}>{label}</button>
+            ))}
+          </aside>
+
+          <div className="config-detail page-scroll">
+            {/* ── Model ── */}
+            {configTab === 'model' && (
+              <>
+                <div className="section-label">当前配置</div>
+                <div className="card card-compact" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 0 }}>
+                  {[
+                    ['厂商', summary.provider],
+                    ['模型', summary.model],
+                    ['API', summary.api],
+                    ['Key', summary.apiKey],
+                    ['飞书', summary.feishu],
+                  ].map(([k, v]) => (
+                    <div key={k} className="config-row">
+                      <span className="config-label">{k}</span>
+                      <span className="config-value" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="divider" />
+                <div className="section-label">模型网关</div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
+                  {Object.entries(PROVIDER_PRESETS).map(([key, preset]) => (
+                    <button key={key} className={`chip ${selectedPreset === key ? 'active' : ''}`} onClick={() => handleProviderPresetChange(key)}>{preset.label}</button>
+                  ))}
+                  <button className={`chip ${selectedPreset === '__custom__' ? 'active' : ''}`} onClick={() => setSelectedPreset('__custom__')}>自定义</button>
+                </div>
+
+                <div className="config-row">
+                  <span className="config-label">Base URL</span>
+                  <input className="input" type="text" value={modelConfig.baseUrl} onChange={(e) => setModelConfig({ ...modelConfig, baseUrl: e.target.value })} placeholder="https://api.example.com/v1" />
+                </div>
+                <div className="config-row">
+                  <span className="config-label">API Key</span>
+                  <input className="input" type="password" value={modelConfig.apiKey} onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })} placeholder="sk-..." />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+                  <div className="config-row">
+                    <span className="config-label">API 类型</span>
+                    <select className="select" value={modelConfig.api} onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })} aria-label="API 类型">
+                      {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">模型 ID</span>
+                    <input className="input" type="text" value={modelConfig.modelId} onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })} placeholder="gpt-4o" />
+                  </div>
+                </div>
+
+                <div className="config-actions" style={{ marginTop: 12 }}>
+                  <button className="btn btn-primary" onClick={saveConfig} disabled={loading}>{loading ? '保存中...' : '保存'}</button>
+                  <button className="btn btn-ghost" onClick={() => { loadConfig(); addToast?.('已加载', 'info'); }}>重新加载</button>
+                  <button className="btn btn-ghost" onClick={testConnection} disabled={testResult === 'testing'}>
+                    {testResult === 'testing' ? '测试中...' : testResult === 'ok' ? '连接正常' : '测试连接'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ── Feishu ── */}
+            {configTab === 'feishu' && (
+              <>
+                <div className="section-label">飞书机器人</div>
+                <div className="config-row">
+                  <span className="config-label">App ID</span>
+                  <input className="input" type="text" value={feishuConfig.appId} onChange={(e) => setFeishuConfig({ ...feishuConfig, appId: e.target.value })} placeholder="cli_..." />
+                </div>
+                <div className="config-row">
+                  <span className="config-label">App Secret</span>
+                  <input className="input" type="password" value={feishuConfig.appSecret} onChange={(e) => setFeishuConfig({ ...feishuConfig, appSecret: e.target.value })} placeholder="..." />
+                </div>
+                <div className="config-actions" style={{ marginTop: 12 }}>
+                  <button className="btn btn-primary" onClick={saveConfig} disabled={loading}>{loading ? '保存中...' : '保存'}</button>
+                  <button className="btn btn-ghost" onClick={() => { loadConfig(); addToast?.('已加载', 'info'); }}>重新加载</button>
+                </div>
+              </>
+            )}
+
+            {/* ── Skills ── */}
+            {configTab === 'skills' && (
+              <>
+                <div className="section-label">安装技能</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input className="input" value={skillInstallName} onChange={(e) => setSkillInstallName(e.target.value)} placeholder="技能名称" onKeyDown={(e) => e.key === 'Enter' && handleInstallSkill()} style={{ flex: 1 }} />
+                  <button className="btn btn-primary btn-sm" onClick={() => handleInstallSkill()} disabled={skillInstalling || !skillInstallName.trim()}>{skillInstalling ? '...' : '安装'}</button>
+                </div>
+
+                <div className="divider" />
+                <div className="section-label">Skills</div>
+                <div className="config-grid">
+                  {SKILL_CATALOG.map((s) => (
+                    <button key={s.id} className="config-card" onClick={() => handleInstallSkill(s.id)} disabled={skillInstalling}>
+                      <div className="config-card-head">
+                        <span>{s.emoji}</span>
+                        <span className="config-card-name">{s.name}</span>
+                      </div>
                     </button>
-                  ))
-                ) : (
-                  <div className="oc-dd-empty">暂无已配置模型，请先在设置中配置</div>
-                )}
-                <div className="oc-dd-divider" />
-                <button className="oc-dd-item action" onClick={() => { setMainTab('config'); setConfigTab('model'); setShowModelSelector(false); }}>
-                  {MI('settings', 'oc-dd-action-ico')}
-                  <span>配置模型</span>
-                </button>
+                  ))}
+                </div>
+
+                <div className="divider" />
+                <div className="section-label">Plugins</div>
+                <div className="config-grid">
+                  {PLUGIN_CATALOG.map((p) => (
+                    <button key={p.id} className={`config-card ${isPluginEnabled(p.id) ? 'selected' : ''}`} onClick={() => togglePluginAllow(p.id)}>
+                      <div className="config-card-head">
+                        <span>{p.emoji}</span>
+                        <span className="config-card-name">{p.name}</span>
+                        {isPluginEnabled(p.id) && <span className="badge badge-ok">ON</span>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="divider" />
+                <div className="section-label">plugins.allow</div>
+                <textarea className="textarea" value={skillPluginsAllowText} onChange={(e) => setSkillPluginsAllowText(e.target.value)} placeholder={'feishu\nmemory\nweb_search'} rows={4} />
+                <div className="config-actions" style={{ marginTop: 8 }}>
+                  <button className="btn btn-primary" onClick={saveConfig} disabled={loading}>{loading ? '保存中...' : '保存'}</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ════════════ Ops Tab ════════════ */}
+      {mainTab === 'ops' && (
+        <div className="page-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Quick deploy */}
+          <div className="card card-compact">
+            <div className="section-label">一键安装</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
+              <div>
+                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>厂商</span>
+                <select className="select" value={deployProvider} onChange={(e) => { setDeployProvider(e.target.value); if (PROVIDER_PRESETS[e.target.value]) setDeployModelId(PROVIDER_PRESETS[e.target.value].models[0]); }} aria-label="厂商" style={{ width: '100%' }}>
+                  <option value="">选择...</option>
+                  {Object.entries(PROVIDER_PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
+                  <option value="__custom__">自定义</option>
+                </select>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>模型 ID</span>
+                <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="gpt-4o" />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>API Key</span>
+                <input className="input" type="password" value={deployApiKey} onChange={(e) => setDeployApiKey(e.target.value)} placeholder="sk-..." />
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={handleOneClickInstall} disabled={deployRunning || !deployProvider || !deployApiKey} style={{ width: '100%' }}>
+              {deployRunning ? '部署中...' : '开始部署'}
+            </button>
+            {deploySteps.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, fontSize: '0.6875rem' }}>
+                {['诊断', '依赖', '安装', '配置'].map((label, idx) => (
+                  <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {idx > 0 && <span style={{ width: 12, height: 1, background: 'var(--border)', display: 'inline-block' }} />}
+                    <span className={`badge ${deploySteps[idx] === 'done' ? 'badge-ok' : deploySteps[idx] === 'running' ? 'badge-accent' : deploySteps[idx] === 'error' ? 'badge-danger' : 'badge-muted'}`}>{label}</span>
+                  </span>
+                ))}
               </div>
             )}
           </div>
 
-          <button className="oc-icon-btn" onClick={loadStatus} title="刷新状态">
-            {MI('refresh')}
-          </button>
-        </div>
-      </header>
-
-      {/* ─── Tab Navigation ─── */}
-      <nav className="oc-tabs">
-        {([
-          { id: 'chat' as MainTab, icon: 'forum', label: '对话' },
-          { id: 'config' as MainTab, icon: 'tune', label: '配置' },
-          { id: 'ops' as MainTab, icon: 'terminal', label: '运维' },
-        ]).map((tab) => (
-          <button
-            key={tab.id}
-            className={`oc-tab ${mainTab === tab.id ? 'active' : ''}`}
-            onClick={() => setMainTab(tab.id)}
-          >
-            {MI(tab.icon, 'oc-tab-ico')}
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </nav>
-
-      {/* ─── Content ─── */}
-      <div className="oc-content">
-
-        {/* ═══════════ Chat Tab ═══════════ */}
-        {mainTab === 'chat' && (
-          <div className="oc-chat-tab">
-            {/* Status Cards */}
-            <div className="oc-status-row">
-              <div className={`oc-scard ${status?.running ? 'ok' : 'warn'}`}>
-                {MI(status?.running ? 'check_circle' : 'error', 'oc-scard-ico')}
-                <div className="oc-scard-body">
-                  <span className="oc-scard-label">网关状态</span>
-                  <span className="oc-scard-value">{status?.running ? '正常运行' : '未运行'}</span>
-                </div>
-                {!status?.running && (
-                  <button className="oc-scard-action" onClick={() => runAction('restart-gateway')} disabled={loading}>
-                    启动
-                  </button>
-                )}
-              </div>
-              <div className="oc-scard">
-                {MI('tag', 'oc-scard-ico')}
-                <div className="oc-scard-body">
-                  <span className="oc-scard-label">版本</span>
-                  <span className="oc-scard-value">{status?.version ? `OpenClaw ${status.version}` : '--'}</span>
-                </div>
-              </div>
-              <div className="oc-scard">
-                {MI('smart_toy', 'oc-scard-ico')}
-                <div className="oc-scard-body">
-                  <span className="oc-scard-label">当前模型</span>
-                  <span className="oc-scard-value">{getCurrentModel()}</span>
-                </div>
-              </div>
-              <div className={`oc-scard ${status?.feishuConnected ? 'ok' : ''}`}>
-                {MI('chat', 'oc-scard-ico')}
-                <div className="oc-scard-body">
-                  <span className="oc-scard-label">飞书</span>
-                  <span className="oc-scard-value">{status?.feishuConnected ? '已连接' : '未连接'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Chat Area */}
-            <div className="oc-chat">
-              <div className="oc-chat-bar">
-                <div className="oc-chat-conn">
-                  <span className={`oc-conn-dot ${chatConnected ? 'on' : ''}`} />
-                  <span>{chatConnected ? 'Agent 会话已建立' : '等待连接...'}</span>
-                </div>
-                <div className="oc-chat-actions">
-                  <button className="oc-link-btn" onClick={handleReconnect} disabled={!currentDevice || chatStreaming}>
-                    {MI('sync', 'oc-link-ico')} 重连
-                  </button>
-                  <button className="oc-link-btn" onClick={() => { setChatMessages([]); setChatStreaming(false); }} disabled={chatMessages.length === 0 || chatStreaming}>
-                    {MI('delete_sweep', 'oc-link-ico')} 清空
-                  </button>
-                </div>
-              </div>
-
-              <div className="oc-chat-messages">
-                {chatMessages.length === 0 ? (
-                  <div className="oc-welcome">
-                    <div className="oc-welcome-icon-wrap">
-                      {MI('hub', 'oc-welcome-icon')}
-                    </div>
-                    <h3>OpenClaw Agent 就绪</h3>
-                    <p>通过自然语言与板端 AI Agent 交互，管理设备、执行任务</p>
-                    <div className="oc-quick-grid">
-                      {QUICK_PROMPTS.map((item) => (
-                        <button
-                          key={item.label}
-                          className={`oc-quick-card ${item.color}`}
-                          onClick={() => dispatchOpenClawMessage(item.prompt)}
-                          disabled={!chatConnected || chatStreaming}
-                        >
-                          <div className="oc-quick-ico-wrap">{MI(item.icon, 'oc-quick-ico')}</div>
-                          <span className="oc-quick-label">{item.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  chatMessages.map((msg) => (
-                    <div key={msg.id} className={`oc-msg ${msg.role}`}>
-                      <div className="oc-msg-avatar">
-                        {msg.role === 'user' ? MI('person') : MI('smart_toy')}
-                      </div>
-                      <div className="oc-msg-content">
-                        <div className="oc-msg-meta">
-                          <span className="oc-msg-role">{msg.role === 'user' ? '你' : 'OpenClaw'}</span>
-                          <span className="oc-msg-time">
-                            {new Date(msg.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <div className="oc-msg-bubble">
-                          {msg.text ? (
-                            msg.role === 'assistant' ? renderMarkdown(msg.text) : msg.text
-                          ) : (
-                            msg.role === 'assistant' && chatStreaming ? (
-                              <div className="oc-typing">
-                                <span className="oc-typing-dot" />
-                                <span className="oc-typing-dot" />
-                                <span className="oc-typing-dot" />
-                              </div>
-                            ) : null
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              {chatMessages.length > 0 && (
-                <div className="oc-prompt-bar">
-                  {QUICK_PROMPTS.map((item) => (
-                    <button
-                      key={item.label}
-                      className="oc-prompt-chip"
-                      onClick={() => dispatchOpenClawMessage(item.prompt)}
-                      disabled={!chatConnected || chatStreaming}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <form className="oc-chat-input" onSubmit={sendMessage}>
-                <div className="oc-input-box">
-                  {MI('edit', 'oc-input-ico')}
-                  <input
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder={chatConnected ? '向 OpenClaw Agent 发送消息...' : '等待连接 OpenClaw...'}
-                    disabled={!chatConnected}
-                  />
-                </div>
-                {chatStreaming ? (
-                  <button type="button" className="oc-stop-btn" onClick={handleStopStream} title="停止生成">
-                    {MI('stop_circle')}
-                  </button>
-                ) : (
-                  <button type="submit" className="oc-send-btn" disabled={!chatConnected || !chatInput.trim()}>
-                    {MI('send')}
-                  </button>
-                )}
-              </form>
-            </div>
+          {/* Actions grid */}
+          <div className="section-label">操作</div>
+          <div className="config-grid">
+            {([
+              { action: 'check', label: '诊断' },
+              { action: 'prepare', label: '安装依赖' },
+              { action: 'install', label: '安装 OpenClaw' },
+              { action: 'upgrade', label: '升级' },
+              { action: 'restart-gateway', label: '重启网关' },
+            ] as const).map((op) => (
+              <button key={op.action} className={`chip ${activeOp === op.action ? 'active' : ''}`} onClick={() => runAction(op.action)} disabled={loading}>{op.label}</button>
+            ))}
+            <button className="chip" onClick={() => setConfirmAction({ action: 'uninstall', label: '卸载' })} disabled={loading} style={{ color: 'var(--danger)' }}>卸载</button>
           </div>
-        )}
 
-        {/* ═══════════ Config Tab ═══════════ */}
-        {mainTab === 'config' && (
-          <div className="oc-config-tab">
-            <aside className="oc-config-nav">
-              {([
-                { id: 'model' as ConfigTab, icon: 'smart_toy', label: '模型配置' },
-                { id: 'feishu' as ConfigTab, icon: 'chat', label: '飞书配置' },
-                { id: 'skills' as ConfigTab, icon: 'extension', label: '技能插件' },
-              ]).map((item) => (
-                <button
-                  key={item.id}
-                  className={`oc-cnav-item ${configTab === item.id ? 'active' : ''}`}
-                  onClick={() => setConfigTab(item.id)}
-                >
-                  {MI(item.icon, 'oc-cnav-ico')}
-                  <span>{item.label}</span>
-                </button>
+          {/* System info */}
+          <div className="section-label">系统</div>
+          <div className="card card-compact">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 0 }}>
+              {[
+                ['端口', '18789'],
+                ['版本', status?.version ? `OpenClaw ${status.version}` : '--'],
+                ['状态', status?.running ? '正常' : '停止'],
+                ['飞书', status?.feishuConnected ? '已连接' : '未连接'],
+              ].map(([k, v]) => (
+                <div key={k} className="config-row">
+                  <span className="config-label">{k}</span>
+                  <span className="config-value mono" style={{ fontSize: '0.75rem' }}>{v}</span>
+                </div>
               ))}
-            </aside>
-
-            <div className="oc-config-body">
-              {/* ─── Model Config ─── */}
-              {configTab === 'model' && (
-                <div className="oc-config-panel">
-                  {/* Config Summary */}
-                  <div className="oc-summary-card">
-                    <div className="oc-summary-title">{MI('dashboard', 'oc-summary-ico')} 当前运行配置</div>
-                    <div className="oc-summary-grid">
-                      <div className="oc-summary-item">
-                        <span className="oc-summary-label">模型厂商</span>
-                        <span className={`oc-summary-value ${summary.provider === '未配置' ? 'unconfigured' : ''}`}>{summary.provider}</span>
-                      </div>
-                      <div className="oc-summary-item">
-                        <span className="oc-summary-label">当前模型</span>
-                        <span className={`oc-summary-value ${summary.model === '未配置' ? 'unconfigured' : ''}`}>{summary.model}</span>
-                      </div>
-                      <div className="oc-summary-item">
-                        <span className="oc-summary-label">API 类型</span>
-                        <span className="oc-summary-value">{summary.api}</span>
-                      </div>
-                      <div className="oc-summary-item">
-                        <span className="oc-summary-label">API Key</span>
-                        <span className={`oc-summary-value ${summary.apiKey === '未配置' ? 'unconfigured' : ''}`}>{summary.apiKey}</span>
-                      </div>
-                      <div className="oc-summary-item">
-                        <span className="oc-summary-label">飞书</span>
-                        <span className={`oc-summary-value ${summary.feishu === '未配置' ? 'unconfigured' : ''}`}>{summary.feishu}</span>
-                      </div>
-                      <div className="oc-summary-item oc-summary-action">
-                        <span className="oc-summary-label">连接测试</span>
-                        <button
-                          className={`oc-test-btn ${testResult}`}
-                          onClick={testConnection}
-                          disabled={testResult === 'testing'}
-                        >
-                          {testResult === 'testing' ? MI('hourglass_top', 'oc-test-ico') :
-                           testResult === 'ok' ? MI('check_circle', 'oc-test-ico') :
-                           testResult === 'fail' ? MI('error', 'oc-test-ico') :
-                           MI('bolt', 'oc-test-ico')}
-                          <span>{testResult === 'testing' ? '测试中...' : testResult === 'ok' ? '连接正常' : testResult === 'fail' ? '连接失败' : '测试连接'}</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <section className="oc-section">
-                    <div className="oc-section-hdr">
-                      <h3>模型网关配置</h3>
-                      <p>配置 AI 模型网关参数，保存后自动重启 Gateway 服务。</p>
-                    </div>
-
-                    <div className="oc-form">
-                      {/* Provider Preset */}
-                      <div className="oc-field">
-                        <label>模型厂商 (快速选择)</label>
-                        <div className="oc-preset-grid">
-                          {Object.entries(PROVIDER_PRESETS).map(([key, preset]) => (
-                            <button
-                              key={key}
-                              className={`oc-preset-btn ${selectedPreset === key ? 'active' : ''}`}
-                              onClick={() => handleProviderPresetChange(key)}
-                            >
-                              {preset.label}
-                            </button>
-                          ))}
-                          <button
-                            className={`oc-preset-btn ${selectedPreset === '__custom__' ? 'active' : ''}`}
-                            onClick={() => { setSelectedPreset('__custom__'); }}
-                          >
-                            自定义
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="oc-field">
-                        <label>BASE URL</label>
-                        <div className="oc-input-group">
-                          {MI('link', 'oc-field-ico')}
-                          <input
-                            type="text"
-                            value={modelConfig.baseUrl}
-                            onChange={(e) => setModelConfig({ ...modelConfig, baseUrl: e.target.value })}
-                            placeholder="https://api.example.com/v1"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="oc-field">
-                        <label>API KEY</label>
-                        <div className="oc-input-group">
-                          {MI('key', 'oc-field-ico')}
-                          <input
-                            type="password"
-                            value={modelConfig.apiKey}
-                            onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })}
-                            placeholder="sk-..."
-                          />
-                        </div>
-                      </div>
-
-                      <div className="oc-field-row">
-                        <div className="oc-field">
-                          <label>API 类型</label>
-                          <select
-                            value={modelConfig.api}
-                            onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })}
-                            aria-label="API 类型"
-                          >
-                            {API_TYPE_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="oc-field">
-                          <label>模型 ID</label>
-                          <div className="oc-input-group">
-                            {MI('model_training', 'oc-field-ico')}
-                            <input
-                              type="text"
-                              value={modelConfig.modelId}
-                              onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })}
-                              placeholder="gpt-4o"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="oc-field">
-                        <label>模型名称 (显示用)</label>
-                        <div className="oc-input-group">
-                          {MI('label', 'oc-field-ico')}
-                          <input
-                            type="text"
-                            value={modelConfig.modelName}
-                            onChange={(e) => setModelConfig({ ...modelConfig, modelName: e.target.value })}
-                            placeholder="My Custom Model"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-
-                  <div className="oc-form-footer">
-                    <button className="oc-btn primary" onClick={saveConfig} disabled={loading}>
-                      {loading ? MI('hourglass_top', 'oc-btn-ico') : MI('save', 'oc-btn-ico')}
-                      {loading ? '保存中...' : '保存配置'}
-                    </button>
-                    <button className="oc-btn ghost" onClick={() => { loadConfig(); addToast?.('已重新加载', 'info'); }}>
-                      {MI('refresh', 'oc-btn-ico')} 重新加载
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ─── Feishu Config ─── */}
-              {configTab === 'feishu' && (
-                <div className="oc-config-panel">
-                  <section className="oc-section">
-                    <div className="oc-section-hdr">
-                      <h3>飞书机器人配置</h3>
-                      <p>配置飞书应用凭证，用于飞书机器人与 OpenClaw 的消息互通。</p>
-                    </div>
-
-                    <div className="oc-guide-card">
-                      {MI('info', 'oc-guide-ico')}
-                      <div>
-                        <strong>配置指南</strong>
-                        <p>在飞书开放平台创建应用，获取 App ID 和 App Secret，然后在此处配置。配置后 OpenClaw 可通过飞书接收和发送消息。</p>
-                      </div>
-                    </div>
-
-                    <div className="oc-form">
-                      <div className="oc-field">
-                        <label>APP ID</label>
-                        <div className="oc-input-group">
-                          {MI('badge', 'oc-field-ico')}
-                          <input
-                            type="text"
-                            value={feishuConfig.appId}
-                            onChange={(e) => setFeishuConfig({ ...feishuConfig, appId: e.target.value })}
-                            placeholder="cli_..."
-                          />
-                        </div>
-                      </div>
-                      <div className="oc-field">
-                        <label>APP SECRET</label>
-                        <div className="oc-input-group">
-                          {MI('lock', 'oc-field-ico')}
-                          <input
-                            type="password"
-                            value={feishuConfig.appSecret}
-                            onChange={(e) => setFeishuConfig({ ...feishuConfig, appSecret: e.target.value })}
-                            placeholder="..."
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-
-                  <div className="oc-form-footer">
-                    <button className="oc-btn primary" onClick={saveConfig} disabled={loading}>
-                      {loading ? MI('hourglass_top', 'oc-btn-ico') : MI('save', 'oc-btn-ico')}
-                      {loading ? '保存中...' : '保存配置'}
-                    </button>
-                    <button className="oc-btn ghost" onClick={() => { loadConfig(); addToast?.('已重新加载', 'info'); }}>
-                      {MI('refresh', 'oc-btn-ico')} 重新加载
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ─── Skills & Plugins ─── */}
-              {configTab === 'skills' && (
-                <div className="oc-config-panel">
-                  <section className="oc-section">
-                    <div className="oc-section-hdr">
-                      <h3>技能 / 插件管理</h3>
-                      <p>管理 OpenClaw 的 Skills 和 Plugins，控制 AI Agent 可使用的能力。</p>
-                    </div>
-
-                    {/* Quick Install */}
-                    <div className="oc-skill-install">
-                      <div className="oc-skill-install-header">
-                        <span>从 ClawHub 安装技能</span>
-                        <a href="https://skillhub.tencent.com" target="_blank" rel="noopener noreferrer" className="oc-skill-link">
-                          技能市场 →
-                        </a>
-                      </div>
-                      <div className="oc-skill-install-row">
-                        <div className="oc-input-group">
-                          {MI('download', 'oc-field-ico')}
-                          <input
-                            type="text"
-                            value={skillInstallName}
-                            onChange={(e) => setSkillInstallName(e.target.value)}
-                            placeholder="输入技能名称，如 rdk-x5-ai-detect"
-                            onKeyDown={(e) => e.key === 'Enter' && handleInstallSkill()}
-                          />
-                        </div>
-                        <button className="oc-btn primary compact" onClick={() => handleInstallSkill()} disabled={skillInstalling || !skillInstallName.trim()}>
-                          {skillInstalling ? '安装中...' : '安装'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Skill Catalog */}
-                    <div className="oc-catalog">
-                      <div className="oc-catalog-title">内置 Skills 目录</div>
-                      <div className="oc-catalog-grid">
-                        {SKILL_CATALOG.map((skill) => (
-                          <div key={skill.id} className="oc-catalog-card">
-                            <div className="oc-catalog-header">
-                              <span className="oc-catalog-emoji">{skill.emoji}</span>
-                              <div className="oc-catalog-info">
-                                <span className="oc-catalog-name">{skill.name}</span>
-                                <span className="oc-catalog-id">{skill.id}</span>
-                              </div>
-                              <span className="oc-tag green">Skill</span>
-                            </div>
-                            <p className="oc-catalog-desc">{skill.desc}</p>
-                            <button
-                              className="oc-btn ghost compact"
-                              onClick={() => handleInstallSkill(skill.id)}
-                              disabled={skillInstalling}
-                            >
-                              {skillInstalling ? '...' : '安装'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Plugin Catalog */}
-                    <div className="oc-catalog">
-                      <div className="oc-catalog-title">插件目录</div>
-                      <div className="oc-catalog-grid">
-                        {PLUGIN_CATALOG.map((plugin) => (
-                          <div key={plugin.id} className={`oc-catalog-card ${isPluginEnabled(plugin.id) ? 'enabled' : ''}`}>
-                            <div className="oc-catalog-header">
-                              <span className="oc-catalog-emoji">{plugin.emoji}</span>
-                              <div className="oc-catalog-info">
-                                <span className="oc-catalog-name">{plugin.name}</span>
-                                <span className="oc-catalog-id">{plugin.id}</span>
-                              </div>
-                              {isPluginEnabled(plugin.id) && <span className="oc-tag success">已启用</span>}
-                            </div>
-                            <p className="oc-catalog-desc">{plugin.desc}</p>
-                            <button
-                              className={`oc-btn ${isPluginEnabled(plugin.id) ? 'ghost' : 'primary'} compact`}
-                              onClick={() => togglePluginAllow(plugin.id)}
-                            >
-                              {isPluginEnabled(plugin.id) ? '停用' : '启用'}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Raw plugins.allow */}
-                    <div className="oc-field oc-field-mt">
-                      <label>plugins.allow (高级编辑)</label>
-                      <textarea
-                        className="oc-textarea"
-                        value={skillPluginsAllowText}
-                        onChange={(e) => setSkillPluginsAllowText(e.target.value)}
-                        placeholder={'skillhub\nfeishu\nmemory'}
-                        rows={5}
-                      />
-                    </div>
-                  </section>
-
-                  <div className="oc-form-footer">
-                    <button className="oc-btn primary" onClick={saveConfig} disabled={loading}>
-                      {loading ? MI('hourglass_top', 'oc-btn-ico') : MI('save', 'oc-btn-ico')}
-                      {loading ? '保存中...' : '保存配置'}
-                    </button>
-                    <button className="oc-btn ghost" onClick={() => { loadConfig(); addToast?.('已重新加载', 'info'); }}>
-                      {MI('refresh', 'oc-btn-ico')} 重新加载
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
-        )}
 
-        {/* ═══════════ Operations Tab ═══════════ */}
-        {mainTab === 'ops' && (
-          <div className="oc-ops-tab">
-            <div className="oc-ops-scroll">
-              {/* One-Click Deploy */}
-              <div className="oc-deploy-wizard">
-                <div className="oc-deploy-header">
-                  <div>
-                    <div className="oc-deploy-badge">一键安装向导</div>
-                    <p className="oc-deploy-desc">选择模型厂商、填写 API Key，自动完成环境检测 → 安装依赖 → 安装 OpenClaw → 初始化配置。</p>
-                  </div>
-                </div>
-                <div className="oc-deploy-form">
-                  <div className="oc-deploy-field">
-                    <label>模型厂商</label>
-                    <select value={deployProvider} aria-label="模型厂商" onChange={(e) => {
-                      setDeployProvider(e.target.value);
-                      if (PROVIDER_PRESETS[e.target.value]) {
-                        setDeployModelId(PROVIDER_PRESETS[e.target.value].models[0]);
-                      }
-                    }}>
-                      <option value="">选择厂商...</option>
-                      {Object.entries(PROVIDER_PRESETS).map(([key, p]) => (
-                        <option key={key} value={key}>{p.label}</option>
-                      ))}
-                      <option value="__custom__">自定义</option>
-                    </select>
-                  </div>
-                  {deployProvider === '__custom__' && (
-                    <>
-                      <div className="oc-deploy-field">
-                        <label>Base URL</label>
-                        <input type="text" value={deployCustomBaseUrl} onChange={(e) => setDeployCustomBaseUrl(e.target.value)} placeholder="https://..." />
-                      </div>
-                      <div className="oc-deploy-field">
-                        <label>API 类型</label>
-                        <select value={deployCustomApi} aria-label="API 类型" onChange={(e) => setDeployCustomApi(e.target.value)}>
-                          {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
-                      </div>
-                    </>
-                  )}
-                  <div className="oc-deploy-field">
-                    <label>模型 ID</label>
-                    <input type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="gpt-4o" />
-                  </div>
-                  <div className="oc-deploy-field">
-                    <label>API Key</label>
-                    <input type="password" value={deployApiKey} onChange={(e) => setDeployApiKey(e.target.value)} placeholder="sk-..." />
-                  </div>
-                  <button
-                    className="oc-btn primary"
-                    onClick={handleOneClickInstall}
-                    disabled={deployRunning || !deployProvider || !deployApiKey}
-                  >
-                    {deployRunning ? MI('hourglass_top', 'oc-btn-ico') : MI('rocket_launch', 'oc-btn-ico')}
-                    {deployRunning ? '部署中...' : '开始部署'}
-                  </button>
-                </div>
-
-                {/* Deploy Progress */}
-                {deploySteps.length > 0 && (
-                  <div className="oc-deploy-progress">
-                    {['系统诊断', '安装依赖', '安装 OpenClaw', '初始化配置'].map((label, idx) => (
-                      <div key={label} className="oc-deploy-step-wrap">
-                        {idx > 0 && <div className={`oc-deploy-connector ${deploySteps[idx - 1] === 'done' ? 'done' : deploySteps[idx - 1] === 'error' ? 'error' : ''}`} />}
-                        <div className={`oc-deploy-step step-${deploySteps[idx] || 'pending'}`}>
-                          <div className="oc-deploy-circle">
-                            {deploySteps[idx] === 'running' && MI('hourglass_top', 'oc-deploy-step-ico spinning')}
-                            {deploySteps[idx] === 'done' && MI('check', 'oc-deploy-step-ico')}
-                            {deploySteps[idx] === 'error' && MI('close', 'oc-deploy-step-ico')}
-                            {deploySteps[idx] === 'pending' && <span className="oc-deploy-pending-dot" />}
-                          </div>
-                          <span className="oc-deploy-step-label">{label}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Service Management */}
-              <div className="oc-ops-section">
-                <h4>部署管理</h4>
-                <div className="oc-ops-grid">
-                  {([
-                    { action: 'check', icon: 'search', label: '系统诊断', desc: '检测 OpenClaw 运行环境', color: 'blue' },
-                    { action: 'prepare', icon: 'inventory_2', label: '安装依赖', desc: '准备运行所需环境', color: 'blue' },
-                    { action: 'install', icon: 'download', label: '安装 OpenClaw', desc: '全新安装到设备', color: 'green' },
-                    { action: 'upgrade', icon: 'upgrade', label: '升级版本', desc: '升级到最新版本', color: 'blue' },
-                  ] as const).map((op) => (
-                    <button
-                      key={op.action}
-                      className={`oc-op-card ${op.color} ${activeOp === op.action ? 'active' : ''}`}
-                      onClick={() => runAction(op.action)}
-                      disabled={loading}
-                    >
-                      {MI(op.icon, 'oc-op-ico')}
-                      <div className="oc-op-info">
-                        <span className="oc-op-label">{op.label}</span>
-                        <span className="oc-op-desc">{op.desc}</span>
-                      </div>
-                      {activeOp === op.action && <span className="oc-op-spinner" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="oc-ops-section">
-                <h4>服务管理</h4>
-                <div className="oc-ops-grid">
-                  <button className="oc-op-card orange" onClick={() => runAction('restart-gateway')} disabled={loading}>
-                    {MI('restart_alt', 'oc-op-ico')}
-                    <div className="oc-op-info">
-                      <span className="oc-op-label">重启网关</span>
-                      <span className="oc-op-desc">重启 Gateway 服务</span>
-                    </div>
-                    {activeOp === 'restart-gateway' && <span className="oc-op-spinner" />}
-                  </button>
-                  <button className="oc-op-card red" onClick={() => setConfirmAction({ action: 'uninstall', label: '卸载 OpenClaw' })} disabled={loading}>
-                    {MI('delete_forever', 'oc-op-ico')}
-                    <div className="oc-op-info">
-                      <span className="oc-op-label">卸载</span>
-                      <span className="oc-op-desc">完全移除 OpenClaw</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <div className="oc-ops-section">
-                <h4>系统信息</h4>
-                <div className="oc-info-grid">
-                  <div className="oc-info-item">
-                    <span className="oc-info-label">网关端口</span>
-                    <span className="oc-info-value">18789</span>
-                  </div>
-                  <div className="oc-info-item">
-                    <span className="oc-info-label">版本</span>
-                    <span className="oc-info-value">{status?.version || '--'}</span>
-                  </div>
-                  <div className="oc-info-item">
-                    <span className="oc-info-label">运行状态</span>
-                    <span className={`oc-info-value ${status?.running ? 'ok' : 'err'}`}>
-                      {status?.running ? '正常' : '停止'}
-                    </span>
-                  </div>
-                  <div className="oc-info-item">
-                    <span className="oc-info-label">飞书</span>
-                    <span className={`oc-info-value ${status?.feishuConnected ? 'ok' : ''}`}>
-                      {status?.feishuConnected ? '已连接' : '未连接'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Terminal Output */}
-              {(output || loading) && (
-                <div className="oc-terminal">
-                  <div className="oc-term-header">
-                    <div className="oc-term-dots"><span /><span /><span /></div>
-                    <span className="oc-term-title">{loading ? '执行中...' : '执行输出'}</span>
-                    <button className="oc-term-close" onClick={() => setOutput('')}>{MI('close')}</button>
-                  </div>
-                  <pre className="oc-term-body">
-                    {output}
-                    {loading && <span className="oc-term-cursor">|</span>}
-                    <div ref={outputEndRef} />
-                  </pre>
-                </div>
-              )}
+          {/* Terminal output */}
+          {(output || loading) && (
+            <div className="config-terminal" style={{ maxHeight: 240 }}>
+              <pre style={{ margin: 0 }}>{output}{loading && '|'}</pre>
+              <div ref={outputEndRef} />
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
-      {/* ─── Confirm Dialog ─── */}
+      {/* ── Confirm Dialog ── */}
       {confirmAction && (
-        <div className="oc-overlay" onClick={() => setConfirmAction(null)}>
-          <div className="oc-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="oc-dialog-icon warn">{MI('warning')}</div>
-            <h3>确认{confirmAction.label}</h3>
-            <p>此操作将完全移除 OpenClaw 及其所有配置数据，且无法撤销。确定要继续吗？</p>
-            <div className="oc-dialog-btns">
-              <button className="oc-btn ghost" onClick={() => setConfirmAction(null)}>取消</button>
-              <button className="oc-btn danger" onClick={() => runAction(confirmAction.action)} disabled={loading}>
-                {loading ? '执行中...' : `确认${confirmAction.label}`}
-              </button>
+        <div className="modal-overlay" onClick={() => setConfirmAction(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header"><span className="modal-title">确认{confirmAction.label}</span></div>
+            <div className="modal-body">此操作不可撤销。确定继续？</div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setConfirmAction(null)}>取消</button>
+              <button className="btn btn-danger" onClick={() => runAction(confirmAction.action)} disabled={loading}>{loading ? '执行中...' : '确认'}</button>
             </div>
           </div>
         </div>

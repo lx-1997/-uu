@@ -205,33 +205,33 @@ export default function IDE() {
   const editorLabel = currentDevice ? `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}` : 'VS Code Web';
 
   return (
-    <div className="ide-container" ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="immersive" ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* ── 顶部工具栏 ── */}
-      <div className="ros-topbar">
-        <div className="ros-topbar-left">
+      <div className="immersive-bar">
+        <div className="immersive-bar-left">
           
-          <span className="ros-topbar-title">代码编辑器</span>
-          <span className="ros-topbar-badge">{currentDevice ? 'code-server' : 'VS Code'}</span>
+          <span className="immersive-bar-title">代码编辑器</span>
+          <span className="badge badge-muted">{currentDevice ? 'code-server' : 'VS Code'}</span>
           {currentDevice && (
-            <span className="ros-topbar-device">{currentDevice.name} · {currentDevice.ip}</span>
+            <span className="immersive-bar-meta">{currentDevice.name} · {currentDevice.ip}</span>
           )}
         </div>
 
-        <div className="ros-topbar-center">
+        <div className="immersive-bar-center">
           {showIframe && (
-            <span className={`ros-status-badge ${!iframeLoading ? 'live' : ''}`}>
-              <span className="ros-status-dot" />
+            <span className="immersive-bar-status">
+              <span className={`status-dot ${!iframeLoading ? 'online' : ''}`} />
               {iframeLoading ? '加载中' : '已就绪'}
             </span>
           )}
         </div>
 
-        <div className="ros-topbar-right">
+        <div className="immersive-bar-right">
           {showIframe && (
             <>
               {/* 非桌面端才显示刷新按钮 */}
               {!desktop && (
-                <button className="ros-tool-btn" onClick={handleReload} title="刷新">
+                <button className="btn-icon" onClick={handleReload} title="刷新">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
                     <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
@@ -240,7 +240,7 @@ export default function IDE() {
               )}
 
               <button
-                className="ros-tool-btn"
+                className="btn-icon"
                 onClick={() => window.open(getCodeServerUrl(), '_blank')}
                 title="新窗口打开"
               >
@@ -251,7 +251,7 @@ export default function IDE() {
               </button>
 
               {!desktop && (
-                <button className="ros-tool-btn" onClick={toggleFullscreen} title="全屏 (F11)">
+                <button className="btn-icon" onClick={toggleFullscreen} title="全屏 (F11)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     {isFullscreen ? (
                       <><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></>
@@ -262,9 +262,9 @@ export default function IDE() {
                 </button>
               )}
 
-              <div className="ros-topbar-sep" />
+              <div className="immersive-bar-sep" />
 
-              <button className="ros-disconnect-btn" onClick={handleDisconnect}>
+              <button className="btn btn-ghost" onClick={handleDisconnect}>
                 关闭
               </button>
             </>
@@ -273,27 +273,27 @@ export default function IDE() {
       </div>
 
       {/* ── 主视口 ── */}
-      <div className="ros-viewport" style={{ flex: 1 }}>
+      <div className="immersive-viewport" style={{ flex: 1 }}>
         {showIframe ? (
           <>
             {iframeLoading && (
-              <div className="ros-loading-overlay">
-                <div className="ros-loading-spinner" />
-                <span className="ros-loading-text">正在加载 {editorLabel}...</span>
+              <div className="immersive-loading">
+                <div className="spinner" />
+                <span className="immersive-loading-text">正在加载 {editorLabel}...</span>
               </div>
             )}
             {/* 桌面端由 WebContentsView 渲染，此处只显示占位或错误 */}
             {desktop ? (
-              <div style={{ width: '100%', height: '100%', background: '#1e1e1e', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <div className="immersive-desktop-placeholder" style={{ width: '100%', height: '100%', background: '#1e1e1e', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                 {loadError ? (
                   <>
-                    <span style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
+                    <span className="immersive-error" style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
                     {loadError.includes('未安装') && currentDevice && (
-                      <button className="ros-connect-main-btn" style={{ background: '#2563eb', marginTop: 8 }} disabled={installing} onClick={handleInstall}>
+                      <button className="btn btn-primary" style={{ background: '#2563eb', marginTop: 8 }} disabled={installing} onClick={handleInstall}>
                         {installing ? '正在安装...' : '一键安装 code-server'}
                       </button>
                     )}
-                    <button className="ros-connect-main-btn" style={{ background: '#ff6b00', marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
+                    <button className="btn btn-ghost" style={{ background: '#ff6b00', marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
                   </>
                 ) : (
                   <span style={{ color: '#555', fontSize: 13 }}>code-server 已在独立视图中加载</span>
@@ -303,7 +303,6 @@ export default function IDE() {
               <iframe
                 ref={iframeRef}
                 src={getCodeServerUrl()}
-                className="ros-iframe"
                 title="code-server"
                 onLoad={handleIframeLoad}
                 allow="clipboard-read; clipboard-write; fullscreen"
@@ -312,9 +311,9 @@ export default function IDE() {
             )}
           </>
         ) : (
-          <div className="ros-welcome">
+          <div className="immersive-welcome">
             <div className="ros-welcome-visual">
-              <div className="ros-welcome-icon">
+              <div className="immersive-welcome-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
                 </svg>
@@ -322,22 +321,22 @@ export default function IDE() {
               <div className="ros-welcome-glow" />
             </div>
 
-            <h2 className="ros-welcome-title">
+            <h2 className="immersive-welcome-title">
               {currentDevice ? 'code-server 编辑器' : 'VS Code Web 编辑器'}
             </h2>
-            <p className="ros-welcome-desc">
+            <p className="immersive-welcome-desc">
               {currentDevice
                 ? `连接设备 ${currentDevice.ip} 上的 code-server，直接编辑 /root 目录代码`
                 : '基于 vscode.dev 的在线代码编辑器，支持中文界面，可通过 Remote SSH 连接到设备'}
             </p>
 
             {!currentDevice && (
-              <p className="ros-welcome-desc" style={{ color: '#f59e0b' }}>请先在左侧连接一个设备</p>
+              <p className="immersive-welcome-desc" style={{ color: '#f59e0b' }}>请先在左侧连接一个设备</p>
             )}
 
             {loadError?.includes('未安装') && currentDevice && (
               <button
-                className="ros-connect-main-btn"
+                className="btn btn-primary"
                 onClick={handleInstall}
                 disabled={installing}
                 style={{ background: '#2563eb', marginBottom: 8 }}
@@ -350,7 +349,7 @@ export default function IDE() {
             )}
 
             <button
-              className="ros-connect-main-btn"
+              className="btn btn-primary"
               onClick={handleConnect}
               disabled={!currentDevice || installing}
               style={{ background: '#ff6b00' }}

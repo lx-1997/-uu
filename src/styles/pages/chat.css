@@ -1,0 +1,538 @@
+/* ═══════════════════════════════════════════════════════
+   AI Dock — Floating Chat + Context Strip
+   ═══════════════════════════════════════════════════════ */
+
+/* ── Dock container ── */
+.dock {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(var(--dock-max-width), calc(100vw - var(--rail-width) - 40px));
+  z-index: var(--z-dock);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: calc(var(--rail-width) / 2);
+}
+
+.dock.expanded {
+  bottom: 0;
+  width: calc(100vw - var(--rail-width));
+  margin-left: calc(var(--rail-width) / 2);
+  height: 100%;
+  max-height: 100%;
+  transform: translateX(-50%);
+}
+
+.dock.workspace {
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  margin-left: 0;
+  bottom: 0;
+  transform: none;
+  left: 0;
+  border-radius: 0;
+}
+
+/* ── Chat panel (expanded) ── */
+.dock-chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--dock-bg);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
+  border: 1px solid var(--dock-border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--dock-shadow);
+  overflow: hidden;
+}
+
+.dock.workspace .dock-chat {
+  border-radius: 0;
+}
+
+/* Header */
+.dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.dock-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dock-header-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dock-header-badges {
+  display: flex;
+  gap: 4px;
+}
+
+.dock-header-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Messages stream */
+.dock-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dock-msg {
+  display: flex;
+  gap: 8px;
+  animation: fadeUp var(--duration-fast) var(--ease-out);
+}
+
+.dock-msg.user {
+  flex-direction: row-reverse;
+}
+
+.dock-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+}
+
+.dock-msg.ai .dock-avatar {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.dock-bubble {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+
+.dock-msg.ai .dock-bubble {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+}
+
+.dock-msg.user .dock-bubble {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: none;
+}
+
+[data-theme="cyber"] .dock-msg.ai .dock-bubble {
+  border-color: var(--border-strong);
+}
+
+.dock-bubble .msg-text {
+  margin: 0;
+}
+
+.dock-bubble .msg-text p { margin: 0 0 8px; }
+.dock-bubble .msg-text p:last-child { margin-bottom: 0; }
+
+.dock-msg-time {
+  display: block;
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Typing indicator */
+.dock-typing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.typing-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: pulse 1s infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+/* Task panel */
+.dock-tasks {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-inset);
+}
+
+.dock-task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.75rem;
+}
+
+.dock-task-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dock-task-dot.running { background: var(--accent); }
+.dock-task-dot.done    { background: var(--ok); }
+.dock-task-dot.failed  { background: var(--danger); }
+
+.dock-task-label {
+  flex: 1;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-task-status {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+/* ── Input area ── */
+.dock-input-area {
+  flex-shrink: 0;
+  background: var(--dock-bg);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
+  border: 1px solid var(--dock-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--dock-shadow);
+  padding: 4px;
+}
+
+.dock.expanded .dock-input-area {
+  border-radius: 0 0 0 0;
+  border-top: 1px solid var(--border);
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  box-shadow: none;
+}
+
+/* Attachment preview */
+.dock-attachments {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  overflow-x: auto;
+}
+
+.dock-att-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-inset);
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+}
+
+.dock-att-item img {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.dock-att-remove {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dock-att-remove:hover {
+  color: var(--danger);
+}
+
+/* Form row */
+.dock-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+}
+
+.dock-form-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.dock-action-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.dock-action-btn:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+.dock-action-btn.recording {
+  color: var(--danger);
+  animation: pulse 1s infinite;
+}
+
+.dock-cmd-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+}
+
+.dock-cmd-input::placeholder {
+  color: var(--text-muted);
+}
+
+.dock-cmd-input:focus {
+  outline: none;
+}
+
+.dock-send-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.dock-send-btn.ready {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.dock-send-btn.ready:hover {
+  background: var(--accent-hover);
+}
+
+[data-theme="cyber"] .dock-send-btn.ready {
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+/* ── Context strip (AI Native) ── */
+.dock-context-strip {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dock-context-strip::-webkit-scrollbar {
+  height: 0;
+}
+
+.dock-ctx-chip {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.dock-ctx-chip:hover {
+  background: var(--chip-bg-active);
+  color: var(--chip-text-active);
+  border-color: var(--accent-border);
+}
+
+[data-theme="cyber"] .dock-ctx-chip:hover {
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+/* ── Suggestions dropdown (idle) ── */
+.dock-suggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: fadeUp var(--duration-fast) var(--ease-out);
+  z-index: 10;
+}
+
+.dock-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+
+.dock-suggestion-item:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+/* ── Block renderers ── */
+.dock-bubble .msg-block {
+  margin: 8px 0;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.dock-bubble .terminal-block-body {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.dock-bubble .chat-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
+  cursor: pointer;
+}
+
+.dock-bubble .chat-action-btn:hover {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+/* Status items in blocks */
+.dock-bubble .status-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dock-bubble .status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.dock-bubble .status-item-label {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+}
+
+.dock-bubble .status-item-value {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.dock-bubble .status-item-value.ok {
+  color: var(--ok);
+}
+
+/* Approval block */
+.dock-bubble .approval-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.dock-bubble .approval-block .btn {
+  font-size: 0.6875rem;
+  padding: 4px 8px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .dock {
+    width: calc(100vw - 20px);
+    margin-left: 0;
+  }
+
+  .dock.expanded {
+    width: 100vw;
+    margin-left: 0;
+  }
+}

@@ -11,7 +11,14 @@ import { TerminalProvider, useTerminalStore } from './useTerminalStore';
 import { AIChatProvider, useAIChatStore } from './useAIChatStore';
 
 // ---- State shape (unchanged — backward compatible) ----
+export type { ThemeMode } from './useUIStore';
+
 export interface AppState {
+  // Theme
+  theme: 'aurora' | 'cyber';
+  setTheme: (t: 'aurora' | 'cyber') => void;
+  toggleTheme: () => void;
+
   // Device
   activeDevice: string;
   setActiveDevice: (id: string) => void;

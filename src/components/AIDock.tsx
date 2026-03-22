@@ -701,327 +701,190 @@ export default function AIDock() {
   };
 
   return (
-    <div className={`floating-dock ${chatExpanded ? 'chat-open' : ''} ${workspaceMode ? 'workspace-mode' : ''} ${isFlasherTab ? 'flasher-passive' : ''}`}>
-      <div className="dock-wrapper">
-        {chatExpanded && chatMessages.length > 0 && (
-          <div className={`chat-panel ${workspaceMode ? 'workspace' : ''}`}>
-            {/* ── Header ── */}
-            <div className="chat-panel-header">
-              <div className="chat-panel-title-wrap">
-                <span style={{ display: 'flex', alignItems: 'center', color: '#ff6b00' }}>{Icon.spark}</span>
-                <span className="chat-panel-title">AI 工作台</span>
-
-                <span className={`agent-badge on ${agentExecution.lastError ? 'error' : ''}`}>
-                  {agentExecution.lastError ? 'RDK Studio Claw ERROR' : 'RDK Studio Claw ON'}
+    <div className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''}`}>
+      {/* ── Chat panel (expanded) ── */}
+      {chatExpanded && chatMessages.length > 0 && (
+        <div className="dock-chat">
+          <div className="dock-header">
+            <div className="dock-header-left">
+              <span className="dock-header-title">RDKClaw</span>
+              <div className="dock-header-badges">
+                <span className={`badge ${agentExecution.lastError ? 'badge-danger' : 'badge-accent'}`}>
+                  {agentExecution.lastError ? 'Error' : 'ON'}
                 </span>
-                <span className={`agent-badge ${openclawConnected ? 'on' : 'off'}`}>
-                  {openclawConnected ? 'OpenClaw READY' : 'OpenClaw OFFLINE'}
+                <span className={`badge ${openclawConnected ? 'badge-ok' : 'badge-muted'}`}>
+                  {openclawConnected ? 'OpenClaw' : 'Offline'}
                 </span>
-              </div>
-              <div className="chat-panel-controls">
-                {taskHistory.length > 0 && (
-                  <button
-                    className={`chat-panel-action ${showTaskPanel ? 'active' : ''}`}
-                    onClick={() => setShowTaskPanel(!showTaskPanel)}
-                    title="任务面板"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
-                    </svg>
-                    <span style={{ marginLeft: 4 }}>
-                      任务{taskHistory.filter(t => t.status === 'running').length > 0
-                        ? ` (${taskHistory.filter(t => t.status === 'running').length})`
-                        : ''}
-                    </span>
-                  </button>
-                )}
-                {chatMessages.length > 0 && (
-                  <button
-                    className="chat-panel-action"
-                    onClick={clearChatHistory}
-                    title="清空对话"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-                    </svg>
-                    <span style={{ marginLeft: 4 }}>清空</span>
-                  </button>
-                )}
-                <button
-                  className="chat-panel-action"
-                  onClick={() => setWorkspaceMode(!workspaceMode)}
-                  title={workspaceMode ? '还原窗口' : '全屏模式'}
-                >
-                  {workspaceMode ? Icon.collapse : Icon.expand}
-                  <span style={{ marginLeft: 4 }}>{workspaceMode ? '还原' : '放大'}</span>
-                </button>
-                <button className="chat-panel-close" onClick={closeDock} title="关闭">
-                  {Icon.close}
-                </button>
               </div>
             </div>
-
-            {/* ── Task Panel (overlay) ── */}
-            {showTaskPanel && (
-              <div className="task-panel">
-                <div className="task-panel-title">任务列表</div>
-                {taskHistory.length === 0 ? (
-                  <div className="task-panel-empty">暂无任务记录</div>
-                ) : (
-                  <div className="task-panel-list">
-                    {taskHistory.map(task => (
-                      <div key={task.id} className={`task-item task-${task.status}`}>
-                        <div className="task-item-header">
-                          <span className={`task-dot task-dot-${task.status}`} />
-                          <span className="task-item-label">{getCapability(task.capabilityId)?.label ?? task.capabilityId}</span>
-                          <span className="task-item-status">
-                            {task.status === 'running' ? '执行中' : task.status === 'done' ? '已完成' : task.status === 'failed' ? '失败' : task.status === 'cancelled' ? '已取消' : '等待中'}
-                          </span>
-                        </div>
-                        {task.steps.length > 0 && (
-                          <div className="task-item-steps">
-                            {task.steps.map((s, i) => (
-                              <div key={i} className={`task-step-mini task-step-${s.status}`}>
-                                <span className="task-step-icon">
-                                  {s.status === 'done' ? '✓' : s.status === 'running' ? '◉' : '○'}
-                                </span>
-                                <span>{s.label}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {task.result && (
-                          <div className={`task-item-result ${task.result.success ? 'success' : 'fail'}`}>
-                            {task.result.title} — {task.result.detail}
-                          </div>
-                        )}
-                        {task.status === 'running' && (
-                          <button className="task-cancel-btn-panel" onClick={() => cancelRunningTask(task.id)}>
-                            取消
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Chat stream ── */}
-            <div className="chat-stream">
-              {/* Active tasks banner */}
-              {(() => {
-                const running = taskHistory.filter(t => t.status === 'running');
-                if (running.length < 2) return null;
-                return (
-                  <div className="active-tasks-banner">
-                    <span className="active-tasks-icon">⚡</span>
-                    <span>{running.length} 个任务并行中：</span>
-                    {running.map(t => (
-                      <span key={t.id} className="active-task-tag">
-                        {getCapability(t.capabilityId)?.label ?? t.capabilityId}
-                      </span>
-                    ))}
-                  </div>
-                );
-              })()}
-              {!showAllMessages && hiddenCount > 0 && (
-                <button className="history-truncate" onClick={() => setShowAllMessages(true)}>
-                  查看更早的 {hiddenCount} 条消息
+            <div className="dock-header-right">
+              {taskHistory.length > 0 && (
+                <button className="btn-icon" onClick={() => setShowTaskPanel(!showTaskPanel)} title="任务">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
                 </button>
               )}
+              <button className="btn-icon" onClick={clearChatHistory} title="清空">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </button>
+              <button className="btn-icon" onClick={() => setWorkspaceMode(!workspaceMode)} title={workspaceMode ? '还原' : '全屏'}>
+                {workspaceMode ? Icon.collapse : Icon.expand}
+              </button>
+              <button className="btn-icon" onClick={closeDock} title="关闭">{Icon.close}</button>
+            </div>
+          </div>
 
-              {visibleMessages.map((msg) => (
-                <div key={msg.id} className={`chat-message ${msg.role}`}>
-                  {/* Avatar */}
-                  <div className={`chat-avatar ${msg.role}`}>
-                    {msg.role === 'ai' ? Icon.robot : Icon.user}
-                  </div>
-                  {/* Bubble */}
-                  <div className={`chat-bubble ${msg.role}`}>
-                    {/* Attachments (images/files/audio/video) */}
-                    {msg.attachments && msg.attachments.length > 0 && (
-                      <div className={`chat-attachments ${msg.attachments.length > 1 ? 'grid' : ''}`}>
-                        {msg.attachments.map(att => (
-                          <AttachmentRenderer key={att.id} attachment={att} />
-                        ))}
-                      </div>
-                    )}
-                    {/* Text content */}
-                    {msg.text && (
-                      msg.role === 'ai'
-                        ? <div className="msg-text">{renderMarkdown(msg.text)}</div>
-                        : <p className="msg-text">{msg.text}</p>
-                    )}
-                    {msg.blocks?.map((block, i) => (
-                      <BlockRenderer
-                        key={i}
-                        block={block}
-                        onConfirm={executeConfirm}
-                        onDismiss={dismissConfirm}
-                        onCancelTask={cancelRunningTask}
-                        onApprovalAction={handleApprovalAction}
-                      />
-                    ))}
-                    {msg.action && (
-                      <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
-                        {msg.action.label} →
-                      </button>
-                    )}
-                    <span className="chat-msg-time">
-                      {new Date(msg.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
+          {/* Task panel */}
+          {showTaskPanel && (
+            <div className="dock-tasks">
+              {taskHistory.map(task => (
+                <div key={task.id} className="dock-task-item">
+                  <span className={`dock-task-dot ${task.status}`} />
+                  <span className="dock-task-label">{getCapability(task.capabilityId)?.label ?? task.capabilityId}</span>
+                  <span className="dock-task-status">
+                    {task.status === 'running' ? '执行中' : task.status === 'done' ? '完成' : task.status === 'failed' ? '失败' : '等待'}
+                  </span>
+                  {task.status === 'running' && (
+                    <button className="btn btn-sm btn-ghost" onClick={() => cancelRunningTask(task.id)}>取消</button>
+                  )}
                 </div>
               ))}
+            </div>
+          )}
 
-              {aiTyping && (
-                <div className="chat-message ai">
-                  <div className="chat-avatar ai">{Icon.robot}</div>
-                  <div className="chat-bubble ai typing">
-                    <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
-                    <button type="button" className="task-cancel-btn" onClick={stopCurrentRun} title="停止当前执行">
-                      停止
+          {/* Chat stream */}
+          <div className="dock-stream">
+            {!showAllMessages && hiddenCount > 0 && (
+              <button className="btn btn-sm btn-ghost" style={{ alignSelf: 'center' }} onClick={() => setShowAllMessages(true)}>
+                查看更早 {hiddenCount} 条
+              </button>
+            )}
+
+            {visibleMessages.map((msg) => (
+              <div key={msg.id} className={`dock-msg ${msg.role}`}>
+                <div className={`dock-avatar ${msg.role}`}>
+                  {msg.role === 'ai' ? Icon.robot : Icon.user}
+                </div>
+                <div className={`dock-bubble ${msg.role}`}>
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                      {msg.attachments.map(att => (
+                        <AttachmentRenderer key={att.id} attachment={att} />
+                      ))}
+                    </div>
+                  )}
+                  {msg.text && (
+                    msg.role === 'ai'
+                      ? <div className="msg-text">{renderMarkdown(msg.text)}</div>
+                      : <p className="msg-text">{msg.text}</p>
+                  )}
+                  {msg.blocks?.map((block, i) => (
+                    <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} />
+                  ))}
+                  {msg.action && (
+                    <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
+                      {msg.action.label} →
                     </button>
+                  )}
+                  <span className="dock-msg-time">
+                    {new Date(msg.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+            ))}
+
+            {aiTyping && (
+              <div className="dock-msg ai">
+                <div className="dock-avatar ai">{Icon.robot}</div>
+                <div className="dock-bubble ai">
+                  <div className="dock-typing">
+                    <div className="typing-dots"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
+                    <button className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>停止</button>
                   </div>
                 </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
-        )}
-
-        {/* Suggestions overlay (idle state) */}
-        {showSuggestions && !chatExpanded && filteredSuggestions.length > 0 && (
-          <div className="suggestions-dropdown">
-            {filteredSuggestions.slice(0, 6).map((s, i) => (
-              <div key={i} className="suggestion-item" onMouseDown={() => { setCmd(s.text); setShowSuggestions(false); }}>
-                <span className="suggestion-icon">{s.icon}</span>
-                {s.text}
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── Input bar (multimodal) ── */}
-        <div
-          className={`input-area ${pendingAttachments.length > 0 ? 'has-attachments' : ''}`}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-        >
-          {/* Attachment preview strip */}
-          {pendingAttachments.length > 0 && (
-            <div className="attachment-preview-strip">
-              {pendingAttachments.map(att => (
-                <div key={att.id} className={`attachment-preview-item ${att.type}`}>
-                  {att.type === 'image' && <img src={att.url} alt={att.name} className="attachment-thumb" />}
-                  {att.type === 'video' && (
-                    <div className="attachment-icon-wrap video">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                    </div>
-                  )}
-                  {att.type === 'audio' && (
-                    <div className="attachment-icon-wrap audio">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
-                    </div>
-                  )}
-                  {att.type === 'file' && (
-                    <div className="attachment-icon-wrap file">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    </div>
-                  )}
-                  <span className="attachment-name">{att.name}</span>
-                  <button type="button" className="attachment-remove" onClick={() => removeAttachment(att.id)}>
-                    {Icon.close}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {isRecording && recordingTranscript && (
-            <div className="attachment-preview-strip">
-              <div className="attachment-preview-item audio">
-                <div className="attachment-icon-wrap audio">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-                </div>
-                <span className="attachment-name">正在识别：{recordingTranscript}</span>
-              </div>
-            </div>
-          )}
-
-          <form className="input-box" onSubmit={handleUnifiedCommand}>
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*,audio/*,.pdf,.zip,.tar,.gz,.py,.js,.ts,.json,.txt,.md,.csv" title="选择文件" className="sr-only" />
-
-            {/* Left action buttons */}
-            <div className="input-actions-left">
-              <button type="button" className="input-action-btn" onClick={handleFilePick} title="上传图片/文件">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={`input-action-btn ${isRecording ? 'recording' : ''}`}
-                onClick={toggleVoiceRecord}
-                title={isRecording ? '停止录音' : '语音输入'}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                  <line x1="12" y1="19" x2="12" y2="23"/>
-                  <line x1="8" y1="23" x2="16" y2="23"/>
-                </svg>
-              </button>
-            </div>
-
-            {/* Text input */}
-            <input
-              type="text"
-              className="cmd-input"
-              placeholder={openclawConnected
-                ? '输入消息，或上传图片/文件/语音...'
-                : '和 RDK Studio Claw 聊聊，或拖拽文件到这里...'}
-              ref={chatInputRef}
-              value={cmd}
-              onChange={(e) => setCmd(e.target.value)}
-              onFocus={() => { setInputFocused(true); if (!chatExpanded) setShowSuggestions(true); }}
-              onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape' && chatExpanded) { closeDock(); e.preventDefault(); }
-              }}
-            />
-
-            {/* Right actions */}
-            {cmd.trim() && (
-              <button type="button" className="input-clear-btn" onClick={() => setCmd('')} title="清空">
-                {Icon.close}
-              </button>
             )}
-            <button
-              type="submit"
-              className={`send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`}
-              disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping}
-              title="发送"
-            >
-              {Icon.send}
-            </button>
-          </form>
+            <div ref={messagesEndRef} />
+          </div>
         </div>
+      )}
 
-        {/* ── Quick prompt chips (contextual per tab) ── */}
-        <div className="quick-prompt-strip">
-            {quickPrompts.map((prompt) => (
-              <button
-                key={prompt.id}
-                className="quick-prompt-chip"
-                onClick={() => submitQuickPrompt(prompt.text)}
-              >
-                <span className="qp-icon">{prompt.icon}</span>
-                <span className="qp-label">{prompt.label}</span>
-              </button>
+      {/* Suggestions (idle) */}
+      {showSuggestions && !chatExpanded && filteredSuggestions.length > 0 && (
+        <div className="dock-suggestions" style={{ position: 'relative' }}>
+          {filteredSuggestions.slice(0, 6).map((s, i) => (
+            <div key={i} className="dock-suggestion-item" onMouseDown={() => { setCmd(s.text); setShowSuggestions(false); }}>
+              {s.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Input area ── */}
+      <div className="dock-input-area" onDrop={handleDrop} onDragOver={handleDragOver}>
+        {pendingAttachments.length > 0 && (
+          <div className="dock-attachments">
+            {pendingAttachments.map(att => (
+              <div key={att.id} className="dock-att-item">
+                {att.type === 'image' && att.url && <img src={att.url} alt="" />}
+                <span className="truncate">{att.name}</span>
+                <button className="dock-att-remove" onClick={() => removeAttachment(att.id)}>{Icon.close}</button>
+              </div>
             ))}
           </div>
+        )}
+
+        {isRecording && recordingTranscript && (
+          <div className="dock-attachments">
+            <div className="dock-att-item">
+              <span className="truncate">识别中：{recordingTranscript}</span>
+            </div>
+          </div>
+        )}
+
+        <form className="dock-form dock-input" onSubmit={handleUnifiedCommand}>
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*,audio/*,.pdf,.zip,.tar,.gz,.py,.js,.ts,.json,.txt,.md,.csv" title="选择文件" className="sr-only" />
+
+          <div className="dock-form-actions">
+            <button type="button" className="dock-action-btn" onClick={handleFilePick} title="附件">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </button>
+            <button type="button" className={`dock-action-btn ${isRecording ? 'recording' : ''}`} onClick={toggleVoiceRecord} title={isRecording ? '停止' : '语音'}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+              </svg>
+            </button>
+          </div>
+
+          <input
+            type="text"
+            className="dock-cmd-input"
+            placeholder="消息、指令或拖拽文件..."
+            ref={chatInputRef}
+            value={cmd}
+            onChange={(e) => setCmd(e.target.value)}
+            onFocus={() => { setInputFocused(true); if (!chatExpanded) setShowSuggestions(true); }}
+            onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
+            onKeyDown={(e) => { if (e.key === 'Escape' && chatExpanded) { closeDock(); e.preventDefault(); } }}
+          />
+
+          {cmd.trim() && (
+            <button type="button" className="dock-action-btn" onClick={() => setCmd('')} title="清空">{Icon.close}</button>
+          )}
+          <button type="submit" className={`dock-send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`} disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping} title="发送">
+            {Icon.send}
+          </button>
+        </form>
+
+        {/* Context strip (AI Native) */}
+        <div className="dock-context-strip">
+          {quickPrompts.map((p) => (
+            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

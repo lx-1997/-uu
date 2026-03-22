@@ -193,42 +193,42 @@ export default function Vnc() {
   }, [showIframe]);
 
   return (
-    <div className="vnc-container" ref={containerRef}>
+    <div className="immersive" ref={containerRef}>
       {/* ── 顶部工具栏 ── */}
-      <div className="vnc-topbar">
-        <div className="vnc-topbar-left">
+      <div className="immersive-bar">
+        <div className="immersive-bar-left">
           
-          <span className="vnc-topbar-title">远程桌面</span>
+          <span className="immersive-bar-title">远程桌面</span>
           {currentDevice && (
-            <span className="vnc-topbar-device">
+            <span className="immersive-bar-meta">
               {(currentDevice as any).username || (currentDevice as any).name}@{(currentDevice as any).host || (currentDevice as any).ip}
             </span>
           )}
         </div>
 
-        <div className="vnc-topbar-center">
+        <div className="immersive-bar-center">
           {showIframe && (
             <>
-              <span className={`vnc-status-badge ${phase === 'connected' ? 'live' : ''}`}>
-                <span className="vnc-status-dot" />
+              <span className={`immersive-bar-status ${phase === 'connected' ? 'live' : ''}`}>
+                <span className="status-dot" />
                 {phase === 'connected' ? '已连接' : '未连接'}
               </span>
               {latency !== null && (
-                <span className="vnc-latency-badge">{latency}ms</span>
+                <span className="immersive-bar-meta">{latency}ms</span>
               )}
             </>
           )}
         </div>
 
-        <div className="vnc-topbar-right">
+        <div className="immersive-bar-right">
           {showIframe && (
             <>
               {/* 画质选择 */}
-              <div className="vnc-quality-group">
+              <div className="immersive-quality">
                 {(['auto', 'high', 'low'] as const).map(q => (
                   <button
                     key={q}
-                    className={`vnc-quality-btn ${quality === q ? 'active' : ''}`}
+                    className={`immersive-quality-btn ${quality === q ? 'active' : ''}`}
                     onClick={() => handleQualityChange(q)}
                   >
                     {q === 'auto' ? '自动' : q === 'high' ? '高清' : '流畅'}
@@ -236,16 +236,16 @@ export default function Vnc() {
                 ))}
               </div>
 
-              <div className="vnc-topbar-sep" />
+              <div className="immersive-bar-sep" />
 
-              <button className="vnc-tool-btn" onClick={() => window.open(getVncUrl(), '_blank')} title="新窗口打开">
+              <button className="btn-icon" onClick={() => window.open(getVncUrl(), '_blank')} title="新窗口打开">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
                   <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
                 </svg>
               </button>
 
-              <button className="vnc-tool-btn" onClick={toggleFullscreen} title="全屏 (F11)">
+              <button className="btn-icon" onClick={toggleFullscreen} title="全屏 (F11)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   {isFullscreen ? (
                     <><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></>
@@ -255,16 +255,16 @@ export default function Vnc() {
                 </svg>
               </button>
 
-              <button className="vnc-tool-btn" onClick={() => setShowLogs(!showLogs)} title="日志">
+              <button className="btn-icon" onClick={() => setShowLogs(!showLogs)} title="日志">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
                 </svg>
               </button>
 
-              <div className="vnc-topbar-sep" />
+              <div className="immersive-bar-sep" />
 
-              <button className="vnc-disconnect-btn" onClick={handleDisconnect}>
+              <button className="btn btn-danger" onClick={handleDisconnect}>
                 断开
               </button>
             </>
@@ -273,16 +273,16 @@ export default function Vnc() {
       </div>
 
       {/* ── 主视口 ── */}
-      <div className="vnc-viewport">
+      <div className="immersive-viewport">
         {showIframe ? (
           <>
             {/* 桌面端由 WebContentsView 渲染，React 层只显示占位或错误 */}
             {isDesktop() ? (
-              <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <div className="immersive-desktop-placeholder" style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
                 {loadError ? (
                   <>
-                    <span style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
-                    <button className="vnc-connect-main-btn" style={{ marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
+                    <span className="immersive-error" style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
+                    <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
                   </>
                 ) : (
                   <span style={{ color: '#444', fontSize: 13 }}>noVNC 已在独立视图中加载</span>
@@ -299,12 +299,12 @@ export default function Vnc() {
             )}
             {/* 日志抽屉 */}
             {showLogs && (
-              <div className="vnc-log-drawer">
-                <div className="vnc-log-header">
+              <div className="immersive-logs">
+                <div className="immersive-logs-head">
                   <span>代理日志</span>
-                  <button className="vnc-log-close" onClick={() => setShowLogs(false)}>×</button>
+                  <button className="btn btn-ghost" onClick={() => setShowLogs(false)}>×</button>
                 </div>
-                <div className="vnc-log-body">
+                <div className="immersive-logs-body">
                   {logLines.map((line, i) => (
                     <div key={i} className="vnc-log-line">{line}</div>
                   ))}
@@ -317,8 +317,8 @@ export default function Vnc() {
           </>
         ) : (
           /* ── 欢迎/连接界面 ── */
-          <div className="vnc-welcome">
-            <div className="vnc-welcome-visual">
+          <div className="immersive-welcome">
+            <div className="immersive-welcome-icon">
               <div className="vnc-welcome-screen">
                 <div className="vnc-screen-titlebar" />
                 <div className="vnc-screen-sidebar" />
@@ -330,35 +330,35 @@ export default function Vnc() {
               <div className="vnc-welcome-glow" />
             </div>
 
-            <h2 className="vnc-welcome-title">Web 远程桌面</h2>
-            <p className="vnc-welcome-desc">
+            <h2 className="immersive-welcome-title">Web 远程桌面</h2>
+            <p className="immersive-welcome-desc">
               通过 WebSocket 代理直连设备桌面，零安装、低延迟
             </p>
 
             {phase === 'checking' && (
-              <div className="vnc-phase-indicator">
+              <div className="immersive-loading">
                 <div className="vnc-phase-spinner" />
                 <span>检查 VNC 服务状态...</span>
               </div>
             )}
 
             {phase === 'connecting' && (
-              <div className="vnc-phase-indicator">
+              <div className="immersive-loading">
                 <div className="vnc-phase-spinner" />
                 <span>正在启动并连接...</span>
               </div>
             )}
 
             {phase === 'error' && (
-              <div className="vnc-error-banner">
+              <div className="immersive-error">
                 <span>⚠️ {statusText}</span>
-                <button className="vnc-retry-btn" onClick={handleConnect}>重试</button>
+                <button className="btn btn-ghost" onClick={handleConnect}>重试</button>
               </div>
             )}
 
             {(phase === 'idle' || phase === 'error') && (
               <button
-                className="vnc-connect-main-btn"
+                className="btn btn-primary"
                 onClick={handleConnect}
                 disabled={!currentDevice}
               >
@@ -379,11 +379,11 @@ export default function Vnc() {
                 <span>全屏模式</span>
               </div>
               <div className="vnc-hint-item">
-                <span className="vnc-hint-dot" />
+                <span className="status-dot" />
                 <span>支持剪贴板同步</span>
               </div>
               <div className="vnc-hint-item">
-                <span className="vnc-hint-dot" />
+                <span className="status-dot" />
                 <span>自适应画质</span>
               </div>
             </div>

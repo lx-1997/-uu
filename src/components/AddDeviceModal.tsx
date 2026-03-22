@@ -133,47 +133,44 @@ export default function AddDeviceModal() {
 
   return (
     <div className="modal-overlay" onClick={close}>
-      <div className="add-device-modal" onClick={e => e.stopPropagation()}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="adm-header">
+        <div className="modal-header">
           <div>
-            <div className="adm-title">添加设备</div>
-            <div className="adm-subtitle">
+            <div className="modal-title">添加设备</div>
+            <div>
               {step === 'method' && '选择连接方式'}
               {step === 'configure' && (method === 'manual' ? '配置 SSH 连接' : 'USB 串口连接')}
               {step === 'verify' && '验证连接'}
             </div>
           </div>
-          <button className="adm-close" onClick={close}>{Icons.close}</button>
+          <button className="btn-icon" onClick={close}>{Icons.close}</button>
         </div>
 
         {/* Progress */}
-        <div className="adm-progress">
+        <div>
           {['连接方式', '配置', '验证'].map((label, i) => (
-            <div key={label} className={`adm-step ${i <= stepIndex ? 'active' : ''} ${i < stepIndex ? 'done' : ''}`}>
-              <div className="adm-step-dot">{i < stepIndex ? Icons.check : i + 1}</div>
-              <span className="adm-step-label">{label}</span>
+            <div key={label}>
+              <span>{i < stepIndex ? Icons.check : i + 1}</span>
+              <span>{label}</span>
             </div>
           ))}
-          <div className="adm-progress-line">
-            <div className="adm-progress-fill" style={{ width: `${stepIndex * 50}%` }} />
-          </div>
         </div>
 
         {/* Step 1: Choose method */}
         {step === 'method' && (
-          <div className="adm-body">
-            <div className="adm-method-grid">
+          <div className="modal-body">
+            <div>
               {METHODS.map(m => (
-                <button key={m.key} className="adm-method-card" onClick={() => goToConfigure(m.key)}>
-                  <div className="adm-method-icon">{m.icon}</div>
-                  <div className="adm-method-title">{m.title}</div>
-                  <div className="adm-method-desc">{m.desc}</div>
-                  <span className="adm-method-arrow">{Icons.arrow}</span>
+                <button key={m.key} className="config-card" onClick={() => goToConfigure(m.key)}>
+                  <div className="config-card-head">{m.icon}</div>
+                  <div className="config-card-name">{m.title}</div>
+                  <div>{m.desc}</div>
+                  <span>{Icons.arrow}</span>
                 </button>
               ))}
             </div>
-            <div className="adm-hint">
+            <div>
               支持 RDK X3 / X5 / S100 / Ultra 全系列开发板
             </div>
           </div>
@@ -181,50 +178,60 @@ export default function AddDeviceModal() {
 
         {/* Step 2: Configure */}
         {step === 'configure' && (
-          <div className="adm-body">
+          <div className="modal-body">
             {method === 'manual' && (
-              <div className="adm-form">
-                <label className="adm-field">
-                  <span className="adm-field-label">IP 地址</span>
-                  <input
-                    className="adm-input"
-                    placeholder="如 192.168.1.100"
-                    value={newDeviceIp}
-                    onChange={e => setNewDeviceIp(e.target.value)}
-                    autoFocus
-                  />
+              <div>
+                <label className="config-row">
+                  <span className="config-label">IP 地址</span>
+                  <span className="config-value">
+                    <input
+                      className="input"
+                      placeholder="如 192.168.1.100"
+                      value={newDeviceIp}
+                      onChange={e => setNewDeviceIp(e.target.value)}
+                      autoFocus
+                    />
+                  </span>
                 </label>
-                <div className="adm-field-row">
-                  <label className="adm-field">
-                    <span className="adm-field-label">用户名</span>
-                    <input className="adm-input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
+                <div>
+                  <label className="config-row">
+                    <span className="config-label">用户名</span>
+                    <span className="config-value">
+                      <input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
+                    </span>
                   </label>
-                  <label className="adm-field">
-                    <span className="adm-field-label">密码</span>
-                    <input className="adm-input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} placeholder="默认 root" />
+                  <label className="config-row">
+                    <span className="config-label">密码</span>
+                    <span className="config-value">
+                      <input className="input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} placeholder="默认 root" />
+                    </span>
                   </label>
                 </div>
-                <label className="adm-field">
-                  <span className="adm-field-label">SSH 端口</span>
-                  <input className="adm-input" value={sshPort} onChange={e => setSshPort(e.target.value)} style={{ maxWidth: 120 }} />
+                <label className="config-row">
+                  <span className="config-label">SSH 端口</span>
+                  <span className="config-value">
+                    <input className="input" value={sshPort} onChange={e => setSshPort(e.target.value)} style={{ maxWidth: 120 }} />
+                  </span>
                 </label>
-                <label className="adm-field">
-                  <span className="adm-field-label">设备名称（可选）</span>
-                  <input
-                    className="adm-input"
-                    placeholder="如 RDK X5 - 工位3"
-                    value={newDeviceName}
-                    onChange={e => setNewDeviceName(e.target.value)}
-                  />
+                <label className="config-row">
+                  <span className="config-label">设备名称（可选）</span>
+                  <span className="config-value">
+                    <input
+                      className="input"
+                      placeholder="如 RDK X5 - 工位3"
+                      value={newDeviceName}
+                      onChange={e => setNewDeviceName(e.target.value)}
+                    />
+                  </span>
                 </label>
-                <div className="adm-field-hint">
+                <div>
                   官方常用默认：SSH 为 sunrise/sunrise（串口常见 root/root）；默认有线 IP 常见为 192.168.127.10
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                  <button type="button" className="clean-btn outline-btn sm-btn" onClick={() => { setSshUser('sunrise'); setSshPass('sunrise'); }}>
+                  <button type="button" className="btn btn-ghost" onClick={() => { setSshUser('sunrise'); setSshPass('sunrise'); }}>
                     使用 sunrise 默认
                   </button>
-                  <button type="button" className="clean-btn outline-btn sm-btn" onClick={() => { setSshUser('root'); setSshPass('root'); }}>
+                  <button type="button" className="btn btn-ghost" onClick={() => { setSshUser('root'); setSshPass('root'); }}>
                     使用 root 默认
                   </button>
                 </div>
@@ -236,13 +243,17 @@ export default function AddDeviceModal() {
                   </label>
                   {showWifiConfig && (
                     <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', marginTop: '12px' }}>
-                      <label className="adm-field" style={{ marginBottom: '12px' }}>
-                        <span className="adm-field-label">WiFi 名称 (SSID)</span>
-                        <input className="adm-input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
+                      <label className="config-row" style={{ marginBottom: '12px' }}>
+                        <span className="config-label">WiFi 名称 (SSID)</span>
+                        <span className="config-value">
+                          <input className="input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
+                        </span>
                       </label>
-                      <label className="adm-field">
-                        <span className="adm-field-label">密码 (Password)</span>
-                        <input className="adm-input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
+                      <label className="config-row">
+                        <span className="config-label">密码 (Password)</span>
+                        <span className="config-value">
+                          <input className="input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
+                        </span>
                       </label>
                     </div>
                   )}
@@ -251,58 +262,68 @@ export default function AddDeviceModal() {
             )}
 
             {method === 'usb' && (
-              <div className="adm-usb-section">
-                <div className="adm-usb-guide">
-                  <div className="adm-usb-step">
-                    <span className="adm-usb-num">1</span>
+              <div>
+                <div>
+                  <div>
+                    <span>1</span>
                     <span>将调试线缆连接到 RDK 调试口（X3/X5: Micro USB｜S100: Type-C）</span>
                   </div>
-                  <div className="adm-usb-step">
-                    <span className="adm-usb-num">2</span>
+                  <div>
+                    <span>2</span>
                     <span>确认 PC 已识别串口驱动 (CP210X / CH340)</span>
                   </div>
                 </div>
-                <div className="adm-field-row">
-                  <label className="adm-field">
-                    <span className="adm-field-label">串口号</span>
-                    <select className="adm-input" value={serialPort} onChange={e => setSerialPort(e.target.value)}>
-                      <option value="/dev/ttyUSB0">/dev/ttyUSB0</option>
-                      <option value="/dev/ttyUSB1">/dev/ttyUSB1</option>
-                      <option value="/dev/ttyACM0">/dev/ttyACM0</option>
-                      <option value="COM3">COM3</option>
-                      <option value="COM4">COM4</option>
-                    </select>
+                <div>
+                  <label className="config-row">
+                    <span className="config-label">串口号</span>
+                    <span className="config-value">
+                      <select className="select" value={serialPort} onChange={e => setSerialPort(e.target.value)}>
+                        <option value="/dev/ttyUSB0">/dev/ttyUSB0</option>
+                        <option value="/dev/ttyUSB1">/dev/ttyUSB1</option>
+                        <option value="/dev/ttyACM0">/dev/ttyACM0</option>
+                        <option value="COM3">COM3</option>
+                        <option value="COM4">COM4</option>
+                      </select>
+                    </span>
                   </label>
-                  <label className="adm-field">
-                    <span className="adm-field-label">波特率</span>
-                    <select className="adm-input" value={baudRate} onChange={e => setBaudRate(e.target.value)}>
-                      <option value="921600">921600</option>
-                      <option value="115200">115200</option>
-                      <option value="460800">460800</option>
-                      <option value="9600">9600</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="adm-field-row">
-                  <label className="adm-field">
-                    <span className="adm-field-label">用户名</span>
-                    <input className="adm-input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
-                  </label>
-                  <label className="adm-field">
-                    <span className="adm-field-label">密码</span>
-                    <input className="adm-input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} placeholder="默认 root" />
+                  <label className="config-row">
+                    <span className="config-label">波特率</span>
+                    <span className="config-value">
+                      <select className="select" value={baudRate} onChange={e => setBaudRate(e.target.value)}>
+                        <option value="921600">921600</option>
+                        <option value="115200">115200</option>
+                        <option value="460800">460800</option>
+                        <option value="9600">9600</option>
+                      </select>
+                    </span>
                   </label>
                 </div>
-                <label className="adm-field">
-                  <span className="adm-field-label">设备名称（可选）</span>
-                  <input
-                    className="adm-input"
-                    placeholder="如 RDK X5 (USB)"
-                    value={newDeviceName}
-                    onChange={e => setNewDeviceName(e.target.value)}
-                  />
+                <div>
+                  <label className="config-row">
+                    <span className="config-label">用户名</span>
+                    <span className="config-value">
+                      <input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
+                    </span>
+                  </label>
+                  <label className="config-row">
+                    <span className="config-label">密码</span>
+                    <span className="config-value">
+                      <input className="input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} placeholder="默认 root" />
+                    </span>
+                  </label>
+                </div>
+                <label className="config-row">
+                  <span className="config-label">设备名称（可选）</span>
+                  <span className="config-value">
+                    <input
+                      className="input"
+                      placeholder="如 RDK X5 (USB)"
+                      value={newDeviceName}
+                      onChange={e => setNewDeviceName(e.target.value)}
+                    />
+                  </span>
                 </label>
-                <div className="adm-field-hint">
+                <div>
                   连接后将直接进入终端会话 &nbsp;|&nbsp; X5 常见波特率 115200 &nbsp;|&nbsp; X3 常见波特率 921600
                 </div>
 
@@ -313,13 +334,17 @@ export default function AddDeviceModal() {
                   </label>
                   {showWifiConfig && (
                     <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', marginTop: '12px' }}>
-                      <label className="adm-field" style={{ marginBottom: '12px' }}>
-                        <span className="adm-field-label">WiFi 名称 (SSID)</span>
-                        <input className="adm-input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
+                      <label className="config-row" style={{ marginBottom: '12px' }}>
+                        <span className="config-label">WiFi 名称 (SSID)</span>
+                        <span className="config-value">
+                          <input className="input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
+                        </span>
                       </label>
-                      <label className="adm-field">
-                        <span className="adm-field-label">密码 (Password)</span>
-                        <input className="adm-input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
+                      <label className="config-row">
+                        <span className="config-label">密码 (Password)</span>
+                        <span className="config-value">
+                          <input className="input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
+                        </span>
                       </label>
                     </div>
                   )}
@@ -328,12 +353,12 @@ export default function AddDeviceModal() {
             )}
 
             {/* Bottom nav */}
-            <div className="adm-nav">
-              <button className="adm-nav-btn secondary" onClick={() => setStep('method')}>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setStep('method')}>
                 {Icons.back} 返回
               </button>
               <button
-                className="adm-nav-btn primary"
+                className="btn btn-primary"
                 onClick={goToVerify}
                 disabled={method === 'manual' ? (!newDeviceIp.trim() || !sshPass.trim()) : !sshPass.trim()}
               >
@@ -345,46 +370,48 @@ export default function AddDeviceModal() {
 
         {/* Step 3: Verify */}
         {step === 'verify' && (
-          <div className="adm-body">
+          <div className="modal-body">
             {verifying && (
-              <div className="adm-verifying">
-                <div className="adm-verify-spinner" />
-                <div className="adm-verify-text">
+              <div>
+                <div />
+                <div>
                   {showWifiConfig ? '正在验证连接并配置网络...' : '正在验证连接...'}
                 </div>
-                <div className="adm-verify-sub">
+                <div>
                   {method === 'usb' ? '检测串口设备...' : `尝试连接 ${newDeviceIp}:${sshPort}...`}
                 </div>
               </div>
             )}
             {!verifying && verifyOk && (
-              <div className="adm-verify-ok">
-                <div className="adm-verify-check">{Icons.check}</div>
-                <div className="adm-verify-title">
+              <div>
+                <div>{Icons.check}</div>
+                <div>
                   {showWifiConfig ? '连接成功且已获取设备网络IP' : '连接成功'}
                 </div>
-                <div className="adm-verify-info">
-                  <div className="adm-info-row"><span>设备</span><strong>{newDeviceName || 'RDK Device'}</strong></div>
-                  <div className="adm-info-row"><span>{method === 'usb' && !showWifiConfig ? '串口' : 'IP'}</span><strong>{method === 'usb' && !showWifiConfig ? `${serialPort} @ ${baudRate}` : newDeviceIp || '192.168.31.25'}</strong></div>
-                  <div className="adm-info-row"><span>{showWifiConfig ? '所连网络' : '型号'}</span><strong>{showWifiConfig ? wifiSsid : 'RDK X5'}</strong></div>
-                  <div className="adm-info-row"><span>系统</span><strong>Ubuntu 22.04 (3.1.0)</strong></div>
+                <div>
+                  <div><span>设备</span><strong>{newDeviceName || 'RDK Device'}</strong></div>
+                  <div><span>{method === 'usb' && !showWifiConfig ? '串口' : 'IP'}</span><strong>{method === 'usb' && !showWifiConfig ? `${serialPort} @ ${baudRate}` : newDeviceIp || '192.168.31.25'}</strong></div>
+                  <div><span>{showWifiConfig ? '所连网络' : '型号'}</span><strong>{showWifiConfig ? wifiSsid : 'RDK X5'}</strong></div>
+                  <div><span>系统</span><strong>Ubuntu 22.04 (3.1.0)</strong></div>
                 </div>
-                <label className="adm-field" style={{ marginTop: 16 }}>
-                  <span className="adm-field-label">设备别名（可修改）</span>
-                  <input
-                    className="adm-input"
-                    value={newDeviceName}
-                    onChange={e => setNewDeviceName(e.target.value)}
-                  />
+                <label className="config-row" style={{ marginTop: 16 }}>
+                  <span className="config-label">设备别名（可修改）</span>
+                  <span className="config-value">
+                    <input
+                      className="input"
+                      value={newDeviceName}
+                      onChange={e => setNewDeviceName(e.target.value)}
+                    />
+                  </span>
                 </label>
               </div>
             )}
 
-            <div className="adm-nav">
-              <button className="adm-nav-btn secondary" onClick={() => { setStep('configure'); setVerifyOk(false); }}>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => { setStep('configure'); setVerifyOk(false); }}>
                 {Icons.back} 返回
               </button>
-              <button className="adm-nav-btn primary" onClick={confirmAdd} disabled={verifying}>
+              <button className="btn btn-primary" onClick={confirmAdd} disabled={verifying}>
                 {verifyOk ? (method === 'usb' ? '进入终端' : '添加到工作区') : '请等待...'} {verifyOk && Icons.check}
               </button>
             </div>

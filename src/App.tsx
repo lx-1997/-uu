@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { AppProvider, useAppState } from './hooks/useAppState';
-import Sidebar from './components/Sidebar';
+import IconRail from './components/IconRail';
 import TopToolbar from './components/TopToolbar';
 import AIDock from './components/AIDock';
 import Toasts from './components/Toasts';
@@ -21,32 +21,33 @@ import Models from './components/Models';
 import SkillBrowser from './components/SkillBrowser';
 import ErrorBoundary from './components/ErrorBoundary';
 
-const IMMERSIVE_TABS = new Set(['terminal', 'ide', 'vnc', 'hardware', 'ros']);
+const TAB_NAMES: Record<string, string> = {
+  dashboard: '工作台',
+  openclaw: 'OpenClaw',
+  skills: '技能中心',
+  terminal: '终端',
+  files: '文件',
+  vnc: '远程桌面',
+  ide: 'IDE',
+  hardware: '硬件监控',
+  flasher: '烧录工具',
+  examples: 'NodeHub',
+  models: 'ModelZoo',
+  ros: 'ROS',
+};
 
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
 
   if (isLoading) {
     return (
-      <div className="center-stage">
-        <div className="loading-stage">
-          <div className="spinner"></div>
-          <div className="loading-msg">{loadingMsg}</div>
-          <div className="loading-skeleton">
-            <div className="skeleton-line wide"></div>
-            <div className="skeleton-line medium"></div>
-            <div className="skeleton-row">
-              <div className="skeleton-card"></div>
-              <div className="skeleton-card"></div>
-            </div>
-          </div>
-        </div>
+      <div className="loading-overlay">
+        <div className="spinner-lg" />
+        <span style={{ marginTop: 12, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{loadingMsg}</span>
       </div>
     );
   }
 
-  // 持久化组件（terminal/vnc/ide）始终挂载，用 CSS display 控制可见性，保留连接状态
-  // 非持久化组件按需渲染
   const standardViews: Record<string, ReactNode> = {
     dashboard: <Dashboard />,
     flasher: <Flasher />,
@@ -61,13 +62,11 @@ function MainContent() {
 
   return (
     <>
-      {/* 非持久化 tab */}
       {standardViews[activeTab] && (
-        <div className="page-transition page-slot">
+        <div className="page-slot page-enter">
           {standardViews[activeTab]}
         </div>
       )}
-      {/* 持久化 tab：始终挂载 */}
       <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
         <Terminal />
       </div>
@@ -81,42 +80,26 @@ function MainContent() {
   );
 }
 
-/* ── 桌面端 tab 切换时同步 WebContentsView 可见性 ── */
 function useDesktopTabSync(activeTab: string) {
   useEffect(() => {
     const rdk = (window as any).rdkDesktop;
     if (!rdk?.setActiveUrl) return;
-    // VNC 和 IDE tab 有可能存在活跃的嵌入视图，其他 tab 时全部隐藏
     if (activeTab !== 'vnc' && activeTab !== 'ide') {
       rdk.setActiveUrl(null);
     }
-    // VNC/IDE 自身组件会在 connect 时调用 openUrl，这里只处理离开时隐藏
   }, [activeTab]);
 }
 
-function AppShell() {
-  const { activeTab } = useAppState();
-  useDesktopTabSync(activeTab);
-  const viewportClassName = [
-    'canvas-viewport',
-    IMMERSIVE_TABS.has(activeTab) ? 'viewport-terminal' : '',
-    activeTab === 'vnc' ? 'viewport-vnc' : '',
-    activeTab === 'ide' ? 'viewport-ide' : '',
-    activeTab === 'flasher' ? 'viewport-flasher' : '',
-    activeTab === 'dashboard' ? 'viewport-dashboard' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-
+function useDesktopViewBounds(activeTab: string) {
   useEffect(() => {
-    const rdk = window.rdkDesktop;
+    const rdk = (window as any).rdkDesktop;
     if (!rdk?.updateViewBounds) return;
 
     let rafId = 0;
     const reportBounds = () => {
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(() => {
-        const viewport = document.querySelector('.canvas-viewport') as HTMLElement | null;
+        const viewport = document.querySelector('.content-area') as HTMLElement | null;
         if (!viewport) return;
         const rect = viewport.getBoundingClientRect();
         rdk.updateViewBounds?.({
@@ -138,23 +121,51 @@ function AppShell() {
       cancelAnimationFrame(rafId);
     };
   }, [activeTab]);
+}
+
+function useThemeSync() {
+  const { theme } = useAppState();
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+}
+
+function AppShell() {
+  const { activeTab, currentDevice, theme } = useAppState();
+  useDesktopTabSync(activeTab);
+  useDesktopViewBounds(activeTab);
+  useThemeSync();
+
+  const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
 
   return (
-    <div className="canvas-shell">
-      <div className="layout-container">
-        <Sidebar />
-        <div className="main-area">
-          <TopToolbar />
-          <div className={viewportClassName}>
-            <div className={`viewport-frame ${IMMERSIVE_TABS.has(activeTab) ? 'viewport-frame-immersive' : ''}`}>
-              <ErrorBoundary>
-                <MainContent />
-              </ErrorBoundary>
-            </div>
-          </div>
-          <AIDock />
+    <div className="app-shell">
+      <IconRail />
+
+      <header className="top-bar">
+        <div className="topbar-left">
+          <span className="topbar-page-name">{TAB_NAMES[activeTab] || activeTab}</span>
         </div>
-      </div>
+        <div className="topbar-right">
+          {currentDevice && (
+            <div className="topbar-device-chip">
+              <span className={`status-dot ${deviceOnline ? 'online' : 'offline'}`} />
+              <span className="mono truncate" style={{ maxWidth: 180 }}>
+                {currentDevice.name} · {currentDevice.ip}
+              </span>
+            </div>
+          )}
+          <TopToolbar />
+        </div>
+      </header>
+
+      <main className="content-area">
+        <ErrorBoundary>
+          <MainContent />
+        </ErrorBoundary>
+        <AIDock />
+      </main>
+
       <Toasts />
       <AddDeviceModal />
       <SettingsPanel />

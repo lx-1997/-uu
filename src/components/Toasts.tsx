@@ -8,7 +8,7 @@ export default function Toasts() {
   return (
     <div className="toast-container">
       {toasts.map(t => (
-        <div key={t.id} className={`toast ${t.type}`}>
+        <div key={t.id} className={`toast toast-${t.type}`}>
           <span className="toast-icon">
             {t.type === 'success' ? '✅' : t.type === 'error' ? '❌' : 'ℹ️'}
           </span>

@@ -228,20 +228,19 @@ export default function Examples() {
   /* ── 未连接设备 ── */
   if (!currentDevice) {
     return (
-      <div className="nh-page">
-        <div className="nh-empty-state">
-          <div className="nh-empty-icon-wrap">
-            <span className="nh-empty-glow" />
-            <span style={{ fontSize: '3rem' }}>📦</span>
+      <div className="tool-page">
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <span>📦</span>
           </div>
-          <h2 className="nh-empty-title">NodeHub · 应用商店</h2>
-          <p className="nh-empty-desc">地瓜机器人 NodeHub 应用商店，一键安装、运行、管理 RDK 应用</p>
-          <div className="nh-empty-steps">
-            <div className="nh-empty-step"><span className="nh-step-num">1</span>连接 RDK 开发板</div>
-            <div className="nh-empty-step"><span className="nh-step-num">2</span>浏览并安装感兴趣的应用</div>
-            <div className="nh-empty-step"><span className="nh-step-num">3</span>一键运行，实时查看效果</div>
+          <h2 className="empty-state-title">NodeHub · 应用商店</h2>
+          <p className="empty-state-desc">地瓜机器人 NodeHub 应用商店，一键安装、运行、管理 RDK 应用</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+            <span className="badge badge-muted">❶ 连接 RDK 开发板</span>
+            <span className="badge badge-muted">❷ 浏览并安装感兴趣的应用</span>
+            <span className="badge badge-muted">❸ 一键运行，实时查看效果</span>
           </div>
-          <a href="https://developer.d-robotics.cc/nodehub" target="_blank" rel="noopener noreferrer" className="nh-ext-link">
+          <a href="https://developer.d-robotics.cc/nodehub" target="_blank" rel="noopener noreferrer" className="btn btn-ghost">
             访问 NodeHub ↗
           </a>
         </div>
@@ -251,140 +250,136 @@ export default function Examples() {
 
   /* ── 主页面 ── */
   return (
-    <div className="nh-page">
+    <div className="tool-page">
       {/* 顶部状态栏 */}
-      <div className="nh-topbar">
-        <div className="nh-topbar-left">
-          <span className="nh-topbar-icon">📦</span>
-          <span className="nh-topbar-name">NodeHub</span>
-          <span className="nh-topbar-badge">{apps.length} 应用</span>
+      <div className="tool-bar">
+        <div className="tool-bar-left">
+          <span className="tool-card-icon">📦</span>
+          <span className="tool-bar-title">NodeHub</span>
+          <span className="badge badge-muted">{apps.length} 应用</span>
         </div>
-        <div className="nh-topbar-right">
-          <div className="nh-stat-chips">
-            <span className="nh-stat-chip"><span className="nh-stat-num">{installedCount}</span>已安装</span>
-            <span className="nh-stat-chip live"><span className="nh-stat-num">{runningCount}</span>运行中</span>
+        <div className="tool-bar-right">
+          <div className="tool-stats">
+            <span className="tool-stat-chip"><span className="num">{installedCount}</span>已安装</span>
+            <span className="tool-stat-chip live"><span className="num">{runningCount}</span>运行中</span>
           </div>
-          <button className="nh-btn ghost" onClick={syncFromBoard} disabled={busyId === 'sync-board'}>
+          <button className="btn btn-ghost" onClick={syncFromBoard} disabled={busyId === 'sync-board'}>
             {busyId === 'sync-board' ? '同步中...' : '板端同步'}
           </button>
-          <button className="nh-btn ghost" onClick={handleOfficialReadyCheck} disabled={!!busyId}>官方环境检查</button>
-          <button className="nh-btn ghost" onClick={handleCheckDeps} disabled={!!busyId}>依赖检查</button>
-          <button className="nh-add-btn" onClick={() => setShowAdd(true)}>+ 添加应用</button>
+          <button className="btn btn-ghost" onClick={handleOfficialReadyCheck} disabled={!!busyId}>官方环境检查</button>
+          <button className="btn btn-ghost" onClick={handleCheckDeps} disabled={!!busyId}>依赖检查</button>
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ 添加应用</button>
         </div>
       </div>
 
-      {/* 设备信息条 */}
-      <div className="nh-device-bar">
-        <div className="nh-device-item"><span className="nh-device-label">设备</span><span className="nh-device-val">{currentDevice.name}</span></div>
-        <span className="nh-device-sep" />
-        <div className="nh-device-item"><span className="nh-device-label">IP</span><span className="nh-device-val mono">{currentDevice.ip}</span></div>
-        <span className="nh-device-sep" />
-        <div className="nh-device-item"><span className="nh-device-label">已安装</span><span className="nh-device-val">{installedCount}</span></div>
-        <span className="nh-device-sep" />
-        <div className="nh-device-item"><span className="nh-device-label">运行中</span><span className={`nh-device-val ${runningCount > 0 ? 'ok' : ''}`}>{runningCount}</span></div>
-      </div>
+      <div className="tool-content">
+        {/* 设备信息条 */}
+        <div className="tool-stats" style={{ flexWrap: 'wrap', paddingBottom: 8 }}>
+          <span className="tool-stat-chip">设备 <span className="num">{currentDevice.name}</span></span>
+          <span className="tool-stat-chip">IP <span className="num mono">{currentDevice.ip}</span></span>
+          <span className="tool-stat-chip"><span className="num">{installedCount}</span> 已安装</span>
+          <span className="tool-stat-chip live"><span className="num">{runningCount}</span> 运行中</span>
+        </div>
 
-      {/* 筛选栏 */}
-      <div className="nh-filter-bar">
-        <div className="nh-filter-tabs">
+        {/* 筛选栏 */}
+        <div className="tool-filter">
           {CATEGORIES.map(c => (
-            <button key={c} className={`nh-tab-btn ${filter === c ? 'active' : ''}`} onClick={() => setFilter(c)}>{c}</button>
+            <button key={c} className={`tool-filter-btn ${filter === c ? 'active' : ''}`} onClick={() => setFilter(c)}>{c}</button>
+          ))}
+          <input className="input tool-bar-search" placeholder="搜索应用..." value={search} onChange={e => setSearch(e.target.value)} style={{ marginLeft: 'auto' }} />
+        </div>
+
+        {/* 应用卡片网格 */}
+        <div className="tool-grid">
+          {filtered.length === 0 && <p className="empty-state-desc">没有匹配的应用</p>}
+          {filtered.map(app => (
+            <div key={app.id} className={`tool-card ${app.running ? 'running' : app.installed ? 'installed' : ''} ${expandedId === app.id ? 'expanded' : ''}`}>
+              <div className="tool-card-head" onClick={() => setExpandedId(expandedId === app.id ? null : app.id)} style={{ cursor: 'pointer' }}>
+                <span className="tool-card-icon">{app.icon}</span>
+                <div className="tool-card-info">
+                  <span className="tool-card-name">{app.name}</span>
+                  <span className="tool-card-meta"><span className="badge badge-muted">{app.category}</span></span>
+                </div>
+                {app.running && <span className="badge badge-ok"><span className="status-dot online" />运行中</span>}
+                {app.installed && !app.running && <span className="badge badge-accent">已安装</span>}
+                <span style={{ marginLeft: 'auto', fontSize: '0.7rem', transition: 'transform 0.2s', transform: expandedId === app.id ? 'rotate(180deg)' : 'rotate(0)' }} className="tool-card-meta">▼</span>
+              </div>
+              <p className="tool-card-desc">{app.desc}</p>
+              {/* 内联详情面板 */}
+              {expandedId === app.id && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span className="tool-card-desc"><span className="badge badge-muted">功能说明</span> {app.desc}</span>
+                  <span className="tool-card-desc"><span className="badge badge-muted">适用场景</span> {app.scenario || '通用机器人开发场景'}</span>
+                  <span className="tool-card-desc"><span className="badge badge-muted">执行结果</span> 安装后可在板端启动节点并输出实时结果，支持系统同步状态。</span>
+                  <details>
+                    <summary className="tool-card-meta" style={{ cursor: 'pointer' }}>查看执行命令</summary>
+                    <pre className="config-terminal">{`安装: ${app.installCmd}\n运行: ${app.runCmd}\n卸载: ${app.uninstallCmd}`}</pre>
+                  </details>
+                  {app.repo && (
+                    <span className="tool-card-desc">
+                      <span className="badge badge-muted">NodeHub</span>{' '}
+                      <a href={app.repo} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">查看详情 ↗</a>
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="tool-card-actions">
+                {!app.installed && (
+                  <button className="btn btn-primary" disabled={busyId === app.id} onClick={() => handleInstall(app)}>
+                    {busyId === app.id ? '安装中...' : '安装'}
+                  </button>
+                )}
+                {app.installed && !app.running && (
+                  <button className="btn btn-primary" disabled={busyId === app.id} onClick={() => handleRun(app)}>▶ 运行</button>
+                )}
+                {app.running && (
+                  <button className="btn btn-danger" onClick={() => handleStop(app)}>⏹ 停止</button>
+                )}
+                {app.installed && (
+                  <button className="btn btn-ghost" onClick={() => handleUninstall(app)}>卸载</button>
+                )}
+                {app.custom && (
+                  <button className="btn btn-ghost" onClick={() => handleRemoveCustom(app.id)}>移除</button>
+                )}
+              </div>
+            </div>
           ))}
         </div>
-        <div className="nh-search-wrap">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input className="nh-search" placeholder="搜索应用..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-      </div>
-
-      {/* 应用卡片网格 */}
-      <div className="nh-grid">
-        {filtered.length === 0 && <div className="nh-no-result">没有匹配的应用</div>}
-        {filtered.map(app => (
-          <div key={app.id} className={`nh-card ${app.running ? 'running' : app.installed ? 'installed' : ''} ${expandedId === app.id ? 'expanded' : ''}`}>
-            <div className="nh-card-head" onClick={() => setExpandedId(expandedId === app.id ? null : app.id)} style={{ cursor: 'pointer' }}>
-              <span className="nh-card-icon">{app.icon}</span>
-              <div className="nh-card-info">
-                <span className="nh-card-name">{app.name}</span>
-                <span className="nh-card-cat">{app.category}</span>
-              </div>
-              {app.running && <span className="nh-badge running"><span className="nh-badge-dot" />运行中</span>}
-              {app.installed && !app.running && <span className="nh-badge installed">已安装</span>}
-              <span className="nh-expand-arrow" style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#94a3b8', transition: 'transform 0.2s', transform: expandedId === app.id ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
-            </div>
-            <p className="nh-card-desc">{app.desc}</p>
-            {/* 内联详情面板 */}
-            {expandedId === app.id && (
-              <div className="nh-card-detail" style={{ padding: '10px 14px', background: 'rgba(0,0,0,0.02)', borderRadius: 8, margin: '6px 0 10px', fontSize: '0.78rem', color: '#475569', lineHeight: 1.7 }}>
-                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>功能说明:</span> {app.desc}</div>
-                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>适用场景:</span> {app.scenario || '通用机器人开发场景'}</div>
-                <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>执行结果:</span> 安装后可在板端启动节点并输出实时结果，支持系统同步状态。</div>
-                <details>
-                  <summary style={{ cursor: 'pointer', color: '#64748b', fontSize: '0.74rem' }}>查看执行命令</summary>
-                  <div style={{ marginTop: 8, fontSize: '0.72rem' }}>
-                    <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>安装:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{app.installCmd}</code></div>
-                    <div style={{ marginBottom: 6 }}><span style={{ color: '#94a3b8' }}>运行:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{app.runCmd}</code></div>
-                    <div><span style={{ color: '#94a3b8' }}>卸载:</span> <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>{app.uninstallCmd}</code></div>
-                  </div>
-                </details>
-                {app.repo && <div><span style={{ color: '#94a3b8' }}>NodeHub:</span> <a href={app.repo} target="_blank" rel="noopener noreferrer" style={{ color: '#ff6b00' }}>{app.repo}</a></div>}
-              </div>
-            )}
-            <div className="nh-card-actions">
-              {!app.installed && (
-                <button className="nh-btn primary" disabled={busyId === app.id} onClick={() => handleInstall(app)}>
-                  {busyId === app.id ? '安装中...' : '安装'}
-                </button>
-              )}
-              {app.installed && !app.running && (
-                <button className="nh-btn primary" disabled={busyId === app.id} onClick={() => handleRun(app)}>▶ 运行</button>
-              )}
-              {app.running && (
-                <button className="nh-btn danger" onClick={() => handleStop(app)}>⏹ 停止</button>
-              )}
-              {app.installed && (
-                <button className="nh-btn ghost" onClick={() => handleUninstall(app)}>卸载</button>
-              )}
-              {app.custom && (
-                <button className="nh-btn ghost" onClick={() => handleRemoveCustom(app.id)}>移除</button>
-              )}
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* 日志面板 */}
       {showLog && logs.length > 0 && (
-        <div className="nh-log-panel">
-          <div className="nh-log-header">
+        <div className="tool-log">
+          <div className="tool-log-head">
             <span>📋 执行日志</span>
-            <div className="nh-log-actions">
-              <button className="nh-btn ghost sm" onClick={() => setLogs([])}>清空</button>
-              <button className="nh-btn ghost sm" onClick={() => setShowLog(false)}>收起</button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setLogs([])}>清空</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowLog(false)}>收起</button>
             </div>
           </div>
-          <pre className="nh-log-body">{logs.join('\n')}</pre>
+          <pre className="tool-log-body">{logs.join('\n')}</pre>
         </div>
       )}
 
       {/* 添加应用弹窗 */}
       {showAdd && (
         <>
-          <div className="nh-overlay" onClick={() => setShowAdd(false)} />
-          <div className="nh-modal">
-            <div className="nh-modal-head">
-              <h3 className="nh-modal-title">📦 添加自定义应用</h3>
-              <button className="nh-modal-close" onClick={() => setShowAdd(false)}>✕</button>
+          <div className="modal-overlay" onClick={() => setShowAdd(false)} />
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3 className="modal-title">📦 添加自定义应用</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAdd(false)}>✕</button>
             </div>
-            <div className="nh-modal-body">
-              <div className="nh-field"><label>应用名称</label><input placeholder="我的应用" value={newApp.name} onChange={e => setNewApp(p => ({ ...p, name: e.target.value }))} /></div>
-              <div className="nh-field"><label>描述</label><input placeholder="应用描述..." value={newApp.desc} onChange={e => setNewApp(p => ({ ...p, desc: e.target.value }))} /></div>
-              <div className="nh-field"><label>安装命令</label><input placeholder="sudo apt install -y ..." value={newApp.installCmd} onChange={e => setNewApp(p => ({ ...p, installCmd: e.target.value }))} /></div>
-              <div className="nh-field"><label>运行命令</label><input placeholder="ros2 launch ..." value={newApp.runCmd} onChange={e => setNewApp(p => ({ ...p, runCmd: e.target.value }))} /></div>
-              <div className="nh-field"><label>卸载命令</label><input placeholder="sudo apt remove -y ..." value={newApp.uninstallCmd} onChange={e => setNewApp(p => ({ ...p, uninstallCmd: e.target.value }))} /></div>
-              <button className="nh-btn primary full" onClick={handleAddApp}>添加应用</button>
+            <div className="modal-body tool-add-modal">
+              <div className="tool-add-field"><label>应用名称</label><input className="input" placeholder="我的应用" value={newApp.name} onChange={e => setNewApp(p => ({ ...p, name: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>描述</label><input className="input" placeholder="应用描述..." value={newApp.desc} onChange={e => setNewApp(p => ({ ...p, desc: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>安装命令</label><input className="input" placeholder="sudo apt install -y ..." value={newApp.installCmd} onChange={e => setNewApp(p => ({ ...p, installCmd: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>运行命令</label><input className="input" placeholder="ros2 launch ..." value={newApp.runCmd} onChange={e => setNewApp(p => ({ ...p, runCmd: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>卸载命令</label><input className="input" placeholder="sudo apt remove -y ..." value={newApp.uninstallCmd} onChange={e => setNewApp(p => ({ ...p, uninstallCmd: e.target.value }))} /></div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowAdd(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleAddApp}>添加应用</button>
             </div>
           </div>
         </>

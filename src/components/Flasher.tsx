@@ -27,7 +27,6 @@ interface ImageItem {
   downloadUrl: string;
   tags: string[];
 }
-
 interface WifiConfig {
   mode: 'station' | 'ap';
   ssid: string;
@@ -438,25 +437,24 @@ export default function Flasher() {
      RENDER
      ═══════════════════════════════════════════════════════════ */
   return (
-    <div className="center-stage flasher-stage">
-      <div className="ob-wizard flasher-wizard flx-shell">
+    <div className="tool-page">
+      <div className="tool-content">
         {/* ── Header ── */}
-        <section className="flx-header">
-          <div>
-            <div className="flx-kicker">RDK 镜像烧录</div>
-            <h1>镜像烧录向导</h1>
-            <p>支持 RDK X3 / X5 / S100 全系列，TF 卡直写或 xburn 工具烧录。</p>
-          </div>
+        <section className="card card-compact">
+          <div className="section-label">RDK 镜像烧录</div>
+          <h1>镜像烧录向导</h1>
+          <p className="config-card-desc">支持 RDK X3 / X5 / S100 全系列，TF 卡直写或 xburn 工具烧录。</p>
         </section>
 
         {/* ── Step Indicator ── */}
-        <section className="flx-steps">
+        <section className="flash-steps">
           {STEP_LABELS.map((label, idx) => (
             <div
               key={label}
-              className={`flx-step ${step > idx ? 'done' : ''} ${step === idx ? 'active' : ''}`}
+              className={`flash-step ${step > idx ? 'done' : ''} ${step === idx ? 'active' : ''}`}
             >
-              <span>{idx + 1}</span>
+              <span className="flash-step-num">{idx + 1}</span>
+              <span className="flash-step-line" aria-hidden />
               {label}
             </div>
           ))}
@@ -464,90 +462,102 @@ export default function Flasher() {
 
         {/* ═══════ Step 0: Select Device ═══════ */}
         {step === 0 && (
-          <section className="flx-body">
-            <div className="flx-card">
-              <div className="flx-card-title">选择设备型号</div>
-              <div className="flx-list">
-                {DEVICE_LIST.map((dev) => (
-                  <div
-                    key={dev.key}
-                    className={`flx-list-item ${selectedDeviceKey === dev.key ? 'active' : ''} ${dev.disabled ? 'disabled' : ''}`}
-                    onClick={() => chooseDevice(dev.key)}
-                  >
-                    <strong>{dev.name}</strong>
-                    {dev.disabled && dev.disabledNotice && (
-                      <span className="flx-disabled-notice">{dev.disabledNotice}</span>
-                    )}
-                    <div className="flx-action-row">
-                      <button
-                        className="clean-btn outline-btn sm-btn"
-                        onClick={(e) => { e.stopPropagation(); openExternal(dev.infoUrl); }}
-                      >
-                        了解设备
-                      </button>
-                      {dev.imageDownloadUrl && (
-                        <button
-                          className="clean-btn outline-btn sm-btn"
-                          onClick={(e) => { e.stopPropagation(); openExternal(dev.imageDownloadUrl!); }}
-                        >
-                          镜像下载
-                        </button>
-                      )}
-                      {dev.toolDownloadUrl && (
-                        <button
-                          className="clean-btn outline-btn sm-btn"
-                          onClick={(e) => { e.stopPropagation(); openExternal(dev.toolDownloadUrl!); }}
-                        >
-                          烧录工具
-                        </button>
-                      )}
-                    </div>
+          <section className="card card-compact">
+            <div className="section-label">选择设备型号</div>
+            <div className="config-grid">
+              {DEVICE_LIST.map((dev) => (
+                <div
+                  key={dev.key}
+                  className={`config-card ${selectedDeviceKey === dev.key ? 'selected' : ''}`}
+                  onClick={() => chooseDevice(dev.key)}
+                >
+                  <div className="config-card-head">
+                    <div className="config-card-name">{dev.name}</div>
                   </div>
-                ))}
-              </div>
+                  {dev.disabled && dev.disabledNotice && (
+                    <div className="config-card-desc">{dev.disabledNotice}</div>
+                  )}
+                  <div className="config-card-meta">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={(e) => { e.stopPropagation(); openExternal(dev.infoUrl); }}
+                    >
+                      了解设备
+                    </button>
+                    {dev.imageDownloadUrl && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={(e) => { e.stopPropagation(); openExternal(dev.imageDownloadUrl!); }}
+                      >
+                        镜像下载
+                      </button>
+                    )}
+                    {dev.toolDownloadUrl && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={(e) => { e.stopPropagation(); openExternal(dev.toolDownloadUrl!); }}
+                      >
+                        烧录工具
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-            {error && <div className="warning-banner">{error}</div>}
-            <div className="ob-nav">
-              <div />
-              <button
-                className="ob-btn primary"
-                disabled={!selectedDeviceKey}
-                onClick={() => goToStep(1)}
-              >
-                下一步 &rarr; 选择镜像
-              </button>
+            {error && (
+              <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+              </div>
+            )}
+            <div className="config-header" style={{ marginTop: 12 }}>
+              <div className="tool-bar-left" />
+              <div className="tool-bar-right">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!selectedDeviceKey}
+                  onClick={() => goToStep(1)}
+                >
+                  下一步 &rarr; 选择镜像
+                </button>
+              </div>
             </div>
           </section>
         )}
 
         {/* ═══════ Step 1: Select Image ═══════ */}
         {step === 1 && (
-          <section className="flx-body">
-            <div className="flx-card-grid">
+          <section className="card card-compact">
+            <div className="config-grid">
               {/* Official images */}
-              <div className="flx-card">
-                <div className="flx-card-title">官方镜像</div>
-                <div className="flx-list">
+              <div>
+                <div className="section-label">官方镜像</div>
+                <div className="config-grid">
                   {imageCandidates.map((img) => (
                     <div
                       key={img.key}
-                      className={`flx-list-item ${!useLocalImage && selectedImageKey === img.key ? 'active' : ''}`}
+                      className={`config-card ${!useLocalImage && selectedImageKey === img.key ? 'selected' : ''}`}
                       onClick={() => { setSelectedImageKey(img.key); setUseLocalImage(false); }}
                     >
-                      <strong>{img.name}</strong>
-                      <div className="flx-tag-row">
+                      <div className="config-card-head">
+                        <div className="config-card-name">{img.name}</div>
+                      </div>
+                      <div className="config-card-meta">
                         {img.tags.map((tag) => (
                           <span
                             key={`${img.key}-${tag}`}
-                            className={`flx-tag ${tag.includes('图形') ? 'flx-tag-green' : ''}`}
+                            className={`badge ${tag.includes('图形') ? 'badge-ok' : 'badge-muted'}`}
                           >
                             {tag}
                           </span>
                         ))}
                       </div>
-                      <div className="flx-action-row">
-                        <button className="clean-btn outline-btn sm-btn" onClick={(e) => { e.stopPropagation(); openExternal(img.infoUrl); }}>详情</button>
-                        <button className="clean-btn outline-btn sm-btn" onClick={(e) => { e.stopPropagation(); openExternal(img.downloadUrl); }}>手动下载</button>
+                      <div className="config-card-meta">
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openExternal(img.infoUrl); }}>详情</button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openExternal(img.downloadUrl); }}>手动下载</button>
                       </div>
                     </div>
                   ))}
@@ -555,80 +565,99 @@ export default function Flasher() {
               </div>
 
               {/* Local image */}
-              <div className="flx-card">
-                <div className="flx-card-title">本机镜像文件</div>
-                <div className="flx-form">
+              <div>
+                <div className="section-label">本机镜像文件</div>
+                <div className="config-section">
                   <div
-                    className={`flx-list-item flx-clickable ${useLocalImage ? 'active' : ''}`}
+                    className={`config-card ${useLocalImage ? 'selected' : ''}`}
                     onClick={pickLocalImage}
                   >
-                    <strong>{localImagePath ? '已选择本机文件' : '选择本机镜像文件...'}</strong>
-                    {localImagePath && <span className="flx-break-all">{localImagePath}</span>}
+                    <div className="config-card-head">
+                      <div className="config-card-name">{localImagePath ? '已选择本机文件' : '选择本机镜像文件...'}</div>
+                    </div>
+                    {localImagePath && <div className="config-card-desc" style={{ wordBreak: 'break-all' }}>{localImagePath}</div>}
                   </div>
-                  <div className="flx-inline">
+                  <div className="config-actions" style={{ width: '100%', alignItems: 'stretch' }}>
                     <input
-                      className="clean-input"
+                      className="input"
+                      style={{ flex: 1, minWidth: 0 }}
                       placeholder="或手动输入路径 (.img / .xz / .zip)"
                       value={localImagePath}
                       onChange={(e) => { setLocalImagePath(e.target.value); if (e.target.value) setUseLocalImage(true); }}
                     />
                     {isDesktop && (
-                      <button className="clean-btn outline-btn sm-btn" onClick={pickLocalImage}>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocalImage}>
                         浏览
                       </button>
                     )}
                   </div>
                   {needsXburn && (
-                    <div className="warning-banner">
-                      该设备走 xburn 流程，本机镜像文件可选（也可在 xburn 内选择镜像）。
+                    <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
+                      <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
+                        该设备走 xburn 流程，本机镜像文件可选（也可在 xburn 内选择镜像）。
+                      </p>
                     </div>
                   )}
                   {!isDesktop && (
-                    <div className="warning-banner">
-                      当前为浏览器环境，本机烧录功能需在桌面客户端中使用。
+                    <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
+                      <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
+                        当前为浏览器环境，本机烧录功能需在桌面客户端中使用。
+                      </p>
                     </div>
                   )}
                 </div>
               </div>
             </div>
-            {error && <div className="warning-banner">{error}</div>}
-            <div className="ob-nav">
-              <button className="ob-btn ghost" onClick={() => goToStep(0)}>&larr; 上一步</button>
-              <button
-                className="ob-btn primary"
-                disabled={!canProceedFromImage && !needsXburn}
-                onClick={() => goToStep(2)}
-              >
-                下一步 &rarr; {needsXburn ? '烧录' : '选择磁盘'}
-              </button>
+            {error && (
+              <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+              </div>
+            )}
+            <div className="config-header" style={{ marginTop: 12 }}>
+              <div className="tool-bar-left">
+                <button type="button" className="btn btn-ghost" onClick={() => goToStep(0)}>&larr; 上一步</button>
+              </div>
+              <div className="tool-bar-right">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!canProceedFromImage && !needsXburn}
+                  onClick={() => goToStep(2)}
+                >
+                  下一步 &rarr; {needsXburn ? '烧录' : '选择磁盘'}
+                </button>
+              </div>
             </div>
           </section>
         )}
 
         {/* ═══════ Step 2: Select Drive / Confirm ═══════ */}
         {step === 2 && (
-          <section className="flx-body">
-            <div className="flx-card-grid">
+          <section className="card card-compact">
+            <div className="config-grid">
               {needsXburn ? (
                 /* xburn guidance */
-                <div className="flx-card flx-card-xburn">
-                  <div className="flx-card-title">推荐流程：使用 xburn</div>
-                  <div className="warning-banner">
-                    S100 / eMMC 机型建议使用 xburn-gui 完成烧录。
+                <div className="card card-compact">
+                  <div className="section-label">推荐流程：使用 xburn</div>
+                  <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
+                    <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
+                      S100 / eMMC 机型建议使用 xburn-gui 完成烧录。
+                    </p>
                   </div>
-                  <p className="flx-xburn-desc">
+                  <p className="config-card-desc">
                     1. 确认已安装 xburn-gui<br />
                     2. 通过 USB Type-C 连接开发板<br />
                     3. 点击下方按钮启动 xburn 并在工具中选择镜像
                   </p>
-                  <div className="flx-action-row">
+                  <div className="config-actions">
                     {isDesktop && (
-                      <button className="clean-btn" onClick={launchXburn}>
+                      <button type="button" className="btn btn-primary" onClick={launchXburn}>
                         启动 xburn 工具
                       </button>
                     )}
                     <button
-                      className="clean-btn outline-btn sm-btn"
+                      type="button"
+                      className="btn btn-ghost btn-sm"
                       onClick={() => openExternal(xburnUrl)}
                     >
                       下载 xburn-gui
@@ -637,31 +666,35 @@ export default function Flasher() {
                 </div>
               ) : (
                 /* drive selection */
-                <div className="flx-card">
-                  <div className="flx-card-title">
-                    选择目标磁盘
-                    <span className="flx-danger-hint">写盘将清空目标磁盘全部数据！</span>
+                <div>
+                  <div className="config-header" style={{ alignItems: 'flex-start' }}>
+                    <div className="section-label" style={{ marginBottom: 0 }}>选择目标磁盘</div>
+                    <span className="badge badge-danger">写盘将清空目标磁盘全部数据！</span>
                   </div>
-                  <div className="flx-list">
+                  <div className="config-grid">
                     {drives.length === 0 ? (
-                      <div className="flx-empty-hint">
+                      <div className="config-card-desc">
                         {isDesktop ? '未检测到可写盘设备，请插入 TF 卡后刷新' : '当前环境不支持磁盘检测'}
                       </div>
                     ) : (
                       drives.map((d) => (
                         <button
+                          type="button"
                           key={d.path}
-                          className={`flx-list-item ${selectedDrive === d.path ? 'active' : ''}`}
+                          className={`config-card ${selectedDrive === d.path ? 'selected' : ''}`}
+                          style={{ textAlign: 'left' }}
                           onClick={() => setSelectedDrive(d.path)}
                         >
-                          <strong>{d.label || d.path}</strong>
-                          <span>{d.bus} &middot; {d.size} &middot; {d.path}</span>
+                          <div className="config-card-head">
+                            <div className="config-card-name">{d.label || d.path}</div>
+                          </div>
+                          <div className="config-card-desc">{d.bus} &middot; {d.size} &middot; {d.path}</div>
                         </button>
                       ))
                     )}
                   </div>
                   {isDesktop && (
-                    <button className="clean-btn outline-btn sm-btn" onClick={scanDrives}>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={scanDrives}>
                       刷新磁盘列表
                     </button>
                   )}
@@ -669,41 +702,51 @@ export default function Flasher() {
               )}
 
               {/* Confirm summary */}
-              <div className="flx-card">
-                <div className="flx-card-title">确认信息</div>
-                <div className="flx-confirm-grid">
-                  <div>
-                    <span>设备</span>
-                    <strong>{DEVICE_LIST.find((d) => d.key === selectedDeviceKey)?.name}</strong>
+              <div>
+                <div className="section-label">确认信息</div>
+                <div className="config-section">
+                  <div className="config-row">
+                    <span className="config-label">设备</span>
+                    <span className="config-value">
+                      <strong>{DEVICE_LIST.find((d) => d.key === selectedDeviceKey)?.name}</strong>
+                    </span>
                   </div>
-                  <div>
-                    <span>镜像</span>
-                    <strong>{useLocalImage ? '本机文件' : (selectedImage?.name ?? '--')}</strong>
+                  <div className="config-row">
+                    <span className="config-label">镜像</span>
+                    <span className="config-value">
+                      <strong>{useLocalImage ? '本机文件' : (selectedImage?.name ?? '--')}</strong>
+                    </span>
                   </div>
-                  <div>
-                    <span>本机路径</span>
-                    <strong className="flx-break-all">
-                      {localImagePath || (needsXburn ? 'xburn 内选择' : (useLocalImage ? '未选择' : '在线镜像'))}
-                    </strong>
+                  <div className="config-row">
+                    <span className="config-label">本机路径</span>
+                    <span className="config-value">
+                      <strong style={{ wordBreak: 'break-all' }}>
+                        {localImagePath || (needsXburn ? 'xburn 内选择' : (useLocalImage ? '未选择' : '在线镜像'))}
+                      </strong>
+                    </span>
                   </div>
-                  <div>
-                    <span>目标磁盘</span>
-                    <strong>{needsXburn ? 'xburn 管理' : (selectedDrive || '未选择')}</strong>
+                  <div className="config-row">
+                    <span className="config-label">目标磁盘</span>
+                    <span className="config-value">
+                      <strong>{needsXburn ? 'xburn 管理' : (selectedDrive || '未选择')}</strong>
+                    </span>
                   </div>
                 </div>
                 {!needsXburn && (
-                  <div className="flx-form flx-mt-8">
-                    <label className="flx-radio-label">
-                      <input
-                        type="checkbox"
-                        checked={backupBeforeFlash}
-                        onChange={(e) => setBackupBeforeFlash(e.target.checked)}
-                      />
-                      写盘前先备份目标盘（推荐）
-                    </label>
+                  <div className="config-section">
+                    <div className="config-row">
+                      <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%' }}>
+                        <input
+                          type="checkbox"
+                          checked={backupBeforeFlash}
+                          onChange={(e) => setBackupBeforeFlash(e.target.checked)}
+                        />
+                        写盘前先备份目标盘（推荐）
+                      </label>
+                    </div>
                     {backupBeforeFlash && (
                       <input
-                        className="clean-input"
+                        className="input"
                         placeholder="备份文件路径（可选，默认 Downloads）"
                         value={backupDestPath}
                         onChange={(e) => setBackupDestPath(e.target.value)}
@@ -712,43 +755,54 @@ export default function Flasher() {
                   </div>
                 )}
                 {!needsXburn && (
-                  <div className="warning-banner flx-mt-8">
-                    写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。
+                  <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
+                    <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
+                      写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。
+                    </p>
                   </div>
                 )}
               </div>
             </div>
-            {error && <div className="warning-banner">{error}</div>}
-            <div className="ob-nav">
-              <button className="ob-btn ghost" onClick={() => goToStep(1)}>&larr; 上一步</button>
-              {needsXburn ? (
-                isDesktop ? (
-                  <button className="ob-btn primary" onClick={() => startFlashWorkflow()}>
-                    启动 xburn 烧录
-                  </button>
+            {error && (
+              <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+              </div>
+            )}
+            <div className="config-header" style={{ marginTop: 12 }}>
+              <div className="tool-bar-left">
+                <button type="button" className="btn btn-ghost" onClick={() => goToStep(1)}>&larr; 上一步</button>
+              </div>
+              <div className="tool-bar-right">
+                {needsXburn ? (
+                  isDesktop ? (
+                    <button type="button" className="btn btn-primary" onClick={() => startFlashWorkflow()}>
+                      启动 xburn 烧录
+                    </button>
+                  ) : (
+                    <button type="button" className="btn btn-primary" onClick={() => openExternal(xburnUrl)}>
+                      前往下载 xburn
+                    </button>
+                  )
                 ) : (
-                  <button className="ob-btn primary" onClick={() => openExternal(xburnUrl)}>
-                    前往下载 xburn
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!canProceedFromDrive || loading || !isDesktop}
+                    onClick={() => startFlashWorkflow()}
+                  >
+                    {loading ? '执行中...' : '开始写盘'}
                   </button>
-                )
-              ) : (
-                <button
-                  className="ob-btn primary"
-                  disabled={!canProceedFromDrive || loading || !isDesktop}
-                  onClick={() => startFlashWorkflow()}
-                >
-                  {loading ? '执行中...' : '开始写盘'}
-                </button>
-              )}
+                )}
+              </div>
             </div>
           </section>
         )}
 
         {/* ═══════ Step 3: Flash Progress ═══════ */}
         {step === 3 && (
-          <section className="flx-progress-wrap">
-            <div className="flx-progress-header">
-              <h3>
+          <section className="card card-compact">
+            <div className="config-header">
+              <h3 style={{ margin: 0, fontSize: '1rem' }}>
                 {phase === 'downloading' && '下载镜像中...'}
                 {phase === 'backup' && '备份目标盘中...'}
                 {phase === 'decompressing' && '解压镜像中...'}
@@ -759,23 +813,23 @@ export default function Flasher() {
                 {phase === 'idle' && '准备中...'}
               </h3>
               {phase !== 'done' && phase !== 'error' && (
-                <button className="ob-btn ghost" onClick={requestCancel}>请求取消</button>
+                <button type="button" className="btn btn-ghost" onClick={requestCancel}>请求取消</button>
               )}
             </div>
 
             {/* Progress bar */}
-            <div className="flx-progress-bar-wrap">
-              <div className="flx-progress-bar">
+            <div className="config-actions" style={{ width: '100%', alignItems: 'center', gap: 12 }}>
+              <div className="flash-progress" style={{ flex: 1, minWidth: 0 }}>
                 <div
-                  className={`flx-progress-fill ${phase === 'error' ? 'error' : ''} ${phase === 'done' ? 'done' : ''}`}
+                  className={`flash-progress-fill ${phase === 'error' ? 'error' : ''} ${phase === 'done' ? 'done' : ''}`}
                   style={{ width: `${Math.min(progress, 100)}%` }}
                 />
               </div>
-              <span className="flx-progress-percent">{Math.round(progress)}%</span>
+              <span className="config-card-desc" style={{ fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{Math.round(progress)}%</span>
             </div>
 
             {/* Phase indicators */}
-            <div className="flx-stage-list">
+            <div className="config-section">
               {(['backup', 'downloading', 'decompressing', 'flashing', 'verifying'] as const).map((p) => {
                 const labels = {
                   backup: '备份目标盘',
@@ -799,16 +853,23 @@ export default function Flasher() {
                 if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath)) state = 'skip';
                 if (p === 'downloading' && useLocalImage) state = 'skip';
 
+                const badgeClass =
+                  state === 'run' ? 'badge-accent'
+                    : state === 'done' ? 'badge-ok'
+                      : state === 'error' ? 'badge-danger'
+                        : 'badge-muted';
+
                 return (
-                  <div key={p} className={`flx-stage ${state}`}>
-                    <span className="dot" />
-                    <span className="label">{labels[p]}</span>
-                    <span className="status">
-                      {state === 'wait' && '等待'}
-                      {state === 'run' && '执行中'}
-                      {state === 'done' && '完成'}
-                      {state === 'error' && '失败'}
-                      {state === 'skip' && '跳过'}
+                  <div key={p} className="config-row">
+                    <span className="config-label">{labels[p]}</span>
+                    <span className="config-value">
+                      <span className={`badge ${badgeClass}`}>
+                        {state === 'wait' && '等待'}
+                        {state === 'run' && '执行中'}
+                        {state === 'done' && '完成'}
+                        {state === 'error' && '失败'}
+                        {state === 'skip' && '跳过'}
+                      </span>
                     </span>
                   </div>
                 );
@@ -816,43 +877,54 @@ export default function Flasher() {
             </div>
 
             {/* Log panel */}
-            <div className="flx-log-panel">
+            <div className="config-terminal">
               {logs.length === 0 ? (
-                <div className="flx-log-empty">等待日志输出...</div>
+                <div className="config-card-desc">等待日志输出...</div>
               ) : (
                 logs.map((line, idx) => <div key={idx}>{line}</div>)
               )}
             </div>
 
-            {error && <div className="warning-banner flx-mt-8">{error}</div>}
+            {error && (
+              <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+              </div>
+            )}
             {!error && (backupResultPath || verifyDetail) && (
-              <div className="warning-banner flx-mt-8">
-                {backupResultPath ? `备份文件: ${backupResultPath}` : ''}
-                {backupResultPath && verifyDetail ? ' | ' : ''}
-                {verifyDetail ? `校验: ${verifyDetail}` : ''}
+              <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--ok)', background: 'var(--ok-subtle)' }}>
+                <p className="config-card-desc" style={{ color: 'var(--ok)', margin: 0 }}>
+                  {backupResultPath ? `备份文件: ${backupResultPath}` : ''}
+                  {backupResultPath && verifyDetail ? ' | ' : ''}
+                  {verifyDetail ? `校验: ${verifyDetail}` : ''}
+                </p>
               </div>
             )}
 
             {(phase === 'done' || phase === 'error') && (
-              <div className="ob-nav flx-mt-12">
-                <button
-                  className="ob-btn ghost"
-                  onClick={() => {
-                    setStep(0);
-                    setPhase('idle');
-                    setProgress(0);
-                    setLogs([]);
-                    setError('');
-                    scannedRef.current = false;
-                  }}
-                >
-                  重新开始
-                </button>
-                {phase === 'done' && (
-                  <button className="ob-btn primary" onClick={() => setStep(4)}>
-                    完成 &rarr;
+              <div className="config-header" style={{ marginTop: 12 }}>
+                <div className="tool-bar-left">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      setStep(0);
+                      setPhase('idle');
+                      setProgress(0);
+                      setLogs([]);
+                      setError('');
+                      scannedRef.current = false;
+                    }}
+                  >
+                    重新开始
                   </button>
-                )}
+                </div>
+                <div className="tool-bar-right">
+                  {phase === 'done' && (
+                    <button type="button" className="btn btn-primary" onClick={() => setStep(4)}>
+                      完成 &rarr;
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </section>
@@ -860,25 +932,26 @@ export default function Flasher() {
 
         {/* ═══════ Step 4: Done ═══════ */}
         {step === 4 && (
-          <section className="flx-done">
+          <section className="card card-compact">
             <h2>写盘完成</h2>
-            <p>镜像已写入目标磁盘。请安全弹出介质并插入目标板卡进行启动验证。</p>
+            <p className="config-card-desc">镜像已写入目标磁盘。请安全弹出介质并插入目标板卡进行启动验证。</p>
 
             {/* WiFi configuration */}
-            <div className="flx-card flx-wifi-card">
-              <div className="flx-card-title flx-wifi-header">
-                <span>WiFi 预配置（可选）</span>
+            <div className="card card-compact">
+              <div className="config-header">
+                <span className="section-label" style={{ marginBottom: 0 }}>WiFi 预配置（可选）</span>
                 <button
-                  className="clean-btn outline-btn sm-btn"
+                  type="button"
+                  className="btn btn-ghost btn-sm"
                   onClick={() => setShowWifiConfig(!showWifiConfig)}
                 >
                   {showWifiConfig ? '收起' : '展开配置'}
                 </button>
               </div>
               {showWifiConfig && (
-                <div className="flx-form">
-                  <div className="flx-inline">
-                    <label className="flx-radio-label">
+                <div className="config-section">
+                  <div className="config-actions" style={{ flexWrap: 'wrap' }}>
+                    <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                       <input
                         type="radio"
                         name="wifi-mode"
@@ -887,7 +960,7 @@ export default function Flasher() {
                       />
                       Station 模式
                     </label>
-                    <label className="flx-radio-label">
+                    <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                       <input
                         type="radio"
                         name="wifi-mode"
@@ -898,20 +971,21 @@ export default function Flasher() {
                     </label>
                   </div>
                   <input
-                    className="clean-input"
+                    className="input"
                     placeholder="WiFi 名称 (SSID)"
                     value={wifiConfig.ssid}
                     onChange={(e) => setWifiConfig((c) => ({ ...c, ssid: e.target.value }))}
                   />
                   <input
-                    className="clean-input"
+                    className="input"
                     type="password"
                     placeholder="WiFi 密码（至少 8 位）"
                     value={wifiConfig.password}
                     onChange={(e) => setWifiConfig((c) => ({ ...c, password: e.target.value }))}
                   />
                   <button
-                    className="clean-btn sm-btn"
+                    type="button"
+                    className="btn btn-primary btn-sm"
                     disabled={!wifiConfig.ssid.trim() || wifiConfig.password.length < 8}
                     onClick={async () => {
                       addToast('WiFi 配置将在设备首次启动时生效', 'info');
@@ -925,28 +999,33 @@ export default function Flasher() {
             </div>
 
             {/* Next actions */}
-            <div className="flx-next-actions">
+            <div className="config-actions" style={{ flexWrap: 'wrap', marginTop: 12 }}>
               <button
-                className="clean-btn"
+                type="button"
+                className="btn btn-primary"
                 onClick={() => { setActiveTab('terminal'); addToast('已切换到终端', 'info'); }}
               >
                 终端验证
               </button>
               <button
-                className="clean-btn outline-btn"
+                type="button"
+                className="btn btn-ghost"
                 onClick={() => { setActiveTab('hardware'); addToast('已切换到硬件监控', 'info'); }}
               >
                 硬件状态
               </button>
               <button
-                className="clean-btn outline-btn"
+                type="button"
+                className="btn btn-ghost"
                 onClick={() => { setActiveTab('examples'); addToast('已切换到示例应用', 'info'); }}
               >
                 示例应用
               </button>
             </div>
             <button
-              className="ob-btn ghost"
+              type="button"
+              className="btn btn-ghost"
+              style={{ marginTop: 8 }}
               onClick={() => {
                 setStep(0);
                 setPhase('idle');

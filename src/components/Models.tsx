@@ -229,20 +229,19 @@ export default function Models() {
   /* ── 未连接设备 ── */
   if (!currentDevice) {
     return (
-      <div className="mdl-page">
-        <div className="mdl-empty-state">
-          <div className="mdl-empty-icon-wrap">
-            <span className="mdl-empty-glow" />
-            <span style={{ fontSize: '3rem' }}>🧠</span>
+      <div className="tool-page">
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <span>🧠</span>
           </div>
-          <h2 className="mdl-empty-title">ModelZoo · 模型仓库</h2>
-          <p className="mdl-empty-desc">RDK 模型仓库 · BPU 加速推理，一键部署运行 AI 模型到开发板</p>
-          <div className="mdl-empty-steps">
-            <div className="mdl-empty-step"><span className="mdl-step-num">1</span>连接 RDK 开发板</div>
-            <div className="mdl-empty-step"><span className="mdl-step-num">2</span>选择模型并一键部署</div>
-            <div className="mdl-empty-step"><span className="mdl-step-num">3</span>运行推理，查看效果</div>
+          <h2 className="empty-state-title">ModelZoo · 模型仓库</h2>
+          <p className="empty-state-desc">RDK 模型仓库 · BPU 加速推理，一键部署运行 AI 模型到开发板</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+            <span className="badge badge-muted">❶ 连接 RDK 开发板</span>
+            <span className="badge badge-muted">❷ 选择模型并一键部署</span>
+            <span className="badge badge-muted">❸ 运行推理，查看效果</span>
           </div>
-          <a href="https://github.com/D-Robotics/rdk_model_zoo" target="_blank" rel="noopener noreferrer" className="mdl-ext-link">
+          <a href="https://github.com/D-Robotics/rdk_model_zoo" target="_blank" rel="noopener noreferrer" className="btn btn-ghost">
             访问 ModelZoo GitHub ↗
           </a>
         </div>
@@ -252,142 +251,135 @@ export default function Models() {
 
   /* ── 主页面 ── */
   return (
-    <div className="mdl-page">
+    <div className="tool-page">
       {/* 顶部状态栏 */}
-      <div className="mdl-topbar">
-        <div className="mdl-topbar-left">
-          <span className="mdl-topbar-icon">🧠</span>
-          <span className="mdl-topbar-name">ModelZoo</span>
-          <span className="mdl-topbar-badge">{models.length} 模型</span>
+      <div className="tool-bar">
+        <div className="tool-bar-left">
+          <span className="tool-card-icon">🧠</span>
+          <span className="tool-bar-title">ModelZoo</span>
+          <span className="badge badge-muted">{models.length} 模型</span>
         </div>
-        <div className="mdl-topbar-right">
-          <div className="mdl-stat-chips">
-            <span className="mdl-stat-chip"><span className="mdl-stat-num">{deployedCount}</span>已部署</span>
-            <span className="mdl-stat-chip live"><span className="mdl-stat-num">{runningCount}</span>运行中</span>
+        <div className="tool-bar-right">
+          <div className="tool-stats">
+            <span className="tool-stat-chip"><span className="num">{deployedCount}</span>已部署</span>
+            <span className="tool-stat-chip live"><span className="num">{runningCount}</span>运行中</span>
           </div>
-          <button className="mdl-btn ghost" onClick={syncFromBoard} disabled={busyId === 'sync-board'}>
+          <button className="btn btn-ghost" onClick={syncFromBoard} disabled={busyId === 'sync-board'}>
             {busyId === 'sync-board' ? '同步中...' : '板端同步'}
           </button>
-          <button className="mdl-btn ghost" onClick={handleOfficialReadyCheck} disabled={!!busyId}>官方环境检查</button>
-          <button className="mdl-add-btn" onClick={() => setShowAdd(true)}>+ 添加模型</button>
+          <button className="btn btn-ghost" onClick={handleOfficialReadyCheck} disabled={!!busyId}>官方环境检查</button>
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ 添加模型</button>
         </div>
       </div>
 
-      {/* 设备信息条 */}
-      <div className="mdl-device-bar">
-        <div className="mdl-device-item"><span className="mdl-device-label">设备</span><span className="mdl-device-val">{currentDevice.name}</span></div>
-        <span className="mdl-device-sep" />
-        <div className="mdl-device-item"><span className="mdl-device-label">IP</span><span className="mdl-device-val mono">{currentDevice.ip}</span></div>
-        <span className="mdl-device-sep" />
-        <div className="mdl-device-item"><span className="mdl-device-label">已部署</span><span className="mdl-device-val">{deployedCount}</span></div>
-        <span className="mdl-device-sep" />
-        <div className="mdl-device-item"><span className="mdl-device-label">运行中</span><span className={`mdl-device-val ${runningCount > 0 ? 'ok' : ''}`}>{runningCount}</span></div>
-      </div>
+      <div className="tool-content">
+        {/* 设备信息条 */}
+        <div className="tool-stats" style={{ flexWrap: 'wrap', paddingBottom: 8 }}>
+          <span className="tool-stat-chip">设备 <span className="num">{currentDevice.name}</span></span>
+          <span className="tool-stat-chip">IP <span className="num mono">{currentDevice.ip}</span></span>
+          <span className="tool-stat-chip"><span className="num">{deployedCount}</span> 已部署</span>
+          <span className="tool-stat-chip live"><span className="num">{runningCount}</span> 运行中</span>
+        </div>
 
-      {/* 筛选栏 */}
-      <div className="mdl-filter-bar">
-        <div className="mdl-filter-tabs">
+        {/* 筛选栏 */}
+        <div className="tool-filter">
           {CATEGORIES.map(c => (
-            <button key={c} className={`mdl-tab-btn ${filter === c ? 'active' : ''}`} onClick={() => setFilter(c)}>{c}</button>
+            <button key={c} className={`tool-filter-btn ${filter === c ? 'active' : ''}`} onClick={() => setFilter(c)}>{c}</button>
+          ))}
+          <input className="input tool-bar-search" placeholder="搜索模型..." value={search} onChange={e => setSearch(e.target.value)} style={{ marginLeft: 'auto' }} />
+        </div>
+
+        {/* 模型卡片网格 */}
+        <div className="tool-grid">
+          {filtered.length === 0 && <p className="empty-state-desc">没有匹配的模型</p>}
+          {filtered.map(m => (
+            <div key={m.id} className={`tool-card ${m.running ? 'running' : m.deployed ? 'installed' : ''}`}>
+              <div className="tool-card-head">
+                <span className="tool-card-icon">{m.icon}</span>
+                <div className="tool-card-info">
+                  <span className="tool-card-name">{m.name}</span>
+                  <span className="tool-card-meta"><span className="badge badge-muted">{m.category}</span> · {m.format} · {m.size}</span>
+                </div>
+                {m.running && <span className="badge badge-ok"><span className="status-dot online" />运行中</span>}
+                {m.deployed && !m.running && <span className="badge badge-accent">已部署</span>}
+              </div>
+              <p className="tool-card-desc">{m.desc}</p>
+              {(m.fps || m.latency) && (
+                <div className="tool-card-perf">
+                  {m.fps && <span>⚡ {m.fps}</span>}
+                  {m.latency && <span>⏱ {m.latency}</span>}
+                </div>
+              )}
+              {m.boards.length > 0 && (
+                <div className="tool-card-boards">
+                  {m.boards.map(b => <span key={b} className="tool-board-chip">{b}</span>)}
+                </div>
+              )}
+              <div className="tool-card-actions">
+                {!m.deployed && (
+                  <button className="btn btn-primary" disabled={busyId === m.id} onClick={() => handleDeploy(m)}>
+                    {busyId === m.id ? '部署中...' : '部署'}
+                  </button>
+                )}
+                {m.deployed && !m.running && (
+                  <button className="btn btn-primary" disabled={busyId === m.id} onClick={() => handleRun(m)}>▶ 运行</button>
+                )}
+                {m.running && (
+                  <button className="btn btn-danger" onClick={() => handleStop(m)}>⏹ 停止</button>
+                )}
+                {m.deployed && (
+                  <button className="btn btn-ghost" onClick={() => handleRemove(m)}>移除</button>
+                )}
+                {m.custom && (
+                  <button className="btn btn-ghost" onClick={() => handleRemoveCustom(m.id)}>删除</button>
+                )}
+                {m.repo && (
+                  <a href={m.repo} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-sm">详情 ↗</a>
+                )}
+              </div>
+            </div>
           ))}
         </div>
-        <div className="mdl-search-wrap">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input className="mdl-search" placeholder="搜索模型..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-      </div>
-
-      {/* 模型卡片网格 */}
-      <div className="mdl-grid">
-        {filtered.length === 0 && (
-          <div className="mdl-no-result">没有匹配的模型</div>
-        )}
-        {filtered.map(m => (
-          <div key={m.id} className={`mdl-card ${m.running ? 'running' : m.deployed ? 'deployed' : ''}`}>
-            <div className="mdl-card-head">
-              <span className="mdl-card-icon">{m.icon}</span>
-              <div className="mdl-card-info">
-                <span className="mdl-card-name">{m.name}</span>
-                <span className="mdl-card-meta">{m.category} · {m.format} · {m.size}</span>
-              </div>
-              {m.running && <span className="mdl-badge running"><span className="mdl-badge-dot" />运行中</span>}
-              {m.deployed && !m.running && <span className="mdl-badge deployed">已部署</span>}
-            </div>
-            <p className="mdl-card-desc">{m.desc}</p>
-            {(m.fps || m.latency) && (
-              <div className="mdl-card-perf">
-                {m.fps && <span>⚡ {m.fps}</span>}
-                {m.latency && <span>⏱ {m.latency}</span>}
-              </div>
-            )}
-            {m.boards.length > 0 && (
-              <div className="mdl-card-boards">
-                {m.boards.map(b => <span key={b} className="mdl-board-chip">{b}</span>)}
-              </div>
-            )}
-            <div className="mdl-card-actions">
-              {!m.deployed && (
-                <button className="mdl-btn primary" disabled={busyId === m.id} onClick={() => handleDeploy(m)}>
-                  {busyId === m.id ? '部署中...' : '部署'}
-                </button>
-              )}
-              {m.deployed && !m.running && (
-                <button className="mdl-btn primary" disabled={busyId === m.id} onClick={() => handleRun(m)}>▶ 运行</button>
-              )}
-              {m.running && (
-                <button className="mdl-btn danger" onClick={() => handleStop(m)}>⏹ 停止</button>
-              )}
-              {m.deployed && (
-                <button className="mdl-btn ghost" onClick={() => handleRemove(m)}>移除</button>
-              )}
-              {m.custom && (
-                <button className="mdl-btn ghost" onClick={() => handleRemoveCustom(m.id)}>删除</button>
-              )}
-              {m.repo && (
-                <a href={m.repo} target="_blank" rel="noopener noreferrer" className="mdl-btn link">详情 ↗</a>
-              )}
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* 日志面板 */}
       {showLog && logs.length > 0 && (
-        <div className="mdl-log-panel">
-          <div className="mdl-log-header">
+        <div className="tool-log">
+          <div className="tool-log-head">
             <span>📋 执行日志</span>
-            <div className="mdl-log-actions">
-              <button className="mdl-btn ghost sm" onClick={() => setLogs([])}>清空</button>
-              <button className="mdl-btn ghost sm" onClick={() => setShowLog(false)}>收起</button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setLogs([])}>清空</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowLog(false)}>收起</button>
             </div>
           </div>
-          <pre className="mdl-log-body">{logs.join('\n')}</pre>
+          <pre className="tool-log-body">{logs.join('\n')}</pre>
         </div>
       )}
 
       {/* 添加模型弹窗 */}
       {showAdd && (
         <>
-          <div className="mdl-overlay" onClick={() => setShowAdd(false)} />
-          <div className="mdl-modal">
-            <div className="mdl-modal-head">
-              <h3 className="mdl-modal-title">🧠 添加自定义模型</h3>
-              <button className="mdl-modal-close" onClick={() => setShowAdd(false)}>✕</button>
+          <div className="modal-overlay" onClick={() => setShowAdd(false)} />
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3 className="modal-title">🧠 添加自定义模型</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAdd(false)}>✕</button>
             </div>
-            <div className="mdl-modal-body">
-              <div className="mdl-field"><label>模型名称</label><input placeholder="MyModel" value={newModel.name} onChange={e => setNewModel(p => ({ ...p, name: e.target.value }))} /></div>
-              <div className="mdl-field"><label>描述</label><input placeholder="模型描述..." value={newModel.desc} onChange={e => setNewModel(p => ({ ...p, desc: e.target.value }))} /></div>
-              <div className="mdl-field"><label>格式</label>
-                <select value={newModel.format} onChange={e => setNewModel(p => ({ ...p, format: e.target.value }))}>
+            <div className="modal-body tool-add-modal">
+              <div className="tool-add-field"><label>模型名称</label><input className="input" placeholder="MyModel" value={newModel.name} onChange={e => setNewModel(p => ({ ...p, name: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>描述</label><input className="input" placeholder="模型描述..." value={newModel.desc} onChange={e => setNewModel(p => ({ ...p, desc: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>格式</label>
+                <select className="select" aria-label="模型格式" value={newModel.format} onChange={e => setNewModel(p => ({ ...p, format: e.target.value }))}>
                   <option>BIN</option><option>ONNX</option><option>PyTorch</option><option>其他</option>
                 </select>
               </div>
-              <div className="mdl-field"><label>部署命令</label><input placeholder="bash download.sh ..." value={newModel.deployCmd} onChange={e => setNewModel(p => ({ ...p, deployCmd: e.target.value }))} /></div>
-              <div className="mdl-field"><label>运行命令</label><input placeholder="python3 infer.py ..." value={newModel.runCmd} onChange={e => setNewModel(p => ({ ...p, runCmd: e.target.value }))} /></div>
-              <div className="mdl-field"><label>移除命令</label><input placeholder="rm -rf /path/to/model" value={newModel.removeCmd} onChange={e => setNewModel(p => ({ ...p, removeCmd: e.target.value }))} /></div>
-              <button className="mdl-btn primary full" onClick={handleAddModel}>添加模型</button>
+              <div className="tool-add-field"><label>部署命令</label><input className="input" placeholder="bash download.sh ..." value={newModel.deployCmd} onChange={e => setNewModel(p => ({ ...p, deployCmd: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>运行命令</label><input className="input" placeholder="python3 infer.py ..." value={newModel.runCmd} onChange={e => setNewModel(p => ({ ...p, runCmd: e.target.value }))} /></div>
+              <div className="tool-add-field"><label>移除命令</label><input className="input" placeholder="rm -rf /path/to/model" value={newModel.removeCmd} onChange={e => setNewModel(p => ({ ...p, removeCmd: e.target.value }))} /></div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowAdd(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleAddModel}>添加模型</button>
             </div>
           </div>
         </>

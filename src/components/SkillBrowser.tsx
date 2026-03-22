@@ -178,56 +178,44 @@ export default function SkillBrowser() {
   ];
 
   return (
-    <div className="skill-browser-v2 skill-hub-v3">
-      <header className="skill-hub-hero">
-        <div className="skill-hub-copy">
-          <span className="skill-hub-kicker">AI Runtime Center</span>
-          <h1 className="skill-hub-title">技能与策略中心</h1>
-          <p className="skill-hub-subtitle">
-            把技能目录、调用能力、审批边界、联网策略和渠道入口收束到一个界面里，
-            让 RDKClaw 的“能做什么”和“应该怎么做”不再割裂。
-          </p>
-        </div>
+    <div className="config-page">
+      <div className="grid-3">
+        {summaryCards.map((card) => (
+          <div key={card.label} className="card card-compact">
+            <span className="config-label">{card.label}</span>
+            <strong className="config-value">{card.value}</strong>
+          </div>
+        ))}
+      </div>
 
-        <div className="skill-hub-stat-grid">
-          {summaryCards.map((card) => (
-            <div key={card.label} className="skill-hub-stat-card">
-              <span className="skill-hub-stat-label">{card.label}</span>
-              <strong className="skill-hub-stat-value">{card.value}</strong>
-              <span className="skill-hub-stat-hint">{card.hint}</span>
-            </div>
-          ))}
-        </div>
-      </header>
-
-      <div className="skill-hub-toolbar">
-        <div className="skill-hub-segments">
+      <div className="config-section">
+        <div className="config-tabs">
           <button
             type="button"
-            className={`segment-btn ${workspaceTab === 'catalog' ? 'active' : ''}`}
+            className={`config-tab ${workspaceTab === 'catalog' ? 'active' : ''}`}
             onClick={() => setWorkspaceTab('catalog')}
           >
             技能目录
           </button>
           <button
             type="button"
-            className={`segment-btn ${workspaceTab === 'policy' ? 'active' : ''}`}
+            className={`config-tab ${workspaceTab === 'policy' ? 'active' : ''}`}
             onClick={() => setWorkspaceTab('policy')}
           >
             策略中心
           </button>
         </div>
 
-        <div className="skill-v2-toolbar-actions">
+        <div className="config-actions">
           <input
-            className="skill-v2-search"
+            className="input"
             type="text"
-            placeholder="搜索技能名称、说明或分类..."
+            placeholder="搜索技能..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <select
-            className="skill-v2-filter"
+            className="input"
             value={filter}
             title="按分类筛选"
             onChange={(e) => setFilter(e.target.value)}
@@ -239,11 +227,11 @@ export default function SkillBrowser() {
               </option>
             ))}
           </select>
-          <button className="skill-v2-btn" onClick={handleReload} disabled={loading}>
+          <button className="btn btn-ghost btn-sm" onClick={handleReload} disabled={loading}>
             {loading ? '加载中...' : '刷新'}
           </button>
           {workspaceTab === 'policy' && (
-            <button className="skill-v2-btn primary" onClick={savePolicy} disabled={savingPolicy || !policy}>
+            <button className="btn btn-primary btn-sm" onClick={savePolicy} disabled={savingPolicy || !policy}>
               {savingPolicy ? '保存中...' : '保存策略'}
             </button>
           )}
@@ -251,19 +239,19 @@ export default function SkillBrowser() {
       </div>
 
       {workspaceTab === 'catalog' ? (
-        <div className="skill-hub-layout">
-          <aside className="skill-v2-nav skill-hub-sidebar">
-            <div className="skill-v2-nav-head">
-              <span>当前结果</span>
-              <strong>{filtered.length}</strong>
+        <div className="config-split">
+          <aside className="config-sidebar">
+            <div className="config-row">
+              <span className="config-label">当前结果</span>
+              <strong className="config-value">{filtered.length}</strong>
             </div>
 
-            <section className="skill-v2-group skill-hub-categories">
-              <h3>分类视图</h3>
-              <div className="skill-hub-category-pills">
+            <section className="config-section">
+              <h3 className="config-section-title">分类</h3>
+              <div className="config-actions">
                 <button
                   type="button"
-                  className={`skill-hub-category-pill ${filter === 'all' ? 'active' : ''}`}
+                  className={`chip ${filter === 'all' ? 'active' : ''}`}
                   onClick={() => setFilter('all')}
                 >
                   全部
@@ -272,7 +260,7 @@ export default function SkillBrowser() {
                   <button
                     key={category.key}
                     type="button"
-                    className={`skill-hub-category-pill ${filter === category.key ? 'active' : ''}`}
+                    className={`chip ${filter === category.key ? 'active' : ''}`}
                     onClick={() => setFilter(category.key)}
                   >
                     <span>{category.icon}</span>
@@ -284,8 +272,8 @@ export default function SkillBrowser() {
             </section>
 
             {builtinSkills.length > 0 && (
-              <section className="skill-v2-group">
-                <h3>内置技能 · {builtinSkills.length}</h3>
+              <section className="config-section">
+                <h3 className="config-section-title">内置 · {builtinSkills.length}</h3>
                 {builtinSkills.map((skill) => (
                   <SkillNavItem
                     key={skill.name}
@@ -298,8 +286,8 @@ export default function SkillBrowser() {
             )}
 
             {ecoSkills.length > 0 && (
-              <section className="skill-v2-group">
-                <h3>生态技能 · {ecoSkills.length}</h3>
+              <section className="config-section">
+                <h3 className="config-section-title">生态 · {ecoSkills.length}</h3>
                 {ecoSkills.map((skill) => (
                   <SkillNavItem
                     key={skill.name}
@@ -311,91 +299,89 @@ export default function SkillBrowser() {
               </section>
             )}
 
-            {filtered.length === 0 && !loading && <div className="skill-v2-empty">无匹配技能</div>}
+            {filtered.length === 0 && !loading && <div className="badge badge-muted">无匹配技能</div>}
           </aside>
 
-          <main className="skill-v2-main skill-hub-detail">
+          <main className="config-detail">
             {!selectedSkill && (
-              <div className="skill-v2-placeholder">
-                <p>选择左侧一个技能查看详情</p>
-                <p>当前共 {skills.length} 个技能，目录和策略都可以在这里统一管理。</p>
+              <div className="config-section">
+                <span className="config-label">选择技能查看详情</span>
               </div>
             )}
 
             {selectedSkill && (
               <>
-                <section className="skill-v2-card skill-detail-hero-card">
-                  <div className="skill-detail-hero">
+                <section className="config-card">
+                  <div className="config-card-head">
                     <div>
-                      <div className="skill-detail-kicker">Skill Detail</div>
                       <h3>{selectedSkill.name}</h3>
-                      <p className="skill-v2-desc">{selectedSkill.description}</p>
+                      <span className="config-label">{selectedSkill.description}</span>
                     </div>
-                    <div className="skill-v2-badges">
-                      <span className="skill-v2-badge">{selectedSkill.version}</span>
-                      <span className="skill-v2-badge">{selectedCategoryIcon} {selectedCategoryLabel}</span>
-                      <span className="skill-v2-badge">APIs {selectedSkill.apis.length}</span>
-                      {selectedSkill.metadata?.rdkstudio?.tab && <span className="skill-v2-badge">入口 {selectedSkill.metadata.rdkstudio.tab}</span>}
-                      {selectedRequires?.device && <span className="skill-v2-badge warning">需要设备在线</span>}
+                    <div className="config-actions">
+                      <span className="badge badge-muted">{selectedSkill.version}</span>
+                      <span className="badge badge-muted">{selectedCategoryIcon} {selectedCategoryLabel}</span>
+                      <span className="badge badge-accent">APIs {selectedSkill.apis.length}</span>
+                      {selectedSkill.metadata?.rdkstudio?.tab && <span className="badge badge-ok">入口 {selectedSkill.metadata.rdkstudio.tab}</span>}
+                      {selectedRequires?.device && <span className="badge badge-warn">需要设备在线</span>}
                     </div>
                   </div>
                 </section>
 
-                <section className="skill-v2-policy-grid skill-detail-grid">
-                  <div className="skill-v2-card">
-                    <h3>能力画像</h3>
-                    <div className="skill-hub-meta-list">
-                      <div className="skill-hub-meta-item">
-                        <span>文件路径</span>
-                        <strong>{selectedSkill.filePath || '未声明'}</strong>
+                <section className="config-grid">
+                  <div className="config-card">
+                    <h3 className="config-section-title">能力画像</h3>
+                    <div>
+                      <div className="config-row">
+                        <span className="config-label">文件路径</span>
+                        <strong className="config-value">{selectedSkill.filePath || '未声明'}</strong>
                       </div>
-                      <div className="skill-hub-meta-item">
-                        <span>默认入口</span>
-                        <strong>{selectedSkill.metadata?.rdkstudio?.tab || '无指定入口'}</strong>
+                      <div className="config-row">
+                        <span className="config-label">默认入口</span>
+                        <strong className="config-value">{selectedSkill.metadata?.rdkstudio?.tab || '无'}</strong>
                       </div>
-                      <div className="skill-hub-meta-item">
-                        <span>设备依赖</span>
-                        <strong>{selectedRequires?.device ? '需要设备' : '纯本地/服务端能力'}</strong>
+                      <div className="config-row">
+                        <span className="config-label">设备依赖</span>
+                        <strong className="config-value">{selectedRequires?.device ? '需要设备' : '无'}</strong>
                       </div>
-                      <div className="skill-hub-meta-item">
-                        <span>服务依赖</span>
-                        <strong>{selectedServices.length > 0 ? selectedServices.join(' / ') : '未声明'}</strong>
+                      <div className="config-row">
+                        <span className="config-label">服务依赖</span>
+                        <strong className="config-value">{selectedServices.length > 0 ? selectedServices.join(' / ') : '无'}</strong>
                       </div>
                     </div>
 
                     {selectedSkill.clientActions.length > 0 && (
                       <>
-                        <h4 className="skill-hub-subsection-title">客户端动作</h4>
-                        <div className="skill-v2-chip-list">
+                        <h4 className="config-section-title">客户端动作</h4>
+                        <div className="config-actions">
                           {selectedSkill.clientActions.map((action, index) => (
-                            <code className="skill-v2-chip" key={`${action}-${index}`}>{action}</code>
+                            <code className="chip" key={`${action}-${index}`}>{action}</code>
                           ))}
                         </div>
                       </>
                     )}
                   </div>
 
-                  <div className="skill-v2-card">
-                    <h3>API 列表</h3>
+                  <div className="config-card">
+                    <h3 className="config-section-title">API 列表</h3>
                     {selectedSkill.apis.length === 0 ? (
-                      <p className="skill-v2-desc">该技能暂未声明 API。</p>
+                      <span className="config-label">暂无 API</span>
                     ) : (
-                      <div className="skill-v2-api-list">
+                      <div>
                         {selectedSkill.apis.map((api, index) => (
-                          <div key={`${api.path}-${index}`} className="skill-v2-api-row">
-                            <span className={`skill-api-method ${api.method.toLowerCase()}`}>{api.method}</span>
-                            <span className="skill-api-path">{api.path}</span>
-                            <span className="skill-api-name">{api.name}</span>
-                            {api.caution && <span className="skill-api-caution">⚠ {api.caution}</span>}
+                          <div key={`${api.path}-${index}`} className="config-row">
+                            <span className={`badge badge-muted ${api.method.toLowerCase()}`}>{api.method}</span>
+                            <span className="config-value">{api.path}</span>
+                            <span className="config-label">{api.name}</span>
+                            {api.caution && <span className="badge badge-warn">⚠ {api.caution}</span>}
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
 
-                  <div className="skill-v2-card">
-                    <h3>SKILL.md 原文</h3>
-                    <pre className="skill-v2-raw">{skillMd || '正在读取技能说明...'}</pre>
+                  <div className="config-card">
+                    <h3 className="config-section-title">SKILL.md</h3>
+                    <pre className="config-terminal">{skillMd || '加载中...'}</pre>
                   </div>
                 </section>
               </>
@@ -403,23 +389,22 @@ export default function SkillBrowser() {
           </main>
         </div>
       ) : (
-        <div className="skill-policy-view">
+        <div className="config-section">
           {policy && (
             <>
-              <section className="skill-policy-overview">
+              <section className="grid-3">
                 {policyOverview.map((item) => (
-                  <div key={item.title} className="skill-policy-overview-card">
-                    <span>{item.title}</span>
-                    <strong>{item.value}</strong>
-                    <small>{item.desc}</small>
+                  <div key={item.title} className="card card-compact">
+                    <span className="config-label">{item.title}</span>
+                    <strong className="config-value">{item.value}</strong>
                   </div>
                 ))}
               </section>
 
-              <section className="skill-v2-policy-grid skill-policy-grid-v3">
-                <div className="skill-v2-card">
-                  <h3>人格 / 记忆边界</h3>
-                  <label className="toggle-row">
+              <section className="config-grid">
+                <div className="config-card">
+                  <h3 className="config-section-title">人格 / 记忆边界</h3>
+                  <label className="config-row">
                     <input
                       type="checkbox"
                       checked={policy.memory.mainSessionReadsMemory}
@@ -427,7 +412,7 @@ export default function SkillBrowser() {
                     />
                     主会话读取 MEMORY
                   </label>
-                  <label className="toggle-row">
+                  <label className="config-row">
                     <input
                       type="checkbox"
                       checked={policy.memory.sharedSessionBlocksMemory}
@@ -435,32 +420,29 @@ export default function SkillBrowser() {
                     />
                     共享会话屏蔽 MEMORY
                   </label>
-                  <p className="skill-v2-desc">
-                    这决定 RDKClaw 在 Studio 主会话和共享通道里分别能读取哪些长期上下文。
-                  </p>
                 </div>
 
-                <div className="skill-v2-card">
-                  <h3>委派 / 审批</h3>
-                  <div className="skill-v2-field">
-                    <span>委派策略</span>
-                    <select title="委派策略" aria-label="委派策略" value={policy.delegation.strategy} onChange={(e) => setPolicy({ ...policy, delegation: { ...policy.delegation, strategy: e.target.value as RDKClawPolicy['delegation']['strategy'] } })}>
+                <div className="config-card">
+                  <h3 className="config-section-title">委派 / 审批</h3>
+                  <div className="config-row">
+                    <span className="config-label">委派策略</span>
+                    <select className="config-value" title="委派策略" aria-label="委派策略" value={policy.delegation.strategy} onChange={(e) => setPolicy({ ...policy, delegation: { ...policy.delegation, strategy: e.target.value as RDKClawPolicy['delegation']['strategy'] } })}>
                       <option value="local-first">local-first</option>
                       <option value="board-first">board-first</option>
                       <option value="hybrid">hybrid</option>
                     </select>
                   </div>
-                  <div className="skill-v2-field">
-                    <span>审批模式</span>
-                    <select title="审批模式" aria-label="审批模式" value={policy.approval.mode} onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } })}>
+                  <div className="config-row">
+                    <span className="config-label">审批模式</span>
+                    <select className="config-value" title="审批模式" aria-label="审批模式" value={policy.approval.mode} onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } })}>
                       <option value="always">always</option>
                       <option value="risk-based">risk-based</option>
                       <option value="auto">auto</option>
                     </select>
                   </div>
-                  <div className="skill-v2-field">
-                    <span>风险阈值</span>
-                    <select title="风险阈值" aria-label="风险阈值" value={policy.approval.riskThreshold} onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } })}>
+                  <div className="config-row">
+                    <span className="config-label">风险阈值</span>
+                    <select className="config-value" title="风险阈值" aria-label="风险阈值" value={policy.approval.riskThreshold} onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } })}>
                       <option value="low">low</option>
                       <option value="medium">medium</option>
                       <option value="high">high</option>
@@ -468,23 +450,20 @@ export default function SkillBrowser() {
                   </div>
                 </div>
 
-                <div className="skill-v2-card">
-                  <h3>定时 / 推送</h3>
-                  <div className="skill-v2-field">
-                    <span>默认推送渠道</span>
-                    <select title="默认推送渠道" aria-label="默认推送渠道" value={policy.scheduler.defaultChannel} onChange={(e) => setPolicy({ ...policy, scheduler: { ...policy.scheduler, defaultChannel: e.target.value as RDKClawPolicy['scheduler']['defaultChannel'] } })}>
+                <div className="config-card">
+                  <h3 className="config-section-title">定时 / 推送</h3>
+                  <div className="config-row">
+                    <span className="config-label">默认推送渠道</span>
+                    <select className="config-value" title="默认推送渠道" aria-label="默认推送渠道" value={policy.scheduler.defaultChannel} onChange={(e) => setPolicy({ ...policy, scheduler: { ...policy.scheduler, defaultChannel: e.target.value as RDKClawPolicy['scheduler']['defaultChannel'] } })}>
                       <option value="chat">chat</option>
                       <option value="feishu">feishu</option>
                     </select>
                   </div>
-                  <p className="skill-v2-desc">
-                    定时任务、提醒和后台自主运行默认会把结果发送到这里。
-                  </p>
                 </div>
 
-                <div className="skill-v2-card">
-                  <h3>联网能力</h3>
-                  <label className="toggle-row">
+                <div className="config-card">
+                  <h3 className="config-section-title">联网能力</h3>
+                  <label className="config-row">
                     <input
                       type="checkbox"
                       checked={policy.network.enabled}
@@ -492,17 +471,18 @@ export default function SkillBrowser() {
                     />
                     启用联网工具
                   </label>
-                  <label className="toggle-row">
+                  <label className="config-row">
                     <input
                       type="checkbox"
                       checked={policy.network.requireApproval}
                       onChange={(e) => setPolicy({ ...policy, network: { ...policy.network, requireApproval: e.target.checked } })}
                     />
-                    联网默认走审批
+                    联网走审批
                   </label>
-                  <div className="skill-v2-field">
-                    <span>单次抓取最大字符</span>
+                  <div className="config-row">
+                    <span className="config-label">单次抓取上限</span>
                     <input
+                      className="config-value"
                       type="number"
                       title="单次抓取最大字符"
                       aria-label="单次抓取最大字符"
@@ -518,49 +498,37 @@ export default function SkillBrowser() {
                   </div>
                 </div>
 
-                <div className="skill-v2-card skill-channel-card">
-                  <h3>渠道与运行入口</h3>
-                  <div className="skill-channel-stack">
+                <div className="config-card">
+                  <h3 className="config-section-title">渠道入口</h3>
+                  <div className="config-section">
                     {channelCards.map((card) => (
-                      <button key={card.title} type="button" className="skill-channel-link" onClick={card.onClick}>
-                        <div>
-                          <strong>{card.title}</strong>
-                          <span>{card.desc}</span>
-                        </div>
+                      <button key={card.title} type="button" className="btn btn-ghost btn-sm" onClick={card.onClick}>
+                        <strong>{card.title}</strong>
                         <span>{card.action}</span>
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <div className="skill-v2-card skill-channel-card">
-                  <h3>Provider / 模型配置</h3>
-                  <p className="skill-v2-desc">
-                    Studio 主助手的模型供应商和 OpenClaw 网关配置分离管理，避免“本地聊天模型”和“板端代理模型”相互覆盖。
-                  </p>
-                  <div className="skill-channel-stack">
-                    <button type="button" className="skill-channel-link" onClick={openAiSettings}>
-                      <div>
-                        <strong>Studio AI 配置</strong>
-                        <span>设置当前聊天模型、API Key 与兼容 Base URL。</span>
-                      </div>
+                <div className="config-card">
+                  <h3 className="config-section-title">Provider / 模型</h3>
+                  <div className="config-section">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={openAiSettings}>
+                      <strong>Studio AI 配置</strong>
                       <span>打开 AI 设置</span>
                     </button>
-                    <button type="button" className="skill-channel-link" onClick={() => setActiveTab('openclaw')}>
-                      <div>
-                        <strong>OpenClaw Runtime</strong>
-                        <span>查看网关模型、插件和飞书运行状态。</span>
-                      </div>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActiveTab('openclaw')}>
+                      <strong>OpenClaw Runtime</strong>
                       <span>打开 OpenClaw</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="skill-v2-policy-footer">
-                  <button className="skill-v2-btn primary" onClick={savePolicy} disabled={savingPolicy}>
+                <div className="config-actions">
+                  <button className="btn btn-primary" onClick={savePolicy} disabled={savingPolicy}>
                     {savingPolicy ? '保存中...' : '保存策略'}
                   </button>
-                  <span className="skill-v2-save-info">{saveInfoText}</span>
+                  <span className="badge badge-muted">{saveInfoText}</span>
                 </div>
               </section>
             </>
@@ -585,14 +553,14 @@ function SkillNavItem({
   const isEco = skill.name.startsWith('eco-');
 
   return (
-    <button type="button" className={`skill-v2-item ${selected ? 'selected' : ''} ${isEco ? 'eco' : ''}`} onClick={onClick}>
-      <div className="skill-v2-item-icon">{icon}</div>
-      <div className="skill-v2-item-content">
-        <div className="skill-v2-item-name">{skill.name}</div>
-        <div className="skill-v2-item-desc">{skill.description.slice(0, 72)}{skill.description.length > 72 ? '...' : ''}</div>
+    <button type="button" className={`config-sidebar-item ${selected ? 'active' : ''} ${isEco ? 'eco' : ''}`} onClick={onClick}>
+      <div className="config-card-icon">{icon}</div>
+      <div>
+        <div className="config-card-name">{skill.name}</div>
+        <div className="config-label">{skill.description.slice(0, 72)}{skill.description.length > 72 ? '...' : ''}</div>
       </div>
-      <div className="skill-v2-item-meta">
-        <span>{skill.apis.length} APIs</span>
+      <div>
+        <span className="badge badge-muted">{skill.apis.length} APIs</span>
       </div>
     </button>
   );
