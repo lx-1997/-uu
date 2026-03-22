@@ -714,20 +714,23 @@ print(json.dumps(result,ensure_ascii=False))`;
   ): void {
     const patch: any = {};
     if (config.modelGateway?.baseUrl && config.modelGateway?.apiKey) {
+      const modelId = config.modelGateway.modelId || 'default-model';
+      const modelName = config.modelGateway.modelName || modelId;
       patch.models = {
+        mode: 'merge',
         providers: {
           'custom-gateway': {
             baseUrl: config.modelGateway.baseUrl,
             apiKey: config.modelGateway.apiKey,
             api: normalizeOpenClawApi(config.modelGateway.api),
             models: [{
-              id: config.modelGateway.modelId || 'qwen3.5-plus',
-              name: config.modelGateway.modelName || 'Custom Model',
+              id: modelId,
+              name: modelName,
             }],
           },
         },
       };
-      patch.agents = { defaults: { model: { primary: 'custom-gateway/' + (config.modelGateway.modelId || 'qwen3.5-plus') } } };
+      patch.agents = { defaults: { model: { primary: 'custom-gateway/' + modelId } } };
     }
     if (config.feishu?.appId && config.feishu?.appSecret) {
       const feishuPatch: Record<string, any> = {
@@ -760,26 +763,33 @@ print(json.dumps(result,ensure_ascii=False))`;
       return;
     }
     const patchB64 = Buffer.from(JSON.stringify(patch), 'utf8').toString('base64');
-    const pyScript = `import json,os,sys,base64
-p=os.path.expanduser('~/.openclaw/openclaw.json')
-os.makedirs(os.path.dirname(p),exist_ok=True)
-d=json.load(open(p)) if os.path.exists(p) else {}
-pat=json.loads(base64.b64decode(sys.argv[1]).decode())
-def merge(a,b):
- for k,v in b.items():
-  if k in a and isinstance(a.get(k),dict) and isinstance(v,dict):merge(a[k],v)
-  else:a[k]=v
-merge(d,pat)
-if 'channels' in pat and 'feishu' in pat['channels']:
- d.setdefault('channels',{})['feishu']=pat['channels']['feishu']
-json.dump(d,open(p,'w'),indent=2,ensure_ascii=False)
-print('[OpenClaw] 配置已更新')`;
+    const pyScript = `import json,os,sys,base64,traceback
+try:
+ p=os.path.expanduser('~/.openclaw/openclaw.json')
+ os.makedirs(os.path.dirname(p),exist_ok=True)
+ d=json.load(open(p)) if os.path.exists(p) else {}
+ pat=json.loads(base64.b64decode(sys.argv[1]).decode())
+ def merge(a,b):
+  for k,v in b.items():
+   if k in a and isinstance(a.get(k),dict) and isinstance(v,dict):merge(a[k],v)
+   else:a[k]=v
+ merge(d,pat)
+ if 'channels' in pat and 'feishu' in pat['channels']:
+  d.setdefault('channels',{})['feishu']=pat['channels']['feishu']
+ json.dump(d,open(p,'w'),indent=2,ensure_ascii=False)
+ v=json.load(open(p))
+ mp=((v.get('models') or {}).get('providers') or {}).get('custom-gateway')
+ ap=((v.get('agents') or {}).get('defaults') or {}).get('model',{}).get('primary','')
+ print('[OpenClaw] 配置已更新 | model-provider:',('ok' if mp else 'missing'),'| primary:',ap or 'none')
+except Exception as e:
+ traceback.print_exc()
+ print('[OpenClaw] 配置写入失败:',str(e))
+ sys.exit(1)`;
     const base64Script = Buffer.from(pyScript, 'utf8').toString('base64');
     const cmd = [
       'export PATH="$HOME/.npm-global/bin:$PATH"',
       `echo '${base64Script}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}'`,
       ENSURE_GATEWAY_LOCAL_MODE,
-      RUN_DOCTOR,
       '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart)',
       'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
     ].join(' && ');
@@ -843,22 +853,29 @@ onConnected = () => {
 onConnectFailed = (msg) => { clearTimeout(timer); finish(false, msg); };
 
 onFrame = (frame) => {
-  if (frame.type === 'res' && frame.id === sendId && !frame.ok) {
-    return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+  if (frame.type === 'res') {
+    if (frame.id === sendId && !frame.ok) return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+    return;
   }
   if (frame.type !== 'event') return;
-  process.stderr.write('[DEBUG] event=' + frame.event + ' keys=' + JSON.stringify(Object.keys(frame.payload || {})) + ' payload=' + JSON.stringify(frame.payload).slice(0, 500) + '\\n');
   const p = frame.payload || {};
   const stream = p.stream;
   const d = p.data || {};
-  // v3: stream-based events
-  if (stream === 'assistant') { const chunk = d.delta || d.text || ''; if (chunk) text += chunk; return; }
+
+  if (stream === 'assistant') {
+    const chunk = d.delta || d.text || p.delta || p.text || '';
+    if (chunk) text += chunk;
+    return;
+  }
   if (stream === 'thinking') return;
+  if (stream === 'tool') return;
   if (stream === 'lifecycle') {
-    if (d.phase === 'end') { clearTimeout(timer); return finish(!!text.trim(), text || 'empty response'); }
+    if (d.phase === 'end' || d.phase === 'complete') { clearTimeout(timer); return finish(true, text || '(done)'); }
     if (d.phase === 'error') { clearTimeout(timer); return finish(false, d.error || d.message || 'lifecycle error'); }
     return;
   }
+  if (stream) return;
+
   // legacy fallback
   if (p.state === 'delta' && typeof p.text === 'string') { text += p.text; return; }
   if (p.state === 'final') { clearTimeout(timer); return finish(!!(p.text || text).trim(), p.text || text || 'empty final'); }
@@ -869,7 +886,7 @@ onFrame = (frame) => {
 };
 
 ws.onerror = () => { clearTimeout(timer); finish(false, 'websocket error'); };
-ws.onclose = () => { if (!done) { clearTimeout(timer); finish(!!text.trim(), text || 'websocket closed unexpectedly'); } };
+ws.onclose = () => { if (!done) { clearTimeout(timer); finish(true, text || '(connection closed)'); } };
 `;
     const jsB64 = Buffer.from(jsScript, 'utf8').toString('base64');
     const cmd = [
@@ -1013,13 +1030,12 @@ ws.onclose = () => { if (!done) { clearTimeout(timer); finish(!!text.trim(), tex
     sessionId: string,
     device: Device
   ): { abort: () => void } {
-    const messageBase64 = Buffer.from(message, 'utf8').toString('base64');
-    const sessionBase64 = Buffer.from(sessionId || 'main', 'utf8').toString('base64');
+    const messageB64 = Buffer.from(message, 'utf8').toString('base64');
+    const sessionB64 = Buffer.from(sessionId || 'main', 'utf8').toString('base64');
     const wsScript = OPENCLAW_WS_CONNECT_HELPER + `
 
-const decode = (s) => Buffer.from(String(s || ''), 'base64').toString('utf8');
-const message = decode(process.argv[1]).trim();
-const sessionKey = decode(process.argv[2]) || 'main';
+const message = Buffer.from('${messageB64}', 'base64').toString('utf8').trim();
+const sessionKey = Buffer.from('${sessionB64}', 'base64').toString('utf8') || 'main';
 if (!message) { console.error('__OPENCLAW_WS_FAILED__'); console.error('empty message'); process.exit(1); }
 
 let done = false;
@@ -1050,22 +1066,31 @@ onConnectFailed = (msg) => { clearInterval(timer); finish(false, msg); };
 
 onFrame = (frame) => {
   lastActivity = Date.now();
-  if (frame.type === 'res' && frame.id === sendId && !frame.ok) {
-    return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+  if (frame.type === 'res') {
+    if (frame.id === sendId && !frame.ok) return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+    return;
   }
   if (frame.type !== 'event') return;
   const p = frame.payload || {};
   const stream = p.stream;
   const d = p.data || {};
-  // v3: stream-based events
-  if (stream === 'assistant') { const chunk = d.delta || d.text || ''; if (chunk) { collected += chunk; process.stdout.write(chunk); } return; }
+
+  // v3: stream-based events (event name can be "agent", "chat", or anything)
+  if (stream === 'assistant') {
+    const chunk = d.delta || d.text || p.delta || p.text || '';
+    if (chunk) { collected += chunk; process.stdout.write(chunk); }
+    return;
+  }
   if (stream === 'thinking') return;
+  if (stream === 'tool') return;
   if (stream === 'lifecycle') {
-    if (d.phase === 'end') return finish(!!collected.trim(), collected || 'empty response');
+    if (d.phase === 'end' || d.phase === 'complete') return finish(true, collected || '(done)');
     if (d.phase === 'error') return finish(false, d.error || d.message || 'lifecycle error');
     return;
   }
-  // legacy fallback
+  if (stream) return;
+
+  // legacy fallback (no stream field)
   if (p.state === 'delta' && typeof p.text === 'string') { collected += p.text; process.stdout.write(p.text); return; }
   if (p.state === 'final') {
     const t = (typeof p.text === 'string' && p.text.trim()) ? p.text : collected;
@@ -1090,7 +1115,7 @@ ws.onclose = () => { if (!done) { finish(!!collected.trim(), collected || 'webso
       'export PATH="$HOME/.npm-global/bin:$PATH"',
       `echo '${scriptBase64}' | base64 -d > /tmp/oc_chat_ws.js`,
       'chmod 700 /tmp/oc_chat_ws.js 2>/dev/null || true',
-      `node /tmp/oc_chat_ws.js '${messageBase64}' '${sessionBase64}'`,
+      'node /tmp/oc_chat_ws.js',
     ].join(' && ');
 
     return this.execCommand(device, cmd, (chunk) => {

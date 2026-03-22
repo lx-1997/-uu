@@ -680,13 +680,18 @@ export default function OpenClaw() {
 
     setLoading(true);
     try {
-      await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
+      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: payload }),
       });
-      addToast?.('配置已保存，Gateway 已重启', 'success');
-      setTimeout(() => { loadConfig(); loadStatus(); }, 1500);
+      const result = await res.json();
+      if (result.ok === false) {
+        addToast?.(`保存失败: ${result.output || result.error || '未知错误'}`, 'error');
+      } else {
+        addToast?.('配置已保存，Gateway 已重启', 'success');
+      }
+      setTimeout(() => { loadConfig(); loadStatus(); }, 2000);
     } catch (err: any) {
       addToast?.(`保存失败: ${err.message}`, 'error');
     } finally {
@@ -733,13 +738,18 @@ export default function OpenClaw() {
     setShowModelSelector(false);
     setLoading(true);
     try {
-      await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
+      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: { modelGateway: { ...modelConfig, modelId } } }),
       });
-      addToast?.(`已切换到 ${modelId}`, 'success');
-      setTimeout(() => { loadConfig(); loadStatus(); }, 1000);
+      const result = await res.json();
+      if (result.ok === false) {
+        addToast?.(`切换失败: ${result.output || result.error || '未知错误'}`, 'error');
+      } else {
+        addToast?.(`已切换到 ${modelId}`, 'success');
+      }
+      setTimeout(() => { loadConfig(); loadStatus(); }, 2000);
     } catch (err: any) {
       addToast?.(`切换失败: ${err.message}`, 'error');
     } finally {
