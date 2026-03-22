@@ -191,6 +191,8 @@ export interface AppState {
   setOpenclawChatMode: (v: boolean) => void;
   openclawConnected: boolean;
   setOpenclawConnected: (v: boolean) => void;
+  openclawSendMessage: ((text: string) => void) | null;
+  registerOpenclawSend: (fn: ((text: string) => void) | null) => void;
 
   // Task tracking
   taskHistory: Task[];

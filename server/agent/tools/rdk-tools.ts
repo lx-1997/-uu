@@ -29,6 +29,15 @@ export function createRdkTools(deviceId: string): Tool[] {
     deviceFileUploadFromLocalTool(deviceId),
     boardOpenClawStatusTool(deviceId),
     boardOpenClawReadConfigTool(deviceId),
+    boardOpenClawInstallTool(deviceId),
+    boardOpenClawUpgradeTool(deviceId),
+    boardOpenClawUninstallTool(deviceId),
+    boardOpenClawModelSwitchTool(deviceId),
+    boardOpenClawFeishuConfigTool(deviceId),
+    boardOpenClawPairingListTool(deviceId),
+    boardOpenClawPairingApproveTool(deviceId),
+    boardOpenClawPairingRejectTool(deviceId),
+    boardOpenClawLogsTool(deviceId),
     boardOpenClawRestartGatewayTool(deviceId),
     deviceDiagnoseTool(deviceId),
     rosTopicsTool(deviceId),
@@ -204,6 +213,247 @@ function boardOpenClawReadConfigTool(deviceId: string): Tool<{ path?: string }> 
     async execute(input) {
       const configPath = input.path || '/root/.openclaw/openclaw.json';
       return readDeviceFile(deviceId, configPath);
+    },
+  };
+}
+
+function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_install',
+    description: '一键安装板端 OpenClaw（官方 install.sh + doctor + restart + health）。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const cmd = [
+        'bash -lc',
+        '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
+        'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
+        '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || npm install -g openclaw@latest 2>&1);',
+        '(openclaw doctor --yes 2>&1 || openclaw doctor 2>&1 || true);',
+        '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true);',
+        '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || true)"',
+      ].join(' ');
+      return execOnDevice(deviceId, [cmd]);
+    },
+  };
+}
+
+function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_upgrade',
+    description: '升级板端 OpenClaw（优先 openclaw update，失败回退 npm latest），并执行健康检查。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const cmd = [
+        'bash -lc',
+        '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
+        'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
+        '(openclaw update --no-restart 2>&1 || openclaw update 2>&1 || npm install -g openclaw@latest 2>&1);',
+        '(openclaw doctor --yes 2>&1 || openclaw doctor 2>&1 || true);',
+        '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true);',
+        '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || true)"',
+      ].join(' ');
+      return execOnDevice(deviceId, [cmd]);
+    },
+  };
+}
+
+function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_uninstall',
+    description: '卸载板端 OpenClaw（官方 uninstall 优先，失败回退手动清理）。高风险操作，建议先确认。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const cmd = [
+        'bash -lc',
+        '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
+        'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
+        '(openclaw uninstall --all --yes --non-interactive 2>&1 || ((openclaw gateway stop 2>/dev/null || true) && (openclaw gateway uninstall 2>/dev/null || true) && (systemctl --user stop openclaw-gateway 2>/dev/null || true) && (systemctl --user disable openclaw-gateway 2>/dev/null || true) && rm -rf ~/.openclaw 2>/dev/null || true));',
+        '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true);"',
+      ].join(' ');
+      return execOnDevice(deviceId, [cmd]);
+    },
+  };
+}
+
+function boardOpenClawModelSwitchTool(deviceId: string): Tool<{ provider?: string; modelId: string }> {
+  return {
+    name: 'board_openclaw_model_switch',
+    description: '切换板端 OpenClaw 主模型（修改 openclaw.json 并重启 gateway）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', description: '可选 provider，默认 custom-gateway' },
+        modelId: { type: 'string', description: '目标模型 ID，例如 qwen3.5-plus' },
+      },
+      required: ['modelId'],
+    },
+    async execute(input) {
+      const provider = (input.provider || 'custom-gateway').trim();
+      const modelId = input.modelId.trim();
+      if (!provider || !modelId) throw new Error('provider/modelId 不能为空');
+      const payload = Buffer.from(JSON.stringify({ provider, modelId }), 'utf8').toString('base64');
+      const py = `import base64,json,os,sys
+args=json.loads(base64.b64decode(sys.argv[1]).decode("utf-8"))
+p=os.path.expanduser("~/.openclaw/openclaw.json")
+os.makedirs(os.path.dirname(p),exist_ok=True)
+d={}
+if os.path.exists(p):
+  try:
+    d=json.load(open(p,"r",encoding="utf-8"))
+  except Exception:
+    d={}
+agents=d.setdefault("agents",{})
+defaults=agents.setdefault("defaults",{})
+model=defaults.setdefault("model",{})
+model["primary"]=f"{args['provider']}/{args['modelId']}"
+json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
+print(model["primary"])`;
+      const pyB64 = Buffer.from(py, 'utf8').toString('base64');
+      const cmd = `bash -lc "echo '${pyB64}' | base64 -d >/tmp/rdk_oc_switch_model.py && python3 /tmp/rdk_oc_switch_model.py '${payload}' && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true) && (openclaw status 2>&1 || true)"`;
+      return execOnDevice(deviceId, [cmd]);
+    },
+  };
+}
+
+function boardOpenClawFeishuConfigTool(deviceId: string): Tool<{
+  appId: string;
+  appSecret: string;
+  connectionMode?: 'websocket' | 'webhook';
+  domain?: 'feishu' | 'lark';
+  dmPolicy?: 'pairing' | 'allowlist' | 'open' | 'disabled';
+  verificationToken?: string;
+  encryptKey?: string;
+}> {
+  return {
+    name: 'board_openclaw_feishu_config',
+    description: '配置板端 OpenClaw 的 Feishu 通道参数，并重启 gateway。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        appId: { type: 'string' },
+        appSecret: { type: 'string' },
+        connectionMode: { type: 'string', description: 'websocket 或 webhook' },
+        domain: { type: 'string', description: 'feishu 或 lark' },
+        dmPolicy: { type: 'string', description: 'pairing/allowlist/open/disabled' },
+        verificationToken: { type: 'string' },
+        encryptKey: { type: 'string' },
+      },
+      required: ['appId', 'appSecret'],
+    },
+    async execute(input) {
+      const connectionMode = input.connectionMode || 'websocket';
+      if (connectionMode === 'webhook' && (!input.verificationToken || !input.encryptKey)) {
+        throw new Error('webhook 模式必须同时提供 verificationToken 与 encryptKey');
+      }
+      const payload = Buffer.from(JSON.stringify({
+        appId: input.appId.trim(),
+        appSecret: input.appSecret.trim(),
+        connectionMode,
+        domain: (input.domain || 'feishu').trim(),
+        dmPolicy: (input.dmPolicy || 'pairing').trim(),
+        verificationToken: (input.verificationToken || '').trim(),
+        encryptKey: (input.encryptKey || '').trim(),
+      }), 'utf8').toString('base64');
+      const py = `import base64,json,os,sys
+cfg=json.loads(base64.b64decode(sys.argv[1]).decode("utf-8"))
+p=os.path.expanduser("~/.openclaw/openclaw.json")
+os.makedirs(os.path.dirname(p),exist_ok=True)
+d={}
+if os.path.exists(p):
+  try:
+    d=json.load(open(p,"r",encoding="utf-8"))
+  except Exception:
+    d={}
+channels=d.setdefault("channels",{})
+feishu=channels.setdefault("feishu",{})
+feishu["enabled"]=True
+feishu["appId"]=cfg["appId"]
+feishu["appSecret"]=cfg["appSecret"]
+feishu["connectionMode"]=cfg["connectionMode"]
+feishu["domain"]=cfg["domain"]
+feishu["dmPolicy"]=cfg["dmPolicy"]
+if cfg["connectionMode"]=="webhook":
+  feishu["verificationToken"]=cfg["verificationToken"]
+  feishu["encryptKey"]=cfg["encryptKey"]
+json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
+print(json.dumps({"ok":True,"mode":feishu["connectionMode"],"domain":feishu["domain"],"dmPolicy":feishu["dmPolicy"]},ensure_ascii=False))`;
+      const pyB64 = Buffer.from(py, 'utf8').toString('base64');
+      const cmd = `bash -lc "echo '${pyB64}' | base64 -d >/tmp/rdk_oc_feishu_cfg.py && python3 /tmp/rdk_oc_feishu_cfg.py '${payload}' && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true) && (openclaw gateway status 2>&1 || openclaw status 2>&1 || true)"`;
+      return execOnDevice(deviceId, [cmd]);
+    },
+  };
+}
+
+function boardOpenClawPairingListTool(deviceId: string): Tool<{ channel?: string }> {
+  return {
+    name: 'board_openclaw_pairing_list',
+    description: '查看板端 OpenClaw 某渠道的待配对请求，默认 feishu。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: '渠道名，默认 feishu' },
+      },
+    },
+    async execute(input) {
+      const channel = (input.channel || 'feishu').trim();
+      return execOnDevice(deviceId, [`bash -lc "openclaw pairing list ${channel} 2>&1 || echo pairing_list_failed"`]);
+    },
+  };
+}
+
+function boardOpenClawPairingApproveTool(deviceId: string): Tool<{ code: string; channel?: string }> {
+  return {
+    name: 'board_openclaw_pairing_approve',
+    description: '批准板端 OpenClaw 配对码（默认 feishu）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: '渠道名，默认 feishu' },
+        code: { type: 'string', description: '配对码' },
+      },
+      required: ['code'],
+    },
+    async execute(input) {
+      const channel = (input.channel || 'feishu').trim();
+      const code = input.code.trim();
+      return execOnDevice(deviceId, [`bash -lc "openclaw pairing approve ${channel} ${code} 2>&1"`]);
+    },
+  };
+}
+
+function boardOpenClawPairingRejectTool(deviceId: string): Tool<{ code: string; channel?: string }> {
+  return {
+    name: 'board_openclaw_pairing_reject',
+    description: '拒绝板端 OpenClaw 配对码（默认 feishu）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: '渠道名，默认 feishu' },
+        code: { type: 'string', description: '配对码' },
+      },
+      required: ['code'],
+    },
+    async execute(input) {
+      const channel = (input.channel || 'feishu').trim();
+      const code = input.code.trim();
+      return execOnDevice(deviceId, [`bash -lc "openclaw pairing reject ${channel} ${code} 2>&1"`]);
+    },
+  };
+}
+
+function boardOpenClawLogsTool(deviceId: string): Tool<{ limit?: number }> {
+  return {
+    name: 'board_openclaw_logs',
+    description: '查看板端 OpenClaw 网关日志（非跟随模式），默认最近 200 行。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: '日志行数，默认 200，最大 1000' },
+      },
+    },
+    async execute(input) {
+      const limit = Math.max(20, Math.min(1000, Number.isFinite(input.limit) ? Number(input.limit) : 200));
+      return execOnDevice(deviceId, [`bash -lc "openclaw logs --limit ${limit} 2>&1 || journalctl --user -u openclaw-gateway --no-pager -n ${limit} 2>&1 || echo no_logs"`]);
     },
   };
 }

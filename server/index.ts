@@ -732,7 +732,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   }
   const safeModel = shellEscape(targetModel);
   const commandMap: Record<'start' | 'status' | 'switch' | 'install' | 'logs', string> = {
-    install: `bash -lc '(curl -fsSL https://openclaw.sh/install.sh | bash || curl -fsSL https://code-server.dev/install.sh | sh || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
+    install: `bash -lc '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard || curl -fsSL https://code-server.dev/install.sh | sh || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
     start: `bash -lc '(openclaw gateway start --port ${OPENCLAW_GATEWAY_PORT} || openclaw start || clawctl start || true); (openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     status: `bash -lc '(openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     switch: `bash -lc '(openclaw model use ${safeModel} || clawctl model use ${safeModel} || echo "switch command unavailable"); (openclaw status || clawctl status || true)'`,
@@ -856,8 +856,7 @@ app.post('/api/devices/:id/openclaw/check', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
   const { password } = resolvePassword(request, device);
-
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runCheck(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -869,7 +868,8 @@ app.post('/api/devices/:id/openclaw/prepare', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runPrepare(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -881,7 +881,8 @@ app.post('/api/devices/:id/openclaw/install', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const deviceObj = { ip: device.host, userName: device.username, id: device.id };
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runInstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
@@ -1042,6 +1043,107 @@ app.post('/api/devices/:id/openclaw/script-install', async (request, response) =
   const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runScriptInstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/logs', async (request, response) => {
+  const { id } = request.params;
+  const { limit } = request.body as { limit?: number };
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runLogs(deviceObj, Number(limit ?? 200), (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.get('/api/devices/:id/openclaw/skills', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.getInstalledSkills(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    const skills: string[] = [];
+    const plugins: string[] = [];
+    let section = '';
+    for (const line of output.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed === '===SKILLS===') { section = 'skills'; continue; }
+      if (trimmed === '===PLUGINS===') { section = 'plugins'; continue; }
+      if (!trimmed || trimmed.startsWith('无已安装')) continue;
+      if (section === 'skills') skills.push(trimmed);
+      else if (section === 'plugins') plugins.push(trimmed);
+    }
+    response.json({ ok: success, skills, plugins, raw: output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/pairing/list', async (request, response) => {
+  const { id } = request.params;
+  const { channel } = request.body as { channel?: string };
+  const pairingChannel = String(channel || 'feishu').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(pairingChannel)) {
+    response.status(400).json({ error: 'channel 格式非法' });
+    return;
+  }
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runPairingList(deviceObj, pairingChannel, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/pairing/approve', async (request, response) => {
+  const { id } = request.params;
+  const { channel, code } = request.body as { channel?: string; code?: string };
+  const pairingChannel = String(channel || 'feishu').trim();
+  const pairingCode = String(code || '').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(pairingChannel)) {
+    response.status(400).json({ error: 'channel 格式非法' });
+    return;
+  }
+  if (!/^[A-Za-z0-9]{4,16}$/.test(pairingCode)) {
+    response.status(400).json({ error: 'code 格式非法（4-16 位字母数字）' });
+    return;
+  }
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runPairingApprove(deviceObj, pairingChannel, pairingCode, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/pairing/reject', async (request, response) => {
+  const { id } = request.params;
+  const { channel, code } = request.body as { channel?: string; code?: string };
+  const pairingChannel = String(channel || 'feishu').trim();
+  const pairingCode = String(code || '').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(pairingChannel)) {
+    response.status(400).json({ error: 'channel 格式非法' });
+    return;
+  }
+  if (!/^[A-Za-z0-9]{4,16}$/.test(pairingCode)) {
+    response.status(400).json({ error: 'code 格式非法（4-16 位字母数字）' });
+    return;
+  }
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runPairingReject(deviceObj, pairingChannel, pairingCode, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
   });
 });

@@ -325,10 +325,12 @@ export default function AIDock() {
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
     handleApprovalAction, stopCurrentRun,
     openclawConnected, setOpenclawConnected,
+    openclawSendMessage,
     currentDevice, addToast,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
+  const [dockOcMode, setDockOcMode] = useState(true);
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -641,21 +643,30 @@ export default function AIDock() {
     lowcode: [
       { id: 'flow', icon: '🧩', label: '生成流程', text: '帮我生成一个摄像头→AI检测→推送的工作流' },
     ],
+    openclaw: [
+      { id: 'oc-health', icon: '🩺', label: '网关健康检查', text: '请先检查当前网关状态并给出一条结论' },
+      { id: 'oc-cap', icon: '🧩', label: '能力总览', text: '帮我总结当前设备可用的 OpenClaw 能力' },
+      { id: 'oc-diag', icon: '🔧', label: '诊断修复', text: '帮我诊断为什么会连接失败，并给修复命令' },
+    ],
   };
   const defaultPrompts = [
     { id: 'diag', icon: '🔍', label: '分析异常日志', text: '请结合终端最近输出，帮我定位异常并给出修复步骤' },
     { id: 'hw', icon: '🌡️', label: '硬件状态', text: '检查当前设备的 BPU 负载和芯片温度' },
     { id: 'plan', icon: '📋', label: '执行计划', text: '把当前需求拆成 3 步并立即开始执行第一步' },
   ];
-  const quickPrompts = promptsByTab[activeTab] ?? defaultPrompts;
+  const effectiveTab = (activeTab === 'openclaw' && !dockOcMode) ? '_rdkclaw_fallback' : activeTab;
+  const quickPrompts = promptsByTab[effectiveTab] ?? defaultPrompts;
   const isFlasherTab = activeTab === 'flasher';
 
   /* 直接提交快捷提示 */
   const submitQuickPrompt = (text: string) => {
+    if (activeTab === 'openclaw' && dockOcMode && openclawSendMessage) {
+      openclawSendMessage(text);
+      return;
+    }
     setCmd(text);
-    // 下一帧自动提交
     requestAnimationFrame(() => {
-      const form = document.querySelector('.input-box') as HTMLFormElement;
+      const form = document.querySelector('.dock-form') as HTMLFormElement;
       form?.requestSubmit();
     });
   };
@@ -668,6 +679,12 @@ export default function AIDock() {
     const rawText = cmd.trim();
     const hasAttachments = pendingAttachments.length > 0;
     if (!rawText && !hasAttachments) return;
+
+    if (activeTab === 'openclaw' && dockOcMode && openclawSendMessage && rawText && !rawText.startsWith('/ai ')) {
+      openclawSendMessage(rawText);
+      setCmd('');
+      return;
+    }
 
     const aiForced = rawText.match(/^\/ai\s+([\s\S]+)/i);
     if (aiForced) {
@@ -860,7 +877,7 @@ export default function AIDock() {
           <input
             type="text"
             className="dock-cmd-input"
-            placeholder="消息、指令或拖拽文件..."
+            placeholder={activeTab === 'openclaw' && dockOcMode && openclawSendMessage ? '向 OpenClaw Agent 发送消息...' : '消息、指令或拖拽文件...'}
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}
@@ -879,6 +896,16 @@ export default function AIDock() {
 
         {/* Context strip (AI Native) */}
         <div className="dock-context-strip">
+          {activeTab === 'openclaw' && (
+            <button
+              className="dock-ctx-chip active"
+              onClick={() => setDockOcMode((prev) => !prev)}
+              title={dockOcMode ? '当前：OpenClaw Agent 模式（点击切换到 RDKClaw）' : '当前：RDKClaw 模式（点击切换到 OpenClaw Agent）'}
+              style={{ fontWeight: 600 }}
+            >
+              {dockOcMode ? '🤖 OpenClaw ↔' : '🔧 RDKClaw ↔'}
+            </button>
+          )}
           {quickPrompts.map((p) => (
             <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text)}>
               {p.label}

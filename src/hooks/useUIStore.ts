@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useRef, useCallback } from 'react';
 import type { Tab, ConfirmDialogState, TransferItem } from '../app-types';
 import { FLASH_IMAGES } from '../constants';
 import { useToastStore } from './useToastStore';
@@ -81,6 +81,8 @@ export interface UIStoreState {
   setOpenclawChatMode: (v: boolean) => void;
   openclawConnected: boolean;
   setOpenclawConnected: (v: boolean) => void;
+  openclawSendMessage: ((text: string) => void) | null;
+  registerOpenclawSend: (fn: ((text: string) => void) | null) => void;
 
   // Hardware
   hardwareRange: 'realtime' | '10m' | '1h';
@@ -285,6 +287,10 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [openclawThreshold] = useState(74);
   const [openclawChatMode, setOpenclawChatMode] = useState(false);
   const [openclawConnected, setOpenclawConnected] = useState(false);
+  const openclawSendRef = useRef<((text: string) => void) | null>(null);
+  const registerOpenclawSend = useCallback((fn: ((text: string) => void) | null) => {
+    openclawSendRef.current = fn;
+  }, []);
 
   // ── Hardware ──
   const [hardwareRange, setHardwareRange] = useState<'realtime' | '10m' | '1h'>('realtime');
@@ -329,6 +335,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     flowCheckProgress, isFlowChecking, runFlowValidation,
     openclawMode, setOpenclawMode, openclawThreshold,
     openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
+    openclawSendMessage: openclawSendRef.current, registerOpenclawSend,
     hardwareRange, setHardwareRange,
     examplePreset, setExamplePreset,
     rosTopic, setRosTopic, rosRecording, setRosRecording,

@@ -25,6 +25,11 @@ interface ConfigData {
   feishu?: {
     appId: string;
     appSecret: string;
+    connectionMode?: 'websocket' | 'webhook';
+    domain?: 'feishu' | 'lark';
+    dmPolicy?: 'pairing' | 'allowlist' | 'open' | 'disabled';
+    verificationToken?: string;
+    encryptKey?: string;
   };
   runtimeModel?: {
     provider: string;
@@ -48,21 +53,38 @@ interface ChatMessage {
   text: string;
 }
 
-type MainTab = 'chat' | 'config' | 'ops';
 type ConfigTab = 'model' | 'feishu' | 'skills';
 
 /* ═══════════════════════════════════════════
    Constants
    ═══════════════════════════════════════════ */
 
-const PROVIDER_PRESETS: Record<string, { label: string; baseUrl: string; api: string; models: string[] }> = {
-  anthropic: { label: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022'] },
-  openai: { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-chat', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'] },
-  google: { label: 'Google', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'google-genai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'] },
-  deepseek: { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-chat', models: ['deepseek-chat', 'deepseek-reasoner'] },
-  qwen: { label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', api: 'openai-chat', models: ['qwen3-plus', 'qwen3-max'] },
-  zhipu: { label: '智谱 AI', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-chat', models: ['glm-4-plus', 'glm-4-flash'] },
-  moonshot: { label: 'Moonshot', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-chat', models: ['moonshot-v1-8k', 'moonshot-v1-32k'] },
+interface ProviderPreset {
+  label: string;
+  group: 'international' | 'china';
+  baseUrl: string;
+  api: string;
+  models: string[];
+  keyHint?: string;
+  docUrl?: string;
+}
+
+const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
+  // International
+  anthropic: { label: 'Anthropic', group: 'international', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022'], keyHint: 'sk-ant-...' },
+  openai: { label: 'OpenAI', group: 'international', baseUrl: 'https://api.openai.com/v1', api: 'openai-chat', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'], keyHint: 'sk-...' },
+  google: { label: 'Google Gemini', group: 'international', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'google-genai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], keyHint: 'AIza...' },
+  openrouter: { label: 'OpenRouter', group: 'international', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-chat', models: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemini-2.5-pro'], keyHint: 'sk-or-...' },
+  // China
+  bailian: { label: '阿里百炼', group: 'china', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', api: 'openai-chat', models: ['qwen-plus', 'qwen-max', 'qwen-turbo', 'qwen3-235b-a22b'], keyHint: 'sk-...', docUrl: 'https://bailian.console.aliyun.com' },
+  deepseek: { label: 'DeepSeek', group: 'china', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-chat', models: ['deepseek-chat', 'deepseek-reasoner'], keyHint: 'sk-...' },
+  siliconflow: { label: '硅基流动', group: 'china', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-chat', models: ['Qwen/Qwen3-235B-A22B', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1'], keyHint: 'sk-...' },
+  zhipu: { label: '智谱 AI', group: 'china', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-chat', models: ['glm-4-plus', 'glm-4-flash', 'glm-4-long'], keyHint: '...' },
+  moonshot: { label: 'Moonshot', group: 'china', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-chat', models: ['moonshot-v1-128k', 'moonshot-v1-32k'], keyHint: 'sk-...' },
+  volcengine: { label: '火山引擎', group: 'china', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', api: 'openai-chat', models: ['doubao-1.5-pro-256k', 'doubao-1.5-lite-32k'], keyHint: '...' },
+  baichuan: { label: '百川', group: 'china', baseUrl: 'https://api.baichuan-ai.com/v1', api: 'openai-chat', models: ['Baichuan4-Turbo', 'Baichuan4-Air'], keyHint: 'sk-...' },
+  minimax: { label: 'MiniMax', group: 'china', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-chat', models: ['MiniMax-Text-01', 'abab6.5s-chat'], keyHint: '...' },
+  stepfun: { label: '阶跃星辰', group: 'china', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-chat', models: ['step-2-16k', 'step-1-128k'], keyHint: '...' },
 };
 
 const API_TYPE_OPTIONS = [
@@ -72,30 +94,30 @@ const API_TYPE_OPTIONS = [
 ];
 
 const QUICK_PROMPTS = [
-  { icon: 'health_and_safety', label: '网关健康检查', prompt: '请先检查当前网关状态并给出一条结论', color: 'green' },
-  { icon: 'widgets', label: '能力总览', prompt: '帮我总结当前设备可用的 OpenClaw 能力', color: 'blue' },
-  { icon: 'checklist', label: '设备巡检', prompt: '我现在要做一个设备健康巡检，给我步骤', color: 'purple' },
-  { icon: 'build', label: '诊断修复', prompt: '帮我诊断为什么会连接失败，并给修复命令', color: 'orange' },
+  { label: '网关健康检查', prompt: '请先检查当前网关状态并给出一条结论' },
+  { label: '能力总览', prompt: '帮我总结当前设备可用的 OpenClaw 能力' },
+  { label: '设备巡检', prompt: '我现在要做一个设备健康巡检，给我步骤' },
+  { label: '诊断修复', prompt: '帮我诊断为什么会连接失败，并给修复命令' },
 ];
 
 const SKILL_CATALOG = [
-  { id: 'rdk-x5-ai-detect', name: 'AI 推理检测', emoji: '🧠', desc: 'BPU 加速 YOLO/分类/分割/ASR/端侧 LLM' },
-  { id: 'rdk-x5-system', name: '系统管理', emoji: '🖥️', desc: '备份、OTA、温度、CPU 频率、systemd' },
-  { id: 'rdk-x5-monitor', name: '硬件监控', emoji: '📊', desc: 'CPU/BPU/内存/温度实时监控' },
-  { id: 'rdk-x5-network', name: '网络配置', emoji: '🌐', desc: 'WiFi、以太网、DNS、防火墙管理' },
-  { id: 'rdk-x5-camera', name: '摄像头', emoji: '📸', desc: '摄像头采集、预览、图片保存' },
-  { id: 'rdk-x5-media', name: '多媒体', emoji: '🎬', desc: '音视频编解码与播放' },
-  { id: 'rdk-x5-gpio', name: 'GPIO', emoji: '⚡', desc: 'GPIO 引脚控制与状态读取' },
-  { id: 'rdk-x5-tros', name: 'TROS', emoji: '🤖', desc: 'TogetherROS 话题/节点/启动' },
-  { id: 'rdk-x5-app', name: '应用管理', emoji: '📦', desc: '容器与应用部署管理' },
-  { id: 'rdk-x5-quickstart', name: '快速入门', emoji: '🚀', desc: '新手引导与示例运行' },
+  { id: 'rdk-x5-ai-detect', name: 'AI 推理检测', emoji: '🧠' },
+  { id: 'rdk-x5-system', name: '系统管理', emoji: '🖥️' },
+  { id: 'rdk-x5-monitor', name: '硬件监控', emoji: '📊' },
+  { id: 'rdk-x5-network', name: '网络配置', emoji: '🌐' },
+  { id: 'rdk-x5-camera', name: '摄像头', emoji: '📸' },
+  { id: 'rdk-x5-media', name: '多媒体', emoji: '🎬' },
+  { id: 'rdk-x5-gpio', name: 'GPIO', emoji: '⚡' },
+  { id: 'rdk-x5-tros', name: 'TROS', emoji: '🤖' },
+  { id: 'rdk-x5-app', name: '应用管理', emoji: '📦' },
+  { id: 'rdk-x5-quickstart', name: '快速入门', emoji: '🚀' },
 ];
 
 const PLUGIN_CATALOG = [
-  { id: 'feishu', name: '飞书', emoji: '💬', type: 'channel', desc: '飞书消息通道，接收和发送消息' },
-  { id: 'skillhub', name: 'SkillHub', emoji: '🏪', type: 'skill', desc: 'Skill 市场，安装和管理技能' },
-  { id: 'memory', name: '对话记忆', emoji: '🧠', type: 'memory', desc: '长期对话记忆与上下文管理' },
-  { id: 'web_search', name: '网络搜索', emoji: '🔍', type: 'plugin', desc: '联网搜索实时信息' },
+  { id: 'feishu', name: '飞书', emoji: '💬' },
+  { id: 'skillhub', name: 'SkillHub', emoji: '🏪' },
+  { id: 'memory', name: '对话记忆', emoji: '🧠' },
+  { id: 'web_search', name: '网络搜索', emoji: '🔍' },
 ];
 
 /* ═══════════════════════════════════════════
@@ -103,11 +125,7 @@ const PLUGIN_CATALOG = [
    ═══════════════════════════════════════════ */
 
 export default function OpenClaw() {
-  const { currentDevice, addToast } = useAppState();
-
-  // ─── Tab State ───
-  const [mainTab, setMainTab] = useState<MainTab>('chat');
-  const [configTab, setConfigTab] = useState<ConfigTab>('model');
+  const { currentDevice, addToast, registerOpenclawSend } = useAppState();
 
   // ─── Data State ───
   const [status, setStatus] = useState<GatewayStatus | null>(null);
@@ -115,9 +133,24 @@ export default function OpenClaw() {
   const [loading, setLoading] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
 
-  // ─── Chat State ───
-  const [chatInput, setChatInput] = useState('');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  // ─── Chat State (persisted per device) ───
+  const chatStorageKey = currentDevice ? `oc-chat-${currentDevice.id}` : '';
+  const [chatMessages, setChatMessagesRaw] = useState<ChatMessage[]>(() => {
+    if (!chatStorageKey) return [];
+    try {
+      const saved = sessionStorage.getItem(chatStorageKey);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const setChatMessages: typeof setChatMessagesRaw = (update) => {
+    setChatMessagesRaw((prev) => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      if (chatStorageKey) {
+        try { sessionStorage.setItem(chatStorageKey, JSON.stringify(next.slice(-200))); } catch { /* quota */ }
+      }
+      return next;
+    });
+  };
   const [chatConnected, setChatConnected] = useState(false);
   const [chatStreaming, setChatStreaming] = useState(false);
 
@@ -133,35 +166,50 @@ export default function OpenClaw() {
   const [testResult, setTestResult] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
 
   // ─── Feishu Config State ───
-  const [feishuConfig, setFeishuConfig] = useState({ appId: '', appSecret: '' });
+  const [feishuConfig, setFeishuConfig] = useState({
+    appId: '',
+    appSecret: '',
+    connectionMode: 'websocket' as 'websocket' | 'webhook',
+    domain: 'feishu' as 'feishu' | 'lark',
+    dmPolicy: 'pairing' as 'pairing' | 'allowlist' | 'open' | 'disabled',
+    verificationToken: '',
+    encryptKey: '',
+  });
+  const [pairingChannel, setPairingChannel] = useState('feishu');
+  const [pairingCode, setPairingCode] = useState('');
 
   // ─── Skills/Plugins State ───
   const [skillPluginsAllowText, setSkillPluginsAllowText] = useState('');
   const [skillInstallName, setSkillInstallName] = useState('');
   const [skillInstalling, setSkillInstalling] = useState(false);
+  const [boardSkills, setBoardSkills] = useState<string[]>([]);
+  const [boardPlugins, setBoardPlugins] = useState<string[]>([]);
 
   // ─── Operations State ───
-  const [output, setOutput] = useState('');
   const [activeOp, setActiveOp] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ action: string; label: string } | null>(null);
 
   // ─── Deploy Wizard State ───
   const [deployProvider, setDeployProvider] = useState('');
+  const [deployBaseUrl, setDeployBaseUrl] = useState('');
   const [deployApiKey, setDeployApiKey] = useState('');
   const [deployModelId, setDeployModelId] = useState('');
-  const [deployCustomBaseUrl, setDeployCustomBaseUrl] = useState('');
-  const [deployCustomApi, setDeployCustomApi] = useState('openai-chat');
+  const [deployApi, setDeployApi] = useState('openai-chat');
   const [deployRunning, setDeployRunning] = useState(false);
   const [deploySteps, setDeploySteps] = useState<('pending' | 'running' | 'done' | 'error')[]>([]);
 
   // ─── UI State ───
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [mobilePanel, setMobilePanel] = useState(false);
+  const [accordion, setAccordion] = useState<ConfigTab | 'deploy' | 'ops' | 'pairing' | null>(null);
+  const [configTab, setConfigTab] = useState<ConfigTab>('model');
 
   // ─── Refs ───
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement | null>(null);
-  const outputEndRef = useRef<HTMLDivElement | null>(null);
+  
 
   /* ═══════════════════════════════════════════
      Effects
@@ -171,6 +219,12 @@ export default function OpenClaw() {
     if (currentDevice) {
       loadStatus();
       loadConfig();
+      loadBoardSkills();
+      try {
+        const saved = sessionStorage.getItem(`oc-chat-${currentDevice.id}`);
+        if (saved) setChatMessagesRaw(JSON.parse(saved));
+        else setChatMessagesRaw([]);
+      } catch { setChatMessagesRaw([]); }
     }
   }, [currentDevice]);
 
@@ -185,7 +239,6 @@ export default function OpenClaw() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showModelSelector]);
 
-  // Socket.IO connection for chat
   useEffect(() => {
     if (!currentDevice) {
       if (socketRef.current) {
@@ -240,18 +293,9 @@ export default function OpenClaw() {
       }]);
       addToast?.(data.error || 'OpenClaw 对话异常', 'error');
     });
-    socket.on('openclaw:disconnected', () => {
-      setChatConnected(false);
-      setChatStreaming(false);
-    });
-    socket.on('disconnect', () => {
-      setChatConnected(false);
-      setChatStreaming(false);
-    });
-    socket.on('connect_error', () => {
-      setChatConnected(false);
-      setChatStreaming(false);
-    });
+    socket.on('openclaw:disconnected', () => { setChatConnected(false); setChatStreaming(false); });
+    socket.on('disconnect', () => { setChatConnected(false); setChatStreaming(false); });
+    socket.on('connect_error', () => { setChatConnected(false); setChatStreaming(false); });
 
     return () => {
       socket.emit('openclaw:stop', { deviceId: currentDevice.id });
@@ -266,9 +310,7 @@ export default function OpenClaw() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, chatStreaming]);
 
-  useEffect(() => {
-    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [output]);
+  
 
   /* ═══════════════════════════════════════════
      API Functions
@@ -293,31 +335,98 @@ export default function OpenClaw() {
       const data = await res.json();
       setConfig(data);
       if (data.modelGateway) setModelConfig(data.modelGateway);
-      if (data.feishu) setFeishuConfig(data.feishu);
+      if (data.feishu) {
+        setFeishuConfig((prev) => ({
+          ...prev,
+          ...data.feishu,
+          connectionMode: data.feishu.connectionMode || prev.connectionMode,
+          domain: data.feishu.domain || prev.domain,
+          dmPolicy: data.feishu.dmPolicy || prev.dmPolicy,
+          verificationToken: data.feishu.verificationToken || '',
+          encryptKey: data.feishu.encryptKey || '',
+        }));
+      }
       if (Array.isArray(data.pluginsAllow)) setSkillPluginsAllowText(data.pluginsAllow.join('\n'));
     } catch { /* silent */ }
+  };
+
+  const appendSystemMessage = (text: string) => {
+    setChatMessages((prev) => [...prev, { id: Date.now(), role: 'assistant', text }]);
+  };
+
+  const SLOW_ACTIONS = new Set(['install', 'upgrade', 'uninstall', 'prepare', 'check', 'doctor']);
+
+  const updateLastAssistant = (text: string) => {
+    setChatMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === 'assistant') return [...prev.slice(0, -1), { ...last, text }];
+      return prev;
+    });
   };
 
   const runAction = async (action: string, body?: any) => {
     if (!currentDevice) return;
     setLoading(true);
     setActiveOp(action);
-    setOutput('');
+
+    const isSlow = SLOW_ACTIONS.has(action);
+    const startTime = Date.now();
+    appendSystemMessage(`\`>>> ${action}\`\n\n执行中...`);
+
+    let progressTimer: ReturnType<typeof setInterval> | null = null;
+    if (isSlow) {
+      progressTimer = setInterval(() => {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        updateLastAssistant(`\`>>> ${action}\`\n\n执行中... (${elapsed}s)\n\n_${action === 'install' || action === 'upgrade' ? '安装/升级可能需要几分钟，请耐心等待' : '正在通过 SSH 执行命令'}_`);
+      }, 5000);
+    }
+
+    const controller = new AbortController();
+    const fetchTimeout = isSlow ? 600000 : 120000;
+    const fetchTimer = setTimeout(() => controller.abort(), fetchTimeout);
+
     try {
       const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/${action}`, {
         method: action === 'status' || action === 'version' ? 'GET' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
       });
-      const data = await res.json();
-      setOutput(data.output || JSON.stringify(data, null, 2));
-      if (action === 'install' || action === 'uninstall' || action === 'restart-gateway') {
-        setTimeout(loadStatus, 2000);
+      clearTimeout(fetchTimer);
+      if (progressTimer) clearInterval(progressTimer);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      const rawText = await res.text();
+      let data: any;
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n\`\`\`\n${rawText || '(空响应)'}\n\`\`\``);
+        addToast?.('操作完成，但响应格式异常', 'warning');
+        return;
       }
-      if (data.ok) addToast?.('操作成功', 'success');
+
+      if (!res.ok) {
+        const errMsg = data.error || data.message || `HTTP ${res.status}`;
+        updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n**错误：** ${errMsg}`);
+        addToast?.(errMsg, 'error');
+      } else {
+        const output = data.output?.trim() || JSON.stringify(data, null, 2);
+        updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n\`\`\`\n${output}\n\`\`\``);
+        if (action === 'install' || action === 'uninstall' || action === 'restart-gateway' || action === 'upgrade') {
+          setTimeout(loadStatus, 2000);
+        }
+        if (data.ok) addToast?.('操作成功', 'success');
+      }
     } catch (err: any) {
-      setOutput(`错误: ${err.message}`);
-      addToast?.(err.message, 'error');
+      clearTimeout(fetchTimer);
+      if (progressTimer) clearInterval(progressTimer);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const msg = err.name === 'AbortError'
+        ? `操作超时 (${Math.round(fetchTimeout / 1000)}s)，命令可能仍在板端运行`
+        : err.message;
+      updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n**错误：** ${msg}`);
+      addToast?.(msg, 'error');
     } finally {
       setLoading(false);
       setActiveOp(null);
@@ -336,15 +445,18 @@ export default function OpenClaw() {
       { id: msgId, role: 'user', text: userText },
       { id: msgId + 1, role: 'assistant', text: '' },
     ]);
-    setChatInput('');
     setChatStreaming(true);
     socketRef.current.emit('openclaw:send', { deviceId: currentDevice.id, message: userText });
   }, [currentDevice, chatConnected, chatStreaming]);
 
-  const sendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    dispatchOpenClawMessage(chatInput);
-  };
+  useEffect(() => {
+    if (chatConnected && !chatStreaming) {
+      registerOpenclawSend((text: string) => dispatchOpenClawMessage(text));
+    } else {
+      registerOpenclawSend(null);
+    }
+    return () => registerOpenclawSend(null);
+  }, [chatConnected, chatStreaming, registerOpenclawSend, dispatchOpenClawMessage]);
 
   const handleReconnect = () => {
     if (!currentDevice || !socketRef.current) return;
@@ -364,21 +476,22 @@ export default function OpenClaw() {
 
   /* ─── Config Functions ─── */
 
-  const saveConfig = async () => {
+  const saveConfig = async (tab?: ConfigTab) => {
     if (!currentDevice) return;
+    const activeTab = tab || configTab;
 
     const pluginAllowList = skillPluginsAllowText
       .split(/\r?\n|,/)
       .map((item) => item.trim())
       .filter(Boolean);
 
-    if (configTab === 'model') {
+    if (activeTab === 'model') {
       if (!modelConfig.baseUrl.trim() || !modelConfig.apiKey.trim()) {
         addToast?.('需要填写 Base URL 和 API Key', 'warning');
         return;
       }
     }
-    if (configTab === 'feishu') {
+    if (activeTab === 'feishu') {
       const hasId = !!feishuConfig.appId.trim();
       const hasSecret = !!feishuConfig.appSecret.trim();
       if ((hasId && !hasSecret) || (!hasId && hasSecret)) {
@@ -389,8 +502,14 @@ export default function OpenClaw() {
         addToast?.('飞书配置为空，未提交', 'info');
         return;
       }
+      if (feishuConfig.connectionMode === 'webhook') {
+        if (!feishuConfig.verificationToken.trim() || !feishuConfig.encryptKey.trim()) {
+          addToast?.('webhook 模式必须同时填写 Verification Token 和 Encrypt Key', 'warning');
+          return;
+        }
+      }
     }
-    if (configTab === 'skills') {
+    if (activeTab === 'skills') {
       const invalid = pluginAllowList.find((id) => !/^[a-zA-Z0-9@/_.-]+$/.test(id));
       if (invalid) {
         addToast?.(`无效插件 ID: ${invalid}`, 'warning');
@@ -399,9 +518,9 @@ export default function OpenClaw() {
     }
 
     const payload: any = {};
-    if (configTab === 'model') payload.modelGateway = modelConfig;
-    else if (configTab === 'feishu') payload.feishu = feishuConfig;
-    else if (configTab === 'skills') payload.pluginsAllow = pluginAllowList;
+    if (activeTab === 'model') payload.modelGateway = modelConfig;
+    else if (activeTab === 'feishu') payload.feishu = feishuConfig;
+    else if (activeTab === 'skills') payload.pluginsAllow = pluginAllowList;
 
     setLoading(true);
     try {
@@ -440,11 +559,8 @@ export default function OpenClaw() {
       const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/status`);
       const data = await res.json();
       setTestResult(data.running ? 'ok' : 'fail');
-      if (data.running) {
-        addToast?.('网关连接正常', 'success');
-      } else {
-        addToast?.('网关未运行，请先启动', 'warning');
-      }
+      if (data.running) addToast?.('网关连接正常', 'success');
+      else addToast?.('网关未运行，请先启动', 'warning');
     } catch {
       setTestResult('fail');
       addToast?.('连接测试失败', 'error');
@@ -460,9 +576,7 @@ export default function OpenClaw() {
       await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          config: { modelGateway: { ...modelConfig, modelId } },
-        }),
+        body: JSON.stringify({ config: { modelGateway: { ...modelConfig, modelId } } }),
       });
       addToast?.(`已切换到 ${modelId}`, 'success');
       setTimeout(() => { loadConfig(); loadStatus(); }, 1000);
@@ -477,14 +591,13 @@ export default function OpenClaw() {
 
   const handleOneClickInstall = async () => {
     if (!currentDevice || deployRunning) return;
-    if (!deployProvider || !deployApiKey) {
-      addToast?.('请选择模型厂商并填写 API Key', 'warning');
+    if (!deployApiKey || !deployModelId) {
+      addToast?.('请填写模型 ID 和 API Key', 'warning');
       return;
     }
 
     setDeployRunning(true);
     setDeploySteps(['running', 'pending', 'pending', 'pending']);
-    setOutput('');
 
     const stepActions = ['check', 'prepare', 'install'];
     for (let i = 0; i < stepActions.length; i++) {
@@ -494,8 +607,10 @@ export default function OpenClaw() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
-        const data = await res.json();
-        setOutput((prev) => prev + (data.output || '') + '\n');
+        const rawText = await res.text();
+        let data: any;
+        try { data = rawText ? JSON.parse(rawText) : {}; } catch { data = { output: rawText }; }
+        if (data.output) appendSystemMessage(`\`>>> ${stepActions[i]}\`\n\n\`\`\`\n${data.output}\n\`\`\``);
         if (!data.ok && stepActions[i] !== 'check') {
           setDeploySteps((prev) => prev.map((s, idx) => idx === i ? 'error' : s));
           setDeployRunning(false);
@@ -511,24 +626,36 @@ export default function OpenClaw() {
       }
     }
 
-    // Step 4: Onboard with config
     setDeploySteps((prev) => prev.map((s, idx) => idx === 3 ? 'running' : s));
     try {
-      const isCustom = deployProvider === '__custom__';
-      const provider = isCustom ? 'custom-gateway' : deployProvider;
-      const modelId = deployModelId || (PROVIDER_PRESETS[deployProvider]?.models[0] || 'default');
+      const preset = PROVIDER_PRESETS[deployProvider];
+      const baseUrl = deployBaseUrl || preset?.baseUrl || '';
+      const api = deployApi || preset?.api || 'openai-chat';
 
-      await fetch(`/api/devices/${currentDevice.id}/openclaw/onboard`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, apiKey: deployApiKey, modelId }),
-      });
+      if (preset && !deployBaseUrl) {
+        await fetch(`/api/devices/${currentDevice.id}/openclaw/onboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: deployProvider, apiKey: deployApiKey, modelId: deployModelId }),
+        });
+      } else {
+        await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            config: {
+              modelGateway: { baseUrl, apiKey: deployApiKey, api, modelId: deployModelId, modelName: deployProvider || 'custom' },
+            },
+          }),
+        });
+      }
       setDeploySteps((prev) => prev.map((s, idx) => idx === 3 ? 'done' : s));
+      appendSystemMessage('**部署完成！** 模型配置已写入，Gateway 正在重启...');
       addToast?.('部署完成！', 'success');
       setTimeout(() => { loadConfig(); loadStatus(); }, 2000);
     } catch (err: any) {
       setDeploySteps((prev) => prev.map((s, idx) => idx === 3 ? 'error' : s));
-      addToast?.(`初始化配置失败: ${err.message}`, 'error');
+      addToast?.(`配置失败: ${err.message}`, 'error');
     } finally {
       setDeployRunning(false);
     }
@@ -556,7 +683,9 @@ export default function OpenClaw() {
       } else {
         addToast?.('安装可能未成功，请查看输出', 'warning');
       }
-      if (mainTab === 'ops') setOutput(data.output || '');
+      if (data.output) {
+        appendSystemMessage(`\`>>> skill install ${name}\`\n\n\`\`\`\n${data.output}\n\`\`\``);
+      }
     } catch (err: any) {
       addToast?.(`安装失败: ${err.message}`, 'error');
     } finally {
@@ -564,12 +693,22 @@ export default function OpenClaw() {
     }
   };
 
+  const loadBoardSkills = async () => {
+    if (!currentDevice) return;
+    try {
+      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/skills`);
+      const data = await res.json();
+      if (data.ok) {
+        setBoardSkills(data.skills || []);
+        setBoardPlugins(data.plugins || []);
+      }
+    } catch { /* silent */ }
+  };
+
   const togglePluginAllow = (pluginId: string) => {
     setSkillPluginsAllowText((prev) => {
       const list = prev.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      if (list.includes(pluginId)) {
-        return list.filter((id) => id !== pluginId).join('\n');
-      }
+      if (list.includes(pluginId)) return list.filter((id) => id !== pluginId).join('\n');
       return [...list, pluginId].join('\n');
     });
   };
@@ -605,6 +744,13 @@ export default function OpenClaw() {
     <span className={`material-symbols-outlined ${cls || ''}`}>{name}</span>
   );
 
+  const toggleAccordion = (key: typeof accordion) => {
+    setAccordion((prev) => prev === key ? null : key);
+    if (key === 'model' || key === 'feishu' || key === 'skills') {
+      setConfigTab(key);
+    }
+  };
+
   /* ═══════════════════════════════════════════
      Render - Empty State
      ═══════════════════════════════════════════ */
@@ -623,354 +769,412 @@ export default function OpenClaw() {
   const summary = getConfigSummary();
 
   /* ═══════════════════════════════════════════
+     Render - Accordion Trigger
+     ═══════════════════════════════════════════ */
+
+  const AccTrigger = ({ id, icon, label, hint }: { id: typeof accordion; icon: string; label: string; hint?: string }) => (
+    <button className={`oc-accordion-trigger ${accordion === id ? 'open' : ''}`} onClick={() => toggleAccordion(id)}>
+      <span className="oc-accordion-trigger-left" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {MI(icon)}
+        {label}
+      </span>
+      {accordion !== id && hint && <span className="oc-accordion-summary">{hint}</span>}
+      {MI('expand_more')}
+    </button>
+  );
+
+  /* ═══════════════════════════════════════════
+     Render - Right Panel Content
+     ═══════════════════════════════════════════ */
+
+  const renderPanel = () => (
+    <>
+      <div className="oc-panel-header">
+        <strong>控制面板</strong>
+        <button className="oc-panel-toggle" onClick={() => { setPanelOpen(false); setMobilePanel(false); }} title="收起面板">
+          {MI('close')}
+        </button>
+      </div>
+
+      <div className="oc-panel-body">
+        {/* ── Operations ── */}
+        <div className="oc-accordion">
+          <div className="oc-accordion-item">
+            <AccTrigger id="ops" icon="terminal" label="Gateway 网关" hint={status?.running ? '运行中' : '停止'} />
+            {accordion === 'ops' && (
+              <div className="oc-accordion-content">
+                <div className="oc-actions-grid">
+                  <button className={`chip ${activeOp === 'check' ? 'active' : ''}`} onClick={() => runAction('check')} disabled={loading}>诊断检查</button>
+                  <button className={`chip ${activeOp === 'doctor' ? 'active' : ''}`} onClick={() => runAction('doctor')} disabled={loading}>Doctor</button>
+                  <button className={`chip ${activeOp === 'restart-gateway' ? 'active' : ''}`} onClick={() => runAction('restart-gateway')} disabled={loading}>重启网关</button>
+                  <button className={`chip ${activeOp === 'logs' ? 'active' : ''}`} onClick={() => runAction('logs', { limit: 300 })} disabled={loading}>查看日志</button>
+                </div>
+                <div className="divider" style={{ margin: '8px 0' }} />
+                <div className="oc-actions-grid">
+                  <button className={`chip ${activeOp === 'prepare' ? 'active' : ''}`} onClick={() => runAction('prepare')} disabled={loading}>环境准备</button>
+                  <button className={`chip ${activeOp === 'install' ? 'active' : ''}`} onClick={() => runAction('install')} disabled={loading}>安装</button>
+                  <button className={`chip ${activeOp === 'upgrade' ? 'active' : ''}`} onClick={() => runAction('upgrade')} disabled={loading}>升级</button>
+                  <button className="chip" onClick={() => setConfirmAction({ action: 'uninstall', label: '卸载 OpenClaw' })} disabled={loading} style={{ color: 'var(--danger)' }}>卸载</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Deploy ── */}
+          <div className="oc-accordion-item">
+            <AccTrigger id="deploy" icon="rocket_launch" label="一键部署" hint={deployRunning ? '部署中...' : undefined} />
+            {accordion === 'deploy' && (
+              <div className="oc-accordion-content">
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>快速选择（自动填充，填充后可手动修改）</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 8 }}>
+                  {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'china').map(([k, p]) => (
+                    <button key={k} className={`chip ${deployProvider === k ? 'active' : ''}`} onClick={() => { setDeployProvider(k); setDeployBaseUrl(p.baseUrl); setDeployModelId(p.models[0]); setDeployApi(p.api); }} style={{ fontSize: '0.625rem', padding: '2px 7px' }}>{p.label}</button>
+                  ))}
+                  {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'international').map(([k, p]) => (
+                    <button key={k} className={`chip ${deployProvider === k ? 'active' : ''}`} onClick={() => { setDeployProvider(k); setDeployBaseUrl(p.baseUrl); setDeployModelId(p.models[0]); setDeployApi(p.api); }} style={{ fontSize: '0.625rem', padding: '2px 7px' }}>{p.label}</button>
+                  ))}
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">Base URL</span>
+                  <input className="input" type="text" value={deployBaseUrl} onChange={(e) => { setDeployBaseUrl(e.target.value); setDeployProvider(''); }} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">模型 ID</span>
+                  <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">API Key</span>
+                  <input className="input" type="password" value={deployApiKey} onChange={(e) => setDeployApiKey(e.target.value)} placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'} />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">协议</span>
+                  <select className="select" value={deployApi} onChange={(e) => setDeployApi(e.target.value)} aria-label="API 协议">
+                    {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ width: '100%', marginTop: 8 }}>
+                  {deployRunning ? '部署中...' : '开始部署'}
+                </button>
+                {deploySteps.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: '0.625rem' }}>
+                    {['诊断', '依赖', '安装', '配置'].map((label, idx) => (
+                      <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        {idx > 0 && <span style={{ width: 10, height: 1, background: 'var(--border)', display: 'inline-block' }} />}
+                        <span className={`badge ${deploySteps[idx] === 'done' ? 'badge-ok' : deploySteps[idx] === 'running' ? 'badge-accent' : deploySteps[idx] === 'error' ? 'badge-danger' : 'badge-muted'}`}>{label}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Model Config ── */}
+          <div className="oc-accordion-item">
+            <AccTrigger id="model" icon="psychology" label="模型" hint={summary.model} />
+            {accordion === 'model' && (
+              <div className="oc-accordion-content">
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>快速选择（自动填充下方字段，填充后仍可手动修改）</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 8 }}>
+                  {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'china').map(([key, preset]) => (
+                    <button key={key} className={`chip ${selectedPreset === key ? 'active' : ''}`} onClick={() => handleProviderPresetChange(key)} style={{ fontSize: '0.625rem', padding: '2px 7px' }}>{preset.label}</button>
+                  ))}
+                  {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'international').map(([key, preset]) => (
+                    <button key={key} className={`chip ${selectedPreset === key ? 'active' : ''}`} onClick={() => handleProviderPresetChange(key)} style={{ fontSize: '0.625rem', padding: '2px 7px' }}>{preset.label}</button>
+                  ))}
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">Base URL</span>
+                  <input className="input" type="text" value={modelConfig.baseUrl} onChange={(e) => { setModelConfig({ ...modelConfig, baseUrl: e.target.value }); setSelectedPreset(''); }} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">模型 ID</span>
+                  <input className="input" type="text" value={modelConfig.modelId} onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">API Key</span>
+                  <input className="input" type="password" value={modelConfig.apiKey} onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })} placeholder={selectedPreset && PROVIDER_PRESETS[selectedPreset]?.keyHint || 'sk-...'} />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">协议</span>
+                  <select className="select" value={modelConfig.api} onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })} aria-label="API 协议">
+                    {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                <div className="oc-form-actions">
+                  <button className="btn btn-primary btn-sm" onClick={() => saveConfig('model')} disabled={loading}>{loading ? '...' : '保存'}</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { loadConfig(); addToast?.('已加载', 'info'); }}>重载</button>
+                  <button className="btn btn-ghost btn-sm" onClick={testConnection} disabled={testResult === 'testing'}>
+                    {testResult === 'testing' ? '...' : testResult === 'ok' ? '正常' : '测试'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Channels (Feishu + Pairing) ── */}
+          <div className="oc-accordion-item">
+            <AccTrigger id="feishu" icon="forum" label="消息渠道" hint={summary.feishu} />
+            {accordion === 'feishu' && (
+              <div className="oc-accordion-content">
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 6 }}>飞书机器人配置</div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">App ID</span>
+                  <input className="input" type="text" value={feishuConfig.appId} onChange={(e) => setFeishuConfig({ ...feishuConfig, appId: e.target.value })} placeholder="cli_..." />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">Secret</span>
+                  <input className="input" type="password" value={feishuConfig.appSecret} onChange={(e) => setFeishuConfig({ ...feishuConfig, appSecret: e.target.value })} placeholder="..." />
+                </div>
+                <div className="oc-form-grid-3">
+                  <div className="oc-deploy-field">
+                    <label>连接</label>
+                    <select className="select" value={feishuConfig.connectionMode} onChange={(e) => setFeishuConfig({ ...feishuConfig, connectionMode: e.target.value as any })} aria-label="连接模式">
+                      <option value="websocket">websocket</option>
+                      <option value="webhook">webhook</option>
+                    </select>
+                  </div>
+                  <div className="oc-deploy-field">
+                    <label>域名</label>
+                    <select className="select" value={feishuConfig.domain} onChange={(e) => setFeishuConfig({ ...feishuConfig, domain: e.target.value as any })} aria-label="域名">
+                      <option value="feishu">feishu</option>
+                      <option value="lark">lark</option>
+                    </select>
+                  </div>
+                  <div className="oc-deploy-field">
+                    <label>DM 策略</label>
+                    <select className="select" value={feishuConfig.dmPolicy} onChange={(e) => setFeishuConfig({ ...feishuConfig, dmPolicy: e.target.value as any })} aria-label="DM 策略">
+                      <option value="pairing">pairing</option>
+                      <option value="allowlist">allowlist</option>
+                      <option value="open">open</option>
+                      <option value="disabled">disabled</option>
+                    </select>
+                  </div>
+                </div>
+                {feishuConfig.connectionMode === 'webhook' && (
+                  <>
+                    <div className="oc-form-row">
+                      <span className="oc-form-label">Token</span>
+                      <input className="input" type="password" value={feishuConfig.verificationToken} onChange={(e) => setFeishuConfig({ ...feishuConfig, verificationToken: e.target.value })} placeholder="Verification Token" />
+                    </div>
+                    <div className="oc-form-row">
+                      <span className="oc-form-label">Key</span>
+                      <input className="input" type="password" value={feishuConfig.encryptKey} onChange={(e) => setFeishuConfig({ ...feishuConfig, encryptKey: e.target.value })} placeholder="Encrypt Key" />
+                    </div>
+                  </>
+                )}
+                <div className="oc-form-actions">
+                  <button className="btn btn-primary btn-sm" onClick={() => saveConfig('feishu')} disabled={loading}>{loading ? '...' : '保存'}</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { loadConfig(); addToast?.('已加载', 'info'); }}>重载</button>
+                </div>
+                <div className="divider" style={{ margin: '10px 0' }} />
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 6 }}>配对审批</div>
+                <div className="oc-pairing-row">
+                  <select className="select" value={pairingChannel} onChange={(e) => setPairingChannel(e.target.value)} aria-label="配对渠道">
+                    <option value="feishu">feishu</option>
+                    <option value="telegram">telegram</option>
+                    <option value="whatsapp">whatsapp</option>
+                    <option value="discord">discord</option>
+                    <option value="slack">slack</option>
+                  </select>
+                  <input className="input" type="text" value={pairingCode} onChange={(e) => setPairingCode(e.target.value.toUpperCase())} placeholder="配对码" />
+                  <button className="btn btn-primary btn-sm" onClick={() => runAction('pairing/approve', { channel: pairingChannel, code: pairingCode.trim() })} disabled={loading || !pairingCode.trim()}>批准</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => runAction('pairing/reject', { channel: pairingChannel, code: pairingCode.trim() })} disabled={loading || !pairingCode.trim()}>拒绝</button>
+                </div>
+                <button className={`chip ${activeOp === 'pairing/list' ? 'active' : ''}`} onClick={() => runAction('pairing/list', { channel: pairingChannel })} disabled={loading} style={{ marginTop: 6, fontSize: '0.6875rem' }}>查看待审批列表</button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Skills Config ── */}
+          <div className="oc-accordion-item">
+            <AccTrigger id="skills" icon="extension" label="技能 / 插件" hint={boardSkills.length > 0 ? `${boardSkills.length} 个技能` : `${skillPluginsAllowText.split('\n').filter(Boolean).length} 个插件`} />
+            {accordion === 'skills' && (
+              <div className="oc-accordion-content">
+                {boardSkills.length > 0 && (
+                  <>
+                    <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>板端已安装技能</span>
+                      <button className="btn btn-ghost btn-sm" onClick={loadBoardSkills} style={{ fontSize: '0.5625rem', padding: '1px 4px' }}>刷新</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                      {boardSkills.map((s) => (
+                        <span key={s} className="chip active" style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default' }}>{s}</span>
+                      ))}
+                    </div>
+                    <div className="divider" style={{ margin: '6px 0' }} />
+                  </>
+                )}
+                {boardPlugins.length > 0 && (
+                  <>
+                    <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>板端已启用插件</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 6 }}>
+                      {boardPlugins.map((p) => (
+                        <span key={p} className="chip active" style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default' }}>{p}</span>
+                      ))}
+                    </div>
+                    <div className="divider" style={{ margin: '6px 0' }} />
+                  </>
+                )}
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>安装技能</div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <input className="input" value={skillInstallName} onChange={(e) => setSkillInstallName(e.target.value)} placeholder="技能名称" onKeyDown={(e) => e.key === 'Enter' && handleInstallSkill()} style={{ flex: 1, fontSize: '0.75rem', padding: '5px 8px' }} />
+                  <button className="btn btn-primary btn-sm" onClick={() => { handleInstallSkill(); setTimeout(loadBoardSkills, 3000); }} disabled={skillInstalling || !skillInstallName.trim()} style={{ fontSize: '0.6875rem' }}>{skillInstalling ? '...' : '安装'}</button>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 6 }}>
+                  {SKILL_CATALOG.map((s) => (
+                    <button key={s.id} className={`chip ${boardSkills.includes(s.id) ? 'active' : ''}`} onClick={() => { handleInstallSkill(s.id); setTimeout(loadBoardSkills, 3000); }} disabled={skillInstalling} style={{ fontSize: '0.625rem', padding: '2px 6px' }}>
+                      {s.emoji} {s.name} {boardSkills.includes(s.id) && '✓'}
+                    </button>
+                  ))}
+                </div>
+                <div className="divider" style={{ margin: '8px 0' }} />
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>插件开关</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                  {PLUGIN_CATALOG.map((p) => (
+                    <button key={p.id} className={`chip ${isPluginEnabled(p.id) ? 'active' : ''}`} onClick={() => togglePluginAllow(p.id)} style={{ fontSize: '0.625rem', padding: '2px 6px' }}>
+                      {p.emoji} {p.name} {isPluginEnabled(p.id) && '✓'}
+                    </button>
+                  ))}
+                </div>
+                <div className="oc-form-actions">
+                  <button className="btn btn-primary btn-sm" onClick={() => saveConfig('skills')} disabled={loading}>{loading ? '...' : '保存插件'}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      
+    </>
+  );
+
+  /* ═══════════════════════════════════════════
      Render - Main
      ═══════════════════════════════════════════ */
 
   return (
-    <div className="config-page">
-      {/* ── Header row ── */}
-      <div className="config-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="config-card-icon">{MI('hub')}</span>
-          <strong>OpenClaw</strong>
-          <span className={`badge ${status?.running ? 'badge-ok' : 'badge-warn'}`}>
-            {statusLoading ? '...' : status?.running ? '运行中' : '停止'}
-          </span>
-          {status?.version && <span className="badge badge-muted">v{status.version}</span>}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div ref={modelDropdownRef} style={{ position: 'relative' }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowModelSelector(!showModelSelector)}>
+    <div className={`oc-layout ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''}`}>
+      {/* ════════════ Left: Chat ════════════ */}
+      <div className="oc-main">
+        {/* Status bar */}
+        <div className="oc-status-bar">
+          <div className="oc-status-item">
+            <span className={`status-dot ${status?.running ? 'online' : ''}`} />
+            <span className="oc-status-label">网关</span>
+            <span className="oc-status-value">{statusLoading ? '...' : status?.running ? '运行中' : '停止'}</span>
+          </div>
+          {status?.version && (
+            <div className="oc-status-item">
+              <span className="oc-status-label">v</span>
+              <span className="oc-status-value">{status.version}</span>
+            </div>
+          )}
+          <div className="oc-status-item" ref={modelDropdownRef} style={{ position: 'relative' }}>
+            <span className="oc-status-label">模型</span>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowModelSelector(!showModelSelector)} style={{ fontSize: '0.75rem', padding: '2px 6px' }}>
               {getCurrentModel()} {MI('expand_more')}
             </button>
             {showModelSelector && (
-              <div className="card" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 50, minWidth: 200, marginTop: 4 }}>
+              <div className="card" style={{ position: 'absolute', left: 0, top: '100%', zIndex: 50, minWidth: 200, marginTop: 4 }}>
                 <div className="section-label">可用模型</div>
                 {getAvailableModels().length > 0 ? getAvailableModels().map((m) => (
                   <button key={m.modelId} className={`config-sidebar-item ${config?.primaryModel === `${m.provider}/${m.modelId}` ? 'active' : ''}`} onClick={() => switchModel(m.provider, m.modelId)}>
                     {m.label || m.modelId}
-                    {m.hasKey && <span className="badge badge-ok">Key</span>}
+                    {m.hasKey && <span className="badge badge-ok" style={{ marginLeft: 'auto' }}>Key</span>}
                   </button>
-                )) : <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', padding: '8px 0' }}>暂无模型</p>}
+                )) : <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', padding: '8px 12px' }}>暂无模型</p>}
                 <div className="divider" />
-                <button className="config-sidebar-item" onClick={() => { setMainTab('config'); setConfigTab('model'); setShowModelSelector(false); }}>配置模型</button>
+                <button className="config-sidebar-item" onClick={() => { toggleAccordion('model'); setShowModelSelector(false); setPanelOpen(true); }}>配置模型</button>
               </div>
             )}
           </div>
-          <button className="btn-icon" onClick={loadStatus} title="刷新">{MI('refresh')}</button>
-        </div>
-      </div>
+          <div className="oc-status-item">
+            <span className={`status-dot ${status?.feishuConnected ? 'online' : ''}`} />
+            <span className="oc-status-label">飞书</span>
+            <span className="oc-status-value">{status?.feishuConnected ? '已连接' : '未连接'}</span>
+          </div>
 
-      {/* ── Tabs ── */}
-      <nav className="config-tabs">
-        {([['chat', '对话'], ['config', '配置'], ['ops', '运维']] as [MainTab, string][]).map(([id, label]) => (
-          <button key={id} className={`config-tab ${mainTab === id ? 'active' : ''}`} onClick={() => setMainTab(id)}>{label}</button>
-        ))}
-      </nav>
-
-      {/* ════════════ Chat Tab ════════════ */}
-      {mainTab === 'chat' && (
-        <>
-          {/* Status strip */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {[
-              { label: '网关', val: status?.running ? '运行中' : '停止', ok: !!status?.running },
-              { label: '版本', val: status?.version || '--', ok: true },
-              { label: '模型', val: getCurrentModel(), ok: !!config?.primaryModel },
-              { label: '飞书', val: status?.feishuConnected ? '已连接' : '未连接', ok: !!status?.feishuConnected },
-            ].map((s) => (
-              <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem' }}>
-                <span className={`status-dot ${s.ok ? 'online' : ''}`} />
-                <span style={{ color: 'var(--text-muted)' }}>{s.label}</span>
-                <strong style={{ color: 'var(--text-primary)' }}>{s.val}</strong>
-              </div>
-            ))}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
             {!status?.running && (
-              <button className="btn btn-primary btn-sm" onClick={() => runAction('restart-gateway')} disabled={loading}>启动网关</button>
+              <button className="btn btn-primary btn-sm" onClick={() => runAction('restart-gateway')} disabled={loading} style={{ fontSize: '0.6875rem' }}>启动网关</button>
             )}
+            <button className="btn-icon" onClick={loadStatus} title="刷新状态">{MI('refresh')}</button>
+            {!panelOpen && (
+              <button className="btn-icon" onClick={() => setPanelOpen(true)} title="打开面板">{MI('dock_to_left')}</button>
+            )}
+            <button className="btn-icon oc-mobile-panel-btn" onClick={() => setMobilePanel(true)} title="控制面板" style={{ display: 'none' }}>{MI('tune')}</button>
           </div>
+        </div>
 
-          {/* Chat area */}
-          <div className="config-chat" style={{ flex: 1, minHeight: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: '0.75rem' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span className={`status-dot ${chatConnected ? 'online' : ''}`} />
-                {chatConnected ? '已连接' : '连接中...'}
-              </span>
-              <span style={{ display: 'flex', gap: 4 }}>
-                <button className="btn btn-ghost btn-sm" onClick={handleReconnect} disabled={chatStreaming}>重连</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => { setChatMessages([]); setChatStreaming(false); }} disabled={chatMessages.length === 0}>清空</button>
-              </span>
-            </div>
+        {/* Chat header */}
+        <div className="oc-chat-header">
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className={`status-dot ${chatConnected ? 'online' : ''}`} />
+            {chatConnected ? 'OpenClaw Agent 已连接' : '连接中...'}
+          </span>
+          <span style={{ display: 'flex', gap: 4 }}>
+            <button className="btn btn-ghost btn-sm" onClick={handleReconnect} disabled={chatStreaming} style={{ fontSize: '0.6875rem' }}>重连</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setChatMessages([]); setChatStreaming(false); }} disabled={chatMessages.length === 0} style={{ fontSize: '0.6875rem' }}>清空</button>
+          </span>
+        </div>
 
-            <div className="config-chat-stream" style={{ flex: 1, overflow: 'auto' }}>
-              {chatMessages.length === 0 ? (
-                <div className="empty-state" style={{ padding: '40px 20px' }}>
-                  <div className="empty-state-icon">{MI('hub')}</div>
-                  <strong>OpenClaw Agent 就绪</strong>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 12 }}>
-                    {QUICK_PROMPTS.map((item) => (
-                      <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming}>
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                chatMessages.map((msg) => (
-                  <div key={msg.id} className={`config-chat-msg ${msg.role === 'assistant' ? 'ai' : 'user'}`}>
-                    {msg.text ? (
-                      msg.role === 'assistant' ? renderMarkdown(msg.text) : msg.text
-                    ) : (
-                      msg.role === 'assistant' && chatStreaming ? (
-                        <span style={{ display: 'flex', gap: 3 }}><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></span>
-                      ) : null
-                    )}
-                  </div>
-                ))
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            {chatMessages.length > 0 && (
-              <div style={{ display: 'flex', gap: 4, padding: '6px 12px', borderTop: '1px solid var(--border)', overflowX: 'auto' }}>
+        {/* Chat messages */}
+        <div className="oc-chat-body">
+          {chatMessages.length === 0 ? (
+            <div className="oc-chat-empty">
+              <div className="oc-chat-empty-icon">{MI('hub')}</div>
+              <strong>OpenClaw Agent 就绪</strong>
+              <div className="oc-quick-prompts">
                 {QUICK_PROMPTS.map((item) => (
-                  <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming} style={{ flexShrink: 0 }}>
+                  <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming}>
                     {item.label}
                   </button>
                 ))}
               </div>
-            )}
+            </div>
+          ) : (
+            chatMessages.map((msg) => (
+              <div key={msg.id} className={`config-chat-msg ${msg.role === 'assistant' ? 'ai' : 'user'}`}>
+                {msg.text ? (
+                  msg.role === 'assistant' ? renderMarkdown(msg.text) : msg.text
+                ) : (
+                  msg.role === 'assistant' && chatStreaming ? (
+                    <span style={{ display: 'flex', gap: 3 }}><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></span>
+                  ) : null
+                )}
+              </div>
+            ))
+          )}
+          <div ref={chatEndRef} />
+        </div>
 
-            <form className="config-chat-input" onSubmit={sendMessage}>
-              <input className="input" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder={chatConnected ? '向 OpenClaw Agent 发送...' : '等待连接...'} disabled={!chatConnected} style={{ flex: 1 }} />
-              {chatStreaming ? (
-                <button type="button" className="btn btn-danger btn-sm" onClick={handleStopStream}>停止</button>
-              ) : (
-                <button type="submit" className="btn btn-primary btn-sm" disabled={!chatConnected || !chatInput.trim()}>发送</button>
-              )}
-            </form>
-          </div>
-        </>
-      )}
+        {/* Quick prompts strip */}
+        <div className="oc-chat-suggestions">
+          {QUICK_PROMPTS.map((item) => (
+            <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming} style={{ flexShrink: 0, fontSize: '0.6875rem' }}>
+              {item.label}
+            </button>
+          ))}
+          {chatStreaming && (
+            <button className="btn btn-danger btn-sm" onClick={handleStopStream} style={{ flexShrink: 0, fontSize: '0.6875rem' }}>停止生成</button>
+          )}
+        </div>
+      </div>
 
-      {/* ════════════ Config Tab ════════════ */}
-      {mainTab === 'config' && (
-        <div className="config-split">
-          <aside className="config-sidebar">
-            {([['model', '模型'], ['feishu', '飞书'], ['skills', '技能']] as [ConfigTab, string][]).map(([id, label]) => (
-              <button key={id} className={`config-sidebar-item ${configTab === id ? 'active' : ''}`} onClick={() => setConfigTab(id)}>{label}</button>
-            ))}
-          </aside>
-
-          <div className="config-detail page-scroll">
-            {/* ── Model ── */}
-            {configTab === 'model' && (
-              <>
-                <div className="section-label">当前配置</div>
-                <div className="card card-compact" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 0 }}>
-                  {[
-                    ['厂商', summary.provider],
-                    ['模型', summary.model],
-                    ['API', summary.api],
-                    ['Key', summary.apiKey],
-                    ['飞书', summary.feishu],
-                  ].map(([k, v]) => (
-                    <div key={k} className="config-row">
-                      <span className="config-label">{k}</span>
-                      <span className="config-value" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>{v}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="divider" />
-                <div className="section-label">模型网关</div>
-
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
-                  {Object.entries(PROVIDER_PRESETS).map(([key, preset]) => (
-                    <button key={key} className={`chip ${selectedPreset === key ? 'active' : ''}`} onClick={() => handleProviderPresetChange(key)}>{preset.label}</button>
-                  ))}
-                  <button className={`chip ${selectedPreset === '__custom__' ? 'active' : ''}`} onClick={() => setSelectedPreset('__custom__')}>自定义</button>
-                </div>
-
-                <div className="config-row">
-                  <span className="config-label">Base URL</span>
-                  <input className="input" type="text" value={modelConfig.baseUrl} onChange={(e) => setModelConfig({ ...modelConfig, baseUrl: e.target.value })} placeholder="https://api.example.com/v1" />
-                </div>
-                <div className="config-row">
-                  <span className="config-label">API Key</span>
-                  <input className="input" type="password" value={modelConfig.apiKey} onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })} placeholder="sk-..." />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-                  <div className="config-row">
-                    <span className="config-label">API 类型</span>
-                    <select className="select" value={modelConfig.api} onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })} aria-label="API 类型">
-                      {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">模型 ID</span>
-                    <input className="input" type="text" value={modelConfig.modelId} onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })} placeholder="gpt-4o" />
-                  </div>
-                </div>
-
-                <div className="config-actions" style={{ marginTop: 12 }}>
-                  <button className="btn btn-primary" onClick={saveConfig} disabled={loading}>{loading ? '保存中...' : '保存'}</button>
-                  <button className="btn btn-ghost" onClick={() => { loadConfig(); addToast?.('已加载', 'info'); }}>重新加载</button>
-                  <button className="btn btn-ghost" onClick={testConnection} disabled={testResult === 'testing'}>
-                    {testResult === 'testing' ? '测试中...' : testResult === 'ok' ? '连接正常' : '测试连接'}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {/* ── Feishu ── */}
-            {configTab === 'feishu' && (
-              <>
-                <div className="section-label">飞书机器人</div>
-                <div className="config-row">
-                  <span className="config-label">App ID</span>
-                  <input className="input" type="text" value={feishuConfig.appId} onChange={(e) => setFeishuConfig({ ...feishuConfig, appId: e.target.value })} placeholder="cli_..." />
-                </div>
-                <div className="config-row">
-                  <span className="config-label">App Secret</span>
-                  <input className="input" type="password" value={feishuConfig.appSecret} onChange={(e) => setFeishuConfig({ ...feishuConfig, appSecret: e.target.value })} placeholder="..." />
-                </div>
-                <div className="config-actions" style={{ marginTop: 12 }}>
-                  <button className="btn btn-primary" onClick={saveConfig} disabled={loading}>{loading ? '保存中...' : '保存'}</button>
-                  <button className="btn btn-ghost" onClick={() => { loadConfig(); addToast?.('已加载', 'info'); }}>重新加载</button>
-                </div>
-              </>
-            )}
-
-            {/* ── Skills ── */}
-            {configTab === 'skills' && (
-              <>
-                <div className="section-label">安装技能</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <input className="input" value={skillInstallName} onChange={(e) => setSkillInstallName(e.target.value)} placeholder="技能名称" onKeyDown={(e) => e.key === 'Enter' && handleInstallSkill()} style={{ flex: 1 }} />
-                  <button className="btn btn-primary btn-sm" onClick={() => handleInstallSkill()} disabled={skillInstalling || !skillInstallName.trim()}>{skillInstalling ? '...' : '安装'}</button>
-                </div>
-
-                <div className="divider" />
-                <div className="section-label">Skills</div>
-                <div className="config-grid">
-                  {SKILL_CATALOG.map((s) => (
-                    <button key={s.id} className="config-card" onClick={() => handleInstallSkill(s.id)} disabled={skillInstalling}>
-                      <div className="config-card-head">
-                        <span>{s.emoji}</span>
-                        <span className="config-card-name">{s.name}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="divider" />
-                <div className="section-label">Plugins</div>
-                <div className="config-grid">
-                  {PLUGIN_CATALOG.map((p) => (
-                    <button key={p.id} className={`config-card ${isPluginEnabled(p.id) ? 'selected' : ''}`} onClick={() => togglePluginAllow(p.id)}>
-                      <div className="config-card-head">
-                        <span>{p.emoji}</span>
-                        <span className="config-card-name">{p.name}</span>
-                        {isPluginEnabled(p.id) && <span className="badge badge-ok">ON</span>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="divider" />
-                <div className="section-label">plugins.allow</div>
-                <textarea className="textarea" value={skillPluginsAllowText} onChange={(e) => setSkillPluginsAllowText(e.target.value)} placeholder={'feishu\nmemory\nweb_search'} rows={4} />
-                <div className="config-actions" style={{ marginTop: 8 }}>
-                  <button className="btn btn-primary" onClick={saveConfig} disabled={loading}>{loading ? '保存中...' : '保存'}</button>
-                </div>
-              </>
-            )}
-          </div>
+      {/* ════════════ Right: Panel ════════════ */}
+      {panelOpen && (
+        <div className="oc-panel">
+          {renderPanel()}
         </div>
       )}
 
-      {/* ════════════ Ops Tab ════════════ */}
-      {mainTab === 'ops' && (
-        <div className="page-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Quick deploy */}
-          <div className="card card-compact">
-            <div className="section-label">一键安装</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
-              <div>
-                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>厂商</span>
-                <select className="select" value={deployProvider} onChange={(e) => { setDeployProvider(e.target.value); if (PROVIDER_PRESETS[e.target.value]) setDeployModelId(PROVIDER_PRESETS[e.target.value].models[0]); }} aria-label="厂商" style={{ width: '100%' }}>
-                  <option value="">选择...</option>
-                  {Object.entries(PROVIDER_PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
-                  <option value="__custom__">自定义</option>
-                </select>
-              </div>
-              <div>
-                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>模型 ID</span>
-                <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="gpt-4o" />
-              </div>
-              <div>
-                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>API Key</span>
-                <input className="input" type="password" value={deployApiKey} onChange={(e) => setDeployApiKey(e.target.value)} placeholder="sk-..." />
-              </div>
-            </div>
-            <button className="btn btn-primary" onClick={handleOneClickInstall} disabled={deployRunning || !deployProvider || !deployApiKey} style={{ width: '100%' }}>
-              {deployRunning ? '部署中...' : '开始部署'}
-            </button>
-            {deploySteps.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, fontSize: '0.6875rem' }}>
-                {['诊断', '依赖', '安装', '配置'].map((label, idx) => (
-                  <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    {idx > 0 && <span style={{ width: 12, height: 1, background: 'var(--border)', display: 'inline-block' }} />}
-                    <span className={`badge ${deploySteps[idx] === 'done' ? 'badge-ok' : deploySteps[idx] === 'running' ? 'badge-accent' : deploySteps[idx] === 'error' ? 'badge-danger' : 'badge-muted'}`}>{label}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Actions grid */}
-          <div className="section-label">操作</div>
-          <div className="config-grid">
-            {([
-              { action: 'check', label: '诊断' },
-              { action: 'prepare', label: '安装依赖' },
-              { action: 'install', label: '安装 OpenClaw' },
-              { action: 'upgrade', label: '升级' },
-              { action: 'restart-gateway', label: '重启网关' },
-            ] as const).map((op) => (
-              <button key={op.action} className={`chip ${activeOp === op.action ? 'active' : ''}`} onClick={() => runAction(op.action)} disabled={loading}>{op.label}</button>
-            ))}
-            <button className="chip" onClick={() => setConfirmAction({ action: 'uninstall', label: '卸载' })} disabled={loading} style={{ color: 'var(--danger)' }}>卸载</button>
-          </div>
-
-          {/* System info */}
-          <div className="section-label">系统</div>
-          <div className="card card-compact">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 0 }}>
-              {[
-                ['端口', '18789'],
-                ['版本', status?.version ? `OpenClaw ${status.version}` : '--'],
-                ['状态', status?.running ? '正常' : '停止'],
-                ['飞书', status?.feishuConnected ? '已连接' : '未连接'],
-              ].map(([k, v]) => (
-                <div key={k} className="config-row">
-                  <span className="config-label">{k}</span>
-                  <span className="config-value mono" style={{ fontSize: '0.75rem' }}>{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Terminal output */}
-          {(output || loading) && (
-            <div className="config-terminal" style={{ maxHeight: 240 }}>
-              <pre style={{ margin: 0 }}>{output}{loading && '|'}</pre>
-              <div ref={outputEndRef} />
-            </div>
-          )}
+      {/* ════════════ Mobile drawer overlay ════════════ */}
+      {mobilePanel && <div className="oc-drawer-overlay" onClick={() => setMobilePanel(false)} />}
+      {mobilePanel && (
+        <div className="oc-panel" style={{ position: 'fixed', inset: 0, top: 'auto', height: '70vh', zIndex: 'var(--z-modal)' as any, borderRadius: '20px 20px 0 0', boxShadow: 'var(--shadow-xl)' }}>
+          {renderPanel()}
         </div>
       )}
 

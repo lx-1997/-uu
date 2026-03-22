@@ -50,6 +50,11 @@ export interface ConfigData {
   feishu?: {
     appId: string;
     appSecret: string;
+    connectionMode?: 'websocket' | 'webhook';
+    domain?: 'feishu' | 'lark';
+    dmPolicy?: 'pairing' | 'allowlist' | 'open' | 'disabled';
+    verificationToken?: string;
+    encryptKey?: string;
   };
   runtimeModel?: {
     provider: string;
@@ -74,34 +79,36 @@ const CLAWHUB_AUTO_LOGIN_CMD = [
   'echo "[OpenClaw] 正在自动登录 ClawHub..."',
   `clawhub login --token ${CLAWHUB_TOKEN} 2>&1 || echo "[OpenClaw] ClawHub 自动登录失败"`
 ].join(' && ');
+const BOARD_ENV_EXPORT = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH"';
+const RESTART_GATEWAY_FALLBACK = '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true)';
+const RUN_DOCTOR = '(openclaw doctor --yes 2>&1 || openclaw doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查")';
+const RUN_HEALTH = '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || true)';
 
 const NPM_INSTALL_CMD = [
-  'echo "[OpenClaw] 配置 npm 前缀..."',
-  'export NPM_CONFIG_PREFIX="$HOME/.npm-global"',
-  'export PATH="$HOME/.npm-global/bin:$PATH"',
-  'echo "[OpenClaw] 清理缓存和残留..."',
-  'rm -rf "$HOME/.npm-global/lib/node_modules/openclaw" 2>/dev/null',
-  'npm cache clean --force 2>/dev/null',
-  'echo "[OpenClaw] 开始安装（ARM 设备约需 5-15 分钟，请勿关闭）..."',
-  'for i in 1 2 3; do if CI=1 npm install -g openclaw@2026.3.8 --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@2026.3.8 --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 安装失败，重试 $i/3..."; sleep 10; done',
+  BOARD_ENV_EXPORT,
+  'echo "[OpenClaw] 开始安装（官方推荐流程）..."',
+  // 优先官方安装脚本，失败回退 npm latest
+  '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 安装失败，重试 $i/3..."; sleep 10; done))',
   CLAWHUB_AUTO_LOGIN_CMD,
-  'echo "[OpenClaw] 安装 Google Gemini CLI..."',
-  '( (timeout 300 CI=1 npm install -g @google/gemini-cli@latest --loglevel info --prefer-offline=false --fetch-timeout=60000 --fetch-retries=3 2>&1) || (echo "[OpenClaw] 官方源失败，尝试国内镜像..." && timeout 300 CI=1 npm install -g @google/gemini-cli@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=60000 --fetch-retries=3 2>&1) ) || echo "[OpenClaw] Gemini CLI 安装跳过或失败"',
   NPM_NVM_CLEANUP,
-  'echo "[OpenClaw] 安装进程结束"'
+  RUN_DOCTOR,
+  RESTART_GATEWAY_FALLBACK,
+  RUN_HEALTH,
+  'echo "[OpenClaw] 安装流程完成"'
 ].join(' && ');
 
-const GATEWAY_RESTART_CMD = 'export PATH="$HOME/.npm-global/bin:$PATH" && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart) && echo "[OpenClaw] Gateway 已重启"';
+const GATEWAY_RESTART_CMD = `${BOARD_ENV_EXPORT} && ${RESTART_GATEWAY_FALLBACK} && echo "[OpenClaw] Gateway 已重启"`;
 
 const NPM_UPGRADE_CMD = [
-  'export NPM_CONFIG_PREFIX="$HOME/.npm-global"',
-  'export PATH="$HOME/.npm-global/bin:$PATH"',
-  'echo "[OpenClaw] 开始升级到最新版..."',
-  'for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 10; done',
-  'echo "[OpenClaw] 安装/更新 Google Gemini CLI..."',
-  '( (timeout 300 CI=1 npm install -g @google/gemini-cli@latest --loglevel info --prefer-offline=false --fetch-timeout=60000 --fetch-retries=3 2>&1) || (echo "[OpenClaw] 官方源失败，尝试国内镜像..." && timeout 300 CI=1 npm install -g @google/gemini-cli@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=60000 --fetch-retries=3 2>&1) ) || echo "[OpenClaw] Gemini CLI 安装跳过或失败"',
+  BOARD_ENV_EXPORT,
+  'echo "[OpenClaw] 开始升级（官方推荐流程）..."',
+  // 优先 CLI update，失败回退 npm latest
+  '(openclaw update --no-restart 2>&1 || openclaw update 2>&1 || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 10; done))',
   NPM_NVM_CLEANUP,
-  'echo "[OpenClaw] 升级完成"'
+  RUN_DOCTOR,
+  RESTART_GATEWAY_FALLBACK,
+  RUN_HEALTH,
+  'echo "[OpenClaw] 升级流程完成"'
 ].join(' && ');
 
 export class OpenClawDeploymentManager {
@@ -238,31 +245,46 @@ export class OpenClawDeploymentManager {
   }
 
   runCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const scriptPath = this.getScriptPath('openclaw_check.sh');
-    if (!fs.existsSync(scriptPath)) {
-      onOutput(`[ERROR] 脚本不存在: ${scriptPath}\n`);
-      onComplete(false);
-      return;
-    }
-    const content = fs.readFileSync(scriptPath, 'utf8');
-    const base64 = Buffer.from(content, 'utf8').toString('base64');
-    const remotePath = '/tmp/openclaw_check.sh';
-    const cmd = `echo '${base64}' | base64 -d > ${remotePath} && chmod +x ${remotePath} && bash ${remotePath}`;
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 0 });
+    const cmd = [
+      BOARD_ENV_EXPORT,
+      'echo "=== OpenClaw 诊断 ==="',
+      'echo "--- 版本 ---"',
+      'openclaw --version 2>&1 || echo "openclaw 未安装"',
+      'echo ""',
+      'echo "--- Gateway 状态 ---"',
+      'openclaw gateway status 2>&1 || echo "gateway status 不可用"',
+      'echo ""',
+      'echo "--- Health ---"',
+      'openclaw health 2>&1 || echo "health 不可用"',
+      'echo ""',
+      'echo "--- Doctor ---"',
+      'openclaw doctor 2>&1 || echo "doctor 不可用"',
+      'echo ""',
+      'echo "--- Node/NPM ---"',
+      'node --version 2>&1 || echo "node 未安装"',
+      'npm --version 2>&1 || echo "npm 未安装"',
+      'echo "=== 诊断完成 ==="',
+    ].join(' ; ');
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000 });
   }
 
   runPrepare(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const scriptPath = this.getScriptPath('openclaw_prepare.sh');
-    if (!fs.existsSync(scriptPath)) {
-      onOutput(`[ERROR] 脚本不存在: ${scriptPath}\n`);
-      onComplete(false);
-      return;
-    }
-    const content = fs.readFileSync(scriptPath, 'utf8');
-    const base64 = Buffer.from(content, 'utf8').toString('base64');
-    const remotePath = '/tmp/openclaw_prepare.sh';
-    const cmd = `echo '${base64}' | base64 -d > ${remotePath} && chmod +x ${remotePath} && echo "${device.userName}" | sudo -S bash ${remotePath}`;
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 0 });
+    const cmd = [
+      BOARD_ENV_EXPORT,
+      'echo "=== 环境准备 ==="',
+      'echo "--- 检查 Node.js ---"',
+      'node --version 2>&1 || echo "node 未安装，请先安装 Node.js 18+"',
+      'echo "--- 检查 npm ---"',
+      'npm --version 2>&1 || echo "npm 未安装"',
+      'echo "--- 创建目录 ---"',
+      'mkdir -p "$HOME/.openclaw" "$HOME/.npm-global" 2>&1 && echo "目录已就绪"',
+      'echo "--- 配置 npm ---"',
+      'npm config set prefix "$HOME/.npm-global" 2>/dev/null ; npm config set fund false 2>/dev/null ; npm config set update-notifier false 2>/dev/null ; echo "npm 配置完成"',
+      'echo "--- 检查 openclaw ---"',
+      'openclaw --version 2>&1 || echo "openclaw 尚未安装（可点击安装按钮）"',
+      'echo "=== 准备完成 ==="',
+    ].join(' ; ');
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000 });
   }
 
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -275,16 +297,14 @@ export class OpenClawDeploymentManager {
 
   runUninstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
-      'export NPM_CONFIG_PREFIX="$HOME/.npm-global"',
-      'export PATH="$HOME/.npm-global/bin:$PATH"',
+      BOARD_ENV_EXPORT,
       'echo "[OpenClaw] 开始卸载..."',
-      'npm uninstall -g openclaw 2>/dev/null || true',
-      'systemctl --user stop openclaw-gateway 2>/dev/null || true',
-      'systemctl --user disable openclaw-gateway 2>/dev/null || true',
-      'rm -rf ~/.openclaw 2>/dev/null || true',
+      // 优先官方卸载流程，失败回退手动清理。
+      '(openclaw uninstall --all --yes --non-interactive 2>&1 || (openclaw gateway stop 2>/dev/null || true) && (openclaw gateway uninstall 2>/dev/null || true) && (systemctl --user stop openclaw-gateway 2>/dev/null || true) && (systemctl --user disable openclaw-gateway 2>/dev/null || true) && rm -rf ~/.openclaw 2>/dev/null || true)',
+      '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true)',
       'echo "[OpenClaw] 卸载完成"'
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete);
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 0 });
   }
 
   getGatewayStatus(device: Device, onResult: (status: GatewayStatus) => void, onOutput?: (chunk: string) => void): void {
@@ -448,7 +468,7 @@ print(json.dumps(result, ensure_ascii=False))`;
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {
     const pyScript = `import json,os
 p=os.path.expanduser('~/.openclaw/openclaw.json')
-result={"modelGateway":{"baseUrl":"","apiKey":"","api":"anthropic-messages","modelId":"qwen3.5-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
+result={"modelGateway":{"baseUrl":"","apiKey":"","api":"anthropic-messages","modelId":"qwen3.5-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
 if os.path.exists(p):
   d=json.load(open(p))
   provider=((d.get('models') or {}).get('providers') or {}).get('custom-gateway') or {}
@@ -465,7 +485,15 @@ if os.path.exists(p):
   if isinstance(runtime_provider_cfg,dict):
     runtime_api_key=runtime_provider_cfg.get('apiKey','') or ''
   result["modelGateway"].update({"baseUrl":provider.get('baseUrl','') or '',"apiKey":provider.get('apiKey','') or '',"api":provider.get('api','anthropic-messages') or 'anthropic-messages',"modelId":model.get('id','qwen3.5-plus') or 'qwen3.5-plus',"modelName":model.get('name','Custom Model') or 'Custom Model'})
-  result["feishu"].update({"appId":feishu.get('appId','') or '',"appSecret":feishu.get('appSecret','') or ''})
+  result["feishu"].update({
+    "appId":feishu.get('appId','') or '',
+    "appSecret":feishu.get('appSecret','') or '',
+    "connectionMode":feishu.get('connectionMode','websocket') or 'websocket',
+    "domain":feishu.get('domain','feishu') or 'feishu',
+    "dmPolicy":feishu.get('dmPolicy','pairing') or 'pairing',
+    "verificationToken":feishu.get('verificationToken','') or '',
+    "encryptKey":feishu.get('encryptKey','') or ''
+  })
   result["runtimeModel"].update({"provider":runtime_provider or '',"modelId":runtime_model_id or '',"apiKey":runtime_api_key or ''})
   result["primaryModel"]=primary or ''
   plugins=((d.get('plugins') or {}).get('allow') or [])
@@ -534,12 +562,20 @@ print(json.dumps(result,ensure_ascii=False))`;
       patch.agents = { defaults: { model: { primary: 'custom-gateway/' + (config.modelGateway.modelId || 'qwen3.5-plus') } } };
     }
     if (config.feishu?.appId && config.feishu?.appSecret) {
+      const feishuPatch: Record<string, any> = {
+        appId: config.feishu.appId,
+        appSecret: config.feishu.appSecret,
+        enabled: true,
+      };
+      if (config.feishu.connectionMode) feishuPatch.connectionMode = config.feishu.connectionMode;
+      if (config.feishu.domain) feishuPatch.domain = config.feishu.domain;
+      if (config.feishu.dmPolicy) feishuPatch.dmPolicy = config.feishu.dmPolicy;
+      if (config.feishu.connectionMode === 'webhook') {
+        if (config.feishu.verificationToken) feishuPatch.verificationToken = config.feishu.verificationToken;
+        if (config.feishu.encryptKey) feishuPatch.encryptKey = config.feishu.encryptKey;
+      }
       patch.channels = {
-        feishu: {
-          appId: config.feishu.appId,
-          appSecret: config.feishu.appSecret,
-          enabled: true,
-        },
+        feishu: feishuPatch,
       };
     }
     if (Array.isArray(config.pluginsAllow)) {
@@ -602,6 +638,67 @@ print('[OpenClaw] 配置已更新')`;
       'echo "[OpenClaw] 安装完成"',
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 0 });
+  }
+
+  runLogs(
+    device: Device,
+    limit: number,
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void
+  ): void {
+    const maxLines = Number.isFinite(limit) ? Math.max(20, Math.min(1000, Math.floor(limit))) : 200;
+    const cmd = [
+      BOARD_ENV_EXPORT,
+      `(openclaw logs --limit ${maxLines} 2>&1 || journalctl --user -u openclaw-gateway --no-pager -n ${maxLines} 2>&1 || echo "[OpenClaw] 暂无日志")`,
+    ].join(' && ');
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000, pty: false });
+  }
+
+  getInstalledSkills(
+    device: Device,
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void
+  ): void {
+    const cmd = [
+      BOARD_ENV_EXPORT,
+      'echo "===SKILLS==="',
+      '(clawhub list 2>/dev/null || ls -1 /opt/openclaw/skills 2>/dev/null || echo "无已安装技能")',
+      'echo "===PLUGINS==="',
+      '(cat ~/.openclaw/openclaw.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(chr(10).join(d.get(\'plugins\',{}).get(\'allow\',[])))" 2>/dev/null || echo "")',
+    ].join(' ; ');
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 15000 });
+  }
+
+  runPairingList(
+    device: Device,
+    channel: string,
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void
+  ): void {
+    const cmd = `${BOARD_ENV_EXPORT} && (openclaw pairing list ${channel} 2>&1 || echo "[OpenClaw] pairing list 失败")`;
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 20000, pty: false });
+  }
+
+  runPairingApprove(
+    device: Device,
+    channel: string,
+    code: string,
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void
+  ): void {
+    const cmd = `${BOARD_ENV_EXPORT} && (openclaw pairing approve ${channel} ${code} 2>&1 || echo "[OpenClaw] pairing approve 失败")`;
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 20000, pty: false });
+  }
+
+  runPairingReject(
+    device: Device,
+    channel: string,
+    code: string,
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void
+  ): void {
+    const cmd = `${BOARD_ENV_EXPORT} && (openclaw pairing reject ${channel} ${code} 2>&1 || echo "[OpenClaw] 当前版本可能不支持 pairing reject")`;
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 20000, pty: false });
   }
 
   getWifiList(device: Device, onResult: (wifiNames: string[], success: boolean) => void): void {
