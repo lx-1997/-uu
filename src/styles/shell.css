@@ -160,6 +160,73 @@
   margin-top: auto;
 }
 
+/* ── Expanded rail ── */
+
+.icon-rail {
+  width: var(--rail-width);
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+.icon-rail.expanded {
+  width: 180px;
+  align-items: stretch;
+}
+
+.icon-rail.expanded .rail-logo {
+  align-self: center;
+}
+
+.icon-rail.expanded .rail-nav {
+  align-items: stretch;
+}
+
+.icon-rail.expanded .rail-btn {
+  width: auto;
+  justify-content: flex-start;
+  padding: 0 12px;
+  gap: 10px;
+}
+
+.icon-rail.expanded .rail-separator {
+  width: 100%;
+}
+
+.icon-rail.expanded .rail-footer {
+  align-items: stretch;
+}
+
+.rail-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.rail-expand-btn {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+  margin-top: 4px;
+}
+
+.rail-expand-btn:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+.app-shell:has(.icon-rail.expanded) {
+  grid-template-columns: 180px 1fr;
+}
+
 /* Device indicator */
 .rail-device-dot {
   width: 8px;

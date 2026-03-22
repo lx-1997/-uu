@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   fetchDeviceDiagnostics,
   fetchDeviceOpenClawHealth,
@@ -6,6 +6,118 @@ import {
 } from '../api';
 import { useAppState } from '../hooks/useAppState';
 import { parseMetrics } from '../utils/diagnostics';
+
+function ParticleCanvas({ accent }: { accent: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animId = 0;
+    const particles: { x: number; y: number; vx: number; vy: number; r: number; o: number }[] = [];
+    const COUNT = 25;
+    const LINK_DIST = 120;
+
+    const resize = () => {
+      canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+      canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+      ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+    };
+
+    resize();
+    for (let i = 0; i < COUNT; i++) {
+      particles.push({
+        x: Math.random() * canvas.offsetWidth,
+        y: Math.random() * canvas.offsetHeight,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        r: Math.random() * 2 + 1,
+        o: Math.random() * 0.4 + 0.1,
+      });
+    }
+
+    const draw = () => {
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      ctx.clearRect(0, 0, w, h);
+
+      const color = accent ? '255, 107, 0' : '148, 163, 184';
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > w) p.vx *= -1;
+        if (p.y < 0 || p.y > h) p.vy *= -1;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${color}, ${p.o})`;
+        ctx.fill();
+
+        for (let j = i + 1; j < particles.length; j++) {
+          const q = particles[j];
+          const dx = p.x - q.x;
+          const dy = p.y - q.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < LINK_DIST) {
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(q.x, q.y);
+            ctx.strokeStyle = `rgba(${color}, ${0.08 * (1 - dist / LINK_DIST)})`;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+      animId = requestAnimationFrame(draw);
+    };
+
+    draw();
+    window.addEventListener('resize', resize);
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', resize);
+    };
+  }, [accent]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}
+    />
+  );
+}
+
+function AnimatedNumber({ value, suffix }: { value: string; suffix?: string }) {
+  const [display, setDisplay] = useState(value);
+  const prevRef = useRef(value);
+
+  useEffect(() => {
+    if (value === '--' || value === prevRef.current) { setDisplay(value); prevRef.current = value; return; }
+    const numMatch = value.match(/^([\d.]+)/);
+    if (!numMatch) { setDisplay(value); prevRef.current = value; return; }
+    const target = parseFloat(numMatch[1]);
+    const rest = value.slice(numMatch[1].length);
+    const start = prevRef.current.match(/^([\d.]+)/) ? parseFloat(prevRef.current.match(/^([\d.]+)/)![1]) : 0;
+    const duration = 600;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const progress = Math.min((now - t0) / duration, 1);
+      const ease = 1 - Math.pow(1 - progress, 3);
+      const current = start + (target - start) * ease;
+      setDisplay(`${Number.isInteger(target) ? Math.round(current) : current.toFixed(1)}${rest}`);
+      if (progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    prevRef.current = value;
+  }, [value]);
+
+  return <>{display}{suffix || ''}</>;
+}
 
 export default function Dashboard() {
   const {
@@ -19,6 +131,9 @@ export default function Dashboard() {
 
   const [openclawHealth, setOpenclawHealth] = useState<OpenClawHealthStatus | null>(null);
   const [metrics, setMetrics] = useState({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { requestAnimationFrame(() => setMounted(true)); }, []);
 
   useEffect(() => {
     if (!currentDevice) return;
@@ -47,19 +162,21 @@ export default function Dashboard() {
       .catch(() => {});
   }, [currentDevice?.id]);
 
-  const prompt = (text: string) => {
+  const prompt = useCallback((text: string) => {
     setChatExpanded(true);
     setCmd(text);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       (document.querySelector('.dock-input') as HTMLFormElement | null)?.requestSubmit();
     }));
-  };
+  }, [setChatExpanded, setCmd]);
 
-  /* ── No device ── */
   if (!currentDevice) {
     return (
       <div className="dash">
-        <div className="dash-empty-hero">
+        <ParticleCanvas accent={false} />
+        <div className="dash-decor dash-decor-hex" />
+        <div className="dash-decor dash-decor-ring" />
+        <div className={`dash-empty-hero ${mounted ? 'dash-enter' : ''}`}>
           <div className="dash-brand">RDK Studio</div>
           <p className="dash-tagline">连接你的 RDK 开发板，开始构建</p>
           <button className="dash-action primary" onClick={() => setShowAddDevice(true)}>
@@ -73,40 +190,38 @@ export default function Dashboard() {
     );
   }
 
-  /* ── Connected ── */
+  const stats = [
+    { key: 'mem', val: metrics.memory, label: 'MEM', warn: false },
+    { key: 'temp', val: metrics.temp, label: 'TEMP', warn: metrics.tempC >= 85 },
+    { key: 'bpu', val: metrics.bpu, label: 'BPU', warn: metrics.bpuVal >= 90 },
+    { key: 'up', val: metrics.uptime, label: 'UP', warn: false },
+  ];
+
   return (
     <div className="dash">
-      {/* Hero */}
-      <div className="dash-hero">
+      <ParticleCanvas accent={true} />
+      <div className="dash-decor dash-decor-hex" />
+      <div className="dash-decor dash-decor-ring" />
+      <div className="dash-decor dash-decor-dot" />
+
+      <div className={`dash-hero ${mounted ? 'dash-enter' : ''}`}>
         <h1 className="dash-device-name">{currentDevice.name}</h1>
         <p className="dash-tagline">{currentDevice.ip}</p>
       </div>
 
-      {/* Status */}
-      <div className="dash-status">
-        <div className="dash-stat">
-          <span className="dash-stat-val">{metrics.memory}</span>
-          <span className="dash-stat-lbl">MEM</span>
-        </div>
-        <span className="dash-stat-sep" />
-        <div className="dash-stat">
-          <span className={`dash-stat-val ${metrics.tempC >= 85 ? 'warn' : ''}`}>{metrics.temp}</span>
-          <span className="dash-stat-lbl">TEMP</span>
-        </div>
-        <span className="dash-stat-sep" />
-        <div className="dash-stat">
-          <span className={`dash-stat-val ${metrics.bpuVal >= 90 ? 'warn' : ''}`}>{metrics.bpu}</span>
-          <span className="dash-stat-lbl">BPU</span>
-        </div>
-        <span className="dash-stat-sep" />
-        <div className="dash-stat">
-          <span className="dash-stat-val">{metrics.uptime}</span>
-          <span className="dash-stat-lbl">UP</span>
-        </div>
+      <div className={`dash-status ${mounted ? 'dash-enter dash-enter-d1' : ''}`}>
+        {stats.map((s, i) => (
+          <span key={s.key}>
+            {i > 0 && <span className="dash-stat-sep" />}
+            <span className="dash-stat" style={{ animationDelay: `${200 + i * 80}ms` }}>
+              <span className={`dash-stat-val ${s.warn ? 'warn' : ''}`}><AnimatedNumber value={s.val} /></span>
+              <span className="dash-stat-lbl">{s.label}</span>
+            </span>
+          </span>
+        ))}
       </div>
 
-      {/* Actions */}
-      <div className="dash-actions">
+      <div className={`dash-actions ${mounted ? 'dash-enter dash-enter-d2' : ''}`}>
         <button className="dash-action primary" onClick={() => prompt('帮我生成一个最小可运行的 RDK 应用，并直接开始实现')}>
           <span className="dash-action-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
@@ -127,8 +242,7 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* Footer status */}
-      <div className="dash-footer">
+      <div className={`dash-footer ${mounted ? 'dash-enter dash-enter-d3' : ''}`}>
         <span className="dash-footer-item">
           <span className={`status-dot ${openclawHealth?.aiReady ? 'online' : 'warn'}`} />
           OpenClaw {openclawHealth?.aiReady ? 'Ready' : '未就绪'}

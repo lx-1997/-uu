@@ -194,6 +194,10 @@ export interface AppState {
   openclawSendMessage: ((text: string) => void) | null;
   registerOpenclawSend: (fn: ((text: string) => void) | null) => void;
 
+  // Rail
+  railExpanded: boolean;
+  setRailExpanded: (v: boolean) => void;
+
   // Task tracking
   taskHistory: Task[];
   showTaskPanel: boolean;

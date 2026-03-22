@@ -84,6 +84,10 @@ export interface UIStoreState {
   openclawSendMessage: ((text: string) => void) | null;
   registerOpenclawSend: (fn: ((text: string) => void) | null) => void;
 
+  // Rail
+  railExpanded: boolean;
+  setRailExpanded: (v: boolean) => void;
+
   // Hardware
   hardwareRange: 'realtime' | '10m' | '1h';
   setHardwareRange: (v: 'realtime' | '10m' | '1h') => void;
@@ -292,6 +296,9 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     openclawSendRef.current = fn;
   }, []);
 
+  // ── Rail ──
+  const [railExpanded, setRailExpanded] = useState(false);
+
   // ── Hardware ──
   const [hardwareRange, setHardwareRange] = useState<'realtime' | '10m' | '1h'>('realtime');
 
@@ -336,6 +343,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     openclawMode, setOpenclawMode, openclawThreshold,
     openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
     openclawSendMessage: openclawSendRef.current, registerOpenclawSend,
+    railExpanded, setRailExpanded,
     hardwareRange, setHardwareRange,
     examplePreset, setExamplePreset,
     rosTopic, setRosTopic, rosRecording, setRosRecording,

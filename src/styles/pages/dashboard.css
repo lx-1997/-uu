@@ -243,3 +243,85 @@
 .dash-empty-hero .dash-brand {
   font-size: 2.5rem;
 }
+
+/* ── Entrance animations ── */
+.dash-enter {
+  animation: dashFadeUp 0.6s var(--ease-out) both;
+}
+
+.dash-enter-d1 { animation-delay: 200ms; }
+.dash-enter-d2 { animation-delay: 400ms; }
+.dash-enter-d3 { animation-delay: 600ms; }
+
+@keyframes dashFadeUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Floating decorations ── */
+.dash-decor {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dash-decor-hex {
+  width: 120px;
+  height: 120px;
+  top: 15%;
+  right: 12%;
+  border: 1px solid var(--border);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  opacity: 0.3;
+  animation: floatRotate 20s linear infinite;
+}
+
+.dash-decor-ring {
+  width: 60px;
+  height: 60px;
+  bottom: 20%;
+  left: 10%;
+  border: 1.5px solid var(--accent-border);
+  border-radius: 50%;
+  opacity: 0.25;
+  animation: floatY 8s var(--ease-in-out) infinite;
+}
+
+.dash-decor-dot {
+  width: 8px;
+  height: 8px;
+  top: 25%;
+  left: 18%;
+  background: var(--accent);
+  border-radius: 50%;
+  opacity: 0.2;
+  animation: floatY 6s var(--ease-in-out) infinite reverse;
+}
+
+@keyframes floatRotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-12px); }
+}
+
+[data-theme="cyber"] .dash-decor-hex {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 8px var(--accent-glow);
+  opacity: 0.2;
+}
+
+[data-theme="cyber"] .dash-decor-ring {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+  opacity: 0.15;
+}
+
+[data-theme="cyber"] .dash-decor-dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  opacity: 0.3;
+}
