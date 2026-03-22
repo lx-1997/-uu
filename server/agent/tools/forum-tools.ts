@@ -120,6 +120,27 @@ function getResponseSetCookies(res: Response) {
   return single ? [single] : [];
 }
 
+/** 将 Set-Cookie 合并进现有 Cookie 请求头（Discourse 在 csrf.json 等请求里常会刷新 _forum_session）。 */
+function mergeCookieHeader(existing: string, setCookies: string[]): string {
+  const bag = new Map<string, string>();
+  for (const part of String(existing || "").split(";")) {
+    const p = part.trim();
+    if (!p) continue;
+    const eq = p.indexOf("=");
+    if (eq <= 0) continue;
+    const name = p.slice(0, eq).trim();
+    const value = p.slice(eq + 1).trim();
+    if (name) bag.set(name, value);
+  }
+  for (const raw of setCookies) {
+    const parsed = parseSetCookieHeader(raw);
+    if (parsed) bag.set(parsed.name, parsed.value);
+  }
+  return Array.from(bag.entries())
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
+}
+
 async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
   const creds = buildCredentialAuth();
   if (!creds) {
@@ -210,16 +231,13 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
     return { ok: false as const, reason: "forum_sso_bridge_failed" };
   }
 
-  // Prefer _t (long-lived user token) over _forum_session
+  // 带上 SSO 回跳后论坛返回的全部 Cookie（仅 _t/_forum_session 可能缺字段，导致 CSRF/写操作失败）
   const userToken = forumCookies.get(FORUM_TOKEN_COOKIE_NAME);
   const session = forumCookies.get(FORUM_SESSION_COOKIE_NAME);
-  const cookieParts: string[] = [];
-  if (userToken) cookieParts.push(`${FORUM_TOKEN_COOKIE_NAME}=${userToken}`);
-  if (session) cookieParts.push(`${FORUM_SESSION_COOKIE_NAME}=${session}`);
-  if (cookieParts.length === 0) {
+  if (!userToken && !session) {
     return { ok: false as const, reason: "forum_session_not_obtained" };
   }
-  const cookie = cookieParts.join("; ");
+  const cookie = toCookieHeader(forumCookies);
   forumSessionCookieCache = { value: cookie, fetchedAt: Date.now() };
   return { ok: true as const, cookie, source: "sso_credential" as const };
 }
@@ -442,7 +460,7 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   return {
     name: "forum_drobotics_create_post",
-    description: "在地瓜机器人论坛创建新主题或回复（需配置 API Key）。",
+    description: "在地瓜机器人论坛创建新主题或回复（支持 API Key，或使用用户名密码 SSO 会话 Cookie + CSRF）。",
     inputSchema: {
       type: "object",
       properties: {
@@ -495,6 +513,7 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
       const timeout = withTimeout(timeoutMs);
       try {
         let csrfToken = "";
+        let cookieForWrite = auth.mode === "cookie" ? auth.headers.Cookie || "" : "";
         if (auth.mode === "cookie") {
           const csrfRes = await fetch(`${base}/session/csrf.json`, {
             method: "GET",
@@ -502,9 +521,12 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
             headers: {
               Accept: "application/json",
               "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+              Referer: `${base}/`,
+              Origin: base,
               ...auth.headers,
             },
           });
+          cookieForWrite = mergeCookieHeader(cookieForWrite, getResponseSetCookies(csrfRes));
           const csrfText = await csrfRes.text();
           if (!csrfRes.ok) {
             throw new Error(`获取 CSRF 失败: HTTP ${csrfRes.status} · ${csrfText.slice(0, 200)}`);
@@ -523,10 +545,14 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
           method: "POST",
           signal: timeout.signal,
           headers: {
-            ...auth.headers,
+            ...(auth.mode === "cookie"
+              ? { ...auth.headers, Cookie: cookieForWrite }
+              : auth.headers),
             "Content-Type": "application/x-www-form-urlencoded",
             Accept: "application/json",
             "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+            Referer: `${base}/`,
+            Origin: base,
             ...(auth.mode === "cookie"
               ? {
                 "x-csrf-token": csrfToken,
