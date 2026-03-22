@@ -828,7 +828,7 @@ def post(path, payload):
     headers=headers,
     method='POST',
   )
-  with urllib.request.urlopen(req, timeout=120) as resp:
+  with urllib.request.urlopen(req, timeout=540) as resp:
     return resp.getcode(), resp.read().decode('utf-8', 'ignore')
 
 errors = []
@@ -896,7 +896,7 @@ sys.exit(1)
 
     return this.execCommand(device, cmd, (chunk) => {
       onChunk(chunk);
-    }, onComplete, { pty: false, timeout: 120000 });
+    }, onComplete, { pty: false, timeout: 600000 });
   }
 
   stopInteractiveChat(sessionId: string, device: Device | null): void {

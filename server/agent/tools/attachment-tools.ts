@@ -4,6 +4,12 @@ import * as path from "node:path";
 import { getApiKey, getBaseUrl, type ProviderConfig } from "../provider-setup.js";
 import type { Tool } from "./types.js";
 
+let unpdfExtractText: ((data: any, options: any) => Promise<{ text: string; totalPages: number }>) | null = null;
+try {
+  const unpdf = await import("unpdf");
+  unpdfExtractText = unpdf.extractText as any;
+} catch { /* unpdf not available */ }
+
 export interface ChatAttachmentInput {
   id: string;
   type: "image" | "file" | "audio" | "video";
@@ -59,19 +65,32 @@ const TEXT_LIKE_EXTENSIONS = new Set([
   ".css",
 ]);
 
-const VISION_MODEL_BY_PROVIDER: Record<string, string> = {
+const VISION_FALLBACK_BY_PROVIDER: Record<string, string> = {
   openai: "gpt-4o-mini",
   "openai-compatible": "gpt-4o-mini",
   openrouter: "openai/gpt-4o-mini",
+  anthropic: "claude-sonnet-4-20250514",
+  google: "gemini-2.5-flash",
   qwen: "qwen-vl-max-latest",
+  bailian: "qwen-vl-max-latest",
+  deepseek: "deepseek-chat",
   zhipu: "glm-4v-flash",
+  moonshot: "moonshot-v1-128k",
+  siliconflow: "Qwen/Qwen2.5-VL-72B-Instruct",
+  volcengine: "doubao-1.5-vision-pro-32k",
   xai: "grok-2-vision-1212",
 };
+
+const VISION_HINT_PATTERNS = /vision|vl|4v|4o|grok-2|gemini|claude|glm-4v|doubao.*vision|qwen.*vl/i;
+
+const visionCapabilityCache = new Map<string, boolean>();
 
 const AUDIO_MODEL_BY_PROVIDER: Record<string, string> = {
   openai: "gpt-4o-mini-transcribe",
   "openai-compatible": "gpt-4o-mini-transcribe",
   groq: "whisper-large-v3-turbo",
+  qwen: "qwen3-asr-flash",
+  bailian: "qwen3-asr-flash",
 };
 
 function sanitizeSegment(value: string) {
@@ -119,13 +138,37 @@ function truncateText(value: string, max = MAX_EXTRACT_CHARS) {
   return `${value.slice(0, max)}\n\n[...已截断，共 ${value.length} 字符]`;
 }
 
-function readTextFromBuffer(buffer: Buffer, name: string, mimeType?: string) {
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  if (!unpdfExtractText) return "";
+  try {
+    const result = await unpdfExtractText(new Uint8Array(buffer), { mergePages: true });
+    const text = normalizeText(String(result.text));
+    if (!text) return "";
+    return truncateText(text, 50_000);
+  } catch {
+    return "";
+  }
+}
+
+function isPdfAttachment(name: string, mimeType?: string): boolean {
+  if (mimeType === "application/pdf") return true;
+  return path.extname(name).toLowerCase() === ".pdf";
+}
+
+function readTextFromBuffer(buffer: Buffer, name: string, mimeType?: string): string {
   if (!isTextLikeAttachment(name, mimeType) || buffer.length > MAX_TEXT_ATTACHMENT_BYTES) return "";
   try {
     return truncateText(normalizeText(buffer.toString("utf-8")));
   } catch {
     return "";
   }
+}
+
+async function readTextFromBufferAsync(buffer: Buffer, name: string, mimeType?: string): Promise<string> {
+  if (isPdfAttachment(name, mimeType)) {
+    return extractPdfText(buffer);
+  }
+  return readTextFromBuffer(buffer, name, mimeType);
 }
 
 async function readManifest(sessionId: string): Promise<SessionAttachment[]> {
@@ -152,13 +195,6 @@ function buildDataUrl(mimeType: string | undefined, contentBase64: string) {
   return `data:${mimeType || "application/octet-stream"};base64,${contentBase64}`;
 }
 
-function resolveVisionModel(config: ProviderConfig) {
-  if (config.model && /vision|vl|4v|4o|grok-2/i.test(config.model)) {
-    return config.model;
-  }
-  return VISION_MODEL_BY_PROVIDER[config.provider] || config.model || "gpt-4o-mini";
-}
-
 function flattenVisionReply(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (Array.isArray(content)) {
@@ -172,6 +208,47 @@ function flattenVisionReply(content: unknown): string {
       .trim();
   }
   return "";
+}
+
+async function tryVisionRequest(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  imageDataUrl: string,
+  question: string,
+): Promise<{ ok: boolean; text: string; error?: string }> {
+  try {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: question },
+            { type: "image_url", image_url: { url: imageDataUrl, detail: "auto" } },
+          ],
+        }],
+        temperature: 0.2,
+        max_tokens: 900,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return { ok: false, text: "", error: `HTTP ${res.status}: ${errText.slice(0, 200)}` };
+    }
+    const json = await res.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+    const reply = flattenVisionReply(json.choices?.[0]?.message?.content);
+    if (reply) {
+      visionCapabilityCache.set(`${baseUrl}::${model}`, true);
+      return { ok: true, text: reply };
+    }
+    return { ok: false, text: "", error: "empty reply" };
+  } catch (err: any) {
+    return { ok: false, text: "", error: err.message };
+  }
 }
 
 async function describeImageViaProvider(
@@ -191,49 +268,37 @@ async function describeImageViaProvider(
     throw new Error("图片过大，请压缩到 12MB 以内后重试");
   }
   const baseUrl = getBaseUrl(providerConfig).replace(/\/+$/, "");
-  const model = resolveVisionModel(providerConfig);
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: question?.trim() || "请详细描述这张图片中的关键信息、文字内容、界面元素，以及和 RDK 设备/开发相关的线索。",
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: buildDataUrl(attachment.mimeType, buffer.toString("base64")),
-                detail: "auto",
-              },
-            },
-          ],
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 900,
-    }),
-  });
-  const payload = (await res.json().catch(() => ({}))) as {
-    error?: { message?: string };
-    choices?: Array<{ message?: { content?: unknown } }>;
-  };
-  if (!res.ok) {
-    throw new Error(payload.error?.message || `视觉分析失败 (${res.status})`);
+  const imageDataUrl = buildDataUrl(attachment.mimeType, buffer.toString("base64"));
+  const prompt = question?.trim() || "请详细描述这张图片中的关键信息、文字内容、界面元素，以及和 RDK 设备/开发相关的线索。";
+
+  const currentModel = providerConfig.model || "";
+  const cacheKey = `${baseUrl}::${currentModel}`;
+  const modelsToTry: string[] = [];
+
+  if (visionCapabilityCache.get(cacheKey) !== false && currentModel) {
+    modelsToTry.push(currentModel);
   }
-  const text = flattenVisionReply(payload.choices?.[0]?.message?.content);
-  if (!text) {
-    throw new Error("视觉分析返回为空");
+  if (VISION_HINT_PATTERNS.test(currentModel)) {
+    // already added above
+  } else {
+    const fallback = VISION_FALLBACK_BY_PROVIDER[providerConfig.provider];
+    if (fallback && fallback !== currentModel) modelsToTry.push(fallback);
   }
-  return text;
+  if (modelsToTry.length === 0) modelsToTry.push(currentModel || "gpt-4o-mini");
+
+  const errors: string[] = [];
+  for (const model of modelsToTry) {
+    const result = await tryVisionRequest(baseUrl, apiKey, model, imageDataUrl, prompt);
+    if (result.ok) {
+      if (model === currentModel) console.log(`[Vision] 当前模型 ${model} 支持视觉`);
+      else console.log(`[Vision] 回退到 ${model} 成功`);
+      return result.text;
+    }
+    visionCapabilityCache.set(`${baseUrl}::${model}`, false);
+    errors.push(`${model}: ${result.error}`);
+  }
+
+  throw new Error(`图片分析失败，已尝试 ${modelsToTry.join(', ')}。错误: ${errors.join('; ')}`);
 }
 
 async function transcribeAudioViaProvider(
@@ -382,7 +447,8 @@ export async function prepareSessionAttachments(
       await fs.writeFile(storedPath, buffer);
       candidate.storedPath = storedPath;
       if (!candidate.textContent) {
-        candidate.textContent = readTextFromBuffer(buffer, name, attachment.mimeType) || undefined;
+        const extracted = await readTextFromBufferAsync(buffer, name, attachment.mimeType);
+        candidate.textContent = extracted || undefined;
       }
     }
 
@@ -412,7 +478,7 @@ export function buildAttachmentPrompt(newAttachments: SessionAttachment[]): stri
       extras.push(`文本摘录: ${truncateText(attachment.textContent, 220)}`);
     }
     if (attachment.type === "image") {
-      extras.push("如需理解图片内容，请调用 attachment_describe_image");
+      extras.push("**重要：请立即调用 attachment_describe_image 分析此图片**，不要跳过图片理解");
     }
     if (attachment.type === "audio" && !attachment.transcript) {
       extras.push("当前未附带转写，可先调用 attachment_get_audio_transcript 查看是否已有转写");
@@ -420,10 +486,18 @@ export function buildAttachmentPrompt(newAttachments: SessionAttachment[]): stri
     return `- ${parts.join(" | ")}${extras.length ? `\n  ${extras.join("\n  ")}` : ""}`;
   });
 
+  const hasImages = newAttachments.some((a: SessionAttachment) => a.type === "image");
+  const hasPdf = newAttachments.some((a: SessionAttachment) => isPdfAttachment(a.name, a.mimeType));
+  const footer = [
+    "可用工具：attachment_list / attachment_read / attachment_describe_image / attachment_get_audio_transcript。",
+    hasImages ? "注意：用户上传了图片，你必须先调用 attachment_describe_image 理解图片内容后再回复。" : "",
+    hasPdf ? "注意：PDF 内容已自动提取，可通过 attachment_read 读取完整文本。" : "",
+  ].filter(Boolean).join("\n");
+
   return [
     "以下是本条消息新上传的附件：",
     ...lines,
-    "可用工具：attachment_list / attachment_read / attachment_describe_image / attachment_get_audio_transcript。",
+    footer,
   ].join("\n");
 }
 
@@ -508,7 +582,7 @@ export function createAttachmentTools(
         throw new Error("该附件当前没有可读取的文本内容");
       }
       const buffer = await fs.readFile(attachment.storedPath);
-      const text = readTextFromBuffer(buffer, attachment.name, attachment.mimeType);
+      const text = await readTextFromBufferAsync(buffer, attachment.name, attachment.mimeType);
       if (!text) {
         throw new Error("该附件不是可直接读取的文本文件，请改用其它工具或结合上下文处理");
       }

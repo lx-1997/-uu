@@ -2534,18 +2534,30 @@ app.post('/api/agent/chat', async (request, response) => {
     });
 
     const sendEvent = (event: string, data: unknown) => {
-      response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (!response.writableEnded) {
+        response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      }
     };
 
-    for await (const event of rdkclaw.streamChat({
-      message: String(message || '').trim(),
-      deviceId,
-      sessionId,
-      userId,
-      mode,
-      attachments,
-    })) {
-      sendEvent(event.type, event.data);
+    const keepAlive = setInterval(() => {
+      if (!response.writableEnded) {
+        response.write(': keepalive\n\n');
+      }
+    }, 15000);
+
+    try {
+      for await (const event of rdkclaw.streamChat({
+        message: String(message || '').trim(),
+        deviceId,
+        sessionId,
+        userId,
+        mode,
+        attachments,
+      })) {
+        sendEvent(event.type, event.data);
+      }
+    } finally {
+      clearInterval(keepAlive);
     }
 
     response.end();

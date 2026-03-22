@@ -534,21 +534,51 @@ export class FeishuWebSocketChannel {
         sessionId,
       });
     }
-    for await (const event of this.rdkclaw.streamChat({
-      message: text || "请结合我刚通过飞书发送的附件继续处理当前请求。",
-      userId: openId,
-      deviceId: latestUiDeviceId,
-      sessionId,
-      mode: "auto",
-      attachments,
-    })) {
-      if (event.type === "text") {
-        const delta = String(event.data?.delta ?? event.data?.text ?? "");
-        if (delta) chunks.push(delta);
-      } else if (event.type === "message_end") {
-        finalText = String(event.data?.text ?? "").trim();
+
+    let toolCount = 0;
+    let lastProgressAt = Date.now();
+    const PROGRESS_INTERVAL_MS = 30_000;
+
+    try {
+      for await (const event of this.rdkclaw.streamChat({
+        message: text || "请结合我刚通过飞书发送的附件继续处理当前请求。",
+        userId: openId,
+        deviceId: latestUiDeviceId,
+        sessionId,
+        mode: "auto",
+        attachments,
+      })) {
+        if (event.type === "text") {
+          const delta = String(event.data?.delta ?? event.data?.text ?? "");
+          if (delta) chunks.push(delta);
+        } else if (event.type === "message_end") {
+          finalText = String(event.data?.text ?? "").trim();
+        } else if (event.type === "tool_start") {
+          toolCount++;
+          const now = Date.now();
+          if (now - lastProgressAt > PROGRESS_INTERVAL_MS) {
+            lastProgressAt = now;
+            const toolName = String(event.data?.name ?? "");
+            const progressMsg = `正在执行中... (${toolCount} 个步骤${toolName ? `，当前: ${toolName}` : ""})`;
+            this.sendText(chatId, progressMsg).catch(() => {});
+          }
+        }
       }
+    } catch (err: any) {
+      const errMsg = `执行出错: ${err.message || "未知错误"}`;
+      console.error(`[FeishuWS] streamChat error for ${openId.slice(0, 6)}***:`, err.message);
+      await this.sendText(chatId, errMsg).catch(() => {});
+      this.publishMirror("channel_message_error", "飞书错误", errMsg, {
+        channel: "feishu",
+        direction: "error",
+        openIdMasked,
+        chatId,
+        messageId: msgId,
+        sessionId,
+      });
+      return;
     }
+
     const streamed = chunks.join("").trim();
     const replyRaw = (finalText || streamed).trim() || "我已经执行完成，但未提取到可显示的文本结果。请让我重试并返回详细过程。";
     const reply = normalizeForFeishu(replyRaw);
@@ -561,7 +591,7 @@ export class FeishuWebSocketChannel {
       messageId: msgId,
       sessionId,
     });
-    console.log(`[FeishuWS] replied to ${openId.slice(0, 6)}***, chars=${reply.length}`);
+    console.log(`[FeishuWS] replied to ${openId.slice(0, 6)}***, chars=${reply.length}, tools=${toolCount}`);
   }
 
   private async handleP2PEntered(payload: any): Promise<void> {
