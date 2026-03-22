@@ -1,10 +1,32 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import type { SkillManifest } from '../skills/types';
 import { fetchSkills, reloadSkills, fetchSkillMd } from '../skills/loader';
-import { fetchRDKClawPolicy, saveRDKClawPolicy, type RDKClawPolicy } from '../api';
 import { useAppState } from '../hooks/useAppState';
 
+interface EcoSkill {
+  id: string;
+  source: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  platforms: string[];
+  installCmd: string;
+  runCmd: string;
+  stopCmd?: string;
+  uninstallCmd?: string;
+  boardStatusByDevice: Record<string, { installed: boolean; running: boolean }>;
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  nodehub: 'NodeHub',
+  modelzoo: 'ModelZoo',
+  tros: 'TROS',
+  openclaw_skill: 'OpenClaw',
+};
+
 const CATEGORY_LABELS: Record<string, string> = {
+  all: '全部',
   system: '系统',
   development: '开发',
   ai: 'AI',
@@ -14,554 +36,332 @@ const CATEGORY_LABELS: Record<string, string> = {
   general: '通用',
 };
 
-const CATEGORY_ICONS: Record<string, string> = {
-  system: '⚙️',
-  development: '💻',
-  ai: '🤖',
-  robotics: '🦾',
-  monitoring: '📊',
-  remote: '🖥️',
-  general: '📦',
-};
+const CREATE_PROMPTS = [
+  {
+    title: '从 NodeHub 应用创建',
+    desc: '把一个 NodeHub 应用变成板端 OpenClaw 可调用的技能',
+    prompt: '我想把一个 NodeHub 应用制作成板端 OpenClaw 技能。请先问我应用名称或 NodeHub 链接，然后帮我：1) 分析应用的安装/运行/停止命令 2) 生成高质量的 SKILL.md（包含 trigger、risk、执行策略、前置条件）3) 安装到板端 /opt/openclaw/skills/ 目录',
+  },
+  {
+    title: '从 ModelZoo 模型创建',
+    desc: '把一个 AI 模型变成板端可调用的推理技能',
+    prompt: '我想把一个 ModelZoo 模型制作成板端 OpenClaw 技能。请先问我模型名称或链接，然后帮我：1) 分析模型的部署/推理/停止命令 2) 生成高质量的 SKILL.md（包含 trigger、risk、执行策略、硬件要求）3) 安装到板端 /opt/openclaw/skills/ 目录',
+  },
+  {
+    title: '自定义技能',
+    desc: '从零开始描述一个能力，RDKClaw 帮你生成 SKILL.md',
+    prompt: '我想制作一个自定义的板端 OpenClaw 技能。请引导我完成以下步骤：1) 确认技能名称和用途 2) 确认安装依赖、运行命令、停止命令 3) 生成完整的 SKILL.md（参考 RDK Board Delegate 的格式，包含 trigger、risk、permissions、delegate_preference、执行策略、质量要求）4) 安装到板端',
+  },
+  {
+    title: '从 URL 学习并创建',
+    desc: '给 RDKClaw 一个文档/仓库链接，自动分析并生成技能',
+    prompt: '我想从一个网页/文档/GitHub 仓库链接创建板端 OpenClaw 技能。我会给你链接，请你：1) 抓取并分析页面内容 2) 提取安装步骤、运行方式、依赖要求 3) 生成高质量的 SKILL.md 4) 安装到板端。请问链接是什么？',
+  },
+];
 
 export default function SkillBrowser() {
-  const { setActiveTab, setShowSettings, setSettingsTab } = useAppState();
-  const [skills, setSkills] = useState<SkillManifest[]>([]);
+  const { currentDevice, addToast, setCmd, setChatExpanded } = useAppState();
+
+  const [rdkSkills, setRdkSkills] = useState<SkillManifest[]>([]);
+  const [ecoSkills, setEcoSkills] = useState<EcoSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [selectedSkillName, setSelectedSkillName] = useState<string | null>(null);
+  const [filter, setFilter] = useState('all');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [skillMd, setSkillMd] = useState<string | null>(null);
-  const [filter, setFilter] = useState<string>('all');
-  const [workspaceTab, setWorkspaceTab] = useState<'catalog' | 'policy'>('catalog');
-  const [policy, setPolicy] = useState<RDKClawPolicy | null>(null);
-  const [savingPolicy, setSavingPolicy] = useState(false);
-  const [policySavedAt, setPolicySavedAt] = useState<number | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionOutput, setActionOutput] = useState('');
 
-  const load = useCallback(async () => {
+  const loadRdkSkills = useCallback(async () => {
     setLoading(true);
     const data = await fetchSkills();
-    setSkills(data);
+    setRdkSkills(data);
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => {
-    fetchRDKClawPolicy().then((res) => setPolicy(res.policy)).catch(() => null);
+  const loadEcoSkills = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ecosystem/search?q=');
+      if (!res.ok) return;
+      const data = await res.json();
+      setEcoSkills(data.skills || []);
+    } catch { /* silent */ }
   }, []);
+
+  useEffect(() => { loadRdkSkills(); loadEcoSkills(); }, [loadRdkSkills, loadEcoSkills]);
 
   const handleReload = async () => {
     setLoading(true);
     const data = await reloadSkills();
-    setSkills(data);
+    setRdkSkills(data);
+    await loadEcoSkills();
     setLoading(false);
   };
 
-  const handleSelectSkill = (skill: SkillManifest) => {
-    setSelectedSkillName(skill.name);
-    setSkillMd(null);
+  type UnifiedSkill = {
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    source: 'builtin' | 'eco';
+    ecoSource?: string;
+    isEco: boolean;
+    boardInstalled: boolean;
+    boardRunning: boolean;
+    raw: SkillManifest | EcoSkill;
   };
 
-  const savePolicy = async () => {
-    if (!policy) return;
-    setSavingPolicy(true);
-    try {
-      const res = await saveRDKClawPolicy(policy);
-      setPolicy(res.policy);
-      setPolicySavedAt(Date.now());
-    } finally {
-      setSavingPolicy(false);
+  const allSkills: UnifiedSkill[] = useMemo(() => {
+    const result: UnifiedSkill[] = [];
+    for (const s of rdkSkills) {
+      if (s.name.startsWith('eco-')) continue;
+      result.push({
+        id: `rdk:${s.name}`,
+        name: s.name,
+        description: s.description,
+        category: s.metadata?.rdkstudio?.category || 'general',
+        source: 'builtin',
+        isEco: false,
+        boardInstalled: false,
+        boardRunning: false,
+        raw: s,
+      });
     }
-  };
+    for (const s of ecoSkills) {
+      const deviceId = currentDevice?.id || '';
+      const bs = s.boardStatusByDevice?.[deviceId];
+      result.push({
+        id: `eco:${s.id}`,
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        source: 'eco',
+        ecoSource: s.source,
+        isEco: true,
+        boardInstalled: !!bs?.installed,
+        boardRunning: !!bs?.running,
+        raw: s,
+      });
+    }
+    return result;
+  }, [rdkSkills, ecoSkills, currentDevice]);
 
-  const categories = useMemo(
-    () => [...new Set(skills.map((skill) => skill.metadata?.rdkstudio?.category || 'general'))],
-    [skills],
-  );
-
-  const filtered = useMemo(() => skills.filter((skill) => {
-    const cat = skill.metadata?.rdkstudio?.category || 'general';
-    if (filter !== 'all' && cat !== filter) return false;
+  const filtered = useMemo(() => allSkills.filter((s) => {
+    if (filter !== 'all') {
+      if (filter === 'nodehub' || filter === 'modelzoo' || filter === 'tros') {
+        if (s.ecoSource !== filter) return false;
+      } else if (filter === 'builtin') {
+        if (s.isEco) return false;
+      } else {
+        if (s.category !== filter) return false;
+      }
+    }
     if (search) {
       const q = search.toLowerCase();
-      return skill.name.toLowerCase().includes(q) || skill.description.toLowerCase().includes(q);
+      return s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q);
     }
     return true;
-  }), [filter, search, skills]);
+  }), [allSkills, filter, search]);
 
-  const builtinSkills = useMemo(() => filtered.filter((skill) => !skill.name.startsWith('eco-')), [filtered]);
-  const ecoSkills = useMemo(() => filtered.filter((skill) => skill.name.startsWith('eco-')), [filtered]);
-  const deviceRequiredCount = useMemo(
-    () => skills.filter((skill) => skill.metadata?.rdkstudio?.requires?.device).length,
-    [skills],
-  );
-  const categorySummary = useMemo(
-    () =>
-      categories.map((cat) => ({
-        key: cat,
-        label: CATEGORY_LABELS[cat] || cat,
-        icon: CATEGORY_ICONS[cat] || '📦',
-        count: skills.filter((skill) => (skill.metadata?.rdkstudio?.category || 'general') === cat).length,
-      })),
-    [categories, skills],
-  );
-
-  const selectedSkill = useMemo(
-    () => filtered.find((skill) => skill.name === selectedSkillName) ?? skills.find((skill) => skill.name === selectedSkillName) ?? filtered[0] ?? skills[0] ?? null,
-    [filtered, selectedSkillName, skills],
-  );
+  const selected = useMemo(() => {
+    if (!selectedId) return filtered[0] || null;
+    return allSkills.find((s) => s.id === selectedId) || filtered[0] || null;
+  }, [allSkills, filtered, selectedId]);
 
   useEffect(() => {
-    if (selectedSkill && selectedSkill.name !== selectedSkillName) {
-      setSelectedSkillName(selectedSkill.name);
-    }
-  }, [selectedSkill, selectedSkillName]);
-
-  useEffect(() => {
-    if (!selectedSkill) {
+    if (!selected) { setSkillMd(null); return; }
+    if (!selected.isEco) {
+      fetchSkillMd(selected.name).then(setSkillMd).catch(() => setSkillMd(null));
+    } else {
       setSkillMd(null);
-      return;
     }
-    fetchSkillMd(selectedSkill.name).then((md) => setSkillMd(md)).catch(() => setSkillMd(null));
-  }, [selectedSkill]);
+  }, [selected]);
 
-  const selectedCategory = selectedSkill?.metadata?.rdkstudio?.category || 'general';
-  const selectedCategoryLabel = CATEGORY_LABELS[selectedCategory] || selectedCategory;
-  const selectedCategoryIcon = CATEGORY_ICONS[selectedCategory] || '📦';
-  const selectedRequires = selectedSkill?.metadata?.rdkstudio?.requires;
-  const selectedServices = selectedRequires?.services || [];
-  const summaryCards = [
-    { label: '全部技能', value: String(skills.length), hint: '内置 + 生态能力总数' },
-    { label: '设备相关', value: String(deviceRequiredCount), hint: '执行前需要设备在线' },
-    { label: '生态技能', value: String(skills.filter((skill) => skill.name.startsWith('eco-')).length), hint: '来自生态目录的扩展能力' },
-  ];
-
-  const saveInfoText = policySavedAt
-    ? `上次保存：${new Date(policySavedAt).toLocaleTimeString()}`
-    : '尚未保存本次修改';
-
-  const openFeishuSettings = () => {
-    setSettingsTab('feishu');
-    setShowSettings(true);
+  const runEcoAction = async (action: string, skillId: string) => {
+    if (!currentDevice) { addToast?.('请先连接设备', 'warning'); return; }
+    setActionLoading(action);
+    setActionOutput('');
+    try {
+      const res = await fetch(`/api/ecosystem/skills/${encodeURIComponent(skillId)}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: currentDevice.id }),
+      });
+      const data = await res.json();
+      setActionOutput(data.output || data.message || JSON.stringify(data, null, 2));
+      if (data.ok || data.message) addToast?.(`${action} 成功`, 'success');
+      else addToast?.(`${action} 可能失败`, 'warning');
+      setTimeout(loadEcoSkills, 2000);
+    } catch (err: any) {
+      setActionOutput(`错误: ${err.message}`);
+      addToast?.(err.message, 'error');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
-  const openAiSettings = () => {
-    setSettingsTab('ai');
-    setShowSettings(true);
+  const startCreateDialog = (prompt: string) => {
+    setCmd(prompt);
+    setChatExpanded(true);
   };
 
-  const policyOverview = policy ? [
-    { title: '审批策略', value: policy.approval.mode, desc: `风险阈值 ${policy.approval.riskThreshold}` },
-    { title: '委派策略', value: policy.delegation.strategy, desc: '决定优先本地还是板端能力' },
-    { title: '联网能力', value: policy.network.enabled ? '已启用' : '未启用', desc: `抓取上限 ${policy.network.maxFetchChars} chars` },
-    { title: '默认渠道', value: policy.scheduler.defaultChannel, desc: '定时任务与推送默认落点' },
-  ] : [];
-
-  const channelCards = [
-    {
-      title: 'Studio Chat',
-      desc: '本地主会话，适合需要确认、文件与设备上下文的任务。',
-      action: '回到工作台',
-      onClick: () => setActiveTab('dashboard'),
-    },
-    {
-      title: '飞书通道',
-      desc: '适合外出时远程续接 Studio 会话，审批和镜像状态统一回流。',
-      action: '打开飞书设置',
-      onClick: openFeishuSettings,
-    },
-    {
-      title: 'OpenClaw Runtime',
-      desc: '统一查看模型、渠道、技能启用状态以及网关运行情况。',
-      action: '打开 OpenClaw',
-      onClick: () => setActiveTab('openclaw'),
-    },
-  ];
+  const builtinCount = allSkills.filter((s) => !s.isEco).length;
+  const ecoCount = allSkills.filter((s) => s.isEco).length;
 
   return (
-    <div className="config-page">
-      <div className="grid-3">
-        {summaryCards.map((card) => (
-          <div key={card.label} className="card card-compact">
-            <span className="config-label">{card.label}</span>
-            <strong className="config-value">{card.value}</strong>
+    <div className="config-page" style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: 0, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <strong style={{ fontSize: '1rem' }}>RDKClaw 技能</strong>
+          <span className="badge badge-muted">{builtinCount} 内置</span>
+          <span className="badge badge-muted">{ecoCount} 生态</span>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={handleReload} disabled={loading}>{loading ? '...' : '刷新'}</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {/* Left: Skill List */}
+        <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索技能..." style={{ fontSize: '0.8125rem' }} />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+              {['all', 'builtin', 'nodehub', 'modelzoo', 'system', 'ai', 'development'].map((f) => (
+                <button key={f} className={`chip ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)} style={{ fontSize: '0.5625rem', padding: '2px 5px' }}>
+                  {f === 'all' ? '全部' : f === 'builtin' ? '内置' : CATEGORY_LABELS[f] || SOURCE_LABELS[f] || f}
+                </button>
+              ))}
+            </div>
           </div>
-        ))}
-      </div>
-
-      <div className="config-section">
-        <div className="config-tabs">
-          <button
-            type="button"
-            className={`config-tab ${workspaceTab === 'catalog' ? 'active' : ''}`}
-            onClick={() => setWorkspaceTab('catalog')}
-          >
-            技能目录
-          </button>
-          <button
-            type="button"
-            className={`config-tab ${workspaceTab === 'policy' ? 'active' : ''}`}
-            onClick={() => setWorkspaceTab('policy')}
-          >
-            策略中心
-          </button>
-        </div>
-
-        <div className="config-actions">
-          <input
-            className="input"
-            type="text"
-            placeholder="搜索技能..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <select
-            className="input"
-            value={filter}
-            title="按分类筛选"
-            onChange={(e) => setFilter(e.target.value)}
-          >
-            <option value="all">全部分类</option>
-            {categories.map((cat) => (
-              <option key={cat} value={cat}>
-                {CATEGORY_ICONS[cat] || '📦'} {CATEGORY_LABELS[cat] || cat}
-              </option>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {filtered.length === 0 && (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>无匹配技能</div>
+            )}
+            {filtered.map((s) => (
+              <button
+                key={s.id}
+                className={`config-sidebar-item ${selected?.id === s.id ? 'active' : ''}`}
+                onClick={() => setSelectedId(s.id)}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '8px 12px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%' }}>
+                  <strong style={{ fontSize: '0.75rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</strong>
+                  {s.isEco && s.ecoSource && <span className="badge badge-muted" style={{ fontSize: '0.5rem' }}>{SOURCE_LABELS[s.ecoSource] || s.ecoSource}</span>}
+                  {!s.isEco && <span className="badge badge-muted" style={{ fontSize: '0.5rem' }}>内置</span>}
+                  {s.boardInstalled && <span className="badge badge-ok" style={{ fontSize: '0.5rem' }}>板端</span>}
+                </div>
+                <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>{s.description}</span>
+              </button>
             ))}
-          </select>
-          <button className="btn btn-ghost btn-sm" onClick={handleReload} disabled={loading}>
-            {loading ? '加载中...' : '刷新'}
-          </button>
-          {workspaceTab === 'policy' && (
-            <button className="btn btn-primary btn-sm" onClick={savePolicy} disabled={savingPolicy || !policy}>
-              {savingPolicy ? '保存中...' : '保存策略'}
-            </button>
-          )}
+          </div>
         </div>
-      </div>
 
-      {workspaceTab === 'catalog' ? (
-        <div className="config-split">
-          <aside className="config-sidebar">
-            <div className="config-row">
-              <span className="config-label">当前结果</span>
-              <strong className="config-value">{filtered.length}</strong>
+        {/* Right: Detail + Create */}
+        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Create Skill Section */}
+            <div style={{ background: 'var(--accent-subtle)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--accent-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <strong style={{ fontSize: '0.875rem' }}>通过对话制作技能</strong>
+                <span className="badge badge-accent">AI 驱动</span>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
+                告诉 RDKClaw 你想要什么能力，它会分析需求、生成高质量的 SKILL.md（包含触发词、风险等级、执行策略、前置条件），并安装到板端。
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {CREATE_PROMPTS.map((p) => (
+                  <button
+                    key={p.title}
+                    className="config-card"
+                    onClick={() => startCreateDialog(p.prompt)}
+                    style={{ textAlign: 'left', padding: '10px 12px' }}
+                  >
+                    <strong style={{ fontSize: '0.75rem', display: 'block', marginBottom: 4 }}>{p.title}</strong>
+                    <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>{p.desc}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <section className="config-section">
-              <h3 className="config-section-title">分类</h3>
-              <div className="config-actions">
-                <button
-                  type="button"
-                  className={`chip ${filter === 'all' ? 'active' : ''}`}
-                  onClick={() => setFilter('all')}
-                >
-                  全部
-                </button>
-                {categorySummary.map((category) => (
-                  <button
-                    key={category.key}
-                    type="button"
-                    className={`chip ${filter === category.key ? 'active' : ''}`}
-                    onClick={() => setFilter(category.key)}
-                  >
-                    <span>{category.icon}</span>
-                    <span>{category.label}</span>
-                    <strong>{category.count}</strong>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            {builtinSkills.length > 0 && (
-              <section className="config-section">
-                <h3 className="config-section-title">内置 · {builtinSkills.length}</h3>
-                {builtinSkills.map((skill) => (
-                  <SkillNavItem
-                    key={skill.name}
-                    skill={skill}
-                    selected={selectedSkill?.name === skill.name}
-                    onClick={() => handleSelectSkill(skill)}
-                  />
-                ))}
-              </section>
-            )}
-
-            {ecoSkills.length > 0 && (
-              <section className="config-section">
-                <h3 className="config-section-title">生态 · {ecoSkills.length}</h3>
-                {ecoSkills.map((skill) => (
-                  <SkillNavItem
-                    key={skill.name}
-                    skill={skill}
-                    selected={selectedSkill?.name === skill.name}
-                    onClick={() => handleSelectSkill(skill)}
-                  />
-                ))}
-              </section>
-            )}
-
-            {filtered.length === 0 && !loading && <div className="badge badge-muted">无匹配技能</div>}
-          </aside>
-
-          <main className="config-detail">
-            {!selectedSkill && (
-              <div className="config-section">
-                <span className="config-label">选择技能查看详情</span>
-              </div>
-            )}
-
-            {selectedSkill && (
+            {/* Selected Skill Detail */}
+            {selected && (
               <>
-                <section className="config-card">
-                  <div className="config-card-head">
-                    <div>
-                      <h3>{selectedSkill.name}</h3>
-                      <span className="config-label">{selectedSkill.description}</span>
-                    </div>
-                    <div className="config-actions">
-                      <span className="badge badge-muted">{selectedSkill.version}</span>
-                      <span className="badge badge-muted">{selectedCategoryIcon} {selectedCategoryLabel}</span>
-                      <span className="badge badge-accent">APIs {selectedSkill.apis.length}</span>
-                      {selectedSkill.metadata?.rdkstudio?.tab && <span className="badge badge-ok">入口 {selectedSkill.metadata.rdkstudio.tab}</span>}
-                      {selectedRequires?.device && <span className="badge badge-warn">需要设备在线</span>}
-                    </div>
+                <div className="divider" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: '0.9375rem' }}>{selected.name}</h3>
+                  {selected.isEco && selected.ecoSource && <span className="badge badge-accent">{SOURCE_LABELS[selected.ecoSource] || selected.ecoSource}</span>}
+                  <span className="badge badge-muted">{CATEGORY_LABELS[selected.category] || selected.category}</span>
+                  {selected.boardInstalled && <span className="badge badge-ok">板端已安装</span>}
+                  {selected.boardRunning && <span className="badge badge-accent">运行中</span>}
+                </div>
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: 0 }}>{selected.description}</p>
+
+                {/* Eco skill actions */}
+                {selected.isEco && currentDevice && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => runEcoAction('provision', (selected.raw as EcoSkill).id)} disabled={!!actionLoading}>
+                      {actionLoading === 'provision' ? '...' : '注册为 OpenClaw Skill'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => runEcoAction('install', (selected.raw as EcoSkill).id)} disabled={!!actionLoading}>
+                      {actionLoading === 'install' ? '...' : '安装'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => runEcoAction('run', (selected.raw as EcoSkill).id)} disabled={!!actionLoading}>
+                      {actionLoading === 'run' ? '...' : '运行'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => runEcoAction('stop', (selected.raw as EcoSkill).id)} disabled={!!actionLoading}>
+                      {actionLoading === 'stop' ? '...' : '停止'}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => runEcoAction('deprovision', (selected.raw as EcoSkill).id)} disabled={!!actionLoading} style={{ color: 'var(--danger)' }}>
+                      {actionLoading === 'deprovision' ? '...' : '移除'}
+                    </button>
                   </div>
-                </section>
+                )}
 
-                <section className="config-grid">
-                  <div className="config-card">
-                    <h3 className="config-section-title">能力画像</h3>
-                    <div>
-                      <div className="config-row">
-                        <span className="config-label">文件路径</span>
-                        <strong className="config-value">{selectedSkill.filePath || '未声明'}</strong>
-                      </div>
-                      <div className="config-row">
-                        <span className="config-label">默认入口</span>
-                        <strong className="config-value">{selectedSkill.metadata?.rdkstudio?.tab || '无'}</strong>
-                      </div>
-                      <div className="config-row">
-                        <span className="config-label">设备依赖</span>
-                        <strong className="config-value">{selectedRequires?.device ? '需要设备' : '无'}</strong>
-                      </div>
-                      <div className="config-row">
-                        <span className="config-label">服务依赖</span>
-                        <strong className="config-value">{selectedServices.length > 0 ? selectedServices.join(' / ') : '无'}</strong>
-                      </div>
-                    </div>
+                {/* Eco skill commands */}
+                {selected.isEco && (
+                  <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', display: 'flex', flexDirection: 'column', gap: 2, background: 'var(--bg-secondary)', padding: '8px 10px', borderRadius: 'var(--radius-xs)' }}>
+                    {(selected.raw as EcoSkill).installCmd && <div><span style={{ color: 'var(--text-muted)' }}>install:</span> {(selected.raw as EcoSkill).installCmd}</div>}
+                    <div><span style={{ color: 'var(--text-muted)' }}>run:</span> {(selected.raw as EcoSkill).runCmd}</div>
+                    {(selected.raw as EcoSkill).stopCmd && <div><span style={{ color: 'var(--text-muted)' }}>stop:</span> {(selected.raw as EcoSkill).stopCmd}</div>}
+                  </div>
+                )}
 
-                    {selectedSkill.clientActions.length > 0 && (
-                      <>
-                        <h4 className="config-section-title">客户端动作</h4>
-                        <div className="config-actions">
-                          {selectedSkill.clientActions.map((action, index) => (
-                            <code className="chip" key={`${action}-${index}`}>{action}</code>
-                          ))}
+                {/* Builtin skill APIs */}
+                {!selected.isEco && (selected.raw as SkillManifest).apis.length > 0 && (
+                  <>
+                    <div className="section-label">API</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {(selected.raw as SkillManifest).apis.map((api) => (
+                        <div key={api.name} style={{ display: 'flex', gap: 6, fontSize: '0.6875rem', fontFamily: 'var(--font-mono)' }}>
+                          <span className="badge badge-muted" style={{ fontSize: '0.5625rem' }}>{api.method}</span>
+                          <span style={{ color: 'var(--text-secondary)' }}>{api.path}</span>
                         </div>
-                      </>
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  </>
+                )}
 
-                  <div className="config-card">
-                    <h3 className="config-section-title">API 列表</h3>
-                    {selectedSkill.apis.length === 0 ? (
-                      <span className="config-label">暂无 API</span>
-                    ) : (
-                      <div>
-                        {selectedSkill.apis.map((api, index) => (
-                          <div key={`${api.path}-${index}`} className="config-row">
-                            <span className={`badge badge-muted ${api.method.toLowerCase()}`}>{api.method}</span>
-                            <span className="config-value">{api.path}</span>
-                            <span className="config-label">{api.name}</span>
-                            {api.caution && <span className="badge badge-warn">⚠ {api.caution}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                {/* Action output */}
+                {actionOutput && (
+                  <div className="config-terminal" style={{ maxHeight: 180 }}>
+                    <pre style={{ margin: 0 }}>{actionOutput}</pre>
                   </div>
+                )}
 
-                  <div className="config-card">
-                    <h3 className="config-section-title">SKILL.md</h3>
-                    <pre className="config-terminal">{skillMd || '加载中...'}</pre>
-                  </div>
-                </section>
+                {/* SKILL.md content */}
+                {skillMd && (
+                  <>
+                    <div className="section-label">SKILL.md</div>
+                    <div className="config-terminal" style={{ maxHeight: 300 }}>
+                      <pre style={{ margin: 0 }}>{skillMd}</pre>
+                    </div>
+                  </>
+                )}
               </>
             )}
-          </main>
+          </div>
         </div>
-      ) : (
-        <div className="config-section">
-          {policy && (
-            <>
-              <section className="grid-3">
-                {policyOverview.map((item) => (
-                  <div key={item.title} className="card card-compact">
-                    <span className="config-label">{item.title}</span>
-                    <strong className="config-value">{item.value}</strong>
-                  </div>
-                ))}
-              </section>
-
-              <section className="config-grid">
-                <div className="config-card">
-                  <h3 className="config-section-title">人格 / 记忆边界</h3>
-                  <label className="config-row">
-                    <input
-                      type="checkbox"
-                      checked={policy.memory.mainSessionReadsMemory}
-                      onChange={(e) => setPolicy({ ...policy, memory: { ...policy.memory, mainSessionReadsMemory: e.target.checked } })}
-                    />
-                    主会话读取 MEMORY
-                  </label>
-                  <label className="config-row">
-                    <input
-                      type="checkbox"
-                      checked={policy.memory.sharedSessionBlocksMemory}
-                      onChange={(e) => setPolicy({ ...policy, memory: { ...policy.memory, sharedSessionBlocksMemory: e.target.checked } })}
-                    />
-                    共享会话屏蔽 MEMORY
-                  </label>
-                </div>
-
-                <div className="config-card">
-                  <h3 className="config-section-title">委派 / 审批</h3>
-                  <div className="config-row">
-                    <span className="config-label">委派策略</span>
-                    <select className="config-value" title="委派策略" aria-label="委派策略" value={policy.delegation.strategy} onChange={(e) => setPolicy({ ...policy, delegation: { ...policy.delegation, strategy: e.target.value as RDKClawPolicy['delegation']['strategy'] } })}>
-                      <option value="local-first">local-first</option>
-                      <option value="board-first">board-first</option>
-                      <option value="hybrid">hybrid</option>
-                    </select>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">审批模式</span>
-                    <select className="config-value" title="审批模式" aria-label="审批模式" value={policy.approval.mode} onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } })}>
-                      <option value="always">always</option>
-                      <option value="risk-based">risk-based</option>
-                      <option value="auto">auto</option>
-                    </select>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">风险阈值</span>
-                    <select className="config-value" title="风险阈值" aria-label="风险阈值" value={policy.approval.riskThreshold} onChange={(e) => setPolicy({ ...policy, approval: { ...policy.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } })}>
-                      <option value="low">low</option>
-                      <option value="medium">medium</option>
-                      <option value="high">high</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="config-card">
-                  <h3 className="config-section-title">定时 / 推送</h3>
-                  <div className="config-row">
-                    <span className="config-label">默认推送渠道</span>
-                    <select className="config-value" title="默认推送渠道" aria-label="默认推送渠道" value={policy.scheduler.defaultChannel} onChange={(e) => setPolicy({ ...policy, scheduler: { ...policy.scheduler, defaultChannel: e.target.value as RDKClawPolicy['scheduler']['defaultChannel'] } })}>
-                      <option value="chat">chat</option>
-                      <option value="feishu">feishu</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="config-card">
-                  <h3 className="config-section-title">联网能力</h3>
-                  <label className="config-row">
-                    <input
-                      type="checkbox"
-                      checked={policy.network.enabled}
-                      onChange={(e) => setPolicy({ ...policy, network: { ...policy.network, enabled: e.target.checked } })}
-                    />
-                    启用联网工具
-                  </label>
-                  <label className="config-row">
-                    <input
-                      type="checkbox"
-                      checked={policy.network.requireApproval}
-                      onChange={(e) => setPolicy({ ...policy, network: { ...policy.network, requireApproval: e.target.checked } })}
-                    />
-                    联网走审批
-                  </label>
-                  <div className="config-row">
-                    <span className="config-label">单次抓取上限</span>
-                    <input
-                      className="config-value"
-                      type="number"
-                      title="单次抓取最大字符"
-                      aria-label="单次抓取最大字符"
-                      min={2000}
-                      max={120000}
-                      step={500}
-                      value={policy.network.maxFetchChars}
-                      onChange={(e) => {
-                        const next = Number(e.target.value || 0);
-                        setPolicy({ ...policy, network: { ...policy.network, maxFetchChars: Math.max(2000, Math.min(120000, next || 16000)) } });
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="config-card">
-                  <h3 className="config-section-title">渠道入口</h3>
-                  <div className="config-section">
-                    {channelCards.map((card) => (
-                      <button key={card.title} type="button" className="btn btn-ghost btn-sm" onClick={card.onClick}>
-                        <strong>{card.title}</strong>
-                        <span>{card.action}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="config-card">
-                  <h3 className="config-section-title">Provider / 模型</h3>
-                  <div className="config-section">
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={openAiSettings}>
-                      <strong>Studio AI 配置</strong>
-                      <span>打开 AI 设置</span>
-                    </button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActiveTab('openclaw')}>
-                      <strong>OpenClaw Runtime</strong>
-                      <span>打开 OpenClaw</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="config-actions">
-                  <button className="btn btn-primary" onClick={savePolicy} disabled={savingPolicy}>
-                    {savingPolicy ? '保存中...' : '保存策略'}
-                  </button>
-                  <span className="badge badge-muted">{saveInfoText}</span>
-                </div>
-              </section>
-            </>
-          )}
-        </div>
-      )}
+      </div>
     </div>
-  );
-}
-
-function SkillNavItem({
-  skill,
-  selected,
-  onClick,
-}: {
-  skill: SkillManifest;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const cat = skill.metadata?.rdkstudio?.category || 'general';
-  const icon = CATEGORY_ICONS[cat] || '📦';
-  const isEco = skill.name.startsWith('eco-');
-
-  return (
-    <button type="button" className={`config-sidebar-item ${selected ? 'active' : ''} ${isEco ? 'eco' : ''}`} onClick={onClick}>
-      <div className="config-card-icon">{icon}</div>
-      <div>
-        <div className="config-card-name">{skill.name}</div>
-        <div className="config-label">{skill.description.slice(0, 72)}{skill.description.length > 72 ? '...' : ''}</div>
-      </div>
-      <div>
-        <span className="badge badge-muted">{skill.apis.length} APIs</span>
-      </div>
-    </button>
   );
 }

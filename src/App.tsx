@@ -24,15 +24,14 @@ import ErrorBoundary from './components/ErrorBoundary';
 const TAB_NAMES: Record<string, string> = {
   dashboard: '工作台',
   openclaw: 'OpenClaw',
-  skills: '技能中心',
+  skills: 'RDKClaw 技能',
   terminal: '终端',
   files: '文件',
   vnc: '远程桌面',
   ide: 'IDE',
   hardware: '硬件监控',
   flasher: '烧录工具',
-  examples: 'NodeHub',
-  models: 'ModelZoo',
+  
   ros: 'ROS',
 };
 
@@ -54,9 +53,7 @@ function MainContent() {
     files: <Files />,
     openclaw: <OpenClaw />,
     hardware: <Hardware />,
-    examples: <Examples />,
     ros: <Ros />,
-    models: <Models />,
     skills: <SkillBrowser />,
   };
 
