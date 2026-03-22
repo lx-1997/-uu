@@ -96,6 +96,35 @@ async function fileToBase64(file: File) {
   return btoa(binary);
 }
 
+function StatusCollapsible({ block }: { block: Extract<ChatBlock, { type: 'status' }> }) {
+  const [open, setOpen] = useState(!block.defaultCollapsed);
+  return (
+    <div className={`msg-block status-collapsible ${open ? 'open' : ''}`}>
+      <button
+        type="button"
+        className="status-collapsible-trigger"
+        onClick={() => setOpen((p) => !p)}
+      >
+        <svg className="status-collapsible-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+        <span className="status-collapsible-summary">{block.summary || block.items[0]?.label || '详情'}</span>
+      </button>
+      {open && (
+        <div className="status-collapsible-body">
+          {block.items.map((item) => (
+            <div key={item.label} className="status-block-item">
+              <span className={`status-block-dot ${item.ok ? 'ok' : 'warn'}`} />
+              <span className="status-block-label">{item.label}</span>
+              <span className="status-block-value">{item.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BlockRenderer({
   block,
   onConfirm,
@@ -163,6 +192,13 @@ function BlockRenderer({
   }
 
   if (block.type === 'status') {
+    if (block.collapsible) {
+      return (
+        <StatusCollapsible
+          block={block}
+        />
+      );
+    }
     return (
       <div className="msg-block status-block">
         {block.items.map((item) => (
@@ -806,14 +842,17 @@ export default function AIDock() {
                       ))}
                     </div>
                   )}
-                  {msg.text && (
-                    msg.role === 'ai'
-                      ? <div className="msg-text">{renderMarkdown(msg.text)}</div>
-                      : <p className="msg-text">{msg.text}</p>
+                  {msg.role === 'user' && msg.text && (
+                    <p className="msg-text">{msg.text}</p>
                   )}
-                  {msg.blocks?.map((block, i) => (
-                    <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} />
-                  ))}
+                  {msg.role === 'ai' && (
+                    <>
+                      {msg.blocks?.map((block, i) => (
+                        <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} />
+                      ))}
+                      {msg.text && <div className="msg-text">{renderMarkdown(msg.text)}</div>}
+                    </>
+                  )}
                   {msg.action && (
                     <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
                       {msg.action.label} →

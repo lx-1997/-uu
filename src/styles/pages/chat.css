@@ -496,6 +496,92 @@
   gap: 4px;
 }
 
+.dock-bubble .status-block-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.dock-bubble .status-block-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  margin-top: 5px;
+  background: var(--text-muted);
+}
+
+.dock-bubble .status-block-dot.ok {
+  background: var(--ok);
+}
+
+.dock-bubble .status-block-dot.warn {
+  background: var(--warning, #e6a23c);
+}
+
+.dock-bubble .status-block-label {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.dock-bubble .status-block-value {
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+/* Collapsible status block (meta / thinking) */
+.dock-bubble .status-collapsible {
+  margin: 4px 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  font-size: 0.6875rem;
+  overflow: hidden;
+}
+
+.dock-bubble .status-collapsible-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  text-align: left;
+  transition: color 0.15s;
+}
+
+.dock-bubble .status-collapsible-trigger:hover {
+  color: var(--text-primary);
+}
+
+.dock-bubble .status-collapsible-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.dock-bubble .status-collapsible.open .status-collapsible-chevron {
+  transform: rotate(90deg);
+}
+
+.dock-bubble .status-collapsible-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-bubble .status-collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 10px 8px 22px;
+}
+
 .dock-bubble .status-item {
   display: flex;
   justify-content: space-between;

@@ -417,6 +417,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   : '';
                 aiBlocks.push({
                   type: 'status',
+                  collapsible: true,
+                  defaultCollapsed: true,
+                  summary: `${executorLabel(executor)} · ${message}`,
                   items: [
                     { label: `执行主体: ${executorLabel(executor)}`, value: `${phase} · ${message}`, ok: true },
                     {
@@ -566,20 +569,34 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'turn_start': {
-                const turn = Number(event.data.turn || 0);
-                aiBlocks.push({
-                  type: 'status',
-                  items: [{ label: '思考轮次', value: `第 ${Math.max(1, turn)} 轮开始`, ok: true }],
-                });
+                const turn = Math.max(1, Number(event.data.turn || 0));
+                const existing = aiBlocks.find(
+                  (b) => b.type === 'status' && b.summary?.startsWith('思考轮次'),
+                );
+                if (existing && existing.type === 'status') {
+                  existing.items[0] = { label: '思考轮次', value: `第 ${turn} 轮`, ok: true };
+                  existing.summary = `思考轮次 · 第 ${turn} 轮`;
+                } else {
+                  aiBlocks.push({
+                    type: 'status',
+                    collapsible: true,
+                    defaultCollapsed: true,
+                    summary: `思考轮次 · 第 ${turn} 轮`,
+                    items: [{ label: '思考轮次', value: `第 ${turn} 轮`, ok: true }],
+                  });
+                }
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
               case 'turn_end': {
-                const turn = Number(event.data.turn || 0);
-                aiBlocks.push({
-                  type: 'status',
-                  items: [{ label: '思考轮次', value: `第 ${Math.max(1, turn)} 轮结束`, ok: true }],
-                });
+                const turn = Math.max(1, Number(event.data.turn || 0));
+                const existing = aiBlocks.find(
+                  (b) => b.type === 'status' && b.summary?.startsWith('思考轮次'),
+                );
+                if (existing && existing.type === 'status') {
+                  existing.items[0] = { label: '思考轮次', value: `共 ${turn} 轮`, ok: true };
+                  existing.summary = `思考轮次 · 共 ${turn} 轮`;
+                }
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
