@@ -210,27 +210,51 @@ function buildConnectParams(nonce, ts) {
 let onConnected = () => {};
 let onConnectFailed = (msg) => { console.error(msg); process.exit(1); };
 let onFrame = () => {};
+let wsConnected = false;
 
-const connectId = 'connect-' + Math.random().toString(16).slice(2);
-const ws = new WebSocket('ws://127.0.0.1:18789');
+const WS_URL = 'ws://127.0.0.1:18789';
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000;
+let wsRetries = 0;
+let ws;
 
-ws.onmessage = (ev) => {
-  let frame;
-  try { frame = JSON.parse(typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString('utf8')); } catch { return; }
-  if (!frame) return;
-  if (frame.type === 'event' && frame.event === 'connect.challenge') {
-    const nonce = (frame.payload && frame.payload.nonce) ? String(frame.payload.nonce) : '';
-    const ts = (frame.payload && frame.payload.ts) ? Number(frame.payload.ts) : Date.now();
-    ws.send(JSON.stringify({ type: 'req', id: connectId, method: 'connect', params: buildConnectParams(nonce, ts) }));
-    return;
-  }
-  if (frame.type === 'res' && frame.id === connectId) {
-    if (!frame.ok) { onConnectFailed((frame.error && frame.error.message) || 'connect failed'); return; }
-    onConnected();
-    return;
-  }
-  onFrame(frame);
-};
+let wsOnClose = null;
+
+function connectWs() {
+  const sock = new WebSocket(WS_URL);
+  const connectId = 'connect-' + Math.random().toString(16).slice(2);
+  sock.onmessage = (ev) => {
+    let frame;
+    try { frame = JSON.parse(typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString('utf8')); } catch { return; }
+    if (!frame) return;
+    if (frame.type === 'event' && frame.event === 'connect.challenge') {
+      const nonce = (frame.payload && frame.payload.nonce) ? String(frame.payload.nonce) : '';
+      const ts = (frame.payload && frame.payload.ts) ? Number(frame.payload.ts) : Date.now();
+      sock.send(JSON.stringify({ type: 'req', id: connectId, method: 'connect', params: buildConnectParams(nonce, ts) }));
+      return;
+    }
+    if (frame.type === 'res' && frame.id === connectId) {
+      if (!frame.ok) { onConnectFailed((frame.error && frame.error.message) || 'connect failed'); return; }
+      wsConnected = true;
+      onConnected();
+      return;
+    }
+    onFrame(frame);
+  };
+  sock.onerror = () => {
+    if (wsConnected) return;
+    if (wsRetries < MAX_RETRIES) {
+      wsRetries++;
+      console.error('[WS] connect failed, retry ' + wsRetries + '/' + MAX_RETRIES + '...');
+      setTimeout(() => { ws = connectWs(); }, RETRY_DELAY);
+    } else {
+      onConnectFailed('websocket connect failed after ' + MAX_RETRIES + ' retries (gateway may not be running on 127.0.0.1:18789)');
+    }
+  };
+  sock.onclose = () => { if (wsOnClose) wsOnClose(); };
+  return sock;
+}
+ws = connectWs();
 `;
 
 const NPM_INSTALL_CMD = [
@@ -885,8 +909,7 @@ onFrame = (frame) => {
   if (p.type === 'agent_error') { clearTimeout(timer); return finish(false, p.error || 'agent error'); }
 };
 
-ws.onerror = () => { clearTimeout(timer); finish(false, 'websocket error'); };
-ws.onclose = () => { if (!done) { clearTimeout(timer); finish(true, text || '(connection closed)'); } };
+wsOnClose = () => { if (!done) { clearTimeout(timer); finish(true, text || '(connection closed)'); } };
 `;
     const jsB64 = Buffer.from(jsScript, 'utf8').toString('base64');
     const cmd = [
@@ -1050,14 +1073,15 @@ const finish = (ok, reason) => {
   if (ok) { process.exit(0); }
   else { console.error('__OPENCLAW_WS_FAILED__'); console.error(String(reason || 'unknown error')); process.exit(1); }
 };
+const IDLE_TIMEOUT = 300000;
 const timer = setInterval(() => {
   if (done) return;
-  if (Date.now() - lastActivity > 120000) {
+  if (Date.now() - lastActivity > IDLE_TIMEOUT) {
     clearInterval(timer);
     if (collected.trim()) finish(true);
-    else finish(false, 'timeout waiting chat response');
+    else finish(false, 'timeout waiting chat response (' + (IDLE_TIMEOUT / 1000) + 's idle)');
   }
-}, 1000);
+}, 5000);
 
 onConnected = () => {
   ws.send(JSON.stringify({ type: 'req', id: sendId, method: 'chat.send', params: { sessionKey, message, idempotencyKey: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2) } }));
@@ -1107,8 +1131,7 @@ onFrame = (frame) => {
   if (p.type === 'agent_error') return finish(false, p.error || 'agent error');
 };
 
-ws.onerror = () => finish(false, 'websocket error');
-ws.onclose = () => { if (!done) { finish(!!collected.trim(), collected || 'websocket closed before response'); } };
+wsOnClose = () => { if (!done) { finish(!!collected.trim(), collected || 'websocket closed before response'); } };
 `;
     const scriptBase64 = Buffer.from(wsScript, 'utf8').toString('base64');
     const cmd = [

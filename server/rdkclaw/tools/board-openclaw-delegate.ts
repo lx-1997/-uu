@@ -95,7 +95,12 @@ export function boardOpenClawDelegateTool(
               resolve(output.trim() || "板端 OpenClaw 执行完成（无文本输出）");
               return;
             }
-            reject(new Error(parseBoardError(output)));
+            const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
+            if (cleanOutput.length > 20) {
+              resolve(cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]");
+            } else {
+              reject(new Error(parseBoardError(output)));
+            }
           },
           sessionId,
           boardDevice,

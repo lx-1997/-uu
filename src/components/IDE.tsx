@@ -40,8 +40,7 @@ const buildLaunchCmd = (port: number) =>
   `'`;
 
 export default function IDE() {
-  const { currentDevice, addToast } = useAppState();
-  if (!currentDevice) return <DeviceGuard feature="IDE" />;
+  const { currentDevice, addToast, activeTab } = useAppState();
 
   const [showIframe, setShowIframe] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
@@ -191,8 +190,6 @@ export default function IDE() {
     return () => window.removeEventListener('keydown', handler);
   }, [showIframe]);
 
-  // 桌面端：tab 切换时同步 WebContentsView 可见性（IDE 是持久化组件，不会卸载）
-  const { activeTab } = useAppState();
   useEffect(() => {
     if (!isDesktop() || !activeUrlRef.current) return;
     const rdk = (window as any).rdkDesktop;
@@ -203,8 +200,10 @@ export default function IDE() {
     }
   }, [activeTab]);
 
+  if (!currentDevice) return <DeviceGuard feature="IDE" />;
+
   const desktop = isDesktop();
-  const editorLabel = currentDevice ? `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}` : 'VS Code Web';
+  const editorLabel = `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}`;
 
   return (
     <div className="immersive" ref={containerRef}>

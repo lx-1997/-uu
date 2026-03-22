@@ -152,12 +152,18 @@ export function boardOpenClawAssessTool(
           },
           (success) => {
             if (!success) {
-              const reason = parseBoardError(output);
-              resolve(JSON.stringify({
-                canHandle: false,
-                confidence: 0.2,
-                reason,
-              }, null, 2));
+              const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
+              if (cleanOutput.length > 10) {
+                const normalized = normalizeAssessment(cleanOutput, "板端连接中断，基于部分输出评估");
+                resolve(JSON.stringify(normalized, null, 2));
+              } else {
+                const reason = parseBoardError(output);
+                resolve(JSON.stringify({
+                  canHandle: false,
+                  confidence: 0.2,
+                  reason,
+                }, null, 2));
+              }
               return;
             }
             const normalized = normalizeAssessment(output);
