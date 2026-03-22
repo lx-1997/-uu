@@ -69,9 +69,27 @@ export default function Hardware() {
 
   const toneColor = healthTone === 'ok' ? 'var(--ok)' : healthTone === 'danger' ? 'var(--danger)' : 'var(--warn)';
 
+  if (!currentDevice) {
+    return (
+      <div className="tool-page">
+        <div className="tool-bar">
+          <div className="tool-bar-left"><span className="tool-bar-title">硬件监控</span></div>
+        </div>
+        <div className="tool-content">
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z" /></svg>
+            </div>
+            <div className="empty-state-title">请先连接设备</div>
+            <div className="empty-state-desc">连接 RDK 开发板后即可实时监控 CPU 温度、内存、BPU 负载等硬件指标。</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tool-page">
-      {/* 顶部栏 */}
       <div className="tool-bar">
         <div className="tool-bar-left">
           <span className="tool-bar-title">硬件监控</span>
@@ -94,7 +112,6 @@ export default function Hardware() {
       </div>
 
       <div className="tool-content">
-        {/* 核心指标仪表盘 */}
         <div className="config-section">
           <div className="config-section-title">核心指标</div>
           <div className="hw-gauges">

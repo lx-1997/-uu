@@ -7,9 +7,11 @@ loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43
 
 import { downloadDeviceFile, listDeviceFiles, readDeviceFile, writeDeviceFile, uploadDeviceFile, executeDeviceCommand } from '../api';
 import { useAppState } from '../hooks/useAppState';
+import DeviceGuard from './DeviceGuard';
 
 export default function Files() {
   const { currentDevice, addToast } = useAppState();
+  if (!currentDevice) return <DeviceGuard feature="文件管理" />;
   const [currentPath, setCurrentPath] = useState('/root');
   const [entries, setEntries] = useState<Array<{ name: string; isDir: boolean; size?: string; date?: string }>>([]);
   const [running, setRunning] = useState(false);
@@ -48,7 +50,7 @@ export default function Files() {
         addToast(`当前目录未找到，正在全盘深入搜索 ${fileName}...`, 'info');
         try {
           const res = await executeDeviceCommand(deviceRef.current.id, `for p in $(find /userdata /root /home/sunrise /var/log /etc -name "${fileName}" 2>/dev/null | head -n 10); do if [ -d "$p" ]; then echo "DIR:$p"; else echo "FILE:$p"; fi; done`);
-          const lines = res.output.split(/\\r?\\n/).map(l => l.trim().replace(/Command completed without output\\.?/i, '')).filter(l => l && (l.startsWith('DIR:/') || l.startsWith('FILE:/')));
+          const lines = res.output.split(/\r?\n/).map(l => l.trim().replace(/Command completed without output\.?/i, '')).filter(l => l && (l.startsWith('DIR:/') || l.startsWith('FILE:/')));
           
           if (lines.length === 1) {
             const isDir = lines[0].startsWith('DIR:');

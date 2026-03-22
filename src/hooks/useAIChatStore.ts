@@ -466,19 +466,39 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     };
                   }
                 }
-                if (result.includes('\n') || result.length > 100) {
-                  aiBlocks.push({
-                    type: 'terminal',
-                    lines: result.split('\n').slice(0, 60),
-                    label: `${toolName} · 最终结果`,
-                    collapsible: true,
-                    previewLines: 10,
-                  });
-                } else if (!state) {
-                  aiBlocks.push({
-                    type: 'status',
-                    items: [{ label: toolName, value: result || (isError ? '失败' : '完成'), ok: !isError }],
-                  });
+
+                let imageHandled = false;
+                if (!isError && result.startsWith('{')) {
+                  try {
+                    const parsed = JSON.parse(result) as Record<string, unknown>;
+                    if (parsed.__type === 'image_download' && typeof parsed.imageUrl === 'string') {
+                      aiBlocks.push({
+                        type: 'image',
+                        src: parsed.imageUrl as string,
+                        caption: `${parsed.fileName || '图片'} (${parsed.bytes || 0} bytes) — 来自设备`,
+                      });
+                      imageHandled = true;
+                    }
+                  } catch {
+                    // not JSON, fall through to normal handling
+                  }
+                }
+
+                if (!imageHandled) {
+                  if (result.includes('\n') || result.length > 100) {
+                    aiBlocks.push({
+                      type: 'terminal',
+                      lines: result.split('\n').slice(0, 60),
+                      label: `${toolName} · 最终结果`,
+                      collapsible: true,
+                      previewLines: 10,
+                    });
+                  } else if (!state) {
+                    aiBlocks.push({
+                      type: 'status',
+                      items: [{ label: toolName, value: result || (isError ? '失败' : '完成'), ok: !isError }],
+                    });
+                  }
                 }
                 updateAiMessage(aiText, aiBlocks);
                 break;

@@ -311,9 +311,199 @@
   width: 100%;
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   background: var(--bg-secondary);
   color: var(--text-muted);
   font-size: 0.8125rem;
+}
+
+/* ── Welcome visual decorations ── */
+.ros-welcome-visual,
+.vnc-welcome-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+}
+
+.ros-welcome-glow,
+.vnc-welcome-glow {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  opacity: 0.5;
+  animation: breathe 4s var(--ease-in-out) infinite;
+  pointer-events: none;
+}
+
+.ros-welcome-visual .immersive-welcome-icon,
+.vnc-welcome-visual .immersive-welcome-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-xl);
+  z-index: 1;
+}
+
+.ros-welcome-visual .immersive-welcome-icon svg,
+.vnc-welcome-visual .immersive-welcome-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+/* VNC mini screen decoration */
+.vnc-welcome-screen {
+  width: 52px;
+  height: 36px;
+  border-radius: 4px;
+  background: var(--bg-inset);
+  border: 1.5px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.vnc-screen-titlebar {
+  height: 6px;
+  background: var(--accent-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.vnc-screen-sidebar {
+  width: 10px;
+  height: 100%;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  float: left;
+}
+
+.vnc-screen-content {
+  flex: 1;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vnc-screen-block {
+  border-radius: 2px;
+  background: var(--accent-subtle);
+}
+
+.vnc-screen-block.a {
+  height: 8px;
+  width: 70%;
+}
+
+.vnc-screen-block.b {
+  height: 6px;
+  width: 50%;
+}
+
+/* ── Feature hints (shared by VNC / IDE / ROS) ── */
+.vnc-welcome-hints,
+.ros-welcome-hints,
+.immersive-feature-hints {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.vnc-hint-item,
+.ros-hint-item,
+.immersive-feature-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  transition: border-color var(--duration-fast);
+}
+
+.vnc-hint-item:hover,
+.ros-hint-item:hover,
+.immersive-feature-hint:hover {
+  border-color: var(--accent-border);
+}
+
+.vnc-hint-item kbd,
+.ros-hint-item kbd,
+.immersive-feature-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.ros-hint-dot,
+.vnc-hint-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.vnc-hint-item .status-dot,
+.ros-hint-item .status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+}
+
+/* ── Spinner for VNC/ROS phases ── */
+.vnc-phase-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ── No device text ── */
+.vnc-no-device,
+.ros-no-device {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ── ROS / VNC log lines ── */
+.vnc-log-line,
+.ros-log-line {
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
 }

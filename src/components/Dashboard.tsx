@@ -1,13 +1,15 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   fetchDeviceDiagnostics,
   fetchDeviceOpenClawHealth,
+  fetchDeviceWorkspaceHealth,
   type OpenClawHealthStatus,
 } from '../api';
 import { useAppState } from '../hooks/useAppState';
 import { parseMetrics } from '../utils/diagnostics';
+import OnboardingWizard from './OnboardingWizard';
 
-function ParticleCanvas({ accent }: { accent: boolean }) {
+function FlowingGradientBg({ accent }: { accent: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -17,62 +19,49 @@ function ParticleCanvas({ accent }: { accent: boolean }) {
     if (!ctx) return;
 
     let animId = 0;
-    const particles: { x: number; y: number; vx: number; vy: number; r: number; o: number }[] = [];
-    const COUNT = 25;
-    const LINK_DIST = 120;
+    let t = 0;
 
     const resize = () => {
-      canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
-      canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
-      ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.offsetWidth * dpr;
+      canvas.height = canvas.offsetHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
-
     resize();
-    for (let i = 0; i < COUNT; i++) {
-      particles.push({
-        x: Math.random() * canvas.offsetWidth,
-        y: Math.random() * canvas.offsetHeight,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        r: Math.random() * 2 + 1,
-        o: Math.random() * 0.4 + 0.1,
-      });
-    }
+
+    const orbs = Array.from({ length: 5 }, (_, i) => ({
+      cx: 0.2 + Math.random() * 0.6,
+      cy: 0.2 + Math.random() * 0.6,
+      rx: 0.15 + Math.random() * 0.12,
+      ry: 0.12 + Math.random() * 0.1,
+      speed: 0.0003 + Math.random() * 0.0004,
+      phase: (i / 5) * Math.PI * 2,
+    }));
 
     const draw = () => {
       const w = canvas.offsetWidth;
       const h = canvas.offsetHeight;
       ctx.clearRect(0, 0, w, h);
+      t += 1;
 
-      const color = accent ? '255, 107, 0' : '148, 163, 184';
-
-      for (let i = 0; i < particles.length; i++) {
-        const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        if (p.x < 0 || p.x > w) p.vx *= -1;
-        if (p.y < 0 || p.y > h) p.vy *= -1;
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${color}, ${p.o})`;
-        ctx.fill();
-
-        for (let j = i + 1; j < particles.length; j++) {
-          const q = particles[j];
-          const dx = p.x - q.x;
-          const dy = p.y - q.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < LINK_DIST) {
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(q.x, q.y);
-            ctx.strokeStyle = `rgba(${color}, ${0.08 * (1 - dist / LINK_DIST)})`;
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
-          }
+      for (const orb of orbs) {
+        const x = (orb.cx + Math.sin(t * orb.speed + orb.phase) * 0.15) * w;
+        const y = (orb.cy + Math.cos(t * orb.speed * 0.7 + orb.phase) * 0.12) * h;
+        const r = Math.max(w, h) * (orb.rx + Math.sin(t * orb.speed * 0.5) * 0.03);
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        if (accent) {
+          grad.addColorStop(0, 'rgba(255, 107, 0, 0.08)');
+          grad.addColorStop(0.4, 'rgba(255, 60, 0, 0.04)');
+          grad.addColorStop(1, 'transparent');
+        } else {
+          grad.addColorStop(0, 'rgba(148, 163, 184, 0.06)');
+          grad.addColorStop(0.4, 'rgba(100, 116, 139, 0.03)');
+          grad.addColorStop(1, 'transparent');
         }
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
       }
+
       animId = requestAnimationFrame(draw);
     };
 
@@ -87,9 +76,24 @@ function ParticleCanvas({ accent }: { accent: boolean }) {
   return (
     <canvas
       ref={canvasRef}
+      className="dash-flowing-bg"
       style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}
     />
   );
+}
+
+function useParallax() {
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const onMove = useCallback((e: ReactMouseEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const x = ((e.clientX - cx) / rect.width) * 12;
+    const y = -((e.clientY - cy) / rect.height) * 8;
+    setTilt({ x, y });
+  }, []);
+  const onLeave = useCallback(() => setTilt({ x: 0, y: 0 }), []);
+  return { tilt, onMove, onLeave };
 }
 
 function AnimatedNumber({ value, suffix }: { value: string; suffix?: string }) {
@@ -127,6 +131,7 @@ export default function Dashboard() {
     setActiveTab,
     setChatExpanded,
     setCmd,
+    obStep, setObStep,
   } = useAppState();
 
   const [openclawHealth, setOpenclawHealth] = useState<OpenClawHealthStatus | null>(null);
@@ -155,10 +160,16 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(t); };
   }, [currentDevice?.id]);
 
+  type WorkspaceModule = { ready: boolean; installed: boolean; running?: boolean; summary: string; recommendedAction: string };
+  const [wsHealth, setWsHealth] = useState<Record<string, WorkspaceModule> | null>(null);
+
   useEffect(() => {
-    if (!currentDevice) { setOpenclawHealth(null); return; }
+    if (!currentDevice) { setOpenclawHealth(null); setWsHealth(null); return; }
     fetchDeviceOpenClawHealth(currentDevice.id)
       .then((r) => setOpenclawHealth(r.status))
+      .catch(() => {});
+    fetchDeviceWorkspaceHealth(currentDevice.id)
+      .then((r) => setWsHealth(r.status?.modules ?? null))
       .catch(() => {});
   }, [currentDevice?.id]);
 
@@ -170,12 +181,30 @@ export default function Dashboard() {
     }));
   }, [setChatExpanded, setCmd]);
 
+  const parallax = useParallax();
+
+  const onboardingInProgress = obStep !== 'done';
+  const postConnectSteps = obStep === 'openclaw' || obStep === 'rdkclaw';
+  const connectJustCompleted = obStep === 'connect' && !!currentDevice;
+  const showOnboarding = onboardingInProgress && (!currentDevice || postConnectSteps || connectJustCompleted);
+
+  if (showOnboarding) {
+    return (
+      <div className="dash">
+        <FlowingGradientBg accent={!!currentDevice} />
+        <div className="dash-morph-halo" />
+        <div className="dash-morph-halo secondary" />
+        <OnboardingWizard />
+      </div>
+    );
+  }
+
   if (!currentDevice) {
     return (
       <div className="dash">
-        <ParticleCanvas accent={false} />
-        <div className="dash-decor dash-decor-hex" />
-        <div className="dash-decor dash-decor-ring" />
+        <FlowingGradientBg accent={false} />
+        <div className="dash-morph-halo" />
+        <div className="dash-morph-halo secondary" />
         <div className={`dash-empty-hero ${mounted ? 'dash-enter' : ''}`}>
           <div className="dash-brand">RDK Studio</div>
           <p className="dash-tagline">连接你的 RDK 开发板，开始构建</p>
@@ -184,6 +213,9 @@ export default function Dashboard() {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
             </span>
             添加设备
+          </button>
+          <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={() => setObStep('board')}>
+            重新开始引导
           </button>
         </div>
       </div>
@@ -197,12 +229,38 @@ export default function Dashboard() {
     { key: 'up', val: metrics.uptime, label: 'UP', warn: false },
   ];
 
+  const cards = [
+    {
+      key: 'dev',
+      title: '一句话开发',
+      desc: '用自然语言描述需求，AI 自动实现',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>,
+      primary: true,
+      action: () => prompt('帮我生成一个最小可运行的 RDK 应用，并直接开始实现'),
+    },
+    {
+      key: 'term',
+      title: 'Terminal',
+      desc: '远程终端，命令直达设备',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3" /><rect x="2.25" y="4.5" width="19.5" height="15" rx="2.25" /></svg>,
+      primary: false,
+      action: () => setActiveTab('terminal'),
+    },
+    {
+      key: 'oc',
+      title: 'OpenClaw',
+      desc: '板端 AI 智能体管理',
+      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5m14 0l-4.091-4.091a2.25 2.25 0 01-.659-1.591V3.104m-4.5 0a24.301 24.301 0 014.5 0m0 0v5.714M5 14.5V17a2 2 0 002 2h10a2 2 0 002-2v-2.5" /></svg>,
+      primary: false,
+      action: () => setActiveTab('openclaw'),
+    },
+  ];
+
   return (
-    <div className="dash">
-      <ParticleCanvas accent={true} />
-      <div className="dash-decor dash-decor-hex" />
-      <div className="dash-decor dash-decor-ring" />
-      <div className="dash-decor dash-decor-dot" />
+    <div className="dash" onMouseMove={parallax.onMove} onMouseLeave={parallax.onLeave}>
+      <FlowingGradientBg accent={true} />
+      <div className="dash-morph-halo" />
+      <div className="dash-morph-halo secondary" />
 
       <div className={`dash-hero ${mounted ? 'dash-enter' : ''}`}>
         <h1 className="dash-device-name">{currentDevice.name}</h1>
@@ -221,28 +279,53 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className={`dash-actions ${mounted ? 'dash-enter dash-enter-d2' : ''}`}>
-        <button className="dash-action primary" onClick={() => prompt('帮我生成一个最小可运行的 RDK 应用，并直接开始实现')}>
-          <span className="dash-action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
-          </span>
-          一句话开发
-        </button>
-        <button className="dash-action" onClick={() => setActiveTab('terminal')}>
-          <span className="dash-action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3" /><rect x="2.25" y="4.5" width="19.5" height="15" rx="2.25" /></svg>
-          </span>
-          Terminal
-        </button>
-        <button className="dash-action" onClick={() => setActiveTab('openclaw')}>
-          <span className="dash-action-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5m14 0l-4.091-4.091a2.25 2.25 0 01-.659-1.591V3.104m-4.5 0a24.301 24.301 0 014.5 0m0 0v5.714M5 14.5V17a2 2 0 002 2h10a2 2 0 002-2v-2.5" /></svg>
-          </span>
-          OpenClaw
-        </button>
+      <div className={`dash-cards ${mounted ? 'dash-enter dash-enter-d2' : ''}`}>
+        {cards.map((card, i) => (
+          <button
+            key={card.key}
+            className={`dash-3d-card ${card.primary ? 'primary' : ''}`}
+            onClick={card.action}
+            style={{
+              transform: `perspective(800px) rotateY(${parallax.tilt.x * (0.6 + i * 0.2)}deg) rotateX(${parallax.tilt.y * (0.6 + i * 0.2)}deg) translateZ(0)`,
+              animationDelay: `${400 + i * 100}ms`,
+            }}
+          >
+            <div className="dash-3d-card-glow" />
+            <div className="dash-3d-card-icon">{card.icon}</div>
+            <div className="dash-3d-card-body">
+              <span className="dash-3d-card-title">{card.title}</span>
+              <span className="dash-3d-card-desc">{card.desc}</span>
+            </div>
+          </button>
+        ))}
       </div>
 
-      <div className={`dash-footer ${mounted ? 'dash-enter dash-enter-d3' : ''}`}>
+      {wsHealth && (
+        <div className={`dash-quickstart ${mounted ? 'dash-enter dash-enter-d3' : ''}`}>
+          {([
+            { key: 'development', label: '开发环境', icon: '>', tab: 'terminal' as const },
+            { key: 'codeServer', label: 'IDE', icon: '<>', tab: 'ide' as const },
+            { key: 'vnc', label: '远程桌面', icon: '[]', tab: 'vnc' as const },
+            { key: 'ros', label: 'ROS', icon: 'R', tab: 'ros' as const },
+          ] as const).map(item => {
+            const mod = wsHealth[item.key] as WorkspaceModule | undefined;
+            if (!mod) return null;
+            return (
+              <button
+                key={item.key}
+                className={`dash-qs-item ${mod.ready ? 'ready' : ''}`}
+                onClick={() => setActiveTab(item.tab)}
+              >
+                <span className={`dash-qs-dot ${mod.ready ? 'ok' : mod.installed ? 'partial' : ''}`} />
+                <span className="dash-qs-label">{item.label}</span>
+                <span className="dash-qs-status">{mod.ready ? '就绪' : mod.installed ? '未启动' : '未安装'}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className={`dash-footer ${mounted ? 'dash-enter' : ''}`} style={{ animationDelay: '800ms' }}>
         <span className="dash-footer-item">
           <span className={`status-dot ${openclawHealth?.aiReady ? 'online' : 'warn'}`} />
           OpenClaw {openclawHealth?.aiReady ? 'Ready' : '未就绪'}

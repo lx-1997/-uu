@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { executeDeviceCommand } from '../api';
 import { isDesktop } from '../utils/env';
+import DeviceGuard from './DeviceGuard';
 
 /* ── code-server 默认端口（设备侧） ── */
 const CODE_SERVER_PORT = 9888;
@@ -40,6 +41,7 @@ const buildLaunchCmd = (port: number) =>
 
 export default function IDE() {
   const { currentDevice, addToast } = useAppState();
+  if (!currentDevice) return <DeviceGuard feature="IDE" />;
 
   const [showIframe, setShowIframe] = useState(false);
   const [iframeLoading, setIframeLoading] = useState(false);
@@ -205,7 +207,7 @@ export default function IDE() {
   const editorLabel = currentDevice ? `code-server · ${currentDevice.ip}:${CODE_SERVER_PORT}` : 'VS Code Web';
 
   return (
-    <div className="immersive" ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="immersive" ref={containerRef}>
       {/* ── 顶部工具栏 ── */}
       <div className="immersive-bar">
         <div className="immersive-bar-left">
@@ -273,7 +275,7 @@ export default function IDE() {
       </div>
 
       {/* ── 主视口 ── */}
-      <div className="immersive-viewport" style={{ flex: 1 }}>
+      <div className="immersive-viewport">
         {showIframe ? (
           <>
             {iframeLoading && (
@@ -284,19 +286,19 @@ export default function IDE() {
             )}
             {/* 桌面端由 WebContentsView 渲染，此处只显示占位或错误 */}
             {desktop ? (
-              <div className="immersive-desktop-placeholder" style={{ width: '100%', height: '100%', background: '#1e1e1e', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <div className="immersive-desktop-placeholder">
                 {loadError ? (
                   <>
-                    <span className="immersive-error" style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
+                    <span className="immersive-error">⚠️ {loadError}</span>
                     {loadError.includes('未安装') && currentDevice && (
-                      <button className="btn btn-primary" style={{ background: '#2563eb', marginTop: 8 }} disabled={installing} onClick={handleInstall}>
+                      <button className="btn btn-primary" disabled={installing} onClick={handleInstall}>
                         {installing ? '正在安装...' : '一键安装 code-server'}
                       </button>
                     )}
-                    <button className="btn btn-ghost" style={{ background: '#ff6b00', marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
+                    <button className="btn btn-ghost" onClick={() => { handleDisconnect(); }}>返回重试</button>
                   </>
                 ) : (
-                  <span style={{ color: '#555', fontSize: 13 }}>code-server 已在独立视图中加载</span>
+                  <span>code-server 已在独立视图中加载</span>
                 )}
               </div>
             ) : (
@@ -306,7 +308,6 @@ export default function IDE() {
                 title="code-server"
                 onLoad={handleIframeLoad}
                 allow="clipboard-read; clipboard-write; fullscreen"
-                style={{ width: '100%', height: '100%', border: 'none' }}
               />
             )}
           </>
@@ -330,17 +331,8 @@ export default function IDE() {
                 : '基于 vscode.dev 的在线代码编辑器，支持中文界面，可通过 Remote SSH 连接到设备'}
             </p>
 
-            {!currentDevice && (
-              <p className="immersive-welcome-desc" style={{ color: '#f59e0b' }}>请先在左侧连接一个设备</p>
-            )}
-
             {loadError?.includes('未安装') && currentDevice && (
-              <button
-                className="btn btn-primary"
-                onClick={handleInstall}
-                disabled={installing}
-                style={{ background: '#2563eb', marginBottom: 8 }}
-              >
+              <button className="btn btn-primary" onClick={handleInstall} disabled={installing}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
@@ -348,12 +340,7 @@ export default function IDE() {
               </button>
             )}
 
-            <button
-              className="btn btn-primary"
-              onClick={handleConnect}
-              disabled={!currentDevice || installing}
-              style={{ background: '#ff6b00' }}
-            >
+            <button className="btn btn-primary" onClick={handleConnect} disabled={!currentDevice || installing}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
               </svg>

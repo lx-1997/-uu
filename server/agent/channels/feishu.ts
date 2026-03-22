@@ -1,4 +1,6 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import type { ChatAttachmentInput } from "../tools/attachment-tools.js";
 import { RDKClawApp } from "../../rdkclaw/app.js";
 import { FeishuAuthStore } from "../../rdkclaw/feishu-auth-store.js";
@@ -538,6 +540,7 @@ export class FeishuWebSocketChannel {
     let toolCount = 0;
     let lastProgressAt = Date.now();
     const PROGRESS_INTERVAL_MS = 30_000;
+    const pendingImages: Array<{ localPath: string; fileName: string }> = [];
 
     try {
       for await (const event of this.rdkclaw.streamChat({
@@ -562,6 +565,21 @@ export class FeishuWebSocketChannel {
             const progressMsg = `正在执行中... (${toolCount} 个步骤${toolName ? `，当前: ${toolName}` : ""})`;
             this.sendText(chatId, progressMsg).catch(() => {});
           }
+        } else if (event.type === "tool_result") {
+          const resultStr = String(event.data?.result ?? "");
+          if (resultStr.startsWith("{")) {
+            try {
+              const parsed = JSON.parse(resultStr) as Record<string, unknown>;
+              if (parsed.__type === "image_download" && typeof parsed.localPath === "string") {
+                pendingImages.push({
+                  localPath: parsed.localPath as string,
+                  fileName: String(parsed.fileName || "image"),
+                });
+              }
+            } catch {
+              // not JSON
+            }
+          }
         }
       }
     } catch (err: any) {
@@ -583,6 +601,25 @@ export class FeishuWebSocketChannel {
     const replyRaw = (finalText || streamed).trim() || "我已经执行完成，但未提取到可显示的文本结果。请让我重试并返回详细过程。";
     const reply = normalizeForFeishu(replyRaw);
     await this.sendText(chatId, reply);
+
+    let imagesSent = 0;
+    for (const img of pendingImages) {
+      try {
+        if (fs.existsSync(img.localPath)) {
+          const buffer = fs.readFileSync(img.localPath);
+          const ext = nodePath.extname(img.localPath).toLowerCase();
+          const mime = ext === ".png" ? "image/png"
+            : ext === ".gif" ? "image/gif"
+            : ext === ".webp" ? "image/webp"
+            : "image/jpeg";
+          const sent = await this.sendImageFromBuffer(chatId, buffer, mime);
+          if (sent) imagesSent++;
+        }
+      } catch (err) {
+        console.warn(`[FeishuWS] failed to send image ${img.fileName}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
     this.publishMirror("channel_message_outbound", "飞书回复", reply, {
       channel: "feishu",
       direction: "outbound",
@@ -591,7 +628,7 @@ export class FeishuWebSocketChannel {
       messageId: msgId,
       sessionId,
     });
-    console.log(`[FeishuWS] replied to ${openId.slice(0, 6)}***, chars=${reply.length}, tools=${toolCount}`);
+    console.log(`[FeishuWS] replied to ${openId.slice(0, 6)}***, chars=${reply.length}, tools=${toolCount}, images=${imagesSent}`);
   }
 
   private async handleP2PEntered(payload: any): Promise<void> {
@@ -669,5 +706,54 @@ export class FeishuWebSocketChannel {
         },
       });
     }
+  }
+
+  private async uploadImage(imageBuffer: Buffer, mimeType?: string): Promise<string | null> {
+    const cfg = this.getConfig();
+    const authBase = authBaseByDomain(cfg.domain);
+    const token = await this.getTenantToken();
+    const ext = mimeType?.includes("png") ? ".png" : mimeType?.includes("gif") ? ".gif" : ".jpg";
+    const blob = new Blob([imageBuffer], { type: mimeType || "image/png" });
+    const formData = new FormData();
+    formData.append("image_type", "message");
+    formData.append("image", blob, `image${ext}`);
+    try {
+      const res = await fetch(`${authBase}/open-apis/im/v1/images`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        code?: number;
+        data?: { image_key?: string };
+      };
+      if (payload.code === 0 && payload.data?.image_key) {
+        return payload.data.image_key;
+      }
+      console.warn("[FeishuWS] uploadImage failed:", payload);
+      return null;
+    } catch (err) {
+      console.warn("[FeishuWS] uploadImage error:", err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+
+  private async sendImage(chatId: string, imageKey: string): Promise<void> {
+    if (!this.client || !chatId || !imageKey) return;
+    await this.client.im.message.create({
+      params: { receive_id_type: "chat_id" },
+      data: {
+        receive_id: chatId,
+        msg_type: "image",
+        content: JSON.stringify({ image_key: imageKey }),
+      },
+    });
+  }
+
+  async sendImageFromBuffer(chatId: string, imageBuffer: Buffer, mimeType?: string): Promise<boolean> {
+    const imageKey = await this.uploadImage(imageBuffer, mimeType);
+    if (!imageKey) return false;
+    await this.sendImage(chatId, imageKey);
+    return true;
   }
 }

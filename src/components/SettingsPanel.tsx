@@ -14,6 +14,12 @@ import {
   rejectFeishuPairing,
   startFeishuRuntime,
   stopFeishuRuntime,
+  fetchRDKClawPersona,
+  saveRDKClawPersona,
+  fetchRDKClawPolicy,
+  saveRDKClawPolicy,
+  type PersonaProfile,
+  type RDKClawPolicy,
 } from '../api';
 
 const AI_PROVIDER_DEFAULTS: Record<string, { label: string; model: string; baseUrl: string }> = {
@@ -117,6 +123,59 @@ export default function SettingsPanel() {
     expireAt: number;
     createdAt: number;
   }>>([]);
+
+  // ── RDKClaw Persona & Policy ──
+  const [persona, setPersona] = useState<PersonaProfile>({
+    name: 'RDKClaw', tone: 'professional', stylePrompt: '', riskLevel: 'balanced',
+    boardDelegationBias: 'medium', delegationBias: 'balanced', autonomyLevel: 'assisted',
+    riskBoundary: 'moderate', notifyStyle: 'compact',
+  });
+  const [policy, setPolicy] = useState<RDKClawPolicy>({
+    approval: { mode: 'risk-based', riskThreshold: 'medium' },
+    delegation: { strategy: 'hybrid', allowBoardAuto: true },
+    memory: { mainSessionReadsMemory: true, sharedSessionBlocksMemory: false, dailyMemoryDays: 7 },
+    scheduler: { defaultChannel: 'chat', allowSecondInterval: false },
+    network: { enabled: true, maxFetchChars: 30000, requireApproval: false },
+  });
+  const [rdkclawLoading, setRdkclawLoading] = useState(false);
+  const [rdkclawSaving, setRdkclawSaving] = useState(false);
+
+  const refreshRdkclawData = async () => {
+    const [personaRes, policyRes] = await Promise.all([
+      fetchRDKClawPersona(),
+      fetchRDKClawPolicy(),
+    ]);
+    setPersona(personaRes.persona);
+    setPolicy(policyRes.policy);
+  };
+
+  useEffect(() => {
+    if (!showSettings || settingsTab !== 'rdkclaw') return;
+    setRdkclawLoading(true);
+    refreshRdkclawData()
+      .catch(() => addToast('读取 RDKClaw 配置失败', 'error'))
+      .finally(() => setRdkclawLoading(false));
+  }, [showSettings, settingsTab]);
+
+  const handleSavePersona = async () => {
+    setRdkclawSaving(true);
+    try {
+      const res = await saveRDKClawPersona(persona);
+      setPersona(res.persona);
+      addToast('人格设定已保存', 'success');
+    } catch { addToast('保存人格设定失败', 'error'); }
+    finally { setRdkclawSaving(false); }
+  };
+
+  const handleSavePolicy = async () => {
+    setRdkclawSaving(true);
+    try {
+      const res = await saveRDKClawPolicy(policy);
+      setPolicy(res.policy);
+      addToast('执行策略已保存', 'success');
+    } catch { addToast('保存执行策略失败', 'error'); }
+    finally { setRdkclawSaving(false); }
+  };
 
   const refreshFeishuData = async () => {
     const [statusRes, boundRes, cfgRes, pairingRes] = await Promise.all([
@@ -261,16 +320,15 @@ export default function SettingsPanel() {
   };
 
   return (
-    <>
-      <div className="settings-overlay" onClick={() => setShowSettings(false)}></div>
-      <div className="settings-drawer">
+    <div className="settings-overlay" onClick={() => setShowSettings(false)}>
+      <div className="settings-drawer" onClick={e => e.stopPropagation()}>
         <div className="settings-header">
           <div className="settings-title">⚙️ 客户端设置</div>
           <button type="button" className="btn-icon" onClick={() => setShowSettings(false)}>×</button>
         </div>
 
         <div className="settings-nav">
-          {([['general', '通用'], ['ai', 'AI 模型'], ['connection', '连接'], ['feishu', '飞书'], ['about', '关于']] as const).map(([key, label]) => (
+          {([['general', '通用'], ['ai', 'AI 模型'], ['rdkclaw', 'RDKClaw'], ['connection', '连接'], ['feishu', '飞书'], ['about', '关于']] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -692,6 +750,208 @@ export default function SettingsPanel() {
           </>
         )}
 
+        {settingsTab === 'rdkclaw' && (
+          <>
+            {rdkclawLoading ? (
+              <div className="config-section"><div className="config-value">加载中...</div></div>
+            ) : (
+              <>
+                <div className="config-section">
+                  <div className="config-section-title">人格设定 (Persona)</div>
+                  <div className="config-row">
+                    <span className="config-label">名称</span>
+                    <div className="config-value">
+                      <input className="input" title="Agent 名称" aria-label="Agent 名称" value={persona.name} onChange={e => setPersona(p => ({ ...p, name: e.target.value }))} placeholder="RDKClaw" />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">语气风格</span>
+                    <div className="config-value">
+                      <select className="select" title="语气风格" aria-label="语气风格" value={persona.tone} onChange={e => setPersona(p => ({ ...p, tone: e.target.value as PersonaProfile['tone'] }))}>
+                        <option value="professional">专业严谨</option>
+                        <option value="friendly">友好亲切</option>
+                        <option value="concise">精炼简洁</option>
+                        <option value="mentor">导师指导</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">自定义人格 Prompt</span>
+                    <div className="config-value">
+                      <textarea className="input" title="自定义 Prompt" aria-label="自定义 Prompt" rows={3} value={persona.stylePrompt} onChange={e => setPersona(p => ({ ...p, stylePrompt: e.target.value }))} placeholder="可选：给 Agent 添加额外人格指令，如「回答尽量使用中文，代码注释用英文」" style={{ resize: 'vertical', minHeight: 60 }} />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">风险倾向</span>
+                    <div className="config-value">
+                      <select className="select" title="风险倾向" aria-label="风险倾向" value={persona.riskLevel} onChange={e => setPersona(p => ({ ...p, riskLevel: e.target.value as PersonaProfile['riskLevel'] }))}>
+                        <option value="conservative">保守 — 优先安全</option>
+                        <option value="balanced">均衡 — 安全与效率兼顾</option>
+                        <option value="aggressive">激进 — 效率优先</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">自治等级</span>
+                    <div className="config-value">
+                      <select className="select" title="自治等级" aria-label="自治等级" value={persona.autonomyLevel} onChange={e => setPersona(p => ({ ...p, autonomyLevel: e.target.value as PersonaProfile['autonomyLevel'] }))}>
+                        <option value="manual">手动 — 每步需确认</option>
+                        <option value="assisted">辅助 — 低风险自动，高风险确认</option>
+                        <option value="autonomous">自主 — 全自动执行</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">委派倾向</span>
+                    <div className="config-value">
+                      <select className="select" title="委派倾向" aria-label="委派倾向" value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}>
+                        <option value="local-first">Studio 优先</option>
+                        <option value="balanced">均衡</option>
+                        <option value="board-first">板端优先</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">板端委派偏好</span>
+                    <div className="config-value">
+                      <select className="select" title="板端委派偏好" aria-label="板端委派偏好" value={persona.boardDelegationBias} onChange={e => setPersona(p => ({ ...p, boardDelegationBias: e.target.value as PersonaProfile['boardDelegationBias'] }))}>
+                        <option value="low">低 — 尽量本地</option>
+                        <option value="medium">中 — 智能判断</option>
+                        <option value="high">高 — 积极委派板端</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">风险边界</span>
+                    <div className="config-value">
+                      <select className="select" title="风险边界" aria-label="风险边界" value={persona.riskBoundary} onChange={e => setPersona(p => ({ ...p, riskBoundary: e.target.value as PersonaProfile['riskBoundary'] }))}>
+                        <option value="strict">严格 — 不执行破坏性操作</option>
+                        <option value="moderate">适度 — 破坏性操作需确认</option>
+                        <option value="relaxed">宽松 — 信任 Agent 判断</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">通知风格</span>
+                    <div className="config-value">
+                      <select className="select" title="通知风格" aria-label="通知风格" value={persona.notifyStyle} onChange={e => setPersona(p => ({ ...p, notifyStyle: e.target.value as PersonaProfile['notifyStyle'] }))}>
+                        <option value="compact">精简</option>
+                        <option value="detailed">详细</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-actions">
+                    <button type="button" className="btn btn-primary" onClick={handleSavePersona} disabled={rdkclawSaving}>
+                      {rdkclawSaving ? '保存中...' : '保存人格设定'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="config-section">
+                  <div className="config-section-title">审批策略</div>
+                  <div className="config-row">
+                    <span className="config-label">审批模式</span>
+                    <div className="config-value">
+                      <select className="select" title="审批模式" aria-label="审批模式" value={policy.approval.mode} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } }))}>
+                        <option value="always">始终审批</option>
+                        <option value="risk-based">基于风险等级</option>
+                        <option value="auto">全自动</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">风险阈值</span>
+                    <div className="config-value">
+                      <select className="select" title="风险阈值" aria-label="风险阈值" value={policy.approval.riskThreshold} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } }))}>
+                        <option value="low">低 — 几乎所有操作需审批</option>
+                        <option value="medium">中 — 仅中高风险操作需审批</option>
+                        <option value="high">高 — 仅高危操作需审批</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="config-section">
+                  <div className="config-section-title">委派策略</div>
+                  <div className="config-row">
+                    <span className="config-label">执行策略</span>
+                    <div className="config-value">
+                      <select className="select" title="委派策略" aria-label="委派策略" value={policy.delegation.strategy} onChange={e => setPolicy(p => ({ ...p, delegation: { ...p.delegation, strategy: e.target.value as RDKClawPolicy['delegation']['strategy'] } }))}>
+                        <option value="local-first">本地优先</option>
+                        <option value="board-first">板端优先</option>
+                        <option value="hybrid">智能混合</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">允许板端自动执行</span>
+                    <input type="checkbox" title="允许板端自动执行" aria-label="允许板端自动执行" checked={policy.delegation.allowBoardAuto} onChange={e => setPolicy(p => ({ ...p, delegation: { ...p.delegation, allowBoardAuto: e.target.checked } }))} />
+                  </div>
+                </div>
+
+                <div className="config-section">
+                  <div className="config-section-title">记忆与上下文</div>
+                  <div className="config-row">
+                    <span className="config-label">主会话读取历史记忆</span>
+                    <input type="checkbox" title="主会话读取历史记忆" aria-label="主会话读取历史记忆" checked={policy.memory.mainSessionReadsMemory} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, mainSessionReadsMemory: e.target.checked } }))} />
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">跨会话记忆隔离</span>
+                    <input type="checkbox" title="跨会话记忆隔离" aria-label="跨会话记忆隔离" checked={policy.memory.sharedSessionBlocksMemory} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, sharedSessionBlocksMemory: e.target.checked } }))} />
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">每日记忆保留天数</span>
+                    <div className="config-value">
+                      <input type="number" className="input" title="记忆天数" aria-label="记忆天数" value={policy.memory.dailyMemoryDays} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, dailyMemoryDays: Number(e.target.value) || 7 } }))} min={1} max={90} style={{ maxWidth: 100 }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="config-section">
+                  <div className="config-section-title">调度配置</div>
+                  <div className="config-row">
+                    <span className="config-label">默认任务通道</span>
+                    <div className="config-value">
+                      <select className="select" title="默认通道" aria-label="默认通道" value={policy.scheduler.defaultChannel} onChange={e => setPolicy(p => ({ ...p, scheduler: { ...p.scheduler, defaultChannel: e.target.value as 'chat' | 'feishu' } }))}>
+                        <option value="chat">Studio 聊天</option>
+                        <option value="feishu">飞书</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">允许秒级调度间隔</span>
+                    <input type="checkbox" title="秒级调度" aria-label="秒级调度" checked={policy.scheduler.allowSecondInterval} onChange={e => setPolicy(p => ({ ...p, scheduler: { ...p.scheduler, allowSecondInterval: e.target.checked } }))} />
+                  </div>
+                </div>
+
+                <div className="config-section">
+                  <div className="config-section-title">联网能力</div>
+                  <div className="config-row">
+                    <span className="config-label">启用 Agent 联网</span>
+                    <input type="checkbox" title="启用联网" aria-label="启用联网" checked={policy.network.enabled} onChange={e => setPolicy(p => ({ ...p, network: { ...p.network, enabled: e.target.checked } }))} />
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">单次抓取上限 (字符)</span>
+                    <div className="config-value">
+                      <input type="number" className="input" title="抓取上限" aria-label="抓取上限" value={policy.network.maxFetchChars} onChange={e => setPolicy(p => ({ ...p, network: { ...p.network, maxFetchChars: Number(e.target.value) || 30000 } }))} min={1000} max={200000} style={{ maxWidth: 120 }} />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">联网需人工审批</span>
+                    <input type="checkbox" title="联网需审批" aria-label="联网需审批" checked={policy.network.requireApproval} onChange={e => setPolicy(p => ({ ...p, network: { ...p.network, requireApproval: e.target.checked } }))} />
+                  </div>
+                  <div className="config-actions">
+                    <button type="button" className="btn btn-primary" onClick={handleSavePolicy} disabled={rdkclawSaving}>
+                      {rdkclawSaving ? '保存中...' : '保存执行策略'}
+                    </button>
+                    <span className="config-label-hint">策略保存在本地 ~/.rdkstudio/rdkclaw-policy.json</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
         {settingsTab === 'about' && (
           <>
             <div className="config-section">
@@ -719,6 +979,6 @@ export default function SettingsPanel() {
         )}
         </div>
       </div>
-    </>
+    </div>
   );
 }

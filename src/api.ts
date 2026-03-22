@@ -346,6 +346,29 @@ export function fetchAgentConfig() {
   }>('/api/agent/config');
 }
 
+export interface PersonaProfile {
+  name: string;
+  tone: 'professional' | 'friendly' | 'concise' | 'mentor';
+  stylePrompt: string;
+  riskLevel: 'conservative' | 'balanced' | 'aggressive';
+  boardDelegationBias: 'low' | 'medium' | 'high';
+  delegationBias: 'local-first' | 'balanced' | 'board-first';
+  autonomyLevel: 'manual' | 'assisted' | 'autonomous';
+  riskBoundary: 'strict' | 'moderate' | 'relaxed';
+  notifyStyle: 'compact' | 'detailed';
+}
+
+export function fetchRDKClawPersona() {
+  return request<{ ok: boolean; persona: PersonaProfile }>('/api/rdkclaw/persona');
+}
+
+export function saveRDKClawPersona(patch: Partial<PersonaProfile>) {
+  return request<{ ok: boolean; persona: PersonaProfile }>('/api/rdkclaw/persona', {
+    method: 'POST',
+    body: JSON.stringify(patch),
+  });
+}
+
 export function fetchRDKClawPolicy() {
   return request<{ ok: boolean; policy: RDKClawPolicy }>('/api/rdkclaw/policy');
 }
@@ -603,6 +626,10 @@ export function executeDeviceCommand(deviceId: string, command: string, password
     headers: password ? { 'x-device-password': password } : undefined,
     body: JSON.stringify({ command }),
   });
+}
+
+export function fetchDeviceWifiList(deviceId: string) {
+  return request<{ ok: boolean; wifiNames: string[] }>(`/api/devices/${deviceId}/openclaw/wifi-list`);
 }
 
 export function fetchDeviceDiagnostics(deviceId: string, password?: string) {

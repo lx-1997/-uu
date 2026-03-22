@@ -50,10 +50,12 @@ export function createRdkTools(deviceId: string): Tool[] {
   return tools;
 }
 
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
+
 function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: string; localPath?: string }> {
   return {
     name: 'device_file_download_to_local',
-    description: '把设备上的文件下载到本机（RDK Studio 所在电脑）。可选 localPath，不填则下载到 workspace/downloads/。',
+    description: '把设备上的文件下载到本机（RDK Studio 所在电脑）。可选 localPath，不填则下载到 workspace/downloads/。下载图片后会返回可预览的 URL。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -68,6 +70,20 @@ function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: str
         ? path.resolve(ctx.workspaceDir, input.localPath)
         : path.resolve(ctx.workspaceDir, 'downloads', fileName);
       const result = await downloadDeviceFileToLocal(deviceId, input.remotePath, target);
+
+      const ext = path.extname(fileName).toLowerCase();
+      if (IMAGE_EXTENSIONS.has(ext)) {
+        const downloadsDir = path.resolve(ctx.workspaceDir, 'downloads');
+        const relativePath = path.relative(downloadsDir, result.localPath).replace(/\\/g, '/');
+        const imageUrl = `/api/local-files/${encodeURIComponent(relativePath)}`;
+        return JSON.stringify({
+          __type: 'image_download',
+          localPath: result.localPath,
+          bytes: result.bytes,
+          imageUrl,
+          fileName,
+        });
+      }
       return `已下载到本机: ${result.localPath} (${result.bytes} bytes)`;
     },
   };

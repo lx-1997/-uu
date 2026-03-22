@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { AppProvider, useAppState } from './hooks/useAppState';
+import { useAuth } from './hooks/useAuth';
 import IconRail from './components/IconRail';
 import TopToolbar from './components/TopToolbar';
 import AIDock from './components/AIDock';
@@ -171,10 +172,53 @@ function AppShell() {
   );
 }
 
+function SSOGate({ children }: { children: ReactNode }) {
+  const { loading, ssoEnabled, user, loginUrl } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="loading-overlay">
+        <div className="spinner-lg" />
+        <span style={{ marginTop: 12, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+          正在验证身份...
+        </span>
+      </div>
+    );
+  }
+
+  if (ssoEnabled && !user) {
+    if (loginUrl) {
+      window.location.href = loginUrl;
+      return (
+        <div className="loading-overlay">
+          <div className="spinner-lg" />
+          <span style={{ marginTop: 12, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+            正在跳转到 D-Robotics SSO 登录...
+          </span>
+        </div>
+      );
+    }
+    return (
+      <div className="loading-overlay">
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <h2 style={{ fontSize: '1.25rem', color: 'var(--text-primary)' }}>需要登录</h2>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+            请联系管理员配置 SSO 登录信息
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
-    <AppProvider>
-      <AppShell />
-    </AppProvider>
+    <SSOGate>
+      <AppProvider>
+        <AppShell />
+      </AppProvider>
+    </SSOGate>
   );
 }

@@ -1,57 +1,9 @@
-import { type ReactNode, useState } from 'react';
+import { useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { verifyDeviceConnection } from '../api';
 
 type ConnMethod = 'manual' | 'usb';
 type Step = 'method' | 'configure' | 'verify';
-
-/* ── SVG icons ── */
-const Icons = {
-  wifi: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 12.55a11 11 0 0114 0"/><path d="M1.42 9a16 16 0 0121.16 0"/>
-      <path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
-    </svg>
-  ),
-  edit: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-    </svg>
-  ),
-  usb: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 18v-6"/><path d="M8 18v-2"/><path d="M16 18v-4"/>
-      <rect x="6" y="18" width="4" height="4" rx="1"/><rect x="14" y="18" width="4" height="4" rx="1"/>
-      <circle cx="12" cy="8" r="2"/><path d="M12 2v4"/>
-    </svg>
-  ),
-  check: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12"/>
-    </svg>
-  ),
-  arrow: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-    </svg>
-  ),
-  back: (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
-    </svg>
-  ),
-  close: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-    </svg>
-  ),
-};
-
-const METHODS: { key: ConnMethod; icon: ReactNode; title: string; desc: string }[] = [
-  { key: 'manual', icon: Icons.edit, title: 'SSH 网络连接', desc: '输入 IP 地址，通过有线网络或 WiFi 远程连接' },
-  { key: 'usb',    icon: Icons.usb,  title: 'USB 串口调试', desc: '通过 Micro USB / Type-C 调试口直连' },
-];
 
 export default function AddDeviceModal() {
   const {
@@ -72,6 +24,7 @@ export default function AddDeviceModal() {
   const [showWifiConfig, setShowWifiConfig] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyOk, setVerifyOk] = useState(false);
+  const [showPass, setShowPass] = useState(false);
 
   const close = () => {
     setShowAddDevice(false);
@@ -89,88 +42,94 @@ export default function AddDeviceModal() {
     setShowWifiConfig(false);
   };
 
-  const goToConfigure = (m: ConnMethod) => {
-    setMethod(m);
-    setStep('configure');
-  };
+  const goToConfigure = (m: ConnMethod) => { setMethod(m); setStep('configure'); };
 
   const goToVerify = () => {
     setStep('verify');
     setVerifying(true);
     setVerifyOk(false);
-
     const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
     verifyDeviceConnection({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'sunrise', password: sshPass.trim() })
-      .then(() => {
-        setVerifying(false);
-        setVerifyOk(true);
-      })
-      .catch(() => {
-        setVerifying(false);
-        setVerifyOk(false);
-        addToast('连接验证失败，请检查 IP/账号/密码', 'error');
-      });
+      .then(() => { setVerifying(false); setVerifyOk(true); })
+      .catch(() => { setVerifying(false); setVerifyOk(false); addToast('连接验证失败，请检查 IP/账号/密码', 'error'); });
   };
 
   const confirmAdd = () => {
     const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
-    addNewDevice({
-      host,
-      port: Number(sshPort || '22'),
-      username: sshUser.trim() || 'sunrise',
-      password: sshPass.trim(),
-      name: newDeviceName,
-    });
-    if (method === 'usb') {
-      setActiveTab('terminal');
-      addToast(`串口 ${serialPort} 已连接，进入终端会话`, 'success');
-    }
+    addNewDevice({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'sunrise', password: sshPass.trim(), name: newDeviceName });
+    if (method === 'usb') { setActiveTab('terminal'); addToast(`串口 ${serialPort} 已连接`, 'success'); }
+    close();
   };
 
   if (!showAddDevice) return null;
-
   const stepIndex = step === 'method' ? 0 : step === 'configure' ? 1 : 2;
 
   return (
     <div className="modal-overlay" onClick={close}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
+      <div className="modal-content add-device-modal" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="modal-header">
           <div>
             <div className="modal-title">添加设备</div>
-            <div>
+            <div className="modal-subtitle">
               {step === 'method' && '选择连接方式'}
-              {step === 'configure' && (method === 'manual' ? '配置 SSH 连接' : 'USB 串口连接')}
+              {step === 'configure' && (method === 'manual' ? '配置 SSH 连接' : 'USB 串口')}
               {step === 'verify' && '验证连接'}
             </div>
           </div>
-          <button className="btn-icon" onClick={close}>{Icons.close}</button>
+          <button className="btn-icon" onClick={close}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
         </div>
 
-        {/* Progress */}
-        <div>
+        {/* Step indicator */}
+        <div className="add-device-steps">
           {['连接方式', '配置', '验证'].map((label, i) => (
-            <div key={label}>
-              <span>{i < stepIndex ? Icons.check : i + 1}</span>
-              <span>{label}</span>
+            <div key={label} className={`add-device-step ${i < stepIndex ? 'done' : i === stepIndex ? 'active' : ''}`}>
+              <span className="add-device-step-num">
+                {i < stepIndex ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg> : i + 1}
+              </span>
+              <span className="add-device-step-label">{label}</span>
+              {i < 2 && <span className="add-device-step-line" />}
             </div>
           ))}
         </div>
 
-        {/* Step 1: Choose method */}
+        {/* Step 1: Method */}
         {step === 'method' && (
           <div className="modal-body">
-            <div>
-              {METHODS.map(m => (
-                <button key={m.key} className="config-card" onClick={() => goToConfigure(m.key)}>
-                  <div className="config-card-head">{m.icon}</div>
-                  <div className="config-card-name">{m.title}</div>
-                  <div>{m.desc}</div>
-                  <span>{Icons.arrow}</span>
-                </button>
-              ))}
+            <div className="add-device-methods">
+              <button className="add-device-method-card" onClick={() => goToConfigure('manual')}>
+                <div className="add-device-method-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12.55a11 11 0 0114 0"/><path d="M1.42 9a16 16 0 0121.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/>
+                  </svg>
+                </div>
+                <div className="add-device-method-body">
+                  <strong>SSH 网络连接</strong>
+                  <span>通过有线/WiFi 远程连接，输入 IP 地址即可</span>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+              <button className="add-device-method-card" onClick={() => goToConfigure('usb')}>
+                <div className="add-device-method-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 18v-6"/><path d="M8 18v-2"/><path d="M16 18v-4"/>
+                    <rect x="6" y="18" width="4" height="4" rx="1"/><rect x="14" y="18" width="4" height="4" rx="1"/>
+                    <circle cx="12" cy="8" r="2"/><path d="M12 2v4"/>
+                  </svg>
+                </div>
+                <div className="add-device-method-body">
+                  <strong>USB 串口调试</strong>
+                  <span>Micro USB / Type-C 调试口直连</span>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
             </div>
-            <div>
+            <div className="add-device-support-hint">
               支持 RDK X3 / X5 / S100 / Ultra 全系列开发板
             </div>
           </div>
@@ -179,190 +138,102 @@ export default function AddDeviceModal() {
         {/* Step 2: Configure */}
         {step === 'configure' && (
           <div className="modal-body">
-            {method === 'manual' && (
-              <div>
-                <label className="config-row">
-                  <span className="config-label">IP 地址</span>
-                  <span className="config-value">
-                    <input
-                      className="input"
-                      placeholder="如 192.168.1.100"
-                      value={newDeviceIp}
-                      onChange={e => setNewDeviceIp(e.target.value)}
-                      autoFocus
-                    />
-                  </span>
-                </label>
-                <div>
-                  <label className="config-row">
-                    <span className="config-label">用户名</span>
-                    <span className="config-value">
-                      <input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
-                    </span>
-                  </label>
-                  <label className="config-row">
-                    <span className="config-label">密码</span>
-                    <span className="config-value">
-                      <input className="input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} placeholder="默认 root" />
-                    </span>
-                  </label>
+            {method === 'manual' ? (
+              <div className="add-device-form">
+                <div className="add-device-field">
+                  <label>IP 地址</label>
+                  <input className="input" placeholder="192.168.1.100" value={newDeviceIp} onChange={e => setNewDeviceIp(e.target.value)} autoFocus />
                 </div>
-                <label className="config-row">
-                  <span className="config-label">SSH 端口</span>
-                  <span className="config-value">
-                    <input className="input" value={sshPort} onChange={e => setSshPort(e.target.value)} style={{ maxWidth: 120 }} />
-                  </span>
-                </label>
-                <label className="config-row">
-                  <span className="config-label">设备名称（可选）</span>
-                  <span className="config-value">
-                    <input
-                      className="input"
-                      placeholder="如 RDK X5 - 工位3"
-                      value={newDeviceName}
-                      onChange={e => setNewDeviceName(e.target.value)}
-                    />
-                  </span>
-                </label>
-                <div>
-                  官方常用默认：SSH 为 sunrise/sunrise（串口常见 root/root）；默认有线 IP 常见为 192.168.127.10
+                <div className="add-device-field-row">
+                  <div className="add-device-field">
+                    <label>用户名</label>
+                    <input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
+                  </div>
+                  <div className="add-device-field">
+                    <label>密码</label>
+                    <div className="add-device-pass-wrap">
+                      <input className="input" type={showPass ? 'text' : 'password'} value={sshPass} onChange={e => setSshPass(e.target.value)} />
+                      <button type="button" className="btn-icon add-device-pass-toggle" onClick={() => setShowPass(v => !v)}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          {showPass ? <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></> : <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>}
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => { setSshUser('sunrise'); setSshPass('sunrise'); }}>
-                    使用 sunrise 默认
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => { setSshUser('root'); setSshPass('root'); }}>
-                    使用 root 默认
-                  </button>
+                <div className="add-device-field-row">
+                  <div className="add-device-field">
+                    <label>SSH 端口</label>
+                    <input className="input" value={sshPort} onChange={e => setSshPort(e.target.value)} />
+                  </div>
+                  <div className="add-device-field">
+                    <label>设备别名（可选）</label>
+                    <input className="input" placeholder="如 RDK X5 工位3" value={newDeviceName} onChange={e => setNewDeviceName(e.target.value)} />
+                  </div>
+                </div>
+                <div className="add-device-presets">
+                  <span className="add-device-presets-label">快捷填充：</span>
+                  <button className="chip" onClick={() => { setSshUser('sunrise'); setSshPass('sunrise'); }}>sunrise / sunrise</button>
+                  <button className="chip" onClick={() => { setSshUser('root'); setSshPass('root'); }}>root / root</button>
+                  <button className="chip" onClick={() => setNewDeviceIp('192.168.127.10')}>有线默认 IP</button>
                 </div>
 
-                <div style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#64748b', fontSize: '0.9rem' }}>
+                <div className="add-device-wifi-toggle">
+                  <label>
                     <input type="checkbox" checked={showWifiConfig} onChange={e => setShowWifiConfig(e.target.checked)} />
-                    通过此连接配置设备 WiFi (可选)
+                    <span>连接后顺便配置 WiFi</span>
                   </label>
-                  {showWifiConfig && (
-                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', marginTop: '12px' }}>
-                      <label className="config-row" style={{ marginBottom: '12px' }}>
-                        <span className="config-label">WiFi 名称 (SSID)</span>
-                        <span className="config-value">
-                          <input className="input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
-                        </span>
-                      </label>
-                      <label className="config-row">
-                        <span className="config-label">密码 (Password)</span>
-                        <span className="config-value">
-                          <input className="input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
-                        </span>
-                      </label>
+                </div>
+                {showWifiConfig && (
+                  <div className="add-device-wifi-fields">
+                    <div className="add-device-field">
+                      <label>WiFi 名称 (SSID)</label>
+                      <input className="input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="MyWiFi" />
                     </div>
-                  )}
+                    <div className="add-device-field">
+                      <label>WiFi 密码</label>
+                      <input className="input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="add-device-form">
+                <div className="add-device-usb-steps">
+                  <div className="add-device-usb-step"><span className="add-device-usb-num">1</span>将调试线连接到 RDK 调试口</div>
+                  <div className="add-device-usb-step"><span className="add-device-usb-num">2</span>确认 PC 已识别串口驱动 (CP210X / CH340)</div>
+                </div>
+                <div className="add-device-field-row">
+                  <div className="add-device-field">
+                    <label>串口号</label>
+                    <select className="select" value={serialPort} onChange={e => setSerialPort(e.target.value)}>
+                      <option value="/dev/ttyUSB0">/dev/ttyUSB0</option>
+                      <option value="/dev/ttyUSB1">/dev/ttyUSB1</option>
+                      <option value="COM3">COM3</option><option value="COM4">COM4</option>
+                    </select>
+                  </div>
+                  <div className="add-device-field">
+                    <label>波特率</label>
+                    <select className="select" value={baudRate} onChange={e => setBaudRate(e.target.value)}>
+                      <option value="921600">921600</option><option value="115200">115200</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="add-device-field-row">
+                  <div className="add-device-field"><label>用户名</label><input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} /></div>
+                  <div className="add-device-field"><label>密码</label><input className="input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} /></div>
+                </div>
+                <div className="add-device-field">
+                  <label>设备别名（可选）</label>
+                  <input className="input" placeholder="如 RDK X5 (USB)" value={newDeviceName} onChange={e => setNewDeviceName(e.target.value)} />
                 </div>
               </div>
             )}
 
-            {method === 'usb' && (
-              <div>
-                <div>
-                  <div>
-                    <span>1</span>
-                    <span>将调试线缆连接到 RDK 调试口（X3/X5: Micro USB｜S100: Type-C）</span>
-                  </div>
-                  <div>
-                    <span>2</span>
-                    <span>确认 PC 已识别串口驱动 (CP210X / CH340)</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="config-row">
-                    <span className="config-label">串口号</span>
-                    <span className="config-value">
-                      <select className="select" value={serialPort} onChange={e => setSerialPort(e.target.value)}>
-                        <option value="/dev/ttyUSB0">/dev/ttyUSB0</option>
-                        <option value="/dev/ttyUSB1">/dev/ttyUSB1</option>
-                        <option value="/dev/ttyACM0">/dev/ttyACM0</option>
-                        <option value="COM3">COM3</option>
-                        <option value="COM4">COM4</option>
-                      </select>
-                    </span>
-                  </label>
-                  <label className="config-row">
-                    <span className="config-label">波特率</span>
-                    <span className="config-value">
-                      <select className="select" value={baudRate} onChange={e => setBaudRate(e.target.value)}>
-                        <option value="921600">921600</option>
-                        <option value="115200">115200</option>
-                        <option value="460800">460800</option>
-                        <option value="9600">9600</option>
-                      </select>
-                    </span>
-                  </label>
-                </div>
-                <div>
-                  <label className="config-row">
-                    <span className="config-label">用户名</span>
-                    <span className="config-value">
-                      <input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
-                    </span>
-                  </label>
-                  <label className="config-row">
-                    <span className="config-label">密码</span>
-                    <span className="config-value">
-                      <input className="input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} placeholder="默认 root" />
-                    </span>
-                  </label>
-                </div>
-                <label className="config-row">
-                  <span className="config-label">设备名称（可选）</span>
-                  <span className="config-value">
-                    <input
-                      className="input"
-                      placeholder="如 RDK X5 (USB)"
-                      value={newDeviceName}
-                      onChange={e => setNewDeviceName(e.target.value)}
-                    />
-                  </span>
-                </label>
-                <div>
-                  连接后将直接进入终端会话 &nbsp;|&nbsp; X5 常见波特率 115200 &nbsp;|&nbsp; X3 常见波特率 921600
-                </div>
-
-                <div style={{ marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#64748b', fontSize: '0.9rem' }}>
-                    <input type="checkbox" checked={showWifiConfig} onChange={e => setShowWifiConfig(e.target.checked)} />
-                    在此串口连接过程中同时配网 (可选)
-                  </label>
-                  {showWifiConfig && (
-                    <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', marginTop: '12px' }}>
-                      <label className="config-row" style={{ marginBottom: '12px' }}>
-                        <span className="config-label">WiFi 名称 (SSID)</span>
-                        <span className="config-value">
-                          <input className="input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="如 MyHomeRouter" />
-                        </span>
-                      </label>
-                      <label className="config-row">
-                        <span className="config-label">密码 (Password)</span>
-                        <span className="config-value">
-                          <input className="input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder="无密码可留空" />
-                        </span>
-                      </label>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Bottom nav */}
             <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => setStep('method')}>
-                {Icons.back} 返回
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={goToVerify}
-                disabled={method === 'manual' ? (!newDeviceIp.trim() || !sshPass.trim()) : !sshPass.trim()}
-              >
-                下一步 {Icons.arrow}
+              <button className="btn btn-ghost" onClick={() => setStep('method')}>返回</button>
+              <button className="btn btn-primary" onClick={goToVerify} disabled={method === 'manual' ? (!newDeviceIp.trim() || !sshPass.trim()) : !sshPass.trim()}>
+                下一步
               </button>
             </div>
           </div>
@@ -371,48 +242,44 @@ export default function AddDeviceModal() {
         {/* Step 3: Verify */}
         {step === 'verify' && (
           <div className="modal-body">
-            {verifying && (
-              <div>
-                <div />
-                <div>
-                  {showWifiConfig ? '正在验证连接并配置网络...' : '正在验证连接...'}
-                </div>
-                <div>
-                  {method === 'usb' ? '检测串口设备...' : `尝试连接 ${newDeviceIp}:${sshPort}...`}
-                </div>
-              </div>
-            )}
-            {!verifying && verifyOk && (
-              <div>
-                <div>{Icons.check}</div>
-                <div>
-                  {showWifiConfig ? '连接成功且已获取设备网络IP' : '连接成功'}
-                </div>
-                <div>
-                  <div><span>设备</span><strong>{newDeviceName || 'RDK Device'}</strong></div>
-                  <div><span>{method === 'usb' && !showWifiConfig ? '串口' : 'IP'}</span><strong>{method === 'usb' && !showWifiConfig ? `${serialPort} @ ${baudRate}` : newDeviceIp || '192.168.31.25'}</strong></div>
-                  <div><span>{showWifiConfig ? '所连网络' : '型号'}</span><strong>{showWifiConfig ? wifiSsid : 'RDK X5'}</strong></div>
-                  <div><span>系统</span><strong>Ubuntu 22.04 (3.1.0)</strong></div>
-                </div>
-                <label className="config-row" style={{ marginTop: 16 }}>
-                  <span className="config-label">设备别名（可修改）</span>
-                  <span className="config-value">
-                    <input
-                      className="input"
-                      value={newDeviceName}
-                      onChange={e => setNewDeviceName(e.target.value)}
-                    />
-                  </span>
-                </label>
-              </div>
-            )}
-
+            <div className="verify-status">
+              {verifying && (
+                <>
+                  <div className="spinner" />
+                  <div className="verify-status-title">正在验证连接...</div>
+                  <div className="verify-status-detail">
+                    {method === 'usb' ? '检测串口设备...' : `连接 ${newDeviceIp}:${sshPort}...`}
+                  </div>
+                </>
+              )}
+              {!verifying && verifyOk && (
+                <>
+                  <div className="verify-status-icon ok">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <div className="verify-status-title">连接成功</div>
+                  <div className="verify-info-grid">
+                    <div className="verify-info-item"><span className="verify-info-label">设备</span><strong>{newDeviceName || 'RDK Device'}</strong></div>
+                    <div className="verify-info-item"><span className="verify-info-label">IP</span><strong>{newDeviceIp || '127.0.0.1'}</strong></div>
+                    <div className="verify-info-item"><span className="verify-info-label">用户</span><strong>{sshUser}</strong></div>
+                    <div className="verify-info-item"><span className="verify-info-label">端口</span><strong>{sshPort}</strong></div>
+                  </div>
+                </>
+              )}
+              {!verifying && !verifyOk && (
+                <>
+                  <div className="verify-status-icon fail">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </div>
+                  <div className="verify-status-title">连接失败</div>
+                  <div className="verify-status-detail">请检查 IP 地址、用户名、密码，以及设备是否通电在线。</div>
+                </>
+              )}
+            </div>
             <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => { setStep('configure'); setVerifyOk(false); }}>
-                {Icons.back} 返回
-              </button>
-              <button className="btn btn-primary" onClick={confirmAdd} disabled={verifying}>
-                {verifyOk ? (method === 'usb' ? '进入终端' : '添加到工作区') : '请等待...'} {verifyOk && Icons.check}
+              <button className="btn btn-ghost" onClick={() => { setStep('configure'); setVerifyOk(false); }}>返回</button>
+              <button className="btn btn-primary" onClick={verifyOk ? confirmAdd : goToVerify} disabled={verifying}>
+                {verifying ? '验证中...' : verifyOk ? '添加到工作区' : '重试'}
               </button>
             </div>
           </div>

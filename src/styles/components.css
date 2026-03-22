@@ -605,3 +605,480 @@
   color: var(--text-secondary);
   max-width: 360px;
 }
+
+/* ── Device Guard (unified no-device state) ── */
+.device-guard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 400px;
+  padding: 40px 24px;
+}
+
+.device-guard-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  max-width: 360px;
+  padding: 40px 32px;
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  animation: scaleIn var(--duration-normal) var(--ease-out);
+}
+
+.device-guard-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--accent-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.device-guard-title {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.device-guard-desc {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* ── AddDevice Modal ── */
+.add-device-modal {
+  max-width: 500px;
+}
+
+.modal-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.add-device-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 12px 24px 4px;
+}
+
+.add-device-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.add-device-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+  flex-shrink: 0;
+}
+
+.add-device-step.active .add-device-step-num {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent);
+}
+
+.add-device-step.done .add-device-step-num {
+  background: var(--ok-subtle);
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.add-device-step-label {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.add-device-step.active .add-device-step-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.add-device-step.done .add-device-step-label {
+  color: var(--ok);
+}
+
+.add-device-step-line {
+  width: 32px;
+  height: 1.5px;
+  background: var(--border);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.add-device-step.done .add-device-step-line {
+  background: var(--ok);
+}
+
+/* Method cards */
+.add-device-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.add-device-method-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  text-align: left;
+}
+
+.add-device-method-card:hover {
+  border-color: var(--accent-border);
+  box-shadow: 0 2px 12px var(--accent-glow);
+  background: var(--bg-elevated);
+}
+
+.add-device-method-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.add-device-method-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.add-device-method-body strong {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.add-device-method-body span {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.add-device-support-hint {
+  text-align: center;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+
+/* Configure form */
+.add-device-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.add-device-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.add-device-field label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.add-device-field-row {
+  display: flex;
+  gap: 10px;
+}
+
+.add-device-pass-wrap {
+  position: relative;
+  display: flex;
+}
+
+.add-device-pass-wrap .input {
+  flex: 1;
+  padding-right: 32px;
+}
+
+.add-device-pass-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+}
+
+.add-device-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.add-device-presets-label {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+
+.add-device-presets .chip {
+  font-size: 0.625rem;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.add-device-wifi-toggle {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.add-device-wifi-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.add-device-wifi-fields {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+}
+
+/* USB steps */
+.add-device-usb-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+}
+
+.add-device-usb-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.add-device-usb-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ── Verify Status ── */
+.verify-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.verify-status-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.verify-status-icon.ok {
+  background: var(--ok-subtle);
+}
+
+.verify-status-icon.fail {
+  background: var(--danger-subtle);
+}
+
+.verify-status-title {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.verify-status-detail {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  max-width: 320px;
+}
+
+.verify-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+  margin-top: 8px;
+}
+
+.verify-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-inset);
+}
+
+.verify-info-label {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.verify-info-item strong {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ── WiFi Modal ── */
+.wifi-modal {
+  max-width: 440px;
+}
+
+.wifi-modal .modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wifi-list-section {
+  margin-bottom: 16px;
+}
+
+.wifi-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.wifi-list-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.wifi-list-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.wifi-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+}
+
+.wifi-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast);
+  text-align: left;
+  background: transparent;
+  border: none;
+  width: 100%;
+}
+
+.wifi-list-item:hover {
+  background: var(--bg-inset);
+}
+
+.wifi-list-item.selected {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.wifi-list-item span {
+  flex: 1;
+}
+
+.wifi-list-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.wifi-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wifi-hint {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}

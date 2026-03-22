@@ -1017,9 +1017,9 @@ export default function Flasher() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => { setActiveTab('examples'); addToast('已切换到示例应用', 'info'); }}
+                onClick={() => { setActiveTab('skills'); addToast('已切换到技能中心', 'info'); }}
               >
-                示例应用
+                技能中心
               </button>
             </div>
             <button

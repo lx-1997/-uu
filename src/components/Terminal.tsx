@@ -180,6 +180,27 @@ export default function Terminal() {
     removeSession(id);
   };
 
+  if (!currentDevice) {
+    return (
+      <div className="immersive">
+        <div className="immersive-bar">
+          <div className="immersive-bar-left"><span className="immersive-bar-title">终端</span></div>
+        </div>
+        <div className="immersive-viewport">
+          <div className="immersive-welcome">
+            <div className="immersive-welcome-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3" /><rect x="2.25" y="4.5" width="19.5" height="15" rx="2.25" />
+              </svg>
+            </div>
+            <h2 className="immersive-welcome-title">远程终端</h2>
+            <p className="immersive-welcome-desc">请先在左下角连接一台 RDK 设备，即可打开 SSH 终端会话。</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="immersive">
       <div className="immersive-bar">
@@ -206,7 +227,7 @@ export default function Terminal() {
           </div>
         </div>
         <div className="immersive-bar-center">
-          <span className={currentDevice ? 'immersive-bar-meta' : 'immersive-bar-title'}>{currentDevice ? currentDevice.name : '终端'}</span>
+          <span className="immersive-bar-meta">{currentDevice.name}</span>
         </div>
         <div className="immersive-bar-right">
           <button className="btn-icon" title="复制选中" onClick={copySelection}>

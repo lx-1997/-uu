@@ -177,6 +177,20 @@ function BlockRenderer({
   }
 
   if (block.type === 'image') {
+    if (block.src) {
+      return (
+        <div className="msg-block image-block">
+          <img
+            className="image-block-real"
+            src={block.src}
+            alt={block.caption || '设备图片'}
+            loading="lazy"
+            onClick={() => window.open(block.src, '_blank')}
+          />
+          {block.caption && <div className="image-block-caption">{block.caption}</div>}
+        </div>
+      );
+    }
     return (
       <div className="msg-block image-block">
         <div className={`image-block-preview frame-${rosFrame}`}>

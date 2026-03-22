@@ -34,9 +34,11 @@ export default function IconRail() {
     activeTab, setActiveTab,
     devices, activeDevice, currentDevice,
     setActiveDevice, setShowAddDevice,
+    removeDevice,
     setShowSettings,
     theme, toggleTheme,
     railExpanded, setRailExpanded,
+    obReturnStep, setObReturnStep,
   } = useAppState();
 
   const [showDevicePanel, setShowDevicePanel] = useState(false);
@@ -72,6 +74,18 @@ export default function IconRail() {
         </div>
 
         <div className="rail-footer">
+          {obReturnStep && (
+            <button
+              className="rail-btn rail-return-guide"
+              data-tooltip={!railExpanded ? '返回新手引导' : undefined}
+              onClick={() => { setActiveTab('dashboard'); setObReturnStep(null); }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+              </svg>
+              {railExpanded && <span className="rail-label">返回引导</span>}
+            </button>
+          )}
           <button
             className="rail-btn"
             data-tooltip={!railExpanded ? (currentDevice ? currentDevice.name : '选择设备') : undefined}
@@ -124,7 +138,7 @@ export default function IconRail() {
               </div>
             )}
             {devices.map((dev) => (
-              <button
+              <div
                 key={dev.id}
                 className={`device-panel-item ${activeDevice === dev.id ? 'active' : ''}`}
                 onClick={() => {
@@ -132,13 +146,28 @@ export default function IconRail() {
                   setActiveTab('dashboard');
                   setShowDevicePanel(false);
                 }}
+                style={{ cursor: 'pointer' }}
               >
                 <span className={`status-dot ${dev.status === 'connected' || dev.status === 'online' ? 'online' : 'offline'}`} />
                 <div className="device-panel-item-info">
                   <div className="device-panel-item-name">{dev.name}</div>
                   <div className="device-panel-item-addr">{dev.ip}</div>
                 </div>
-              </button>
+                <button
+                  type="button"
+                  className="btn-icon"
+                  title="删除设备"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeDevice(dev.id);
+                  }}
+                  style={{ marginLeft: 'auto', flexShrink: 0, width: 24, height: 24, opacity: 0.5 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                  </svg>
+                </button>
+              </div>
             ))}
             <button
               className="device-panel-add-btn"

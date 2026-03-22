@@ -31,10 +31,12 @@ export interface AppState {
   setActiveTab: (tab: Tab) => void;
 
   // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'done') => void;
+  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
+  obReturnStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null;
+  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null) => void;
 
   // Loading
   isLoading: boolean;
@@ -146,8 +148,8 @@ export interface AppState {
   removeDevice: (id: string) => void;
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
-  settingsTab: 'general' | 'ai' | 'connection' | 'feishu' | 'about';
-  setSettingsTab: (v: 'general' | 'ai' | 'connection' | 'feishu' | 'about') => void;
+  settingsTab: 'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about';
+  setSettingsTab: (v: 'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about') => void;
   autoReconnect: boolean;
   setAutoReconnect: (v: boolean) => void;
   connectionTimeout: number;

@@ -32,6 +32,7 @@ import { FeishuWebSocketChannel } from './agent/channels/feishu.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
+import { isSSOEnabled, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -509,9 +510,31 @@ async function runOnDevice(
   return null;
 }
 
-app.use(cors());
+app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: '50mb' }));
+
+// SSO auth — register routes first (before middleware blocks unauthenticated requests)
+registerSSORoutes(app);
+if (isSSOEnabled()) {
+  app.use(ssoAuthMiddleware);
+  console.log('[SSO] D-Robotics SSO enabled');
+} else {
+  console.log('[SSO] SSO not configured (set SSO_CLIENT_ID & SSO_CLIENT_SECRET to enable)');
+}
+
 app.use('/vnc', express.static(process.cwd() + '/public/vnc'));
+
+// Serve agent-downloaded files so frontend can display images etc.
+app.use('/api/local-files', express.static(path.join(process.cwd(), 'downloads'), {
+  maxAge: '1h',
+  setHeaders(res, filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
+    if (imageExts.has(ext)) {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+  },
+}));
 
 // ─── Ecosystem Bridge ───
 const ecosystem = initEcosystem();

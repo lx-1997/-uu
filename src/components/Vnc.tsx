@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { executeDeviceCommand, fetchVncStatus } from '../api';
 import { useAppState } from '../hooks/useAppState';
 import { isDesktop } from '../utils/env';
+import DeviceGuard from './DeviceGuard';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
@@ -192,9 +193,10 @@ export default function Vnc() {
     return () => window.removeEventListener('keydown', handler);
   }, [showIframe]);
 
+  if (!currentDevice) return <DeviceGuard feature="远程桌面" />;
+
   return (
     <div className="immersive" ref={containerRef}>
-      {/* ── 顶部工具栏 ── */}
       <div className="immersive-bar">
         <div className="immersive-bar-left">
           
@@ -276,16 +278,15 @@ export default function Vnc() {
       <div className="immersive-viewport">
         {showIframe ? (
           <>
-            {/* 桌面端由 WebContentsView 渲染，React 层只显示占位或错误 */}
             {isDesktop() ? (
-              <div className="immersive-desktop-placeholder" style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <div className="immersive-desktop-placeholder">
                 {loadError ? (
                   <>
-                    <span className="immersive-error" style={{ color: '#f87171', fontSize: 13 }}>⚠️ {loadError}</span>
-                    <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => { handleDisconnect(); }}>返回重试</button>
+                    <span className="immersive-error">⚠️ {loadError}</span>
+                    <button className="btn btn-primary" onClick={() => { handleDisconnect(); }}>返回重试</button>
                   </>
                 ) : (
-                  <span style={{ color: '#444', fontSize: 13 }}>noVNC 已在独立视图中加载</span>
+                  <span>noVNC 已在独立视图中加载</span>
                 )}
               </div>
             ) : (
@@ -309,7 +310,7 @@ export default function Vnc() {
                     <div key={i} className="vnc-log-line">{line}</div>
                   ))}
                   {logLines.length === 0 && (
-                    <div className="vnc-log-line" style={{ color: '#555' }}>等待输出...</div>
+                    <div className="vnc-log-line">等待输出...</div>
                   )}
                 </div>
               </div>

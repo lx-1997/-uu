@@ -18,10 +18,12 @@ export interface UIStoreState {
   setActiveTab: (tab: Tab) => void;
 
   // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'done') => void;
+  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
+  obReturnStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null;
+  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null) => void;
 
   // Loading
   isLoading: boolean;
@@ -111,8 +113,8 @@ export interface UIStoreState {
   // Settings
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
-  settingsTab: 'general' | 'ai' | 'connection' | 'feishu' | 'about';
-  setSettingsTab: (v: 'general' | 'ai' | 'connection' | 'feishu' | 'about') => void;
+  settingsTab: 'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about';
+  setSettingsTab: (v: 'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about') => void;
   autoReconnect: boolean;
   setAutoReconnect: (v: boolean) => void;
   connectionTimeout: number;
@@ -155,9 +157,16 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   // ── Navigation ──
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
-  // ── Onboarding ──
-  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect' | 'openclaw' | 'done'>('board');
-  const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
+  // ── Onboarding (persisted) ──
+  const [obStep, setObStepRaw] = useState<'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done'>(() => {
+    const saved = localStorage.getItem('rdk-onboarding-step');
+    if (saved && ['board', 'flash', 'connect', 'openclaw', 'rdkclaw', 'done'].includes(saved)) return saved as any;
+    return 'board';
+  });
+  const setObStep = (v: typeof obStep) => { setObStepRaw(v); localStorage.setItem('rdk-onboarding-step', v); };
+  const [selectedBoard, setSelectedBoardRaw] = useState<string | null>(() => localStorage.getItem('rdk-onboarding-board'));
+  const setSelectedBoard = (v: string | null) => { setSelectedBoardRaw(v); if (v) localStorage.setItem('rdk-onboarding-board', v); else localStorage.removeItem('rdk-onboarding-board'); };
+  const [obReturnStep, setObReturnStep] = useState<'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null>(null);
 
   // ── Loading ──
   const [isLoading, setIsLoading] = useState(false);
@@ -315,7 +324,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
 
   // ── Settings ──
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'ai' | 'connection' | 'feishu' | 'about'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about'>('general');
   const [autoReconnect, setAutoReconnect] = useState(true);
   const [connectionTimeout, setConnectionTimeout] = useState(30);
   const [language, setLanguage] = useState('zh-CN');
@@ -329,7 +338,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const value: UIStoreState = {
     theme, setTheme, toggleTheme,
     activeTab, setActiveTab,
-    obStep, setObStep, selectedBoard, setSelectedBoard,
+    obStep, setObStep, selectedBoard, setSelectedBoard, obReturnStep, setObReturnStep,
     isLoading, loadingMsg, openWorkspace,
     flashImage, setFlashImage, flashTarget, setFlashTarget,
     flashMode, setFlashMode, flashVerify, setFlashVerify,

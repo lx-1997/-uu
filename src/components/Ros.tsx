@@ -82,7 +82,59 @@ export default function Ros() {
     }
   }, []);
 
-  /* 完整连接流程：检查 → 启动 → 连接 Webviz */
+  /* 安装 rosbridge_server（ROS2） */
+  const installRosbridge = useCallback(async (deviceId: string): Promise<boolean> => {
+    try {
+      appendLog('开始安装 rosbridge_server...');
+      const result = await executeDeviceCommand(
+        deviceId,
+        `bash -lc "
+          source /opt/ros/*/setup.bash 2>/dev/null || source /opt/tros/*/setup.bash 2>/dev/null || true
+          ROS_DISTRO=\$(printenv ROS_DISTRO 2>/dev/null || ls /opt/ros/ 2>/dev/null | head -1 || ls /opt/tros/ 2>/dev/null | head -1 || echo humble)
+          echo INSTALLING_FOR_DISTRO=\$ROS_DISTRO
+          sudo apt-get update -qq 2>/dev/null
+          if sudo apt-get install -y -qq ros-\$ROS_DISTRO-rosbridge-server 2>/dev/null; then
+            echo ROSBRIDGE_INSTALL_OK
+          elif pip3 install rosbridge-suite 2>/dev/null; then
+            echo ROSBRIDGE_INSTALL_OK
+          else
+            echo ROSBRIDGE_INSTALL_FAILED
+          fi
+        "`
+      );
+      const output = result.output || '';
+      output.split(/\r?\n/).filter(Boolean).forEach(l => appendLog(l));
+      return output.includes('ROSBRIDGE_INSTALL_OK');
+    } catch (err) {
+      appendLog(`安装失败: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }, []);
+
+  /* 检查 ROS2/TROS 和 rosbridge 安装状态 */
+  const checkInstallation = useCallback(async (deviceId: string): Promise<{ ros2: boolean; tros: boolean; rosbridge: boolean }> => {
+    try {
+      const result = await executeDeviceCommand(
+        deviceId,
+        `bash -lc "
+          source /opt/tros/*/setup.bash 2>/dev/null || source /opt/ros/*/setup.bash 2>/dev/null || true
+          command -v ros2 &>/dev/null && echo ROS2_OK || echo ROS2_MISSING
+          test -d /opt/tros && echo TROS_OK || echo TROS_MISSING
+          dpkg -l 2>/dev/null | grep -qE 'rosbridge|tros' && echo ROSBRIDGE_PKG_OK || (pip3 list 2>/dev/null | grep -qi rosbridge && echo ROSBRIDGE_PKG_OK || echo ROSBRIDGE_PKG_MISSING)
+        "`
+      );
+      const out = result.output || '';
+      return {
+        ros2: out.includes('ROS2_OK'),
+        tros: out.includes('TROS_OK'),
+        rosbridge: out.includes('ROSBRIDGE_PKG_OK'),
+      };
+    } catch {
+      return { ros2: false, tros: false, rosbridge: false };
+    }
+  }, []);
+
+  /* 完整连接流程：检查安装 → 安装 → 启动 → 连接 Webviz */
   const handleConnect = useCallback(async () => {
     if (!currentDevice) {
       addToast('请先连接设备', 'warning');
@@ -91,15 +143,46 @@ export default function Ros() {
 
     setLogLines([]);
     setPhase('checking');
-    setStatusText('检查 rosbridge 服务状态...');
-    appendLog('开始检查 rosbridge 服务...');
-    addToast('正在检查 rosbridge 服务...', 'info');
+    setStatusText('检查 ROS 环境...');
+    appendLog('开始检查 ROS 环境...');
 
-    // 1. 检查 rosbridge 是否已运行
+    const install = await checkInstallation(currentDevice.id);
+
+    const rosLabel = install.tros ? 'TROS' : 'ROS2';
+    appendLog(`检测到: ${install.ros2 ? rosLabel : '未安装 ROS2/TROS'}, rosbridge: ${install.rosbridge ? '已安装' : '未安装'}`);
+
+    if (!install.ros2 && !install.tros) {
+      setPhase('error');
+      setStatusText('设备上未安装 ROS2 或 TROS。请先安装 TROS (sudo apt install tros) 或 ROS2。');
+      appendLog('ROS2/TROS 均未安装');
+      addToast('设备未安装 ROS2/TROS，请先在终端中安装', 'warning');
+      return;
+    }
+
+    if (!install.rosbridge) {
+      setPhase('starting');
+      setStatusText('rosbridge_server 未安装，正在自动安装...');
+      appendLog('rosbridge 未安装，开始自动安装...');
+      addToast('正在为设备安装 rosbridge_server...', 'info');
+
+      const installOk = await installRosbridge(currentDevice.id);
+      if (!installOk) {
+        setPhase('error');
+        setStatusText('rosbridge 自动安装失败，请手动安装: sudo apt install ros-${ROS_DISTRO}-rosbridge-server');
+        appendLog('自动安装失败');
+        addToast('rosbridge 自动安装失败', 'error');
+        return;
+      }
+      appendLog('rosbridge 安装成功');
+      addToast('rosbridge_server 安装成功', 'success');
+    }
+
+    setStatusText('检查 rosbridge 服务状态...');
+    appendLog('检查 rosbridge 是否运行中...');
+
     let active = await checkRosbridge(currentDevice.id);
 
     if (!active) {
-      // 2. 尝试启动 rosbridge
       setPhase('starting');
       setStatusText('正在启动 rosbridge_websocket...');
       appendLog('rosbridge 未运行，尝试启动...');
@@ -109,14 +192,13 @@ export default function Ros() {
 
       if (!active) {
         setPhase('error');
-        setStatusText('rosbridge 启动失败，请确认已安装 rosbridge_server');
-        addToast('rosbridge 启动失败，请检查设备上是否安装了 rosbridge_server', 'warning');
+        setStatusText('rosbridge 启动失败，请检查设备 ROS 环境配置');
+        addToast('rosbridge 启动失败', 'warning');
         appendLog('rosbridge 启动失败');
         return;
       }
     }
 
-    // 3. rosbridge 就绪，加载 Webviz
     setPhase('connecting');
     setStatusText('rosbridge 就绪，正在加载 Webviz...');
     appendLog(`rosbridge 运行中 (端口 ${ROSBRIDGE_PORT})`);
@@ -126,7 +208,7 @@ export default function Ros() {
     setRosbridgeUrl(url);
     setIframeLoading(true);
     setShowIframe(true);
-  }, [currentDevice, addToast, checkRosbridge, startRosbridge, buildWebvizUrl]);
+  }, [currentDevice, addToast, checkRosbridge, startRosbridge, buildWebvizUrl, checkInstallation, installRosbridge]);
 
   /* 断开连接 */
   const handleDisconnect = () => {
@@ -335,7 +417,23 @@ export default function Ros() {
             {phase === 'error' && (
               <div className="immersive-error">
                 <span>⚠️ {statusText}</span>
-                <button className="btn btn-primary" onClick={handleConnect}>重试</button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <button className="btn btn-primary" onClick={handleConnect}>重试</button>
+                  {statusText.includes('未安装') && (
+                    <button className="btn btn-ghost" onClick={() => {
+                      if (currentDevice) {
+                        setPhase('starting');
+                        setStatusText('正在安装 rosbridge...');
+                        installRosbridge(currentDevice.id).then(ok => {
+                          if (ok) { addToast('安装成功，请点击重试', 'success'); setPhase('idle'); }
+                          else { setPhase('error'); setStatusText('安装失败，请手动安装'); }
+                        });
+                      }
+                    }}>
+                      一键安装 rosbridge
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
