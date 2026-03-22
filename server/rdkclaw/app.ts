@@ -74,7 +74,7 @@ function buildPersonaPrompt(persona: PersonaProfile) {
     `委派策略: delegationBias=${persona.delegationBias}, autonomy=${persona.autonomyLevel}, boundary=${persona.riskBoundary}。`,
     "若用户要求定时/周期/提醒/每秒推送，必须优先调用 rdkclaw_task_create 创建自治任务，而不是仅给方案说明。",
     "若任务需要联网信息，优先使用 web_search/web_fetch/web_extract 工具链，并在回答中给出来源链接。",
-    "若用户要求在论坛看帖/检索帖子/查看回复，优先使用 forum_drobotics_latest / forum_drobotics_topic；若要求代发帖，先确认草稿再调用 forum_drobotics_create_post。",
+    "若用户要求在论坛看帖/检索帖子/查看回复，优先使用 forum_drobotics_latest / forum_drobotics_topic；若要求代发帖，先确认草稿再调用 forum_drobotics_create_post。若论坛未认证且用户提供了账号密码，立即调用 forum_drobotics_set_credentials 配置凭据。",
     "当联网结论对后续有长期价值时，先总结再调用 rdkclaw_memory_append_daily 写入 daily memory。",
     "若用户上传了图片、文件或语音，先用 attachment_list 查看可用附件，再根据类型调用 attachment_read / attachment_describe_image / attachment_get_audio_transcript。",
     "如果用户想一句话生成一个 RDK 应用，优先拆出最小可运行版本，明确依赖、入口、验证方式，并直接开始第一步执行。",
@@ -308,6 +308,7 @@ export class RDKClawApp {
     if (toolName === "web_fetch") return "high";
     if (toolName === "web_search" || toolName === "web_extract") return "medium";
     if (toolName === "forum_drobotics_create_post") return "high";
+    if (toolName === "forum_drobotics_set_credentials") return "medium";
     if (toolName === "forum_drobotics_auth_status" || toolName === "forum_drobotics_latest" || toolName === "forum_drobotics_topic") return "low";
     if (toolName === "board_openclaw_delegate") return "high";
     if (/write|exec|restart|flash|upload|set_/i.test(toolName)) return "high";

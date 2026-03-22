@@ -1,4 +1,5 @@
 import type { Tool } from "./types.js";
+import { createCipheriv } from "node:crypto";
 
 interface ForumToolOptions {
   timeoutMs?: number;
@@ -8,9 +9,21 @@ interface ForumToolOptions {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_FETCH_CHARS = 16_000;
 const DEFAULT_FORUM_BASE = "https://forum.d-robotics.cc";
+const SSO_BASE = "https://sso.d-robotics.cc";
+const SSO_AES_KEY = "wJE911ku0VOpUtx0";
 const FORUM_SESSION_COOKIE_NAME = "_forum_session";
+const FORUM_TOKEN_COOKIE_NAME = "_t";
 const SSO_COOKIE_TTL_MS = 30 * 60 * 1000;
 let forumSessionCookieCache: { value: string; fetchedAt: number } | null = null;
+
+function aesEncryptEcb(key: string, plaintext: string): string {
+  const keyBuf = Buffer.from(key, "utf8");
+  const cipher = createCipheriv("aes-128-ecb", keyBuf, null);
+  cipher.setAutoPadding(true);
+  let encrypted = cipher.update(plaintext, "utf8", "base64");
+  encrypted += cipher.final("base64");
+  return encrypted;
+}
 
 function withTimeout(timeoutMs: number) {
   const controller = new AbortController();
@@ -116,7 +129,6 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
     return { ok: true as const, cookie: forumSessionCookieCache.value, source: "cache" as const };
   }
   const forumCookies = new Map<string, string>();
-  const devCookies = new Map<string, string>();
   const toCookieHeader = (bag: Map<string, string>) =>
     Array.from(bag.entries()).map(([k, v]) => `${k}=${v}`).join("; ");
   const mergeCookies = (bag: Map<string, string>, setCookies: string[]) => {
@@ -126,7 +138,32 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
     }
   };
 
-  // 1) 从论坛拿 SSO 跳转地址
+  // 1) Login to sso.d-robotics.cc with AES-encrypted credentials
+  const encrypted = aesEncryptEcb(SSO_AES_KEY, JSON.stringify({
+    username: creds.username,
+    password: creds.password,
+  }));
+  const ssoLoginRes = await fetchWithCookie(`${SSO_BASE}/api/login`, {
+    method: "POST",
+    timeoutMs,
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ type: "up", data: encrypted }),
+  });
+  let ssoToken: string;
+  try {
+    const ssoData = await ssoLoginRes.json() as { status: number; data: string; message?: string };
+    if (ssoData.status !== 0 || !ssoData.data) {
+      return { ok: false as const, reason: `sso_login_failed: ${ssoData.message || ssoData.data || "unknown"}` };
+    }
+    ssoToken = ssoData.data.replace(/^Bearer\s+/i, "");
+  } catch {
+    return { ok: false as const, reason: "sso_login_parse_error" };
+  }
+
+  // 2) Get forum SSO redirect URL
   const ssoStart = await fetchWithCookie(`${base}/session/sso`, {
     method: "GET",
     redirect: "manual",
@@ -143,11 +180,8 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
     return { ok: false as const, reason: "forum_sso_redirect_missing" };
   }
 
-  // 2) 带账号密码请求 developer 侧 SSO 桥接（站点启用 SSO，若后端支持将回跳论坛）
-  const devUrl = new URL(devSsoUrl);
-  devUrl.searchParams.set("username", creds.username);
-  devUrl.searchParams.set("password", creds.password);
-  const devResp = await fetchWithCookie(devUrl.toString(), {
+  // 3) Request developer SSO bridge with JWT token as cookie
+  const devResp = await fetchWithCookie(devSsoUrl, {
     method: "GET",
     redirect: "manual",
     timeoutMs,
@@ -155,14 +189,13 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
       "User-Agent": "RDKClaw/1.0 (+forum-tool)",
       Accept: "text/html,application/json",
     },
-    cookie: toCookieHeader(devCookies),
+    cookie: `token=${ssoToken}`,
   });
-  mergeCookies(devCookies, getResponseSetCookies(devResp));
-  const maybeForumBack = devResp.headers.get("location") || "";
+  const forumBackUrl = devResp.headers.get("location") || "";
 
-  // 3) 若回跳论坛，继续跟随一次，拿 _forum_session
-  if (maybeForumBack && /forum\.d-robotics\.cc/i.test(maybeForumBack)) {
-    const backResp = await fetchWithCookie(maybeForumBack, {
+  // 4) Follow forum redirect to obtain session cookies
+  if (forumBackUrl && /forum\.d-robotics\.cc/i.test(forumBackUrl)) {
+    const backResp = await fetchWithCookie(forumBackUrl, {
       method: "GET",
       redirect: "manual",
       timeoutMs,
@@ -174,18 +207,19 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
     });
     mergeCookies(forumCookies, getResponseSetCookies(backResp));
   } else {
-    // developer 常见返回 HTML，并携带 from=disLogin，表示需要交互式登录
-    const text = await devResp.text().catch(() => "");
-    if (/from["']?\s*:\s*["']disLogin/i.test(text) || /disLogin/i.test(text)) {
-      return { ok: false as const, reason: "interactive_login_required" };
-    }
+    return { ok: false as const, reason: "forum_sso_bridge_failed" };
   }
 
+  // Prefer _t (long-lived user token) over _forum_session
+  const userToken = forumCookies.get(FORUM_TOKEN_COOKIE_NAME);
   const session = forumCookies.get(FORUM_SESSION_COOKIE_NAME);
-  if (!session) {
+  const cookieParts: string[] = [];
+  if (userToken) cookieParts.push(`${FORUM_TOKEN_COOKIE_NAME}=${userToken}`);
+  if (session) cookieParts.push(`${FORUM_SESSION_COOKIE_NAME}=${session}`);
+  if (cookieParts.length === 0) {
     return { ok: false as const, reason: "forum_session_not_obtained" };
   }
-  const cookie = `${FORUM_SESSION_COOKIE_NAME}=${session}`;
+  const cookie = cookieParts.join("; ");
   forumSessionCookieCache = { value: cookie, fetchedAt: Date.now() };
   return { ok: true as const, cookie, source: "sso_credential" as const };
 }
@@ -235,12 +269,10 @@ function authHint(base: string, detail = "") {
     "当前论坛访问需要登录认证（实测匿名 latest/about/topic 均会 403）。",
     "该论坛开启了 SSO，/u/login 会跳转到 /session/sso，不能直接用用户名密码调用 /session 登录。",
     "可用方式：",
-    "1) 服务端配置 API 凭据（推荐）",
-    "   - FORUM_DROBOTICS_API_KEY",
-    "   - FORUM_DROBOTICS_API_USERNAME",
-    "2) 配置 FORUM_DROBOTICS_USERNAME / FORUM_DROBOTICS_PASSWORD（将尝试 SSO 自动换取会话）",
-    "3) 浏览器登录后导出 Cookie 到 FORUM_DROBOTICS_COOKIE（模拟人工登录态）",
-    "4) 浏览器登录后通过 Web 端手动操作发帖（不走 API）",
+    "1) 在对话中告诉我你的论坛用户名和密码，我会调用 forum_drobotics_set_credentials 自动配置（最快）",
+    "2) 在 RDK Studio 设置面板中配置论坛账号",
+    "3) 配置 API 凭据（FORUM_DROBOTICS_API_KEY + FORUM_DROBOTICS_API_USERNAME）",
+    "4) 浏览器登录后导出 Cookie 到 FORUM_DROBOTICS_COOKIE",
   ].filter(Boolean).join("\n");
 }
 
@@ -537,6 +569,72 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
   };
 }
 
+function forumSetCredentialsTool(options: ForumToolOptions): Tool<{ username: string; password: string }> {
+  const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  return {
+    name: "forum_drobotics_set_credentials",
+    description: "设置地瓜机器人论坛的登录凭据（用户名+密码），写入后立即验证 SSO 是否可用。用户在对话中提供账号密码时调用此工具。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        username: { type: "string", description: "论坛用户名" },
+        password: { type: "string", description: "论坛密码" },
+      },
+      required: ["username", "password"],
+    },
+    async execute(input) {
+      const username = String(input.username || "").trim();
+      const password = String(input.password || "").trim();
+      if (!username || !password) {
+        return "错误：用户名和密码均不能为空。";
+      }
+
+      process.env.FORUM_DROBOTICS_USERNAME = username;
+      process.env.FORUM_DROBOTICS_PASSWORD = password;
+      forumSessionCookieCache = null;
+
+      const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
+      const auth = await resolveForumAuth(base, timeoutMs);
+
+      if (auth.mode !== "none") {
+        const timeout = withTimeout(timeoutMs);
+        try {
+          const res = await fetch(`${base}/latest.json?page=0`, {
+            method: "GET",
+            signal: timeout.signal,
+            headers: {
+              Accept: "application/json",
+              "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+              ...auth.headers,
+            },
+          });
+          if (res.ok) {
+            return [
+              `论坛凭据已保存并验证成功。`,
+              `用户名: ${username}`,
+              `密码: ***`,
+              `认证方式: ${auth.detail}`,
+              `论坛读取权限: 已确认`,
+              `现在可以使用 forum_drobotics_create_post 发帖。`,
+            ].join("\n");
+          }
+        } finally {
+          timeout.clear();
+        }
+      }
+
+      const reason = auth.mode === "none" ? auth.detail : "verify_failed";
+      return [
+        `论坛凭据已保存，但验证未通过。`,
+        `用户名: ${username}`,
+        `密码: ***`,
+        `原因: ${resolveAuthDetailText(reason)}`,
+        `建议: 请确认账号密码是否正确，或尝试浏览器登录 ${base} 后导出 Cookie。`,
+      ].join("\n");
+    },
+  };
+}
+
 function forumAuthStatusTool(options: ForumToolOptions): Tool<Record<string, never>> {
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   return {
@@ -594,6 +692,7 @@ function forumAuthStatusTool(options: ForumToolOptions): Tool<Record<string, nev
 
 export function createForumTools(options: ForumToolOptions = {}): Tool[] {
   return [
+    forumSetCredentialsTool(options),
     forumAuthStatusTool(options),
     forumLatestTool(options),
     forumTopicTool(options),

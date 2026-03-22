@@ -19,6 +19,7 @@ scheduler_template: forum_monitoring
 - 用户要代发技术帖、故障帖、复现帖、需求帖。
 
 ## 推荐工具
+- 对话配置凭据：`forum_drobotics_set_credentials`（用户提供账号密码时调用）
 - 鉴权自检：`forum_drobotics_auth_status`
 - 获取最新主题：`forum_drobotics_latest`
 - 查看主题与回复：`forum_drobotics_topic`
@@ -34,6 +35,8 @@ scheduler_template: forum_monitoring
 
 ## 发帖流程（强制）
 0. 先调用 `forum_drobotics_auth_status`，确认是否有论坛读写权限。
+   - 若未认证且用户已提供账号密码，立即调用 `forum_drobotics_set_credentials` 配置凭据。
+   - 若未认证且用户未提供凭据，提示用户在对话中告知论坛账号密码。
 1. 先向用户确认发帖目标：`新主题` 或 `回复已有主题`。
 2. 生成草稿：标题、背景、复现步骤、日志、期望结果、已尝试操作。
 3. 把草稿完整展示给用户确认。
@@ -47,7 +50,7 @@ scheduler_template: forum_monitoring
 ## 输出规范
 - 返回论坛 URL、主题 ID、关键回复摘要。
 - 发帖成功后必须返回 `topic_id` 与访问链接。
-- 如无权限发帖，明确提示需要配置论坛 API 凭据后再执行写操作。
+- 如无权限发帖，提示用户可在对话中直接告知论坛账号密码，或在设置面板中配置。
 
 ## 禁止事项
 - 未经用户确认直接发帖或回帖。
