@@ -39,6 +39,12 @@ export function createRdkTools(deviceId: string): Tool[] {
     boardOpenClawPairingRejectTool(deviceId),
     boardOpenClawLogsTool(deviceId),
     boardOpenClawRestartGatewayTool(deviceId),
+    boardOpenClawDoctorTool(deviceId),
+    boardOpenClawModelTestTool(deviceId),
+    boardOpenClawCheckTool(deviceId),
+    boardOpenClawHealthTool(deviceId),
+    boardOpenClawSkillsListTool(deviceId),
+    boardOpenClawSkillInstallTool(deviceId),
     deviceDiagnoseTool(deviceId),
     rosTopicsTool(deviceId),
     rosNodesTool(deviceId),
@@ -276,16 +282,20 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
 function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_uninstall',
-    description: '卸载板端 OpenClaw（官方 uninstall 优先，失败回退手动清理）。高风险操作，建议先确认。',
+    description: '彻底卸载板端 OpenClaw：停止服务 → 官方卸载 → 清理 systemd → 清除 ClawHub 登录态 → 删除配置/日志/缓存/临时文件 → 移除 npm 包。高风险操作，建议先确认。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
-      const cmd = [
-        'bash -lc',
-        '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
-        'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
-        '(openclaw uninstall --all --yes --non-interactive 2>&1 || ((openclaw gateway stop 2>/dev/null || true) && (openclaw gateway uninstall 2>/dev/null || true) && (systemctl --user stop openclaw-gateway 2>/dev/null || true) && (systemctl --user disable openclaw-gateway 2>/dev/null || true) && rm -rf ~/.openclaw 2>/dev/null || true));',
-        '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true);"',
-      ].join(' ');
+      const steps = [
+        'export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\"; export PATH=\\"$HOME/.npm-global/bin:$PATH\\"',
+        'echo \\"[1/6] 停止 gateway...\\"; (openclaw gateway stop 2>/dev/null || true); (systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+        'echo \\"[2/6] 官方卸载...\\"; (openclaw uninstall --all --yes --non-interactive 2>&1 || true)',
+        'echo \\"[3/6] 清理 systemd...\\"; (openclaw gateway uninstall 2>/dev/null || true); (systemctl --user disable openclaw-gateway 2>/dev/null || true); (rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true); (systemctl --user daemon-reload 2>/dev/null || true)',
+        'echo \\"[4/6] 清除 ClawHub 登录态...\\"; (clawhub logout 2>/dev/null || true)',
+        'echo \\"[5/6] 清理配置/日志/缓存...\\"; (rm -rf ~/.openclaw /tmp/openclaw-* /tmp/clawhub-* ~/.cache/openclaw ~/.local/share/openclaw 2>/dev/null || true)',
+        'echo \\"[6/6] 移除 npm 包...\\"; (npm rm -g openclaw 2>/dev/null || true); (npm rm -g clawhub 2>/dev/null || true)',
+        'echo \\"[OpenClaw] 卸载完成，已彻底清理\\"',
+      ];
+      const cmd = `bash -lc "${steps.join(' && ')}"`;
       return execOnDevice(deviceId, [cmd]);
     },
   };
@@ -486,6 +496,116 @@ function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, 
       return execOnDevice(deviceId, [
         'bash -lc "(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true) && (openclaw status || clawctl status || echo restarted)"',
       ]);
+    },
+  };
+}
+
+function boardOpenClawDoctorTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_doctor',
+    description: '在板端执行 openclaw doctor --fix，自动诊断并修复常见问题（配置、权限、daemon 等）。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      return execOnDevice(deviceId, [
+        'bash -lc "export PATH=\\"$HOME/.npm-global/bin:$PATH\\"; (openclaw doctor --fix --yes 2>&1 || openclaw doctor --fix 2>&1 || openclaw doctor 2>&1 || echo doctor_not_available)"',
+      ]);
+    },
+  };
+}
+
+function boardOpenClawModelTestTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_model_test',
+    description: '测试板端 OpenClaw 当前配置的模型是否可用（发送一条简单消息并检查是否有回复）。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      return execOnDevice(deviceId, [
+        `bash -lc 'export PATH="$HOME/.npm-global/bin:$PATH"; (openclaw message --message "reply OK" --timeout 30 2>&1 || openclaw message "reply OK" 2>&1 || echo MODEL_TEST_UNAVAILABLE)'`,
+      ]);
+    },
+  };
+}
+
+function boardOpenClawCheckTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_check',
+    description: '完整诊断板端 OpenClaw 环境：Node/npm 版本、安装状态、网关端口、配置（敏感字段已脱敏）、health。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const maskPy = `import json,os,sys;p=os.path.expanduser("~/.openclaw/openclaw.json");d=json.load(open(p));
+def mask(o):
+ if isinstance(o,dict):
+  return{k:("***" if any(s in k.lower() for s in ["key","token","secret","password"]) and isinstance(v,str) else mask(v)) for k,v in o.items()}
+ if isinstance(o,list):return[mask(i) for i in o]
+ return o
+print(json.dumps(mask(d),indent=2))`.replace(/\n/g, ';');
+      const cmds = [
+        'export PATH="$HOME/.npm-global/bin:$PATH"',
+        'echo "--- node ---"; node --version 2>&1 || echo not_installed',
+        'echo "--- npm ---"; npm --version 2>&1 || echo not_installed',
+        'echo "--- openclaw ---"; openclaw --version 2>&1 || echo not_installed',
+        'echo "--- gateway port ---"; (ss -lntp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep 18789 || echo port_not_listening',
+        'echo "--- health ---"; (openclaw health --json 2>&1 || openclaw status --all 2>&1 || echo no_health)',
+        `echo "--- config (keys masked) ---"; python3 -c "${maskPy}" 2>/dev/null || (openclaw config get 2>&1 || echo no_config)`,
+      ].join('; ');
+      return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
+    },
+  };
+}
+
+function boardOpenClawHealthTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_health',
+    description: '获取板端 OpenClaw 结构化健康状态（JSON 格式：installed、gatewayRunning、version、hasToken、aiReady 等）。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      return execOnDevice(deviceId, [
+        `bash -lc 'export PATH="$HOME/.npm-global/bin:$PATH"; (openclaw health --json 2>&1 || openclaw status --all --json 2>&1 || echo "{\\"installed\\":false}")'`,
+      ]);
+    },
+  };
+}
+
+function boardOpenClawSkillsListTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_skills_list',
+    description: '列出板端 OpenClaw 已安装的技能（clawhub list）和 plugins.allow 配置。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const cmds = [
+        'export PATH="$HOME/.npm-global/bin:$PATH"',
+        'echo "--- installed skills ---"; (clawhub list 2>&1 || openclaw skills list 2>&1 || echo no_skills)',
+        'echo "--- plugins.allow ---"; cat ~/.openclaw/openclaw.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get(\'plugins\',{}).get(\'allow\',[]),indent=2))" 2>/dev/null || echo no_plugins_config',
+      ].join('; ');
+      return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
+    },
+  };
+}
+
+function boardOpenClawSkillInstallTool(deviceId: string): Tool<{ skillId: string }> {
+  return {
+    name: 'board_openclaw_skill_install',
+    description: '在板端安装 OpenClaw 技能/插件（通过 clawhub install）。安装后自动添加到 plugins.allow 并重启 gateway。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        skillId: { type: 'string', description: '要安装的技能 ID，如 @anthropic/memory 或 github-user/skill-name' },
+      },
+      required: ['skillId'],
+    },
+    async execute(input) {
+      const id = input.skillId.replace(/[;&|`$()'"\\]/g, '');
+      const pyAdd = `import json,os;p=os.path.expanduser('~/.openclaw/openclaw.json');d=json.load(open(p)) if os.path.exists(p) else {};a=d.setdefault('plugins',{}).setdefault('allow',[]);x='${id}';a.append(x) if x not in a else None;json.dump(d,open(p,'w'),indent=2);print('added',x)`;
+      const cmds = [
+        'export PATH="$HOME/.npm-global/bin:$PATH"',
+        `echo "[OpenClaw] 安装技能 ${id}..."`,
+        `(clawhub install ${id} 2>&1 || echo install_failed)`,
+        'echo "[OpenClaw] 添加到 plugins.allow..."',
+        `python3 -c "${pyAdd}" 2>&1`,
+        '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true)',
+        'echo "[OpenClaw] 技能安装完成"',
+      ].join('; ');
+      return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
     },
   };
 }

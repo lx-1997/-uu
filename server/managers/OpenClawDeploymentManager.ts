@@ -486,10 +486,34 @@ export class OpenClawDeploymentManager {
     const cmd = [
       BOARD_ENV_EXPORT,
       'echo "[OpenClaw] 开始卸载..."',
-      // 优先官方卸载流程，失败回退手动清理。
-      '(openclaw uninstall --all --yes --non-interactive 2>&1 || (openclaw gateway stop 2>/dev/null || true) && (openclaw gateway uninstall 2>/dev/null || true) && (systemctl --user stop openclaw-gateway 2>/dev/null || true) && (systemctl --user disable openclaw-gateway 2>/dev/null || true) && rm -rf ~/.openclaw 2>/dev/null || true)',
+
+      'echo "[1/6] 停止 gateway 服务..."',
+      '(openclaw gateway stop 2>/dev/null || true)',
+      '(systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+
+      'echo "[2/6] 执行官方卸载..."',
+      '(openclaw uninstall --all --yes --non-interactive 2>&1 || true)',
+
+      'echo "[3/6] 卸载 systemd 服务..."',
+      '(openclaw gateway uninstall 2>/dev/null || true)',
+      '(systemctl --user disable openclaw-gateway 2>/dev/null || true)',
+      '(rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true)',
+      '(systemctl --user daemon-reload 2>/dev/null || true)',
+
+      'echo "[4/6] 清除 ClawHub 登录态..."',
+      '(clawhub logout 2>/dev/null || true)',
+
+      'echo "[5/6] 清理配置、日志和临时文件..."',
+      '(rm -rf ~/.openclaw 2>/dev/null || true)',
+      '(rm -rf /tmp/openclaw-* /tmp/clawhub-* 2>/dev/null || true)',
+      '(rm -rf ~/.cache/openclaw 2>/dev/null || true)',
+      '(rm -rf ~/.local/share/openclaw 2>/dev/null || true)',
+
+      'echo "[6/6] 移除全局 npm 包..."',
       '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true)',
-      'echo "[OpenClaw] 卸载完成"'
+      '(npm rm -g clawhub 2>/dev/null || true)',
+
+      'echo "[OpenClaw] 卸载完成，已彻底清理"',
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 0 });
   }

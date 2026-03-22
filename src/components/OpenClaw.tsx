@@ -466,10 +466,17 @@ export default function OpenClaw() {
     setStatusLoading(true);
     try {
       const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/status`);
+      if (!res.ok) {
+        addToast?.(`获取状态失败: HTTP ${res.status}`, 'error');
+        return null;
+      }
       const data = await res.json();
       setStatus(data);
       return data;
-    } catch { return null; } finally {
+    } catch (e: any) {
+      addToast?.(`获取状态失败: ${e?.message || '网络错误'}`, 'error');
+      return null;
+    } finally {
       setStatusLoading(false);
     }
   };
@@ -488,6 +495,11 @@ export default function OpenClaw() {
     if (!currentDevice) return null;
     try {
       const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/config`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        addToast?.(`加载配置失败: ${errBody.error || `HTTP ${res.status}`}`, 'error');
+        return null;
+      }
       const data = await res.json();
       setConfig(data);
       if (data.modelGateway) setModelConfig(data.modelGateway);
@@ -504,7 +516,10 @@ export default function OpenClaw() {
       }
       if (Array.isArray(data.pluginsAllow)) setSkillPluginsAllowText(data.pluginsAllow.join('\n'));
       return data;
-    } catch { return null; }
+    } catch (e: any) {
+      addToast?.(`加载配置失败: ${e?.message || '网络错误'}`, 'error');
+      return null;
+    }
   };
 
   const appendSystemMessage = (text: string) => {
@@ -686,7 +701,7 @@ export default function OpenClaw() {
         body: JSON.stringify({ config: payload }),
       });
       const result = await res.json();
-      if (result.ok === false) {
+      if (!res.ok || result.ok === false) {
         addToast?.(`保存失败: ${result.output || result.error || '未知错误'}`, 'error');
       } else {
         addToast?.('配置已保存，Gateway 已重启', 'success');
@@ -744,7 +759,7 @@ export default function OpenClaw() {
         body: JSON.stringify({ config: { modelGateway: { ...modelConfig, modelId } } }),
       });
       const result = await res.json();
-      if (result.ok === false) {
+      if (!res.ok || result.ok === false) {
         addToast?.(`切换失败: ${result.output || result.error || '未知错误'}`, 'error');
       } else {
         addToast?.(`已切换到 ${modelId}`, 'success');
@@ -831,12 +846,20 @@ export default function OpenClaw() {
     if (!currentDevice) return;
     try {
       const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/skills`);
+      if (!res.ok) {
+        addToast?.(`获取技能列表失败: HTTP ${res.status}`, 'error');
+        return;
+      }
       const data = await res.json();
       if (data.ok) {
         setBoardSkills(data.skills || []);
         setBoardPlugins(data.plugins || []);
+      } else {
+        addToast?.(`获取技能列表失败: ${data.error || '未知错误'}`, 'error');
       }
-    } catch { /* silent */ }
+    } catch (e: any) {
+      addToast?.(`获取技能列表失败: ${e?.message || '网络错误'}`, 'error');
+    }
   };
 
   const togglePluginAllow = (pluginId: string) => {

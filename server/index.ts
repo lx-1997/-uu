@@ -3108,6 +3108,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    if (openclawChatSession) {
+      openclawChatSession.abort();
+      openclawChatSession = null;
+    }
     sshStream?.end();
     sshClient?.end();
   });
