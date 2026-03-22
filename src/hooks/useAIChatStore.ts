@@ -153,6 +153,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const commandLockRef = useRef(false);
   const currentRunIdRef = useRef('');
   const streamAbortRef = useRef<null | (() => void)>(null);
+  const streamGenerationRef = useRef(0);
   const toolTimelineRef = useRef<Record<string, {
     toolName: string;
     executor: string;
@@ -213,6 +214,33 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     }).join(' | ');
   };
 
+  const abortInFlightRun = (announce: boolean) => {
+    const runId = currentRunIdRef.current;
+    // Bump generation so stale stream callbacks/finally won't clobber new run state.
+    streamGenerationRef.current += 1;
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    if (runId) {
+      cancelRDKClawRun(runId).catch(() => null);
+    }
+    currentRunIdRef.current = '';
+    commandLockRef.current = false;
+    setAiTyping(false);
+    if (announce) {
+      setChatMessages((prev) => [...prev, {
+        id: Date.now(),
+        role: 'ai',
+        text: '',
+        blocks: [{
+          type: 'task-result',
+          success: false,
+          title: '已停止当前执行',
+          detail: runId ? `runId: ${runId}` : '已中断当前流式响应',
+        }],
+      }]);
+    }
+  };
+
   // ── Main command handler ──
   const handleCommand = (
     e: React.FormEvent,
@@ -226,7 +254,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     const userMsg = String(options?.messageOverride ?? cmd).trim();
     const requestAttachments = options?.attachments ?? [];
     const displayAttachments = options?.displayAttachments ?? [];
-    if ((!userMsg && requestAttachments.length === 0) || commandLockRef.current) return;
+    if (!userMsg && requestAttachments.length === 0) return;
+    // 抢占式执行：新指令优先，先中止旧任务再开始当前任务。
+    if (commandLockRef.current || aiTyping) {
+      abortInFlightRun(false);
+    }
     const requestMessage = userMsg || '请结合我刚上传的附件继续处理当前请求。';
     const transcriptText = displayAttachments
       .map((attachment) => attachment.transcript?.trim())
@@ -250,6 +282,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     commandLockRef.current = true;
 
     (async () => {
+      const generation = ++streamGenerationRef.current;
       try {
         // /settings — quick command to open settings
         if (requestAttachments.length === 0 && userMsg === '/settings') {
@@ -341,6 +374,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           if (phase === 'error') return '失败';
           return '执行中';
         };
+        const resolveDecisionSourceLabel = (source: string) => {
+          if (source === 'user_mode') return '用户指定';
+          if (source === 'skill_policy') return '技能策略';
+          if (source === 'policy_rule') return '规则命中';
+          if (source === 'persona') return '人格/策略配置';
+          return '默认策略';
+        };
+        let toolStepNo = 0;
 
         const { done, abort } = streamAgentChat(
           requestMessage,
@@ -348,6 +389,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           sessionIdRef.current,
           requestAttachments,
           (event: AgentSSEEvent) => {
+            if (generation !== streamGenerationRef.current) return;
             switch (event.type) {
               case 'meta': {
                 currentRunId = String(event.data.runId || currentRunId || '');
@@ -361,6 +403,15 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const newAttachmentsCount = Number(event.data.new_attachments_count || 0);
                 const audioTranscriptCount = Number(event.data.audio_transcript_count || 0);
                 const newAudioTranscriptCount = Number(event.data.new_audio_transcript_count || 0);
+                const decisionSource = String(event.data.decision_source || 'default');
+                const decisionReason = String(event.data.decision_reason || '未提供');
+                const confidenceRaw = Number(event.data.confidence || 0);
+                const confidence = Number.isFinite(confidenceRaw)
+                  ? `${Math.round(Math.max(0, Math.min(1, confidenceRaw)) * 100)}%`
+                  : 'N/A';
+                const matchedSkills = Array.isArray(event.data.matched_skills)
+                  ? (event.data.matched_skills as string[]).filter(Boolean)
+                  : [];
                 const attachmentTypes = Array.isArray(event.data.attachment_types)
                   ? (event.data.attachment_types as string[]).filter(Boolean).join(' / ')
                   : '';
@@ -380,6 +431,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       value: networkEnabled ? `已启用 · 上限 ${networkMaxFetchChars || 0} chars` : '已禁用',
                       ok: networkEnabled,
                     },
+                    {
+                      label: '调度决策',
+                      value: `${resolveDecisionSourceLabel(decisionSource)} · 置信度 ${confidence} · ${decisionReason}`,
+                      ok: true,
+                    },
+                    {
+                      label: '命中能力',
+                      value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '无明显技能命中，按通用流程执行',
+                      ok: matchedSkills.length > 0,
+                    },
                   ],
                 });
                 updateAiMessage(aiText, aiBlocks);
@@ -391,6 +452,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'tool_start': {
+                toolStepNo += 1;
                 const toolName = resolveToolName(event.data);
                 const args = event.data.args as Record<string, unknown>;
                 const executor = String(event.data.executor || (toolName === 'board_openclaw_delegate' ? 'board_openclaw' : 'rdkclaw_local'));
@@ -400,7 +462,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 aiBlocks.push({
                   type: 'status',
                   items: [
-                    { label: `${toolName} · ${executorLabel(executor)}`, value: `${phase}... ${argStr}`, ok: true },
+                    { label: `第 ${toolStepNo} 步 · ${toolName} · ${executorLabel(executor)}`, value: `${phase}... ${argStr}`, ok: true },
                   ],
                 });
                 const toolCallId = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
@@ -503,6 +565,31 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
+              case 'turn_start': {
+                const turn = Number(event.data.turn || 0);
+                aiBlocks.push({
+                  type: 'status',
+                  items: [{ label: '思考轮次', value: `第 ${Math.max(1, turn)} 轮开始`, ok: true }],
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'turn_end': {
+                const turn = Number(event.data.turn || 0);
+                aiBlocks.push({
+                  type: 'status',
+                  items: [{ label: '思考轮次', value: `第 ${Math.max(1, turn)} 轮结束`, ok: true }],
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'message_end': {
+                if (!aiText.trim()) {
+                  aiText = String(event.data.text || '');
+                }
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
               case 'approval_required': {
                 const approvalId = String(event.data.approvalId || '');
                 if (!approvalId) break;
@@ -571,11 +658,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         streamAbortRef.current = abort;
 
         await done;
+        if (generation !== streamGenerationRef.current) return;
         setAiTyping(false);
       } finally {
-        streamAbortRef.current = null;
-        currentRunIdRef.current = '';
-        commandLockRef.current = false;
+        if (generation === streamGenerationRef.current) {
+          streamAbortRef.current = null;
+          currentRunIdRef.current = '';
+          commandLockRef.current = false;
+        }
       }
     })();
   };
@@ -613,25 +703,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const stopCurrentRun = () => {
-    const runId = currentRunIdRef.current;
-    streamAbortRef.current?.();
-    streamAbortRef.current = null;
-    if (runId) {
-      cancelRDKClawRun(runId).catch(() => null);
-    }
-    setAiTyping(false);
-    commandLockRef.current = false;
-    setChatMessages((prev) => [...prev, {
-      id: Date.now(),
-      role: 'ai',
-      text: '',
-      blocks: [{
-        type: 'task-result',
-        success: false,
-        title: '已停止当前执行',
-        detail: runId ? `runId: ${runId}` : '已中断当前流式响应',
-      }],
-    }]);
+    abortInFlightRun(true);
   };
 
   // ── Effects ──
@@ -663,6 +735,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           chatId?: string;
           messageId?: string;
           sessionId?: string;
+          mirrorId?: string;
+          rdkEventKind?: 'tool_start' | 'tool_progress' | 'tool_result';
+          toolName?: string;
+          toolCallId?: string;
+          executor?: 'board_openclaw' | 'rdkclaw_local' | string;
+          isError?: boolean;
         };
       }>;
       const detail = e.detail ?? {};
@@ -678,10 +756,44 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           sessionIdRef.current = payload.sessionId;
           reportActiveSession('feishu-mirror-switch');
         }
-        const dedupKey = `${payload.messageId || ''}:${detail.type || ''}:${payload.direction || ''}`;
+        const dedupKey = payload.mirrorId
+          ? String(payload.mirrorId)
+          : `${payload.messageId || ''}:${detail.type || ''}:${payload.direction || ''}`;
         if (dedupKey !== '::' && feishuMirrorSeenRef.current.has(dedupKey)) return;
         if (dedupKey !== '::') feishuMirrorSeenRef.current.add(dedupKey);
         setChatExpanded(true);
+        const executorLabel = payload.executor === 'board_openclaw' ? '板端 OpenClaw' : payload.executor ? String(payload.executor) : 'RDKClaw';
+        if (payload.rdkEventKind === 'tool_start' || payload.rdkEventKind === 'tool_progress' || payload.rdkEventKind === 'tool_result') {
+          const phaseText = payload.rdkEventKind === 'tool_start'
+            ? '开始执行'
+            : payload.rdkEventKind === 'tool_progress'
+              ? '执行中'
+              : (payload.isError ? '执行失败' : '执行完成');
+          const toolName = payload.toolName || 'unknown_tool';
+          setChatMessages((prev) => [
+            ...prev,
+            {
+              id: ts + 1,
+              role: 'ai',
+              text: '',
+              source: 'studio',
+              blocks: [
+                {
+                  type: 'status',
+                  items: [{ label: `飞书流程 · ${toolName} · ${executorLabel}`, value: `${phaseText} · ${message}`, ok: payload.rdkEventKind !== 'tool_result' || !payload.isError }],
+                },
+              ],
+              channelMeta: {
+                channel: 'feishu',
+                direction: payload.direction,
+                openIdMasked: payload.openIdMasked,
+                chatId: payload.chatId,
+                messageId: payload.messageId,
+              },
+            },
+          ]);
+          return;
+        }
         if (payload.direction === 'ack' || payload.direction === 'error') {
           const label = payload.direction === 'error' ? '飞书通道' : '飞书回执';
           setChatMessages((prev) => [

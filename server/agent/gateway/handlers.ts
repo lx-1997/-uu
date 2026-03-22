@@ -54,18 +54,29 @@ function safeEqual(a: string, b: string): boolean {
 // ============== connect ==============
 
 const handleConnect: Handler = async (params, client, ctx) => {
-  const p = params as { token?: string; nonce?: string } | undefined;
+  const p = params as {
+    token?: string;
+    nonce?: string;
+    auth?: { token?: string };
+    device?: { nonce?: string; id?: string };
+    minProtocol?: number;
+    maxProtocol?: number;
+    client?: { id?: string; version?: string; platform?: string; mode?: string };
+    role?: string;
+    scopes?: string[];
+  } | undefined;
 
-  // token 验证（对齐 openclaw auth.ts: timingSafeEqual 防计时攻击）
+  const authToken = p?.auth?.token || p?.token || '';
+  const challengeNonce = p?.device?.nonce || p?.nonce || '';
+
   if (ctx.token) {
-    if (!p?.token || !safeEqual(p.token, ctx.token)) {
+    if (!authToken || !safeEqual(authToken, ctx.token)) {
       return { ok: false, error: errorShape(ErrorCodes.UNAUTHORIZED, "invalid token") };
     }
   }
 
-  // nonce 验证（对齐 openclaw challenge-response）
   const expectedNonce = ctx.nonces.get(client.id);
-  if (expectedNonce && p?.nonce !== expectedNonce) {
+  if (expectedNonce && challengeNonce !== expectedNonce) {
     return { ok: false, error: errorShape(ErrorCodes.UNAUTHORIZED, "nonce mismatch") };
   }
   ctx.nonces.delete(client.id);

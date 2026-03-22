@@ -81,8 +81,157 @@ const CLAWHUB_AUTO_LOGIN_CMD = [
 ].join(' && ');
 const BOARD_ENV_EXPORT = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH"';
 const RESTART_GATEWAY_FALLBACK = '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true)';
-const RUN_DOCTOR = '(openclaw doctor --yes 2>&1 || openclaw doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查")';
+const START_GATEWAY_FALLBACK = '(openclaw gateway start 2>&1 || openclaw start 2>&1 || clawctl start 2>&1 || true)';
+const ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64 = Buffer.from(`
+import json
+import os
+
+p = os.path.expanduser("~/.openclaw/openclaw.json")
+os.makedirs(os.path.dirname(p), exist_ok=True)
+
+try:
+    with open(p, "r", encoding="utf-8") as f:
+        d = json.load(f)
+except Exception:
+    d = {}
+
+g = d.get("gateway") if isinstance(d.get("gateway"), dict) else {}
+g["mode"] = "local"
+g["bind"] = "loopback"
+d["gateway"] = g
+
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(d, f, indent=2, ensure_ascii=False)
+
+print("[OpenClaw] gateway.mode=local, gateway.bind=loopback")
+`.trim(), 'utf8').toString('base64');
+
+const ENSURE_GATEWAY_LOCAL_MODE = [
+  'echo "[OpenClaw] 确保 gateway.mode=local 与 bind=loopback"',
+  `echo '${ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_mode.py`,
+  'python3 /tmp/oc_fix_gateway_mode.py 2>&1 || echo "[OpenClaw] gateway mode 修复失败"',
+].join(' && ');
+const RUN_DOCTOR = '(openclaw doctor --fix --yes 2>&1 || openclaw doctor --fix 2>&1 || openclaw doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查")';
 const RUN_HEALTH = '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || true)';
+const SUPPORTED_OPENCLAW_APIS = new Set([
+  'openai-completions',
+  'anthropic-messages',
+]);
+
+function normalizeOpenClawApi(raw: unknown): string {
+  const value = String(raw || '').trim();
+  if (!value) return 'openai-completions';
+  if (value === 'openai-chat') return 'openai-completions';
+  if (value === 'openai-responses' || value === 'openai-codex-responses') return 'openai-completions';
+  if (value === 'google-genai' || value === 'google-generative-ai') return 'openai-completions';
+  if (value === 'anthropic-messages') return 'anthropic-messages';
+  if (SUPPORTED_OPENCLAW_APIS.has(value)) return value;
+  return 'openai-completions';
+}
+
+/**
+ * Shared Node.js preamble for OpenClaw Gateway v3 WebSocket connections.
+ * Generates an Ed25519 keypair, reads the gateway token, signs the challenge nonce,
+ * and completes the connect handshake. Scripts append their own logic via
+ * onConnected / onConnectFailed / onFrame callbacks.
+ */
+const OPENCLAW_WS_CONNECT_HELPER = `
+const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
+
+if (typeof WebSocket === 'undefined') {
+  console.error('WebSocket runtime unavailable (requires Node >= 22)');
+  process.exit(1);
+}
+
+let token = '';
+try {
+  const cfgPath = process.env.HOME + '/.openclaw/openclaw.json';
+  if (fs.existsSync(cfgPath)) {
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    token = (((cfg.gateway || {}).auth || {}).token || '').trim();
+  }
+} catch {}
+
+const IDENTITY_PATH = process.env.HOME + '/.openclaw/.rdkstudio-device.json';
+let deviceIdentity;
+try {
+  if (fs.existsSync(IDENTITY_PATH)) {
+    deviceIdentity = JSON.parse(fs.readFileSync(IDENTITY_PATH, 'utf8'));
+  }
+} catch {}
+if (!deviceIdentity || !deviceIdentity.publicKey || !deviceIdentity.privateKey) {
+  const kp = crypto.generateKeyPairSync('ed25519');
+  const pubRaw = kp.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32);
+  const pubB64 = Buffer.from(pubRaw).toString('base64url');
+  const devId = crypto.createHash('sha256').update(pubRaw).digest('hex');
+  const privPem = kp.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  deviceIdentity = { id: devId, publicKey: pubB64, privateKey: privPem };
+  try { fs.mkdirSync(os.path.dirname ? require('path').dirname(IDENTITY_PATH) : (process.env.HOME + '/.openclaw'), { recursive: true }); } catch {}
+  try { fs.writeFileSync(IDENTITY_PATH, JSON.stringify(deviceIdentity), 'utf8'); } catch {}
+}
+
+const CLIENT_ID = 'cli';
+const CLIENT_MODE = 'cli';
+const ROLE = 'operator';
+const SCOPES = ['operator.read', 'operator.write', 'operator.admin', 'operator.approvals', 'operator.pairing'];
+
+function signChallenge(nonce, ts) {
+  const signingToken = token || '';
+  const payload = ['v2', deviceIdentity.id, CLIENT_ID, CLIENT_MODE, ROLE, SCOPES.join(','), String(ts), signingToken, nonce].join('|');
+  const privKey = crypto.createPrivateKey(deviceIdentity.privateKey);
+  const sig = crypto.sign(null, Buffer.from(payload), privKey);
+  return {
+    id: deviceIdentity.id,
+    publicKey: deviceIdentity.publicKey,
+    signature: Buffer.from(sig).toString('base64url'),
+    signedAt: ts,
+    nonce: nonce,
+  };
+}
+
+function buildConnectParams(nonce, ts) {
+  const params = {
+    minProtocol: 3,
+    maxProtocol: 3,
+    client: { id: CLIENT_ID, version: '1.0.0', platform: os.platform(), mode: CLIENT_MODE },
+    role: ROLE,
+    scopes: SCOPES,
+    device: signChallenge(nonce, ts),
+    locale: 'zh-CN',
+    userAgent: 'rdkstudio/1.0.0',
+    caps: ['agent-events', 'tool-events'],
+  };
+  if (token) params.auth = { token };
+  return params;
+}
+
+let onConnected = () => {};
+let onConnectFailed = (msg) => { console.error(msg); process.exit(1); };
+let onFrame = () => {};
+
+const connectId = 'connect-' + Math.random().toString(16).slice(2);
+const ws = new WebSocket('ws://127.0.0.1:18789');
+
+ws.onmessage = (ev) => {
+  let frame;
+  try { frame = JSON.parse(typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString('utf8')); } catch { return; }
+  if (!frame) return;
+  if (frame.type === 'event' && frame.event === 'connect.challenge') {
+    const nonce = (frame.payload && frame.payload.nonce) ? String(frame.payload.nonce) : '';
+    const ts = (frame.payload && frame.payload.ts) ? Number(frame.payload.ts) : Date.now();
+    ws.send(JSON.stringify({ type: 'req', id: connectId, method: 'connect', params: buildConnectParams(nonce, ts) }));
+    return;
+  }
+  if (frame.type === 'res' && frame.id === connectId) {
+    if (!frame.ok) { onConnectFailed((frame.error && frame.error.message) || 'connect failed'); return; }
+    onConnected();
+    return;
+  }
+  onFrame(frame);
+};
+`;
 
 const NPM_INSTALL_CMD = [
   BOARD_ENV_EXPORT,
@@ -90,6 +239,7 @@ const NPM_INSTALL_CMD = [
   // 优先官方安装脚本，失败回退 npm latest
   '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 安装失败，重试 $i/3..."; sleep 10; done))',
   CLAWHUB_AUTO_LOGIN_CMD,
+  ENSURE_GATEWAY_LOCAL_MODE,
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
@@ -98,12 +248,22 @@ const NPM_INSTALL_CMD = [
 ].join(' && ');
 
 const GATEWAY_RESTART_CMD = `${BOARD_ENV_EXPORT} && ${RESTART_GATEWAY_FALLBACK} && echo "[OpenClaw] Gateway 已重启"`;
+const GATEWAY_PORT_CHECK = `python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_STREAM); s.settimeout(1.0); ok=(s.connect_ex(("127.0.0.1",18789))==0); s.close(); print("OPEN" if ok else "CLOSED")'`;
+const GATEWAY_DIAG_LOGS = [
+  'echo "--- openclaw logs ---"',
+  '(openclaw logs --limit 200 2>&1 || true)',
+  'echo "--- journalctl (user/openclaw-gateway) ---"',
+  '(journalctl --user -u openclaw-gateway --no-pager -n 120 2>&1 || true)',
+  'echo "--- /tmp/openclaw log files ---"',
+  '(ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 3 | while read f; do echo "=== $f ==="; tail -n 120 "$f" 2>/dev/null || true; done || true)',
+].join(' ; ');
 
 const NPM_UPGRADE_CMD = [
   BOARD_ENV_EXPORT,
   'echo "[OpenClaw] 开始升级（官方推荐流程）..."',
   // 优先 CLI update，失败回退 npm latest
   '(openclaw update --no-restart 2>&1 || openclaw update 2>&1 || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 10; done))',
+  ENSURE_GATEWAY_LOCAL_MODE,
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
@@ -252,7 +412,8 @@ export class OpenClawDeploymentManager {
       'openclaw --version 2>&1 || echo "openclaw 未安装"',
       'echo ""',
       'echo "--- Gateway 状态 ---"',
-      'openclaw gateway status 2>&1 || echo "gateway status 不可用"',
+      `${GATEWAY_PORT_CHECK} 2>/dev/null || echo "CLOSED"`,
+      '(systemctl --user status openclaw-gateway --no-pager -n 20 2>&1 || true)',
       'echo ""',
       'echo "--- Health ---"',
       'openclaw health 2>&1 || echo "health 不可用"',
@@ -282,9 +443,11 @@ export class OpenClawDeploymentManager {
       'npm config set prefix "$HOME/.npm-global" 2>/dev/null ; npm config set fund false 2>/dev/null ; npm config set update-notifier false 2>/dev/null ; echo "npm 配置完成"',
       'echo "--- 检查 openclaw ---"',
       'openclaw --version 2>&1 || echo "openclaw 尚未安装（可点击安装按钮）"',
+      'echo "--- 修复网关模式 ---"',
+      ENSURE_GATEWAY_LOCAL_MODE,
       'echo "=== 准备完成 ==="',
     ].join(' ; ');
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000 });
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
   }
 
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -468,7 +631,7 @@ print(json.dumps(result, ensure_ascii=False))`;
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {
     const pyScript = `import json,os
 p=os.path.expanduser('~/.openclaw/openclaw.json')
-result={"modelGateway":{"baseUrl":"","apiKey":"","api":"anthropic-messages","modelId":"qwen3.5-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
+result={"modelGateway":{"baseUrl":"","apiKey":"","api":"openai-completions","modelId":"qwen3.5-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
 if os.path.exists(p):
   d=json.load(open(p))
   provider=((d.get('models') or {}).get('providers') or {}).get('custom-gateway') or {}
@@ -484,7 +647,12 @@ if os.path.exists(p):
   runtime_provider_cfg=((d.get('models') or {}).get('providers') or {}).get(runtime_provider) or {}
   if isinstance(runtime_provider_cfg,dict):
     runtime_api_key=runtime_provider_cfg.get('apiKey','') or ''
-  result["modelGateway"].update({"baseUrl":provider.get('baseUrl','') or '',"apiKey":provider.get('apiKey','') or '',"api":provider.get('api','anthropic-messages') or 'anthropic-messages',"modelId":model.get('id','qwen3.5-plus') or 'qwen3.5-plus',"modelName":model.get('name','Custom Model') or 'Custom Model'})
+  api_value=(provider.get('api','openai-completions') or 'openai-completions')
+  if api_value=='openai-chat':
+    api_value='openai-completions'
+  elif api_value=='google-genai':
+    api_value='google-generative-ai'
+  result["modelGateway"].update({"baseUrl":provider.get('baseUrl','') or '',"apiKey":provider.get('apiKey','') or '',"api":api_value,"modelId":model.get('id','qwen3.5-plus') or 'qwen3.5-plus',"modelName":model.get('name','Custom Model') or 'Custom Model'})
   result["feishu"].update({
     "appId":feishu.get('appId','') or '',
     "appSecret":feishu.get('appSecret','') or '',
@@ -551,7 +719,7 @@ print(json.dumps(result,ensure_ascii=False))`;
           'custom-gateway': {
             baseUrl: config.modelGateway.baseUrl,
             apiKey: config.modelGateway.apiKey,
-            api: config.modelGateway.api || 'anthropic-messages',
+            api: normalizeOpenClawApi(config.modelGateway.api),
             models: [{
               id: config.modelGateway.modelId || 'qwen3.5-plus',
               name: config.modelGateway.modelName || 'Custom Model',
@@ -610,6 +778,8 @@ print('[OpenClaw] 配置已更新')`;
     const cmd = [
       'export PATH="$HOME/.npm-global/bin:$PATH"',
       `echo '${base64Script}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}'`,
+      ENSURE_GATEWAY_LOCAL_MODE,
+      RUN_DOCTOR,
       '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart)',
       'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
     ].join(' && ');
@@ -617,7 +787,16 @@ print('[OpenClaw] 配置已更新')`;
   }
 
   runRestartGateway(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const cmd = 'export PATH="$HOME/.npm-global/bin:$PATH" && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart) && echo "[OpenClaw] Gateway 已重启"';
+    const cmd = [
+      'export PATH="$HOME/.npm-global/bin:$PATH"',
+      ENSURE_GATEWAY_LOCAL_MODE,
+      '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true)',
+      'echo "[OpenClaw] Gateway 重启命令已执行，等待端口就绪..."',
+      `ok=0; for i in 1 2 3 4 5 6; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
+      `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${START_GATEWAY_FALLBACK}; fi`,
+      `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
+      `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
+    ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete);
   }
 
@@ -627,8 +806,78 @@ print('[OpenClaw] 配置已更新')`;
   }
 
   runDoctor(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const cmd = 'export PATH="$HOME/.npm-global/bin:$PATH" && (openclaw doctor 2>&1 || echo "[OpenClaw] doctor 命令不可用，可能未安装")';
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 30000 });
+    const cmd = `export PATH="$HOME/.npm-global/bin:$PATH" && ${ENSURE_GATEWAY_LOCAL_MODE} && (openclaw doctor --fix 2>&1 || openclaw doctor 2>&1 || echo "[OpenClaw] doctor 命令不可用，可能未安装")`;
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000 });
+  }
+
+  runModelTest(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
+    const jsScript = OPENCLAW_WS_CONNECT_HELPER + `
+
+const sessionKey = 'model-test-' + Date.now();
+const prompt = '请只回复一个词：OK';
+let text = '';
+let done = false;
+const sendId = 'send-' + Math.random().toString(16).slice(2);
+
+function finish(ok, payload) {
+  if (done) return;
+  done = true;
+  try { ws.close(); } catch {}
+  if (ok) {
+    process.stdout.write('MODEL_TEST_OK\\n');
+    process.stdout.write(String(payload || '').trim() + '\\n');
+    process.exit(0);
+  }
+  process.stderr.write('MODEL_TEST_FAIL: ' + String(payload || 'unknown') + '\\n');
+  process.exit(1);
+}
+
+const timer = setTimeout(() => finish(false, 'timeout waiting gateway response'), 90000);
+
+onConnected = () => {
+  ws.send(JSON.stringify({
+    type: 'req', id: sendId, method: 'chat.send',
+    params: { sessionKey, message: prompt, idempotencyKey: 'mt-' + Date.now() + '-' + Math.random().toString(36).slice(2) },
+  }));
+};
+onConnectFailed = (msg) => { clearTimeout(timer); finish(false, msg); };
+
+onFrame = (frame) => {
+  if (frame.type === 'res' && frame.id === sendId && !frame.ok) {
+    return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+  }
+  if (frame.type !== 'event') return;
+  process.stderr.write('[DEBUG] event=' + frame.event + ' keys=' + JSON.stringify(Object.keys(frame.payload || {})) + ' payload=' + JSON.stringify(frame.payload).slice(0, 500) + '\\n');
+  const p = frame.payload || {};
+  const stream = p.stream;
+  const d = p.data || {};
+  // v3: stream-based events
+  if (stream === 'assistant') { const chunk = d.delta || d.text || ''; if (chunk) text += chunk; return; }
+  if (stream === 'thinking') return;
+  if (stream === 'lifecycle') {
+    if (d.phase === 'end') { clearTimeout(timer); return finish(!!text.trim(), text || 'empty response'); }
+    if (d.phase === 'error') { clearTimeout(timer); return finish(false, d.error || d.message || 'lifecycle error'); }
+    return;
+  }
+  // legacy fallback
+  if (p.state === 'delta' && typeof p.text === 'string') { text += p.text; return; }
+  if (p.state === 'final') { clearTimeout(timer); return finish(!!(p.text || text).trim(), p.text || text || 'empty final'); }
+  if (p.state === 'error') { clearTimeout(timer); return finish(false, p.error || 'chat error'); }
+  if (p.type === 'message_delta' && typeof p.delta === 'string') { text += p.delta; return; }
+  if (p.type === 'message_end') { clearTimeout(timer); return finish(!!(p.text || text).trim(), p.text || text || 'empty'); }
+  if (p.type === 'agent_error') { clearTimeout(timer); return finish(false, p.error || 'agent error'); }
+};
+
+ws.onerror = () => { clearTimeout(timer); finish(false, 'websocket error'); };
+ws.onclose = () => { if (!done) { clearTimeout(timer); finish(!!text.trim(), text || 'websocket closed unexpectedly'); } };
+`;
+    const jsB64 = Buffer.from(jsScript, 'utf8').toString('base64');
+    const cmd = [
+      'export PATH="$HOME/.npm-global/bin:$PATH"',
+      `echo '${jsB64}' | base64 -d > /tmp/oc_model_test.js`,
+      'node /tmp/oc_model_test.js',
+    ].join(' && ');
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000, pty: false });
   }
 
   runScriptInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -649,7 +898,7 @@ print('[OpenClaw] 配置已更新')`;
     const maxLines = Number.isFinite(limit) ? Math.max(20, Math.min(1000, Math.floor(limit))) : 200;
     const cmd = [
       BOARD_ENV_EXPORT,
-      `(openclaw logs --limit ${maxLines} 2>&1 || journalctl --user -u openclaw-gateway --no-pager -n ${maxLines} 2>&1 || echo "[OpenClaw] 暂无日志")`,
+      `echo "--- openclaw logs ---" ; (openclaw logs --limit ${maxLines} 2>&1 || true) ; echo "--- journalctl ---" ; (journalctl --user -u openclaw-gateway --no-pager -n ${maxLines} 2>&1 || true) ; echo "--- /tmp/openclaw ---" ; (ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 3 | while read f; do echo "=== $f ==="; tail -n ${Math.max(40, Math.min(300, Math.floor(maxLines / 2)))} "$f" 2>/dev/null || true; done || true)`,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000, pty: false });
   }
@@ -766,132 +1015,82 @@ print('[OpenClaw] 配置已更新')`;
   ): { abort: () => void } {
     const messageBase64 = Buffer.from(message, 'utf8').toString('base64');
     const sessionBase64 = Buffer.from(sessionId || 'main', 'utf8').toString('base64');
-    const pyScript = `import base64, json, os, sys, urllib.request, urllib.error, subprocess
+    const wsScript = OPENCLAW_WS_CONNECT_HELPER + `
 
-msg = base64.b64decode(sys.argv[1]).decode('utf-8', 'ignore')
-session = base64.b64decode(sys.argv[2]).decode('utf-8', 'ignore') or 'main'
+const decode = (s) => Buffer.from(String(s || ''), 'base64').toString('utf8');
+const message = decode(process.argv[1]).trim();
+const sessionKey = decode(process.argv[2]) || 'main';
+if (!message) { console.error('__OPENCLAW_WS_FAILED__'); console.error('empty message'); process.exit(1); }
 
-cfg = {}
-try:
-  p = os.path.expanduser('~/.openclaw/openclaw.json')
-  if os.path.exists(p):
-    with open(p, 'r', encoding='utf-8') as f:
-      cfg = json.load(f)
-except Exception:
-  cfg = {}
+let done = false;
+let collected = '';
+let lastActivity = Date.now();
+const sendId = 'send-' + Math.random().toString(16).slice(2);
 
-token = ((cfg.get('gateway') or {}).get('auth') or {}).get('token') or ''
-headers = {
-  'Content-Type': 'application/json',
-  'x-openclaw-agent-id': 'main',
-  'x-openclaw-session-key': session,
-}
-if token:
-  headers['Authorization'] = f'Bearer {token}'
+const finish = (ok, reason) => {
+  if (done) return;
+  done = true;
+  try { ws.close(); } catch {}
+  if (ok) { process.exit(0); }
+  else { console.error('__OPENCLAW_WS_FAILED__'); console.error(String(reason || 'unknown error')); process.exit(1); }
+};
+const timer = setInterval(() => {
+  if (done) return;
+  if (Date.now() - lastActivity > 120000) {
+    clearInterval(timer);
+    if (collected.trim()) finish(true);
+    else finish(false, 'timeout waiting chat response');
+  }
+}, 1000);
 
-def discover_local_plugin_ids():
-  ids = []
-  ext = os.path.expanduser('~/.openclaw/extensions')
-  if os.path.isdir(ext):
-    for name in os.listdir(ext):
-      full = os.path.join(ext, name)
-      if os.path.isdir(full):
-        ids.append(name)
-  return ids
+onConnected = () => {
+  ws.send(JSON.stringify({ type: 'req', id: sendId, method: 'chat.send', params: { sessionKey, message, idempotencyKey: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2) } }));
+};
+onConnectFailed = (msg) => { clearInterval(timer); finish(false, msg); };
 
-def patch_plugins_allow_and_restart():
-  p = os.path.expanduser('~/.openclaw/openclaw.json')
-  data = {}
-  if os.path.exists(p):
-    with open(p, 'r', encoding='utf-8') as f:
-      data = json.load(f)
-  plugins = data.setdefault('plugins', {})
-  allow = plugins.get('allow')
-  if not isinstance(allow, list):
-    allow = []
-  changed = False
-  for pid in discover_local_plugin_ids():
-    if pid not in allow:
-      allow.append(pid)
-      changed = True
-  plugins['allow'] = allow
-  if changed:
-    with open(p, 'w', encoding='utf-8') as f:
-      json.dump(data, f, indent=2, ensure_ascii=False)
-    subprocess.run('systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart >/dev/null 2>&1 || true', shell=True)
-  return changed, allow
+onFrame = (frame) => {
+  lastActivity = Date.now();
+  if (frame.type === 'res' && frame.id === sendId && !frame.ok) {
+    return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+  }
+  if (frame.type !== 'event') return;
+  const p = frame.payload || {};
+  const stream = p.stream;
+  const d = p.data || {};
+  // v3: stream-based events
+  if (stream === 'assistant') { const chunk = d.delta || d.text || ''; if (chunk) { collected += chunk; process.stdout.write(chunk); } return; }
+  if (stream === 'thinking') return;
+  if (stream === 'lifecycle') {
+    if (d.phase === 'end') return finish(!!collected.trim(), collected || 'empty response');
+    if (d.phase === 'error') return finish(false, d.error || d.message || 'lifecycle error');
+    return;
+  }
+  // legacy fallback
+  if (p.state === 'delta' && typeof p.text === 'string') { collected += p.text; process.stdout.write(p.text); return; }
+  if (p.state === 'final') {
+    const t = (typeof p.text === 'string' && p.text.trim()) ? p.text : collected;
+    if (typeof p.text === 'string' && p.text.trim() && !collected.trim()) process.stdout.write(p.text);
+    return finish(!!t.trim(), t || 'empty final');
+  }
+  if (p.state === 'error') return finish(false, p.error || 'chat error');
+  if (p.type === 'message_delta' && typeof p.delta === 'string') { collected += p.delta; process.stdout.write(p.delta); return; }
+  if (p.type === 'message_end') {
+    const t = (typeof p.text === 'string' && p.text.trim()) ? p.text : collected;
+    if (typeof p.text === 'string' && p.text.trim() && !collected.trim()) process.stdout.write(p.text);
+    return finish(!!t.trim(), t || 'empty');
+  }
+  if (p.type === 'agent_error') return finish(false, p.error || 'agent error');
+};
 
-def post(path, payload):
-  req = urllib.request.Request(
-    'http://127.0.0.1:18789' + path,
-    data=json.dumps(payload).encode('utf-8'),
-    headers=headers,
-    method='POST',
-  )
-  with urllib.request.urlopen(req, timeout=540) as resp:
-    return resp.getcode(), resp.read().decode('utf-8', 'ignore')
-
-errors = []
-text = ''
-
-def request_once():
-  local_errors = []
-  local_text = ''
-  try:
-    _, body = post('/v1/chat/completions', {
-      'model': 'openclaw',
-      'stream': False,
-      'user': session,
-      'messages': [{'role': 'user', 'content': msg}],
-    })
-    payload = json.loads(body or '{}')
-    local_text = ((payload.get('choices') or [{}])[0].get('message') or {}).get('content') or ((payload.get('choices') or [{}])[0].get('text') or '')
-  except Exception as e:
-    local_errors.append(f'chat/completions failed: {e}')
-
-  if not local_text:
-    try:
-      _, body = post('/v1/responses', {
-        'model': 'openclaw',
-        'stream': False,
-        'user': session,
-        'input': msg,
-      })
-      payload = json.loads(body or '{}')
-      local_text = payload.get('output_text') or ''
-      if not local_text:
-        output = payload.get('output') or []
-        if isinstance(output, list) and output:
-          first = output[0] or {}
-          local_text = first.get('text') or ''
-    except Exception as e:
-      local_errors.append(f'responses failed: {e}')
-
-  return local_text, local_errors
-
-text, errors = request_once()
-
-if (not text) and any('plugins.allow is empty' in str(err) for err in errors):
-  changed, allow = patch_plugins_allow_and_restart()
-  if changed:
-    errors.append('plugins.allow auto-fixed: ' + ','.join(allow))
-  text, retry_errors = request_once()
-  errors.extend(retry_errors)
-
-if text:
-  print(text)
-  sys.exit(0)
-
-print('__OPENCLAW_HTTP_FAILED__')
-for err in errors:
-  print(err)
-sys.exit(1)
+ws.onerror = () => finish(false, 'websocket error');
+ws.onclose = () => { if (!done) { finish(!!collected.trim(), collected || 'websocket closed before response'); } };
 `;
-    const scriptBase64 = Buffer.from(pyScript, 'utf8').toString('base64');
+    const scriptBase64 = Buffer.from(wsScript, 'utf8').toString('base64');
     const cmd = [
       'export PATH="$HOME/.npm-global/bin:$PATH"',
-      `echo '${scriptBase64}' | base64 -d > /tmp/oc_chat_http.py`,
-      `python3 /tmp/oc_chat_http.py '${messageBase64}' '${sessionBase64}'`,
+      `echo '${scriptBase64}' | base64 -d > /tmp/oc_chat_ws.js`,
+      'chmod 700 /tmp/oc_chat_ws.js 2>/dev/null || true',
+      `node /tmp/oc_chat_ws.js '${messageBase64}' '${sessionBase64}'`,
     ].join(' && ');
 
     return this.execCommand(device, cmd, (chunk) => {

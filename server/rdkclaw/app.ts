@@ -23,8 +23,10 @@ import {
 } from "../agent/tools/attachment-tools.js";
 import { createRdkTools } from "../agent/tools/rdk-tools.js";
 import { createStudioTools, type StudioAutonomyRuntime } from "../agent/tools/studio-tools.js";
+import { createForumTools } from "../agent/tools/forum-tools.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
+import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { PersonaStore } from "./persona-store.js";
 import { SkillRegistry } from "./skills/registry.js";
@@ -65,9 +67,14 @@ function buildPersonaPrompt(persona: PersonaProfile) {
     `风格: ${persona.tone}；风险偏好: ${persona.riskLevel}。`,
     "优先使用 Skill 驱动能力编排，不要在回答中暴露内部实现细节。",
     "若任务涉及真实设备操作、板端插件或板端上下文，请优先调用 board_openclaw_delegate。",
+    "你是总调度者，板端 OpenClaw 是执行员工：当任务可能适合板端时，先调用 board_openclaw_assess 评估可行性；仅在 canHandle=true 时再调用 board_openclaw_delegate。",
+    "若 board_openclaw_assess 返回 canHandle=false 或置信度低，则改用本地设备工具（device_exec/device_file_* 等）继续完成任务。",
+    "当你已经通过设备探测发现板端已有现成能力、脚本、配置或工程目录时，不要在 Studio 侧重复实现；应直接调用 board_openclaw_delegate，让板端 OpenClaw 复用并继续处理。",
+    "除非用户明确要求重写/重构，否则禁止重复造轮子（例如重复创建已有感知、推理、ROS、服务编排脚本）。",
     `委派策略: delegationBias=${persona.delegationBias}, autonomy=${persona.autonomyLevel}, boundary=${persona.riskBoundary}。`,
     "若用户要求定时/周期/提醒/每秒推送，必须优先调用 rdkclaw_task_create 创建自治任务，而不是仅给方案说明。",
     "若任务需要联网信息，优先使用 web_search/web_fetch/web_extract 工具链，并在回答中给出来源链接。",
+    "若用户要求在论坛看帖/检索帖子/查看回复，优先使用 forum_drobotics_latest / forum_drobotics_topic；若要求代发帖，先确认草稿再调用 forum_drobotics_create_post。",
     "当联网结论对后续有长期价值时，先总结再调用 rdkclaw_memory_append_daily 写入 daily memory。",
     "若用户上传了图片、文件或语音，先用 attachment_list 查看可用附件，再根据类型调用 attachment_read / attachment_describe_image / attachment_get_audio_transcript。",
     "如果用户想一句话生成一个 RDK 应用，优先拆出最小可运行版本，明确依赖、入口、验证方式，并直接开始第一步执行。",
@@ -91,6 +98,15 @@ function selectDelegateDecision(
   matchedSkills: RDKClawSkillMeta[],
 ): DelegateDecision {
   const text = req.message.toLowerCase();
+  if (/已有|已经有|现成|不要重复|别重复|重复造轮子|复用|复用板端|直接用板端/.test(text)) {
+    return {
+      forceBoard: false,
+      preferBoard: true,
+      source: "policy_rule",
+      reason: "用户明确要求复用板端现有能力，避免重复实现",
+      confidence: 0.95,
+    };
+  }
   if (req.mode === "board") {
     return { forceBoard: true, preferBoard: true, source: "user_mode", reason: "用户指定 board 模式", confidence: 1 };
   }
@@ -131,8 +147,31 @@ function selectDelegateDecision(
   return { forceBoard: false, preferBoard: false, source: "default", reason: "默认本地优先，按需调用板端", confidence: 0.6 };
 }
 
+function filterRdkToolsForBoardPreferred(tools: Tool[]): Tool[] {
+  const allow = new Set([
+    // 设备只读探测
+    "device_exec",
+    "device_file_read",
+    "device_file_list",
+    "device_file_download_to_local",
+    "device_diagnose",
+    "ros_topics",
+    "ros_nodes",
+    "vnc_status",
+    "flash_check",
+    // 板端 OpenClaw 只读探测
+    "board_openclaw_status",
+    "board_openclaw_read_config",
+    "board_openclaw_logs",
+    "board_openclaw_pairing_list",
+  ]);
+  return tools.filter((tool) => allow.has(tool.name));
+}
+
 function resolveExecutor(toolName?: string) {
-  return toolName === "board_openclaw_delegate" ? "board_openclaw" : "rdkclaw_local";
+  return toolName === "board_openclaw_delegate" || toolName === "board_openclaw_assess"
+    ? "board_openclaw"
+    : "rdkclaw_local";
 }
 
 function mapMiniEvent(
@@ -268,6 +307,8 @@ export class RDKClawApp {
   private resolveToolRisk(toolName: string): RiskLevel {
     if (toolName === "web_fetch") return "high";
     if (toolName === "web_search" || toolName === "web_extract") return "medium";
+    if (toolName === "forum_drobotics_create_post") return "high";
+    if (toolName === "forum_drobotics_auth_status" || toolName === "forum_drobotics_latest" || toolName === "forum_drobotics_topic") return "low";
     if (toolName === "board_openclaw_delegate") return "high";
     if (/write|exec|restart|flash|upload|set_/i.test(toolName)) return "high";
     if (/diagnose|status|read|list|topics|nodes/i.test(toolName)) return "low";
@@ -380,12 +421,18 @@ export class RDKClawApp {
           maxFetchChars: policy.network.maxFetchChars,
           timeoutMs: 15000,
         }),
+        ...createForumTools({
+          maxFetchChars: policy.network.maxFetchChars,
+          timeoutMs: 15000,
+        }),
       );
     }
     if (req.deviceId) {
       if (!decision.forceBoard) {
-        tools.push(...createRdkTools(req.deviceId));
+        const deviceTools = createRdkTools(req.deviceId);
+        tools.push(...(decision.preferBoard ? filterRdkToolsForBoardPreferred(deviceTools) : deviceTools));
       }
+      tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager));
       tools.push(
         boardOpenClawDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
           emitEvent({
@@ -432,9 +479,9 @@ export class RDKClawApp {
         ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
         : "",
       decision.forceBoard
-        ? "本次任务必须优先调用 board_openclaw_delegate，不要直接执行本地设备写操作工具。"
+        ? "本次任务需优先板端执行：先调用 board_openclaw_assess，再根据评估结果调用 board_openclaw_delegate。仅当评估明确不可执行时，才改用本地工具兜底。"
         : decision.preferBoard
-          ? "本次任务优先考虑 board_openclaw_delegate，除非任务明显适合本地轻量工具。"
+          ? "本次任务优先考虑板端员工模式：先调用 board_openclaw_assess 判断板端是否可做；若 canHandle=true 再调用 board_openclaw_delegate。若评估不可做或委派因权限/网关失败，请立即回退使用 device_exec / device_file_* 工具完成任务，不要反复重试同一失败委派。"
           : "本次任务默认本地优先，必要时再调用 board_openclaw_delegate。",
     ].filter(Boolean).join("\n");
     const modelDef = buildModelDef(providerConfig);

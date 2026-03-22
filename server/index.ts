@@ -32,7 +32,7 @@ import { FeishuWebSocketChannel } from './agent/channels/feishu.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
-import { isSSOEnabled, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
+import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -90,6 +90,10 @@ const apiKey = process.env.OPENAI_API_KEY ?? '';
 const model = process.env.OPENAI_MODEL ?? 'qwen3.5-plus';
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
 const devicePasswordCache = new Map<string, string>();
+const SUPPORTED_OPENCLAW_APIS = new Set([
+  'openai-completions',
+  'anthropic-messages',
+]);
 type FlashBackupJob = {
   id: string;
   deviceId: string;
@@ -101,6 +105,20 @@ type FlashBackupJob = {
   finishedAt?: number;
 };
 const flashBackupJobs = new Map<string, FlashBackupJob>();
+type OpenClawDeployStepName = 'check' | 'prepare' | 'install' | 'config';
+type OpenClawDeployStepState = 'pending' | 'running' | 'done' | 'error';
+type OpenClawDeployJob = {
+  id: string;
+  deviceId: string;
+  status: 'running' | 'done' | 'error';
+  steps: Record<OpenClawDeployStepName, OpenClawDeployStepState>;
+  output: string;
+  error?: string;
+  startedAt: number;
+  finishedAt?: number;
+};
+const openClawDeployJobs = new Map<string, OpenClawDeployJob>();
+const OPENCLAW_DEPLOY_JOB_TTL_MS = 6 * 60 * 60 * 1000;
 
 type WorkspaceModuleHealth = {
   ready: boolean;
@@ -252,6 +270,33 @@ function passwordCandidates(username: string) {
 function isTransientSshError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return /timed out|timeout|handshake|econnreset|socket closed|connection reset|connect failed/.test(message);
+}
+
+function normalizeOpenClawApi(raw: unknown): string {
+  const value = String(raw || '').trim();
+  if (!value) return 'openai-completions';
+  if (value === 'openai-chat') return 'openai-completions';
+  if (value === 'openai-responses' || value === 'openai-codex-responses') return 'openai-completions';
+  if (value === 'google-genai' || value === 'google-generative-ai') return 'openai-completions';
+  if (value === 'anthropic-messages') return 'anthropic-messages';
+  if (SUPPORTED_OPENCLAW_APIS.has(value)) return value;
+  return 'openai-completions';
+}
+
+function cleanupOpenClawDeployJobs(now = Date.now()) {
+  for (const [jobId, job] of openClawDeployJobs.entries()) {
+    const doneAt = job.finishedAt ?? job.startedAt;
+    if (now - doneAt > OPENCLAW_DEPLOY_JOB_TTL_MS) {
+      openClawDeployJobs.delete(jobId);
+    }
+  }
+}
+
+function appendDeployOutput(job: OpenClawDeployJob, chunk: string) {
+  job.output += chunk;
+  if (job.output.length > 250_000) {
+    job.output = job.output.slice(job.output.length - 250_000);
+  }
 }
 
 function gcFeishuSeen() {
@@ -515,9 +560,13 @@ app.use(express.json({ limit: '50mb' }));
 
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)
 registerSSORoutes(app);
-if (isSSOEnabled()) {
+if (isSSOEnabled() || isSSORequired()) {
   app.use(ssoAuthMiddleware);
-  console.log('[SSO] D-Robotics SSO enabled');
+  if (isSSOEnabled()) {
+    console.log('[SSO] D-Robotics SSO enabled');
+  } else {
+    console.warn('[SSO] SSO required but client credentials are missing; login will be blocked until configured');
+  }
 } else {
   console.log('[SSO] SSO not configured (set SSO_CLIENT_ID & SSO_CLIENT_SECRET to enable)');
 }
@@ -873,6 +922,86 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
   }
 });
 
+function runOpenClawManagerStep(
+  invoke: (onOutput: (chunk: string) => void, onComplete: (success: boolean) => void) => void,
+): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    let output = '';
+    invoke(
+      (chunk) => {
+        output += chunk;
+      },
+      (success) => {
+        resolve({ ok: success, output });
+      },
+    );
+  });
+}
+
+async function executeOpenClawDeployJob(
+  job: OpenClawDeployJob,
+  deviceObj: ReturnType<typeof toOpenClawDevice>,
+  deployConfig: {
+    provider: string;
+    baseUrl: string;
+    apiKey: string;
+    modelId: string;
+    api: string;
+  },
+) {
+  const runStep = async (
+    step: OpenClawDeployStepName,
+    runner: () => Promise<{ ok: boolean; output: string }>,
+    required: boolean,
+  ) => {
+    job.steps[step] = 'running';
+    const result = await runner();
+    appendDeployOutput(job, `\n>>> ${step}\n${result.output || ''}\n`);
+    if (!result.ok) {
+      job.steps[step] = 'error';
+      if (required) {
+        throw new Error(`${step} 步骤执行失败`);
+      }
+      return;
+    }
+    job.steps[step] = 'done';
+  };
+
+  try {
+    await runStep('check', () => runOpenClawManagerStep((onOutput, onComplete) => {
+      openClawManager.runCheck(deviceObj, onOutput, onComplete);
+    }), false);
+    await runStep('prepare', () => runOpenClawManagerStep((onOutput, onComplete) => {
+      openClawManager.runPrepare(deviceObj, onOutput, onComplete);
+    }), true);
+    await runStep('install', () => runOpenClawManagerStep((onOutput, onComplete) => {
+      openClawManager.runInstall(deviceObj, onOutput, onComplete);
+    }), true);
+    await runStep('config', () => runOpenClawManagerStep((onOutput, onComplete) => {
+      openClawManager.updateConfig(
+        deviceObj,
+        {
+          modelGateway: {
+            baseUrl: deployConfig.baseUrl,
+            apiKey: deployConfig.apiKey,
+            api: normalizeOpenClawApi(deployConfig.api),
+            modelId: deployConfig.modelId,
+            modelName: deployConfig.provider || 'custom',
+          },
+        },
+        onOutput,
+        onComplete,
+      );
+    }), true);
+    job.status = 'done';
+    job.finishedAt = Date.now();
+  } catch (error) {
+    job.status = 'error';
+    job.error = error instanceof Error ? error.message : '部署失败';
+    job.finishedAt = Date.now();
+  }
+}
+
 // OpenClaw 部署 API
 app.post('/api/devices/:id/openclaw/check', async (request, response) => {
   const { id } = request.params;
@@ -910,6 +1039,74 @@ app.post('/api/devices/:id/openclaw/install', async (request, response) => {
   openClawManager.runInstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
   });
+});
+
+app.post('/api/devices/:id/openclaw/deploy/start', async (request, response) => {
+  const { id } = request.params;
+  const { provider, baseUrl, apiKey, modelId, api } = request.body as {
+    provider?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    modelId?: string;
+    api?: string;
+  };
+  if (!apiKey?.trim() || !modelId?.trim()) {
+    response.status(400).json({ error: 'apiKey 和 modelId 为必填项' });
+    return;
+  }
+
+  cleanupOpenClawDeployJobs();
+  const existingRunning = Array.from(openClawDeployJobs.values()).find((job) => job.deviceId === id && job.status === 'running');
+  if (existingRunning) {
+    response.json({ ok: true, jobId: existingRunning.id, alreadyRunning: true });
+    return;
+  }
+
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+
+  const jobId = uuid();
+  const job: OpenClawDeployJob = {
+    id: jobId,
+    deviceId: id,
+    status: 'running',
+    steps: {
+      check: 'pending',
+      prepare: 'pending',
+      install: 'pending',
+      config: 'pending',
+    },
+    output: '',
+    startedAt: Date.now(),
+  };
+  openClawDeployJobs.set(jobId, job);
+  response.json({ ok: true, jobId, status: job.status });
+
+  void executeOpenClawDeployJob(job, deviceObj, {
+    provider: String(provider || '').trim(),
+    baseUrl: String(baseUrl || '').trim(),
+    apiKey: apiKey.trim(),
+    modelId: modelId.trim(),
+    api: normalizeOpenClawApi(api),
+  });
+});
+
+app.get('/api/devices/:id/openclaw/deploy/status', async (request, response) => {
+  const { id } = request.params;
+  const jobId = String(request.query.jobId || '').trim();
+  if (!jobId) {
+    response.status(400).json({ error: '缺少 jobId' });
+    return;
+  }
+  cleanupOpenClawDeployJobs();
+  const job = openClawDeployJobs.get(jobId);
+  if (!job || job.deviceId !== id) {
+    response.status(404).json({ error: '部署任务不存在' });
+    return;
+  }
+  response.json({ ok: true, job });
 });
 
 app.post('/api/devices/:id/openclaw/upgrade', async (request, response) => {
@@ -965,6 +1162,9 @@ app.post('/api/devices/:id/openclaw/config', async (request, response) => {
   if (!config) {
     response.status(400).json({ error: '缺少配置数据' });
     return;
+  }
+  if (config?.modelGateway) {
+    config.modelGateway.api = normalizeOpenClawApi(config.modelGateway.api);
   }
 
   const device = await resolveDevice(request, response, id);
@@ -1054,6 +1254,20 @@ app.post('/api/devices/:id/openclaw/doctor', async (request, response) => {
   let output = '';
   openClawManager.runDoctor(deviceObj, (chunk) => { output += chunk; }, (success) => {
     response.json({ ok: success, output });
+  });
+});
+
+app.post('/api/devices/:id/openclaw/model-test', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runModelTest(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    const text = output.trim();
+    const ok = success && /MODEL_TEST_OK/.test(text);
+    response.json({ ok, output: text });
   });
 });
 
@@ -2091,6 +2305,57 @@ app.post('/api/rdkclaw/policy', (request, response) => {
   response.json({ ok: true, policy: rdkclaw.savePolicy(patch) });
 });
 
+app.get('/api/rdkclaw/forum/auth', (_request, response) => {
+  const username = String(process.env.FORUM_DROBOTICS_USERNAME || '').trim();
+  const hasPassword = !!String(process.env.FORUM_DROBOTICS_PASSWORD || '').trim();
+  const hasApiKey = !!String(process.env.FORUM_DROBOTICS_API_KEY || '').trim();
+  const hasApiUsername = !!String(process.env.FORUM_DROBOTICS_API_USERNAME || '').trim();
+  const hasCookie = !!String(process.env.FORUM_DROBOTICS_COOKIE || '').trim();
+  response.json({
+    ok: true,
+    auth: {
+      username: username ? maskOpenId(username) : '',
+      hasPassword,
+      hasApiKey,
+      hasApiUsername,
+      hasCookie,
+    },
+  });
+});
+
+app.post('/api/rdkclaw/forum/auth', (request, response) => {
+  const username = String(request.body?.username || '').trim();
+  const password = String(request.body?.password || '').trim();
+  if (!username || !password) {
+    response.status(400).json({ error: 'username 与 password 为必填项' });
+    return;
+  }
+  process.env.FORUM_DROBOTICS_USERNAME = username;
+  process.env.FORUM_DROBOTICS_PASSWORD = password;
+  response.json({
+    ok: true,
+    message: '论坛 SSO 账号凭据已写入当前服务运行态（重启后失效）',
+    username: maskOpenId(username),
+  });
+});
+
+app.post('/api/rdkclaw/forum/auth/cookie', (request, response) => {
+  const cookie = String(request.body?.cookie || '').trim();
+  if (!cookie) {
+    response.status(400).json({ error: 'cookie 不能为空' });
+    return;
+  }
+  process.env.FORUM_DROBOTICS_COOKIE = cookie;
+  response.json({ ok: true, message: '论坛 Cookie 已写入当前服务运行态（重启后失效）' });
+});
+
+app.post('/api/rdkclaw/forum/auth/clear', (_request, response) => {
+  delete process.env.FORUM_DROBOTICS_USERNAME;
+  delete process.env.FORUM_DROBOTICS_PASSWORD;
+  delete process.env.FORUM_DROBOTICS_COOKIE;
+  response.json({ ok: true, message: '论坛认证信息已清除' });
+});
+
 app.post('/api/rdkclaw/approvals/:approvalId/decision', (request, response) => {
   const decision = String(request.body?.decision || '') as ApprovalDecisionMode;
   if (!decision) {
@@ -2747,6 +3012,11 @@ io.on('connection', (socket) => {
               msg = raw
                 .replace(/__OPENCLAW_HTTP_FAILED__/gi, '')
                 .trim() || `OpenClaw Gateway HTTP 接口不可用，请检查 ${OPENCLAW_GATEWAY_PORT} 端口与网关配置`;
+            }
+            if (/__OPENCLAW_WS_FAILED__/i.test(raw)) {
+              msg = raw
+                .replace(/__OPENCLAW_WS_FAILED__/gi, '')
+                .trim() || `OpenClaw Gateway WS 调用失败，请检查 ${OPENCLAW_GATEWAY_PORT} 端口、token 与网关权限`;
             }
             if (/plugins\.allow is empty/i.test(raw)) {
               msg = 'OpenClaw 插件安全策略阻止加载本地插件（plugins.allow 为空）。请在 openclaw.json 中显式配置受信任插件 IDs，或移除未受信插件后重试。';

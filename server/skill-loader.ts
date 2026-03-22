@@ -33,6 +33,27 @@ export interface SkillManifest {
 
 const SKILLS_DIR = path.join(process.cwd(), 'skills');
 
+function collectSkillFiles(dir: string, isRoot = true): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...collectSkillFiles(full, false));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (isRoot && entry.name.endsWith('.md')) {
+      out.push(full);
+      continue;
+    }
+    if (!isRoot && entry.name.toUpperCase() === 'SKILL.MD') {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
 function parseFrontmatter(raw: string): { frontmatter: Record<string, any>; body: string } {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: raw };
@@ -138,9 +159,8 @@ export function loadAllSkills(): SkillManifest[] {
     return skills;
   }
 
-  for (const file of fs.readdirSync(SKILLS_DIR)) {
-    if (!file.endsWith('.md')) continue;
-    const skill = loadSkill(path.join(SKILLS_DIR, file));
+  for (const filePath of collectSkillFiles(SKILLS_DIR, true)) {
+    const skill = loadSkill(filePath);
     if (skill) skills.push(skill);
   }
 
@@ -153,9 +173,24 @@ export function getSkillByName(skills: SkillManifest[], name: string): SkillMani
 }
 
 export function getRawSkillMd(name: string): string | null {
-  const filePath = path.join(SKILLS_DIR, `${name}.md`);
-  if (!fs.existsSync(filePath)) return null;
-  return fs.readFileSync(filePath, 'utf-8');
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) return null;
+  const files = collectSkillFiles(SKILLS_DIR, true);
+  for (const filePath of files) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const { frontmatter } = parseFrontmatter(raw);
+      const fmName = String(frontmatter.name || '').trim().toLowerCase();
+      const baseName = path.basename(filePath, path.extname(filePath)).toLowerCase();
+      const dirName = path.basename(path.dirname(filePath)).toLowerCase();
+      if (fmName === normalized || baseName === normalized || dirName === normalized) {
+        return raw;
+      }
+    } catch {
+      // ignore file read parse errors
+    }
+  }
+  return null;
 }
 
 /**

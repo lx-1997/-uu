@@ -10,18 +10,51 @@ export interface SSOUser {
 interface AuthState {
   loading: boolean;
   ssoEnabled: boolean;
+  ssoRequired: boolean;
+  ssoConfigured: boolean;
   user: SSOUser | null;
   loginUrl: string | null;
+  refresh: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
-let cachedState: { ssoEnabled: boolean; user: SSOUser | null; loginUrl: string | null } | null = null;
+let cachedState: {
+  ssoEnabled: boolean;
+  ssoRequired: boolean;
+  ssoConfigured: boolean;
+  user: SSOUser | null;
+  loginUrl: string | null;
+} | null = null;
 
 export function useAuth(): AuthState {
   const [loading, setLoading] = useState(!cachedState);
   const [ssoEnabled, setSsoEnabled] = useState(cachedState?.ssoEnabled ?? false);
+  const [ssoRequired, setSsoRequired] = useState(cachedState?.ssoRequired ?? false);
+  const [ssoConfigured, setSsoConfigured] = useState(cachedState?.ssoConfigured ?? false);
   const [user, setUser] = useState<SSOUser | null>(cachedState?.user ?? null);
   const [loginUrl, setLoginUrl] = useState<string | null>(cachedState?.loginUrl ?? null);
+
+  const refresh = useCallback(async () => {
+    const [meRes, loginRes] = await Promise.all([
+      fetch('/api/sso/me', { credentials: 'include' }),
+      fetch('/api/sso/login'),
+    ]);
+    const meData = (await meRes.json()) as { enabled?: boolean; required?: boolean; configured?: boolean; user?: SSOUser | null };
+    const loginData = (await loginRes.json()) as { enabled?: boolean; required?: boolean; configured?: boolean; loginUrl?: string };
+
+    const enabled = !!(meData.enabled || loginData.enabled);
+    const required = !!(meData.required || loginData.required);
+    const configured = !!(meData.configured || loginData.configured);
+    const fetchedUser = meData.user ?? null;
+    const fetchedLoginUrl = loginData.loginUrl ?? null;
+
+    cachedState = { ssoEnabled: enabled, ssoRequired: required, ssoConfigured: configured, user: fetchedUser, loginUrl: fetchedLoginUrl };
+    setSsoEnabled(enabled);
+    setSsoRequired(required);
+    setSsoConfigured(configured);
+    setUser(fetchedUser);
+    setLoginUrl(fetchedLoginUrl);
+  }, []);
 
   useEffect(() => {
     if (cachedState) return;
@@ -30,34 +63,19 @@ export function useAuth(): AuthState {
 
     (async () => {
       try {
-        const [meRes, loginRes] = await Promise.all([
-          fetch('/api/sso/me', { credentials: 'include' }),
-          fetch('/api/sso/login'),
-        ]);
-
-        if (cancelled) return;
-
-        const meData = (await meRes.json()) as { enabled?: boolean; user?: SSOUser | null };
-        const loginData = (await loginRes.json()) as { enabled?: boolean; loginUrl?: string };
-
-        const enabled = !!meData.enabled;
-        const fetchedUser = meData.user ?? null;
-        const fetchedLoginUrl = loginData.loginUrl ?? null;
-
-        cachedState = { ssoEnabled: enabled, user: fetchedUser, loginUrl: fetchedLoginUrl };
-        setSsoEnabled(enabled);
-        setUser(fetchedUser);
-        setLoginUrl(fetchedLoginUrl);
+        await refresh();
       } catch {
-        cachedState = { ssoEnabled: false, user: null, loginUrl: null };
+        cachedState = { ssoEnabled: false, ssoRequired: false, ssoConfigured: false, user: null, loginUrl: null };
         setSsoEnabled(false);
+        setSsoRequired(false);
+        setSsoConfigured(false);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, []);
+  }, [refresh]);
 
   const logout = useCallback(async () => {
     try {
@@ -75,5 +93,5 @@ export function useAuth(): AuthState {
     }
   }, []);
 
-  return { loading, ssoEnabled, user, loginUrl, logout };
+  return { loading, ssoEnabled, ssoRequired, ssoConfigured, user, loginUrl, refresh, logout };
 }

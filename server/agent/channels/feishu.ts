@@ -541,6 +541,13 @@ export class FeishuWebSocketChannel {
     let lastProgressAt = Date.now();
     const PROGRESS_INTERVAL_MS = 30_000;
     const pendingImages: Array<{ localPath: string; fileName: string }> = [];
+    let mirrorSeq = 0;
+    const nextMirrorId = () => `${msgId || "no-msg"}:${++mirrorSeq}`;
+    const summarizeResult = (raw: string) => {
+      const compact = String(raw || "").replace(/\s+/g, " ").trim();
+      if (!compact) return "无输出";
+      return compact.length > 180 ? `${compact.slice(0, 180)}...` : compact;
+    };
 
     try {
       for await (const event of this.rdkclaw.streamChat({
@@ -558,15 +565,65 @@ export class FeishuWebSocketChannel {
           finalText = String(event.data?.text ?? "").trim();
         } else if (event.type === "tool_start") {
           toolCount++;
+          const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
+          const executor = String(event.data?.executor || (toolName === "board_openclaw_delegate" ? "board_openclaw" : "rdkclaw_local"));
+          this.publishMirror("channel_message_ack", "飞书流程", `开始执行工具：${toolName}`, {
+            channel: "feishu",
+            direction: "ack",
+            openIdMasked,
+            chatId,
+            messageId: msgId,
+            sessionId,
+            mirrorId: nextMirrorId(),
+            rdkEventKind: "tool_start",
+            toolName,
+            toolCallId: String(event.data?.toolCallId || ""),
+            executor,
+          });
           const now = Date.now();
           if (now - lastProgressAt > PROGRESS_INTERVAL_MS) {
             lastProgressAt = now;
-            const toolName = String(event.data?.name ?? "");
             const progressMsg = `正在执行中... (${toolCount} 个步骤${toolName ? `，当前: ${toolName}` : ""})`;
             this.sendText(chatId, progressMsg).catch(() => {});
           }
+        } else if (event.type === "tool_progress") {
+          const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
+          const chunk = String(event.data?.chunk || "").trim();
+          if (chunk) {
+            const previewLine = chunk.split("\n").map((line) => line.trim()).filter(Boolean).slice(-1)[0] || chunk;
+            this.publishMirror("channel_message_ack", "飞书流程", `${toolName}: ${previewLine}`, {
+              channel: "feishu",
+              direction: "ack",
+              openIdMasked,
+              chatId,
+              messageId: msgId,
+              sessionId,
+              mirrorId: nextMirrorId(),
+              rdkEventKind: "tool_progress",
+              toolName,
+              toolCallId: String(event.data?.toolCallId || ""),
+              executor: String(event.data?.executor || (toolName === "board_openclaw_delegate" ? "board_openclaw" : "rdkclaw_local")),
+            });
+          }
         } else if (event.type === "tool_result") {
+          const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
+          const executor = String(event.data?.executor || (toolName === "board_openclaw_delegate" ? "board_openclaw" : "rdkclaw_local"));
+          const isError = Boolean(event.data?.isError);
           const resultStr = String(event.data?.result ?? "");
+          this.publishMirror("channel_message_ack", "飞书流程", `${toolName} ${isError ? "失败" : "完成"}：${summarizeResult(resultStr)}`, {
+            channel: "feishu",
+            direction: "ack",
+            openIdMasked,
+            chatId,
+            messageId: msgId,
+            sessionId,
+            mirrorId: nextMirrorId(),
+            rdkEventKind: "tool_result",
+            toolName,
+            toolCallId: String(event.data?.toolCallId || ""),
+            executor,
+            isError,
+          });
           if (resultStr.startsWith("{")) {
             try {
               const parsed = JSON.parse(resultStr) as Record<string, unknown>;

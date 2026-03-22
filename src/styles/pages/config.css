@@ -871,6 +871,82 @@
   padding-top: 8px;
 }
 
+/* ── Setup Checklist ── */
+.oc-setup-checklist {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.oc-setup-checklist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.oc-setup-icon {
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.oc-setup-progress {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-bg, rgba(var(--accent-rgb, 99, 102, 241), 0.1));
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.oc-setup-checklist-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.oc-setup-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  transition: background var(--duration-fast);
+}
+
+.oc-setup-item:hover {
+  background: var(--bg-hover);
+}
+
+.oc-setup-item.highlight {
+  background: var(--accent-bg, rgba(var(--accent-rgb, 99, 102, 241), 0.06));
+  border-left: 2px solid var(--accent);
+}
+
+.oc-setup-item .material-symbols-outlined {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.oc-setup-item-label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.oc-setup-guide-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 0.625rem;
+  color: var(--accent);
+  background: var(--accent-bg, rgba(var(--accent-rgb, 99, 102, 241), 0.06));
+  border-top: 1px solid var(--border);
+}
+
 /* ── Mobile drawer ── */
 .oc-drawer-overlay {
   display: none;

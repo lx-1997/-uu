@@ -1,11 +1,11 @@
 [
   {
-    "id": "23bcd019-55a4-43ae-ba4f-5599d8333923",
+    "id": "40a5faf8-06fc-44d0-8e7d-6f467a2c1a9b",
     "host": "192.168.1.18",
     "port": 22,
-    "username": "sunrise",
-    "password": "sunrise",
+    "username": "root",
+    "password": "root",
     "status": "connected",
-    "lastCheckedAt": "2026-03-22T12:40:07.837Z"
+    "lastCheckedAt": "2026-03-22T14:04:05.271Z"
   }
 ]

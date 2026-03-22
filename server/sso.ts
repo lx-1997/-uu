@@ -9,6 +9,8 @@ import type { Request, Response, NextFunction } from 'express';
 const SSO_BASE = process.env.SSO_BASE_URL || 'https://sso.d-robotics.cc';
 const SSO_CLIENT_ID = process.env.SSO_CLIENT_ID || '';
 const SSO_CLIENT_SECRET = process.env.SSO_CLIENT_SECRET || '';
+// Keep SSO optional by default; enable hard gate only when explicitly set to 1.
+const SSO_REQUIRED = process.env.SSO_REQUIRED === '1';
 const SSO_CALLBACK_PATH = '/api/sso/callback';
 
 const TOKEN_COOKIE = 'rdk_sso_token';
@@ -40,6 +42,10 @@ export function isSSOEnabled(): boolean {
   return !!(SSO_CLIENT_ID && SSO_CLIENT_SECRET);
 }
 
+export function isSSORequired(): boolean {
+  return SSO_REQUIRED;
+}
+
 function buildCallbackUrl(req: Request): string {
   const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http');
   const host = String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost:8787');
@@ -47,6 +53,10 @@ function buildCallbackUrl(req: Request): string {
 }
 
 function buildLoginUrl(req: Request, state: string): string {
+  if (!isSSOEnabled()) {
+    const redirectUri = `${String(req.headers['x-forwarded-proto'] || req.protocol || 'http')}://${String(req.headers['x-forwarded-host'] || req.headers.host || 'localhost:8787')}`;
+    return `${SSO_BASE}/?redirect=${encodeURIComponent(redirectUri)}`;
+  }
   const redirectUri = buildCallbackUrl(req);
   const params = new URLSearchParams({
     response_type: 'code',
@@ -59,7 +69,7 @@ function buildLoginUrl(req: Request, state: string): string {
 }
 
 export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
-  if (!isSSOEnabled()) {
+  if (!isSSORequired()) {
     next();
     return;
   }
@@ -81,7 +91,12 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
   }
 
   if (req.path.startsWith('/api/')) {
-    res.status(401).json({ error: 'unauthorized', ssoLoginUrl: buildLoginUrl(req, 'api') });
+    res.status(401).json({
+      error: 'unauthorized',
+      required: true,
+      configured: isSSOEnabled(),
+      ssoLoginUrl: buildLoginUrl(req, 'api'),
+    });
     return;
   }
 
@@ -91,15 +106,19 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
 
 export function registerSSORoutes(app: any): void {
   app.get('/api/sso/login', (req: Request, res: Response) => {
-    if (!isSSOEnabled()) {
-      res.json({ enabled: false });
+    if (!isSSORequired()) {
+      res.json({ enabled: false, required: false, configured: isSSOEnabled() });
       return;
     }
     const state = crypto.randomBytes(16).toString('hex');
-    res.json({ enabled: true, loginUrl: buildLoginUrl(req, state) });
+    res.json({ enabled: true, required: true, configured: isSSOEnabled(), loginUrl: buildLoginUrl(req, state) });
   });
 
   app.get(SSO_CALLBACK_PATH, async (req: Request, res: Response) => {
+    if (!isSSOEnabled()) {
+      res.status(503).send('SSO callback unavailable: missing client credentials');
+      return;
+    }
     const code = String(req.query.code || '');
     if (!code) {
       res.status(400).send('Missing authorization code');
@@ -191,20 +210,20 @@ export function registerSSORoutes(app: any): void {
   });
 
   app.get('/api/sso/me', (req: Request, res: Response) => {
-    if (!isSSOEnabled()) {
-      res.json({ enabled: false, user: null });
+    if (!isSSORequired()) {
+      res.json({ enabled: false, required: false, configured: isSSOEnabled(), user: null });
       return;
     }
     const sessionId = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
     if (sessionId && sessions.has(sessionId)) {
       const session = sessions.get(sessionId)!;
       if (session.expiresAt > Date.now()) {
-        res.json({ enabled: true, user: session.user });
+        res.json({ enabled: true, required: true, configured: isSSOEnabled(), user: session.user });
         return;
       }
       sessions.delete(sessionId);
     }
-    res.json({ enabled: true, user: null });
+    res.json({ enabled: true, required: true, configured: isSSOEnabled(), user: null });
   });
 
   app.post('/api/sso/logout', (req: Request, res: Response) => {

@@ -734,7 +734,7 @@ export default function AIDock() {
   return (
     <div className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''}`}>
       {/* ── Chat panel (expanded) ── */}
-      {chatExpanded && chatMessages.length > 0 && (
+      {chatExpanded && (
         <div className="dock-chat">
           <div className="dock-header">
             <div className="dock-header-left">
@@ -784,6 +784,9 @@ export default function AIDock() {
 
           {/* Chat stream */}
           <div className="dock-stream">
+            {chatMessages.length === 0 && !aiTyping && (
+              <div className="dock-empty-hint">聊天已清空，输入新消息即可继续。</div>
+            )}
             {!showAllMessages && hiddenCount > 0 && (
               <button className="btn btn-sm btn-ghost" style={{ alignSelf: 'center' }} onClick={() => setShowAllMessages(true)}>
                 查看更早 {hiddenCount} 条

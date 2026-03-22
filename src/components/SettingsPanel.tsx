@@ -20,6 +20,11 @@ import {
   saveRDKClawPolicy,
   type PersonaProfile,
   type RDKClawPolicy,
+  fetchRDKClawForumAuth,
+  saveRDKClawForumCredential,
+  saveRDKClawForumCookie,
+  clearRDKClawForumAuth,
+  type ForumAuthView,
 } from '../api';
 
 const AI_PROVIDER_DEFAULTS: Record<string, { label: string; model: string; baseUrl: string }> = {
@@ -139,14 +144,27 @@ export default function SettingsPanel() {
   });
   const [rdkclawLoading, setRdkclawLoading] = useState(false);
   const [rdkclawSaving, setRdkclawSaving] = useState(false);
+  const [forumAuth, setForumAuth] = useState<ForumAuthView>({
+    username: '',
+    hasPassword: false,
+    hasApiKey: false,
+    hasApiUsername: false,
+    hasCookie: false,
+  });
+  const [forumUsernameInput, setForumUsernameInput] = useState('');
+  const [forumPasswordInput, setForumPasswordInput] = useState('');
+  const [forumCookieInput, setForumCookieInput] = useState('');
+  const [forumSaving, setForumSaving] = useState(false);
 
   const refreshRdkclawData = async () => {
-    const [personaRes, policyRes] = await Promise.all([
+    const [personaRes, policyRes, forumAuthRes] = await Promise.all([
       fetchRDKClawPersona(),
       fetchRDKClawPolicy(),
+      fetchRDKClawForumAuth(),
     ]);
     setPersona(personaRes.persona);
     setPolicy(policyRes.policy);
+    setForumAuth(forumAuthRes.auth);
   };
 
   useEffect(() => {
@@ -175,6 +193,61 @@ export default function SettingsPanel() {
       addToast('执行策略已保存', 'success');
     } catch { addToast('保存执行策略失败', 'error'); }
     finally { setRdkclawSaving(false); }
+  };
+
+  const handleSaveForumCredential = async () => {
+    const username = forumUsernameInput.trim();
+    const password = forumPasswordInput.trim();
+    if (!username || !password) {
+      addToast('请填写论坛用户名和密码', 'warning');
+      return;
+    }
+    setForumSaving(true);
+    try {
+      const res = await saveRDKClawForumCredential({ username, password });
+      setForumPasswordInput('');
+      await refreshRdkclawData();
+      addToast(res.message || '论坛账号已保存', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : '论坛账号保存失败', 'error');
+    } finally {
+      setForumSaving(false);
+    }
+  };
+
+  const handleSaveForumCookie = async () => {
+    const cookie = forumCookieInput.trim();
+    if (!cookie) {
+      addToast('请粘贴论坛 Cookie', 'warning');
+      return;
+    }
+    setForumSaving(true);
+    try {
+      const res = await saveRDKClawForumCookie(cookie);
+      setForumCookieInput('');
+      await refreshRdkclawData();
+      addToast(res.message || '论坛 Cookie 已保存', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : '论坛 Cookie 保存失败', 'error');
+    } finally {
+      setForumSaving(false);
+    }
+  };
+
+  const handleClearForumAuth = async () => {
+    setForumSaving(true);
+    try {
+      const res = await clearRDKClawForumAuth();
+      setForumUsernameInput('');
+      setForumPasswordInput('');
+      setForumCookieInput('');
+      await refreshRdkclawData();
+      addToast(res.message || '论坛认证已清空', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : '清空论坛认证失败', 'error');
+    } finally {
+      setForumSaving(false);
+    }
   };
 
   const refreshFeishuData = async () => {
@@ -946,6 +1019,87 @@ export default function SettingsPanel() {
                     </button>
                     <span className="config-label-hint">策略保存在本地 ~/.rdkstudio/rdkclaw-policy.json</span>
                   </div>
+                </div>
+
+                <div className="config-section">
+                  <div className="config-section-title">论坛账号管理（SSO / 发帖）</div>
+                  <div className="config-row">
+                    <span className="config-label">当前论坛用户</span>
+                    <span className="config-value">{forumAuth.username || '未配置'}</span>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">已保存密码</span>
+                    <span className="config-value">{forumAuth.hasPassword ? '是' : '否'}</span>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">已保存 Cookie</span>
+                    <span className="config-value">{forumAuth.hasCookie ? '是' : '否'}</span>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">API Key 模式</span>
+                    <span className="config-value">
+                      {forumAuth.hasApiKey && forumAuth.hasApiUsername ? '已配置' : '未配置'}
+                    </span>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">论坛用户名</span>
+                    <div className="config-value">
+                      <input
+                        type="text"
+                        className="input"
+                        title="论坛用户名"
+                        aria-label="论坛用户名"
+                        placeholder="qiaolongli"
+                        value={forumUsernameInput}
+                        onChange={(e) => setForumUsernameInput(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">论坛密码</span>
+                    <div className="config-value">
+                      <input
+                        type="password"
+                        className="input"
+                        title="论坛密码"
+                        aria-label="论坛密码"
+                        placeholder="请输入论坛密码"
+                        value={forumPasswordInput}
+                        onChange={(e) => setForumPasswordInput(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">论坛 Cookie（可选）</span>
+                    <div className="config-value">
+                      <textarea
+                        className="input"
+                        title="论坛 Cookie"
+                        aria-label="论坛 Cookie"
+                        rows={2}
+                        value={forumCookieInput}
+                        onChange={(e) => setForumCookieInput(e.target.value)}
+                        placeholder="_forum_session=...; other_cookie=..."
+                      />
+                    </div>
+                  </div>
+                  <div className="config-actions">
+                    <button type="button" className="btn btn-primary" onClick={handleSaveForumCredential} disabled={forumSaving}>
+                      {forumSaving ? '保存中...' : '保存账号密码'}
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={handleSaveForumCookie} disabled={forumSaving}>
+                      保存 Cookie
+                    </button>
+                    <button type="button" className="btn btn-danger" onClick={handleClearForumAuth} disabled={forumSaving}>
+                      清空论坛认证
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={() => refreshRdkclawData().catch(() => addToast('刷新论坛认证状态失败', 'error'))} disabled={forumSaving}>
+                      刷新状态
+                    </button>
+                  </div>
+                  <span className="config-label-hint">
+                    保存后即可让 RDKClaw 尝试通过 SSO 访问论坛并执行发帖流程；重启服务后运行态凭据会失效。
+                  </span>
                 </div>
               </>
             )}

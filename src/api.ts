@@ -380,6 +380,39 @@ export function saveRDKClawPolicy(patch: Partial<RDKClawPolicy>) {
   });
 }
 
+export interface ForumAuthView {
+  username: string;
+  hasPassword: boolean;
+  hasApiKey: boolean;
+  hasApiUsername: boolean;
+  hasCookie: boolean;
+}
+
+export function fetchRDKClawForumAuth() {
+  return request<{ ok: boolean; auth: ForumAuthView }>('/api/rdkclaw/forum/auth');
+}
+
+export function saveRDKClawForumCredential(input: { username: string; password: string }) {
+  return request<{ ok: boolean; message: string; username: string }>('/api/rdkclaw/forum/auth', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function saveRDKClawForumCookie(cookie: string) {
+  return request<{ ok: boolean; message: string }>('/api/rdkclaw/forum/auth/cookie', {
+    method: 'POST',
+    body: JSON.stringify({ cookie }),
+  });
+}
+
+export function clearRDKClawForumAuth() {
+  return request<{ ok: boolean; message: string }>('/api/rdkclaw/forum/auth/clear', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
 export function decideRDKClawApproval(approvalId: string, decision: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny') {
   return request<{ ok: boolean }>(`/api/rdkclaw/approvals/${approvalId}/decision`, {
     method: 'POST',

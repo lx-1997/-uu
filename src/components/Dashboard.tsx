@@ -223,37 +223,10 @@ export default function Dashboard() {
   }
 
   const stats = [
-    { key: 'mem', val: metrics.memory, label: 'MEM', warn: false },
+    { key: 'mem', val: metrics.memory, label: 'MEM' },
     { key: 'temp', val: metrics.temp, label: 'TEMP', warn: metrics.tempC >= 85 },
     { key: 'bpu', val: metrics.bpu, label: 'BPU', warn: metrics.bpuVal >= 90 },
-    { key: 'up', val: metrics.uptime, label: 'UP', warn: false },
-  ];
-
-  const cards = [
-    {
-      key: 'dev',
-      title: '一句话开发',
-      desc: '用自然语言描述需求，AI 自动实现',
-      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>,
-      primary: true,
-      action: () => prompt('帮我生成一个最小可运行的 RDK 应用，并直接开始实现'),
-    },
-    {
-      key: 'term',
-      title: 'Terminal',
-      desc: '远程终端，命令直达设备',
-      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3" /><rect x="2.25" y="4.5" width="19.5" height="15" rx="2.25" /></svg>,
-      primary: false,
-      action: () => setActiveTab('terminal'),
-    },
-    {
-      key: 'oc',
-      title: 'OpenClaw',
-      desc: '板端 AI 智能体管理',
-      icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5m14 0l-4.091-4.091a2.25 2.25 0 01-.659-1.591V3.104m-4.5 0a24.301 24.301 0 014.5 0m0 0v5.714M5 14.5V17a2 2 0 002 2h10a2 2 0 002-2v-2.5" /></svg>,
-      primary: false,
-      action: () => setActiveTab('openclaw'),
-    },
+    { key: 'up', val: metrics.uptime, label: 'UPTIME' },
   ];
 
   return (
@@ -262,78 +235,64 @@ export default function Dashboard() {
       <div className="dash-morph-halo" />
       <div className="dash-morph-halo secondary" />
 
-      <div className={`dash-hero ${mounted ? 'dash-enter' : ''}`}>
-        <h1 className="dash-device-name">{currentDevice.name}</h1>
-        <p className="dash-tagline">{currentDevice.ip}</p>
-      </div>
-
-      <div className={`dash-status ${mounted ? 'dash-enter dash-enter-d1' : ''}`}>
-        {stats.map((s, i) => (
-          <span key={s.key}>
-            {i > 0 && <span className="dash-stat-sep" />}
-            <span className="dash-stat" style={{ animationDelay: `${200 + i * 80}ms` }}>
-              <span className={`dash-stat-val ${s.warn ? 'warn' : ''}`}><AnimatedNumber value={s.val} /></span>
-              <span className="dash-stat-lbl">{s.label}</span>
-            </span>
+      {/* ── Hero: device name as the centerpiece ── */}
+      <div className={`lp-hero ${mounted ? 'lp-enter' : ''}`}>
+        <div className="lp-status-row">
+          <span className={`lp-pill ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : ''}`}>
+            <span className={`status-dot ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : 'offline'}`} />
+            {currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? '在线' : '离线'}
           </span>
+          <span className={`lp-pill ${openclawHealth?.aiReady ? 'ok' : ''}`}>
+            <span className={`status-dot ${openclawHealth?.aiReady ? 'online' : 'warn'}`} />
+            OpenClaw {openclawHealth?.aiReady ? 'Ready' : '---'}
+          </span>
+        </div>
+        <h1 className="lp-device-name">{currentDevice.name}</h1>
+        <p className="lp-device-ip">{currentDevice.ip}</p>
+      </div>
+
+      {/* ── Live metrics strip ── */}
+      <div className={`lp-metrics ${mounted ? 'lp-enter lp-d1' : ''}`}>
+        {stats.map((s, i) => (
+          <div key={s.key} className={`lp-metric ${(s as any).warn ? 'warn' : ''}`} style={mounted ? { animationDelay: `${200 + i * 60}ms` } : undefined}>
+            <span className="lp-metric-val"><AnimatedNumber value={s.val} /></span>
+            <span className="lp-metric-lbl">{s.label}</span>
+          </div>
         ))}
       </div>
 
-      <div className={`dash-cards ${mounted ? 'dash-enter dash-enter-d2' : ''}`}>
-        {cards.map((card, i) => (
-          <button
-            key={card.key}
-            className={`dash-3d-card ${card.primary ? 'primary' : ''}`}
-            onClick={card.action}
-            style={{
-              transform: `perspective(800px) rotateY(${parallax.tilt.x * (0.6 + i * 0.2)}deg) rotateX(${parallax.tilt.y * (0.6 + i * 0.2)}deg) translateZ(0)`,
-              animationDelay: `${400 + i * 100}ms`,
-            }}
-          >
-            <div className="dash-3d-card-glow" />
-            <div className="dash-3d-card-icon">{card.icon}</div>
-            <div className="dash-3d-card-body">
-              <span className="dash-3d-card-title">{card.title}</span>
-              <span className="dash-3d-card-desc">{card.desc}</span>
-            </div>
-          </button>
-        ))}
+      {/* ── CTA: primary action ── */}
+      <div className={`lp-cta ${mounted ? 'lp-enter lp-d2' : ''}`}>
+        <button className="lp-cta-btn primary" onClick={() => prompt('帮我生成一个最小可运行的 RDK 应用，并直接开始实现')}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+          一句话开发
+        </button>
+        <button className="lp-cta-btn" onClick={() => setActiveTab('terminal')}>Terminal</button>
+        <button className="lp-cta-btn" onClick={() => setActiveTab('openclaw')}>OpenClaw</button>
+        <button className="lp-cta-btn" onClick={() => prompt('帮我全面检查设备健康状态')}>设备体检</button>
       </div>
 
+      {/* ── Workspace capability badges ── */}
       {wsHealth && (
-        <div className={`dash-quickstart ${mounted ? 'dash-enter dash-enter-d3' : ''}`}>
+        <div className={`lp-caps ${mounted ? 'lp-enter lp-d3' : ''}`}>
           {([
-            { key: 'development', label: '开发环境', icon: '>', tab: 'terminal' as const },
-            { key: 'codeServer', label: 'IDE', icon: '<>', tab: 'ide' as const },
-            { key: 'vnc', label: '远程桌面', icon: '[]', tab: 'vnc' as const },
-            { key: 'ros', label: 'ROS', icon: 'R', tab: 'ros' as const },
-          ] as const).map(item => {
+            { key: 'development', label: '开发环境', tab: 'terminal' as const },
+            { key: 'codeServer', label: 'IDE', tab: 'ide' as const },
+            { key: 'vnc', label: '远程桌面', tab: 'vnc' as const },
+            { key: 'ros', label: 'ROS', tab: 'ros' as const },
+          ]).map(item => {
             const mod = wsHealth[item.key] as WorkspaceModule | undefined;
             if (!mod) return null;
             return (
-              <button
-                key={item.key}
-                className={`dash-qs-item ${mod.ready ? 'ready' : ''}`}
-                onClick={() => setActiveTab(item.tab)}
-              >
-                <span className={`dash-qs-dot ${mod.ready ? 'ok' : mod.installed ? 'partial' : ''}`} />
-                <span className="dash-qs-label">{item.label}</span>
-                <span className="dash-qs-status">{mod.ready ? '就绪' : mod.installed ? '未启动' : '未安装'}</span>
+              <button key={item.key} className={`lp-cap ${mod.ready ? 'ready' : ''}`} onClick={() => setActiveTab(item.tab)}>
+                <span className={`lp-cap-dot ${mod.ready ? 'ok' : mod.installed ? 'partial' : ''}`} />
+                <span className="lp-cap-name">{item.label}</span>
+                <span className="lp-cap-status">{mod.ready ? '就绪' : mod.installed ? '未启动' : '未安装'}</span>
               </button>
             );
           })}
         </div>
       )}
-
-      <div className={`dash-footer ${mounted ? 'dash-enter' : ''}`} style={{ animationDelay: '800ms' }}>
-        <span className="dash-footer-item">
-          <span className={`status-dot ${openclawHealth?.aiReady ? 'online' : 'warn'}`} />
-          OpenClaw {openclawHealth?.aiReady ? 'Ready' : '未就绪'}
-        </span>
-        <span className="dash-footer-item">
-          {currentDevice.status === 'connected' ? '在线' : '离线'}
-        </span>
-      </div>
     </div>
   );
 }

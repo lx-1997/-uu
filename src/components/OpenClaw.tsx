@@ -53,7 +53,24 @@ interface ChatMessage {
   text: string;
 }
 
+type DeployStepState = 'pending' | 'running' | 'done' | 'error';
+type DeployStepName = 'check' | 'prepare' | 'install' | 'config';
+interface DeployJob {
+  id: string;
+  status: 'running' | 'done' | 'error';
+  steps: Record<DeployStepName, DeployStepState>;
+  output?: string;
+  error?: string;
+}
+
 type ConfigTab = 'model' | 'feishu' | 'skills';
+
+type SetupStep = 'gateway' | 'model' | 'feishu';
+interface SetupStatus {
+  gateway: 'ok' | 'warn' | 'error';
+  model: 'ok' | 'warn' | 'unconfigured';
+  feishu: 'ok' | 'warn' | 'unconfigured';
+}
 
 /* ═══════════════════════════════════════════
    Constants
@@ -72,25 +89,24 @@ interface ProviderPreset {
 const PROVIDER_PRESETS: Record<string, ProviderPreset> = {
   // International
   anthropic: { label: 'Anthropic', group: 'international', baseUrl: 'https://api.anthropic.com/v1', api: 'anthropic-messages', models: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022'], keyHint: 'sk-ant-...' },
-  openai: { label: 'OpenAI', group: 'international', baseUrl: 'https://api.openai.com/v1', api: 'openai-chat', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'], keyHint: 'sk-...' },
-  google: { label: 'Google Gemini', group: 'international', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'google-genai', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], keyHint: 'AIza...' },
-  openrouter: { label: 'OpenRouter', group: 'international', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-chat', models: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemini-2.5-pro'], keyHint: 'sk-or-...' },
+  openai: { label: 'OpenAI', group: 'international', baseUrl: 'https://api.openai.com/v1', api: 'openai-completions', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'], keyHint: 'sk-...' },
+  google: { label: 'Google Gemini', group: 'international', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'openai-completions', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], keyHint: 'AIza...' },
+  openrouter: { label: 'OpenRouter', group: 'international', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions', models: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemini-2.5-pro'], keyHint: 'sk-or-...' },
   // China
-  bailian: { label: '阿里百炼', group: 'china', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', api: 'openai-chat', models: ['qwen-plus', 'qwen-max', 'qwen-turbo', 'qwen3-235b-a22b'], keyHint: 'sk-...', docUrl: 'https://bailian.console.aliyun.com' },
-  deepseek: { label: 'DeepSeek', group: 'china', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-chat', models: ['deepseek-chat', 'deepseek-reasoner'], keyHint: 'sk-...' },
-  siliconflow: { label: '硅基流动', group: 'china', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-chat', models: ['Qwen/Qwen3-235B-A22B', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1'], keyHint: 'sk-...' },
-  zhipu: { label: '智谱 AI', group: 'china', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-chat', models: ['glm-4-plus', 'glm-4-flash', 'glm-4-long'], keyHint: '...' },
-  moonshot: { label: 'Moonshot', group: 'china', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-chat', models: ['moonshot-v1-128k', 'moonshot-v1-32k'], keyHint: 'sk-...' },
-  volcengine: { label: '火山引擎', group: 'china', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', api: 'openai-chat', models: ['doubao-1.5-pro-256k', 'doubao-1.5-lite-32k'], keyHint: '...' },
-  baichuan: { label: '百川', group: 'china', baseUrl: 'https://api.baichuan-ai.com/v1', api: 'openai-chat', models: ['Baichuan4-Turbo', 'Baichuan4-Air'], keyHint: 'sk-...' },
-  minimax: { label: 'MiniMax', group: 'china', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-chat', models: ['MiniMax-Text-01', 'abab6.5s-chat'], keyHint: '...' },
-  stepfun: { label: '阶跃星辰', group: 'china', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-chat', models: ['step-2-16k', 'step-1-128k'], keyHint: '...' },
+  bailian: { label: '阿里百炼', group: 'china', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', api: 'openai-completions', models: ['qwen-plus', 'qwen-max', 'qwen-turbo', 'qwen3-235b-a22b'], keyHint: 'sk-...', docUrl: 'https://bailian.console.aliyun.com' },
+  deepseek: { label: 'DeepSeek', group: 'china', baseUrl: 'https://api.deepseek.com/v1', api: 'openai-completions', models: ['deepseek-chat', 'deepseek-reasoner'], keyHint: 'sk-...' },
+  siliconflow: { label: '硅基流动', group: 'china', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', models: ['Qwen/Qwen3-235B-A22B', 'deepseek-ai/DeepSeek-V3', 'deepseek-ai/DeepSeek-R1'], keyHint: 'sk-...' },
+  zhipu: { label: '智谱 AI', group: 'china', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', models: ['glm-4-plus', 'glm-4-flash', 'glm-4-long'], keyHint: '...' },
+  moonshot: { label: 'Moonshot', group: 'china', baseUrl: 'https://api.moonshot.cn/v1', api: 'openai-completions', models: ['moonshot-v1-128k', 'moonshot-v1-32k'], keyHint: 'sk-...' },
+  volcengine: { label: '火山引擎', group: 'china', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', api: 'openai-completions', models: ['doubao-1.5-pro-256k', 'doubao-1.5-lite-32k'], keyHint: '...' },
+  baichuan: { label: '百川', group: 'china', baseUrl: 'https://api.baichuan-ai.com/v1', api: 'openai-completions', models: ['Baichuan4-Turbo', 'Baichuan4-Air'], keyHint: 'sk-...' },
+  minimax: { label: 'MiniMax', group: 'china', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-completions', models: ['MiniMax-Text-01', 'abab6.5s-chat'], keyHint: '...' },
+  stepfun: { label: '阶跃星辰', group: 'china', baseUrl: 'https://api.stepfun.com/v1', api: 'openai-completions', models: ['step-2-16k', 'step-1-128k'], keyHint: '...' },
 };
 
 const API_TYPE_OPTIONS = [
-  { value: 'openai-chat', label: 'OpenAI Chat' },
+  { value: 'openai-completions', label: 'OpenAI Completions' },
   { value: 'anthropic-messages', label: 'Anthropic Messages' },
-  { value: 'google-genai', label: 'Google GenAI' },
 ];
 
 const QUICK_PROMPTS = [
@@ -158,7 +174,7 @@ export default function OpenClaw() {
   const [modelConfig, setModelConfig] = useState({
     baseUrl: '',
     apiKey: '',
-    api: 'openai-chat',
+    api: 'openai-completions',
     modelId: '',
     modelName: '',
   });
@@ -194,9 +210,16 @@ export default function OpenClaw() {
   const [deployBaseUrl, setDeployBaseUrl] = useState('');
   const [deployApiKey, setDeployApiKey] = useState('');
   const [deployModelId, setDeployModelId] = useState('');
-  const [deployApi, setDeployApi] = useState('openai-chat');
+  const [deployApi, setDeployApi] = useState('openai-completions');
+  const [deployFeishuAppId, setDeployFeishuAppId] = useState('');
+  const [deployFeishuAppSecret, setDeployFeishuAppSecret] = useState('');
   const [deployRunning, setDeployRunning] = useState(false);
-  const [deploySteps, setDeploySteps] = useState<('pending' | 'running' | 'done' | 'error')[]>([]);
+  const [deploySteps, setDeploySteps] = useState<DeployStepState[]>([]);
+  const [deployJobId, setDeployJobId] = useState('');
+
+  // ─── Post-install Guide State ───
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [setupStep, setSetupStep] = useState<SetupStep>('gateway');
 
   // ─── UI State ───
   const [showModelSelector, setShowModelSelector] = useState(false);
@@ -209,7 +232,101 @@ export default function OpenClaw() {
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement | null>(null);
-  
+  const deployPollRef = useRef<number | null>(null);
+  const messageIdRef = useRef(0);
+  const deployJobStorageKey = currentDevice ? `oc-deploy-job-${currentDevice.id}` : '';
+  const nextChatMessageId = useCallback(() => {
+    const now = Date.now();
+    if (now <= messageIdRef.current) {
+      messageIdRef.current += 1;
+    } else {
+      messageIdRef.current = now;
+    }
+    return messageIdRef.current;
+  }, []);
+  const applyDeployJob = (job: DeployJob) => {
+    const stepOrder: DeployStepName[] = ['check', 'prepare', 'install', 'config'];
+    setDeploySteps(stepOrder.map((name) => job.steps?.[name] || 'pending'));
+    if (job.status === 'running') {
+      setDeployRunning(true);
+      return;
+    }
+    setDeployRunning(false);
+    if (deployPollRef.current) {
+      window.clearInterval(deployPollRef.current);
+      deployPollRef.current = null;
+    }
+    if (deployJobStorageKey) localStorage.removeItem(deployJobStorageKey);
+    if (job.status === 'done') {
+      addToast?.('部署完成！', 'success');
+      appendSystemMessage('**部署完成！** 模型配置已写入，Gateway 正在重启...');
+      setTimeout(async () => {
+        await loadConfig();
+        await loadStatus();
+        if (deployFeishuAppId.trim() && deployFeishuAppSecret.trim()) {
+          appendSystemMessage('正在写入飞书配置...');
+          try {
+            await fetch(`/api/devices/${currentDevice?.id}/openclaw/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                config: {
+                  feishu: {
+                    appId: deployFeishuAppId.trim(),
+                    appSecret: deployFeishuAppSecret.trim(),
+                    connectionMode: 'websocket',
+                    domain: 'feishu',
+                    dmPolicy: 'pairing',
+                  },
+                },
+              }),
+            });
+            appendSystemMessage('**飞书配置已写入！** Gateway 已重启。');
+            addToast?.('飞书配置已保存', 'success');
+            setTimeout(() => { loadConfig(); loadStatus(); }, 1500);
+          } catch {
+            appendSystemMessage('飞书配置写入失败，请在控制面板中手动配置。');
+          }
+        }
+        setShowSetupGuide(true);
+        setSetupStep('gateway');
+        setPanelOpen(true);
+      }, 1200);
+      return;
+    }
+    const err = job.error || '部署失败，请查看日志输出';
+    addToast?.(err, 'error');
+    if (job.output?.trim()) {
+      appendSystemMessage(`\`>>> deploy\`\n\n\`\`\`\n${job.output.slice(-4000)}\n\`\`\``);
+    }
+  };
+  const stopDeployPolling = () => {
+    if (deployPollRef.current) {
+      window.clearInterval(deployPollRef.current);
+      deployPollRef.current = null;
+    }
+  };
+  const pollDeployStatus = async (jobId: string) => {
+    if (!currentDevice) return;
+    const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/deploy/status?jobId=${encodeURIComponent(jobId)}`);
+    if (!res.ok) {
+      throw new Error(`获取部署状态失败 (HTTP ${res.status})`);
+    }
+    const data = await res.json();
+    if (!data?.ok || !data?.job) {
+      throw new Error(data?.error || '部署状态接口返回异常');
+    }
+    applyDeployJob(data.job as DeployJob);
+  };
+  const beginDeployPolling = (jobId: string) => {
+    stopDeployPolling();
+    setDeployJobId(jobId);
+    if (deployJobStorageKey) localStorage.setItem(deployJobStorageKey, jobId);
+    void pollDeployStatus(jobId).catch(() => { /* wait next tick */ });
+    deployPollRef.current = window.setInterval(() => {
+      void pollDeployStatus(jobId).catch(() => { /* transient network */ });
+    }, 2500);
+  };
 
   /* ═══════════════════════════════════════════
      Effects
@@ -217,9 +334,10 @@ export default function OpenClaw() {
 
   useEffect(() => {
     if (currentDevice) {
-      loadStatus();
-      loadConfig();
-      loadBoardSkills();
+      const init = async () => {
+        await Promise.all([loadStatus(), loadConfig(), loadBoardSkills()]);
+      };
+      init();
       try {
         const saved = sessionStorage.getItem(`oc-chat-${currentDevice.id}`);
         if (saved) setChatMessagesRaw(JSON.parse(saved));
@@ -227,6 +345,33 @@ export default function OpenClaw() {
       } catch { setChatMessagesRaw([]); }
     }
   }, [currentDevice]);
+
+  useEffect(() => {
+    if (status !== null && config !== null && needsSetup()) {
+      setShowSetupGuide(true);
+      if (!status.running) {
+        setSetupStep('gateway');
+      } else if (!config.modelGateway?.baseUrl || !config.modelGateway?.apiKey) {
+        setSetupStep('model');
+      } else {
+        setSetupStep('feishu');
+      }
+    }
+  }, [status, config]);
+
+  useEffect(() => {
+    stopDeployPolling();
+    setDeployJobId('');
+    setDeployRunning(false);
+    setDeploySteps([]);
+    if (!deployJobStorageKey) return;
+    const savedJobId = localStorage.getItem(deployJobStorageKey);
+    if (savedJobId) {
+      beginDeployPolling(savedJobId);
+    }
+  }, [deployJobStorageKey]);
+
+  useEffect(() => () => stopDeployPolling(), []);
 
   useEffect(() => {
     if (!showModelSelector) return;
@@ -287,7 +432,7 @@ export default function OpenClaw() {
     socket.on('openclaw:error', (data: { error: string }) => {
       setChatStreaming(false);
       setChatMessages((prev) => [...prev, {
-        id: Date.now(),
+        id: nextChatMessageId(),
         role: 'assistant',
         text: `**错误：** ${data.error}`,
       }]);
@@ -316,20 +461,31 @@ export default function OpenClaw() {
      API Functions
      ═══════════════════════════════════════════ */
 
-  const loadStatus = async () => {
-    if (!currentDevice) return;
+  const loadStatus = async (): Promise<GatewayStatus | null> => {
+    if (!currentDevice) return null;
     setStatusLoading(true);
     try {
       const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/status`);
       const data = await res.json();
       setStatus(data);
-    } catch { /* silent */ } finally {
+      return data;
+    } catch { return null; } finally {
       setStatusLoading(false);
     }
   };
 
-  const loadConfig = async () => {
+  const loadStatusWithRetry = async (times = 5, intervalMs = 2000) => {
     if (!currentDevice) return;
+    for (let i = 0; i < times; i += 1) {
+      await loadStatus();
+      if (i < times - 1) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+    }
+  };
+
+  const loadConfig = async (): Promise<ConfigData | null> => {
+    if (!currentDevice) return null;
     try {
       const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/config`);
       const data = await res.json();
@@ -347,11 +503,12 @@ export default function OpenClaw() {
         }));
       }
       if (Array.isArray(data.pluginsAllow)) setSkillPluginsAllowText(data.pluginsAllow.join('\n'));
-    } catch { /* silent */ }
+      return data;
+    } catch { return null; }
   };
 
   const appendSystemMessage = (text: string) => {
-    setChatMessages((prev) => [...prev, { id: Date.now(), role: 'assistant', text }]);
+    setChatMessages((prev) => [...prev, { id: nextChatMessageId(), role: 'assistant', text }]);
   };
 
   const SLOW_ACTIONS = new Set(['install', 'upgrade', 'uninstall', 'prepare', 'check', 'doctor']);
@@ -414,7 +571,7 @@ export default function OpenClaw() {
         const output = data.output?.trim() || JSON.stringify(data, null, 2);
         updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n\`\`\`\n${output}\n\`\`\``);
         if (action === 'install' || action === 'uninstall' || action === 'restart-gateway' || action === 'upgrade') {
-          setTimeout(loadStatus, 2000);
+          setTimeout(() => { void loadStatusWithRetry(action === 'restart-gateway' ? 7 : 4, 2000); }, 1000);
         }
         if (data.ok) addToast?.('操作成功', 'success');
       }
@@ -439,15 +596,14 @@ export default function OpenClaw() {
   const dispatchOpenClawMessage = useCallback((text: string) => {
     if (!currentDevice || !text.trim() || !socketRef.current || !chatConnected || chatStreaming) return;
     const userText = text.trim();
-    const msgId = Date.now();
     setChatMessages((prev) => [
       ...prev,
-      { id: msgId, role: 'user', text: userText },
-      { id: msgId + 1, role: 'assistant', text: '' },
+      { id: nextChatMessageId(), role: 'user', text: userText },
+      { id: nextChatMessageId(), role: 'assistant', text: '' },
     ]);
     setChatStreaming(true);
     socketRef.current.emit('openclaw:send', { deviceId: currentDevice.id, message: userText });
-  }, [currentDevice, chatConnected, chatStreaming]);
+  }, [currentDevice, chatConnected, chatStreaming, nextChatMessageId]);
 
   useEffect(() => {
     if (chatConnected && !chatStreaming) {
@@ -556,14 +712,18 @@ export default function OpenClaw() {
     if (!currentDevice) return;
     setTestResult('testing');
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/status`);
+      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/model-test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
       const data = await res.json();
-      setTestResult(data.running ? 'ok' : 'fail');
-      if (data.running) addToast?.('网关连接正常', 'success');
-      else addToast?.('网关未运行，请先启动', 'warning');
+      const passed = !!data?.ok;
+      setTestResult(passed ? 'ok' : 'fail');
+      if (passed) addToast?.('模型调用测试通过', 'success');
+      else addToast?.(data?.output || '模型调用测试失败', 'warning');
     } catch {
       setTestResult('fail');
-      addToast?.('连接测试失败', 'error');
+      addToast?.('模型调用测试失败', 'error');
     }
     setTimeout(() => setTestResult('idle'), 5000);
   };
@@ -595,69 +755,33 @@ export default function OpenClaw() {
       addToast?.('请填写模型 ID 和 API Key', 'warning');
       return;
     }
-
-    setDeployRunning(true);
-    setDeploySteps(['running', 'pending', 'pending', 'pending']);
-
-    const stepActions = ['check', 'prepare', 'install'];
-    for (let i = 0; i < stepActions.length; i++) {
-      setDeploySteps((prev) => prev.map((s, idx) => idx === i ? 'running' : idx < i ? 'done' : s));
-      try {
-        const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/${stepActions[i]}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        const rawText = await res.text();
-        let data: any;
-        try { data = rawText ? JSON.parse(rawText) : {}; } catch { data = { output: rawText }; }
-        if (data.output) appendSystemMessage(`\`>>> ${stepActions[i]}\`\n\n\`\`\`\n${data.output}\n\`\`\``);
-        if (!data.ok && stepActions[i] !== 'check') {
-          setDeploySteps((prev) => prev.map((s, idx) => idx === i ? 'error' : s));
-          setDeployRunning(false);
-          addToast?.(`${stepActions[i]} 步骤失败`, 'error');
-          return;
-        }
-        setDeploySteps((prev) => prev.map((s, idx) => idx === i ? 'done' : s));
-      } catch (err: any) {
-        setDeploySteps((prev) => prev.map((s, idx) => idx === i ? 'error' : s));
-        setDeployRunning(false);
-        addToast?.(`部署错误: ${err.message}`, 'error');
-        return;
-      }
-    }
-
-    setDeploySteps((prev) => prev.map((s, idx) => idx === 3 ? 'running' : s));
     try {
       const preset = PROVIDER_PRESETS[deployProvider];
       const baseUrl = deployBaseUrl || preset?.baseUrl || '';
-      const api = deployApi || preset?.api || 'openai-chat';
-
-      if (preset && !deployBaseUrl) {
-        await fetch(`/api/devices/${currentDevice.id}/openclaw/onboard`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: deployProvider, apiKey: deployApiKey, modelId: deployModelId }),
-        });
-      } else {
-        await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            config: {
-              modelGateway: { baseUrl, apiKey: deployApiKey, api, modelId: deployModelId, modelName: deployProvider || 'custom' },
-            },
-          }),
-        });
+      const api = deployApi || preset?.api || 'openai-completions';
+      setDeployRunning(true);
+      setDeploySteps(['running', 'pending', 'pending', 'pending']);
+      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/deploy/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: deployProvider || 'custom',
+          baseUrl,
+          apiKey: deployApiKey,
+          modelId: deployModelId,
+          api,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.jobId) {
+        throw new Error(data?.error || `部署启动失败 (HTTP ${res.status})`);
       }
-      setDeploySteps((prev) => prev.map((s, idx) => idx === 3 ? 'done' : s));
-      appendSystemMessage('**部署完成！** 模型配置已写入，Gateway 正在重启...');
-      addToast?.('部署完成！', 'success');
-      setTimeout(() => { loadConfig(); loadStatus(); }, 2000);
+      beginDeployPolling(data.jobId);
+      addToast?.(data.alreadyRunning ? '检测到已有部署任务，已继续跟踪' : '部署已启动，可切换页面后回来查看进度', 'info');
     } catch (err: any) {
-      setDeploySteps((prev) => prev.map((s, idx) => idx === 3 ? 'error' : s));
       addToast?.(`配置失败: ${err.message}`, 'error');
-    } finally {
       setDeployRunning(false);
+      stopDeployPolling();
     }
   };
 
@@ -740,6 +864,31 @@ export default function OpenClaw() {
     };
   };
 
+  const getSetupStatus = (): SetupStatus => {
+    const gwOk = !!status?.running;
+    const modelOk = !!(config?.modelGateway?.baseUrl && config?.modelGateway?.apiKey);
+    const feishuOk = !!(config?.feishu?.appId && config?.feishu?.appSecret);
+    return {
+      gateway: gwOk ? 'ok' : (status === null ? 'warn' : 'error'),
+      model: modelOk ? 'ok' : 'unconfigured',
+      feishu: feishuOk ? 'ok' : 'unconfigured',
+    };
+  };
+
+  const getSetupCompletionCount = () => {
+    const s = getSetupStatus();
+    let done = 0;
+    if (s.gateway === 'ok') done++;
+    if (s.model === 'ok') done++;
+    if (s.feishu === 'ok') done++;
+    return done;
+  };
+
+  const needsSetup = () => {
+    const s = getSetupStatus();
+    return s.gateway !== 'ok' || s.model !== 'ok';
+  };
+
   const MI = (name: string, cls?: string) => (
     <span className={`material-symbols-outlined ${cls || ''}`}>{name}</span>
   );
@@ -787,6 +936,77 @@ export default function OpenClaw() {
      Render - Right Panel Content
      ═══════════════════════════════════════════ */
 
+  const setupStatus = getSetupStatus();
+  const setupDone = getSetupCompletionCount();
+
+  const renderSetupChecklist = () => {
+    const items: { key: SetupStep; icon: string; label: string; status: string; statusClass: string; action: () => void; actionLabel: string }[] = [
+      {
+        key: 'gateway',
+        icon: 'dns',
+        label: '网关',
+        status: setupStatus.gateway === 'ok' ? '运行中' : setupStatus.gateway === 'warn' ? '检测中...' : '未运行',
+        statusClass: setupStatus.gateway === 'ok' ? 'badge-ok' : setupStatus.gateway === 'warn' ? 'badge-accent' : 'badge-danger',
+        action: () => { toggleAccordion('ops'); },
+        actionLabel: setupStatus.gateway === 'ok' ? '查看' : '启动',
+      },
+      {
+        key: 'model',
+        icon: 'psychology',
+        label: '模型',
+        status: setupStatus.model === 'ok' ? getCurrentModel() : '未配置',
+        statusClass: setupStatus.model === 'ok' ? 'badge-ok' : 'badge-muted',
+        action: () => { toggleAccordion('model'); },
+        actionLabel: setupStatus.model === 'ok' ? '修改' : '配置',
+      },
+      {
+        key: 'feishu',
+        icon: 'forum',
+        label: '飞书',
+        status: setupStatus.feishu === 'ok' ? '已配置' : '未配置',
+        statusClass: setupStatus.feishu === 'ok' ? 'badge-ok' : 'badge-muted',
+        action: () => { toggleAccordion('feishu'); },
+        actionLabel: setupStatus.feishu === 'ok' ? '修改' : '配置',
+      },
+    ];
+
+    return (
+      <div className="oc-setup-checklist">
+        <div className="oc-setup-checklist-header">
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {MI('checklist', 'oc-setup-icon')}
+            <strong style={{ fontSize: '0.75rem' }}>配置状态</strong>
+          </span>
+          <span className="oc-setup-progress">{setupDone}/3</span>
+        </div>
+        <div className="oc-setup-checklist-body">
+          {items.map((item) => (
+            <div key={item.key} className={`oc-setup-item ${setupStep === item.key && showSetupGuide ? 'highlight' : ''}`}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                {MI(item.icon)}
+                <span className="oc-setup-item-label">{item.label}</span>
+                <span className={`badge ${item.statusClass}`} style={{ fontSize: '0.5625rem' }}>{item.status}</span>
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={item.action} style={{ fontSize: '0.625rem', padding: '2px 6px', flexShrink: 0 }}>
+                {item.actionLabel}
+              </button>
+            </div>
+          ))}
+        </div>
+        {showSetupGuide && needsSetup() && (
+          <div className="oc-setup-guide-hint">
+            {setupStatus.gateway !== 'ok'
+              ? '请先启动网关，点击上方「启动」或展开 Gateway 网关面板'
+              : setupStatus.model !== 'ok'
+              ? '网关已运行，请配置模型以启用 AI 能力'
+              : '基础配置已完成！可选配置飞书以接入消息渠道'}
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowSetupGuide(false)} style={{ fontSize: '0.5625rem', marginLeft: 'auto' }}>关闭引导</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderPanel = () => (
     <>
       <div className="oc-panel-header">
@@ -797,6 +1017,8 @@ export default function OpenClaw() {
       </div>
 
       <div className="oc-panel-body">
+        {renderSetupChecklist()}
+
         {/* ── Operations ── */}
         <div className="oc-accordion">
           <div className="oc-accordion-item">
@@ -822,7 +1044,7 @@ export default function OpenClaw() {
 
           {/* ── Deploy ── */}
           <div className="oc-accordion-item">
-            <AccTrigger id="deploy" icon="rocket_launch" label="一键部署" hint={deployRunning ? '部署中...' : undefined} />
+            <AccTrigger id="deploy" icon="rocket_launch" label="一键部署" hint={deployRunning ? (deployJobId ? `部署中 #${deployJobId.slice(0, 8)}` : '部署中...') : undefined} />
             {accordion === 'deploy' && (
               <div className="oc-accordion-content">
                 <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>快速选择（自动填充，填充后可手动修改）</div>
@@ -851,6 +1073,16 @@ export default function OpenClaw() {
                   <select className="select" value={deployApi} onChange={(e) => setDeployApi(e.target.value)} aria-label="API 协议">
                     {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
+                </div>
+                <div className="divider" style={{ margin: '8px 0' }} />
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>飞书配置（可选，部署后自动写入）</div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">App ID</span>
+                  <input className="input" type="text" value={deployFeishuAppId} onChange={(e) => setDeployFeishuAppId(e.target.value)} placeholder="cli_... (可跳过)" />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">Secret</span>
+                  <input className="input" type="password" value={deployFeishuAppSecret} onChange={(e) => setDeployFeishuAppSecret(e.target.value)} placeholder="飞书 App Secret (可跳过)" />
                 </div>
                 <button className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ width: '100%', marginTop: 8 }}>
                   {deployRunning ? '部署中...' : '开始部署'}
@@ -1098,7 +1330,7 @@ export default function OpenClaw() {
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
             {!status?.running && (
-              <button className="btn btn-primary btn-sm" onClick={() => runAction('restart-gateway')} disabled={loading} style={{ fontSize: '0.6875rem' }}>启动网关</button>
+              <button className="btn btn-primary btn-sm" onClick={() => { runAction('restart-gateway'); setShowSetupGuide(true); }} disabled={loading} style={{ fontSize: '0.6875rem' }}>启动网关</button>
             )}
             <button className="btn-icon" onClick={loadStatus} title="刷新状态">{MI('refresh')}</button>
             {!panelOpen && (
@@ -1125,14 +1357,35 @@ export default function OpenClaw() {
           {chatMessages.length === 0 ? (
             <div className="oc-chat-empty">
               <div className="oc-chat-empty-icon">{MI('hub')}</div>
-              <strong>OpenClaw Agent 就绪</strong>
-              <div className="oc-quick-prompts">
-                {QUICK_PROMPTS.map((item) => (
-                  <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+              {needsSetup() ? (
+                <>
+                  <strong>OpenClaw 需要配置</strong>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '4px 0 8px', textAlign: 'center', maxWidth: 320 }}>
+                    {!status?.running
+                      ? '网关未运行。请在右侧面板中启动网关，或使用「一键部署」完成安装和配置。'
+                      : '网关已运行，但模型尚未配置。请在右侧面板中配置模型以启用 AI 对话能力。'}
+                  </p>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {!status?.running && (
+                      <button className="btn btn-primary btn-sm" onClick={() => { runAction('restart-gateway'); setShowSetupGuide(true); }} disabled={loading}>启动网关</button>
+                    )}
+                    <button className="btn btn-ghost btn-sm" onClick={() => { setPanelOpen(true); toggleAccordion(status?.running ? 'model' : 'deploy'); }}>
+                      {status?.running ? '配置模型' : '一键部署'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <strong>OpenClaw Agent 就绪</strong>
+                  <div className="oc-quick-prompts">
+                    {QUICK_PROMPTS.map((item) => (
+                      <button key={item.label} className="chip" onClick={() => dispatchOpenClawMessage(item.prompt)} disabled={!chatConnected || chatStreaming}>
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             chatMessages.map((msg) => (

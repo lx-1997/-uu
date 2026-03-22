@@ -1,8 +1,0 @@
-path: yolo_dataset
-train: /personal/yolo_dataset/images/train
-val: /personal/yolo_dataset/images/val 
-
-names:
-  0: park
-  1: qrcode
-  2: obstacle

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import { useAuth } from './hooks/useAuth';
 import IconRail from './components/IconRail';
@@ -173,7 +173,33 @@ function AppShell() {
 }
 
 function SSOGate({ children }: { children: ReactNode }) {
-  const { loading, ssoEnabled, user, loginUrl } = useAuth();
+  const { loading, ssoEnabled, ssoRequired, ssoConfigured, user, loginUrl, refresh } = useAuth();
+  const [authStatus, setAuthStatus] = useState<'idle' | 'checking' | 'failed'>('idle');
+
+  useEffect(() => {
+    if (!(ssoRequired || ssoEnabled) || user) return;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      try {
+        if (!cancelled) setAuthStatus('checking');
+        await refresh();
+        if (!cancelled) setAuthStatus('idle');
+      } catch {
+        if (!cancelled) setAuthStatus('failed');
+      }
+    }, 1800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [refresh, ssoEnabled, ssoRequired, user]);
+
+  const loginFrameUrl = useMemo(() => {
+    if (!loginUrl) return '';
+    if (loginUrl.includes('redirect=')) return loginUrl;
+    const sep = loginUrl.includes('?') ? '&' : '?';
+    return `${loginUrl}${sep}embed=1`;
+  }, [loginUrl]);
 
   if (loading) {
     return (
@@ -186,25 +212,85 @@ function SSOGate({ children }: { children: ReactNode }) {
     );
   }
 
-  if (ssoEnabled && !user) {
-    if (loginUrl) {
-      window.location.href = loginUrl;
-      return (
-        <div className="loading-overlay">
-          <div className="spinner-lg" />
-          <span style={{ marginTop: 12, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-            正在跳转到 D-Robotics SSO 登录...
-          </span>
-        </div>
-      );
-    }
+  if ((ssoRequired || ssoEnabled) && !user) {
     return (
       <div className="loading-overlay">
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-          <h2 style={{ fontSize: '1.25rem', color: 'var(--text-primary)' }}>需要登录</h2>
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-            请联系管理员配置 SSO 登录信息
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 14,
+            width: 'min(540px, 92vw)',
+            textAlign: 'center',
+            padding: 24,
+            borderRadius: 14,
+            border: '1px solid var(--line)',
+            background: 'var(--panel-bg)',
+            boxShadow: 'var(--shadow-soft)',
+          }}
+        >
+          <h2 style={{ fontSize: '1.2rem', color: 'var(--text-primary)' }}>请先登录 D-Robotics 账号</h2>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            本平台与地瓜机器人社区使用相同 SSO 登录体系：
+            <br />
+            <a href="https://sso.d-robotics.cc/" target="_blank" rel="noreferrer noopener">
+              https://sso.d-robotics.cc/
+            </a>
           </p>
+          {loginUrl && ssoConfigured ? (
+            <>
+              <div
+                style={{
+                  width: '100%',
+                  minHeight: 520,
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  border: '1px solid var(--line)',
+                  background: 'var(--surface-1)',
+                }}
+              >
+                <iframe
+                  title="D-Robotics SSO"
+                  src={loginFrameUrl || loginUrl}
+                  style={{ width: '100%', height: 520, border: 0, background: '#fff' }}
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: '0.8125rem', color: authStatus === 'failed' ? 'var(--danger)' : 'var(--text-muted)' }}>
+                  {authStatus === 'checking' && '正在检查登录状态...'}
+                  {authStatus === 'failed' && '登录状态检查失败，请重试或检查网络。'}
+                  {authStatus === 'idle' && '请在上方输入用户名和密码，成功后将自动进入平台。'}
+                </span>
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      setAuthStatus('checking');
+                      await refresh();
+                      setAuthStatus('idle');
+                    } catch {
+                      setAuthStatus('failed');
+                    }
+                  }}
+                >
+                  刷新状态
+                </button>
+                <button
+                  className="btn-ghost"
+                  type="button"
+                  onClick={() => { window.open(loginUrl, '_blank', 'noopener,noreferrer'); }}
+                >
+                  新窗口登录
+                </button>
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: '0.8125rem', color: 'var(--danger)' }}>
+              当前服务端未完成 SSO 客户端配置（缺少 `SSO_CLIENT_ID` / `SSO_CLIENT_SECRET`），请先配置后再登录。
+            </p>
+          )}
         </div>
       </div>
     );
