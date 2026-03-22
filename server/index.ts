@@ -101,6 +101,64 @@ type FlashBackupJob = {
 };
 const flashBackupJobs = new Map<string, FlashBackupJob>();
 
+type WorkspaceModuleHealth = {
+  ready: boolean;
+  installed: boolean;
+  running?: boolean;
+  summary: string;
+  recommendedAction: string;
+  missing?: string[];
+};
+
+type DeviceWorkspaceHealth = {
+  checkedAt: number;
+  readyModules: number;
+  totalModules: number;
+  modules: {
+    development: WorkspaceModuleHealth;
+    codeServer: WorkspaceModuleHealth;
+    vnc: WorkspaceModuleHealth;
+    ros: WorkspaceModuleHealth;
+    nodeHub: WorkspaceModuleHealth;
+    modelZoo: WorkspaceModuleHealth;
+  };
+};
+
+const WORKSPACE_HEALTH_SCRIPT = [
+  'python_ready=$(command -v python3 >/dev/null 2>&1 && echo 1 || echo 0)',
+  'git_ready=$(command -v git >/dev/null 2>&1 && echo 1 || echo 0)',
+  'node_ready=$(command -v node >/dev/null 2>&1 && echo 1 || echo 0)',
+  'npm_ready=$(command -v npm >/dev/null 2>&1 && echo 1 || echo 0)',
+  'code_installed=$(command -v code-server >/dev/null 2>&1 && echo 1 || echo 0)',
+  'code_running=$( (ss -lntp 2>/dev/null | grep -q ":13337" || pgrep -af "code-server.*13337" >/dev/null 2>&1) && echo 1 || echo 0 )',
+  'vnc_installed=$( (command -v x11vnc >/dev/null 2>&1 || command -v vncserver >/dev/null 2>&1) && echo 1 || echo 0 )',
+  'vnc_running=$( (ss -lntp 2>/dev/null | grep -q ":5900" || pgrep -af "x11vnc|Xtigervnc|vncserver" >/dev/null 2>&1) && echo 1 || echo 0 )',
+  'ros2_ready=$(command -v ros2 >/dev/null 2>&1 && echo 1 || echo 0)',
+  'rosbridge_installed=$(dpkg -l 2>/dev/null | grep -Eq "^ii[[:space:]]+.*rosbridge" && echo 1 || echo 0)',
+  'rosbridge_running=$( (ss -lntp 2>/dev/null | grep -q ":9090" || pgrep -af "rosbridge_websocket|rosbridge_server" >/dev/null 2>&1) && echo 1 || echo 0 )',
+  'tros_count=$(dpkg -l 2>/dev/null | grep -Ec "^ii[[:space:]]+(tros-|hobot)" || true)',
+  'modelzoo_dir=$(test -d /opt/rdk_model_zoo && echo 1 || echo 0)',
+  'hrt_ready=$(command -v hrt_model_exec >/dev/null 2>&1 && echo 1 || echo 0)',
+  'bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "import importlib.util; mods=(\'hobot_dnn\',\'hobot_dnn_rdkx5\',\'bpu_infer_lib_x5\',\'bpu_infer_lib_x3\'); print(1 if any(importlib.util.find_spec(name) is not None for name in mods) else 0)" 2>/dev/null || echo 0; else echo 0; fi)',
+  'printf "checked_at=%s\\n" "$(date +%s)"',
+  'printf "python_ready=%s\\n" "$python_ready"',
+  'printf "git_ready=%s\\n" "$git_ready"',
+  'printf "node_ready=%s\\n" "$node_ready"',
+  'printf "npm_ready=%s\\n" "$npm_ready"',
+  'printf "code_installed=%s\\n" "$code_installed"',
+  'printf "code_running=%s\\n" "$code_running"',
+  'printf "vnc_installed=%s\\n" "$vnc_installed"',
+  'printf "vnc_running=%s\\n" "$vnc_running"',
+  'printf "ros2_ready=%s\\n" "$ros2_ready"',
+  'printf "rosbridge_installed=%s\\n" "$rosbridge_installed"',
+  'printf "rosbridge_running=%s\\n" "$rosbridge_running"',
+  'printf "tros_count=%s\\n" "$tros_count"',
+  'printf "modelzoo_dir=%s\\n" "$modelzoo_dir"',
+  'printf "hrt_ready=%s\\n" "$hrt_ready"',
+  'printf "bpu_ready=%s\\n" "$bpu_ready"',
+].join('; ');
+const WORKSPACE_HEALTH_COMMAND = `bash -lc ${shellEscape(WORKSPACE_HEALTH_SCRIPT)}`;
+
 // OpenClaw Manager
 const resourcesPath = path.join(process.cwd(), 'build-resources');
 const openClawManager = new OpenClawDeploymentManager(resourcesPath);
@@ -229,6 +287,152 @@ function auditKey(input: string) {
   if (!raw) return '';
   const digest = crypto.createHash('sha1').update(raw).digest('hex').slice(0, 8);
   return `${raw.slice(0, 6)}***#${digest}`;
+}
+
+function parseWorkspaceHealthPairs(output: string) {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .reduce<Record<string, string>>((acc, line) => {
+      const idx = line.indexOf('=');
+      if (idx <= 0) return acc;
+      acc[line.slice(0, idx)] = line.slice(idx + 1);
+      return acc;
+    }, {});
+}
+
+function readHealthBool(values: Record<string, string>, key: string) {
+  return values[key] === '1';
+}
+
+function readHealthInt(values: Record<string, string>, key: string) {
+  const value = Number.parseInt(values[key] || '0', 10);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function buildWorkspaceModuleStatus(
+  ready: boolean,
+  installed: boolean,
+  summary: string,
+  recommendedAction: string,
+  missing: string[] = [],
+  running?: boolean,
+): WorkspaceModuleHealth {
+  return {
+    ready,
+    installed,
+    ...(typeof running === 'boolean' ? { running } : {}),
+    summary,
+    recommendedAction,
+    ...(missing.length > 0 ? { missing } : {}),
+  };
+}
+
+function buildWorkspaceHealth(output: string): DeviceWorkspaceHealth {
+  const values = parseWorkspaceHealthPairs(output);
+  const pythonReady = readHealthBool(values, 'python_ready');
+  const gitReady = readHealthBool(values, 'git_ready');
+  const nodeReady = readHealthBool(values, 'node_ready');
+  const npmReady = readHealthBool(values, 'npm_ready');
+  const codeInstalled = readHealthBool(values, 'code_installed');
+  const codeRunning = readHealthBool(values, 'code_running');
+  const vncInstalled = readHealthBool(values, 'vnc_installed');
+  const vncRunning = readHealthBool(values, 'vnc_running');
+  const ros2Ready = readHealthBool(values, 'ros2_ready');
+  const rosbridgeInstalled = readHealthBool(values, 'rosbridge_installed');
+  const rosbridgeRunning = readHealthBool(values, 'rosbridge_running');
+  const trosCount = readHealthInt(values, 'tros_count');
+  const modelZooDir = readHealthBool(values, 'modelzoo_dir');
+  const hrtReady = readHealthBool(values, 'hrt_ready');
+  const bpuReady = readHealthBool(values, 'bpu_ready');
+
+  const developmentMissing = [
+    pythonReady ? '' : 'Python3',
+    gitReady ? '' : 'Git',
+    nodeReady ? '' : 'Node.js',
+    npmReady ? '' : 'npm',
+  ].filter(Boolean);
+  const developmentReady = developmentMissing.length === 0;
+  const development = buildWorkspaceModuleStatus(
+    developmentReady,
+    developmentReady,
+    developmentReady ? 'Python / Git / Node / npm 已就绪' : `缺少 ${developmentMissing.join(' / ')}`,
+    developmentReady ? '可以直接开始一句话开发' : '让 RDKClaw 先补齐缺失开发环境',
+    developmentMissing,
+  );
+
+  const codeServer = buildWorkspaceModuleStatus(
+    codeInstalled && codeRunning,
+    codeInstalled,
+    !codeInstalled ? '未安装 code-server' : codeRunning ? 'code-server 已安装并正在监听 13337 端口' : 'code-server 已安装，但当前未启动',
+    !codeInstalled ? '前往 IDE 页安装 code-server' : codeRunning ? '打开 IDE 继续开发' : '前往 IDE 页启动 code-server',
+    !codeInstalled ? ['code-server'] : [],
+    codeRunning,
+  );
+
+  const vnc = buildWorkspaceModuleStatus(
+    vncInstalled && vncRunning,
+    vncInstalled,
+    !vncInstalled ? '未检测到 VNC 组件' : vncRunning ? 'VNC 服务已运行，可直接连接桌面' : 'VNC 组件已安装，但当前未运行',
+    !vncInstalled ? '前往 VNC 页尝试安装 / 启动服务' : vncRunning ? '打开远程桌面' : '前往 VNC 页启动桌面服务',
+    !vncInstalled ? ['x11vnc / vncserver'] : [],
+    vncRunning,
+  );
+
+  const rosMissing = [
+    ros2Ready ? '' : 'ROS2',
+    rosbridgeInstalled ? '' : 'rosbridge_server',
+  ].filter(Boolean);
+  const ros = buildWorkspaceModuleStatus(
+    ros2Ready && rosbridgeInstalled && rosbridgeRunning,
+    ros2Ready || rosbridgeInstalled,
+    !ros2Ready ? 'ROS2 未安装' : !rosbridgeInstalled ? '缺少 rosbridge_server' : rosbridgeRunning ? 'ROS2 与 rosbridge 已就绪' : 'rosbridge 已安装，但当前未运行',
+    !ros2Ready || !rosbridgeInstalled ? '前往 ROS 页补齐依赖并启动 rosbridge' : rosbridgeRunning ? '打开 ROS 可视化' : '前往 ROS 页启动 rosbridge',
+    rosMissing,
+    rosbridgeRunning,
+  );
+
+  const nodeHubMissing = [
+    ros2Ready ? '' : 'ROS2',
+    trosCount > 0 ? '' : 'tros / hobot 生态包',
+  ].filter(Boolean);
+  const nodeHub = buildWorkspaceModuleStatus(
+    ros2Ready && trosCount > 0,
+    trosCount > 0,
+    ros2Ready && trosCount > 0 ? `已检测到 ${trosCount} 个 tros / hobot 组件` : `缺少 ${nodeHubMissing.join(' / ')}`,
+    ros2Ready && trosCount > 0 ? '打开 NodeHub 同步板端能力' : '先补齐 RDK 官方生态包，再同步 NodeHub',
+    nodeHubMissing,
+  );
+
+  const modelZooMissing = [
+    modelZooDir ? '' : 'ModelZoo 仓库目录',
+    hrtReady ? '' : 'hrt_model_exec',
+    bpuReady ? '' : 'BPU Python 运行时',
+  ].filter(Boolean);
+  const modelZoo = buildWorkspaceModuleStatus(
+    modelZooDir && hrtReady && bpuReady,
+    modelZooDir,
+    modelZooDir && hrtReady && bpuReady ? 'ModelZoo 仓库与 BPU 运行时已就绪' : `缺少 ${modelZooMissing.join(' / ')}`,
+    modelZooDir && hrtReady && bpuReady ? '打开 ModelZoo 管理模型' : '先补齐 ModelZoo 仓库与 BPU 运行环境',
+    modelZooMissing,
+  );
+
+  const modules = {
+    development,
+    codeServer,
+    vnc,
+    ros,
+    nodeHub,
+    modelZoo,
+  };
+  const checkedAtSeconds = readHealthInt(values, 'checked_at');
+  return {
+    checkedAt: checkedAtSeconds > 0 ? checkedAtSeconds * 1000 : Date.now(),
+    readyModules: Object.values(modules).filter((item) => item.ready).length,
+    totalModules: Object.keys(modules).length,
+    modules,
+  };
 }
 
 function applyFeishuConfig(next: ReturnType<FeishuConfigStore['getConfig']>) {
@@ -762,6 +966,18 @@ app.get('/api/devices/:id/openclaw/status', async (request, response) => {
   });
 });
 
+app.get('/api/devices/:id/openclaw/health', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  openClawManager.getHealthStatus(deviceObj, (status) => {
+    response.json({ ok: true, status });
+  });
+});
+
 app.get('/api/devices/:id/openclaw/config', async (request, response) => {
   const { id } = request.params;
   const device = await resolveDevice(request, response, id);
@@ -890,6 +1106,20 @@ app.get('/api/devices/:id/diagnostics', async (request, response) => {
 
   response.json({
     ok: true,
+    output: executed.output,
+    device: sanitizeDevice(executed.device as Device & { password?: string }),
+  });
+});
+
+app.get('/api/devices/:id/workspace/health', async (request, response) => {
+  const { id } = request.params;
+
+  const executed = await runOnDevice(request, response, id, [WORKSPACE_HEALTH_COMMAND]);
+  if (!executed) return;
+
+  response.json({
+    ok: true,
+    status: buildWorkspaceHealth(executed.output),
     output: executed.output,
     device: sanitizeDevice(executed.device as Device & { password?: string }),
   });
@@ -2132,16 +2362,27 @@ app.post('/api/channels/feishu/webhook', async (request, response) => {
 // ─── Agent Chat (SSE) ───
 
 app.post('/api/agent/chat', async (request, response) => {
-  const { message, deviceId, sessionId, userId, mode } = request.body as {
+  const { message, deviceId, sessionId, userId, mode, attachments } = request.body as {
     message?: string;
     deviceId?: string;
     sessionId?: string;
     userId?: string;
     mode?: RDKClawExecutionMode;
+    attachments?: Array<{
+      id: string;
+      type: 'image' | 'file' | 'audio' | 'video';
+      name: string;
+      mimeType?: string;
+      size?: number;
+      contentBase64?: string;
+      transcript?: string;
+      textContent?: string;
+      source?: 'studio' | 'feishu';
+    }>;
   };
 
-  if (!message?.trim()) {
-    response.status(400).json({ error: '消息不能为空' });
+  if (!message?.trim() && (!attachments || attachments.length === 0)) {
+    response.status(400).json({ error: '消息或附件不能为空' });
     return;
   }
 
@@ -2169,11 +2410,12 @@ app.post('/api/agent/chat', async (request, response) => {
     };
 
     for await (const event of rdkclaw.streamChat({
-      message: message.trim(),
+      message: String(message || '').trim(),
       deviceId,
       sessionId,
       userId,
       mode,
+      attachments,
     })) {
       sendEvent(event.type, event.data);
     }

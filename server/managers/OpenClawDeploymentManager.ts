@@ -21,6 +21,16 @@ export interface GatewayStatus {
   feishuConnected: boolean;
 }
 
+export interface OpenClawHealthStatus {
+  installed: boolean;
+  gatewayRunning: boolean;
+  version: string;
+  hasToken: boolean;
+  tokenStatus: 'ok' | 'missing' | 'invalid' | 'unknown';
+  aiReady: boolean;
+  summary: string;
+}
+
 export interface PluginSkillStatus {
   installedPlugins: string[];
   enabledPlugins: string[];
@@ -321,6 +331,118 @@ print(json.dumps(result))`;
       }
       onResult({ running: false, version: '', feishuConnected: false });
     });
+  }
+
+  getHealthStatus(device: Device, onResult: (status: OpenClawHealthStatus) => void): void {
+    const pyScript = `import json, os, socket, subprocess, urllib.request, urllib.error
+result = {
+  "installed": False,
+  "gatewayRunning": False,
+  "version": "",
+  "hasToken": False,
+  "tokenStatus": "unknown",
+  "aiReady": False,
+  "summary": ""
+}
+
+def check_port(host, port):
+  s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  s.settimeout(2)
+  try:
+    return s.connect_ex((host, port)) == 0
+  finally:
+    s.close()
+
+try:
+  env = os.environ.copy()
+  env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + env.get("PATH", "")
+  out = subprocess.check_output(["openclaw", "--version"], env=env, stderr=subprocess.DEVNULL, timeout=6).decode().strip()
+  result["installed"] = True
+  result["version"] = out
+except Exception:
+  pass
+
+result["gatewayRunning"] = check_port("127.0.0.1", 18789)
+
+token = ""
+try:
+  p = os.path.expanduser("~/.openclaw/openclaw.json")
+  if os.path.exists(p):
+    d = json.load(open(p, "r", encoding="utf-8"))
+    token = (((d.get("gateway") or {}).get("auth") or {}).get("token") or "").strip()
+except Exception:
+  token = ""
+
+result["hasToken"] = bool(token)
+
+if not result["installed"]:
+  result["tokenStatus"] = "unknown"
+elif not result["hasToken"]:
+  result["tokenStatus"] = "missing"
+elif not result["gatewayRunning"]:
+  result["tokenStatus"] = "unknown"
+else:
+  try:
+    req = urllib.request.Request(
+      "http://127.0.0.1:18789/v1/models",
+      headers={"Authorization": "Bearer " + token},
+      method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=6) as resp:
+      code = int(resp.getcode())
+      result["tokenStatus"] = "ok" if 200 <= code < 300 else "invalid"
+  except urllib.error.HTTPError as e:
+    result["tokenStatus"] = "invalid" if e.code in (401, 403) else "unknown"
+  except Exception:
+    result["tokenStatus"] = "unknown"
+
+result["aiReady"] = bool(result["installed"] and result["gatewayRunning"] and result["tokenStatus"] == "ok")
+
+if not result["installed"]:
+  result["summary"] = "未安装 OpenClaw"
+elif not result["gatewayRunning"]:
+  result["summary"] = "OpenClaw 已安装，但网关未运行"
+elif result["tokenStatus"] == "missing":
+  result["summary"] = "OpenClaw 已安装，但缺少 token"
+elif result["tokenStatus"] == "invalid":
+  result["summary"] = "OpenClaw token 无效"
+elif result["tokenStatus"] == "ok":
+  result["summary"] = "OpenClaw 已就绪，可用 AI 能力"
+else:
+  result["summary"] = "OpenClaw 状态待确认"
+
+print(json.dumps(result, ensure_ascii=False))`;
+    const b64 = Buffer.from(pyScript, 'utf8').toString('base64');
+    const cmd = `echo '${b64}' | base64 -d > /tmp/oc_health.py && python3 /tmp/oc_health.py`;
+    let output = '';
+    this.execCommand(device, cmd, (chunk) => { output += chunk; }, () => {
+      const jsonLine = (output || '').split('\n').map(l => l.trim()).find((l) => l.startsWith('{'));
+      if (!jsonLine) {
+        onResult({
+          installed: false,
+          gatewayRunning: false,
+          version: '',
+          hasToken: false,
+          tokenStatus: 'unknown',
+          aiReady: false,
+          summary: '状态检测失败',
+        });
+        return;
+      }
+      try {
+        onResult(JSON.parse(jsonLine) as OpenClawHealthStatus);
+      } catch {
+        onResult({
+          installed: false,
+          gatewayRunning: false,
+          version: '',
+          hasToken: false,
+          tokenStatus: 'unknown',
+          aiReady: false,
+          summary: '状态解析失败',
+        });
+      }
+    }, { timeout: 20000 });
   }
 
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {

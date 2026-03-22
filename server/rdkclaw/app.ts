@@ -15,6 +15,12 @@ import {
   loadProviderConfig,
   type ProviderConfig,
 } from "../agent/provider-setup.js";
+import {
+  buildAttachmentPrompt,
+  createAttachmentTools,
+  ensureAudioAttachmentTranscripts,
+  prepareSessionAttachments,
+} from "../agent/tools/attachment-tools.js";
 import { createRdkTools } from "../agent/tools/rdk-tools.js";
 import { createStudioTools, type StudioAutonomyRuntime } from "../agent/tools/studio-tools.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
@@ -63,6 +69,9 @@ function buildPersonaPrompt(persona: PersonaProfile) {
     "若用户要求定时/周期/提醒/每秒推送，必须优先调用 rdkclaw_task_create 创建自治任务，而不是仅给方案说明。",
     "若任务需要联网信息，优先使用 web_search/web_fetch/web_extract 工具链，并在回答中给出来源链接。",
     "当联网结论对后续有长期价值时，先总结再调用 rdkclaw_memory_append_daily 写入 daily memory。",
+    "若用户上传了图片、文件或语音，先用 attachment_list 查看可用附件，再根据类型调用 attachment_read / attachment_describe_image / attachment_get_audio_transcript。",
+    "如果用户想一句话生成一个 RDK 应用，优先拆出最小可运行版本，明确依赖、入口、验证方式，并直接开始第一步执行。",
+    "新设备场景下，优先检查连接、OpenClaw 可用性、关键依赖是否缺失，再进入应用开发或能力调用。",
     "输出简洁，明确给出执行结果与下一步建议。",
   ].join("\n");
 }
@@ -357,10 +366,13 @@ export class RDKClawApp {
     base: { runId: string; sessionId: string },
     decision: DelegateDecision,
     policy: RDKClawPolicy,
+    providerConfig: ProviderConfig,
+    sessionAttachments: Awaited<ReturnType<typeof prepareSessionAttachments>>["allAttachments"],
   ): Tool[] {
     const tools: Tool[] = [
       ...builtinTools,
       ...createStudioTools(this.autonomyRuntime),
+      ...createAttachmentTools(sessionAttachments, providerConfig, base.sessionId),
     ];
     if (policy.network.enabled) {
       tools.push(
@@ -400,18 +412,31 @@ export class RDKClawApp {
       throw new Error("未配置 AI 模型 API Key，请先在设置中配置。");
     }
 
+    const sessionKey = req.sessionId?.trim() || `rdkclaw-${Date.now()}`;
+    const attachmentState = await prepareSessionAttachments(sessionKey, req.attachments);
+    await ensureAudioAttachmentTranscripts(
+      sessionKey,
+      attachmentState.allAttachments,
+      providerConfig,
+      attachmentState.newAttachments.map((item) => item.id),
+    );
+    const attachmentPrompt = buildAttachmentPrompt(attachmentState.newAttachments);
+    const effectiveMessage = [String(req.message || "").trim(), attachmentPrompt].filter(Boolean).join("\n\n");
     const persona = this.personaStore.getPersona();
     const policy = this.policyStore.getPolicy();
-    const matchedSkills = this.skills.matchByText(req.message).slice(0, 5);
+    const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
     const decision = selectDelegateDecision(req, persona, policy, matchedSkills);
     const systemPrompt = [
       buildPersonaPrompt(persona),
+      attachmentState.allAttachments.length > 0
+        ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
+        : "",
       decision.forceBoard
         ? "本次任务必须优先调用 board_openclaw_delegate，不要直接执行本地设备写操作工具。"
         : decision.preferBoard
           ? "本次任务优先考虑 board_openclaw_delegate，除非任务明显适合本地轻量工具。"
           : "本次任务默认本地优先，必要时再调用 board_openclaw_delegate。",
-    ].join("\n");
+    ].filter(Boolean).join("\n");
     const modelDef = buildModelDef(providerConfig);
     const streamFn = buildStreamFn(providerConfig);
     const apiKey = getApiKey(providerConfig);
@@ -423,7 +448,6 @@ export class RDKClawApp {
     process.env.RDKCLAW_MAIN_READS_MEMORY = policy.memory.mainSessionReadsMemory ? "1" : "0";
     process.env.RDKCLAW_SHARED_BLOCKS_MEMORY = policy.memory.sharedSessionBlocksMemory ? "1" : "0";
 
-    const sessionKey = req.sessionId?.trim() || `rdkclaw-${Date.now()}`;
     const runId = crypto.randomUUID();
     const base = { runId, sessionId: sessionKey };
     const queue: RDKClawEvent[] = [
@@ -442,13 +466,18 @@ export class RDKClawApp {
           network_enabled: policy.network.enabled,
           network_max_fetch_chars: policy.network.maxFetchChars,
           network_require_approval: policy.network.requireApproval,
+          attachments_count: attachmentState.allAttachments.length,
+          new_attachments_count: attachmentState.newAttachments.length,
+          attachment_types: Array.from(new Set(attachmentState.allAttachments.map((item) => item.type))),
+          audio_transcript_count: attachmentState.allAttachments.filter((item) => item.type === "audio" && item.transcript).length,
+          new_audio_transcript_count: attachmentState.newAttachments.filter((item) => item.type === "audio" && item.transcript).length,
         },
       },
     ];
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
-      tools: this.createTools(req, (event) => queue.push(event), base, decision, policy),
+      tools: this.createTools(req, (event) => queue.push(event), base, decision, policy, providerConfig, attachmentState.allAttachments),
       streamFn,
       modelDef,
       apiKey,
@@ -474,7 +503,7 @@ export class RDKClawApp {
     });
 
     const runPromise = agent
-      .run(sessionKey, req.message)
+      .run(sessionKey, effectiveMessage || "请结合当前附件继续处理。")
       .catch((error) => {
         failed = error;
       })

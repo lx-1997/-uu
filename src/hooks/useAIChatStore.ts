@@ -1,7 +1,17 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState } from '../app-types';
+import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
 import { CMD_SUGGESTIONS } from '../constants';
-import { bindRDKClawFeishuCode, cancelRDKClawRun, decideRDKClawApproval, setActiveRdkclawDevice, setActiveRdkclawSession, stopRDKClawTask, streamAgentChat, type AgentSSEEvent } from '../api';
+import {
+  bindRDKClawFeishuCode,
+  cancelRDKClawRun,
+  decideRDKClawApproval,
+  setActiveRdkclawDevice,
+  setActiveRdkclawSession,
+  stopRDKClawTask,
+  streamAgentChat,
+  type AgentAttachmentPayload,
+  type AgentSSEEvent,
+} from '../api';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
@@ -19,7 +29,14 @@ export interface AIChatStoreState {
   setChatExpanded: (v: boolean) => void;
   aiTyping: boolean;
   setAiTyping: React.Dispatch<React.SetStateAction<boolean>>;
-  handleCommand: (e: React.FormEvent) => void;
+  handleCommand: (
+    e: React.FormEvent,
+    options?: {
+      messageOverride?: string;
+      attachments?: AgentAttachmentPayload[];
+      displayAttachments?: ChatAttachment[];
+    },
+  ) => void;
   executeConfirm: (confirmId: string) => void;
   dismissConfirm: (confirmId: string) => void;
   clearChatHistory: () => void;
@@ -197,14 +214,35 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ── Main command handler ──
-  const handleCommand = (e: React.FormEvent) => {
+  const handleCommand = (
+    e: React.FormEvent,
+    options?: {
+      messageOverride?: string;
+      attachments?: AgentAttachmentPayload[];
+      displayAttachments?: ChatAttachment[];
+    },
+  ) => {
     e.preventDefault();
-    if (!cmd.trim() || commandLockRef.current) return;
-    const userMsg = cmd.trim();
+    const userMsg = String(options?.messageOverride ?? cmd).trim();
+    const requestAttachments = options?.attachments ?? [];
+    const displayAttachments = options?.displayAttachments ?? [];
+    if ((!userMsg && requestAttachments.length === 0) || commandLockRef.current) return;
+    const requestMessage = userMsg || '请结合我刚上传的附件继续处理当前请求。';
+    const transcriptText = displayAttachments
+      .map((attachment) => attachment.transcript?.trim())
+      .filter(Boolean)
+      .join('\n');
+    const displayText = userMsg || transcriptText || '';
     reportActiveSession('user-command');
     reportActiveDevice('user-command');
     const msgId = Date.now();
-    setChatMessages(prev => [...prev, { id: msgId, role: 'user', text: userMsg, source: 'studio' }]);
+    setChatMessages(prev => [...prev, {
+      id: msgId,
+      role: 'user',
+      text: displayText,
+      source: 'studio',
+      attachments: displayAttachments.length > 0 ? displayAttachments : undefined,
+    }]);
     setChatExpanded(true);
     setCmd('');
     setShowSuggestions(false);
@@ -214,14 +252,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         // /settings — quick command to open settings
-        if (userMsg === '/settings') {
+        if (requestAttachments.length === 0 && userMsg === '/settings') {
           setShowSettings(true);
           setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '已打开设置面板。' }]);
           setAiTyping(false);
           return;
         }
 
-        const bindMatch = userMsg.match(/^(?:绑定飞书|飞书绑定|bind\s*feishu)\s+(\d{6})$/i);
+        const bindMatch = requestAttachments.length === 0
+          ? userMsg.match(/^(?:绑定飞书|飞书绑定|bind\s*feishu)\s+(\d{6})$/i)
+          : null;
         if (bindMatch) {
           const code = bindMatch[1];
           try {
@@ -244,7 +284,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const stopTaskMatch = userMsg.match(/^(?:停止任务|暂停任务|stop\s*task)\s+([a-zA-Z0-9_-]+)$/i);
+        const stopTaskMatch = requestAttachments.length === 0
+          ? userMsg.match(/^(?:停止任务|暂停任务|stop\s*task)\s+([a-zA-Z0-9_-]+)$/i)
+          : null;
         if (stopTaskMatch) {
           const taskId = stopTaskMatch[1];
           try {
@@ -301,9 +343,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         };
 
         const { done, abort } = streamAgentChat(
-          userMsg,
+          requestMessage,
           currentDevice?.id,
           sessionIdRef.current,
+          requestAttachments,
           (event: AgentSSEEvent) => {
             switch (event.type) {
               case 'meta': {
@@ -314,10 +357,24 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const message = String(event.data.message || '开始处理请求');
                 const networkEnabled = Boolean(event.data.network_enabled);
                 const networkMaxFetchChars = Number(event.data.network_max_fetch_chars || 0);
+                const attachmentsCount = Number(event.data.attachments_count || 0);
+                const newAttachmentsCount = Number(event.data.new_attachments_count || 0);
+                const audioTranscriptCount = Number(event.data.audio_transcript_count || 0);
+                const newAudioTranscriptCount = Number(event.data.new_audio_transcript_count || 0);
+                const attachmentTypes = Array.isArray(event.data.attachment_types)
+                  ? (event.data.attachment_types as string[]).filter(Boolean).join(' / ')
+                  : '';
                 aiBlocks.push({
                   type: 'status',
                   items: [
                     { label: `执行主体: ${executorLabel(executor)}`, value: `${phase} · ${message}`, ok: true },
+                    {
+                      label: '多模态上下文',
+                      value: attachmentsCount > 0
+                        ? `已接入 ${attachmentsCount} 个附件${newAttachmentsCount > 0 ? `（本轮新增 ${newAttachmentsCount}）` : ''}${attachmentTypes ? ` · ${attachmentTypes}` : ''}${newAudioTranscriptCount > 0 ? ` · 本轮语音已转写 ${newAudioTranscriptCount} 个` : audioTranscriptCount > 0 ? ` · 累计已转写 ${audioTranscriptCount} 个语音` : ''}`
+                        : '本轮无附件',
+                      ok: attachmentsCount > 0,
+                    },
                     {
                       label: '联网能力',
                       value: networkEnabled ? `已启用 · 上限 ${networkMaxFetchChars || 0} chars` : '已禁用',

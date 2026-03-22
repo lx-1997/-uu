@@ -401,3 +401,38 @@ docs/
 本项目并不是从零做客户端，而是把“已有 Web + Node 工作台”桌面化。最佳路径不是重写，而是给它加一个 Electron 外壳，并把本地服务、数据目录、运行时地址、静态资源路径这四个关键点收拢起来。
 
 只要这四个点处理好，现有终端、VNC、文件、AI、OpenClaw 基本都能平滑迁移到客户端形态。
+
+---
+
+## 12. desktop 启动冲突排障（5173 端口）
+
+当运行 `npm run desktop` 时，如果页面显示为其他项目（例如 DressUp 页面），通常是 `5173` 端口被外部 Vite 服务占用导致。
+
+### 12.1 快速诊断（Windows）
+
+1. 查看谁占用了端口：
+
+```powershell
+Get-NetTCPConnection -LocalPort 5173 | Select-Object OwningProcess -Unique
+```
+
+2. 查看该 PID 对应命令行：
+
+```powershell
+Get-CimInstance Win32_Process -Filter "ProcessId = <PID>" | Select-Object Name, CommandLine
+```
+
+3. 结束占用进程：
+
+```powershell
+Stop-Process -Id <PID> -Force
+```
+
+### 12.2 代码层防护（已落地）
+
+- `scripts/dev-client.mjs`
+  - 启动前会打印端口占用 PID、尝试清理并输出清理结果；
+  - 清理后会复检端口，如果仍被占用则直接失败退出，避免误启动。
+- `scripts/wait-and-launch.mjs`
+  - 在启动 Electron 前会校验 `http://localhost:5173` 返回页面是否为 RDK 页面；
+  - 若检测到非 RDK 指纹，会中止启动并提示排障命令。

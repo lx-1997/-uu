@@ -258,12 +258,25 @@ export interface FeishuConfigView {
   hasEncryptKey: boolean;
 }
 
+export interface AgentAttachmentPayload {
+  id: string;
+  type: 'image' | 'file' | 'audio' | 'video';
+  name: string;
+  mimeType?: string;
+  size?: number;
+  contentBase64?: string;
+  transcript?: string;
+  textContent?: string;
+  source?: 'studio' | 'feishu';
+}
+
 export type AgentEventCallback = (event: AgentSSEEvent) => void;
 
 export function streamAgentChat(
   message: string,
   deviceId?: string,
   sessionId?: string,
+  attachments?: AgentAttachmentPayload[],
   onEvent?: AgentEventCallback,
 ): { abort: () => void; done: Promise<void> } {
   const controller = new AbortController();
@@ -273,7 +286,7 @@ export function streamAgentChat(
       const res = await fetch(resolveUrl('/api/agent/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, deviceId, sessionId }),
+        body: JSON.stringify({ message, deviceId, sessionId, attachments }),
         signal: controller.signal,
       });
 
@@ -525,6 +538,59 @@ export function runOpenClawAgentAction(
       clearTimeout(timer);
       return { error: err instanceof Error ? err.message : 'OpenClaw action error' };
     });
+}
+
+export interface OpenClawHealthStatus {
+  installed: boolean;
+  gatewayRunning: boolean;
+  version: string;
+  hasToken: boolean;
+  tokenStatus: 'ok' | 'missing' | 'invalid' | 'unknown';
+  aiReady: boolean;
+  summary: string;
+}
+
+export interface WorkspaceModuleHealth {
+  ready: boolean;
+  installed: boolean;
+  running?: boolean;
+  summary: string;
+  recommendedAction: string;
+  missing?: string[];
+}
+
+export interface DeviceWorkspaceHealth {
+  checkedAt: number;
+  readyModules: number;
+  totalModules: number;
+  modules: {
+    development: WorkspaceModuleHealth;
+    codeServer: WorkspaceModuleHealth;
+    vnc: WorkspaceModuleHealth;
+    ros: WorkspaceModuleHealth;
+    nodeHub: WorkspaceModuleHealth;
+    modelZoo: WorkspaceModuleHealth;
+  };
+}
+
+export function fetchDeviceOpenClawHealth(deviceId: string, password?: string) {
+  return request<{ ok: boolean; status: OpenClawHealthStatus }>(`/api/devices/${deviceId}/openclaw/health`, {
+    headers: password ? { 'x-device-password': password } : undefined,
+  });
+}
+
+export function fetchDeviceWorkspaceHealth(deviceId: string, password?: string) {
+  return request<{ ok: boolean; status: DeviceWorkspaceHealth }>(`/api/devices/${deviceId}/workspace/health`, {
+    headers: password ? { 'x-device-password': password } : undefined,
+  });
+}
+
+export function installDeviceOpenClaw(deviceId: string, password?: string) {
+  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/openclaw/install`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+    body: JSON.stringify({}),
+  });
 }
 
 export function checkDevicePing(deviceId: string) {

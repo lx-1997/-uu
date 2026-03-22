@@ -14,7 +14,7 @@ import type { Model, StreamFunction } from '@mariozechner/pi-ai';
 registerBuiltInApiProviders();
 
 export interface ProviderConfig {
-  provider: 'qwen' | 'deepseek' | 'openai' | 'custom';
+  provider: string;
   model: string;
   apiKey: string;
   baseUrl?: string;
@@ -36,12 +36,40 @@ const PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string }> = {
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
   },
+  moonshot: {
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'moonshot-v1-8k',
+  },
+  zhipu: {
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-4-flash',
+  },
+  groq: {
+    baseUrl: 'https://api.groq.com/openai/v1',
+    model: 'llama-3.3-70b-versatile',
+  },
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'openai/gpt-4o-mini',
+  },
+  xai: {
+    baseUrl: 'https://api.x.ai/v1',
+    model: 'grok-2-latest',
+  },
+  ollama: {
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'qwen2.5:7b',
+  },
+  'openai-compatible': {
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+  },
 };
 
 /**
  * sk-sp- 前缀的通义千问 key 需要用 coding 端点
  */
-function resolveQwenBaseUrl(config: ProviderConfig): string {
+function resolveProviderBaseUrl(config: ProviderConfig): string {
   if (config.baseUrl) return config.baseUrl;
   if (config.provider === 'qwen' && config.apiKey.startsWith('sk-sp-')) {
     return 'https://coding.dashscope.aliyuncs.com/v1';
@@ -73,7 +101,7 @@ export function saveProviderConfig(config: ProviderConfig): void {
  * 已知问题：通义千问不支持 developer role，需要 supportsDeveloperRole: false
  */
 export function buildModelDef(config: ProviderConfig): Model<any> {
-  const baseUrl = resolveQwenBaseUrl(config);
+  const baseUrl = resolveProviderBaseUrl(config);
   const defaults = PROVIDER_DEFAULTS[config.provider];
   const modelId = config.model || defaults?.model || 'gpt-4o-mini';
   const isQwenCodingEndpoint = config.provider === 'qwen' && baseUrl.includes('coding.dashscope.aliyuncs.com');
@@ -104,5 +132,5 @@ export function getApiKey(config: ProviderConfig): string {
 }
 
 export function getBaseUrl(config: ProviderConfig): string {
-  return resolveQwenBaseUrl(config);
+  return resolveProviderBaseUrl(config);
 }

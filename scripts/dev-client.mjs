@@ -1,29 +1,49 @@
 import { execSync, spawn } from 'node:child_process';
 
+function getWindowsPidsOnPort(port) {
+  try {
+    const output = execSync(
+      `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) -join ' '"`,
+      { encoding: 'utf8' },
+    );
+    return String(output)
+      .trim()
+      .split(/\s+/)
+      .filter((pid) => /^\d+$/.test(pid));
+  } catch {
+    return [];
+  }
+}
+
 function killPort(port) {
   if (process.platform === 'win32') {
-    try {
-      const output = execSync(`netstat -ano -p tcp | findstr :${port}`, { encoding: 'utf8' });
-      const pids = new Set(
-        output
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .filter((line) => /LISTENING/i.test(line))
-          .map((line) => line.split(/\s+/).pop())
-          .filter((pid) => pid && /^\d+$/.test(pid)),
-      );
-
-      for (const pid of pids) {
-        try {
-          execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
-        } catch {
-          // ignore
-        }
-      }
-    } catch {
-      // no process using this port
+    const beforePids = getWindowsPidsOnPort(port);
+    if (beforePids.length === 0) {
+      console.log(`[dev:client] port ${port} is free`);
+      return;
     }
+
+    console.log(`[dev:client] port ${port} occupied, target PIDs: ${beforePids.join(', ')}`);
+    const killedPids = [];
+    for (const pid of beforePids) {
+      try {
+        execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+        killedPids.push(pid);
+      } catch {
+        // 进程可能已退出，保持幂等
+      }
+    }
+    console.log(`[dev:client] killed PIDs on port ${port}: ${killedPids.length > 0 ? killedPids.join(', ') : 'none'}`);
+
+    const afterPids = getWindowsPidsOnPort(port);
+    if (afterPids.length > 0) {
+      console.error(`[dev:client] port ${port} is still occupied by PID(s): ${afterPids.join(', ')}`);
+      console.error(`[dev:client] Run: Get-NetTCPConnection -LocalPort ${port} | Select-Object OwningProcess -Unique`);
+      console.error(`[dev:client] Then: Stop-Process -Id <PID> -Force`);
+      process.exit(1);
+    }
+
+    console.log(`[dev:client] port ${port} is now free`);
     return;
   }
 

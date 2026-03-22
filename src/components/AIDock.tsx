@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import type { ChatBlock, ChatAttachment } from '../app-types';
+import type { AgentAttachmentPayload } from '../api';
 import { getCapability } from '../ai';
 import { resolveSocketUrl } from '../utils/socket';
 import { renderMarkdown } from './MarkdownRenderer';
@@ -50,6 +51,50 @@ const Icon = {
     </svg>
   ),
 };
+
+type PendingAttachment = ChatAttachment & {
+  file: File;
+};
+
+type BrowserSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: {
+    results: ArrayLike<ArrayLike<{ transcript?: string }>>;
+    resultIndex?: number;
+  }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+
+type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
+
+const MAX_PENDING_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+
+function isTextLikeFile(file: File) {
+  return file.type.startsWith('text/')
+    || [
+      'application/json',
+      'application/xml',
+      'application/javascript',
+    ].includes(file.type)
+    || /\.(txt|md|json|ya?ml|toml|ini|csv|ts|tsx|js|jsx|py|sh|log|xml|html|css)$/i.test(file.name);
+}
+
+async function fileToBase64(file: File) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
 
 function BlockRenderer({
   block,
@@ -216,14 +261,28 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   if (attachment.type === 'image') {
     return (
       <div className="chat-attachment chat-attachment-image">
-        <img src={attachment.url} alt={attachment.name} loading="lazy" onClick={() => window.open(attachment.url, '_blank')} />
+        {attachment.url ? (
+          <img src={attachment.url} alt={attachment.name} loading="lazy" onClick={() => window.open(attachment.url, '_blank')} />
+        ) : (
+          <div className="file-attachment-info">
+            <span className="file-attachment-name">{attachment.name}</span>
+            <span className="file-attachment-size">图片附件已上传，可在当前会话继续分析</span>
+          </div>
+        )}
       </div>
     );
   }
   if (attachment.type === 'video') {
     return (
       <div className="chat-attachment chat-attachment-video">
-        <video src={attachment.url} controls preload="metadata" />
+        {attachment.url ? (
+          <video src={attachment.url} controls preload="metadata" />
+        ) : (
+          <div className="file-attachment-info">
+            <span className="file-attachment-name">{attachment.name}</span>
+            <span className="file-attachment-size">视频附件已上传</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -233,7 +292,12 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
         <div className="audio-msg-icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
         </div>
-        <audio src={attachment.url} controls preload="metadata" />
+        {attachment.url ? <audio src={attachment.url} controls preload="metadata" /> : <span className="file-attachment-size">语音附件已上传</span>}
+        {attachment.transcript && (
+          <div className="file-attachment-info">
+            <span className="file-attachment-size">转写：{attachment.transcript}</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -261,36 +325,74 @@ export default function AIDock() {
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
     handleApprovalAction, stopCurrentRun,
     openclawConnected, setOpenclawConnected,
-    currentDevice,
+    currentDevice, addToast,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
-  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingTranscript, setRecordingTranscript] = useState('');
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
-  const forceLocalAssistantRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const voiceTranscriptRef = useRef('');
 
-  const addAttachment = useCallback((file: File) => {
+  const addAttachment = useCallback((file: File, extras?: { transcript?: string; textContent?: string }) => {
+    if (file.size > MAX_PENDING_ATTACHMENT_BYTES) {
+      addToast(`附件 ${file.name} 过大，请控制在 ${Math.floor(MAX_PENDING_ATTACHMENT_BYTES / (1024 * 1024))}MB 以内`, 'warning');
+      return;
+    }
     const url = URL.createObjectURL(file);
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
-    const att: ChatAttachment = {
+    const att: PendingAttachment = {
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'file',
       name: file.name,
       url,
       mimeType: file.type,
       size: file.size,
+      transcript: extras?.transcript,
+      textContent: extras?.textContent,
+      file,
     };
     setPendingAttachments(prev => [...prev, att]);
+  }, [addToast]);
+
+  const materializeAgentAttachments = useCallback(async (attachments: PendingAttachment[]): Promise<AgentAttachmentPayload[]> => {
+    return Promise.all(attachments.map(async (attachment) => {
+      const payload: AgentAttachmentPayload = {
+        id: attachment.id,
+        type: attachment.type,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        transcript: attachment.transcript,
+        textContent: attachment.textContent,
+        source: 'studio',
+      };
+
+      if (attachment.file.size > 0) {
+        payload.contentBase64 = await fileToBase64(attachment.file);
+      }
+
+      if (!payload.textContent && isTextLikeFile(attachment.file) && attachment.file.size <= 256 * 1024) {
+        try {
+          payload.textContent = (await attachment.file.text()).slice(0, 12_000);
+        } catch {
+          // ignore text extraction failure
+        }
+      }
+
+      return payload;
+    }));
   }, []);
 
   const removeAttachment = useCallback((id: string) => {
@@ -308,7 +410,7 @@ export default function AIDock() {
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    Array.from(files).forEach(addAttachment);
+    Array.from(files).forEach((file) => addAttachment(file));
     e.target.value = '';
   }, [addAttachment]);
 
@@ -316,7 +418,7 @@ export default function AIDock() {
     e.preventDefault();
     e.stopPropagation();
     const files = e.dataTransfer.files;
-    Array.from(files).forEach(addAttachment);
+    Array.from(files).forEach((file) => addAttachment(file));
   }, [addAttachment]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -326,6 +428,7 @@ export default function AIDock() {
 
   const toggleVoiceRecord = useCallback(async () => {
     if (isRecording) {
+      speechRecognitionRef.current?.stop();
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
       return;
@@ -334,22 +437,69 @@ export default function AIDock() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       audioChunksRef.current = [];
+      voiceTranscriptRef.current = '';
+      setRecordingTranscript('');
+
+      const speechWindow = window as Window & {
+        SpeechRecognition?: BrowserSpeechRecognitionCtor;
+        webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
+      };
+      const SpeechRecognitionCtor = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+      if (SpeechRecognitionCtor) {
+        try {
+          const recognition = new SpeechRecognitionCtor();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = 'zh-CN';
+          recognition.onresult = (event) => {
+            const finalTranscript: string[] = [];
+            for (let i = 0; i < event.results.length; i += 1) {
+              const alt = event.results[i]?.[0];
+              if (alt?.transcript) {
+                finalTranscript.push(String(alt.transcript));
+              }
+            }
+            const merged = finalTranscript.join('').trim();
+            voiceTranscriptRef.current = merged;
+            setRecordingTranscript(merged);
+          };
+          recognition.onerror = () => null;
+          recognition.onend = () => {
+            if (isRecording) {
+              setIsRecording(false);
+            }
+          };
+          recognition.start();
+          speechRecognitionRef.current = recognition;
+        } catch {
+          speechRecognitionRef.current = null;
+        }
+      }
+
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
+        speechRecognitionRef.current?.stop();
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
-        addAttachment(file);
+        addAttachment(file, {
+          transcript: voiceTranscriptRef.current || undefined,
+        });
+        if (voiceTranscriptRef.current && !cmd.trim()) {
+          setCmd(voiceTranscriptRef.current);
+        }
+        setRecordingTranscript('');
+        voiceTranscriptRef.current = '';
       };
       recorder.start();
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
     } catch {
-      // Microphone not available
+      addToast('无法访问麦克风，请检查浏览器或桌面端权限', 'warning');
     }
-  }, [isRecording, addAttachment]);
+  }, [isRecording, addAttachment, addToast, cmd, setCmd]);
 
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
@@ -447,7 +597,8 @@ export default function AIDock() {
     dashboard: [
       { id: 'diag', icon: '🩺', label: '一键体检', text: '帮我全面检查设备健康状态，包括温度、负载和网络' },
       { id: 'stat', icon: '📊', label: '能力盘点', text: '同步 NodeHub 和 ModelZoo 板端状态，汇总当前可编排能力' },
-      { id: 'appgen', icon: '✨', label: '生成应用', text: '基于当前设备能力，生成一个可部署机器人应用并立即执行第一步' },
+      { id: 'appgen', icon: '✨', label: '一句话做应用', text: '只根据我这一句话，帮我生成一个最小可运行的 RDK 应用，并直接开始第一步实现与验证' },
+      { id: 'new-device', icon: '🧭', label: '新设备接管', text: '把当前设备当成一台全新设备，检查连接、OpenClaw、模型/应用依赖和可开发环境是否就绪' },
     ],
     terminal: [
       { id: 'cmd', icon: '⌨️', label: '帮我写命令', text: '我想做什么操作，帮我生成终端命令' },
@@ -512,56 +663,35 @@ export default function AIDock() {
   // 说明：用户输入统一走 RDK Studio Claw 主链路（/api/agent/chat）
   // 板端 OpenClaw 仅作为 RDK Studio Claw 在服务端可调用的能力，不在前端直连对话
 
-  const handleUnifiedCommand = (e: React.FormEvent) => {
+  const handleUnifiedCommand = async (e: React.FormEvent) => {
     e.preventDefault();
-    const text = cmd.trim();
+    const rawText = cmd.trim();
     const hasAttachments = pendingAttachments.length > 0;
-    if (!text && !hasAttachments) return;
+    if (!rawText && !hasAttachments) return;
 
-    // Attach files to the message
-    if (hasAttachments) {
-      const msgId = Date.now();
-      const attachmentText = pendingAttachments
-        .map(a => a.type === 'image' ? `[图片: ${a.name}]` : a.type === 'audio' ? '[语音消息]' : `[文件: ${a.name}]`)
-        .join(' ');
-      const fullText = text ? `${text}\n${attachmentText}` : attachmentText;
-
-      setChatMessages(prev => [...prev, {
-        id: msgId,
-        role: 'user' as const,
-        text: fullText,
-        attachments: [...pendingAttachments],
-      }]);
-      setChatExpanded(true);
-      setPendingAttachments([]);
-      setCmd('');
-
-      if (text) {
-        setTimeout(() => handleCommand(e), 50);
-      }
-      return;
-    }
-
-    const aiForced = text.match(/^\/ai\s+([\s\S]+)/i);
+    const aiForced = rawText.match(/^\/ai\s+([\s\S]+)/i);
     if (aiForced) {
       const next = aiForced[1].trim();
-      if (!next) return;
-      forceLocalAssistantRef.current = true;
-      setCmd(next);
-      requestAnimationFrame(() => {
-        const form = document.querySelector('.input-box') as HTMLFormElement;
-        form?.requestSubmit();
+      if (!next && !hasAttachments) return;
+    }
+
+    try {
+      const requestText = aiForced ? aiForced[1].trim() : rawText;
+      const attachmentPayloads = hasAttachments
+        ? await materializeAgentAttachments(pendingAttachments)
+        : [];
+      const displayAttachments = pendingAttachments.map(({ file: _file, ...attachment }) => attachment);
+      handleCommand(e, {
+        messageOverride: requestText,
+        attachments: attachmentPayloads,
+        displayAttachments,
       });
-      return;
+      pendingAttachments.forEach((attachment) => URL.revokeObjectURL(attachment.url));
+      setPendingAttachments([]);
+      setRecordingTranscript('');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : '附件处理失败，请重试', 'error');
     }
-
-    if (forceLocalAssistantRef.current) {
-      forceLocalAssistantRef.current = false;
-      handleCommand(e);
-      return;
-    }
-
-    handleCommand(e);
   };
 
   const closeDock = () => {
@@ -806,6 +936,17 @@ export default function AIDock() {
                   </button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {isRecording && recordingTranscript && (
+            <div className="attachment-preview-strip">
+              <div className="attachment-preview-item audio">
+                <div className="attachment-icon-wrap audio">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                </div>
+                <span className="attachment-name">正在识别：{recordingTranscript}</span>
+              </div>
             </div>
           )}
 

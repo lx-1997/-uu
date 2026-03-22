@@ -16,6 +16,64 @@ import {
   stopFeishuRuntime,
 } from '../api';
 
+const AI_PROVIDER_DEFAULTS: Record<string, { label: string; model: string; baseUrl: string }> = {
+  qwen: {
+    label: '通义千问 (Qwen)',
+    model: 'qwen3.5-plus',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    model: 'deepseek-chat',
+    baseUrl: 'https://api.deepseek.com/v1',
+  },
+  openai: {
+    label: 'OpenAI',
+    model: 'gpt-4o-mini',
+    baseUrl: 'https://api.openai.com/v1',
+  },
+  moonshot: {
+    label: 'Moonshot',
+    model: 'moonshot-v1-8k',
+    baseUrl: 'https://api.moonshot.cn/v1',
+  },
+  zhipu: {
+    label: '智谱 AI',
+    model: 'glm-4-flash',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+  },
+  groq: {
+    label: 'Groq',
+    model: 'llama-3.3-70b-versatile',
+    baseUrl: 'https://api.groq.com/openai/v1',
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    model: 'openai/gpt-4o-mini',
+    baseUrl: 'https://openrouter.ai/api/v1',
+  },
+  xai: {
+    label: 'xAI',
+    model: 'grok-2-latest',
+    baseUrl: 'https://api.x.ai/v1',
+  },
+  ollama: {
+    label: 'Ollama',
+    model: 'qwen2.5:7b',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+  },
+  'openai-compatible': {
+    label: 'OpenAI 兼容',
+    model: 'gpt-4o-mini',
+    baseUrl: '',
+  },
+};
+
+const AI_PROVIDER_OPTIONS = Object.entries(AI_PROVIDER_DEFAULTS).map(([value, item]) => ({
+  value,
+  label: item.label,
+}));
+
 export default function SettingsPanel() {
   const {
     showSettings, setShowSettings, settingsTab, setSettingsTab,
@@ -94,6 +152,7 @@ export default function SettingsPanel() {
           setAiConfigured(true);
           setAiProvider(cfg.provider || 'qwen');
           setAiModel(cfg.model || '');
+          setAiBaseUrl(cfg.baseUrl || '');
         }
       }).catch(() => {});
     }
@@ -169,13 +228,14 @@ export default function SettingsPanel() {
       addToast('请填写 API Key', 'warning');
       return;
     }
+    const providerDefaults = AI_PROVIDER_DEFAULTS[aiProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
     setAiSaving(true);
     try {
       await saveAgentConfig({
         provider: aiProvider,
-        model: aiModel,
+        model: aiModel || providerDefaults.model,
         apiKey: aiApiKey || undefined,
-        baseUrl: aiBaseUrl || undefined,
+        baseUrl: aiBaseUrl || providerDefaults.baseUrl || undefined,
       });
       setAiConfigured(true);
       setAiApiKey('');
@@ -188,6 +248,17 @@ export default function SettingsPanel() {
   };
 
   if (!showSettings) return null;
+
+  const applyAiProviderPreset = (nextProvider: string) => {
+    const prevDefaults = AI_PROVIDER_DEFAULTS[aiProvider];
+    const nextDefaults = AI_PROVIDER_DEFAULTS[nextProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
+    const shouldReplaceModel = !aiModel || aiModel === prevDefaults?.model;
+    const shouldReplaceBaseUrl = !aiBaseUrl || aiBaseUrl === prevDefaults?.baseUrl;
+
+    setAiProvider(nextProvider);
+    if (shouldReplaceModel) setAiModel(nextDefaults.model);
+    if (shouldReplaceBaseUrl) setAiBaseUrl(nextDefaults.baseUrl);
+  };
 
   return (
     <>
@@ -238,11 +309,10 @@ export default function SettingsPanel() {
               </div>
               <div className="settings-row">
                 <span className="settings-label">服务商</span>
-                <select className="clean-input" title="模型服务商" aria-label="模型服务商" style={{ width: '180px', padding: '8px' }} value={aiProvider} onChange={e => setAiProvider(e.target.value)}>
-                  <option value="qwen">通义千问 (Qwen)</option>
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="openai-compatible">OpenAI 兼容</option>
+                <select className="clean-input" title="模型服务商" aria-label="模型服务商" style={{ width: '180px', padding: '8px' }} value={aiProvider} onChange={e => applyAiProviderPreset(e.target.value)}>
+                  {AI_PROVIDER_OPTIONS.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
                 </select>
               </div>
               <div className="settings-row">
@@ -253,7 +323,7 @@ export default function SettingsPanel() {
                   style={{ width: '220px', padding: '8px' }}
                   title="模型名称"
                   aria-label="模型名称"
-                  placeholder={aiProvider === 'qwen' ? 'qwen3.5-plus' : aiProvider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini'}
+                  placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model || '请输入模型 ID'}
                   value={aiModel}
                   onChange={e => setAiModel(e.target.value)}
                 />
@@ -271,21 +341,19 @@ export default function SettingsPanel() {
                   onChange={e => setAiApiKey(e.target.value)}
                 />
               </div>
-              {(aiProvider === 'openai-compatible') && (
-                <div className="settings-row">
-                  <span className="settings-label">Base URL</span>
-                  <input
-                    type="text"
-                    className="clean-input"
-                    style={{ width: '260px', padding: '8px' }}
-                    title="Base URL"
-                    aria-label="Base URL"
-                    placeholder="https://your-api.example.com/v1"
-                    value={aiBaseUrl}
-                    onChange={e => setAiBaseUrl(e.target.value)}
-                  />
-                </div>
-              )}
+              <div className="settings-row">
+                <span className="settings-label">Base URL</span>
+                <input
+                  type="text"
+                  className="clean-input"
+                  style={{ width: '320px', padding: '8px' }}
+                  title="Base URL"
+                  aria-label="Base URL"
+                  placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl || 'https://your-api.example.com/v1'}
+                  value={aiBaseUrl}
+                  onChange={e => setAiBaseUrl(e.target.value)}
+                />
+              </div>
               <div style={{ marginTop: 16, display: 'flex', gap: 12, alignItems: 'center' }}>
                 <button
                   className="segment-btn active"

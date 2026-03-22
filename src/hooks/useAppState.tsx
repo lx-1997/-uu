@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect } from 'react';
-import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState, AgentPlan, AgentExecutionState } from '../app-types';
+import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
 import { CMD_SUGGESTIONS } from '../constants';
 import type { Task } from '../ai';
+import type { AgentAttachmentPayload } from '../api';
 
 import { ToastProvider, useToastStore } from './useToastStore';
 import { DeviceProvider, useDeviceStore } from './useDeviceStore';
@@ -23,8 +24,8 @@ export interface AppState {
   setActiveTab: (tab: Tab) => void;
 
   // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'done') => void;
+  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
 
@@ -162,7 +163,14 @@ export interface AppState {
   setChatExpanded: (v: boolean) => void;
   aiTyping: boolean;
   setAiTyping: React.Dispatch<React.SetStateAction<boolean>>;
-  handleCommand: (e: React.FormEvent) => void;
+  handleCommand: (
+    e: React.FormEvent,
+    options?: {
+      messageOverride?: string;
+      attachments?: AgentAttachmentPayload[];
+      displayAttachments?: ChatAttachment[];
+    },
+  ) => void;
   executeConfirm: (confirmId: string) => void;
   dismissConfirm: (confirmId: string) => void;
   clearChatHistory: () => void;

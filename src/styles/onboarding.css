@@ -229,6 +229,15 @@
   display: flex;
   justify-content: center;
 }
+.ob-openclaw-center {
+  gap: 12px;
+}
+.ob-openclaw-panel {
+  width: min(860px, 100%);
+}
+.ob-openclaw-log {
+  margin-top: 12px;
+}
 .ob-hero-card {
   display: flex;
   align-items: center;

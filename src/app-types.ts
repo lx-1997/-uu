@@ -59,6 +59,8 @@ export interface ChatAttachment {
   size?: number;
   duration?: number;
   thumbnailUrl?: string;
+  transcript?: string;
+  textContent?: string;
 }
 
 export interface ChatMessage {

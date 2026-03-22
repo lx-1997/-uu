@@ -1,4 +1,5 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
+import type { ChatAttachmentInput } from "../tools/attachment-tools.js";
 import { RDKClawApp } from "../../rdkclaw/app.js";
 import { FeishuAuthStore } from "../../rdkclaw/feishu-auth-store.js";
 import type { FeishuRuntimeConfig } from "../../rdkclaw/feishu-config-store.js";
@@ -21,6 +22,15 @@ type FeishuRuntimeStatus = {
 };
 
 const FEISHU_MAX_TEXT = 1800;
+
+function parseContentObject(content: unknown): Record<string, unknown> {
+  if (typeof content !== "string") return {};
+  try {
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
 
 function extractTextFromPost(parsed: Record<string, unknown>): string {
   const post = parsed.post as { zh_cn?: { content?: Array<Array<{ text?: string }>> } } | undefined;
@@ -61,6 +71,47 @@ function normalizeForFeishu(text: string): string {
     .trim();
 }
 
+function extensionFromMime(mimeType: string) {
+  if (!mimeType) return "";
+  if (mimeType.includes("png")) return ".png";
+  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return ".jpg";
+  if (mimeType.includes("webp")) return ".webp";
+  if (mimeType.includes("gif")) return ".gif";
+  if (mimeType.includes("mpeg")) return ".mp3";
+  if (mimeType.includes("wav")) return ".wav";
+  if (mimeType.includes("ogg")) return ".ogg";
+  if (mimeType.includes("webm")) return ".webm";
+  if (mimeType.includes("mp4")) return ".mp4";
+  if (mimeType.includes("pdf")) return ".pdf";
+  return "";
+}
+
+function parseContentDispositionFileName(raw: string | null) {
+  if (!raw) return "";
+  const utf8 = raw.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8);
+    } catch {
+      return utf8;
+    }
+  }
+  const basic = raw.match(/filename="?([^"]+)"?/i)?.[1];
+  return basic || "";
+}
+
+function summarizeInboundAttachments(attachments: ChatAttachmentInput[]) {
+  if (attachments.length === 0) return "";
+  return attachments
+    .map((attachment) => {
+      if (attachment.type === "image") return `[图片] ${attachment.name}`;
+      if (attachment.type === "audio") return `[语音] ${attachment.name}`;
+      if (attachment.type === "video") return `[视频] ${attachment.name}`;
+      return `[文件] ${attachment.name}`;
+    })
+    .join(" ");
+}
+
 function unwrapEventPayload(raw: any): any {
   if (raw?.event && typeof raw.event === "object") return raw.event;
   if (raw?.data?.event && typeof raw.data.event === "object") return raw.data.event;
@@ -90,6 +141,7 @@ export class FeishuWebSocketChannel {
     lastEventAt: null,
     connectionMode: "websocket",
   };
+  private tenantToken: { value: string; expireAt: number } | null = null;
 
   constructor(opts: FeishuChannelOptions) {
     this.rdkclaw = opts.rdkclaw;
@@ -192,6 +244,7 @@ export class FeishuWebSocketChannel {
     }
     this.wsClient = null;
     this.client = null;
+    this.tenantToken = null;
     this.status.running = false;
     this.status.connected = false;
   }
@@ -199,6 +252,112 @@ export class FeishuWebSocketChannel {
   async restart(): Promise<void> {
     await this.stop();
     await this.start();
+  }
+
+  private async getTenantToken(): Promise<string> {
+    const cfg = this.getConfig();
+    if (!cfg.appId || !cfg.appSecret) {
+      throw new Error("飞书缺少 App ID 或 App Secret");
+    }
+    const now = Date.now();
+    if (this.tenantToken && this.tenantToken.expireAt > now + 30_000) {
+      return this.tenantToken.value;
+    }
+    const authBase = authBaseByDomain(cfg.domain);
+    const res = await fetch(`${authBase}/open-apis/auth/v3/tenant_access_token/internal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({
+        app_id: cfg.appId,
+        app_secret: cfg.appSecret,
+      }),
+    });
+    const payload = (await res.json().catch(() => ({}))) as {
+      code?: number;
+      msg?: string;
+      tenant_access_token?: string;
+      expire?: number;
+    };
+    if (!res.ok || payload.code !== 0 || !payload.tenant_access_token) {
+      throw new Error(payload.msg || "获取飞书 tenant_access_token 失败");
+    }
+    this.tenantToken = {
+      value: payload.tenant_access_token,
+      expireAt: now + Math.max(60, Number(payload.expire || 7200)) * 1000,
+    };
+    return this.tenantToken.value;
+  }
+
+  private async downloadMessageResource(
+    messageId: string,
+    resourceKey: string,
+    type: "image" | "file",
+    fallbackName: string,
+  ): Promise<{ contentBase64: string; mimeType: string; name: string }> {
+    const cfg = this.getConfig();
+    const authBase = authBaseByDomain(cfg.domain);
+    const token = await this.getTenantToken();
+    const res = await fetch(
+      `${authBase}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(resourceKey)}?type=${type}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`下载飞书资源失败 (${res.status}) ${text.slice(0, 120)}`);
+    }
+    const mimeType = res.headers.get("content-type") || "application/octet-stream";
+    const fileName = parseContentDispositionFileName(res.headers.get("content-disposition"))
+      || `${fallbackName}${extensionFromMime(mimeType)}`;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return {
+      contentBase64: buffer.toString("base64"),
+      mimeType,
+      name: fileName,
+    };
+  }
+
+  private async resolveMessageAttachments(message: any): Promise<ChatAttachmentInput[]> {
+    const msgType = String(message?.message_type || message?.msg_type || "").toLowerCase();
+    const parsed = parseContentObject(message?.content);
+    const messageId = String(message?.message_id || "");
+    if (!msgType || !messageId) return [];
+
+    if (msgType === "image") {
+      const imageKey = String(parsed.image_key || parsed.imageKey || "");
+      if (!imageKey) return [];
+      const file = await this.downloadMessageResource(messageId, imageKey, "image", `feishu-image-${messageId}`);
+      return [{
+        id: `feishu-${messageId}-image`,
+        type: "image",
+        name: file.name,
+        mimeType: file.mimeType,
+        size: undefined,
+        contentBase64: file.contentBase64,
+        source: "feishu",
+      }];
+    }
+
+    if (msgType === "file" || msgType === "audio" || msgType === "media") {
+      const fileKey = String(parsed.file_key || parsed.fileKey || parsed.audio_key || parsed.audioKey || "");
+      if (!fileKey) return [];
+      const file = await this.downloadMessageResource(messageId, fileKey, "file", `feishu-${msgType}-${messageId}`);
+      return [{
+        id: `feishu-${messageId}-${msgType}`,
+        type: msgType === "audio" ? "audio" : "file",
+        name: file.name,
+        mimeType: file.mimeType,
+        size: undefined,
+        contentBase64: file.contentBase64,
+        source: "feishu",
+      }];
+    }
+
+    return [];
   }
 
   private async handleMessage(payload: any): Promise<void> {
@@ -210,10 +369,30 @@ export class FeishuWebSocketChannel {
     const openId = String(sender?.sender_id?.open_id || "");
     const chatType = String(message?.chat_type || "");
     const senderType = String(sender?.sender_type || "");
+    let attachments: ChatAttachmentInput[] = [];
+    try {
+      attachments = await this.resolveMessageAttachments(message);
+    } catch (error) {
+      const msgId = String(message?.message_id || "");
+      const openIdMasked = `${openId.slice(0, 4)}***${openId.slice(-4)}`;
+      const hint = `收到附件，但下载解析失败：${error instanceof Error ? error.message : "未知错误"}`;
+      if (chatId) {
+        await this.sendText(chatId, hint);
+      }
+      this.publishMirror("channel_message_error", "飞书附件", hint, {
+        channel: "feishu",
+        direction: "error",
+        openIdMasked,
+        chatId,
+        messageId: msgId,
+      });
+      return;
+    }
     const text = parseText(message?.content);
+    const inboundText = text || summarizeInboundAttachments(attachments);
     if (senderType === "app") return;
-    if (!chatId || !openId || !text) {
-      console.log(`[FeishuWS] skip message: chatId=${!!chatId} openId=${!!openId} text=${!!text}`);
+    if (!chatId || !openId || (!inboundText && attachments.length === 0)) {
+      console.log(`[FeishuWS] skip message: chatId=${!!chatId} openId=${!!openId} text=${!!inboundText} attachments=${attachments.length}`);
       return;
     }
     const msgId = String(message?.message_id || "");
@@ -225,7 +404,7 @@ export class FeishuWebSocketChannel {
     const boundSessionId = this.authStore.resolveSession(openId, "");
     const sessionId = latestUiSessionId || boundSessionId || fallbackSessionId;
     this.authStore.touchSession(openId, sessionId, chatId);
-    this.publishMirror("channel_message_inbound", "飞书消息", text, {
+    this.publishMirror("channel_message_inbound", "飞书消息", inboundText, {
       channel: "feishu",
       direction: "inbound",
       openIdMasked,
@@ -238,7 +417,7 @@ export class FeishuWebSocketChannel {
 
     // 允许用户直接在飞书私信中回填配对码完成绑定，减少来回切换成本
     const maybeCode = (() => {
-      const m = text.match(/(\d{6})/);
+      const m = inboundText.match(/(\d{6})/);
       return m?.[1] || "";
     })();
     if (!isBound && maybeCode) {
@@ -356,11 +535,12 @@ export class FeishuWebSocketChannel {
       });
     }
     for await (const event of this.rdkclaw.streamChat({
-      message: text,
+      message: text || "请结合我刚通过飞书发送的附件继续处理当前请求。",
       userId: openId,
       deviceId: latestUiDeviceId,
       sessionId,
       mode: "auto",
+      attachments,
     })) {
       if (event.type === "text") {
         const delta = String(event.data?.delta ?? event.data?.text ?? "");

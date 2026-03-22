@@ -4,12 +4,25 @@ export type RDKClawExecutionMode =
   | "board"
   | "board-preferred";
 
+export interface RDKClawAttachment {
+  id: string;
+  type: "image" | "file" | "audio" | "video";
+  name: string;
+  mimeType?: string;
+  size?: number;
+  contentBase64?: string;
+  transcript?: string;
+  textContent?: string;
+  source?: "studio" | "feishu";
+}
+
 export interface RDKClawChatRequest {
   message: string;
   deviceId?: string;
   sessionId?: string;
   userId?: string;
   mode?: RDKClawExecutionMode;
+  attachments?: RDKClawAttachment[];
 }
 
 export type RDKClawEventType =

@@ -11,8 +11,8 @@ export interface UIStoreState {
   setActiveTab: (tab: Tab) => void;
 
   // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'done') => void;
+  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
 
@@ -129,7 +129,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
   // ── Onboarding ──
-  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect' | 'done'>('board');
+  const [obStep, setObStep] = useState<'board' | 'flash' | 'connect' | 'openclaw' | 'done'>('board');
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
 
   // ── Loading ──

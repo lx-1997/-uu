@@ -1,10 +1,4 @@
-import { useEffect } from 'react';
-import './styles.css';
-import './styles/openclaw.css';
-import './styles/nodehub.css';
-import './styles/models.css';
-import './styles/ros.css';
-import './styles/skills.css';
+import { useEffect, type ReactNode } from 'react';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import Sidebar from './components/Sidebar';
 import TopToolbar from './components/TopToolbar';
@@ -26,6 +20,8 @@ import Ros from './components/Ros';
 import Models from './components/Models';
 import SkillBrowser from './components/SkillBrowser';
 import ErrorBoundary from './components/ErrorBoundary';
+
+const IMMERSIVE_TABS = new Set(['terminal', 'ide', 'vnc', 'hardware', 'ros']);
 
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
@@ -51,22 +47,36 @@ function MainContent() {
 
   // 持久化组件（terminal/vnc/ide）始终挂载，用 CSS display 控制可见性，保留连接状态
   // 非持久化组件按需渲染
+  const standardViews: Record<string, ReactNode> = {
+    dashboard: <Dashboard />,
+    flasher: <Flasher />,
+    files: <Files />,
+    openclaw: <OpenClaw />,
+    hardware: <Hardware />,
+    examples: <Examples />,
+    ros: <Ros />,
+    models: <Models />,
+    skills: <SkillBrowser />,
+  };
+
   return (
     <>
       {/* 非持久化 tab */}
-      {activeTab === 'dashboard' && <div className="page-transition"><Dashboard /></div>}
-      {activeTab === 'flasher' && <div className="page-transition"><Flasher /></div>}
-      {activeTab === 'files' && <div className="page-transition"><Files /></div>}
-      {activeTab === 'openclaw' && <div className="page-transition"><OpenClaw /></div>}
-      {activeTab === 'hardware' && <div className="page-transition"><Hardware /></div>}
-      {activeTab === 'examples' && <div className="page-transition"><Examples /></div>}
-      {activeTab === 'ros' && <div className="page-transition"><Ros /></div>}
-      {activeTab === 'models' && <div className="page-transition"><Models /></div>}
-      {activeTab === 'skills' && <div className="page-transition"><SkillBrowser /></div>}
+      {standardViews[activeTab] && (
+        <div className="page-transition page-slot">
+          {standardViews[activeTab]}
+        </div>
+      )}
       {/* 持久化 tab：始终挂载 */}
-      <div style={{ display: activeTab === 'terminal' ? 'contents' : 'none' }}><Terminal /></div>
-      <div style={{ display: activeTab === 'vnc' ? 'contents' : 'none' }}><Vnc /></div>
-      <div style={{ display: activeTab === 'ide' ? 'contents' : 'none' }}><IDE /></div>
+      <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
+        <Terminal />
+      </div>
+      <div className={`persistent-pane ${activeTab === 'vnc' ? 'is-active' : 'is-hidden'}`}>
+        <Vnc />
+      </div>
+      <div className={`persistent-pane ${activeTab === 'ide' ? 'is-active' : 'is-hidden'}`}>
+        <IDE />
+      </div>
     </>
   );
 }
@@ -87,6 +97,16 @@ function useDesktopTabSync(activeTab: string) {
 function AppShell() {
   const { activeTab } = useAppState();
   useDesktopTabSync(activeTab);
+  const viewportClassName = [
+    'canvas-viewport',
+    IMMERSIVE_TABS.has(activeTab) ? 'viewport-terminal' : '',
+    activeTab === 'vnc' ? 'viewport-vnc' : '',
+    activeTab === 'ide' ? 'viewport-ide' : '',
+    activeTab === 'flasher' ? 'viewport-flasher' : '',
+    activeTab === 'dashboard' ? 'viewport-dashboard' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   useEffect(() => {
     const rdk = window.rdkDesktop;
@@ -125,12 +145,12 @@ function AppShell() {
         <Sidebar />
         <div className="main-area">
           <TopToolbar />
-          <div
-            className={`canvas-viewport ${['terminal','ide','vnc','hardware','ros','openclaw'].includes(activeTab) ? 'viewport-terminal' : ''} ${activeTab === 'vnc' ? 'viewport-vnc' : ''} ${activeTab === 'ide' ? 'viewport-ide' : ''} ${activeTab === 'flasher' ? 'viewport-flasher' : ''}`}
-          >
-            <ErrorBoundary>
-              <MainContent />
-            </ErrorBoundary>
+          <div className={viewportClassName}>
+            <div className={`viewport-frame ${IMMERSIVE_TABS.has(activeTab) ? 'viewport-frame-immersive' : ''}`}>
+              <ErrorBoundary>
+                <MainContent />
+              </ErrorBoundary>
+            </div>
           </div>
           <AIDock />
         </div>
