@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { resolveApiUrl } from '../utils/apiBase';
 
 export interface SSOUser {
   id: string;
@@ -36,8 +37,8 @@ export function useAuth(): AuthState {
 
   const refresh = useCallback(async () => {
     const [meRes, loginRes] = await Promise.all([
-      fetch('/api/sso/me', { credentials: 'include' }),
-      fetch('/api/sso/login'),
+      fetch(resolveApiUrl('/api/sso/me'), { credentials: 'include' }),
+      fetch(resolveApiUrl('/api/sso/login')),
     ]);
     const meData = (await meRes.json()) as { enabled?: boolean; required?: boolean; configured?: boolean; user?: SSOUser | null };
     const loginData = (await loginRes.json()) as { enabled?: boolean; required?: boolean; configured?: boolean; loginUrl?: string };
@@ -79,7 +80,7 @@ export function useAuth(): AuthState {
 
   const logout = useCallback(async () => {
     try {
-      const res = await fetch('/api/sso/logout', { method: 'POST', credentials: 'include' });
+      const res = await fetch(resolveApiUrl('/api/sso/logout'), { method: 'POST', credentials: 'include' });
       const data = (await res.json()) as { logoutUrl?: string };
       cachedState = null;
       setUser(null);

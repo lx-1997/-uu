@@ -95,7 +95,10 @@ export default function OnboardingWizard() {
 
   const [ocChecking, setOcChecking] = useState(false);
   const [ocReady, setOcReady] = useState<boolean | null>(null);
+  const [ocInstalled, setOcInstalled] = useState<boolean | null>(null);
+  const [ocGatewayRunning, setOcGatewayRunning] = useState<boolean | null>(null);
   const [ocInstalling, setOcInstalling] = useState(false);
+  const [ocStartingGw, setOcStartingGw] = useState(false);
   const [deviceOnline, setDeviceOnline] = useState<boolean | null>(null);
   const [ocInstallLog, setOcInstallLog] = useState('');
   const [installElapsed, setInstallElapsed] = useState(0);
@@ -120,8 +123,16 @@ export default function OnboardingWizard() {
       .then((r) => setDeviceOnline(!!r.ok))
       .catch(() => setDeviceOnline(false));
     fetchDeviceOpenClawHealth(currentDevice.id)
-      .then(r => setOcReady(!!r.status?.aiReady))
-      .catch(() => setOcReady(false))
+      .then(r => {
+        setOcInstalled(!!r.status?.installed);
+        setOcGatewayRunning(!!r.status?.gatewayRunning);
+        setOcReady(!!r.status?.aiReady);
+      })
+      .catch(() => {
+        setOcInstalled(null);
+        setOcGatewayRunning(null);
+        setOcReady(false);
+      })
       .finally(() => setOcChecking(false));
   }, [obStep, currentDevice?.id]);
 
@@ -201,6 +212,8 @@ export default function OnboardingWizard() {
               setOcInstalling(false);
               if (payload.ok) {
                 addToast('OpenClaw 安装完成', 'success');
+                setOcInstalled(true);
+                setOcGatewayRunning(true);
                 setOcReady(true);
               } else {
                 addToast('OpenClaw 安装未成功，请查看日志或到 OpenClaw 页重试', 'warning');
@@ -221,6 +234,32 @@ export default function OnboardingWizard() {
       abortRef.current = null;
     }
   }, [currentDevice, deviceOnline, addToast]);
+
+  const handleStartGateway = useCallback(async () => {
+    if (!currentDevice) return;
+    setOcStartingGw(true);
+    try {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/restart-gateway`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addToast('网关启动指令已发送', 'success');
+      await new Promise(r => setTimeout(r, 3000));
+      const health = await fetchDeviceOpenClawHealth(currentDevice.id);
+      setOcGatewayRunning(!!health.status?.gatewayRunning);
+      setOcReady(!!health.status?.aiReady);
+      if (health.status?.gatewayRunning) {
+        addToast('OpenClaw 网关已启动', 'success');
+      } else {
+        addToast('网关启动中，请稍等片刻后刷新', 'warning');
+      }
+    } catch {
+      addToast('网关启动失败，请前往 OpenClaw 页面手动操作', 'warning');
+    } finally {
+      setOcStartingGw(false);
+    }
+  }, [currentDevice, addToast]);
 
   const handleSkipConfirm = () => {
     if (ocInstalling) {
@@ -406,12 +445,31 @@ export default function OnboardingWizard() {
             {!ocChecking && ocReady === true && (
               <div className="ob-oc-ready">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-                <span>OpenClaw 已就绪</span>
+                <span>OpenClaw 已就绪（已安装，网关运行中）</span>
               </div>
             )}
-            {!ocChecking && ocReady === false && !showSkipWarning && (
+            {!ocChecking && !ocReady && ocInstalled && !showSkipWarning && (
               <div className="ob-oc-missing">
-                <span>OpenClaw 未安装或未就绪</span>
+                <span>
+                  OpenClaw 已安装{ocGatewayRunning === false ? '，但网关未启动' : '，正在检查网关状态'}
+                </span>
+                <div className="ob-oc-actions">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleStartGateway}
+                    disabled={ocStartingGw}
+                  >
+                    {ocStartingGw ? '启动中...' : '启动网关'}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={goOpenClaw}>
+                    前往 OpenClaw 页面
+                  </button>
+                </div>
+              </div>
+            )}
+            {!ocChecking && ocReady === false && !ocInstalled && !showSkipWarning && (
+              <div className="ob-oc-missing">
+                <span>OpenClaw 未安装</span>
                 <div className="ob-oc-actions">
                   <button
                     className="btn btn-primary btn-sm"

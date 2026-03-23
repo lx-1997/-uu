@@ -19,14 +19,14 @@
     "build:desktop:linux": "npm run build && npm run build:server && electron-builder --linux",
     "verify:modules": "node scripts/verify-real-modules.mjs",
     "preview": "vite preview",
-    "start": "node dist-server/index.js",
+    "start": "node dist-server/server/index.js",
     "build:server": "tsc -p tsconfig.server.json"
   },
   "build": {
     "appId": "com.rdk.studio",
     "productName": "RDK Studio",
     "copyright": "Copyright © 2025 RDK",
-    "asar": true,
+    "asar": false,
     "asarUnpack": [
       "node_modules/ssh2/**",
       "node_modules/cpu-features/**",

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import type { SkillManifest } from '../skills/types';
 import { fetchSkills, reloadSkills, fetchSkillMd } from '../skills/loader';
 import { useAppState } from '../hooks/useAppState';
+import { resolveApiUrl } from '../utils/apiBase';
 
 interface EcoSkill {
   id: string;
@@ -81,7 +82,7 @@ export default function SkillBrowser() {
 
   const loadEcoSkills = useCallback(async () => {
     try {
-      const res = await fetch('/api/ecosystem/search?q=');
+      const res = await fetch(resolveApiUrl('/api/ecosystem/search?q='));
       if (!res.ok) return;
       const data = await res.json();
       setEcoSkills(data.skills || []);
@@ -182,7 +183,7 @@ export default function SkillBrowser() {
     setActionLoading(action);
     setActionOutput('');
     try {
-      const res = await fetch(`/api/ecosystem/skills/${encodeURIComponent(skillId)}/${action}`, {
+      const res = await fetch(resolveApiUrl(`/api/ecosystem/skills/${encodeURIComponent(skillId)}/${action}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: currentDevice.id }),

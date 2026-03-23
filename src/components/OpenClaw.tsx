@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { renderMarkdown } from './MarkdownRenderer';
 import { resolveSocketUrl } from '../utils/socket';
+import { resolveApiUrl } from '../utils/apiBase';
 import {
   subscribeOpenClawDeployJob,
   startOpenClawDeployPoll,
@@ -148,7 +149,7 @@ const PLUGIN_CATALOG = [
    ═══════════════════════════════════════════ */
 
 export default function OpenClaw() {
-  const { currentDevice, addToast, registerOpenclawSend } = useAppState();
+  const { currentDevice, addToast, registerOpenclawSend, activeTab } = useAppState();
 
   // ─── Data State ───
   const [status, setStatus] = useState<GatewayStatus | null>(null);
@@ -269,7 +270,7 @@ export default function OpenClaw() {
         if (deployFeishuAppId.trim() && deployFeishuAppSecret.trim()) {
           appendSystemMessage('正在写入飞书配置...');
           try {
-            await fetch(`/api/devices/${currentDevice?.id}/openclaw/config`, {
+            await fetch(resolveApiUrl(`/api/devices/${currentDevice?.id}/openclaw/config`), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -320,10 +321,6 @@ export default function OpenClaw() {
 
   useEffect(() => {
     if (currentDevice) {
-      const init = async () => {
-        await Promise.all([loadStatus(), loadConfig(), loadBoardSkills()]);
-      };
-      init();
       try {
         const saved = sessionStorage.getItem(`oc-chat-${currentDevice.id}`);
         if (saved) setChatMessagesRaw(JSON.parse(saved));
@@ -331,6 +328,12 @@ export default function OpenClaw() {
       } catch { setChatMessagesRaw([]); }
     }
   }, [currentDevice]);
+
+  useEffect(() => {
+    if (currentDevice && activeTab === 'openclaw') {
+      void Promise.all([loadStatus(), loadConfig(), loadBoardSkills()]);
+    }
+  }, [currentDevice, activeTab]);
 
   useEffect(() => {
     if (status !== null && config !== null && needsSetup()) {
@@ -457,7 +460,7 @@ export default function OpenClaw() {
     if (!currentDevice) return null;
     setStatusLoading(true);
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/status`);
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/status`));
       if (!res.ok) {
         addToast?.(`获取状态失败: HTTP ${res.status}`, 'error');
         return null;
@@ -486,7 +489,7 @@ export default function OpenClaw() {
   const loadConfig = async (): Promise<ConfigData | null> => {
     if (!currentDevice) return null;
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/config`);
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/config`));
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         addToast?.(`加载配置失败: ${errBody.error || `HTTP ${res.status}`}`, 'error');
@@ -550,7 +553,7 @@ export default function OpenClaw() {
     const fetchTimer = setTimeout(() => controller.abort(), fetchTimeout);
 
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/${action}`, {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/${action}`), {
         method: action === 'status' || action === 'version' ? 'GET' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,
@@ -687,7 +690,7 @@ export default function OpenClaw() {
 
     setLoading(true);
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/config`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: payload }),
@@ -724,7 +727,7 @@ export default function OpenClaw() {
     if (!currentDevice) return;
     setTestResult('testing');
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/model-test`, {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/model-test`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -745,7 +748,7 @@ export default function OpenClaw() {
     setShowModelSelector(false);
     setLoading(true);
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/config`, {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/config`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: { modelGateway: { ...modelConfig, modelId } } }),
@@ -778,7 +781,7 @@ export default function OpenClaw() {
       const api = deployApi || preset?.api || 'openai-completions';
       setDeployRunning(true);
       setDeploySteps(['running', 'pending', 'pending', 'pending']);
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/deploy/start`, {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/start`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -809,7 +812,7 @@ export default function OpenClaw() {
     if (!currentDevice || !name) return;
     setSkillInstalling(true);
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw`, {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -837,7 +840,7 @@ export default function OpenClaw() {
   const loadBoardSkills = async () => {
     if (!currentDevice) return;
     try {
-      const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/skills`);
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/skills`));
       if (!res.ok) {
         addToast?.(`获取技能列表失败: HTTP ${res.status}`, 'error');
         return;

@@ -283,10 +283,10 @@ ipcMain.handle('rdk:flash:decompress-image', async (_event, payload) => {
 /* ── 判断是否打包模式 ── */
 const isPacked = app.isPackaged;
 
-/* ── 获取资源根目录 ── */
-function getResourcesPath() {
+/* ── 获取应用根目录（ASAR 内） ── */
+function getAppRoot() {
   if (isPacked) {
-    return process.resourcesPath;
+    return app.getAppPath();
   }
   return path.join(__dirname, '..');
 }
@@ -296,19 +296,20 @@ function startEmbeddedServer() {
   if (!isPacked) return Promise.resolve(8787);
 
   return new Promise((resolve, reject) => {
-    const serverPath = path.join(getResourcesPath(), 'dist-server', 'index.js');
-    const dataPath = path.join(getResourcesPath(), 'data');
+    // asar: false 时 app.getAppPath() 指向 resources/app/ (真实目录)
+    // tsconfig.server.json 的 rootDir 是项目根，所以 server/index.ts 编译到 dist-server/server/index.js
+    const serverPath = path.join(getAppRoot(), 'dist-server', 'server', 'index.js');
+    const dataPath = path.join(process.resourcesPath, 'data');
 
     console.log('[server] starting embedded server:', serverPath);
+    console.log('[server] data path:', dataPath);
 
-    // 必须用 ELECTRON_RUN_AS_NODE：否则 process.execPath 是 RDK Studio.exe，会再启动整套 Electron GUI，造成递归多开、未响应。
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         PORT: '8787',
         NODE_ENV: 'production',
-        // 数据目录指向 resources/data
         RDK_DATA_DIR: dataPath,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -331,8 +332,12 @@ function startEmbeddedServer() {
       reject(err);
     });
 
-    // 5s 超时兜底
-    setTimeout(() => resolve(8787), 5000);
+    serverProcess.on('exit', (code, signal) => {
+      console.error('[server] exited:', { code, signal });
+    });
+
+    // 10s 超时兜底
+    setTimeout(() => resolve(8787), 10000);
   });
 }
 
