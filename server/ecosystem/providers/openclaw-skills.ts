@@ -86,6 +86,26 @@ const SEED_OC_SKILLS: SeedOCSkill[] = [
     tags: ['monitor', '监控', 'bpu', 'cpu', '温度', '内存', '诊断'],
     category: '系统',
   },
+  {
+    id: 'openclaw.tts',
+    name: 'TTS 文字转语音',
+    desc: '使用 edge-tts 将文字转换为自然语音音频（MP3），支持中英文 20+ 音色、语速调节',
+    platform: 'rdk-x5',
+    requiredBins: ['python3'],
+    runCmd: 'python3 -c "import edge_tts; print(\'edge-tts ready\')" 2>/dev/null || pip3 install edge-tts -q && python3 -c "import edge_tts; print(\'edge-tts ready\')"',
+    tags: ['tts', '语音', '朗读', '播报', 'text-to-speech', '语音合成', '文字转语音', 'voice'],
+    category: 'AI',
+  },
+  {
+    id: 'openclaw.stt',
+    name: 'STT 语音转文字',
+    desc: '使用 Google Speech Recognition 将音频文件转为文字，支持中英文等多语言，WAV/MP3/FLAC/OGG 格式',
+    platform: 'rdk-x5',
+    requiredBins: ['python3'],
+    runCmd: 'python3 -c "import speech_recognition; print(\'SpeechRecognition ready\')" 2>/dev/null || pip3 install SpeechRecognition -q && python3 -c "import speech_recognition; print(\'SpeechRecognition ready\')"',
+    tags: ['stt', '语音识别', '听写', '音频转文字', 'speech-to-text', 'transcribe', '转录'],
+    category: 'AI',
+  },
 ];
 
 function seedToSkill(seed: SeedOCSkill): OpenClawSkillDef {

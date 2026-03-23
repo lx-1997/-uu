@@ -145,7 +145,7 @@ export default function OnboardingWizard() {
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [ocInstallLog]);
+  }, [ocInstallLog, ocGwLog]);
 
   useEffect(() => {
     return () => {
@@ -263,7 +263,8 @@ export default function OnboardingWizard() {
   const handleStartGateway = useCallback(async () => {
     if (!currentDevice) return;
     setOcStartingGw(true);
-    setOcGwLog('');
+    setOcGwLog('[网关] 正在发送启动指令...\n');
+
     try {
       const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/restart-gateway`), {
         method: 'POST',
@@ -271,12 +272,12 @@ export default function OnboardingWizard() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { ok: boolean; output?: string };
-      setOcGwLog(data.output || '(无输出)');
+      const gwOutput = (data.output || '').trim();
+      setOcGwLog(prev => prev + (gwOutput ? gwOutput + '\n' : '') + '\n[网关] 启动指令已执行，等待网关就绪...\n');
 
-      addToast('网关启动指令已发送，等待就绪...', 'info');
-
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 8; i++) {
         await new Promise(r => setTimeout(r, 3000));
+        setOcGwLog(prev => prev + `[检查] 第 ${i + 1}/8 次状态轮询...\n`);
         try {
           const health = await fetchDeviceOpenClawHealth(currentDevice.id);
           const s = health.status;
@@ -284,14 +285,21 @@ export default function OnboardingWizard() {
           setOcGatewayRunning(!!s?.gatewayRunning);
           setOcReady(!!s?.aiReady);
           setOcSummary(s?.summary || '');
+          setOcVersion(s?.version || '');
           if (s?.gatewayRunning) {
+            setOcGwLog(prev => prev + `[成功] 网关已启动 ✓\n`);
             addToast('OpenClaw 网关已启动', 'success');
             return;
           }
-        } catch { /* retry */ }
+          setOcGwLog(prev => prev + `[检查] 网关尚未就绪 (${s?.summary || '等待中'})\n`);
+        } catch {
+          setOcGwLog(prev => prev + `[检查] 状态查询失败，继续等待...\n`);
+        }
       }
+      setOcGwLog(prev => prev + '\n[超时] 8 次轮询后网关仍未就绪，请点击「重新检查」或前往 OpenClaw 页面\n');
       addToast('网关可能仍在启动中，请点击「重新检查」刷新状态', 'warning');
-    } catch {
+    } catch (e) {
+      setOcGwLog(prev => prev + `\n[错误] ${e instanceof Error ? e.message : '网关启动请求失败'}\n`);
       addToast('网关启动失败，请前往 OpenClaw 页面手动操作', 'warning');
     } finally {
       setOcStartingGw(false);
@@ -536,7 +544,7 @@ export default function OnboardingWizard() {
             )}
 
             {/* Gateway log */}
-            {ocGwLog && !ocInstalling && !showSkipWarning && (
+            {(ocStartingGw || ocGwLog) && !ocInstalling && !showSkipWarning && (
               <div className="ob-install-terminal">
                 <div className="ob-install-terminal-header">
                   <span className="ob-install-terminal-dots">
@@ -544,10 +552,16 @@ export default function OnboardingWizard() {
                   </span>
                   <span className="ob-install-terminal-title">网关日志</span>
                   {ocStartingGw && <span className="ob-elapsed">启动中...</span>}
+                  {ocGwLog && (
+                    <button className="ob-install-terminal-copy" onClick={() => {
+                      navigator.clipboard.writeText(ocGwLog).then(() => addToast('日志已复制', 'success')).catch(() => {});
+                    }} type="button">复制日志</button>
+                  )}
                 </div>
-                <pre className="ob-install-terminal-body">
-                  {ocGwLog}
+                <pre className="ob-install-terminal-body" ref={!ocInstalling ? logContainerRef : undefined}>
+                  {ocGwLog || '准备启动网关...\n'}
                   {ocStartingGw && <span className="ob-install-cursor">_</span>}
+                  <div ref={!ocInstalling ? logEndRef : undefined} />
                 </pre>
               </div>
             )}

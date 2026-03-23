@@ -52,6 +52,8 @@ export function createRdkTools(deviceId: string): Tool[] {
     vncStopTool(deviceId),
     vncStatusTool(deviceId),
     flashCheckTool(deviceId),
+    ttsTextToSpeechTool(deviceId),
+    sttSpeechToTextTool(deviceId),
   ];
   return tools;
 }
@@ -705,6 +707,193 @@ function flashCheckTool(deviceId: string): Tool<Record<string, never>> {
         'echo "=== Board Info ===" && cat /sys/class/socinfo/board_id 2>/dev/null || echo "unknown"',
       ].join(' && ');
       return execOnDevice(deviceId, [commands]);
+    },
+  };
+}
+
+function ttsTextToSpeechTool(deviceId: string): Tool<{ text: string; voice?: string; speed?: string }> {
+  return {
+    name: 'text_to_speech',
+    description:
+      '将文字转换为语音音频文件（MP3）。支持中英文。' +
+      '用于需要语音播报、TTS、朗读、文字转语音等场景。' +
+      '需要设备联网（使用 edge-tts 在线合成）。' +
+      '返回可播放的音频文件 URL。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '要合成为语音的文字内容' },
+        voice: {
+          type: 'string',
+          description:
+            '语音音色。中文推荐: zh-CN-XiaoxiaoNeural(女)、zh-CN-YunxiNeural(男)、' +
+            'zh-CN-XiaoyiNeural(女温柔)、zh-CN-YunjianNeural(男沉稳)。' +
+            '英文推荐: en-US-JennyNeural(女)、en-US-GuyNeural(男)。默认 zh-CN-XiaoxiaoNeural',
+        },
+        speed: {
+          type: 'string',
+          description: '语速调节，如 "+20%" 加速、"-10%" 减速。默认 "+0%"',
+        },
+      },
+      required: ['text'],
+    },
+    async execute(input, ctx) {
+      const voice = input.voice || 'zh-CN-XiaoxiaoNeural';
+      const speed = input.speed || '+0%';
+      const ts = Date.now();
+      const remoteOut = `/tmp/tts_${ts}.mp3`;
+      const localFileName = `tts_${ts}.mp3`;
+
+      const pyScript = `
+import asyncio, sys
+try:
+    import edge_tts
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'edge-tts', '-q'])
+    import edge_tts
+
+async def main():
+    communicate = edge_tts.Communicate(
+        text="""${input.text.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"')}""",
+        voice="${voice}",
+        rate="${speed}",
+    )
+    await communicate.save("${remoteOut}")
+    print("TTS_OK")
+
+asyncio.run(main())
+`.trim();
+
+      const b64 = Buffer.from(pyScript, 'utf8').toString('base64');
+      const cmd = `echo '${b64}' | base64 -d > /tmp/rdk_tts_${ts}.py && python3 /tmp/rdk_tts_${ts}.py 2>&1`;
+
+      const output = await execOnDevice(deviceId, [cmd]);
+
+      if (!output.includes('TTS_OK')) {
+        return `TTS 合成失败:\n${output}\n\n提示: 请确保设备已联网且可访问 Microsoft Edge TTS 服务。`;
+      }
+
+      const localPath = path.resolve(ctx.workspaceDir, 'downloads', localFileName);
+      const result = await downloadDeviceFileToLocal(deviceId, remoteOut, localPath);
+      const audioUrl = `/api/local-files/${encodeURIComponent(localFileName)}`;
+
+      await execOnDevice(deviceId, [`rm -f /tmp/rdk_tts_${ts}.py ${remoteOut}`]);
+
+      return JSON.stringify({
+        __type: 'audio_tts',
+        text: input.text.slice(0, 100) + (input.text.length > 100 ? '...' : ''),
+        voice,
+        speed,
+        audioUrl,
+        localPath: result.localPath,
+        bytes: result.bytes,
+        message: `语音合成完成 (${(result.bytes / 1024).toFixed(1)} KB)，音频文件: [${localFileName}](${audioUrl})`,
+      });
+    },
+  };
+}
+
+function sttSpeechToTextTool(deviceId: string): Tool<{ audio_path: string; language?: string }> {
+  return {
+    name: 'speech_to_text',
+    description:
+      '将设备上的音频文件转换为文字（语音识别/STT）。支持中英文。' +
+      '用于语音识别、音频转文字、听写等场景。' +
+      '需要设备联网（使用 Google Speech Recognition 在线识别）。' +
+      '支持 wav/mp3/flac/ogg 等常见音频格式。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        audio_path: { type: 'string', description: '设备上的音频文件绝对路径，如 /tmp/recording.wav' },
+        language: {
+          type: 'string',
+          description: '识别语言。zh-CN=中文（默认），en-US=英文，ja=日语。默认 zh-CN',
+        },
+      },
+      required: ['audio_path'],
+    },
+    async execute(input) {
+      const lang = input.language || 'zh-CN';
+      const ts = Date.now();
+
+      const pyScript = `
+import sys, json
+
+for mod in ['speech_recognition', 'pydub']:
+    try:
+        __import__(mod)
+    except ImportError:
+        import subprocess
+        pkg = 'SpeechRecognition' if mod == 'speech_recognition' else mod
+        subprocess.check_call([sys.executable, '-m', 'pip', 'install', pkg, '-q'])
+
+import speech_recognition as sr
+from pydub import AudioSegment
+import os, tempfile
+
+audio_path = "${input.audio_path.replace(/"/g, '\\"')}"
+lang = "${lang}"
+
+if not os.path.isfile(audio_path):
+    print(json.dumps({"ok": False, "error": f"文件不存在: {audio_path}"}))
+    sys.exit(0)
+
+wav_path = audio_path
+tmp_wav = None
+ext = os.path.splitext(audio_path)[1].lower()
+if ext not in ('.wav',):
+    try:
+        seg = AudioSegment.from_file(audio_path)
+        tmp_wav = tempfile.mktemp(suffix='.wav')
+        seg.export(tmp_wav, format='wav')
+        wav_path = tmp_wav
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": f"音频格式转换失败: {e}"}))
+        sys.exit(0)
+
+recognizer = sr.Recognizer()
+try:
+    with sr.AudioFile(wav_path) as source:
+        audio = recognizer.record(source)
+    text = recognizer.recognize_google(audio, language=lang)
+    print(json.dumps({"ok": True, "text": text, "language": lang}))
+except sr.UnknownValueError:
+    print(json.dumps({"ok": False, "error": "无法识别语音内容，音频可能太短、太安静或不清晰"}))
+except sr.RequestError as e:
+    print(json.dumps({"ok": False, "error": f"语音识别服务请求失败: {e}"}))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+finally:
+    if tmp_wav and os.path.exists(tmp_wav):
+        os.remove(tmp_wav)
+`.trim();
+
+      const b64 = Buffer.from(pyScript, 'utf8').toString('base64');
+      const cmd = `echo '${b64}' | base64 -d > /tmp/rdk_stt_${ts}.py && python3 /tmp/rdk_stt_${ts}.py 2>&1; rm -f /tmp/rdk_stt_${ts}.py`;
+
+      const output = await execOnDevice(deviceId, [cmd]);
+      const jsonLine = output.split('\n').map(l => l.trim()).find(l => l.startsWith('{'));
+
+      if (!jsonLine) {
+        return `语音识别执行失败:\n${output}\n\n提示: 请确保设备已联网并安装了 ffmpeg（用于非 WAV 格式转换）。`;
+      }
+
+      try {
+        const result = JSON.parse(jsonLine) as { ok: boolean; text?: string; error?: string; language?: string };
+        if (result.ok && result.text) {
+          return JSON.stringify({
+            __type: 'stt_result',
+            text: result.text,
+            language: result.language || lang,
+            audioPath: input.audio_path,
+            message: `语音识别完成:\n\n"${result.text}"`,
+          });
+        }
+        return `语音识别失败: ${result.error || '未知错误'}`;
+      } catch {
+        return `语音识别输出解析失败:\n${output}`;
+      }
     },
   };
 }

@@ -50,12 +50,12 @@ function FlowingGradientBg({ accent }: { accent: boolean }) {
         const r = Math.max(w, h) * (orb.rx + Math.sin(t * orb.speed * 0.5) * 0.03);
         const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
         if (accent) {
-          grad.addColorStop(0, 'rgba(255, 107, 0, 0.08)');
-          grad.addColorStop(0.4, 'rgba(255, 60, 0, 0.04)');
+          grad.addColorStop(0, 'rgba(255, 107, 0, 0.14)');
+          grad.addColorStop(0.4, 'rgba(255, 60, 0, 0.07)');
           grad.addColorStop(1, 'transparent');
         } else {
-          grad.addColorStop(0, 'rgba(148, 163, 184, 0.06)');
-          grad.addColorStop(0.4, 'rgba(100, 116, 139, 0.03)');
+          grad.addColorStop(0, 'rgba(148, 163, 184, 0.10)');
+          grad.addColorStop(0.4, 'rgba(100, 116, 139, 0.05)');
           grad.addColorStop(1, 'transparent');
         }
         ctx.fillStyle = grad;

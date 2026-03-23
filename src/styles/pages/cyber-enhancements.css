@@ -211,7 +211,7 @@
     border-radius: var(--radius-xs) var(--radius-xs) 0 0;
   }
 
-  .rail-btn[data-tooltip]::after { display: none; }
+  [data-tooltip]::after { display: none; }
 
   .top-bar {
     grid-row: 1;

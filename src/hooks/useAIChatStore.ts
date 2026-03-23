@@ -214,9 +214,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     }).join(' | ');
   };
 
+  const abortCooldownRef = useRef(false);
+
   const abortInFlightRun = (announce: boolean) => {
     const runId = currentRunIdRef.current;
-    // Bump generation so stale stream callbacks/finally won't clobber new run state.
     streamGenerationRef.current += 1;
     streamAbortRef.current?.();
     streamAbortRef.current = null;
@@ -227,10 +228,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     commandLockRef.current = false;
     setAiTyping(false);
     if (announce) {
+      abortCooldownRef.current = true;
+      setTimeout(() => { abortCooldownRef.current = false; }, 600);
       setChatMessages((prev) => [...prev, {
         id: Date.now(),
         role: 'ai',
-        text: '',
+        text: '已停止。你可以继续输入新的指令。',
         blocks: [{
           type: 'task-result',
           success: false,
@@ -255,7 +258,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     const requestAttachments = options?.attachments ?? [];
     const displayAttachments = options?.displayAttachments ?? [];
     if (!userMsg && requestAttachments.length === 0) return;
-    // 抢占式执行：新指令优先，先中止旧任务再开始当前任务。
+    if (abortCooldownRef.current) {
+      abortCooldownRef.current = false;
+    }
     if (commandLockRef.current || aiTyping) {
       abortInFlightRun(false);
     }

@@ -16,10 +16,10 @@
 /* ── Morphing halo blobs ── */
 .dash-morph-halo {
   position: absolute;
-  width: 50vw;
-  height: 50vw;
-  max-width: 600px;
-  max-height: 600px;
+  width: 60vw;
+  height: 60vw;
+  max-width: 720px;
+  max-height: 720px;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -55%);
@@ -29,27 +29,27 @@
     var(--accent-glow) 0%,
     transparent 70%
   );
-  opacity: 0.5;
+  opacity: 0.7;
   pointer-events: none;
   z-index: 0;
   animation: morphHalo 12s var(--ease-in-out) infinite alternate;
-  filter: blur(40px);
+  filter: blur(50px);
 }
 
 .dash-morph-halo.secondary {
-  width: 35vw;
-  height: 35vw;
-  max-width: 420px;
-  max-height: 420px;
+  width: 45vw;
+  height: 45vw;
+  max-width: 540px;
+  max-height: 540px;
   transform: translate(-30%, -40%);
   border-radius: 60% 40% 55% 45% / 45% 60% 40% 55%;
   background: radial-gradient(
     ellipse at 60% 50%,
-    rgba(255, 107, 0, 0.06) 0%,
-    rgba(168, 85, 247, 0.04) 40%,
+    rgba(255, 107, 0, 0.10) 0%,
+    rgba(168, 85, 247, 0.06) 40%,
     transparent 70%
   );
-  opacity: 0.4;
+  opacity: 0.6;
   animation: morphHalo2 15s var(--ease-in-out) infinite alternate;
   filter: blur(60px);
 }
@@ -90,7 +90,7 @@
 
 /* ── Brand / Tagline (empty state) ── */
 .dash-brand {
-  font-size: 3rem;
+  font-size: 3.5rem;
   font-weight: 800;
   background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   -webkit-background-clip: text;
@@ -109,22 +109,22 @@
 }
 
 .dash-tagline {
-  font-size: 0.875rem;
+  font-size: 1.0625rem;
   color: var(--text-muted);
-  max-width: 360px;
+  max-width: 420px;
 }
 
 /* ── Legacy action buttons (empty state) ── */
 .dash-action {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 24px;
+  gap: 10px;
+  padding: 14px 28px;
   border-radius: var(--radius-pill);
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   box-shadow: var(--shadow-md);
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   color: var(--text-primary);
   cursor: pointer;
@@ -154,7 +154,7 @@
   text-align: center;
 }
 
-.dash-empty-hero .dash-brand { font-size: 2.5rem; }
+.dash-empty-hero .dash-brand { font-size: 3rem; }
 
 /* ── Entrance animations ── */
 .dash-enter { animation: dashFadeUp 0.6s var(--ease-out) both; }
@@ -191,12 +191,12 @@
 .lp-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 12px;
+  gap: 6px;
+  padding: 5px 14px;
   border-radius: var(--radius-pill);
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  font-size: 0.625rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -205,7 +205,7 @@
 .lp-pill.ok { border-color: var(--ok); color: var(--ok); }
 
 .lp-device-name {
-  font-size: 2.75rem;
+  font-size: 3.25rem;
   font-weight: 800;
   color: var(--text-primary);
   letter-spacing: -0.03em;
@@ -225,7 +225,7 @@
 }
 
 .lp-device-ip {
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   color: var(--text-muted);
   font-family: var(--font-mono);
   letter-spacing: 0.03em;
@@ -249,7 +249,7 @@
 }
 
 .lp-metric-val {
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--text-primary);
@@ -265,7 +265,7 @@
 }
 
 .lp-metric-lbl {
-  font-size: 0.5625rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -285,10 +285,10 @@
 .lp-cta-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 24px;
+  gap: 10px;
+  padding: 14px 28px;
   border-radius: var(--radius-pill);
-  font-size: 0.8125rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.25s var(--ease-out);
@@ -335,12 +335,12 @@
 .lp-cap {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  gap: 8px;
+  padding: 8px 16px;
   border-radius: var(--radius-pill);
   background: var(--bg-surface);
   border: 1px solid var(--border);
-  font-size: 0.6875rem;
+  font-size: 0.8125rem;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
@@ -943,9 +943,9 @@
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
-  .lp-device-name { font-size: 1.75rem; }
+  .lp-device-name { font-size: 2rem; }
   .lp-metrics { gap: 16px; }
-  .lp-metric-val { font-size: 1rem; }
+  .lp-metric-val { font-size: 1.25rem; }
   .lp-cta { flex-wrap: wrap; justify-content: center; }
 
   .ob-board-grid {
