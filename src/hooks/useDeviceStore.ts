@@ -45,6 +45,10 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const [newDeviceIp, setNewDeviceIp] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [scannedDevices, setScannedDevices] = useState<Array<{ name: string; ip: string }>>([]);
+  const devicesRef = React.useRef<Device[]>([]);
+  useEffect(() => {
+    devicesRef.current = devices;
+  }, [devices]);
 
   // Confirm helper — kept local; the full confirm dialog lives in UIStore,
   // but device removal needs a simple callback-style confirm.
@@ -155,32 +159,40 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
   // Background ping
   useEffect(() => {
-    if (devices.length === 0) return;
-
     let cancelled = false;
+    let pinging = false;
     const pingAll = async () => {
-      if (cancelled) return;
-      const newDevices = await Promise.all(devices.map(async (dev) => {
-        try {
-          const res = await checkDevicePing(dev.id);
-          return { ...dev, status: res.status === 'connected' ? 'online' : 'offline' };
-        } catch {
-          return { ...dev, status: 'offline' };
-        }
-      }));
-      if (!cancelled) {
-        setDevices(prev => prev.map(p => {
-          const up = newDevices.find(n => n.id === p.id);
-          return (up && p.status !== up.status) ? { ...p, status: up.status } : p;
+      if (cancelled || pinging) return;
+      const snapshot = devicesRef.current;
+      if (snapshot.length === 0) return;
+      pinging = true;
+      try {
+        const newDevices = await Promise.all(snapshot.map(async (dev) => {
+          try {
+            const res = await checkDevicePing(dev.id);
+            return { ...dev, status: res.status === 'connected' ? 'online' : 'offline' };
+          } catch {
+            return { ...dev, status: 'offline' };
+          }
         }));
+        if (!cancelled) {
+          setDevices(prev => prev.map(p => {
+            const up = newDevices.find(n => n.id === p.id);
+            return (up && p.status !== up.status) ? { ...p, status: up.status } : p;
+          }));
+        }
+      } finally {
+        pinging = false;
       }
     };
 
-    const timer = setInterval(pingAll, 10000);
-    pingAll();
+    const timer = setInterval(() => {
+      void pingAll();
+    }, 10000);
+    void pingAll();
 
     return () => { cancelled = true; clearInterval(timer); };
-  }, [devices.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const value: DeviceStoreState = {
     activeDevice, setActiveDevice, devices, setDevices, currentDevice,

@@ -10,6 +10,9 @@ import https from 'node:https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const SERVER_PORT = 8787;
+const SERVER_BOOT_TIMEOUT_MS = 15_000;
+const SERVER_SHUTDOWN_GRACE_MS = 2_500;
 
 // 侧边栏宽度 + 顶部工具栏高度（与 src/styles/layout.css 保持一致）
 const SIDEBAR_W = 260;
@@ -292,53 +295,108 @@ function getAppRoot() {
 }
 
 /* ── 启动内嵌 Express 服务器（仅生产模式） ── */
+function stopEmbeddedServer() {
+  const proc = serverProcess;
+  if (!proc) return Promise.resolve();
+  serverProcess = null;
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+
+    const forceTimer = setTimeout(() => {
+      if (proc.killed) {
+        finish();
+        return;
+      }
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // ignore force-kill failures
+      }
+      finish();
+    }, SERVER_SHUTDOWN_GRACE_MS);
+
+    proc.once('exit', () => {
+      clearTimeout(forceTimer);
+      finish();
+    });
+
+    try {
+      proc.kill('SIGTERM');
+    } catch {
+      clearTimeout(forceTimer);
+      finish();
+    }
+  });
+}
+
 function startEmbeddedServer() {
-  if (!isPacked) return Promise.resolve(8787);
+  if (!isPacked) return Promise.resolve(SERVER_PORT);
 
   return new Promise((resolve, reject) => {
     // asar: false 时 app.getAppPath() 指向 resources/app/ (真实目录)
     // tsconfig.server.json 的 rootDir 是项目根，所以 server/index.ts 编译到 dist-server/server/index.js
     const serverPath = path.join(getAppRoot(), 'dist-server', 'server', 'index.js');
-    const dataPath = path.join(process.resourcesPath, 'data');
+    const envDataDir = String(process.env.RDK_DATA_DIR || '').trim();
+    const dataPath = envDataDir || path.join(app.getPath('userData'), 'data');
+    fs.mkdirSync(dataPath, { recursive: true });
 
     console.log('[server] starting embedded server:', serverPath);
     console.log('[server] data path:', dataPath);
 
-    serverProcess = spawn(process.execPath, [serverPath], {
+    const child = spawn(process.execPath, [serverPath], {
       cwd: getAppRoot(),
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
-        PORT: '8787',
+        PORT: String(SERVER_PORT),
         NODE_ENV: 'production',
         RDK_DATA_DIR: dataPath,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    serverProcess = child;
 
-    serverProcess.stdout?.on('data', (data) => {
+    let settled = false;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(bootTimer);
+      fn(value);
+    };
+
+    const bootTimer = setTimeout(() => {
+      settle(reject, new Error(`内置服务启动超时（>${SERVER_BOOT_TIMEOUT_MS}ms）`));
+    }, SERVER_BOOT_TIMEOUT_MS);
+
+    child.stdout?.on('data', (data) => {
       const msg = data.toString();
       console.log('[server]', msg.trim());
       if (msg.includes('running on')) {
-        resolve(8787);
+        settle(resolve, SERVER_PORT);
       }
     });
 
-    serverProcess.stderr?.on('data', (data) => {
+    child.stderr?.on('data', (data) => {
       console.error('[server:err]', data.toString().trim());
     });
 
-    serverProcess.on('error', (err) => {
+    child.on('error', (err) => {
       console.error('[server] failed to start:', err);
-      reject(err);
+      settle(reject, err);
     });
 
-    serverProcess.on('exit', (code, signal) => {
+    child.on('exit', (code, signal) => {
       console.error('[server] exited:', { code, signal });
+      if (!settled) {
+        settle(reject, new Error(`内置服务启动失败，进程已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`));
+      }
     });
-
-    // 10s 超时兜底
-    setTimeout(() => resolve(8787), 10000);
   });
 }
 
@@ -636,9 +694,19 @@ app.whenReady().then(async () => {
   if (isPacked) {
     try {
       await startEmbeddedServer();
-      await waitForServer(8787);
+      const ready = await waitForServer(SERVER_PORT);
+      if (!ready) {
+        throw new Error(`内置服务健康检查失败（端口 ${SERVER_PORT}）`);
+      }
     } catch (err) {
       console.error('[main] server startup failed:', err);
+      dialog.showErrorBox(
+        'RDK Studio 启动失败',
+        `内置服务未能正常启动，请检查端口 ${SERVER_PORT} 是否被占用，或查看日志后重试。\n\n${err instanceof Error ? err.message : String(err)}`,
+      );
+      await stopEmbeddedServer();
+      app.quit();
+      return;
     }
   }
 
@@ -651,20 +719,13 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', () => {
-  // 关闭内嵌服务器
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-  }
+app.on('window-all-closed', async () => {
+  await stopEmbeddedServer();
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-app.on('before-quit', () => {
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-  }
+app.on('before-quit', async () => {
+  await stopEmbeddedServer();
 });

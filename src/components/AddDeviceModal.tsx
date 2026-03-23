@@ -51,7 +51,24 @@ export default function AddDeviceModal() {
     const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
     verifyDeviceConnection({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'sunrise', password: sshPass.trim() })
       .then(() => { setVerifying(false); setVerifyOk(true); })
-      .catch(() => { setVerifying(false); setVerifyOk(false); addToast('连接验证失败，请检查 IP/账号/密码', 'error'); });
+      .catch((error) => {
+        setVerifying(false);
+        setVerifyOk(false);
+        const raw = error instanceof Error ? error.message : '连接验证失败';
+        if (raw.includes('[SSH_AUTH_FAILED]')) {
+          addToast('认证失败：请检查用户名和密码', 'error');
+          return;
+        }
+        if (raw.includes('[SSH_CONNECT_TIMEOUT]')) {
+          addToast('连接超时：请检查设备网络、IP 与端口', 'warning');
+          return;
+        }
+        if (raw.includes('[INVALID_DEVICE_CREDENTIALS]')) {
+          addToast('请完整填写 IP、用户名和密码', 'warning');
+          return;
+        }
+        addToast('连接验证失败，请检查 IP/账号/密码', 'error');
+      });
   };
 
   const confirmAdd = () => {
@@ -77,7 +94,7 @@ export default function AddDeviceModal() {
               {step === 'verify' && '验证连接'}
             </div>
           </div>
-          <button className="btn-icon" onClick={close}>
+          <button className="btn-icon" onClick={close} title="关闭弹窗" aria-label="关闭弹窗">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
@@ -147,13 +164,13 @@ export default function AddDeviceModal() {
                 <div className="add-device-field-row">
                   <div className="add-device-field">
                     <label>用户名</label>
-                    <input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} />
+                    <input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} title="SSH 用户名" />
                   </div>
                   <div className="add-device-field">
                     <label>密码</label>
                     <div className="add-device-pass-wrap">
-                      <input className="input" type={showPass ? 'text' : 'password'} value={sshPass} onChange={e => setSshPass(e.target.value)} />
-                      <button type="button" className="btn-icon add-device-pass-toggle" onClick={() => setShowPass(v => !v)}>
+                      <input className="input" type={showPass ? 'text' : 'password'} value={sshPass} onChange={e => setSshPass(e.target.value)} title="SSH 密码" />
+                      <button type="button" className="btn-icon add-device-pass-toggle" onClick={() => setShowPass(v => !v)} title={showPass ? '隐藏密码' : '显示密码'} aria-label={showPass ? '隐藏密码' : '显示密码'}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           {showPass ? <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></> : <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>}
                         </svg>
@@ -164,7 +181,7 @@ export default function AddDeviceModal() {
                 <div className="add-device-field-row">
                   <div className="add-device-field">
                     <label>SSH 端口</label>
-                    <input className="input" value={sshPort} onChange={e => setSshPort(e.target.value)} />
+                    <input className="input" value={sshPort} onChange={e => setSshPort(e.target.value)} title="SSH 端口" />
                   </div>
                   <div className="add-device-field">
                     <label>设备别名（可选）</label>
@@ -206,7 +223,7 @@ export default function AddDeviceModal() {
                 <div className="add-device-field-row">
                   <div className="add-device-field">
                     <label>串口号</label>
-                    <select className="select" value={serialPort} onChange={e => setSerialPort(e.target.value)}>
+                    <select className="select" value={serialPort} onChange={e => setSerialPort(e.target.value)} title="串口号">
                       <option value="/dev/ttyUSB0">/dev/ttyUSB0</option>
                       <option value="/dev/ttyUSB1">/dev/ttyUSB1</option>
                       <option value="COM3">COM3</option><option value="COM4">COM4</option>
@@ -214,14 +231,14 @@ export default function AddDeviceModal() {
                   </div>
                   <div className="add-device-field">
                     <label>波特率</label>
-                    <select className="select" value={baudRate} onChange={e => setBaudRate(e.target.value)}>
+                    <select className="select" value={baudRate} onChange={e => setBaudRate(e.target.value)} title="波特率">
                       <option value="921600">921600</option><option value="115200">115200</option>
                     </select>
                   </div>
                 </div>
                 <div className="add-device-field-row">
-                  <div className="add-device-field"><label>用户名</label><input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} /></div>
-                  <div className="add-device-field"><label>密码</label><input className="input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} /></div>
+                  <div className="add-device-field"><label>用户名</label><input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} title="用户名" /></div>
+                  <div className="add-device-field"><label>密码</label><input className="input" type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} title="密码" /></div>
                 </div>
                 <div className="add-device-field">
                   <label>设备别名（可选）</label>

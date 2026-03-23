@@ -3,6 +3,8 @@ import express from 'express';
 import cors from 'cors';
 import { v4 as uuid } from 'uuid';
 import crypto from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import { spawn } from 'node:child_process';
 import type { ChatMessage, Device } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
 import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js';
@@ -126,6 +128,17 @@ type OpenClawDeployJob = {
 };
 const openClawDeployJobs = new Map<string, OpenClawDeployJob>();
 const OPENCLAW_DEPLOY_JOB_TTL_MS = 6 * 60 * 60 * 1000;
+const FLASH_BACKUP_JOB_TTL_MS = 24 * 60 * 60 * 1000;
+const RUNTIME_JOBS_STATE_FILE = 'runtime-jobs.json';
+const EXEC_COMMAND_MAX_LENGTH = 4000;
+const BATCH_EXEC_MAX_COMMANDS = 30;
+const ONE_SHOT_PROMPT_MAX_CHARS = 600;
+const ONE_SHOT_MAX_FILES = 24;
+const ONE_SHOT_MAX_FILE_CHARS = 120_000;
+const ONE_SHOT_MAX_TOTAL_CHARS = 400_000;
+const ONE_SHOT_DEPLOY_MAX_FILES = 80;
+const ONE_SHOT_DEPLOY_MAX_BYTES = 2 * 1024 * 1024;
+let runtimeJobsPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 type WorkspaceModuleHealth = {
   ready: boolean;
@@ -148,6 +161,30 @@ type DeviceWorkspaceHealth = {
     nodeHub: WorkspaceModuleHealth;
     modelZoo: WorkspaceModuleHealth;
   };
+};
+
+type OneShotGeneratedFile = {
+  path: string;
+  content: string;
+};
+
+type OneShotAppPlan = {
+  appName: string;
+  summary: string;
+  files: OneShotGeneratedFile[];
+  runCommand: string;
+  testCommand?: string;
+};
+
+type OneShotValidationResult = {
+  ok: boolean;
+  checks: Array<{ name: string; ok: boolean; detail: string }>;
+};
+
+type OneShotFixSuggestion = {
+  title: string;
+  detail: string;
+  command?: string;
 };
 
 const WORKSPACE_HEALTH_SCRIPT = [
@@ -279,6 +316,39 @@ function isTransientSshError(error: unknown) {
   return /timed out|timeout|handshake|econnreset|socket closed|connection reset|connect failed/.test(message);
 }
 
+function isSshTimeoutError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /timed out|timeout|超时/.test(message);
+}
+
+function isSshAuthError(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /all configured authentication methods failed|permission denied|authentication failure|auth fail/.test(message);
+}
+
+type ApiErrorPayload = {
+  code: string;
+  message: string;
+  retryable?: boolean;
+  details?: Record<string, unknown>;
+};
+
+function sendApiError(
+  response: express.Response,
+  status: number,
+  code: string,
+  message: string,
+  options?: { retryable?: boolean; details?: Record<string, unknown> },
+) {
+  const payload: ApiErrorPayload = {
+    code,
+    message,
+    ...(typeof options?.retryable === 'boolean' ? { retryable: options.retryable } : {}),
+    ...(options?.details ? { details: options.details } : {}),
+  };
+  response.status(status).json(payload);
+}
+
 function normalizeOpenClawApi(raw: unknown): string {
   const value = String(raw || '').trim();
   if (!value) return 'openai-completions';
@@ -291,10 +361,102 @@ function normalizeOpenClawApi(raw: unknown): string {
 }
 
 function cleanupOpenClawDeployJobs(now = Date.now()) {
+  let changed = false;
   for (const [jobId, job] of openClawDeployJobs.entries()) {
     const doneAt = job.finishedAt ?? job.startedAt;
     if (now - doneAt > OPENCLAW_DEPLOY_JOB_TTL_MS) {
       openClawDeployJobs.delete(jobId);
+      changed = true;
+    }
+  }
+  if (changed) schedulePersistRuntimeJobs();
+}
+
+function cleanupFlashBackupJobs(now = Date.now()) {
+  let changed = false;
+  for (const [jobId, job] of flashBackupJobs.entries()) {
+    const doneAt = job.finishedAt ?? job.startedAt;
+    if (now - doneAt > FLASH_BACKUP_JOB_TTL_MS) {
+      flashBackupJobs.delete(jobId);
+      changed = true;
+    }
+  }
+  if (changed) schedulePersistRuntimeJobs();
+}
+
+function runtimeJobsStatePath() {
+  const dataDir = process.env.RDK_DATA_DIR ?? path.resolve(process.cwd(), 'data');
+  return path.join(dataDir, RUNTIME_JOBS_STATE_FILE);
+}
+
+function schedulePersistRuntimeJobs() {
+  if (runtimeJobsPersistTimer) return;
+  runtimeJobsPersistTimer = setTimeout(() => {
+    runtimeJobsPersistTimer = null;
+    void persistRuntimeJobsState();
+  }, 200);
+}
+
+async function persistRuntimeJobsState() {
+  cleanupOpenClawDeployJobs();
+  cleanupFlashBackupJobs();
+  const snapshot = {
+    updatedAt: Date.now(),
+    openClawDeployJobs: Array.from(openClawDeployJobs.values()),
+    flashBackupJobs: Array.from(flashBackupJobs.values()),
+  };
+  try {
+    const target = runtimeJobsStatePath();
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, JSON.stringify(snapshot, null, 2), 'utf-8');
+  } catch (error) {
+    console.warn('[jobs] persist state failed:', error instanceof Error ? error.message : error);
+  }
+}
+
+async function restoreRuntimeJobsState() {
+  try {
+    const target = runtimeJobsStatePath();
+    const raw = await fs.readFile(target, 'utf-8');
+    const parsed = JSON.parse(raw) as {
+      openClawDeployJobs?: OpenClawDeployJob[];
+      flashBackupJobs?: FlashBackupJob[];
+    };
+    const now = Date.now();
+
+    for (const item of parsed.openClawDeployJobs ?? []) {
+      if (!item?.id || !item.deviceId) continue;
+      const normalized: OpenClawDeployJob = {
+        ...item,
+        status: item.status === 'running' ? 'error' : item.status,
+        error: item.status === 'running'
+          ? '服务重启后任务中断，请重新发起部署'
+          : item.error,
+        finishedAt: item.status === 'running' ? now : item.finishedAt,
+      };
+      openClawDeployJobs.set(normalized.id, normalized);
+    }
+
+    for (const item of parsed.flashBackupJobs ?? []) {
+      if (!item?.id || !item.deviceId) continue;
+      const normalized: FlashBackupJob = {
+        ...item,
+        status: item.status === 'running' ? 'error' : item.status,
+        error: item.status === 'running'
+          ? '服务重启后任务中断，请重新发起备份'
+          : item.error,
+        finishedAt: item.status === 'running' ? now : item.finishedAt,
+      };
+      flashBackupJobs.set(normalized.id, normalized);
+    }
+
+    cleanupOpenClawDeployJobs(now);
+    cleanupFlashBackupJobs(now);
+    console.log(`[jobs] restored deploy=${openClawDeployJobs.size} backup=${flashBackupJobs.size}`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code !== 'ENOENT') {
+      console.warn('[jobs] restore state failed:', error instanceof Error ? error.message : error);
     }
   }
 }
@@ -304,6 +466,7 @@ function appendDeployOutput(job: OpenClawDeployJob, chunk: string) {
   if (job.output.length > 250_000) {
     job.output = job.output.slice(job.output.length - 250_000);
   }
+  schedulePersistRuntimeJobs();
 }
 
 function gcFeishuSeen() {
@@ -362,6 +525,435 @@ function readHealthBool(values: Record<string, string>, key: string) {
 function readHealthInt(values: Record<string, string>, key: string) {
   const value = Number.parseInt(values[key] || '0', 10);
   return Number.isFinite(value) ? value : 0;
+}
+
+function slugifyName(input: string) {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'rdk-app';
+}
+
+function safeRelativeFilePath(input: string) {
+  const normalized = String(input || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .trim();
+  if (!normalized || normalized.includes('..')) return '';
+  if (normalized.includes('\0')) return '';
+  if (/^[a-zA-Z]:/.test(normalized)) return '';
+  if (normalized.startsWith('.')) return '';
+  return normalized;
+}
+
+function resolveGeneratedAppsRootDir() {
+  return path.join(process.cwd(), 'workspace', 'generated-apps');
+}
+
+function isSubPath(child: string, parent: string) {
+  const resolvedChild = path.resolve(child);
+  const resolvedParent = path.resolve(parent);
+  return resolvedChild === resolvedParent || resolvedChild.startsWith(`${resolvedParent}${path.sep}`);
+}
+
+function runProcess(command: string, args: string[], cwd: string, timeoutMs = 15_000) {
+  return new Promise<{ ok: boolean; output: string; timedOut: boolean; exitCode: number | null }>((resolve) => {
+    let settled = false;
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      resolve({ ok: false, output: `timeout after ${timeoutMs}ms`, timedOut: true, exitCode: null });
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { output += chunk.toString(); });
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok: false, output: error.message, timedOut: false, exitCode: null });
+    });
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok: code === 0, output: output.trim(), timedOut: false, exitCode: code });
+    });
+  });
+}
+
+async function validateOneShotApp(appDir: string): Promise<OneShotValidationResult> {
+  const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+  const requiredFiles = ['README.md', 'main.py', 'requirements.txt'];
+
+  for (const file of requiredFiles) {
+    const target = path.join(appDir, file);
+    try {
+      await fs.access(target);
+      checks.push({ name: `exists:${file}`, ok: true, detail: 'ok' });
+    } catch {
+      checks.push({ name: `exists:${file}`, ok: false, detail: 'missing' });
+    }
+  }
+
+  const hasMain = checks.find((c) => c.name === 'exists:main.py')?.ok;
+  if (hasMain) {
+    const candidates: Array<{ cmd: string; args: string[] }> = [
+      { cmd: 'python', args: ['-m', 'py_compile', 'main.py'] },
+      { cmd: 'python3', args: ['-m', 'py_compile', 'main.py'] },
+      { cmd: 'py', args: ['-3', '-m', 'py_compile', 'main.py'] },
+    ];
+    let syntaxChecked = false;
+    for (const candidate of candidates) {
+      const result = await runProcess(candidate.cmd, candidate.args, appDir, 20_000);
+      if (result.ok) {
+        checks.push({ name: 'python:syntax', ok: true, detail: `${candidate.cmd} ok` });
+        syntaxChecked = true;
+        break;
+      }
+      if (!/not found|enoent/i.test(result.output)) {
+        checks.push({ name: 'python:syntax', ok: false, detail: result.output || `${candidate.cmd} failed` });
+        syntaxChecked = true;
+        break;
+      }
+    }
+    if (!syntaxChecked) {
+      checks.push({ name: 'python:syntax', ok: false, detail: 'python runtime not found' });
+    }
+  }
+
+  const ok = checks.every((item) => item.ok);
+  return { ok, checks };
+}
+
+async function collectOneShotFiles(appDir: string) {
+  const files: Array<{ relativePath: string; content: Buffer }> = [];
+  let totalBytes = 0;
+
+  const walk = async (currentDir: string) => {
+    const entries = await fs.readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const abs = path.join(currentDir, entry.name);
+      const rel = path.relative(appDir, abs).replace(/\\/g, '/');
+      if (!rel || rel.startsWith('..')) continue;
+      if (entry.isDirectory()) {
+        await walk(abs);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (files.length >= ONE_SHOT_DEPLOY_MAX_FILES) {
+        throw new Error(`文件数量超限（最多 ${ONE_SHOT_DEPLOY_MAX_FILES} 个）`);
+      }
+      const content = await fs.readFile(abs);
+      totalBytes += content.length;
+      if (totalBytes > ONE_SHOT_DEPLOY_MAX_BYTES) {
+        throw new Error(`文件体积超限（最多 ${Math.floor(ONE_SHOT_DEPLOY_MAX_BYTES / 1024)}KB）`);
+      }
+      files.push({ relativePath: rel, content });
+    }
+  };
+
+  await walk(appDir);
+  return { files, totalBytes };
+}
+
+function normalizeOneShotRunCommand(raw: unknown): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value.length > 200) return '';
+  if (/[\r\n]/.test(value)) return '';
+  // Keep one-shot runner constrained to Python entry commands.
+  if (!/^(python|python3|py)\b/i.test(value)) return '';
+  // Block shell control separators to reduce command-injection risk.
+  if (/[`;&|<>]/.test(value)) return '';
+  return value;
+}
+
+async function runOneShotAppSmoke(appDir: string, runCommandRaw?: string) {
+  const requestedCommand = normalizeOneShotRunCommand(runCommandRaw);
+  if (requestedCommand) {
+    const shellRunner = process.platform === 'win32'
+      ? { cmd: 'cmd', args: ['/d', '/s', '/c', requestedCommand] }
+      : { cmd: 'bash', args: ['-lc', requestedCommand] };
+    const customResult = await runProcess(shellRunner.cmd, shellRunner.args, appDir, 20_000);
+    if (customResult.ok) {
+      return { ok: true, runner: requestedCommand, output: customResult.output, timedOut: false };
+    }
+    if (customResult.timedOut) {
+      return {
+        ok: true,
+        runner: requestedCommand,
+        output: customResult.output || '运行超时，可能是常驻服务应用',
+        timedOut: true,
+      };
+    }
+    if (!/not found|enoent/i.test(customResult.output)) {
+      return { ok: false, runner: requestedCommand, output: customResult.output, timedOut: false };
+    }
+  }
+
+  const candidates: Array<{ cmd: string; args: string[] }> = [
+    { cmd: 'python', args: ['main.py'] },
+    { cmd: 'python3', args: ['main.py'] },
+    { cmd: 'py', args: ['-3', 'main.py'] },
+  ];
+  let last = '';
+  for (const candidate of candidates) {
+    const result = await runProcess(candidate.cmd, candidate.args, appDir, 20_000);
+    if (result.ok) {
+      return {
+        ok: true,
+        runner: `${candidate.cmd} ${candidate.args.join(' ')}`,
+        output: result.output,
+        timedOut: false,
+      };
+    }
+    if (result.timedOut) {
+      return {
+        ok: true,
+        runner: `${candidate.cmd} ${candidate.args.join(' ')}`,
+        output: result.output || '运行超时，可能是常驻服务应用',
+        timedOut: true,
+      };
+    }
+    if (!/not found|enoent/i.test(result.output)) {
+      last = result.output;
+      break;
+    }
+    last = result.output;
+  }
+
+  return {
+    ok: false,
+    runner: requestedCommand || 'python main.py',
+    output: last || '未找到可用的 Python 运行时',
+    timedOut: false,
+  };
+}
+
+function suggestFixesFromRunOutput(output: string): OneShotFixSuggestion[] {
+  const text = String(output || '').toLowerCase();
+  const suggestions: OneShotFixSuggestion[] = [];
+  if (text.includes('no module named')) {
+    suggestions.push({
+      title: '安装依赖',
+      detail: '检测到依赖缺失，建议先安装 requirements.txt',
+      command: 'pip install -r requirements.txt',
+    });
+  }
+  if (text.includes('permission denied')) {
+    suggestions.push({
+      title: '修复权限',
+      detail: '检测到权限不足，建议修复目标目录权限',
+      command: 'chmod -R u+rwX .',
+    });
+  }
+  if (text.includes('syntaxerror')) {
+    suggestions.push({
+      title: '语法检查',
+      detail: '检测到语法错误，建议先做语法检查定位问题',
+      command: 'python -m py_compile main.py',
+    });
+  }
+  if (text.includes('python runtime not found') || text.includes('python: not found') || text.includes('python3: not found')) {
+    suggestions.push({
+      title: '安装 Python',
+      detail: '设备缺少 Python 运行时，请先安装 python3',
+      command: 'apt-get update && apt-get install -y python3',
+    });
+  }
+  if (suggestions.length === 0) {
+    suggestions.push({
+      title: '排查入口',
+      detail: '建议先查看完整运行日志，再检查 requirements.txt 与 main.py 入口是否匹配',
+      command: 'python main.py',
+    });
+  }
+  return suggestions.slice(0, 3);
+}
+
+function fallbackOneShotPlan(prompt: string): OneShotAppPlan {
+  const appName = `rdk-${slugifyName(prompt.split(/\s+/).slice(0, 4).join('-') || 'app')}`;
+  const summary = `由一句话需求生成的最小可运行 RDK 应用骨架：${prompt}`;
+  return {
+    appName,
+    summary,
+    runCommand: 'python main.py',
+    testCommand: 'python -m py_compile main.py',
+    files: [
+      {
+        path: 'README.md',
+        content: `# ${appName}
+
+${summary}
+
+## 快速开始
+
+\`\`\`bash
+python main.py
+\`\`\`
+
+## 下一步建议
+
+- 将设备指令封装到 \`app/rdk_client.py\`
+- 把业务流程补充到 \`app/pipeline.py\`
+- 根据场景添加依赖到 \`requirements.txt\`
+`,
+      },
+      {
+        path: 'requirements.txt',
+        content: 'requests>=2.31.0\n',
+      },
+      {
+        path: 'main.py',
+        content: `from app.pipeline import run
+
+def main():
+    result = run()
+    print(result)
+
+if __name__ == "__main__":
+    main()
+`,
+      },
+      {
+        path: 'app/pipeline.py',
+        content: `def run():
+    # TODO: 按需求补充设备调用与业务逻辑
+    return "RDK app bootstrap is ready."
+`,
+      },
+      {
+        path: 'app/rdk_client.py',
+        content: `class RdkClient:
+    def __init__(self, host: str = "127.0.0.1", port: int = 22):
+        self.host = host
+        self.port = port
+
+    def ping(self) -> bool:
+        # TODO: 替换为真实设备连接检测
+        return True
+`,
+      },
+    ],
+  };
+}
+
+function tryParseJsonObject(raw: string) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+async function generateOneShotPlan(prompt: string): Promise<{ plan: OneShotAppPlan; usedFallback: boolean }> {
+  const fallback = fallbackOneShotPlan(prompt);
+  if (!apiKey) return { plan: fallback, usedFallback: true };
+
+  const plannerPrompt = `你是 RDK 应用脚手架生成器。用户会给你一句话需求。
+
+请只返回严格 JSON（不要 markdown，不要注释，不要代码块）：
+{
+  "appName": "仅小写字母数字和中划线",
+  "summary": "一句话说明",
+  "runCommand": "运行命令",
+  "testCommand": "可选测试命令",
+  "files": [
+    { "path": "相对路径", "content": "文件内容字符串" }
+  ]
+}
+
+要求：
+1) files 至少包含：README.md, main.py, requirements.txt
+2) 不得出现绝对路径，不得出现 .. 路径跳转
+3) 输出应为可直接保存的源码内容
+4) 以 Python 项目为默认栈，适配 RDK 设备应用开发`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    const upstreamResponse = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: plannerPrompt },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 1800,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const payload = (await upstreamResponse.json().catch(() => ({}))) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const text = payload.choices?.[0]?.message?.content ?? '';
+    const parsed = tryParseJsonObject(text);
+    if (!parsed) return { plan: fallback, usedFallback: true };
+
+    const appName = slugifyName(String(parsed.appName || fallback.appName));
+    const summary = String(parsed.summary || fallback.summary);
+    const runCommand = normalizeOneShotRunCommand(parsed.runCommand) || fallback.runCommand;
+    const testCommand = String(parsed.testCommand || fallback.testCommand || '');
+    const rawFiles = Array.isArray(parsed.files) ? parsed.files.slice(0, ONE_SHOT_MAX_FILES) : [];
+    const files: OneShotGeneratedFile[] = rawFiles
+      .map((item) => {
+        const obj = (item ?? {}) as Record<string, unknown>;
+        const p = safeRelativeFilePath(String(obj.path || ''));
+        const c = String(obj.content || '').slice(0, ONE_SHOT_MAX_FILE_CHARS);
+        return { path: p, content: c };
+      })
+      .filter((f) => Boolean(f.path));
+
+    const totalChars = files.reduce((sum, f) => sum + f.content.length, 0);
+    if (totalChars > ONE_SHOT_MAX_TOTAL_CHARS) {
+      return { plan: fallback, usedFallback: true };
+    }
+
+    const hasReadme = files.some((f) => f.path === 'README.md');
+    const hasMain = files.some((f) => f.path === 'main.py');
+    const hasReq = files.some((f) => f.path === 'requirements.txt');
+    if (!hasReadme || !hasMain || !hasReq || files.length < 3) {
+      return { plan: fallback, usedFallback: true };
+    }
+
+    return {
+      plan: {
+        appName,
+        summary,
+        runCommand,
+        ...(testCommand ? { testCommand } : {}),
+        files,
+      },
+      usedFallback: false,
+    };
+  } catch {
+    return { plan: fallback, usedFallback: true };
+  }
 }
 
 function buildWorkspaceModuleStatus(
@@ -517,6 +1109,7 @@ async function runOnDevice(
   response: express.Response,
   id: string,
   commands: string[],
+  options?: { timeoutMs?: number },
 ) {
   const device = await resolveDevice(request, response, id);
   if (!device) {
@@ -526,6 +1119,7 @@ async function runOnDevice(
   const { password, key } = resolvePassword(request, device);
   const candidates = password ? [password] : passwordCandidates(device.username);
   let lastError: unknown = null;
+  const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? 120_000));
 
   for (const pwd of candidates) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -538,6 +1132,7 @@ async function runOnDevice(
             password: pwd,
           },
           commands,
+          { timeoutMs },
         );
 
         devicePasswordCache.set(key, pwd);
@@ -552,13 +1147,34 @@ async function runOnDevice(
   }
 
   if (!password) {
-    response.status(400).json({ error: '设备密码缺失或不正确，请在设备管理中重新连接并填写密码' });
+    sendApiError(
+      response,
+      400,
+      'DEVICE_AUTH_REQUIRED',
+      '设备密码缺失或不正确，请在设备管理中重新连接并填写密码',
+      { retryable: false },
+    );
     return null;
   }
 
-  response.status(500).json({
-    error: lastError instanceof Error ? `板端命令执行失败: ${lastError.message}` : '板端命令执行失败',
-  });
+  if (isSshTimeoutError(lastError)) {
+    sendApiError(
+      response,
+      504,
+      'DEVICE_COMMAND_TIMEOUT',
+      lastError instanceof Error ? `板端命令执行超时: ${lastError.message}` : '板端命令执行超时',
+      { retryable: true },
+    );
+    return null;
+  }
+
+  sendApiError(
+    response,
+    500,
+    'DEVICE_COMMAND_FAILED',
+    lastError instanceof Error ? `板端命令执行失败: ${lastError.message}` : '板端命令执行失败',
+    { retryable: false },
+  );
   return null;
 }
 
@@ -678,6 +1294,69 @@ app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
 });
 
+app.post('/api/apps/one-shot-generate', async (request, response) => {
+  const { prompt } = request.body as { prompt?: string };
+  const input = String(prompt || '').trim();
+  if (!input) {
+    sendApiError(response, 400, 'INVALID_PROMPT', 'prompt 不能为空', { retryable: false });
+    return;
+  }
+  if (input.length > ONE_SHOT_PROMPT_MAX_CHARS) {
+    sendApiError(
+      response,
+      400,
+      'INVALID_PROMPT',
+      `prompt 过长，请控制在 ${ONE_SHOT_PROMPT_MAX_CHARS} 字以内`,
+      { retryable: false },
+    );
+    return;
+  }
+
+  const generatedRoot = resolveGeneratedAppsRootDir();
+  const { plan, usedFallback } = await generateOneShotPlan(input);
+  const appSlug = slugifyName(plan.appName);
+  const folderName = `${appSlug}-${Date.now()}`;
+  const appDir = path.join(generatedRoot, folderName);
+
+  try {
+    await fs.mkdir(appDir, { recursive: true });
+    const writtenFiles: string[] = [];
+    for (const file of plan.files) {
+      const relativePath = safeRelativeFilePath(file.path);
+      if (!relativePath) continue;
+      const absPath = path.join(appDir, relativePath);
+      await fs.mkdir(path.dirname(absPath), { recursive: true });
+      await fs.writeFile(absPath, file.content ?? '', 'utf-8');
+      writtenFiles.push(relativePath);
+    }
+    if (writtenFiles.length === 0) {
+      sendApiError(response, 500, 'APP_GENERATE_EMPTY', '未生成有效应用文件', { retryable: true });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      app: {
+        name: appSlug,
+        summary: plan.summary,
+        rootDir: appDir,
+        files: writtenFiles,
+        runCommand: plan.runCommand,
+        testCommand: plan.testCommand ?? '',
+        usedFallback,
+      },
+    });
+  } catch (error) {
+    sendApiError(
+      response,
+      500,
+      'APP_GENERATE_WRITE_FAILED',
+      error instanceof Error ? `应用文件写入失败: ${error.message}` : '应用文件写入失败',
+      { retryable: true },
+    );
+  }
+});
+
 app.get('/api/token-usage/report', (request, response) => {
   const hours = Number(request.query.hours || 24);
   const source = String(request.query.source || 'all') as 'all' | 'rdkclaw' | 'openclaw';
@@ -685,6 +1364,294 @@ app.get('/api/token-usage/report', (request, response) => {
   const limit = Number(request.query.limit || 50);
   const report = getTokenUsageReport({ hours, source, deviceId, limit });
   response.json(report);
+});
+
+app.post('/api/apps/one-shot-validate', async (request, response) => {
+  const { appDir } = request.body as { appDir?: string };
+  const targetDir = String(appDir || '').trim();
+  if (!targetDir) {
+    sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 不能为空', { retryable: false });
+    return;
+  }
+
+  const generatedRoot = resolveGeneratedAppsRootDir();
+  if (!isSubPath(targetDir, generatedRoot)) {
+    sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 非法，不在生成目录范围内', { retryable: false });
+    return;
+  }
+
+  try {
+    const stat = await fs.stat(targetDir);
+    if (!stat.isDirectory()) {
+      sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 不是有效目录', { retryable: false });
+      return;
+    }
+    const validation = await validateOneShotApp(targetDir);
+    response.json({ ok: true, validation });
+  } catch (error) {
+    sendApiError(
+      response,
+      500,
+      'APP_VALIDATE_FAILED',
+      error instanceof Error ? `应用校验失败: ${error.message}` : '应用校验失败',
+      { retryable: true },
+    );
+  }
+});
+
+app.post('/api/apps/one-shot-run', async (request, response) => {
+  const { appDir, runCommand } = request.body as { appDir?: string; runCommand?: string };
+  const targetDir = String(appDir || '').trim();
+  const normalizedRunCommand = normalizeOneShotRunCommand(runCommand);
+  if (!targetDir) {
+    sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 不能为空', { retryable: false });
+    return;
+  }
+  if (String(runCommand || '').trim() && !normalizedRunCommand) {
+    sendApiError(response, 400, 'INVALID_RUN_COMMAND', 'runCommand 非法，仅支持 Python 启动命令', { retryable: false });
+    return;
+  }
+
+  const generatedRoot = resolveGeneratedAppsRootDir();
+  if (!isSubPath(targetDir, generatedRoot)) {
+    sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 非法，不在生成目录范围内', { retryable: false });
+    return;
+  }
+
+  try {
+    const stat = await fs.stat(targetDir);
+    if (!stat.isDirectory()) {
+      sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 不是有效目录', { retryable: false });
+      return;
+    }
+    const runResult = await runOneShotAppSmoke(targetDir, normalizedRunCommand);
+    response.json({
+      ok: runResult.ok,
+      run: {
+        runner: runResult.runner,
+        output: runResult.output,
+        timedOut: runResult.timedOut,
+      },
+    });
+  } catch (error) {
+    sendApiError(
+      response,
+      500,
+      'APP_RUN_FAILED',
+      error instanceof Error ? `应用运行失败: ${error.message}` : '应用运行失败',
+      { retryable: true },
+    );
+  }
+});
+
+app.post('/api/apps/one-shot-deploy', async (request, response) => {
+  const {
+    appDir,
+    deviceId,
+    remoteDir,
+    runAfterDeploy,
+    runCommand,
+  } = request.body as {
+    appDir?: string;
+    deviceId?: string;
+    remoteDir?: string;
+    runAfterDeploy?: boolean;
+    runCommand?: string;
+  };
+
+  const targetDir = String(appDir || '').trim();
+  const targetDeviceId = String(deviceId || '').trim();
+  const normalizedRunCommand = normalizeOneShotRunCommand(runCommand);
+  if (!targetDir || !targetDeviceId) {
+    sendApiError(response, 400, 'INVALID_DEPLOY_PAYLOAD', 'appDir 与 deviceId 为必填项', { retryable: false });
+    return;
+  }
+  if (String(runCommand || '').trim() && !normalizedRunCommand) {
+    sendApiError(response, 400, 'INVALID_RUN_COMMAND', 'runCommand 非法，仅支持 Python 启动命令', { retryable: false });
+    return;
+  }
+
+  const generatedRoot = resolveGeneratedAppsRootDir();
+  if (!isSubPath(targetDir, generatedRoot)) {
+    sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 非法，不在生成目录范围内', { retryable: false });
+    return;
+  }
+
+  const normalizedRemoteDir = String(remoteDir || '').trim();
+  const defaultRemoteDir = `/userdata/apps/${slugifyName(path.basename(targetDir))}`;
+  const finalRemoteDir = normalizedRemoteDir || defaultRemoteDir;
+  if (!finalRemoteDir.startsWith('/') || finalRemoteDir.includes('..')) {
+    sendApiError(response, 400, 'INVALID_REMOTE_DIR', 'remoteDir 非法，仅支持绝对路径且不得包含 ..', { retryable: false });
+    return;
+  }
+
+  const device = await resolveDevice(request, response, targetDeviceId);
+  if (!device) return;
+
+  try {
+    const stat = await fs.stat(targetDir);
+    if (!stat.isDirectory()) {
+      sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 不是有效目录', { retryable: false });
+      return;
+    }
+  } catch {
+    sendApiError(response, 400, 'INVALID_APP_DIR', 'appDir 不存在', { retryable: false });
+    return;
+  }
+
+  let fileBundle: { files: Array<{ relativePath: string; content: Buffer }>; totalBytes: number };
+  try {
+    fileBundle = await collectOneShotFiles(targetDir);
+  } catch (error) {
+    sendApiError(
+      response,
+      400,
+      'INVALID_APP_FILES',
+      error instanceof Error ? error.message : '应用文件不符合部署要求',
+      { retryable: false },
+    );
+    return;
+  }
+
+  if (fileBundle.files.length === 0) {
+    sendApiError(response, 400, 'INVALID_APP_FILES', '应用目录为空，无法部署', { retryable: false });
+    return;
+  }
+  const hasRequirements = fileBundle.files.some(
+    (file) => file.relativePath.replace(/\\/g, '/').toLowerCase() === 'requirements.txt',
+  );
+
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+  const cached = devicePasswordCache.get(key);
+  const persistedPassword = (device as Device & { password?: string }).password ?? '';
+  const seedPassword = cached || persistedPassword || defaultSshPassword || device.username;
+  const candidates = Array.from(new Set([seedPassword, ...passwordCandidates(device.username)].filter(Boolean)));
+  let lastError: unknown = null;
+
+  for (const pwd of candidates) {
+    try {
+      const precheckRaw = await runRemoteCommands(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+        ['bash -lc "PY=$(command -v python || command -v python3 || command -v py || true); PIP=$(command -v pip || command -v pip3 || true); AVAIL=$(df -Pk /userdata 2>/dev/null | tail -1 | awk \'{print $4}\' || echo 0); NET=unknown; if command -v curl >/dev/null 2>&1; then curl -Is --max-time 5 https://pypi.org/simple/ >/dev/null 2>&1 && NET=ok || NET=fail; elif command -v wget >/dev/null 2>&1; then wget -q --spider -T 5 https://pypi.org/simple/ >/dev/null 2>&1 && NET=ok || NET=fail; elif [ -n \"$PY\" ]; then $PY -c \"import urllib.request; urllib.request.urlopen(\'https://pypi.org/simple/\', timeout=5)\" >/dev/null 2>&1 && NET=ok || NET=fail; fi; echo PY=$PY; echo PIP=$PIP; echo AVAIL_KB=$AVAIL; echo NET=$NET"'],
+        { timeoutMs: 20_000 },
+      );
+      const pyLine = precheckRaw.split(/\r?\n/).find((line) => line.startsWith('PY=')) || 'PY=';
+      const pipLine = precheckRaw.split(/\r?\n/).find((line) => line.startsWith('PIP=')) || 'PIP=';
+      const availLine = precheckRaw.split(/\r?\n/).find((line) => line.startsWith('AVAIL_KB=')) || 'AVAIL_KB=0';
+      const netLine = precheckRaw.split(/\r?\n/).find((line) => line.startsWith('NET=')) || 'NET=unknown';
+      const pyCmd = pyLine.slice(3).trim();
+      const pipCmd = pipLine.slice(4).trim();
+      const availKb = Number.parseInt(availLine.slice('AVAIL_KB='.length).trim(), 10) || 0;
+      const netState = netLine.slice(4).trim().toLowerCase();
+      if (!pyCmd) {
+        sendApiError(response, 400, 'DEPLOY_PRECHECK_FAILED', '目标设备缺少 Python 运行时，无法直接运行应用', {
+          retryable: false,
+          details: {
+            suggestions: ['请先在设备安装 python3', '安装完成后重新执行部署'],
+          },
+        });
+        return;
+      }
+      if (availKb > 0 && availKb < 20 * 1024) {
+        sendApiError(response, 400, 'DEPLOY_PRECHECK_FAILED', '设备可用空间不足，建议先清理 /userdata 空间', {
+          retryable: false,
+          details: {
+            availableKB: availKb,
+            suggestions: ['清理旧日志/旧应用目录', '保证至少 20MB 可用空间后重试'],
+          },
+        });
+        return;
+      }
+      if (hasRequirements && !pipCmd) {
+        sendApiError(response, 400, 'DEPLOY_PRECHECK_FAILED', '应用包含 requirements.txt，但目标设备缺少 pip，无法安装依赖', {
+          retryable: false,
+          details: {
+            suggestions: ['请先在设备安装 pip/pip3', '安装完成后重新执行部署'],
+          },
+        });
+        return;
+      }
+      if (hasRequirements && netState === 'fail') {
+        sendApiError(response, 400, 'DEPLOY_PRECHECK_FAILED', '设备当前无法访问依赖源（pypi.org），依赖安装可能失败', {
+          retryable: true,
+          details: {
+            suggestions: ['确认设备网络可访问外网', '或改用内网镜像源后重试'],
+          },
+        });
+        return;
+      }
+
+      const uniqueDirs = Array.from(new Set([
+        finalRemoteDir,
+        ...fileBundle.files.map((f) => path.posix.dirname(path.posix.join(finalRemoteDir, f.relativePath)).replace(/\\/g, '/')),
+      ]));
+      const mkdirCmd = uniqueDirs.map((dir) => `mkdir -p ${shEscape(dir)}`).join(' && ');
+      await runRemoteCommands(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+        [mkdirCmd],
+        { timeoutMs: 60_000 },
+      );
+
+      for (const file of fileBundle.files) {
+        const remotePath = path.posix.join(finalRemoteDir, file.relativePath).replace(/\\/g, '/');
+        await uploadFileSftp(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          remotePath,
+          file.content,
+        );
+      }
+
+      devicePasswordCache.set(key, pwd);
+      let run: { ok: boolean; output: string } | null = null;
+      if (runAfterDeploy !== false) {
+        const runEntryCommand = normalizedRunCommand || 'python main.py';
+        const runScript = `cd ${shEscape(finalRemoteDir)} && (${runEntryCommand})`;
+        const runResult = await runRemoteCommands(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          [`bash -lc ${shellEscape(runScript)}`],
+          { timeoutMs: 60_000 },
+        ).then((output) => ({ ok: true, output })).catch((error) => ({ ok: false, output: error instanceof Error ? error.message : String(error) }));
+        run = runResult;
+      }
+
+      response.json({
+        ok: true,
+        deploy: {
+          deviceId: targetDeviceId,
+          remoteDir: finalRemoteDir,
+          fileCount: fileBundle.files.length,
+          totalBytes: fileBundle.totalBytes,
+          runCommand: normalizedRunCommand || 'python main.py',
+          ...(run ? {
+            run: {
+              ...run,
+              ...(run.ok ? {} : { suggestions: suggestFixesFromRunOutput(run.output) }),
+            },
+          } : {}),
+        },
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+  }
+
+  if (isSshAuthError(lastError)) {
+    sendApiError(response, 401, 'SSH_AUTH_FAILED', '部署认证失败，请检查设备账号密码', { retryable: false });
+    return;
+  }
+  if (isSshTimeoutError(lastError)) {
+    sendApiError(response, 504, 'DEPLOY_TIMEOUT', '部署超时，请检查网络和设备状态', { retryable: true });
+    return;
+  }
+  sendApiError(
+    response,
+    500,
+    'DEPLOY_FAILED',
+    lastError instanceof Error ? `部署失败: ${lastError.message}` : '部署失败',
+    { retryable: true },
+  );
 });
 
 app.post('/api/token-usage/reset', (_request, response) => {
@@ -705,7 +1672,7 @@ app.post('/api/devices/connect', async (request, response) => {
   };
 
   if (!host || !username || !password) {
-    response.status(400).json({ error: 'host、username、password 均为必填项' });
+    sendApiError(response, 400, 'INVALID_DEVICE_CREDENTIALS', 'host、username、password 均为必填项', { retryable: false });
     return;
   }
 
@@ -735,9 +1702,15 @@ app.post('/api/devices/connect', async (request, response) => {
     await writeDevices(nextDevices);
     response.json({ device: sanitizeDevice(nextDevice) });
   } catch (error) {
-    response.status(500).json({
-      error: error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败',
-    });
+    if (isSshTimeoutError(error)) {
+      sendApiError(response, 504, 'SSH_CONNECT_TIMEOUT', error instanceof Error ? `SSH 连接超时: ${error.message}` : 'SSH 连接超时', { retryable: true });
+      return;
+    }
+    if (isSshAuthError(error)) {
+      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，请检查用户名或密码', { retryable: false });
+      return;
+    }
+    sendApiError(response, 500, 'SSH_CONNECT_FAILED', error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败', { retryable: true });
   }
 });
 
@@ -750,7 +1723,7 @@ app.post('/api/devices/verify', async (request, response) => {
   };
 
   if (!host || !username || !password) {
-    response.status(400).json({ error: 'host、username、password 均为必填项' });
+    sendApiError(response, 400, 'INVALID_DEVICE_CREDENTIALS', 'host、username、password 均为必填项', { retryable: false });
     return;
   }
 
@@ -758,9 +1731,15 @@ app.post('/api/devices/verify', async (request, response) => {
     await verifySshConnection({ host, port: Number(port ?? 22), username, password });
     response.json({ ok: true });
   } catch (error) {
-    response.status(500).json({
-      error: error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败',
-    });
+    if (isSshTimeoutError(error)) {
+      sendApiError(response, 504, 'SSH_CONNECT_TIMEOUT', error instanceof Error ? `SSH 连接超时: ${error.message}` : 'SSH 连接超时', { retryable: true });
+      return;
+    }
+    if (isSshAuthError(error)) {
+      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，请检查用户名或密码', { retryable: false });
+      return;
+    }
+    sendApiError(response, 500, 'SSH_CONNECT_FAILED', error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败', { retryable: true });
   }
 });
 
@@ -793,7 +1772,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   };
 
   if (!action || !['start', 'status', 'switch', 'install', 'logs'].includes(action)) {
-    response.status(400).json({ error: 'action 必须是 start/status/switch/install/logs' });
+    sendApiError(response, 400, 'INVALID_OPENCLAW_ACTION', 'action 必须是 start/status/switch/install/logs', { retryable: false });
     return;
   }
 
@@ -803,7 +1782,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
     : devices[0];
 
   if (!target) {
-    response.status(404).json({ error: '未找到可用设备，请先在设备管理中连接设备' });
+    sendApiError(response, 404, 'DEVICE_NOT_FOUND', '未找到可用设备，请先在设备管理中连接设备', { retryable: false });
     return;
   }
 
@@ -816,7 +1795,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
 
   const targetModel = modelName?.trim() || 'qwen3.5-plus';
   if (!isSafeName(targetModel)) {
-    response.status(400).json({ ok: false, error: 'Invalid model name' });
+    sendApiError(response, 400, 'INVALID_MODEL_NAME', '模型名称不合法', { retryable: false });
     return;
   }
   const safeModel = shellEscape(targetModel);
@@ -864,13 +1843,25 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   }
 
   if (!password) {
-    response.status(400).json({ error: '设备密码缺失或不正确，请在设备管理中重新连接并填写密码' });
+    sendApiError(response, 400, 'DEVICE_PASSWORD_MISSING', '设备密码缺失或不正确，请在设备管理中重新连接并填写密码', { retryable: false });
     return;
   }
 
-  response.status(500).json({
-    error: lastError instanceof Error ? `OpenClaw 板端执行失败: ${lastError.message}` : 'OpenClaw 板端执行失败',
-  });
+  if (isSshAuthError(lastError)) {
+    sendApiError(response, 401, 'SSH_AUTH_FAILED', 'OpenClaw 板端认证失败，请检查设备账号密码', { retryable: false });
+    return;
+  }
+  if (isSshTimeoutError(lastError)) {
+    sendApiError(response, 504, 'DEVICE_COMMAND_TIMEOUT', 'OpenClaw 板端执行超时，请稍后重试', { retryable: true });
+    return;
+  }
+  sendApiError(
+    response,
+    500,
+    'OPENCLAW_ACTION_FAILED',
+    lastError instanceof Error ? `OpenClaw 板端执行失败: ${lastError.message}` : 'OpenClaw 板端执行失败',
+    { retryable: true },
+  );
 });
 
 app.delete('/api/devices/:id', async (request, response) => {
@@ -897,19 +1888,19 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
   const device = devices.find((item) => item.id === id);
 
   if (!device) {
-    response.status(404).json({ error: '设备不存在' });
+    sendApiError(response, 404, 'DEVICE_NOT_FOUND', '设备不存在', { retryable: false });
     return;
   }
 
   const sshPassword = providedPassword || resolveStoredDevicePassword(device);
 
   if (!sshPassword) {
-    response.status(400).json({ error: '缺少设备密码，请补充当前设备密码后重试' });
+    sendApiError(response, 400, 'DEVICE_PASSWORD_MISSING', '缺少设备密码，请补充当前设备密码后重试', { retryable: false });
     return;
   }
 
   if (!installCommand && !configureCommand) {
-    response.status(400).json({ error: '至少提供一条 OpenClaw 命令' });
+    sendApiError(response, 400, 'INVALID_OPENCLAW_COMMANDS', '至少提供一条 OpenClaw 命令', { retryable: false });
     return;
   }
 
@@ -933,9 +1924,21 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
     await writeDevices(devices.map((item) => (item.id === nextDevice.id ? nextDevice : item)));
     response.json({ output, device: sanitizeDevice(nextDevice as Device & { password?: string }) });
   } catch (error) {
-    response.status(500).json({
-      error: error instanceof Error ? `OpenClaw 执行失败: ${error.message}` : 'OpenClaw 执行失败',
-    });
+    if (isSshAuthError(error)) {
+      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'OpenClaw 认证失败，请检查设备账号密码', { retryable: false });
+      return;
+    }
+    if (isSshTimeoutError(error)) {
+      sendApiError(response, 504, 'DEVICE_COMMAND_TIMEOUT', 'OpenClaw 执行超时，请稍后重试', { retryable: true });
+      return;
+    }
+    sendApiError(
+      response,
+      500,
+      'OPENCLAW_COMMAND_FAILED',
+      error instanceof Error ? `OpenClaw 执行失败: ${error.message}` : 'OpenClaw 执行失败',
+      { retryable: true },
+    );
   }
 });
 
@@ -972,16 +1975,19 @@ async function executeOpenClawDeployJob(
     required: boolean,
   ) => {
     job.steps[step] = 'running';
+    schedulePersistRuntimeJobs();
     const result = await runner();
     appendDeployOutput(job, `\n>>> ${step}\n${result.output || ''}\n`);
     if (!result.ok) {
       job.steps[step] = 'error';
+      schedulePersistRuntimeJobs();
       if (required) {
         throw new Error(`${step} 步骤执行失败`);
       }
       return;
     }
     job.steps[step] = 'done';
+    schedulePersistRuntimeJobs();
   };
 
   try {
@@ -1012,10 +2018,12 @@ async function executeOpenClawDeployJob(
     }), true);
     job.status = 'done';
     job.finishedAt = Date.now();
+    schedulePersistRuntimeJobs();
   } catch (error) {
     job.status = 'error';
     job.error = error instanceof Error ? error.message : '部署失败';
     job.finishedAt = Date.now();
+    schedulePersistRuntimeJobs();
   }
 }
 
@@ -1095,7 +2103,7 @@ app.post('/api/devices/:id/openclaw/deploy/start', async (request, response) => 
     api?: string;
   };
   if (!apiKey?.trim() || !modelId?.trim()) {
-    response.status(400).json({ error: 'apiKey 和 modelId 为必填项' });
+    sendApiError(response, 400, 'INVALID_DEPLOY_CONFIG', 'apiKey 和 modelId 为必填项', { retryable: false });
     return;
   }
 
@@ -1126,6 +2134,7 @@ app.post('/api/devices/:id/openclaw/deploy/start', async (request, response) => 
     startedAt: Date.now(),
   };
   openClawDeployJobs.set(jobId, job);
+  schedulePersistRuntimeJobs();
   response.json({ ok: true, jobId, status: job.status });
 
   void executeOpenClawDeployJob(job, deviceObj, {
@@ -1141,13 +2150,13 @@ app.get('/api/devices/:id/openclaw/deploy/status', async (request, response) => 
   const { id } = request.params;
   const jobId = String(request.query.jobId || '').trim();
   if (!jobId) {
-    response.status(400).json({ error: '缺少 jobId' });
+    sendApiError(response, 400, 'INVALID_JOB_ID', '缺少 jobId', { retryable: false });
     return;
   }
   cleanupOpenClawDeployJobs();
   const job = openClawDeployJobs.get(jobId);
   if (!job || job.deviceId !== id) {
-    response.status(404).json({ error: '部署任务不存在' });
+    sendApiError(response, 404, 'OPENCLAW_DEPLOY_JOB_NOT_FOUND', '部署任务不存在', { retryable: false });
     return;
   }
   response.json({ ok: true, job });
@@ -1184,7 +2193,7 @@ app.post('/api/devices/:id/openclaw/onboard', async (request, response) => {
   const { provider, apiKey, modelId } = request.body as { provider?: string; apiKey?: string; modelId?: string };
   
   if (!provider || !apiKey) {
-    response.status(400).json({ error: 'provider 和 apiKey 为必填项' });
+    sendApiError(response, 400, 'INVALID_ONBOARD_CONFIG', 'provider 和 apiKey 为必填项', { retryable: false });
     return;
   }
 
@@ -1204,7 +2213,7 @@ app.post('/api/devices/:id/openclaw/config', async (request, response) => {
   const { config } = request.body as { config?: any };
 
   if (!config) {
-    response.status(400).json({ error: '缺少配置数据' });
+    sendApiError(response, 400, 'INVALID_OPENCLAW_CONFIG', '缺少配置数据', { retryable: false });
     return;
   }
   if (config?.modelGateway) {
@@ -1257,7 +2266,7 @@ app.get('/api/devices/:id/openclaw/config', async (request, response) => {
     if (success && config) {
       response.json(config);
     } else {
-      response.status(500).json({ error: '读取配置失败' });
+      sendApiError(response, 500, 'OPENCLAW_CONFIG_READ_FAILED', '读取配置失败', { retryable: true });
     }
   });
 });
@@ -1369,7 +2378,7 @@ app.get('/api/devices/:id/openclaw/skill-content', async (request, response) => 
   const { id } = request.params;
   const skillIdRaw = String(request.query.skillId || '').trim();
   if (!skillIdRaw) {
-    response.status(400).json({ ok: false, error: 'skillId 不能为空' });
+    sendApiError(response, 400, 'INVALID_SKILL_ID', 'skillId 不能为空', { retryable: false });
     return;
   }
 
@@ -1382,12 +2391,15 @@ app.get('/api/devices/:id/openclaw/skill-content', async (request, response) => 
   try {
     const parsed = JSON.parse(text) as { ok?: boolean; path?: string; content?: string };
     if (!parsed.ok) {
-      response.status(404).json({ ok: false, error: `未找到 skill 内容: ${skillIdRaw}` });
+      sendApiError(response, 404, 'SKILL_CONTENT_NOT_FOUND', `未找到 skill 内容: ${skillIdRaw}`, { retryable: false });
       return;
     }
     response.json({ ok: true, path: parsed.path || '', content: parsed.content || '' });
   } catch {
-    response.status(500).json({ ok: false, error: 'skill 内容解析失败', raw: text });
+    sendApiError(response, 500, 'SKILL_CONTENT_PARSE_FAILED', 'skill 内容解析失败', {
+      retryable: true,
+      details: { raw: text },
+    });
   }
 });
 
@@ -1396,7 +2408,7 @@ app.post('/api/devices/:id/openclaw/pairing/list', async (request, response) => 
   const { channel } = request.body as { channel?: string };
   const pairingChannel = String(channel || 'feishu').trim();
   if (!/^[a-zA-Z0-9_-]+$/.test(pairingChannel)) {
-    response.status(400).json({ error: 'channel 格式非法' });
+    sendApiError(response, 400, 'INVALID_PAIRING_CHANNEL', 'channel 格式非法', { retryable: false });
     return;
   }
   const device = await resolveDevice(request, response, id);
@@ -1415,11 +2427,11 @@ app.post('/api/devices/:id/openclaw/pairing/approve', async (request, response) 
   const pairingChannel = String(channel || 'feishu').trim();
   const pairingCode = String(code || '').trim();
   if (!/^[a-zA-Z0-9_-]+$/.test(pairingChannel)) {
-    response.status(400).json({ error: 'channel 格式非法' });
+    sendApiError(response, 400, 'INVALID_PAIRING_CHANNEL', 'channel 格式非法', { retryable: false });
     return;
   }
   if (!/^[A-Za-z0-9]{4,16}$/.test(pairingCode)) {
-    response.status(400).json({ error: 'code 格式非法（4-16 位字母数字）' });
+    sendApiError(response, 400, 'INVALID_PAIRING_CODE', 'code 格式非法（4-16 位字母数字）', { retryable: false });
     return;
   }
   const device = await resolveDevice(request, response, id);
@@ -1438,11 +2450,11 @@ app.post('/api/devices/:id/openclaw/pairing/reject', async (request, response) =
   const pairingChannel = String(channel || 'feishu').trim();
   const pairingCode = String(code || '').trim();
   if (!/^[a-zA-Z0-9_-]+$/.test(pairingChannel)) {
-    response.status(400).json({ error: 'channel 格式非法' });
+    sendApiError(response, 400, 'INVALID_PAIRING_CHANNEL', 'channel 格式非法', { retryable: false });
     return;
   }
   if (!/^[A-Za-z0-9]{4,16}$/.test(pairingCode)) {
-    response.status(400).json({ error: 'code 格式非法（4-16 位字母数字）' });
+    sendApiError(response, 400, 'INVALID_PAIRING_CODE', 'code 格式非法（4-16 位字母数字）', { retryable: false });
     return;
   }
   const device = await resolveDevice(request, response, id);
@@ -1472,7 +2484,7 @@ app.post('/api/devices/:id/openclaw/wifi-connect', async (request, response) => 
   const { wifiName, wifiPassword } = request.body as { wifiName?: string; wifiPassword?: string };
 
   if (!wifiName) {
-    response.status(400).json({ error: 'wifiName 为必填项' });
+    sendApiError(response, 400, 'INVALID_WIFI_NAME', 'wifiName 为必填项', { retryable: false });
     return;
   }
 
@@ -1492,11 +2504,15 @@ app.post('/api/devices/:id/exec', async (request, response) => {
   const { command } = request.body as { command?: string };
 
   if (!command?.trim()) {
-    response.json({ ok: false, output: '', error: '空命令已忽略' });
+    sendApiError(response, 400, 'INVALID_COMMAND', '空命令已忽略', { retryable: false });
+    return;
+  }
+  if (command.length > EXEC_COMMAND_MAX_LENGTH) {
+    sendApiError(response, 400, 'INVALID_COMMAND', `命令过长，最大 ${EXEC_COMMAND_MAX_LENGTH} 字符`, { retryable: false });
     return;
   }
 
-  const executed = await runOnDevice(request, response, id, [command]);
+  const executed = await runOnDevice(request, response, id, [command], { timeoutMs: 60_000 });
   if (!executed) return;
 
   response.json({
@@ -1512,17 +2528,25 @@ app.post('/api/devices/:id/batch-exec', async (request, response) => {
   const { commands } = request.body as { commands?: string[] };
 
   if (!Array.isArray(commands) || commands.length === 0) {
-    response.json({ ok: false, output: '', error: '空命令批次已忽略' });
+    sendApiError(response, 400, 'INVALID_BATCH_COMMANDS', '空命令批次已忽略', { retryable: false });
+    return;
+  }
+  if (commands.length > BATCH_EXEC_MAX_COMMANDS) {
+    sendApiError(response, 400, 'INVALID_BATCH_COMMANDS', `批量命令数量过多，最大 ${BATCH_EXEC_MAX_COMMANDS} 条`, { retryable: false });
     return;
   }
 
   const filtered = commands.map((item) => item?.trim()).filter(Boolean) as string[];
   if (filtered.length === 0) {
-    response.json({ ok: false, output: '', error: '空命令批次已忽略' });
+    sendApiError(response, 400, 'INVALID_BATCH_COMMANDS', '空命令批次已忽略', { retryable: false });
+    return;
+  }
+  if (filtered.some((item) => item.length > EXEC_COMMAND_MAX_LENGTH)) {
+    sendApiError(response, 400, 'INVALID_BATCH_COMMANDS', `存在过长命令，单条最大 ${EXEC_COMMAND_MAX_LENGTH} 字符`, { retryable: false });
     return;
   }
 
-  const executed = await runOnDevice(request, response, id, filtered);
+  const executed = await runOnDevice(request, response, id, filtered, { timeoutMs: 60_000 });
   if (!executed) return;
 
   response.json({
@@ -1575,14 +2599,14 @@ app.post('/api/devices/:id/flash/download', async (request, response) => {
   const { id } = request.params;
   const { imageUrl, targetPath } = request.body as { imageUrl?: string; targetPath?: string };
   if (!imageUrl?.trim()) {
-    response.status(400).json({ error: '缺少镜像下载地址 imageUrl' });
+    sendApiError(response, 400, 'INVALID_FLASH_DOWNLOAD_PAYLOAD', '缺少镜像下载地址 imageUrl', { retryable: false });
     return;
   }
   const dest = targetPath?.trim() || FLASH_DEFAULT_DEST;
   // 在设备上下载镜像
   const executed = await runOnDevice(request, response, id, [
     `bash -lc "echo 'Downloading image...'; wget -q --show-progress -O ${shEscape(dest)} ${shEscape(imageUrl)} 2>&1 || curl -fSL -o ${shEscape(dest)} ${shEscape(imageUrl)} 2>&1; echo DONE; ls -lh ${shEscape(dest)}"`,
-  ]);
+  ], { timeoutMs: 30 * 60 * 1000 });
   if (!executed) return;
   response.json({ ok: true, output: executed.output, path: dest });
 });
@@ -1591,7 +2615,7 @@ app.post('/api/devices/:id/flash/write', async (request, response) => {
   const { id } = request.params;
   const { imagePath, target } = request.body as { imagePath?: string; target?: string };
   if (!imagePath?.trim()) {
-    response.status(400).json({ error: '缺少镜像路径 imagePath' });
+    sendApiError(response, 400, 'INVALID_FLASH_WRITE_PAYLOAD', '缺少镜像路径 imagePath', { retryable: false });
     return;
   }
   // target: emmc (/dev/mmcblk0), sd (/dev/mmcblk1), 或自定义路径
@@ -1599,7 +2623,7 @@ app.post('/api/devices/:id/flash/write', async (request, response) => {
   // 使用 hbupdate 或 dd 写入
   const executed = await runOnDevice(request, response, id, [
     `bash -lc "if command -v hbupdate >/dev/null 2>&1; then echo 'Using hbupdate...'; hbupdate ${shEscape(imagePath)} 2>&1; else echo 'Using dd...'; dd if=${shEscape(imagePath)} of=${shEscape(targetDev)} bs=4M status=progress 2>&1; sync; fi; echo FLASH_COMPLETE"`,
-  ]);
+  ], { timeoutMs: 30 * 60 * 1000 });
   if (!executed) return;
   response.json({ ok: true, output: executed.output });
 });
@@ -1627,6 +2651,7 @@ app.post('/api/devices/:id/flash/backup/check', async (request, response) => {
 app.post('/api/devices/:id/flash/backup/start', async (request, response) => {
   const { id } = request.params;
   const { outputPath, sourceDevice } = request.body as { outputPath?: string; sourceDevice?: string };
+  cleanupFlashBackupJobs();
   const jobId = uuid();
   const outPath = outputPath?.trim() || `/userdata/rdk-backup-${Date.now()}.img`;
   flashBackupJobs.set(jobId, {
@@ -1636,6 +2661,7 @@ app.post('/api/devices/:id/flash/backup/start', async (request, response) => {
     outputPath: outPath,
     startedAt: Date.now(),
   });
+  schedulePersistRuntimeJobs();
 
   const sourceArg = sourceDevice?.trim() ? ` --device ${shEscape(sourceDevice.trim())}` : '';
   const command = `bash -lc '
@@ -1656,13 +2682,14 @@ fi
 ls -lh ${shEscape(outPath)} 2>/dev/null || true
 '`;
 
-  const executed = await runOnDevice(request, response, id, [command]);
+  const executed = await runOnDevice(request, response, id, [command], { timeoutMs: 30 * 60 * 1000 });
   if (!executed) {
     const job = flashBackupJobs.get(jobId);
     if (job) {
       job.status = 'error';
       job.error = '板端命令执行失败';
       job.finishedAt = Date.now();
+      schedulePersistRuntimeJobs();
     }
     return;
   }
@@ -1674,6 +2701,7 @@ ls -lh ${shEscape(outPath)} 2>/dev/null || true
     job.output = executed.output;
     job.error = failed ? '板端缺少 rdk-backup 命令' : undefined;
     job.finishedAt = Date.now();
+    schedulePersistRuntimeJobs();
   }
 
   response.json({
@@ -1688,13 +2716,14 @@ ls -lh ${shEscape(outPath)} 2>/dev/null || true
 app.get('/api/devices/:id/flash/backup/status', async (request, response) => {
   const { id } = request.params;
   const { jobId } = request.query as { jobId?: string };
+  cleanupFlashBackupJobs();
   if (!jobId?.trim()) {
-    response.status(400).json({ error: '缺少 jobId' });
+    sendApiError(response, 400, 'INVALID_JOB_ID', '缺少 jobId', { retryable: false });
     return;
   }
   const job = flashBackupJobs.get(jobId.trim());
   if (!job || job.deviceId !== id) {
-    response.status(404).json({ error: '备份任务不存在' });
+    sendApiError(response, 404, 'FLASH_BACKUP_JOB_NOT_FOUND', '备份任务不存在', { retryable: false });
     return;
   }
   response.json({ ok: true, job });
@@ -1705,7 +2734,7 @@ app.post('/api/devices/:id/flash/backup/download', async (request, response) => 
   const { outputPath } = request.body as { outputPath?: string };
   const targetPath = outputPath?.trim();
   if (!targetPath) {
-    response.status(400).json({ error: '缺少 outputPath' });
+    sendApiError(response, 400, 'INVALID_OUTPUT_PATH', '缺少 outputPath', { retryable: false });
     return;
   }
 
@@ -1714,10 +2743,11 @@ app.post('/api/devices/:id/flash/backup/download', async (request, response) => 
     response,
     id,
     [`sudo bash -lc "if [ -f ${shEscape(targetPath)} ]; then base64 ${shEscape(targetPath)} | tr -d '\\n'; else echo NOT_FOUND; fi"`],
+    { timeoutMs: 10 * 60 * 1000 },
   );
   if (!executed) return;
   if (executed.output.trim() === 'NOT_FOUND') {
-    response.status(404).json({ error: '备份文件不存在' });
+    sendApiError(response, 404, 'FLASH_BACKUP_FILE_NOT_FOUND', '备份文件不存在', { retryable: false });
     return;
   }
   response.json({ ok: true, path: targetPath, contentBase64: executed.output.trim() });
@@ -1744,7 +2774,7 @@ app.post('/api/devices/:id/flash/execute', async (request, response) => {
   };
 
   if (!imageUrl?.trim()) {
-    response.status(400).json({ error: '缺少镜像地址 imageUrl' });
+    sendApiError(response, 400, 'INVALID_FLASH_EXECUTE_PAYLOAD', '缺少镜像地址 imageUrl', { retryable: false });
     return;
   }
 
@@ -1818,7 +2848,7 @@ fi
 echo "===FLASH_DONE==="
 '`;
 
-  const executed = await runOnDevice(request, response, id, [command]);
+  const executed = await runOnDevice(request, response, id, [command], { timeoutMs: 45 * 60 * 1000 });
   if (!executed) return;
 
   response.json({ ok: true, output: executed.output, strategy: 'network-direct', targetDevice });
@@ -2000,27 +3030,36 @@ app.post('/api/devices/scan', async (_request, response) => {
     }
     const uniqueSubnets = [...new Set(subnets)];
     const found: Array<{ ip: string; port: number }> = [];
-    const scanPromises: Promise<void>[] = [];
-
+    const targets: string[] = [];
     for (const subnet of uniqueSubnets) {
       for (let i = 1; i <= 254; i++) {
-        const ip = `${subnet}.${i}`;
-        scanPromises.push(
-          new Promise<void>((resolve) => {
-            const sock = net.connect({ host: ip, port: 22, timeout: 800 });
-            sock.on('connect', () => {
-              found.push({ ip, port: 22 });
-              sock.destroy();
-              resolve();
-            });
-            sock.on('error', () => { sock.destroy(); resolve(); });
-            sock.on('timeout', () => { sock.destroy(); resolve(); });
-          }),
-        );
+        targets.push(`${subnet}.${i}`);
       }
     }
 
-    await Promise.all(scanPromises);
+    const scanIp = (ip: string) => new Promise<void>((resolve) => {
+      const sock = net.connect({ host: ip, port: 22, timeout: 800 });
+      sock.on('connect', () => {
+        found.push({ ip, port: 22 });
+        sock.destroy();
+        resolve();
+      });
+      sock.on('error', () => { sock.destroy(); resolve(); });
+      sock.on('timeout', () => { sock.destroy(); resolve(); });
+    });
+
+    let cursor = 0;
+    const concurrency = Math.min(64, targets.length || 1);
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= targets.length) break;
+        await scanIp(targets[index]);
+      }
+    });
+
+    await Promise.all(workers);
     response.json({ ok: true, devices: found, subnets: uniqueSubnets });
   } catch (error) {
     response.status(500).json({ error: error instanceof Error ? error.message : 'Scan failed' });
@@ -2044,6 +3083,7 @@ app.get('/api/devices/:id/files/list', async (request, response) => {
     response,
     id,
     [`sudo bash -lc "ls -al ${shEscape(targetPath)} || true"`],
+    { timeoutMs: 60_000 },
   );
   if (!executed) return;
   response.json({ ok: true, output: executed.output, path: targetPath });
@@ -2055,7 +3095,7 @@ app.get('/api/devices/:id/files/read', async (request, response) => {
   const lines = Number(request.query.lines ?? 200);
 
   if (!targetPath.trim()) {
-    response.status(400).json({ error: 'path 不能为空' });
+    sendApiError(response, 400, 'INVALID_PATH', 'path 不能为空', { retryable: false });
     return;
   }
 
@@ -2065,6 +3105,7 @@ app.get('/api/devices/:id/files/read', async (request, response) => {
     response,
     id,
     [`sudo bash -lc "if [ -f ${shEscape(targetPath)} ]; then head -n ${Number.isFinite(lines) && lines > 0 ? Math.min(lines, 2000) : 200} ${shEscape(targetPath)} 2>/dev/null | base64 | tr -d '\\n'; else echo 'NOT_A_FILE'; fi || true"`],
+    { timeoutMs: 180_000 },
   );
   if (!executed) return;
   
@@ -2083,7 +3124,7 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
   const { path: targetPath, content, append } = request.body as { path?: string; content?: string; append?: boolean };
 
   if (!targetPath?.trim()) {
-    response.status(400).json({ error: 'path 不能为空' });
+    sendApiError(response, 400, 'INVALID_PATH', 'path 不能为空', { retryable: false });
     return;
   }
 
@@ -2097,7 +3138,11 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
     
     for (const pwd of candidates) {
       try {
-        await runRemoteCommands({ host: device.host, port: device.port ?? 22, username: device.username, password: pwd }, [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`]);
+        await runRemoteCommands(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
+          { timeoutMs: 30_000 },
+        );
         await uploadFileSftp({ host: device.host, port: device.port ?? 22, username: device.username, password: pwd }, targetPath, Buffer.from(content ?? '', 'utf-8'));
         response.json({ ok: true, output: '写入完成', path: targetPath });
         return;
@@ -2116,6 +3161,7 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
     response,
     id,
     [`bash -lc "mkdir -p $(dirname ${shEscape(targetPath)}); echo ${shEscape(base64Content)} | base64 -d ${redirect} ${shEscape(targetPath)}"`],
+    { timeoutMs: 180_000 },
   );
   if (!executed) return;
   response.json({ ok: true, output: executed.output || '写入完成', path: targetPath });
@@ -2126,7 +3172,7 @@ app.post('/api/devices/:id/files/upload', async (request, response) => {
   const { path: targetPath, contentBase64 } = request.body as { path?: string; contentBase64?: string };
 
   if (!targetPath?.trim() || !contentBase64) {
-    response.status(400).json({ error: 'path 和 contentBase64 不能为空' });
+    sendApiError(response, 400, 'INVALID_UPLOAD_PAYLOAD', 'path 和 contentBase64 不能为空', { retryable: false });
     return;
   }
 
@@ -2142,7 +3188,8 @@ app.post('/api/devices/:id/files/upload', async (request, response) => {
       // Create folder if needed via exec first
       await runRemoteCommands(
         { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-        [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`]
+        [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
+        { timeoutMs: 30_000 },
       );
       
       const buffer = Buffer.from(contentBase64, 'base64');
@@ -2169,7 +3216,7 @@ app.get('/api/devices/:id/files/download', async (request, response) => {
   const targetPath = String(request.query.path ?? '');
 
   if (!targetPath.trim()) {
-    response.status(400).json({ error: 'path 不能为空' });
+    sendApiError(response, 400, 'INVALID_PATH', 'path 不能为空', { retryable: false });
     return;
   }
 
@@ -2178,16 +3225,21 @@ app.get('/api/devices/:id/files/download', async (request, response) => {
     request,
     response,
     id,
-    [`sudo bash -lc "if [ -d ${shEscape(targetPath)} ]; then tar czf - ${shEscape(targetPath)} 2>/dev/null | base64 | tr -d '\\n'; elif [ -f ${shEscape(targetPath)} ]; then base64 ${shEscape(targetPath)} | tr -d '\\n'; else echo 'NOT_FOUND'; fi || true"`],
+    [`sudo bash -lc "if [ -d ${shEscape(targetPath)} ]; then echo '__TYPE__:dir'; tar czf - ${shEscape(targetPath)} 2>/dev/null | base64 | tr -d '\\n'; elif [ -f ${shEscape(targetPath)} ]; then echo '__TYPE__:file'; base64 ${shEscape(targetPath)} | tr -d '\\n'; else echo 'NOT_FOUND'; fi || true"`],
+    { timeoutMs: 10 * 60 * 1000 },
   );
   
   if (!executed) return;
-  if (executed.output.trim() === 'NOT_FOUND') {
-    response.status(404).json({ error: '文件或目录不存在' });
+  const output = executed.output.trim();
+  if (output === 'NOT_FOUND') {
+    sendApiError(response, 404, 'FILE_NOT_FOUND', '文件或目录不存在', { retryable: false });
     return;
   }
-  
-  response.json({ ok: true, path: targetPath, contentBase64: executed.output.trim(), isDir: true /* Frontend will check extension */ });
+
+  const typeMatch = output.match(/^__TYPE__:(dir|file)\r?\n/);
+  const isDir = typeMatch?.[1] === 'dir';
+  const contentBase64 = typeMatch ? output.slice(typeMatch[0].length).trim() : output;
+  response.json({ ok: true, path: targetPath, contentBase64, isDir });
 });
 
 app.post('/api/agent/plan', async (request, response) => {
@@ -3292,6 +4344,11 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(port, '0.0.0.0', () => {
-  console.log(`RDK Studio server running on http://0.0.0.0:${port}`);
-});
+async function startServer() {
+  await restoreRuntimeJobsState();
+  httpServer.listen(port, '0.0.0.0', () => {
+    console.log(`RDK Studio server running on http://0.0.0.0:${port}`);
+  });
+}
+
+void startServer();

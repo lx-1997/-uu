@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useRef } from 'react';
 import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
 import { CMD_SUGGESTIONS } from '../constants';
 import type { Task } from '../ai';
@@ -238,6 +238,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
   const ui = useUIStore();
   const terminal = useTerminalStore();
   const chat = useAIChatStore();
+  const apiErrorSeenRef = useRef<Record<string, number>>({});
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -282,6 +283,69 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
     const viewport = document.querySelector('.canvas-viewport');
     if (viewport) viewport.scrollTo({ top: 0, behavior: 'smooth' });
   }, [ui.activeTab]);
+
+  // Global API error routing: convert raw backend failures into
+  // user-actionable guidance without changing page structure.
+  useEffect(() => {
+    type ApiErrorDetail = {
+      status?: number;
+      url?: string;
+      message?: string;
+      code?: string;
+      retryable?: boolean;
+    };
+
+    const onApiError = (evt: Event) => {
+      const e = evt as CustomEvent<ApiErrorDetail>;
+      const detail = e.detail ?? {};
+      const code = String(detail.code || '').trim();
+      const message = String(detail.message || '请求失败').trim();
+      const status = Number(detail.status || 0);
+      const retryable = Boolean(detail.retryable);
+
+      const key = `${status}:${code}:${message}`;
+      const now = Date.now();
+      const lastSeen = apiErrorSeenRef.current[key] ?? 0;
+      if (now - lastSeen < 2200) return;
+      apiErrorSeenRef.current[key] = now;
+
+      if (code === 'DEVICE_AUTH_REQUIRED') {
+        toast.addToast('设备认证失效，请重新填写账号密码', 'warning');
+        device.setShowAddDevice(true);
+        return;
+      }
+
+      if (code === 'DEVICE_COMMAND_TIMEOUT') {
+        toast.addToast('设备响应超时，建议稍后重试或检查网络质量', 'warning');
+        return;
+      }
+
+      if (code === 'FILE_NOT_FOUND') {
+        toast.addToast('目标文件不存在，请刷新目录后重试', 'info');
+        return;
+      }
+
+      if (code.startsWith('INVALID_')) {
+        toast.addToast(message, 'warning');
+        return;
+      }
+
+      if (retryable || status === 504) {
+        toast.addToast(`${message}（可重试）`, 'warning');
+        return;
+      }
+
+      if (status >= 500) {
+        toast.addToast(`${message}（服务端错误）`, 'error');
+        return;
+      }
+
+      toast.addToast(message, 'error');
+    };
+
+    window.addEventListener('rdk-api-error', onApiError as EventListener);
+    return () => window.removeEventListener('rdk-api-error', onApiError as EventListener);
+  }, [device, toast]);
 
   const value: AppState = {
     // Toast

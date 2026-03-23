@@ -49,7 +49,7 @@ export default function Files() {
         }
         addToast(`当前目录未找到，正在全盘深入搜索 ${fileName}...`, 'info');
         try {
-          const res = await executeDeviceCommand(deviceRef.current.id, `for p in $(find /userdata /root /home/sunrise /var/log /etc -name "${fileName}" 2>/dev/null | head -n 10); do if [ -d "$p" ]; then echo "DIR:$p"; else echo "FILE:$p"; fi; done`);
+          const res = await executeDeviceCommand(deviceRef.current.id, `for p in $(find /userdata /root /home/sunrise /var/log /etc -name ${shellSafe(fileName)} 2>/dev/null | head -n 10); do if [ -d "$p" ]; then echo "DIR:$p"; else echo "FILE:$p"; fi; done`);
           const lines = res.output.split(/\r?\n/).map(l => l.trim().replace(/Command completed without output\.?/i, '')).filter(l => l && (l.startsWith('DIR:/') || l.startsWith('FILE:/')));
           
           if (lines.length === 1) {
@@ -276,7 +276,7 @@ export default function Files() {
 
   const selectedEntry = selectedName ? entries.find((entry) => entry.name === selectedName) || null : null;
 
-  const shellSafe = (value: string) => value.replace(/"/g, '\\"');
+  const shellSafe = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
 
   const createFolder = async () => {
     if (!ensureDevice() || !currentDevice) return;
@@ -285,7 +285,7 @@ export default function Files() {
     const targetPath = currentPath === '/' ? `/${folderName}` : `${currentPath}/${folderName}`;
     setRunning(true);
     try {
-      await executeDeviceCommand(currentDevice.id, `mkdir -p "${shellSafe(targetPath)}"`);
+      await executeDeviceCommand(currentDevice.id, `mkdir -p ${shellSafe(targetPath)}`);
       addToast('文件夹创建成功', 'success');
       refreshList();
     } catch (err) {
@@ -302,7 +302,7 @@ export default function Files() {
     const to = currentPath === '/' ? `/${nextName}` : `${currentPath}/${nextName}`;
     setRunning(true);
     try {
-      await executeDeviceCommand(currentDevice.id, `mv "${shellSafe(from)}" "${shellSafe(to)}"`);
+      await executeDeviceCommand(currentDevice.id, `mv ${shellSafe(from)} ${shellSafe(to)}`);
       addToast('重命名成功', 'success');
       refreshList();
     } catch (err) {

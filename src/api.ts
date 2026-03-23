@@ -27,6 +27,63 @@ export interface DeviceFileOpResult {
   contentBase64?: string;
 }
 
+export interface OneShotGeneratedAppResult {
+  ok: boolean;
+  app: {
+    name: string;
+    summary: string;
+    rootDir: string;
+    files: string[];
+    runCommand: string;
+    testCommand?: string;
+    usedFallback?: boolean;
+  };
+}
+
+export interface OneShotValidationResponse {
+  ok: boolean;
+  validation: {
+    ok: boolean;
+    checks: Array<{ name: string; ok: boolean; detail: string }>;
+  };
+}
+
+export interface OneShotRunResponse {
+  ok: boolean;
+  run: {
+    runner: string;
+    output: string;
+    timedOut: boolean;
+  };
+}
+
+export interface OneShotDeployResponse {
+  ok: boolean;
+  deploy: {
+    deviceId: string;
+    remoteDir: string;
+    fileCount: number;
+    totalBytes: number;
+    runCommand: string;
+    run?: {
+      ok: boolean;
+      output: string;
+      suggestions?: Array<{
+        title: string;
+        detail: string;
+        command?: string;
+      }>;
+    };
+  };
+}
+
+interface ApiErrorPayload {
+  error?: string;
+  message?: string;
+  code?: string;
+  retryable?: boolean;
+}
+
 const devicePasswordKey = (deviceId: string) => `rdk:device-password:${deviceId}`;
 
 export function rememberDevicePassword(deviceId: string, password: string) {
@@ -55,6 +112,20 @@ function resolveUrl(path: string): string {
   return resolveApiUrl(path);
 }
 
+function isTransientRequestError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const name = (error.name || '').toLowerCase();
+  const message = (error.message || '').toLowerCase();
+  if (name === 'aborterror') return false;
+  return (
+    message.includes('networkerror')
+    || message.includes('failed to fetch')
+    || message.includes('timeout')
+    || message.includes('econnreset')
+    || message.includes('connection reset')
+  );
+}
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   // 将相对路径转为绝对 URL（桌面端）
   if (typeof input === 'string' && input.startsWith('/')) {
@@ -73,32 +144,92 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     }
   }
 
-  const response = await fetch(input, {
-    ...init,
-    headers,
-  });
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const maxAttempts = method === 'GET' || method === 'HEAD' ? 2 : 1;
+  let attempt = 0;
 
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { error?: string };
-    const url = typeof input === 'string' ? input : input.url;
-    const message = payload.error ?? 'Request failed';
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('rdk-api-error', {
-        detail: {
-          status: response.status,
-          url,
-          message,
-        },
-      }));
+  while (attempt < maxAttempts) {
+    attempt += 1;
+    try {
+      const response = await fetch(input, {
+        ...init,
+        headers,
+      });
+
+      if (!response.ok) {
+        if (response.status >= 500 && attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+          continue;
+        }
+        const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+        const url = typeof input === 'string' ? input : input.url;
+        const message = payload.message ?? payload.error ?? 'Request failed';
+        const code = payload.code ?? '';
+        const retryable = Boolean(payload.retryable);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('rdk-api-error', {
+            detail: {
+              status: response.status,
+              url,
+              message,
+              code,
+              retryable,
+            },
+          }));
+        }
+        const codePart = code ? `[${code}] ` : '';
+        throw new Error(`HTTP ${response.status} · ${codePart}${message} · ${url}`);
+      }
+
+      return (await response.json()) as T;
+    } catch (error) {
+      if (attempt < maxAttempts && isTransientRequestError(error)) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+        continue;
+      }
+      throw error;
     }
-    throw new Error(`HTTP ${response.status} · ${message} · ${url}`);
   }
 
-  return (await response.json()) as T;
+  throw new Error('Request failed after retry');
 }
 
 export function fetchDevices() {
   return request<{ devices: Device[] }>('/api/devices');
+}
+
+export function generateOneShotApp(prompt: string) {
+  return request<OneShotGeneratedAppResult>('/api/apps/one-shot-generate', {
+    method: 'POST',
+    body: JSON.stringify({ prompt }),
+  });
+}
+
+export function validateOneShotApp(appDir: string) {
+  return request<OneShotValidationResponse>('/api/apps/one-shot-validate', {
+    method: 'POST',
+    body: JSON.stringify({ appDir }),
+  });
+}
+
+export function runOneShotApp(appDir: string, runCommand?: string) {
+  return request<OneShotRunResponse>('/api/apps/one-shot-run', {
+    method: 'POST',
+    body: JSON.stringify({ appDir, ...(runCommand ? { runCommand } : {}) }),
+  });
+}
+
+export function deployOneShotApp(payload: {
+  appDir: string;
+  deviceId: string;
+  remoteDir?: string;
+  runAfterDeploy?: boolean;
+  runCommand?: string;
+}) {
+  return request<OneShotDeployResponse>('/api/apps/one-shot-deploy', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export function connectDevice(payload: DevicePayload) {

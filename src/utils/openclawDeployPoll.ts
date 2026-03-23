@@ -24,6 +24,11 @@ let intervalId: ReturnType<typeof setInterval> | null = null;
 let activeDeviceId = '';
 let activeJobId = '';
 let lastEmittedTerminal: string | null = null;
+let consecutiveFailures = 0;
+
+const POLL_INTERVAL_MS = 2500;
+const POLL_REQUEST_TIMEOUT_MS = 6000;
+const MAX_CONSECUTIVE_FAILURES = 6;
 
 export function deployJobStorageKey(deviceId: string) {
   return `oc-deploy-job-${deviceId}`;
@@ -53,7 +58,9 @@ export async function fetchOpenClawDeployJob(
   const url = resolveApiUrl(
     `/api/devices/${encodeURIComponent(deviceId)}/openclaw/deploy/status?jobId=${encodeURIComponent(jobId)}`,
   );
-  const res = await fetch(url);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), POLL_REQUEST_TIMEOUT_MS);
+  const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timeout));
   if (!res.ok) return null;
   const data = (await res.json()) as { ok?: boolean; job?: OpenClawDeployJobPayload };
   if (!data?.ok || !data.job) return null;
@@ -72,8 +79,30 @@ function clearTimer() {
 }
 
 async function tick() {
-  const job = await fetchJobStatus();
-  if (!job) return;
+  let job: OpenClawDeployJobPayload | null = null;
+  let failed = false;
+  try {
+    job = await fetchJobStatus();
+  } catch {
+    failed = true;
+  }
+  if (!job) {
+    if (!failed) failed = true;
+    if (failed) consecutiveFailures += 1;
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      clearTimer();
+      window.dispatchEvent(
+        new CustomEvent('rdk-oc-deploy-finished', {
+          detail: {
+            status: 'error',
+            error: '部署状态轮询中断，请稍后手动刷新状态',
+          },
+        }),
+      );
+    }
+    return;
+  }
+  consecutiveFailures = 0;
   emit(job);
   if (job.status === 'running') return;
 
@@ -102,10 +131,11 @@ export function startOpenClawDeployPoll(deviceId: string, jobId: string) {
   activeDeviceId = deviceId;
   activeJobId = jobId;
   lastEmittedTerminal = null;
+  consecutiveFailures = 0;
   void tick();
   intervalId = setInterval(() => {
     void tick();
-  }, 2500);
+  }, POLL_INTERVAL_MS);
 }
 
 /** 根据 localStorage 恢复轮询（设备切换时调用） */
@@ -135,4 +165,5 @@ export function stopOpenClawDeployPoll() {
   clearTimer();
   activeDeviceId = '';
   activeJobId = '';
+  consecutiveFailures = 0;
 }

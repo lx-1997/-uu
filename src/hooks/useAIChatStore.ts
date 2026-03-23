@@ -5,6 +5,11 @@ import {
   bindRDKClawFeishuCode,
   cancelRDKClawRun,
   decideRDKClawApproval,
+  executeDeviceCommand,
+  deployOneShotApp,
+  generateOneShotApp,
+  runOneShotApp,
+  validateOneShotApp,
   setActiveRdkclawDevice,
   setActiveRdkclawSession,
   stopRDKClawTask,
@@ -165,6 +170,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const commandLockRef = useRef(false);
   const currentRunIdRef = useRef('');
   const streamAbortRef = useRef<null | (() => void)>(null);
+  const lastGeneratedAppRef = useRef<{ name: string; rootDir: string; runCommand: string } | null>(null);
+  const lastDeployFixRef = useRef<{
+    deviceId: string;
+    remoteDir: string;
+    runCommand: string;
+    suggestions: Array<{ title: string; detail: string; command?: string }>;
+  } | null>(null);
   const streamGenerationRef = useRef(0);
   const toolTimelineRef = useRef<Record<string, {
     toolName: string;
@@ -329,6 +341,317 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         if (requestAttachments.length === 0 && userMsg === '/settings') {
           setShowSettings(true);
           setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '已打开设置面板。' }]);
+          setAiTyping(false);
+          return;
+        }
+
+        const resolveOneShotPrompt = () => {
+          if (requestAttachments.length > 0) return '';
+          const explicit = userMsg.match(/^(?:\/one-shot-app|一句话生成(?:rdk)?应用)\s+(.+)$/i);
+          if (explicit) return explicit[1].trim();
+          if (userMsg.startsWith('/')) return '';
+          const implicit = /(?:生成|创建|做一个|写一个).{0,24}(?:rdk).{0,24}(?:应用|app|项目|脚手架)/i.test(userMsg)
+            || /(?:rdk).{0,24}(?:应用|app|项目).{0,24}(?:生成|创建|搭建)/i.test(userMsg);
+          return implicit ? userMsg.trim() : '';
+        };
+        const oneShotPrompt = resolveOneShotPrompt();
+        if (oneShotPrompt) {
+          const prompt = oneShotPrompt;
+          try {
+            const result = await generateOneShotApp(prompt);
+            let validationText = '未执行';
+            let validationBlocks: ChatBlock[] = [];
+            try {
+              const validation = await validateOneShotApp(result.app.rootDir);
+              validationText = validation.validation.ok ? '通过' : '未通过';
+              validationBlocks = [{
+                type: 'status',
+                collapsible: true,
+                defaultCollapsed: true,
+                summary: `自动校验 · ${validationText}`,
+                items: validation.validation.checks.map((c) => ({
+                  label: c.name,
+                  value: c.detail,
+                  ok: c.ok,
+                })),
+              }];
+            } catch {
+              validationText = '校验失败';
+            }
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: '已完成应用骨架生成。',
+              source: 'studio',
+              blocks: [
+                {
+                  type: 'status',
+                  items: [
+                    { label: '应用名称', value: result.app.name, ok: true },
+                    { label: '生成目录', value: result.app.rootDir, ok: true },
+                    { label: '文件数量', value: String(result.app.files.length), ok: true },
+                    { label: '运行命令', value: result.app.runCommand, ok: true },
+                    { label: '生成模式', value: result.app.usedFallback ? '模板兜底' : 'AI 规划', ok: true },
+                    { label: '自动校验', value: validationText, ok: validationText === '通过' },
+                  ],
+                },
+                {
+                  type: 'terminal',
+                  label: '已生成文件',
+                  lines: result.app.files.map((f) => `- ${f}`),
+                  collapsible: true,
+                  previewLines: 8,
+                },
+                ...validationBlocks,
+              ],
+            }]);
+            lastGeneratedAppRef.current = {
+              name: result.app.name,
+              rootDir: result.app.rootDir,
+              runCommand: result.app.runCommand || 'python main.py',
+            };
+          } catch (error) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `应用生成失败：${error instanceof Error ? error.message : '未知错误'}`,
+              source: 'studio',
+            }]);
+          }
+          setAiTyping(false);
+          return;
+        }
+
+        const runGeneratedMatch = requestAttachments.length === 0
+          ? userMsg.match(/^(?:\/run-one-shot-app(?:\s+(.+))?|运行(?:刚|刚刚)?生成(?:的)?(?:rdk)?应用|启动(?:刚|刚刚)?生成(?:的)?(?:rdk)?应用)$/i)
+          : null;
+        if (runGeneratedMatch) {
+          const explicitDir = String(runGeneratedMatch[1] || '').trim();
+          const appDir = explicitDir || lastGeneratedAppRef.current?.rootDir || '';
+          if (!appDir) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: '还没有可运行的生成应用，请先执行一句话生成。',
+              source: 'studio',
+            }]);
+            setAiTyping(false);
+            return;
+          }
+          const runCommand = lastGeneratedAppRef.current?.rootDir === appDir
+            ? (lastGeneratedAppRef.current?.runCommand || 'python main.py')
+            : 'python main.py';
+          try {
+            const run = await runOneShotApp(appDir, runCommand);
+            const outputLines = String(run.run.output || '').split(/\r?\n/).filter(Boolean).slice(0, 60);
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: run.ok ? '应用已执行完成。' : '应用执行失败。',
+              source: 'studio',
+              blocks: [
+                {
+                  type: 'status',
+                  items: [
+                    { label: '运行命令', value: run.run.runner || runCommand, ok: true },
+                    { label: '执行结果', value: run.ok ? (run.run.timedOut ? '运行中（超时中断）' : '成功') : '失败', ok: run.ok },
+                    { label: '应用目录', value: appDir, ok: true },
+                  ],
+                },
+                {
+                  type: 'terminal',
+                  label: '运行输出',
+                  lines: outputLines.length > 0 ? outputLines : ['[无输出]'],
+                  collapsible: true,
+                  previewLines: 10,
+                },
+              ],
+            }]);
+          } catch (error) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `应用执行失败：${error instanceof Error ? error.message : '未知错误'}`,
+              source: 'studio',
+            }]);
+          }
+          setAiTyping(false);
+          return;
+        }
+
+        const deployGeneratedMatch = requestAttachments.length === 0
+          ? userMsg.match(/^(?:\/deploy-one-shot-app(?:\s+(.+))?|部署(?:刚|刚刚)?生成(?:的)?(?:rdk)?应用|发布(?:刚|刚刚)?生成(?:的)?(?:rdk)?应用)$/i)
+          : null;
+        if (deployGeneratedMatch) {
+          const explicitDir = String(deployGeneratedMatch[1] || '').trim();
+          const appDir = explicitDir || lastGeneratedAppRef.current?.rootDir || '';
+          if (!currentDevice?.id) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: '请先连接目标设备，再执行部署。',
+              source: 'studio',
+            }]);
+            setAiTyping(false);
+            return;
+          }
+          if (!appDir) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: '还没有可部署的生成应用，请先执行一句话生成。',
+              source: 'studio',
+            }]);
+            setAiTyping(false);
+            return;
+          }
+
+          try {
+            const deployRunCommand = lastGeneratedAppRef.current?.rootDir === appDir
+              ? (lastGeneratedAppRef.current?.runCommand || 'python main.py')
+              : 'python main.py';
+            const deploy = await deployOneShotApp({
+              appDir,
+              deviceId: currentDevice.id,
+              runAfterDeploy: true,
+              runCommand: deployRunCommand,
+            });
+            const runOutput = String(deploy.deploy.run?.output || '').split(/\r?\n/).filter(Boolean).slice(0, 60);
+            const suggestions = deploy.deploy.run?.suggestions ?? [];
+            lastDeployFixRef.current = {
+              deviceId: currentDevice.id,
+              remoteDir: deploy.deploy.remoteDir,
+              runCommand: deploy.deploy.runCommand || deployRunCommand,
+              suggestions,
+            };
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: '应用已部署到设备。',
+              source: 'studio',
+              blocks: [
+                {
+                  type: 'status',
+                  items: [
+                    { label: '目标设备', value: `${currentDevice.name} (${currentDevice.ip})`, ok: true },
+                    { label: '部署目录', value: deploy.deploy.remoteDir, ok: true },
+                    { label: '文件数量', value: String(deploy.deploy.fileCount), ok: true },
+                    { label: '运行命令', value: deploy.deploy.runCommand || deployRunCommand, ok: true },
+                    { label: '运行结果', value: deploy.deploy.run?.ok ? '成功' : '失败', ok: Boolean(deploy.deploy.run?.ok) },
+                    ...(suggestions.length > 0 ? [{ label: '修复建议', value: `${suggestions.length} 条`, ok: true }] : []),
+                  ],
+                },
+                ...(runOutput.length > 0 ? [{
+                  type: 'terminal' as const,
+                  label: '设备运行输出',
+                  lines: runOutput,
+                  collapsible: true,
+                  previewLines: 10,
+                }] : []),
+                ...(suggestions.length > 0 ? [{
+                  type: 'terminal' as const,
+                  label: '建议下一步',
+                  lines: suggestions.map((item, idx) => {
+                    const cmd = item.command ? ` | 命令: ${item.command}` : '';
+                    return `${idx + 1}. ${item.title}: ${item.detail}${cmd}`;
+                  }),
+                  collapsible: true,
+                  previewLines: 6,
+                }] : []),
+              ],
+            }]);
+          } catch (error) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `部署失败：${error instanceof Error ? error.message : '未知错误'}`,
+              source: 'studio',
+            }]);
+          }
+          setAiTyping(false);
+          return;
+        }
+
+        const applyFixMatch = requestAttachments.length === 0
+          ? userMsg.match(/^(?:\/apply-last-fix|执行修复)\s*(\d+)?$/i)
+          : null;
+        if (applyFixMatch) {
+          const fixState = lastDeployFixRef.current;
+          const indexRaw = Number.parseInt(String(applyFixMatch[1] || '1'), 10);
+          const index = Number.isFinite(indexRaw) ? Math.max(1, indexRaw) : 1;
+          if (!fixState || fixState.suggestions.length === 0) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: '暂无可执行修复建议，请先完成一次部署并产生建议。',
+              source: 'studio',
+            }]);
+            setAiTyping(false);
+            return;
+          }
+
+          const selected = fixState.suggestions[index - 1];
+          if (!selected?.command) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `第 ${index} 条建议没有可执行命令，请手动处理。`,
+              source: 'studio',
+            }]);
+            setAiTyping(false);
+            return;
+          }
+
+          try {
+            const command = `cd ${fixState.remoteDir} && ${selected.command}`;
+            const result = await executeDeviceCommand(fixState.deviceId, command);
+            const lines = String(result.output || '').split(/\r?\n/).filter(Boolean).slice(0, 60);
+            const retryRunCommand = `cd ${fixState.remoteDir} && (${fixState.runCommand || 'python main.py'})`;
+            const retryResult = await executeDeviceCommand(fixState.deviceId, retryRunCommand).catch((error) => ({
+              ok: false,
+              output: error instanceof Error ? error.message : '自动重试运行失败',
+            }));
+            const retryLines = String(retryResult.output || '').split(/\r?\n/).filter(Boolean).slice(0, 60);
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `已执行修复建议 #${index}：${selected.title}，并自动重试运行。`,
+              source: 'studio',
+              blocks: [
+                {
+                  type: 'status',
+                  items: [
+                    { label: '修复项', value: selected.title, ok: true },
+                    { label: '执行目录', value: fixState.remoteDir, ok: true },
+                    { label: '命令', value: selected.command || '', ok: true },
+                    { label: '重试命令', value: fixState.runCommand || 'python main.py', ok: true },
+                    { label: '重试运行', value: retryResult.ok ? '成功' : '失败', ok: Boolean(retryResult.ok) },
+                  ],
+                },
+                {
+                  type: 'terminal',
+                  label: '修复输出',
+                  lines: lines.length > 0 ? lines : ['[无输出]'],
+                  collapsible: true,
+                  previewLines: 10,
+                },
+                {
+                  type: 'terminal',
+                  label: '重试运行输出',
+                  lines: retryLines.length > 0 ? retryLines : ['[无输出]'],
+                  collapsible: true,
+                  previewLines: 10,
+                },
+              ],
+            }]);
+          } catch (error) {
+            setChatMessages(prev => [...prev, {
+              id: msgId + 1,
+              role: 'ai',
+              text: `修复执行失败：${error instanceof Error ? error.message : '未知错误'}`,
+              source: 'studio',
+            }]);
+          }
           setAiTyping(false);
           return;
         }

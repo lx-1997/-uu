@@ -1,0 +1,17 @@
+{
+  "linux": {
+    "maxFileCountDriftPct": 40,
+    "maxTotalBytesDriftPct": 45,
+    "maxLargestFileDriftPct": 45
+  },
+  "mac": {
+    "maxFileCountDriftPct": 40,
+    "maxTotalBytesDriftPct": 45,
+    "maxLargestFileDriftPct": 45
+  },
+  "win": {
+    "maxFileCountDriftPct": 50,
+    "maxTotalBytesDriftPct": 50,
+    "maxLargestFileDriftPct": 50
+  }
+}

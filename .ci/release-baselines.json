@@ -1,0 +1,23 @@
+{
+  "linux": {
+    "requiredExtensions": [".appimage", ".deb"],
+    "minFileCount": 2,
+    "maxFileCount": 40,
+    "minTotalBytes": 5000000,
+    "maxTotalBytes": 5000000000
+  },
+  "mac": {
+    "requiredExtensions": [".dmg"],
+    "minFileCount": 1,
+    "maxFileCount": 30,
+    "minTotalBytes": 5000000,
+    "maxTotalBytes": 5000000000
+  },
+  "win": {
+    "requiredExtensions": [".exe"],
+    "minFileCount": 1,
+    "maxFileCount": 60,
+    "minTotalBytes": 5000000,
+    "maxTotalBytes": 5000000000
+  }
+}

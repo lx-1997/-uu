@@ -7,6 +7,10 @@ export interface SshCredentials {
   port?: number;
 }
 
+export interface RunRemoteCommandOptions {
+  timeoutMs?: number;
+}
+
 export function verifySshConnection(credentials: SshCredentials) {
   return new Promise<void>((resolve, reject) => {
     const client = new Client();
@@ -29,12 +33,36 @@ export function verifySshConnection(credentials: SshCredentials) {
   });
 }
 
-export function runRemoteCommands(credentials: SshCredentials, commands: string[]) {
+export function runRemoteCommands(
+  credentials: SshCredentials,
+  commands: string[],
+  options: RunRemoteCommandOptions = {},
+) {
   // Existing function
   return new Promise<string>((resolve, reject) => {
-    // ...
-
     const client = new Client();
+    const timeoutMs = Math.max(5_000, Number(options.timeoutMs ?? 120_000));
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      client.end();
+      reject(new Error(`SSH 命令执行超时（${timeoutMs}ms）`));
+    }, timeoutMs);
+
+    const safeResolve = (output: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(output);
+    };
+
+    const safeReject = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
 
     client
       .on('ready', () => {
@@ -42,7 +70,7 @@ export function runRemoteCommands(credentials: SshCredentials, commands: string[
         client.exec(fullCommand, { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } }, (error, stream) => {
           if (error) {
             client.end();
-            reject(error);
+            safeReject(error);
             return;
           }
 
@@ -53,11 +81,11 @@ export function runRemoteCommands(credentials: SshCredentials, commands: string[
             .on('close', (code: number | null) => {
               client.end();
               if (code && code !== 0) {
-                reject(new Error(stderr || `Remote command failed with exit code ${code}`));
+                safeReject(new Error(stderr || `Remote command failed with exit code ${code}`));
                 return;
               }
 
-              resolve(stdout);
+              safeResolve(stdout);
             })
             .on('data', (chunk: Buffer) => {
               stdout += chunk.toString();
@@ -69,7 +97,7 @@ export function runRemoteCommands(credentials: SshCredentials, commands: string[
         });
       })
       .on('error', (error) => {
-        reject(error);
+        safeReject(error);
       })
       .connect({
         host: credentials.host,

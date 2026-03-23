@@ -1,0 +1,240 @@
+name: Desktop Build Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_smoke:
+        description: "Enable runtime smoke check (launch packaged app and probe /api/health)"
+        required: false
+        default: false
+        type: boolean
+      baseline_suggest:
+        description: "Generate baseline suggestion from current artifacts"
+        required: false
+        default: false
+        type: boolean
+      require_reference:
+        description: "Require reference manifests for drift check"
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: desktop-build-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop-linux:
+    name: Desktop Linux Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      RDK_DESKTOP_STRICT_RESOURCES: "1"
+      RDK_DESKTOP_SMOKE_RUNTIME: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_smoke && '1' || '0' }}
+      RDK_DESKTOP_SMOKE_LOG_FILE: .smoke/linux-desktop-smoke.log
+      RDK_DESKTOP_DRIFT_REQUIRE_REFERENCE: ${{ ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || (github.event_name == 'workflow_dispatch' && inputs.require_reference)) && '1' || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Linux packaging deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools rpm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop linux package (includes smoke check)
+        run: npm run build:desktop:linux
+
+      - name: Generate Linux release manifest
+        if: always()
+        run: npm run verify:desktop:manifest
+
+      - name: Guard Linux release manifest
+        if: always()
+        run: npm run verify:desktop:manifest:guard:linux
+
+      - name: Drift-check Linux release manifest
+        if: always()
+        run: npm run verify:desktop:manifest:drift:linux
+
+      - name: Suggest Linux baseline update
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.baseline_suggest
+        run: npm run verify:desktop:baseline:suggest:linux
+
+      - name: Summarize Linux smoke logs
+        if: always()
+        run: node scripts/smoke-log-summary.mjs
+
+      - name: Upload Linux smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdk-studio-linux-smoke-logs
+          if-no-files-found: warn
+          path: |
+            .smoke/*.log
+            .smoke/release-manifest.json
+            .smoke/release-sha256.txt
+            .smoke/release-guard.json
+            .smoke/release-drift.json
+            .smoke/release-baseline-suggested-*.json
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdk-studio-linux
+          if-no-files-found: error
+          path: |
+            release/*.AppImage
+            release/*.deb
+
+  desktop-macos:
+    name: Desktop macOS Package
+    runs-on: macos-latest
+    timeout-minutes: 35
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      RDK_DESKTOP_STRICT_RESOURCES: "1"
+      RDK_DESKTOP_SMOKE_RUNTIME: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_smoke && '1' || '0' }}
+      RDK_DESKTOP_SMOKE_LOG_FILE: .smoke/macos-desktop-smoke.log
+      RDK_DESKTOP_DRIFT_REQUIRE_REFERENCE: ${{ ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || (github.event_name == 'workflow_dispatch' && inputs.require_reference)) && '1' || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop mac package (includes smoke check)
+        run: npm run build:desktop:mac
+
+      - name: Generate macOS release manifest
+        if: always()
+        run: npm run verify:desktop:manifest
+
+      - name: Guard macOS release manifest
+        if: always()
+        run: npm run verify:desktop:manifest:guard:mac
+
+      - name: Drift-check macOS release manifest
+        if: always()
+        run: npm run verify:desktop:manifest:drift:mac
+
+      - name: Suggest macOS baseline update
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.baseline_suggest
+        run: npm run verify:desktop:baseline:suggest:mac
+
+      - name: Summarize macOS smoke logs
+        if: always()
+        run: node scripts/smoke-log-summary.mjs
+
+      - name: Upload macOS smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdk-studio-macos-smoke-logs
+          if-no-files-found: warn
+          path: |
+            .smoke/*.log
+            .smoke/release-manifest.json
+            .smoke/release-sha256.txt
+            .smoke/release-guard.json
+            .smoke/release-drift.json
+            .smoke/release-baseline-suggested-*.json
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdk-studio-macos
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+
+  desktop-windows:
+    name: Desktop Windows Package
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      RDK_DESKTOP_STRICT_RESOURCES: "1"
+      RDK_DESKTOP_SMOKE_RUNTIME: ${{ github.event_name == 'workflow_dispatch' && inputs.runtime_smoke && '1' || '0' }}
+      RDK_DESKTOP_SMOKE_LOG_FILE: .smoke/windows-desktop-smoke.log
+      RDK_DESKTOP_DRIFT_REQUIRE_REFERENCE: ${{ ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || (github.event_name == 'workflow_dispatch' && inputs.require_reference)) && '1' || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop windows package (includes smoke check)
+        run: npm run build:desktop:win
+
+      - name: Generate Windows release manifest
+        if: always()
+        run: npm run verify:desktop:manifest
+
+      - name: Guard Windows release manifest
+        if: always()
+        run: npm run verify:desktop:manifest:guard:win
+
+      - name: Drift-check Windows release manifest
+        if: always()
+        run: npm run verify:desktop:manifest:drift:win
+
+      - name: Suggest Windows baseline update
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.baseline_suggest
+        run: npm run verify:desktop:baseline:suggest:win
+
+      - name: Summarize Windows smoke logs
+        if: always()
+        run: node scripts/smoke-log-summary.mjs
+
+      - name: Upload Windows smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdk-studio-windows-smoke-logs
+          if-no-files-found: warn
+          path: |
+            .smoke/*.log
+            .smoke/release-manifest.json
+            .smoke/release-sha256.txt
+            .smoke/release-guard.json
+            .smoke/release-drift.json
+            .smoke/release-baseline-suggested-*.json
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdk-studio-windows
+          if-no-files-found: error
+          path: |
+            release/*.exe
