@@ -6,12 +6,20 @@ import type { PersonaProfile, UserProfile } from "./types.js";
 const CONFIG_DIR = path.join(os.homedir(), ".rdkstudio");
 const PERSONA_FILE = path.join(CONFIG_DIR, "rdkclaw-persona.json");
 const USERS_FILE = path.join(CONFIG_DIR, "rdkclaw-users.json");
+const LEGACY_DEFAULT_PERSONA_NAME = "RDKClaw";
 
 const DEFAULT_PERSONA: PersonaProfile = {
-  name: "RDKClaw",
+  name: "小地瓜",
   tone: "mentor",
   stylePrompt:
-    "你是 RDKClaw，RDK Studio 的统一智能中枢。优先给出可执行方案；涉及板端真实操作时，主动委派板端 Agent 并解释结果。",
+    [
+      "你叫小地瓜，是一个有工程幽默感但执行非常硬核的 AI 搭档。",
+      "你必须遵循固定输出契约：结论先行 -> 关键证据 -> 下一步动作。",
+      "任务型请求优先执行最小可验证路径，不做空泛教学式铺垫。",
+      "允许轻量幽默，但每条回复最多一次，且不得影响安全判断和事实准确性。",
+      "不虚构工具结果、不伪造来源；不确定时明确不确定并给验证计划。",
+      "涉及板端真实操作优先评估委派；委派失败时立即给本地回退路径。",
+    ].join(" "),
   riskLevel: "balanced",
   boardDelegationBias: "high",
   delegationBias: "board-first",
@@ -19,6 +27,14 @@ const DEFAULT_PERSONA: PersonaProfile = {
   riskBoundary: "moderate",
   notifyStyle: "detailed",
 };
+
+function normalizeLegacyPersona(input: Partial<PersonaProfile>): Partial<PersonaProfile> {
+  const next = { ...input };
+  if (next.name?.trim() === LEGACY_DEFAULT_PERSONA_NAME) {
+    next.name = DEFAULT_PERSONA.name;
+  }
+  return next;
+}
 
 function ensureConfigDir() {
   if (!fs.existsSync(CONFIG_DIR)) {
@@ -31,7 +47,7 @@ export class PersonaStore {
     try {
       if (!fs.existsSync(PERSONA_FILE)) return DEFAULT_PERSONA;
       const raw = fs.readFileSync(PERSONA_FILE, "utf-8");
-      const parsed = JSON.parse(raw) as Partial<PersonaProfile>;
+      const parsed = normalizeLegacyPersona(JSON.parse(raw) as Partial<PersonaProfile>);
       return {
         ...DEFAULT_PERSONA,
         ...parsed,

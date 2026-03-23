@@ -23,6 +23,8 @@ export interface RDKClawChatRequest {
   userId?: string;
   mode?: RDKClawExecutionMode;
   attachments?: RDKClawAttachment[];
+  // 服务端内部字段：用于在 SSE 断连时中止当前 run
+  abortSignal?: AbortSignal;
 }
 
 export type RDKClawEventType =
@@ -100,6 +102,8 @@ export interface UserProfile {
   preferredExecutor: "auto" | "local" | "board";
   preferredLanguage: string;
   notes: string;
+  workspaceProfileId?: string;
+  workspaceRoot?: string;
 }
 
 export interface SkillPermission {

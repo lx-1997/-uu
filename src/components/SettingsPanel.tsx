@@ -96,8 +96,55 @@ export default function SettingsPanel() {
   const [aiModel, setAiModel] = useState('');
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiBaseUrl, setAiBaseUrl] = useState('');
+  const [aiLabel, setAiLabel] = useState('');
   const [aiConfigured, setAiConfigured] = useState(false);
+  const [aiSavedModels, setAiSavedModels] = useState<Array<{
+    id: string;
+    label: string;
+    provider: string;
+    model: string;
+    hasApiKey: boolean;
+    baseUrl?: string;
+    isActive: boolean;
+  }>>([]);
+  const [selectedAiModelId, setSelectedAiModelId] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
+  const applyAiModelToForm = (entry: {
+    id: string;
+    label: string;
+    provider: string;
+    model: string;
+    hasApiKey: boolean;
+    baseUrl?: string;
+    isActive: boolean;
+  }) => {
+    setSelectedAiModelId(entry.id);
+    setAiLabel(entry.label || '');
+    setAiProvider(entry.provider || 'qwen');
+    setAiModel(entry.model || '');
+    setAiBaseUrl(entry.baseUrl || '');
+    setAiApiKey('');
+  };
+
+  const refreshAiConfig = async () => {
+    const cfg = await fetchAgentConfig();
+    const models = cfg.models || [];
+    setAiSavedModels(models);
+    const active = models.find((item) => item.isActive) || models[0];
+    if (active) {
+      applyAiModelToForm(active);
+      setAiConfigured(!!active.hasApiKey);
+      return;
+    }
+    setAiConfigured(false);
+    setSelectedAiModelId('');
+    setAiLabel('');
+    setAiProvider(cfg.provider || 'qwen');
+    setAiModel(cfg.model || '');
+    setAiBaseUrl(cfg.baseUrl || '');
+    setAiApiKey('');
+  };
+
   const [feishuStatus, setFeishuStatus] = useState<FeishuRuntimeStatus | null>(null);
   const [feishuBoundUsers, setFeishuBoundUsers] = useState<Array<{ openId: string; boundAt: number }>>([]);
   const [feishuLoading, setFeishuLoading] = useState(false);
@@ -279,14 +326,7 @@ export default function SettingsPanel() {
 
   useEffect(() => {
     if (showSettings && settingsTab === 'ai') {
-      fetchAgentConfig().then(cfg => {
-        if (cfg.configured) {
-          setAiConfigured(true);
-          setAiProvider(cfg.provider || 'qwen');
-          setAiModel(cfg.model || '');
-          setAiBaseUrl(cfg.baseUrl || '');
-        }
-      }).catch(() => {});
+      refreshAiConfig().catch(() => {});
     }
   }, [showSettings, settingsTab]);
 
@@ -356,7 +396,8 @@ export default function SettingsPanel() {
   };
 
   const handleSaveAiConfig = async () => {
-    if (!aiApiKey.trim() && !aiConfigured) {
+    const selectedEntry = aiSavedModels.find((item) => item.id === selectedAiModelId);
+    if (!aiApiKey.trim() && !selectedEntry?.hasApiKey) {
       addToast('请填写 API Key', 'warning');
       return;
     }
@@ -364,19 +405,65 @@ export default function SettingsPanel() {
     setAiSaving(true);
     try {
       await saveAgentConfig({
+        action: 'upsert',
+        id: selectedAiModelId || undefined,
+        label: aiLabel.trim() || `${aiProvider}/${aiModel || providerDefaults.model}`,
         provider: aiProvider,
         model: aiModel || providerDefaults.model,
         apiKey: aiApiKey || undefined,
         baseUrl: aiBaseUrl || providerDefaults.baseUrl || undefined,
+        setActive: true,
       });
-      setAiConfigured(true);
-      setAiApiKey('');
-      addToast('AI 模型配置已保存', 'success');
+      await refreshAiConfig();
+      addToast(selectedAiModelId ? '模型配置已更新并切换' : '模型已新增并切换', 'success');
     } catch {
       addToast('保存失败', 'error');
     } finally {
       setAiSaving(false);
     }
+  };
+
+  const handleSwitchAiModel = async () => {
+    if (!selectedAiModelId) {
+      addToast('请先选择一个模型', 'warning');
+      return;
+    }
+    setAiSaving(true);
+    try {
+      await saveAgentConfig({ action: 'switch', id: selectedAiModelId });
+      await refreshAiConfig();
+      addToast('模型切换成功', 'success');
+    } catch {
+      addToast('模型切换失败', 'error');
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleDeleteAiModel = async () => {
+    if (!selectedAiModelId) {
+      addToast('请先选择一个模型', 'warning');
+      return;
+    }
+    setAiSaving(true);
+    try {
+      await saveAgentConfig({ action: 'delete', id: selectedAiModelId });
+      await refreshAiConfig();
+      addToast('模型已删除', 'success');
+    } catch {
+      addToast('删除失败', 'error');
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleCreateNewAiModel = () => {
+    setSelectedAiModelId('');
+    setAiLabel('');
+    setAiProvider('qwen');
+    setAiModel(AI_PROVIDER_DEFAULTS.qwen.model);
+    setAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
+    setAiApiKey('');
   };
 
   if (!showSettings) return null;
@@ -445,6 +532,55 @@ export default function SettingsPanel() {
                 {aiConfigured && <span className="badge badge-ok">● 已配置</span>}
               </div>
               <div className="config-row">
+                <span className="config-label">已保存模型</span>
+                <div className="config-value">
+                  <select
+                    className="select"
+                    title="已保存模型"
+                    aria-label="已保存模型"
+                    value={selectedAiModelId}
+                    onChange={e => {
+                      const nextId = e.target.value;
+                      setSelectedAiModelId(nextId);
+                      const next = aiSavedModels.find((item) => item.id === nextId);
+                      if (next) applyAiModelToForm(next);
+                    }}
+                  >
+                    <option value="">新建模型配置</option>
+                    {aiSavedModels.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label || `${item.provider}/${item.model}`}{item.isActive ? ' (当前)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="config-actions">
+                <button type="button" className="btn btn-ghost" onClick={handleCreateNewAiModel} disabled={aiSaving}>
+                  新建
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={handleSwitchAiModel} disabled={aiSaving || !selectedAiModelId}>
+                  切换
+                </button>
+                <button type="button" className="btn btn-danger" onClick={handleDeleteAiModel} disabled={aiSaving || !selectedAiModelId}>
+                  删除
+                </button>
+              </div>
+              <div className="config-row">
+                <span className="config-label">配置名称</span>
+                <div className="config-value">
+                  <input
+                    type="text"
+                    className="input"
+                    title="配置名称"
+                    aria-label="配置名称"
+                    placeholder="例如：DeepSeek 主力 / OpenAI 备用"
+                    value={aiLabel}
+                    onChange={e => setAiLabel(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="config-row">
                 <span className="config-label">服务商</span>
                 <div className="config-value">
                   <select className="select" title="模型服务商" aria-label="模型服务商" value={aiProvider} onChange={e => applyAiProviderPreset(e.target.value)}>
@@ -503,10 +639,10 @@ export default function SettingsPanel() {
                   onClick={handleSaveAiConfig}
                   disabled={aiSaving}
                 >
-                  {aiSaving ? '保存中...' : '保存配置'}
+                  {aiSaving ? '保存中...' : (selectedAiModelId ? '更新并切换' : '新增并切换')}
                 </button>
                 <span className="config-label-hint">
-                  配置保存在本地 ~/.rdkstudio/agent-config.json
+                  配置保存在本地 ~/.rdkstudio/agent-config.json（支持多模型）
                 </span>
               </div>
             </div>

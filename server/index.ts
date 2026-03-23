@@ -21,8 +21,14 @@ import {
   FLASH_TMP_IMAGE_XZ, FLASH_TMP_IMAGE_RAW, FLASH_DEFAULT_DEST,
   DIAGNOSTIC_COMMANDS, buildSystemPrompt,
 } from './constants.js';
-import { loadAllSkills, getSkillByName, getRawSkillMd, buildSkillContext, bridgeEcoSkill } from './skill-loader.js';
-import { loadProviderConfig, saveProviderConfig, type ProviderConfig } from './agent/provider-setup.js';
+import { loadAllSkills, getSkillByName, getRawSkillMd, buildSkillContext } from './skill-loader.js';
+import {
+  loadProviderConfig,
+  loadProviderRegistry,
+  upsertProviderConfigEntry,
+  switchActiveProviderConfig,
+  deleteProviderConfigEntry,
+} from './agent/provider-setup.js';
 import { RDKClawApp } from './rdkclaw/app.js';
 import { FeishuChannelAdapter } from './rdkclaw/feishu-channel-adapter.js';
 import { FeishuApiClient } from './rdkclaw/feishu-api-client.js';
@@ -33,6 +39,7 @@ import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
 import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
+import { getTokenUsageReport, recordTokenUsage, resetTokenUsage } from './monitoring/token-usage.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -616,23 +623,12 @@ app.use('/api/ecosystem', createEcosystemRouter(ecosystem, ecoRunOnDevice));
 // ─── Skill System ───
 const loadedSkills = loadAllSkills();
 
-// Bridge ecosystem skills into the unified skill registry
-try {
-  const ecoSkills = ecosystem.registry.getAllSkills();
-  for (const eco of ecoSkills) {
-    const bridged = bridgeEcoSkill(eco as any);
-    loadedSkills.push(bridged);
-  }
-  if (ecoSkills.length > 0) {
-    console.log(`[SkillLoader] bridged ${ecoSkills.length} ecosystem skills`);
-  }
-} catch (e) {
-  console.warn('[SkillLoader] ecosystem bridge skipped:', e);
-}
-
 app.get('/api/skills', (_request, response) => {
+  response.setHeader('x-rdk-internal-api', 'true');
   response.json({
     ok: true,
+    internalOnly: true,
+    message: '兼容接口：仅供内部调试或历史功能使用，不作为技能工坊数据源。',
     skills: loadedSkills.map(s => ({
       name: s.name,
       description: s.description,
@@ -646,6 +642,7 @@ app.get('/api/skills', (_request, response) => {
 });
 
 app.get('/api/skills/:name', (request, response) => {
+  response.setHeader('x-rdk-internal-api', 'true');
   const skill = getSkillByName(loadedSkills, request.params.name);
   if (!skill) {
     response.status(404).json({ error: `Skill '${request.params.name}' not found` });
@@ -655,6 +652,7 @@ app.get('/api/skills/:name', (request, response) => {
 });
 
 app.get('/api/skills/:name/md', (request, response) => {
+  response.setHeader('x-rdk-internal-api', 'true');
   const md = getRawSkillMd(request.params.name);
   if (!md) {
     response.status(404).json({ error: `SKILL.md for '${request.params.name}' not found` });
@@ -664,14 +662,33 @@ app.get('/api/skills/:name/md', (request, response) => {
 });
 
 app.post('/api/skills/reload', (_request, response) => {
+  response.setHeader('x-rdk-internal-api', 'true');
   const reloaded = loadAllSkills();
   loadedSkills.length = 0;
   loadedSkills.push(...reloaded);
-  response.json({ ok: true, total: loadedSkills.length });
+  response.json({
+    ok: true,
+    internalOnly: true,
+    message: '仅重载本地技能文档，不包含生态技能桥接。',
+    total: loadedSkills.length,
+  });
 });
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
+});
+
+app.get('/api/token-usage/report', (request, response) => {
+  const hours = Number(request.query.hours || 24);
+  const source = String(request.query.source || 'all') as 'all' | 'rdkclaw' | 'openclaw';
+  const deviceId = String(request.query.deviceId || '').trim();
+  const limit = Number(request.query.limit || 50);
+  const report = getTokenUsageReport({ hours, source, deviceId, limit });
+  response.json(report);
+});
+
+app.post('/api/token-usage/reset', (_request, response) => {
+  response.json(resetTokenUsage());
 });
 
 app.get('/api/devices', async (_request, response) => {
@@ -1346,6 +1363,32 @@ app.get('/api/devices/:id/openclaw/skills', async (request, response) => {
     }
     response.json({ ok: success, skills, plugins, raw: output });
   });
+});
+
+app.get('/api/devices/:id/openclaw/skill-content', async (request, response) => {
+  const { id } = request.params;
+  const skillIdRaw = String(request.query.skillId || '').trim();
+  if (!skillIdRaw) {
+    response.status(400).json({ ok: false, error: 'skillId 不能为空' });
+    return;
+  }
+
+  const run = await runOnDevice(request, response, id, [
+    `bash -lc "python3 -c \\"import base64,sys,os,json;raw=base64.b64decode(sys.argv[1]).decode('utf-8','ignore').strip();bases=['/opt/openclaw/skills','/root/.openclaw/workspace/skills'];c=[raw,raw.split()[0] if raw else '',raw.replace('openclaw.','',1), (raw.split()[0] if raw else '').replace('openclaw.','',1)];cand=[];[cand.append(x) for x in c if x and x not in cand];found='';\nfor base in bases:\n  if not os.path.isdir(base):\n    continue\n  paths=[]\n  [paths.extend([f'{base}/{x}/SKILL.md',f'{base}/{x}/skill.md']) for x in cand]\n  for p in paths:\n    if os.path.isfile(p):\n      found=p\n      break\n  if found:\n    break\n  dirs=sorted(os.listdir(base))\n  for x in cand:\n    m=''\n    for d in dirs:\n      if d==x or d.startswith(x):\n        m=d\n        break\n    if m:\n      for p in (f'{base}/{m}/SKILL.md',f'{base}/{m}/skill.md'):\n        if os.path.isfile(p):\n          found=p\n          break\n    if found:\n      break\n  if found:\n    break\ncontent=''\nif found:\n  try:\n    content=open(found,'r',encoding='utf-8',errors='ignore').read()\n  except Exception:\n    content=''\nprint(json.dumps({'ok':bool(found),'path':found,'content':content}, ensure_ascii=False))\\" '${Buffer.from(skillIdRaw).toString('base64')}'"`,
+  ]);
+  if (!run) return;
+
+  const text = String(run.output || '').trim();
+  try {
+    const parsed = JSON.parse(text) as { ok?: boolean; path?: string; content?: string };
+    if (!parsed.ok) {
+      response.status(404).json({ ok: false, error: `未找到 skill 内容: ${skillIdRaw}` });
+      return;
+    }
+    response.json({ ok: true, path: parsed.path || '', content: parsed.content || '' });
+  } catch {
+    response.status(500).json({ ok: false, error: 'skill 内容解析失败', raw: text });
+  }
 });
 
 app.post('/api/devices/:id/openclaw/pairing/list', async (request, response) => {
@@ -2277,8 +2320,18 @@ app.post('/api/agent/plan', async (request, response) => {
 
 app.get('/api/agent/config', (_request, response) => {
   const config = loadProviderConfig();
+  const registry = loadProviderRegistry();
+  const models = registry.entries.map((entry) => ({
+    id: entry.id,
+    label: entry.label,
+    provider: entry.provider,
+    model: entry.model,
+    hasApiKey: !!entry.apiKey,
+    baseUrl: entry.baseUrl,
+    isActive: entry.id === registry.activeId,
+  }));
   if (!config) {
-    response.json({ configured: false });
+    response.json({ configured: false, models, activeModelId: registry.activeId || null });
     return;
   }
   response.json({
@@ -2287,27 +2340,83 @@ app.get('/api/agent/config', (_request, response) => {
     model: config.model,
     hasApiKey: !!config.apiKey,
     baseUrl: config.baseUrl,
+    models,
+    activeModelId: registry.activeId || null,
   });
 });
 
 app.post('/api/agent/config', (request, response) => {
-  const { provider, model, apiKey: key, baseUrl } = request.body as Partial<ProviderConfig>;
+  const body = (request.body ?? {}) as {
+    action?: 'upsert' | 'switch' | 'delete';
+    id?: string;
+    label?: string;
+    provider?: string;
+    model?: string;
+    apiKey?: string;
+    baseUrl?: string;
+    setActive?: boolean;
+  };
+
+  const action = body.action || 'upsert';
+  if (action === 'switch') {
+    const id = String(body.id || '').trim();
+    if (!id) {
+      response.status(400).json({ error: '缺少模型 ID' });
+      return;
+    }
+    const ok = switchActiveProviderConfig(id);
+    if (!ok) {
+      response.status(404).json({ error: '模型不存在' });
+      return;
+    }
+    response.json({ ok: true });
+    return;
+  }
+
+  if (action === 'delete') {
+    const id = String(body.id || '').trim();
+    if (!id) {
+      response.status(400).json({ error: '缺少模型 ID' });
+      return;
+    }
+    const ok = deleteProviderConfigEntry(id);
+    if (!ok) {
+      response.status(404).json({ error: '模型不存在' });
+      return;
+    }
+    response.json({ ok: true });
+    return;
+  }
+
+  const provider = String(body.provider || '').trim();
+  const model = String(body.model || '').trim();
   if (!provider) {
     response.status(400).json({ error: '缺少 provider' });
     return;
   }
+  if (!model) {
+    response.status(400).json({ error: '缺少 model' });
+    return;
+  }
+
+  // 向后兼容：如果请求里不带 action/id，默认更新当前激活模型
+  const legacyMode = !body.action;
   const existing = loadProviderConfig();
-  if (!key && !existing?.apiKey) {
+  const key = typeof body.apiKey === 'string' ? body.apiKey : undefined;
+  if (!key?.trim() && !existing?.apiKey) {
     response.status(400).json({ error: '缺少 apiKey' });
     return;
   }
-  const config: ProviderConfig = {
-    provider: provider as ProviderConfig['provider'],
-    model: model || '',
-    apiKey: key || existing?.apiKey || '',
-    baseUrl,
-  };
-  saveProviderConfig(config);
+
+  upsertProviderConfigEntry({
+    id: legacyMode ? undefined : body.id,
+    label: body.label,
+    provider,
+    model,
+    apiKey: key,
+    baseUrl: body.baseUrl,
+    setActive: body.setActive ?? true,
+  });
   response.json({ ok: true });
 });
 
@@ -2643,16 +2752,30 @@ app.post('/api/rdkclaw/users/:userId', (request, response) => {
     preferredExecutor: body.preferredExecutor ?? 'auto',
     preferredLanguage: body.preferredLanguage ?? 'zh-CN',
     notes: body.notes ?? '',
+    workspaceProfileId: typeof body.workspaceProfileId === 'string' ? body.workspaceProfileId : undefined,
+    workspaceRoot: typeof body.workspaceRoot === 'string' ? body.workspaceRoot : undefined,
   });
   response.json({ ok: true, user });
 });
 
 app.get('/api/rdkclaw/skills', (_request, response) => {
-  response.json({ ok: true, skills: rdkclaw.listSkills() });
+  response.setHeader('x-rdk-internal-api', 'true');
+  response.json({
+    ok: true,
+    internalOnly: true,
+    message: '内部接口：用于 RDKClaw 调试，不用于技能工坊展示。',
+    skills: rdkclaw.listSkills(),
+  });
 });
 
 app.post('/api/rdkclaw/skills/reload', (_request, response) => {
-  response.json({ ok: true, skills: rdkclaw.reloadSkills() });
+  response.setHeader('x-rdk-internal-api', 'true');
+  response.json({
+    ok: true,
+    internalOnly: true,
+    message: '内部接口：用于 RDKClaw 调试，不用于技能工坊展示。',
+    skills: rdkclaw.reloadSkills(),
+  });
 });
 
 // ─── RDKClaw Autonomy Tasks ───
@@ -2839,6 +2962,17 @@ app.post('/api/agent/chat', async (request, response) => {
 
   try {
     const runId = uuid();
+    const requestAbortController = new AbortController();
+    let disconnected = false;
+    const handleDisconnect = () => {
+      if (disconnected) return;
+      disconnected = true;
+      requestAbortController.abort();
+    };
+
+    request.on('close', handleDisconnect);
+    request.on('aborted', handleDisconnect);
+    response.on('close', handleDisconnect);
 
     response.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -2868,11 +3002,15 @@ app.post('/api/agent/chat', async (request, response) => {
         userId,
         mode,
         attachments,
+        abortSignal: requestAbortController.signal,
       })) {
         sendEvent(event.type, event.data);
       }
     } finally {
       clearInterval(keepAlive);
+      request.off('close', handleDisconnect);
+      request.off('aborted', handleDisconnect);
+      response.off('close', handleDisconnect);
     }
 
     response.end();
@@ -3032,6 +3170,16 @@ io.on('connection', (socket) => {
           socket.emit('openclaw:data', { chunk });
         },
         (success) => {
+          recordTokenUsage({
+            source: 'openclaw',
+            deviceId,
+            sessionId: `session-${socket.id}`,
+            model: 'openclaw-gateway',
+            promptText: String(message || ''),
+            completionText: streamed || '',
+            success,
+            estimated: true,
+          });
           if (!success) {
             const raw = (streamed || '').trim();
             let msg = raw || 'OpenClaw 会话执行失败，请检查设备连接、密码或 Gateway 状态';

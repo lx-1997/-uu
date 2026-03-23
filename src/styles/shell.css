@@ -5,6 +5,7 @@
 
 /* ── App Shell Grid ── */
 .app-shell {
+  --rail-current-width: var(--rail-width);
   display: grid;
   grid-template-columns: var(--rail-width) 1fr;
   grid-template-rows: var(--topbar-height) 1fr;
@@ -227,6 +228,12 @@
 }
 
 .app-shell:has(.icon-rail.expanded) {
+  --rail-current-width: 180px;
+  grid-template-columns: 180px 1fr;
+}
+
+.app-shell.rail-expanded {
+  --rail-current-width: 180px;
   grid-template-columns: 180px 1fr;
 }
 
@@ -504,7 +511,7 @@
 
 .device-panel {
   position: fixed;
-  left: calc(var(--rail-width) + 8px);
+  left: calc(var(--rail-current-width) + 8px);
   top: 60px;
   width: 320px;
   max-height: calc(100vh - 120px);

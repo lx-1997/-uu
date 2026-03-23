@@ -26,7 +26,7 @@ import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 const TAB_NAMES: Record<string, string> = {
   dashboard: '工作台',
   openclaw: 'OpenClaw',
-  skills: 'RDKClaw 技能',
+  skills: '技能工坊',
   terminal: '终端',
   files: '文件',
   vnc: '远程桌面',
@@ -132,7 +132,7 @@ function useThemeSync() {
 }
 
 function AppShell() {
-  const { activeTab, currentDevice, theme } = useAppState();
+  const { activeTab, currentDevice, theme, railExpanded } = useAppState();
   useDesktopTabSync(activeTab);
   useDesktopViewBounds(activeTab);
   useThemeSync();
@@ -140,7 +140,7 @@ function AppShell() {
   const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${railExpanded ? 'rail-expanded' : ''}`}>
       <OpenClawDeployPollHost />
       <IconRail />
 

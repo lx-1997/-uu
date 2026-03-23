@@ -975,7 +975,8 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(true, text || '(con
     const cmd = [
       BOARD_ENV_EXPORT,
       'echo "===SKILLS==="',
-      '(clawhub list 2>/dev/null || ls -1 /opt/openclaw/skills 2>/dev/null || echo "无已安装技能")',
+      '(for d in /opt/openclaw/skills /root/.openclaw/workspace/skills; do [ -d "$d" ] && ls -1 "$d"; done | sed \'/^\\s*$/d\' | sort -u || true)',
+      '[ -d /opt/openclaw/skills ] || [ -d /root/.openclaw/workspace/skills ] || echo "无已安装技能"',
       'echo "===PLUGINS==="',
       '(cat ~/.openclaw/openclaw.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(chr(10).join(d.get(\'plugins\',{}).get(\'allow\',[])))" 2>/dev/null || echo "")',
     ].join(' ; ');

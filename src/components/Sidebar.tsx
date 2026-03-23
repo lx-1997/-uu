@@ -90,7 +90,7 @@ const NAV_GROUPS: Array<{
     items: [
       { tab: 'dashboard', label: '总览', hint: '新手流程与设备主控台' },
       { tab: 'openclaw', label: 'OpenClaw', hint: 'AI 网关、渠道与技能中心' },
-      { tab: 'skills', label: '技能与策略', hint: '技能目录、权限与联网策略' },
+      { tab: 'skills', label: '技能工坊', hint: '生成 OpenClaw 技能并部署到板端' },
     ],
   },
   {

@@ -1017,9 +1017,9 @@ export default function Flasher() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => { setActiveTab('skills'); addToast('已切换到技能中心', 'info'); }}
+                onClick={() => { setActiveTab('skills'); addToast('已切换到技能工坊', 'info'); }}
               >
-                技能中心
+                技能工坊
               </button>
             </div>
             <button

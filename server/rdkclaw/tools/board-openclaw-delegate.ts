@@ -54,7 +54,7 @@ export function boardOpenClawDelegateTool(
       },
       required: ["task"],
     },
-    async execute(input) {
+    async execute(input, ctx) {
       const devices = await readDevices();
       const device = devices.find((d) => d.id === deviceId);
       if (!device) throw new Error("设备不存在，无法委派板端 OpenClaw");
@@ -70,9 +70,21 @@ export function boardOpenClawDelegateTool(
       const sessionId = input.sessionId?.trim() || `rdkclaw-board-${Date.now()}`;
 
       return await new Promise<string>((resolve, reject) => {
+        if (ctx.abortSignal?.aborted) {
+          reject(new Error("操作已中止"));
+          return;
+        }
+
+        let settled = false;
+        const settle = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          fn();
+        };
         let output = "";
         let pending = "";
         let lastEmitAt = 0;
+        let handle: { abort: () => void } | null = null;
         const flushProgress = (force = false) => {
           const now = Date.now();
           if (!force && now - lastEmitAt < 400) return;
@@ -82,24 +94,38 @@ export function boardOpenClawDelegateTool(
           lastEmitAt = now;
           onProgress?.(toSend);
         };
-        manager.sendAgentMessage(
+
+        const onAbort = () => {
+          try {
+            handle?.abort();
+          } catch {
+            // ignore abort failures
+          }
+          settle(() => reject(new Error("操作已中止")));
+        };
+        ctx.abortSignal?.addEventListener("abort", onAbort, { once: true });
+
+        handle = manager.sendAgentMessage(
           msg,
           (chunk) => {
+            if (settled) return;
             output += chunk;
             pending += chunk;
             flushProgress(false);
           },
           (success) => {
+            if (settled) return;
+            ctx.abortSignal?.removeEventListener("abort", onAbort);
             flushProgress(true);
             if (success) {
-              resolve(output.trim() || "板端 OpenClaw 执行完成（无文本输出）");
+              settle(() => resolve(output.trim() || "板端 OpenClaw 执行完成（无文本输出）"));
               return;
             }
             const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
             if (cleanOutput.length > 20) {
-              resolve(cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]");
+              settle(() => resolve(cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]"));
             } else {
-              reject(new Error(parseBoardError(output)));
+              settle(() => reject(new Error(parseBoardError(output))));
             }
           },
           sessionId,

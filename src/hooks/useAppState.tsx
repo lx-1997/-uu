@@ -211,6 +211,13 @@ export interface AppState {
     runId?: string,
   ) => void;
   stopCurrentRun: () => void;
+  backgroundCurrentRun: () => void;
+  backgroundRuns: Array<{
+    runId: string;
+    status: 'running' | 'ended';
+    detachedAt: number;
+  }>;
+  stopBackgroundRun: (runId: string) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);

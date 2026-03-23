@@ -20,8 +20,21 @@ export interface ProviderConfig {
   baseUrl?: string;
 }
 
+export interface ProviderConfigEntry extends ProviderConfig {
+  id: string;
+  label: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProviderConfigRegistry {
+  activeId: string | null;
+  entries: ProviderConfigEntry[];
+}
+
 const CONFIG_DIR = path.join(os.homedir(), '.rdkstudio');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'agent-config.json');
+const DEFAULT_ENTRY_ID = 'default';
 
 const PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string }> = {
   qwen: {
@@ -78,20 +91,170 @@ function resolveProviderBaseUrl(config: ProviderConfig): string {
 }
 
 export function loadProviderConfig(): ProviderConfig | null {
+  const registry = loadProviderRegistry();
+  const active = getActiveProviderEntry(registry);
+  if (!active) return null;
+  return {
+    provider: active.provider,
+    model: active.model,
+    apiKey: active.apiKey,
+    baseUrl: active.baseUrl,
+  };
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
+  if (!input || typeof input !== 'object') {
+    return { activeId: null, entries: [] };
+  }
+  const maybe = input as Partial<ProviderConfigRegistry>;
+  const entriesRaw = Array.isArray(maybe.entries) ? maybe.entries : [];
+  const entries: ProviderConfigEntry[] = [];
+  for (const entry of entriesRaw) {
+    const item = entry as Partial<ProviderConfigEntry>;
+    const provider = normalizeText(item.provider);
+    const model = normalizeText(item.model);
+    if (!provider || !model) continue;
+    const now = Date.now();
+    entries.push({
+      id: normalizeText(item.id) || `cfg-${Math.random().toString(36).slice(2, 10)}`,
+      label: normalizeText(item.label) || `${provider}/${model}`,
+      provider,
+      model,
+      apiKey: normalizeText(item.apiKey),
+      baseUrl: normalizeText(item.baseUrl) || undefined,
+      createdAt: Number.isFinite(item.createdAt) ? Number(item.createdAt) : now,
+      updatedAt: Number.isFinite(item.updatedAt) ? Number(item.updatedAt) : now,
+    });
+  }
+  const activeId = normalizeText(maybe.activeId) || null;
+  return {
+    activeId: entries.some((e) => e.id === activeId) ? activeId : (entries[0]?.id || null),
+    entries,
+  };
+}
+
+export function loadProviderRegistry(): ProviderConfigRegistry {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) return null;
+    if (!fs.existsSync(CONFIG_FILE)) return { activeId: null, entries: [] };
     const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
-    return JSON.parse(raw) as ProviderConfig;
+    const parsed = JSON.parse(raw) as unknown;
+
+    // 兼容旧格式（单配置对象）
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && !('entries' in (parsed as Record<string, unknown>))) {
+      const legacy = parsed as Partial<ProviderConfig>;
+      const provider = normalizeText(legacy.provider);
+      const model = normalizeText(legacy.model);
+      const apiKey = normalizeText(legacy.apiKey);
+      if (!provider || !model) {
+        return { activeId: null, entries: [] };
+      }
+      const now = Date.now();
+      return {
+        activeId: DEFAULT_ENTRY_ID,
+        entries: [{
+          id: DEFAULT_ENTRY_ID,
+          label: `${provider}/${model}`,
+          provider,
+          model,
+          apiKey,
+          baseUrl: normalizeText(legacy.baseUrl) || undefined,
+          createdAt: now,
+          updatedAt: now,
+        }],
+      };
+    }
+
+    return ensureRegistryShape(parsed);
   } catch {
-    return null;
+    return { activeId: null, entries: [] };
   }
 }
 
-export function saveProviderConfig(config: ProviderConfig): void {
+export function saveProviderRegistry(registry: ProviderConfigRegistry): void {
   if (!fs.existsSync(CONFIG_DIR)) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
   }
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(registry, null, 2), 'utf-8');
+}
+
+export function getActiveProviderEntry(registry?: ProviderConfigRegistry): ProviderConfigEntry | null {
+  const store = registry || loadProviderRegistry();
+  if (store.entries.length === 0) return null;
+  const activeId = store.activeId || store.entries[0].id;
+  return store.entries.find((e) => e.id === activeId) || store.entries[0] || null;
+}
+
+export function saveProviderConfig(config: ProviderConfig): void {
+  const now = Date.now();
+  const registry = loadProviderRegistry();
+  const active = getActiveProviderEntry(registry);
+  const id = active?.id || DEFAULT_ENTRY_ID;
+  const normalized: ProviderConfigEntry = {
+    id,
+    label: active?.label || `${config.provider}/${config.model}`,
+    provider: config.provider,
+    model: config.model,
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl,
+    createdAt: active?.createdAt || now,
+    updatedAt: now,
+  };
+  const others = registry.entries.filter((entry) => entry.id !== id);
+  saveProviderRegistry({
+    activeId: id,
+    entries: [normalized, ...others],
+  });
+}
+
+export function upsertProviderConfigEntry(input: {
+  id?: string;
+  label?: string;
+  provider: string;
+  model: string;
+  apiKey?: string;
+  baseUrl?: string;
+  setActive?: boolean;
+}): ProviderConfigEntry {
+  const registry = loadProviderRegistry();
+  const now = Date.now();
+  const existing = input.id ? registry.entries.find((entry) => entry.id === input.id) : null;
+  const active = getActiveProviderEntry(registry);
+  const id = input.id?.trim() || `cfg-${Math.random().toString(36).slice(2, 10)}`;
+  const resolvedApiKey = normalizeText(input.apiKey) || existing?.apiKey || active?.apiKey || '';
+  const next: ProviderConfigEntry = {
+    id,
+    label: normalizeText(input.label) || existing?.label || `${input.provider}/${input.model}`,
+    provider: input.provider,
+    model: input.model,
+    apiKey: resolvedApiKey,
+    baseUrl: normalizeText(input.baseUrl) || existing?.baseUrl || undefined,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+  const entries = [next, ...registry.entries.filter((entry) => entry.id !== id)];
+  const activeId = input.setActive === false ? (registry.activeId || next.id) : next.id;
+  saveProviderRegistry({ activeId, entries });
+  return next;
+}
+
+export function switchActiveProviderConfig(id: string): boolean {
+  const registry = loadProviderRegistry();
+  if (!registry.entries.some((entry) => entry.id === id)) return false;
+  saveProviderRegistry({ ...registry, activeId: id });
+  return true;
+}
+
+export function deleteProviderConfigEntry(id: string): boolean {
+  const registry = loadProviderRegistry();
+  if (!registry.entries.some((entry) => entry.id === id)) return false;
+  const entries = registry.entries.filter((entry) => entry.id !== id);
+  const activeId = registry.activeId === id ? (entries[0]?.id || null) : registry.activeId;
+  saveProviderRegistry({ activeId, entries });
+  return true;
 }
 
 /**

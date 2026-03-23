@@ -41,6 +41,8 @@ import type { MemoryManager, MemorySearchResult } from "../memory.js";
 export interface ToolContext {
   /** 工作目录: 文件操作的基准路径，防止访问工作区外的文件 */
   workspaceDir: string;
+  /** Bootstrap 根目录: AGENTS/SOUL/USER/MEMORY 等文件所在目录 */
+  bootstrapDir?: string;
   /** 会话 Key: 用于隔离不同 agent / 会话的状态 */
   sessionKey: string;
   /** 兼容字段：保留 sessionId（便于 CLI/调试显示） */

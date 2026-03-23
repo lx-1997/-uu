@@ -8,18 +8,18 @@
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(var(--dock-max-width), calc(100vw - var(--rail-width) - 40px));
+  width: min(var(--dock-max-width), calc(100vw - var(--rail-current-width, var(--rail-width)) - 40px));
   z-index: var(--z-dock);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-left: calc(var(--rail-width) / 2);
+  margin-left: calc(var(--rail-current-width, var(--rail-width)) / 2);
 }
 
 .dock.expanded {
   bottom: 0;
-  width: calc(100vw - var(--rail-width));
-  margin-left: calc(var(--rail-width) / 2);
+  width: calc(100vw - var(--rail-current-width, var(--rail-width)));
+  margin-left: calc(var(--rail-current-width, var(--rail-width)) / 2);
   height: 100%;
   max-height: 100%;
   transform: translateX(-50%);
@@ -143,8 +143,8 @@
   font-size: 0.8125rem;
   line-height: 1.65;
   color: var(--text-primary);
-  user-select: text;
   -webkit-user-select: text;
+  user-select: text;
 }
 
 .dock-bubble-toolbar {

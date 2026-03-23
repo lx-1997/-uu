@@ -10,17 +10,20 @@ import {
 
 export class ContextLoader {
   private workspaceDir: string;
+  private bootstrapDir?: string;
   private maxChars?: number;
   private warn?: (message: string) => void;
 
   constructor(
     workspaceDir: string,
     opts?: {
+      bootstrapDir?: string;
       maxChars?: number;
       warn?: (message: string) => void;
     },
   ) {
     this.workspaceDir = workspaceDir;
+    this.bootstrapDir = opts?.bootstrapDir;
     this.maxChars = opts?.maxChars;
     this.warn = opts?.warn;
   }
@@ -31,7 +34,7 @@ export class ContextLoader {
   async loadBootstrapFiles(params?: {
     sessionKey?: string;
   }): Promise<BootstrapFile[]> {
-    const files = await loadWorkspaceBootstrapFiles(this.workspaceDir);
+    const files = await loadWorkspaceBootstrapFiles(this.bootstrapDir || this.workspaceDir);
     return filterBootstrapFilesForSession(files, params?.sessionKey);
   }
 
@@ -79,7 +82,7 @@ export class ContextLoader {
    * 检查 HEARTBEAT.md 是否有待办任务
    */
   async hasHeartbeatTasks(): Promise<boolean> {
-    const files = await loadWorkspaceBootstrapFiles(this.workspaceDir);
+    const files = await loadWorkspaceBootstrapFiles(this.bootstrapDir || this.workspaceDir);
     const heartbeat = files.find((f) => f.name === DEFAULT_HEARTBEAT_FILENAME);
     if (!heartbeat?.content) return false;
 

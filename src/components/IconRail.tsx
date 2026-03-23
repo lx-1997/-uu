@@ -21,7 +21,7 @@ const NAV_ITEMS: NavItem[] = [
       'M9.5 7a1 1 0 100-2 1 1 0 000 2z',
       'M14.5 7a1 1 0 100-2 1 1 0 000 2z',
     ] },
-  { tab: 'skills', label: 'AI 技能', desc: 'RDKClaw 技能浏览与管理',
+  { tab: 'skills', label: '技能工坊', desc: 'OpenClaw 技能生成与部署',
     paths: ['M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z'] },
 ];
 
@@ -142,6 +142,7 @@ export default function IconRail() {
             className="rail-expand-btn"
             onClick={() => setRailExpanded(!railExpanded)}
             data-tooltip={!railExpanded ? '展开导航' : undefined}
+            aria-label={railExpanded ? '收起导航' : '展开导航'}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: railExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
               <path d="M9 18l6-6-6-6" />

@@ -8,6 +8,7 @@ import {
 } from '../provider-setup.js';
 import type { RDKClawExecutionMode } from '../../rdkclaw/types.js';
 import type { AutonomyTask } from '../../rdkclaw/autonomy-scheduler.js';
+import { getTokenUsageReport } from '../../monitoring/token-usage.js';
 
 const ALLOWED_PROVIDERS = new Set<ProviderConfig['provider']>([
   'qwen',
@@ -224,6 +225,9 @@ function approveAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{ taskId:
 }
 
 function resolveAgentRoot(workspaceDir?: string): string {
+  if (workspaceDir && fs.existsSync(path.join(workspaceDir, 'AGENTS.md'))) {
+    return workspaceDir;
+  }
   const cwd = workspaceDir || process.cwd();
   const roots = [cwd, path.join(cwd, 'agent')];
   for (const base of roots) {
@@ -245,7 +249,7 @@ function appendDailyMemoryTool(): Tool<{ note: string; date?: string }> {
       required: ['note'],
     },
     async execute(input, ctx) {
-      const root = resolveAgentRoot(ctx.workspaceDir);
+      const root = resolveAgentRoot(ctx.bootstrapDir || ctx.workspaceDir);
       const token = (input.date || new Date().toISOString().slice(0, 10)).trim();
       const memoryDir = path.join(root, 'memory');
       const file = path.join(memoryDir, `${token}.md`);
@@ -273,11 +277,41 @@ function promoteLongTermMemoryTool(): Tool<{ summary: string }> {
       if (key.startsWith('feishu-') || key.startsWith('feishu:') || key.startsWith('autonomy-') || key.startsWith('auto:') || key.startsWith('channel:')) {
         return '共享会话禁止写入 MEMORY.md，请改写入 daily memory。';
       }
-      const root = resolveAgentRoot(ctx.workspaceDir);
+      const root = resolveAgentRoot(ctx.bootstrapDir || ctx.workspaceDir);
       const file = path.join(root, 'MEMORY.md');
       const row = `\n## ${new Date().toISOString()}\n- ${input.summary.trim()}\n`;
       fs.appendFileSync(file, row, 'utf-8');
       return `已更新长期记忆: ${file}`;
+    },
+  };
+}
+
+function tokenUsageReportTool(): Tool<{
+  hours?: number;
+  source?: "all" | "rdkclaw" | "openclaw";
+  deviceId?: string;
+  limit?: number;
+}> {
+  return {
+    name: 'rdkclaw_token_usage_report',
+    description: '查看底层大模型 token 消耗统计（支持 RDKClaw、本地与板端 OpenClaw）。返回窗口期汇总与最近记录。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        hours: { type: 'number', description: '统计窗口小时数，默认 24' },
+        source: { type: 'string', description: 'all/rdkclaw/openclaw' },
+        deviceId: { type: 'string', description: '可选，按设备过滤' },
+        limit: { type: 'number', description: '最近记录条数，默认 50' },
+      },
+    },
+    async execute(input) {
+      const report = getTokenUsageReport({
+        hours: Number(input.hours ?? 24),
+        source: (input.source as "all" | "rdkclaw" | "openclaw") || "all",
+        deviceId: input.deviceId?.trim() || "",
+        limit: Number(input.limit ?? 50),
+      });
+      return JSON.stringify(report, null, 2);
     },
   };
 }
@@ -288,6 +322,7 @@ export function createStudioTools(runtime?: StudioAutonomyRuntime): Tool[] {
     setStudioAgentConfigTool(),
     appendDailyMemoryTool(),
     promoteLongTermMemoryTool(),
+    tokenUsageReportTool(),
   ];
   if (runtime) {
     tools.push(

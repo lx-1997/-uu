@@ -133,6 +133,8 @@ export interface AgentConfig {
   sessionDir?: string;
   /** 工作目录 */
   workspaceDir?: string;
+  /** Bootstrap 目录（AGENTS/SOUL/USER/MEMORY 所在目录） */
+  bootstrapDir?: string;
   /** 记忆存储目录 */
   memoryDir?: string;
   /** 是否启用记忆 */
@@ -213,6 +215,7 @@ export class Agent {
   private tools: Tool[];
   private maxTurns: number;
   private workspaceDir: string;
+  private bootstrapDir?: string;
   private toolPolicy?: ToolPolicy;
   private approval?: ApprovalConfig;
   private onApprovalRequest?: ApprovalHandler;
@@ -338,6 +341,7 @@ export class Agent {
     this.tools = config.tools ?? builtinTools;
     this.maxTurns = config.maxTurns ?? 20;
     this.workspaceDir = config.workspaceDir ?? process.cwd();
+    this.bootstrapDir = config.bootstrapDir;
     this.apiKey = config.apiKey ?? getEnvApiKey(provider);
     this.temperature = config.temperature;
     this.reasoning = config.reasoning ?? "medium";
@@ -358,7 +362,9 @@ export class Agent {
     // 初始化子系统
     this.sessions = new SessionManager(config.sessionDir);
     this.memory = new MemoryManager(config.memoryDir ?? "./.mini-agent/memory");
-    this.context = new ContextLoader(this.workspaceDir);
+    this.context = new ContextLoader(this.workspaceDir, {
+      bootstrapDir: this.bootstrapDir,
+    });
     this.skills = new SkillManager(this.workspaceDir);
     this.heartbeat = new HeartbeatManager(this.workspaceDir, {
       intervalMs: config.heartbeatInterval,
@@ -664,6 +670,7 @@ export class Agent {
           let memoriesUsed = 0;
           const toolCtx: ToolContext = {
             workspaceDir: this.workspaceDir,
+            bootstrapDir: this.bootstrapDir,
             sessionKey,
             sessionId: sessionIdOrKey,
             agentId: resolveAgentIdFromSessionKey(sessionKey),

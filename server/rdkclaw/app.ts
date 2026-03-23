@@ -1,5 +1,3 @@
-import * as path from "node:path";
-import * as os from "node:os";
 import * as crypto from "node:crypto";
 import {
   Agent,
@@ -26,11 +24,14 @@ import { createStudioTools, type StudioAutonomyRuntime } from "../agent/tools/st
 import { createForumTools } from "../agent/tools/forum-tools.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
+import { readDevices } from "../storage.js";
+import { recordTokenUsage } from "../monitoring/token-usage.js";
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { PersonaStore } from "./persona-store.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { RDKClawPolicyStore } from "./policy-store.js";
+import { UserWorkspaceStore } from "./workspace-store.js";
 import type {
   ApprovalDecisionMode,
   PersonaProfile,
@@ -228,12 +229,19 @@ function mapMiniEvent(
   }
 }
 
+function resolveBoardDevicePassword(device: { username: string; password?: string }) {
+  const persisted = device.password ?? "";
+  const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
+  return persisted || envPwd || device.username;
+}
+
 export class RDKClawApp {
   private readonly workspaceDir: string;
   private readonly openClawManager: OpenClawDeploymentManager;
   private readonly personaStore: PersonaStore;
   private readonly skills: SkillRegistry;
   private readonly policyStore: RDKClawPolicyStore;
+  private readonly workspaceStore: UserWorkspaceStore;
   private autonomyRuntime?: StudioAutonomyRuntime;
   private pendingApprovals = new Map<string, {
     resolve: (decision: ApprovalDecisionMode) => void;
@@ -245,12 +253,60 @@ export class RDKClawApp {
   private runAgents = new Map<string, Agent>();
   private sessionAutoApprove = new Map<string, boolean>();
 
+  private async getBoardSkillSnapshot(deviceId?: string): Promise<{ skills: string[]; plugins: string[] }> {
+    if (!deviceId) return { skills: [], plugins: [] };
+    const devices = await readDevices();
+    const hit = devices.find((d) => d.id === deviceId);
+    if (!hit) return { skills: [], plugins: [] };
+    const board = {
+      ip: hit.host,
+      userName: hit.username,
+      id: hit.id,
+      password: resolveBoardDevicePassword(hit as { username: string; password?: string }),
+    };
+    const timeoutMs = 9000;
+    return await new Promise<{ skills: string[]; plugins: string[] }>((resolve) => {
+      let output = "";
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve({ skills: [], plugins: [] });
+      }, timeoutMs);
+      this.openClawManager.getInstalledSkills(
+        board,
+        (chunk) => { output += chunk; },
+        () => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          const skills: string[] = [];
+          const plugins: string[] = [];
+          let section = "";
+          for (const line of output.split("\n")) {
+            const trimmed = line.trim();
+            if (trimmed === "===SKILLS===") { section = "skills"; continue; }
+            if (trimmed === "===PLUGINS===") { section = "plugins"; continue; }
+            if (!trimmed || trimmed.startsWith("无已安装")) continue;
+            if (section === "skills") skills.push(trimmed);
+            else if (section === "plugins") plugins.push(trimmed);
+          }
+          resolve({
+            skills: Array.from(new Set(skills)),
+            plugins: Array.from(new Set(plugins)),
+          });
+        },
+      );
+    });
+  }
+
   constructor(workspaceDir: string, openClawManager: OpenClawDeploymentManager) {
     this.workspaceDir = workspaceDir;
     this.openClawManager = openClawManager;
     this.personaStore = new PersonaStore();
     this.skills = new SkillRegistry({ workspaceDir });
     this.policyStore = new RDKClawPolicyStore();
+    this.workspaceStore = new UserWorkspaceStore(workspaceDir);
   }
 
   setAutonomyRuntime(runtime: StudioAutonomyRuntime) {
@@ -455,12 +511,19 @@ export class RDKClawApp {
   }
 
   async *streamChat(req: RDKClawChatRequest): AsyncGenerator<RDKClawEvent> {
+    const externalAbortSignal = req.abortSignal;
+    let abortedByClient = Boolean(externalAbortSignal?.aborted);
+    if (abortedByClient) {
+      return;
+    }
     const providerConfig = resolveProviderConfig();
     if (!providerConfig.apiKey) {
       throw new Error("未配置 AI 模型 API Key，请先在设置中配置。");
     }
 
-    const sessionKey = req.sessionId?.trim() || `rdkclaw-${Date.now()}`;
+    const sessionKey = req.sessionId?.trim() || (req.userId?.trim() ? `rdkclaw:${req.userId.trim()}` : `rdkclaw-${Date.now()}`);
+    const userProfile = req.userId ? this.personaStore.getUser(req.userId) : null;
+    const workspace = await this.workspaceStore.getOrInit(req.userId, userProfile);
     const attachmentState = await prepareSessionAttachments(sessionKey, req.attachments);
     await ensureAudioAttachmentTranscripts(
       sessionKey,
@@ -473,9 +536,18 @@ export class RDKClawApp {
     const persona = this.personaStore.getPersona();
     const policy = this.policyStore.getPolicy();
     const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
+    const boardSnapshot = await this.getBoardSkillSnapshot(req.deviceId);
     const decision = selectDelegateDecision(req, persona, policy, matchedSkills);
     const systemPrompt = [
       buildPersonaPrompt(persona),
+      req.deviceId
+        ? (boardSnapshot.skills.length > 0
+          ? `当前板端已安装 OpenClaw 技能（每次执行前快照）: ${boardSnapshot.skills.join(", ")}`
+          : "当前板端技能快照为空（可能未安装或读取失败）。如任务匹配不到现有技能，请优先生成并下发新技能，再继续执行。")
+        : "",
+      req.deviceId && boardSnapshot.plugins.length > 0
+        ? `当前板端允许插件: ${boardSnapshot.plugins.join(", ")}`
+        : "",
       attachmentState.allAttachments.length > 0
         ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
         : "",
@@ -509,7 +581,14 @@ export class RDKClawApp {
           decision_source: decision.source,
           decision_reason: decision.reason,
           confidence: decision.confidence,
+          workspace_profile_id: workspace.profileId,
+          workspace_source: workspace.source,
+          workspace_dir: workspace.workspaceDir,
           matched_skills: matchedSkills.map((s) => s.name),
+          board_skills_count: boardSnapshot.skills.length,
+          board_skills: boardSnapshot.skills,
+          board_plugins_count: boardSnapshot.plugins.length,
+          board_plugins: boardSnapshot.plugins,
           approval_mode: policy.approval.mode,
           network_enabled: policy.network.enabled,
           network_max_fetch_chars: policy.network.maxFetchChars,
@@ -532,8 +611,9 @@ export class RDKClawApp {
       provider: providerConfig.provider,
       model: providerConfig.model,
       workspaceDir: this.workspaceDir,
-      sessionDir: path.join(os.homedir(), ".rdkstudio", "sessions"),
-      memoryDir: path.join(os.homedir(), ".rdkstudio", "memory"),
+      bootstrapDir: workspace.workspaceDir,
+      sessionDir: workspace.sessionDir,
+      memoryDir: workspace.memoryDir,
       enableContext: true,
       enableSkills: true,
       enableMemory: true,
@@ -545,6 +625,11 @@ export class RDKClawApp {
     let finished = false;
     let failed: unknown = null;
     this.runAgents.set(runId, agent);
+    const handleExternalAbort = () => {
+      abortedByClient = true;
+      agent.abort();
+    };
+    externalAbortSignal?.addEventListener("abort", handleExternalAbort, { once: true });
     const unsubscribe = agent.subscribe((event) => {
       const mapped = mapMiniEvent(event, base);
       if (mapped) queue.push(mapped);
@@ -558,6 +643,7 @@ export class RDKClawApp {
       .finally(() => {
         finished = true;
         unsubscribe();
+        externalAbortSignal?.removeEventListener("abort", handleExternalAbort);
         this.runAgents.delete(runId);
       });
 
@@ -572,6 +658,9 @@ export class RDKClawApp {
 
     await runPromise;
     if (failed) {
+      if (abortedByClient) {
+        return;
+      }
       throw failed;
     }
   }

@@ -238,13 +238,17 @@ export default function Dashboard() {
       {/* ── Hero: device name as the centerpiece ── */}
       <div className={`lp-hero ${mounted ? 'lp-enter' : ''}`}>
         <div className="lp-status-row">
-          <span className={`lp-pill ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : ''}`}>
-            <span className={`status-dot ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : 'offline'}`} />
-            {currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? '在线' : '离线'}
-          </span>
           <span className={`lp-pill ${openclawHealth?.aiReady ? 'ok' : ''}`}>
             <span className={`status-dot ${openclawHealth?.aiReady ? 'online' : 'warn'}`} />
-            OpenClaw {openclawHealth?.aiReady ? 'Ready' : '---'}
+            RDKClaw
+          </span>
+          <span className={`lp-pill ${openclawHealth?.gatewayRunning ? 'ok' : ''}`}>
+            <span className={`status-dot ${openclawHealth?.gatewayRunning ? 'online' : 'warn'}`} />
+            OpenClaw
+          </span>
+          <span className={`lp-pill ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : ''}`}>
+            <span className={`status-dot ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : 'offline'}`} />
+            设备在线
           </span>
         </div>
         <h1 className="lp-device-name">{currentDevice.name}</h1>

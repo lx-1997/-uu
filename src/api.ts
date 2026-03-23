@@ -275,6 +275,7 @@ export function streamAgentChat(
   message: string,
   deviceId?: string,
   sessionId?: string,
+  userId?: string,
   attachments?: AgentAttachmentPayload[],
   onEvent?: AgentEventCallback,
 ): { abort: () => void; done: Promise<void> } {
@@ -285,7 +286,7 @@ export function streamAgentChat(
       const res = await fetch(resolveUrl('/api/agent/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, deviceId, sessionId, attachments }),
+        body: JSON.stringify({ message, deviceId, sessionId, userId, attachments }),
         signal: controller.signal,
       });
 
@@ -342,6 +343,16 @@ export function fetchAgentConfig() {
     model?: string;
     hasApiKey?: boolean;
     baseUrl?: string;
+    activeModelId?: string | null;
+    models?: Array<{
+      id: string;
+      label: string;
+      provider: string;
+      model: string;
+      hasApiKey: boolean;
+      baseUrl?: string;
+      isActive: boolean;
+    }>;
   }>('/api/agent/config');
 }
 
@@ -540,10 +551,14 @@ export function rejectFeishuPairing(code: string) {
 }
 
 export function saveAgentConfig(config: {
-  provider: string;
-  model: string;
+  action?: 'upsert' | 'switch' | 'delete';
+  id?: string;
+  label?: string;
+  provider?: string;
+  model?: string;
   apiKey?: string;
   baseUrl?: string;
+  setActive?: boolean;
 }) {
   return request<{ ok: boolean }>('/api/agent/config', {
     method: 'POST',

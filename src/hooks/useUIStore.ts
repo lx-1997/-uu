@@ -306,7 +306,18 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ── Rail ──
-  const [railExpanded, setRailExpanded] = useState(false);
+  const [railExpandedState, setRailExpandedState] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const saved = localStorage.getItem('rdk-rail-expanded');
+    if (saved == null) return true;
+    return saved === '1';
+  });
+  const setRailExpanded = (v: boolean) => {
+    setRailExpandedState(v);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('rdk-rail-expanded', v ? '1' : '0');
+    }
+  };
 
   // ── Hardware ──
   const [hardwareRange, setHardwareRange] = useState<'realtime' | '10m' | '1h'>('realtime');
@@ -352,7 +363,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     openclawMode, setOpenclawMode, openclawThreshold,
     openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
     openclawSendMessage: openclawSendRef.current, registerOpenclawSend,
-    railExpanded, setRailExpanded,
+    railExpanded: railExpandedState, setRailExpanded,
     hardwareRange, setHardwareRange,
     examplePreset, setExamplePreset,
     rosTopic, setRosTopic, rosRecording, setRosRecording,

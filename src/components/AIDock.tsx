@@ -437,7 +437,8 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    handleApprovalAction, stopCurrentRun,
+    handleApprovalAction, stopCurrentRun, backgroundCurrentRun,
+    backgroundRuns, stopBackgroundRun,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
     currentDevice, addToast,
@@ -857,9 +858,6 @@ export default function AIDock() {
               <button className="btn-icon" onClick={clearChatHistory} title="清空">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
               </button>
-              <button className="btn-icon" onClick={() => setWorkspaceMode(!workspaceMode)} title={workspaceMode ? '还原' : '全屏'}>
-                {workspaceMode ? Icon.collapse : Icon.expand}
-              </button>
               <button className="btn-icon" onClick={closeDock} title="关闭">{Icon.close}</button>
             </div>
           </div>
@@ -867,6 +865,18 @@ export default function AIDock() {
           {/* Task panel */}
           {showTaskPanel && (
             <div className="dock-tasks">
+              {backgroundRuns.length > 0 && backgroundRuns.map((run) => (
+                <div key={run.runId} className="dock-task-item">
+                  <span className={`dock-task-dot ${run.status === 'running' ? 'running' : 'cancelled'}`} />
+                  <span className="dock-task-label">板端后台任务</span>
+                  <span className="dock-task-status">
+                    {run.status === 'running' ? '后台执行中' : '已结束'}
+                  </span>
+                  {run.status === 'running' && (
+                    <button className="btn btn-sm btn-ghost" onClick={() => stopBackgroundRun(run.runId)}>结束</button>
+                  )}
+                </div>
+              ))}
               {taskHistory.map(task => (
                 <div key={task.id} className="dock-task-item">
                   <span className={`dock-task-dot ${task.status}`} />
@@ -955,7 +965,8 @@ export default function AIDock() {
                 <div className="dock-bubble ai">
                   <div className="dock-typing">
                     <div className="typing-dots"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
-                    <button className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>停止</button>
+                    <button className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>转后台</button>
+                    <button className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>结束任务</button>
                   </div>
                 </div>
               </div>
@@ -1028,6 +1039,16 @@ export default function AIDock() {
 
           {cmd.trim() && (
             <button type="button" className="dock-action-btn" onClick={() => setCmd('')} title="清空">{Icon.close}</button>
+          )}
+          {!chatExpanded && (
+            <button
+              type="button"
+              className="dock-action-btn"
+              onClick={() => setChatExpanded(true)}
+              title="打开聊天面板"
+            >
+              {Icon.expand}
+            </button>
           )}
           <button type="submit" className={`dock-send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`} disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping} title="发送">
             {Icon.send}

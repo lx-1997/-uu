@@ -54,6 +54,13 @@ export interface AIChatStoreState {
     runId?: string,
   ) => void;
   stopCurrentRun: () => void;
+  backgroundCurrentRun: () => void;
+  backgroundRuns: Array<{
+    runId: string;
+    status: 'running' | 'ended';
+    detachedAt: number;
+  }>;
+  stopBackgroundRun: (runId: string) => void;
 }
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
@@ -98,6 +105,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const [agentPlan, setAgentPlan] = useState<AgentPlan | null>(null);
   const [agentExecution, setAgentExecution] = useState<AgentExecutionState>({ running: false, currentStep: 0, totalSteps: 0 });
   const agentAbortRef = useRef(false);
+  const [backgroundRuns, setBackgroundRuns] = useState<Array<{
+    runId: string;
+    status: 'running' | 'ended';
+    detachedAt: number;
+  }>>([]);
 
   const filteredSuggestions = cmd.trim()
     ? CMD_SUGGESTIONS.filter((s) => s.text.includes(cmd) || s.keyword.includes(cmd.toLowerCase()))
@@ -163,7 +175,31 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
   const approvalBlockRef = useRef<Record<string, number>>({});
-  const sessionIdRef = useRef(`ui-${Date.now()}`);
+  const sessionStorageKey = 'rdk:chat:session-id';
+  const userStorageKey = 'rdk:chat:user-id';
+  const readOrCreateStableId = (key: string, prefix: string) => {
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing?.trim()) return existing.trim();
+      const created = `${prefix}-${Date.now()}`;
+      localStorage.setItem(key, created);
+      return created;
+    } catch {
+      return `${prefix}-${Date.now()}`;
+    }
+  };
+  const sessionIdRef = useRef(readOrCreateStableId(sessionStorageKey, 'ui'));
+  const userIdRef = useRef(readOrCreateStableId(userStorageKey, 'studio-user'));
+  const persistSessionId = (value: string) => {
+    const next = String(value || '').trim();
+    if (!next) return;
+    sessionIdRef.current = next;
+    try {
+      localStorage.setItem(sessionStorageKey, next);
+    } catch {
+      // ignore persistence failures
+    }
+  };
   const feishuMirrorSeenRef = useRef<Set<string>>(new Set());
   const syncWarnAtRef = useRef<{ session: number; device: number }>({ session: 0, device: 0 });
   const reportActiveSession = (reason: string) => {
@@ -233,12 +269,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       setChatMessages((prev) => [...prev, {
         id: Date.now(),
         role: 'ai',
-        text: '已停止。你可以继续输入新的指令。',
+        text: '当前任务已结束。你可以继续输入新的指令。',
         blocks: [{
           type: 'task-result',
           success: false,
-          title: '已停止当前执行',
-          detail: runId ? `runId: ${runId}` : '已中断当前流式响应',
+          title: '任务已结束',
+          detail: runId ? `已发送结束指令（runId: ${runId}）` : '已结束当前流式响应',
         }],
       }]);
     }
@@ -392,6 +428,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           requestMessage,
           currentDevice?.id,
           sessionIdRef.current,
+          userIdRef.current,
           requestAttachments,
           (event: AgentSSEEvent) => {
             if (generation !== streamGenerationRef.current) return;
@@ -728,6 +765,54 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     abortInFlightRun(true);
   };
 
+  const backgroundCurrentRun = () => {
+    const runId = currentRunIdRef.current;
+    const nextSessionId = `ui-${Date.now()}`;
+    persistSessionId(nextSessionId);
+    reportActiveSession('background-detach');
+    if (runId) {
+      setBackgroundRuns((prev) => {
+        if (prev.some((item) => item.runId === runId)) return prev;
+        const next: typeof prev = [{ runId, status: 'running' as const, detachedAt: Date.now() }, ...prev].slice(0, 20);
+        return next;
+      });
+    }
+    setAiTyping(false);
+    commandLockRef.current = false;
+    setChatMessages((prev) => [...prev, {
+      id: Date.now(),
+      role: 'ai',
+      text: '当前任务已转入后台继续执行，你可以直接继续新的对话。',
+      blocks: [{
+        type: 'task-result',
+        success: true,
+        title: '任务已转后台',
+        detail: runId
+          ? `后台运行中（runId: ${runId}），已切换到新会话继续对话`
+          : '已切换到新会话继续对话',
+      }],
+    }]);
+  };
+
+  const stopBackgroundRun = (runId: string) => {
+    if (!runId) return;
+    cancelRDKClawRun(runId).catch(() => null);
+    setBackgroundRuns((prev) => prev.map((item) => (
+      item.runId === runId ? { ...item, status: 'ended' as const } : item
+    )));
+    setChatMessages((prev) => [...prev, {
+      id: Date.now(),
+      role: 'ai',
+      text: '后台任务已结束。',
+      blocks: [{
+        type: 'task-result',
+        success: false,
+        title: '后台任务已结束',
+        detail: `runId: ${runId}`,
+      }],
+    }]);
+  };
+
   // ── Effects ──
 
   useEffect(() => {
@@ -775,7 +860,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       if (isFeishuMirror) {
         if (payload.sessionId && payload.sessionId !== sessionIdRef.current) {
           // 飞书会话优先作为统一上下文，自动接管当前 Studio 会话键
-          sessionIdRef.current = payload.sessionId;
+          persistSessionId(payload.sessionId);
           reportActiveSession('feishu-mirror-switch');
         }
         const dedupKey = payload.mirrorId
@@ -916,7 +1001,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     aiTyping, setAiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
-    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, stopCurrentRun,
+    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, stopCurrentRun, backgroundCurrentRun,
+    backgroundRuns, stopBackgroundRun,
   };
 
   return React.createElement(AIChatContext.Provider, { value }, children);
