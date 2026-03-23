@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { executeDeviceCommand, fetchDeviceWifiList } from '../../api';
+import { fetchDeviceWifiList } from '../../api';
+import { resolveApiUrl } from '../../utils/apiBase';
 import { useAppState } from '../../hooks/useAppState';
 
 export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
@@ -11,18 +12,15 @@ export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
   const [wifiList, setWifiList] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
 
+  const [connectLog, setConnectLog] = useState('');
+
   const scanWifi = useCallback(async () => {
     if (!currentDevice) return;
     setScanning(true);
     try {
       const res = await fetchDeviceWifiList(currentDevice.id);
       const names = res.wifiNames?.filter(Boolean) || [];
-      if (names.length > 0) { setWifiList(names); setScanning(false); return; }
-      const fallback = await executeDeviceCommand(
-        currentDevice.id,
-        'bash -lc "nmcli dev wifi list --rescan yes 2>/dev/null | tail -n +2 | awk \'{print $2}\' | sort -u | head -20"',
-      );
-      setWifiList(fallback.output.split('\n').map(l => l.trim()).filter(Boolean));
+      setWifiList(names);
     } catch {
       addToast('扫描 WiFi 失败', 'warning');
     } finally {
@@ -35,14 +33,26 @@ export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
   const handleConnect = async () => {
     if (!currentDevice || !ssid) return;
     setConnecting(true);
-    const esc = (s: string) => s.replace(/"/g, '\\"');
-    const cmd = password.trim()
-      ? `bash -lc "nmcli dev wifi connect \\"${esc(ssid)}\\" password \\"${esc(password)}\\" || (wpa_passphrase \\"${esc(ssid)}\\" \\"${esc(password)}\\" | sudo tee /etc/wpa_supplicant/wpa_supplicant.conf >/dev/null && sudo wpa_cli -i wlan0 reconfigure)"`
-      : `bash -lc "nmcli dev wifi connect \\"${esc(ssid)}\\" || sudo nmcli dev wifi connect \\"${esc(ssid)}\\""`;
-    executeDeviceCommand(currentDevice.id, cmd)
-      .then(() => { addToast(`已连接到 ${ssid}`, 'success'); onClose(); })
-      .catch(e => addToast(e instanceof Error ? e.message : 'WiFi 配置失败', 'error'))
-      .finally(() => setConnecting(false));
+    setConnectLog('');
+    try {
+      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/wifi-connect`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wifiName: ssid, wifiPassword: password }),
+      });
+      const data = await res.json() as { ok: boolean; output?: string; error?: string };
+      if (data.output) setConnectLog(data.output);
+      if (data.ok) {
+        addToast(`已连接到 ${ssid}`, 'success');
+        onClose();
+      } else {
+        addToast(data.error || data.output || 'WiFi 连接失败，请检查密码是否正确', 'error');
+      }
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'WiFi 配置请求失败', 'error');
+    } finally {
+      setConnecting(false);
+    }
   };
 
   return (
@@ -118,7 +128,11 @@ export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          <div className="wifi-hint">连接时可能短暂断开当前网络，请耐心等待重连。</div>
+          {connectLog && (
+            <pre className="wifi-connect-log">{connectLog}</pre>
+          )}
+
+          <div className="wifi-hint">连接时可能短暂断开当前 SSH 连接，请耐心等待设备重连。</div>
 
           <div className="modal-footer">
             <button className="btn btn-ghost" onClick={onClose}>取消</button>

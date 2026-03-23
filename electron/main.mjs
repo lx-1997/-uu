@@ -305,6 +305,7 @@ function startEmbeddedServer() {
     console.log('[server] data path:', dataPath);
 
     serverProcess = spawn(process.execPath, [serverPath], {
+      cwd: getAppRoot(),
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -407,6 +408,18 @@ async function createMainWindow() {
   });
 
   const target = getRendererUrl();
+
+  let loadRetries = 0;
+  mainWin.webContents.on('did-fail-load', (_ev, _code, desc, failUrl) => {
+    if (loadRetries < 5 && failUrl === target) {
+      loadRetries += 1;
+      console.log('[main] load failed (' + desc + '), retry ' + loadRetries + '/5');
+      setTimeout(() => {
+        if (mainWin && !mainWin.isDestroyed()) mainWin.loadURL(target).catch(() => {});
+      }, 1500);
+    }
+  });
+
   await mainWin.loadURL(target);
 
   // 窗口 resize 时同步所有 WebContentsView 的尺寸

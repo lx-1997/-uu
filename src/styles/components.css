@@ -1077,6 +1077,20 @@
   gap: 12px;
 }
 
+.wifi-connect-log {
+  font-size: 0.6875rem;
+  font-family: 'Menlo', 'Consolas', monospace;
+  background: var(--bg-deeper, #1a1a2e);
+  color: #a8d8a8;
+  padding: 8px 10px;
+  border-radius: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 4px;
+}
+
 .wifi-hint {
   font-size: 0.6875rem;
   color: var(--text-muted);

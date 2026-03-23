@@ -62,9 +62,9 @@ export default function Vnc() {
   // ── 构建 VNC URL ──
   const getVncUrl = useCallback(() => {
     if (!currentDevice) return '';
-    const host = window.location.hostname;
-    // 桌面端（file:// 协议）直接用 8787；开发模式也用 8787；Web 模式用当前端口
     const isDesktopMode = !!(window as any).rdkDesktop?.isDesktop;
+    // file:// 协议下 window.location.hostname 为空，桌面端直接用 localhost
+    const host = isDesktopMode ? 'localhost' : (window.location.hostname || 'localhost');
     const backendPort = isDesktopMode ? 8787 : ((import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80));
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
     const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;

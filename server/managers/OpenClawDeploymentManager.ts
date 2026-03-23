@@ -1037,20 +1037,30 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(true, text || '(con
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void
   ): void {
-    const escapedName = (wifiName || '').replace(/"/g, '\\"');
-    const escapedPwd = (wifiPassword || '').replace(/"/g, '\\"');
-    const cmd = `sudo wifi_connect "${escapedName}" "${escapedPwd}" 2>&1`;
+    const nameB64 = Buffer.from(wifiName || '').toString('base64');
+    const pwdB64 = Buffer.from(wifiPassword || '').toString('base64');
+
+    // WIFI_SSID / WIFI_KEY avoid clashing with bash built-in $PWD
+    // Delete ALL matching connections (loop) to prevent "Secrets" reuse bug
+    // Use nmcli connection add with security inline (no separate modify step)
+    const script = [
+      `WIFI_SSID=$(echo '${nameB64}' | base64 -d)`,
+      `WIFI_KEY=$(echo '${pwdB64}' | base64 -d)`,
+      `echo "[WiFi] 清理所有同名旧连接..."`,
+      `while sudo nmcli con delete "$WIFI_SSID" 2>/dev/null; do true; done`,
+      `echo "[WiFi] 扫描网络..."`,
+      `sudo nmcli device wifi rescan 2>/dev/null; sleep 2`,
+      `echo "[WiFi] 正在连接 $WIFI_SSID ..."`,
+      `if command -v wifi_connect >/dev/null 2>&1; then sudo wifi_connect "$WIFI_SSID" "$WIFI_KEY" 2>&1; else sudo nmcli device wifi connect "$WIFI_SSID" password "$WIFI_KEY" ifname wlan0 2>&1; fi`,
+      `sleep 3`,
+      `NEW_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP "inet \\\\K[\\\\d.]+" || true)`,
+      `if [ -n "$NEW_IP" ]; then echo "[WiFi] OK IP=$NEW_IP"; else echo "[WiFi] FAIL"; fi`,
+    ].join(' ; ');
+
     let output = '';
-    const collectOutput = (chunk: string) => {
-      output += chunk;
-      onOutput(chunk);
-    };
-    const wrapComplete = (exitSuccess: boolean) => {
-      const hasErrorInOutput = /error|failed|secrets were required|connection activation failed|invalid|denied|refused|authentication failed|wrong password/i.test(output);
-      const success = exitSuccess && !hasErrorInOutput;
-      onComplete(success);
-    };
-    this.execCommand(device, cmd, collectOutput, wrapComplete, { timeout: 60000 });
+    const collectOutput = (chunk: string) => { output += chunk; onOutput(chunk); };
+    const wrapComplete = () => { onComplete(/\[WiFi\] OK IP=/.test(output)); };
+    this.execCommand(device, script, collectOutput, wrapComplete, { timeout: 90000 });
   }
 
   // OpenClaw 对话方法

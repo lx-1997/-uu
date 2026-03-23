@@ -689,6 +689,13 @@
   color: var(--text-secondary);
 }
 
+.ob-oc-detail {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
 .ob-oc-checking {
   flex-direction: row;
 }
