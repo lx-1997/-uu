@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import {
   fetchDeviceOpenClawHealth,
-  installDeviceOpenClaw,
+  checkDevicePing,
 } from '../api';
+import { resolveApiUrl } from '../utils/apiBase';
 
 type Step = 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done';
 
@@ -54,6 +55,18 @@ const IMAGE_RECOMMENDATIONS: Record<string, { name: string; tag: string; url: st
   s100: { name: 'RDKS100-V4.0.4-Beta Desktop', tag: 'ubuntu22.04', url: 'https://archive.d-robotics.cc/downloads/os_images/rdk_s100/' },
 };
 
+const SKIP_RISKS = [
+  '板端 AI Agent 能力不可用（智能对话、自动化执行）',
+  '无法通过飞书等消息渠道远程控制设备',
+  '板端技能（摄像头、推理、GPIO 等）无法被 AI 调用',
+];
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`;
+}
+
 function StepIndicator({ current }: { current: Step }) {
   const idx = STEPS.findIndex(s => s.key === current);
   return (
@@ -83,6 +96,15 @@ export default function OnboardingWizard() {
   const [ocChecking, setOcChecking] = useState(false);
   const [ocReady, setOcReady] = useState<boolean | null>(null);
   const [ocInstalling, setOcInstalling] = useState(false);
+  const [deviceOnline, setDeviceOnline] = useState<boolean | null>(null);
+  const [ocInstallLog, setOcInstallLog] = useState('');
+  const [installElapsed, setInstallElapsed] = useState(0);
+  const [showSkipWarning, setShowSkipWarning] = useState(false);
+
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLPreElement>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (obStep === 'connect' && currentDevice) {
@@ -93,23 +115,129 @@ export default function OnboardingWizard() {
   useEffect(() => {
     if (obStep !== 'openclaw' || !currentDevice) return;
     setOcChecking(true);
+    setDeviceOnline(null);
+    checkDevicePing(currentDevice.id)
+      .then((r) => setDeviceOnline(!!r.ok))
+      .catch(() => setDeviceOnline(false));
     fetchDeviceOpenClawHealth(currentDevice.id)
       .then(r => setOcReady(!!r.status?.aiReady))
       .catch(() => setOcReady(false))
       .finally(() => setOcChecking(false));
   }, [obStep, currentDevice?.id]);
 
-  const handleInstallOC = async () => {
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [ocInstallLog]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const handleInstallOC = useCallback(async () => {
     if (!currentDevice) return;
-    setOcInstalling(true);
+    if (deviceOnline === false) {
+      addToast('设备当前无法连通（请先确认网络与 SSH），再安装 OpenClaw', 'warning');
+      return;
+    }
+
     try {
-      await installDeviceOpenClaw(currentDevice.id);
-      addToast('OpenClaw 安装完成', 'success');
-      setOcReady(true);
+      const ping = await checkDevicePing(currentDevice.id);
+      if (!ping.ok) {
+        addToast('安装前检测：设备未响应，请检查网络后重试', 'warning');
+        return;
+      }
     } catch {
-      addToast('OpenClaw 安装失败，请稍后在 OpenClaw 页重试', 'warning');
+      addToast('安装前检测：无法连接设备', 'warning');
+      return;
+    }
+
+    setOcInstalling(true);
+    setOcInstallLog('');
+    setInstallElapsed(0);
+    setShowSkipWarning(false);
+
+    timerRef.current = setInterval(() => {
+      setInstallElapsed(prev => prev + 1);
+    }, 1000);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const url = resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/install-stream`);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const payload = JSON.parse(line.slice(6));
+            if (payload.type === 'log') {
+              setOcInstallLog(prev => prev + payload.text);
+            } else if (payload.type === 'done') {
+              if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+              setOcInstalling(false);
+              if (payload.ok) {
+                addToast('OpenClaw 安装完成', 'success');
+                setOcReady(true);
+              } else {
+                addToast('OpenClaw 安装未成功，请查看日志或到 OpenClaw 页重试', 'warning');
+                setOcReady(false);
+              }
+            }
+          } catch { /* malformed SSE line */ }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
+      const msg = err instanceof Error ? err.message : String(err);
+      setOcInstallLog(prev => prev + `\n[错误] ${msg}\n`);
+      addToast('OpenClaw 安装请求失败，请稍后在 OpenClaw 页重试', 'warning');
     } finally {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       setOcInstalling(false);
+      abortRef.current = null;
+    }
+  }, [currentDevice, deviceOnline, addToast]);
+
+  const handleSkipConfirm = () => {
+    if (ocInstalling) {
+      addToast('OpenClaw 安装仍在后台进行，完成后可在 OpenClaw 页面查看', 'info');
+      abortRef.current?.abort();
+    }
+    setShowSkipWarning(false);
+    setObStep('rdkclaw');
+  };
+
+  const handleCopyLog = async () => {
+    if (!ocInstallLog.trim()) return;
+    try {
+      await navigator.clipboard.writeText(ocInstallLog);
+      addToast('日志已复制到剪贴板', 'success');
+    } catch {
+      addToast('复制失败', 'warning');
     }
   };
 
@@ -270,17 +398,27 @@ export default function OnboardingWizard() {
             {ocChecking && (
               <div className="ob-oc-checking"><div className="spinner" /><span>正在检查 OpenClaw 状态...</span></div>
             )}
+            {!ocChecking && deviceOnline === false && (
+              <div className="ob-oc-offline">
+                <span>设备当前<strong>无法连通</strong>，请先确认开发板已联网、IP 正确且本机能 SSH，再安装 OpenClaw。</span>
+              </div>
+            )}
             {!ocChecking && ocReady === true && (
               <div className="ob-oc-ready">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                 <span>OpenClaw 已就绪</span>
               </div>
             )}
-            {!ocChecking && ocReady === false && (
+            {!ocChecking && ocReady === false && !showSkipWarning && (
               <div className="ob-oc-missing">
                 <span>OpenClaw 未安装或未就绪</span>
                 <div className="ob-oc-actions">
-                  <button className="btn btn-primary btn-sm" onClick={handleInstallOC} disabled={ocInstalling}>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleInstallOC}
+                    disabled={ocInstalling || deviceOnline === false}
+                    title={deviceOnline === false ? '请先恢复设备连通' : undefined}
+                  >
                     {ocInstalling ? '安装中...' : '一键安装 OpenClaw'}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={goOpenClaw}>
@@ -289,12 +427,72 @@ export default function OnboardingWizard() {
                 </div>
               </div>
             )}
+
+            {/* Terminal-style install log */}
+            {(ocInstalling || ocInstallLog) && !showSkipWarning && (
+              <div className="ob-install-terminal">
+                <div className="ob-install-terminal-header">
+                  <span className="ob-install-terminal-dots">
+                    <span className="td red" /><span className="td yellow" /><span className="td green" />
+                  </span>
+                  <span className="ob-install-terminal-title">安装日志</span>
+                  {ocInstalling && (
+                    <span className="ob-elapsed">{formatElapsed(installElapsed)}</span>
+                  )}
+                  {ocInstallLog && (
+                    <button className="ob-install-terminal-copy" onClick={handleCopyLog} type="button">
+                      复制日志
+                    </button>
+                  )}
+                </div>
+                <pre className="ob-install-terminal-body" ref={logContainerRef}>
+                  {ocInstallLog || '正在连接设备，准备安装...\n'}
+                  {ocInstalling && <span className="ob-install-cursor">_</span>}
+                  <div ref={logEndRef} />
+                </pre>
+              </div>
+            )}
+
+            {/* Skip warning overlay */}
+            {showSkipWarning && (
+              <div className="ob-skip-warning">
+                <div className="ob-skip-warning-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                </div>
+                <strong className="ob-skip-warning-title">跳过将影响以下功能</strong>
+                <ul className="ob-skip-warning-list">
+                  {SKIP_RISKS.map((risk, i) => (
+                    <li key={i}>{risk}</li>
+                  ))}
+                </ul>
+                <p className="ob-skip-warning-hint">
+                  你可以稍后在 OpenClaw 页面随时安装。
+                </p>
+                <div className="ob-skip-warning-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={() => setShowSkipWarning(false)}>
+                    返回
+                  </button>
+                  <button className="btn btn-danger btn-sm" onClick={handleSkipConfirm}>
+                    仍然跳过
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
           <div className="ob-actions">
             <button className="btn btn-ghost" onClick={() => setObStep('connect')}>上一步</button>
-            <button className="btn btn-primary" onClick={() => setObStep('rdkclaw')}>
-              {ocReady ? '下一步' : '跳过，稍后安装'}
-            </button>
+            {ocReady ? (
+              <button className="btn btn-primary" onClick={() => setObStep('rdkclaw')}>
+                下一步
+              </button>
+            ) : (
+              <button className="btn btn-ghost" onClick={() => setShowSkipWarning(true)}>
+                跳过此步骤
+              </button>
+            )}
           </div>
         </div>
       )}

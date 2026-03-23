@@ -1041,6 +1041,33 @@ app.post('/api/devices/:id/openclaw/install', async (request, response) => {
   });
 });
 
+app.post('/api/devices/:id/openclaw/install-stream', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+
+  response.setHeader('Content-Type', 'text/event-stream');
+  response.setHeader('Cache-Control', 'no-cache');
+  response.setHeader('Connection', 'keep-alive');
+  response.flushHeaders();
+
+  request.on('close', () => { response.end(); });
+
+  openClawManager.runInstall(deviceObj, (chunk) => {
+    if (!response.writableEnded) {
+      response.write(`data: ${JSON.stringify({ type: 'log', text: chunk })}\n\n`);
+    }
+  }, (success) => {
+    if (!response.writableEnded) {
+      response.write(`data: ${JSON.stringify({ type: 'done', ok: success })}\n\n`);
+      response.end();
+    }
+  });
+});
+
 app.post('/api/devices/:id/openclaw/deploy/start', async (request, response) => {
   const { id } = request.params;
   const { provider, baseUrl, apiKey, modelId, api } = request.body as {

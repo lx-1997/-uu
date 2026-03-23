@@ -21,6 +21,7 @@ import Ros from './components/Ros';
 import Models from './components/Models';
 import SkillBrowser from './components/SkillBrowser';
 import ErrorBoundary from './components/ErrorBoundary';
+import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 
 const TAB_NAMES: Record<string, string> = {
   dashboard: '工作台',
@@ -52,7 +53,6 @@ function MainContent() {
     dashboard: <Dashboard />,
     flasher: <Flasher />,
     files: <Files />,
-    openclaw: <OpenClaw />,
     hardware: <Hardware />,
     ros: <Ros />,
     skills: <SkillBrowser />,
@@ -65,6 +65,9 @@ function MainContent() {
           {standardViews[activeTab]}
         </div>
       )}
+      <div className={`persistent-pane ${activeTab === 'openclaw' ? 'is-active' : 'is-hidden'}`}>
+        <OpenClaw />
+      </div>
       <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
         <Terminal />
       </div>
@@ -138,6 +141,7 @@ function AppShell() {
 
   return (
     <div className="app-shell">
+      <OpenClawDeployPollHost />
       <IconRail />
 
       <header className="top-bar">

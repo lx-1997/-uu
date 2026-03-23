@@ -1,5 +1,6 @@
 import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
+import { resolveApiUrl } from './utils/apiBase';
 
 export interface DeviceExecResult {
   ok: boolean;
@@ -51,9 +52,7 @@ function extractDeviceId(input: RequestInfo) {
 
 /* 桌面端（file:// 协议）下相对路径失效，需拼接绝对 URL */
 function resolveUrl(path: string): string {
-  const apiBase = (window as any).rdkDesktop?.apiBase;
-  if (apiBase) return `${apiBase}${path}`;
-  return path;
+  return resolveApiUrl(path);
 }
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {

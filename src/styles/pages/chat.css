@@ -143,6 +143,39 @@
   font-size: 0.8125rem;
   line-height: 1.65;
   color: var(--text-primary);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.dock-bubble-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2px 0 6px;
+}
+
+.dock-bubble-copy {
+  padding: 2px 8px;
+  font-size: 0.625rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dock-bubble-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dock-msg.user .dock-bubble-copy {
+  border-color: rgba(255, 255, 255, 0.35);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dock-msg.user .dock-bubble-copy:hover {
+  border-color: #fff;
+  color: #fff;
 }
 
 .dock-msg.ai .dock-bubble {

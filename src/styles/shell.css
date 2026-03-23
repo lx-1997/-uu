@@ -354,6 +354,98 @@
   color: var(--text-primary);
 }
 
+/* 顶栏：多网卡 IP 列表（复制） */
+.topbar-ip-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-ip-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  min-width: 280px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+}
+
+.topbar-ip-menu-hint {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  padding: 4px 8px 8px;
+  line-height: 1.4;
+}
+
+.topbar-ip-warn {
+  font-size: 0.6875rem;
+  color: var(--warning, #b45309);
+  background: var(--warning-bg, rgba(180, 83, 9, 0.08));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 0 8px 8px;
+  line-height: 1.45;
+}
+
+.topbar-ip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.topbar-ip-row:hover {
+  background: var(--bg-inset);
+}
+
+.topbar-ip-row.is-current {
+  border: 1px solid var(--border);
+  background: var(--accent-subtle, rgba(99, 102, 241, 0.08));
+}
+
+.topbar-ip-iface {
+  color: var(--text-muted);
+  flex: 0 0 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-ip-val {
+  font-family: ui-monospace, monospace;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-ip-copy {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 0.625rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.topbar-ip-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .topbar-icon-btn svg {
   width: 18px;
   height: 18px;

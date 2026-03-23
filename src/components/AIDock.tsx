@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
-import type { ChatBlock, ChatAttachment } from '../app-types';
+import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload } from '../api';
 import { getCapability } from '../ai';
 import { resolveSocketUrl } from '../utils/socket';
@@ -160,6 +160,16 @@ function BlockRenderer({
             <span className="td red" /><span className="td yellow" /><span className="td green" />
           </span>
           <span className="terminal-block-label">{block.label || 'Terminal'}</span>
+          <button
+            type="button"
+            className="chat-panel-action"
+            title="复制全部输出"
+            onClick={() => {
+              void copyDockPlainText(block.lines.join('\n')).then(() => {});
+            }}
+          >
+            复制输出
+          </button>
           {collapsible && (
             <button
               type="button"
@@ -185,6 +195,13 @@ function BlockRenderer({
       <div className="msg-block code-block">
         <div className="code-block-header">
           <span className="code-block-lang">{block.lang}</span>
+          <button
+            type="button"
+            className="chat-panel-action"
+            onClick={() => { void copyDockPlainText(block.content); }}
+          >
+            复制
+          </button>
         </div>
         <pre className="code-block-body"><code>{block.content}</code></pre>
       </div>
@@ -363,6 +380,53 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
       </div>
     </div>
   );
+}
+
+function chatMessageToPlainText(msg: ChatMessage): string {
+  const parts: string[] = [];
+  if (msg.text?.trim()) parts.push(msg.text.trim());
+  if (msg.blocks?.length) {
+    for (const b of msg.blocks) {
+      if (b.type === 'terminal') {
+        parts.push((b.label ? `${b.label}\n` : '') + b.lines.join('\n'));
+      } else if (b.type === 'code') {
+        parts.push(`\`\`\`${b.lang}\n${b.content}\n\`\`\``);
+      } else if (b.type === 'status') {
+        parts.push(b.items.map((i) => `${i.label}: ${i.value}`).join('\n'));
+      } else if (b.type === 'confirm' || b.type === 'approval') {
+        parts.push(b.text);
+      } else if (b.type === 'progress') {
+        parts.push(b.steps.map((s) => `${s.label} (${s.status})`).join('\n'));
+      } else if (b.type === 'task-result') {
+        parts.push([b.title, b.detail].filter(Boolean).join('\n'));
+      } else if (b.type === 'image') {
+        parts.push(b.caption || b.src || '[图片]');
+      }
+    }
+  }
+  return parts.join('\n\n').trim();
+}
+
+async function copyDockPlainText(text: string): Promise<boolean> {
+  if (!text.trim()) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export default function AIDock() {
@@ -835,6 +899,26 @@ export default function AIDock() {
                   {msg.role === 'ai' ? Icon.robot : Icon.user}
                 </div>
                 <div className={`dock-bubble ${msg.role}`}>
+                  {(() => {
+                    const plain = chatMessageToPlainText(msg);
+                    if (!plain) return null;
+                    return (
+                      <div className="dock-bubble-toolbar">
+                        <button
+                          type="button"
+                          className="dock-bubble-copy"
+                          title="复制本条全文（纯文本）"
+                          onClick={() => {
+                            void copyDockPlainText(plain).then((ok) => {
+                              addToast(ok ? '已复制到剪贴板' : '复制失败，可尝试用鼠标拖选文字', ok ? 'success' : 'warning');
+                            });
+                          }}
+                        >
+                          复制
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
                       {msg.attachments.map(att => (

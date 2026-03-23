@@ -2,6 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { renderMarkdown } from './MarkdownRenderer';
 import { resolveSocketUrl } from '../utils/socket';
+import {
+  subscribeOpenClawDeployJob,
+  startOpenClawDeployPoll,
+  stopOpenClawDeployPoll,
+  deployJobStorageKey as ocDeployJobLsKey,
+  fetchOpenClawDeployJob,
+} from '../utils/openclawDeployPoll';
 import io from 'socket.io-client';
 
 /* ═══════════════════════════════════════════
@@ -232,9 +239,9 @@ export default function OpenClaw() {
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement | null>(null);
-  const deployPollRef = useRef<number | null>(null);
   const messageIdRef = useRef(0);
-  const deployJobStorageKey = currentDevice ? `oc-deploy-job-${currentDevice.id}` : '';
+  const ocDeployLsKey = currentDevice ? ocDeployJobLsKey(currentDevice.id) : '';
+  const applyDeployJobRef = useRef<(job: DeployJob) => void>(() => {});
   const nextChatMessageId = useCallback(() => {
     const now = Date.now();
     if (now <= messageIdRef.current) {
@@ -252,13 +259,9 @@ export default function OpenClaw() {
       return;
     }
     setDeployRunning(false);
-    if (deployPollRef.current) {
-      window.clearInterval(deployPollRef.current);
-      deployPollRef.current = null;
-    }
-    if (deployJobStorageKey) localStorage.removeItem(deployJobStorageKey);
+    stopOpenClawDeployPoll();
+    if (ocDeployLsKey) localStorage.removeItem(ocDeployLsKey);
     if (job.status === 'done') {
-      addToast?.('部署完成！', 'success');
       appendSystemMessage('**部署完成！** 模型配置已写入，Gateway 正在重启...');
       setTimeout(async () => {
         await loadConfig();
@@ -295,37 +298,20 @@ export default function OpenClaw() {
       return;
     }
     const err = job.error || '部署失败，请查看日志输出';
-    addToast?.(err, 'error');
+    appendSystemMessage(`**部署失败：** ${err}`);
     if (job.output?.trim()) {
       appendSystemMessage(`\`>>> deploy\`\n\n\`\`\`\n${job.output.slice(-4000)}\n\`\`\``);
     }
   };
   const stopDeployPolling = () => {
-    if (deployPollRef.current) {
-      window.clearInterval(deployPollRef.current);
-      deployPollRef.current = null;
-    }
-  };
-  const pollDeployStatus = async (jobId: string) => {
-    if (!currentDevice) return;
-    const res = await fetch(`/api/devices/${currentDevice.id}/openclaw/deploy/status?jobId=${encodeURIComponent(jobId)}`);
-    if (!res.ok) {
-      throw new Error(`获取部署状态失败 (HTTP ${res.status})`);
-    }
-    const data = await res.json();
-    if (!data?.ok || !data?.job) {
-      throw new Error(data?.error || '部署状态接口返回异常');
-    }
-    applyDeployJob(data.job as DeployJob);
+    stopOpenClawDeployPoll();
   };
   const beginDeployPolling = (jobId: string) => {
-    stopDeployPolling();
+    if (!currentDevice) return;
+    stopOpenClawDeployPoll();
     setDeployJobId(jobId);
-    if (deployJobStorageKey) localStorage.setItem(deployJobStorageKey, jobId);
-    void pollDeployStatus(jobId).catch(() => { /* wait next tick */ });
-    deployPollRef.current = window.setInterval(() => {
-      void pollDeployStatus(jobId).catch(() => { /* transient network */ });
-    }, 2500);
+    if (ocDeployLsKey) localStorage.setItem(ocDeployLsKey, jobId);
+    startOpenClawDeployPoll(currentDevice.id, jobId);
   };
 
   /* ═══════════════════════════════════════════
@@ -359,19 +345,25 @@ export default function OpenClaw() {
     }
   }, [status, config]);
 
-  useEffect(() => {
-    stopDeployPolling();
-    setDeployJobId('');
-    setDeployRunning(false);
-    setDeploySteps([]);
-    if (!deployJobStorageKey) return;
-    const savedJobId = localStorage.getItem(deployJobStorageKey);
-    if (savedJobId) {
-      beginDeployPolling(savedJobId);
-    }
-  }, [deployJobStorageKey]);
+  applyDeployJobRef.current = applyDeployJob;
 
-  useEffect(() => () => stopDeployPolling(), []);
+  useEffect(() => {
+    if (!currentDevice) return;
+    const unsub = subscribeOpenClawDeployJob((job) => {
+      if (job.deviceId !== currentDevice.id) return;
+      applyDeployJobRef.current(job as DeployJob);
+    });
+    return unsub;
+  }, [currentDevice?.id]);
+
+  useEffect(() => {
+    if (!currentDevice) return;
+    const jid = localStorage.getItem(ocDeployJobLsKey(currentDevice.id));
+    if (!jid) return;
+    void fetchOpenClawDeployJob(currentDevice.id, jid).then((j) => {
+      if (j) applyDeployJobRef.current(j as DeployJob);
+    });
+  }, [currentDevice?.id]);
 
   useEffect(() => {
     if (!showModelSelector) return;

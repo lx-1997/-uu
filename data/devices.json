@@ -1,29 +1,11 @@
 [
   {
-    "id": "7d5325a5-f7eb-49e7-8f87-8a215c4b676b",
-    "host": "192.168.43.164",
-    "port": 22,
-    "username": "root",
-    "password": "root",
-    "status": "connected",
-    "lastCheckedAt": "2026-03-23T03:38:57.815Z"
-  },
-  {
-    "id": "95a66910-d96b-4b4c-b58c-fb64046c3d0e",
+    "id": "69f1b3b9-a14e-4fc3-ab82-3a76ac57ed6e",
     "host": "192.168.127.10",
     "port": 22,
     "username": "root",
     "password": "root",
     "status": "connected",
-    "lastCheckedAt": "2026-03-23T03:34:08.472Z"
-  },
-  {
-    "id": "40a5faf8-06fc-44d0-8e7d-6f467a2c1a9b",
-    "host": "192.168.1.18",
-    "port": 22,
-    "username": "root",
-    "password": "root",
-    "status": "connected",
-    "lastCheckedAt": "2026-03-22T17:50:41.528Z"
+    "lastCheckedAt": "2026-03-23T06:01:52.201Z"
   }
 ]
