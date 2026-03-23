@@ -1,26 +1,33 @@
 /* RDK Studio — Style Entry Point (v2) */
 
-/* 1. Design tokens (dual theme) */
+/* 所有 @import 须连续置于文件顶部（PostCSS / CSS 规范） */
+@import '@fontsource-variable/material-symbols-outlined/full.css';
 @import './tokens.css';
-
-/* 2. Reset & typography */
 @import './reset.css';
-
-/* 3. Animations & keyframes */
 @import './animations.css';
-
-/* 4. Shell layout (Rail + TopBar + Content) */
 @import './shell.css';
-
-/* 5. Shared components */
 @import './components.css';
-
-/* 6. Page-specific */
 @import './pages/dashboard.css';
 @import './pages/chat.css';
 @import './pages/immersive.css';
 @import './pages/config.css';
 @import './pages/tools.css';
-
-/* 7. Theme enhancements + responsive */
 @import './pages/cyber-enhancements.css';
+
+/* Material Symbols：woff2 由上一行 fontsource 打入 dist，桌面端离线可用 */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined Variable', 'Material Symbols Outlined', sans-serif;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

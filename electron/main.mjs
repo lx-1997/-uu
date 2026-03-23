@@ -301,9 +301,11 @@ function startEmbeddedServer() {
 
     console.log('[server] starting embedded server:', serverPath);
 
+    // 必须用 ELECTRON_RUN_AS_NODE：否则 process.execPath 是 RDK Studio.exe，会再启动整套 Electron GUI，造成递归多开、未响应。
     serverProcess = spawn(process.execPath, [serverPath], {
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
         PORT: '8787',
         NODE_ENV: 'production',
         // 数据目录指向 resources/data

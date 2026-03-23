@@ -11,8 +11,10 @@
     "dev:client": "node scripts/dev-client.mjs",
     "dev:server": "node scripts/dev-server.mjs",
     "build": "tsc --noEmit -p tsconfig.json && npm run build:server && vite build",
-    "build:desktop": "npm run build && npm run build:server && electron-builder",
-    "build:desktop:win": "npm run build && npm run build:server && electron-builder --win",
+    "clean:win-unpacked": "node scripts/clean-electron-win-unpacked.mjs",
+    "build:desktop": "npm run build && npm run build:server && npm run clean:win-unpacked && electron-builder",
+    "build:desktop:win": "npm run build && npm run build:server && npm run clean:win-unpacked && electron-builder --win",
+    "build:desktop:win:dir": "npm run build && npm run build:server && npm run clean:win-unpacked && electron-builder --win dir",
     "build:desktop:mac": "npm run build && npm run build:server && electron-builder --mac",
     "build:desktop:linux": "npm run build && npm run build:server && electron-builder --linux",
     "verify:modules": "node scripts/verify-real-modules.mjs",
@@ -46,6 +48,7 @@
       }
     ],
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",
@@ -106,6 +109,7 @@
     }
   },
   "dependencies": {
+    "@fontsource-variable/material-symbols-outlined": "^5.2.38",
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@mariozechner/pi-ai": "^0.50.7",
     "@monaco-editor/react": "^4.7.0",
