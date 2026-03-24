@@ -527,7 +527,7 @@ export class Agent {
     const runPromise = this.run(childSessionKey, params.task);
     runPromise
       .then(async (result) => {
-        const summary = result.text.slice(0, 600);
+        const summary = result.text.slice(0, 2000);
         this.emit({
           type: "subagent_summary",
           childSessionKey,

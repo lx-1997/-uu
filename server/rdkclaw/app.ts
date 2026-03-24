@@ -289,6 +289,26 @@ function mapMiniEvent(
           context_overflow_error: event.error,
         },
       };
+    case "subagent_summary":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "end",
+          message: `子代理完成: ${(event as any).label || "task"}`,
+          subagent_summary: (event as any).summary,
+        },
+      };
+    case "subagent_error":
+      return {
+        type: "error",
+        data: {
+          ...base,
+          error: `子代理失败: ${(event as any).error}`,
+          subagent_label: (event as any).label,
+        },
+      };
     case "agent_end":
       return null;
     default:
