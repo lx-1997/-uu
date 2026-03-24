@@ -4,13 +4,16 @@ import { WeixinAccountStore, type WeixinAccount } from "../../rdkclaw/weixin-acc
 import type { WeixinRuntimeConfig } from "../../rdkclaw/weixin-config-store.js";
 import { WeixinApiClient, type WeixinMessage } from "../../rdkclaw/weixin-api-client.js";
 import { extractAttachments } from "../../rdkclaw/weixin-media.js";
+import { FeishuAuthStore } from "../../rdkclaw/feishu-auth-store.js";
 import type { NotificationHub } from "../../rdkclaw/notification-hub.js";
+import { readDevices } from "../../storage.js";
 
 type WeixinChannelOptions = {
   rdkclaw: RDKClawApp;
   accountStore: WeixinAccountStore;
   getConfig: () => WeixinRuntimeConfig;
   notificationHub?: NotificationHub;
+  feishuAuthStore?: FeishuAuthStore;
 };
 
 export type WeixinRuntimeStatus = {
@@ -58,6 +61,7 @@ export class WeixinPollingChannel {
   private accountStore: WeixinAccountStore;
   private getConfig: () => WeixinRuntimeConfig;
   private notificationHub?: NotificationHub;
+  private feishuAuthStore?: FeishuAuthStore;
 
   private pollers = new Map<string, AccountPoller>();
   private started = false;
@@ -67,6 +71,7 @@ export class WeixinPollingChannel {
     this.accountStore = opts.accountStore;
     this.getConfig = opts.getConfig;
     this.notificationHub = opts.notificationHub;
+    this.feishuAuthStore = opts.feishuAuthStore;
   }
 
   getStatus(): WeixinRuntimeStatus {
@@ -265,7 +270,17 @@ export class WeixinPollingChannel {
       poller.client.sendTyping(fromUserId, typingTicket, 1).catch(() => {});
     }
 
-    const sessionId = `weixin:${fromUserId}`;
+    const fallbackSessionId = `weixin:${fromUserId}`;
+    const latestUiSessionId = this.feishuAuthStore?.getLatestUiSession() || "";
+    const sessionId = latestUiSessionId || fallbackSessionId;
+
+    let deviceId = this.feishuAuthStore?.getLatestUiDevice() || "";
+    deviceId = await this.resolveDeviceId(deviceId);
+
+    if (!deviceId) {
+      console.log(`${tag} no connected device, proceeding without deviceId`);
+    }
+
     const chunks: string[] = [];
     let finalText = "";
     const imagePaths: string[] = [];
@@ -275,7 +290,8 @@ export class WeixinPollingChannel {
         message: displayText,
         userId: fromUserId,
         sessionId,
-        mode: "board-preferred",
+        deviceId: deviceId || undefined,
+        mode: deviceId ? "board-preferred" : "local",
         attachments: attachments.length > 0 ? attachments : undefined,
       })) {
         if (event.type === "text") {
@@ -345,6 +361,20 @@ export class WeixinPollingChannel {
         accountId: poller.account.accountId,
       });
     console.log(`${tag} replied to ${maskedUser}, chars=${reply.length} images=${imagePaths.length}`);
+  }
+
+  private async resolveDeviceId(latestUiDeviceId: string): Promise<string> {
+    try {
+      const devices = await readDevices();
+      if (latestUiDeviceId) {
+        const exact = devices.find(d => d.id === latestUiDeviceId && d.status === "connected");
+        if (exact) return latestUiDeviceId;
+      }
+      const connected = devices.find(d => d.status === "connected");
+      return connected?.id || "";
+    } catch {
+      return latestUiDeviceId || "";
+    }
   }
 
   private publishMirror(

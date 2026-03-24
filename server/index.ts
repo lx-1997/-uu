@@ -271,6 +271,7 @@ const weixinChannel = new WeixinPollingChannel({
   accountStore: weixinAccountStore,
   getConfig: () => weixinConfigStore.getConfig(),
   notificationHub,
+  feishuAuthStore: feishuAuth,
 });
 if (weixinConfigStore.getConfig().enabled && weixinAccountStore.listAccounts().length > 0) {
   weixinChannel.start();
