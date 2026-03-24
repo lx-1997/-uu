@@ -7,6 +7,7 @@ import { FeishuAuthStore } from "../../rdkclaw/feishu-auth-store.js";
 import type { FeishuRuntimeConfig } from "../../rdkclaw/feishu-config-store.js";
 import type { NotificationHub } from "../../rdkclaw/notification-hub.js";
 import { readDevices } from "../../storage.js";
+import { matchTextApproval } from "../../rdkclaw/channel-safety.js";
 
 type FeishuChannelOptions = {
   rdkclaw: RDKClawApp;
@@ -129,6 +130,14 @@ function authBaseByDomain(domain: "feishu" | "lark"): string {
   return domain === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn";
 }
 
+interface FeishuPendingApproval {
+  approvalId: string;
+  toolName: string;
+  risk: string;
+  chatId: string;
+  createdAt: number;
+}
+
 export class FeishuWebSocketChannel {
   private readonly rdkclaw: RDKClawApp;
   private readonly authStore: FeishuAuthStore;
@@ -139,6 +148,7 @@ export class FeishuWebSocketChannel {
   private eventSeen = new Map<string, number>();
   private client: Lark.Client | null = null;
   private wsClient: unknown | null = null;
+  private pendingApprovals = new Map<string, FeishuPendingApproval>();
   private status: FeishuRuntimeStatus = {
     running: false,
     connected: false,
@@ -445,11 +455,13 @@ export class FeishuWebSocketChannel {
     const msgId = String(message?.message_id || "");
     const openIdMasked = `${openId.slice(0, 4)}***${openId.slice(-4)}`;
     console.log(`[FeishuWS] inbound chatType=${chatType || "unknown"} openId=${openId.slice(0, 6)}*** chatId=${chatId}`);
-    const fallbackSessionId = sessionKeyFor(chatType, openId, chatId);
-    const latestUiSessionId = this.authStore.getLatestUiSession();
+
+    if (text && this.tryHandleApprovalReply(openId, chatId, text, openIdMasked)) {
+      return;
+    }
+
+    const sessionId = sessionKeyFor(chatType, openId, chatId);
     let latestUiDeviceId = this.authStore.getLatestUiDevice();
-    const boundSessionId = this.authStore.resolveSession(openId, "");
-    const sessionId = latestUiSessionId || boundSessionId || fallbackSessionId;
     this.authStore.touchSession(openId, sessionId, chatId);
     this.publishMirror("channel_message_inbound", "飞书消息", inboundText, {
       channel: "feishu",
@@ -496,18 +508,7 @@ export class FeishuWebSocketChannel {
       return;
     }
 
-    if (!latestUiSessionId && !boundSessionId) {
-      const hint = "请先打开 RDK Studio 聊天窗口并发送一条消息，建立活跃会话后再继续。";
-      await this.sendText(chatId, hint);
-      this.publishMirror("channel_message_error", "飞书会话", hint, {
-        channel: "feishu",
-        direction: "error",
-        openIdMasked,
-        chatId,
-        messageId: msgId,
-      });
-      return;
-    }
+    // 移除了 latestUiSessionId 强依赖：每个飞书用户独立 session，不再阻断
 
     if (!latestUiDeviceId) {
       // 没有设备心跳时，尝试从设备清单挑选当前已连接设备，避免因一次心跳缺失导致飞书链路退化。
@@ -602,12 +603,24 @@ export class FeishuWebSocketChannel {
         sessionId,
         mode: "auto",
         attachments,
+        channel: "feishu",
       })) {
         if (event.type === "text") {
           const delta = String(event.data?.delta ?? event.data?.text ?? "");
           if (delta) chunks.push(delta);
         } else if (event.type === "message_end") {
           finalText = String(event.data?.text ?? "").trim();
+        } else if (event.type === "approval_required") {
+          const approvalId = String(event.data?.approvalId ?? "");
+          const toolName = String(event.data?.toolName ?? "");
+          const risk = String(event.data?.risk ?? "medium");
+          if (approvalId) {
+            this.pendingApprovals.set(openId, {
+              approvalId, toolName, risk, chatId, createdAt: Date.now(),
+            });
+            const promptText = `⚠️ 需要确认\n工具: ${toolName}\n风险: ${risk}\n\n回复「允许」执行，或「拒绝」取消`;
+            await this.sendText(chatId, promptText);
+          }
         } else if (event.type === "error") {
           const errorMsg = String(event.data?.error ?? "RDKClaw 执行失败");
           if (!chunks.length) chunks.push(errorMsg);
@@ -774,6 +787,33 @@ export class FeishuWebSocketChannel {
       chatId,
     });
     console.log(`[FeishuWS] issued pairing code for ${openId.slice(0, 6)}*** source=${source}`);
+  }
+
+  private tryHandleApprovalReply(
+    openId: string,
+    chatId: string,
+    text: string,
+    openIdMasked: string,
+  ): boolean {
+    const pending = this.pendingApprovals.get(openId);
+    if (!pending) return false;
+    if (Date.now() - pending.createdAt > 300_000) {
+      this.pendingApprovals.delete(openId);
+      return false;
+    }
+    const result = matchTextApproval(text);
+    if (!result.matched) return false;
+
+    this.pendingApprovals.delete(openId);
+    const success = this.rdkclaw.decideApproval(pending.approvalId, result.decision === "allow_once" ? "allow_once" : "deny");
+    const label = result.decision === "allow_once" ? "已允许" : "已拒绝";
+    console.log(`[FeishuWS] approval ${label} by ${openIdMasked}: ${pending.toolName} (${pending.approvalId})`);
+    if (success) {
+      this.sendText(chatId, `${label}执行 ${pending.toolName}`).catch(() => {});
+    } else {
+      this.sendText(chatId, "该审批已过期或已被处理").catch(() => {});
+    }
+    return true;
   }
 
   private publishMirror(

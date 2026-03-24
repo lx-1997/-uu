@@ -332,9 +332,7 @@ export class WeixinPollingChannel {
       poller.client.sendTyping(fromUserId, typingTicket, 1).catch(() => {});
     }
 
-    const fallbackSessionId = `weixin:${fromUserId}`;
-    const latestUiSessionId = this.feishuAuthStore?.getLatestUiSession() || "";
-    const sessionId = latestUiSessionId || fallbackSessionId;
+    const sessionId = `weixin:${fromUserId}`;
 
     let deviceId = this.feishuAuthStore?.getLatestUiDevice() || "";
     deviceId = await this.resolveDeviceId(deviceId);

@@ -376,9 +376,10 @@ export class Agent {
     this.enableSkills = config.enableSkills ?? true;
     this.enableHeartbeat = config.enableHeartbeat ?? false;
 
-    // Global lane 并发数（对应 OpenClaw: DEFAULT_AGENT_MAX_CONCURRENT = 4）
     const globalLane = resolveGlobalLane();
-    setLaneConcurrency(globalLane, config.maxConcurrentRuns ?? 4);
+    const envMax = Number(process.env.RDKCLAW_MAX_CONCURRENT_RUNS);
+    const maxRuns = envMax > 0 ? envMax : (config.maxConcurrentRuns ?? 8);
+    setLaneConcurrency(globalLane, maxRuns);
 
     // Tool Result Guard（对应 OpenClaw: attempt.ts → guardSessionManager()）
     this.toolResultGuard = installSessionToolResultGuard(this.sessions);
