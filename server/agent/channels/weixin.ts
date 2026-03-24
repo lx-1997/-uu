@@ -8,6 +8,7 @@ import { extractAttachments } from "../../rdkclaw/weixin-media.js";
 import { FeishuAuthStore } from "../../rdkclaw/feishu-auth-store.js";
 import type { NotificationHub } from "../../rdkclaw/notification-hub.js";
 import { readDevices } from "../../storage.js";
+import { matchTextApproval } from "../../rdkclaw/channel-safety.js";
 
 type WeixinChannelOptions = {
   rdkclaw: RDKClawApp;
@@ -30,16 +31,19 @@ const MAX_RETRY_DELAY_MS = 60_000;
 
 const IMG_EXT = "png|jpe?g|gif|bmp|webp";
 const VID_EXT = "mp4|webm|avi|mov|mkv";
-const MEDIA_EXT = `${IMG_EXT}|${VID_EXT}`;
-const MD_MEDIA_RE = new RegExp(`!\\[[^\\]]*\\]\\(([^)]+\\.(?:${MEDIA_EXT}))\\)`, "gi");
+const DOC_EXT = "docx?|xlsx?|pptx?|pdf|csv|txt|md|zip|rar|7z";
+const ALL_EXT = `${IMG_EXT}|${VID_EXT}|${DOC_EXT}`;
+const MD_MEDIA_RE = new RegExp(`!\\[[^\\]]*\\]\\(([^)]+\\.(?:${ALL_EXT}))\\)`, "gi");
 const LOCAL_PATH_RE = new RegExp(
-  `(?:^|[\\s"'：])([A-Za-z]:[\\\\\/][\\w.\\-\\\\\/]+\\.(?:${MEDIA_EXT})|\/[\\w.\\-\/]+\\.(?:${MEDIA_EXT}))`,
+  `(?:^|[\\s"'：])([A-Za-z]:[\\\\\/][\\w.\\-\\\\\/]+\\.(?:${ALL_EXT})|\/[\\w.\\-\/]+\\.(?:${ALL_EXT}))`,
   "gi",
 );
 const IMAGE_EXT_SET = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
 const VIDEO_EXT_SET = new Set(["mp4", "webm", "avi", "mov", "mkv"]);
+const DOC_EXT_SET = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "csv", "txt", "md", "zip", "rar", "7z"]);
 
-interface MediaPath { path: string; kind: "image" | "video" }
+type FileKind = "image" | "video" | "document";
+interface MediaPath { path: string; kind: FileKind }
 
 function extractMediaPathsFromResult(raw: string): MediaPath[] {
   const out: MediaPath[] = [];
@@ -49,20 +53,26 @@ function extractMediaPathsFromResult(raw: string): MediaPath[] {
       out.push({ path: String(obj.localPath), kind: "image" });
     } else if (obj?.__type === "video_download" && obj.localPath) {
       out.push({ path: String(obj.localPath), kind: "video" });
+    } else if (obj?.localPath) {
+      const kind = classifyExt(String(obj.localPath));
+      if (kind) out.push({ path: String(obj.localPath), kind });
     }
   } catch {
     for (const m of raw.matchAll(LOCAL_PATH_RE)) {
       const ext = m[1].split(".").pop()?.toLowerCase() || "";
-      out.push({ path: m[1], kind: VIDEO_EXT_SET.has(ext) ? "video" : "image" });
+      const kind: FileKind = VIDEO_EXT_SET.has(ext) ? "video"
+        : DOC_EXT_SET.has(ext) ? "document" : "image";
+      out.push({ path: m[1], kind });
     }
   }
   return out;
 }
 
-function classifyExt(filePath: string): "image" | "video" | null {
+function classifyExt(filePath: string): FileKind | null {
   const ext = filePath.split(".").pop()?.toLowerCase() || "";
   if (IMAGE_EXT_SET.has(ext)) return "image";
   if (VIDEO_EXT_SET.has(ext)) return "video";
+  if (DOC_EXT_SET.has(ext)) return "document";
   return null;
 }
 
@@ -92,6 +102,16 @@ interface AccountPoller {
   typingTickets: Map<string, string>;
 }
 
+interface PendingChannelApproval {
+  approvalId: string;
+  toolName: string;
+  risk: string;
+  args: Record<string, unknown>;
+  fromUserId: string;
+  contextToken: string;
+  createdAt: number;
+}
+
 export class WeixinPollingChannel {
   private rdkclaw: RDKClawApp;
   private accountStore: WeixinAccountStore;
@@ -101,6 +121,8 @@ export class WeixinPollingChannel {
 
   private pollers = new Map<string, AccountPoller>();
   private started = false;
+
+  private pendingApprovals = new Map<string, PendingChannelApproval>();
 
   constructor(opts: WeixinChannelOptions) {
     this.rdkclaw = opts.rdkclaw;
@@ -278,6 +300,10 @@ export class WeixinPollingChannel {
     const mediaTag = attachments.length ? ` +${attachments.length}附件` : "";
     console.log(`${tag} inbound from ${maskedUser}: ${displayText.slice(0, 80)}${mediaTag}`);
 
+    if (text && this.tryHandleApprovalReply(poller, fromUserId, contextToken, text, tag, maskedUser)) {
+      return;
+    }
+
     this.publishMirror("channel_message_inbound", "微信消息",
       `来自 ${maskedUser}: ${displayText.slice(0, 200)}${mediaTag}`, {
         channel: "weixin",
@@ -329,6 +355,7 @@ export class WeixinPollingChannel {
         deviceId: deviceId || undefined,
         mode: deviceId ? "board-preferred" : "local",
         attachments: attachments.length > 0 ? attachments : undefined,
+        channel: "weixin",
       })) {
         if (event.type === "text") {
           const delta = String(event.data?.delta ?? event.data?.text ?? "");
@@ -339,6 +366,31 @@ export class WeixinPollingChannel {
           const result = String(event.data?.result ?? "");
           for (const mp of extractMediaPathsFromResult(result)) {
             if (fs.existsSync(mp.path)) mediaPaths.push(mp);
+          }
+        } else if (event.type === "approval_required") {
+          const approvalId = String(event.data?.approvalId ?? "");
+          const toolName = String(event.data?.toolName ?? "");
+          const risk = String(event.data?.risk ?? "medium");
+          const args = (event.data?.args as Record<string, unknown>) || {};
+          if (approvalId) {
+            this.pendingApprovals.set(fromUserId, {
+              approvalId, toolName, risk, args,
+              fromUserId, contextToken,
+              createdAt: Date.now(),
+            });
+            const argsPreview = Object.entries(args)
+              .slice(0, 3)
+              .map(([k, v]) => `  ${k}: ${String(v).slice(0, 60)}`)
+              .join("\n");
+            const promptText = [
+              `⚠️ 需要你的确认`,
+              `工具: ${toolName}`,
+              `风险: ${risk}`,
+              argsPreview ? `参数:\n${argsPreview}` : "",
+              `\n回复「允许」执行，或「拒绝」取消`,
+            ].filter(Boolean).join("\n");
+            await poller.client.sendText(fromUserId, contextToken, promptText).catch(() => {});
+            console.log(`${tag} sent approval prompt to ${maskedUser} for ${toolName} (${approvalId})`);
           }
         } else if (event.type === "error") {
           const errorMsg = String(event.data?.error ?? "RDKClaw 执行失败");
@@ -386,7 +438,7 @@ export class WeixinPollingChannel {
       }
     }
 
-    // Send media via CDN
+    // Send media/documents via CDN
     for (const mp of mediaPaths) {
       try {
         const buf = fs.readFileSync(mp.path);
@@ -394,6 +446,10 @@ export class WeixinPollingChannel {
           const uploaded = await poller.client.uploadMedia(fromUserId, buf, 2);
           await poller.client.sendVideo(fromUserId, contextToken, uploaded);
           console.log(`${tag} sent video to ${maskedUser}: ${mp.path}`);
+        } else if (mp.kind === "document") {
+          const uploaded = await poller.client.uploadMedia(fromUserId, buf, 3);
+          await poller.client.sendFile(fromUserId, contextToken, uploaded, path.basename(mp.path));
+          console.log(`${tag} sent file to ${maskedUser}: ${mp.path}`);
         } else {
           const uploaded = await poller.client.uploadMedia(fromUserId, buf, 1);
           await poller.client.sendImage(fromUserId, contextToken, uploaded);
@@ -404,12 +460,12 @@ export class WeixinPollingChannel {
       }
     }
 
-    // Strip markdown media references from text before sending
+    // Strip markdown media/file references from text before sending
     let cleanText = replyRaw;
     if (mediaPaths.length > 0) {
       cleanText = cleanText
         .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-        .replace(/本地路径[：:]\s*\S+\.(png|jpe?g|gif|bmp|webp|mp4|webm|avi|mov|mkv)/gi, "")
+        .replace(/本地路径[：:]\s*\S+\.(png|jpe?g|gif|bmp|webp|mp4|webm|avi|mov|mkv|docx?|xlsx?|pptx?|pdf|csv|txt|md|zip|rar|7z)/gi, "")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
     }
@@ -429,7 +485,8 @@ export class WeixinPollingChannel {
 
     const imgCount = mediaPaths.filter(m => m.kind === "image").length;
     const vidCount = mediaPaths.filter(m => m.kind === "video").length;
-    const mediaSummary = [imgCount && `${imgCount}图`, vidCount && `${vidCount}视频`].filter(Boolean).join("+");
+    const docCount = mediaPaths.filter(m => m.kind === "document").length;
+    const mediaSummary = [imgCount && `${imgCount}图`, vidCount && `${vidCount}视频`, docCount && `${docCount}文件`].filter(Boolean).join("+");
     this.publishMirror("channel_message_outbound", "微信回复",
       (reply || `[${mediaSummary}]`).slice(0, 200), {
         channel: "weixin",
@@ -437,7 +494,50 @@ export class WeixinPollingChannel {
         fromUserId: maskedUser,
         accountId: poller.account.accountId,
       });
-    console.log(`${tag} replied to ${maskedUser}, chars=${reply.length} media=${mediaPaths.length}(img=${imgCount} vid=${vidCount})`);
+    console.log(`${tag} replied to ${maskedUser}, chars=${reply.length} media=${mediaPaths.length}(img=${imgCount} vid=${vidCount} doc=${docCount})`);
+  }
+
+  private tryHandleApprovalReply(
+    poller: AccountPoller,
+    fromUserId: string,
+    contextToken: string,
+    text: string,
+    tag: string,
+    maskedUser: string,
+  ): boolean {
+    const pending = this.pendingApprovals.get(fromUserId);
+    if (!pending) return false;
+
+    if (Date.now() - pending.createdAt > 300_000) {
+      this.pendingApprovals.delete(fromUserId);
+      return false;
+    }
+
+    const result = matchTextApproval(text);
+    if (!result.matched) return false;
+
+    this.pendingApprovals.delete(fromUserId);
+    const success = this.rdkclaw.decideApproval(pending.approvalId, result.decision === "allow_once" ? "allow_once" : "deny");
+    const label = result.decision === "allow_once" ? "已允许" : "已拒绝";
+    console.log(`${tag} approval ${label} by ${maskedUser}: ${pending.toolName} (${pending.approvalId})`);
+
+    if (success) {
+      poller.client.sendText(fromUserId, contextToken,
+        `${label}执行 ${pending.toolName}`).catch(() => {});
+    } else {
+      poller.client.sendText(fromUserId, contextToken,
+        "该审批已过期或已被处理").catch(() => {});
+    }
+
+    this.publishMirror("channel_message_inbound", "微信审批",
+      `${maskedUser} ${label} ${pending.toolName}`, {
+        channel: "weixin",
+        direction: "inbound",
+        fromUserId: maskedUser,
+        accountId: poller.account.accountId,
+      });
+
+    return true;
   }
 
   private async resolveDeviceId(latestUiDeviceId: string): Promise<string> {

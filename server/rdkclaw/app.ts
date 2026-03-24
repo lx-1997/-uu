@@ -41,6 +41,7 @@ import { RDKClawPolicyStore } from "./policy-store.js";
 import { UserWorkspaceStore } from "./workspace-store.js";
 import type {
   ApprovalDecisionMode,
+  ChannelSource,
   PersonaProfile,
   RDKClawChatRequest,
   RDKClawEvent,
@@ -49,6 +50,10 @@ import type {
   RiskLevel,
   UserProfile,
 } from "./types.js";
+import {
+  getExternalChannelPolicy,
+  validateExecCommand,
+} from "./channel-safety.js";
 
 const DEFAULT_CONFIG: ProviderConfig = {
   provider: "qwen",
@@ -484,6 +489,7 @@ export class RDKClawApp {
     policy: RDKClawPolicy,
     emitEvent: (event: RDKClawEvent) => void,
     base: { runId: string; sessionId: string },
+    channel: ChannelSource = "studio",
   ): Tool {
     return {
       ...tool,
@@ -491,8 +497,26 @@ export class RDKClawApp {
         if (tool.name.startsWith("web_") && !policy.network.enabled) {
           throw new Error("联网工具已禁用，请在策略面板中开启网络能力。");
         }
+
+        const isExternal = channel !== "studio";
+
+        if (isExternal) {
+          const chanPolicy = getExternalChannelPolicy(tool.name);
+          if (chanPolicy === "block") {
+            throw new Error(`安全限制：外部通道(${channel})禁止使用工具 ${tool.name}`);
+          }
+
+          if ((tool.name === "exec" || tool.name === "device_exec") && (input as any)?.command) {
+            const cmdCheck = validateExecCommand(String((input as any).command), channel);
+            if (cmdCheck.blocked) {
+              throw new Error(`安全拦截：${cmdCheck.reason}`);
+            }
+          }
+        }
+
         const risk = this.resolveToolRisk(tool.name);
-        if (!this.shouldRequireApproval(policy, risk, base.sessionId, tool.name)) {
+        const forceApproval = isExternal && getExternalChannelPolicy(tool.name) === "force_approval";
+        if (!forceApproval && !this.shouldRequireApproval(policy, risk, base.sessionId, tool.name)) {
           return tool.execute(input, ctx);
         }
         const approvalId = `approval-${crypto.randomUUID()}`;
@@ -605,7 +629,8 @@ export class RDKClawApp {
     }
     tools.push(createSoulUpdateTool(emitEvent, base));
     tools.push(...planTools);
-    return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base));
+    const channel = req.channel || "studio";
+    return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base, channel));
   }
 
   async *streamChat(req: RDKClawChatRequest): AsyncGenerator<RDKClawEvent> {

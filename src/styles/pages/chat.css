@@ -1006,6 +1006,37 @@
   background: #000;
 }
 
+/* File block */
+.dock-bubble .file-block {
+  padding: 8px 12px;
+}
+
+.dock-bubble .file-block-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #67e8f9;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.dock-bubble .file-block-link:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dock-bubble .file-block-icon {
+  font-size: 1.3em;
+}
+
+.dock-bubble .file-block-name {
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
 /* Approval block */
 .dock-bubble .approval-block {
   display: flex;

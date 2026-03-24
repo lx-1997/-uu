@@ -953,6 +953,19 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         caption: `${parsed.fileName || '视频'} (${((parsed.bytes as number) / 1024 / 1024).toFixed(1)} MB) — 来自设备`,
                       });
                       mediaHandled = true;
+                    } else if (parsed.localPath && typeof parsed.fileName === 'string') {
+                      const ext = String(parsed.fileName).split('.').pop()?.toLowerCase() || '';
+                      const docExts = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf', 'csv', 'txt', 'md', 'zip', 'rar', '7z']);
+                      if (docExts.has(ext)) {
+                        const fileUrl = `/api/local-files/${encodeURIComponent(parsed.fileName as string)}`;
+                        aiBlocks.push({
+                          type: 'file',
+                          src: fileUrl,
+                          fileName: parsed.fileName as string,
+                          caption: `${parsed.fileName} (${((parsed.bytes as number) / 1024).toFixed(0)} KB) — 来自设备`,
+                        });
+                        mediaHandled = true;
+                      }
                     }
                   } catch {
                     // not JSON, fall through to normal handling

@@ -16,6 +16,8 @@ export interface RDKClawAttachment {
   source?: "studio" | "feishu" | "weixin";
 }
 
+export type ChannelSource = "studio" | "weixin" | "feishu";
+
 export interface RDKClawChatRequest {
   message: string;
   deviceId?: string;
@@ -23,6 +25,7 @@ export interface RDKClawChatRequest {
   userId?: string;
   mode?: RDKClawExecutionMode;
   attachments?: RDKClawAttachment[];
+  channel?: ChannelSource;
   // 服务端内部字段：用于在 SSE 断连时中止当前 run
   abortSignal?: AbortSignal;
 }

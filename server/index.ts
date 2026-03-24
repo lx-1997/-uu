@@ -1267,9 +1267,13 @@ app.get('/api/local-files/:filename', (req, res) => {
     const filePath = path.join(dir, filename);
     if (existsSync(filePath)) {
       const ext = path.extname(filename).toLowerCase();
-      const cacheExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.mp4', '.webm', '.mov', '.avi', '.mkv']);
-      if (cacheExts.has(ext)) {
+      const mediaExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.mp4', '.webm', '.mov', '.avi', '.mkv']);
+      const docExts = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf', '.csv', '.zip', '.rar', '.7z']);
+      if (mediaExts.has(ext)) {
         res.setHeader('Cache-Control', 'public, max-age=3600');
+      }
+      if (docExts.has(ext)) {
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
       }
       return res.sendFile(filePath);
     }
