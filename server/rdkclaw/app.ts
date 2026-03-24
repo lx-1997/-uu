@@ -71,8 +71,7 @@ function resolveProviderConfig(): ProviderConfig {
 function buildPersonaPrompt(persona: PersonaProfile) {
   const lines = [
     `你是 ${persona.name}。`,
-    `风格: ${persona.tone}；风险偏好: ${persona.riskLevel}。`,
-    `委派策略: delegationBias=${persona.delegationBias}, autonomy=${persona.autonomyLevel}, boundary=${persona.riskBoundary}。`,
+    `风险偏好: ${persona.riskLevel}，委派: ${persona.delegationBias}，自治: ${persona.autonomyLevel}。`,
   ];
   if (persona.extraInstructions?.trim()) {
     lines.push(`额外指令: ${persona.extraInstructions.trim()}`);

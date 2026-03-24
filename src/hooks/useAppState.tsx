@@ -148,8 +148,8 @@ export interface AppState {
   removeDevice: (id: string) => void;
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
-  settingsTab: 'general' | 'ai' | 'connection' | 'feishu' | 'weixin' | 'rdkclaw' | 'about';
-  setSettingsTab: (v: 'general' | 'ai' | 'connection' | 'feishu' | 'weixin' | 'rdkclaw' | 'about') => void;
+  settingsTab: 'rdkclaw' | 'about';
+  setSettingsTab: (v: 'rdkclaw' | 'about') => void;
   autoReconnect: boolean;
   setAutoReconnect: (v: boolean) => void;
   connectionTimeout: number;

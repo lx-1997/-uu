@@ -492,12 +492,10 @@ export function fetchAgentConfig() {
 
 export interface PersonaProfile {
   name: string;
-  tone: 'professional' | 'friendly' | 'concise' | 'mentor';
   extraInstructions: string;
   riskLevel: 'conservative' | 'balanced' | 'aggressive';
   delegationBias: 'local-first' | 'balanced' | 'board-first';
   autonomyLevel: 'manual' | 'assisted' | 'autonomous';
-  riskBoundary: 'strict' | 'moderate' | 'relaxed';
 }
 
 export function fetchRDKClawPersona() {

@@ -10,12 +10,10 @@ const LEGACY_DEFAULT_PERSONA_NAME = "RDKClaw";
 
 const DEFAULT_PERSONA: PersonaProfile = {
   name: "小地瓜",
-  tone: "mentor",
   extraInstructions: "",
   riskLevel: "balanced",
   delegationBias: "board-first",
   autonomyLevel: "assisted",
-  riskBoundary: "moderate",
 };
 
 function normalizeLegacyPersona(input: Partial<PersonaProfile>): Partial<PersonaProfile> {
@@ -30,6 +28,8 @@ function normalizeLegacyPersona(input: Partial<PersonaProfile>): Partial<Persona
   delete (next as Record<string, unknown>).stylePrompt;
   delete (next as Record<string, unknown>).boardDelegationBias;
   delete (next as Record<string, unknown>).notifyStyle;
+  delete (next as Record<string, unknown>).tone;
+  delete (next as Record<string, unknown>).riskBoundary;
   return next;
 }
 

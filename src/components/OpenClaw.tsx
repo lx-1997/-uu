@@ -72,7 +72,7 @@ interface DeployJob {
   error?: string;
 }
 
-type ConfigTab = 'model' | 'feishu' | 'weixin' | 'skills';
+type ConfigTab = 'model' | 'feishu' | 'skills';
 
 type SetupStep = 'gateway' | 'model' | 'feishu';
 interface SetupStatus {
@@ -213,12 +213,7 @@ export default function OpenClaw() {
   const [pairingChannel, setPairingChannel] = useState('feishu');
   const [pairingCode, setPairingCode] = useState('');
 
-  // ─── WeChat Config State ───
-  const [weixinAccounts, setWeixinAccounts] = useState<Array<{ accountId: string; nickname: string; boundAt: number }>>([]);
-  const [weixinEnabled, setWeixinEnabled] = useState(true);
-  const [weixinAckStyle, setWeixinAckStyle] = useState<'text' | 'emoji' | 'off'>('text');
-  const [weixinLoginLoading, setWeixinLoginLoading] = useState(false);
-  const [weixinQrCode, setWeixinQrCode] = useState<string | null>(null);
+  // ─── WeChat Config State (moved to SettingsPanel) ───
 
   // ─── Skills/Plugins State ───
   const [skillPluginsAllowText, setSkillPluginsAllowText] = useState('');
@@ -350,7 +345,7 @@ export default function OpenClaw() {
 
   useEffect(() => {
     if (currentDevice && activeTab === 'openclaw') {
-      void Promise.all([loadStatus(), loadConfig(), loadBoardSkills(), loadEcoSkillCatalog(), loadWeixinAccounts()]);
+      void Promise.all([loadStatus(), loadConfig(), loadBoardSkills(), loadEcoSkillCatalog()]);
     }
   }, [currentDevice, activeTab]);
 
@@ -536,75 +531,7 @@ export default function OpenClaw() {
     }
   };
 
-  const loadWeixinAccounts = async () => {
-    try {
-      const { fetchWeixinAccounts, fetchWeixinConfig } = await import('../api');
-      const [acctRes, cfgRes] = await Promise.all([fetchWeixinAccounts(), fetchWeixinConfig()]);
-      if (acctRes.ok) setWeixinAccounts(acctRes.accounts);
-      if (cfgRes.ok) {
-        setWeixinEnabled(cfgRes.config.enabled);
-        setWeixinAckStyle(cfgRes.config.ackStyle);
-      }
-    } catch { /* ignore */ }
-  };
-
-  const startWeixinLogin = async () => {
-    setWeixinLoginLoading(true);
-    setWeixinQrCode(null);
-    try {
-      const eventSource = new EventSource(resolveApiUrl('/api/rdkclaw/weixin/login'));
-      eventSource.addEventListener('qrcode', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.qrcode) setWeixinQrCode(data.qrcode);
-        } catch { /* ignore */ }
-      });
-      eventSource.addEventListener('bound', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          addToast?.(`微信已绑定: ${data.nickname || data.accountId}`, 'success');
-          loadWeixinAccounts();
-        } catch { /* ignore */ }
-        setWeixinQrCode(null);
-        setWeixinLoginLoading(false);
-        eventSource.close();
-      });
-      eventSource.addEventListener('error', (e) => {
-        try {
-          const data = JSON.parse((e as any).data || '{}');
-          addToast?.(`登录失败: ${data.message || '未知错误'}`, 'error');
-        } catch { /* ignore */ }
-        setWeixinLoginLoading(false);
-        eventSource.close();
-      });
-      eventSource.addEventListener('done', () => {
-        setWeixinLoginLoading(false);
-        setWeixinQrCode(null);
-        eventSource.close();
-      });
-      eventSource.onerror = () => {
-        setWeixinLoginLoading(false);
-        setWeixinQrCode(null);
-        eventSource.close();
-      };
-    } catch (err: any) {
-      addToast?.(`启动登录失败: ${err.message || ''}`, 'error');
-      setWeixinLoginLoading(false);
-    }
-  };
-
-  const saveWeixinSettings = async () => {
-    try {
-      setLoading(true);
-      const { saveWeixinConfig } = await import('../api');
-      const res = await saveWeixinConfig({ enabled: weixinEnabled, ackStyle: weixinAckStyle });
-      if (res.ok) addToast?.('微信设置已保存', 'success');
-    } catch (err: any) {
-      addToast?.(`保存失败: ${err.message || ''}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  /* WeChat functions moved to SettingsPanel */
 
   const appendSystemMessage = (text: string) => {
     setChatMessages((prev) => [...prev, { id: nextChatMessageId(), role: 'assistant', text }]);
@@ -1085,7 +1012,7 @@ export default function OpenClaw() {
 
   const toggleAccordion = (key: typeof accordion) => {
     setAccordion((prev) => prev === key ? null : key);
-    if (key === 'model' || key === 'feishu' || key === 'weixin' || key === 'skills') {
+    if (key === 'model' || key === 'feishu' || key === 'skills') {
       setConfigTab(key as ConfigTab);
     }
   };
@@ -1404,67 +1331,6 @@ export default function OpenClaw() {
                   <button className="btn btn-ghost btn-sm" onClick={() => runAction('pairing/reject', { channel: pairingChannel, code: pairingCode.trim() })} disabled={loading || !pairingCode.trim()}>拒绝</button>
                 </div>
                 <button className={`chip ${activeOp === 'pairing/list' ? 'active' : ''}`} onClick={() => runAction('pairing/list', { channel: pairingChannel })} disabled={loading} style={{ marginTop: 6, fontSize: '0.6875rem' }}>查看待审批列表</button>
-              </div>
-            )}
-          </div>
-
-          {/* ── WeChat ClawBot ── */}
-          <div className="oc-accordion-item">
-            <AccTrigger id="weixin" icon="chat" label="微信 ClawBot" hint={weixinAccounts.length > 0 ? `${weixinAccounts.length} 个账号` : '未绑定'} />
-            {accordion === 'weixin' && (
-              <div className="oc-accordion-content">
-                <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 6 }}>
-                  微信 ClawBot 渠道 — 通过扫码将个人微信连接到 RDKClaw
-                </div>
-                {weixinAccounts.length > 0 && (
-                  <>
-                    <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>已绑定账号</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-                      {weixinAccounts.map((a) => (
-                        <div key={a.accountId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: 'var(--bg-elevated)', borderRadius: 6, fontSize: '0.6875rem' }}>
-                          <span>{a.nickname || a.accountId.slice(0, 12) + '...'}</span>
-                          <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.5625rem', padding: '1px 6px', color: 'var(--text-danger)' }}
-                            onClick={async () => {
-                              const { removeWeixinAccount } = await import('../api');
-                              await removeWeixinAccount(a.accountId);
-                              loadWeixinAccounts();
-                              addToast?.('已移除', 'info');
-                            }}>移除</button>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-                <button className="btn btn-primary btn-sm" onClick={startWeixinLogin} disabled={weixinLoginLoading} style={{ marginBottom: 8 }}>
-                  {weixinLoginLoading ? '等待扫码...' : '扫码绑定微信'}
-                </button>
-                {weixinQrCode && (
-                  <div style={{ textAlign: 'center', padding: 12, background: '#fff', borderRadius: 8, marginBottom: 8 }}>
-                    <img src={weixinQrCode} alt="微信扫码" style={{ width: 200, height: 200, imageRendering: 'pixelated' }} />
-                    <div style={{ fontSize: '0.625rem', color: '#666', marginTop: 4 }}>请用微信扫一扫</div>
-                  </div>
-                )}
-                <div className="divider" style={{ margin: '8px 0' }} />
-                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>渠道设置</div>
-                <div className="oc-form-row">
-                  <span className="oc-form-label">启用</span>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input type="checkbox" checked={weixinEnabled} onChange={(e) => setWeixinEnabled(e.target.checked)} />
-                    <span style={{ fontSize: '0.6875rem' }}>{weixinEnabled ? '已启用' : '已禁用'}</span>
-                  </label>
-                </div>
-                <div className="oc-form-row">
-                  <span className="oc-form-label">收到回执</span>
-                  <select className="select" value={weixinAckStyle} onChange={(e) => setWeixinAckStyle(e.target.value as any)} aria-label="回执风格">
-                    <option value="text">文本回执</option>
-                    <option value="emoji">emoji 回执</option>
-                    <option value="off">关闭</option>
-                  </select>
-                </div>
-                <div className="oc-form-actions" style={{ marginTop: 6 }}>
-                  <button className="btn btn-primary btn-sm" onClick={saveWeixinSettings} disabled={loading}>{loading ? '...' : '保存设置'}</button>
-                  <button className="btn btn-ghost btn-sm" onClick={async () => { const { restartWeixinChannel } = await import('../api'); await restartWeixinChannel(); addToast?.('已重启', 'info'); }}>重启渠道</button>
-                </div>
               </div>
             )}
           </div>
