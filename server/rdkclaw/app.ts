@@ -20,6 +20,7 @@ import {
   prepareSessionAttachments,
 } from "../agent/tools/attachment-tools.js";
 import { createRdkTools } from "../agent/tools/rdk-tools.js";
+import { createDeviceManagerTools } from "../agent/tools/device-manager-tools.js";
 import { createStudioTools, type StudioAutonomyRuntime } from "../agent/tools/studio-tools.js";
 import { createForumTools } from "../agent/tools/forum-tools.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
@@ -589,6 +590,7 @@ export class RDKClawApp {
       ...builtinTools,
       ...createStudioTools(this.autonomyRuntime),
       ...createAttachmentTools(sessionAttachments, providerConfig, base.sessionId),
+      ...createDeviceManagerTools(),
     ];
     if (policy.network.enabled) {
       tools.push(

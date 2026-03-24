@@ -56,7 +56,7 @@ const EXTERNAL_ALWAYS_APPROVE_TOOLS = new Set([
 export function getExternalChannelPolicy(toolName: string): "block" | "force_approval" | "allow" {
   if (EXTERNAL_BLOCKED_TOOLS.has(toolName)) return "block";
   if (EXTERNAL_ALWAYS_APPROVE_TOOLS.has(toolName)) return "force_approval";
-  if (/write|exec|restart|flash|upload|set_|delete|remove/i.test(toolName)) return "force_approval";
+  if (/write|exec|restart|flash|upload|set_|delete|remove|connect_ssh/i.test(toolName)) return "force_approval";
   return "allow";
 }
 

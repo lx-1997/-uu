@@ -1256,6 +1256,10 @@ if (isSSOEnabled() || isSSORequired()) {
 
 app.use('/vnc', express.static(process.cwd() + '/public/vnc'));
 
+app.get('/quick-connect', (_req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'quick-connect.html'));
+});
+
 // Serve agent-downloaded files — search multiple directories for the requested file
 const localFilesDirs = [
   path.join(process.cwd(), 'workspace', 'downloads'),

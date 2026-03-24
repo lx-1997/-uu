@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RDK Studio — 快速连接设备</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .card { background: #14141f; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; width: 90%; max-width: 400px; }
+  h1 { font-size: 1.3rem; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { font-size: 0.85rem; color: #888; margin-bottom: 24px; }
+  label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 6px; }
+  input { width: 100%; padding: 12px 14px; background: #1a1a28; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: #fff; font-size: 1rem; outline: none; margin-bottom: 16px; }
+  input:focus { border-color: #67e8f9; }
+  .row { display: flex; gap: 12px; }
+  .row input { flex: 1; }
+  .row input.port { max-width: 80px; }
+  button { width: 100%; padding: 14px; background: linear-gradient(135deg, #06b6d4, #8b5cf6); border: none; border-radius: 10px; color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button:hover:not(:disabled) { opacity: 0.9; }
+  .result { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: 0.9rem; line-height: 1.5; }
+  .success { background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); color: #4ade80; }
+  .error { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+  .loading { text-align: center; color: #67e8f9; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>RDK Studio 快速连接</h1>
+  <p class="subtitle">输入 RDK 设备信息，一键添加到 Studio</p>
+
+  <label for="host">设备 IP 地址</label>
+  <div class="row">
+    <input id="host" type="text" placeholder="192.168.1.100" autofocus>
+    <input id="port" class="port" type="number" placeholder="22" value="22">
+  </div>
+
+  <label for="username">用户名</label>
+  <input id="username" type="text" placeholder="root" value="root">
+
+  <label for="password">密码</label>
+  <input id="password" type="password" placeholder="sunrise" value="sunrise">
+
+  <button id="connectBtn" onclick="doConnect()">连接设备</button>
+  <div id="result"></div>
+</div>
+
+<script>
+async function doConnect() {
+  const host = document.getElementById('host').value.trim();
+  const port = parseInt(document.getElementById('port').value) || 22;
+  const username = document.getElementById('username').value.trim() || 'root';
+  const password = document.getElementById('password').value || 'sunrise';
+  const btn = document.getElementById('connectBtn');
+  const result = document.getElementById('result');
+
+  if (!host) { result.className = 'result error'; result.textContent = '请输入设备 IP 地址'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '连接中...';
+  result.className = 'result loading';
+  result.textContent = '正在通过 SSH 连接设备，请稍候...';
+
+  try {
+    const res = await fetch('/api/devices/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, port, username, password }),
+    });
+    const data = await res.json();
+    if (res.ok && data.device) {
+      result.className = 'result success';
+      result.innerHTML = `连接成功!<br>设备: ${data.device.host}:${data.device.port}<br>ID: ${data.device.id}<br><br>可以关闭此页面，设备已自动添加到 RDK Studio。`;
+      btn.textContent = '已连接 ✓';
+    } else {
+      result.className = 'result error';
+      result.textContent = data.message || data.error || '连接失败，请检查设备信息';
+      btn.disabled = false;
+      btn.textContent = '重试';
+    }
+  } catch (err) {
+    result.className = 'result error';
+    result.textContent = '网络错误: ' + (err.message || '无法连接到 Studio 服务');
+    btn.disabled = false;
+    btn.textContent = '重试';
+  }
+}
+</script>
+</body>
+</html>
