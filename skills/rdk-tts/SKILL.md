@@ -9,6 +9,8 @@ delegate_preference: local
 requires_board: true
 approval_level: auto
 cooldown_seconds: 0
+scheduler_template: none
+category: AI
 ---
 
 # TTS 文字转语音
@@ -42,3 +44,12 @@ Agent 通过 `text_to_speech` 工具调用，参数：
 - `text`（必填）：要合成的文字
 - `voice`（可选）：音色名称，默认 zh-CN-XiaoxiaoNeural
 - `speed`（可选）：语速，如 "+20%"、"-10%"
+
+## 可用音色（常用）
+
+- zh-CN-XiaoxiaoNeural: 中文女, 活泼自然（默认）
+- zh-CN-YunxiNeural: 中文男, 清朗
+- zh-CN-XiaoyiNeural: 中文女, 温柔
+- zh-CN-YunjianNeural: 中文男, 沉稳
+- en-US-JennyNeural: 英文女, 自然
+- en-US-GuyNeural: 英文男, 自然

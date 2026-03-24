@@ -10,6 +10,7 @@ requires_board: false
 approval_level: strict
 cooldown_seconds: 3
 scheduler_template: openclaw_lifecycle_maintenance
+category: Lifecycle
 ---
 
 # RDK OpenClaw Lifecycle Ops

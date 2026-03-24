@@ -10,6 +10,7 @@ requires_board: false
 approval_level: confirm
 cooldown_seconds: 0
 scheduler_template: local_device_ops
+category: DevOps
 ---
 
 # RDK Device Ops

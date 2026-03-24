@@ -10,6 +10,7 @@ requires_board: true
 approval_level: confirm
 cooldown_seconds: 0
 scheduler_template: board_maintenance
+category: Delegation
 ---
 
 # RDK Board Delegate

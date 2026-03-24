@@ -10,6 +10,7 @@ requires_board: false
 approval_level: confirm
 cooldown_seconds: 0
 scheduler_template: bridge_validation
+category: Delegation
 ---
 
 # RDK OpenClaw Bridge

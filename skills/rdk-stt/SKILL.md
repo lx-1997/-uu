@@ -9,6 +9,8 @@ delegate_preference: local
 requires_board: true
 approval_level: auto
 cooldown_seconds: 0
+scheduler_template: none
+category: AI
 ---
 
 # STT 语音转文字
@@ -40,3 +42,15 @@ cooldown_seconds: 0
 Agent 通过 `speech_to_text` 工具调用，参数：
 - `audio_path`（必填）：设备上的音频文件路径
 - `language`（可选）：识别语言，默认 zh-CN
+
+## 支持语言
+
+- zh-CN: 中文（简体，默认）
+- en-US: 英文
+- ja: 日语
+- ko: 韩语
+- zh-TW: 中文（繁体）
+
+## 注意事项
+- 单次识别音频建议不超过 60 秒
+- 返回 JSON 包含 `text` 识别结果

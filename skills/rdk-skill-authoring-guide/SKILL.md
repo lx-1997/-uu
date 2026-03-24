@@ -10,6 +10,7 @@ requires_board: false
 approval_level: none
 cooldown_seconds: 0
 scheduler_template: none
+category: Meta
 ---
 
 # RDK Skill Authoring Guide
