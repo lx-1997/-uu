@@ -34,6 +34,7 @@ export function createRdkTools(deviceId: string): Tool[] {
     boardOpenClawUninstallTool(deviceId),
     boardOpenClawModelSwitchTool(deviceId),
     boardOpenClawFeishuConfigTool(deviceId),
+    boardOpenClawWeixinConfigTool(deviceId),
     boardOpenClawPairingListTool(deviceId),
     boardOpenClawPairingApproveTool(deviceId),
     boardOpenClawPairingRejectTool(deviceId),
@@ -410,6 +411,41 @@ json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
 print(json.dumps({"ok":True,"mode":feishu["connectionMode"],"domain":feishu["domain"],"dmPolicy":feishu["dmPolicy"]},ensure_ascii=False))`;
       const pyB64 = Buffer.from(py, 'utf8').toString('base64');
       const cmd = `bash -lc "echo '${pyB64}' | base64 -d >/tmp/rdk_oc_feishu_cfg.py && python3 /tmp/rdk_oc_feishu_cfg.py '${payload}' && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true) && (openclaw gateway status 2>&1 || openclaw status 2>&1 || true)"`;
+      return execOnDevice(deviceId, [cmd]);
+    },
+  };
+}
+
+function boardOpenClawWeixinConfigTool(deviceId: string): Tool<{
+  enabled?: boolean;
+}> {
+  return {
+    name: 'board_openclaw_weixin_config',
+    description: '在板端 OpenClaw 启用微信 ClawBot 插件并重启 gateway。用户需要通过 openclaw channels login --channel openclaw-weixin 在板端完成扫码绑定。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', description: '是否启用微信插件，默认 true' },
+      },
+    },
+    async execute(input) {
+      const enabled = input.enabled !== false;
+      const py = `import json,os
+p=os.path.expanduser("~/.openclaw/openclaw.json")
+os.makedirs(os.path.dirname(p),exist_ok=True)
+d={}
+if os.path.exists(p):
+  try:
+    d=json.load(open(p,"r",encoding="utf-8"))
+  except Exception:
+    d={}
+plugins=d.setdefault("plugins",{})
+entries=plugins.setdefault("entries",{})
+entries["openclaw-weixin"]={"enabled":${enabled ? 'True' : 'False'}}
+json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
+print(json.dumps({"ok":True,"enabled":${enabled ? 'true' : 'false'}},ensure_ascii=False))`;
+      const pyB64 = Buffer.from(py, 'utf8').toString('base64');
+      const cmd = `bash -lc "echo '${pyB64}' | base64 -d >/tmp/rdk_oc_wx_cfg.py && python3 /tmp/rdk_oc_wx_cfg.py && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true) && (openclaw gateway status 2>&1 || openclaw status 2>&1 || true)"`;
       return execOnDevice(deviceId, [cmd]);
     },
   };

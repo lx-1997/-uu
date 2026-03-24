@@ -259,6 +259,7 @@ export function filterBootstrapFilesForSession(
   }
   const nonMain =
     sessionKey.startsWith("feishu:") ||
+    sessionKey.startsWith("weixin:") ||
     sessionKey.startsWith("auto:") ||
     sessionKey.startsWith("channel:");
   const mainReadsMemory = process.env.RDKCLAW_MAIN_READS_MEMORY !== "0";

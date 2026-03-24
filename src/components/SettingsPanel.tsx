@@ -531,7 +531,7 @@ export default function SettingsPanel() {
         </div>
 
         <div className="settings-nav">
-          {([['general', '通用'], ['ai', 'AI 模型'], ['rdkclaw', 'RDKClaw'], ['connection', '连接'], ['feishu', '飞书'], ['about', '关于']] as const).map(([key, label]) => (
+          {([['general', '通用'], ['ai', 'AI 模型'], ['rdkclaw', 'RDKClaw'], ['connection', '连接'], ['feishu', '飞书'], ['weixin', '微信'], ['about', '关于']] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -1322,6 +1322,26 @@ export default function SettingsPanel() {
                 </div>
               </>
             )}
+          </>
+        )}
+
+        {settingsTab === 'weixin' && (
+          <>
+            <div className="config-section">
+              <div className="config-section-title">微信 ClawBot 渠道</div>
+              <div className="config-row">
+                <span className="config-label">渠道状态</span>
+                <span className="config-value" id="weixin-status">加载中...</span>
+              </div>
+              <div className="config-row">
+                <span className="config-label">已绑定账号</span>
+                <span className="config-value" id="weixin-accounts">-</span>
+              </div>
+              <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                微信 ClawBot 的详细配置请前往 OpenClaw 面板的「微信 ClawBot」区域管理。
+                在那里可以扫码绑定微信、管理已绑定账号、以及调整回执风格等设置。
+              </div>
+            </div>
           </>
         )}
 

@@ -400,7 +400,7 @@ export interface AgentAttachmentPayload {
   contentBase64?: string;
   transcript?: string;
   textContent?: string;
-  source?: 'studio' | 'feishu';
+  source?: 'studio' | 'feishu' | 'weixin';
 }
 
 export type AgentEventCallback = (event: AgentSSEEvent) => void;
@@ -693,6 +693,69 @@ export function rejectFeishuPairing(code: string) {
   return request<{ ok: boolean }>('/api/rdkclaw/feishu/pairing/reject', {
     method: 'POST',
     body: JSON.stringify({ code }),
+  });
+}
+
+// ─── WeChat ClawBot API ───
+
+export interface WeixinRuntimeStatus {
+  running: boolean;
+  accountCount: number;
+  lastPollAt: number | null;
+  lastError: string | null;
+  enabled: boolean;
+}
+
+export interface WeixinConfigView {
+  enabled: boolean;
+  syncWithStudio: boolean;
+  mirrorToStudioChat: boolean;
+  ackOnReceive: boolean;
+  ackStyle: 'text' | 'emoji' | 'off';
+}
+
+export interface WeixinAccountView {
+  accountId: string;
+  nickname: string;
+  boundAt: number;
+}
+
+export function fetchWeixinStatus() {
+  return request<{ ok: boolean } & WeixinRuntimeStatus>('/api/rdkclaw/weixin/status');
+}
+
+export function fetchWeixinConfig() {
+  return request<{ ok: boolean; config: WeixinConfigView }>('/api/rdkclaw/weixin/config');
+}
+
+export function saveWeixinConfig(patch: Partial<WeixinConfigView>) {
+  return request<{ ok: boolean; config: WeixinConfigView }>('/api/rdkclaw/weixin/config', {
+    method: 'POST',
+    body: JSON.stringify(patch),
+  });
+}
+
+export function fetchWeixinAccounts() {
+  return request<{ ok: boolean; accounts: WeixinAccountView[] }>('/api/rdkclaw/weixin/accounts');
+}
+
+export function addWeixinAccount(accountId: string, token: string, nickname?: string) {
+  return request<{ ok: boolean }>('/api/rdkclaw/weixin/accounts', {
+    method: 'POST',
+    body: JSON.stringify({ accountId, token, nickname }),
+  });
+}
+
+export function removeWeixinAccount(accountId: string) {
+  return request<{ ok: boolean }>(`/api/rdkclaw/weixin/accounts/${accountId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function restartWeixinChannel() {
+  return request<{ ok: boolean }>('/api/rdkclaw/weixin/restart', {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 

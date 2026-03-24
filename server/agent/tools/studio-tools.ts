@@ -274,7 +274,7 @@ function promoteLongTermMemoryTool(): Tool<{ summary: string }> {
     },
     async execute(input, ctx) {
       const key = String(ctx.sessionKey || '');
-      if (key.startsWith('feishu-') || key.startsWith('feishu:') || key.startsWith('autonomy-') || key.startsWith('auto:') || key.startsWith('channel:')) {
+      if (key.startsWith('feishu-') || key.startsWith('feishu:') || key.startsWith('weixin-') || key.startsWith('weixin:') || key.startsWith('autonomy-') || key.startsWith('auto:') || key.startsWith('channel:')) {
         return '共享会话禁止写入 MEMORY.md，请改写入 daily memory。';
       }
       const root = resolveAgentRoot(ctx.bootstrapDir || ctx.workspaceDir);

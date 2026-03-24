@@ -19,6 +19,7 @@ export interface GatewayStatus {
   running: boolean;
   version: string;
   feishuConnected: boolean;
+  weixinConnected: boolean;
 }
 
 export interface OpenClawHealthStatus {
@@ -520,7 +521,7 @@ export class OpenClawDeploymentManager {
 
   getGatewayStatus(device: Device, onResult: (status: GatewayStatus) => void, onOutput?: (chunk: string) => void): void {
     const pyScript = `import json, os, subprocess
-result = {"running": False, "version": "", "feishuConnected": False}
+result = {"running": False, "version": "", "feishuConnected": False, "weixinConnected": False}
 try:
     import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -543,6 +544,9 @@ try:
         d = json.load(open(p))
         feishu = (d.get("channels") or {}).get("feishu") or {}
         result["feishuConnected"] = bool(feishu.get("enabled") and feishu.get("appId"))
+        plugins = (d.get("plugins") or {}).get("entries") or {}
+        wx = plugins.get("openclaw-weixin") or {}
+        result["weixinConnected"] = bool(wx.get("enabled"))
 except:
     pass
 print(json.dumps(result))`;
@@ -560,7 +564,7 @@ print(json.dumps(result))`;
           return;
         } catch (_) {}
       }
-      onResult({ running: false, version: '', feishuConnected: false });
+      onResult({ running: false, version: '', feishuConnected: false, weixinConnected: false });
     });
   }
 

@@ -39,6 +39,9 @@ import { FeishuApiClient } from './rdkclaw/feishu-api-client.js';
 import { FeishuAuthStore } from './rdkclaw/feishu-auth-store.js';
 import { FeishuConfigStore } from './rdkclaw/feishu-config-store.js';
 import { FeishuWebSocketChannel } from './agent/channels/feishu.js';
+import { WeixinConfigStore } from './rdkclaw/weixin-config-store.js';
+import { WeixinAccountStore } from './rdkclaw/weixin-account-store.js';
+import { WeixinPollingChannel } from './agent/channels/weixin.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
@@ -245,6 +248,21 @@ const feishuChannel = new FeishuWebSocketChannel({
 const feishuEventSeen = new Map<string, number>();
 let feishuLastEventAt: number | null = null;
 let feishuLastAuthorizedAt: number | null = null;
+
+const weixinConfigStore = new WeixinConfigStore();
+const weixinAccountStore = new WeixinAccountStore();
+weixinAccountStore.importFromOpenClawDir();
+const weixinChannel = new WeixinPollingChannel({
+  rdkclaw,
+  accountStore: weixinAccountStore,
+  getConfig: () => weixinConfigStore.getConfig(),
+  notificationHub,
+});
+if (weixinConfigStore.getConfig().enabled && weixinAccountStore.listAccounts().length > 0) {
+  weixinChannel.start();
+  console.log('[Weixin] 微信 ClawBot 渠道已启动');
+}
+
 const autonomyScheduler = new AutonomyScheduler(rdkclaw, notificationHub);
 if (!feishuApi.isConfigured()) {
   console.warn('[Feishu] FEISHU_APP_ID / FEISHU_APP_SECRET 未配置，Webhook 将无法主动回消息。');
@@ -3813,6 +3831,133 @@ app.post('/api/rdkclaw/feishu/pairing/reject', (request, response) => {
     return;
   }
   response.json({ ok: true });
+});
+
+// ─── WeChat ClawBot Channel Routes ───
+
+app.get('/api/rdkclaw/weixin/status', (_request, response) => {
+  const status = weixinChannel.getStatus();
+  const cfg = weixinConfigStore.getConfig();
+  response.json({
+    ok: true,
+    enabled: cfg.enabled,
+    ...status,
+  });
+});
+
+app.get('/api/rdkclaw/weixin/config', (_request, response) => {
+  const cfg = weixinConfigStore.getConfig();
+  response.json({ ok: true, config: cfg });
+});
+
+app.post('/api/rdkclaw/weixin/config', (request, response) => {
+  const body = request.body || {};
+  const next = weixinConfigStore.saveConfig(body);
+  if (next.enabled && weixinAccountStore.listAccounts().length > 0) {
+    weixinChannel.restart();
+  } else if (!next.enabled) {
+    weixinChannel.stop();
+  }
+  response.json({ ok: true, config: next });
+});
+
+app.get('/api/rdkclaw/weixin/accounts', (_request, response) => {
+  const accounts = weixinAccountStore.listAccounts().map((a) => ({
+    accountId: a.accountId,
+    nickname: a.nickname || '',
+    boundAt: a.boundAt,
+  }));
+  response.json({ ok: true, accounts });
+});
+
+app.post('/api/rdkclaw/weixin/accounts', (request, response) => {
+  const { accountId, token, nickname } = request.body || {};
+  if (!accountId || !token) {
+    response.status(400).json({ ok: false, error: '缺少 accountId 或 token' });
+    return;
+  }
+  const account = {
+    accountId: String(accountId),
+    token: String(token),
+    nickname: nickname ? String(nickname) : undefined,
+    boundAt: Date.now(),
+  };
+  weixinAccountStore.addAccount(account);
+  weixinChannel.addAccount(account);
+  response.json({ ok: true });
+});
+
+app.delete('/api/rdkclaw/weixin/accounts/:id', (request, response) => {
+  const id = request.params.id;
+  const removed = weixinAccountStore.removeAccount(id);
+  if (removed) weixinChannel.removeAccount(id);
+  response.json({ ok: removed, message: removed ? '已移除' : '账号不存在' });
+});
+
+app.post('/api/rdkclaw/weixin/restart', (_request, response) => {
+  weixinAccountStore.reload();
+  weixinChannel.restart();
+  response.json({ ok: true, message: '微信渠道已重启' });
+});
+
+app.post('/api/rdkclaw/weixin/login', async (request, response) => {
+  response.setHeader('Content-Type', 'text/event-stream');
+  response.setHeader('Cache-Control', 'no-cache');
+  response.setHeader('Connection', 'keep-alive');
+
+  const sendSSE = (event: string, data: unknown) => {
+    response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const { spawn } = await import('node:child_process');
+    const child = spawn('npx', ['-y', '@tencent-weixin/openclaw-weixin-cli@latest', 'login', '--json'], {
+      cwd: process.cwd(),
+      shell: true,
+      env: { ...process.env, FORCE_COLOR: '0' },
+    });
+
+    let output = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      output += text;
+
+      const qrMatch = text.match(/"qrcode"\s*:\s*"([^"]+)"/);
+      if (qrMatch) {
+        sendSSE('qrcode', { qrcode: qrMatch[1] });
+      }
+
+      const tokenMatch = text.match(/"token"\s*:\s*"([^"]+)"/);
+      const accountMatch = text.match(/"accountId"\s*:\s*"([^"]+)"/);
+      if (tokenMatch && accountMatch) {
+        const account = {
+          accountId: accountMatch[1],
+          token: tokenMatch[1],
+          nickname: text.match(/"nickname"\s*:\s*"([^"]+)"/)?.[1] || '',
+          boundAt: Date.now(),
+        };
+        weixinAccountStore.addAccount(account);
+        weixinChannel.addAccount(account);
+        sendSSE('bound', { accountId: account.accountId, nickname: account.nickname });
+      }
+    });
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      sendSSE('log', { message: chunk.toString().trim() });
+    });
+
+    child.on('close', (code) => {
+      sendSSE('done', { code });
+      response.end();
+    });
+
+    request.on('close', () => {
+      child.kill('SIGTERM');
+    });
+  } catch (err: any) {
+    sendSSE('error', { message: err.message || '启动登录流程失败' });
+    response.end();
+  }
 });
 
 app.get('/api/rdkclaw/feishu/config', (_request, response) => {
