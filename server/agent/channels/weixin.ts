@@ -1,7 +1,9 @@
+import fs from "node:fs";
 import { RDKClawApp } from "../../rdkclaw/app.js";
 import { WeixinAccountStore, type WeixinAccount } from "../../rdkclaw/weixin-account-store.js";
 import type { WeixinRuntimeConfig } from "../../rdkclaw/weixin-config-store.js";
-import { WeixinApiClient, type WeixinMessage, type WeixinMessageItem } from "../../rdkclaw/weixin-api-client.js";
+import { WeixinApiClient, type WeixinMessage } from "../../rdkclaw/weixin-api-client.js";
+import { extractAttachments } from "../../rdkclaw/weixin-media.js";
 import type { NotificationHub } from "../../rdkclaw/notification-hub.js";
 
 type WeixinChannelOptions = {
@@ -22,25 +24,8 @@ const WEIXIN_MAX_TEXT = 4000;
 const MIN_RETRY_DELAY_MS = 2_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-function extractText(items: WeixinMessageItem[] | undefined): string {
-  if (!items) return "";
-  const parts: string[] = [];
-  for (const item of items) {
-    if (item.type === 1 && item.text_item?.text) {
-      parts.push(item.text_item.text);
-    } else if (item.type === 2) {
-      parts.push("[图片]");
-    } else if (item.type === 3) {
-      parts.push("[语音]");
-    } else if (item.type === 4) {
-      const name = item.file_item?.file_name || "文件";
-      parts.push(`[文件] ${name}`);
-    } else if (item.type === 5) {
-      parts.push("[视频]");
-    }
-  }
-  return parts.join(" ").trim();
-}
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|bmp|webp|tiff?)$/i;
+const IMAGE_PATH_RE = /(?:^|\s)(\/[\w./-]+\.(?:png|jpe?g|gif|bmp|webp))/gi;
 
 function normalizeForWeixin(text: string): string {
   const raw = String(text || "").trim();
@@ -234,19 +219,26 @@ export class WeixinPollingChannel {
 
     const fromUserId = msg.from_user_id!;
     const contextToken = msg.context_token || "";
-    const text = extractText(msg.item_list);
     const tag = `[WeixinChannel:${poller.account.accountId.slice(0, 8)}]`;
 
-    if (!text) {
+    const { text, attachments } = await extractAttachments(poller.client, msg.item_list);
+
+    const hasContent = text || attachments.length > 0;
+    if (!hasContent) {
       console.log(`${tag} skipping empty message from ${fromUserId.slice(0, 6)}***`);
       return;
     }
 
+    const hasVoice = attachments.some(a => a.type === "audio");
+    const hasImage = attachments.some(a => a.type === "image");
+    const displayText = text || (hasVoice ? "(语音消息)" : hasImage ? "(图片)" : "(媒体消息)");
+
     const maskedUser = `${fromUserId.slice(0, 4)}***${fromUserId.slice(-4)}`;
-    console.log(`${tag} inbound from ${maskedUser}: ${text.slice(0, 80)}${text.length > 80 ? "..." : ""}`);
+    const mediaTag = attachments.length ? ` +${attachments.length}附件` : "";
+    console.log(`${tag} inbound from ${maskedUser}: ${displayText.slice(0, 80)}${mediaTag}`);
 
     this.publishMirror("channel_message_inbound", "微信消息",
-      `来自 ${maskedUser}: ${text.slice(0, 200)}`, {
+      `来自 ${maskedUser}: ${displayText.slice(0, 200)}${mediaTag}`, {
         channel: "weixin",
         direction: "inbound",
         fromUserId: maskedUser,
@@ -276,19 +268,27 @@ export class WeixinPollingChannel {
     const sessionId = `weixin:${fromUserId}`;
     const chunks: string[] = [];
     let finalText = "";
+    const imagePaths: string[] = [];
 
     try {
       for await (const event of this.rdkclaw.streamChat({
-        message: text,
+        message: displayText,
         userId: fromUserId,
         sessionId,
         mode: "board-preferred",
+        attachments: attachments.length > 0 ? attachments : undefined,
       })) {
         if (event.type === "text") {
           const delta = String(event.data?.delta ?? event.data?.text ?? "");
           if (delta) chunks.push(delta);
         } else if (event.type === "message_end") {
           finalText = String(event.data?.text ?? "").trim();
+        } else if (event.type === "tool_result") {
+          const result = String(event.data?.result ?? "");
+          for (const match of result.matchAll(IMAGE_PATH_RE)) {
+            const p = match[1];
+            if (fs.existsSync(p)) imagePaths.push(p);
+          }
         } else if (event.type === "error") {
           const errorMsg = String(event.data?.error ?? "RDKClaw 执行失败");
           if (!chunks.length) chunks.push(errorMsg);
@@ -308,28 +308,43 @@ export class WeixinPollingChannel {
       poller.client.sendTyping(fromUserId, typingTicket, 2).catch(() => {});
     }
 
+    // Send image attachments found in tool results
+    for (const imgPath of imagePaths) {
+      try {
+        const buf = fs.readFileSync(imgPath);
+        const cdn = await poller.client.uploadMedia(buf, 1);
+        await poller.client.sendImage(fromUserId, contextToken, cdn);
+        console.log(`${tag} sent image to ${maskedUser}: ${imgPath}`);
+      } catch (err) {
+        console.warn(`${tag} uploadMedia failed for ${imgPath}:`, (err as Error).message);
+      }
+    }
+
+    // Send text reply
     const streamed = chunks.join("").trim();
     const replyRaw = (finalText || streamed).trim()
-      || "已执行完成，但未提取到可显示的文本结果。";
+      || (imagePaths.length > 0 ? "" : "已执行完成，但未提取到可显示的文本结果。");
     const reply = normalizeForWeixin(replyRaw);
 
-    let remaining = reply;
-    while (remaining.length > 0) {
-      const chunk = remaining.slice(0, WEIXIN_MAX_TEXT);
-      remaining = remaining.slice(WEIXIN_MAX_TEXT);
-      await poller.client.sendText(fromUserId, contextToken, chunk).catch((err) => {
-        console.error(`${tag} sendText error:`, err instanceof Error ? err.message : err);
-      });
+    if (reply) {
+      let remaining = reply;
+      while (remaining.length > 0) {
+        const chunk = remaining.slice(0, WEIXIN_MAX_TEXT);
+        remaining = remaining.slice(WEIXIN_MAX_TEXT);
+        await poller.client.sendText(fromUserId, contextToken, chunk).catch((err) => {
+          console.error(`${tag} sendText error:`, err instanceof Error ? err.message : err);
+        });
+      }
     }
 
     this.publishMirror("channel_message_outbound", "微信回复",
-      reply.slice(0, 200), {
+      (reply || `[${imagePaths.length}张图片]`).slice(0, 200), {
         channel: "weixin",
         direction: "outbound",
         fromUserId: maskedUser,
         accountId: poller.account.accountId,
       });
-    console.log(`${tag} replied to ${maskedUser}, chars=${reply.length}`);
+    console.log(`${tag} replied to ${maskedUser}, chars=${reply.length} images=${imagePaths.length}`);
   }
 
   private publishMirror(

@@ -1,6 +1,10 @@
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+
 const DEFAULT_ILINK_BASE = "https://ilinkai.weixin.qq.com";
+const WEIXIN_CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c";
 const LONGPOLL_TIMEOUT_MS = 35_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
+const CDN_TIMEOUT_MS = 30_000;
 
 export interface WeixinMessageItem {
   type: number; // 1=TEXT, 2=IMAGE, 3=VOICE, 4=FILE, 5=VIDEO
@@ -49,6 +53,30 @@ export interface SendMessageResponse {
 export interface GetConfigResponse {
   ret?: number;
   typing_ticket?: string;
+}
+
+export interface GetUploadUrlResponse {
+  ret?: number;
+  errmsg?: string;
+  upload_param?: UploadParam;
+  thumb_upload_param?: UploadParam;
+}
+
+export interface UploadParam {
+  upload_url?: string;
+  encrypt_query_param?: string;
+}
+
+export const MediaType = { IMAGE: 1, VIDEO: 2, FILE: 3 } as const;
+
+function aesEcbEncrypt(data: Buffer, key: Buffer): Buffer {
+  const cipher = createCipheriv("aes-128-ecb", key, null);
+  return Buffer.concat([cipher.update(data), cipher.final()]);
+}
+
+function aesEcbDecrypt(data: Buffer, key: Buffer): Buffer {
+  const decipher = createDecipheriv("aes-128-ecb", key, null);
+  return Buffer.concat([decipher.update(data), decipher.final()]);
 }
 
 function randomUin(): string {
@@ -172,5 +200,87 @@ export class WeixinApiClient {
     const payload: Record<string, string> = { ilink_user_id: userId };
     if (contextToken) payload.context_token = contextToken;
     return this.post<GetConfigResponse>("getconfig", payload, 10_000);
+  }
+
+  // ── CDN media download ──
+
+  async downloadMedia(cdnMedia: CdnMedia): Promise<Buffer> {
+    if (!cdnMedia.encrypt_query_param || !cdnMedia.aes_key) {
+      throw new Error("CdnMedia missing encrypt_query_param or aes_key");
+    }
+    const url = `${WEIXIN_CDN_BASE}?${cdnMedia.encrypt_query_param}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CDN_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error(`CDN download failed: ${res.status}`);
+      const encrypted = Buffer.from(await res.arrayBuffer());
+      const key = Buffer.from(cdnMedia.aes_key, "base64");
+      return aesEcbDecrypt(encrypted, key);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // ── CDN media upload ──
+
+  async getUploadUrl(
+    mediaType: (typeof MediaType)[keyof typeof MediaType],
+    rawSize: number,
+    rawMd5: string,
+    encSize: number,
+  ): Promise<GetUploadUrlResponse> {
+    return this.post<GetUploadUrlResponse>("getuploadurl", {
+      media_type: mediaType,
+      rawsize: rawSize,
+      rawfilemd5: rawMd5,
+      filesize: encSize,
+    }, DEFAULT_TIMEOUT_MS);
+  }
+
+  async uploadMedia(
+    fileBuf: Buffer,
+    mediaType: (typeof MediaType)[keyof typeof MediaType] = MediaType.IMAGE,
+  ): Promise<CdnMedia> {
+    const aesKey = randomBytes(16);
+    const encrypted = aesEcbEncrypt(fileBuf, aesKey);
+    const rawMd5 = createHash("md5").update(fileBuf).digest("hex");
+
+    const urlRes = await this.getUploadUrl(mediaType, fileBuf.length, rawMd5, encrypted.length);
+    const uploadParam = urlRes.upload_param;
+    if (!uploadParam?.upload_url) {
+      throw new Error(`getUploadUrl failed: ${urlRes.errmsg || "no upload_url"}`);
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CDN_TIMEOUT_MS);
+    try {
+      const uploadRes = await fetch(uploadParam.upload_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: encrypted,
+        signal: controller.signal,
+      });
+      if (!uploadRes.ok) throw new Error(`CDN upload failed: ${uploadRes.status}`);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    return {
+      encrypt_query_param: uploadParam.encrypt_query_param || "",
+      aes_key: aesKey.toString("base64"),
+    };
+  }
+
+  async sendImage(toUserId: string, contextToken: string, cdn: CdnMedia) {
+    return this.sendMessage(toUserId, contextToken, [
+      { type: 2, image_item: { cdn_media: cdn } },
+    ]);
+  }
+
+  async sendFile(toUserId: string, contextToken: string, cdn: CdnMedia, fileName: string) {
+    return this.sendMessage(toUserId, contextToken, [
+      { type: 4, file_item: { cdn_media: cdn, file_name: fileName } },
+    ]);
   }
 }
