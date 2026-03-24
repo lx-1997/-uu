@@ -1,0 +1,43 @@
+{
+  "entries": [
+    {
+      "id": "1774329331470-wykpue",
+      "ts": 1774329331470,
+      "source": "rdkclaw",
+      "deviceId": "83f7ef28-c304-415c-961e-b272561de578",
+      "sessionId": "ui-1774275896631",
+      "model": "qwen3.5-plus",
+      "promptTokens": 430,
+      "completionTokens": 14,
+      "totalTokens": 444,
+      "estimated": true,
+      "success": true
+    },
+    {
+      "id": "1774329740359-pyngh7",
+      "ts": 1774329740359,
+      "source": "rdkclaw",
+      "deviceId": "83f7ef28-c304-415c-961e-b272561de578",
+      "sessionId": "ui-1774275896631",
+      "model": "qwen3.5-plus",
+      "promptTokens": 430,
+      "completionTokens": 14,
+      "totalTokens": 444,
+      "estimated": true,
+      "success": true
+    },
+    {
+      "id": "1774330062842-uyiqmk",
+      "ts": 1774330062842,
+      "source": "rdkclaw",
+      "deviceId": "83f7ef28-c304-415c-961e-b272561de578",
+      "sessionId": "ui-1774275896631",
+      "model": "qwen3.5-plus",
+      "promptTokens": 400,
+      "completionTokens": 36,
+      "totalTokens": 436,
+      "estimated": true,
+      "success": true
+    }
+  ]
+}

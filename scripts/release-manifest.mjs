@@ -7,6 +7,7 @@ const releaseDir = path.join(rootDir, 'release');
 const outDir = path.join(rootDir, '.smoke');
 const manifestPath = path.join(outDir, 'release-manifest.json');
 const hashListPath = path.join(outDir, 'release-sha256.txt');
+const artifactExts = new Set(['.appimage', '.deb', '.dmg', '.exe', '.blockmap', '.yml', '.yaml', '.zip', '.pkg']);
 
 function walk(dir) {
   const files = [];
@@ -16,7 +17,12 @@ function walk(dir) {
     if (!current || !fs.existsSync(current)) continue;
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
-      if (entry.isDirectory()) stack.push(full);
+      if (entry.isDirectory()) {
+        const relDir = path.relative(releaseDir, full).replace(/\\/g, '/').toLowerCase();
+        // Ignore unpacked app directories to keep manifest stable on CI.
+        if (relDir === 'win-unpacked' || relDir.endsWith('.app') || relDir.endsWith('-unpacked')) continue;
+        stack.push(full);
+      }
       else files.push(full);
     }
   }
@@ -37,9 +43,11 @@ try {
   if (!fs.existsSync(releaseDir)) {
     throw new Error('release 目录不存在，无法生成发布清单');
   }
-  const files = walk(releaseDir).sort((a, b) => a.localeCompare(b));
+  const files = walk(releaseDir)
+    .filter((item) => artifactExts.has(path.extname(item).toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
   if (files.length === 0) {
-    throw new Error('release 目录为空，无法生成发布清单');
+    throw new Error('release 目录中未发现可分发产物，无法生成发布清单');
   }
   fs.mkdirSync(outDir, { recursive: true });
 

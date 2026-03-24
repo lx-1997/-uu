@@ -8,6 +8,7 @@
 import { readDevices } from '../../storage.js';
 import { runRemoteCommands, uploadFileSftp } from '../../ssh.js';
 import type { Device } from '../../../shared/types.js';
+import { runInDeviceLane } from '../../device-exec-scheduler.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -42,26 +43,25 @@ export async function getDevicePassword(device: Device): Promise<string> {
 export async function execOnDevice(deviceId: string, commands: string[]): Promise<string> {
   const device = await getDevice(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
-
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const pwd = await getDevicePassword(device);
-  const candidates = [pwd, ...passwordCandidates(device.username)];
-  let lastError: unknown = null;
-
-  for (const p of [...new Set(candidates)]) {
-    try {
-      const output = await runRemoteCommands(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: p },
-        commands,
-      );
-      devicePasswordCache.set(key, p);
-      return output;
-    } catch (err) {
-      lastError = err;
+  return runInDeviceLane(device.id, async () => {
+    const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+    const pwd = await getDevicePassword(device);
+    const candidates = [pwd, ...passwordCandidates(device.username)];
+    let lastError: unknown = null;
+    for (const p of [...new Set(candidates)]) {
+      try {
+        const output = await runRemoteCommands(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+          commands,
+        );
+        devicePasswordCache.set(key, p);
+        return output;
+      } catch (err) {
+        lastError = err;
+      }
     }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error('SSH 命令执行失败');
+    throw lastError instanceof Error ? lastError : new Error('SSH 命令执行失败');
+  });
 }
 
 /**
@@ -77,27 +77,26 @@ export async function readDeviceFile(deviceId: string, filePath: string): Promis
 export async function writeDeviceFile(deviceId: string, filePath: string, content: string): Promise<void> {
   const device = await getDevice(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
-
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const pwd = await getDevicePassword(device);
-  const candidates = [pwd, ...passwordCandidates(device.username)];
-  let lastError: unknown = null;
-
-  for (const p of [...new Set(candidates)]) {
-    try {
-      await uploadFileSftp(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: p },
-        filePath,
-        Buffer.from(content, 'utf-8'),
-      );
-      devicePasswordCache.set(key, p);
-      return;
-    } catch (err) {
-      lastError = err;
+  await runInDeviceLane(device.id, async () => {
+    const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+    const pwd = await getDevicePassword(device);
+    const candidates = [pwd, ...passwordCandidates(device.username)];
+    let lastError: unknown = null;
+    for (const p of [...new Set(candidates)]) {
+      try {
+        await uploadFileSftp(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+          filePath,
+          Buffer.from(content, 'utf-8'),
+        );
+        devicePasswordCache.set(key, p);
+        return;
+      } catch (err) {
+        lastError = err;
+      }
     }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error('设备文件写入失败');
+    throw lastError instanceof Error ? lastError : new Error('设备文件写入失败');
+  });
 }
 
 /**
@@ -138,28 +137,27 @@ export async function uploadLocalFileToDevice(
 ): Promise<{ bytes: number; remotePath: string }> {
   const device = await getDevice(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
-
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const pwd = await getDevicePassword(device);
-  const candidates = [pwd, ...passwordCandidates(device.username)];
   const buffer = await fs.readFile(localPath);
-  let lastError: unknown = null;
-
-  for (const p of [...new Set(candidates)]) {
-    try {
-      await uploadFileSftp(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: p },
-        remotePath,
-        buffer,
-      );
-      devicePasswordCache.set(key, p);
-      return { bytes: buffer.length, remotePath };
-    } catch (err) {
-      lastError = err;
+  return runInDeviceLane(device.id, async () => {
+    const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+    const pwd = await getDevicePassword(device);
+    const candidates = [pwd, ...passwordCandidates(device.username)];
+    let lastError: unknown = null;
+    for (const p of [...new Set(candidates)]) {
+      try {
+        await uploadFileSftp(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+          remotePath,
+          buffer,
+        );
+        devicePasswordCache.set(key, p);
+        return { bytes: buffer.length, remotePath };
+      } catch (err) {
+        lastError = err;
+      }
     }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error('本地文件上传到设备失败');
+    throw lastError instanceof Error ? lastError : new Error('本地文件上传到设备失败');
+  });
 }
 
 function shEscape(raw: string) {
