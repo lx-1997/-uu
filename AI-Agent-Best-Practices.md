@@ -650,3 +650,61 @@ if (value !== null) { ... }，这样可以避免空指针异常。"
 - Bug 修复（有明确的错误信息）
 - 添加/修改已有模式的代码
 - 简单的配置更改
+
+---
+
+## 六、五层智能架构（RDK Studio 实践）
+
+### 6.1 架构概述
+
+不将所有智能都塞进 system prompt（会膨胀并降低注意力），而是分层分发：
+
+| 层级 | 载体 | 职责 | 体积控制 |
+|------|------|------|----------|
+| L1: 身份层 | SOUL.md | 人格、北星原则、输出契约 | <100 行 |
+| L2: 工具层 | TOOLS.md + rdk-tools.ts description | 工具环境、组合模式、使用指导 | 工具自带描述 |
+| L3: 技能层 | skills/*/SKILL.md | 可复用流程、策略、元技能 | 按需加载 |
+| L4: 代码层 | pruning.ts, compaction.ts, DeviceHealthMonitor | 上下文管理、自愈、状态感知 | 零 prompt 开销 |
+| L5: 主动层 | HeartbeatManager + HEARTBEAT.md | 定期巡检、异常检测、自动恢复 | 仅心跳触发时加载 |
+
+### 6.2 关键设计决策
+
+**SOUL.md 保持精简**
+- 只放身份、原则、行为规则 — 这些是"不变的人格"
+- 新增的认知能力（问题分析、错误恢复、并行操作）放入 meta-skills
+- 避免"prompt 膨胀"：SOUL.md 每一行都消耗模型注意力
+
+**工具描述即文档**
+- 在 `rdk-tools.ts` 的 `description` 字段中包含使用指导和验证方法
+- 相关工具间互相引用（如 `doctor → restart → health`）
+- 模型每次调用都能看到，不需要额外 prompt
+
+**技能分层加载**
+- Level 1（纯知识参考）设为 `disableModelInvocation: true`，不注入 prompt
+- Level 2+（流程/策略）动态注入 prompt，通过 SkillManager 统一管理
+- 新技能统一使用 `skills/<name>/SKILL.md` 格式
+
+**代码级智能无 prompt 开销**
+- 上下文修剪（三层递进：soft trim → hard clear → message drop）
+- 主动 compaction（70% 上下文占用时触发，不等消息被丢弃）
+- System prompt token 数纳入 pruning 预算（防止隐性溢出）
+
+### 6.3 项目实践对照
+
+| 问题 | 解决方案 | 涉及文件 |
+|------|----------|----------|
+| SOUL.md 膨胀风险 | 只加 context_awareness + proactive_stance，共~100 字 | agent/SOUL.md |
+| 工具无验证指导 | description 中加入验证方法和工具间引用 | server/agent/tools/rdk-tools.ts |
+| 缺少元认知技能 | 创建 problem-analysis / error-recovery / parallel-ops | skills/rdk-*/ |
+| 心跳系统被禁用 | enableHeartbeat: true + HEARTBEAT.md 巡检清单 | server/rdkclaw/app.ts, agent/HEARTBEAT.md |
+| 子 Agent 事件丢失 | mapMiniEvent 增加 subagent_summary/error 映射 | server/rdkclaw/app.ts |
+| 子 Agent 摘要太短 | 600→2000 字符 | server/agent/agent.ts |
+| 子 Agent 缺 SOUL | SOUL.md 加入子 Agent 白名单 | server/agent/context/bootstrap.ts |
+| 上下文溢出 | system prompt token 纳入 pruning + 主动 compaction | server/agent/context/pruning.ts, compaction.ts |
+| Skill 格式混乱 | 统一 SKILL.md 格式 + 删除重复 + 标准化 frontmatter | skills/ |
+| OpenClaw 会话不复用 | 同对话复用 sessionId | server/rdkclaw/tools/board-openclaw-delegate.ts |
+| 健康检查静默失败 | 移除 `\|\| true` + 缩短超时 | server/managers/OpenClawDeploymentManager.ts |
+| 部署无法取消 | AbortController 初始化 + signal 传递 | src/components/OnboardingWizard.tsx |
+| 缺少 Cursor Rules | 创建 project-conventions / agent-system / code-patterns | .cursor/rules/ |
+| 轻量 Agent 路径技能脱节 | runRdkAgent 接入 SkillManager | server/agent/rdk-agent.ts |
+| L1 技能浪费 prompt | disableModelInvocation + 知识合并到 TOOLS.md | skills/*.md, agent/TOOLS.md |
