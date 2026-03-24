@@ -76,12 +76,19 @@ function renderInlineMarkdown(text: string, keyOffset: number): React.ReactNode[
 }
 
 function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  const TOKEN_RE = /(\*\*[^*]+\*\*|`[^`]+`|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\))/g;
+  const parts = text.split(TOKEN_RE);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**'))
       return <strong key={i} style={{ fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
     if (part.startsWith('`') && part.endsWith('`'))
       return <code key={i} className="md-inline-code">{part.slice(1, -1)}</code>;
+    const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch)
+      return <img key={i} src={imgMatch[2]} alt={imgMatch[1]} className="md-inline-img" loading="lazy" />;
+    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch)
+      return <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer">{linkMatch[1]}</a>;
     return <span key={i}>{part}</span>;
   });
 }

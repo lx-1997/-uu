@@ -1257,7 +1257,7 @@ if (isSSOEnabled() || isSSORequired()) {
 app.use('/vnc', express.static(process.cwd() + '/public/vnc'));
 
 // Serve agent-downloaded files so frontend can display images etc.
-app.use('/api/local-files', express.static(path.join(process.cwd(), 'downloads'), {
+const localFilesOpts: import('serve-static').ServeStaticOptions = {
   maxAge: '1h',
   setHeaders(res, filePath) {
     const ext = path.extname(filePath).toLowerCase();
@@ -1266,7 +1266,9 @@ app.use('/api/local-files', express.static(path.join(process.cwd(), 'downloads')
       res.setHeader('Cache-Control', 'public, max-age=3600');
     }
   },
-}));
+};
+app.use('/api/local-files', express.static(path.join(process.cwd(), 'workspace', 'downloads'), localFilesOpts));
+app.use('/api/local-files', express.static(path.join(process.cwd(), 'downloads'), localFilesOpts));
 
 // ─── Ecosystem Bridge ───
 

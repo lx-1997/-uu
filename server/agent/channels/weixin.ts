@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { RDKClawApp } from "../../rdkclaw/app.js";
 import { WeixinAccountStore, type WeixinAccount } from "../../rdkclaw/weixin-account-store.js";
 import type { WeixinRuntimeConfig } from "../../rdkclaw/weixin-config-store.js";
@@ -27,7 +28,12 @@ const WEIXIN_MAX_TEXT = 4000;
 const MIN_RETRY_DELAY_MS = 2_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-const IMAGE_EXT_SET = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]);
+const IMG_EXT = "png|jpe?g|gif|bmp|webp";
+const MD_IMG_RE = new RegExp(`!\\[[^\\]]*\\]\\(([^)]+\\.(?:${IMG_EXT}))\\)`, "gi");
+const LOCAL_PATH_RE = new RegExp(
+  `(?:^|[\\s"'：])([A-Za-z]:[\\\\\/][\\w.\\-\\\\\/]+\\.(?:${IMG_EXT})|\/[\\w.\\-\/]+\\.(?:${IMG_EXT}))`,
+  "gi",
+);
 
 function extractImagePathsFromResult(raw: string): string[] {
   const paths: string[] = [];
@@ -37,11 +43,7 @@ function extractImagePathsFromResult(raw: string): string[] {
       paths.push(String(obj.localPath));
     }
   } catch {
-    // not JSON, try regex for file paths (Unix + Windows)
-    const re = /(?:^|[\s"'=])([A-Za-z]:[\\\/][\w.\-\\\/]+\.(?:png|jpe?g|gif|bmp|webp)|\/[\w.\-\/]+\.(?:png|jpe?g|gif|bmp|webp))/gi;
-    for (const m of raw.matchAll(re)) {
-      paths.push(m[1]);
-    }
+    for (const m of raw.matchAll(LOCAL_PATH_RE)) paths.push(m[1]);
   }
   return paths;
 }
@@ -339,7 +341,33 @@ export class WeixinPollingChannel {
       poller.client.sendTyping(fromUserId, typingTicket, 2).catch(() => {});
     }
 
-    // Send image attachments found in tool results
+    // Collect image paths from tool results + final text
+    const streamed = chunks.join("").trim();
+    const replyRaw = (finalText || streamed).trim();
+
+    // Also scan the text reply for markdown images and local paths
+    const seen = new Set(imagePaths.map(p => p.toLowerCase()));
+    for (const re of [MD_IMG_RE, LOCAL_PATH_RE]) {
+      re.lastIndex = 0;
+      for (const m of replyRaw.matchAll(re)) {
+        let p = m[1];
+        if (p.startsWith("/api/local-files/")) {
+          const basename = path.basename(decodeURIComponent(p.replace("/api/local-files/", "")));
+          const workDir = process.env.RDK_WORKSPACE_DIR || process.cwd();
+          const candidates = [
+            path.join(workDir, "workspace", "downloads", basename),
+            path.join(workDir, "downloads", basename),
+          ];
+          p = candidates.find(c => fs.existsSync(c)) || p;
+        }
+        if (!seen.has(p.toLowerCase()) && fs.existsSync(p)) {
+          imagePaths.push(p);
+          seen.add(p.toLowerCase());
+        }
+      }
+    }
+
+    // Send images via CDN
     for (const imgPath of imagePaths) {
       try {
         const buf = fs.readFileSync(imgPath);
@@ -351,11 +379,17 @@ export class WeixinPollingChannel {
       }
     }
 
-    // Send text reply
-    const streamed = chunks.join("").trim();
-    const replyRaw = (finalText || streamed).trim()
+    // Strip markdown image references from text before sending
+    let cleanText = replyRaw;
+    if (imagePaths.length > 0) {
+      cleanText = cleanText
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+        .replace(/本地路径[：:]\s*\S+\.(png|jpe?g|gif|bmp|webp)/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+    const reply = normalizeForWeixin(cleanText)
       || (imagePaths.length > 0 ? "" : "已执行完成，但未提取到可显示的文本结果。");
-    const reply = normalizeForWeixin(replyRaw);
 
     if (reply) {
       let remaining = reply;

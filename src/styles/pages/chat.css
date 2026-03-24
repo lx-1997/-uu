@@ -218,6 +218,16 @@
 .dock-bubble .msg-text p { margin: 0 0 8px; }
 .dock-bubble .msg-text p:last-child { margin-bottom: 0; }
 
+.dock-bubble .msg-text .md-inline-img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 6px;
+  margin: 6px 0;
+  cursor: pointer;
+  object-fit: contain;
+}
+
 .dock-hidden-hint {
   margin: 0 0 6px;
   font-size: 0.6875rem;
