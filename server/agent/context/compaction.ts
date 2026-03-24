@@ -588,8 +588,19 @@ export async function compactHistoryIfNeeded(params: {
     settings: params.compactionSettings,
   });
 
-  if (!shouldCompact || pruneResult.droppedMessages.length === 0) {
+  if (!shouldCompact) {
     return { pruneResult };
+  }
+
+  if (pruneResult.droppedMessages.length === 0) {
+    const totalTokens = estimateMessagesTokens(params.messages);
+    const threshold = params.contextWindowTokens * 0.7;
+    if (totalTokens <= threshold) {
+      return { pruneResult };
+    }
+    const halfIdx = Math.max(1, Math.floor(params.messages.length / 3));
+    pruneResult.droppedMessages.push(...params.messages.slice(0, halfIdx));
+    pruneResult.messages = params.messages.slice(halfIdx);
   }
 
   const resolvedSettings = { ...DEFAULT_COMPACTION_SETTINGS, ...params.compactionSettings };

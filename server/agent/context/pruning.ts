@@ -447,10 +447,12 @@ function sliceWithinBudget(messages: Message[], budgetChars: number): Message[] 
 export function pruneContextMessages(params: {
   messages: Message[];
   contextWindowTokens: number;
+  systemPromptTokens?: number;
   settings?: Partial<ContextPruningSettings>;
 }): PruneResult {
   const settings = resolvePruningSettings(params.settings);
-  const contextTokens = Math.max(1, Math.floor(params.contextWindowTokens));
+  const systemTokens = Math.max(0, params.systemPromptTokens ?? 0);
+  const contextTokens = Math.max(1, Math.floor(params.contextWindowTokens - systemTokens));
   const charWindow = contextTokens * CHARS_PER_TOKEN_ESTIMATE;
   const budgetChars = Math.max(1, Math.floor(charWindow * settings.maxHistoryShare));
   const isPrunable = makeToolPrunablePredicate(settings.tools);
