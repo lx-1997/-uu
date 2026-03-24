@@ -30,6 +30,7 @@ import {
 import { createRdkTools } from './tools/rdk-tools.js';
 import { createStudioTools } from './tools/studio-tools.js';
 import { createWebTools } from './tools/web-tools.js';
+import { SkillManager } from './skills.js';
 
 const AGENT_DIR = path.join(process.cwd(), 'agent');
 const SESSION_DIR = path.join(os.homedir(), '.rdkstudio', 'sessions');
@@ -43,12 +44,14 @@ function readAgentFile(filename: string): string {
   }
 }
 
-function buildSystemPrompt(): string {
+async function buildSystemPrompt(): Promise<string> {
   const soul = readAgentFile('SOUL.md');
   const tools = readAgentFile('TOOLS.md');
-  const skills = readAgentFile('SKILLS.md');
 
-  const parts = [soul, tools, skills].filter(Boolean);
+  const skillManager = new SkillManager(process.cwd());
+  const skillsPrompt = await skillManager.buildSkillsPrompt();
+
+  const parts = [soul, tools, skillsPrompt].filter(Boolean);
   return parts.join('\n\n---\n\n');
 }
 
@@ -98,7 +101,7 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
     tools.push(...createRdkTools(options.deviceId));
   }
 
-  const systemPromptBase = buildSystemPrompt();
+  const systemPromptBase = await buildSystemPrompt();
   const systemPrompt = options.systemPromptAppend
     ? `${systemPromptBase}\n\n---\n\n${options.systemPromptAppend}`
     : systemPromptBase;
