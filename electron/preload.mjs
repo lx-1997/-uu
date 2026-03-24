@@ -34,7 +34,8 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   setActiveUrl: (url) => ipcRenderer.send('rdk:set-active-url', { url }),
   updateViewBounds: (bounds) => ipcRenderer.send('rdk:update-view-bounds', { bounds }),
 
-  // 本机真实烧录能力（桌面端）
+  // 本机烧录能力探测与操作
+  flashGetCapabilities: () => ipcRenderer.invoke('rdk:flash:get-capabilities'),
   flashListDrives: () => ipcRenderer.invoke('rdk:flash:list-drives'),
   flashPickImage: (options) => ipcRenderer.invoke('rdk:flash:pick-image', options),
   flashWriteLocal: (payload) => ipcRenderer.invoke('rdk:flash:write-local', payload),

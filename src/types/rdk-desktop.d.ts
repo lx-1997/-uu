@@ -12,6 +12,16 @@ declare global {
     removable?: boolean;
   }
 
+  interface FlashCapabilities {
+    supportsDriveScan: boolean;
+    supportsDirectWrite: boolean;
+    supportsBackup: boolean;
+    supportsAutoDecompressXz: boolean;
+    supportsVerifyAfterWrite: boolean;
+    supportsLaunchThirdPartyTool: boolean;
+    thirdPartyToolName?: string;
+  }
+
   interface FlashProgressPayload {
     stage: string;
     message: string;
@@ -31,6 +41,7 @@ declare global {
       onSubUrlOpen?: (cb: (url: string) => void) => void;
       onUrlLoadFailed?: (cb: (url: string, errorCode: number, errorDescription: string) => void) => void;
       onUrlLoaded?: (cb: (url: string) => void) => void;
+      flashGetCapabilities?: () => Promise<FlashCapabilities>;
       flashListDrives?: () => Promise<{ ok: boolean; drives?: FlashDrive[]; error?: string }>;
       flashPickImage?: (options?: { extensions?: string[] }) => Promise<{ ok: boolean; path?: string; canceled?: boolean }>;
       flashWriteLocal?: (payload: { imagePath: string; drivePath: string; verifyMode?: 'none' | 'sample' }) => Promise<{ ok: boolean; output?: string; error?: string; verify?: { ok: boolean; detail: string } }>;

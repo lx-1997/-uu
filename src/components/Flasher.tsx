@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { isDesktop as checkIsDesktop } from '../utils/env';
+import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -154,6 +155,7 @@ export default function Flasher() {
 
   const isDesktop = checkIsDesktop();
   const platform = window.rdkDesktop?.platform ?? 'unknown';
+  const { caps } = useFlashCapabilities();
 
   const imageListKey = resolveImageKey(selectedDeviceKey);
   const imageCandidates = IMAGE_LIST[imageListKey] ?? [];
@@ -210,7 +212,7 @@ export default function Flasher() {
 
   const scanDrives = async () => {
     if (!window.rdkDesktop?.flashListDrives) {
-      setError('当前环境不支持磁盘扫描，请在桌面客户端运行');
+      setError(isDesktop ? '当前环境暂不支持磁盘扫描' : '磁盘扫描仅支持桌面客户端');
       return;
     }
     try {
@@ -231,11 +233,11 @@ export default function Flasher() {
   };
 
   useEffect(() => {
-    if (step !== 2 || !isDesktop || needsXburn) return;
+    if (step !== 2 || !isDesktop || needsXburn || !caps.supportsDriveScan) return;
     if (scannedRef.current) return;
     scannedRef.current = true;
     scanDrives();
-  }, [step, isDesktop, needsXburn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step, isDesktop, needsXburn, caps.supportsDriveScan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── pick local image ── */
   const pickLocalImage = async () => {
@@ -277,7 +279,7 @@ export default function Flasher() {
   const decompressImage = async (filePath: string): Promise<string | null> => {
     if (!isCompressedFile(filePath)) return filePath;
     if (!window.rdkDesktop?.flashDecompressImage) {
-      appendLog('当前环境不支持自动解压，请手动解压后选择 .img 文件');
+      appendLog('当前环境暂不支持自动解压，请手动解压后选择 .img 文件');
       setError('请手动解压镜像文件为 .img 后重新选择');
       return null;
     }
@@ -298,7 +300,7 @@ export default function Flasher() {
   const executeFlash = async () => {
     if (needsXburn) return;
     if (!isDesktop || !window.rdkDesktop?.flashWriteLocal) {
-      setError('写盘仅支持桌面客户端');
+      setError(isDesktop ? '当前环境暂不支持直接写盘' : '写盘功能仅支持桌面客户端');
       return;
     }
 
@@ -377,7 +379,7 @@ export default function Flasher() {
   /* ── launch xburn for S100/eMMC ── */
   const launchXburn = async () => {
     if (!window.rdkDesktop?.launchXburn) {
-      setError('当前客户端未启用 xburn，请升级桌面端或手动安装 xburn-gui');
+      setError('当前环境未启用 xburn 工具启动，请手动安装并打开 xburn-gui');
       return;
     }
     const result = await window.rdkDesktop.launchXburn({
@@ -598,10 +600,12 @@ export default function Flasher() {
                       </p>
                     </div>
                   )}
-                  {!isDesktop && (
+                  {!caps.supportsDirectWrite && (
                     <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                       <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
-                        当前为浏览器环境，本机烧录功能需在桌面客户端中使用。
+                        {isDesktop
+                          ? '当前系统需要额外配置才能使用直接写盘功能，可使用第三方工具完成介质制作。'
+                          : '当前为浏览器环境，本机烧录功能需在桌面客户端中使用。'}
                       </p>
                     </div>
                   )}
@@ -650,7 +654,7 @@ export default function Flasher() {
                     3. 点击下方按钮启动 xburn 并在工具中选择镜像
                   </p>
                   <div className="config-actions">
-                    {isDesktop && (
+                    {caps.supportsLaunchThirdPartyTool && (
                       <button type="button" className="btn btn-primary" onClick={launchXburn}>
                         启动 xburn 工具
                       </button>
@@ -674,7 +678,7 @@ export default function Flasher() {
                   <div className="config-grid">
                     {drives.length === 0 ? (
                       <div className="config-card-desc">
-                        {isDesktop ? '未检测到可写盘设备，请插入 TF 卡后刷新' : '当前环境不支持磁盘检测'}
+                        {caps.supportsDriveScan ? '未检测到可写盘设备，请插入 TF 卡后刷新' : '当前环境暂不支持磁盘检测'}
                       </div>
                     ) : (
                       drives.map((d) => (
@@ -693,7 +697,7 @@ export default function Flasher() {
                       ))
                     )}
                   </div>
-                  {isDesktop && (
+                  {caps.supportsDriveScan && (
                     <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={scanDrives}>
                       刷新磁盘列表
                     </button>
@@ -774,7 +778,7 @@ export default function Flasher() {
               </div>
               <div className="tool-bar-right">
                 {needsXburn ? (
-                  isDesktop ? (
+                  caps.supportsLaunchThirdPartyTool ? (
                     <button type="button" className="btn btn-primary" onClick={() => startFlashWorkflow()}>
                       启动 xburn 烧录
                     </button>
@@ -787,7 +791,7 @@ export default function Flasher() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={!canProceedFromDrive || loading || !isDesktop}
+                    disabled={!canProceedFromDrive || loading || !caps.supportsDirectWrite}
                     onClick={() => startFlashWorkflow()}
                   >
                     {loading ? '执行中...' : '开始写盘'}
