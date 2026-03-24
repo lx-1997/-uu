@@ -83,6 +83,7 @@ export interface ChatMessage {
 export type ChatBlock =
   | { type: 'code'; lang: string; content: string }
   | { type: 'image'; src: string; caption?: string }
+  | { type: 'video'; src: string; caption?: string }
   | { type: 'terminal'; lines: string[]; label?: string; collapsible?: boolean; previewLines?: number }
   | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }>; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }
   | { type: 'confirm'; text: string; confirmId: string }

@@ -12,7 +12,7 @@ export interface WeixinMessageItem {
   image_item?: { cdn_media?: CdnMedia; media?: MediaRef; mid_size?: number };
   voice_item?: { cdn_media?: CdnMedia; duration_ms?: number };
   file_item?: { cdn_media?: CdnMedia; media?: MediaRef; file_name?: string; file_size?: number; len?: string };
-  video_item?: { cdn_media?: CdnMedia; thumb_cdn_media?: CdnMedia };
+  video_item?: { cdn_media?: CdnMedia; media?: MediaRef; thumb_cdn_media?: CdnMedia; video_size?: number };
   ref_msg?: { message_id?: number; from_user_id?: string; item_list?: WeixinMessageItem[] };
 }
 
@@ -304,6 +304,22 @@ export class WeixinApiClient {
             encrypt_type: 1,
           },
           mid_size: uploaded.ciphertextSize,
+        },
+      },
+    ]);
+  }
+
+  async sendVideo(toUserId: string, contextToken: string, uploaded: UploadResult) {
+    return this.sendMessage(toUserId, contextToken, [
+      {
+        type: 5,
+        video_item: {
+          media: {
+            encrypt_query_param: uploaded.downloadEncryptQueryParam,
+            aes_key: Buffer.from(uploaded.aesKeyHex).toString("base64"),
+            encrypt_type: 1,
+          },
+          video_size: uploaded.ciphertextSize,
         },
       },
     ]);

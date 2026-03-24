@@ -29,23 +29,41 @@ const MIN_RETRY_DELAY_MS = 2_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
 const IMG_EXT = "png|jpe?g|gif|bmp|webp";
+const VID_EXT = "mp4|webm|avi|mov|mkv";
+const MEDIA_EXT = `${IMG_EXT}|${VID_EXT}`;
 const MD_IMG_RE = new RegExp(`!\\[[^\\]]*\\]\\(([^)]+\\.(?:${IMG_EXT}))\\)`, "gi");
 const LOCAL_PATH_RE = new RegExp(
-  `(?:^|[\\s"'：])([A-Za-z]:[\\\\\/][\\w.\\-\\\\\/]+\\.(?:${IMG_EXT})|\/[\\w.\\-\/]+\\.(?:${IMG_EXT}))`,
+  `(?:^|[\\s"'：])([A-Za-z]:[\\\\\/][\\w.\\-\\\\\/]+\\.(?:${MEDIA_EXT})|\/[\\w.\\-\/]+\\.(?:${MEDIA_EXT}))`,
   "gi",
 );
+const IMAGE_EXT_SET = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp"]);
+const VIDEO_EXT_SET = new Set(["mp4", "webm", "avi", "mov", "mkv"]);
 
-function extractImagePathsFromResult(raw: string): string[] {
-  const paths: string[] = [];
+interface MediaPath { path: string; kind: "image" | "video" }
+
+function extractMediaPathsFromResult(raw: string): MediaPath[] {
+  const out: MediaPath[] = [];
   try {
     const obj = JSON.parse(raw);
     if (obj?.__type === "image_download" && obj.localPath) {
-      paths.push(String(obj.localPath));
+      out.push({ path: String(obj.localPath), kind: "image" });
+    } else if (obj?.__type === "video_download" && obj.localPath) {
+      out.push({ path: String(obj.localPath), kind: "video" });
     }
   } catch {
-    for (const m of raw.matchAll(LOCAL_PATH_RE)) paths.push(m[1]);
+    for (const m of raw.matchAll(LOCAL_PATH_RE)) {
+      const ext = m[1].split(".").pop()?.toLowerCase() || "";
+      out.push({ path: m[1], kind: VIDEO_EXT_SET.has(ext) ? "video" : "image" });
+    }
   }
-  return paths;
+  return out;
+}
+
+function classifyExt(filePath: string): "image" | "video" | null {
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  if (IMAGE_EXT_SET.has(ext)) return "image";
+  if (VIDEO_EXT_SET.has(ext)) return "video";
+  return null;
 }
 
 function normalizeForWeixin(text: string): string {
@@ -301,7 +319,7 @@ export class WeixinPollingChannel {
 
     const chunks: string[] = [];
     let finalText = "";
-    const imagePaths: string[] = [];
+    const mediaPaths: MediaPath[] = [];
 
     try {
       for await (const event of this.rdkclaw.streamChat({
@@ -319,8 +337,8 @@ export class WeixinPollingChannel {
           finalText = String(event.data?.text ?? "").trim();
         } else if (event.type === "tool_result") {
           const result = String(event.data?.result ?? "");
-          for (const p of extractImagePathsFromResult(result)) {
-            if (fs.existsSync(p)) imagePaths.push(p);
+          for (const mp of extractMediaPathsFromResult(result)) {
+            if (fs.existsSync(mp.path)) mediaPaths.push(mp);
           }
         } else if (event.type === "error") {
           const errorMsg = String(event.data?.error ?? "RDKClaw 执行失败");
@@ -341,12 +359,12 @@ export class WeixinPollingChannel {
       poller.client.sendTyping(fromUserId, typingTicket, 2).catch(() => {});
     }
 
-    // Collect image paths from tool results + final text
+    // Collect media paths from tool results + final text
     const streamed = chunks.join("").trim();
     const replyRaw = (finalText || streamed).trim();
 
     // Also scan the text reply for markdown images and local paths
-    const seen = new Set(imagePaths.map(p => p.toLowerCase()));
+    const seen = new Set(mediaPaths.map(mp => mp.path.toLowerCase()));
     for (const re of [MD_IMG_RE, LOCAL_PATH_RE]) {
       re.lastIndex = 0;
       for (const m of replyRaw.matchAll(re)) {
@@ -361,35 +379,42 @@ export class WeixinPollingChannel {
           p = candidates.find(c => fs.existsSync(c)) || p;
         }
         if (!seen.has(p.toLowerCase()) && fs.existsSync(p)) {
-          imagePaths.push(p);
+          const kind = classifyExt(p) || "image";
+          mediaPaths.push({ path: p, kind });
           seen.add(p.toLowerCase());
         }
       }
     }
 
-    // Send images via CDN
-    for (const imgPath of imagePaths) {
+    // Send media via CDN
+    for (const mp of mediaPaths) {
       try {
-        const buf = fs.readFileSync(imgPath);
-        const cdn = await poller.client.uploadMedia(buf, 1);
-        await poller.client.sendImage(fromUserId, contextToken, cdn);
-        console.log(`${tag} sent image to ${maskedUser}: ${imgPath}`);
+        const buf = fs.readFileSync(mp.path);
+        if (mp.kind === "video") {
+          const uploaded = await poller.client.uploadMedia(fromUserId, buf, 2);
+          await poller.client.sendVideo(fromUserId, contextToken, uploaded);
+          console.log(`${tag} sent video to ${maskedUser}: ${mp.path}`);
+        } else {
+          const uploaded = await poller.client.uploadMedia(fromUserId, buf, 1);
+          await poller.client.sendImage(fromUserId, contextToken, uploaded);
+          console.log(`${tag} sent image to ${maskedUser}: ${mp.path}`);
+        }
       } catch (err) {
-        console.warn(`${tag} uploadMedia failed for ${imgPath}:`, (err as Error).message);
+        console.warn(`${tag} uploadMedia failed for ${mp.path}:`, (err as Error).message);
       }
     }
 
-    // Strip markdown image references from text before sending
+    // Strip markdown media references from text before sending
     let cleanText = replyRaw;
-    if (imagePaths.length > 0) {
+    if (mediaPaths.length > 0) {
       cleanText = cleanText
         .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-        .replace(/本地路径[：:]\s*\S+\.(png|jpe?g|gif|bmp|webp)/gi, "")
+        .replace(/本地路径[：:]\s*\S+\.(png|jpe?g|gif|bmp|webp|mp4|webm|avi|mov|mkv)/gi, "")
         .replace(/\n{3,}/g, "\n\n")
         .trim();
     }
     const reply = normalizeForWeixin(cleanText)
-      || (imagePaths.length > 0 ? "" : "已执行完成，但未提取到可显示的文本结果。");
+      || (mediaPaths.length > 0 ? "" : "已执行完成，但未提取到可显示的文本结果。");
 
     if (reply) {
       let remaining = reply;
@@ -402,14 +427,17 @@ export class WeixinPollingChannel {
       }
     }
 
+    const imgCount = mediaPaths.filter(m => m.kind === "image").length;
+    const vidCount = mediaPaths.filter(m => m.kind === "video").length;
+    const mediaSummary = [imgCount && `${imgCount}图`, vidCount && `${vidCount}视频`].filter(Boolean).join("+");
     this.publishMirror("channel_message_outbound", "微信回复",
-      (reply || `[${imagePaths.length}张图片]`).slice(0, 200), {
+      (reply || `[${mediaSummary}]`).slice(0, 200), {
         channel: "weixin",
         direction: "outbound",
         fromUserId: maskedUser,
         accountId: poller.account.accountId,
       });
-    console.log(`${tag} replied to ${maskedUser}, chars=${reply.length} images=${imagePaths.length}`);
+    console.log(`${tag} replied to ${maskedUser}, chars=${reply.length} media=${mediaPaths.length}(img=${imgCount} vid=${vidCount})`);
   }
 
   private async resolveDeviceId(latestUiDeviceId: string): Promise<string> {

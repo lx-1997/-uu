@@ -935,7 +935,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   }
                 }
 
-                let imageHandled = false;
+                let mediaHandled = false;
                 if (!isError && result.startsWith('{')) {
                   try {
                     const parsed = JSON.parse(result) as Record<string, unknown>;
@@ -945,14 +945,21 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         src: parsed.imageUrl as string,
                         caption: `${parsed.fileName || '图片'} (${parsed.bytes || 0} bytes) — 来自设备`,
                       });
-                      imageHandled = true;
+                      mediaHandled = true;
+                    } else if (parsed.__type === 'video_download' && typeof parsed.videoUrl === 'string') {
+                      aiBlocks.push({
+                        type: 'video',
+                        src: parsed.videoUrl as string,
+                        caption: `${parsed.fileName || '视频'} (${((parsed.bytes as number) / 1024 / 1024).toFixed(1)} MB) — 来自设备`,
+                      });
+                      mediaHandled = true;
                     }
                   } catch {
                     // not JSON, fall through to normal handling
                   }
                 }
 
-                if (!imageHandled) {
+                if (!mediaHandled) {
                   if (result.includes('\n') || result.length > 100) {
                     aiBlocks.push({
                       type: 'terminal',

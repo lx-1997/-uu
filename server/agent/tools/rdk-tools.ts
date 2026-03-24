@@ -63,6 +63,7 @@ export function createRdkTools(deviceId: string): Tool[] {
 }
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.avi', '.mov', '.mkv']);
 
 function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: string; localPath?: string }> {
   return {
@@ -84,14 +85,23 @@ function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: str
       const result = await downloadDeviceFileToLocal(deviceId, input.remotePath, target);
 
       const ext = path.extname(fileName).toLowerCase();
+      const savedName = path.basename(result.localPath);
+      const mediaUrl = `/api/local-files/${encodeURIComponent(savedName)}`;
       if (IMAGE_EXTENSIONS.has(ext)) {
-        const savedName = path.basename(result.localPath);
-        const imageUrl = `/api/local-files/${encodeURIComponent(savedName)}`;
         return JSON.stringify({
           __type: 'image_download',
           localPath: result.localPath,
           bytes: result.bytes,
-          imageUrl,
+          imageUrl: mediaUrl,
+          fileName: savedName,
+        });
+      }
+      if (VIDEO_EXTENSIONS.has(ext)) {
+        return JSON.stringify({
+          __type: 'video_download',
+          localPath: result.localPath,
+          bytes: result.bytes,
+          videoUrl: mediaUrl,
           fileName: savedName,
         });
       }

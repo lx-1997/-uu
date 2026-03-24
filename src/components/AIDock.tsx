@@ -288,6 +288,20 @@ function BlockRenderer({
     );
   }
 
+  if (block.type === 'video') {
+    return (
+      <div className="msg-block video-block">
+        <video
+          className="video-block-player"
+          src={block.src}
+          controls
+          preload="metadata"
+        />
+        {block.caption && <div className="image-block-caption">{block.caption}</div>}
+      </div>
+    );
+  }
+
   if (block.type === 'confirm') {
     return (
       <div className="msg-block confirm-block">
@@ -751,7 +765,7 @@ export default function AIDock() {
     if (!compactFlowMode) return blocks;
     return blocks.filter((block) => {
       if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result' || block.type === 'recommendation' || block.type === 'soul-update') return true;
-      if (block.type === 'image' || block.type === 'code') return true;
+      if (block.type === 'image' || block.type === 'video' || block.type === 'code') return true;
       if (block.type === 'status') return shouldKeepStatusInCompact(block);
       return false;
     });

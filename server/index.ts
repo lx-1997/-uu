@@ -1267,8 +1267,8 @@ app.get('/api/local-files/:filename', (req, res) => {
     const filePath = path.join(dir, filename);
     if (existsSync(filePath)) {
       const ext = path.extname(filename).toLowerCase();
-      const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
-      if (imageExts.has(ext)) {
+      const cacheExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.mp4', '.webm', '.mov', '.avi', '.mkv']);
+      if (cacheExts.has(ext)) {
         res.setHeader('Cache-Control', 'public, max-age=3600');
       }
       return res.sendFile(filePath);
