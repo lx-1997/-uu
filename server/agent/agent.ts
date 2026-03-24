@@ -511,19 +511,36 @@ export class Agent {
     return `agent:${normalizeAgentId(agentId)}:subagent:${id}`;
   }
 
+  // 子代理工具范围
+  private subagentToolScopes = new Map<string, string>();
+
+  private static readonly TOOL_SCOPE_SETS: Record<string, Set<string>> = {
+    "read-only": new Set(["read", "list", "grep", "memory_search", "memory_get"]),
+    "device-read": new Set([
+      "read", "list", "grep", "memory_search", "memory_get",
+      "device_file_read", "device_file_list", "device_diagnose",
+      "board_openclaw_status", "board_openclaw_health", "board_openclaw_check",
+      "board_openclaw_logs", "ros_topics", "ros_nodes", "vnc_status", "flash_check",
+    ]),
+  };
+
   /**
-   * 启动子代理（最小版）
+   * 启动子代理
    */
   private async spawnSubagent(params: {
     parentSessionKey: string;
     task: string;
     label?: string;
     cleanup?: "keep" | "delete";
+    toolScope?: "read-only" | "device-read" | "full";
   }): Promise<{ runId: string; sessionKey: string }> {
     if (isSubagentSessionKey(params.parentSessionKey)) {
       throw new Error("子代理会话不能再触发子代理");
     }
     const childSessionKey = this.buildSubagentSessionKey(this.agentId);
+    if (params.toolScope && params.toolScope !== "full") {
+      this.subagentToolScopes.set(childSessionKey, params.toolScope);
+    }
     const runPromise = this.run(childSessionKey, params.task);
     runPromise
       .then(async (result) => {
@@ -553,6 +570,9 @@ export class Agent {
           task: params.task,
           error: err instanceof Error ? err.message : String(err),
         });
+      })
+      .finally(() => {
+        this.subagentToolScopes.delete(childSessionKey);
       });
     return {
       runId: childSessionKey,
@@ -679,12 +699,13 @@ export class Agent {
             onMemorySearch: (results) => {
               memoriesUsed += results.length;
             },
-            spawnSubagent: async ({ task, label, cleanup }) =>
+            spawnSubagent: async ({ task, label, cleanup, toolScope }) =>
               this.spawnSubagent({
                 parentSessionKey: sessionKey,
                 task,
                 label,
                 cleanup,
+                toolScope,
               }),
           };
 
@@ -751,8 +772,13 @@ export class Agent {
           // 构建系统提示
           const systemPrompt = await this.buildSystemPrompt({ sessionKey });
 
-          // 工具包装: 注入 run-level abort signal
-          const rawTools = this.resolveToolsForRun();
+          // 工具包装: 注入 run-level abort signal + 子代理范围过滤
+          let rawTools = this.resolveToolsForRun();
+          const scopeName = this.subagentToolScopes.get(sessionKey);
+          if (scopeName) {
+            const allowed = Agent.TOOL_SCOPE_SETS[scopeName];
+            if (allowed) rawTools = rawTools.filter((t) => allowed.has(t.name));
+          }
           const toolsForRun = rawTools.map((t) => wrapToolWithAbortSignal(t, runAbortController.signal));
 
           // ===== Agent Loop（EventStream 模式） =====

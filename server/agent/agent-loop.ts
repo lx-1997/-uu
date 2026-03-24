@@ -128,6 +128,52 @@ function skipToolCall(call: { id: string; name: string }): ContentBlock {
   };
 }
 
+// ============== 工具并行分组 ==============
+
+const PARALLEL_SAFE_TOOLS = new Set([
+  "read", "list", "grep",
+  "memory_search", "memory_get",
+  "device_file_read", "device_file_list",
+  "device_diagnose",
+  "attachment_list", "attachment_read",
+  "ecosystem_query",
+  "board_openclaw_assess", "board_openclaw_status", "board_openclaw_health",
+  "board_openclaw_check", "board_openclaw_logs",
+  "studio_get_agent_config",
+  "rdkclaw_token_usage_report",
+  "forum_drobotics_latest", "forum_drobotics_topic", "forum_drobotics_auth_status",
+  "web_search", "web_extract",
+  "ros_topics", "ros_nodes",
+  "vnc_status",
+  "flash_check",
+]);
+
+interface ToolExecGroup {
+  calls: { id: string; name: string; input: Record<string, unknown> }[];
+  parallel: boolean;
+}
+
+function groupToolCallsForExecution(
+  calls: { id: string; name: string; input: Record<string, unknown> }[],
+): ToolExecGroup[] {
+  if (calls.length <= 1) return [{ calls, parallel: false }];
+  const groups: ToolExecGroup[] = [];
+  let pending: typeof calls = [];
+  for (const call of calls) {
+    if (PARALLEL_SAFE_TOOLS.has(call.name)) {
+      pending.push(call);
+    } else {
+      if (pending.length > 0) {
+        groups.push({ calls: pending, parallel: true });
+        pending = [];
+      }
+      groups.push({ calls: [call], parallel: false });
+    }
+  }
+  if (pending.length > 0) groups.push({ calls: pending, parallel: true });
+  return groups;
+}
+
 // ============== 主循环 ==============
 
 /**
@@ -361,115 +407,124 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
             continue;
           }
 
-          // ===== 执行工具（串行 + steering 中断检测） =====
-          // 对应 OpenClaw: executeToolCalls() + getSteeringMessages 检查
+          // ===== 执行工具（分组并行 + steering 中断检测） =====
+          // 只读工具组并行执行（Promise.allSettled），写/副作用工具串行 + 审批
           const toolResults: ContentBlock[] = [];
           let steeringMessages: Message[] | null = null;
+          const toolGroups = groupToolCallsForExecution(toolCalls);
 
-          for (let i = 0; i < toolCalls.length; i++) {
-            const call = toolCalls[i];
-            const tool = toolsForRun.find((t) => t.name === call.name);
-            let result: string;
-
-            stream.push({
-              type: "tool_execution_start",
-              toolCallId: call.id,
-              toolName: call.name,
-              args: call.input,
-            });
-
-            if (tool) {
-              // 审批检查（对齐 openclaw: exec-approvals → requiresExecApproval + waitForDecision）
-              if (params.checkToolApproval) {
-                const approval = await params.checkToolApproval(call);
-                if (approval !== null) {
-                  const decision = approval.decision as "allow-once" | "allow-always" | "deny";
-                  stream.push({
-                    type: "tool_approval_request",
-                    toolCallId: call.id,
-                    toolName: call.name,
-                    args: call.input,
-                  });
-                  stream.push({
-                    type: "tool_approval_resolved",
-                    toolCallId: call.id,
-                    toolName: call.name,
-                    decision,
-                  });
-                  if (!approval.approved) {
-                    result = "Tool execution denied by user.";
-                    totalToolCalls++;
-                    stream.push({
-                      type: "tool_execution_end",
-                      toolCallId: call.id,
-                      toolName: call.name,
-                      result,
-                      isError: true,
-                    });
-                    toolResults.push({
-                      type: "tool_result",
-                      tool_use_id: call.id,
-                      name: call.name,
-                      content: result,
-                    });
-                    // 审批拒绝后继续检查 steering
-                    const steering = await getSteeringMessages();
-                    if (steering.length > 0) {
-                      steeringMessages = steering;
-                      const remaining = toolCalls.slice(i + 1);
-                      for (const skipped of remaining) {
-                        stream.push({ type: "tool_skipped", toolCallId: skipped.id, toolName: skipped.name });
-                        toolResults.push(skipToolCall(skipped));
-                      }
-                      stream.push({ type: "steering", pendingCount: steering.length });
-                      break;
-                    }
-                    continue;
-                  }
-                }
+          for (const group of toolGroups) {
+            if (steeringMessages) {
+              for (const call of group.calls) {
+                stream.push({ type: "tool_skipped", toolCallId: call.id, toolName: call.name });
+                toolResults.push(skipToolCall(call));
               }
-
-              try {
-                result = await tool.execute(call.input, toolCtx);
-              } catch (err) {
-                result = `执行错误: ${(err as Error).message}`;
-              }
-            } else {
-              result = `未知工具: ${call.name}`;
+              continue;
             }
 
-            totalToolCalls++;
-            const isError = !tool;
-            stream.push({
-              type: "tool_execution_end",
-              toolCallId: call.id,
-              toolName: call.name,
-              result: result.length > 500 ? `${result.slice(0, 500)}...` : result,
-              isError,
-            });
-            toolResults.push({
-              type: "tool_result",
-              tool_use_id: call.id,
-              name: call.name,
-              content: result,
-            });
-
-            // 对应 OpenClaw: 每执行完一个工具检查 steering
-            const steering = await getSteeringMessages();
-            if (steering.length > 0) {
-              steeringMessages = steering;
-              // 对应 OpenClaw: skipToolCall() — 跳过剩余工具
-              const remaining = toolCalls.slice(i + 1);
-              for (const skipped of remaining) {
-                stream.push({
-                  type: "tool_skipped",
-                  toolCallId: skipped.id,
-                  toolName: skipped.name,
-                });
-                toolResults.push(skipToolCall(skipped));
+            if (group.parallel && group.calls.length > 1) {
+              // ── 并行执行只读工具组 ──
+              for (const call of group.calls) {
+                stream.push({ type: "tool_execution_start", toolCallId: call.id, toolName: call.name, args: call.input });
               }
-              stream.push({ type: "steering", pendingCount: steering.length });
-              break;
+              const settled = await Promise.allSettled(
+                group.calls.map(async (call) => {
+                  const tool = toolsForRun.find((t) => t.name === call.name);
+                  if (!tool) return { text: `未知工具: ${call.name}`, errFlag: true };
+                  try {
+                    return { text: await tool.execute(call.input, toolCtx), errFlag: false };
+                  } catch (err) {
+                    return { text: `执行错误: ${(err as Error).message}`, errFlag: false };
+                  }
+                }),
+              );
+              for (let j = 0; j < group.calls.length; j++) {
+                const call = group.calls[j];
+                const s = settled[j];
+                const { text: result, errFlag: isError } = s.status === "fulfilled"
+                  ? s.value
+                  : { text: `执行错误: ${String((s as PromiseRejectedResult).reason)}`, errFlag: true };
+                totalToolCalls++;
+                stream.push({
+                  type: "tool_execution_end",
+                  toolCallId: call.id,
+                  toolName: call.name,
+                  result: result.length > 500 ? `${result.slice(0, 500)}...` : result,
+                  isError,
+                });
+                toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
+              }
+              const steering = await getSteeringMessages();
+              if (steering.length > 0) {
+                steeringMessages = steering;
+                stream.push({ type: "steering", pendingCount: steering.length });
+              }
+            } else {
+              // ── 串行执行（审批检查 + 逐个 steering 检查） ──
+              for (let gi = 0; gi < group.calls.length; gi++) {
+                const call = group.calls[gi];
+                const tool = toolsForRun.find((t) => t.name === call.name);
+                let result: string;
+
+                stream.push({ type: "tool_execution_start", toolCallId: call.id, toolName: call.name, args: call.input });
+
+                if (tool) {
+                  if (params.checkToolApproval) {
+                    const approval = await params.checkToolApproval(call);
+                    if (approval !== null) {
+                      const decision = approval.decision as "allow-once" | "allow-always" | "deny";
+                      stream.push({ type: "tool_approval_request", toolCallId: call.id, toolName: call.name, args: call.input });
+                      stream.push({ type: "tool_approval_resolved", toolCallId: call.id, toolName: call.name, decision });
+                      if (!approval.approved) {
+                        result = "Tool execution denied by user.";
+                        totalToolCalls++;
+                        stream.push({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError: true });
+                        toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
+                        const steering = await getSteeringMessages();
+                        if (steering.length > 0) {
+                          steeringMessages = steering;
+                          for (const skipped of group.calls.slice(gi + 1)) {
+                            stream.push({ type: "tool_skipped", toolCallId: skipped.id, toolName: skipped.name });
+                            toolResults.push(skipToolCall(skipped));
+                          }
+                          stream.push({ type: "steering", pendingCount: steering.length });
+                        }
+                        if (steeringMessages) break;
+                        continue;
+                      }
+                    }
+                  }
+                  try {
+                    result = await tool.execute(call.input, toolCtx);
+                  } catch (err) {
+                    result = `执行错误: ${(err as Error).message}`;
+                  }
+                } else {
+                  result = `未知工具: ${call.name}`;
+                }
+
+                totalToolCalls++;
+                const isError = !tool;
+                stream.push({
+                  type: "tool_execution_end",
+                  toolCallId: call.id,
+                  toolName: call.name,
+                  result: result.length > 500 ? `${result.slice(0, 500)}...` : result,
+                  isError,
+                });
+                toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
+
+                const steering = await getSteeringMessages();
+                if (steering.length > 0) {
+                  steeringMessages = steering;
+                  for (const skipped of group.calls.slice(gi + 1)) {
+                    stream.push({ type: "tool_skipped", toolCallId: skipped.id, toolName: skipped.name });
+                    toolResults.push(skipToolCall(skipped));
+                  }
+                  stream.push({ type: "steering", pendingCount: steering.length });
+                  break;
+                }
+              }
             }
           }
 

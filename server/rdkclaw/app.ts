@@ -30,6 +30,7 @@ import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { createEcosystemQueryTool } from "./tools/ecosystem-query.js";
 import { createSoulUpdateTool } from "./tools/soul-update.js";
+import { planTools } from "../agent/tools/plan-tool.js";
 import type { EcosystemRegistry } from "../ecosystem/registry.js";
 import { getDeviceProfile, type DeviceProfile } from "../ecosystem/device-profiles.js";
 import { detectPlatform } from "../ecosystem/device-profiles.js";
@@ -603,6 +604,7 @@ export class RDKClawApp {
       }
     }
     tools.push(createSoulUpdateTool(emitEvent, base));
+    tools.push(...planTools);
     return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base));
   }
 

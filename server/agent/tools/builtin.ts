@@ -622,15 +622,22 @@ export const sessionsSpawnTool: Tool<{
   task: string;
   label?: string;
   cleanup?: "keep" | "delete";
+  toolScope?: "read-only" | "device-read" | "full";
 }> = {
   name: "sessions_spawn",
-  description: "启动子代理执行后台任务，并回传摘要",
+  description:
+    "启动子代理执行后台任务，并回传摘要。可通过 toolScope 限制子代理的工具范围：read-only（仅文件读取与搜索）、device-read（加板端只读）、full（全量工具，默认）。",
   inputSchema: {
     type: "object",
     properties: {
       task: { type: "string", description: "子代理任务描述" },
       label: { type: "string", description: "可选标签" },
       cleanup: { type: "string", description: "完成后是否清理会话: keep|delete" },
+      toolScope: {
+        type: "string",
+        enum: ["read-only", "device-read", "full"],
+        description: "子代理工具范围: read-only=仅读取搜索, device-read=加板端只读, full=全量(默认)",
+      },
     },
     required: ["task"],
   },
@@ -642,8 +649,9 @@ export const sessionsSpawnTool: Tool<{
       task: input.task,
       label: input.label,
       cleanup: input.cleanup,
+      toolScope: input.toolScope,
     });
-    return `子代理已启动: runId=${result.runId} sessionKey=${result.sessionKey}`;
+    return `子代理已启动: runId=${result.runId} sessionKey=${result.sessionKey} toolScope=${input.toolScope ?? "full"}`;
   },
 };
 
