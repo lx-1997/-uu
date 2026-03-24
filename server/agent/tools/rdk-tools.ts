@@ -661,7 +661,7 @@ function rosTopicsTool(deviceId: string): Tool<Record<string, never>> {
     },
     async execute() {
       return execOnDevice(deviceId, [
-        'bash -lc "(command -v ros2 >/dev/null 2>&1 && ros2 topic list) || echo ROS2_NOT_INSTALLED"',
+        'bash -lc "source /opt/tros/humble/setup.bash 2>/dev/null; (command -v ros2 >/dev/null 2>&1 && ros2 topic list) || echo ROS2_NOT_INSTALLED"',
       ]);
     },
   };
@@ -677,7 +677,7 @@ function rosNodesTool(deviceId: string): Tool<Record<string, never>> {
     },
     async execute() {
       return execOnDevice(deviceId, [
-        'bash -lc "(command -v ros2 >/dev/null 2>&1 && ros2 node list) || echo ROS2_NOT_INSTALLED"',
+        'bash -lc "source /opt/tros/humble/setup.bash 2>/dev/null; (command -v ros2 >/dev/null 2>&1 && ros2 node list) || echo ROS2_NOT_INSTALLED"',
       ]);
     },
   };

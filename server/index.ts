@@ -194,18 +194,24 @@ type OneShotFixSuggestion = {
 };
 
 const WORKSPACE_HEALTH_SCRIPT = [
+  // Cache expensive system queries upfront (each runs once instead of 3×)
+  '_dpkg=$(dpkg -l 2>/dev/null | awk "/^ii/{print \\$2}")',
+  '_ss=$(ss -lntp 2>/dev/null)',
+  '_ps=$(ps -eo args --no-headers 2>/dev/null)',
+  // Source TROS so ros2 CLI is discoverable even when not in default PATH
+  'test -f /opt/tros/humble/setup.bash && . /opt/tros/humble/setup.bash 2>/dev/null || true',
   'python_ready=$(command -v python3 >/dev/null 2>&1 && echo 1 || echo 0)',
   'git_ready=$(command -v git >/dev/null 2>&1 && echo 1 || echo 0)',
   'node_ready=$(command -v node >/dev/null 2>&1 && echo 1 || echo 0)',
   'npm_ready=$(command -v npm >/dev/null 2>&1 && echo 1 || echo 0)',
   'code_installed=$(command -v code-server >/dev/null 2>&1 && echo 1 || echo 0)',
-  'code_running=$( (ss -lntp 2>/dev/null | grep -q ":13337" || pgrep -af "code-server.*13337" >/dev/null 2>&1) && echo 1 || echo 0 )',
+  'code_running=$( (echo "$_ss" | grep -q ":13337" || echo "$_ps" | grep -q "code-server.*13337") && echo 1 || echo 0 )',
   'vnc_installed=$( (command -v x11vnc >/dev/null 2>&1 || command -v vncserver >/dev/null 2>&1) && echo 1 || echo 0 )',
-  'vnc_running=$( (ss -lntp 2>/dev/null | grep -q ":5900" || pgrep -af "x11vnc|Xtigervnc|vncserver" >/dev/null 2>&1) && echo 1 || echo 0 )',
+  'vnc_running=$( (echo "$_ss" | grep -q ":5900" || echo "$_ps" | grep -qE "x11vnc|Xtigervnc|vncserver") && echo 1 || echo 0 )',
   'ros2_ready=$(command -v ros2 >/dev/null 2>&1 && echo 1 || echo 0)',
-  'rosbridge_installed=$(dpkg -l 2>/dev/null | grep -Eq "^ii[[:space:]]+.*rosbridge" && echo 1 || echo 0)',
-  'rosbridge_running=$( (ss -lntp 2>/dev/null | grep -q ":9090" || pgrep -af "rosbridge_websocket|rosbridge_server" >/dev/null 2>&1) && echo 1 || echo 0 )',
-  'tros_count=$(dpkg -l 2>/dev/null | grep -Ec "^ii[[:space:]]+(tros-|hobot)" || true)',
+  'rosbridge_installed=$(echo "$_dpkg" | grep -q "rosbridge" && echo 1 || echo 0)',
+  'rosbridge_running=$( (echo "$_ss" | grep -q ":9090" || echo "$_ps" | grep -qE "rosbridge_websocket|rosbridge_server") && echo 1 || echo 0 )',
+  'tros_count=$(echo "$_dpkg" | grep -Ec "^(tros-|hobot)" || true)',
   'modelzoo_dir=$(test -d /opt/rdk_model_zoo && echo 1 || echo 0)',
   'hrt_ready=$(command -v hrt_model_exec >/dev/null 2>&1 && echo 1 || echo 0)',
   'bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "import importlib.util; mods=(\'hobot_dnn\',\'hobot_dnn_rdkx5\',\'bpu_infer_lib_x5\',\'bpu_infer_lib_x3\'); print(1 if any(importlib.util.find_spec(name) is not None for name in mods) else 0)" 2>/dev/null || echo 0; else echo 0; fi)',
@@ -2913,7 +2919,7 @@ echo "===FLASH_DONE==="
 
 app.get('/api/devices/:id/ros/topics', async (request, response) => {
   const { id } = request.params;
-  const executed = await runOnDevice(request, response, id, ['bash -lc "(command -v ros2 >/dev/null 2>&1 && ros2 topic list) || echo ROS2_NOT_INSTALLED"']);
+  const executed = await runOnDevice(request, response, id, ['bash -lc "source /opt/tros/humble/setup.bash 2>/dev/null; (command -v ros2 >/dev/null 2>&1 && ros2 topic list) || echo ROS2_NOT_INSTALLED"']);
   if (!executed) return;
 
   const topics = executed.output
