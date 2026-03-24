@@ -41,6 +41,8 @@ import { FeishuConfigStore } from './rdkclaw/feishu-config-store.js';
 import { FeishuWebSocketChannel } from './agent/channels/feishu.js';
 import { WeixinConfigStore } from './rdkclaw/weixin-config-store.js';
 import { WeixinAccountStore } from './rdkclaw/weixin-account-store.js';
+import { ForumAuthStore } from './rdkclaw/forum-auth-store.js';
+import { verifyForumSsoLogin } from './agent/tools/forum-tools.js';
 import { WeixinPollingChannel } from './agent/channels/weixin.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
@@ -256,6 +258,9 @@ const feishuChannel = new FeishuWebSocketChannel({
 const feishuEventSeen = new Map<string, number>();
 let feishuLastEventAt: number | null = null;
 let feishuLastAuthorizedAt: number | null = null;
+
+const forumAuthStore = new ForumAuthStore();
+forumAuthStore.load();
 
 const weixinConfigStore = new WeixinConfigStore();
 const weixinAccountStore = new WeixinAccountStore();
@@ -3718,53 +3723,32 @@ app.post('/api/rdkclaw/policy', (request, response) => {
 });
 
 app.get('/api/rdkclaw/forum/auth', (_request, response) => {
-  const username = String(process.env.FORUM_DROBOTICS_USERNAME || '').trim();
-  const hasPassword = !!String(process.env.FORUM_DROBOTICS_PASSWORD || '').trim();
-  const hasApiKey = !!String(process.env.FORUM_DROBOTICS_API_KEY || '').trim();
-  const hasApiUsername = !!String(process.env.FORUM_DROBOTICS_API_USERNAME || '').trim();
-  const hasCookie = !!String(process.env.FORUM_DROBOTICS_COOKIE || '').trim();
-  response.json({
-    ok: true,
-    auth: {
-      username: username ? maskOpenId(username) : '',
-      hasPassword,
-      hasApiKey,
-      hasApiUsername,
-      hasCookie,
-    },
-  });
+  response.json({ ok: true, auth: forumAuthStore.getView() });
 });
 
-app.post('/api/rdkclaw/forum/auth', (request, response) => {
+app.post('/api/rdkclaw/forum/auth', async (request, response) => {
   const username = String(request.body?.username || '').trim();
   const password = String(request.body?.password || '').trim();
   if (!username || !password) {
     response.status(400).json({ error: 'username 与 password 为必填项' });
     return;
   }
-  process.env.FORUM_DROBOTICS_USERNAME = username;
-  process.env.FORUM_DROBOTICS_PASSWORD = password;
+  forumAuthStore.saveCredentials(username, password);
+  const verify = await verifyForumSsoLogin();
+  forumAuthStore.markVerified(verify.ok ? 'ok' : 'failed');
   response.json({
     ok: true,
-    message: '论坛 SSO 账号凭据已写入当前服务运行态（重启后失效）',
-    username: maskOpenId(username),
+    verified: verify.ok,
+    verifyDetail: verify.detail,
+    message: verify.ok
+      ? '论坛凭据已保存并验证成功'
+      : `论坛凭据已保存，但 SSO 验证未通过: ${verify.detail}`,
+    auth: forumAuthStore.getView(),
   });
 });
 
-app.post('/api/rdkclaw/forum/auth/cookie', (request, response) => {
-  const cookie = String(request.body?.cookie || '').trim();
-  if (!cookie) {
-    response.status(400).json({ error: 'cookie 不能为空' });
-    return;
-  }
-  process.env.FORUM_DROBOTICS_COOKIE = cookie;
-  response.json({ ok: true, message: '论坛 Cookie 已写入当前服务运行态（重启后失效）' });
-});
-
 app.post('/api/rdkclaw/forum/auth/clear', (_request, response) => {
-  delete process.env.FORUM_DROBOTICS_USERNAME;
-  delete process.env.FORUM_DROBOTICS_PASSWORD;
-  delete process.env.FORUM_DROBOTICS_COOKIE;
+  forumAuthStore.clear();
   response.json({ ok: true, message: '论坛认证信息已清除' });
 });
 

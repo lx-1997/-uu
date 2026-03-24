@@ -193,16 +193,21 @@ export default function SettingsPanel() {
 
   /* ── Forum State ── */
   const [forumAuth, setForumAuth] = useState<ForumAuthView>({
-    username: '', hasPassword: false, hasApiKey: false, hasApiUsername: false, hasCookie: false,
+    username: '', hasPassword: false, hasCookie: false,
+    hasApiKey: false, hasApiUsername: false,
+    lastVerified: null, lastVerifyResult: null,
   });
   const [forumUsernameInput, setForumUsernameInput] = useState('');
   const [forumPasswordInput, setForumPasswordInput] = useState('');
   const [forumSaving, setForumSaving] = useState(false);
+  const [forumVerifyMsg, setForumVerifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   /* ── WeChat State ── */
   const [weixinAccounts, setWeixinAccounts] = useState<Array<{ accountId: string; nickname: string; boundAt: number }>>([]);
   const [weixinLoginLoading, setWeixinLoginLoading] = useState(false);
   const [weixinQrCode, setWeixinQrCode] = useState<string | null>(null);
+  const [weixinLoginStatus, setWeixinLoginStatus] = useState<string>('');
+  const [weixinLoginEventSource, setWeixinLoginEventSource] = useState<EventSource | null>(null);
 
   /* ═══════════════════════════════════════════
      Data Loading
@@ -291,13 +296,18 @@ export default function SettingsPanel() {
     const password = forumPasswordInput.trim();
     if (!username || !password) { addToast('请填写论坛用户名和密码', 'warning'); return; }
     setForumSaving(true);
+    setForumVerifyMsg(null);
     try {
       const res = await saveRDKClawForumCredential({ username, password });
       setForumPasswordInput('');
-      await refreshRdkclawData();
-      addToast(res.message || '论坛账号已保存', 'success');
+      setForumAuth(res.auth);
+      setForumVerifyMsg({
+        ok: res.verified,
+        text: res.verified ? '凭据已保存，SSO 验证通过' : `凭据已保存，但验证未通过: ${res.verifyDetail}`,
+      });
+      addToast(res.verified ? '论坛凭据验证成功' : '凭据已保存，SSO 验证未通过', res.verified ? 'success' : 'warning');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : '论坛账号保存失败', 'error');
+      addToast(error instanceof Error ? error.message : '保存失败', 'error');
     } finally { setForumSaving(false); }
   };
 
@@ -453,28 +463,60 @@ export default function SettingsPanel() {
 
   /* ── WeChat Handlers ── */
 
-  const startWeixinLogin = async () => {
-    setWeixinLoginLoading(true);
+  const closeWeixinLogin = () => {
+    weixinLoginEventSource?.close();
+    setWeixinLoginEventSource(null);
+    setWeixinLoginLoading(false);
     setWeixinQrCode(null);
-    try {
-      const eventSource = new EventSource(resolveApiUrl('/api/rdkclaw/weixin/login'));
-      eventSource.addEventListener('qrcode', (e) => {
-        try { const data = JSON.parse(e.data); if (data.qrcode) setWeixinQrCode(data.qrcode); } catch { /* ignore */ }
-      });
-      eventSource.addEventListener('bound', (e) => {
-        try { const data = JSON.parse(e.data); addToast(`微信已绑定: ${data.nickname || data.accountId}`, 'success'); loadWeixinData(); } catch { /* ignore */ }
-        setWeixinQrCode(null); setWeixinLoginLoading(false); eventSource.close();
-      });
-      eventSource.addEventListener('error', (e) => {
-        try { const data = JSON.parse((e as any).data || '{}'); addToast(`登录失败: ${data.message || '未知错误'}`, 'error'); } catch { /* ignore */ }
-        setWeixinLoginLoading(false); eventSource.close();
-      });
-      eventSource.addEventListener('done', () => { setWeixinLoginLoading(false); setWeixinQrCode(null); eventSource.close(); });
-      eventSource.onerror = () => { setWeixinLoginLoading(false); setWeixinQrCode(null); eventSource.close(); };
-    } catch (err: any) {
-      addToast(`启动登录失败: ${err.message || ''}`, 'error');
-      setWeixinLoginLoading(false);
-    }
+    setWeixinLoginStatus('');
+  };
+
+  const startWeixinLogin = () => {
+    closeWeixinLogin();
+    setWeixinLoginLoading(true);
+    setWeixinLoginStatus('正在获取二维码...');
+
+    const es = new EventSource(resolveApiUrl('/api/rdkclaw/weixin/login'));
+    setWeixinLoginEventSource(es);
+
+    es.addEventListener('qrcode', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.qrcode) {
+          setWeixinQrCode(data.qrcode);
+          setWeixinLoginStatus('请用微信扫描下方二维码');
+        }
+      } catch { /* ignore */ }
+    });
+    es.addEventListener('scanned', () => {
+      setWeixinLoginStatus('已扫码，请在微信中确认...');
+    });
+    es.addEventListener('log', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.message) setWeixinLoginStatus(data.message);
+      } catch { /* ignore */ }
+    });
+    es.addEventListener('bound', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addToast(`微信已绑定: ${data.nickname || data.accountId}`, 'success');
+        loadWeixinData();
+      } catch { /* ignore */ }
+      closeWeixinLogin();
+    });
+    es.addEventListener('error', (e) => {
+      try {
+        const data = JSON.parse((e as any).data || '{}');
+        addToast(`登录失败: ${data.message || '未知错误'}`, 'error');
+      } catch { /* ignore */ }
+      closeWeixinLogin();
+    });
+    es.addEventListener('done', () => { closeWeixinLogin(); });
+    es.onerror = () => {
+      addToast('连接中断，请重试', 'error');
+      closeWeixinLogin();
+    };
   };
 
   /* ═══════════════════════════════════════════
@@ -759,19 +801,43 @@ export default function SettingsPanel() {
 
                   <div className="settings-actions">
                     <button type="button" className="btn btn-primary btn-sm" onClick={startWeixinLogin} disabled={weixinLoginLoading}>
-                      {weixinLoginLoading ? '等待扫码...' : '扫码绑定'}
+                      扫码连接
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={async () => { await restartWeixinChannel(); addToast('已重启', 'info'); }}>重启渠道</button>
                   </div>
-
-                  {weixinQrCode && (
-                    <div className="settings-qr-container">
-                      <img src={weixinQrCode} alt="微信扫码" className="settings-qr-img" />
-                      <p className="settings-hint">请用微信扫一扫</p>
-                    </div>
-                  )}
                 </div>
               </section>
+
+              {/* 微信扫码弹窗 */}
+              {weixinLoginLoading && (
+                <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeWeixinLogin(); }}>
+                  <div className="modal-card" style={{ maxWidth: 380 }}>
+                    <div className="modal-header">
+                      <span className="modal-title">微信扫码连接</span>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={closeWeixinLogin} aria-label="关闭">&times;</button>
+                    </div>
+                    <div className="modal-body" style={{ textAlign: 'center' }}>
+                      {weixinQrCode ? (
+                        <>
+                          <div className="settings-qr-container">
+                            <img src={weixinQrCode} alt="微信扫码" className="settings-qr-img" />
+                          </div>
+                          <p style={{ margin: '12px 0 4px', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                            {weixinLoginStatus || '请用微信扫一扫'}
+                          </p>
+                        </>
+                      ) : (
+                        <div style={{ padding: '40px 0' }}>
+                          <div className="spinner" style={{ margin: '0 auto 12px' }} />
+                          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                            {weixinLoginStatus || '正在获取二维码...'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <hr className="settings-section-divider" />
 
@@ -794,11 +860,15 @@ export default function SettingsPanel() {
 
               {/* ══ 7. 社区论坛 ══ */}
               <section id="forum" className="settings-section" ref={registerSectionRef('forum')}>
-                <H title="社区论坛" desc="授权后 RDKClaw 可帮你在 D-Robotics 社区发帖互动。" />
+                <H title="社区论坛" desc="授权后 RDKClaw 可帮你在 D-Robotics 社区发帖互动。也可在对话中直接告诉 RDKClaw 你的论坛账号密码，会自动保存。" />
                 <div className="settings-card">
                   <div className="settings-row">
                     <span className="settings-row-label">论坛用户</span>
-                    <span className="settings-row-static">{forumAuth.username || '未配置'}</span>
+                    <div className="settings-actions">
+                      <span className="settings-row-static">{forumAuth.username || '未配置'}</span>
+                      {forumAuth.lastVerifyResult === 'ok' && <span className="settings-status-badge ok">SSO 验证通过</span>}
+                      {forumAuth.lastVerifyResult === 'failed' && <span className="settings-status-badge error">验证失败</span>}
+                    </div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">用户名</span>
@@ -808,10 +878,16 @@ export default function SettingsPanel() {
                     <span className="settings-row-label">密码</span>
                     <div className="settings-row-value"><input type="password" className="input" title="密码" aria-label="密码" placeholder="论坛密码" value={forumPasswordInput} onChange={e => setForumPasswordInput(e.target.value)} /></div>
                   </div>
+                  {forumVerifyMsg && (
+                    <div className={`settings-status-badge ${forumVerifyMsg.ok ? 'ok' : 'error'}`}>
+                      {forumVerifyMsg.text}
+                    </div>
+                  )}
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveForumCredential} disabled={forumSaving}>{forumSaving ? '...' : '保存'}</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveForumCredential} disabled={forumSaving}>{forumSaving ? '验证中...' : '保存并验证'}</button>
                     <button type="button" className="btn btn-danger btn-sm" onClick={handleClearForumAuth} disabled={forumSaving}>清空</button>
                   </div>
+                  <span className="settings-hint">保存后自动通过 SSO 验证密码是否有效，凭据持久化到本地。</span>
                 </div>
               </section>
 

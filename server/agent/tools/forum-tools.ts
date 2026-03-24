@@ -1,5 +1,6 @@
 import type { Tool } from "./types.js";
 import { createCipheriv } from "node:crypto";
+import { ForumAuthStore } from "../../rdkclaw/forum-auth-store.js";
 
 interface ForumToolOptions {
   timeoutMs?: number;
@@ -615,46 +616,29 @@ function forumSetCredentialsTool(options: ForumToolOptions): Tool<{ username: st
         return "错误：用户名和密码均不能为空。";
       }
 
-      process.env.FORUM_DROBOTICS_USERNAME = username;
-      process.env.FORUM_DROBOTICS_PASSWORD = password;
+      const store = new ForumAuthStore();
+      store.saveCredentials(username, password);
       forumSessionCookieCache = null;
 
-      const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
-      const auth = await resolveForumAuth(base, timeoutMs);
+      const result = await verifyForumSsoLogin(timeoutMs);
+      store.markVerified(result.ok ? "ok" : "failed");
 
-      if (auth.mode !== "none") {
-        const timeout = withTimeout(timeoutMs);
-        try {
-          const res = await fetch(`${base}/latest.json?page=0`, {
-            method: "GET",
-            signal: timeout.signal,
-            headers: {
-              Accept: "application/json",
-              "User-Agent": "RDKClaw/1.0 (+forum-tool)",
-              ...auth.headers,
-            },
-          });
-          if (res.ok) {
-            return [
-              `论坛凭据已保存并验证成功。`,
-              `用户名: ${username}`,
-              `密码: ***`,
-              `认证方式: ${auth.detail}`,
-              `论坛读取权限: 已确认`,
-              `现在可以使用 forum_drobotics_create_post 发帖。`,
-            ].join("\n");
-          }
-        } finally {
-          timeout.clear();
-        }
+      if (result.ok) {
+        return [
+          `论坛凭据已保存到本地并验证成功。`,
+          `用户名: ${username}`,
+          `认证方式: ${result.detail}`,
+          `论坛读取权限: 已确认`,
+          `凭据已持久化到 ~/.rdkstudio/forum-auth.json，重启后仍有效。`,
+          `现在可以使用 forum_drobotics_create_post 发帖。`,
+        ].join("\n");
       }
 
-      const reason = auth.mode === "none" ? auth.detail : "verify_failed";
+      const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
       return [
-        `论坛凭据已保存，但验证未通过。`,
+        `论坛凭据已保存到本地，但 SSO 验证未通过。`,
         `用户名: ${username}`,
-        `密码: ***`,
-        `原因: ${resolveAuthDetailText(reason)}`,
+        `原因: ${resolveAuthDetailText(result.detail)}`,
         `建议: 请确认账号密码是否正确，或尝试浏览器登录 ${base} 后导出 Cookie。`,
       ].join("\n");
     },
@@ -714,6 +698,41 @@ function forumAuthStatusTool(options: ForumToolOptions): Tool<Record<string, nev
       }
     },
   };
+}
+
+/**
+ * Verify forum SSO login and return the result.
+ * Can be used by both the agent tool and the API endpoint.
+ */
+export async function verifyForumSsoLogin(
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<{ ok: boolean; detail: string }> {
+  const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
+  forumSessionCookieCache = null;
+  const auth = await resolveForumAuth(base, timeoutMs);
+  if (auth.mode === "none") {
+    return { ok: false, detail: auth.detail };
+  }
+  const timeout = withTimeout(timeoutMs);
+  try {
+    const res = await fetch(`${base}/latest.json?page=0`, {
+      method: "GET",
+      signal: timeout.signal,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+        ...auth.headers,
+      },
+    });
+    if (res.ok) {
+      return { ok: true, detail: auth.detail };
+    }
+    return { ok: false, detail: `http_${res.status}` };
+  } catch {
+    return { ok: false, detail: "network_error" };
+  } finally {
+    timeout.clear();
+  }
 }
 
 export function createForumTools(options: ForumToolOptions = {}): Tool[] {
