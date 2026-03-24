@@ -155,7 +155,7 @@ export default function Flasher() {
 
   const isDesktop = checkIsDesktop();
   const platform = window.rdkDesktop?.platform ?? 'unknown';
-  const { caps } = useFlashCapabilities();
+  const { caps, loading: capsLoading } = useFlashCapabilities();
 
   const imageListKey = resolveImageKey(selectedDeviceKey);
   const imageCandidates = IMAGE_LIST[imageListKey] ?? [];
@@ -600,7 +600,7 @@ export default function Flasher() {
                       </p>
                     </div>
                   )}
-                  {!caps.supportsDirectWrite && (
+                  {!capsLoading && !caps.supportsDirectWrite && (
                     <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                       <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
                         {isDesktop
@@ -791,7 +791,7 @@ export default function Flasher() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={!canProceedFromDrive || loading || !caps.supportsDirectWrite}
+                    disabled={!canProceedFromDrive || loading || (!capsLoading && !caps.supportsDirectWrite)}
                     onClick={() => startFlashWorkflow()}
                   >
                     {loading ? '执行中...' : '开始写盘'}

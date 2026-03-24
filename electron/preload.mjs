@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   flashDecompressImage: (payload) => ipcRenderer.invoke('rdk:flash:decompress-image', payload),
   launchXburn: (payload) => ipcRenderer.invoke('rdk:flash:launch-xburn', payload),
   onFlashProgress: (cb) => {
-    ipcRenderer.on('rdk:flash:progress', (_event, payload) => cb(payload));
+    const wrapped = (_event, payload) => cb(payload);
+    ipcRenderer.on('rdk:flash:progress', wrapped);
+    return () => ipcRenderer.removeListener('rdk:flash:progress', wrapped);
   },
 });

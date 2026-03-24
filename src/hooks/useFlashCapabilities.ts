@@ -12,7 +12,7 @@ const EMPTY_CAPS: FlashCapabilities = {
 
 let cachedCaps: FlashCapabilities | null = null;
 
-export function useFlashCapabilities() {
+export function useFlashCapabilities(): { caps: FlashCapabilities; loading: boolean } {
   const [caps, setCaps] = useState<FlashCapabilities>(cachedCaps ?? EMPTY_CAPS);
   const [loading, setLoading] = useState(!cachedCaps);
 
