@@ -113,8 +113,8 @@ export interface UIStoreState {
   // Settings
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
-  settingsTab: 'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about';
-  setSettingsTab: (v: 'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about') => void;
+  settingsTab: 'general' | 'ai' | 'connection' | 'feishu' | 'weixin' | 'rdkclaw' | 'about';
+  setSettingsTab: (v: 'general' | 'ai' | 'connection' | 'feishu' | 'weixin' | 'rdkclaw' | 'about') => void;
   autoReconnect: boolean;
   setAutoReconnect: (v: boolean) => void;
   connectionTimeout: number;
@@ -335,7 +335,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
 
   // ── Settings ──
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'ai' | 'connection' | 'feishu' | 'rdkclaw' | 'about'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'ai' | 'connection' | 'feishu' | 'weixin' | 'rdkclaw' | 'about'>('general');
   const [autoReconnect, setAutoReconnect] = useState(true);
   const [connectionTimeout, setConnectionTimeout] = useState(30);
   const [language, setLanguage] = useState('zh-CN');

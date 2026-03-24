@@ -31,7 +31,7 @@ export interface ChatAttachmentInput {
   contentBase64?: string;
   transcript?: string;
   textContent?: string;
-  source?: "studio" | "feishu";
+  source?: "studio" | "feishu" | "weixin";
 }
 
 export interface SessionAttachment {
@@ -44,7 +44,7 @@ export interface SessionAttachment {
   createdAt: number;
   transcript?: string;
   textContent?: string;
-  source?: "studio" | "feishu";
+  source?: "studio" | "feishu" | "weixin";
 }
 
 export interface PreparedAttachmentState {
