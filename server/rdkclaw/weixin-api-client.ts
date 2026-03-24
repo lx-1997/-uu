@@ -47,7 +47,7 @@ export interface SendMessageResponse {
 }
 
 export interface GetConfigResponse {
-  ret: number;
+  ret?: number;
   typing_ticket?: string;
 }
 
@@ -57,6 +57,12 @@ function randomUin(): string {
   const view = new DataView(buf.buffer);
   const val = view.getUint32(0, true);
   return Buffer.from(String(val)).toString("base64");
+}
+
+function randomClientId(): string {
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  return Array.from(buf).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 export class WeixinApiClient {
@@ -130,14 +136,22 @@ export class WeixinApiClient {
     toUserId: string,
     contextToken: string,
     items: WeixinMessageItem[],
+    state: 1 | 2 = 2,
   ): Promise<SendMessageResponse> {
-    return this.post<SendMessageResponse>("sendmessage", {
+    const res = await this.post<SendMessageResponse>("sendmessage", {
       msg: {
         to_user_id: toUserId,
+        client_id: randomClientId(),
+        message_type: 2,
+        message_state: state,
         context_token: contextToken,
         item_list: items,
       },
     }, DEFAULT_TIMEOUT_MS);
+    if (res.ret !== undefined && res.ret !== 0) {
+      console.warn(`[WeixinApiClient] sendMessage failed: ret=${res.ret} errmsg=${res.errmsg || ""}`);
+    }
+    return res;
   }
 
   async sendText(toUserId: string, contextToken: string, text: string) {

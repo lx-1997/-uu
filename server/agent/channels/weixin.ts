@@ -261,7 +261,7 @@ export class WeixinPollingChannel {
     let typingTicket: string | undefined;
     try {
       const configRes = await poller.client.getConfig(fromUserId, contextToken);
-      if (configRes.ret === 0 && configRes.typing_ticket) {
+      if ((configRes.ret === undefined || configRes.ret === 0) && configRes.typing_ticket) {
         typingTicket = configRes.typing_ticket;
         poller.typingTickets.set(fromUserId, typingTicket);
       }
