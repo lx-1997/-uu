@@ -182,15 +182,13 @@ export default function SettingsPanel() {
 
   // ── RDKClaw Persona & Policy ──
   const [persona, setPersona] = useState<PersonaProfile>({
-    name: 'RDKClaw', tone: 'professional', stylePrompt: '', riskLevel: 'balanced',
-    boardDelegationBias: 'medium', delegationBias: 'balanced', autonomyLevel: 'assisted',
-    riskBoundary: 'moderate', notifyStyle: 'compact',
+    name: 'RDKClaw', tone: 'professional', extraInstructions: '', riskLevel: 'balanced',
+    delegationBias: 'balanced', autonomyLevel: 'assisted',
+    riskBoundary: 'moderate',
   });
   const [policy, setPolicy] = useState<RDKClawPolicy>({
     approval: { mode: 'risk-based', riskThreshold: 'medium' },
-    delegation: { strategy: 'hybrid', allowBoardAuto: true },
     memory: { mainSessionReadsMemory: true, sharedSessionBlocksMemory: false, dailyMemoryDays: 7 },
-    scheduler: { defaultChannel: 'chat', allowSecondInterval: false },
     network: { enabled: true, maxFetchChars: 30000, requireApproval: false },
     context: { contextTokens: 128000, maxHistoryShare: 0.5, softTrimRatio: 0.3, hardClearRatio: 0.5, keepLastAssistants: 3 },
   });
@@ -1047,9 +1045,9 @@ export default function SettingsPanel() {
                     </div>
                   </div>
                   <div className="config-row">
-                    <span className="config-label">自定义人格 Prompt</span>
+                    <span className="config-label">额外指令</span>
                     <div className="config-value">
-                      <textarea className="input" title="自定义 Prompt" aria-label="自定义 Prompt" rows={3} value={persona.stylePrompt} onChange={e => setPersona(p => ({ ...p, stylePrompt: e.target.value }))} placeholder="可选：给 Agent 添加额外人格指令，如「回答尽量使用中文，代码注释用英文」" style={{ resize: 'vertical', minHeight: 60 }} />
+                      <textarea className="input" title="额外指令" aria-label="额外指令" rows={3} value={persona.extraInstructions} onChange={e => setPersona(p => ({ ...p, extraInstructions: e.target.value }))} placeholder="可选：补充 SOUL.md 未涵盖的临时指令，如「本次优先用英文回复」" style={{ resize: 'vertical', minHeight: 60 }} />
                     </div>
                   </div>
                   <div className="config-row">
@@ -1083,31 +1081,12 @@ export default function SettingsPanel() {
                     </div>
                   </div>
                   <div className="config-row">
-                    <span className="config-label">板端委派偏好</span>
-                    <div className="config-value">
-                      <select className="select" title="板端委派偏好" aria-label="板端委派偏好" value={persona.boardDelegationBias} onChange={e => setPersona(p => ({ ...p, boardDelegationBias: e.target.value as PersonaProfile['boardDelegationBias'] }))}>
-                        <option value="low">低 — 尽量本地</option>
-                        <option value="medium">中 — 智能判断</option>
-                        <option value="high">高 — 积极委派板端</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="config-row">
                     <span className="config-label">风险边界</span>
                     <div className="config-value">
                       <select className="select" title="风险边界" aria-label="风险边界" value={persona.riskBoundary} onChange={e => setPersona(p => ({ ...p, riskBoundary: e.target.value as PersonaProfile['riskBoundary'] }))}>
                         <option value="strict">严格 — 不执行破坏性操作</option>
                         <option value="moderate">适度 — 破坏性操作需确认</option>
                         <option value="relaxed">宽松 — 信任 Agent 判断</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">通知风格</span>
-                    <div className="config-value">
-                      <select className="select" title="通知风格" aria-label="通知风格" value={persona.notifyStyle} onChange={e => setPersona(p => ({ ...p, notifyStyle: e.target.value as PersonaProfile['notifyStyle'] }))}>
-                        <option value="compact">精简</option>
-                        <option value="detailed">详细</option>
                       </select>
                     </div>
                   </div>
@@ -1142,23 +1121,6 @@ export default function SettingsPanel() {
                   </div>
                 </div>
 
-                <div className="config-section">
-                  <div className="config-section-title">委派策略</div>
-                  <div className="config-row">
-                    <span className="config-label">执行策略</span>
-                    <div className="config-value">
-                      <select className="select" title="委派策略" aria-label="委派策略" value={policy.delegation.strategy} onChange={e => setPolicy(p => ({ ...p, delegation: { ...p.delegation, strategy: e.target.value as RDKClawPolicy['delegation']['strategy'] } }))}>
-                        <option value="local-first">本地优先</option>
-                        <option value="board-first">板端优先</option>
-                        <option value="hybrid">智能混合</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">允许板端自动执行</span>
-                    <input type="checkbox" title="允许板端自动执行" aria-label="允许板端自动执行" checked={policy.delegation.allowBoardAuto} onChange={e => setPolicy(p => ({ ...p, delegation: { ...p.delegation, allowBoardAuto: e.target.checked } }))} />
-                  </div>
-                </div>
 
                 <div className="config-section">
                   <div className="config-section-title">记忆与上下文</div>
@@ -1253,22 +1215,6 @@ export default function SettingsPanel() {
                   </div>
                 </div>
 
-                <div className="config-section">
-                  <div className="config-section-title">调度配置</div>
-                  <div className="config-row">
-                    <span className="config-label">默认任务通道</span>
-                    <div className="config-value">
-                      <select className="select" title="默认通道" aria-label="默认通道" value={policy.scheduler.defaultChannel} onChange={e => setPolicy(p => ({ ...p, scheduler: { ...p.scheduler, defaultChannel: e.target.value as 'chat' | 'feishu' } }))}>
-                        <option value="chat">Studio 聊天</option>
-                        <option value="feishu">飞书</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">允许秒级调度间隔</span>
-                    <input type="checkbox" title="秒级调度" aria-label="秒级调度" checked={policy.scheduler.allowSecondInterval} onChange={e => setPolicy(p => ({ ...p, scheduler: { ...p.scheduler, allowSecondInterval: e.target.checked } }))} />
-                  </div>
-                </div>
 
                 <div className="config-section">
                   <div className="config-section-title">联网能力</div>

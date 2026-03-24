@@ -158,6 +158,7 @@ function BlockRenderer({
   onCancelTask,
   onApprovalAction,
   onRecommendationChoice,
+  onSoulUpdateDecision,
 }: {
   block: ChatBlock;
   onConfirm?: (id: string) => void;
@@ -165,6 +166,7 @@ function BlockRenderer({
   onCancelTask?: (taskId: string) => void;
   onApprovalAction?: (approvalId: string, action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run', runId?: string) => void;
   onRecommendationChoice?: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
+  onSoulUpdateDecision?: (proposalId: string, accepted: boolean) => void;
 }) {
   const [rosFrame, setRosFrame] = useState(0);
   const [expandedTerminal, setExpandedTerminal] = useState(false);
@@ -344,6 +346,38 @@ function BlockRenderer({
     );
   }
 
+  if (block.type === 'soul-update') {
+    const actionLabel = block.action === 'add' ? '添加' : block.action === 'modify' ? '修改' : '删除';
+    const decided = block.accepted !== null && block.accepted !== undefined;
+    return (
+      <div className="msg-block confirm-block soul-update-card">
+        <div className="confirm-block-head">
+          <span className="confirm-block-title">SOUL.md 更新提议</span>
+          <span className="soul-update-action">{actionLabel} &lt;{block.section}&gt;</span>
+        </div>
+        <p className="confirm-block-text">{block.reason}</p>
+        {block.currentSnippet && (
+          <div className="soul-update-diff">
+            <div className="soul-update-label">当前内容</div>
+            <pre className="soul-update-pre soul-update-old">{block.currentSnippet}</pre>
+          </div>
+        )}
+        <div className="soul-update-diff">
+          <div className="soul-update-label">{block.action === 'remove' ? '将被删除' : '提议内容'}</div>
+          <pre className="soul-update-pre soul-update-new">{block.content}</pre>
+        </div>
+        {!decided ? (
+          <div className="confirm-block-actions">
+            <button className="confirm-btn yes" onClick={() => onSoulUpdateDecision?.(block.proposalId, true)}>接受</button>
+            <button className="confirm-btn no" onClick={() => onSoulUpdateDecision?.(block.proposalId, false)}>拒绝</button>
+          </div>
+        ) : (
+          <div className="soul-update-result">{block.accepted ? '已更新 SOUL.md' : '已拒绝'}</div>
+        )}
+      </div>
+    );
+  }
+
   if (block.type === 'approval') {
     const risk = (block.risk || 'medium').toLowerCase();
     const riskLabel = risk === 'high' ? '高风险' : risk === 'low' ? '低风险' : '中风险';
@@ -518,7 +552,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    handleApprovalAction, handleRecommendationChoice, stopCurrentRun, backgroundCurrentRun,
+    handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
@@ -716,7 +750,7 @@ export default function AIDock() {
   const filterAiBlocksForCompact = useCallback((blocks: ChatBlock[]) => {
     if (!compactFlowMode) return blocks;
     return blocks.filter((block) => {
-      if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result' || block.type === 'recommendation') return true;
+      if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result' || block.type === 'recommendation' || block.type === 'soul-update') return true;
       if (block.type === 'image' || block.type === 'code') return true;
       if (block.type === 'status') return shouldKeepStatusInCompact(block);
       return false;
@@ -1067,7 +1101,7 @@ export default function AIDock() {
                               <div className="dock-hidden-hint">已折叠中间过程 {foldedCount} 项（切换到“完整”可查看）</div>
                             )}
                             {visibleBlocks.map((block, i) => (
-                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} />
+                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} />
                             ))}
                           </>
                         );

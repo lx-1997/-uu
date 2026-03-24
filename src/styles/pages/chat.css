@@ -902,6 +902,58 @@
   font-weight: 600;
 }
 
+/* Soul update proposal block */
+.dock-bubble .soul-update-card {
+  border-color: var(--warning, #e6a23c);
+}
+
+.dock-bubble .soul-update-action {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  margin-left: 6px;
+  font-family: var(--font-mono, monospace);
+}
+
+.dock-bubble .soul-update-diff {
+  margin: 4px 0;
+}
+
+.dock-bubble .soul-update-label {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.dock-bubble .soul-update-pre {
+  font-size: 0.7rem;
+  font-family: var(--font-mono, monospace);
+  padding: 6px 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.dock-bubble .soul-update-old {
+  background: var(--danger-bg, rgba(245, 108, 108, 0.1));
+  border: 1px solid var(--danger, #f56c6c);
+}
+
+.dock-bubble .soul-update-new {
+  background: var(--ok-bg, rgba(103, 194, 58, 0.1));
+  border: 1px solid var(--ok, #67c23a);
+}
+
+.dock-bubble .soul-update-result {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: var(--ok);
+  font-weight: 600;
+}
+
 /* Image block — real device images */
 .dock-bubble .image-block {
   padding: 0;

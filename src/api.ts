@@ -575,6 +575,13 @@ export function sendRecommendationChoice(recommendationId: string, choiceId: str
   });
 }
 
+export function sendSoulUpdateDecision(proposalId: string, accepted: boolean) {
+  return request<{ ok: boolean; applied: boolean }>(`/api/rdkclaw/soul-updates/${proposalId}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ accepted }),
+  });
+}
+
 export function cancelRDKClawRun(runId: string) {
   return request<{ ok: boolean }>(`/api/rdkclaw/runs/${runId}/cancel`, {
     method: 'POST',

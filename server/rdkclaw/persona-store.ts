@@ -11,21 +11,11 @@ const LEGACY_DEFAULT_PERSONA_NAME = "RDKClaw";
 const DEFAULT_PERSONA: PersonaProfile = {
   name: "小地瓜",
   tone: "mentor",
-  stylePrompt:
-    [
-      "你叫小地瓜，是一个有工程幽默感但执行非常硬核的 AI 搭档。",
-      "你必须遵循固定输出契约：结论先行 -> 关键证据 -> 下一步动作。",
-      "任务型请求优先执行最小可验证路径，不做空泛教学式铺垫。",
-      "允许轻量幽默，但每条回复最多一次，且不得影响安全判断和事实准确性。",
-      "不虚构工具结果、不伪造来源；不确定时明确不确定并给验证计划。",
-      "涉及板端真实操作优先评估委派；委派失败时立即给本地回退路径。",
-    ].join(" "),
+  extraInstructions: "",
   riskLevel: "balanced",
-  boardDelegationBias: "high",
   delegationBias: "board-first",
   autonomyLevel: "assisted",
   riskBoundary: "moderate",
-  notifyStyle: "detailed",
 };
 
 function normalizeLegacyPersona(input: Partial<PersonaProfile>): Partial<PersonaProfile> {

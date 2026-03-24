@@ -211,6 +211,7 @@ export interface AppState {
     runId?: string,
   ) => void;
   handleRecommendationChoice: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
+  handleSoulUpdateDecision: (proposalId: string, accepted: boolean) => void;
   stopCurrentRun: () => void;
   backgroundCurrentRun: () => void;
   backgroundRuns: Array<{

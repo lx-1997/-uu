@@ -3689,6 +3689,31 @@ app.post('/api/rdkclaw/approvals/:approvalId/decision', (request, response) => {
   response.json({ ok: true });
 });
 
+app.post('/api/rdkclaw/soul-updates/:proposalId/decision', async (request, response) => {
+  const { applySoulUpdate, getPendingProposal, removePendingProposal } = await import('./rdkclaw/tools/soul-update.js');
+  const { proposalId } = request.params;
+  const accepted = Boolean(request.body?.accepted);
+
+  const proposal = getPendingProposal(proposalId);
+  if (!proposal) {
+    response.status(404).json({ error: '提议不存在或已过期' });
+    return;
+  }
+
+  if (!accepted) {
+    removePendingProposal(proposalId);
+    response.json({ ok: true, applied: false });
+    return;
+  }
+
+  const result = await applySoulUpdate(proposalId);
+  if (!result.ok) {
+    response.status(500).json({ error: result.error || '写入 SOUL.md 失败' });
+    return;
+  }
+  response.json({ ok: true, applied: true });
+});
+
 app.post('/api/rdkclaw/runs/:runId/cancel', (request, response) => {
   const ok = rdkclaw.cancelRun(request.params.runId);
   if (!ok) {

@@ -36,6 +36,8 @@ export type RDKClawEventType =
   | "approval_decision"
   | "recommendation"
   | "recommendation_choice"
+  | "soul_update_proposal"
+  | "soul_update_applied"
   | "turn_start"
   | "turn_end"
   | "message_end"
@@ -78,18 +80,10 @@ export interface RDKClawPolicy {
     mode: ApprovalMode;
     riskThreshold: RiskLevel;
   };
-  delegation: {
-    strategy: "local-first" | "board-first" | "hybrid";
-    allowBoardAuto: boolean;
-  };
   memory: {
     mainSessionReadsMemory: boolean;
     sharedSessionBlocksMemory: boolean;
     dailyMemoryDays: number;
-  };
-  scheduler: {
-    defaultChannel: "chat" | "feishu";
-    allowSecondInterval: boolean;
   };
   network: {
     enabled: boolean;
@@ -113,13 +107,20 @@ export interface ExecutorSelection {
 export interface PersonaProfile {
   name: string;
   tone: "professional" | "friendly" | "concise" | "mentor";
-  stylePrompt: string;
+  extraInstructions: string;
   riskLevel: "conservative" | "balanced" | "aggressive";
-  boardDelegationBias: "low" | "medium" | "high";
   delegationBias: "local-first" | "balanced" | "board-first";
   autonomyLevel: "manual" | "assisted" | "autonomous";
   riskBoundary: "strict" | "moderate" | "relaxed";
-  notifyStyle: "compact" | "detailed";
+}
+
+export interface SoulUpdateProposal {
+  proposalId: string;
+  section: string;
+  action: "add" | "modify" | "remove";
+  content: string;
+  reason: string;
+  currentSnippet?: string;
 }
 
 export interface UserProfile {

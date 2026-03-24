@@ -6,6 +6,7 @@ import {
   cancelRDKClawRun,
   decideRDKClawApproval,
   sendRecommendationChoice,
+  sendSoulUpdateDecision,
   executeDeviceCommand,
   deployOneShotApp,
   generateOneShotApp,
@@ -60,6 +61,7 @@ export interface AIChatStoreState {
     runId?: string,
   ) => void;
   handleRecommendationChoice: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
+  handleSoulUpdateDecision: (proposalId: string, accepted: boolean) => void;
   stopCurrentRun: () => void;
   backgroundCurrentRun: () => void;
   backgroundRuns: Array<{
@@ -1050,6 +1052,24 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               }
               case 'recommendation_choice':
                 break;
+              case 'soul_update_proposal': {
+                const proposalId = String(event.data.proposalId || '');
+                if (!proposalId) break;
+                aiBlocks.push({
+                  type: 'soul-update',
+                  proposalId,
+                  section: String(event.data.section || ''),
+                  action: (event.data.action as 'add' | 'modify' | 'remove') || 'add',
+                  content: String(event.data.content || ''),
+                  reason: String(event.data.reason || ''),
+                  currentSnippet: event.data.currentSnippet ? String(event.data.currentSnippet) : undefined,
+                  accepted: null,
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'soul_update_applied':
+                break;
               case 'approval_decision': {
                 const approvalId = String(event.data.approvalId || '');
                 const decision = String(event.data.decision || 'allow_once');
@@ -1275,6 +1295,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       blocks: msg.blocks?.map((b) => {
         if (b.type !== 'recommendation' || b.recommendationId !== recommendationId) return b;
         return { ...b, chosen: choiceId };
+      }),
+    })));
+  };
+
+  const handleSoulUpdateDecision = (proposalId: string, accepted: boolean) => {
+    sendSoulUpdateDecision(proposalId, accepted).catch(() => null);
+    setChatMessages((prev) => prev.map((msg) => ({
+      ...msg,
+      blocks: msg.blocks?.map((b) => {
+        if (b.type !== 'soul-update' || b.proposalId !== proposalId) return b;
+        return { ...b, accepted };
       }),
     })));
   };
@@ -1640,7 +1671,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     aiTyping, setAiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
-    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, stopCurrentRun, backgroundCurrentRun,
+    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
   };
 

@@ -29,6 +29,7 @@ import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { createEcosystemQueryTool } from "./tools/ecosystem-query.js";
+import { createSoulUpdateTool } from "./tools/soul-update.js";
 import type { EcosystemRegistry } from "../ecosystem/registry.js";
 import { getDeviceProfile, type DeviceProfile } from "../ecosystem/device-profiles.js";
 import { detectPlatform } from "../ecosystem/device-profiles.js";
@@ -66,26 +67,15 @@ function resolveProviderConfig(): ProviderConfig {
 }
 
 function buildPersonaPrompt(persona: PersonaProfile) {
-  return [
+  const lines = [
     `你是 ${persona.name}。`,
-    persona.stylePrompt,
     `风格: ${persona.tone}；风险偏好: ${persona.riskLevel}。`,
-    "优先使用 Skill 驱动能力编排，不要在回答中暴露内部实现细节。",
-    "若任务涉及真实设备操作、板端插件或板端上下文，请优先调用 board_openclaw_delegate。",
-    "你是总调度者，板端 OpenClaw 是执行员工：当任务可能适合板端时，先调用 board_openclaw_assess 评估可行性；仅在 canHandle=true 时再调用 board_openclaw_delegate。",
-    "若 board_openclaw_assess 返回 canHandle=false 或置信度低，则改用本地设备工具（device_exec/device_file_* 等）继续完成任务。",
-    "当你已经通过设备探测发现板端已有现成能力、脚本、配置或工程目录时，不要在 Studio 侧重复实现；应直接调用 board_openclaw_delegate，让板端 OpenClaw 复用并继续处理。",
-    "除非用户明确要求重写/重构，否则禁止重复造轮子（例如重复创建已有感知、推理、ROS、服务编排脚本）。",
     `委派策略: delegationBias=${persona.delegationBias}, autonomy=${persona.autonomyLevel}, boundary=${persona.riskBoundary}。`,
-    "若用户要求定时/周期/提醒/每秒推送，必须优先调用 rdkclaw_task_create 创建自治任务，而不是仅给方案说明。",
-    "若任务需要联网信息，优先使用 web_search/web_fetch/web_extract 工具链，并在回答中给出来源链接。",
-    "若用户要求在论坛看帖/检索帖子/查看回复，优先使用 forum_drobotics_latest / forum_drobotics_topic；若要求代发帖，先确认草稿再调用 forum_drobotics_create_post。若论坛未认证且用户提供了账号密码，立即调用 forum_drobotics_set_credentials 配置凭据。",
-    "当联网结论对后续有长期价值时，先总结再调用 rdkclaw_memory_append_daily 写入 daily memory。",
-    "若用户上传了图片、文件或语音，先用 attachment_list 查看可用附件，再根据类型调用 attachment_read / attachment_describe_image / attachment_get_audio_transcript。",
-    "如果用户想一句话生成一个 RDK 应用，优先拆出最小可运行版本，明确依赖、入口、验证方式，并直接开始第一步执行。",
-    "新设备场景下，优先检查连接、OpenClaw 可用性、关键依赖是否缺失，再进入应用开发或能力调用。",
-    "输出简洁，明确给出执行结果与下一步建议。",
-  ].join("\n");
+  ];
+  if (persona.extraInstructions?.trim()) {
+    lines.push(`额外指令: ${persona.extraInstructions.trim()}`);
+  }
+  return lines.join("\n");
 }
 
 interface DelegateDecision {
@@ -612,6 +602,7 @@ export class RDKClawApp {
         tools.push(createEcosystemQueryTool(req.deviceId, this.ecosystemRegistry, platform));
       }
     }
+    tools.push(createSoulUpdateTool(emitEvent, base));
     return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base));
   }
 

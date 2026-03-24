@@ -11,18 +11,10 @@ const DEFAULT_POLICY: RDKClawPolicy = {
     mode: "always",
     riskThreshold: "medium",
   },
-  delegation: {
-    strategy: "hybrid",
-    allowBoardAuto: true,
-  },
   memory: {
     mainSessionReadsMemory: true,
     sharedSessionBlocksMemory: true,
     dailyMemoryDays: 2,
-  },
-  scheduler: {
-    defaultChannel: "chat",
-    allowSecondInterval: true,
   },
   network: {
     enabled: true,
@@ -64,9 +56,7 @@ export class RDKClawPolicyStore {
         ...DEFAULT_POLICY,
         ...parsed,
         approval: { ...DEFAULT_POLICY.approval, ...(parsed.approval ?? {}) },
-        delegation: { ...DEFAULT_POLICY.delegation, ...(parsed.delegation ?? {}) },
         memory: { ...DEFAULT_POLICY.memory, ...(parsed.memory ?? {}) },
-        scheduler: { ...DEFAULT_POLICY.scheduler, ...(parsed.scheduler ?? {}) },
         network: { ...DEFAULT_POLICY.network, ...(parsed.network ?? {}) },
         context: {
           ...DEFAULT_POLICY.context,
@@ -84,9 +74,7 @@ export class RDKClawPolicyStore {
       ...prev,
       ...patch,
       approval: { ...prev.approval, ...(patch.approval ?? {}) },
-      delegation: { ...prev.delegation, ...(patch.delegation ?? {}) },
       memory: { ...prev.memory, ...(patch.memory ?? {}) },
-      scheduler: { ...prev.scheduler, ...(patch.scheduler ?? {}) },
       network: { ...prev.network, ...(patch.network ?? {}) },
       context: { ...prev.context, ...(patch.context ?? {}) },
     };
