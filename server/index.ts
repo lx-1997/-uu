@@ -4,7 +4,7 @@ import cors from 'cors';
 import QRCode from 'qrcode';
 import { v4 as uuid } from 'uuid';
 import crypto from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import type { ChatMessage, Device } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
@@ -1256,19 +1256,26 @@ if (isSSOEnabled() || isSSORequired()) {
 
 app.use('/vnc', express.static(process.cwd() + '/public/vnc'));
 
-// Serve agent-downloaded files so frontend can display images etc.
-const localFilesOpts: import('serve-static').ServeStaticOptions = {
-  maxAge: '1h',
-  setHeaders(res, filePath) {
-    const ext = path.extname(filePath).toLowerCase();
-    const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
-    if (imageExts.has(ext)) {
-      res.setHeader('Cache-Control', 'public, max-age=3600');
+// Serve agent-downloaded files — search multiple directories for the requested file
+const localFilesDirs = [
+  path.join(process.cwd(), 'workspace', 'downloads'),
+  path.join(process.cwd(), 'downloads'),
+];
+app.get('/api/local-files/:filename', (req, res) => {
+  const filename = path.basename(decodeURIComponent(req.params.filename));
+  for (const dir of localFilesDirs) {
+    const filePath = path.join(dir, filename);
+    if (existsSync(filePath)) {
+      const ext = path.extname(filename).toLowerCase();
+      const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
+      if (imageExts.has(ext)) {
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+      }
+      return res.sendFile(filePath);
     }
-  },
-};
-app.use('/api/local-files', express.static(path.join(process.cwd(), 'workspace', 'downloads'), localFilesOpts));
-app.use('/api/local-files', express.static(path.join(process.cwd(), 'downloads'), localFilesOpts));
+  }
+  res.status(404).json({ error: 'File not found' });
+});
 
 // ─── Ecosystem Bridge ───
 

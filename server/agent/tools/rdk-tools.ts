@@ -85,15 +85,14 @@ function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: str
 
       const ext = path.extname(fileName).toLowerCase();
       if (IMAGE_EXTENSIONS.has(ext)) {
-        const downloadsDir = path.resolve(ctx.workspaceDir, 'downloads');
-        const relativePath = path.relative(downloadsDir, result.localPath).replace(/\\/g, '/');
-        const imageUrl = `/api/local-files/${encodeURIComponent(relativePath)}`;
+        const savedName = path.basename(result.localPath);
+        const imageUrl = `/api/local-files/${encodeURIComponent(savedName)}`;
         return JSON.stringify({
           __type: 'image_download',
           localPath: result.localPath,
           bytes: result.bytes,
           imageUrl,
-          fileName,
+          fileName: savedName,
         });
       }
       return `已下载到本机: ${result.localPath} (${result.bytes} bytes)`;

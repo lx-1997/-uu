@@ -247,9 +247,10 @@ export class WeixinApiClient {
     const rawMd5 = createHash("md5").update(fileBuf).digest("hex");
 
     const urlRes = await this.getUploadUrl(mediaType, fileBuf.length, rawMd5, encrypted.length);
+    console.log("[WeixinApiClient] getUploadUrl response:", JSON.stringify(urlRes).slice(0, 500));
     const uploadParam = urlRes.upload_param;
     if (!uploadParam?.upload_url) {
-      throw new Error(`getUploadUrl failed: ${urlRes.errmsg || "no upload_url"}`);
+      throw new Error(`getUploadUrl failed: ret=${urlRes.ret} errmsg=${urlRes.errmsg || "none"} keys=${Object.keys(urlRes)}`);
     }
 
     const controller = new AbortController();
