@@ -320,6 +320,13 @@ export interface RDKClawPolicy {
     maxFetchChars: number;
     requireApproval: boolean;
   };
+  context: {
+    contextTokens: number;
+    maxHistoryShare: number;
+    softTrimRatio: number;
+    hardClearRatio: number;
+    keepLastAssistants: number;
+  };
 }
 
 export interface FeishuRuntimeStatus {
@@ -694,6 +701,39 @@ export function saveAgentConfig(config: {
   return request<{ ok: boolean }>('/api/agent/config', {
     method: 'POST',
     body: JSON.stringify(config),
+  });
+}
+
+export interface AgentConfigExportPayload {
+  version: number;
+  exportedAt: number;
+  activeId: string | null;
+  entries: Array<{
+    id: string;
+    label: string;
+    provider: string;
+    model: string;
+    apiKey: string;
+    hasApiKey: boolean;
+    baseUrl?: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
+}
+
+export function exportAgentConfig(includeSecrets = true) {
+  const qp = new URLSearchParams({ includeSecrets: includeSecrets ? '1' : '0' }).toString();
+  return request<{ ok: boolean; includeSecrets: boolean; registry: AgentConfigExportPayload }>(`/api/agent/config/export?${qp}`);
+}
+
+export function importAgentConfig(payload: {
+  registry: AgentConfigExportPayload;
+  setActiveId?: string;
+  merge?: boolean;
+}) {
+  return request<{ ok: boolean; imported: number; total: number; activeId: string | null; merged: boolean }>('/api/agent/config/import', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }
 

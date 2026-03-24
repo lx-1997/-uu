@@ -184,7 +184,7 @@ export default function Dashboard() {
   const parallax = useParallax();
 
   const onboardingInProgress = obStep !== 'done';
-  const postConnectSteps = obStep === 'openclaw' || obStep === 'rdkclaw';
+  const postConnectSteps = obStep === 'model' || obStep === 'openclaw' || obStep === 'rdkclaw';
   const connectJustCompleted = obStep === 'connect' && !!currentDevice;
   const showOnboarding = onboardingInProgress && (!currentDevice || postConnectSteps || connectJustCompleted);
 

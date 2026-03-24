@@ -27,9 +27,11 @@ import { loadAllSkills, getSkillByName, getRawSkillMd, buildSkillContext } from 
 import {
   loadProviderConfig,
   loadProviderRegistry,
+  saveProviderRegistry,
   upsertProviderConfigEntry,
   switchActiveProviderConfig,
   deleteProviderConfigEntry,
+  type ProviderConfigRegistry,
 } from './agent/provider-setup.js';
 import { RDKClawApp } from './rdkclaw/app.js';
 import { FeishuChannelAdapter } from './rdkclaw/feishu-channel-adapter.js';
@@ -42,6 +44,7 @@ import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
 import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage } from './monitoring/token-usage.js';
+import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -1118,32 +1121,39 @@ async function runOnDevice(
 
   const { password, key } = resolvePassword(request, device);
   const candidates = password ? [password] : passwordCandidates(device.username);
-  let lastError: unknown = null;
   const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? 120_000));
-
-  for (const pwd of candidates) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const output = await runRemoteCommands(
-          {
-            host: device.host,
-            port: device.port ?? 22,
-            username: device.username,
-            password: pwd,
-          },
-          commands,
-          { timeoutMs },
-        );
-
-        devicePasswordCache.set(key, pwd);
-        return { device, output };
-      } catch (error) {
-        lastError = error;
-        if (!(attempt === 0 && isTransientSshError(error))) {
-          break;
+  let lastError: unknown = null;
+  const output = await runInDeviceLane(device.id, async () => {
+    for (const pwd of candidates) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const result = await runRemoteCommands(
+            {
+              host: device.host,
+              port: device.port ?? 22,
+              username: device.username,
+              password: pwd,
+            },
+            commands,
+            { timeoutMs },
+          );
+          devicePasswordCache.set(key, pwd);
+          return result;
+        } catch (error) {
+          lastError = error;
+          if (!(attempt === 0 && isTransientSshError(error))) {
+            break;
+          }
         }
       }
     }
+    throw lastError instanceof Error ? lastError : new Error('板端命令执行失败');
+  }).catch((error) => {
+    lastError = error;
+    return null;
+  });
+  if (output !== null) {
+    return { device, output };
   }
 
   if (!password) {
@@ -1221,15 +1231,23 @@ async function ecoRunOnDevice(deviceId: string, commands: string[]): Promise<{ o
     || defaultSshPassword
     || device.username;
   const candidates = [pwd, ...passwordCandidates(device.username)];
-  for (const p of [...new Set(candidates)]) {
-    try {
-      const output = await runRemoteCommands(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: p },
-        commands,
-      );
-      devicePasswordCache.set(key, p);
-      return { output };
-    } catch { /* try next */ }
+  const output = await runInDeviceLane(device.id, async () => {
+    for (const p of [...new Set(candidates)]) {
+      try {
+        const result = await runRemoteCommands(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+          commands,
+        );
+        devicePasswordCache.set(key, p);
+        return result;
+      } catch {
+        // try next candidate
+      }
+    }
+    return null;
+  });
+  if (output !== null) {
+    return { output };
   }
   return null;
 }
@@ -1292,6 +1310,13 @@ app.post('/api/skills/reload', (_request, response) => {
 
 app.get('/api/health', (_request, response) => {
   response.json({ ok: true });
+});
+
+app.get('/api/devices/scheduler/stats', (_request, response) => {
+  response.json({
+    ok: true,
+    ...getDeviceLaneStats(),
+  });
 });
 
 app.post('/api/apps/one-shot-generate', async (request, response) => {
@@ -1530,11 +1555,11 @@ app.post('/api/apps/one-shot-deploy', async (request, response) => {
 
   for (const pwd of candidates) {
     try {
-      const precheckRaw = await runRemoteCommands(
+      const precheckRaw = await runInDeviceLane(device.id, () => runRemoteCommands(
         { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
         ['bash -lc "PY=$(command -v python || command -v python3 || command -v py || true); PIP=$(command -v pip || command -v pip3 || true); AVAIL=$(df -Pk /userdata 2>/dev/null | tail -1 | awk \'{print $4}\' || echo 0); NET=unknown; if command -v curl >/dev/null 2>&1; then curl -Is --max-time 5 https://pypi.org/simple/ >/dev/null 2>&1 && NET=ok || NET=fail; elif command -v wget >/dev/null 2>&1; then wget -q --spider -T 5 https://pypi.org/simple/ >/dev/null 2>&1 && NET=ok || NET=fail; elif [ -n \"$PY\" ]; then $PY -c \"import urllib.request; urllib.request.urlopen(\'https://pypi.org/simple/\', timeout=5)\" >/dev/null 2>&1 && NET=ok || NET=fail; fi; echo PY=$PY; echo PIP=$PIP; echo AVAIL_KB=$AVAIL; echo NET=$NET"'],
         { timeoutMs: 20_000 },
-      );
+      ));
       const pyLine = precheckRaw.split(/\r?\n/).find((line) => line.startsWith('PY=')) || 'PY=';
       const pipLine = precheckRaw.split(/\r?\n/).find((line) => line.startsWith('PIP=')) || 'PIP=';
       const availLine = precheckRaw.split(/\r?\n/).find((line) => line.startsWith('AVAIL_KB=')) || 'AVAIL_KB=0';
@@ -1586,19 +1611,19 @@ app.post('/api/apps/one-shot-deploy', async (request, response) => {
         ...fileBundle.files.map((f) => path.posix.dirname(path.posix.join(finalRemoteDir, f.relativePath)).replace(/\\/g, '/')),
       ]));
       const mkdirCmd = uniqueDirs.map((dir) => `mkdir -p ${shEscape(dir)}`).join(' && ');
-      await runRemoteCommands(
+      await runInDeviceLane(device.id, () => runRemoteCommands(
         { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
         [mkdirCmd],
         { timeoutMs: 60_000 },
-      );
+      ));
 
       for (const file of fileBundle.files) {
         const remotePath = path.posix.join(finalRemoteDir, file.relativePath).replace(/\\/g, '/');
-        await uploadFileSftp(
+        await runInDeviceLane(device.id, () => uploadFileSftp(
           { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
           remotePath,
           file.content,
-        );
+        ));
       }
 
       devicePasswordCache.set(key, pwd);
@@ -1606,11 +1631,11 @@ app.post('/api/apps/one-shot-deploy', async (request, response) => {
       if (runAfterDeploy !== false) {
         const runEntryCommand = normalizedRunCommand || 'python main.py';
         const runScript = `cd ${shEscape(finalRemoteDir)} && (${runEntryCommand})`;
-        const runResult = await runRemoteCommands(
+        const runResult = await runInDeviceLane(device.id, () => runRemoteCommands(
           { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
           [`bash -lc ${shellEscape(runScript)}`],
           { timeoutMs: 60_000 },
-        ).then((output) => ({ ok: true, output })).catch((error) => ({ ok: false, output: error instanceof Error ? error.message : String(error) }));
+        )).then((output) => ({ ok: true, output })).catch((error) => ({ ok: false, output: error instanceof Error ? error.message : String(error) }));
         run = runResult;
       }
 
@@ -1791,7 +1816,8 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   const passKey = credentialCacheKey(target.host, selectedUsername, selectedPort);
   const cachedPassword = devicePasswordCache.get(passKey);
   const providedPassword = request.header('x-device-password') ?? '';
-  const password = providedPassword || cachedPassword || defaultSshPassword;
+  const persistedPassword = (target as Device & { password?: string }).password ?? '';
+  const password = providedPassword || cachedPassword || persistedPassword || defaultSshPassword;
 
   const targetModel = modelName?.trim() || 'qwen3.5-plus';
   if (!isSafeName(targetModel)) {
@@ -1813,7 +1839,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   for (const pwd of candidates) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const output = await runRemoteCommands(
+        const output = await runInDeviceLane(target.id, () => runRemoteCommands(
           {
             host: target.host,
             port: selectedPort,
@@ -1821,7 +1847,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
             password: pwd,
           },
           [commandMap[action]],
-        );
+        ));
 
         devicePasswordCache.set(passKey, pwd);
 
@@ -1905,7 +1931,7 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
   }
 
   try {
-    const output = await runRemoteCommands(
+    const output = await runInDeviceLane(device.id, () => runRemoteCommands(
       {
         host: device.host,
         port: device.port ?? 22,
@@ -1913,7 +1939,7 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
         password: sshPassword,
       },
       [installCommand ?? '', configureCommand ?? ''],
-    );
+    ));
 
     const nextDevice: Device = {
       ...device,
@@ -2102,8 +2128,13 @@ app.post('/api/devices/:id/openclaw/deploy/start', async (request, response) => 
     modelId?: string;
     api?: string;
   };
-  if (!apiKey?.trim() || !modelId?.trim()) {
-    sendApiError(response, 400, 'INVALID_DEPLOY_CONFIG', 'apiKey 和 modelId 为必填项', { retryable: false });
+  const activeConfig = loadProviderConfig();
+  const resolvedApiKey = String(apiKey || '').trim() || String(activeConfig?.apiKey || '').trim();
+  const resolvedModelId = String(modelId || '').trim() || String(activeConfig?.model || '').trim();
+  const resolvedProvider = String(provider || '').trim() || String(activeConfig?.provider || '').trim() || 'custom';
+  const resolvedBaseUrl = String(baseUrl || '').trim() || String(activeConfig?.baseUrl || '').trim();
+  if (!resolvedApiKey || !resolvedModelId) {
+    sendApiError(response, 400, 'INVALID_DEPLOY_CONFIG', 'apiKey 和 modelId 为必填项（可先在 AI 模型设置中保存）', { retryable: false });
     return;
   }
 
@@ -2138,10 +2169,10 @@ app.post('/api/devices/:id/openclaw/deploy/start', async (request, response) => 
   response.json({ ok: true, jobId, status: job.status });
 
   void executeOpenClawDeployJob(job, deviceObj, {
-    provider: String(provider || '').trim(),
-    baseUrl: String(baseUrl || '').trim(),
-    apiKey: apiKey.trim(),
-    modelId: modelId.trim(),
+    provider: resolvedProvider,
+    baseUrl: resolvedBaseUrl,
+    apiKey: resolvedApiKey,
+    modelId: resolvedModelId,
     api: normalizeOpenClawApi(api),
   });
 });
@@ -3138,12 +3169,18 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
     
     for (const pwd of candidates) {
       try {
-        await runRemoteCommands(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-          [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
-          { timeoutMs: 30_000 },
-        );
-        await uploadFileSftp({ host: device.host, port: device.port ?? 22, username: device.username, password: pwd }, targetPath, Buffer.from(content ?? '', 'utf-8'));
+        await runInDeviceLane(device.id, async () => {
+          await runRemoteCommands(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+            [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
+            { timeoutMs: 30_000 },
+          );
+          await uploadFileSftp(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+            targetPath,
+            Buffer.from(content ?? '', 'utf-8'),
+          );
+        });
         response.json({ ok: true, output: '写入完成', path: targetPath });
         return;
       } catch (e) {
@@ -3186,18 +3223,19 @@ app.post('/api/devices/:id/files/upload', async (request, response) => {
   for (const pwd of candidates) {
     try {
       // Create folder if needed via exec first
-      await runRemoteCommands(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-        [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
-        { timeoutMs: 30_000 },
-      );
-      
-      const buffer = Buffer.from(contentBase64, 'base64');
-      await uploadFileSftp(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-        targetPath,
-        buffer
-      );
+      await runInDeviceLane(device.id, async () => {
+        await runRemoteCommands(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
+          { timeoutMs: 30_000 },
+        );
+        const buffer = Buffer.from(contentBase64, 'base64');
+        await uploadFileSftp(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          targetPath,
+          buffer,
+        );
+      });
       
       response.json({ ok: true, path: targetPath });
       return;
@@ -3470,6 +3508,99 @@ app.post('/api/agent/config', (request, response) => {
     setActive: body.setActive ?? true,
   });
   response.json({ ok: true });
+});
+
+app.get('/api/agent/config/export', (request, response) => {
+  const includeSecrets = String(request.query.includeSecrets || '1') !== '0';
+  const registry = loadProviderRegistry();
+  const exported = {
+    version: 1,
+    exportedAt: Date.now(),
+    activeId: registry.activeId || null,
+    entries: registry.entries.map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      provider: entry.provider,
+      model: entry.model,
+      apiKey: includeSecrets ? entry.apiKey : '',
+      hasApiKey: !!entry.apiKey,
+      baseUrl: entry.baseUrl,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    })),
+  };
+  response.json({ ok: true, includeSecrets, registry: exported });
+});
+
+app.post('/api/agent/config/import', (request, response) => {
+  const body = (request.body ?? {}) as {
+    registry?: {
+      version?: number;
+      activeId?: string | null;
+      entries?: Array<{
+        id?: string;
+        label?: string;
+        provider?: string;
+        model?: string;
+        apiKey?: string;
+        baseUrl?: string;
+        createdAt?: number;
+        updatedAt?: number;
+      }>;
+    };
+    setActiveId?: string;
+    merge?: boolean;
+  };
+  const incoming = body.registry;
+  if (!incoming || !Array.isArray(incoming.entries)) {
+    sendApiError(response, 400, 'INVALID_AGENT_CONFIG_IMPORT', '导入失败：缺少 registry.entries', { retryable: false });
+    return;
+  }
+  const merge = body.merge !== false;
+  const current = loadProviderRegistry();
+  const now = Date.now();
+  const normalizedEntries = incoming.entries
+    .map((entry) => {
+      const provider = String(entry.provider || '').trim();
+      const model = String(entry.model || '').trim();
+      if (!provider || !model) return null;
+      const id = String(entry.id || '').trim() || `cfg-${Math.random().toString(36).slice(2, 10)}`;
+      const label = String(entry.label || '').trim() || `${provider}/${model}`;
+      const apiKey = String(entry.apiKey || '').trim();
+      const baseUrl = String(entry.baseUrl || '').trim() || undefined;
+      const createdAt = Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : now;
+      const updatedAt = Number.isFinite(entry.updatedAt) ? Number(entry.updatedAt) : now;
+      return { id, label, provider, model, apiKey, baseUrl, createdAt, updatedAt };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => !!entry);
+  if (normalizedEntries.length === 0) {
+    sendApiError(response, 400, 'EMPTY_AGENT_CONFIG_IMPORT', '导入失败：没有有效模型配置', { retryable: false });
+    return;
+  }
+  const byId = new Map<string, ProviderConfigRegistry['entries'][number]>();
+  if (merge) {
+    for (const entry of current.entries) byId.set(entry.id, entry);
+  }
+  for (const entry of normalizedEntries) {
+    byId.set(entry.id, entry);
+  }
+  const entries = Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  const desiredActiveId = String(body.setActiveId || incoming.activeId || '').trim();
+  const activeId = entries.some((entry) => entry.id === desiredActiveId)
+    ? desiredActiveId
+    : (entries[0]?.id || null);
+  const nextRegistry: ProviderConfigRegistry = {
+    activeId,
+    entries,
+  };
+  saveProviderRegistry(nextRegistry);
+  response.json({
+    ok: true,
+    imported: normalizedEntries.length,
+    total: entries.length,
+    activeId: nextRegistry.activeId,
+    merged: merge,
+  });
 });
 
 // ─── RDKClaw Core Config ───

@@ -25,7 +25,7 @@ import { createForumTools } from "../agent/tools/forum-tools.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { readDevices } from "../storage.js";
-import { recordTokenUsage } from "../monitoring/token-usage.js";
+import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { PersonaStore } from "./persona-store.js";
@@ -85,88 +85,132 @@ function buildPersonaPrompt(persona: PersonaProfile) {
 }
 
 interface DelegateDecision {
-  forceBoard: boolean;
-  preferBoard: boolean;
-  source: "user_mode" | "skill_policy" | "policy_rule" | "persona" | "default";
+  path: "local_only" | "collaborative" | "board_primary";
+  canLocalComplete: boolean;
+  needsBoardCollaboration: boolean;
+  source: "user_mode" | "skill_policy" | "task_analysis" | "default";
   reason: string;
   confidence: number;
 }
 
+function resolveDelegationModeText(decision: DelegateDecision) {
+  if (decision.path === "board_primary") return "板端主执行（本地兜底）";
+  if (decision.path === "collaborative") return "本地 + 板端协同";
+  return "本地独立完成";
+}
+
+function resolveDelegationExpectationText(decision: DelegateDecision) {
+  if (decision.path === "board_primary") return "先板端评估与委派，若失败再本地兜底补完";
+  if (decision.path === "collaborative") return "本地负责编排，涉及板端能力时并行调用 OpenClaw";
+  return "由 RDKClaw 本地工具链直接完成，不依赖板端委派";
+}
+
 function selectDelegateDecision(
   req: RDKClawChatRequest,
-  persona: PersonaProfile,
-  policy: RDKClawPolicy,
   matchedSkills: RDKClawSkillMeta[],
+  boardSnapshot: { skills: string[]; plugins: string[] },
 ): DelegateDecision {
-  const text = req.message.toLowerCase();
+  const text = String(req.message || "").toLowerCase();
+  if (!req.deviceId) {
+    return {
+      path: "local_only",
+      canLocalComplete: true,
+      needsBoardCollaboration: false,
+      source: "default",
+      reason: "未绑定设备上下文，任务按本地链路执行",
+      confidence: 0.95,
+    };
+  }
   if (/已有|已经有|现成|不要重复|别重复|重复造轮子|复用|复用板端|直接用板端/.test(text)) {
     return {
-      forceBoard: false,
-      preferBoard: true,
-      source: "policy_rule",
-      reason: "用户明确要求复用板端现有能力，避免重复实现",
+      path: "collaborative",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "task_analysis",
+      reason: "任务明确要求复用板端现有能力，需走协同路径",
       confidence: 0.95,
     };
   }
   if (req.mode === "board") {
-    return { forceBoard: true, preferBoard: true, source: "user_mode", reason: "用户指定 board 模式", confidence: 1 };
+    return {
+      path: "board_primary",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "user_mode",
+      reason: "用户指定 board 模式",
+      confidence: 1,
+    };
   }
   if (req.mode === "local") {
-    return { forceBoard: false, preferBoard: false, source: "user_mode", reason: "用户指定 local 模式", confidence: 1 };
+    return {
+      path: "local_only",
+      canLocalComplete: true,
+      needsBoardCollaboration: false,
+      source: "user_mode",
+      reason: "用户指定 local 模式",
+      confidence: 1,
+    };
   }
   const requiresBoardSkill = matchedSkills.find((s) => s.runtimePolicy?.requiresBoard);
   if (requiresBoardSkill) {
     return {
-      forceBoard: true,
-      preferBoard: true,
+      path: "board_primary",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
       source: "skill_policy",
       reason: `Skill(${requiresBoardSkill.name}) 要求板端执行`,
       confidence: 0.95,
     };
   }
-  if (/板端|openclaw|插件|部署|刷写|系统服务|diagnose|repair|deploy/.test(text)) {
+  if (/板端|openclaw|插件|系统服务|刷写|烧录|gateway|配网|升级固件|守护进程/.test(text)) {
     return {
-      forceBoard: true,
-      preferBoard: true,
-      source: "policy_rule",
-      reason: "命中板端高复杂度规则",
+      path: "board_primary",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "task_analysis",
+      reason: "任务直接涉及板端能力或系统级操作，需板端主执行",
       confidence: 0.9,
     };
   }
+  const boardReusable = boardSnapshot.skills.length > 0 && /(复用|已有能力|已安装|现有技能|能力链路)/.test(text);
+  if (boardReusable) {
+    return {
+      path: "collaborative",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "task_analysis",
+      reason: "任务命中板端可复用能力，采用协同执行更稳妥",
+      confidence: 0.88,
+    };
+  }
   if (req.mode === "board-preferred") {
-    return { forceBoard: false, preferBoard: true, source: "user_mode", reason: "用户偏好板端", confidence: 0.85 };
+    return {
+      path: "collaborative",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "user_mode",
+      reason: "用户要求优先尝试板端协同",
+      confidence: 0.85,
+    };
   }
-  if (policy.delegation.strategy === "board-first") {
-    return { forceBoard: false, preferBoard: true, source: "persona", reason: "策略面板配置 board-first", confidence: 0.85 };
+  if (/诊断|修复|部署|日志|状态|温度|负载|摄像头|ros|vnc|设备/.test(text)) {
+    return {
+      path: "collaborative",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "task_analysis",
+      reason: "任务包含设备实操链路，建议本地编排 + 板端协同执行",
+      confidence: 0.78,
+    };
   }
-  if (policy.delegation.strategy === "local-first") {
-    return { forceBoard: false, preferBoard: false, source: "persona", reason: "策略面板配置 local-first", confidence: 0.85 };
-  }
-  if (persona.delegationBias === "board-first" || persona.boardDelegationBias === "high") {
-    return { forceBoard: false, preferBoard: true, source: "persona", reason: "人格配置偏向板端委派", confidence: 0.7 };
-  }
-  return { forceBoard: false, preferBoard: false, source: "default", reason: "默认本地优先，按需调用板端", confidence: 0.6 };
-}
-
-function filterRdkToolsForBoardPreferred(tools: Tool[]): Tool[] {
-  const allow = new Set([
-    // 设备只读探测
-    "device_exec",
-    "device_file_read",
-    "device_file_list",
-    "device_file_download_to_local",
-    "device_diagnose",
-    "ros_topics",
-    "ros_nodes",
-    "vnc_status",
-    "flash_check",
-    // 板端 OpenClaw 只读探测
-    "board_openclaw_status",
-    "board_openclaw_read_config",
-    "board_openclaw_logs",
-    "board_openclaw_pairing_list",
-  ]);
-  return tools.filter((tool) => allow.has(tool.name));
+  return {
+    path: "local_only",
+    canLocalComplete: true,
+    needsBoardCollaboration: false,
+    source: "default",
+    reason: "任务属于通用编排/问答，本地链路可独立完成",
+    confidence: 0.72,
+  };
 }
 
 function resolveExecutor(toolName?: string) {
@@ -222,8 +266,31 @@ function mapMiniEvent(
       };
     case "agent_error":
       return { type: "error", data: { error: event.error, ...base } };
+    case "compaction":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `上下文压缩完成：收缩 ${event.droppedMessages} 条历史消息`,
+          compaction_summary_chars: event.summaryChars,
+          compaction_dropped_messages: event.droppedMessages,
+        },
+      };
+    case "context_overflow_compact":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: "检测到上下文超限，已自动触发压缩重试",
+          context_overflow_error: event.error,
+        },
+      };
     case "agent_end":
-      return { type: "done", data: { ok: true, ...base } };
+      return null;
     default:
       return null;
   }
@@ -252,9 +319,15 @@ export class RDKClawApp {
   }>();
   private runAgents = new Map<string, Agent>();
   private sessionAutoApprove = new Map<string, boolean>();
+  private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: { skills: string[]; plugins: string[] } }>();
+  private static readonly BOARD_SNAPSHOT_TTL_MS = 12_000;
 
   private async getBoardSkillSnapshot(deviceId?: string): Promise<{ skills: string[]; plugins: string[] }> {
     if (!deviceId) return { skills: [], plugins: [] };
+    const cached = this.boardSkillSnapshotCache.get(deviceId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
     const devices = await readDevices();
     const hit = devices.find((d) => d.id === deviceId);
     if (!hit) return { skills: [], plugins: [] };
@@ -271,7 +344,9 @@ export class RDKClawApp {
       const timer = setTimeout(() => {
         if (done) return;
         done = true;
-        resolve({ skills: [], plugins: [] });
+        const value = { skills: [], plugins: [] };
+        this.boardSkillSnapshotCache.set(deviceId, { value, expiresAt: Date.now() + RDKClawApp.BOARD_SNAPSHOT_TTL_MS });
+        resolve(value);
       }, timeoutMs);
       this.openClawManager.getInstalledSkills(
         board,
@@ -291,10 +366,12 @@ export class RDKClawApp {
             if (section === "skills") skills.push(trimmed);
             else if (section === "plugins") plugins.push(trimmed);
           }
-          resolve({
+          const value = {
             skills: Array.from(new Set(skills)),
             plugins: Array.from(new Set(plugins)),
-          });
+          };
+          this.boardSkillSnapshotCache.set(deviceId, { value, expiresAt: Date.now() + RDKClawApp.BOARD_SNAPSHOT_TTL_MS });
+          resolve(value);
         },
       );
     });
@@ -485,10 +562,8 @@ export class RDKClawApp {
       );
     }
     if (req.deviceId) {
-      if (!decision.forceBoard) {
-        const deviceTools = createRdkTools(req.deviceId);
-        tools.push(...(decision.preferBoard ? filterRdkToolsForBoardPreferred(deviceTools) : deviceTools));
-      }
+      const deviceTools = createRdkTools(req.deviceId);
+      tools.push(...deviceTools);
       tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager));
       tools.push(
         boardOpenClawDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
@@ -523,21 +598,31 @@ export class RDKClawApp {
 
     const sessionKey = req.sessionId?.trim() || (req.userId?.trim() ? `rdkclaw:${req.userId.trim()}` : `rdkclaw-${Date.now()}`);
     const userProfile = req.userId ? this.personaStore.getUser(req.userId) : null;
-    const workspace = await this.workspaceStore.getOrInit(req.userId, userProfile);
+    const runStartedAt = Date.now();
+    const workspaceStartedAt = Date.now();
+    const workspacePromise = this.workspaceStore.getOrInit(req.userId, userProfile);
+    const boardSnapshotStartedAt = Date.now();
+    const boardSnapshotPromise = this.getBoardSkillSnapshot(req.deviceId);
+    const attachmentPrepareStartedAt = Date.now();
     const attachmentState = await prepareSessionAttachments(sessionKey, req.attachments);
+    const attachmentPrepareMs = Date.now() - attachmentPrepareStartedAt;
     await ensureAudioAttachmentTranscripts(
       sessionKey,
       attachmentState.allAttachments,
       providerConfig,
       attachmentState.newAttachments.map((item) => item.id),
     );
+    const boardSnapshot = await boardSnapshotPromise;
+    const boardSnapshotMs = Date.now() - boardSnapshotStartedAt;
+    const workspace = await workspacePromise;
+    const workspaceInitMs = Date.now() - workspaceStartedAt;
     const attachmentPrompt = buildAttachmentPrompt(attachmentState.newAttachments);
     const effectiveMessage = [String(req.message || "").trim(), attachmentPrompt].filter(Boolean).join("\n\n");
     const persona = this.personaStore.getPersona();
     const policy = this.policyStore.getPolicy();
     const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
-    const boardSnapshot = await this.getBoardSkillSnapshot(req.deviceId);
-    const decision = selectDelegateDecision(req, persona, policy, matchedSkills);
+    const setupElapsedMs = Date.now() - runStartedAt;
+    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot);
     const systemPrompt = [
       buildPersonaPrompt(persona),
       req.deviceId
@@ -551,11 +636,11 @@ export class RDKClawApp {
       attachmentState.allAttachments.length > 0
         ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
         : "",
-      decision.forceBoard
-        ? "本次任务需优先板端执行：先调用 board_openclaw_assess，再根据评估结果调用 board_openclaw_delegate。仅当评估明确不可执行时，才改用本地工具兜底。"
-        : decision.preferBoard
-          ? "本次任务优先考虑板端员工模式：先调用 board_openclaw_assess 判断板端是否可做；若 canHandle=true 再调用 board_openclaw_delegate。若评估不可做或委派因权限/网关失败，请立即回退使用 device_exec / device_file_* 工具完成任务，不要反复重试同一失败委派。"
-          : "本次任务默认本地优先，必要时再调用 board_openclaw_delegate。",
+      decision.path === "board_primary"
+        ? "执行路径判定：本任务需板端主执行。先调用 board_openclaw_assess，再调用 board_openclaw_delegate；若评估失败或委派失败，立刻切换本地工具兜底完成。"
+        : decision.path === "collaborative"
+          ? "执行路径判定：本任务需本地+板端协同。RDKClaw 负责编排，本地工具与 board_openclaw_delegate 按步骤协同完成。"
+          : "执行路径判定：本任务由 RDKClaw 本地链路独立完成，除非执行中发现板端依赖才触发委派。",
     ].filter(Boolean).join("\n");
     const modelDef = buildModelDef(providerConfig);
     const streamFn = buildStreamFn(providerConfig);
@@ -567,44 +652,86 @@ export class RDKClawApp {
     process.env.RDKCLAW_DAILY_MEMORY_DAYS = String(Math.max(1, policy.memory.dailyMemoryDays || 2));
     process.env.RDKCLAW_MAIN_READS_MEMORY = policy.memory.mainSessionReadsMemory ? "1" : "0";
     process.env.RDKCLAW_SHARED_BLOCKS_MEMORY = policy.memory.sharedSessionBlocksMemory ? "1" : "0";
+    process.env.RDKCLAW_CONTEXT_MAX_HISTORY_SHARE = String(policy.context.maxHistoryShare);
+    process.env.RDKCLAW_CONTEXT_SOFT_TRIM_RATIO = String(policy.context.softTrimRatio);
+    process.env.RDKCLAW_CONTEXT_HARD_CLEAR_RATIO = String(policy.context.hardClearRatio);
+    process.env.RDKCLAW_CONTEXT_KEEP_LAST_ASSISTANTS = String(policy.context.keepLastAssistants);
 
     const runId = crypto.randomUUID();
     const base = { runId, sessionId: sessionKey };
-    const queue: RDKClawEvent[] = [
-      {
-        type: "meta",
-        data: {
-          ...base,
-          executor: "rdkclaw_local",
-          phase: "start",
-          message: "RDK Studio Claw 开始编排任务",
-          decision_source: decision.source,
-          decision_reason: decision.reason,
-          confidence: decision.confidence,
-          workspace_profile_id: workspace.profileId,
-          workspace_source: workspace.source,
-          workspace_dir: workspace.workspaceDir,
-          matched_skills: matchedSkills.map((s) => s.name),
-          board_skills_count: boardSnapshot.skills.length,
-          board_skills: boardSnapshot.skills,
-          board_plugins_count: boardSnapshot.plugins.length,
-          board_plugins: boardSnapshot.plugins,
-          approval_mode: policy.approval.mode,
-          network_enabled: policy.network.enabled,
-          network_max_fetch_chars: policy.network.maxFetchChars,
-          network_require_approval: policy.network.requireApproval,
-          attachments_count: attachmentState.allAttachments.length,
-          new_attachments_count: attachmentState.newAttachments.length,
-          attachment_types: Array.from(new Set(attachmentState.allAttachments.map((item) => item.type))),
-          audio_transcript_count: attachmentState.allAttachments.filter((item) => item.type === "audio" && item.transcript).length,
-          new_audio_transcript_count: attachmentState.newAttachments.filter((item) => item.type === "audio" && item.transcript).length,
-        },
+    const queue: RDKClawEvent[] = [];
+    let queueWaiters: Array<() => void> = [];
+    const wakeQueue = () => {
+      if (queueWaiters.length === 0) return;
+      const waiters = queueWaiters;
+      queueWaiters = [];
+      for (const notify of waiters) notify();
+    };
+    const waitForQueue = () => new Promise<void>((resolve) => {
+      queueWaiters.push(resolve);
+    });
+    const runMetrics = {
+      compactionCount: 0,
+      compactionDroppedMessages: 0,
+      compactionSummaryChars: 0,
+      overflowRecoveryCount: 0,
+      boardToolCalls: 0,
+      localToolCalls: 0,
+      toolCallNames: [] as string[],
+      firstEventAt: null as number | null,
+      firstTextDeltaAt: null as number | null,
+    };
+    const pushEvent = (event: RDKClawEvent) => {
+      queue.push(event);
+      if (!runMetrics.firstEventAt) {
+        runMetrics.firstEventAt = Date.now();
+      }
+      if (event.type === "text" && !runMetrics.firstTextDeltaAt) {
+        runMetrics.firstTextDeltaAt = Date.now();
+      }
+      wakeQueue();
+    };
+    pushEvent({
+      type: "meta",
+      data: {
+        ...base,
+        executor: "rdkclaw_local",
+        phase: "start",
+        message: "RDK Studio Claw 开始编排任务",
+        decision_source: decision.source,
+        decision_reason: decision.reason,
+        confidence: decision.confidence,
+        workspace_profile_id: workspace.profileId,
+        workspace_source: workspace.source,
+        workspace_dir: workspace.workspaceDir,
+        matched_skills: matchedSkills.map((s) => s.name),
+        board_skills_count: boardSnapshot.skills.length,
+        board_skills: boardSnapshot.skills,
+        board_plugins_count: boardSnapshot.plugins.length,
+        board_plugins: boardSnapshot.plugins,
+        approval_mode: policy.approval.mode,
+        network_enabled: policy.network.enabled,
+        network_max_fetch_chars: policy.network.maxFetchChars,
+        network_require_approval: policy.network.requireApproval,
+        delegation_mode: resolveDelegationModeText(decision),
+        delegation_expectation: resolveDelegationExpectationText(decision),
+        can_local_complete: decision.canLocalComplete,
+        needs_board_collaboration: decision.needsBoardCollaboration,
+        attachments_count: attachmentState.allAttachments.length,
+        new_attachments_count: attachmentState.newAttachments.length,
+        attachment_types: Array.from(new Set(attachmentState.allAttachments.map((item) => item.type))),
+        audio_transcript_count: attachmentState.allAttachments.filter((item) => item.type === "audio" && item.transcript).length,
+        new_audio_transcript_count: attachmentState.newAttachments.filter((item) => item.type === "audio" && item.transcript).length,
+        setup_elapsed_ms: setupElapsedMs,
+        setup_workspace_ms: workspaceInitMs,
+        setup_attachments_ms: attachmentPrepareMs,
+        setup_board_snapshot_ms: boardSnapshotMs,
       },
-    ];
+    });
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
-      tools: this.createTools(req, (event) => queue.push(event), base, decision, policy, providerConfig, attachmentState.allAttachments),
+      tools: this.createTools(req, (event) => pushEvent(event), base, decision, policy, providerConfig, attachmentState.allAttachments),
       streamFn,
       modelDef,
       apiKey,
@@ -621,9 +748,13 @@ export class RDKClawApp {
       maxTurns: 12,
       temperature: 0.7,
       reasoning: "medium",
+      contextTokens: Math.max(16_000, Number(policy.context.contextTokens || 128000)),
     });
     let finished = false;
     let failed: unknown = null;
+    let runResult:
+      | { runId?: string; text: string; turns: number; toolCalls: number; skillTriggered?: string; memoriesUsed?: number }
+      | null = null;
     this.runAgents.set(runId, agent);
     const handleExternalAbort = () => {
       abortedByClient = true;
@@ -631,29 +762,47 @@ export class RDKClawApp {
     };
     externalAbortSignal?.addEventListener("abort", handleExternalAbort, { once: true });
     const unsubscribe = agent.subscribe((event) => {
+      if (event.type === "compaction") {
+        runMetrics.compactionCount += 1;
+        runMetrics.compactionDroppedMessages += Math.max(0, Number(event.droppedMessages || 0));
+        runMetrics.compactionSummaryChars += Math.max(0, Number(event.summaryChars || 0));
+      } else if (event.type === "context_overflow_compact") {
+        runMetrics.overflowRecoveryCount += 1;
+      } else if (event.type === "tool_execution_start") {
+        const executor = resolveExecutor(event.toolName);
+        if (executor === "board_openclaw") {
+          runMetrics.boardToolCalls += 1;
+        } else {
+          runMetrics.localToolCalls += 1;
+        }
+        runMetrics.toolCallNames.push(event.toolName);
+      }
       const mapped = mapMiniEvent(event, base);
-      if (mapped) queue.push(mapped);
+      if (mapped) pushEvent(mapped);
     });
 
     const runPromise = agent
       .run(sessionKey, effectiveMessage || "请结合当前附件继续处理。")
+      .then((result) => {
+        runResult = result;
+      })
       .catch((error) => {
         failed = error;
       })
       .finally(() => {
         finished = true;
+        wakeQueue();
         unsubscribe();
         externalAbortSignal?.removeEventListener("abort", handleExternalAbort);
         this.runAgents.delete(runId);
       });
 
     while (!finished || queue.length > 0) {
-      while (queue.length > 0) {
-        yield queue.shift() as RDKClawEvent;
+      if (queue.length === 0) {
+        await waitForQueue();
+        continue;
       }
-      if (!finished) {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
+      yield queue.shift() as RDKClawEvent;
     }
 
     await runPromise;
@@ -663,5 +812,74 @@ export class RDKClawApp {
       }
       throw failed;
     }
+    const completionText = String((runResult as any)?.text || "");
+    const promptText = [String(systemPrompt || ""), String(effectiveMessage || "")]
+      .filter(Boolean)
+      .join("\n\n");
+    const promptTokens = estimateTextTokens(promptText);
+    const completionTokens = estimateTextTokens(completionText);
+    const totalTokens = promptTokens + completionTokens;
+    const runFinishedAt = Date.now();
+    const totalElapsedMs = runFinishedAt - runStartedAt;
+    recordTokenUsage({
+      source: "rdkclaw",
+      deviceId: req.deviceId,
+      sessionId: sessionKey,
+      model: providerConfig.model,
+      promptTokens,
+      completionTokens,
+      success: true,
+      estimated: true,
+    });
+    yield {
+      type: "done",
+      data: {
+        ok: true,
+        ...base,
+        model: providerConfig.model,
+        token_usage: {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          estimated: true,
+        },
+        context: {
+          compactionCount: runMetrics.compactionCount,
+          droppedMessages: runMetrics.compactionDroppedMessages,
+          summaryChars: runMetrics.compactionSummaryChars,
+          overflowRecoveryCount: runMetrics.overflowRecoveryCount,
+          policy: {
+            contextTokens: policy.context.contextTokens,
+            maxHistoryShare: policy.context.maxHistoryShare,
+            softTrimRatio: policy.context.softTrimRatio,
+            hardClearRatio: policy.context.hardClearRatio,
+            keepLastAssistants: policy.context.keepLastAssistants,
+          },
+        },
+        execution: {
+          boardToolCalls: runMetrics.boardToolCalls,
+          localToolCalls: runMetrics.localToolCalls,
+          toolCallNames: runMetrics.toolCallNames.slice(-20),
+        },
+        performance: {
+          setupElapsedMs,
+          workspaceInitMs,
+          attachmentPrepareMs,
+          boardSnapshotMs,
+          firstEventMs: runMetrics.firstEventAt ? runMetrics.firstEventAt - runStartedAt : null,
+          firstTextDeltaMs: runMetrics.firstTextDeltaAt ? runMetrics.firstTextDeltaAt - runStartedAt : null,
+          totalElapsedMs,
+        },
+        delegation: {
+          mode: resolveDelegationModeText(decision),
+          expected: resolveDelegationExpectationText(decision),
+          source: decision.source,
+          reason: decision.reason,
+          confidence: decision.confidence,
+          canLocalComplete: decision.canLocalComplete,
+          needsBoardCollaboration: decision.needsBoardCollaboration,
+        },
+      },
+    };
   }
 }

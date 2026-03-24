@@ -31,12 +31,12 @@ export interface AppState {
   setActiveTab: (tab: Tab) => void;
 
   // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done') => void;
+  obStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
-  obReturnStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null;
-  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null) => void;
+  obReturnStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null;
+  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null) => void;
 
   // Loading
   isLoading: boolean;

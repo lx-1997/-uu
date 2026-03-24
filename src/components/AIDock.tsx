@@ -261,25 +261,35 @@ function BlockRenderer({
   if (block.type === 'confirm') {
     return (
       <div className="msg-block confirm-block">
+        <div className="confirm-block-head">
+          <span className="confirm-block-title">需要你的确认</span>
+        </div>
         <p className="confirm-block-text">{block.text}</p>
         <div className="confirm-block-actions">
-          <button className="confirm-btn yes" onClick={() => onConfirm?.(block.confirmId)}>确认执行</button>
-          <button className="confirm-btn no" onClick={() => onDismiss?.(block.confirmId)}>取消</button>
+          <button className="confirm-btn yes" onClick={() => onConfirm?.(block.confirmId)}>继续执行</button>
+          <button className="confirm-btn no" onClick={() => onDismiss?.(block.confirmId)}>暂不执行</button>
         </div>
       </div>
     );
   }
 
   if (block.type === 'approval') {
+    const risk = (block.risk || 'medium').toLowerCase();
+    const riskLabel = risk === 'high' ? '高风险' : risk === 'low' ? '低风险' : '中风险';
     return (
-      <div className="msg-block confirm-block">
+      <div className={`msg-block confirm-block approval-card risk-${risk}`}>
+        <div className="confirm-block-head">
+          <span className="confirm-block-title">操作审批</span>
+          <span className={`approval-risk ${risk}`}>{riskLabel}</span>
+        </div>
         <p className="confirm-block-text">{block.text}</p>
+        <div className="approval-hint">请选择一个操作（建议先用“仅这次允许”）</div>
         <div className="confirm-block-actions">
-          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_once', block.runId)}>本次允许</button>
-          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_session_auto', block.runId)}>本会话自动</button>
-          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_global_auto', block.runId)}>全局自动</button>
-          <button className="confirm-btn no" onClick={() => onApprovalAction?.(block.approvalId, 'deny', block.runId)}>拒绝</button>
-          <button className="confirm-btn no" onClick={() => onApprovalAction?.(block.approvalId, 'cancel_run', block.runId)}>取消当前任务</button>
+          <button className="confirm-btn yes primary" onClick={() => onApprovalAction?.(block.approvalId, 'allow_once', block.runId)}>仅这次允许</button>
+          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_session_auto', block.runId)}>本会话自动允许</button>
+          <button className="confirm-btn yes" onClick={() => onApprovalAction?.(block.approvalId, 'allow_global_auto', block.runId)}>全局自动允许</button>
+          <button className="confirm-btn no" onClick={() => onApprovalAction?.(block.approvalId, 'deny', block.runId)}>拒绝本次操作</button>
+          <button className="confirm-btn no danger" onClick={() => onApprovalAction?.(block.approvalId, 'cancel_run', block.runId)}>结束当前任务</button>
         </div>
       </div>
     );
@@ -446,6 +456,13 @@ export default function AIDock() {
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
   const [dockOcMode, setDockOcMode] = useState(true);
+  const [compactFlowMode, setCompactFlowMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('rdk:dock:compact-flow') !== '0';
+    } catch {
+      return true;
+    }
+  });
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -621,6 +638,19 @@ export default function AIDock() {
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
   const hiddenCount = Math.max(0, chatMessages.length - visibleMessages.length);
+  const shouldKeepStatusInCompact = useCallback((block: Extract<ChatBlock, { type: 'status' }>) => {
+    if (block.summary === '本轮资源消耗') return true;
+    return block.items.some((item) => /失败|错误|异常|提示|拒绝|超时/.test(`${item.label} ${item.value}`));
+  }, []);
+  const filterAiBlocksForCompact = useCallback((blocks: ChatBlock[]) => {
+    if (!compactFlowMode) return blocks;
+    return blocks.filter((block) => {
+      if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result') return true;
+      if (block.type === 'image' || block.type === 'code') return true;
+      if (block.type === 'status') return shouldKeepStatusInCompact(block);
+      return false;
+    });
+  }, [compactFlowMode, shouldKeepStatusInCompact]);
 
   /* Escape exits workspace mode */
   useEffect(() => {
@@ -640,6 +670,14 @@ export default function AIDock() {
   useEffect(() => {
     setWorkspaceMode(false);
   }, [activeTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('rdk:dock:compact-flow', compactFlowMode ? '1' : '0');
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [compactFlowMode]);
 
   /* Auto-scroll to newest message */
   useEffect(() => {
@@ -850,6 +888,13 @@ export default function AIDock() {
               </div>
             </div>
             <div className="dock-header-right">
+              <button
+                className={`btn-icon dock-view-toggle ${compactFlowMode ? 'active' : ''}`}
+                onClick={() => setCompactFlowMode((prev) => !prev)}
+                title={compactFlowMode ? '已开启极简流程视图（点击查看完整过程）' : '已关闭极简流程视图（点击只看结论）'}
+              >
+                {compactFlowMode ? '极简' : '完整'}
+              </button>
               {taskHistory.length > 0 && (
                 <button className="btn-icon" onClick={() => setShowTaskPanel(!showTaskPanel)} title="任务">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
@@ -941,9 +986,21 @@ export default function AIDock() {
                   )}
                   {msg.role === 'ai' && (
                     <>
-                      {msg.blocks?.map((block, i) => (
-                        <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} />
-                      ))}
+                      {(() => {
+                        const rawBlocks = msg.blocks ?? [];
+                        const visibleBlocks = filterAiBlocksForCompact(rawBlocks);
+                        const foldedCount = Math.max(0, rawBlocks.length - visibleBlocks.length);
+                        return (
+                          <>
+                            {compactFlowMode && foldedCount > 0 && (
+                              <div className="dock-hidden-hint">已折叠中间过程 {foldedCount} 项（切换到“完整”可查看）</div>
+                            )}
+                            {visibleBlocks.map((block, i) => (
+                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} />
+                            ))}
+                          </>
+                        );
+                      })()}
                       {msg.text && <div className="msg-text">{renderMarkdown(msg.text)}</div>}
                     </>
                   )}

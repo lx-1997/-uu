@@ -3,15 +3,18 @@ import { useAppState } from '../hooks/useAppState';
 import {
   fetchDeviceOpenClawHealth,
   checkDevicePing,
+  fetchAgentConfig,
+  saveAgentConfig,
 } from '../api';
 import { resolveApiUrl } from '../utils/apiBase';
 
-type Step = 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done';
+type Step = 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'board', label: '选择硬件' },
   { key: 'flash', label: '烧录系统' },
   { key: 'connect', label: '连接设备' },
+  { key: 'model', label: '模型配置' },
   { key: 'openclaw', label: 'OpenClaw' },
   { key: 'rdkclaw', label: '试用 AI' },
 ];
@@ -61,10 +64,24 @@ const SKIP_RISKS = [
   '板端技能（摄像头、推理、GPIO 等）无法被 AI 调用',
 ];
 
+const MODEL_PRESETS: Record<string, { model: string; baseUrl: string }> = {
+  qwen: { model: 'qwen-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  deepseek: { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
+  openai: { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
+  'openai-compatible': { model: '', baseUrl: '' },
+};
+
 function formatElapsed(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`;
+}
+
+function toDeployHint(code: string, message: string) {
+  if (code === 'INVALID_DEPLOY_CONFIG') return '模型配置不完整：请先在上一步填写并保存 provider / model / API Key。';
+  if (code === 'OPENCLAW_DEPLOY_JOB_NOT_FOUND') return '部署任务状态已过期或不存在，请重新发起一键部署。';
+  if (code === 'DEVICE_NOT_FOUND') return '未找到当前设备，请返回设备连接步骤重新选择。';
+  return message || '部署失败，请查看日志并重试。';
 }
 
 function StepIndicator({ current }: { current: Step }) {
@@ -106,6 +123,15 @@ export default function OnboardingWizard() {
   const [ocGwLog, setOcGwLog] = useState('');
   const [installElapsed, setInstallElapsed] = useState(0);
   const [showSkipWarning, setShowSkipWarning] = useState(false);
+  const [deployJobId, setDeployJobId] = useState('');
+  const [autoVerifying, setAutoVerifying] = useState(false);
+  const [modelProvider, setModelProvider] = useState('qwen');
+  const [modelName, setModelName] = useState(MODEL_PRESETS.qwen.model);
+  const [modelBaseUrl, setModelBaseUrl] = useState(MODEL_PRESETS.qwen.baseUrl);
+  const [modelApiKey, setModelApiKey] = useState('');
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelConfigured, setModelConfigured] = useState(false);
+  const [modelHasSavedKey, setModelHasSavedKey] = useState(false);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   const logContainerRef = useRef<HTMLPreElement>(null);
@@ -114,9 +140,28 @@ export default function OnboardingWizard() {
 
   useEffect(() => {
     if (obStep === 'connect' && currentDevice) {
-      setObStep('openclaw');
+      setObStep('model');
     }
   }, [obStep, currentDevice]);
+
+  useEffect(() => {
+    if (obStep !== 'model' && obStep !== 'openclaw') return;
+    fetchAgentConfig()
+      .then((config) => {
+        const provider = String(config.provider || '').trim();
+        const model = String(config.model || '').trim();
+        const baseUrl = String(config.baseUrl || '').trim();
+        if (provider) setModelProvider(provider);
+        if (model) setModelName(model);
+        if (baseUrl) setModelBaseUrl(baseUrl);
+        setModelConfigured(!!config.configured && !!provider && !!model);
+        setModelHasSavedKey(!!config.hasApiKey);
+      })
+      .catch(() => {
+        setModelConfigured(false);
+        setModelHasSavedKey(false);
+      });
+  }, [obStep]);
 
   useEffect(() => {
     if (obStep !== 'openclaw' || !currentDevice) return;
@@ -156,6 +201,11 @@ export default function OnboardingWizard() {
 
   const handleInstallOC = useCallback(async () => {
     if (!currentDevice) return;
+    if (!modelConfigured) {
+      addToast('请先完成模型配置，再执行一键部署', 'warning');
+      setObStep('model');
+      return;
+    }
     if (deviceOnline === false) {
       addToast('设备当前无法连通（请先确认网络与 SSH），再安装 OpenClaw', 'warning');
       return;
@@ -181,66 +231,91 @@ export default function OnboardingWizard() {
       setInstallElapsed(prev => prev + 1);
     }, 1000);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-
     try {
-      const url = resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/install-stream`);
-      const response = await fetch(url, {
+      const startResponse = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/start`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
+        body: JSON.stringify({
+          provider: modelProvider.trim(),
+          baseUrl: modelBaseUrl.trim(),
+          apiKey: modelApiKey.trim() || undefined,
+          modelId: modelName.trim(),
+          api: 'openai-completions',
+        }),
       });
+      const startPayload = await startResponse.json().catch(() => ({} as { error?: string; code?: string; message?: string; jobId?: string }));
+      if (!startResponse.ok || !startPayload?.jobId) {
+        throw new Error(toDeployHint(String(startPayload?.code || ''), String(startPayload?.message || startPayload?.error || `部署启动失败（HTTP ${startResponse.status}）`)));
+      }
+      setDeployJobId(startPayload.jobId);
+      setOcInstallLog((prev) => `${prev}[部署] 已启动任务 ${startPayload.jobId}\n`);
 
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
+      let deployOk = false;
+      let done = false;
+      while (!done) {
+        await new Promise((r) => setTimeout(r, 1800));
+        const statusResponse = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/status?jobId=${encodeURIComponent(startPayload.jobId)}`));
+        const statusPayload = await statusResponse.json().catch(() => ({} as { code?: string; message?: string; error?: string; job?: { status?: string; output?: string; error?: string } }));
+        const job = statusPayload?.job;
+        if (!statusResponse.ok || !job) {
+          throw new Error(toDeployHint(String(statusPayload?.code || ''), String(statusPayload?.message || statusPayload?.error || `部署状态查询失败（HTTP ${statusResponse.status}）`)));
+        }
+        setOcInstallLog(job.output || '');
+        if (job.status === 'done') {
+          deployOk = true;
+          done = true;
+        } else if (job.status === 'error') {
+          throw new Error(job.error || '部署失败');
+        }
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const payload = JSON.parse(line.slice(6));
-            if (payload.type === 'log') {
-              setOcInstallLog(prev => prev + payload.text);
-            } else if (payload.type === 'done') {
-              if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-              setOcInstalling(false);
-              if (payload.ok) {
-                addToast('OpenClaw 安装完成', 'success');
-                setOcInstalled(true);
-                setOcGatewayRunning(true);
-                setOcReady(true);
-              } else {
-                addToast('OpenClaw 安装未成功，请查看日志或到 OpenClaw 页重试', 'warning');
-                setOcReady(false);
-              }
-            }
-          } catch { /* malformed SSE line */ }
+      if (deployOk) {
+        setAutoVerifying(true);
+        setOcInstallLog((prev) => `${prev}\n[验通] 部署完成，开始自动验通...\n`);
+        const health = await fetchDeviceOpenClawHealth(currentDevice.id);
+        const modelTestRes = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/model-test`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const modelTest = await modelTestRes.json().catch(() => ({ ok: false, output: '模型调用测试响应异常' }));
+        setOcInstalled(!!health.status?.installed);
+        setOcGatewayRunning(!!health.status?.gatewayRunning);
+        setOcReady(!!health.status?.aiReady && !!modelTest.ok);
+        setOcSummary(health.status?.summary || '');
+        setOcVersion(health.status?.version || '');
+        setOcInstallLog((prev) => (
+          `${prev}[验通] 网关状态: ${health.status?.gatewayRunning ? '运行中' : '未运行'}\n` +
+          `[验通] 模型测试: ${modelTest.ok ? '通过' : '失败'}\n` +
+          `${modelTest.output ? `${modelTest.output}\n` : ''}`
+        ));
+        if (health.status?.gatewayRunning && modelTest.ok) {
+          addToast('OpenClaw 部署并验通成功', 'success');
+        } else {
+          addToast('部署完成，但验通未全部通过，请查看日志', 'warning');
         }
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : String(err);
       setOcInstallLog(prev => prev + `\n[错误] ${msg}\n`);
-      addToast('OpenClaw 安装请求失败，请稍后在 OpenClaw 页重试', 'warning');
+      addToast('OpenClaw 一键部署失败，请查看日志', 'warning');
     } finally {
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       setOcInstalling(false);
+      setAutoVerifying(false);
       abortRef.current = null;
     }
-  }, [currentDevice, deviceOnline, addToast]);
+  }, [
+    currentDevice,
+    deviceOnline,
+    addToast,
+    modelConfigured,
+    modelProvider,
+    modelBaseUrl,
+    modelApiKey,
+    modelName,
+    setObStep,
+  ]);
 
   const recheckHealth = useCallback(async () => {
     if (!currentDevice) return;
@@ -305,6 +380,49 @@ export default function OnboardingWizard() {
       setOcStartingGw(false);
     }
   }, [currentDevice, addToast]);
+
+  const handleSaveModelConfig = useCallback(async () => {
+    if (!modelProvider.trim()) {
+      addToast('请先选择 provider', 'warning');
+      return false;
+    }
+    if (!modelName.trim()) {
+      addToast('请先填写模型名称', 'warning');
+      return false;
+    }
+    if (!modelApiKey.trim() && !modelHasSavedKey) {
+      addToast('请先填写 API Key', 'warning');
+      return false;
+    }
+    setModelSaving(true);
+    try {
+      await saveAgentConfig({
+        action: 'upsert',
+        provider: modelProvider.trim(),
+        model: modelName.trim(),
+        apiKey: modelApiKey.trim() || undefined,
+        baseUrl: modelBaseUrl.trim() || undefined,
+        setActive: true,
+      });
+      setModelConfigured(true);
+      setModelHasSavedKey(true);
+      setModelApiKey('');
+      addToast('模型配置已保存', 'success');
+      return true;
+    } catch {
+      addToast('模型配置保存失败', 'error');
+      return false;
+    } finally {
+      setModelSaving(false);
+    }
+  }, [modelProvider, modelName, modelApiKey, modelBaseUrl, modelHasSavedKey, addToast]);
+
+  const handleGoDeploy = useCallback(async () => {
+    const ok = await handleSaveModelConfig();
+    if (ok) {
+      setObStep('openclaw');
+    }
+  }, [handleSaveModelConfig, setObStep]);
 
   const handleSkipConfirm = () => {
     if (ocInstalling) {
@@ -473,11 +591,103 @@ export default function OnboardingWizard() {
       )}
 
       {/* ── Step 4: OpenClaw 检查 ── */}
-      {obStep === 'openclaw' && (
+      {obStep === 'model' && (
         <div className="ob-content">
           <p className="ob-desc">
-            OpenClaw 是 RDK 板端 AI Agent 运行环境。检查你的设备是否已安装：
+            先完成模型配置（必填），然后再执行 OpenClaw 一键部署。该配置会作为板端模型网关的默认参数。
           </p>
+          <div className="ob-oc-status">
+            <div className="config-row">
+              <span className="config-label">Provider</span>
+              <div className="config-value">
+                <select
+                  className="select"
+                  title="模型服务商"
+                  value={modelProvider}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    const preset = MODEL_PRESETS[next] || MODEL_PRESETS['openai-compatible'];
+                    const prev = MODEL_PRESETS[modelProvider] || MODEL_PRESETS['openai-compatible'];
+                    const shouldReplaceModel = !modelName || modelName === prev.model;
+                    const shouldReplaceBaseUrl = !modelBaseUrl || modelBaseUrl === prev.baseUrl;
+                    setModelProvider(next);
+                    if (shouldReplaceModel) setModelName(preset.model);
+                    if (shouldReplaceBaseUrl) setModelBaseUrl(preset.baseUrl);
+                  }}
+                >
+                  <option value="qwen">通义千问</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="openai-compatible">OpenAI Compatible</option>
+                </select>
+              </div>
+            </div>
+            <div className="config-row">
+              <span className="config-label">模型名称</span>
+              <div className="config-value">
+                <input
+                  className="input"
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                  placeholder="如 qwen-plus / deepseek-chat"
+                />
+              </div>
+            </div>
+            <div className="config-row">
+              <span className="config-label">API Key</span>
+              <div className="config-value">
+                <input
+                  type="password"
+                  className="input"
+                  value={modelApiKey}
+                  onChange={(e) => setModelApiKey(e.target.value)}
+                  placeholder={modelHasSavedKey ? '已存在密钥，留空则不覆盖' : '请输入 API Key'}
+                />
+              </div>
+            </div>
+            <div className="config-row">
+              <span className="config-label">Base URL</span>
+              <div className="config-value">
+                <input
+                  className="input"
+                  value={modelBaseUrl}
+                  onChange={(e) => setModelBaseUrl(e.target.value)}
+                  placeholder="如 https://api.deepseek.com/v1"
+                />
+              </div>
+            </div>
+            {modelConfigured && (
+              <div className="ob-oc-ready">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>模型配置已就绪，可继续部署 OpenClaw</span>
+              </div>
+            )}
+          </div>
+          <div className="ob-actions">
+            <button className="btn btn-ghost" onClick={() => setObStep('connect')}>上一步</button>
+            <button className="btn btn-ghost" onClick={() => void handleSaveModelConfig()} disabled={modelSaving}>
+              {modelSaving ? '保存中...' : '仅保存'}
+            </button>
+            <button className="btn btn-primary" onClick={() => void handleGoDeploy()} disabled={modelSaving}>
+              保存并继续部署
+            </button>
+          </div>
+        </div>
+      )}
+
+      {obStep === 'openclaw' && (
+        <div className="ob-content">
+          {!modelConfigured && (
+            <div className="ob-oc-offline">
+              <span>部署前需要先提交模型配置，请返回上一步完成必填项。</span>
+            </div>
+          )}
+          <p className="ob-desc">
+            OpenClaw 是 RDK 板端 AI Agent 运行环境。点击一键部署后将自动执行安装、配置并做验通：
+          </p>
+          {deployJobId && (
+            <p className="ob-desc">当前部署任务：{deployJobId}</p>
+          )}
           <div className="ob-oc-status">
             {ocChecking && (
               <div className="ob-oc-checking"><div className="spinner" /><span>正在检查 OpenClaw 状态...</span></div>
@@ -528,10 +738,10 @@ export default function OnboardingWizard() {
                   <button
                     className="btn btn-primary btn-sm"
                     onClick={handleInstallOC}
-                    disabled={ocInstalling || deviceOnline === false}
+                    disabled={ocInstalling || deviceOnline === false || !modelConfigured}
                     title={deviceOnline === false ? '请先恢复设备连通' : undefined}
                   >
-                    {ocInstalling ? '安装中...' : '一键安装 OpenClaw'}
+                    {ocInstalling ? '部署中...' : '一键部署 OpenClaw'}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={recheckHealth} disabled={ocChecking}>
                     重新检查
@@ -573,7 +783,7 @@ export default function OnboardingWizard() {
                   <span className="ob-install-terminal-dots">
                     <span className="td red" /><span className="td yellow" /><span className="td green" />
                   </span>
-                  <span className="ob-install-terminal-title">安装日志</span>
+                  <span className="ob-install-terminal-title">{autoVerifying ? '验通日志' : '部署日志'}</span>
                   {ocInstalling && (
                     <span className="ob-elapsed">{formatElapsed(installElapsed)}</span>
                   )}
@@ -584,7 +794,7 @@ export default function OnboardingWizard() {
                   )}
                 </div>
                 <pre className="ob-install-terminal-body" ref={logContainerRef}>
-                  {ocInstallLog || '正在连接设备，准备安装...\n'}
+                  {ocInstallLog || '正在连接设备，准备部署...\n'}
                   {ocInstalling && <span className="ob-install-cursor">_</span>}
                   <div ref={logEndRef} />
                 </pre>
@@ -621,7 +831,7 @@ export default function OnboardingWizard() {
             )}
           </div>
           <div className="ob-actions">
-            <button className="btn btn-ghost" onClick={() => setObStep('connect')}>上一步</button>
+            <button className="btn btn-ghost" onClick={() => setObStep('model')}>上一步</button>
             {ocReady ? (
               <button className="btn btn-primary" onClick={() => setObStep('rdkclaw')}>
                 下一步

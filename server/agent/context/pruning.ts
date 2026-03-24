@@ -151,27 +151,48 @@ function clampPositiveInt(value: number | undefined, fallback: number): number {
   return Math.max(0, Math.floor(value));
 }
 
+function parseEnvNumber(name: string): number | undefined {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function resolveEnvPruningSettings(base: ContextPruningSettings): Partial<ContextPruningSettings> {
+  return {
+    maxHistoryShare: parseEnvNumber("RDKCLAW_CONTEXT_MAX_HISTORY_SHARE"),
+    keepLastAssistants: parseEnvNumber("RDKCLAW_CONTEXT_KEEP_LAST_ASSISTANTS"),
+    softTrimRatio: parseEnvNumber("RDKCLAW_CONTEXT_SOFT_TRIM_RATIO"),
+    hardClearRatio: parseEnvNumber("RDKCLAW_CONTEXT_HARD_CLEAR_RATIO"),
+    minPrunableToolChars: base.minPrunableToolChars,
+  };
+}
+
 export function resolvePruningSettings(
   raw?: Partial<ContextPruningSettings>,
 ): ContextPruningSettings {
-  if (!raw) return DEFAULT_CONTEXT_PRUNING_SETTINGS;
   const d = DEFAULT_CONTEXT_PRUNING_SETTINGS;
+  const envSettings = resolveEnvPruningSettings(d);
+  const source = {
+    ...envSettings,
+    ...(raw ?? {}),
+  };
   return {
-    maxHistoryShare: clampShare(raw.maxHistoryShare ?? d.maxHistoryShare, d.maxHistoryShare),
-    keepLastAssistants: clampPositiveInt(raw.keepLastAssistants, d.keepLastAssistants),
-    softTrimRatio: clampShare(raw.softTrimRatio ?? d.softTrimRatio, d.softTrimRatio),
-    hardClearRatio: clampShare(raw.hardClearRatio ?? d.hardClearRatio, d.hardClearRatio),
-    minPrunableToolChars: clampPositiveInt(raw.minPrunableToolChars, d.minPrunableToolChars),
+    maxHistoryShare: clampShare(source.maxHistoryShare ?? d.maxHistoryShare, d.maxHistoryShare),
+    keepLastAssistants: clampPositiveInt(source.keepLastAssistants, d.keepLastAssistants),
+    softTrimRatio: clampShare(source.softTrimRatio ?? d.softTrimRatio, d.softTrimRatio),
+    hardClearRatio: clampShare(source.hardClearRatio ?? d.hardClearRatio, d.hardClearRatio),
+    minPrunableToolChars: clampPositiveInt(source.minPrunableToolChars, d.minPrunableToolChars),
     softTrim: {
-      maxChars: clampPositiveInt(raw.softTrim?.maxChars, d.softTrim.maxChars),
-      headChars: clampPositiveInt(raw.softTrim?.headChars, d.softTrim.headChars),
-      tailChars: clampPositiveInt(raw.softTrim?.tailChars, d.softTrim.tailChars),
+      maxChars: clampPositiveInt(source.softTrim?.maxChars, d.softTrim.maxChars),
+      headChars: clampPositiveInt(source.softTrim?.headChars, d.softTrim.headChars),
+      tailChars: clampPositiveInt(source.softTrim?.tailChars, d.softTrim.tailChars),
     },
     hardClear: {
-      enabled: raw.hardClear?.enabled ?? d.hardClear.enabled,
-      placeholder: raw.hardClear?.placeholder ?? d.hardClear.placeholder,
+      enabled: source.hardClear?.enabled ?? d.hardClear.enabled,
+      placeholder: source.hardClear?.placeholder ?? d.hardClear.placeholder,
     },
-    tools: raw.tools ?? d.tools,
+    tools: source.tools ?? d.tools,
   };
 }
 

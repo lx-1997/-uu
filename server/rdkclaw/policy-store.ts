@@ -29,7 +29,24 @@ const DEFAULT_POLICY: RDKClawPolicy = {
     maxFetchChars: 16000,
     requireApproval: true,
   },
+  context: {
+    contextTokens: 128000,
+    maxHistoryShare: 0.5,
+    softTrimRatio: 0.3,
+    hardClearRatio: 0.5,
+    keepLastAssistants: 3,
+  },
 };
+
+function clampInt(value: number | undefined, fallback: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(Number(value))));
+}
+
+function clampFloat(value: number | undefined, fallback: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Number(value)));
+}
 
 function ensureDir() {
   if (!fs.existsSync(CONFIG_DIR)) {
@@ -51,6 +68,10 @@ export class RDKClawPolicyStore {
         memory: { ...DEFAULT_POLICY.memory, ...(parsed.memory ?? {}) },
         scheduler: { ...DEFAULT_POLICY.scheduler, ...(parsed.scheduler ?? {}) },
         network: { ...DEFAULT_POLICY.network, ...(parsed.network ?? {}) },
+        context: {
+          ...DEFAULT_POLICY.context,
+          ...(parsed.context ?? {}),
+        },
       };
     } catch {
       return DEFAULT_POLICY;
@@ -67,7 +88,16 @@ export class RDKClawPolicyStore {
       memory: { ...prev.memory, ...(patch.memory ?? {}) },
       scheduler: { ...prev.scheduler, ...(patch.scheduler ?? {}) },
       network: { ...prev.network, ...(patch.network ?? {}) },
+      context: { ...prev.context, ...(patch.context ?? {}) },
     };
+    next.context.contextTokens = clampInt(next.context.contextTokens, DEFAULT_POLICY.context.contextTokens, 16000, 256000);
+    next.context.keepLastAssistants = clampInt(next.context.keepLastAssistants, DEFAULT_POLICY.context.keepLastAssistants, 0, 20);
+    next.context.maxHistoryShare = clampFloat(next.context.maxHistoryShare, DEFAULT_POLICY.context.maxHistoryShare, 0.1, 0.95);
+    next.context.softTrimRatio = clampFloat(next.context.softTrimRatio, DEFAULT_POLICY.context.softTrimRatio, 0.1, 0.98);
+    next.context.hardClearRatio = clampFloat(next.context.hardClearRatio, DEFAULT_POLICY.context.hardClearRatio, 0.1, 0.99);
+    if (next.context.softTrimRatio > next.context.hardClearRatio) {
+      next.context.softTrimRatio = next.context.hardClearRatio;
+    }
     ensureDir();
     fs.writeFileSync(POLICY_FILE, JSON.stringify(next, null, 2), "utf-8");
     return next;

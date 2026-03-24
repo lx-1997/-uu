@@ -91,6 +91,24 @@
   gap: 2px;
 }
 
+.dock-view-toggle {
+  width: auto;
+  min-width: 44px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.dock-view-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+}
+
 /* Messages stream */
 .dock-stream {
   flex: 1;
@@ -199,6 +217,12 @@
 
 .dock-bubble .msg-text p { margin: 0 0 8px; }
 .dock-bubble .msg-text p:last-child { margin-bottom: 0; }
+
+.dock-hidden-hint {
+  margin: 0 0 6px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
 
 .dock-msg-time {
   display: block;
@@ -502,6 +526,30 @@
   overflow-y: auto;
 }
 
+.dock-bubble .terminal-block-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.dock-bubble .terminal-block-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-bubble .terminal-block-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .dock-bubble .chat-action-btn {
   display: inline-flex;
   align-items: center;
@@ -531,7 +579,7 @@
 
 .dock-bubble .status-block-item {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 6px;
   font-size: 0.6875rem;
   line-height: 1.5;
@@ -556,12 +604,15 @@
 
 .dock-bubble .status-block-label {
   color: var(--text-muted);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .dock-bubble .status-block-value {
   color: var(--text-secondary);
-  word-break: break-all;
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Collapsible status block (meta / thinking) */
@@ -636,6 +687,118 @@
 
 .dock-bubble .status-item-value.ok {
   color: var(--ok);
+}
+
+/* Confirm / approval cards */
+.dock-bubble .confirm-block {
+  border: 1px solid var(--warning, #e6a23c);
+  background: color-mix(in srgb, var(--warning, #e6a23c) 8%, var(--bg-inset));
+}
+
+.dock-bubble .confirm-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.dock-bubble .confirm-block-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.dock-bubble .confirm-block-text {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dock-bubble .approval-hint {
+  margin-top: 6px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.dock-bubble .confirm-block-actions {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dock-bubble .confirm-btn {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 7px 8px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  text-align: center;
+}
+
+.dock-bubble .confirm-btn.yes {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+}
+
+.dock-bubble .confirm-btn.yes:hover {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.dock-bubble .confirm-btn.no {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border-color: var(--danger);
+}
+
+.dock-bubble .confirm-btn.no:hover {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.dock-bubble .confirm-btn.primary {
+  grid-column: span 2;
+  font-size: 0.75rem;
+}
+
+.dock-bubble .confirm-btn.danger {
+  grid-column: span 2;
+}
+
+.dock-bubble .approval-card.risk-high {
+  border-color: var(--danger);
+}
+
+.dock-bubble .approval-risk {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 0.625rem;
+  font-weight: 700;
+  border: 1px solid var(--border);
+}
+
+.dock-bubble .approval-risk.high {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.dock-bubble .approval-risk.medium {
+  color: var(--warning, #e6a23c);
+  border-color: var(--warning, #e6a23c);
+  background: color-mix(in srgb, var(--warning, #e6a23c) 10%, transparent);
+}
+
+.dock-bubble .approval-risk.low {
+  color: var(--ok);
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
 }
 
 /* Image block — real device images */

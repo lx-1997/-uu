@@ -18,12 +18,12 @@ export interface UIStoreState {
   setActiveTab: (tab: Tab) => void;
 
   // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done') => void;
+  obStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
-  obReturnStep: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null;
-  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null) => void;
+  obReturnStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null;
+  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null) => void;
 
   // Loading
   isLoading: boolean;
@@ -158,15 +158,15 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
   // ── Onboarding (persisted) ──
-  const [obStep, setObStepRaw] = useState<'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | 'done'>(() => {
+  const [obStep, setObStepRaw] = useState<'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done'>(() => {
     const saved = localStorage.getItem('rdk-onboarding-step');
-    if (saved && ['board', 'flash', 'connect', 'openclaw', 'rdkclaw', 'done'].includes(saved)) return saved as any;
+    if (saved && ['board', 'flash', 'connect', 'model', 'openclaw', 'rdkclaw', 'done'].includes(saved)) return saved as any;
     return 'board';
   });
   const setObStep = (v: typeof obStep) => { setObStepRaw(v); localStorage.setItem('rdk-onboarding-step', v); };
   const [selectedBoard, setSelectedBoardRaw] = useState<string | null>(() => localStorage.getItem('rdk-onboarding-board'));
   const setSelectedBoard = (v: string | null) => { setSelectedBoardRaw(v); if (v) localStorage.setItem('rdk-onboarding-board', v); else localStorage.removeItem('rdk-onboarding-board'); };
-  const [obReturnStep, setObReturnStep] = useState<'board' | 'flash' | 'connect' | 'openclaw' | 'rdkclaw' | null>(null);
+  const [obReturnStep, setObReturnStep] = useState<'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null>(null);
 
   // ── Loading ──
   const [isLoading, setIsLoading] = useState(false);

@@ -78,6 +78,13 @@ export interface RDKClawPolicy {
     maxFetchChars: number;
     requireApproval: boolean;
   };
+  context: {
+    contextTokens: number;
+    maxHistoryShare: number;
+    softTrimRatio: number;
+    hardClearRatio: number;
+    keepLastAssistants: number;
+  };
 }
 
 export interface ExecutorSelection {

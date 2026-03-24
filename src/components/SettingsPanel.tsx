@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import {
   approveFeishuPairing,
@@ -9,6 +9,9 @@ import {
   fetchFeishuRuntimeStatus,
   restartFeishuRuntime,
   saveAgentConfig,
+  exportAgentConfig,
+  importAgentConfig,
+  type AgentConfigExportPayload,
   saveFeishuConfig,
   type FeishuRuntimeStatus,
   rejectFeishuPairing,
@@ -109,6 +112,7 @@ export default function SettingsPanel() {
   }>>([]);
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
+  const importAgentConfigRef = useRef<HTMLInputElement | null>(null);
   const applyAiModelToForm = (entry: {
     id: string;
     label: string;
@@ -188,6 +192,7 @@ export default function SettingsPanel() {
     memory: { mainSessionReadsMemory: true, sharedSessionBlocksMemory: false, dailyMemoryDays: 7 },
     scheduler: { defaultChannel: 'chat', allowSecondInterval: false },
     network: { enabled: true, maxFetchChars: 30000, requireApproval: false },
+    context: { contextTokens: 128000, maxHistoryShare: 0.5, softTrimRatio: 0.3, hardClearRatio: 0.5, keepLastAssistants: 3 },
   });
   const [rdkclawLoading, setRdkclawLoading] = useState(false);
   const [rdkclawSaving, setRdkclawSaving] = useState(false);
@@ -466,6 +471,46 @@ export default function SettingsPanel() {
     setAiApiKey('');
   };
 
+  const handleExportAgentConfig = async () => {
+    try {
+      const data = await exportAgentConfig(true);
+      const fileName = `rdkstudio-agent-config-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      const blob = new Blob([JSON.stringify(data.registry, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      addToast('模型配置已导出', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : '导出失败', 'error');
+    }
+  };
+
+  const handleImportAgentConfig = async (file: File) => {
+    setAiSaving(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as AgentConfigExportPayload;
+      if (!Array.isArray(parsed?.entries) || parsed.entries.length === 0) {
+        throw new Error('导入文件无有效 entries');
+      }
+      await importAgentConfig({ registry: parsed, setActiveId: parsed.activeId || undefined, merge: true });
+      await refreshAiConfig();
+      addToast('模型配置导入成功', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? `导入失败：${error.message}` : '导入失败', 'error');
+    } finally {
+      setAiSaving(false);
+      if (importAgentConfigRef.current) {
+        importAgentConfigRef.current.value = '';
+      }
+    }
+  };
+
   if (!showSettings) return null;
 
   const applyAiProviderPreset = (nextProvider: string) => {
@@ -565,6 +610,23 @@ export default function SettingsPanel() {
                 <button type="button" className="btn btn-danger" onClick={handleDeleteAiModel} disabled={aiSaving || !selectedAiModelId}>
                   删除
                 </button>
+                <button type="button" className="btn btn-ghost" onClick={handleExportAgentConfig} disabled={aiSaving}>
+                  导出配置
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => importAgentConfigRef.current?.click()} disabled={aiSaving}>
+                  导入配置
+                </button>
+                <input
+                  ref={importAgentConfigRef}
+                  type="file"
+                  className="sr-only"
+                  accept="application/json,.json"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImportAgentConfig(file);
+                  }}
+                  title="导入模型配置"
+                />
               </div>
               <div className="config-row">
                 <span className="config-label">配置名称</span>
@@ -1112,6 +1174,81 @@ export default function SettingsPanel() {
                     <span className="config-label">每日记忆保留天数</span>
                     <div className="config-value">
                       <input type="number" className="input" title="记忆天数" aria-label="记忆天数" value={policy.memory.dailyMemoryDays} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, dailyMemoryDays: Number(e.target.value) || 7 } }))} min={1} max={90} style={{ maxWidth: 100 }} />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">上下文预算 (tokens)</span>
+                    <div className="config-value">
+                      <input
+                        type="number"
+                        className="input"
+                        title="上下文预算"
+                        aria-label="上下文预算"
+                        value={policy.context.contextTokens}
+                        onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, contextTokens: Math.max(16000, Number(e.target.value) || 128000) } }))}
+                        min={16000}
+                        max={256000}
+                      />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">历史占比上限 (0-1)</span>
+                    <div className="config-value">
+                      <input
+                        type="number"
+                        className="input"
+                        title="历史占比上限"
+                        aria-label="历史占比上限"
+                        value={policy.context.maxHistoryShare}
+                        onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, maxHistoryShare: Number(e.target.value) || 0.5 } }))}
+                        min={0.1}
+                        max={0.95}
+                        step={0.05}
+                      />
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">Soft/Hard 阈值 (0-1)</span>
+                    <div className="config-value">
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="number"
+                          className="input"
+                          title="soft trim 阈值"
+                          aria-label="soft trim 阈值"
+                          value={policy.context.softTrimRatio}
+                          onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, softTrimRatio: Number(e.target.value) || 0.3 } }))}
+                          min={0.1}
+                          max={0.98}
+                          step={0.05}
+                        />
+                        <input
+                          type="number"
+                          className="input"
+                          title="hard clear 阈值"
+                          aria-label="hard clear 阈值"
+                          value={policy.context.hardClearRatio}
+                          onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, hardClearRatio: Number(e.target.value) || 0.5 } }))}
+                          min={0.1}
+                          max={0.99}
+                          step={0.05}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="config-row">
+                    <span className="config-label">保留最近 Assistant 条数</span>
+                    <div className="config-value">
+                      <input
+                        type="number"
+                        className="input"
+                        title="保留助手消息数"
+                        aria-label="保留助手消息数"
+                        value={policy.context.keepLastAssistants}
+                        onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, keepLastAssistants: Math.max(0, Number(e.target.value) || 3) } }))}
+                        min={0}
+                        max={20}
+                      />
                     </div>
                   </div>
                 </div>
