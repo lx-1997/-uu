@@ -320,6 +320,7 @@
 /* Attachment preview */
 .dock-attachments {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 6px 8px;
   overflow-x: auto;
@@ -328,15 +329,34 @@
 .dock-att-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  gap: 6px;
+  padding: 4px 10px;
   border-radius: var(--radius-xs);
   background: var(--bg-inset);
   font-size: 0.6875rem;
   color: var(--text-secondary);
   white-space: nowrap;
-  max-width: 160px;
+  max-width: 220px;
   overflow: hidden;
+  border: 1px solid var(--border-subtle, rgba(128,128,128,0.12));
+  transition: background 0.15s;
+}
+
+.dock-att-item:hover {
+  background: var(--bg-hover, rgba(128,128,128,0.08));
+}
+
+.dock-att-icon {
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.dock-att-size {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
 .dock-att-item img {
@@ -344,6 +364,7 @@
   height: 24px;
   border-radius: 4px;
   object-fit: cover;
+  flex-shrink: 0;
 }
 
 .dock-att-remove {
@@ -356,6 +377,7 @@
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .dock-att-remove:hover {

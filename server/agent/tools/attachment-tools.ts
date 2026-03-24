@@ -10,6 +10,18 @@ try {
   unpdfExtractText = unpdf.extractText as any;
 } catch { /* unpdf not available */ }
 
+let mammothExtractRawText: ((input: { buffer: Buffer }) => Promise<{ value: string }>) | null = null;
+try {
+  const mammoth = await import("mammoth");
+  mammothExtractRawText = mammoth.extractRawText as any;
+} catch { /* mammoth not available */ }
+
+let JSZip: (new () => { loadAsync: (data: Buffer) => Promise<any>; file: (name: string) => any }) | null = null;
+try {
+  const mod = await import("jszip");
+  JSZip = (mod.default ?? mod) as any;
+} catch { /* jszip not available */ }
+
 export interface ChatAttachmentInput {
   id: string;
   type: "image" | "file" | "audio" | "video";
@@ -63,7 +75,33 @@ const TEXT_LIKE_EXTENSIONS = new Set([
   ".xml",
   ".html",
   ".css",
+  ".rst",
+  ".tex",
+  ".rtf",
+  ".c",
+  ".cpp",
+  ".h",
+  ".hpp",
+  ".java",
+  ".go",
+  ".rs",
+  ".rb",
+  ".php",
+  ".sql",
+  ".r",
+  ".lua",
+  ".swift",
+  ".kt",
+  ".scala",
+  ".dart",
+  ".cmake",
+  ".makefile",
+  ".dockerfile",
+  ".gitignore",
+  ".env",
 ]);
+
+const OFFICE_DOC_EXTENSIONS = new Set([".docx", ".pptx", ".xlsx"]);
 
 const VISION_FALLBACK_BY_PROVIDER: Record<string, string> = {
   openai: "gpt-4o-mini",
@@ -150,9 +188,107 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   }
 }
 
+async function extractDocxText(buffer: Buffer): Promise<string> {
+  if (!mammothExtractRawText) return "";
+  try {
+    const result = await mammothExtractRawText({ buffer });
+    const text = normalizeText(String(result.value));
+    return text ? truncateText(text, 50_000) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function extractPptxText(buffer: Buffer): Promise<string> {
+  if (!JSZip) return "";
+  try {
+    const zip = await new JSZip!().loadAsync(buffer);
+    const slideTexts: string[] = [];
+    const slideFiles = Object.keys((zip as any).files)
+      .filter((name: string) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
+      .sort();
+    for (const slideName of slideFiles) {
+      const xml = await (zip as any).files[slideName].async("string");
+      const texts = Array.from(xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)).map((m: any) => m[1]);
+      if (texts.length > 0) {
+        const slideNum = slideName.match(/slide(\d+)/)?.[1] || "?";
+        slideTexts.push(`--- Slide ${slideNum} ---\n${texts.join(" ")}`);
+      }
+    }
+    const text = normalizeText(slideTexts.join("\n\n"));
+    return text ? truncateText(text, 50_000) : "";
+  } catch {
+    return "";
+  }
+}
+
+async function extractXlsxText(buffer: Buffer): Promise<string> {
+  if (!JSZip) return "";
+  try {
+    const zip = await new JSZip!().loadAsync(buffer);
+    const sharedStringsFile = (zip as any).files["xl/sharedStrings.xml"];
+    const sharedStrings: string[] = [];
+    if (sharedStringsFile) {
+      const xml = await sharedStringsFile.async("string");
+      const matches = Array.from(xml.matchAll(/<t[^>]*>([^<]*)<\/t>/g));
+      for (const m of matches) sharedStrings.push((m as any)[1]);
+    }
+    const sheetFiles = Object.keys((zip as any).files)
+      .filter((name: string) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name))
+      .sort();
+    const sheetTexts: string[] = [];
+    for (const sheetName of sheetFiles) {
+      const xml = await (zip as any).files[sheetName].async("string");
+      const rows = Array.from(xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g));
+      const rowTexts: string[] = [];
+      for (const row of rows) {
+        const cells = Array.from((row as any)[1].matchAll(/<c[^>]*(?:t="s"[^>]*)?>[\s\S]*?<v>(\d+)<\/v>[\s\S]*?<\/c>|<c[^>]*?>[\s\S]*?<v>([^<]*)<\/v>[\s\S]*?<\/c>/g));
+        const cellValues: string[] = [];
+        for (const cell of cells) {
+          const sharedIdx = (cell as any)[1];
+          const rawVal = (cell as any)[2];
+          if (sharedIdx !== undefined && sharedStrings[Number(sharedIdx)]) {
+            cellValues.push(sharedStrings[Number(sharedIdx)]);
+          } else if (rawVal !== undefined) {
+            cellValues.push(rawVal);
+          }
+        }
+        if (cellValues.length > 0) rowTexts.push(cellValues.join("\t"));
+      }
+      if (rowTexts.length > 0) {
+        const sheetNum = sheetName.match(/sheet(\d+)/)?.[1] || "?";
+        sheetTexts.push(`--- Sheet ${sheetNum} ---\n${rowTexts.join("\n")}`);
+      }
+    }
+    const text = normalizeText(sheetTexts.join("\n\n"));
+    return text ? truncateText(text, 50_000) : "";
+  } catch {
+    return "";
+  }
+}
+
 function isPdfAttachment(name: string, mimeType?: string): boolean {
   if (mimeType === "application/pdf") return true;
   return path.extname(name).toLowerCase() === ".pdf";
+}
+
+function isDocxAttachment(name: string, mimeType?: string): boolean {
+  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return true;
+  return path.extname(name).toLowerCase() === ".docx";
+}
+
+function isPptxAttachment(name: string, mimeType?: string): boolean {
+  if (mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation") return true;
+  return path.extname(name).toLowerCase() === ".pptx";
+}
+
+function isXlsxAttachment(name: string, mimeType?: string): boolean {
+  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return true;
+  return path.extname(name).toLowerCase() === ".xlsx";
+}
+
+function isOfficeDocAttachment(name: string, mimeType?: string): boolean {
+  return isDocxAttachment(name, mimeType) || isPptxAttachment(name, mimeType) || isXlsxAttachment(name, mimeType);
 }
 
 function readTextFromBuffer(buffer: Buffer, name: string, mimeType?: string): string {
@@ -167,6 +303,15 @@ function readTextFromBuffer(buffer: Buffer, name: string, mimeType?: string): st
 async function readTextFromBufferAsync(buffer: Buffer, name: string, mimeType?: string): Promise<string> {
   if (isPdfAttachment(name, mimeType)) {
     return extractPdfText(buffer);
+  }
+  if (isDocxAttachment(name, mimeType)) {
+    return extractDocxText(buffer);
+  }
+  if (isPptxAttachment(name, mimeType)) {
+    return extractPptxText(buffer);
+  }
+  if (isXlsxAttachment(name, mimeType)) {
+    return extractXlsxText(buffer);
   }
   return readTextFromBuffer(buffer, name, mimeType);
 }
@@ -488,10 +633,12 @@ export function buildAttachmentPrompt(newAttachments: SessionAttachment[]): stri
 
   const hasImages = newAttachments.some((a: SessionAttachment) => a.type === "image");
   const hasPdf = newAttachments.some((a: SessionAttachment) => isPdfAttachment(a.name, a.mimeType));
+  const hasOfficeDoc = newAttachments.some((a: SessionAttachment) => isOfficeDocAttachment(a.name, a.mimeType));
   const footer = [
     "可用工具：attachment_list / attachment_read / attachment_describe_image / attachment_get_audio_transcript。",
     hasImages ? "注意：用户上传了图片，你必须先调用 attachment_describe_image 理解图片内容后再回复。" : "",
     hasPdf ? "注意：PDF 内容已自动提取，可通过 attachment_read 读取完整文本。" : "",
+    hasOfficeDoc ? "注意：Office 文档（Word/PPT/Excel）内容已自动提取文本，可通过 attachment_read 读取。" : "",
   ].filter(Boolean).join("\n");
 
   return [

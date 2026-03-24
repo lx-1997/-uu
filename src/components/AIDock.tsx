@@ -75,6 +75,15 @@ type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
 const MAX_PENDING_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 
+const OFFICE_DOC_MIMES = new Set([
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/msword',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.ms-excel',
+]);
+
 function isTextLikeFile(file: File) {
   return file.type.startsWith('text/')
     || [
@@ -82,7 +91,24 @@ function isTextLikeFile(file: File) {
       'application/xml',
       'application/javascript',
     ].includes(file.type)
-    || /\.(txt|md|json|ya?ml|toml|ini|csv|ts|tsx|js|jsx|py|sh|log|xml|html|css)$/i.test(file.name);
+    || /\.(txt|md|json|ya?ml|toml|ini|csv|ts|tsx|js|jsx|py|sh|log|xml|html|css|rst|tex|rtf|c|cpp|h|hpp|java|go|rs|rb|php|sql|r|lua|swift|kt|scala|dart)$/i.test(file.name);
+}
+
+function isDocumentFile(file: File) {
+  if (OFFICE_DOC_MIMES.has(file.type)) return true;
+  if (file.type === 'application/pdf') return true;
+  return /\.(docx?|pptx?|xlsx?|pdf)$/i.test(file.name);
+}
+
+function getAttachmentIcon(name: string, mimeType?: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (/^docx?$/.test(ext) || mimeType?.includes('word')) return '📄';
+  if (/^pptx?$/.test(ext) || mimeType?.includes('presentation') || mimeType?.includes('powerpoint')) return '📊';
+  if (/^xlsx?$/.test(ext) || mimeType?.includes('spreadsheet') || mimeType?.includes('excel')) return '📋';
+  if (ext === 'pdf' || mimeType === 'application/pdf') return '📕';
+  if (ext === 'md') return '📝';
+  if (/^(zip|tar|gz|rar|7z)$/.test(ext)) return '📦';
+  return '📎';
 }
 
 async function fileToBase64(file: File) {
@@ -1051,7 +1077,9 @@ export default function AIDock() {
             {pendingAttachments.map(att => (
               <div key={att.id} className="dock-att-item">
                 {att.type === 'image' && att.url && <img src={att.url} alt="" />}
+                {att.type === 'file' && <span className="dock-att-icon">{getAttachmentIcon(att.name, att.mimeType)}</span>}
                 <span className="truncate">{att.name}</span>
+                {att.size !== undefined && <span className="dock-att-size">{att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${(att.size / 1024).toFixed(0)}KB` : `${(att.size / 1048576).toFixed(1)}MB`}</span>}
                 <button className="dock-att-remove" onClick={() => removeAttachment(att.id)}>{Icon.close}</button>
               </div>
             ))}
@@ -1067,7 +1095,7 @@ export default function AIDock() {
         )}
 
         <form className="dock-form dock-input" onSubmit={handleUnifiedCommand}>
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*,audio/*,.pdf,.zip,.tar,.gz,.py,.js,.ts,.json,.txt,.md,.csv" title="选择文件" className="sr-only" />
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*,audio/*,.pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.zip,.tar,.gz,.py,.js,.ts,.json,.txt,.md,.csv,.yaml,.yml,.toml,.xml,.html,.css,.rst,.tex,.rtf,.c,.cpp,.h,.java,.go,.rs,.rb,.php,.sql,.lua,.swift,.kt" title="选择文件" className="sr-only" />
 
           <div className="dock-form-actions">
             <button type="button" className="dock-action-btn" onClick={handleFilePick} title="附件">
