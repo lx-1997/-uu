@@ -1,0 +1,30 @@
+---
+description: 常见代码模式和反模式
+globs:
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: false
+---
+
+# 代码模式
+
+## SSH 命令执行
+- 通过 `rdk-ssh-helper.ts` 的 `execOnDevice()` 统一执行
+- 长命令加 timeout：`timeout 30 <command>`
+- 避免交互式命令（vim, top, less）
+- 用 `device-exec-scheduler.ts` 保证同设备命令串行
+
+## 错误处理
+- 不使用 `|| true` 隐藏命令失败（尤其在 health check 中）
+- fetch 调用传入 AbortController signal 支持取消
+- SSH 连接失败要上报，不静默重试
+
+## 前端 React 模式
+- 状态管理用 React hooks（useState, useRef, useEffect）
+- Socket.IO 连接同设备共享，不重复创建
+- 轮询使用全局 poll 模块（`openclawDeployPoll.ts`），组件卸载不影响
+
+## 安全
+- 敏感信息（API Key, Token）在日志和配置展示中脱敏
+- 破坏性操作（rm -rf, dd, mkfs, 卸载）需要用户二次确认
+- SSH 密码不硬编码，从设备配置或环境变量获取

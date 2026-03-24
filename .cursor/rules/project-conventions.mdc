@@ -1,0 +1,38 @@
+---
+description: RDK Studio 项目约定
+globs:
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: true
+---
+
+# 项目约定
+
+## 技术栈
+- 前端: React + TypeScript + Vite + TailwindCSS + Lucide Icons
+- 后端: Node.js (ESM) + Express
+- Agent: 自研 openclaw-mini 框架
+- 设备通信: SSH (ssh2) + WebSocket (Socket.IO)
+- 板端: OpenClaw Agent (npm 全局包)
+
+## 命名规范
+- 文件名: kebab-case（如 `device-health-monitor.ts`）
+- React 组件: PascalCase（如 `OnboardingWizard.tsx`）
+- 函数/变量: camelCase
+- 常量: UPPER_SNAKE_CASE
+- 类型/接口: PascalCase
+
+## 代码风格
+- 使用 ESM（`import/export`，不用 CommonJS）
+- 字符串用单引号，JSX 属性用双引号
+- 异步函数优先 async/await
+- 错误处理不静默吞掉（不用 `|| true` 隐藏失败）
+
+## 目录结构
+- `server/` — 后端 Express + Agent + SSH
+- `server/agent/` — Agent 核心（session, context, skills, tools）
+- `server/rdkclaw/` — RDKClaw 业务层
+- `server/managers/` — OpenClaw 部署管理
+- `src/` — React 前端
+- `agent/` — Agent 人格文件（SOUL.md, TOOLS.md, HEARTBEAT.md）
+- `skills/` — 技能定义（SKILL.md in subdirs）

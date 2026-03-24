@@ -1,0 +1,32 @@
+---
+description: Agent 系统架构规则
+globs:
+  - "server/agent/**"
+  - "server/rdkclaw/**"
+  - "agent/**"
+  - "skills/**"
+alwaysApply: false
+---
+
+# Agent 系统规则
+
+## 五层架构
+1. SOUL.md — 身份 + 行为契约（保持精简，<100行）
+2. TOOLS.md — 工具环境 + 组合模式
+3. skills/ — Level 2+ 过程/策略技能（SKILL.md 格式，含 frontmatter）
+4. 代码级智能 — pruning, compaction, DeviceHealthMonitor
+5. 主动行为层 — Heartbeat, 自愈
+
+## Skill 规范
+- 统一使用 `skills/<name>/SKILL.md` 格式
+- 必填 frontmatter: name, description, version, trigger, risk, permissions, delegate_preference, requires_board, approval_level, cooldown_seconds, scheduler_template, category
+- 内容结构: 适用场景 → 执行流程 → 工具映射 → 输出要求 → 禁止事项
+
+## 工具描述
+- 每个工具 description 应包含：功能、使用场景、验证方法
+- 相关工具间应互相引用（如 "修复后用 board_openclaw_health 验证"）
+
+## Context 管理
+- system prompt 的 token 数必须纳入 pruning 预算
+- compaction 在 70% 上下文窗口占用时主动触发
+- 子 Agent 允许读取 AGENTS.md + TOOLS.md + SOUL.md
