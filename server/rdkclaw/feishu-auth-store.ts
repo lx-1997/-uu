@@ -49,10 +49,16 @@ function now() {
 
 export class FeishuAuthStore {
   private data: FeishuAuthData;
+  private dirty = false;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastGcAt = 0;
+  private static GC_INTERVAL_MS = 30_000;
+  private static FLUSH_DELAY_MS = 2_000;
 
   constructor() {
     this.data = this.read();
-    this.gc();
+    this.gcInMemory();
+    this.saveSync();
   }
 
   private read(): FeishuAuthData {
@@ -89,12 +95,26 @@ export class FeishuAuthStore {
     }
   }
 
-  private save() {
+  private saveSync() {
     ensureDir();
     fs.writeFileSync(AUTH_FILE, JSON.stringify(this.data, null, 2), "utf-8");
+    this.dirty = false;
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
   }
 
-  private gc() {
+  private scheduleSave() {
+    this.dirty = true;
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      if (this.dirty) this.saveSync();
+    }, FeishuAuthStore.FLUSH_DELAY_MS);
+  }
+
+  private gcInMemory() {
     const ts = now();
     this.data.pending = this.data.pending.filter((item) => !item.used && item.expireAt > ts);
     const seen = new Set<string>();
@@ -103,7 +123,14 @@ export class FeishuAuthStore {
       seen.add(item.openId);
       return true;
     });
-    this.save();
+  }
+
+  private gc() {
+    const ts = now();
+    if (ts - this.lastGcAt < FeishuAuthStore.GC_INTERVAL_MS) return;
+    this.lastGcAt = ts;
+    this.gcInMemory();
+    this.scheduleSave();
   }
 
   private ensureMeta() {
@@ -136,7 +163,7 @@ export class FeishuAuthStore {
       used: false,
       createdAt: now(),
     });
-    this.save();
+    this.saveSync();
     return code;
   }
 
@@ -171,7 +198,7 @@ export class FeishuAuthStore {
       }
       return item;
     });
-    this.save();
+    this.saveSync();
     return { ok: true, openId: token.openId };
   }
 
@@ -197,7 +224,7 @@ export class FeishuAuthStore {
     this.data.meta!.latestUiSessionId = session;
     this.data.meta!.latestUiSessionUpdatedAt = now();
     this.data.meta!.updatedAt = now();
-    this.save();
+    this.saveSync();
     return { ok: true };
   }
 
@@ -218,7 +245,7 @@ export class FeishuAuthStore {
     bound.activeSessionId = session;
     bound.lastSessionSyncAt = now();
     if (chatId) bound.lastChatId = String(chatId);
-    this.save();
+    this.scheduleSave();
   }
 
   setLatestUiSession(sessionId: string): void {
@@ -229,7 +256,7 @@ export class FeishuAuthStore {
     this.data.meta!.latestUiSessionId = value;
     this.data.meta!.latestUiSessionUpdatedAt = now();
     this.data.meta!.updatedAt = now();
-    this.save();
+    this.scheduleSave();
   }
 
   setLatestUiDevice(deviceId: string): void {
@@ -240,7 +267,7 @@ export class FeishuAuthStore {
     this.data.meta!.latestUiDeviceId = value;
     this.data.meta!.latestUiDeviceUpdatedAt = now();
     this.data.meta!.updatedAt = now();
-    this.save();
+    this.scheduleSave();
   }
 
   getLatestUiSession(): string {
@@ -290,7 +317,7 @@ export class FeishuAuthStore {
     if (!token) return { ok: false, reason: "配对码不存在或已过期" };
     if (token.used) return { ok: false, reason: "配对码已被使用" };
     token.rejected = true;
-    this.save();
+    this.saveSync();
     return { ok: true };
   }
 }

@@ -134,6 +134,9 @@ export class FeishuWebSocketChannel {
   private readonly authStore: FeishuAuthStore;
   private readonly getConfig: () => FeishuRuntimeConfig;
   private readonly notificationHub?: NotificationHub;
+  private static FETCH_TIMEOUT_MS = 15_000;
+  private static DEDUP_TTL_MS = 10 * 60 * 1000;
+  private eventSeen = new Map<string, number>();
   private client: Lark.Client | null = null;
   private wsClient: unknown | null = null;
   private status: FeishuRuntimeStatus = {
@@ -144,6 +147,7 @@ export class FeishuWebSocketChannel {
     connectionMode: "websocket",
   };
   private tenantToken: { value: string; expireAt: number } | null = null;
+  private tenantTokenInflight: Promise<string> | null = null;
 
   constructor(opts: FeishuChannelOptions) {
     this.rdkclaw = opts.rdkclaw;
@@ -247,6 +251,8 @@ export class FeishuWebSocketChannel {
     this.wsClient = null;
     this.client = null;
     this.tenantToken = null;
+    this.tenantTokenInflight = null;
+    this.eventSeen.clear();
     this.status.running = false;
     this.status.connected = false;
   }
@@ -265,29 +271,44 @@ export class FeishuWebSocketChannel {
     if (this.tenantToken && this.tenantToken.expireAt > now + 30_000) {
       return this.tenantToken.value;
     }
-    const authBase = authBaseByDomain(cfg.domain);
-    const res = await fetch(`${authBase}/open-apis/auth/v3/tenant_access_token/internal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({
-        app_id: cfg.appId,
-        app_secret: cfg.appSecret,
-      }),
+    if (this.tenantTokenInflight) return this.tenantTokenInflight;
+    this.tenantTokenInflight = this.refreshTenantToken(cfg).finally(() => {
+      this.tenantTokenInflight = null;
     });
-    const payload = (await res.json().catch(() => ({}))) as {
-      code?: number;
-      msg?: string;
-      tenant_access_token?: string;
-      expire?: number;
-    };
-    if (!res.ok || payload.code !== 0 || !payload.tenant_access_token) {
-      throw new Error(payload.msg || "获取飞书 tenant_access_token 失败");
+    return this.tenantTokenInflight;
+  }
+
+  private async refreshTenantToken(cfg: FeishuRuntimeConfig): Promise<string> {
+    const authBase = authBaseByDomain(cfg.domain);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FeishuWebSocketChannel.FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${authBase}/open-apis/auth/v3/tenant_access_token/internal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          app_id: cfg.appId,
+          app_secret: cfg.appSecret,
+        }),
+        signal: controller.signal,
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        code?: number;
+        msg?: string;
+        tenant_access_token?: string;
+        expire?: number;
+      };
+      if (!res.ok || payload.code !== 0 || !payload.tenant_access_token) {
+        throw new Error(payload.msg || "获取飞书 tenant_access_token 失败");
+      }
+      this.tenantToken = {
+        value: payload.tenant_access_token,
+        expireAt: Date.now() + Math.max(60, Number(payload.expire || 7200)) * 1000,
+      };
+      return this.tenantToken.value;
+    } finally {
+      clearTimeout(timer);
     }
-    this.tenantToken = {
-      value: payload.tenant_access_token,
-      expireAt: now + Math.max(60, Number(payload.expire || 7200)) * 1000,
-    };
-    return this.tenantToken.value;
   }
 
   private async downloadMessageResource(
@@ -299,6 +320,8 @@ export class FeishuWebSocketChannel {
     const cfg = this.getConfig();
     const authBase = authBaseByDomain(cfg.domain);
     const token = await this.getTenantToken();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
     const res = await fetch(
       `${authBase}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(resourceKey)}?type=${type}`,
       {
@@ -306,8 +329,10 @@ export class FeishuWebSocketChannel {
         headers: {
           Authorization: `Bearer ${token}`,
         },
+        signal: controller.signal,
       },
     );
+    clearTimeout(timer);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`下载飞书资源失败 (${res.status}) ${text.slice(0, 120)}`);
@@ -362,11 +387,31 @@ export class FeishuWebSocketChannel {
     return [];
   }
 
+  private markEventSeen(key: string): boolean {
+    if (!key) return false;
+    const now = Date.now();
+    for (const [k, v] of this.eventSeen.entries()) {
+      if (now - v > FeishuWebSocketChannel.DEDUP_TTL_MS) this.eventSeen.delete(k);
+    }
+    if (this.eventSeen.has(key)) return true;
+    this.eventSeen.set(key, now);
+    return false;
+  }
+
   private async handleMessage(payload: any): Promise<void> {
     const cfg = this.getConfig();
     const event = unwrapEventPayload(payload);
     const message = event?.message;
     const sender = event?.sender;
+
+    const eventId = String(payload?.header?.event_id || payload?.event_id || "");
+    const messageId = String(message?.message_id || "");
+    const dedupKey = eventId || (messageId ? `msg:${messageId}` : "");
+    if (dedupKey && this.markEventSeen(dedupKey)) {
+      console.log(`[FeishuWS] dedup: skipping duplicate event ${dedupKey.slice(0, 20)}`);
+      return;
+    }
+
     const chatId = String(message?.chat_id || "");
     const openId = String(sender?.sender_id?.open_id || "");
     const chatType = String(message?.chat_type || "");
@@ -563,6 +608,9 @@ export class FeishuWebSocketChannel {
           if (delta) chunks.push(delta);
         } else if (event.type === "message_end") {
           finalText = String(event.data?.text ?? "").trim();
+        } else if (event.type === "error") {
+          const errorMsg = String(event.data?.error ?? "RDKClaw 执行失败");
+          if (!chunks.length) chunks.push(errorMsg);
         } else if (event.type === "tool_start") {
           toolCount++;
           const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
@@ -774,11 +822,14 @@ export class FeishuWebSocketChannel {
     const formData = new FormData();
     formData.append("image_type", "message");
     formData.append("image", blob, `image${ext}`);
+    const imgCtrl = new AbortController();
+    const imgTimer = setTimeout(() => imgCtrl.abort(), 30_000);
     try {
       const res = await fetch(`${authBase}/open-apis/im/v1/images`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
+        signal: imgCtrl.signal,
       });
       const payload = (await res.json().catch(() => ({}))) as {
         code?: number;
@@ -792,6 +843,8 @@ export class FeishuWebSocketChannel {
     } catch (err) {
       console.warn("[FeishuWS] uploadImage error:", err instanceof Error ? err.message : err);
       return null;
+    } finally {
+      clearTimeout(imgTimer);
     }
   }
 

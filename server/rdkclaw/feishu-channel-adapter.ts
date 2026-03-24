@@ -16,12 +16,32 @@ export interface FeishuSessionRecord {
 export class FeishuChannelAdapter {
   private app: RDKClawApp;
   private sessions = new Map<string, FeishuSessionRecord>();
+  private static SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+  private static MAX_SESSIONS = 5000;
+  private lastGcAt = 0;
 
   constructor(app: RDKClawApp) {
     this.app = app;
   }
 
+  private gcSessions() {
+    const now = Date.now();
+    if (now - this.lastGcAt < 60_000) return;
+    this.lastGcAt = now;
+    for (const [key, record] of this.sessions.entries()) {
+      if (now - record.lastSeenAt > FeishuChannelAdapter.SESSION_TTL_MS) {
+        this.sessions.delete(key);
+      }
+    }
+    if (this.sessions.size > FeishuChannelAdapter.MAX_SESSIONS) {
+      const sorted = [...this.sessions.entries()].sort((a, b) => a[1].lastSeenAt - b[1].lastSeenAt);
+      const toRemove = sorted.slice(0, sorted.length - FeishuChannelAdapter.MAX_SESSIONS);
+      for (const [key] of toRemove) this.sessions.delete(key);
+    }
+  }
+
   private getSessionKey(userId: string) {
+    this.gcSessions();
     const existing = this.sessions.get(userId);
     if (existing) {
       existing.lastSeenAt = Date.now();

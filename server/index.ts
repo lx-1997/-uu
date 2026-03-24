@@ -507,6 +507,14 @@ function markFeishuSeen(eventId: string) {
   return false;
 }
 
+function deriveFeishuEventKey(body: any): string {
+  const eventId = String(body?.header?.event_id || body?.event_id || '');
+  if (eventId) return eventId;
+  const msgId = String(body?.event?.message?.message_id || '');
+  if (msgId) return `msg:${msgId}`;
+  return '';
+}
+
 function maskOpenId(openId: string) {
   if (!openId) return '';
   if (openId.length <= 8) return `${openId.slice(0, 2)}***${openId.slice(-2)}`;
@@ -4221,8 +4229,8 @@ app.post('/api/channels/feishu/webhook', async (request, response) => {
       return;
     }
 
-    const eventId = String(body?.header?.event_id || body?.event_id || body?.event?.message?.message_id || '');
-    if (markFeishuSeen(eventId)) {
+    const eventKey = deriveFeishuEventKey(body);
+    if (eventKey && markFeishuSeen(eventKey)) {
       response.json({ ok: true, deduped: true });
       return;
     }
@@ -4254,7 +4262,7 @@ app.post('/api/channels/feishu/webhook', async (request, response) => {
       if (chatId && feishuApi.isConfigured()) {
         await feishuApi.sendTextToChat(String(chatId), authText);
       }
-      console.log(`[Feishu] unbound user=${maskOpenId(openId)} event=${eventId} issued_code`);
+      console.log(`[Feishu] unbound user=${maskOpenId(openId)} event=${eventKey} issued_code`);
       response.json({ ok: true, authorized: false, message: '已发送授权码' });
       return;
     }
@@ -4268,7 +4276,7 @@ app.post('/api/channels/feishu/webhook', async (request, response) => {
     if (chatId && feishuApi.isConfigured()) {
       await feishuApi.sendTextToChat(String(chatId), result.text || 'RDKClaw 已处理完成。');
     }
-    console.log(`[Feishu] bound user=${maskOpenId(openId)} event=${eventId} cost_ms=${Date.now() - startedAt}`);
+    console.log(`[Feishu] bound user=${maskOpenId(openId)} event=${eventKey} cost_ms=${Date.now() - startedAt}`);
     response.json({ ok: true, reply: result.text, authorized: true });
   } catch (error) {
     console.error('[Feishu webhook] failed:', error instanceof Error ? error.message : error);
