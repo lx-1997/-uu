@@ -2,6 +2,8 @@ import type { Tool } from "../../agent/tools/types.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager } from "../../managers/OpenClawDeploymentManager.js";
 import type { Device } from "../../../shared/types.js";
+import type { EcosystemRegistry } from "../../ecosystem/registry.js";
+import type { RdkPlatform } from "../../../shared/ecosystem-types.js";
 
 function resolveDevicePassword(device: Device) {
   const persisted = (device as Device & { password?: string }).password ?? "";
@@ -35,6 +37,7 @@ export function boardOpenClawDelegateTool(
   manager: OpenClawDeploymentManager,
   onProgress?: (chunk: string) => void,
   conversationId?: string,
+  ecosystemRegistry?: EcosystemRegistry,
 ): Tool<{
   task: string;
   intent?: string;
@@ -61,13 +64,25 @@ export function boardOpenClawDelegateTool(
       if (!device) throw new Error("设备不存在，无法委派板端 OpenClaw");
 
       const boardDevice = toBoardDevice(device);
-      const msg = [
+      const platform = (device as any).platform as RdkPlatform | undefined;
+      const msgParts = [
         input.intent ? `intent: ${input.intent}` : "",
         input.context ? `context: ${input.context}` : "",
         `task: ${input.task}`,
-      ]
-        .filter(Boolean)
-        .join("\n");
+      ];
+      if (ecosystemRegistry) {
+        const taskKeywords = input.task;
+        const skills = ecosystemRegistry.findRelevantSkills(taskKeywords, platform, 5);
+        if (skills.length > 0) {
+          const skillLines = skills.map((s) => {
+            const note = platform && s.platformNotes?.[platform] ? ` (${s.platformNotes[platform]})` : "";
+            const doc = s.docUrl ? ` 文档:${s.docUrl}` : "";
+            return `  - ${s.name}: ${s.description}${note}${doc}`;
+          });
+          msgParts.push(`\navailable_skills:\n${skillLines.join("\n")}`);
+        }
+      }
+      const msg = msgParts.filter(Boolean).join("\n");
       const sessionId = input.sessionId?.trim() || `rdkclaw-board-${deviceId}-${conversationId || Date.now()}`;
 
       return await new Promise<string>((resolve, reject) => {

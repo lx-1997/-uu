@@ -110,6 +110,12 @@ export interface EcoSkill {
   /** Scenario description for AI context ("适合巡检、安防场景") */
   scenario?: string;
 
+  /** Official documentation / tutorial URL */
+  docUrl?: string;
+
+  /** Per-platform usage notes for RDKClaw guidance */
+  platformNotes?: Record<string, string>;
+
   // ─── Runtime ───
 
   /**

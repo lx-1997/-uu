@@ -34,6 +34,8 @@ export type RDKClawEventType =
   | "tool_result"
   | "approval_required"
   | "approval_decision"
+  | "recommendation"
+  | "recommendation_choice"
   | "turn_start"
   | "turn_end"
   | "message_end"
@@ -41,6 +43,22 @@ export type RDKClawEventType =
   | "error"
   | "retry"
   | "meta";
+
+export interface RecommendationOption {
+  id: string;
+  label: string;
+  description: string;
+  recommended?: boolean;
+}
+
+export interface RecommendationEventData {
+  runId: string;
+  sessionId: string;
+  recommendationId: string;
+  question: string;
+  options: RecommendationOption[];
+  allowAutoExecute: boolean;
+}
 
 export interface RDKClawEvent {
   type: RDKClawEventType;

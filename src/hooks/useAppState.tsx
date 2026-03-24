@@ -210,6 +210,7 @@ export interface AppState {
     action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run',
     runId?: string,
   ) => void;
+  handleRecommendationChoice: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
   stopCurrentRun: () => void;
   backgroundCurrentRun: () => void;
   backgroundRuns: Array<{

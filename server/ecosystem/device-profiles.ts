@@ -36,6 +36,10 @@ export interface DeviceProfile {
   detectionPatterns: string[];
   /** Known limitations that AI should be aware of */
   limitations: string[];
+  /** Official documentation base URL */
+  docBaseUrl: string;
+  /** Capability notes for RDKClaw's inner wisdom (injected into system prompt) */
+  capabilityNotes: string[];
 }
 
 export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
@@ -44,7 +48,7 @@ export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
     displayName: 'RDK X3',
     soc: 'Sunrise 3 (X3J3)',
     bpuTops: 5,
-    cpu: 'Quad-core Cortex-A53',
+    cpu: 'Quad-core Cortex-A53 @1.5GHz',
     ramGb: 2,
     modelFormat: 'NV12 BIN (Bernoulli2)',
     bpuCmd: 'hrut_smi',
@@ -57,6 +61,13 @@ export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
       '2 GB RAM — cannot run models larger than ~500 MB',
       'No USB3 — USB camera bandwidth limited',
     ],
+    docBaseUrl: 'https://developer.d-robotics.cc/rdk_doc/',
+    capabilityNotes: [
+      '5TOPS BPU 适合轻量模型 (YOLOv5s/MobileNet/FCOS)',
+      '2GB 内存限制大模型使用，LLM 不可用',
+      '40pin GPIO (I2C/SPI/UART/PWM)，2路MIPI CSI摄像头',
+      '适用场景：教学入门、轻量视觉检测、GPIO 控制',
+    ],
   },
 
   'rdk-x5': {
@@ -64,7 +75,7 @@ export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
     displayName: 'RDK X5',
     soc: 'Sunrise 5',
     bpuTops: 10,
-    cpu: 'Dual-core Cortex-A55',
+    cpu: 'Octa-core Cortex-A55 @1.5GHz',
     ramGb: 4,
     modelFormat: 'NV12 BIN (Bayes)',
     bpuCmd: 'hrut_smi',
@@ -73,8 +84,15 @@ export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
     bpuInferLib: 'bpu_infer_lib_x5',
     detectionPatterns: ['x5', 'X5', 'sunrise5', 'Sunrise 5'],
     limitations: [
-      'Dual-core CPU — multi-threaded workloads may bottleneck',
       'LLM limited to ≤2B parameter quantized models on-device',
+    ],
+    docBaseUrl: 'https://developer.d-robotics.cc/rdk_doc/',
+    capabilityNotes: [
+      '10TOPS BPU，YOLO/分类/分割/姿态估计主力平台',
+      '支持 DOSOD 开放词汇检测 (~12fps)，端侧 LLM (≤2B)',
+      '4K 视频编解码，CAN FD 接口，Wi-Fi 6，4路USB3.0',
+      '40pin GPIO (28路GPIO/5路UART/8路PWM/3路I2C/2路SPI)',
+      '适用场景：机器人视觉、TROS pipeline、端侧AI推理',
     ],
   },
 
@@ -94,22 +112,40 @@ export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
     limitations: [
       'Higher power consumption — needs active cooling',
     ],
+    docBaseUrl: 'https://developer.d-robotics.cc/rdk_doc/',
+    capabilityNotes: [
+      '96TOPS BPU，支持大规模模型推理',
+      '8GB RAM，可运行较大模型',
+    ],
   },
 
+  // S100 标准版 80TOPS; S100P 为 128TOPS (2.0GHz CPU, 24GB RAM)
   'rdk-s100': {
     platform: 'rdk-s100',
     displayName: 'RDK S100',
-    soc: 'S100',
-    bpuTops: 128,
-    cpu: 'Octa-core',
-    ramGb: 8,
-    modelFormat: 'NV12 BIN',
+    soc: 'S100 (Nash)',
+    bpuTops: 80,
+    cpu: 'Hexa-core Cortex-A78AE @1.5GHz + Quad-core Cortex-R52+ MCU @1.2GHz',
+    ramGb: 12,
+    modelFormat: 'NV12 BIN (Nash)',
     bpuCmd: 'hrut_smi',
     trosPath: '/opt/tros/humble',
     systemPython: '/usr/bin/python3.10',
     bpuInferLib: 'bpu_infer_lib_s100',
-    detectionPatterns: ['s100', 'S100', 'RDK S100'],
-    limitations: [],
+    detectionPatterns: ['s100', 'S100', 'RDK S100', 'rdk_s100'],
+    limitations: [
+      '12-20V DC 供电，功耗高于 X5',
+      'Nash BPU 模型格式与 Bayes(X5) 不兼容，需重新编译',
+      'MIPI/GMSL 相机需配扩展板',
+    ],
+    docBaseUrl: 'https://developer.d-robotics.cc/rdk_doc/rdk_s/',
+    capabilityNotes: [
+      '80TOPS Nash BPU (S100P=128TOPS)，支持 160+ ONNX 算子，CNN+Transformer 优化',
+      'MCU (4x R52+ @1.2GHz) 支持高帧率低延迟关节实时控制，具身智能首选',
+      'DOSOD 开放词汇检测 ~45fps，可运行 LLM/VLM/DeepSeek/InternVL2',
+      '12GB LPDDR5 (S100P=24GB)，GMSL+MIPI 多路相机，双千兆网口',
+      '适用场景：具身智能、人形机器人、大模型推理、高级视觉应用',
+    ],
   },
 };
 

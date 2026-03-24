@@ -28,6 +28,10 @@ import { readDevices } from "../storage.js";
 import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
+import { createEcosystemQueryTool } from "./tools/ecosystem-query.js";
+import type { EcosystemRegistry } from "../ecosystem/registry.js";
+import { getDeviceProfile, type DeviceProfile } from "../ecosystem/device-profiles.js";
+import { detectPlatform } from "../ecosystem/device-profiles.js";
 import { PersonaStore } from "./persona-store.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { RDKClawPolicyStore } from "./policy-store.js";
@@ -204,11 +208,11 @@ function selectDelegateDecision(
     };
   }
   return {
-    path: "local_only",
+    path: "collaborative",
     canLocalComplete: true,
-    needsBoardCollaboration: false,
+    needsBoardCollaboration: true,
     source: "default",
-    reason: "任务属于通用编排/问答，本地链路可独立完成",
+    reason: "已连接设备，默认协同模式：RDKClaw 编排 + OpenClaw 辅助",
     confidence: 0.72,
   };
 }
@@ -296,8 +300,8 @@ function mapMiniEvent(
           ...base,
           executor: "rdkclaw_local",
           phase: "end",
-          message: `子代理完成: ${(event as any).label || "task"}`,
-          subagent_summary: (event as any).summary,
+          message: `子代理完成: ${event.label || "task"}`,
+          subagent_summary: event.summary,
         },
       };
     case "subagent_error":
@@ -305,8 +309,8 @@ function mapMiniEvent(
         type: "error",
         data: {
           ...base,
-          error: `子代理失败: ${(event as any).error}`,
-          subagent_label: (event as any).label,
+          error: `子代理失败: ${event.error}`,
+          subagent_label: event.label,
         },
       };
     case "agent_end":
@@ -325,6 +329,7 @@ function resolveBoardDevicePassword(device: { username: string; password?: strin
 export class RDKClawApp {
   private readonly workspaceDir: string;
   private readonly openClawManager: OpenClawDeploymentManager;
+  private readonly ecosystemRegistry?: EcosystemRegistry;
   private readonly personaStore: PersonaStore;
   private readonly skills: SkillRegistry;
   private readonly policyStore: RDKClawPolicyStore;
@@ -397,9 +402,10 @@ export class RDKClawApp {
     });
   }
 
-  constructor(workspaceDir: string, openClawManager: OpenClawDeploymentManager) {
+  constructor(workspaceDir: string, openClawManager: OpenClawDeploymentManager, ecosystemRegistry?: EcosystemRegistry) {
     this.workspaceDir = workspaceDir;
     this.openClawManager = openClawManager;
+    this.ecosystemRegistry = ecosystemRegistry;
     this.personaStore = new PersonaStore();
     this.skills = new SkillRegistry({ workspaceDir });
     this.policyStore = new RDKClawPolicyStore();
@@ -599,8 +605,12 @@ export class RDKClawApp {
               chunk,
             },
           });
-        }, base.sessionId),
+        }, base.sessionId, this.ecosystemRegistry),
       );
+      if (this.ecosystemRegistry) {
+        const platform = (req as any).platform as RdkPlatform | undefined;
+        tools.push(createEcosystemQueryTool(req.deviceId, this.ecosystemRegistry, platform));
+      }
     }
     return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base));
   }
@@ -643,8 +653,14 @@ export class RDKClawApp {
     const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
     const setupElapsedMs = Date.now() - runStartedAt;
     const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot);
+    const detectedPlatform = (req as any).platform as RdkPlatform | undefined;
+    const deviceProfile = detectedPlatform ? getDeviceProfile(detectedPlatform) : null;
     const systemPrompt = [
       buildPersonaPrompt(persona),
+      deviceProfile
+        ? `当前平台: ${deviceProfile.displayName} (${deviceProfile.bpuTops}TOPS, ${deviceProfile.cpu}, ${deviceProfile.ramGb}GB RAM)。${deviceProfile.capabilityNotes?.length ? '能力: ' + deviceProfile.capabilityNotes.join('；') : ''}${deviceProfile.limitations.length ? '。限制: ' + deviceProfile.limitations.join('；') : ''}`
+        : "",
+      this.ecosystemRegistry ? "你可以使用 ecosystem_query 工具查询当前平台的可用技能、推荐方案和官方文档。" : "",
       req.deviceId
         ? (boardSnapshot.skills.length > 0
           ? `当前板端已安装 OpenClaw 技能（每次执行前快照）: ${boardSnapshot.skills.join(", ")}`
@@ -799,6 +815,10 @@ export class RDKClawApp {
       }
       const mapped = mapMiniEvent(event, base);
       if (mapped) pushEvent(mapped);
+    });
+
+    agent.startHeartbeat((content, reason) => {
+      pushEvent({ type: "meta", data: { ...base, executor: "rdkclaw_local", phase: "heartbeat", message: content, reason } });
     });
 
     const runPromise = agent

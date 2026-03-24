@@ -157,12 +157,14 @@ function BlockRenderer({
   onDismiss,
   onCancelTask,
   onApprovalAction,
+  onRecommendationChoice,
 }: {
   block: ChatBlock;
   onConfirm?: (id: string) => void;
   onDismiss?: (id: string) => void;
   onCancelTask?: (taskId: string) => void;
   onApprovalAction?: (approvalId: string, action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run', runId?: string) => void;
+  onRecommendationChoice?: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
 }) {
   const [rosFrame, setRosFrame] = useState(0);
   const [expandedTerminal, setExpandedTerminal] = useState(false);
@@ -295,6 +297,49 @@ function BlockRenderer({
           <button className="confirm-btn yes" onClick={() => onConfirm?.(block.confirmId)}>继续执行</button>
           <button className="confirm-btn no" onClick={() => onDismiss?.(block.confirmId)}>暂不执行</button>
         </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'recommendation') {
+    return (
+      <div className="msg-block confirm-block recommendation-card">
+        <div className="confirm-block-head">
+          <span className="confirm-block-title">方案推荐</span>
+        </div>
+        {block.question && <p className="confirm-block-text">{block.question}</p>}
+        <div className="recommendation-options">
+          {block.options.map((opt) => (
+            <button
+              key={opt.id}
+              className={`recommendation-option ${opt.recommended ? 'recommended' : ''} ${block.chosen === opt.id ? 'chosen' : ''}`}
+              disabled={!!block.chosen}
+              onClick={() => onRecommendationChoice?.(block.recommendationId, opt.id, false)}
+            >
+              <span className="recommendation-option-label">
+                {opt.recommended && <span className="recommendation-badge">推荐</span>}
+                {opt.label}
+              </span>
+              <span className="recommendation-option-desc">{opt.description}</span>
+            </button>
+          ))}
+        </div>
+        {block.allowAutoExecute && !block.chosen && (
+          <div className="recommendation-auto">
+            <button
+              className="confirm-btn yes"
+              onClick={() => {
+                const rec = block.options.find(o => o.recommended) || block.options[0];
+                if (rec) onRecommendationChoice?.(block.recommendationId, rec.id, true);
+              }}
+            >
+              自动执行推荐方案
+            </button>
+          </div>
+        )}
+        {block.chosen && (
+          <div className="recommendation-chosen">已选择: {block.options.find(o => o.id === block.chosen)?.label || block.chosen}</div>
+        )}
       </div>
     );
   }
@@ -473,7 +518,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    handleApprovalAction, stopCurrentRun, backgroundCurrentRun,
+    handleApprovalAction, handleRecommendationChoice, stopCurrentRun, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
@@ -671,7 +716,7 @@ export default function AIDock() {
   const filterAiBlocksForCompact = useCallback((blocks: ChatBlock[]) => {
     if (!compactFlowMode) return blocks;
     return blocks.filter((block) => {
-      if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result') return true;
+      if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result' || block.type === 'recommendation') return true;
       if (block.type === 'image' || block.type === 'code') return true;
       if (block.type === 'status') return shouldKeepStatusInCompact(block);
       return false;
@@ -1022,7 +1067,7 @@ export default function AIDock() {
                               <div className="dock-hidden-hint">已折叠中间过程 {foldedCount} 项（切换到“完整”可查看）</div>
                             )}
                             {visibleBlocks.map((block, i) => (
-                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} />
+                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} />
                             ))}
                           </>
                         );

@@ -568,6 +568,13 @@ export function decideRDKClawApproval(approvalId: string, decision: 'allow_once'
   });
 }
 
+export function sendRecommendationChoice(recommendationId: string, choiceId: string, autoExecute: boolean) {
+  return request<{ ok: boolean }>(`/api/rdkclaw/recommendations/${recommendationId}/choice`, {
+    method: 'POST',
+    body: JSON.stringify({ choiceId, autoExecute }),
+  });
+}
+
 export function cancelRDKClawRun(runId: string) {
   return request<{ ok: boolean }>(`/api/rdkclaw/runs/${runId}/cancel`, {
     method: 'POST',

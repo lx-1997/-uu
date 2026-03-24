@@ -601,6 +601,12 @@ export async function compactHistoryIfNeeded(params: {
     const halfIdx = Math.max(1, Math.floor(params.messages.length / 3));
     pruneResult.droppedMessages.push(...params.messages.slice(0, halfIdx));
     pruneResult.messages = params.messages.slice(halfIdx);
+
+    const recalcKept = pruneResult.messages.reduce((s, m) => s + JSON.stringify(m).length, 0);
+    const recalcDropped = pruneResult.droppedMessages.reduce((s, m) => s + JSON.stringify(m).length, 0);
+    pruneResult.totalChars = recalcKept + recalcDropped;
+    pruneResult.keptChars = recalcKept;
+    pruneResult.droppedChars = recalcDropped;
   }
 
   const resolvedSettings = { ...DEFAULT_COMPACTION_SETTINGS, ...params.compactionSettings };

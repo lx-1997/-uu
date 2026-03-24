@@ -228,7 +228,8 @@ const WORKSPACE_HEALTH_COMMAND = `bash -lc ${shellEscape(WORKSPACE_HEALTH_SCRIPT
 // OpenClaw Manager
 const resourcesPath = path.join(process.cwd(), 'build-resources');
 const openClawManager = new OpenClawDeploymentManager(resourcesPath);
-const rdkclaw = new RDKClawApp(process.cwd(), openClawManager);
+const ecosystem = initEcosystem();
+const rdkclaw = new RDKClawApp(process.cwd(), openClawManager, ecosystem.registry);
 const notificationHub = new NotificationHub(io);
 const feishuAdapter = new FeishuChannelAdapter(rdkclaw);
 const feishuConfigStore = new FeishuConfigStore();
@@ -1219,7 +1220,6 @@ app.use('/api/local-files', express.static(path.join(process.cwd(), 'downloads')
 }));
 
 // ─── Ecosystem Bridge ───
-const ecosystem = initEcosystem();
 
 async function ecoRunOnDevice(deviceId: string, commands: string[]): Promise<{ output: string } | null> {
   const devices = await readDevices();

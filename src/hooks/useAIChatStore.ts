@@ -5,6 +5,7 @@ import {
   bindRDKClawFeishuCode,
   cancelRDKClawRun,
   decideRDKClawApproval,
+  sendRecommendationChoice,
   executeDeviceCommand,
   deployOneShotApp,
   generateOneShotApp,
@@ -58,6 +59,7 @@ export interface AIChatStoreState {
     action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run',
     runId?: string,
   ) => void;
+  handleRecommendationChoice: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
   stopCurrentRun: () => void;
   backgroundCurrentRun: () => void;
   backgroundRuns: Array<{
@@ -1028,6 +1030,26 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
+              case 'recommendation': {
+                const recId = String(event.data.recommendationId || '');
+                if (!recId) break;
+                const question = String(event.data.question || '');
+                const options = (event.data.options as Array<{ id: string; label: string; description: string; recommended?: boolean }>) || [];
+                const allowAutoExecute = Boolean(event.data.allowAutoExecute);
+                const runId = String(event.data.runId || currentRunId || '');
+                aiBlocks.push({
+                  type: 'recommendation',
+                  recommendationId: recId,
+                  runId,
+                  question,
+                  options,
+                  allowAutoExecute,
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'recommendation_choice':
+                break;
               case 'approval_decision': {
                 const approvalId = String(event.data.approvalId || '');
                 const decision = String(event.data.decision || 'allow_once');
@@ -1242,6 +1264,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           title: ok ? '已提交审批决策' : '已拒绝执行',
           detail: ok ? `策略：${action}` : '该步骤不会执行',
         };
+      }),
+    })));
+  };
+
+  const handleRecommendationChoice = (recommendationId: string, choiceId: string, autoExecute: boolean) => {
+    sendRecommendationChoice(recommendationId, choiceId, autoExecute).catch(() => null);
+    setChatMessages((prev) => prev.map((msg) => ({
+      ...msg,
+      blocks: msg.blocks?.map((b) => {
+        if (b.type !== 'recommendation' || b.recommendationId !== recommendationId) return b;
+        return { ...b, chosen: choiceId };
       }),
     })));
   };
@@ -1607,7 +1640,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     aiTyping, setAiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
-    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, stopCurrentRun, backgroundCurrentRun,
+    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, stopCurrentRun, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
   };
 

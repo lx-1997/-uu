@@ -88,7 +88,8 @@ export type ChatBlock =
   | { type: 'confirm'; text: string; confirmId: string }
   | { type: 'approval'; text: string; approvalId: string; runId?: string; risk?: 'low' | 'medium' | 'high'; executor?: string }
   | { type: 'progress'; steps: Array<{ label: string; status: 'done' | 'running' | 'pending' }>; taskId?: string }
-  | { type: 'task-result'; success: boolean; title: string; detail: string };
+  | { type: 'task-result'; success: boolean; title: string; detail: string }
+  | { type: 'recommendation'; recommendationId: string; runId?: string; question: string; options: Array<{ id: string; label: string; description: string; recommended?: boolean }>; allowAutoExecute?: boolean; chosen?: string };
 
 export interface DashboardCard {
   tab: Tab;
