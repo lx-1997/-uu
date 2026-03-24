@@ -34,6 +34,7 @@ import { planTools } from "../agent/tools/plan-tool.js";
 import type { EcosystemRegistry } from "../ecosystem/registry.js";
 import { getDeviceProfile, type DeviceProfile } from "../ecosystem/device-profiles.js";
 import { detectPlatform } from "../ecosystem/device-profiles.js";
+import type { RdkPlatform } from "../../shared/ecosystem-types.js";
 import { PersonaStore } from "./persona-store.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { RDKClawPolicyStore } from "./policy-store.js";
