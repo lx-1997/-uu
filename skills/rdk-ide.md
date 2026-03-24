@@ -3,6 +3,7 @@ name: rdk-ide
 description: "代码编辑器：嵌入code-server在线IDE。Use when user wants to edit code, open editor, code-server, 代码编辑, 写代码, IDE."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"development","icon":"code","requires":{"device":true},"tab":"ide"}}
+disableModelInvocation: true
 ---
 
 # 代码编辑器

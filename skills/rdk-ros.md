@@ -3,6 +3,7 @@ name: rdk-ros
 description: "ROS2话题管理与录制：扫描话题、列出节点、rosbag录制。Use when user mentions ros, topic, 话题, 节点, rosbag, 录制, rosbridge."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"robotics","icon":"radio","requires":{"device":true},"tab":"ros"}}
+disableModelInvocation: true
 ---
 
 # ROS2

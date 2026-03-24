@@ -3,6 +3,7 @@ name: rdk-workflow
 description: "低代码流程编排：Node-RED工作流管理与验证。Use when user mentions workflow, node-red, 流程, 编排, lowcode, 工作流."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"development","icon":"git-branch","requires":{"device":true},"tab":"lowcode"}}
+disableModelInvocation: true
 ---
 
 # 流程编排

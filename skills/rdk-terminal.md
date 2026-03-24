@@ -3,6 +3,7 @@ name: rdk-terminal
 description: "SSH终端会话管理与命令执行。Use when user wants to open terminal, run command, execute, ssh, 终端, 命令行, 执行命令."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"development","icon":"terminal","requires":{"device":true},"tab":"terminal"}}
+disableModelInvocation: true
 ---
 
 # SSH 终端

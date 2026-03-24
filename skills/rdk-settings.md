@@ -3,6 +3,7 @@ name: rdk-settings
 description: "系统设置与页面导航。Use when user wants to open settings, change preferences, navigate to page, 设置, 偏好, 配置, 打开, 跳转."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"system","icon":"settings"}}
+disableModelInvocation: true
 ---
 
 # 设置与导航

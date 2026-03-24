@@ -3,6 +3,7 @@ name: rdk-hardware
 description: "硬件状态监控与诊断：CPU、内存、温度、BPU。Use when user asks about hardware, temperature, cpu, memory, bpu, 硬件, 温度, 散热, 诊断, 体检."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"monitoring","icon":"activity","requires":{"device":true},"tab":"hardware"}}
+disableModelInvocation: true
 ---
 
 # 硬件诊断

@@ -3,6 +3,7 @@ name: rdk-vnc
 description: "VNC远程桌面连接。Use when user wants to see screen, remote desktop, vnc, 远程桌面, 屏幕, 画面, 桌面."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"remote","icon":"monitor","requires":{"device":true},"tab":"vnc"}}
+disableModelInvocation: true
 ---
 
 # VNC 远程桌面

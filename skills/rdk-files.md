@@ -3,6 +3,7 @@ name: rdk-files
 description: "SFTP文件管理：浏览、编辑、上传、下载设备文件。Use when user wants to upload, download, browse files, 文件管理, 上传, 下载, 传文件."
 version: 1.0.0
 metadata: {"rdkstudio":{"category":"development","icon":"folder","requires":{"device":true},"tab":"files"}}
+disableModelInvocation: true
 ---
 
 # 文件管理
