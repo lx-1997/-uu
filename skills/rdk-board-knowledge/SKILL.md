@@ -69,3 +69,20 @@ doc_reference: {相关文档链接}
 - S100: https://developer.d-robotics.cc/rdk_doc/rdk_s/
 - Model Zoo: https://github.com/D-Robotics/rdk_model_zoo
 - S100 Model Zoo: https://github.com/D-Robotics/rdk_model_zoo_s
+
+## 工具映射
+
+| 工具 | 用途 |
+|------|------|
+| ecosystem_query | 查平台能力 |
+| board_openclaw_assess | 评估可行性 |
+| board_openclaw_delegate | 委派执行 |
+| device_exec | SSH直接执行 |
+| device_diagnose | 设备诊断 |
+
+## 禁止事项
+
+- 不在不了解平台能力的情况下盲目委派
+- 不用 X5 的方案直接套用到 X3（算力差距大）
+- 不忽略 S100 的 MCU 特殊能力
+- 不在委派消息中省略平台上下文

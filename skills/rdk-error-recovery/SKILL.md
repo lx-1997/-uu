@@ -55,6 +55,20 @@ category: Meta
 - 恢复后用对应的验证工具确认成功
 - 多次失败后向用户汇报完整错误链
 
+## 工具映射
+
+| 工具 | 用途 |
+|------|------|
+| `device_exec` | 重试命令、查进程、必要时 kill 后重试 |
+| `board_openclaw_restart_gateway` | 重启 OpenClaw 网关 |
+| `board_openclaw_health` | 健康检查与恢复后验证 |
+| `board_openclaw_doctor` | 自动/深度修复 |
+| `device_diagnose` | 设备侧诊断 |
+
+## 输出要求
+
+每次错误恢复必须报告：原始错误 → 恢复措施 → 恢复结果 → 是否需要进一步处理。
+
 ## 禁止事项
 - 不静默吞掉错误
 - 不在重试循环中无限等待

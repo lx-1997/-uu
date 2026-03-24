@@ -1,6 +1,6 @@
 ---
 name: RDK Board Delegate
-description: 需要板端真实能力时，将任务委派给板端 OpenClaw Agent。
+description: 当任务需要板端真实能力（硬件操作、模型推理、TROS pipeline 等软件端无法模拟的动作）时，将任务委派给板端 OpenClaw Agent；对于简单命令执行，可直接使用 device_exec 而无需委派。
 version: 1.0.0
 trigger: 板端,openclaw,委派,复杂任务,插件,部署,诊断修复
 risk: high
@@ -16,17 +16,40 @@ category: Delegation
 # RDK Board Delegate
 
 ## 适用场景
-- 任务要求板端 OpenClaw 或板端插件完成
-- 任务跨多个板端步骤，软件端工具不够稳定或不够完整
-- 用户明确要求“调用板端 OpenClaw”
+- 任务要求板端 OpenClaw 或板端插件完成（模型部署、TROS pipeline 操作、硬件诊断修复等）。
+- 任务跨多个板端步骤，软件端工具不够稳定或不够完整。
+- 用户明确要求"调用板端 OpenClaw"。
+- **何时直接用 `device_exec`**：目标是单条 shell 命令且不涉及 OpenClaw 技能编排（如 `ls`、`cat`、`systemctl status`），此时无需走委派链路。
 
-## 执行策略
-1. 优先使用 `board_openclaw_delegate`，把任务描述结构化后再提交。
-2. 委派前补充 `intent` 与 `context`，避免板端理解偏差。
-3. 板端返回错误时，先提炼可操作原因，再给出修复建议。
-4. 如任务可拆分，先让板端做高复杂步骤，再由软件端完成收尾验证。
+## 执行流程
+1. **评估可行性**：调用 `board_openclaw_assess` 确认板端 OpenClaw 在线、目标技能/插件已就绪。
+2. **查询生态能力**（可选）：若任务涉及特定插件或模型，调用 `ecosystem_query` 查询版本与兼容性。
+3. **结构化任务描述**：组装委派输入：
+   - `intent`：`diagnose` / `deploy` / `repair` / `automation`
+   - `task`：明确目标与验收条件
+   - `context`：设备现状、限制条件、日志摘要
+4. **提交委派**：调用 `board_openclaw_delegate` 将结构化任务提交给板端 OpenClaw。
+5. **等待与监控**：等待板端返回结果；若超时主动轮询，若报错提炼可操作原因。
+6. **汇总与验证**：板端完成后，汇报执行结果；如有异常，给出原因分析与修复建议。如任务可拆分，由软件端完成收尾验证。
 
-## 委派输入建议
-- `intent`: `diagnose` / `deploy` / `repair` / `automation`
-- `task`: 给出明确目标与验收条件
-- `context`: 设备现状、限制条件、日志摘要
+> **降级路径**：若步骤 1 判定 OpenClaw 不可达，降级为 `device_exec` 执行简单操作并告知用户。
+
+## 工具映射
+
+| 工具 | 用途 | 必需 |
+|------|------|------|
+| `board_openclaw_assess` | 评估板端 OpenClaw 可达性与技能就绪状态 | 是 |
+| `board_openclaw_delegate` | 将结构化任务委派给板端 OpenClaw 执行 | 是 |
+| `ecosystem_query` | 查询插件、模型、pipeline 的注册与版本信息 | 否 |
+| `device_exec` | 降级路径 / 简单命令直接执行（不经过 OpenClaw 编排） | 否 |
+
+## 输出要求
+- 委派后必须汇报：任务是否完成（成功 / 部分完成 / 失败）。
+- 给出关键输出摘要（板端返回的核心信息，去除冗余日志）。
+- 如有异常，说明原因并给出下一步建议（重试、修复、降级）。
+- 输出中标注哪些步骤由板端执行、哪些由软件端执行。
+
+## 禁止事项
+- **不绕过 assess 直接 delegate**：除非用户明确要求，否则必须先评估板端状态。
+- **不重复造轮子**：板端 OpenClaw 已有的能力（技能/插件）不要在本地重写或模拟。
+- **不在设备断连时尝试委派**：设备离线或 SSH 不可达时，不得调用 `board_openclaw_delegate`，应直接告知用户设备状态。

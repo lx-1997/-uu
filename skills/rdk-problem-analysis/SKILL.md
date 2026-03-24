@@ -18,7 +18,7 @@ category: Meta
 ## 适用场景
 用户报告设备/服务/功能异常，需要系统化排查而非盲目尝试。
 
-## 流程
+## 执行流程
 
 ### 1. 信息收集（不超过 3 步）
 - 用 `device_diagnose` 获取硬件基线（温度/内存/磁盘）
@@ -36,7 +36,19 @@ category: Meta
 - 每次验证后检查输出，确认/排除假设
 - 若 3 个假设全部排除，扩大信息收集范围（日志、配置文件）
 
-### 4. 结论输出
+## 工具映射
+
+| 工具 | 用途 |
+|------|------|
+| device_exec | 信息收集 |
+| device_diagnose | 设备状态 |
+| device_file_read | 读日志/配置 |
+| board_openclaw_health | OpenClaw状态 |
+| board_openclaw_delegate | 板端深度诊断 |
+| web_search | 查资料 |
+
+## 输出要求
+
 必须包含：
 - 根因（一句话）
 - 修复动作（具体命令/步骤）

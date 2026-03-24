@@ -20,11 +20,14 @@ category: Lifecycle
 - 用户要修改 OpenClaw 运行配置（模型切换、飞书配置、配对操作）。
 - 用户要验证 OpenClaw 是否可用（gateway/token/健康状态）。
 
-## 推荐工具
-- 诊断/状态：`board_openclaw_status`、`board_openclaw_logs`、`board_openclaw_read_config`
-- 生命周期：`board_openclaw_install`、`board_openclaw_upgrade`、`board_openclaw_uninstall`、`board_openclaw_restart_gateway`
-- 配置与接入：`board_openclaw_model_switch`、`board_openclaw_feishu_config`、`board_openclaw_pairing_list`、`board_openclaw_pairing_approve`、`board_openclaw_pairing_reject`
-- 复杂修复：`board_openclaw_assess`、`board_openclaw_delegate`
+## 工具映射
+
+| 工具 | 用途 |
+|------|------|
+| `board_openclaw_status`、`board_openclaw_logs`、`board_openclaw_read_config` | 诊断/状态 |
+| `board_openclaw_install`、`board_openclaw_upgrade`、`board_openclaw_uninstall`、`board_openclaw_restart_gateway` | 生命周期 |
+| `board_openclaw_model_switch`、`board_openclaw_feishu_config`、`board_openclaw_pairing_list`、`board_openclaw_pairing_approve`、`board_openclaw_pairing_reject` | 配置与接入 |
+| `board_openclaw_assess`、`board_openclaw_delegate` | 复杂修复 |
 
 ## 执行流程（必须按序）
 1. **先体检后变更**：先读取状态/日志/配置，再进入安装或改配置动作。
@@ -32,7 +35,7 @@ category: Lifecycle
 3. **变更后复核**：每次变更后必须再次检查状态并报告是否恢复。
 4. **失败可回退**：给出可执行回退方案（例如恢复旧模型、回滚配置、重启 gateway）。
 
-## 输出规范
+## 输出要求
 - 必须分四段：`当前状态`、`执行动作`、`验证结果`、`下一步建议`。
 - 输出中要标明：哪些动作已经执行、哪些仅为建议。
 - 高风险动作（卸载、覆盖配置）执行前要再次请求用户确认。
