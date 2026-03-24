@@ -27,8 +27,24 @@ const WEIXIN_MAX_TEXT = 4000;
 const MIN_RETRY_DELAY_MS = 2_000;
 const MAX_RETRY_DELAY_MS = 60_000;
 
-const IMAGE_EXT_RE = /\.(png|jpe?g|gif|bmp|webp|tiff?)$/i;
-const IMAGE_PATH_RE = /(?:^|\s)(\/[\w./-]+\.(?:png|jpe?g|gif|bmp|webp))/gi;
+const IMAGE_EXT_SET = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]);
+
+function extractImagePathsFromResult(raw: string): string[] {
+  const paths: string[] = [];
+  try {
+    const obj = JSON.parse(raw);
+    if (obj?.__type === "image_download" && obj.localPath) {
+      paths.push(String(obj.localPath));
+    }
+  } catch {
+    // not JSON, try regex for file paths (Unix + Windows)
+    const re = /(?:^|[\s"'=])([A-Za-z]:[\\\/][\w.\-\\\/]+\.(?:png|jpe?g|gif|bmp|webp)|\/[\w.\-\/]+\.(?:png|jpe?g|gif|bmp|webp))/gi;
+    for (const m of raw.matchAll(re)) {
+      paths.push(m[1]);
+    }
+  }
+  return paths;
+}
 
 function normalizeForWeixin(text: string): string {
   const raw = String(text || "").trim();
@@ -251,7 +267,7 @@ export class WeixinPollingChannel {
       });
 
     if (cfg.ackOnReceive && cfg.ackStyle !== "off") {
-      const ack = cfg.ackStyle === "emoji" ? "👌" : "已收到，正在处理...";
+      const ack = cfg.ackStyle === "emoji" ? "👌" : "小地瓜正在为您服务...";
       await poller.client.sendText(fromUserId, contextToken, ack).catch(() => {});
     }
 
@@ -301,8 +317,7 @@ export class WeixinPollingChannel {
           finalText = String(event.data?.text ?? "").trim();
         } else if (event.type === "tool_result") {
           const result = String(event.data?.result ?? "");
-          for (const match of result.matchAll(IMAGE_PATH_RE)) {
-            const p = match[1];
+          for (const p of extractImagePathsFromResult(result)) {
             if (fs.existsSync(p)) imagePaths.push(p);
           }
         } else if (event.type === "error") {
