@@ -54,9 +54,15 @@ category: AI
 
 ## 在线方案降级
 
-如果离线方案未安装（sherpa_setup 未运行），可降级使用在线工具：
-- `text_to_speech`：edge-tts 在线合成（需联网，音色更丰富）
-- `speech_to_text`：Google 在线识别（需联网）
+离线工具（`sherpa_tts` / `sherpa_stt`）失败时，**必须先询问用户**是否改用在线方案，不可自动切换。
+
+流程：
+1. 调用离线工具
+2. 如果返回中包含 `[离线方案失败]`，向用户说明失败原因
+3. 询问用户："离线语音方案执行失败，是否改用在线方案？（需要设备联网）"
+4. 用户同意后，改用对应在线工具：
+   - `sherpa_tts` 失败 → 改用 `text_to_speech`（edge-tts 在线合成，音色更丰富）
+   - `sherpa_stt` 失败 → 改用 `speech_to_text`（Google 在线识别）
 
 ## 模型信息
 

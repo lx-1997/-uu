@@ -968,7 +968,8 @@ function sherpaOfflineTtsTool(deviceId: string): Tool<{ text: string; speed?: nu
     name: 'sherpa_tts',
     description:
       '离线文字转语音（TTS）。使用 sherpa-onnx + Matcha-ICEFALL 中文模型在设备端本地合成语音，无需联网。' +
-      '需先通过 sherpa_setup 安装环境。返回可播放的音频文件 URL。',
+      '需先通过 sherpa_setup 安装环境。返回可播放的音频文件 URL。' +
+      '如果失败，必须询问用户是否改用在线方案 text_to_speech（需联网）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1049,14 +1050,17 @@ except Exception as e:
 
       await execOnDevice(deviceId, [`rm -f /tmp/rdk_sherpa_tts_${ts}.py`]);
 
+      const offlineFallbackHint =
+        '\n\n[离线方案失败] 请询问用户：是否改用在线方案（text_to_speech，需要设备联网）来完成语音合成？';
+
       if (!jsonLine) {
-        return `离线 TTS 合成失败:\n${output}\n\n提示: 请确保已运行 sherpa_setup 安装环境和模型。`;
+        return `离线 TTS 合成失败:\n${output}` + offlineFallbackHint;
       }
 
       try {
         const result = JSON.parse(jsonLine) as { ok: boolean; error?: string; duration?: number; bytes?: number };
         if (!result.ok) {
-          return `离线 TTS 合成失败: ${result.error}`;
+          return `离线 TTS 合成失败: ${result.error}` + offlineFallbackHint;
         }
 
         const localPath = path.resolve(ctx.workspaceDir, 'downloads', localFileName);
@@ -1077,7 +1081,7 @@ except Exception as e:
           message: `离线语音合成完成 (${(dlResult.bytes / 1024).toFixed(1)} KB, ${result.duration}s)，音频文件: [${localFileName}](${audioUrl})`,
         });
       } catch {
-        return `离线 TTS 输出解析失败:\n${output}`;
+        return `离线 TTS 输出解析失败:\n${output}` + offlineFallbackHint;
       }
     },
   };
@@ -1089,7 +1093,8 @@ function sherpaOfflineSttTool(deviceId: string): Tool<{ audio_path: string; lang
     description:
       '离线语音转文字（STT）。使用 sherpa-onnx + SenseVoice 在设备端本地识别语音，无需联网。' +
       '支持中/英/日/韩/粤五种语言自动检测。需先通过 sherpa_setup 安装环境。' +
-      '支持 wav/mp3/flac/ogg 等音频格式（非 wav 需 ffmpeg）。',
+      '支持 wav/mp3/flac/ogg 等音频格式（非 wav 需 ffmpeg）。' +
+      '如果失败，必须询问用户是否改用在线方案 speech_to_text（需联网）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1172,8 +1177,11 @@ finally:
       const output = await execOnDevice(deviceId, [cmd]);
       const jsonLine = output.split('\n').map(l => l.trim()).find(l => l.startsWith('{'));
 
+      const offlineFallbackHint =
+        '\n\n[离线方案失败] 请询问用户：是否改用在线方案（speech_to_text，需要设备联网）来完成语音识别？';
+
       if (!jsonLine) {
-        return `离线语音识别执行失败:\n${output}\n\n提示: 请确保已运行 sherpa_setup 安装环境和模型。`;
+        return `离线语音识别执行失败:\n${output}` + offlineFallbackHint;
       }
 
       try {
@@ -1189,9 +1197,9 @@ finally:
             message: `离线语音识别完成:\n\n"${result.text}"`,
           });
         }
-        return `离线语音识别失败: ${result.error || '未知错误'}`;
+        return `离线语音识别失败: ${result.error || '未知错误'}` + offlineFallbackHint;
       } catch {
-        return `离线语音识别输出解析失败:\n${output}`;
+        return `离线语音识别输出解析失败:\n${output}` + offlineFallbackHint;
       }
     },
   };
