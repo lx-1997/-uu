@@ -1262,16 +1262,19 @@
 }
 
 .settings-qr-container {
-  text-align: center;
+  display: inline-block;
   padding: 16px;
   background: #fff;
   border-radius: var(--radius-md);
+  border: 1px solid var(--border);
 }
 
 .settings-qr-img {
-  width: 180px;
-  height: 180px;
+  display: block;
+  width: 220px;
+  height: 220px;
   image-rendering: pixelated;
+  border-radius: 4px;
 }
 
 @media (max-width: 480px) {
