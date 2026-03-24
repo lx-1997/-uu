@@ -34,6 +34,7 @@ export function boardOpenClawDelegateTool(
   deviceId: string,
   manager: OpenClawDeploymentManager,
   onProgress?: (chunk: string) => void,
+  conversationId?: string,
 ): Tool<{
   task: string;
   intent?: string;
@@ -43,7 +44,7 @@ export function boardOpenClawDelegateTool(
   return {
     name: "board_openclaw_delegate",
     description:
-      "将复杂板端任务委派给板端 OpenClaw Agent 执行。适用于设备真实操作、板端插件流程、需要板端上下文的复杂任务。",
+      "将复杂板端任务委派给板端 OpenClaw Agent 执行。适用于设备真实操作、板端插件流程、需要板端上下文的复杂任务。同一对话内自动复用会话，板端保留上下文。",
     inputSchema: {
       type: "object",
       properties: {
@@ -67,7 +68,7 @@ export function boardOpenClawDelegateTool(
       ]
         .filter(Boolean)
         .join("\n");
-      const sessionId = input.sessionId?.trim() || `rdkclaw-board-${Date.now()}`;
+      const sessionId = input.sessionId?.trim() || `rdkclaw-board-${deviceId}-${conversationId || Date.now()}`;
 
       return await new Promise<string>((resolve, reject) => {
         if (ctx.abortSignal?.aborted) {

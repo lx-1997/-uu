@@ -599,7 +599,7 @@ export class RDKClawApp {
               chunk,
             },
           });
-        }),
+        }, base.sessionId),
       );
     }
     return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base));
