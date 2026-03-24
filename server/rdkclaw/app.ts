@@ -744,7 +744,7 @@ export class RDKClawApp {
       enableContext: true,
       enableSkills: true,
       enableMemory: true,
-      enableHeartbeat: false,
+      enableHeartbeat: true,
       maxTurns: 12,
       temperature: 0.7,
       reasoning: "medium",
