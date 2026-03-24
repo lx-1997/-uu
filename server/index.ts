@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import QRCode from 'qrcode';
 import { v4 as uuid } from 'uuid';
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
@@ -3992,7 +3993,8 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
       return;
     }
 
-    sendSSE('qrcode', { qrcode: qrData.qrcode_img_content });
+    const qrDataUrl = await QRCode.toDataURL(qrData.qrcode_img_content, { width: 280, margin: 2 });
+    sendSSE('qrcode', { qrcode: qrDataUrl });
     sendSSE('log', { message: '请用微信扫描二维码' });
 
     const deadline = Date.now() + MAX_WAIT_MS;
@@ -4043,7 +4045,8 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
             const refreshData = await refreshRes.json() as { qrcode?: string; qrcode_img_content?: string };
             if (refreshData.qrcode && refreshData.qrcode_img_content) {
               qrcode = refreshData.qrcode;
-              sendSSE('qrcode', { qrcode: refreshData.qrcode_img_content });
+              const refreshQrDataUrl = await QRCode.toDataURL(refreshData.qrcode_img_content, { width: 280, margin: 2 });
+              sendSSE('qrcode', { qrcode: refreshQrDataUrl });
               sendSSE('log', { message: '新二维码已生成，请重新扫描' });
             } else {
               sendSSE('error', { message: '刷新二维码失败' });
