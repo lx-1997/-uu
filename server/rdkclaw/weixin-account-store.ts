@@ -6,6 +6,7 @@ export interface WeixinAccount {
   accountId: string;
   token: string;
   nickname?: string;
+  baseUrl?: string;
   boundAt: number;
 }
 

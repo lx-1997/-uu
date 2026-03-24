@@ -1,4 +1,4 @@
-const ILINK_BASE_URL = "https://oapi.weixinbridge.com/ilink/bot";
+const DEFAULT_ILINK_BASE = "https://ilinkai.weixin.qq.com";
 const LONGPOLL_TIMEOUT_MS = 35_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -60,10 +60,12 @@ function randomUin(): string {
 
 export class WeixinApiClient {
   private token: string;
+  private baseUrl: string;
   private uin: string;
 
-  constructor(token: string) {
+  constructor(token: string, baseUrl?: string) {
     this.token = token;
+    this.baseUrl = (baseUrl || DEFAULT_ILINK_BASE).replace(/\/+$/, "");
     this.uin = randomUin();
   }
 
@@ -73,6 +75,10 @@ export class WeixinApiClient {
 
   isConfigured() {
     return !!this.token;
+  }
+
+  private api(path: string): string {
+    return `${this.baseUrl}/ilink/bot/${path}`;
   }
 
   private headers(): Record<string, string> {
@@ -91,7 +97,7 @@ export class WeixinApiClient {
       ? AbortSignal.any([signal, controller.signal])
       : controller.signal;
     try {
-      const res = await fetch(`${ILINK_BASE_URL}/getupdates`, {
+      const res = await fetch(this.api("getupdates"), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({ get_updates_buf: syncBuf }),
@@ -112,7 +118,7 @@ export class WeixinApiClient {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
     try {
-      const res = await fetch(`${ILINK_BASE_URL}/sendmessage`, {
+      const res = await fetch(this.api("sendmessage"), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
@@ -140,7 +146,7 @@ export class WeixinApiClient {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
     try {
-      await fetch(`${ILINK_BASE_URL}/sendtyping`, {
+      await fetch(this.api("sendtyping"), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
@@ -161,7 +167,7 @@ export class WeixinApiClient {
     try {
       const body: Record<string, string> = { ilink_user_id: userId };
       if (contextToken) body.context_token = contextToken;
-      const res = await fetch(`${ILINK_BASE_URL}/getconfig`, {
+      const res = await fetch(this.api("getconfig"), {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify(body),

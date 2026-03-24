@@ -148,7 +148,7 @@ export class WeixinPollingChannel {
   }
 
   private startPoller(account: WeixinAccount) {
-    const client = new WeixinApiClient(account.token);
+    const client = new WeixinApiClient(account.token, account.baseUrl);
     const poller: AccountPoller = {
       account,
       client,
