@@ -212,6 +212,7 @@ const WORKSPACE_HEALTH_SCRIPT = [
   'rosbridge_installed=$(echo "$_dpkg" | grep -q "rosbridge" && echo 1 || echo 0)',
   'rosbridge_running=$( (echo "$_ss" | grep -q ":9090" || echo "$_ps" | grep -qE "rosbridge_websocket|rosbridge_server") && echo 1 || echo 0 )',
   'tros_count=$(echo "$_dpkg" | grep -Ec "^(tros-|hobot)" || true)',
+  'ros_distro=$(printenv ROS_DISTRO 2>/dev/null || ls -1 /opt/tros/ 2>/dev/null | head -1 || ls -1 /opt/ros/ 2>/dev/null | head -1 || echo humble)',
   'modelzoo_dir=$(test -d /opt/rdk_model_zoo && echo 1 || echo 0)',
   'hrt_ready=$(command -v hrt_model_exec >/dev/null 2>&1 && echo 1 || echo 0)',
   'bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "import importlib.util; mods=(\'hobot_dnn\',\'hobot_dnn_rdkx5\',\'bpu_infer_lib_x5\',\'bpu_infer_lib_x3\'); print(1 if any(importlib.util.find_spec(name) is not None for name in mods) else 0)" 2>/dev/null || echo 0; else echo 0; fi)',
@@ -228,6 +229,7 @@ const WORKSPACE_HEALTH_SCRIPT = [
   'printf "rosbridge_installed=%s\\n" "$rosbridge_installed"',
   'printf "rosbridge_running=%s\\n" "$rosbridge_running"',
   'printf "tros_count=%s\\n" "$tros_count"',
+  'printf "ros_distro=%s\\n" "$ros_distro"',
   'printf "modelzoo_dir=%s\\n" "$modelzoo_dir"',
   'printf "hrt_ready=%s\\n" "$hrt_ready"',
   'printf "bpu_ready=%s\\n" "$bpu_ready"',
@@ -1293,6 +1295,55 @@ async function ecoRunOnDevice(deviceId: string, commands: string[]): Promise<{ o
 }
 
 app.use('/api/ecosystem', createEcosystemRouter(ecosystem, ecoRunOnDevice));
+
+// ─── Background Auto-Provision ───
+// Silently installs missing optional components (rosbridge, vnc, code-server)
+// after a health check detects they are absent. Uses nohup so SSH returns
+// immediately; actual install continues on the device in the background.
+
+const bgProvisionActive = new Map<string, Set<string>>();
+
+function triggerBackgroundProvision(deviceId: string, values: Record<string, string>) {
+  if (!bgProvisionActive.has(deviceId)) bgProvisionActive.set(deviceId, new Set());
+  const active = bgProvisionActive.get(deviceId)!;
+
+  const ros2Ready = readHealthBool(values, 'ros2_ready');
+  const rosbridgeInstalled = readHealthBool(values, 'rosbridge_installed');
+  const vncInstalled = readHealthBool(values, 'vnc_installed');
+  const codeInstalled = readHealthBool(values, 'code_installed');
+  const distro = (values.ros_distro ?? 'humble').trim() || 'humble';
+
+  const tasks: Array<{ key: string; cmd: string }> = [];
+
+  if (ros2Ready && !rosbridgeInstalled && !active.has('rosbridge')) {
+    tasks.push({
+      key: 'rosbridge',
+      cmd: `bash -lc 'test -f /tmp/.rdkstudio-bg-rosbridge && exit 0; touch /tmp/.rdkstudio-bg-rosbridge; nohup bash -c "source /opt/tros/humble/setup.bash 2>/dev/null; apt-get update -qq 2>/dev/null; apt-get install -y -qq ros-${distro}-rosbridge-server 2>&1 || apt-get install -y -qq tros-rosbridge-server 2>&1; rm -f /tmp/.rdkstudio-bg-rosbridge" > /tmp/.rdkstudio-bg-rosbridge.log 2>&1 &'`,
+    });
+  }
+
+  if (!vncInstalled && !active.has('vnc')) {
+    tasks.push({
+      key: 'vnc',
+      cmd: 'bash -lc \'test -f /tmp/.rdkstudio-bg-vnc && exit 0; touch /tmp/.rdkstudio-bg-vnc; nohup bash -c "apt-get update -qq 2>/dev/null; apt-get install -y -qq x11vnc 2>&1 || apt-get install -y -qq tigervnc-standalone-server 2>&1; rm -f /tmp/.rdkstudio-bg-vnc" > /tmp/.rdkstudio-bg-vnc.log 2>&1 &\'',
+    });
+  }
+
+  if (!codeInstalled && !active.has('code-server')) {
+    tasks.push({
+      key: 'code-server',
+      cmd: 'bash -lc \'test -f /tmp/.rdkstudio-bg-codeserver && exit 0; touch /tmp/.rdkstudio-bg-codeserver; nohup bash -c "curl -fsSL https://code-server.dev/install.sh | sh 2>&1; rm -f /tmp/.rdkstudio-bg-codeserver" > /tmp/.rdkstudio-bg-codeserver.log 2>&1 &\'',
+    });
+  }
+
+  for (const task of tasks) {
+    active.add(task.key);
+    ecoRunOnDevice(deviceId, [task.cmd])
+      .then((r) => console.log(`[bg-provision] ${deviceId}/${task.key}: ${r ? 'triggered' : 'device unreachable'}`))
+      .catch((e: unknown) => console.log(`[bg-provision] ${deviceId}/${task.key}: error`, e instanceof Error ? e.message : e))
+      .finally(() => active.delete(task.key));
+  }
+}
 
 // ─── Skill System ───
 const loadedSkills = loadAllSkills();
@@ -2653,6 +2704,8 @@ app.get('/api/devices/:id/workspace/health', async (request, response) => {
     output: executed.output,
     device: sanitizeDevice(executed.device as Device & { password?: string }),
   });
+
+  triggerBackgroundProvision(id, parseWorkspaceHealthPairs(executed.output));
 });
 
 /* ── Flash / System Update API ── */
