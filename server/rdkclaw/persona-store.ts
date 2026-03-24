@@ -23,6 +23,13 @@ function normalizeLegacyPersona(input: Partial<PersonaProfile>): Partial<Persona
   if (next.name?.trim() === LEGACY_DEFAULT_PERSONA_NAME) {
     next.name = DEFAULT_PERSONA.name;
   }
+  const legacy = input as Record<string, unknown>;
+  if (legacy.stylePrompt && !next.extraInstructions) {
+    next.extraInstructions = String(legacy.stylePrompt);
+  }
+  delete (next as Record<string, unknown>).stylePrompt;
+  delete (next as Record<string, unknown>).boardDelegationBias;
+  delete (next as Record<string, unknown>).notifyStyle;
   return next;
 }
 

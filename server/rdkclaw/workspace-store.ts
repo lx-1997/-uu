@@ -132,12 +132,13 @@ export class UserWorkspaceStore {
       };
     }
 
+    const sharedDir = path.join(WORKSPACES_DIR, "shared");
     return {
       profileId: "shared",
-      workspaceDir: this.defaultBootstrapRoot,
+      workspaceDir: sharedDir,
       source: "shared-default",
-      sessionDir: path.join(CONFIG_DIR, "sessions"),
-      memoryDir: path.join(CONFIG_DIR, "memory"),
+      sessionDir: path.join(sharedDir, ".rdkclaw-runtime", "sessions"),
+      memoryDir: path.join(sharedDir, ".rdkclaw-runtime", "memory"),
     };
   }
 

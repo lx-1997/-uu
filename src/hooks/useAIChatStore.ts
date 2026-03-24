@@ -1299,15 +1299,26 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     })));
   };
 
-  const handleSoulUpdateDecision = (proposalId: string, accepted: boolean) => {
-    sendSoulUpdateDecision(proposalId, accepted).catch(() => null);
-    setChatMessages((prev) => prev.map((msg) => ({
-      ...msg,
-      blocks: msg.blocks?.map((b) => {
-        if (b.type !== 'soul-update' || b.proposalId !== proposalId) return b;
-        return { ...b, accepted };
-      }),
-    })));
+  const handleSoulUpdateDecision = async (proposalId: string, accepted: boolean) => {
+    try {
+      await sendSoulUpdateDecision(proposalId, accepted);
+      setChatMessages((prev) => prev.map((msg) => ({
+        ...msg,
+        blocks: msg.blocks?.map((b) => {
+          if (b.type !== 'soul-update' || b.proposalId !== proposalId) return b;
+          return { ...b, accepted };
+        }),
+      })));
+    } catch {
+      setChatMessages((prev) => prev.map((msg) => ({
+        ...msg,
+        blocks: msg.blocks?.map((b) => {
+          if (b.type !== 'soul-update' || b.proposalId !== proposalId) return b;
+          return { ...b, accepted: false };
+        }),
+      })));
+      addToast('SOUL 更新提议已过期或处理失败', 'error');
+    }
   };
 
   const stopCurrentRun = () => {

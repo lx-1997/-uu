@@ -59,6 +59,8 @@
       "electron/**",
       "public/**",
       "data/**",
+      "agent/**",
+      "skills/**",
       "node_modules/**",
       "package.json"
     ],
