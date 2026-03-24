@@ -227,6 +227,9 @@ export default function OnboardingWizard() {
     setInstallElapsed(0);
     setShowSkipWarning(false);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     timerRef.current = setInterval(() => {
       setInstallElapsed(prev => prev + 1);
     }, 1000);
@@ -242,6 +245,7 @@ export default function OnboardingWizard() {
           modelId: modelName.trim(),
           api: 'openai-completions',
         }),
+        signal: controller.signal,
       });
       const startPayload = await startResponse.json().catch(() => ({} as { error?: string; code?: string; message?: string; jobId?: string }));
       if (!startResponse.ok || !startPayload?.jobId) {
@@ -254,7 +258,7 @@ export default function OnboardingWizard() {
       let done = false;
       while (!done) {
         await new Promise((r) => setTimeout(r, 1800));
-        const statusResponse = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/status?jobId=${encodeURIComponent(startPayload.jobId)}`));
+        const statusResponse = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/status?jobId=${encodeURIComponent(startPayload.jobId)}`), { signal: controller.signal });
         const statusPayload = await statusResponse.json().catch(() => ({} as { code?: string; message?: string; error?: string; job?: { status?: string; output?: string; error?: string } }));
         const job = statusPayload?.job;
         if (!statusResponse.ok || !job) {
