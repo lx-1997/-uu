@@ -182,7 +182,7 @@ export class WeixinPollingChannel {
           break;
         }
 
-        if (res.ret !== 0) {
+        if (res.ret !== undefined && res.ret !== 0) {
           poller.lastError = res.errmsg || `ret=${res.ret}`;
           console.warn(`${tag} getUpdates error: ret=${res.ret} errmsg=${res.errmsg || ""}`);
           await this.delay(poller);
@@ -192,8 +192,9 @@ export class WeixinPollingChannel {
         poller.lastError = null;
         poller.retryDelay = MIN_RETRY_DELAY_MS;
 
-        if (res.get_updates_buf) {
-          poller.syncBuf = res.get_updates_buf;
+        const syncBuf = res.get_updates_buf || (res as any).sync_buf || "";
+        if (syncBuf) {
+          poller.syncBuf = syncBuf;
         }
 
         const msgs = res.msgs || [];

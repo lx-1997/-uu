@@ -31,11 +31,12 @@ export interface WeixinMessage {
 }
 
 export interface GetUpdatesResponse {
-  ret: number;
+  ret?: number;
   errcode?: number;
   errmsg?: string;
   msgs?: WeixinMessage[];
   get_updates_buf?: string;
+  sync_buf?: string;
   longpolling_timeout_ms?: number;
 }
 
