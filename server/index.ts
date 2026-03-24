@@ -1061,16 +1061,24 @@ function buildWorkspaceHealth(output: string): DeviceWorkspaceHealth {
     vncRunning,
   );
 
-  const rosMissing = [
-    ros2Ready ? '' : 'ROS2',
-    rosbridgeInstalled ? '' : 'rosbridge_server',
-  ].filter(Boolean);
   const ros = buildWorkspaceModuleStatus(
-    ros2Ready && rosbridgeInstalled && rosbridgeRunning,
-    ros2Ready || rosbridgeInstalled,
-    !ros2Ready ? 'ROS2 未安装' : !rosbridgeInstalled ? '缺少 rosbridge_server' : rosbridgeRunning ? 'ROS2 与 rosbridge 已就绪' : 'rosbridge 已安装，但当前未运行',
-    !ros2Ready || !rosbridgeInstalled ? '前往 ROS 页补齐依赖并启动 rosbridge' : rosbridgeRunning ? '打开 ROS 可视化' : '前往 ROS 页启动 rosbridge',
-    rosMissing,
+    ros2Ready,
+    ros2Ready,
+    !ros2Ready
+      ? 'ROS2/TROS 未安装'
+      : rosbridgeRunning
+        ? 'TROS 与 rosbridge 均就绪'
+        : rosbridgeInstalled
+          ? 'TROS 已就绪，rosbridge 未运行'
+          : trosCount > 0
+            ? `TROS 已就绪（${trosCount} 个组件）`
+            : 'ROS2 已就绪',
+    !ros2Ready
+      ? '安装 TROS: sudo apt install tros-humble-ros-base'
+      : !rosbridgeRunning
+        ? '前往 ROS 页可启动 rosbridge 进行可视化'
+        : '打开 ROS 可视化',
+    ros2Ready ? [] : ['ROS2/TROS'],
     rosbridgeRunning,
   );
 
