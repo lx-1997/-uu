@@ -26,6 +26,20 @@
 - `board_openclaw_read_config`: 读取板端 OpenClaw 配置文件。
 - `board_openclaw_restart_gateway`: 重启板端 OpenClaw 网关。
 
+## 工具组合模式
+
+以下是常见任务对应的工具调用顺序，直接复用：
+
+- **设备排障**: `device_diagnose` → 看温度/内存/磁盘 → 若有异常 `device_exec` 针对性排查
+- **OpenClaw 环境检查**: `board_openclaw_check`（全面）或 `board_openclaw_health`（结构化 JSON）
+- **OpenClaw 修复**: `board_openclaw_doctor` → `board_openclaw_restart_gateway` → `board_openclaw_health` 验证
+- **OpenClaw 安装/升级**: `board_openclaw_install` 或 `board_openclaw_upgrade` → `board_openclaw_health` 验证
+- **文件传输**: `device_file_download_to_local`（下载到本机查看）或 `device_file_upload_from_local`（推到设备）
+- **日志排查**: `board_openclaw_logs`（网关日志）+ `device_exec` 查 journalctl / dmesg
+- **TTS/STT**: `text_to_speech`（文字→音频下载到本机）/ `speech_to_text`（设备音频→文字）
+
+重要：操作后必须用验证工具确认结果，不假装成功。
+
 ## 安全规则
 
 - 危险命令（rm -rf /、dd、mkfs）执行前必须确认

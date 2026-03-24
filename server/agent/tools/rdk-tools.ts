@@ -120,7 +120,7 @@ function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: stri
 function deviceExecTool(deviceId: string): Tool<{ command: string }> {
   return {
     name: 'device_exec',
-    description: '在 RDK 设备上执行 shell 命令。用于运行任意命令、安装软件、查看系统状态、编译代码等。',
+    description: '在 RDK 设备上执行 shell 命令。用于运行任意命令、安装软件、查看系统状态、编译代码等。长时间命令加 timeout 30；避免交互式命令（vim/top）；复杂任务用 && 串联。执行后检查输出确认是否成功。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -211,7 +211,7 @@ function deviceDiagnoseTool(deviceId: string): Tool<Record<string, never>> {
 function boardOpenClawStatusTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_status',
-    description: '查看板端 OpenClaw 状态（进程/服务/版本摘要）。',
+    description: '快速查看板端 OpenClaw 运行状态（进程/服务/版本摘要）。如需结构化 JSON 用 board_openclaw_health；如需全面诊断用 board_openclaw_check。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -489,7 +489,7 @@ function boardOpenClawLogsTool(deviceId: string): Tool<{ limit?: number }> {
 function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_restart_gateway',
-    description: '重启板端 OpenClaw gateway 服务。',
+    description: '重启板端 OpenClaw gateway 服务。重启后应调用 board_openclaw_health 验证服务是否恢复正常。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -505,7 +505,7 @@ function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, 
 function boardOpenClawDoctorTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_doctor',
-    description: '在板端执行 openclaw doctor --fix，自动诊断并修复常见问题（配置、权限、daemon 等）。',
+    description: '在板端执行 openclaw doctor --fix，自动诊断并修复常见问题（配置、权限、daemon 等）。修复后应调用 board_openclaw_restart_gateway + board_openclaw_health 完成验证闭环。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [
@@ -531,7 +531,7 @@ function boardOpenClawModelTestTool(deviceId: string): Tool<Record<string, never
 function boardOpenClawCheckTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_check',
-    description: '完整诊断板端 OpenClaw 环境：Node/npm 版本、安装状态、网关端口、配置（敏感字段已脱敏）、health。',
+    description: '完整诊断板端 OpenClaw 环境：Node/npm 版本、安装状态、网关端口、配置（敏感字段已脱敏）、health。适合首次排查或全面体检；轻量检查用 board_openclaw_health。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const maskPy = `import json,os,sys;p=os.path.expanduser("~/.openclaw/openclaw.json");d=json.load(open(p));
@@ -558,7 +558,7 @@ print(json.dumps(mask(d),indent=2))`.replace(/\n/g, ';');
 function boardOpenClawHealthTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_health',
-    description: '获取板端 OpenClaw 结构化健康状态（JSON 格式：installed、gatewayRunning、version、hasToken、aiReady 等）。',
+    description: '获取板端 OpenClaw 结构化健康状态（JSON 格式：installed、gatewayRunning、version、hasToken、aiReady 等）。用于操作后快速验证服务是否正常。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [
