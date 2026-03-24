@@ -54,6 +54,9 @@ export function createRdkTools(deviceId: string): Tool[] {
     flashCheckTool(deviceId),
     ttsTextToSpeechTool(deviceId),
     sttSpeechToTextTool(deviceId),
+    sherpaSetupTool(deviceId),
+    sherpaOfflineTtsTool(deviceId),
+    sherpaOfflineSttTool(deviceId),
   ];
   return tools;
 }
@@ -893,6 +896,302 @@ finally:
         return `语音识别失败: ${result.error || '未知错误'}`;
       } catch {
         return `语音识别输出解析失败:\n${output}`;
+      }
+    },
+  };
+}
+
+// ── sherpa-onnx 离线语音工具 ────────────────────────────────────
+
+const SHERPA_MODEL_DIR = '/opt/sherpa-models';
+const SHERPA_ASR_DIR = `${SHERPA_MODEL_DIR}/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17`;
+const SHERPA_TTS_DIR = `${SHERPA_MODEL_DIR}/matcha-icefall-zh-baker`;
+const SHERPA_VOCODER = `${SHERPA_MODEL_DIR}/vocos-22khz-univ.onnx`;
+const SHERPA_VAD = `${SHERPA_MODEL_DIR}/silero_vad.onnx`;
+
+function sherpaSetupTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'sherpa_setup',
+    description:
+      '一键安装 sherpa-onnx 离线语音环境（STT + TTS）。' +
+      '安装 Python 包并下载 ASR（SenseVoice ~228MB）、TTS（Matcha ~72MB）、声码器（~51MB）、VAD（~2MB）模型。' +
+      '幂等执行：已安装的部分会自动跳过。首次安装需联网下载约 350MB。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const steps = [
+        `echo "[1/6] 检查 & 安装 sherpa-onnx..."`,
+        `python3 -c "import sherpa_onnx; print('sherpa-onnx already installed:', sherpa_onnx.__version__)" 2>/dev/null || pip3 install sherpa-onnx -q 2>&1`,
+        `echo "[2/6] 创建模型目录..."`,
+        `mkdir -p ${SHERPA_MODEL_DIR}`,
+
+        `echo "[3/6] 检查 ASR 模型 (SenseVoice INT8)..."`,
+        `if [ -f ${SHERPA_ASR_DIR}/model.int8.onnx ]; then echo "ASR model exists, skipping"; else ` +
+          `echo "Downloading ASR model (~228MB)..." && ` +
+          `cd ${SHERPA_MODEL_DIR} && ` +
+          `wget -q --show-progress -O sensevoice.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2 && ` +
+          `tar xjf sensevoice.tar.bz2 && rm -f sensevoice.tar.bz2 && ` +
+          `echo "ASR model downloaded"; fi`,
+
+        `echo "[4/6] 检查 TTS 模型 (Matcha-ICEFALL zh-baker)..."`,
+        `if [ -f ${SHERPA_TTS_DIR}/model-steps-3.onnx ]; then echo "TTS model exists, skipping"; else ` +
+          `echo "Downloading TTS model (~72MB)..." && ` +
+          `cd ${SHERPA_MODEL_DIR} && ` +
+          `wget -q --show-progress -O matcha-tts.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-zh-baker.tar.bz2 && ` +
+          `tar xjf matcha-tts.tar.bz2 && rm -f matcha-tts.tar.bz2 && ` +
+          `echo "TTS model downloaded"; fi`,
+
+        `echo "[5/6] 检查声码器 (Vocos)..."`,
+        `if [ -f ${SHERPA_VOCODER} ]; then echo "Vocoder exists, skipping"; else ` +
+          `echo "Downloading vocoder (~51MB)..." && ` +
+          `wget -q --show-progress -O ${SHERPA_VOCODER} https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-22khz-univ.onnx && ` +
+          `echo "Vocoder downloaded"; fi`,
+
+        `echo "[6/6] 检查 VAD 模型 (Silero)..."`,
+        `if [ -f ${SHERPA_VAD} ]; then echo "VAD model exists, skipping"; else ` +
+          `echo "Downloading VAD model (~2MB)..." && ` +
+          `wget -q --show-progress -O ${SHERPA_VAD} https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx && ` +
+          `echo "VAD model downloaded"; fi`,
+
+        `echo "=== 验证安装 ==="`,
+        `python3 -c "import sherpa_onnx; print('sherpa-onnx version:', sherpa_onnx.__version__)"`,
+        `ls -lh ${SHERPA_ASR_DIR}/model.int8.onnx ${SHERPA_TTS_DIR}/model-steps-3.onnx ${SHERPA_VOCODER} ${SHERPA_VAD} 2>&1`,
+        `echo "[sherpa-onnx] 安装完成"`,
+      ];
+      const cmd = `bash -lc "${steps.join(' && ')}"`;
+      return execOnDevice(deviceId, [cmd]);
+    },
+  };
+}
+
+function sherpaOfflineTtsTool(deviceId: string): Tool<{ text: string; speed?: number }> {
+  return {
+    name: 'sherpa_tts',
+    description:
+      '离线文字转语音（TTS）。使用 sherpa-onnx + Matcha-ICEFALL 中文模型在设备端本地合成语音，无需联网。' +
+      '需先通过 sherpa_setup 安装环境。返回可播放的音频文件 URL。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '要合成为语音的文字内容（支持中文和数字）' },
+        speed: { type: 'number', description: '语速，1.0 为正常，>1 加速，<1 减速。默认 1.0' },
+      },
+      required: ['text'],
+    },
+    async execute(input, ctx) {
+      const speed = input.speed ?? 1.0;
+      const ts = Date.now();
+      const remoteOut = `/tmp/sherpa_tts_${ts}.wav`;
+      const localFileName = `sherpa_tts_${ts}.wav`;
+      const textB64 = Buffer.from(input.text, 'utf8').toString('base64');
+
+      const pyScript = `
+import sys, json, os, base64
+
+text = base64.b64decode("${textB64}").decode("utf-8")
+speed = ${speed}
+output_path = "${remoteOut}"
+
+TTS_DIR = "${SHERPA_TTS_DIR}"
+VOCODER = "${SHERPA_VOCODER}"
+
+for f in [f"{TTS_DIR}/model-steps-3.onnx", VOCODER]:
+    if not os.path.isfile(f):
+        print(json.dumps({"ok": False, "error": f"文件不存在: {f}，请先运行 sherpa_setup"}))
+        sys.exit(0)
+
+try:
+    import sherpa_onnx
+except ImportError:
+    print(json.dumps({"ok": False, "error": "sherpa-onnx 未安装，请先运行 sherpa_setup"}))
+    sys.exit(0)
+
+import numpy as np
+import wave as wave_mod
+
+try:
+    tts_config = sherpa_onnx.OfflineTtsConfig(
+        model=sherpa_onnx.OfflineTtsModelConfig(
+            matcha=sherpa_onnx.OfflineTtsMatchaModelConfig(
+                acoustic_model=f"{TTS_DIR}/model-steps-3.onnx",
+                vocoder=VOCODER,
+                lexicon=f"{TTS_DIR}/lexicon.txt",
+                tokens=f"{TTS_DIR}/tokens.txt",
+                dict_dir=f"{TTS_DIR}/dict",
+            ),
+            num_threads=2,
+            debug=False,
+        ),
+        rule_fsts=",".join(f"{TTS_DIR}/{n}" for n in ["phone.fst", "date.fst", "number.fst"]),
+    )
+    tts = sherpa_onnx.OfflineTts(tts_config)
+    audio = tts.generate(text, sid=0, speed=speed)
+
+    samples = np.array(audio.samples)
+    samples = (samples * 32767).astype(np.int16)
+    with wave_mod.open(output_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(audio.sample_rate)
+        wf.writeframes(samples.tobytes())
+
+    duration = round(len(audio.samples) / audio.sample_rate, 2)
+    file_size = os.path.getsize(output_path)
+    print(json.dumps({"ok": True, "path": output_path, "duration": duration, "bytes": file_size}))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+`.trim();
+
+      const b64 = Buffer.from(pyScript, 'utf8').toString('base64');
+      const cmd = `echo '${b64}' | base64 -d > /tmp/rdk_sherpa_tts_${ts}.py && python3 /tmp/rdk_sherpa_tts_${ts}.py 2>&1`;
+
+      const output = await execOnDevice(deviceId, [cmd]);
+      const jsonLine = output.split('\n').map(l => l.trim()).find(l => l.startsWith('{'));
+
+      await execOnDevice(deviceId, [`rm -f /tmp/rdk_sherpa_tts_${ts}.py`]);
+
+      if (!jsonLine) {
+        return `离线 TTS 合成失败:\n${output}\n\n提示: 请确保已运行 sherpa_setup 安装环境和模型。`;
+      }
+
+      try {
+        const result = JSON.parse(jsonLine) as { ok: boolean; error?: string; duration?: number; bytes?: number };
+        if (!result.ok) {
+          return `离线 TTS 合成失败: ${result.error}`;
+        }
+
+        const localPath = path.resolve(ctx.workspaceDir, 'downloads', localFileName);
+        const dlResult = await downloadDeviceFileToLocal(deviceId, remoteOut, localPath);
+        const audioUrl = `/api/local-files/${encodeURIComponent(localFileName)}`;
+
+        await execOnDevice(deviceId, [`rm -f ${remoteOut}`]);
+
+        return JSON.stringify({
+          __type: 'audio_tts',
+          text: input.text.slice(0, 100) + (input.text.length > 100 ? '...' : ''),
+          speed,
+          audioUrl,
+          localPath: dlResult.localPath,
+          bytes: dlResult.bytes,
+          duration: result.duration,
+          offline: true,
+          message: `离线语音合成完成 (${(dlResult.bytes / 1024).toFixed(1)} KB, ${result.duration}s)，音频文件: [${localFileName}](${audioUrl})`,
+        });
+      } catch {
+        return `离线 TTS 输出解析失败:\n${output}`;
+      }
+    },
+  };
+}
+
+function sherpaOfflineSttTool(deviceId: string): Tool<{ audio_path: string; language?: string }> {
+  return {
+    name: 'sherpa_stt',
+    description:
+      '离线语音转文字（STT）。使用 sherpa-onnx + SenseVoice 在设备端本地识别语音，无需联网。' +
+      '支持中/英/日/韩/粤五种语言自动检测。需先通过 sherpa_setup 安装环境。' +
+      '支持 wav/mp3/flac/ogg 等音频格式（非 wav 需 ffmpeg）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        audio_path: { type: 'string', description: '设备上的音频文件绝对路径，如 /tmp/recording.wav' },
+        language: {
+          type: 'string',
+          description: '识别语言: auto=自动检测(默认), zh=中文, en=英文, ja=日语, ko=韩语, yue=粤语',
+        },
+      },
+      required: ['audio_path'],
+    },
+    async execute(input) {
+      const language = input.language || 'auto';
+      const ts = Date.now();
+
+      const pyScript = `
+import sys, json, os, subprocess
+
+audio_path = "${input.audio_path.replace(/"/g, '\\"')}"
+language = "${language}"
+
+ASR_DIR = "${SHERPA_ASR_DIR}"
+
+if not os.path.isfile(audio_path):
+    print(json.dumps({"ok": False, "error": f"文件不存在: {audio_path}"}))
+    sys.exit(0)
+
+if not os.path.isfile(f"{ASR_DIR}/model.int8.onnx"):
+    print(json.dumps({"ok": False, "error": "ASR 模型未安装，请先运行 sherpa_setup"}))
+    sys.exit(0)
+
+try:
+    import sherpa_onnx
+except ImportError:
+    print(json.dumps({"ok": False, "error": "sherpa-onnx 未安装，请先运行 sherpa_setup"}))
+    sys.exit(0)
+
+wav_path = audio_path
+tmp_wav = None
+ext = os.path.splitext(audio_path)[1].lower()
+if ext not in ('.wav',):
+    tmp_wav = f"/tmp/sherpa_stt_cvt_{os.getpid()}.wav"
+    try:
+        subprocess.check_call(
+            ['ffmpeg', '-y', '-i', audio_path, '-ar', '16000', '-ac', '1', '-sample_fmt', 's16', tmp_wav],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        wav_path = tmp_wav
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": f"音频转换失败 (需要 ffmpeg): {e}"}))
+        sys.exit(0)
+
+try:
+    recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+        model=f"{ASR_DIR}/model.int8.onnx",
+        tokens=f"{ASR_DIR}/tokens.txt",
+        language=language,
+        use_itn=True,
+        num_threads=2,
+        debug=False,
+    )
+    samples, sample_rate = sherpa_onnx.read_wave(wav_path)
+    stream = recognizer.create_stream()
+    stream.accept_waveform(sample_rate, samples)
+    recognizer.decode(stream)
+
+    text = stream.result.text.strip()
+    duration = round(len(samples) / sample_rate, 2)
+    print(json.dumps({"ok": True, "text": text, "language": language, "duration": duration}))
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)}))
+finally:
+    if tmp_wav and os.path.exists(tmp_wav):
+        os.remove(tmp_wav)
+`.trim();
+
+      const b64 = Buffer.from(pyScript, 'utf8').toString('base64');
+      const cmd = `echo '${b64}' | base64 -d > /tmp/rdk_sherpa_stt_${ts}.py && python3 /tmp/rdk_sherpa_stt_${ts}.py 2>&1; rm -f /tmp/rdk_sherpa_stt_${ts}.py`;
+
+      const output = await execOnDevice(deviceId, [cmd]);
+      const jsonLine = output.split('\n').map(l => l.trim()).find(l => l.startsWith('{'));
+
+      if (!jsonLine) {
+        return `离线语音识别执行失败:\n${output}\n\n提示: 请确保已运行 sherpa_setup 安装环境和模型。`;
+      }
+
+      try {
+        const result = JSON.parse(jsonLine) as { ok: boolean; text?: string; error?: string; language?: string; duration?: number };
+        if (result.ok && result.text) {
+          return JSON.stringify({
+            __type: 'stt_result',
+            text: result.text,
+            language: result.language || language,
+            audioPath: input.audio_path,
+            duration: result.duration,
+            offline: true,
+            message: `离线语音识别完成:\n\n"${result.text}"`,
+          });
+        }
+        return `离线语音识别失败: ${result.error || '未知错误'}`;
+      } catch {
+        return `离线语音识别输出解析失败:\n${output}`;
       }
     },
   };
