@@ -68,7 +68,7 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.avi', '.mov', '.mkv']);
 function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: string; localPath?: string }> {
   return {
     name: 'device_file_download_to_local',
-    description: '把设备上的文件下载到本机（RDK Studio 所在电脑）。可选 localPath，不填则下载到 workspace/downloads/。下载图片后会返回可预览的 URL。',
+    description: '把设备上的文件下载到本机（RDK Studio 所在电脑）。可选 localPath，不填则下载到 workspace/downloads/。下载图片或视频后会返回可预览的 URL。',
     inputSchema: {
       type: 'object',
       properties: {

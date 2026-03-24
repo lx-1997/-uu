@@ -31,7 +31,7 @@ const MAX_RETRY_DELAY_MS = 60_000;
 const IMG_EXT = "png|jpe?g|gif|bmp|webp";
 const VID_EXT = "mp4|webm|avi|mov|mkv";
 const MEDIA_EXT = `${IMG_EXT}|${VID_EXT}`;
-const MD_IMG_RE = new RegExp(`!\\[[^\\]]*\\]\\(([^)]+\\.(?:${IMG_EXT}))\\)`, "gi");
+const MD_MEDIA_RE = new RegExp(`!\\[[^\\]]*\\]\\(([^)]+\\.(?:${MEDIA_EXT}))\\)`, "gi");
 const LOCAL_PATH_RE = new RegExp(
   `(?:^|[\\s"'：])([A-Za-z]:[\\\\\/][\\w.\\-\\\\\/]+\\.(?:${MEDIA_EXT})|\/[\\w.\\-\/]+\\.(?:${MEDIA_EXT}))`,
   "gi",
@@ -365,7 +365,7 @@ export class WeixinPollingChannel {
 
     // Also scan the text reply for markdown images and local paths
     const seen = new Set(mediaPaths.map(mp => mp.path.toLowerCase()));
-    for (const re of [MD_IMG_RE, LOCAL_PATH_RE]) {
+    for (const re of [MD_MEDIA_RE, LOCAL_PATH_RE]) {
       re.lastIndex = 0;
       for (const m of replyRaw.matchAll(re)) {
         let p = m[1];

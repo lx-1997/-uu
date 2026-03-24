@@ -216,7 +216,7 @@ export class WeixinApiClient {
     if (!cdnMedia.encrypt_query_param || !cdnMedia.aes_key) {
       throw new Error("CdnMedia missing encrypt_query_param or aes_key");
     }
-    const url = `${WEIXIN_CDN_BASE}?${cdnMedia.encrypt_query_param}`;
+    const url = `${WEIXIN_CDN_BASE}/download?encrypted_query_param=${encodeURIComponent(cdnMedia.encrypt_query_param)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CDN_TIMEOUT_MS);
     try {
