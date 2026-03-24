@@ -476,6 +476,7 @@ export default function SettingsPanel() {
     setWeixinLoginLoading(true);
     setWeixinLoginStatus('正在获取二维码...');
 
+    let settled = false;
     const es = new EventSource(resolveApiUrl('/api/rdkclaw/weixin/login'));
     setWeixinLoginEventSource(es);
 
@@ -498,6 +499,8 @@ export default function SettingsPanel() {
       } catch { /* ignore */ }
     });
     es.addEventListener('bound', (e) => {
+      if (settled) return;
+      settled = true;
       try {
         const data = JSON.parse(e.data);
         addToast(`微信已绑定: ${data.nickname || data.accountId}`, 'success');
@@ -506,14 +509,18 @@ export default function SettingsPanel() {
       closeWeixinLogin();
     });
     es.addEventListener('error', (e) => {
+      if (settled) return;
+      settled = true;
       try {
         const data = JSON.parse((e as any).data || '{}');
         addToast(`登录失败: ${data.message || '未知错误'}`, 'error');
       } catch { /* ignore */ }
       closeWeixinLogin();
     });
-    es.addEventListener('done', () => { closeWeixinLogin(); });
+    es.addEventListener('done', () => { if (!settled) closeWeixinLogin(); });
     es.onerror = () => {
+      if (settled) return;
+      settled = true;
       addToast('连接中断，请重试', 'error');
       closeWeixinLogin();
     };

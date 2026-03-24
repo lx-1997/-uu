@@ -81,33 +81,48 @@ export class WeixinApiClient {
     return `${this.baseUrl}/ilink/bot/${path}`;
   }
 
-  private headers(): Record<string, string> {
+  private static BASE_INFO = { channel_version: "rdkstudio" };
+
+  private buildHeaders(body: string): Record<string, string> {
     return {
       "Content-Type": "application/json",
+      "Content-Length": String(Buffer.byteLength(body, "utf-8")),
       AuthorizationType: "ilink_bot_token",
       Authorization: `Bearer ${this.token}`,
       "X-WECHAT-UIN": this.uin,
     };
   }
 
-  async getUpdates(syncBuf: string, signal?: AbortSignal): Promise<GetUpdatesResponse> {
+  private async post<T>(endpoint: string, payload: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+    const bodyWithInfo = { ...payload, base_info: WeixinApiClient.BASE_INFO };
+    const bodyStr = JSON.stringify(bodyWithInfo);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), LONGPOLL_TIMEOUT_MS + 5_000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const combinedSignal = signal
       ? AbortSignal.any([signal, controller.signal])
       : controller.signal;
     try {
-      const res = await fetch(this.api("getupdates"), {
+      const res = await fetch(this.api(endpoint), {
         method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({ get_updates_buf: syncBuf }),
+        headers: this.buildHeaders(bodyStr),
+        body: bodyStr,
         signal: combinedSignal,
       });
-      const data = (await res.json()) as GetUpdatesResponse;
-      return data;
+      const text = await res.text();
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        throw new Error(`Invalid JSON from ${endpoint}: ${text.slice(0, 200)}`);
+      }
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(timer);
     }
+  }
+
+  async getUpdates(syncBuf: string, signal?: AbortSignal): Promise<GetUpdatesResponse> {
+    return this.post<GetUpdatesResponse>("getupdates", {
+      get_updates_buf: syncBuf || "",
+    }, LONGPOLL_TIMEOUT_MS + 5_000, signal);
   }
 
   async sendMessage(
@@ -115,25 +130,13 @@ export class WeixinApiClient {
     contextToken: string,
     items: WeixinMessageItem[],
   ): Promise<SendMessageResponse> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-    try {
-      const res = await fetch(this.api("sendmessage"), {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({
-          msg: {
-            to_user_id: toUserId,
-            context_token: contextToken,
-            item_list: items,
-          },
-        }),
-        signal: controller.signal,
-      });
-      return (await res.json()) as SendMessageResponse;
-    } finally {
-      clearTimeout(timeout);
-    }
+    return this.post<SendMessageResponse>("sendmessage", {
+      msg: {
+        to_user_id: toUserId,
+        context_token: contextToken,
+        item_list: items,
+      },
+    }, DEFAULT_TIMEOUT_MS);
   }
 
   async sendText(toUserId: string, contextToken: string, text: string) {
@@ -143,39 +146,16 @@ export class WeixinApiClient {
   }
 
   async sendTyping(userId: string, ticket: string, status: 1 | 2): Promise<void> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-    try {
-      await fetch(this.api("sendtyping"), {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({
-          ilink_user_id: userId,
-          typing_ticket: ticket,
-          status,
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
+    await this.post<unknown>("sendtyping", {
+      ilink_user_id: userId,
+      typing_ticket: ticket,
+      status,
+    }, DEFAULT_TIMEOUT_MS);
   }
 
   async getConfig(userId: string, contextToken?: string): Promise<GetConfigResponse> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const body: Record<string, string> = { ilink_user_id: userId };
-      if (contextToken) body.context_token = contextToken;
-      const res = await fetch(this.api("getconfig"), {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      return (await res.json()) as GetConfigResponse;
-    } finally {
-      clearTimeout(timeout);
-    }
+    const payload: Record<string, string> = { ilink_user_id: userId };
+    if (contextToken) payload.context_token = contextToken;
+    return this.post<GetConfigResponse>("getconfig", payload, 10_000);
   }
 }
