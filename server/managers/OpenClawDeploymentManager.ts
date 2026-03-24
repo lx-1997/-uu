@@ -112,7 +112,7 @@ const ENSURE_GATEWAY_LOCAL_MODE = [
   'python3 /tmp/oc_fix_gateway_mode.py 2>&1 || echo "[OpenClaw] gateway mode 修复失败"',
 ].join(' && ');
 const RUN_DOCTOR = '(openclaw doctor --fix --yes 2>&1 || openclaw doctor --fix 2>&1 || openclaw doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查")';
-const RUN_HEALTH = '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || true)';
+const RUN_HEALTH = '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || echo "[OpenClaw] health 检查失败")';
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
   'anthropic-messages',
@@ -475,11 +475,11 @@ export class OpenClawDeploymentManager {
   }
 
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: 0 });
+    this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: 600000 });
   }
 
   runUpgrade(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    this.execCommand(device, NPM_UPGRADE_CMD, onOutput, onComplete, { pty: true, timeout: 0 });
+    this.execCommand(device, NPM_UPGRADE_CMD, onOutput, onComplete, { pty: true, timeout: 600000 });
   }
 
   runUninstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -673,7 +673,7 @@ print(json.dumps(result, ensure_ascii=False))`;
           summary: '状态解析失败',
         });
       }
-    }, { timeout: 20000 });
+    }, { timeout: 12000 });
   }
 
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {
