@@ -9,11 +9,17 @@ const CDN_TIMEOUT_MS = 30_000;
 export interface WeixinMessageItem {
   type: number; // 1=TEXT, 2=IMAGE, 3=VOICE, 4=FILE, 5=VIDEO
   text_item?: { text: string };
-  image_item?: { cdn_media?: CdnMedia };
+  image_item?: { cdn_media?: CdnMedia; media?: MediaRef; mid_size?: number };
   voice_item?: { cdn_media?: CdnMedia; duration_ms?: number };
-  file_item?: { cdn_media?: CdnMedia; file_name?: string; file_size?: number };
+  file_item?: { cdn_media?: CdnMedia; media?: MediaRef; file_name?: string; file_size?: number; len?: string };
   video_item?: { cdn_media?: CdnMedia; thumb_cdn_media?: CdnMedia };
   ref_msg?: { message_id?: number; from_user_id?: string; item_list?: WeixinMessageItem[] };
+}
+
+interface MediaRef {
+  encrypt_query_param: string;
+  aes_key: string;
+  encrypt_type: number;
 }
 
 export interface CdnMedia {
@@ -58,13 +64,15 @@ export interface GetConfigResponse {
 export interface GetUploadUrlResponse {
   ret?: number;
   errmsg?: string;
-  upload_param?: UploadParam;
-  thumb_upload_param?: UploadParam;
+  upload_param?: string;
+  thumb_upload_param?: string;
 }
 
-export interface UploadParam {
-  upload_url?: string;
-  encrypt_query_param?: string;
+export interface UploadResult {
+  fileKey: string;
+  downloadEncryptQueryParam: string;
+  aesKeyHex: string;
+  ciphertextSize: number;
 }
 
 export const MediaType = { IMAGE: 1, VIDEO: 2, FILE: 3 } as const;
@@ -222,66 +230,99 @@ export class WeixinApiClient {
     }
   }
 
-  // ── CDN media upload ──
+  // ── CDN media upload (aligned with openilink-sdk-python) ──
 
-  async getUploadUrl(
+  private async getUploadUrl(
+    toUserId: string,
+    filekey: string,
+    aesKeyHex: string,
     mediaType: (typeof MediaType)[keyof typeof MediaType],
     rawSize: number,
     rawMd5: string,
-    encSize: number,
+    paddedSize: number,
   ): Promise<GetUploadUrlResponse> {
     return this.post<GetUploadUrlResponse>("getuploadurl", {
+      filekey,
+      to_user_id: toUserId,
       media_type: mediaType,
       rawsize: rawSize,
       rawfilemd5: rawMd5,
-      filesize: encSize,
+      filesize: paddedSize,
+      no_need_thumb: true,
+      aeskey: aesKeyHex,
     }, DEFAULT_TIMEOUT_MS);
   }
 
   async uploadMedia(
+    toUserId: string,
     fileBuf: Buffer,
     mediaType: (typeof MediaType)[keyof typeof MediaType] = MediaType.IMAGE,
-  ): Promise<CdnMedia> {
-    const aesKey = randomBytes(16);
-    const encrypted = aesEcbEncrypt(fileBuf, aesKey);
+  ): Promise<UploadResult> {
+    const rawSize = fileBuf.length;
     const rawMd5 = createHash("md5").update(fileBuf).digest("hex");
+    const paddedSize = Math.ceil(rawSize / 16) * 16;
+    const filekey = randomBytes(16).toString("hex");
+    const aesKey = randomBytes(16);
+    const aesKeyHex = aesKey.toString("hex");
 
-    const urlRes = await this.getUploadUrl(mediaType, fileBuf.length, rawMd5, encrypted.length);
-    console.log("[WeixinApiClient] getUploadUrl response:", JSON.stringify(urlRes).slice(0, 500));
-    const uploadParam = urlRes.upload_param;
-    if (!uploadParam?.upload_url) {
-      throw new Error(`getUploadUrl failed: ret=${urlRes.ret} errmsg=${urlRes.errmsg || "none"} keys=${Object.keys(urlRes)}`);
+    const urlRes = await this.getUploadUrl(toUserId, filekey, aesKeyHex, mediaType, rawSize, rawMd5, paddedSize);
+    if (!urlRes.upload_param) {
+      throw new Error(`getUploadUrl failed: ret=${urlRes.ret} errmsg=${urlRes.errmsg || "none"}`);
     }
+
+    const ciphertext = aesEcbEncrypt(fileBuf, aesKey);
+    const cdnUrl = `${WEIXIN_CDN_BASE}/upload?encrypted_query_param=${encodeURIComponent(urlRes.upload_param)}&filekey=${encodeURIComponent(filekey)}`;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CDN_TIMEOUT_MS);
+    let downloadParam = "";
     try {
-      const uploadRes = await fetch(uploadParam.upload_url, {
+      const res = await fetch(cdnUrl, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
-        body: encrypted,
+        body: ciphertext,
         signal: controller.signal,
       });
-      if (!uploadRes.ok) throw new Error(`CDN upload failed: ${uploadRes.status}`);
+      if (!res.ok) throw new Error(`CDN upload HTTP ${res.status}`);
+      downloadParam = res.headers.get("x-encrypted-param") || "";
+      if (!downloadParam) throw new Error("CDN response missing x-encrypted-param header");
     } finally {
       clearTimeout(timer);
     }
 
-    return {
-      encrypt_query_param: uploadParam.encrypt_query_param || "",
-      aes_key: aesKey.toString("base64"),
-    };
+    return { fileKey: filekey, downloadEncryptQueryParam: downloadParam, aesKeyHex, ciphertextSize: ciphertext.length };
   }
 
-  async sendImage(toUserId: string, contextToken: string, cdn: CdnMedia) {
+  async sendImage(toUserId: string, contextToken: string, uploaded: UploadResult) {
     return this.sendMessage(toUserId, contextToken, [
-      { type: 2, image_item: { cdn_media: cdn } },
+      {
+        type: 2,
+        image_item: {
+          media: {
+            encrypt_query_param: uploaded.downloadEncryptQueryParam,
+            aes_key: Buffer.from(uploaded.aesKeyHex).toString("base64"),
+            encrypt_type: 1,
+          },
+          mid_size: uploaded.ciphertextSize,
+        },
+      },
     ]);
   }
 
-  async sendFile(toUserId: string, contextToken: string, cdn: CdnMedia, fileName: string) {
+  async sendFile(toUserId: string, contextToken: string, uploaded: UploadResult, fileName: string) {
     return this.sendMessage(toUserId, contextToken, [
-      { type: 4, file_item: { cdn_media: cdn, file_name: fileName } },
+      {
+        type: 4,
+        file_item: {
+          media: {
+            encrypt_query_param: uploaded.downloadEncryptQueryParam,
+            aes_key: Buffer.from(uploaded.aesKeyHex).toString("base64"),
+            encrypt_type: 1,
+          },
+          file_name: fileName,
+          len: String(uploaded.ciphertextSize),
+        },
+      },
     ]);
   }
 }
