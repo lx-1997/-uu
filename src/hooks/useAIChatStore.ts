@@ -730,10 +730,28 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           id: aiMsgId, role: 'ai', text: '', blocks: [], source: 'studio',
         }]);
 
-        const updateAiMessage = (text: string, blocks: ChatBlock[]) => {
+        let pendingText = '';
+        let pendingBlocks: ChatBlock[] = [];
+        let rafHandle: number | null = null;
+        const flushAiMessage = () => {
+          rafHandle = null;
+          const t = pendingText;
+          const b = [...pendingBlocks];
           setChatMessages(prev => prev.map(m =>
-            m.id === aiMsgId ? { ...m, text, blocks: [...blocks] } : m
+            m.id === aiMsgId ? { ...m, text: t, blocks: b } : m
           ));
+        };
+        const updateAiMessage = (text: string, blocks: ChatBlock[], immediate?: boolean) => {
+          pendingText = text;
+          pendingBlocks = blocks;
+          if (immediate || !rafHandle) {
+            if (rafHandle) cancelAnimationFrame(rafHandle);
+            if (immediate) {
+              flushAiMessage();
+            } else {
+              rafHandle = requestAnimationFrame(flushAiMessage);
+            }
+          }
         };
         const executorLabel = (executor: string) =>
           executor === 'board_openclaw' ? '板端 OpenClaw' : 'RDK Studio Claw';
@@ -771,82 +789,61 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 currentRunId = String(event.data.runId || currentRunId || '');
                 currentRunIdRef.current = currentRunId;
                 const executor = String(event.data.executor || 'rdkclaw_local');
-                const phase = resolvePhase(event.data.phase);
+                const phase = String(event.data.phase || 'start');
                 const message = String(event.data.message || '开始处理请求');
-                const networkEnabled = Boolean(event.data.network_enabled);
-                const networkMaxFetchChars = Number(event.data.network_max_fetch_chars || 0);
-                const attachmentsCount = Number(event.data.attachments_count || 0);
-                const newAttachmentsCount = Number(event.data.new_attachments_count || 0);
-                const audioTranscriptCount = Number(event.data.audio_transcript_count || 0);
-                const newAudioTranscriptCount = Number(event.data.new_audio_transcript_count || 0);
-                const decisionSource = String(event.data.decision_source || 'default');
-                const decisionReason = String(event.data.decision_reason || '未提供');
+
+                if (phase === 'setup') {
+                  aiBlocks.push({
+                    type: 'status',
+                    items: [{ label: executorLabel(executor), value: message, ok: true }],
+                  });
+                  updateAiMessage(aiText, aiBlocks, true);
+                  break;
+                }
+
+                if (phase === 'heartbeat') {
+                  break;
+                }
+
                 const delegationMode = String(event.data.delegation_mode || '默认');
-                const delegationExpectation = String(event.data.delegation_expectation || '');
-                const canLocalComplete = Boolean(event.data.can_local_complete);
-                const needsBoardCollaboration = Boolean(event.data.needs_board_collaboration);
-                const confidenceRaw = Number(event.data.confidence || 0);
-                const confidence = Number.isFinite(confidenceRaw)
-                  ? `${Math.round(Math.max(0, Math.min(1, confidenceRaw)) * 100)}%`
-                  : 'N/A';
                 const matchedSkills = Array.isArray(event.data.matched_skills)
                   ? (event.data.matched_skills as string[]).filter(Boolean)
                   : [];
-                const attachmentTypes = Array.isArray(event.data.attachment_types)
-                  ? (event.data.attachment_types as string[]).filter(Boolean).join(' / ')
-                  : '';
-                aiBlocks.push({
-                  type: 'status',
-                  collapsible: true,
-                  defaultCollapsed: true,
-                  summary: `${executorLabel(executor)} · ${message}`,
-                  items: [
-                    { label: `执行主体: ${executorLabel(executor)}`, value: `${phase} · ${message}`, ok: true },
-                    {
-                      label: '多模态上下文',
-                      value: attachmentsCount > 0
-                        ? `已接入 ${attachmentsCount} 个附件${newAttachmentsCount > 0 ? `（本轮新增 ${newAttachmentsCount}）` : ''}${attachmentTypes ? ` · ${attachmentTypes}` : ''}${newAudioTranscriptCount > 0 ? ` · 本轮语音已转写 ${newAudioTranscriptCount} 个` : audioTranscriptCount > 0 ? ` · 累计已转写 ${audioTranscriptCount} 个语音` : ''}`
-                        : '本轮无附件',
-                      ok: attachmentsCount > 0,
-                    },
-                    {
-                      label: '联网能力',
-                      value: networkEnabled ? `已启用 · 上限 ${networkMaxFetchChars || 0} chars` : '已禁用',
-                      ok: networkEnabled,
-                    },
-                    {
-                      label: '任务路径判定',
-                      value: `${delegationMode} · ${resolveDecisionSourceLabel(decisionSource)} · 置信度 ${confidence}`,
-                      ok: true,
-                    },
-                    {
-                      label: '调度依据',
-                      value: decisionReason,
-                      ok: true,
-                    },
-                    {
-                      label: '执行路径说明',
-                      value: delegationExpectation || '未提供',
-                      ok: true,
-                    },
-                    {
-                      label: '本地可独立完成',
-                      value: canLocalComplete ? '是' : '否',
-                      ok: canLocalComplete,
-                    },
-                    {
-                      label: '需要板端协同',
-                      value: needsBoardCollaboration ? '是' : '否',
-                      ok: !needsBoardCollaboration || Boolean(currentDevice?.id),
-                    },
-                    {
-                      label: '命中能力',
-                      value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '无明显技能命中，按通用流程执行',
-                      ok: matchedSkills.length > 0,
-                    },
-                  ],
-                });
-                updateAiMessage(aiText, aiBlocks);
+                const needsBoardCollaboration = Boolean(event.data.needs_board_collaboration);
+                const networkEnabled = Boolean(event.data.network_enabled);
+
+                const summaryParts = [executorLabel(executor), delegationMode];
+                if (matchedSkills.length > 0) summaryParts.push(`技能: ${matchedSkills.join('/')}`);
+                if (networkEnabled) summaryParts.push('联网');
+                if (needsBoardCollaboration) summaryParts.push('板端协同');
+
+                const existingSetupIdx = aiBlocks.findIndex(
+                  (b) => b.type === 'status' && b.items?.[0]?.value === '正在准备上下文...',
+                );
+                if (existingSetupIdx >= 0) {
+                  aiBlocks[existingSetupIdx] = {
+                    type: 'status',
+                    collapsible: true,
+                    defaultCollapsed: true,
+                    summary: summaryParts.join(' · '),
+                    items: [
+                      { label: '执行路径', value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
+                      { label: '命中能力', value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '通用流程', ok: matchedSkills.length > 0 },
+                    ],
+                  };
+                } else {
+                  aiBlocks.push({
+                    type: 'status',
+                    collapsible: true,
+                    defaultCollapsed: true,
+                    summary: summaryParts.join(' · '),
+                    items: [
+                      { label: '执行路径', value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
+                      { label: '命中能力', value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '通用流程', ok: matchedSkills.length > 0 },
+                    ],
+                  });
+                }
+                updateAiMessage(aiText, aiBlocks, true);
                 break;
               }
               case 'text': {
@@ -1157,7 +1154,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   type: 'status',
                   items: [{ label: '提示', value: friendlyDetail, ok: false }],
                 });
-                updateAiMessage(friendlyText, aiBlocks);
+                updateAiMessage(friendlyText, aiBlocks, true);
                 break;
               }
               case 'done':
@@ -1186,15 +1183,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     localToolCalls?: number;
                     toolCallNames?: string[];
                   } | undefined;
-                  const delegationStats = event.data.delegation as {
-                    mode?: string;
-                    expected?: string;
-                    source?: string;
-                    reason?: string;
-                    confidence?: number;
-                    canLocalComplete?: boolean;
-                    needsBoardCollaboration?: boolean;
-                  } | undefined;
                   const performanceStats = event.data.performance as {
                     setupElapsedMs?: number;
                     workspaceInitMs?: number;
@@ -1204,86 +1192,42 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     firstTextDeltaMs?: number | null;
                     totalElapsedMs?: number;
                   } | undefined;
-                  if (tokenUsage || contextStats || executionStats || delegationStats || performanceStats) {
+                  if (tokenUsage || performanceStats || executionStats) {
                     const usageItems: Array<{ label: string; value: string; ok: boolean }> = [];
-                    if (tokenUsage) {
-                      const promptTokens = Math.max(0, Number(tokenUsage.promptTokens || 0));
-                      const completionTokens = Math.max(0, Number(tokenUsage.completionTokens || 0));
-                      const totalTokens = Math.max(0, Number(tokenUsage.totalTokens || (promptTokens + completionTokens)));
-                      usageItems.push(
-                        { label: 'Prompt Tokens', value: String(promptTokens), ok: true },
-                        { label: 'Completion Tokens', value: String(completionTokens), ok: true },
-                        { label: 'Total Tokens', value: String(totalTokens), ok: true },
-                        { label: '统计方式', value: tokenUsage.estimated ? '估算' : '模型返回', ok: true },
-                      );
+                    if (performanceStats) {
+                      const totalMs = Math.max(0, Math.round(Number(performanceStats.totalElapsedMs || 0)));
+                      const firstTextMs = Number(performanceStats.firstTextDeltaMs);
+                      const label = Number.isFinite(firstTextMs)
+                        ? `总 ${totalMs}ms · 首字 ${Math.round(firstTextMs)}ms`
+                        : `总 ${totalMs}ms`;
+                      usageItems.push({ label: '耗时', value: label, ok: true });
                     }
-                    if (contextStats) {
-                      const compactionCount = Math.max(0, Number(contextStats.compactionCount || 0));
-                      const droppedMessages = Math.max(0, Number(contextStats.droppedMessages || 0));
-                      const overflowRecoveryCount = Math.max(0, Number(contextStats.overflowRecoveryCount || 0));
-                      usageItems.push(
-                        { label: '上下文压缩次数', value: String(compactionCount), ok: compactionCount === 0 || droppedMessages > 0 },
-                        { label: '压缩历史消息数', value: String(droppedMessages), ok: true },
-                        { label: '超限自动恢复', value: String(overflowRecoveryCount), ok: overflowRecoveryCount === 0 || compactionCount > 0 },
-                      );
-                      if (contextStats.policy) {
-                        usageItems.push(
-                          { label: '上下文预算', value: `${Math.max(0, Number(contextStats.policy.contextTokens || 0))} tokens`, ok: true },
-                          { label: '历史占比上限', value: `${Number(contextStats.policy.maxHistoryShare || 0).toFixed(2)}`, ok: true },
-                          { label: 'Soft/Hard 阈值', value: `${Number(contextStats.policy.softTrimRatio || 0).toFixed(2)} / ${Number(contextStats.policy.hardClearRatio || 0).toFixed(2)}`, ok: true },
-                          { label: '保留助手消息', value: `${Math.max(0, Number(contextStats.policy.keepLastAssistants || 0))} 条`, ok: true },
-                        );
-                      }
+                    if (tokenUsage) {
+                      const total = Math.max(0, Number(tokenUsage.totalTokens || 0));
+                      usageItems.push({ label: 'Tokens', value: `${total}${tokenUsage.estimated ? ' (估)' : ''}`, ok: true });
                     }
                     if (executionStats) {
-                      const boardToolCalls = Math.max(0, Number(executionStats.boardToolCalls || 0));
-                      const localToolCalls = Math.max(0, Number(executionStats.localToolCalls || 0));
-                      const totalCalls = boardToolCalls + localToolCalls;
-                      usageItems.push(
-                        { label: '实际执行（板端）', value: `${boardToolCalls} 次`, ok: boardToolCalls > 0 || totalCalls === 0 },
-                        { label: '实际执行（本地）', value: `${localToolCalls} 次`, ok: true },
-                      );
-                      if (Array.isArray(executionStats.toolCallNames) && executionStats.toolCallNames.length > 0) {
-                        usageItems.push({
-                          label: '实际调用工具',
-                          value: executionStats.toolCallNames.join(' / '),
-                          ok: true,
-                        });
+                      const board = Math.max(0, Number(executionStats.boardToolCalls || 0));
+                      const local = Math.max(0, Number(executionStats.localToolCalls || 0));
+                      if (board + local > 0) {
+                        usageItems.push({ label: '工具调用', value: `本地 ${local} · 板端 ${board}`, ok: true });
                       }
                     }
-                    if (delegationStats) {
-                      const delegationConfidence = Number.isFinite(Number(delegationStats.confidence))
-                        ? `${Math.round(Math.max(0, Math.min(1, Number(delegationStats.confidence))) * 100)}%`
-                        : 'N/A';
-                      const canLocalComplete = Boolean(delegationStats.canLocalComplete);
-                      const needsBoardCollaboration = Boolean(delegationStats.needsBoardCollaboration);
-                      usageItems.push(
-                        { label: '任务路径判定', value: String(delegationStats.mode || '未提供'), ok: true },
-                        { label: '执行路径说明', value: String(delegationStats.expected || '未提供'), ok: true },
-                        { label: '决策置信度', value: delegationConfidence, ok: true },
-                        { label: '本地可独立完成', value: canLocalComplete ? '是' : '否', ok: canLocalComplete },
-                        { label: '需要板端协同', value: needsBoardCollaboration ? '是' : '否', ok: !needsBoardCollaboration || Boolean(currentDevice?.id) },
-                      );
-                    }
-                    if (performanceStats) {
-                      const firstEventMs = Number(performanceStats.firstEventMs);
-                      const firstTextDeltaMs = Number(performanceStats.firstTextDeltaMs);
-                      usageItems.push(
-                        { label: '首事件耗时', value: Number.isFinite(firstEventMs) ? `${Math.max(0, Math.round(firstEventMs))} ms` : 'N/A', ok: true },
-                        { label: '首文本耗时', value: Number.isFinite(firstTextDeltaMs) ? `${Math.max(0, Math.round(firstTextDeltaMs))} ms` : 'N/A', ok: true },
-                        { label: '总耗时', value: `${Math.max(0, Math.round(Number(performanceStats.totalElapsedMs || 0)))} ms`, ok: true },
-                        { label: '准备阶段', value: `${Math.max(0, Math.round(Number(performanceStats.setupElapsedMs || 0)))} ms（workspace ${Math.max(0, Math.round(Number(performanceStats.workspaceInitMs || 0)))} / attachment ${Math.max(0, Math.round(Number(performanceStats.attachmentPrepareMs || 0)))} / board ${Math.max(0, Math.round(Number(performanceStats.boardSnapshotMs || 0)))}）`, ok: true },
-                      );
+                    if (contextStats) {
+                      const compaction = Math.max(0, Number(contextStats.compactionCount || 0));
+                      if (compaction > 0) {
+                        usageItems.push({ label: '上下文压缩', value: `${compaction} 次`, ok: true });
+                      }
                     }
                     if (usageItems.length > 0) {
                       aiBlocks.push({
                         type: 'status',
                         collapsible: true,
                         defaultCollapsed: true,
-                        summary: '本轮资源消耗',
+                        summary: usageItems.map((i) => `${i.label}: ${i.value}`).join(' · '),
                         items: usageItems,
                       });
-                      updateAiMessage(aiText, aiBlocks);
+                      updateAiMessage(aiText, aiBlocks, true);
                     }
                   }
                 }
@@ -1294,6 +1238,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         streamAbortRef.current = abort;
 
         await done;
+        if (rafHandle) { cancelAnimationFrame(rafHandle); flushAiMessage(); }
         if (generation !== streamGenerationRef.current) return;
         setAiTyping(false);
       } finally {

@@ -315,7 +315,7 @@ export class RDKClawApp {
   private runAgents = new Map<string, Agent>();
   private sessionAutoApprove = new Map<string, boolean>();
   private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: { skills: string[]; plugins: string[] } }>();
-  private static readonly BOARD_SNAPSHOT_TTL_MS = 12_000;
+  private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
   private readonly deviceQueue = new DeviceQueue();
   private switchDeviceCallback?: (deviceId: string) => void;
 
@@ -710,6 +710,18 @@ export class RDKClawApp {
   ): AsyncGenerator<RDKClawEvent> {
     const externalAbortSignal = req.abortSignal;
     let abortedByClient = Boolean(externalAbortSignal?.aborted);
+
+    const earlyRunId = crypto.randomUUID();
+    yield {
+      type: "meta",
+      data: {
+        runId: earlyRunId,
+        sessionId: sessionKey,
+        executor: "rdkclaw_local",
+        phase: "setup",
+        message: "正在准备上下文...",
+      },
+    };
 
     const userProfile = req.userId ? this.personaStore.getUser(req.userId) : null;
     const runStartedAt = Date.now();
