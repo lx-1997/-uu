@@ -26,6 +26,11 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import type { Tool, ToolContext } from "./types.js";
 import { assertSandboxPath } from "../sandbox-paths.js";
+import {
+  appendUtf8WithTailCap,
+  DEFAULT_STREAM_OUTPUT_CHAR_LIMIT,
+  STDERR_STREAM_CHAR_LIMIT,
+} from "../../utils/stream-output-limit.js";
 
 // ============== 文件读取 ==============
 
@@ -458,6 +463,8 @@ async function runRipgrep(params: {
 
     let stdout = "";
     let stderr = "";
+    let stdoutTrunc = false;
+    let stderrTrunc = false;
     let settled = false;
     const settle = (fn: () => void) => {
       if (settled) {
@@ -477,10 +484,14 @@ async function runRipgrep(params: {
     }, params.timeoutMs);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const r = appendUtf8WithTailCap(stdout, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
+      stdout = r.value;
+      if (r.truncated) stdoutTrunc = true;
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+      const r = appendUtf8WithTailCap(stderr, chunk, STDERR_STREAM_CHAR_LIMIT);
+      stderr = r.value;
+      if (r.truncated) stderrTrunc = true;
     });
 
     child.on("error", (error) => {
@@ -503,6 +514,9 @@ async function runRipgrep(params: {
       }
       if (output.length > 30000) {
         output = `${output.slice(0, 30000)}\n\n[输出过长已截断]`;
+      }
+      if (stdoutTrunc || stderrTrunc) {
+        output += "\n\n[rg 流式输出已按上限截断，仅保留尾部]";
       }
       settle(() => resolve(output));
     });

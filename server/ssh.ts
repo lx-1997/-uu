@@ -1,4 +1,9 @@
 import { Client } from 'ssh2';
+import {
+  appendUtf8WithTailCap,
+  DEFAULT_STREAM_OUTPUT_CHAR_LIMIT,
+  STDERR_STREAM_CHAR_LIMIT,
+} from './utils/stream-output-limit.js';
 
 export interface SshCredentials {
   host: string;
@@ -76,23 +81,33 @@ export function runRemoteCommands(
 
           let stdout = '';
           let stderr = '';
+          let stdoutTrunc = false;
+          let stderrTrunc = false;
 
           stream
             .on('close', (code: number | null) => {
               client.end();
+              const truncNote =
+                (stdoutTrunc || stderrTrunc)
+                  ? '\n[OUTPUT TRUNCATED: stdout/stderr exceeded safe limit; tail retained]'
+                  : '';
               if (code && code !== 0) {
-                safeReject(new Error(stderr || `Remote command failed with exit code ${code}`));
+                safeReject(new Error((stderr + truncNote) || `Remote command failed with exit code ${code}`));
                 return;
               }
 
-              safeResolve(stdout);
+              safeResolve(stdout + (stdoutTrunc || stderrTrunc ? truncNote : ''));
             })
             .on('data', (chunk: Buffer) => {
-              stdout += chunk.toString();
+              const r = appendUtf8WithTailCap(stdout, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
+              stdout = r.value;
+              if (r.truncated) stdoutTrunc = true;
             });
 
           stream.stderr.on('data', (chunk: Buffer) => {
-            stderr += chunk.toString();
+            const r = appendUtf8WithTailCap(stderr, chunk, STDERR_STREAM_CHAR_LIMIT);
+            stderr = r.value;
+            if (r.truncated) stderrTrunc = true;
           });
         });
       })
@@ -147,16 +162,20 @@ export function uploadFileSftp(credentials: SshCredentials, remotePath: string, 
           if (err) return doReject(err);
           
           let stderr = '';
+          let stderrTrunc = false;
           stream.on('close', (code: number | null) => {
             if (code && code !== 0) {
-               doReject(new Error(stderr || `Upload command failed with code ${code}`));
+               const note = stderrTrunc ? ' [stderr truncated]' : '';
+               doReject(new Error((stderr + note) || `Upload command failed with code ${code}`));
             } else {
                doResolve();
             }
           });
           
           stream.stderr.on('data', (chunk) => {
-            stderr += chunk.toString();
+            const r = appendUtf8WithTailCap(stderr, chunk, STDERR_STREAM_CHAR_LIMIT);
+            stderr = r.value;
+            if (r.truncated) stderrTrunc = true;
           });
           
           // Write the base64 encoded buffer straight into the process's standard input

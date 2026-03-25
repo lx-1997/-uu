@@ -78,6 +78,7 @@ import {
   type DelegateDecision,
 } from "./delegation.js";
 import { appendSecurityAuditLog } from "./security-audit-store.js";
+import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from "../utils/stream-output-limit.js";
 
 const DEFAULT_CONFIG: ProviderConfig = {
   provider: "qwen",
@@ -135,6 +136,7 @@ export class RDKClawApp {
   private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
   private readonly deviceQueue = new DeviceQueue();
   private switchDeviceCallback?: (deviceId: string) => void;
+  private pendingMapsCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   private async getBoardSkillSnapshot(deviceId?: string): Promise<BoardSnapshot> {
     if (!deviceId) return { skills: [], skillDetails: [], plugins: [] };
@@ -164,7 +166,10 @@ export class RDKClawApp {
       }, timeoutMs);
       this.openClawManager.getInstalledSkills(
         board,
-        (chunk) => { output += chunk; },
+        (chunk) => {
+          const r = appendUtf8WithTailCap(output, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
+          output = r.value;
+        },
         () => {
           if (done) return;
           done = true;
@@ -219,6 +224,36 @@ export class RDKClawApp {
     this.skills = new SkillRegistry({ workspaceDir });
     this.policyStore = new RDKClawPolicyStore();
     this.workspaceStore = new UserWorkspaceStore(workspaceDir);
+    this.pendingMapsCleanupInterval = setInterval(() => this.cleanupStalePendingMaps(), 60_000);
+  }
+
+  /**
+   * 防止客户端断连后 pending 条目永久占用 Map（审批另有 5min 定时器，此为兜底）。
+   */
+  private cleanupStalePendingMaps() {
+    const now = Date.now();
+    const approvalStaleMs = 10 * 60 * 1000;
+    const recommendationStaleMs = 30 * 60 * 1000;
+    for (const [id, p] of this.pendingApprovals) {
+      if (now - p.createdAt > approvalStaleMs) {
+        this.pendingApprovals.delete(id);
+        try {
+          p.reject(new Error("审批已过期（服务端清理）"));
+        } catch {
+          /* ignore double-reject */
+        }
+      }
+    }
+    for (const [id, p] of this.pendingRecommendations) {
+      if (now - p.createdAt > recommendationStaleMs) {
+        this.pendingRecommendations.delete(id);
+        try {
+          p.resolve({ choiceId: "__expired__", autoExecute: false });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   setAutonomyRuntime(runtime: StudioAutonomyRuntime) {

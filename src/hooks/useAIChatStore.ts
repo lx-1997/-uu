@@ -84,6 +84,28 @@ export interface AIChatStoreState {
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
 
+/** 内存中对话条数上限，避免长会话撑爆渲染进程 */
+const MAX_CHAT_MESSAGES_IN_MEMORY = 100;
+const LARGE_DATA_URL_STORAGE_CHARS = 48_000;
+
+/** 写入 localStorage 前去掉较早消息里巨型 data: URL，减轻 quota 与反序列化压力 */
+function stripHeavyDataUrlsForStorage(messages: ChatMessage[]): ChatMessage[] {
+  const keepLast = 6;
+  return messages.map((m, i) => {
+    if (i >= messages.length - keepLast || !m.attachments?.length) return m;
+    return {
+      ...m,
+      attachments: m.attachments.map((a: ChatAttachment) => {
+        const u = a.url;
+        if (typeof u === 'string' && u.startsWith('data:') && u.length > LARGE_DATA_URL_STORAGE_CHARS) {
+          return { ...a, url: '[omitted-large-data-url]' };
+        }
+        return a;
+      }),
+    };
+  });
+}
+
 export function useAIChatStore(): AIChatStoreState {
   const ctx = useContext(AIChatContext);
   if (!ctx) throw new Error('useAIChatStore must be used within AIChatProvider');
@@ -103,7 +125,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       const saved = localStorage.getItem('rdk-chat-history');
       if (saved) {
         const parsed = JSON.parse(saved) as ChatMessage[];
-        return parsed.map(m => ({
+        const capped = parsed.slice(-MAX_CHAT_MESSAGES_IN_MEMORY);
+        return capped.map(m => ({
           ...m,
           blocks: m.blocks?.filter(b => b.type !== 'confirm' && b.type !== 'progress'),
         }));
@@ -111,6 +134,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     } catch { /* ignore */ }
     return [];
   });
+
+  useEffect(() => {
+    setChatMessages((prev) =>
+      (prev.length > MAX_CHAT_MESSAGES_IN_MEMORY ? prev.slice(-MAX_CHAT_MESSAGES_IN_MEMORY) : prev),
+    );
+  }, [chatMessages.length]);
+
   const [chatExpanded, setChatExpanded] = useState(false);
   const [aiTyping, setAiTyping] = useState(false);
   const pendingActionsRef = useRef<Record<string, () => void>>({});
@@ -1712,7 +1742,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     if (chatPersistTimerRef.current) clearTimeout(chatPersistTimerRef.current);
     chatPersistTimerRef.current = setTimeout(() => {
       try {
-        const toSave = chatMessages.slice(-50);
+        const toSave = stripHeavyDataUrlsForStorage(chatMessages.slice(-50));
         localStorage.setItem('rdk-chat-history', JSON.stringify(toSave));
       } catch { /* quota exceeded */ }
     }, aiTyping ? 2000 : 300);

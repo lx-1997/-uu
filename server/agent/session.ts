@@ -125,8 +125,30 @@ export class SessionManager {
   /** Session 缓存（避免重复加载/解析） */
   private states = new Map<string, SessionState>();
 
+  /** 内存中最多保留的热会话数，防止 unique sessionKey 无限增长导致 OOM */
+  private static readonly MAX_CACHED_SESSIONS = 100;
+  private sessionLastAccess = new Map<string, number>();
+
   constructor(baseDir: string = "./.openclaw-mini/sessions") {
     this.baseDir = baseDir;
+  }
+
+  private touchSessionKey(sessionKey: string) {
+    this.sessionLastAccess.set(sessionKey, Date.now());
+  }
+
+  private evictSessionCacheIfNeeded() {
+    const max = SessionManager.MAX_CACHED_SESSIONS;
+    if (this.states.size <= max) return;
+    const byAccess = [...this.sessionLastAccess.entries()].sort((a, b) => a[1] - b[1]);
+    let over = this.states.size - max;
+    for (const [key] of byAccess) {
+      if (over <= 0) break;
+      if (this.states.delete(key)) {
+        this.sessionLastAccess.delete(key);
+        over--;
+      }
+    }
   }
 
   /**
@@ -366,6 +388,8 @@ export class SessionManager {
     }
 
     this.states.set(sessionKey, state);
+    this.touchSessionKey(sessionKey);
+    this.evictSessionCacheIfNeeded();
     return state;
   }
 
