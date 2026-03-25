@@ -680,7 +680,8 @@ export default function AIDock() {
     ? `${activeDeviceName || '未命名设备'} · ${activeDeviceEndpoint}`
     : '未绑定设备';
   const chatInputRef = useRef<HTMLInputElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  /** 实际滚动容器是 .dock-stream（仅 chatExpanded 时挂载），不能用仅首屏执行的 scrollIntoView */
+  const streamScrollRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -919,14 +920,29 @@ export default function AIDock() {
     }
   }, [compactFlowMode]);
 
-  /* Auto-scroll to newest message (on new messages and on initial mount) */
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages.length, aiTyping]);
-  useEffect(() => {
-    const t = setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 80);
-    return () => clearTimeout(t);
+  const scrollStreamToBottom = useCallback(() => {
+    const el = streamScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
   }, []);
+
+  /* 展开 Dock、新消息、打字态或折叠/极简切换后，把消息区滚到底部 */
+  useEffect(() => {
+    if (!chatExpanded) return;
+    scrollStreamToBottom();
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(scrollStreamToBottom);
+    });
+    const t0 = setTimeout(scrollStreamToBottom, 0);
+    const t1 = setTimeout(scrollStreamToBottom, 80);
+    const t2 = setTimeout(scrollStreamToBottom, 240);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(t0);
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [chatExpanded, chatMessages.length, aiTyping, showAllMessages, compactFlowMode, scrollStreamToBottom]);
 
   /* OpenClaw Socket.IO connection */
   useEffect(() => {
@@ -1225,7 +1241,7 @@ export default function AIDock() {
           )}
 
           {/* Chat stream */}
-          <div className="dock-stream">
+          <div className="dock-stream" ref={streamScrollRef}>
             {chatMessages.length === 0 && !aiTyping && (
               <div className="dock-empty-hint">聊天已清空，输入新消息即可继续。</div>
             )}
@@ -1336,7 +1352,6 @@ export default function AIDock() {
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
         </div>
       )}
