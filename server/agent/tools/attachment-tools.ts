@@ -443,7 +443,11 @@ async function describeImageViaProvider(
     errors.push(`${model}: ${result.error}`);
   }
 
-  throw new Error(`图片分析失败，已尝试 ${modelsToTry.join(', ')}。错误: ${errors.join('; ')}`);
+  throw new Error(
+    `图片分析失败：当前配置的模型不支持图像理解。已尝试: ${modelsToTry.join(', ')}。` +
+    `建议在设置中切换到支持视觉的模型（如 GPT-4o、Claude Sonnet、Gemini、通义千问VL 等）。` +
+    `\n错误详情: ${errors.join('; ')}`,
+  );
 }
 
 async function transcribeAudioViaProvider(
@@ -670,6 +674,52 @@ export async function ensureAudioAttachmentTranscripts(
   if (changed) {
     await writeManifest(sessionId, attachments);
   }
+}
+
+const DOWNLOADABLE_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]);
+const DOWNLOADABLE_VIDEO_EXTS = new Set([".mp4", ".webm", ".avi", ".mov", ".mkv"]);
+
+function mimeFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".mp4": "video/mp4", ".webm": "video/webm", ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime", ".mkv": "video/x-matroska",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
+export async function registerToolDownloadedAttachment(
+  sessionId: string,
+  allAttachments: SessionAttachment[],
+  info: { localPath: string; fileName: string; bytes?: number },
+): Promise<SessionAttachment | null> {
+  const ext = path.extname(info.fileName).toLowerCase();
+  let type: SessionAttachment["type"];
+  if (DOWNLOADABLE_IMAGE_EXTS.has(ext)) {
+    type = "image";
+  } else if (DOWNLOADABLE_VIDEO_EXTS.has(ext)) {
+    type = "video";
+  } else {
+    return null;
+  }
+  const existing = allAttachments.find((a) => a.storedPath === info.localPath);
+  if (existing) return existing;
+  const id = `dl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const attachment: SessionAttachment = {
+    id,
+    type,
+    name: info.fileName,
+    mimeType: mimeFromExt(ext),
+    size: info.bytes,
+    storedPath: info.localPath,
+    createdAt: Date.now(),
+    source: "studio",
+  };
+  allAttachments.push(attachment);
+  await writeManifest(sessionId, allAttachments);
+  console.log(`[Attachment] 自动注册设备下载${type === "image" ? "图片" : "视频"}: ${info.fileName} (id=${id})`);
+  return attachment;
 }
 
 export function createAttachmentTools(

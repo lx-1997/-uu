@@ -19,6 +19,7 @@ import {
   createAttachmentTools,
   ensureAudioAttachmentTranscripts,
   prepareSessionAttachments,
+  registerToolDownloadedAttachment,
 } from "../agent/tools/attachment-tools.js";
 import { createRdkTools } from "../agent/tools/rdk-tools.js";
 import { createDeviceManagerTools } from "../agent/tools/device-manager-tools.js";
@@ -118,6 +119,7 @@ function selectDelegateDecision(
   req: RDKClawChatRequest,
   matchedSkills: RDKClawSkillMeta[],
   boardSnapshot: { skills: string[]; plugins: string[] },
+  sessionAttachments?: Array<{ type: string }>,
 ): DelegateDecision {
   const text = String(req.message || "").toLowerCase();
   if (!req.deviceId) {
@@ -158,6 +160,19 @@ function selectDelegateDecision(
       source: "user_mode",
       reason: "用户指定 local 模式",
       confidence: 1,
+    };
+  }
+  const currentMsgHasMedia = req.attachments?.some((a) => a.type === "image" || a.type === "video");
+  const sessionHasMedia = sessionAttachments?.some((a) => a.type === "image" || a.type === "video");
+  const textMentionsMedia = /图片|照片|截图|图像|画面|image|photo|picture|这张|这个图|拍的/.test(text);
+  if (currentMsgHasMedia || (sessionHasMedia && textMentionsMedia)) {
+    return {
+      path: "local_only",
+      canLocalComplete: true,
+      needsBoardCollaboration: false,
+      source: "task_analysis",
+      reason: "任务涉及图片/视频理解，Vision 能力在本地 AI 模型端，优先本地处理",
+      confidence: 0.93,
     };
   }
   const collaborativeSkill = matchedSkills.find(
@@ -692,7 +707,15 @@ export class RDKClawApp {
       );
     }
     if (req.deviceId) {
-      const deviceTools = createRdkTools(req.deviceId);
+      const deviceTools = createRdkTools(req.deviceId, {
+        onMediaDownloaded: (info) => {
+          registerToolDownloadedAttachment(base.sessionId, sessionAttachments, {
+            localPath: info.localPath,
+            fileName: info.fileName,
+            bytes: info.bytes,
+          }).catch(() => {});
+        },
+      });
       tools.push(...deviceTools);
       tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager));
       tools.push(
@@ -799,7 +822,7 @@ export class RDKClawApp {
     const policy = this.policyStore.getPolicy();
     const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
     const setupElapsedMs = Date.now() - runStartedAt;
-    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot);
+    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot, attachmentState.allAttachments);
     const detectedPlatform = (req as any).platform as RdkPlatform | undefined;
     const deviceProfile = detectedPlatform ? getDeviceProfile(detectedPlatform) : null;
     const systemPrompt = [
@@ -817,7 +840,9 @@ export class RDKClawApp {
         ? `当前板端允许插件: ${boardSnapshot.plugins.join(", ")}`
         : "",
       attachmentState.allAttachments.length > 0
-        ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
+        ? attachmentState.allAttachments.some((a) => a.type === "image")
+          ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件（含图片: ${attachmentState.allAttachments.filter((a) => a.type === "image").map((a) => `[${a.id}] ${a.name}`).join("、")}）。用户提及图片/照片时，请先调用 attachment_describe_image 分析后再回复。`
+          : `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
         : "",
       decision.path === "board_primary"
         ? "执行路径判定：本任务需板端主执行。先调用 board_openclaw_assess，再调用 board_openclaw_delegate；若评估失败或委派失败，立刻切换本地工具兜底完成。"

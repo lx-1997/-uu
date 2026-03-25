@@ -19,13 +19,17 @@ import {
 } from './rdk-ssh-helper.js';
 import * as path from 'node:path';
 
-export function createRdkTools(deviceId: string): Tool[] {
+export interface RdkToolsCallbacks {
+  onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
+}
+
+export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks): Tool[] {
   const tools: Tool[] = [
     deviceExecTool(deviceId),
     deviceFileReadTool(deviceId),
     deviceFileWriteTool(deviceId),
     deviceFileListTool(deviceId),
-    deviceFileDownloadToLocalTool(deviceId),
+    deviceFileDownloadToLocalTool(deviceId, callbacks?.onMediaDownloaded),
     deviceFileUploadFromLocalTool(deviceId),
     boardOpenClawStatusTool(deviceId),
     boardOpenClawReadConfigTool(deviceId),
@@ -66,7 +70,10 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bm
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.avi', '.mov', '.mkv']);
 const DOC_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf', '.csv', '.txt', '.md', '.zip', '.rar', '.7z']);
 
-function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: string; localPath?: string }> {
+function deviceFileDownloadToLocalTool(
+  deviceId: string,
+  onMediaDownloaded?: RdkToolsCallbacks['onMediaDownloaded'],
+): Tool<{ remotePath: string; localPath?: string }> {
   return {
     name: 'device_file_download_to_local',
     description: '把设备上的文件下载到本机（RDK Studio 所在电脑）。可选 localPath，不填则下载到 workspace/downloads/。下载图片、视频或文档后会返回可预览/可下载的 URL。',
@@ -89,6 +96,7 @@ function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: str
       const savedName = path.basename(result.localPath);
       const mediaUrl = `/api/local-files/${encodeURIComponent(savedName)}`;
       if (IMAGE_EXTENSIONS.has(ext)) {
+        onMediaDownloaded?.({ localPath: result.localPath, fileName: savedName, bytes: result.bytes, mediaType: 'image' });
         return JSON.stringify({
           __type: 'image_download',
           localPath: result.localPath,
@@ -98,6 +106,7 @@ function deviceFileDownloadToLocalTool(deviceId: string): Tool<{ remotePath: str
         });
       }
       if (VIDEO_EXTENSIONS.has(ext)) {
+        onMediaDownloaded?.({ localPath: result.localPath, fileName: savedName, bytes: result.bytes, mediaType: 'video' });
         return JSON.stringify({
           __type: 'video_download',
           localPath: result.localPath,
