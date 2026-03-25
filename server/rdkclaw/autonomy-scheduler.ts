@@ -23,6 +23,10 @@ export interface AutonomyTask {
   lastRunAt?: number;
   nextRunAt: number;
   lastError?: string;
+  /** 执行结束后向该微信用户推送摘要（须仍在最近会话表内，参见 weixin_recent_users） */
+  notifyWeixinUserId?: string;
+  /** 执行结束后向该飞书会话推送摘要；支持任意已保存的 chat_id（服务端 allowUnknown） */
+  notifyFeishuChatId?: string;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".rdkstudio");
@@ -45,18 +49,25 @@ function ensureDirSync() {
   dirEnsured = true;
 }
 
+export type AutonomyChannelNotify = {
+  notifyWeixin?: (userId: string, text: string) => Promise<boolean>;
+  notifyFeishu?: (chatId: string, text: string) => Promise<boolean>;
+};
+
 export class AutonomyScheduler {
   private app: RDKClawApp;
   private notifications: NotificationHub;
+  private channelNotify?: AutonomyChannelNotify;
   private tasks: AutonomyTask[] = [];
   private timer: NodeJS.Timeout | null = null;
   private running = new Set<string>();
   private runIdByTaskId = new Map<string, string>();
   private cancelledByUser = new Set<string>();
 
-  constructor(app: RDKClawApp, notifications: NotificationHub) {
+  constructor(app: RDKClawApp, notifications: NotificationHub, channelNotify?: AutonomyChannelNotify) {
     this.app = app;
     this.notifications = notifications;
+    this.channelNotify = channelNotify;
     this.tasks = this.readTasks();
   }
 
@@ -88,6 +99,8 @@ export class AutonomyScheduler {
     timezone?: string;
     mode?: RDKClawExecutionMode;
     requiresApproval?: boolean;
+    notifyWeixinUserId?: string;
+    notifyFeishuChatId?: string;
   }): AutonomyTask {
     const now = Date.now();
     const hasCron = !!input.cron?.trim();
@@ -114,6 +127,8 @@ export class AutonomyScheduler {
         scheduleType === "interval"
           ? now + (intervalSeconds > 0 ? intervalSeconds * 1000 : intervalMinutes * 60000)
           : now + 60000,
+      notifyWeixinUserId: input.notifyWeixinUserId?.trim() || undefined,
+      notifyFeishuChatId: input.notifyFeishuChatId?.trim() || undefined,
     };
     this.tasks = [task, ...this.tasks];
     this.saveTasks();
@@ -326,6 +341,7 @@ export class AutonomyScheduler {
         sessionId: `auto:${task.id}`,
         ts: Date.now(),
       });
+      await this.maybeNotifyChannels(task, false, errorText, textOut);
       return;
     }
     this.notifications.publish({
@@ -337,6 +353,30 @@ export class AutonomyScheduler {
       sessionId: `auto:${task.id}`,
       ts: Date.now(),
     });
+    await this.maybeNotifyChannels(task, true, "", textOut);
+  }
+
+  private async maybeNotifyChannels(task: AutonomyTask, success: boolean, errorText: string, textOut: string) {
+    const weixin = task.notifyWeixinUserId?.trim();
+    const feishu = task.notifyFeishuChatId?.trim();
+    if (!weixin && !feishu) return;
+    const body = success
+      ? `「${task.name}」完成\n${(textOut || "(无文本输出)").trim().slice(0, 1200)}`
+      : `「${task.name}」失败\n${(errorText || "未知错误").slice(0, 800)}`;
+    if (weixin && this.channelNotify?.notifyWeixin) {
+      try {
+        await this.channelNotify.notifyWeixin(weixin, body);
+      } catch {
+        /* non-fatal */
+      }
+    }
+    if (feishu && this.channelNotify?.notifyFeishu) {
+      try {
+        await this.channelNotify.notifyFeishu(feishu, body);
+      } catch {
+        /* non-fatal */
+      }
+    }
   }
 
   /**

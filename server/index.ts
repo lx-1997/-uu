@@ -283,7 +283,10 @@ if (weixinConfigStore.getConfig().enabled && weixinAccountStore.listAccounts().l
   console.log('[Weixin] 微信 ClawBot 渠道已启动');
 }
 
-const autonomyScheduler = new AutonomyScheduler(rdkclaw, notificationHub);
+const autonomyScheduler = new AutonomyScheduler(rdkclaw, notificationHub, {
+  notifyWeixin: (userId, text) => weixinChannel.sendToUser(userId, text),
+  notifyFeishu: (chatId, text) => feishuChannel.sendOutboundChat(chatId, text, true),
+});
 if (!feishuApi.isConfigured()) {
   console.warn('[Feishu] FEISHU_APP_ID / FEISHU_APP_SECRET 未配置，Webhook 将无法主动回消息。');
 }
@@ -294,6 +297,20 @@ rdkclaw.setAutonomyRuntime({
   stopTask: (taskId) => autonomyScheduler.stop(taskId),
   resumeTask: (taskId) => autonomyScheduler.resume(taskId),
   approveTask: (taskId) => autonomyScheduler.approve(taskId),
+  weixinOutbound: {
+    listRecentUsers: () => weixinChannel.getRecentUsers().map((u) => ({
+      userId: u.userId,
+      maskedId: u.maskedId,
+      lastMessageText: u.lastMessageText,
+      lastSeenAt: u.lastSeenAt,
+      accountId: u.accountId,
+    })),
+    sendText: (userId, text) => weixinChannel.sendToUser(userId, text),
+  },
+  feishuOutbound: {
+    listRecentChats: () => feishuChannel.getRecentChats(),
+    sendText: (chatId, text, allowUnknown) => feishuChannel.sendOutboundChat(chatId, text, allowUnknown ?? false),
+  },
 });
 autonomyScheduler.start();
 syncFeishuRuntime().catch((error) => {
@@ -4523,6 +4540,8 @@ app.post('/api/rdkclaw/tasks', (request, response) => {
     timezone,
     mode,
     requiresApproval,
+    notifyWeixinUserId,
+    notifyFeishuChatId,
   } = request.body ?? {};
   if (!name || !prompt || (!intervalMinutes && !intervalSeconds && !cron)) {
     response.status(400).json({ error: 'name、prompt 及 intervalMinutes/intervalSeconds/cron 至少其一为必填项' });
@@ -4537,6 +4556,8 @@ app.post('/api/rdkclaw/tasks', (request, response) => {
     timezone: timezone ? String(timezone) : undefined,
     mode: (mode || 'board-preferred') as RDKClawExecutionMode,
     requiresApproval: !!requiresApproval,
+    notifyWeixinUserId: notifyWeixinUserId ? String(notifyWeixinUserId) : undefined,
+    notifyFeishuChatId: notifyFeishuChatId ? String(notifyFeishuChatId) : undefined,
   });
   response.json({ ok: true, task });
 });

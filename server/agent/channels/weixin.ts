@@ -112,6 +112,15 @@ interface PendingChannelApproval {
   createdAt: number;
 }
 
+export interface WeixinRecentUser {
+  userId: string;
+  maskedId: string;
+  contextToken: string;
+  accountId: string;
+  lastMessageText: string;
+  lastSeenAt: number;
+}
+
 export class WeixinPollingChannel {
   private rdkclaw: RDKClawApp;
   private accountStore: WeixinAccountStore;
@@ -123,6 +132,8 @@ export class WeixinPollingChannel {
   private started = false;
 
   private pendingApprovals = new Map<string, PendingChannelApproval>();
+  private recentUsers = new Map<string, WeixinRecentUser>();
+  private static readonly MAX_RECENT_USERS = 50;
 
   constructor(opts: WeixinChannelOptions) {
     this.rdkclaw = opts.rdkclaw;
@@ -130,6 +141,49 @@ export class WeixinPollingChannel {
     this.getConfig = opts.getConfig;
     this.notificationHub = opts.notificationHub;
     this.feishuAuthStore = opts.feishuAuthStore;
+  }
+
+  getRecentUsers(): WeixinRecentUser[] {
+    return Array.from(this.recentUsers.values())
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  }
+
+  async sendToUser(userId: string, text: string): Promise<boolean> {
+    const user = this.recentUsers.get(userId);
+    if (!user) return false;
+    const poller = this.pollers.get(user.accountId);
+    if (!poller) return false;
+    try {
+      await poller.client.sendText(userId, user.contextToken, text);
+      return true;
+    } catch (err) {
+      console.warn(`[WeixinChannel] sendToUser failed:`, (err as Error).message);
+      return false;
+    }
+  }
+
+  private recordRecentUser(
+    userId: string,
+    contextToken: string,
+    accountId: string,
+    maskedId: string,
+    lastMessageText: string,
+  ) {
+    this.recentUsers.set(userId, {
+      userId,
+      maskedId,
+      contextToken,
+      accountId,
+      lastMessageText: lastMessageText.slice(0, 500),
+      lastSeenAt: Date.now(),
+    });
+    const max = WeixinPollingChannel.MAX_RECENT_USERS;
+    if (this.recentUsers.size <= max) return;
+    const entries = [...this.recentUsers.entries()].sort((a, b) => a[1].lastSeenAt - b[1].lastSeenAt);
+    while (this.recentUsers.size > max && entries.length) {
+      const [k] = entries.shift()!;
+      this.recentUsers.delete(k);
+    }
   }
 
   getStatus(): WeixinRuntimeStatus {
@@ -299,6 +353,8 @@ export class WeixinPollingChannel {
     const maskedUser = `${fromUserId.slice(0, 4)}***${fromUserId.slice(-4)}`;
     const mediaTag = attachments.length ? ` +${attachments.length}附件` : "";
     console.log(`${tag} inbound from ${maskedUser}: ${displayText.slice(0, 80)}${mediaTag}`);
+
+    this.recordRecentUser(fromUserId, contextToken, poller.account.accountId, maskedUser, displayText);
 
     if (text && this.tryHandleApprovalReply(poller, fromUserId, contextToken, text, tag, maskedUser)) {
       return;

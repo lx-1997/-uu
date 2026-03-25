@@ -138,6 +138,13 @@ interface FeishuPendingApproval {
   createdAt: number;
 }
 
+export interface FeishuRecentChat {
+  chatId: string;
+  openIdMasked: string;
+  lastMessageText: string;
+  lastSeenAt: number;
+}
+
 export class FeishuWebSocketChannel {
   private readonly rdkclaw: RDKClawApp;
   private readonly authStore: FeishuAuthStore;
@@ -145,10 +152,12 @@ export class FeishuWebSocketChannel {
   private readonly notificationHub?: NotificationHub;
   private static FETCH_TIMEOUT_MS = 15_000;
   private static DEDUP_TTL_MS = 10 * 60 * 1000;
+  private static MAX_RECENT_CHATS = 50;
   private eventSeen = new Map<string, number>();
   private client: Lark.Client | null = null;
   private wsClient: unknown | null = null;
   private pendingApprovals = new Map<string, FeishuPendingApproval>();
+  private recentChats = new Map<string, FeishuRecentChat>();
   private status: FeishuRuntimeStatus = {
     running: false,
     connected: false,
@@ -164,6 +173,43 @@ export class FeishuWebSocketChannel {
     this.authStore = opts.authStore;
     this.getConfig = opts.getConfig;
     this.notificationHub = opts.notificationHub;
+  }
+
+  getRecentChats(): FeishuRecentChat[] {
+    return Array.from(this.recentChats.values()).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  }
+
+  /**
+   * @param allowUnknown 为 true 时允许向任意 chat_id 发送（如定时任务回执）；否则仅允许近期有过消息的会话，降低误发风险。
+   */
+  async sendOutboundChat(chatId: string, text: string, allowUnknown = false): Promise<boolean> {
+    const id = chatId?.trim();
+    if (!id || !text?.trim()) return false;
+    if (!allowUnknown && !this.recentChats.has(id)) return false;
+    if (!this.client) return false;
+    try {
+      await this.sendText(id, text);
+      return true;
+    } catch (err) {
+      console.warn("[FeishuWS] sendOutboundChat failed:", (err as Error).message);
+      return false;
+    }
+  }
+
+  private recordRecentChat(chatId: string, openIdMasked: string, preview: string) {
+    this.recentChats.set(chatId, {
+      chatId,
+      openIdMasked,
+      lastMessageText: preview.slice(0, 500),
+      lastSeenAt: Date.now(),
+    });
+    const max = FeishuWebSocketChannel.MAX_RECENT_CHATS;
+    if (this.recentChats.size <= max) return;
+    const entries = [...this.recentChats.entries()].sort((a, b) => a[1].lastSeenAt - b[1].lastSeenAt);
+    while (this.recentChats.size > max && entries.length) {
+      const [k] = entries.shift()!;
+      this.recentChats.delete(k);
+    }
   }
 
   getStatus(): FeishuRuntimeStatus {
@@ -473,6 +519,7 @@ export class FeishuWebSocketChannel {
       messageId: msgId,
       sessionId,
     });
+    this.recordRecentChat(chatId, openIdMasked, inboundText);
     const shouldRequirePairing = cfg.dmPolicy === "pairing";
     const isBound = this.authStore.isBound(openId);
 

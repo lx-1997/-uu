@@ -919,10 +919,14 @@ export default function AIDock() {
     }
   }, [compactFlowMode]);
 
-  /* Auto-scroll to newest message */
+  /* Auto-scroll to newest message (on new messages and on initial mount) */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages.length, aiTyping]);
+  useEffect(() => {
+    const t = setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'instant' }), 80);
+    return () => clearTimeout(t);
+  }, []);
 
   /* OpenClaw Socket.IO connection */
   useEffect(() => {

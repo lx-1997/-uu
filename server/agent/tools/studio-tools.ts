@@ -80,6 +80,27 @@ function setStudioAgentConfigTool(): Tool<{
   };
 }
 
+export type StudioWeixinOutbound = {
+  listRecentUsers(): Array<{
+    userId: string;
+    maskedId: string;
+    lastMessageText: string;
+    lastSeenAt: number;
+    accountId: string;
+  }>;
+  sendText(userId: string, text: string): Promise<boolean>;
+};
+
+export type StudioFeishuOutbound = {
+  listRecentChats(): Array<{
+    chatId: string;
+    openIdMasked: string;
+    lastMessageText: string;
+    lastSeenAt: number;
+  }>;
+  sendText(chatId: string, text: string, allowUnknown?: boolean): Promise<boolean>;
+};
+
 export interface StudioAutonomyRuntime {
   listTasks: () => AutonomyTask[];
   createTask: (input: {
@@ -91,11 +112,15 @@ export interface StudioAutonomyRuntime {
     timezone?: string;
     mode?: RDKClawExecutionMode;
     requiresApproval?: boolean;
+    notifyWeixinUserId?: string;
+    notifyFeishuChatId?: string;
   }) => AutonomyTask;
   pauseTask: (taskId: string) => void;
   stopTask: (taskId: string) => void;
   resumeTask: (taskId: string) => void;
   approveTask: (taskId: string) => void;
+  weixinOutbound?: StudioWeixinOutbound;
+  feishuOutbound?: StudioFeishuOutbound;
 }
 
 function listAutonomyTasksTool(runtime: StudioAutonomyRuntime): Tool<Record<string, never>> {
@@ -118,10 +143,14 @@ function createAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{
   timezone?: string;
   mode?: RDKClawExecutionMode;
   requiresApproval?: boolean;
+  notifyWeixinUserId?: string;
+  notifyFeishuChatId?: string;
 }> {
   return {
     name: 'rdkclaw_task_create',
-    description: '创建 RDKClaw 定时任务。支持秒级、分钟级或 cron。用于无需用户触发的自治消息与巡检任务。',
+    description:
+      '创建 RDKClaw 定时任务。支持秒级、分钟级或 cron。用于无需用户触发的自治消息与巡检任务。'
+      + '可选 notifyWeixinUserId / notifyFeishuChatId：任务每次执行结束后将摘要推送到对应微信用户或飞书会话（需先用 weixin_list_recent_users / feishu_list_recent_chats 取得 id）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -133,6 +162,8 @@ function createAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{
         timezone: { type: 'string', description: '时区，默认 local' },
         mode: { type: 'string', description: 'auto/local/board/board-preferred' },
         requiresApproval: { type: 'boolean', description: '是否需要审批' },
+        notifyWeixinUserId: { type: 'string', description: '可选，完整微信 userId；执行结束后向其推送摘要（须近期有会话，见 weixin_list_recent_users）' },
+        notifyFeishuChatId: { type: 'string', description: '可选，飞书 chat_id；执行结束后推送摘要' },
       },
       required: ['name'],
     },
@@ -144,10 +175,81 @@ function createAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{
         intervalSeconds: input.intervalSeconds,
         cron: input.cron?.trim(),
         timezone: input.timezone?.trim(),
-        mode: input.mode || 'local',
+        mode: input.mode || 'board-preferred',
         requiresApproval: !!input.requiresApproval,
+        notifyWeixinUserId: input.notifyWeixinUserId?.trim(),
+        notifyFeishuChatId: input.notifyFeishuChatId?.trim(),
       });
       return `已创建定时任务: ${task.id}\n${JSON.stringify(task, null, 2)}`;
+    },
+  };
+}
+
+function weixinListRecentUsersTool(port: StudioWeixinOutbound): Tool<Record<string, never>> {
+  return {
+    name: 'weixin_list_recent_users',
+    description:
+      '列出近期向微信 ClawBot 发过消息的微信用户（脱敏 id + 最近一条摘要）。'
+      + '在 AI Dock 中要向「上一条发消息来的用户」发内容时，先调用本工具取得 userId，再调用 weixin_send_text_to_user。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const rows = port.listRecentUsers();
+      if (!rows.length) return '暂无近期微信会话（需用户先给机器人发过消息）。';
+      return JSON.stringify(rows, null, 2);
+    },
+  };
+}
+
+function weixinSendTextToUserTool(port: StudioWeixinOutbound): Tool<{ userId: string; text: string }> {
+  return {
+    name: 'weixin_send_text_to_user',
+    description:
+      '向指定微信用户发送纯文本（须该用户近期与机器人有过会话，userId 来自 weixin_list_recent_users）。'
+      + '用于在 AI Dock 中主动把某条说明发给某个微信联系人。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userId: { type: 'string', description: '完整微信用户 ID' },
+        text: { type: 'string', description: '要发送的正文（过长会按微信接口分段）' },
+      },
+      required: ['userId', 'text'],
+    },
+    async execute(input) {
+      const ok = await port.sendText(input.userId.trim(), input.text.trim());
+      return ok ? '已发送微信消息。' : '发送失败：该 userId 不在近期会话中，或网络/接口错误。请让用户先给机器人发一条消息后再试。';
+    },
+  };
+}
+
+function feishuListRecentChatsTool(port: StudioFeishuOutbound): Tool<Record<string, never>> {
+  return {
+    name: 'feishu_list_recent_chats',
+    description: '列出近期在飞书与机器人有过消息的会话（chat_id 与摘要）。用于主动向某会话发消息时取得 chatId。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      const rows = port.listRecentChats();
+      if (!rows.length) return '暂无近期飞书会话。';
+      return JSON.stringify(rows, null, 2);
+    },
+  };
+}
+
+function feishuSendChatTextTool(port: StudioFeishuOutbound): Tool<{ chatId: string; text: string }> {
+  return {
+    name: 'feishu_send_text_to_chat',
+    description:
+      '向近期有过消息的飞书会话发送文本。chatId 须来自 feishu_list_recent_chats（安全限制：不向任意陌生 chat 发信）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string', description: '飞书 chat_id' },
+        text: { type: 'string', description: '正文' },
+      },
+      required: ['chatId', 'text'],
+    },
+    async execute(input) {
+      const ok = await port.sendText(input.chatId.trim(), input.text.trim(), false);
+      return ok ? '已发送飞书消息。' : '发送失败：chatId 不在近期会话列表，或飞书未连接。';
     },
   };
 }
@@ -333,6 +435,18 @@ export function createStudioTools(runtime?: StudioAutonomyRuntime): Tool[] {
       resumeAutonomyTaskTool(runtime),
       approveAutonomyTaskTool(runtime),
     );
+    if (runtime.weixinOutbound) {
+      tools.push(
+        weixinListRecentUsersTool(runtime.weixinOutbound),
+        weixinSendTextToUserTool(runtime.weixinOutbound),
+      );
+    }
+    if (runtime.feishuOutbound) {
+      tools.push(
+        feishuListRecentChatsTool(runtime.feishuOutbound),
+        feishuSendChatTextTool(runtime.feishuOutbound),
+      );
+    }
   }
   return tools;
 }
