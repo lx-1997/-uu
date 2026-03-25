@@ -35,6 +35,7 @@ import { boardOpenClawChatTool } from "./tools/board-openclaw-chat.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { createEcosystemQueryTool } from "./tools/ecosystem-query.js";
 import { createSoulUpdateTool } from "./tools/soul-update.js";
+import { fleetBoardListTool, fleetBoardDelegateTool, fleetBoardBroadcastTool } from "./tools/fleet-dispatch.js";
 import { planTools } from "../agent/tools/plan-tool.js";
 import type { EcosystemRegistry } from "../ecosystem/registry.js";
 import { getDeviceProfile, type DeviceProfile } from "../ecosystem/device-profiles.js";
@@ -505,6 +506,35 @@ export class RDKClawApp {
         const platform = (req as any).platform as RdkPlatform | undefined;
         tools.push(createEcosystemQueryTool(this.ecosystemRegistry, platform));
       }
+      tools.push(fleetBoardListTool(req.deviceId, this.openClawManager));
+      tools.push(fleetBoardDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
+        emitEvent({
+          type: 'tool_progress',
+          data: {
+            ...base,
+            toolName: 'fleet_board_delegate',
+            name: 'fleet_board_delegate',
+            toolCallId: 'fleet_board_delegate',
+            phase: 'running',
+            executor: 'fleet',
+            chunk,
+          },
+        });
+      }));
+      tools.push(fleetBoardBroadcastTool(req.deviceId, this.openClawManager, (chunk) => {
+        emitEvent({
+          type: 'tool_progress',
+          data: {
+            ...base,
+            toolName: 'fleet_board_broadcast',
+            name: 'fleet_board_broadcast',
+            toolCallId: 'fleet_board_broadcast',
+            phase: 'running',
+            executor: 'fleet',
+            chunk,
+          },
+        });
+      }));
     }
     tools.push(createSoulUpdateTool(emitEvent, base));
     tools.push(...planTools);
