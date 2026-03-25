@@ -5,7 +5,7 @@ import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { fetchNodeRedStatus, fetchRosTopics, fetchVncStatus, executeDeviceCommand } from '../api';
 
-export type ThemeMode = 'aurora' | 'cyber';
+export type ThemeMode = 'aurora' | 'cyber' | 'cozy';
 
 export interface UIStoreState {
   // Theme
@@ -152,7 +152,11 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('rdk-theme', t);
     document.documentElement.setAttribute('data-theme', t);
   };
-  const toggleTheme = () => setTheme(theme === 'aurora' ? 'cyber' : 'aurora');
+  const THEME_ORDER: ThemeMode[] = ['aurora', 'cozy', 'cyber'];
+  const toggleTheme = () => {
+    const idx = THEME_ORDER.indexOf(theme);
+    setTheme(THEME_ORDER[(idx + 1) % THEME_ORDER.length]);
+  };
 
   // ── Navigation ──
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');

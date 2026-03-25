@@ -146,3 +146,68 @@
 [data-theme="cyber"] .indicator-active {
   animation: glowPulse 2s var(--ease-in-out) infinite;
 }
+
+/* ══════════════════════════════════════════
+   Cozy Logic — Soft-Touch Animations
+   "Marshmallow-minimalism" micro-interactions
+   ══════════════════════════════════════════ */
+
+@keyframes jellyBounce {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(0.94); }
+  50%  { transform: scale(1.04); }
+  70%  { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+
+@keyframes cozyBreathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.015); opacity: 0.92; }
+}
+
+@keyframes softPop {
+  0%   { opacity: 0; transform: scale(0.92); }
+  60%  { opacity: 1; transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cozyFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+
+/* Button press — jelly squeeze */
+[data-theme="cozy"] .btn:active:not(:disabled) {
+  animation: jellyBounce 350ms var(--ease-out);
+}
+
+/* Card interactive — micro-bounce on hover */
+[data-theme="cozy"] .card-interactive:hover,
+[data-theme="cozy"] .dash-action:hover {
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 300ms var(--ease-out);
+}
+
+/* Modal entrance — soft pop */
+[data-theme="cozy"] .modal-content {
+  animation: softPop 300ms var(--ease-out);
+}
+
+/* Toast entrance — soft pop */
+[data-theme="cozy"] .toast {
+  animation: softPop 350ms var(--ease-out);
+}
+
+/* Logo breathing */
+[data-theme="cozy"] .rail-logo {
+  animation: cozyBreathe 4s var(--ease-in-out) infinite;
+}
+
+/* Page transition — slightly bouncier */
+[data-theme="cozy"] .page-enter {
+  animation: softPop var(--duration-normal) var(--ease-out);
+}
+
+/* Status dot float */
+[data-theme="cozy"] .status-dot.online {
+  animation: cozyFloat 3s var(--ease-in-out) infinite;
+}

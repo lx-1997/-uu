@@ -1,0 +1,242 @@
+/* ═══════════════════════════════════════════════════════
+   Cozy Logic — Visual Enhancements
+   "Marshmallow-minimalism" · Soft-touch · Warm Amber
+   Applied only under [data-theme="cozy"]
+   ═══════════════════════════════════════════════════════ */
+
+/* ── Global ambient warmth ── */
+[data-theme="cozy"] .app-shell {
+  background:
+    radial-gradient(ellipse at 15% 0%, var(--cozy-apricot-subtle) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 100%, var(--cozy-sage-subtle) 0%, transparent 50%),
+    var(--bg-primary);
+}
+
+/* ── Rail — soft inner glow ── */
+[data-theme="cozy"] .icon-rail {
+  border-right-color: var(--border);
+  box-shadow: inset -1px 0 12px var(--cozy-warm-glow);
+}
+
+[data-theme="cozy"] .rail-logo {
+  background: var(--cozy-apricot-subtle);
+  box-shadow: inset 0 1px 4px rgba(200, 149, 106, 0.12);
+}
+
+[data-theme="cozy"] .rail-btn.active {
+  background: var(--accent-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* ── TopBar — frosted cream ── */
+[data-theme="cozy"] .top-bar {
+  border-bottom-color: var(--border);
+  box-shadow: 0 1px 8px var(--cozy-warm-glow);
+}
+
+/* ── Squircle cards — large radius + inner shadow ── */
+[data-theme="cozy"] .card,
+[data-theme="cozy"] .card-glass,
+[data-theme="cozy"] .config-card,
+[data-theme="cozy"] .tool-card,
+[data-theme="cozy"] .dash-action {
+  border-radius: 24px;
+  box-shadow: inset 0 2px 8px rgba(120, 100, 80, 0.06), 0 1px 4px rgba(120, 100, 80, 0.04);
+}
+
+[data-theme="cozy"] .card-glass {
+  background: rgba(255, 252, 245, 0.70);
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  backdrop-filter: blur(20px) saturate(1.1);
+}
+
+/* ── Card hover — soft lift + warm glow ── */
+[data-theme="cozy"] .card-interactive:hover,
+[data-theme="cozy"] .config-card:hover,
+[data-theme="cozy"] .tool-card:hover,
+[data-theme="cozy"] .dash-action:hover {
+  box-shadow:
+    inset 0 2px 8px rgba(120, 100, 80, 0.06),
+    0 6px 20px rgba(200, 149, 106, 0.10);
+  transform: translateY(-1px) scale(1.005);
+}
+
+/* ── Buttons — pill-ish radius ── */
+[data-theme="cozy"] .btn {
+  border-radius: var(--radius-md);
+}
+
+[data-theme="cozy"] .btn-primary {
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.25);
+}
+
+[data-theme="cozy"] .btn-primary:hover:not(:disabled) {
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.25),
+    0 4px 14px rgba(200, 149, 106, 0.20);
+}
+
+[data-theme="cozy"] .btn-ghost {
+  border-radius: var(--radius-md);
+}
+
+/* ── Inputs — warm soft border ── */
+[data-theme="cozy"] .input,
+[data-theme="cozy"] select {
+  border-radius: var(--radius-md);
+}
+
+/* ── Dashboard hero — warm text ── */
+[data-theme="cozy"] .dash-device-name {
+  color: var(--accent);
+}
+
+[data-theme="cozy"] .dash-brand {
+  filter: drop-shadow(0 2px 8px var(--cozy-apricot-subtle));
+}
+
+[data-theme="cozy"] .dash-status {
+  padding: 12px 20px;
+  border-radius: 20px;
+  background: var(--cozy-apricot-subtle);
+  border: 1px solid var(--border);
+}
+
+/* ── Dock — frosted cream panel ── */
+[data-theme="cozy"] .dock-input-area {
+  border-radius: 20px;
+  border-color: var(--border);
+  box-shadow: inset 0 2px 6px var(--cozy-warm-glow), var(--shadow-lg);
+}
+
+[data-theme="cozy"] .dock-chat {
+  border-radius: 24px;
+  border-color: var(--border);
+  box-shadow: inset 0 2px 8px var(--cozy-warm-glow), var(--shadow-xl);
+}
+
+[data-theme="cozy"] .dock-send-btn.ready {
+  box-shadow: 0 2px 10px rgba(200, 149, 106, 0.20);
+}
+
+/* ── Context strip chip ── */
+[data-theme="cozy"] .dock-ctx-chip:hover {
+  background: var(--cozy-apricot-subtle);
+}
+
+/* ── Badges — soft pastel tones ── */
+[data-theme="cozy"] .badge-ok {
+  background: var(--cozy-sage-subtle);
+  color: var(--ok);
+}
+
+[data-theme="cozy"] .badge-accent {
+  background: var(--accent-subtle);
+}
+
+/* ── Status dots — warm glow ── */
+[data-theme="cozy"] .status-dot.online {
+  box-shadow: 0 0 6px rgba(139, 168, 122, 0.45);
+}
+
+[data-theme="cozy"] .status-dot.warn {
+  box-shadow: 0 0 6px rgba(212, 169, 90, 0.40);
+}
+
+/* ── Dotted line connectors (stitch aesthetic) ── */
+[data-theme="cozy"] .rail-separator {
+  border-style: dotted;
+  border-color: rgba(200, 149, 106, 0.20);
+}
+
+/* ── Icons — thicker, round cap ── */
+[data-theme="cozy"] .icon-rail svg,
+[data-theme="cozy"] .rail-btn svg,
+[data-theme="cozy"] .btn-icon svg {
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── Immersive bar ── */
+[data-theme="cozy"] .immersive-bar {
+  box-shadow: 0 1px 6px var(--cozy-warm-glow);
+  border-radius: 0 0 20px 20px;
+}
+
+/* ── Tool bar ── */
+[data-theme="cozy"] .tool-bar {
+  border-bottom-color: var(--border);
+  box-shadow: 0 1px 6px var(--cozy-warm-glow);
+}
+
+/* ── Config card selected ── */
+[data-theme="cozy"] .config-card.selected {
+  border-color: var(--accent-border);
+  box-shadow:
+    inset 0 2px 8px rgba(200, 149, 106, 0.10),
+    0 0 0 3px var(--accent-glow);
+}
+
+/* ── Settings drawer ── */
+[data-theme="cozy"] .settings-drawer {
+  border-radius: 24px 0 0 24px;
+  box-shadow: -4px 0 24px rgba(120, 100, 80, 0.08), var(--shadow-xl);
+}
+
+/* ── Modal — soft squircle ── */
+[data-theme="cozy"] .modal-content {
+  border-radius: 24px;
+  border-color: var(--border);
+  box-shadow:
+    inset 0 2px 10px rgba(120, 100, 80, 0.05),
+    var(--shadow-xl);
+}
+
+/* ── Toast — warm pill ── */
+[data-theme="cozy"] .toast {
+  border-radius: 20px;
+  border-color: var(--border);
+  box-shadow: inset 0 1px 4px rgba(120, 100, 80, 0.05), var(--shadow-md);
+}
+
+/* ── Hardware gauge ring ── */
+[data-theme="cozy"] .hw-gauge-ring .fill {
+  filter: drop-shadow(0 1px 3px rgba(200, 149, 106, 0.20));
+}
+
+/* ── Flash progress ── */
+[data-theme="cozy"] .flash-progress-fill {
+  border-radius: var(--radius-pill);
+  box-shadow: 0 1px 6px rgba(200, 149, 106, 0.20);
+}
+
+/* ── Config terminal ── */
+[data-theme="cozy"] .config-terminal {
+  border-radius: 20px;
+  border-color: var(--border);
+  box-shadow: inset 0 2px 8px rgba(74, 68, 63, 0.06);
+}
+
+/* ── Device panel ── */
+[data-theme="cozy"] .device-panel {
+  border-radius: 20px;
+  border-color: var(--border);
+  box-shadow: inset 0 2px 8px var(--cozy-warm-glow), var(--shadow-xl);
+}
+
+/* ── Scrollbar — warm cream ── */
+[data-theme="cozy"] ::-webkit-scrollbar-thumb {
+  background: rgba(200, 149, 106, 0.14);
+  border-radius: var(--radius-pill);
+}
+
+[data-theme="cozy"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(200, 149, 106, 0.25);
+}
+
+/* ── Selection highlight ── */
+[data-theme="cozy"] ::selection {
+  background: var(--cozy-apricot-subtle);
+  color: var(--text-primary);
+}

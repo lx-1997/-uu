@@ -121,9 +121,13 @@ export default function IconRail() {
           <button
             className="rail-theme-toggle"
             onClick={toggleTheme}
-            data-tooltip={!railExpanded ? (theme === 'aurora' ? '切换到赛博模式' : '切换到极光模式') : undefined}
+            data-tooltip={!railExpanded ? (
+              theme === 'aurora' ? '切换到奶咖模式' :
+              theme === 'cozy'  ? '切换到赛博模式' :
+                                  '切换到极光模式'
+            ) : undefined}
           >
-            {theme === 'aurora' ? '🌙' : '☀️'}
+            {theme === 'aurora' ? '🍪' : theme === 'cozy' ? '🌙' : '☀️'}
           </button>
 
           <button

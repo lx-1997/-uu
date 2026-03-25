@@ -13,6 +13,7 @@
 @import './pages/config.css';
 @import './pages/tools.css';
 @import './pages/cyber-enhancements.css';
+@import './pages/cozy-enhancements.css';
 
 /* Material Symbols：woff2 由上一行 fontsource 打入 dist，桌面端离线可用 */
 .material-symbols-outlined {
