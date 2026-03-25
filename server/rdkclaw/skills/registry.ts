@@ -113,8 +113,8 @@ export class SkillRegistry {
           enabled: fm.enabled !== "false",
           updatedAt: fs.statSync(file).mtimeMs,
         });
-      } catch {
-        // ignore invalid skill files
+      } catch (err) {
+        console.warn(`[SkillRegistry] failed to parse ${file}:`, err instanceof Error ? err.message : err);
       }
     }
     this.cache = metas.sort((a, b) => b.updatedAt - a.updatedAt);

@@ -4,7 +4,6 @@ import type { RdkPlatform } from '../../../shared/ecosystem-types.js';
 import { getDeviceProfile } from '../../ecosystem/device-profiles.js';
 
 export function createEcosystemQueryTool(
-  deviceId: string,
   registry: EcosystemRegistry,
   platform?: RdkPlatform,
 ): Tool<{ query: string; intent?: 'capabilities' | 'recommendation' | 'howto' }> {

@@ -14,8 +14,9 @@
 | `device_file_download_to_local` | 设备→本机下载 | 图片/视频/文档自动识别 |
 | `device_file_upload_from_local` | 本机→设备上传 | localPath 相对 workspace |
 | `device_diagnose` | 硬件全检 | 温度/BPU/内存/磁盘一次查完 |
-| `board_openclaw_delegate` | 委派复杂任务给板端 | 适用于模型部署、pipeline、深度诊断 |
+| `board_openclaw_chat` | 和板端 OpenClaw 交流 | 了解能力、讨论方案、共享分析，不执行任务 |
 | `board_openclaw_assess` | 评估板端是否能干 | delegate 之前先 assess |
+| `board_openclaw_delegate` | 委派复杂任务给板端 | 适用于模型部署、pipeline、深度诊断 |
 | `board_openclaw_health/check/doctor` | OpenClaw 状态检查/修复 | |
 | `ecosystem_query` | 查平台可用能力 | 不确定能不能做时先查这个 |
 | `text_to_speech` / `speech_to_text` | TTS/STT | 离线优先，在线降级 |
@@ -34,7 +35,8 @@
 - **OpenClaw 修复**: doctor → restart_gateway → health 验证
 - **文件传输**: download/upload + 验证
 - **日志分析**: openclaw_logs + exec(journalctl/dmesg)
-- **板端任务**: assess → delegate → 验证结果
+- **板端协作**: chat(了解能力) → assess(评估可行性) → delegate(委派执行) → 验证结果
+- **板端任务**: assess → delegate → 验证结果（确信可行时可跳过 chat）
 
 ## 执行策略
 

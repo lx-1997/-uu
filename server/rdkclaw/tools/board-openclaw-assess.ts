@@ -104,6 +104,7 @@ function normalizeAssessment(raw: string, fallbackReason?: string) {
 export function boardOpenClawAssessTool(
   deviceId: string,
   manager: OpenClawDeploymentManager,
+  conversationId?: string,
 ): Tool<{
   task: string;
   context?: string;
@@ -144,7 +145,7 @@ export function boardOpenClawAssessTool(
         input.context ? `context: ${input.context}` : "",
         `task: ${input.task}`,
       ].filter(Boolean).join("\n");
-      const sessionId = input.sessionId?.trim() || `rdkclaw-board-assess-${Date.now()}`;
+      const sessionId = input.sessionId?.trim() || conversationId || `rdkclaw-board-assess-${Date.now()}`;
 
       return await new Promise<string>((resolve) => {
         let output = "";

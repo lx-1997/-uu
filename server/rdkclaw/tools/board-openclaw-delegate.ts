@@ -117,7 +117,7 @@ export function boardOpenClawDelegateTool(
         );
       }
       const msg = msgParts.filter(Boolean).join("\n");
-      const sessionId = input.sessionId?.trim() || `rdkclaw-board-${deviceId}-${conversationId || Date.now()}`;
+      const sessionId = input.sessionId?.trim() || conversationId || `rdkclaw-board-${deviceId}-${Date.now()}`;
 
       const runOnce = (): Promise<{ output: string; success: boolean }> =>
         new Promise((resolve, reject) => {

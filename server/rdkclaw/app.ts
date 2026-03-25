@@ -119,7 +119,7 @@ function resolveDelegationExpectationText(decision: DelegateDecision) {
 function selectDelegateDecision(
   req: RDKClawChatRequest,
   matchedSkills: RDKClawSkillMeta[],
-  _boardSnapshot: { skills: string[]; plugins: string[] },
+  boardSnapshot: { skills: string[]; plugins: string[] },
 ): DelegateDecision {
   if (!req.deviceId) {
     return {
@@ -175,20 +175,22 @@ function selectDelegateDecision(
     };
   }
 
+  const hasBoardSkills = boardSnapshot.skills.length > 0;
   return {
     path: "collaborative",
     canLocalComplete: true,
-    needsBoardCollaboration: false,
+    needsBoardCollaboration: true,
     source: "default",
-    reason: "设备已连接，Agent 根据能力分布自主决策执行路径",
-    confidence: 0.8,
+    reason: hasBoardSkills
+      ? `设备已连接，板端有 ${boardSnapshot.skills.length} 个技能可用，Agent 根据能力分布自主决策`
+      : "设备已连接但板端无已安装技能，Agent 自主决策执行路径",
+    confidence: hasBoardSkills ? 0.85 : 0.75,
   };
 }
 
 function resolveExecutor(toolName?: string) {
-  return toolName === "board_openclaw_delegate" || toolName === "board_openclaw_assess"
-    ? "board_openclaw"
-    : "rdkclaw_local";
+  if (!toolName) return "rdkclaw_local";
+  return toolName.startsWith("board_openclaw_") ? "board_openclaw" : "rdkclaw_local";
 }
 
 function mapMiniEvent(
@@ -631,7 +633,7 @@ export class RDKClawApp {
         },
       });
       tools.push(...deviceTools);
-      tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager));
+      tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager, base.sessionId));
       tools.push(boardOpenClawChatTool(req.deviceId, this.openClawManager, base.sessionId));
       tools.push(
         boardOpenClawDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
@@ -641,7 +643,7 @@ export class RDKClawApp {
               ...base,
               toolName: "board_openclaw_delegate",
               name: "board_openclaw_delegate",
-              toolCallId: "board_openclaw_delegate",
+              toolCallId: "board_openclaw_delegate", // TODO: 应传入真实 toolCallId，当前框架不支持 per-call callback
               phase: "running",
               executor: "board_openclaw",
               chunk,
@@ -651,7 +653,7 @@ export class RDKClawApp {
       );
       if (this.ecosystemRegistry) {
         const platform = (req as any).platform as RdkPlatform | undefined;
-        tools.push(createEcosystemQueryTool(req.deviceId, this.ecosystemRegistry, platform));
+        tools.push(createEcosystemQueryTool(this.ecosystemRegistry, platform));
       }
     }
     tools.push(createSoulUpdateTool(emitEvent, base));
@@ -801,6 +803,7 @@ export class RDKClawApp {
     const apiKey = getApiKey(providerConfig);
     const baseUrl = getBaseUrl(providerConfig);
 
+    // TODO: 全局 env 写入在并发请求时存在竞态风险，后续应改为通过 Agent 构造参数传入
     process.env.OPENAI_BASE_URL = baseUrl;
     process.env.OPENAI_API_KEY = apiKey;
     process.env.OPENAI_MODEL = providerConfig.model;
