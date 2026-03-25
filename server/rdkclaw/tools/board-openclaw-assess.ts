@@ -112,7 +112,9 @@ export function boardOpenClawAssessTool(
   return {
     name: "board_openclaw_assess",
     description:
-      "让板端 OpenClaw 先评估任务是否适合由其执行（只做评估不落地动作），返回 canHandle/confidence/reason，供 RDKClaw 调度。",
+      "向板端 OpenClaw 咨询：某个任务是否适合由板端执行（只评估不执行）。" +
+      "仅在你已判断任务可能需要板端专长（如复杂板端操作链、OpenClaw 已安装技能、板端应用开发）时才调用。" +
+      "图片分析、搜索、文档处理、知识问答等你能直接完成的任务无需咨询。返回 canHandle/confidence/reason。",
     inputSchema: {
       type: "object",
       properties: {

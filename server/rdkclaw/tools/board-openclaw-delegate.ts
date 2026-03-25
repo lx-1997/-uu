@@ -67,9 +67,8 @@ export function boardOpenClawDelegateTool(
   return {
     name: "board_openclaw_delegate",
     description:
-      "将板端任务委派给 OpenClaw Agent 执行。" +
-      "调用前，你应该先利用 ecosystem_query 和 web_search 了解该任务的最佳做法，" +
-      "然后在 guidance 字段给 OpenClaw 提供你的建议（方案选择、注意事项、推荐的技能或工具链）。" +
+      "将任务委派给板端 OpenClaw 执行。通常在 board_openclaw_assess 确认可行后调用。" +
+      "在 guidance 中融入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、生态方案）对它很重要。" +
       "同一对话内自动复用会话，板端保留上下文。",
     inputSchema: {
       type: "object",
