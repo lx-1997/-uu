@@ -1923,22 +1923,34 @@ app.post('/api/devices/verify', async (request, response) => {
   }
 });
 
+const devicePingCache = new Map<string, { status: string; expiresAt: number }>();
+const PING_CACHE_TTL_MS = 3000;
+
 app.get('/api/devices/:id/ping', async (request, response) => {
   const { id } = request.params;
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const { password } = resolvePassword(request, device);
-  
+  const cached = devicePingCache.get(id);
+  if (cached && cached.expiresAt > Date.now()) {
+    response.json({ ok: cached.status === 'connected', status: cached.status });
+    return;
+  }
+
+  const port = device.port ?? 22;
   try {
-    const client = new Client();
     await new Promise<void>((resolve, reject) => {
-      client.on('ready', () => { client.end(); resolve(); })
-            .on('error', (err) => { client.destroy(); reject(err); })
-            .connect({ host: device.host, port: device.port ?? 22, username: device.username, password: password || 'blank', readyTimeout: 3000 });
+      const socket = net.connect({ host: device.host, port, timeout: 1500 }, () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.on('error', reject);
+      socket.on('timeout', () => { socket.destroy(); reject(new Error('timeout')); });
     });
+    devicePingCache.set(id, { status: 'connected', expiresAt: Date.now() + PING_CACHE_TTL_MS });
     response.json({ ok: true, status: 'connected' });
   } catch {
+    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_CACHE_TTL_MS });
     response.json({ ok: false, status: 'offline' });
   }
 });
