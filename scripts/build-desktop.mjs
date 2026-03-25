@@ -39,17 +39,7 @@ const buildResourcesDir = path.join(rootDir, 'build-resources');
 const packageJsonPath = path.join(rootDir, 'package.json');
 const strictResourceCheck = String(process.env.RDK_DESKTOP_STRICT_RESOURCES || '').trim() === '1';
 function ensureBuildResourcesPrepared() {
-  const sourceIco = path.join(rootDir, 'public', 'vnc', 'app', 'images', 'icons', 'novnc.ico');
-  const sourcePng = path.join(rootDir, 'public', 'vnc', 'app', 'images', 'icons', 'novnc-ios-180.png');
-  const targetIco = path.join(buildResourcesDir, 'icon.ico');
-  const targetPng = path.join(buildResourcesDir, 'icon.png');
-
   fs.mkdirSync(buildResourcesDir, { recursive: true });
-  if (!fs.existsSync(sourceIco) || !fs.existsSync(sourcePng)) {
-    throw new Error('缺少基础图标源文件（public/vnc/app/images/icons）');
-  }
-  fs.copyFileSync(sourceIco, targetIco);
-  fs.copyFileSync(sourcePng, targetPng);
 }
 
 function validateBuildResources() {
