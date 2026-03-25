@@ -1,6 +1,6 @@
 # RDK Studio 产品需求文档 — 产品概述与功能模块
 
-> 版本: 1.0 | 日期: 2026-03-25 | 状态: 初稿
+> 版本: 1.1 | 日期: 2026-03-25 | 状态: 迭代中（新增技能创建/编辑、多板卡协作、云端整合规划）
 
 ---
 
@@ -26,6 +26,7 @@
   - [6.12 ROS 集成](#612-ros-集成)
   - [6.13 设备管理](#613-设备管理)
   - [6.14 设置面板 (Settings)](#614-设置面板-settings)
+  - [6.15 多板卡协作 (Fleet Dispatch)](#615-多板卡协作fleet-dispatch)
 - [7. 待完成 / 规划中功能](#7-待完成--规划中功能)
 
 ---
@@ -423,16 +424,26 @@ OpenClaw 管理
 
 **实现文件**: `src/components/SkillBrowser.tsx`
 
-**功能定位**: OpenClaw 技能的浏览、生成、部署工具。
+**功能定位**: OpenClaw 技能的浏览、创建、编辑、部署工具。三标签页设计。
 
 #### 功能清单
 
 | 功能 | 描述 |
 |------|------|
-| URL 生成技能 | 输入任意 URL，自动分析并生成 SKILL.md |
-| 技能列表 | 展示当前已加载的技能及其状态 |
-| 技能健康检查 | 检测每个技能的运行状态 |
-| 技能部署 | 将生成的技能推送到板端 OpenClaw |
+| 查看/编辑 | 查看板端已安装技能的 SKILL.md 内容，可直接编辑并保存回板端 |
+| 创建技能 | 提供 SKILL.md 模板编辑器，填写技能名和内容后一键部署到板端 |
+| 链接转技能 | AI 辅助：输入 GitHub/NodeHub/网页 URL，AI 分析并生成技能定义 |
+| 部署确认 | 所有写入板端操作均需用户确认（弹窗显示技能名和路径） |
+| 板端技能列表 | 左侧栏展示设备已安装技能，解析 pipe-delimited 格式显示清晰名称 |
+| OpenClaw 状态 | 显示网关运行状态 |
+
+#### 后端 API
+
+| API | 方法 | 描述 |
+|-----|------|------|
+| `/api/devices/:id/openclaw/skills` | GET | 获取板端已安装技能列表 |
+| `/api/devices/:id/openclaw/skill-content` | GET | 读取指定技能的 SKILL.md 内容 |
+| `/api/devices/:id/openclaw/skill-write` | POST | 将 SKILL.md 内容写入板端（参数: skillId, content） |
 
 ---
 
@@ -559,6 +570,30 @@ OpenClaw 管理
 
 ---
 
+### 6.15 多板卡协作（Fleet Dispatch）
+
+**实现文件**: `server/rdkclaw/tools/fleet-dispatch.ts`
+
+**功能定位**: AI Agent 工具层实现的多板卡调度与协作能力。
+
+#### 功能清单
+
+| 工具 | 描述 |
+|------|------|
+| `fleet_board_list` | 列出所有板卡，含硬件画像（型号/BPU/内存/CPU）、去重检测、当前任务状态 |
+| `fleet_board_delegate` | 向指定板卡的 OpenClaw 委派任务，支持角色分配（executor/reviewer/advisor） |
+| `fleet_board_broadcast` | 向多个板卡并行广播任务并汇总结果，自动 IP 去重 |
+
+#### 协调机制
+
+- **IP 去重检测**：自动识别同 IP 的重复注册，警告并在广播时自动去重
+- **冲突拦截**：委派前检查目标板卡是否忙碌，同 IP 设备已有任务时拒绝并发
+- **任务追踪**：全局 `fleetTaskLog` 记录所有跨板任务状态
+- **硬件感知调度**：根据 BPU 算力、内存大小等硬件画像智能分配任务
+- **模型兼容提示**：不同板型（X3 Bernoulli2 / X5 Bayes / S100 Nash）模型不通用
+
+---
+
 ## 7. 待完成 / 规划中功能
 
 代码审查发现以下组件已实现但未接入主界面（`App.tsx` 的 `MainContent` 中未渲染）：
@@ -569,6 +604,8 @@ OpenClaw 管理
 | **Examples 页面** | `src/components/Examples.tsx` | 类型已定义 (`examples` tab) | NodeHub 示例应用列表，支持安装/运行/卸载。同样有 import 但未在视图中渲染 |
 | **Sidebar 组件** | `src/components/Sidebar.tsx` | 无引用 | 另一套侧栏导航实现，仓库内无其它文件 import，疑似遗留代码或早期实验 |
 | **Low-code 页面** | Tab 类型含 `lowcode` | 无对应组件 | `Tab` 类型中定义了 `lowcode`（Node-RED），但无对应前端组件实现 |
+| **云端技能仓库** | 无 | 规划中 | 远程技能同步与热更新，详见 [prd-05-cloud-integration.md](prd-05-cloud-integration.md) |
+| **课程技能包** | 无 | 规划中 | 教学场景的技能化沉淀，详见 [prd-05-cloud-integration.md](prd-05-cloud-integration.md) |
 
 ---
 
