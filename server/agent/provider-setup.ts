@@ -357,24 +357,33 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
   } as any;
 }
 
+let _warmupKey = '';
+let _warmupPromise: Promise<void> | null = null;
+
 /**
  * 启动时尝试从 Provider API 获取模型能力并更新注册表。
- * 静默失败，不影响主流程。
+ * 同一 provider+model 只请求一次，静默失败不影响主流程。
  */
 export async function warmupModelCapabilities(config: ProviderConfig): Promise<void> {
-  try {
-    const baseUrl = resolveProviderBaseUrl(config);
-    const caps = await fetchModelCapabilitiesFromProvider({
-      baseUrl,
-      apiKey: config.apiKey,
-      model: config.model,
-    });
-    if (caps) {
-      registerModelCapabilities(config.model, caps);
+  const key = `${config.provider}:${config.model}`;
+  if (_warmupKey === key && _warmupPromise) return _warmupPromise;
+  _warmupKey = key;
+  _warmupPromise = (async () => {
+    try {
+      const baseUrl = resolveProviderBaseUrl(config);
+      const caps = await fetchModelCapabilitiesFromProvider({
+        baseUrl,
+        apiKey: config.apiKey,
+        model: config.model,
+      });
+      if (caps) {
+        registerModelCapabilities(config.model, caps);
+      }
+    } catch {
+      // 静默失败
     }
-  } catch {
-    // 静默失败
-  }
+  })();
+  return _warmupPromise;
 }
 
 export function buildStreamFn(config: ProviderConfig): StreamFunction {

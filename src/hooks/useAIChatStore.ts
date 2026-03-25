@@ -812,10 +812,27 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const needsBoardCollaboration = Boolean(event.data.needs_board_collaboration);
                 const networkEnabled = Boolean(event.data.network_enabled);
 
+                const modelCaps = event.data.model_capabilities as {
+                  provider?: string;
+                  model?: string;
+                  contextWindow?: number;
+                  maxOutputTokens?: number;
+                } | undefined;
+
                 const summaryParts = [executorLabel(executor), delegationMode];
                 if (matchedSkills.length > 0) summaryParts.push(`技能: ${matchedSkills.join('/')}`);
                 if (networkEnabled) summaryParts.push('联网');
                 if (needsBoardCollaboration) summaryParts.push('板端协同');
+
+                const metaItems: Array<{ label: string; value: string; ok: boolean }> = [
+                  { label: '执行路径', value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
+                  { label: '命中能力', value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '通用流程', ok: matchedSkills.length > 0 },
+                ];
+                if (modelCaps?.model) {
+                  const ctxK = modelCaps.contextWindow ? `${Math.round(modelCaps.contextWindow / 1024)}K` : '?';
+                  const outK = modelCaps.maxOutputTokens ? `${Math.round(modelCaps.maxOutputTokens / 1024)}K` : '?';
+                  metaItems.push({ label: '模型', value: `${modelCaps.model} · 上下文 ${ctxK} · 输出 ${outK}`, ok: true });
+                }
 
                 const existingSetupIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && b.items?.[0]?.value === '正在准备上下文...',
@@ -826,10 +843,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     collapsible: true,
                     defaultCollapsed: true,
                     summary: summaryParts.join(' · '),
-                    items: [
-                      { label: '执行路径', value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
-                      { label: '命中能力', value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '通用流程', ok: matchedSkills.length > 0 },
-                    ],
+                    items: metaItems,
                   };
                 } else {
                   aiBlocks.push({
@@ -837,10 +851,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     collapsible: true,
                     defaultCollapsed: true,
                     summary: summaryParts.join(' · '),
-                    items: [
-                      { label: '执行路径', value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
-                      { label: '命中能力', value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '通用流程', ok: matchedSkills.length > 0 },
-                    ],
+                    items: metaItems,
                   });
                 }
                 updateAiMessage(aiText, aiBlocks, true);
@@ -1260,12 +1271,20 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 }
                 const elapsed = String(event.data.elapsed_display || '');
                 const calls = Number(event.data.tool_calls || 0);
+                const isError = Boolean(event.data.error);
+                const isCancelled = Boolean(event.data.cancelled);
                 const detail: string[] = [];
                 if (elapsed) detail.push(elapsed);
                 if (calls > 0) detail.push(`${calls} 步`);
+                const label = isCancelled
+                  ? '⊘ 已取消'
+                  : isError
+                    ? '✗ 执行出错'
+                    : '✓ 回复完成';
+                const ok = !isError && !isCancelled;
                 aiBlocks.push({
                   type: 'status',
-                  items: [{ label: '✓ 回复完成', value: detail.length > 0 ? detail.join(' · ') : '', ok: true }],
+                  items: [{ label, value: detail.length > 0 ? detail.join(' · ') : '', ok }],
                 });
                 updateAiMessage(aiText, aiBlocks, true);
                 break;

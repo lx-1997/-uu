@@ -878,6 +878,12 @@ export class RDKClawApp {
         attachment_types: Array.from(new Set(attachmentState.allAttachments.map((item) => item.type))),
         audio_transcript_count: attachmentState.allAttachments.filter((item) => item.type === "audio" && item.transcript).length,
         new_audio_transcript_count: attachmentState.newAttachments.filter((item) => item.type === "audio" && item.transcript).length,
+        model_capabilities: {
+          provider: providerConfig.provider,
+          model: providerConfig.model,
+          contextWindow: modelCaps.contextWindow,
+          maxOutputTokens: modelCaps.maxOutputTokens,
+        },
         setup_elapsed_ms: setupElapsedMs,
         setup_workspace_ms: workspaceInitMs,
         setup_attachments_ms: attachmentPrepareMs,
@@ -998,9 +1004,36 @@ export class RDKClawApp {
 
     await runPromise;
     if (failed) {
+      const failElapsedMs = Date.now() - runStartedAt;
+      const failElapsedSec = Math.max(1, Math.round(failElapsedMs / 1000));
+      const failElapsedDisplay = failElapsedSec >= 60
+        ? `${Math.floor(failElapsedSec / 60)} 分 ${failElapsedSec % 60} 秒`
+        : `${failElapsedSec} 秒`;
       if (abortedByClient) {
+        yield {
+          type: "run_complete",
+          data: {
+            ...base,
+            message: "已取消",
+            cancelled: true,
+            elapsed_ms: failElapsedMs,
+            elapsed_display: failElapsedDisplay,
+            tool_calls: runMetrics.localToolCalls + runMetrics.boardToolCalls,
+          },
+        };
         return;
       }
+      yield {
+        type: "run_complete",
+        data: {
+          ...base,
+          message: "执行出错",
+          error: true,
+          elapsed_ms: failElapsedMs,
+          elapsed_display: failElapsedDisplay,
+          tool_calls: runMetrics.localToolCalls + runMetrics.boardToolCalls,
+        },
+      };
       throw failed;
     }
     const completionText = String((runResult as any)?.text || "");
