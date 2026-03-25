@@ -160,6 +160,9 @@ export default function SkillBrowser() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Confirm dialog
+  const [confirmAction, setConfirmAction] = useState<{ title: string; detail: string; onConfirm: () => void } | null>(null);
+
   const loadBoardSkills = useCallback(async () => {
     if (!currentDevice) {
       setBoardSkills([]);
@@ -246,16 +249,11 @@ export default function SkillBrowser() {
 
   const sourceKind = useMemo(() => (looksLikeHttpUrl(sourceUrl) ? detectSourceKind(sourceUrl) : null), [sourceUrl]);
 
-  const handleDeploy = async () => {
-    if (!currentDevice) return addToast?.('请先连接设备', 'warning');
-    const id = newSkillId.trim() || extractSkillName(newSkillContent);
-    if (!id) return addToast?.('请填写技能名称（或在 SKILL.md 中设置 name 字段）', 'warning');
-    if (!/^[a-zA-Z0-9_-]+$/.test(id)) return addToast?.('技能名只能包含字母、数字、下划线和横线', 'warning');
-    if (!newSkillContent.trim()) return addToast?.('SKILL.md 内容不能为空', 'warning');
-
+  const executeDeploy = async (id: string, content: string) => {
+    if (!currentDevice) return;
     setDeploying(true);
     try {
-      const result = await writeSkillToBoard(currentDevice.id, id, newSkillContent.trim());
+      const result = await writeSkillToBoard(currentDevice.id, id, content.trim());
       if (result.ok) {
         addToast?.(`技能 ${id} 已部署到板端: ${result.path || ''}`, 'success');
         await loadBoardSkills();
@@ -270,7 +268,21 @@ export default function SkillBrowser() {
     }
   };
 
-  const handleSaveEdit = async () => {
+  const handleDeploy = () => {
+    if (!currentDevice) return addToast?.('请先连接设备', 'warning');
+    const id = newSkillId.trim() || extractSkillName(newSkillContent);
+    if (!id) return addToast?.('请填写技能名称（或在 SKILL.md 中设置 name 字段）', 'warning');
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) return addToast?.('技能名只能包含字母、数字、下划线和横线', 'warning');
+    if (!newSkillContent.trim()) return addToast?.('SKILL.md 内容不能为空', 'warning');
+
+    setConfirmAction({
+      title: `部署技能「${id}」到板端？`,
+      detail: `将写入 ~/.openclaw/workspace/skills/${id}/SKILL.md（${newSkillContent.trim().split('\n').length} 行）`,
+      onConfirm: () => { setConfirmAction(null); void executeDeploy(id, newSkillContent); },
+    });
+  };
+
+  const executeSaveEdit = async () => {
     if (!currentDevice || !selectedBoardSkill) return;
     const id = selectedBoardSkill.split('|')[0];
     if (!id) return;
@@ -290,6 +302,17 @@ export default function SkillBrowser() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveEdit = () => {
+    if (!currentDevice || !selectedBoardSkill) return;
+    const id = selectedBoardSkill.split('|')[0];
+    if (!id) return;
+    setConfirmAction({
+      title: `保存修改到板端技能「${id}」？`,
+      detail: '此操作将覆盖板端已有的 SKILL.md 文件。',
+      onConfirm: () => { setConfirmAction(null); void executeSaveEdit(); },
+    });
   };
 
   const startUrlBasedSkillCreate = () => {
@@ -402,6 +425,7 @@ export default function SkillBrowser() {
                         className="input"
                         value={editContent}
                         onChange={(e) => setEditContent(e.target.value)}
+                        placeholder="编辑 SKILL.md 内容"
                         style={{ fontFamily: 'monospace', fontSize: '0.75rem', minHeight: 400, resize: 'vertical', whiteSpace: 'pre', lineHeight: 1.5 }}
                       />
                     ) : (
@@ -444,6 +468,7 @@ export default function SkillBrowser() {
                     className="input"
                     value={newSkillContent}
                     onChange={(e) => setNewSkillContent(e.target.value)}
+                    placeholder="输入 SKILL.md 内容"
                     style={{ fontFamily: 'monospace', fontSize: '0.75rem', minHeight: 360, resize: 'vertical', whiteSpace: 'pre', lineHeight: 1.5 }}
                   />
                 </div>
@@ -487,6 +512,19 @@ export default function SkillBrowser() {
           </div>
         </div>
       </div>
+
+      {confirmAction && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'var(--bg)', borderRadius: 'var(--radius-md)', padding: '24px', maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+            <strong style={{ fontSize: '0.9375rem', display: 'block', marginBottom: 8 }}>{confirmAction.title}</strong>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0 0 16px' }}>{confirmAction.detail}</p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmAction(null)}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={confirmAction.onConfirm}>确认部署</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
