@@ -317,6 +317,7 @@ export class RDKClawApp {
   private runAgents = new Map<string, Agent>();
   private sessionAutoApprove = new Map<string, boolean>();
   private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: { skills: string[]; plugins: string[] } }>();
+  private modelCapWarmedUp = new Set<string>();
   private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
   private readonly deviceQueue = new DeviceQueue();
   private switchDeviceCallback?: (deviceId: string) => void;
@@ -776,47 +777,25 @@ export class RDKClawApp {
           : `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
         : "",
       req.deviceId ? [
-        "## 双 Agent 协作模式",
+        "## 双 Agent 协作",
+        "你=RDKClaw（主脑），板端 OpenClaw=外脑。你先分析、能做就做；需板端能力时用三种工具协作：",
+        "- **chat** (board_openclaw_chat)：轻量交流——了解能力、讨论方案、分享信息",
+        "- **assess** (board_openclaw_assess)：评估——让 OpenClaw 判断某任务能否处理",
+        "- **delegate** (board_openclaw_delegate)：委派——确认可行后交付执行，guidance 中注入你的知识",
+        "三者共享会话，不必重复背景。委派后评估结果质量，失败时本地兜底。",
+        "OpenClaw 擅长：板端多步操作、技能链、应用部署。不擅长：联网搜索、文档分析（你的专属能力）。",
+        "若 OpenClaw 回复含 [NEED_RDKCLAW] 块，提取 type/query 后用你的工具获取信息，再 chat 发回。最多补给 2 轮。",
         "",
-        "你是 RDKClaw，用户的主交互智能体。板端的 OpenClaw 是你的协作伙伴（外脑）。",
-        "",
-        "### 你的角色：主脑",
-        "- 所有任务首先由你分析和处理，你是第一决策者",
-        "- 你具备完整的思考、规划和工具执行能力",
-        "- 大部分任务你可以独立完成，不需要请教 OpenClaw",
-        "",
-        "### OpenClaw 的角色：板端外脑",
-        "- 运行在 RDK 设备上，了解板端本地状态和已安装技能",
-        "- 擅长：复杂的板端多步操作、需要 OpenClaw 技能链的任务、板端应用开发部署",
-        "- 不擅长：网页搜索、文档分析（这些是你的本地专属能力）",
-        "- 图像理解能力取决于双方各自配置的模型——你先本地尝试，失败时可将图片传到设备让 OpenClaw 尝试",
-        "",
-        "### 协作流程：你先想，你先做，需要时和 OpenClaw 沟通",
-        "1. **你先分析**：收到任务后，判断需要什么能力、你能否直接完成",
-        "2. **能做就做**：搜索、文件处理、知识问答、简单 device_exec——直接用你的工具",
-        "3. **需要时和 OpenClaw 沟通**——你有三种方式互动，像和伙伴协作一样自然使用：",
-        "   - **交流** (board_openclaw_chat)：和 OpenClaw 聊聊——了解它的模型能力、分享你的分析、讨论方案、获取板端状态。不一定要派活，先沟通也可以",
-        "   - **评估** (board_openclaw_assess)：让 OpenClaw 判断某个具体任务它能否处理",
-        "   - **委派** (board_openclaw_delegate)：确认可行后把任务交给 OpenClaw，在 guidance 中融入你的知识",
-        "4. **结果回收**：委派完成后下载产出文件、评估执行质量，失败时用本地工具兜底",
-        "5. **迭代补给**：如果 OpenClaw 的回复中包含 [NEED_RDKCLAW] 块，说明它需要你的帮助（联网搜索、查文档等）。" +
-          "提取 type/query，用你的工具获取信息，再通过 board_openclaw_chat 发回给它。" +
-          "一次 delegate 最多补给 2 轮，避免无限循环。",
-        "",
-        "交流、评估、委派共享同一会话——你们聊过的内容双方都记得，不必重复说明背景。",
-        "",
-        "### 你的本地工具箱",
-        "- 图片/视频理解 → attachment_describe_image（本地 Vision API；失败时可先 chat 问问 OpenClaw 是否能处理）",
-        "- 网页搜索 → web_search / web_fetch",
-        "- 附件和文档 → attachment_read / attachment_list",
-        "- 设备命令 → device_exec（简单命令直接执行，无需委派）",
-        "- 设备文件 → device_file_*（上传下载直接操作）",
-        "- 设备诊断 → device_diagnose",
-        "- ROS → ros_*、VNC → vnc_*、语音 → tts_* / stt_*",
+        "### 你的本地能力速查",
+        "图片→attachment_describe_image | 联网→web_search/web_fetch | 设备命令→device_exec | 文件→device_file_* | 诊断→device_diagnose",
       ].join("\n") : "",
     ].filter(Boolean).join("\n");
     const modelCaps = lookupModelCapabilities(providerConfig.provider, providerConfig.model);
-    warmupModelCapabilities(providerConfig).catch(() => {});
+    const warmupKey = `${providerConfig.provider}:${providerConfig.model}`;
+    if (!this.modelCapWarmedUp.has(warmupKey)) {
+      this.modelCapWarmedUp.add(warmupKey);
+      warmupModelCapabilities(providerConfig).catch(() => {});
+    }
     const modelDef = buildModelDef(providerConfig);
     const streamFn = buildStreamFn(providerConfig);
     const apiKey = getApiKey(providerConfig);
@@ -928,7 +907,7 @@ export class RDKClawApp {
       enableMemory: true,
       enableHeartbeat: true,
       maxTurns: 12,
-      temperature: 0.7,
+      temperature: 0.5,
       reasoning: "medium",
       contextTokens: Math.max(16_000, Number(policy.context.contextTokens) || modelCaps.contextWindow),
     });

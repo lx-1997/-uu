@@ -9,7 +9,13 @@ function getDataFilePath() {
   return path.join(dataDir, 'devices.json');
 }
 
+let _deviceCache: { data: Device[]; expiresAt: number } | null = null;
+const DEVICE_CACHE_TTL_MS = 3000;
+
 export async function readDevices(): Promise<Device[]> {
+  if (_deviceCache && _deviceCache.expiresAt > Date.now()) {
+    return _deviceCache.data;
+  }
   const dataFilePath = getDataFilePath();
   const content = await fs.readFile(dataFilePath, 'utf-8').catch(async (error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') {
@@ -20,10 +26,13 @@ export async function readDevices(): Promise<Device[]> {
     throw error;
   });
 
-  return JSON.parse(content) as Device[];
+  const devices = JSON.parse(content) as Device[];
+  _deviceCache = { data: devices, expiresAt: Date.now() + DEVICE_CACHE_TTL_MS };
+  return devices;
 }
 
 export async function writeDevices(devices: Device[]) {
+  _deviceCache = null;
   const dataFilePath = getDataFilePath();
   await fs.mkdir(path.dirname(dataFilePath), { recursive: true });
   await fs.writeFile(dataFilePath, JSON.stringify(devices, null, 2), 'utf-8');

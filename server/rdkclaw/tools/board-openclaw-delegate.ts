@@ -145,7 +145,7 @@ export function boardOpenClawDelegateTool(
           let handle: { abort: () => void } | null = null;
           const flushProgress = (force = false) => {
             const now = Date.now();
-            if (!force && now - lastEmitAt < 400) return;
+            if (!force && now - lastEmitAt < 200) return;
             if (!pending.trim()) return;
             const toSend = pending.length > 1200 ? pending.slice(-1200) : pending;
             pending = "";

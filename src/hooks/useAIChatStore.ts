@@ -1681,13 +1681,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('rdkclaw-notify', onNotify as EventListener);
   }, []);
 
-  // Persist chat history
+  // Persist chat history (debounced to avoid blocking main thread during streaming)
+  const chatPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    try {
-      const toSave = chatMessages.slice(-50);
-      localStorage.setItem('rdk-chat-history', JSON.stringify(toSave));
-    } catch { /* quota exceeded */ }
-  }, [chatMessages]);
+    if (chatPersistTimerRef.current) clearTimeout(chatPersistTimerRef.current);
+    chatPersistTimerRef.current = setTimeout(() => {
+      try {
+        const toSave = chatMessages.slice(-50);
+        localStorage.setItem('rdk-chat-history', JSON.stringify(toSave));
+      } catch { /* quota exceeded */ }
+    }, aiTyping ? 2000 : 300);
+  }, [chatMessages, aiTyping]);
 
   // Cleanup task intervals on unmount
   useEffect(() => {
