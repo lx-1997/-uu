@@ -38,8 +38,24 @@ if (platform !== expectedPlatform) {
 const buildResourcesDir = path.join(rootDir, 'build-resources');
 const packageJsonPath = path.join(rootDir, 'package.json');
 const strictResourceCheck = String(process.env.RDK_DESKTOP_STRICT_RESOURCES || '').trim() === '1';
+
+const resourcesPlan = [
+  { source: path.join(rootDir, 'public', 'vnc', 'app', 'images', 'icons', 'novnc.ico'), target: 'icon.ico' },
+  { source: path.join(rootDir, 'public', 'vnc', 'app', 'images', 'icons', 'novnc-ios-180.png'), target: 'icon.png' },
+];
+
 function ensureBuildResourcesPrepared() {
   fs.mkdirSync(buildResourcesDir, { recursive: true });
+  for (const { source, target: name } of resourcesPlan) {
+    const dest = path.join(buildResourcesDir, name);
+    if (fs.existsSync(dest)) continue;
+    if (!fs.existsSync(source)) {
+      console.warn(`[build:desktop] icon source not found: ${source}`);
+      continue;
+    }
+    fs.copyFileSync(source, dest);
+    console.log(`[build:desktop] prepared ${name}`);
+  }
 }
 
 function validateBuildResources() {
@@ -128,13 +144,41 @@ function runWithEnv(cmd, args, extraEnv) {
 const npmCmd = platform === 'win32' ? 'npm.cmd' : 'npm';
 const builderBin = platform === 'win32' ? 'node_modules\\.bin\\electron-builder.cmd' : 'node_modules/.bin/electron-builder';
 
+async function cleanReleaseDirWithRetry(dir, maxRetries = 6, delayMs = 3000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // rmSync may throw on locked files even with force: true
+    }
+    if (!fs.existsSync(dir)) {
+      console.log(`[build:desktop] cleaned release directory${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+      return;
+    }
+    if (attempt === maxRetries) {
+      console.warn(`[build:desktop] release dir still locked after ${maxRetries} retries, moving aside...`);
+      const stale = `${dir}-stale-${Date.now()}`;
+      try {
+        fs.renameSync(dir, stale);
+        console.log(`[build:desktop] moved locked dir → ${path.basename(stale)} (can be deleted later)`);
+        return;
+      } catch {
+        // rename also failed — skip cleanup entirely and let electron-builder overwrite in-place
+        console.warn(`[build:desktop] cannot move release dir either, skipping cleanup (electron-builder will overwrite)`);
+        return;
+      }
+    }
+    console.warn(`[build:desktop] release dir locked, retrying in ${delayMs / 1000}s... (${attempt}/${maxRetries})`);
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+}
+
 try {
   ensureBuildResourcesPrepared();
   validateBuildResources();
   validateBuildConfig();
   if (cleanReleaseDir) {
-    fs.rmSync(releaseDir, { recursive: true, force: true });
-    console.log('[build:desktop] cleaned release directory');
+    await cleanReleaseDirWithRetry(releaseDir);
   }
   await run(npmCmd, ['run', 'build']);
   if (target === 'win') {

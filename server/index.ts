@@ -4885,9 +4885,22 @@ io.on('connection', (socket) => {
 
 async function startServer() {
   await restoreRuntimeJobsState();
+  httpServer.once('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `[server] 端口 ${port} 已被占用（EADDRINUSE）。请关闭占用该端口的程序（例如另一份 RDK Studio、或开发环境的 npm run dev），或设置环境变量 PORT 使用其它端口。`,
+      );
+    } else {
+      console.error('[server] httpServer 监听失败:', err.message);
+    }
+    process.exit(1);
+  });
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`RDK Studio server running on http://0.0.0.0:${port}`);
   });
 }
 
-void startServer();
+startServer().catch((err) => {
+  console.error('[server] 启动失败:', err instanceof Error ? err.message : err);
+  process.exit(1);
+});

@@ -179,6 +179,16 @@ function startEmbeddedServer() {
     serverProcess = child;
 
     let settled = false;
+    const stderrTail = [];
+    const pushStderr = (chunk) => {
+      stderrTail.push(chunk);
+      const joined = stderrTail.join('');
+      if (joined.length > 6000) {
+        stderrTail.length = 0;
+        stderrTail.push(joined.slice(-4000));
+      }
+    };
+
     const settle = (fn, value) => {
       if (settled) return;
       settled = true;
@@ -187,7 +197,13 @@ function startEmbeddedServer() {
     };
 
     const bootTimer = setTimeout(() => {
-      settle(reject, new Error(`内置服务启动超时（>${SERVER_BOOT_TIMEOUT_MS}ms）`));
+      const hint = stderrTail.join('').trim();
+      settle(
+        reject,
+        new Error(
+          `内置服务启动超时（>${SERVER_BOOT_TIMEOUT_MS}ms）${hint ? `\n\n最近日志:\n${hint.slice(-2000)}` : ''}`,
+        ),
+      );
     }, SERVER_BOOT_TIMEOUT_MS);
 
     child.stdout?.on('data', (data) => {
@@ -199,7 +215,9 @@ function startEmbeddedServer() {
     });
 
     child.stderr?.on('data', (data) => {
-      console.error('[server:err]', data.toString().trim());
+      const text = data.toString();
+      pushStderr(text);
+      console.error('[server:err]', text.trim());
     });
 
     child.on('error', (err) => {
@@ -210,7 +228,14 @@ function startEmbeddedServer() {
     child.on('exit', (code, signal) => {
       console.error('[server] exited:', { code, signal });
       if (!settled) {
-        settle(reject, new Error(`内置服务启动失败，进程已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`));
+        const tail = stderrTail.join('').trim();
+        settle(
+          reject,
+          new Error(
+            `内置服务启动失败，进程已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`
+            + (tail ? `\n\n最近 stderr:\n${tail.slice(-2500)}` : ''),
+          ),
+        );
       }
     });
   });

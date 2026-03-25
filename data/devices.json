@@ -1,47 +1,11 @@
 [
   {
-    "id": "83f7ef28-c304-415c-961e-b272561de578",
+    "id": "ba09ed02-1b78-405b-b421-0c664967d191",
     "host": "192.168.66.214",
     "port": 22,
     "username": "root",
     "password": "root",
     "status": "connected",
-    "lastCheckedAt": "2026-03-23T12:36:18.548Z"
-  },
-  {
-    "id": "523a1392-ce40-4f84-ae9c-bd33ccb9fa5d",
-    "host": "192.168.66.214",
-    "port": 22,
-    "username": "sunrise",
-    "password": "sunrise",
-    "status": "connected",
-    "lastCheckedAt": "2026-03-23T12:35:49.826Z"
-  },
-  {
-    "id": "a321cf12-7bdb-4bbf-a7f6-acf99f270522",
-    "host": "192.168.66.78",
-    "port": 22,
-    "username": "root",
-    "password": "root",
-    "status": "connected",
-    "lastCheckedAt": "2026-03-23T09:49:49.645Z"
-  },
-  {
-    "id": "fe696227-91e8-4e69-829d-3ab6970cd7fa",
-    "host": "192.168.43.147",
-    "port": 22,
-    "username": "root",
-    "password": "root",
-    "status": "connected",
-    "lastCheckedAt": "2026-03-23T08:19:44.793Z"
-  },
-  {
-    "id": "69f1b3b9-a14e-4fc3-ab82-3a76ac57ed6e",
-    "host": "192.168.127.10",
-    "port": 22,
-    "username": "root",
-    "password": "root",
-    "status": "connected",
-    "lastCheckedAt": "2026-03-23T06:37:17.034Z"
+    "lastCheckedAt": "2026-03-25T08:36:34.804Z"
   }
 ]
