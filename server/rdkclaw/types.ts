@@ -47,7 +47,9 @@ export type RDKClawEventType =
   | "done"
   | "error"
   | "retry"
-  | "meta";
+  | "meta"
+  | "queue_status"
+  | "no_device";
 
 export interface RecommendationOption {
   id: string;

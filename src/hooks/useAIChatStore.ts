@@ -1105,6 +1105,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
+              case 'queue_status': {
+                const pos = Number(event.data.position ?? 0);
+                const current = String(event.data.currentTask ?? '');
+                const channel = String(event.data.currentChannel ?? '');
+                const channelLabel = channel === 'feishu' ? '飞书' : channel === 'weixin' ? '微信' : channel || '其他渠道';
+                const posLabel = pos > 0 ? `排在第 ${pos} 位` : '正在排队';
+                aiBlocks.push({
+                  type: 'status',
+                  items: [
+                    { label: '队列状态', value: posLabel, ok: false },
+                    ...(current ? [{ label: '当前任务', value: `${channelLabel}: ${current}`, ok: true }] : []),
+                  ],
+                  summary: `设备正忙，${posLabel}，请稍候...`,
+                });
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
               case 'error': {
                 const errorMsg = (event.data.error as string) || 'Agent 执行出错';
                 let friendlyText = '';

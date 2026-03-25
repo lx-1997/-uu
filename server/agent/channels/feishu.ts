@@ -542,17 +542,7 @@ export class FeishuWebSocketChannel {
     }
 
     if (!latestUiDeviceId) {
-      const hint = "请先在 RDK Studio 里连接目标设备，再通过飞书发起设备相关请求。";
-      await this.sendText(chatId, hint);
-      this.publishMirror("channel_message_error", "飞书设备", hint, {
-        channel: "feishu",
-        direction: "error",
-        openIdMasked,
-        chatId,
-        messageId: msgId,
-        sessionId,
-      });
-      return;
+      await this.sendText(chatId, "当前无 RDK 设备连接，板端操作暂不可用，其他功能正常。");
     }
 
     if (cfg.ackOnReceive && cfg.ackStyle !== "off") {
@@ -599,12 +589,20 @@ export class FeishuWebSocketChannel {
       for await (const event of this.rdkclaw.streamChat({
         message: text || "请结合我刚通过飞书发送的附件继续处理当前请求。",
         userId: openId,
-        deviceId: latestUiDeviceId,
-        sessionId,
+        deviceId: latestUiDeviceId || undefined,
         mode: "auto",
         attachments,
         channel: "feishu",
       })) {
+        if (event.type === "queue_status") {
+          const pos = Number(event.data?.position ?? 0);
+          const current = String(event.data?.currentTask ?? "");
+          const hint = pos > 0
+            ? `当前设备正在处理其他任务${current ? `（${current}）` : ""}，你的请求排在第 ${pos} 位，请稍候...`
+            : "正在排队中，请稍候...";
+          await this.sendText(chatId, hint);
+          continue;
+        }
         if (event.type === "text") {
           const delta = String(event.data?.delta ?? event.data?.text ?? "");
           if (delta) chunks.push(delta);

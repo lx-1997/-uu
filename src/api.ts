@@ -297,7 +297,9 @@ export interface AgentSSEEvent {
     | 'done'
     | 'error'
     | 'retry'
-    | 'meta';
+    | 'meta'
+    | 'queue_status'
+    | 'no_device';
   data: Record<string, unknown>;
 }
 

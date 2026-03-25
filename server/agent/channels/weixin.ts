@@ -332,13 +332,13 @@ export class WeixinPollingChannel {
       poller.client.sendTyping(fromUserId, typingTicket, 1).catch(() => {});
     }
 
-    const sessionId = `weixin:${fromUserId}`;
-
     let deviceId = this.feishuAuthStore?.getLatestUiDevice() || "";
     deviceId = await this.resolveDeviceId(deviceId);
 
     if (!deviceId) {
       console.log(`${tag} no connected device, proceeding without deviceId`);
+      await poller.client.sendText(fromUserId, contextToken,
+        "当前无 RDK 设备连接，板端操作暂不可用，其他功能正常。").catch(() => {});
     }
 
     const chunks: string[] = [];
@@ -349,12 +349,20 @@ export class WeixinPollingChannel {
       for await (const event of this.rdkclaw.streamChat({
         message: displayText,
         userId: fromUserId,
-        sessionId,
         deviceId: deviceId || undefined,
         mode: deviceId ? "board-preferred" : "local",
         attachments: attachments.length > 0 ? attachments : undefined,
         channel: "weixin",
       })) {
+        if (event.type === "queue_status") {
+          const pos = Number(event.data?.position ?? 0);
+          const current = String(event.data?.currentTask ?? "");
+          const hint = pos > 0
+            ? `当前设备正在处理其他任务${current ? `（${current}）` : ""}，你的请求排在第 ${pos} 位，请稍候...`
+            : "正在排队中，请稍候...";
+          await poller.client.sendText(fromUserId, contextToken, hint).catch(() => {});
+          continue;
+        }
         if (event.type === "text") {
           const delta = String(event.data?.delta ?? event.data?.text ?? "");
           if (delta) chunks.push(delta);

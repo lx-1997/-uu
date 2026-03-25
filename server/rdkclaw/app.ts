@@ -40,6 +40,7 @@ import { PersonaStore } from "./persona-store.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { RDKClawPolicyStore } from "./policy-store.js";
 import { UserWorkspaceStore } from "./workspace-store.js";
+import { DeviceQueue } from "./device-queue.js";
 import type {
   ApprovalDecisionMode,
   ChannelSource,
@@ -343,6 +344,7 @@ export class RDKClawApp {
   private sessionAutoApprove = new Map<string, boolean>();
   private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: { skills: string[]; plugins: string[] } }>();
   private static readonly BOARD_SNAPSHOT_TTL_MS = 12_000;
+  private readonly deviceQueue = new DeviceQueue();
 
   private async getBoardSkillSnapshot(deviceId?: string): Promise<{ skills: string[]; plugins: string[] }> {
     if (!deviceId) return { skills: [], plugins: [] };
@@ -646,7 +648,44 @@ export class RDKClawApp {
       throw new Error("未配置 AI 模型 API Key，请先在设置中配置。");
     }
 
-    const sessionKey = req.sessionId?.trim() || (req.userId?.trim() ? `rdkclaw:${req.userId.trim()}` : `rdkclaw-${Date.now()}`);
+    const deviceLane = this.deviceQueue.getLane(req.deviceId);
+    const sessionKey = req.deviceId?.trim() ? `device:${req.deviceId.trim()}` : "local";
+
+    const queueStatus = this.deviceQueue.getStatus(deviceLane);
+    if (queueStatus.running) {
+      yield {
+        type: "queue_status" as const,
+        data: {
+          position: queueStatus.pendingCount + 1,
+          currentTask: queueStatus.running.messageSummary,
+          currentChannel: queueStatus.running.channel,
+          deviceLane,
+        },
+      };
+    }
+
+    const channel: import("./types.js").ChannelSource = req.channel || "studio";
+    const slot = await this.deviceQueue.acquireSlot(deviceLane, {
+      channel,
+      messageSummary: String(req.message || "").slice(0, 60),
+    });
+
+    try {
+      yield* this._executeChat(req, sessionKey, providerConfig, slot);
+    } finally {
+      slot.release();
+    }
+  }
+
+  private async *_executeChat(
+    req: RDKClawChatRequest,
+    sessionKey: string,
+    providerConfig: ProviderConfig,
+    _slot: { release: () => void },
+  ): AsyncGenerator<RDKClawEvent> {
+    const externalAbortSignal = req.abortSignal;
+    let abortedByClient = Boolean(externalAbortSignal?.aborted);
+
     const userProfile = req.userId ? this.personaStore.getUser(req.userId) : null;
     const runStartedAt = Date.now();
     const workspaceStartedAt = Date.now();
@@ -685,7 +724,7 @@ export class RDKClawApp {
         ? (boardSnapshot.skills.length > 0
           ? `当前板端已安装 OpenClaw 技能（每次执行前快照）: ${boardSnapshot.skills.join(", ")}`
           : "当前板端技能快照为空（可能未安装或读取失败）。如任务匹配不到现有技能，请优先生成并下发新技能，再继续执行。")
-        : "",
+        : "当前无 RDK 设备连接。板端功能（SSH 命令、OpenClaw 委派、设备监控等）暂不可用。用户可通过对话提供设备 IP 来连接设备。",
       req.deviceId && boardSnapshot.plugins.length > 0
         ? `当前板端允许插件: ${boardSnapshot.plugins.join(", ")}`
         : "",
