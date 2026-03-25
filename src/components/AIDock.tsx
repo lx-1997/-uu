@@ -289,14 +289,20 @@ function BlockRenderer({
   }
 
   if (block.type === 'video') {
+    const videoSrc = block.src || '';
+    const ext = videoSrc.split('.').pop()?.toLowerCase() || 'mp4';
+    const mimeMap: Record<string, string> = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo', mkv: 'video/x-matroska' };
+    const mimeType = mimeMap[ext] || 'video/mp4';
     return (
       <div className="msg-block video-block">
         <video
           className="video-block-player"
-          src={block.src}
           controls
-          preload="metadata"
-        />
+          playsInline
+          preload="auto"
+        >
+          <source src={videoSrc} type={mimeType} />
+        </video>
         {block.caption && <div className="image-block-caption">{block.caption}</div>}
       </div>
     );
