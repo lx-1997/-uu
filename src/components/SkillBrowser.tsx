@@ -189,7 +189,7 @@ export default function SkillBrowser() {
   }, [boardSkills, selectedBoardSkill]);
 
   useEffect(() => {
-    if (selectedBoardSkill) void loadSkillContent(selectedBoardSkill);
+    if (selectedBoardSkill) void loadSkillContent(selectedBoardSkill.split('|')[0]);
   }, [selectedBoardSkill, loadSkillContent]);
 
   const filteredBoardSkills = useMemo(() => {
@@ -241,17 +241,22 @@ export default function SkillBrowser() {
                 当前设备无已安装技能
               </div>
             )}
-            {filteredBoardSkills.map((s) => (
-              <button
-                key={s}
-                className={`config-sidebar-item ${selectedBoardSkill === s ? 'active' : ''}`}
-                onClick={() => setSelectedBoardSkill(s)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
-              >
-                <span className="badge badge-ok" style={{ fontSize: '0.56rem' }}>real</span>
-                <strong style={{ fontSize: '0.75rem', flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s}</strong>
-              </button>
-            ))}
+            {filteredBoardSkills.map((s) => {
+              const name = s.split('|')[0] || s;
+              const desc = (s.split('|')[2] || '').replace(/^"|"$/g, '').trim();
+              return (
+                <button
+                  key={s}
+                  className={`config-sidebar-item ${selectedBoardSkill === s ? 'active' : ''}`}
+                  onClick={() => setSelectedBoardSkill(s)}
+                  title={desc || name}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
+                >
+                  <span className="badge badge-ok" style={{ fontSize: '0.56rem' }}>real</span>
+                  <strong style={{ fontSize: '0.75rem', flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</strong>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -299,7 +304,7 @@ export default function SkillBrowser() {
               )}
               {selectedBoardSkill && (
                 <>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>当前技能: {selectedBoardSkill}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>当前技能: {selectedBoardSkill.split('|')[0]}</div>
                   <div className="config-terminal" style={{ maxHeight: 360 }}>
                     <pre style={{ margin: 0 }}>
                       {skillContentLoading ? '正在读取板端 SKILL.md ...' : (skillContent || '未读取到内容')}
