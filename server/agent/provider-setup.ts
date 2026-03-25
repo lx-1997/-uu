@@ -8,7 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { streamSimple, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
+import { streamSimple, streamSimpleAnthropic, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
 import type { Model, StreamFunction } from '@mariozechner/pi-ai';
 
 registerBuiltInApiProviders();
@@ -36,7 +36,15 @@ const CONFIG_DIR = path.join(os.homedir(), '.rdkstudio');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'agent-config.json');
 const DEFAULT_ENTRY_ID = 'default';
 
-const PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string }> = {
+type ProviderProtocol = 'openai' | 'anthropic';
+
+interface ProviderDefault {
+  baseUrl: string;
+  model: string;
+  protocol?: ProviderProtocol;
+}
+
+const PROVIDER_DEFAULTS: Record<string, ProviderDefault> = {
   qwen: {
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen3.5-plus',
@@ -48,6 +56,35 @@ const PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string }> = {
   openai: {
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
+  },
+  anthropic: {
+    baseUrl: 'https://api.anthropic.com',
+    model: 'claude-sonnet-4-20250514',
+    protocol: 'anthropic',
+  },
+  doubao: {
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-1.5-pro-256k',
+  },
+  gemini: {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: 'gemini-2.5-flash',
+  },
+  stepfun: {
+    baseUrl: 'https://api.stepfun.com/v1',
+    model: 'step-2-16k',
+  },
+  minimax: {
+    baseUrl: 'https://api.minimax.chat/v1',
+    model: 'MiniMax-Text-01',
+  },
+  yi: {
+    baseUrl: 'https://api.lingyiwanwu.com/v1',
+    model: 'yi-lightning',
+  },
+  baichuan: {
+    baseUrl: 'https://api.baichuan-ai.com/v1',
+    model: 'Baichuan4-Air',
   },
   moonshot: {
     baseUrl: 'https://api.moonshot.cn/v1',
@@ -73,11 +110,25 @@ const PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string }> = {
     baseUrl: 'http://127.0.0.1:11434/v1',
     model: 'qwen2.5:7b',
   },
+  siliconflow: {
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    model: 'deepseek-ai/DeepSeek-V3',
+  },
   'openai-compatible': {
-    baseUrl: 'https://api.openai.com/v1',
+    baseUrl: '',
     model: 'gpt-4o-mini',
   },
+  'anthropic-compatible': {
+    baseUrl: '',
+    model: 'claude-sonnet-4-20250514',
+    protocol: 'anthropic',
+  },
 };
+
+function resolveProtocol(config: ProviderConfig): ProviderProtocol {
+  const defaults = PROVIDER_DEFAULTS[config.provider];
+  return defaults?.protocol || 'openai';
+}
 
 /**
  * sk-sp- 前缀的通义千问 key 需要用 coding 端点
@@ -260,14 +311,30 @@ export function deleteProviderConfigEntry(id: string): boolean {
 /**
  * 构建 pi-ai Model 定义
  *
- * 通义千问/DeepSeek 都走 OpenAI 兼容接口，pi-ai 原生支持。
- * 已知问题：通义千问不支持 developer role，需要 supportsDeveloperRole: false
+ * 根据 provider 协议自动选择 openai-completions 或 anthropic-messages。
+ * Qwen coding endpoint 特殊处理 stream_options 兼容性。
  */
 export function buildModelDef(config: ProviderConfig): Model<any> {
   const baseUrl = resolveProviderBaseUrl(config);
   const defaults = PROVIDER_DEFAULTS[config.provider];
   const modelId = config.model || defaults?.model || 'gpt-4o-mini';
+  const protocol = resolveProtocol(config);
   const isQwenCodingEndpoint = config.provider === 'qwen' && baseUrl.includes('coding.dashscope.aliyuncs.com');
+
+  if (protocol === 'anthropic') {
+    return {
+      api: 'anthropic-messages',
+      provider: config.provider,
+      id: modelId,
+      name: modelId,
+      baseUrl,
+      reasoning: false,
+      input: ['text'] as const,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200000,
+      maxTokens: 8192,
+    } as any;
+  }
 
   return {
     api: 'openai-completions',
@@ -277,8 +344,6 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
     baseUrl,
     reasoning: false,
     input: ['text'] as const,
-    // Qwen coding endpoint 在流式模式下不兼容 stream_options.include_usage
-    // 关闭 usage-in-streaming，避免出现 Connection error / 挂起
     ...(isQwenCodingEndpoint ? { compat: { supportsUsageInStreaming: false } } : {}),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
@@ -286,7 +351,11 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
   } as any;
 }
 
-export function buildStreamFn(_config: ProviderConfig): StreamFunction {
+export function buildStreamFn(config: ProviderConfig): StreamFunction {
+  const protocol = resolveProtocol(config);
+  if (protocol === 'anthropic') {
+    return streamSimpleAnthropic;
+  }
   return streamSimple;
 }
 

@@ -37,17 +37,26 @@ import { resolveApiUrl } from '../utils/apiBase';
    Constants
    ═══════════════════════════════════════════ */
 
-const AI_PROVIDER_DEFAULTS: Record<string, { label: string; model: string; baseUrl: string }> = {
+const AI_PROVIDER_DEFAULTS: Record<string, { label: string; model: string; baseUrl: string; protocol?: string }> = {
   qwen: { label: '通义千问 (Qwen)', model: 'qwen3.5-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
   deepseek: { label: 'DeepSeek', model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
+  doubao: { label: '豆包 (Doubao)', model: 'doubao-1.5-pro-256k', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' },
   openai: { label: 'OpenAI', model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
+  anthropic: { label: 'Anthropic (Claude)', model: 'claude-sonnet-4-20250514', baseUrl: 'https://api.anthropic.com', protocol: 'anthropic' },
+  gemini: { label: 'Google Gemini', model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  stepfun: { label: '阶跃星辰 (Step)', model: 'step-2-16k', baseUrl: 'https://api.stepfun.com/v1' },
+  minimax: { label: 'MiniMax', model: 'MiniMax-Text-01', baseUrl: 'https://api.minimax.chat/v1' },
+  yi: { label: '零一万物 (Yi)', model: 'yi-lightning', baseUrl: 'https://api.lingyiwanwu.com/v1' },
+  baichuan: { label: '百川智能', model: 'Baichuan4-Air', baseUrl: 'https://api.baichuan-ai.com/v1' },
   moonshot: { label: 'Moonshot', model: 'moonshot-v1-8k', baseUrl: 'https://api.moonshot.cn/v1' },
-  zhipu: { label: '智谱 AI', model: 'glm-4-flash', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+  zhipu: { label: '智谱 AI (GLM)', model: 'glm-4-flash', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+  siliconflow: { label: 'SiliconFlow', model: 'deepseek-ai/DeepSeek-V3', baseUrl: 'https://api.siliconflow.cn/v1' },
   groq: { label: 'Groq', model: 'llama-3.3-70b-versatile', baseUrl: 'https://api.groq.com/openai/v1' },
   openrouter: { label: 'OpenRouter', model: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1' },
-  xai: { label: 'xAI', model: 'grok-2-latest', baseUrl: 'https://api.x.ai/v1' },
-  ollama: { label: 'Ollama', model: 'qwen2.5:7b', baseUrl: 'http://127.0.0.1:11434/v1' },
-  'openai-compatible': { label: 'OpenAI 兼容', model: 'gpt-4o-mini', baseUrl: '' },
+  xai: { label: 'xAI (Grok)', model: 'grok-2-latest', baseUrl: 'https://api.x.ai/v1' },
+  ollama: { label: 'Ollama (本地)', model: 'qwen2.5:7b', baseUrl: 'http://127.0.0.1:11434/v1' },
+  'openai-compatible': { label: 'OpenAI 兼容协议', model: '', baseUrl: '' },
+  'anthropic-compatible': { label: 'Anthropic 兼容协议', model: '', baseUrl: '', protocol: 'anthropic' },
 };
 
 const AI_PROVIDER_OPTIONS = Object.entries(AI_PROVIDER_DEFAULTS).map(([value, item]) => ({
@@ -600,8 +609,21 @@ export default function SettingsPanel() {
                     <span className="settings-row-label">当前模型</span>
                     <div className="settings-row-value">
                       <select className="select" title="已保存模型" aria-label="已保存模型" value={selectedAiModelId}
-                        onChange={e => { const n = aiSavedModels.find(i => i.id === e.target.value); if (n) applyAiModelToForm(n); else setSelectedAiModelId(e.target.value); }}>
-                        <option value="">+ 新建</option>
+                        onChange={async (e) => {
+                          const id = e.target.value;
+                          if (!id) { handleCreateNewAiModel(); return; }
+                          const entry = aiSavedModels.find(i => i.id === id);
+                          if (!entry) return;
+                          applyAiModelToForm(entry);
+                          if (!entry.isActive) {
+                            try {
+                              await saveAgentConfig({ action: 'switch', id });
+                              await refreshAiConfig();
+                              addToast('模型已切换', 'success');
+                            } catch { addToast('切换失败', 'error'); }
+                          }
+                        }}>
+                        <option value="">+ 新建配置</option>
                         {aiSavedModels.map(i => <option key={i.id} value={i.id}>{i.label || `${i.provider}/${i.model}`}{i.isActive ? ' (当前)' : ''}</option>)}
                       </select>
                       {aiConfigured && <span className="settings-status-badge ok">已配置</span>}
@@ -628,7 +650,7 @@ export default function SettingsPanel() {
                     <div className="settings-row-value"><input type="text" className="input" title="Base URL" aria-label="Base URL" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl || 'https://...'} value={aiBaseUrl} onChange={e => setAiBaseUrl(e.target.value)} /></div>
                   </div>
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveAiConfig} disabled={aiSaving}>{aiSaving ? '...' : (selectedAiModelId ? '保存并切换' : '新增并启用')}</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveAiConfig} disabled={aiSaving}>{aiSaving ? '...' : (selectedAiModelId ? '保存' : '新增并启用')}</button>
                     {selectedAiModelId && <button type="button" className="btn btn-danger btn-sm" onClick={handleDeleteAiModel} disabled={aiSaving}>删除</button>}
                     <button type="button" className="btn btn-ghost btn-sm" onClick={handleExportAgentConfig} disabled={aiSaving}>导出</button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => importAgentConfigRef.current?.click()} disabled={aiSaving}>导入</button>
