@@ -113,8 +113,9 @@ export function boardOpenClawAssessTool(
     name: "board_openclaw_assess",
     description:
       "向板端 OpenClaw 咨询：某个任务是否适合由板端执行（只评估不执行）。" +
-      "仅在你已判断任务可能需要板端专长（如复杂板端操作链、OpenClaw 已安装技能、板端应用开发）时才调用。" +
-      "图片分析、搜索、文档处理、知识问答等你能直接完成的任务无需咨询。返回 canHandle/confidence/reason。",
+      "典型使用场景：1) 任务需要板端专长（复杂板端操作、OpenClaw 技能链、板端应用开发）；" +
+      "2) 你的本地能力受限想让 OpenClaw 协助（如你的模型不支持视觉，可咨询 OpenClaw 是否能处理图片）。" +
+      "搜索、文档处理、知识问答等你能直接完成的任务无需咨询。返回 canHandle/confidence/reason。",
     inputSchema: {
       type: "object",
       properties: {

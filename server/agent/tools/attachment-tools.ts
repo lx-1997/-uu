@@ -444,8 +444,9 @@ async function describeImageViaProvider(
   }
 
   throw new Error(
-    `图片分析失败：当前配置的模型不支持图像理解。已尝试: ${modelsToTry.join(', ')}。` +
-    `建议在设置中切换到支持视觉的模型（如 GPT-4o、Claude Sonnet、Gemini、通义千问VL 等）。` +
+    `图片分析失败：当前本地模型不支持图像理解（已尝试: ${modelsToTry.join(', ')}）。` +
+    `你可以：1) 如果已连接设备，将图片上传到设备后委派 OpenClaw 处理（OpenClaw 的模型可能支持视觉）；` +
+    `2) 在设置中切换到支持视觉的模型（如 GPT-4o、Claude Sonnet、Gemini、通义千问VL）。` +
     `\n错误详情: ${errors.join('; ')}`,
   );
 }
@@ -627,7 +628,7 @@ export function buildAttachmentPrompt(newAttachments: SessionAttachment[]): stri
       extras.push(`文本摘录: ${truncateText(attachment.textContent, 220)}`);
     }
     if (attachment.type === "image") {
-      extras.push("**重要：请立即调用 attachment_describe_image 分析此图片**，不要跳过图片理解");
+      extras.push("请先调用 attachment_describe_image 分析此图片；如果本地模型不支持视觉且已连接设备，可将图片上传到设备后让 OpenClaw 尝试");
     }
     if (attachment.type === "audio" && !attachment.transcript) {
       extras.push("当前未附带转写，可先调用 attachment_get_audio_transcript 查看是否已有转写");
