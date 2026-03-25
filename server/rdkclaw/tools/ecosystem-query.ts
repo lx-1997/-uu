@@ -56,6 +56,13 @@ export function createEcosystemQueryTool(
           const docLink = skill.docUrl ? ` | 文档: ${skill.docUrl}` : '';
           const note = noteForPlatform ? ` | ${noteForPlatform}` : '';
           lines.push(`- **${skill.name}** (${skill.id}): ${skill.description}${note}${docLink}`);
+          lines.push(`  来源: ${skill.source} | 平台: ${skill.platforms.join(', ')}`);
+          if (skill.installCmd) lines.push(`  安装命令: \`${skill.installCmd}\``);
+          if (skill.runCmd) lines.push(`  运行命令: \`${skill.runCmd}\``);
+          if (skill.stopCmd) lines.push(`  停止命令: \`${skill.stopCmd}\``);
+          if (skill.preconditions?.length) {
+            lines.push(`  前置条件: ${skill.preconditions.map((p) => p.message).join('; ')}`);
+          }
         }
         lines.push('');
       } else {

@@ -61,6 +61,7 @@ import {
   getExternalChannelPolicy,
   validateExecCommand,
 } from "./channel-safety.js";
+import { sanitizeSecrets } from "./secret-sanitizer.js";
 import { evaluatePermissionGuard } from "./permission-guard.js";
 import { appendSecurityAuditLog } from "./security-audit-store.js";
 
@@ -214,13 +215,13 @@ function mapMiniEvent(
 ): RDKClawEvent | null {
   switch (event.type) {
     case "message_delta":
-      return { type: "text", data: { delta: event.delta, ...base } };
+      return { type: "text", data: { delta: sanitizeSecrets(event.delta), ...base } };
     case "turn_start":
       return { type: "turn_start", data: { turn: event.turn, ...base } };
     case "turn_end":
       return { type: "turn_end", data: { turn: event.turn, ...base } };
     case "message_end":
-      return { type: "message_end", data: { text: event.text, ...base } };
+      return { type: "message_end", data: { text: sanitizeSecrets(event.text), ...base } };
     case "tool_execution_start":
       return {
         type: "tool_start",
@@ -242,7 +243,7 @@ function mapMiniEvent(
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           name: event.toolName,
-          result: event.result,
+          result: typeof event.result === 'string' ? sanitizeSecrets(event.result) : event.result,
           isError: event.isError,
           phase: event.isError ? "error" : "end",
           executor: resolveExecutor(event.toolName),
@@ -801,7 +802,16 @@ export class RDKClawApp {
       deviceProfile
         ? `当前平台: ${deviceProfile.displayName} (${deviceProfile.bpuTops}TOPS, ${deviceProfile.cpu}, ${deviceProfile.ramGb}GB RAM)。${deviceProfile.capabilityNotes?.length ? '能力: ' + deviceProfile.capabilityNotes.join('；') : ''}${deviceProfile.limitations.length ? '。限制: ' + deviceProfile.limitations.join('；') : ''}`
         : "",
-      this.ecosystemRegistry ? "你可以使用 ecosystem_query 工具查询当前平台的可用技能、推荐方案和官方文档。" : "",
+      this.ecosystemRegistry ? [
+        "## 生态资源（ModelZoo / NodeHub / TROS）",
+        "用 ecosystem_query 工具查询可用模型和技能。它会返回安装命令（installCmd）、运行命令（runCmd）和停止命令（stopCmd）。",
+        "当用户想运行成熟的 AI 应用（目标检测、人体姿态、语音识别等）时：",
+        "1. 先用 ecosystem_query 搜索匹配的模型/技能",
+        "2. 用 device_exec 执行返回的 installCmd 安装（如果需要）",
+        "3. 用 device_exec 执行 runCmd 启动",
+        "4. 用 device_exec 执行 stopCmd 停止",
+        "不要尝试手写运行脚本——生态资源库已包含经过验证的命令。",
+      ].join("\n") : "",
       req.deviceId
         ? (boardSnapshot.skillDetails.length > 0
           ? `当前板端已安装 OpenClaw 技能（${boardSnapshot.skillDetails.length} 个）:\n` +
