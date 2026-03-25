@@ -22,6 +22,8 @@ const PROTECTED_PATH_KEYWORDS = [
   "/rdkclaw", "/openclaw", "/rdkstudio",
   "/node_modules", "/system32", "/windows",
   "/.ssh", "/.gnupg", "/.cursor",
+  "/.env", "/credentials", "/apikey",
+  "/secret", "/token.json",
 ];
 
 export function isCommandDangerous(command: string): ChannelSafetyResult {

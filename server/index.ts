@@ -2820,12 +2820,45 @@ app.post('/api/devices/:id/flash/write', async (request, response) => {
 
 app.post('/api/devices/:id/flash/verify', async (request, response) => {
   const { id } = request.params;
-  // 验证烧录后的系统状态
-  const executed = await runOnDevice(request, response, id, [
-    'bash -lc "echo ===POST_FLASH===; cat /etc/version 2>/dev/null || echo no-version; uname -a; echo ===BOOT===; systemctl is-system-running 2>/dev/null || echo unknown; echo ===BPU===; hrut_smi 2>/dev/null | head -5 || echo bpu-check-unavailable"',
-  ]);
+  const { targetDevice } = request.body as { targetDevice?: string };
+  const dev = targetDevice?.trim() || '/dev/mmcblk1';
+  const verifyCmd = `bash -lc '
+echo "===POST_FLASH==="
+cat /etc/version 2>/dev/null || echo no-version
+uname -a
+
+echo "===BOOT==="
+systemctl is-system-running 2>/dev/null || echo unknown
+
+echo "===BPU==="
+hrut_smi 2>/dev/null | head -5 || echo bpu-check-unavailable
+
+echo "===PARTITIONS==="
+fdisk -l ${dev} 2>/dev/null | head -30 || echo partition-check-unavailable
+lsblk ${dev} 2>/dev/null || echo lsblk-unavailable
+
+echo "===MOUNT==="
+mount | grep "${dev}" 2>/dev/null || echo no-active-mounts
+
+echo "===DISK_HEALTH==="
+df -h / /userdata /boot 2>/dev/null || echo df-unavailable
+
+echo "===VERIFY_DONE==="
+'`;
+  const executed = await runOnDevice(request, response, id, [verifyCmd], { timeoutMs: 60_000 });
   if (!executed) return;
-  response.json({ ok: true, output: executed.output });
+
+  const output = executed.output;
+  const checks = {
+    version: /===POST_FLASH===[\s\S]*?(?:no-version|(\S+))/.exec(output)?.[1] || null,
+    bootStatus: /===BOOT===\s*(\S+)/.exec(output)?.[1] || 'unknown',
+    bpuAvailable: !/bpu-check-unavailable/.test(output),
+    partitionsOk: /===PARTITIONS===/.test(output) && !/partition-check-unavailable/.test(output),
+    mountsOk: /===MOUNT===/.test(output) && !/no-active-mounts/.test(output),
+    diskHealthOk: /===DISK_HEALTH===/.test(output) && !/df-unavailable/.test(output),
+  };
+  const healthy = checks.bootStatus === 'running' && checks.partitionsOk;
+  response.json({ ok: true, healthy, checks, output });
 });
 
 app.post('/api/devices/:id/flash/backup/check', async (request, response) => {
@@ -3033,6 +3066,8 @@ if [ ${skipVerify ? '1' : '0'} -eq 1 ]; then
   echo "skip verify"
 else
   fdisk -l ${shEscape(targetDevice)} 2>/dev/null | head -20 || true
+  lsblk ${shEscape(targetDevice)} 2>/dev/null || true
+  sync && echo "sync ok"
 fi
 
 echo "===FLASH_DONE==="

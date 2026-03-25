@@ -27,6 +27,35 @@ const LOCAL_PROTECTED_SEGMENTS = [
   '/.ssh/',
   '/.gnupg/',
   '/.aws/',
+  '/.env',
+];
+
+const STUDIO_SOURCE_SEGMENTS = [
+  '/server/',
+  '/src/',
+  '/shared/',
+  '/package.json',
+  '/package-lock.json',
+  '/tsconfig',
+  '/vite.config',
+  '/tailwind.config',
+  '/postcss.config',
+  '/eslint',
+  '/.prettierrc',
+  '/Dockerfile',
+  '/docker-compose',
+];
+
+const SENSITIVE_READ_PATTERNS = [
+  '/.env',
+  '/credentials',
+  '/.netrc',
+  '/api-key',
+  '/apikey',
+  '/secret',
+  '/token.json',
+  '/auth.json',
+  '/oauth',
 ];
 
 const DEVICE_ALLOWED_WRITE_PREFIXES = [
@@ -46,6 +75,20 @@ const DEVICE_BLOCKED_PREFIXES = [
   '/boot',
   '/root/.ssh',
   '/root/.gnupg',
+  '/usr/lib/openclaw',
+  '/usr/bin/openclaw',
+  '/usr/local/lib/openclaw',
+];
+
+const DEVICE_DANGEROUS_DELETE_PATTERNS = [
+  /\brm\s+.*\/opt\/openclaw\b/i,
+  /\brm\s+.*\/etc\/openclaw\b/i,
+  /\brm\s+.*\/root\/\.openclaw\b/i,
+  /\brm\s+.*openclaw\.json\b/i,
+  /\bsystemctl\s+(stop|disable)\s+openclaw/i,
+  /\bnpm\s+uninstall\s+-g\s+.*openclaw/i,
+  /\bkill\s+.*openclaw/i,
+  /\bkillall\s+.*openclaw/i,
 ];
 
 const DANGEROUS_COMMAND_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
@@ -79,6 +122,21 @@ function extractString(input: unknown, key: string): string | null {
 function isProtectedLocalPath(targetPath: string, workspaceDir: string): boolean {
   const normalized = normalizePathLike(path.resolve(workspaceDir, targetPath)).toLowerCase();
   return LOCAL_PROTECTED_SEGMENTS.some((segment) => normalized.includes(segment));
+}
+
+function isStudioSourcePath(targetPath: string, workspaceDir: string): boolean {
+  const resolved = path.resolve(workspaceDir, targetPath);
+  const normalized = normalizePathLike(resolved).toLowerCase();
+  const workspaceNorm = normalizePathLike(workspaceDir).toLowerCase();
+  if (!normalized.startsWith(workspaceNorm)) return false;
+  const relative = normalized.slice(workspaceNorm.length);
+  return STUDIO_SOURCE_SEGMENTS.some((seg) => relative.startsWith(seg) || relative === seg);
+}
+
+function isSensitiveReadPath(targetPath: string, workspaceDir: string): boolean {
+  const resolved = path.resolve(workspaceDir, targetPath);
+  const normalized = normalizePathLike(resolved).toLowerCase();
+  return SENSITIVE_READ_PATTERNS.some((pat) => normalized.includes(pat));
 }
 
 function isBlockedDevicePath(targetPath: string): boolean {
@@ -139,7 +197,17 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
   if ((toolName === 'write' || toolName === 'edit') && permission.workspaceBoundaryEnabled) {
     const targetPath = extractString(args, 'file_path');
     if (targetPath && isProtectedLocalPath(targetPath, workspaceDir)) {
-      return { blocked: true, reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules 等）', risk: 'high' };
+      return { blocked: true, reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules/.env 等）', risk: 'high' };
+    }
+    if (targetPath && isStudioSourcePath(targetPath, workspaceDir)) {
+      return { blocked: true, reason: '禁止修改 RDK Studio 源代码文件（server/src/package.json 等）', risk: 'high' };
+    }
+  }
+
+  if (toolName === 'read' && permission.workspaceBoundaryEnabled) {
+    const targetPath = extractString(args, 'file_path');
+    if (targetPath && isSensitiveReadPath(targetPath, workspaceDir)) {
+      return { blocked: true, reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）', risk: 'high' };
     }
   }
 
@@ -150,6 +218,16 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
     }
     if (targetPath && !isAllowedDeviceWritePath(targetPath)) {
       return { blocked: true, reason: '仅允许写入板端开发目录（/userdata,/tmp,/home,/root/.openclaw 等）', risk: 'high' };
+    }
+  }
+
+  if (toolName === 'device_exec' && permission.commandDangerGuardEnabled) {
+    if (command) {
+      for (const pat of DEVICE_DANGEROUS_DELETE_PATTERNS) {
+        if (pat.test(command)) {
+          return { blocked: true, reason: '禁止在板端破坏 OpenClaw 核心文件或服务', risk: 'high' };
+        }
+      }
     }
   }
 

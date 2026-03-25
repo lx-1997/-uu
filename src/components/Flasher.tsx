@@ -124,7 +124,7 @@ const STEP_LABELS = ['选择设备', '选择镜像', '烧录写盘', '完成'];
    Component
    ═══════════════════════════════════════════════════════════ */
 export default function Flasher() {
-  const { setActiveTab, addToast, startFlash } = useAppState();
+  const { setActiveTab, addToast, startFlash, currentDevice } = useAppState();
 
   /* ── wizard state ── */
   const [step, setStep] = useState<WizardStep>(0);
@@ -148,6 +148,13 @@ export default function Flasher() {
   const [backupResultPath, setBackupResultPath] = useState('');
   const [verifyDetail, setVerifyDetail] = useState('');
   const abortRef = useRef(false);
+
+  /* ── board backup state ── */
+  const [backupChecking, setBackupChecking] = useState(false);
+  const [backupAvailable, setBackupAvailable] = useState<boolean | null>(null);
+  const [backupRunning, setBackupRunning] = useState(false);
+  const [backupStatus, setBackupStatus] = useState('');
+  const [backupOutputPath, setBackupOutputPath] = useState('');
 
   /* ── wifi config state ── */
   const [showWifiConfig, setShowWifiConfig] = useState(false);
@@ -930,6 +937,146 @@ export default function Flasher() {
                   )}
                 </div>
               </div>
+            )}
+          </section>
+        )}
+
+        {/* ═══════ Board Backup ═══════ */}
+        {currentDevice && step === 0 && phase === 'idle' && (
+          <section className="card card-compact" style={{ marginTop: 16 }}>
+            <div className="config-header">
+              <h3 style={{ margin: 0, fontSize: '1rem' }}>板端镜像备份</h3>
+              <span className="section-label" style={{ fontSize: '0.8rem', opacity: 0.7 }}>
+                设备: {currentDevice.name || currentDevice.ip}
+              </span>
+            </div>
+            <p className="config-card-desc">
+              将已连接 RDK 设备的当前系统镜像备份到板端存储，可用于后续恢复。
+            </p>
+
+            {backupAvailable === null && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={backupChecking}
+                onClick={async () => {
+                  setBackupChecking(true);
+                  setBackupStatus('');
+                  try {
+                    const res = await fetch(`/api/devices/${currentDevice.id}/flash/backup/check`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                    });
+                    const data = await res.json();
+                    setBackupAvailable(!!data.available);
+                    if (!data.available) {
+                      setBackupStatus('板端未安装 rdk-backup 工具。可在终端中执行 apt install rdk-backup 安装。');
+                    }
+                  } catch {
+                    setBackupStatus('检查备份能力失败，请确认设备已连接');
+                    setBackupAvailable(false);
+                  } finally {
+                    setBackupChecking(false);
+                  }
+                }}
+              >
+                {backupChecking ? '检查中...' : '检查备份能力'}
+              </button>
+            )}
+
+            {backupAvailable === true && !backupRunning && !backupOutputPath && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    setBackupRunning(true);
+                    setBackupStatus('正在启动备份...');
+                    try {
+                      const res = await fetch(`/api/devices/${currentDevice.id}/flash/backup/start`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({}),
+                      });
+                      const data = await res.json();
+                      if (data.ok && data.jobId) {
+                        setBackupStatus(`备份任务已启动 (${data.jobId.slice(0, 8)}...)，请等待完成`);
+                        const pollInterval = setInterval(async () => {
+                          try {
+                            const statusRes = await fetch(
+                              `/api/devices/${currentDevice.id}/flash/backup/status?jobId=${data.jobId}`,
+                            );
+                            const statusData = await statusRes.json();
+                            if (statusData.status === 'done') {
+                              clearInterval(pollInterval);
+                              setBackupRunning(false);
+                              setBackupOutputPath(statusData.outputPath || '备份完成');
+                              setBackupStatus('备份完成');
+                            } else if (statusData.status === 'error') {
+                              clearInterval(pollInterval);
+                              setBackupRunning(false);
+                              setBackupStatus(`备份失败: ${statusData.error || '未知错误'}`);
+                            } else {
+                              setBackupStatus(`备份中... ${statusData.progress || ''}`);
+                            }
+                          } catch {
+                            clearInterval(pollInterval);
+                            setBackupRunning(false);
+                            setBackupStatus('备份状态查询失败');
+                          }
+                        }, 5000);
+                      } else {
+                        setBackupRunning(false);
+                        setBackupStatus(`启动失败: ${data.error || '未知错误'}`);
+                      }
+                    } catch {
+                      setBackupRunning(false);
+                      setBackupStatus('启动备份请求失败');
+                    }
+                  }}
+                >
+                  开始备份
+                </button>
+              </div>
+            )}
+
+            {backupRunning && (
+              <div className="config-card" style={{ borderColor: 'var(--accent)' }}>
+                <p className="config-card-desc" style={{ margin: 0, color: 'var(--accent)' }}>
+                  ⏳ {backupStatus}
+                </p>
+              </div>
+            )}
+
+            {backupOutputPath && (
+              <div className="config-card" style={{ borderColor: 'var(--ok)', background: 'var(--ok-subtle)' }}>
+                <p className="config-card-desc" style={{ margin: 0, color: 'var(--ok)' }}>
+                  ✓ {backupStatus} — 路径: {backupOutputPath}
+                </p>
+              </div>
+            )}
+
+            {backupAvailable === false && backupStatus && (
+              <div className="config-card" style={{ borderColor: 'var(--warning)' }}>
+                <p className="config-card-desc" style={{ margin: 0, color: 'var(--warning)' }}>
+                  {backupStatus}
+                </p>
+              </div>
+            )}
+
+            {(backupOutputPath || backupAvailable === false) && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ marginTop: 4 }}
+                onClick={() => {
+                  setBackupAvailable(null);
+                  setBackupOutputPath('');
+                  setBackupStatus('');
+                }}
+              >
+                重新检查
+              </button>
             )}
           </section>
         )}
