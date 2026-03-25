@@ -12,8 +12,10 @@ import {
   getApiKey,
   getBaseUrl,
   loadProviderConfig,
+  warmupModelCapabilities,
   type ProviderConfig,
 } from "../agent/provider-setup.js";
+import { lookupModelCapabilities } from "../agent/model-registry.js";
 import {
   buildAttachmentPrompt,
   createAttachmentTools,
@@ -813,6 +815,8 @@ export class RDKClawApp {
         "- ROS → ros_*、VNC → vnc_*、语音 → tts_* / stt_*",
       ].join("\n") : "",
     ].filter(Boolean).join("\n");
+    const modelCaps = lookupModelCapabilities(providerConfig.provider, providerConfig.model);
+    warmupModelCapabilities(providerConfig).catch(() => {});
     const modelDef = buildModelDef(providerConfig);
     const streamFn = buildStreamFn(providerConfig);
     const apiKey = getApiKey(providerConfig);
@@ -926,7 +930,7 @@ export class RDKClawApp {
       maxTurns: 12,
       temperature: 0.7,
       reasoning: "medium",
-      contextTokens: Math.max(16_000, Number(policy.context.contextTokens || 128000)),
+      contextTokens: Math.max(16_000, Number(policy.context.contextTokens) || modelCaps.contextWindow),
     });
     let finished = false;
     let failed: unknown = null;
@@ -963,6 +967,31 @@ export class RDKClawApp {
       pushEvent({ type: "meta", data: { ...base, executor: "rdkclaw_local", phase: "heartbeat", message: content, reason } });
     });
 
+    const PROGRESS_INTERVAL_MS = 120_000;
+    let progressTick = 0;
+    const progressTimer = setInterval(() => {
+      if (finished) return;
+      progressTick++;
+      const elapsedMs = Date.now() - runStartedAt;
+      const elapsedMin = Math.floor(elapsedMs / 60000);
+      const totalCalls = runMetrics.localToolCalls + runMetrics.boardToolCalls;
+      const latestTools = runMetrics.toolCallNames.slice(-3);
+      const toolHint = latestTools.length > 0 ? `，最近: ${latestTools.join(' → ')}` : '';
+      pushEvent({
+        type: "run_progress",
+        data: {
+          ...base,
+          tick: progressTick,
+          elapsed_ms: elapsedMs,
+          elapsed_display: elapsedMin > 0 ? `${elapsedMin} 分钟` : `${Math.floor(elapsedMs / 1000)} 秒`,
+          tool_calls: totalCalls,
+          latest_tools: latestTools,
+          message: `仍在处理中，已运行 ${elapsedMin > 0 ? `${elapsedMin} 分钟` : `${Math.floor(elapsedMs / 1000)} 秒`}，` +
+            `执行了 ${totalCalls} 个工具调用${toolHint}`,
+        },
+      });
+    }, PROGRESS_INTERVAL_MS);
+
     const runPromise = agent
       .run(sessionKey, effectiveMessage || "请结合当前附件继续处理。")
       .then((result) => {
@@ -973,6 +1002,7 @@ export class RDKClawApp {
       })
       .finally(() => {
         finished = true;
+        clearInterval(progressTimer);
         wakeQueue();
         unsubscribe();
         externalAbortSignal?.removeEventListener("abort", handleExternalAbort);
@@ -1061,6 +1091,23 @@ export class RDKClawApp {
           canLocalComplete: decision.canLocalComplete,
           needsBoardCollaboration: decision.needsBoardCollaboration,
         },
+      },
+    };
+
+    const totalCalls = runMetrics.localToolCalls + runMetrics.boardToolCalls;
+    const elapsedSec = Math.max(1, Math.round(totalElapsedMs / 1000));
+    const elapsedDisplay = elapsedSec >= 60
+      ? `${Math.floor(elapsedSec / 60)} 分 ${elapsedSec % 60} 秒`
+      : `${elapsedSec} 秒`;
+    yield {
+      type: "run_complete",
+      data: {
+        ...base,
+        message: "已完成回复",
+        elapsed_ms: totalElapsedMs,
+        elapsed_display: elapsedDisplay,
+        tool_calls: totalCalls,
+        compaction_count: runMetrics.compactionCount,
       },
     };
   }

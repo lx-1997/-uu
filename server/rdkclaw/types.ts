@@ -44,6 +44,8 @@ export type RDKClawEventType =
   | "turn_start"
   | "turn_end"
   | "message_end"
+  | "run_progress"
+  | "run_complete"
   | "done"
   | "error"
   | "retry"

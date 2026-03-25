@@ -43,6 +43,8 @@ export class WeixinChannelAdapter {
     const sessionId = this.getSessionKey(payload.userId);
     const events: RDKClawEvent[] = [];
     let text = "";
+    let toolCalls = 0;
+    let elapsedDisplay = "";
     for await (const event of this.app.streamChat({
       message: payload.text,
       userId: payload.userId,
@@ -57,9 +59,19 @@ export class WeixinChannelAdapter {
         const errorMsg = String(event.data.error ?? "RDKClaw 执行失败");
         if (!text.trim()) text = errorMsg;
       }
+      if (event.type === "run_complete") {
+        toolCalls = Number(event.data.tool_calls ?? 0);
+        elapsedDisplay = String(event.data.elapsed_display ?? "");
+      }
     }
+    let body = text.trim() || "RDKClaw 已处理完成。";
+    const footerParts: string[] = [];
+    if (elapsedDisplay) footerParts.push(elapsedDisplay);
+    if (toolCalls > 0) footerParts.push(`${toolCalls} 步`);
+    const footer = footerParts.length > 0 ? `\n\n─── ✓ 回复完成 (${footerParts.join(' · ')}) ───` : "\n\n─── ✓ 回复完成 ───";
+    body += footer;
     return {
-      text: (text.trim() || "RDKClaw 已处理完成。").slice(0, 4000),
+      text: body.slice(0, 4000),
       events,
     };
   }

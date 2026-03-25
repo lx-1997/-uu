@@ -1232,6 +1232,44 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   }
                 }
                 break;
+              case 'run_progress': {
+                const msg = String(event.data.message || '仍在处理中...');
+                const tick = Number(event.data.tick || 0);
+                const existingIdx = aiBlocks.findIndex(
+                  (b) => b.type === 'status' && (b as any)._runProgress,
+                );
+                const progressBlock = {
+                  type: 'status' as const,
+                  _runProgress: true,
+                  items: [{ label: '⏳ 进度', value: msg, ok: true }],
+                };
+                if (existingIdx >= 0) {
+                  aiBlocks[existingIdx] = progressBlock;
+                } else {
+                  aiBlocks.push(progressBlock);
+                }
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
+              case 'run_complete': {
+                const progressIdx = aiBlocks.findIndex(
+                  (b) => b.type === 'status' && (b as any)._runProgress,
+                );
+                if (progressIdx >= 0) {
+                  aiBlocks.splice(progressIdx, 1);
+                }
+                const elapsed = String(event.data.elapsed_display || '');
+                const calls = Number(event.data.tool_calls || 0);
+                const detail: string[] = [];
+                if (elapsed) detail.push(elapsed);
+                if (calls > 0) detail.push(`${calls} 步`);
+                aiBlocks.push({
+                  type: 'status',
+                  items: [{ label: '✓ 回复完成', value: detail.length > 0 ? detail.join(' · ') : '', ok: true }],
+                });
+                updateAiMessage(aiText, aiBlocks, true);
+                break;
+              }
             }
           },
         );

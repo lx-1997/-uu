@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { streamSimple, streamSimpleAnthropic, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
 import type { Model, StreamFunction } from '@mariozechner/pi-ai';
+import { lookupModelCapabilities, fetchModelCapabilitiesFromProvider, registerModelCapabilities } from './model-registry.js';
 
 registerBuiltInApiProviders();
 
@@ -324,6 +325,8 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
   const protocol = resolveProtocol(config);
   const isQwenCodingEndpoint = config.provider === 'qwen' && baseUrl.includes('coding.dashscope.aliyuncs.com');
 
+  const caps = lookupModelCapabilities(config.provider, modelId);
+
   if (protocol === 'anthropic') {
     return {
       api: 'anthropic-messages',
@@ -334,8 +337,8 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
       reasoning: false,
       input: ['text'] as const,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 200000,
-      maxTokens: 8192,
+      contextWindow: caps.contextWindow,
+      maxTokens: caps.maxOutputTokens,
     } as any;
   }
 
@@ -349,9 +352,29 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
     input: ['text'] as const,
     ...(isQwenCodingEndpoint ? { compat: { supportsUsageInStreaming: false } } : {}),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096,
+    contextWindow: caps.contextWindow,
+    maxTokens: caps.maxOutputTokens,
   } as any;
+}
+
+/**
+ * 启动时尝试从 Provider API 获取模型能力并更新注册表。
+ * 静默失败，不影响主流程。
+ */
+export async function warmupModelCapabilities(config: ProviderConfig): Promise<void> {
+  try {
+    const baseUrl = resolveProviderBaseUrl(config);
+    const caps = await fetchModelCapabilitiesFromProvider({
+      baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+    });
+    if (caps) {
+      registerModelCapabilities(config.model, caps);
+    }
+  } catch {
+    // 静默失败
+  }
 }
 
 export function buildStreamFn(config: ProviderConfig): StreamFunction {
