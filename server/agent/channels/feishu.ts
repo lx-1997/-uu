@@ -577,6 +577,7 @@ export class FeishuWebSocketChannel {
     let lastProgressAt = Date.now();
     const PROGRESS_INTERVAL_MS = 30_000;
     const pendingImages: Array<{ localPath: string; fileName: string }> = [];
+    const pendingFiles: Array<{ localPath: string; fileName: string }> = [];
     let mirrorSeq = 0;
     const nextMirrorId = () => `${msgId || "no-msg"}:${++mirrorSeq}`;
     const summarizeResult = (raw: string) => {
@@ -691,6 +692,16 @@ export class FeishuWebSocketChannel {
                   localPath: parsed.localPath as string,
                   fileName: String(parsed.fileName || "image"),
                 });
+              } else if (parsed.__type === "video_download" && typeof parsed.localPath === "string") {
+                pendingFiles.push({
+                  localPath: parsed.localPath as string,
+                  fileName: String(parsed.fileName || "video.mp4"),
+                });
+              } else if (parsed.__type === "file_download" && typeof parsed.localPath === "string") {
+                pendingFiles.push({
+                  localPath: parsed.localPath as string,
+                  fileName: String(parsed.fileName || "file"),
+                });
               }
             } catch {
               // not JSON
@@ -719,6 +730,7 @@ export class FeishuWebSocketChannel {
     await this.sendText(chatId, reply);
 
     let imagesSent = 0;
+    let filesSent = 0;
     for (const img of pendingImages) {
       try {
         if (fs.existsSync(img.localPath)) {
@@ -736,6 +748,23 @@ export class FeishuWebSocketChannel {
       }
     }
 
+    for (const file of pendingFiles) {
+      try {
+        if (fs.existsSync(file.localPath)) {
+          const buffer = fs.readFileSync(file.localPath);
+          const ext = nodePath.extname(file.localPath).toLowerCase();
+          const mime = ext === ".mp4" ? "video/mp4"
+            : ext === ".webm" ? "video/webm"
+            : ext === ".pdf" ? "application/pdf"
+            : "application/octet-stream";
+          const sent = await this.sendFileFromBuffer(chatId, buffer, file.fileName, mime);
+          if (sent) filesSent++;
+        }
+      } catch (err) {
+        console.warn(`[FeishuWS] failed to send file ${file.fileName}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
     this.publishMirror("channel_message_outbound", "飞书回复", reply, {
       channel: "feishu",
       direction: "outbound",
@@ -744,7 +773,7 @@ export class FeishuWebSocketChannel {
       messageId: msgId,
       sessionId,
     });
-    console.log(`[FeishuWS] replied to ${openId.slice(0, 6)}***, chars=${reply.length}, tools=${toolCount}, images=${imagesSent}`);
+    console.log(`[FeishuWS] replied to ${openId.slice(0, 6)}***, chars=${reply.length}, tools=${toolCount}, images=${imagesSent}, files=${filesSent}`);
   }
 
   private async handleP2PEntered(payload: any): Promise<void> {
@@ -902,6 +931,60 @@ export class FeishuWebSocketChannel {
     const imageKey = await this.uploadImage(imageBuffer, mimeType);
     if (!imageKey) return false;
     await this.sendImage(chatId, imageKey);
+    return true;
+  }
+
+  private async uploadFile(fileBuffer: Buffer, fileName: string, mimeType?: string): Promise<string | null> {
+    const cfg = this.getConfig();
+    const authBase = authBaseByDomain(cfg.domain);
+    const token = await this.getTenantToken();
+    const blob = new Blob([fileBuffer], { type: mimeType || "application/octet-stream" });
+    const formData = new FormData();
+    formData.append("file_type", "stream");
+    formData.append("file_name", fileName);
+    formData.append("file", blob, fileName);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60_000);
+    try {
+      const res = await fetch(`${authBase}/open-apis/im/v1/files`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+        signal: ctrl.signal,
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        code?: number;
+        data?: { file_key?: string };
+      };
+      if (payload.code === 0 && payload.data?.file_key) {
+        return payload.data.file_key;
+      }
+      console.warn("[FeishuWS] uploadFile failed:", payload);
+      return null;
+    } catch (err) {
+      console.warn("[FeishuWS] uploadFile error:", err instanceof Error ? err.message : err);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async sendFileMessage(chatId: string, fileKey: string): Promise<void> {
+    if (!this.client || !chatId || !fileKey) return;
+    await this.client.im.message.create({
+      params: { receive_id_type: "chat_id" },
+      data: {
+        receive_id: chatId,
+        msg_type: "file",
+        content: JSON.stringify({ file_key: fileKey }),
+      },
+    });
+  }
+
+  async sendFileFromBuffer(chatId: string, fileBuffer: Buffer, fileName: string, mimeType?: string): Promise<boolean> {
+    const fileKey = await this.uploadFile(fileBuffer, fileName, mimeType);
+    if (!fileKey) return false;
+    await this.sendFileMessage(chatId, fileKey);
     return true;
   }
 }

@@ -513,19 +513,12 @@ export class RDKClawApp {
     return map[risk] >= map[threshold];
   }
 
-  private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string, toolName: string, channel: ChannelSource): boolean {
+  private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string, toolName: string, _channel: ChannelSource): boolean {
     if (/^web_/i.test(toolName) && !policy.network.requireApproval) return false;
     if (this.sessionAutoApprove.get(sessionId)) return false;
 
-    // Studio 端默认由 RDKClaw 自动管控：低/中风险直接放行，高风险再触发审批。
-    if (channel === "studio") {
-      if (risk !== "high") return false;
-      return policy.approval.mode !== "auto";
-    }
-
-    if (policy.approval.mode === "auto") return false;
-    if (policy.approval.mode === "always") return true;
-    return this.isRiskAtLeast(risk, policy.approval.riskThreshold);
+    if (risk !== "high") return false;
+    return policy.approval.mode !== "auto";
   }
 
   private wrapToolWithApproval(
@@ -580,8 +573,7 @@ export class RDKClawApp {
           throw new Error(`安全边界拦截：${guardResult.reason || "请求超出允许范围"}`);
         }
         const risk = guardResult.risk;
-        const forceApproval = isExternal && getExternalChannelPolicy(tool.name) === "force_approval";
-        if (!forceApproval && !this.shouldRequireApproval(policy, risk, base.sessionId, tool.name, channel)) {
+        if (!this.shouldRequireApproval(policy, risk, base.sessionId, tool.name, channel)) {
           if (policy.permission.auditLogEnabled) {
             appendSecurityAuditLog({
               channel,
