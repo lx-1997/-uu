@@ -97,6 +97,19 @@ function buildPersonaPrompt(persona: PersonaProfile) {
   return lines.join("\n");
 }
 
+interface BoardSkillDetail {
+  name: string;
+  path: string;
+  description: string;
+  trigger: string;
+}
+
+interface BoardSnapshot {
+  skills: string[];
+  skillDetails: BoardSkillDetail[];
+  plugins: string[];
+}
+
 interface DelegateDecision {
   path: "local_only" | "collaborative" | "board_primary";
   canLocalComplete: boolean;
@@ -121,7 +134,7 @@ function resolveDelegationExpectationText(decision: DelegateDecision) {
 function selectDelegateDecision(
   req: RDKClawChatRequest,
   matchedSkills: RDKClawSkillMeta[],
-  boardSnapshot: { skills: string[]; plugins: string[] },
+  boardSnapshot: BoardSnapshot,
 ): DelegateDecision {
   if (!req.deviceId) {
     return {
@@ -316,21 +329,21 @@ export class RDKClawApp {
   }>();
   private runAgents = new Map<string, Agent>();
   private sessionAutoApprove = new Map<string, boolean>();
-  private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: { skills: string[]; plugins: string[] } }>();
+  private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: BoardSnapshot }>();
   private modelCapWarmedUp = new Set<string>();
   private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
   private readonly deviceQueue = new DeviceQueue();
   private switchDeviceCallback?: (deviceId: string) => void;
 
-  private async getBoardSkillSnapshot(deviceId?: string): Promise<{ skills: string[]; plugins: string[] }> {
-    if (!deviceId) return { skills: [], plugins: [] };
+  private async getBoardSkillSnapshot(deviceId?: string): Promise<BoardSnapshot> {
+    if (!deviceId) return { skills: [], skillDetails: [], plugins: [] };
     const cached = this.boardSkillSnapshotCache.get(deviceId);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
     const devices = await readDevices();
     const hit = devices.find((d) => d.id === deviceId);
-    if (!hit) return { skills: [], plugins: [] };
+    if (!hit) return { skills: [], skillDetails: [], plugins: [] };
     const board = {
       ip: hit.host,
       userName: hit.username,
@@ -338,13 +351,13 @@ export class RDKClawApp {
       password: resolveBoardDevicePassword(hit as { username: string; password?: string }),
     };
     const timeoutMs = 9000;
-    return await new Promise<{ skills: string[]; plugins: string[] }>((resolve) => {
+    return await new Promise<BoardSnapshot>((resolve) => {
       let output = "";
       let done = false;
       const timer = setTimeout(() => {
         if (done) return;
         done = true;
-        const value = { skills: [], plugins: [] };
+        const value: BoardSnapshot = { skills: [], skillDetails: [], plugins: [] };
         this.boardSkillSnapshotCache.set(deviceId, { value, expiresAt: Date.now() + RDKClawApp.BOARD_SNAPSHOT_TTL_MS });
         resolve(value);
       }, timeoutMs);
@@ -355,7 +368,7 @@ export class RDKClawApp {
           if (done) return;
           done = true;
           clearTimeout(timer);
-          const skills: string[] = [];
+          const skillDetails: BoardSkillDetail[] = [];
           const plugins: string[] = [];
           let section = "";
           for (const line of output.split("\n")) {
@@ -363,11 +376,31 @@ export class RDKClawApp {
             if (trimmed === "===SKILLS===") { section = "skills"; continue; }
             if (trimmed === "===PLUGINS===") { section = "plugins"; continue; }
             if (!trimmed || trimmed.startsWith("无已安装")) continue;
-            if (section === "skills") skills.push(trimmed);
-            else if (section === "plugins") plugins.push(trimmed);
+            if (section === "skills") {
+              const parts = trimmed.split("|");
+              if (parts.length >= 3) {
+                skillDetails.push({
+                  name: parts[0].trim(),
+                  path: parts[1].trim(),
+                  description: parts[2].trim(),
+                  trigger: parts[3]?.trim() || "",
+                });
+              } else {
+                skillDetails.push({ name: trimmed, path: "", description: "", trigger: "" });
+              }
+            } else if (section === "plugins") {
+              plugins.push(trimmed);
+            }
           }
-          const value = {
-            skills: Array.from(new Set(skills)),
+          const seen = new Set<string>();
+          const deduped = skillDetails.filter((s) => {
+            if (seen.has(s.name)) return false;
+            seen.add(s.name);
+            return true;
+          });
+          const value: BoardSnapshot = {
+            skills: deduped.map((s) => s.name),
+            skillDetails: deduped,
             plugins: Array.from(new Set(plugins)),
           };
           this.boardSkillSnapshotCache.set(deviceId, { value, expiresAt: Date.now() + RDKClawApp.BOARD_SNAPSHOT_TTL_MS });
@@ -606,6 +639,7 @@ export class RDKClawApp {
     policy: RDKClawPolicy,
     providerConfig: ProviderConfig,
     sessionAttachments: Awaited<ReturnType<typeof prepareSessionAttachments>>["allAttachments"],
+    boardSnapshot?: BoardSnapshot,
   ): Tool[] {
     const tools: Tool[] = [
       ...builtinTools,
@@ -636,7 +670,12 @@ export class RDKClawApp {
         },
       });
       tools.push(...deviceTools);
-      tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager, base.sessionId));
+      const skillsForBoard = boardSnapshot?.skillDetails.map((s) => ({
+        name: s.name,
+        path: s.path,
+        description: s.description,
+      }));
+      tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager, base.sessionId, skillsForBoard));
       tools.push(boardOpenClawChatTool(req.deviceId, this.openClawManager, base.sessionId));
       tools.push(
         boardOpenClawDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
@@ -652,7 +691,7 @@ export class RDKClawApp {
               chunk,
             },
           });
-        }, base.sessionId, this.ecosystemRegistry),
+        }, base.sessionId, this.ecosystemRegistry, skillsForBoard),
       );
       if (this.ecosystemRegistry) {
         const platform = (req as any).platform as RdkPlatform | undefined;
@@ -764,8 +803,12 @@ export class RDKClawApp {
         : "",
       this.ecosystemRegistry ? "你可以使用 ecosystem_query 工具查询当前平台的可用技能、推荐方案和官方文档。" : "",
       req.deviceId
-        ? (boardSnapshot.skills.length > 0
-          ? `当前板端已安装 OpenClaw 技能（每次执行前快照）: ${boardSnapshot.skills.join(", ")}`
+        ? (boardSnapshot.skillDetails.length > 0
+          ? `当前板端已安装 OpenClaw 技能（${boardSnapshot.skillDetails.length} 个）:\n` +
+            boardSnapshot.skillDetails.map((s) =>
+              `- ${s.name}${s.description ? `: ${s.description}` : ""}${s.path ? ` [${s.path}]` : ""}`
+            ).join("\n") +
+            "\n委派任务时可在 guidance 中引用这些技能名称和路径，帮助 OpenClaw 更快定位。"
           : "当前板端技能快照为空（可能未安装或读取失败）。如任务匹配不到现有技能，请优先生成并下发新技能，再继续执行。")
         : "当前无 RDK 设备连接。板端功能（SSH 命令、OpenClaw 委派、设备监控等）暂不可用。用户可通过对话提供设备 IP 来连接设备。",
       req.deviceId && boardSnapshot.plugins.length > 0
@@ -897,7 +940,7 @@ export class RDKClawApp {
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
-      tools: this.createTools(req, (event) => pushEvent(event), base, decision, policy, providerConfig, attachmentState.allAttachments),
+      tools: this.createTools(req, (event) => pushEvent(event), base, decision, policy, providerConfig, attachmentState.allAttachments, boardSnapshot),
       streamFn,
       modelDef,
       apiKey,

@@ -101,10 +101,17 @@ function normalizeAssessment(raw: string, fallbackReason?: string) {
   };
 }
 
+export interface BoardSkillInfo {
+  name: string;
+  path: string;
+  description: string;
+}
+
 export function boardOpenClawAssessTool(
   deviceId: string,
   manager: OpenClawDeploymentManager,
   conversationId?: string,
+  boardSkills?: BoardSkillInfo[],
 ): Tool<{
   task: string;
   context?: string;
@@ -138,10 +145,16 @@ export function boardOpenClawAssessTool(
       }
 
       const boardDevice = toBoardDevice(device);
+      const skillContext = boardSkills && boardSkills.length > 0
+        ? `\n你当前已安装的技能（${boardSkills.length} 个）:\n` +
+          boardSkills.map((s) => `- ${s.name}: ${s.description || "无描述"} [${s.path}]`).join("\n") +
+          "\n评估时请考虑这些已安装技能是否能完成任务。"
+        : "";
       const prompt = [
         "你是板端 OpenClaw 的任务评估器，只做可行性评估，不执行任务。",
         "请严格返回 JSON（不要 markdown，不要代码块）：",
         '{"canHandle": true|false, "confidence": 0~1, "reason": "一句话原因", "suggestedPath": "board|local"}',
+        skillContext,
         input.context ? `context: ${input.context}` : "",
         `task: ${input.task}`,
       ].filter(Boolean).join("\n");

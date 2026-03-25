@@ -50,12 +50,19 @@ function abortAwareDelay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+export interface BoardSkillInfo {
+  name: string;
+  path: string;
+  description: string;
+}
+
 export function boardOpenClawDelegateTool(
   deviceId: string,
   manager: OpenClawDeploymentManager,
   onProgress?: (chunk: string) => void,
   conversationId?: string,
   ecosystemRegistry?: EcosystemRegistry,
+  boardSkills?: BoardSkillInfo[],
 ): Tool<{
   task: string;
   intent?: string;
@@ -108,6 +115,12 @@ export function boardOpenClawDelegateTool(
           });
           msgParts.push(`\navailable_skills:\n${skillLines.join("\n")}`);
         }
+      }
+      if (boardSkills && boardSkills.length > 0) {
+        const installed = boardSkills.map((s) =>
+          `  - ${s.name}: ${s.description || "无描述"} [${s.path}]`
+        ).join("\n");
+        msgParts.push(`\nyour_installed_skills (${boardSkills.length} 个):\n${installed}`);
       }
       if (useSkills) {
         msgParts.push(

@@ -1005,7 +1005,21 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     const cmd = [
       BOARD_ENV_EXPORT,
       'echo "===SKILLS==="',
-      '(for d in /opt/openclaw/skills /root/.openclaw/workspace/skills; do [ -d "$d" ] && ls -1 "$d"; done | sed \'/^\\s*$/d\' | sort -u || true)',
+      // List skill dirs and read SKILL.md frontmatter (name, description, trigger) for each
+      '(for d in /opt/openclaw/skills /root/.openclaw/workspace/skills; do' +
+      '  [ -d "$d" ] && for s in "$d"/*/; do' +
+      '    [ -d "$s" ] || continue;' +
+      '    sn=$(basename "$s");' +
+      '    sm="$s/SKILL.md";' +
+      '    if [ -f "$sm" ]; then' +
+      '      desc=$(sed -n "/^---$/,/^---$/{ /^description:/{ s/^description: *//; p; q; } }" "$sm" 2>/dev/null);' +
+      '      trigger=$(sed -n "/^---$/,/^---$/{ /^trigger:/{ s/^trigger: *//; p; q; } }" "$sm" 2>/dev/null);' +
+      '      echo "$sn|$d/$sn|${desc:-无描述}|${trigger:-}";' +
+      '    else' +
+      '      echo "$sn|$d/$sn|无 SKILL.md|";' +
+      '    fi;' +
+      '  done;' +
+      'done | sort -t"|" -k1,1 -u || true)',
       '[ -d /opt/openclaw/skills ] || [ -d /root/.openclaw/workspace/skills ] || echo "无已安装技能"',
       'echo "===PLUGINS==="',
       '(cat ~/.openclaw/openclaw.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(chr(10).join(d.get(\'plugins\',{}).get(\'allow\',[])))" 2>/dev/null || echo "")',
