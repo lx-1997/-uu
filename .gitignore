@@ -6,3 +6,11 @@ release/
 rdkstudio_frontend-master/
 build-resources/
 openclaw-main/
+
+# Build artifacts
+*.tsbuildinfo
+
+# Logs & temp
+error.log
+*.log
+temp_*.txt
