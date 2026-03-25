@@ -955,12 +955,25 @@ export default function AIDock() {
     };
   }, [currentDevice, setOpenclawConnected]);
 
-  type QuickPrompt = { id: string; icon: string; label: string; text: string; placeholder?: string };
+  type QuickPrompt = { id: string; icon: string; label: string; text: string; placeholder?: string; forceRdkclaw?: boolean };
   const promptsByTab: Record<string, QuickPrompt[]> = {
     dashboard: [
       { id: 'diag', icon: '🩺', label: '一键体检', text: '帮我全面检查设备健康状态，包括温度、负载和网络' },
       { id: 'stat', icon: '📊', label: '能力盘点', text: '同步 NodeHub 和 ModelZoo 板端状态，汇总当前可编排能力' },
-      { id: 'appgen', icon: '✨', label: '一句话做应用', text: '', placeholder: '描述你想做的机器人应用，如"人脸检测""巡线小车"...' },
+      {
+        id: 'cap-report',
+        icon: '🧭',
+        label: '能力汇报',
+        text: '请分别汇报 RDKClaw 和 OpenClaw 当前能做什么：各列 5 条能力，并给每条配一个可立即执行的一句话示例。',
+        forceRdkclaw: true,
+      },
+      {
+        id: 'appgen',
+        icon: '✨',
+        label: '一句话做应用',
+        text: '请基于当前设备能力，先给我 3 个可落地的一句话应用点子（含难度/预计时长），然后默认选第 1 个直接开始执行。',
+        forceRdkclaw: true,
+      },
       { id: 'new-device', icon: '🧭', label: '新设备接管', text: '把当前设备当成一台全新设备，检查连接、OpenClaw、模型/应用依赖和可开发环境是否就绪' },
     ],
     terminal: [
@@ -1005,6 +1018,13 @@ export default function AIDock() {
       { id: 'flow', icon: '🧩', label: '生成流程', text: '帮我生成一个摄像头→AI检测→推送的工作流' },
     ],
     openclaw: [
+      {
+        id: 'oc-vs-rdk',
+        icon: '🧭',
+        label: '双引擎能力',
+        text: '请分别汇报 RDKClaw 与 OpenClaw 各自适合做什么，并给我一个建议：当前任务更该用哪一个，为什么。',
+        forceRdkclaw: true,
+      },
       { id: 'oc-health', icon: '🩺', label: '网关健康检查', text: '请先检查当前网关状态并给出一条结论' },
       { id: 'oc-cap', icon: '🧩', label: '能力总览', text: '帮我总结当前设备可用的 OpenClaw 能力' },
       { id: 'oc-diag', icon: '🔧', label: '诊断修复', text: '帮我诊断为什么会连接失败，并给修复命令' },
@@ -1019,7 +1039,7 @@ export default function AIDock() {
   const quickPrompts = promptsByTab[effectiveTab] ?? defaultPrompts;
   const isFlasherTab = activeTab === 'flasher';
 
-  const submitQuickPrompt = (text: string, placeholder?: string) => {
+  const submitQuickPrompt = (text: string, placeholder?: string, forceRdkclaw?: boolean) => {
     if (!text && placeholder) {
       setCmd('');
       requestAnimationFrame(() => {
@@ -1031,11 +1051,12 @@ export default function AIDock() {
       });
       return;
     }
-    if (activeTab === 'openclaw' && dockOcMode && openclawSendMessage) {
+    if (!forceRdkclaw && activeTab === 'openclaw' && dockOcMode && openclawSendMessage) {
       openclawSendMessage(text);
       return;
     }
-    setCmd(text);
+    const commandText = forceRdkclaw ? `/ai ${text}` : text;
+    setCmd(commandText);
     requestAnimationFrame(() => {
       const form = document.querySelector('.dock-form') as HTMLFormElement;
       form?.requestSubmit();
@@ -1361,7 +1382,7 @@ export default function AIDock() {
             </button>
           )}
           {quickPrompts.map((p) => (
-            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, p.placeholder)}>
+            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw)}>
               {p.label}
             </button>
           ))}
