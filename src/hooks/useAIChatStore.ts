@@ -831,6 +831,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   model?: string;
                   contextWindow?: number;
                   maxOutputTokens?: number;
+                  tier?: string;
                 } | undefined;
 
                 const summaryParts = [executorLabel(executor), delegationMode];
@@ -845,7 +846,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (modelCaps?.model) {
                   const ctxK = modelCaps.contextWindow ? `${Math.round(modelCaps.contextWindow / 1024)}K` : '?';
                   const outK = modelCaps.maxOutputTokens ? `${Math.round(modelCaps.maxOutputTokens / 1024)}K` : '?';
-                  metaItems.push({ label: '模型', value: `${modelCaps.model} · 上下文 ${ctxK} · 输出 ${outK}`, ok: true });
+                  const tierLabel = modelCaps.tier === 'small' ? ' (精简模式)' : modelCaps.tier === 'large' ? '' : '';
+                  metaItems.push({ label: '模型', value: `${modelCaps.model} · 上下文 ${ctxK} · 输出 ${outK}${tierLabel}`, ok: true });
                 }
 
                 const existingSetupIdx = aiBlocks.findIndex(

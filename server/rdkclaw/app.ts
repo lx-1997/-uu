@@ -911,6 +911,9 @@ export class RDKClawApp {
           : `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
         : "",
       req.deviceId ? buildCollaborationPrompt(boardSnapshot, modelTier) : "",
+      modelTier === 'small'
+        ? "记住：发现用户偏好→memory_save；重复场景→创建技能。"
+        : "## 用户理解\n对话中注意捕捉用户偏好和习惯，用 memory_save 保存重要信息，用 memory_search 回顾历史。发现反复出现的操作模式时主动创建技能。",
     ].filter(Boolean).join("\n");
     const warmupKey = `${providerConfig.provider}:${providerConfig.model}`;
     if (!this.modelCapWarmedUp.has(warmupKey)) {
