@@ -1006,6 +1006,27 @@
   background: #000;
 }
 
+.dock-bubble .video-block-caption {
+  padding: 4px 10px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.dock-bubble .video-block-download {
+  display: inline-block;
+  padding: 4px 12px 6px;
+  font-size: 0.75rem;
+  color: #67e8f9;
+  text-decoration: none;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.dock-bubble .video-block-download:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 /* File block */
 .dock-bubble .file-block {
   padding: 8px 12px;

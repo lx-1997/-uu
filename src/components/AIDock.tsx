@@ -4,6 +4,7 @@ import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload } from '../api';
 import { getCapability } from '../ai';
 import { resolveSocketUrl } from '../utils/socket';
+import { resolveApiUrl } from '../utils/apiBase';
 import { renderMarkdown } from './MarkdownRenderer';
 import io from 'socket.io-client';
 
@@ -114,6 +115,54 @@ function getAttachmentIcon(name: string, mimeType?: string): string {
   if (/^(exe|msi|deb|rpm|dmg|appimage|bin)$/.test(ext)) return '⚙️';
   if (/^(py|js|ts|jsx|tsx|c|cpp|h|java|go|rs|rb|php|sh|lua|swift|kt|scala|dart|sql|r)$/.test(ext)) return '💻';
   return '📎';
+}
+
+const MEDIA_VIDEO_RE = /\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|3gp)$/i;
+const MEDIA_IMAGE_RE = /\.(jpe?g|png|gif|bmp|webp|svg|ico|tiff?)$/i;
+
+function extractMediaFromText(text: string): { cleanText: string; mediaBlocks: ChatBlock[] } {
+  const mediaBlocks: ChatBlock[] = [];
+  let t = text;
+
+  t = t.replace(/<video[^>]*>[\s\S]*?<\/video>/gi, (match) => {
+    const srcMatch = match.match(/src=["']([^"']+)["']/);
+    if (srcMatch) {
+      const src = srcMatch[1];
+      const fileName = decodeURIComponent(src.split('/').pop() || 'video');
+      mediaBlocks.push({ type: 'video', src, caption: fileName });
+    }
+    return '';
+  });
+
+  t = t.replace(/<img[^>]*src=["']([^"']+)["'][^>]*\/?>/gi, (match, src) => {
+    const alt = match.match(/alt=["']([^"']*)["']/)?.[1] || '';
+    mediaBlocks.push({ type: 'image', src, caption: alt });
+    return '';
+  });
+
+  t = t.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt: string, url: string) => {
+    if (MEDIA_VIDEO_RE.test(url)) {
+      mediaBlocks.push({ type: 'video', src: url, caption: alt || '' });
+      return '';
+    }
+    mediaBlocks.push({ type: 'image', src: url, caption: alt || '' });
+    return '';
+  });
+
+  t = t.replace(/(?<!!)\[([^\]]+)\]\(([^)]+)\)/g, (match, label: string, url: string) => {
+    if (MEDIA_VIDEO_RE.test(url)) {
+      mediaBlocks.push({ type: 'video', src: url, caption: label || '' });
+      return '';
+    }
+    if (MEDIA_IMAGE_RE.test(url)) {
+      mediaBlocks.push({ type: 'image', src: url, caption: label || '' });
+      return '';
+    }
+    return match;
+  });
+
+  t = t.replace(/\n{3,}/g, '\n\n').trim();
+  return { cleanText: t, mediaBlocks };
 }
 
 async function fileToBase64(file: File) {
@@ -266,14 +315,15 @@ function BlockRenderer({
 
   if (block.type === 'image') {
     if (block.src) {
+      const imgUrl = resolveApiUrl(block.src);
       return (
         <div className="msg-block image-block">
           <img
             className="image-block-real"
-            src={block.src}
+            src={imgUrl}
             alt={block.caption || '设备图片'}
             loading="lazy"
-            onClick={() => window.open(block.src, '_blank')}
+            onClick={() => window.open(imgUrl, '_blank')}
           />
           {block.caption && <div className="image-block-caption">{block.caption}</div>}
         </div>
@@ -294,8 +344,8 @@ function BlockRenderer({
   }
 
   if (block.type === 'video') {
-    const videoSrc = block.src || '';
-    const ext = videoSrc.split('.').pop()?.toLowerCase() || 'mp4';
+    const videoSrc = resolveApiUrl(block.src || '');
+    const ext = videoSrc.split('.').pop()?.split('?')[0]?.toLowerCase() || 'mp4';
     const mimeMap: Record<string, string> = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo', mkv: 'video/x-matroska' };
     const mimeType = mimeMap[ext] || 'video/mp4';
     return (
@@ -308,7 +358,10 @@ function BlockRenderer({
         >
           <source src={videoSrc} type={mimeType} />
         </video>
-        {block.caption && <div className="image-block-caption">{block.caption}</div>}
+        {block.caption && <div className="video-block-caption">{block.caption}</div>}
+        <a className="video-block-download" href={videoSrc} download target="_blank" rel="noopener noreferrer">
+          下载视频
+        </a>
       </div>
     );
   }
@@ -318,7 +371,7 @@ function BlockRenderer({
       <div className="msg-block file-block">
         <a
           className="file-block-link"
-          href={block.src}
+          href={resolveApiUrl(block.src)}
           download={block.fileName}
           target="_blank"
           rel="noopener noreferrer"
@@ -1159,7 +1212,17 @@ export default function AIDock() {
                           </>
                         );
                       })()}
-                      {msg.text && <div className="msg-text">{renderMarkdown(msg.text)}</div>}
+                      {msg.text && (() => {
+                        const { cleanText, mediaBlocks } = extractMediaFromText(msg.text);
+                        return (
+                          <>
+                            {cleanText && <div className="msg-text">{renderMarkdown(cleanText)}</div>}
+                            {mediaBlocks.map((mb, i) => (
+                              <BlockRenderer key={`extracted-media-${i}`} block={mb} />
+                            ))}
+                          </>
+                        );
+                      })()}
                     </>
                   )}
                   {msg.action && (
