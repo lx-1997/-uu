@@ -8,7 +8,7 @@
  * 不同设备之间可以并行（受 global lane 限制）。
  */
 
-import { enqueueInLane, type EnqueueOpts } from "../agent/command-queue.js";
+import { enqueueInLane } from "../agent/command-queue.js";
 import type { ChannelSource } from "./types.js";
 
 export interface DeviceRunInfo {

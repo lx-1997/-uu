@@ -477,14 +477,7 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
       const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
       const auth = await resolveForumAuth(base, timeoutMs);
       if (auth.mode === "none") {
-        return [
-          "论坛发帖未配置认证信息，无法执行写操作。",
-          "请在服务端环境变量设置：",
-          "- FORUM_DROBOTICS_API_KEY",
-          "- FORUM_DROBOTICS_API_USERNAME",
-          "- 或 FORUM_DROBOTICS_COOKIE（浏览器登录态）",
-          `目标论坛: ${base}`,
-        ].join("\n");
+        return authHint(base, auth.detail);
       }
       const raw = normalizePostBody(input.raw);
       if (!raw) {
