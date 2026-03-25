@@ -257,6 +257,33 @@
   margin-top: 4px;
 }
 
+/* ── Channel badge (feishu / weixin) ── */
+.dock-channel-badge {
+  display: inline-block;
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  margin-bottom: 4px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.dock-msg.ch-feishu .dock-avatar.user {
+  background: #3370ff22;
+  color: #3370ff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.dock-msg.ch-weixin .dock-avatar.user {
+  background: #07c16022;
+  color: #07c160;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 /* Typing indicator */
 .dock-typing {
   display: flex;

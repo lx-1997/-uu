@@ -1228,12 +1228,21 @@ export default function AIDock() {
               </button>
             )}
 
-            {visibleMessages.map((msg) => (
-              <div key={msg.id} className={`dock-msg ${msg.role}`}>
+            {visibleMessages.map((msg) => {
+              const channelClass = msg.channelMeta?.channel ? ` ch-${msg.channelMeta.channel}` : '';
+              const directionClass = msg.channelMeta?.direction ? ` dir-${msg.channelMeta.direction}` : '';
+              return (
+              <div key={msg.id} className={`dock-msg ${msg.role}${channelClass}${directionClass}`}>
                 <div className={`dock-avatar ${msg.role}`}>
-                  {msg.role === 'ai' ? Icon.robot : Icon.user}
+                  {msg.role === 'ai' ? Icon.robot : msg.channelMeta?.channel === 'feishu' ? '飞' : msg.channelMeta?.channel === 'weixin' ? '微' : Icon.user}
                 </div>
                 <div className={`dock-bubble ${msg.role}`}>
+                  {msg.channelMeta && (
+                    <div className="dock-channel-badge">
+                      {msg.channelMeta.channel === 'feishu' ? '飞书' : msg.channelMeta.channel === 'weixin' ? '微信' : msg.channelMeta.channel}
+                      {msg.channelMeta.direction === 'inbound' ? ' · 来信' : msg.channelMeta.direction === 'outbound' ? ' · 回复' : ''}
+                    </div>
+                  )}
                   {(() => {
                     const plain = chatMessageToPlainText(msg);
                     if (!plain) return null;
@@ -1304,7 +1313,8 @@ export default function AIDock() {
                   </span>
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {aiTyping && (
               <div className="dock-msg ai">
