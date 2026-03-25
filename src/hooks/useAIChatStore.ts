@@ -1146,6 +1146,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 } else if (errorMsg.includes('Connection error') || errorMsg.includes('ECONNREFUSED')) {
                   friendlyText = '无法连接到 AI 服务，请检查网络或 API 地址。';
                   friendlyDetail = '如果使用通义千问 sk-sp- 开头的 Key，请确认 Base URL 是否正确';
+                } else if (errorMsg.toLowerCase().includes('network_error') || errorMsg.toLowerCase().includes('network error')) {
+                  friendlyText = '联网检索阶段出现网络错误。';
+                  friendlyDetail = '请检查本机网络、目标站点可达性及是否被限流；可稍后重试或先切换离线方案。';
                 } else {
                   friendlyText = aiText || '请求出错，请稍后重试。';
                 }

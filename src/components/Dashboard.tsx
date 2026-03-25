@@ -9,6 +9,17 @@ import { useAppState } from '../hooks/useAppState';
 import { parseMetrics } from '../utils/diagnostics';
 import OnboardingWizard from './OnboardingWizard';
 
+const ONE_SHOT_DEV_WORKFLOW_PROMPT = [
+  '我想一句话开发一个功能，请严格按以下通用流程执行，并在关键节点先给我确认：',
+  '1) 需求澄清：先复述目标、输入输出和成功标准；',
+  '2) 硬件可行性：检查当前板卡型号、已连接传感器/相机/麦克风、系统与依赖状态，判断是否满足；',
+  '3) 能力匹配：不要只信 data/ecosystem-registry.json，要结合实时探测结果判断技能是否真可用；',
+  '4) 联网检索：搜索官网/文档/代码仓库，确认是否已有成熟方案与实现路径；',
+  '5) 方案产出：给出最小可行实现（涉及 skill 时先给草案），列出风险与前置条件；',
+  '6) 二次确认：明确问我"是否按该方案执行"；',
+  '7) 我确认后再执行，不要直接动手。',
+].join('\n');
+
 function FlowingGradientBg({ accent }: { accent: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -274,7 +285,7 @@ export default function Dashboard() {
 
       {/* ── CTA: primary action ── */}
       <div className={`lp-cta ${mounted ? 'lp-enter lp-d2' : ''}`}>
-        <button className="lp-cta-btn primary" onClick={() => prompt('', false)}>
+        <button className="lp-cta-btn primary" onClick={() => prompt(ONE_SHOT_DEV_WORKFLOW_PROMPT)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
           一句话开发
         </button>
