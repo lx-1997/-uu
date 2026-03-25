@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { isDesktop as checkIsDesktop } from '../utils/env';
+import { resolveApiUrl } from '../utils/apiBase';
 import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
 
 /* ═══════════════════════════════════════════════════════════
@@ -970,7 +971,7 @@ export default function Flasher() {
                   setBackupChecking(true);
                   setBackupStatus('');
                   try {
-                    const res = await fetch(`/api/devices/${currentDevice.id}/flash/backup/check`, {
+                    const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/flash/backup/check`), {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                     });
@@ -1002,7 +1003,7 @@ export default function Flasher() {
                     setBackupRunning(true);
                     setBackupStatus('正在启动备份...');
                     try {
-                      const res = await fetch(`/api/devices/${currentDevice.id}/flash/backup/start`, {
+                      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/flash/backup/start`), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({}),

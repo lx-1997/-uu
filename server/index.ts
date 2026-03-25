@@ -3944,6 +3944,21 @@ app.post('/api/rdkclaw/approvals/:approvalId/decision', (request, response) => {
   response.json({ ok: true });
 });
 
+app.post('/api/rdkclaw/recommendations/:recommendationId/choice', (request, response) => {
+  const { recommendationId } = request.params;
+  const { choiceId, autoExecute } = request.body as { choiceId?: string; autoExecute?: boolean };
+  if (!choiceId) {
+    response.status(400).json({ error: '缺少 choiceId' });
+    return;
+  }
+  const ok = rdkclaw.submitRecommendationChoice(recommendationId, String(choiceId), !!autoExecute);
+  if (!ok) {
+    response.status(404).json({ error: '推荐请求不存在或已结束' });
+    return;
+  }
+  response.json({ ok: true });
+});
+
 app.post('/api/rdkclaw/soul-updates/:proposalId/decision', async (request, response) => {
   const { applySoulUpdate, getPendingProposal, removePendingProposal } = await import('./rdkclaw/tools/soul-update.js');
   const { proposalId } = request.params;

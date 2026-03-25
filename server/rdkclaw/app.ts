@@ -124,6 +124,10 @@ export class RDKClawApp {
     sessionId: string;
     createdAt: number;
   }>();
+  private pendingRecommendations = new Map<string, {
+    resolve: (choice: { choiceId: string; autoExecute: boolean }) => void;
+    createdAt: number;
+  }>();
   private runAgents = new Map<string, Agent>();
   private sessionAutoApprove = new Map<string, boolean>();
   private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: BoardSnapshot }>();
@@ -262,6 +266,14 @@ export class RDKClawApp {
     if (!pending) return false;
     this.pendingApprovals.delete(approvalId);
     pending.resolve(decision);
+    return true;
+  }
+
+  submitRecommendationChoice(recommendationId: string, choiceId: string, autoExecute: boolean) {
+    const pending = this.pendingRecommendations.get(recommendationId);
+    if (!pending) return false;
+    this.pendingRecommendations.delete(recommendationId);
+    pending.resolve({ choiceId, autoExecute });
     return true;
   }
 
