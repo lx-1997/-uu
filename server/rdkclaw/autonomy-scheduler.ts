@@ -53,7 +53,7 @@ export class AutonomyScheduler {
     if (this.timer) return;
     this.timer = setInterval(() => {
       void this.tick();
-    }, 1000);
+    }, 10_000);
     void this.tick();
   }
 

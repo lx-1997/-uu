@@ -2,6 +2,22 @@ import type { ContentBlock, Message } from "../session.js";
 
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 
+const CJK_RANGE = /[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/;
+
+function estimateTokensForText(text: string): number {
+  if (!text) return 0;
+  let cjkChars = 0;
+  let otherChars = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (CJK_RANGE.test(text[i])) {
+      cjkChars++;
+    } else {
+      otherChars++;
+    }
+  }
+  return Math.ceil(cjkChars / 1.5) + Math.ceil(otherChars / 4);
+}
+
 function estimateBlockChars(block: ContentBlock): number {
   if (block.type === "text") {
     return block.text?.length ?? 0;
@@ -21,6 +37,13 @@ function estimateBlockChars(block: ContentBlock): number {
   return 0;
 }
 
+function estimateBlockTokens(block: ContentBlock): number {
+  if (block.type === "text") {
+    return estimateTokensForText(block.text ?? "");
+  }
+  return Math.max(1, Math.ceil(estimateBlockChars(block) / CHARS_PER_TOKEN_ESTIMATE));
+}
+
 export function estimateMessageChars(message: Message): number {
   if (typeof message.content === "string") {
     return message.content.length;
@@ -37,8 +60,14 @@ export function estimateMessagesChars(messages: Message[]): number {
 }
 
 export function estimateMessageTokens(message: Message): number {
-  const chars = estimateMessageChars(message);
-  return Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE));
+  if (typeof message.content === "string") {
+    return Math.max(1, estimateTokensForText(message.content));
+  }
+  let total = 0;
+  for (const block of message.content) {
+    total += estimateBlockTokens(block);
+  }
+  return Math.max(1, total);
 }
 
 export function estimateMessagesTokens(messages: Message[]): number {

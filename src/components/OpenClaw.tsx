@@ -405,8 +405,7 @@ export default function OpenClaw() {
     }
 
     const socket = io(resolveSocketUrl(), {
-      transports: ['polling'],
-      upgrade: false,
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 8,
       reconnectionDelay: 800,

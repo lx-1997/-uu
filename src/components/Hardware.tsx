@@ -51,7 +51,7 @@ export default function Hardware() {
   // 自动刷新
   useEffect(() => {
     if (!autoRefresh || !currentDevice) return;
-    const timer = setInterval(refreshDiagnostics, 3000);
+    const timer = setInterval(refreshDiagnostics, 10000);
     return () => clearInterval(timer);
   }, [autoRefresh, currentDevice?.id, refreshDiagnostics]);
 

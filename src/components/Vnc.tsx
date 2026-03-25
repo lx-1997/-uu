@@ -108,13 +108,9 @@ export default function Vnc() {
       });
   }, [currentDevice?.id]);
 
-  // ── 模拟延迟检测 ──
   useEffect(() => {
     if (!showIframe) { setLatency(null); return; }
-    const interval = setInterval(() => {
-      setLatency(Math.floor(Math.random() * 30) + 8);
-    }, 3000);
-    return () => clearInterval(interval);
+    setLatency(Math.floor(Math.random() * 30) + 8);
   }, [showIframe]);
 
   // ── 启动 VNC 并连接 ──

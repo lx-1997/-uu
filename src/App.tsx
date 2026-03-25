@@ -192,7 +192,7 @@ function SSOGate({ children }: { children: ReactNode }) {
       } catch {
         if (!cancelled) setAuthStatus('failed');
       }
-    }, 1800);
+    }, 5000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

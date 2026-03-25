@@ -932,8 +932,7 @@ export default function AIDock() {
     }
 
     const socket = io(resolveSocketUrl(), {
-      transports: ['polling'],
-      upgrade: false,
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 8,
       reconnectionDelay: 800,

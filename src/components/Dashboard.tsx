@@ -167,7 +167,7 @@ export default function Dashboard() {
         .catch(() => { if (!cancelled) setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 }); });
     };
     load();
-    const t = setInterval(load, 3000);
+    const t = setInterval(load, 10000);
     return () => { cancelled = true; clearInterval(t); };
   }, [currentDevice?.id]);
 

@@ -60,9 +60,20 @@ function persist() {
   }
 }
 
+const CJK_RANGE = /[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/;
+
 export function estimateTextTokens(text: string): number {
-  const chars = Math.max(0, (text || "").length);
-  return Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE));
+  if (!text) return 1;
+  let cjkChars = 0;
+  let otherChars = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (CJK_RANGE.test(text[i])) {
+      cjkChars++;
+    } else {
+      otherChars++;
+    }
+  }
+  return Math.max(1, Math.ceil(cjkChars / 1.5) + Math.ceil(otherChars / 4));
 }
 
 export function recordTokenUsage(input: {

@@ -188,7 +188,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
     const timer = setInterval(() => {
       void pingAll();
-    }, 5000);
+    }, 15000);
     void pingAll();
 
     return () => { cancelled = true; clearInterval(timer); };
