@@ -238,6 +238,20 @@ export default function SettingsPanel() {
   const [weixinLoginStatus, setWeixinLoginStatus] = useState<string>('');
   const [weixinLoginEventSource, setWeixinLoginEventSource] = useState<EventSource | null>(null);
 
+  /**
+   * Close EventSource when the panel unmounts or hides,
+   * preventing leaked SSE connections when user dismisses settings.
+   */
+  useEffect(() => {
+    if (!showSettings && weixinLoginEventSource) {
+      weixinLoginEventSource.close();
+      setWeixinLoginEventSource(null);
+      setWeixinLoginLoading(false);
+      setWeixinQrCode(null);
+      setWeixinLoginStatus('');
+    }
+  }, [showSettings, weixinLoginEventSource]);
+
   /* ═══════════════════════════════════════════
      Data Loading
      ═══════════════════════════════════════════ */

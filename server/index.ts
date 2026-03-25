@@ -655,8 +655,9 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs = 15
       resolve({ ok: false, output: `timeout after ${timeoutMs}ms`, timedOut: true, exitCode: null });
     }, timeoutMs);
 
-    child.stdout.on('data', (chunk) => { output += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { output += chunk.toString(); });
+    const OUTPUT_LIMIT = 512_000;
+    child.stdout.on('data', (chunk) => { if (output.length < OUTPUT_LIMIT) output += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { if (output.length < OUTPUT_LIMIT) output += chunk.toString(); });
     child.on('error', (error) => {
       if (settled) return;
       settled = true;

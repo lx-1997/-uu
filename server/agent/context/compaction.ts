@@ -532,6 +532,53 @@ export function shouldTriggerCompaction(params: {
 }
 
 /**
+ * Proactive compaction trigger — inspired by OpenClaw 2026.3.7 ContextEngine
+ * and Acon (Agent Context Optimization).
+ *
+ * Instead of only compacting when we exceed the hard token limit, this detects
+ * natural task boundaries and compacts proactively. Benefits:
+ * - Compresses at opportune moments (between tasks) rather than mid-conversation
+ * - Prevents context quality degradation from accumulated stale information
+ * - Keeps the working context focused on the current task
+ *
+ * Heuristics for task boundary detection:
+ * 1. Long tool-result output just completed (> 40% of context)
+ * 2. Multiple tool-use rounds completed without new user messages
+ * 3. Context usage exceeds 60% of window (early warning threshold)
+ */
+export function shouldProactiveCompact(params: {
+  messages: Message[];
+  contextWindowTokens: number;
+  settings?: Partial<CompactionSettings>;
+}): boolean {
+  const settings = { ...DEFAULT_COMPACTION_SETTINGS, ...params.settings };
+  if (!settings.enabled) return false;
+
+  const totalTokens = estimateMessagesTokens(params.messages);
+  const usageRatio = totalTokens / params.contextWindowTokens;
+
+  if (usageRatio < 0.6) return false;
+
+  const recentMessages = params.messages.slice(-6);
+  const toolOnlyRounds = recentMessages.filter(
+    m => m.role === 'assistant' && Array.isArray(m.content) &&
+         m.content.every(b => b.type === 'tool_use')
+  ).length;
+
+  if (toolOnlyRounds >= 3 && usageRatio > 0.65) return true;
+
+  const lastMsg = params.messages[params.messages.length - 1];
+  if (lastMsg?.role === 'user' && Array.isArray(lastMsg.content)) {
+    const toolResultTokens = lastMsg.content
+      .filter(b => b.type === 'tool_result')
+      .reduce((sum, b) => sum + (typeof b.content === 'string' ? b.content.length : 0) / 4, 0);
+    if (toolResultTokens > params.contextWindowTokens * 0.4) return true;
+  }
+
+  return false;
+}
+
+/**
  * 生成 compaction 摘要
  *
  * 对应 OpenClaw: pi-coding-agent → generateSummary()

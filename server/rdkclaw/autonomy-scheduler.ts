@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { RDKClawApp } from "./app.js";
@@ -28,10 +29,20 @@ const CONFIG_DIR = path.join(os.homedir(), ".rdkstudio");
 const TASK_FILE = path.join(CONFIG_DIR, "rdkclaw-autonomy-tasks.json");
 const AUDIT_FILE = path.join(CONFIG_DIR, "rdkclaw-autonomy-audit.jsonl");
 
-function ensureDir() {
+let dirEnsured = false;
+
+async function ensureDir() {
+  if (dirEnsured) return;
+  await fsp.mkdir(CONFIG_DIR, { recursive: true });
+  dirEnsured = true;
+}
+
+function ensureDirSync() {
+  if (dirEnsured) return;
   if (!fs.existsSync(CONFIG_DIR)) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
   }
+  dirEnsured = true;
 }
 
 export class AutonomyScheduler {
@@ -328,13 +339,28 @@ export class AutonomyScheduler {
     });
   }
 
+  /**
+   * Async audit log append — non-blocking alternative to appendFileSync.
+   * Fire-and-forget: audit failures are non-fatal and logged to stderr.
+   */
   private audit(item: Record<string, unknown>) {
-    ensureDir();
-    fs.appendFileSync(AUDIT_FILE, `${JSON.stringify({ ts: Date.now(), ...item })}\n`, "utf-8");
+    const line = `${JSON.stringify({ ts: Date.now(), ...item })}\n`;
+    void (async () => {
+      try {
+        await ensureDir();
+        await fsp.appendFile(AUDIT_FILE, line, "utf-8");
+      } catch (err) {
+        process.stderr.write(`[autonomy-audit] write failed: ${err}\n`);
+      }
+    })();
   }
 
+  /**
+   * Sync read — only called once at construction time, so blocking is acceptable.
+   */
   private readTasks(): AutonomyTask[] {
     try {
+      ensureDirSync();
       if (!fs.existsSync(TASK_FILE)) return [];
       const raw = fs.readFileSync(TASK_FILE, "utf-8");
       const parsed = JSON.parse(raw) as AutonomyTask[];
@@ -344,9 +370,20 @@ export class AutonomyScheduler {
     }
   }
 
+  /**
+   * Async task persistence — replaces writeFileSync to avoid blocking
+   * the event loop during scheduler ticks.
+   */
   private saveTasks() {
-    ensureDir();
-    fs.writeFileSync(TASK_FILE, JSON.stringify(this.tasks, null, 2), "utf-8");
+    const data = JSON.stringify(this.tasks, null, 2);
+    void (async () => {
+      try {
+        await ensureDir();
+        await fsp.writeFile(TASK_FILE, data, "utf-8");
+      } catch (err) {
+        process.stderr.write(`[autonomy-scheduler] saveTasks failed: ${err}\n`);
+      }
+    })();
   }
 }
 

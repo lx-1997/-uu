@@ -31,6 +31,7 @@ export {
   compactHistoryIfNeeded,
   computeAdaptiveChunkRatio,
   shouldTriggerCompaction,
+  shouldProactiveCompact,
   type CompactionSettings,
   type SummarizeFn,
   DEFAULT_COMPACTION_SETTINGS,

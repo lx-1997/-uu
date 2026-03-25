@@ -1,3 +1,15 @@
+/**
+ * Per-device serial execution scheduler.
+ *
+ * SSH connections to a single board cannot run commands concurrently
+ * (each command occupies the SSH channel). This scheduler queues tasks
+ * per device and drains them sequentially, preventing concurrent SSH
+ * race conditions while allowing parallelism across different devices.
+ *
+ * Idle lanes are automatically garbage-collected to avoid Map growth
+ * from transient devices.
+ */
+
 type QueueTask<T> = {
   enqueuedAt: number;
   run: () => Promise<T>;

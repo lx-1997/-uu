@@ -28,6 +28,12 @@ const DISK_WARNING = 85;
 const DISK_CRITICAL = 95;
 const MEMORY_WARNING = 85;
 
+/**
+ * Cap on cached health results to prevent unbounded Map growth
+ * when many transient devices are registered over long uptimes.
+ */
+const MAX_CACHED_RESULTS = 200;
+
 export class DeviceHealthMonitor {
   private lastCheck = new Map<string, HealthCheckResult>();
 
@@ -79,7 +85,22 @@ export class DeviceHealthMonitor {
 
     result.ok = result.anomalies.every((a) => a.severity !== 'critical');
     this.lastCheck.set(deviceId, result);
+    this.evictOldEntries();
     return result;
+  }
+
+  /**
+   * Evict oldest entries when cache exceeds MAX_CACHED_RESULTS.
+   * Map iteration order is insertion order, so we delete from the front.
+   */
+  private evictOldEntries() {
+    if (this.lastCheck.size <= MAX_CACHED_RESULTS) return;
+    const excess = this.lastCheck.size - MAX_CACHED_RESULTS;
+    const iter = this.lastCheck.keys();
+    for (let i = 0; i < excess; i++) {
+      const key = iter.next().value;
+      if (key !== undefined) this.lastCheck.delete(key);
+    }
   }
 
   getLastResult(deviceId: string): HealthCheckResult | undefined {

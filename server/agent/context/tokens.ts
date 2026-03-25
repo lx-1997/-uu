@@ -2,14 +2,23 @@ import type { ContentBlock, Message } from "../session.js";
 
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 
-const CJK_RANGE = /[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/;
+/**
+ * CJK character detection via charCode ranges — avoids per-character regex
+ * overhead. Token estimation is called on every message in the context window,
+ * so this is a hot path worth optimizing.
+ */
+function isCJK(code: number): boolean {
+  return (code >= 0x3000 && code <= 0x9fff) ||
+         (code >= 0xac00 && code <= 0xd7af) ||
+         (code >= 0xff00 && code <= 0xffef);
+}
 
 function estimateTokensForText(text: string): number {
   if (!text) return 0;
   let cjkChars = 0;
   let otherChars = 0;
   for (let i = 0; i < text.length; i++) {
-    if (CJK_RANGE.test(text[i])) {
+    if (isCJK(text.charCodeAt(i))) {
       cjkChars++;
     } else {
       otherChars++;

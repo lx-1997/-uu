@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { executeDeviceCommand } from '../api';
 import { isDesktop } from '../utils/env';
@@ -50,6 +50,11 @@ export default function IDE() {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const activeUrlRef = useRef<string>('');
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    return () => { clearTimeout(loadingTimerRef.current); };
+  }, []);
 
   /* ── 构建 code-server URL ── */
   const getCodeServerUrl = () => {
@@ -143,7 +148,7 @@ export default function IDE() {
       activeUrlRef.current = url;
       (window as any).rdkDesktop.openUrl(url);
     }
-    setTimeout(() => setIframeLoading(false), 10000);
+    loadingTimerRef.current = setTimeout(() => setIframeLoading(false), 10000);
   };
 
   /* ── 关闭编辑器 ── */

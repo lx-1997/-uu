@@ -1,9 +1,18 @@
+/**
+ * Device persistence layer with TTL-based read cache.
+ *
+ * devices.json is the single source of truth for registered boards.
+ * A 3-second TTL cache avoids redundant disk I/O when multiple Socket.IO
+ * events or API routes call readDevices() within the same request burst.
+ * The cache is invalidated on every write to ensure consistency.
+ *
+ * In Electron production builds, RDK_DATA_DIR points to the app's
+ * user-data directory instead of the project root.
+ */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Device } from '../shared/types.js';
 
-// 打包后优先使用 RDK_DATA_DIR 环境变量（由 electron/main.mjs 注入）
-// 开发模式下使用项目根目录的 data/
 function getDataFilePath() {
   const dataDir = process.env.RDK_DATA_DIR ?? path.resolve(process.cwd(), 'data');
   return path.join(dataDir, 'devices.json');

@@ -1,3 +1,20 @@
+/**
+ * Multi-board fleet dispatch tools.
+ *
+ * Enables AI to coordinate tasks across multiple RDK boards by:
+ * 1. Listing boards with hardware capability profiles (BPU TOPS, RAM, CPU)
+ * 2. Delegating tasks to specific boards with role-based scheduling
+ * 3. Broadcasting tasks to all unique boards and aggregating results
+ *
+ * Key design decisions:
+ * - IP-based deduplication: multiple device entries sharing the same IP
+ *   are treated as duplicates (common when boards are re-registered)
+ * - Hardware-aware context injection: each delegation includes the target
+ *   board's hardware profile so the remote OpenClaw agent can tailor its
+ *   approach (e.g., use lighter models on X3 vs heavier ones on X5/Ultra)
+ * - Conflict prevention: tasks are tracked globally to prevent concurrent
+ *   commands to the same physical board
+ */
 import type { Tool } from '../../agent/tools/types.js';
 import { readDevices } from '../../storage.js';
 import { OpenClawDeploymentManager } from '../../managers/OpenClawDeploymentManager.js';
