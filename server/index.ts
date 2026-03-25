@@ -250,6 +250,9 @@ const feishuConfigStore = new FeishuConfigStore();
 let feishuConfig = feishuConfigStore.getConfig();
 let feishuApi = new FeishuApiClient(feishuConfig.appId, feishuConfig.appSecret);
 const feishuAuth = new FeishuAuthStore();
+rdkclaw.setSwitchDeviceCallback((deviceId) => {
+  feishuAuth.setLatestUiDevice(deviceId);
+});
 const feishuChannel = new FeishuWebSocketChannel({
   rdkclaw,
   authStore: feishuAuth,

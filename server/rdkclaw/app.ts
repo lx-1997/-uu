@@ -345,6 +345,7 @@ export class RDKClawApp {
   private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: { skills: string[]; plugins: string[] } }>();
   private static readonly BOARD_SNAPSHOT_TTL_MS = 12_000;
   private readonly deviceQueue = new DeviceQueue();
+  private switchDeviceCallback?: (deviceId: string) => void;
 
   private async getBoardSkillSnapshot(deviceId?: string): Promise<{ skills: string[]; plugins: string[] }> {
     if (!deviceId) return { skills: [], plugins: [] };
@@ -413,6 +414,10 @@ export class RDKClawApp {
 
   setAutonomyRuntime(runtime: StudioAutonomyRuntime) {
     this.autonomyRuntime = runtime;
+  }
+
+  setSwitchDeviceCallback(cb: (deviceId: string) => void) {
+    this.switchDeviceCallback = cb;
   }
 
   getPersona(): PersonaProfile {
@@ -592,7 +597,7 @@ export class RDKClawApp {
       ...builtinTools,
       ...createStudioTools(this.autonomyRuntime),
       ...createAttachmentTools(sessionAttachments, providerConfig, base.sessionId),
-      ...createDeviceManagerTools(),
+      ...createDeviceManagerTools(this.switchDeviceCallback),
     ];
     if (policy.network.enabled) {
       tools.push(

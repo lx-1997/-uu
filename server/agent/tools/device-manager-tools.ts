@@ -303,8 +303,49 @@ export const weixinBindQrTool: Tool<Record<string, never>> = {
   },
 };
 
-export function createDeviceManagerTools(): Tool[] {
-  return [
+export type SwitchDeviceCallback = (deviceId: string) => void;
+
+export const switchDeviceTool = (
+  onSwitch: SwitchDeviceCallback,
+): Tool<{ device: string }> => ({
+  name: "switch_device",
+  description:
+    "切换当前会话绑定的 RDK 设备。后续所有渠道（AI Dock、飞书、微信）的消息将路由到新设备。接受设备 IP 或设备 ID。切换在下一条消息生效。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      device: {
+        type: "string",
+        description: "目标设备的 IP 地址或设备 ID",
+      },
+    },
+    required: ["device"],
+  },
+  async execute(input) {
+    const query = (input.device || "").trim();
+    if (!query) return "请提供目标设备的 IP 地址或设备 ID。";
+
+    const devices = await readDevices();
+    const match = devices.find(
+      (d) => d.id === query || d.host === query,
+    );
+    if (!match) {
+      const available = devices.map((d) => `• ${d.host} (${d.status}) [id: ${d.id}]`);
+      return `未找到设备 "${query}"。当前已添加的设备:\n${available.join("\n") || "（无）"}`;
+    }
+    if (match.status !== "connected") {
+      return `设备 ${match.host} 当前状态为 ${match.status}，需要先连接才能切换。可以用 device_connect_ssh 重新连接。`;
+    }
+
+    onSwitch(match.id);
+    return `已切换到设备 ${match.host}:${match.port ?? 22} (${match.username}) [id: ${match.id}]。后续消息将路由到该设备。`;
+  },
+});
+
+export function createDeviceManagerTools(
+  onSwitchDevice?: SwitchDeviceCallback,
+): Tool[] {
+  const tools: Tool[] = [
     deviceListTool,
     deviceScanTool,
     deviceConnectTool,
@@ -312,4 +353,8 @@ export function createDeviceManagerTools(): Tool[] {
     deviceQuickConnectQrTool,
     weixinBindQrTool,
   ];
+  if (onSwitchDevice) {
+    tools.push(switchDeviceTool(onSwitchDevice));
+  }
+  return tools;
 }
