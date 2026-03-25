@@ -876,9 +876,9 @@ export default function OpenClaw() {
       const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/skills`));
       if (!res.ok) return false;
       const data = await res.json() as { ok?: boolean; skills?: string[] };
-      const skills = data.skills || [];
+      const skillNames = (data.skills || []).map((s) => s.split('|')[0]);
       const normalized = normalizeSkillIdForMatch(skillId);
-      return skills.includes(skillId) || skills.includes(normalized);
+      return skillNames.includes(skillId) || skillNames.includes(normalized);
     } catch {
       return false;
     }
@@ -1346,9 +1346,14 @@ export default function OpenClaw() {
                       <button className="btn btn-ghost btn-sm" onClick={loadBoardSkills} style={{ fontSize: '0.5625rem', padding: '1px 4px' }}>刷新</button>
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                      {boardSkills.map((s) => (
-                        <span key={s} className="chip active" style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default' }}>{s}</span>
-                      ))}
+                      {boardSkills.map((s) => {
+                        const parts = s.split('|');
+                        const name = parts[0] || s;
+                        const desc = (parts[2] || '').replace(/^"|"$/g, '').trim();
+                        return (
+                          <span key={s} className="chip active" title={desc || s} style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                        );
+                      })}
                     </div>
                     <div className="divider" style={{ margin: '6px 0' }} />
                   </>
@@ -1357,9 +1362,12 @@ export default function OpenClaw() {
                   <>
                     <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>板端已启用插件</div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 6 }}>
-                      {boardPlugins.map((p) => (
-                        <span key={p} className="chip active" style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default' }}>{p}</span>
-                      ))}
+                      {boardPlugins.map((p) => {
+                        const name = p.split('|')[0] || p;
+                        return (
+                          <span key={p} className="chip active" title={p} style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                        );
+                      })}
                     </div>
                     <div className="divider" style={{ margin: '6px 0' }} />
                   </>
@@ -1376,9 +1384,9 @@ export default function OpenClaw() {
                   {ecoSkillCatalog.length === 0 && (
                     <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)' }}>暂无可用生态技能，请点击刷新。</span>
                   )}
-                  {ecoSkillCatalog.map((s) => {
+                  {(() => { const boardSkillNames = boardSkills.map((b) => b.split('|')[0]); return ecoSkillCatalog.map((s) => {
                     const normalized = normalizeSkillIdForMatch(s.id);
-                    const installed = boardSkills.includes(s.id) || boardSkills.includes(normalized);
+                    const installed = boardSkillNames.includes(s.id) || boardSkillNames.includes(normalized);
                     return (
                       <button
                         key={s.id}
@@ -1391,7 +1399,7 @@ export default function OpenClaw() {
                         {skillEmojiByCategory(s.category)} {s.name} {installed && '✓'}
                       </button>
                     );
-                  })}
+                  }); })()}
                 </div>
                 <div className="divider" style={{ margin: '8px 0' }} />
                 <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>插件开关</div>
