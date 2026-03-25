@@ -23,7 +23,8 @@ interface TokenUsageStore {
 }
 
 const MAX_ENTRIES = 4000;
-const STORE_FILE = path.join(process.cwd(), "data", "llm-token-usage.json");
+const DATA_DIR = process.env.RDK_DATA_DIR ?? path.resolve(process.cwd(), "data");
+const STORE_FILE = path.join(DATA_DIR, "llm-token-usage.json");
 
 /**
  * Debounce interval for async persistence.

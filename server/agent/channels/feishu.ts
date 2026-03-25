@@ -383,9 +383,11 @@ export class FeishuWebSocketChannel {
       const fileKey = String(parsed.file_key || parsed.fileKey || parsed.audio_key || parsed.audioKey || "");
       if (!fileKey) return [];
       const file = await this.downloadMessageResource(messageId, fileKey, "file", `feishu-${msgType}-${messageId}`);
+      const isVideo = msgType === "media" || /^video\//.test(file.mimeType);
+      const resolvedType = msgType === "audio" ? "audio" : isVideo ? "video" : "file";
       return [{
         id: `feishu-${messageId}-${msgType}`,
-        type: msgType === "audio" ? "audio" : "file",
+        type: resolvedType,
         name: file.name,
         mimeType: file.mimeType,
         size: undefined,

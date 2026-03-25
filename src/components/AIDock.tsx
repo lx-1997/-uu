@@ -613,6 +613,10 @@ function chatMessageToPlainText(msg: ChatMessage): string {
         parts.push([b.title, b.detail].filter(Boolean).join('\n'));
       } else if (b.type === 'image') {
         parts.push(b.caption || b.src || '[图片]');
+      } else if (b.type === 'video') {
+        parts.push(b.caption || b.src || '[视频]');
+      } else if (b.type === 'file') {
+        parts.push(b.name || b.src || '[文件]');
       }
     }
   }

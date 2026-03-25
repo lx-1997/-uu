@@ -868,9 +868,8 @@ export default function Flasher() {
                 else if (phase === 'error' && pi === ci) state = 'error';
 
                 if (p === 'backup' && !backupBeforeFlash) state = 'skip';
-                if (!useLocalImage && p === 'downloading' && useLocalImage) state = 'skip';
-                if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath)) state = 'skip';
                 if (p === 'downloading' && useLocalImage) state = 'skip';
+                if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath)) state = 'skip';
 
                 const badgeClass =
                   state === 'run' ? 'badge-accent'
@@ -1016,23 +1015,24 @@ export default function Flasher() {
                         backupPollRef.current = setInterval(async () => {
                           try {
                             const statusRes = await fetch(
-                              `/api/devices/${devId}/flash/backup/status?jobId=${data.jobId}`,
+                              resolveApiUrl(`/api/devices/${devId}/flash/backup/status?jobId=${data.jobId}`),
                             );
                             if (!statusRes.ok) throw new Error(`HTTP ${statusRes.status}`);
                             const statusData = await statusRes.json();
-                            if (statusData.status === 'done') {
+                            const job = statusData.job;
+                            if (job?.status === 'done') {
                               if (backupPollRef.current) clearInterval(backupPollRef.current);
                               backupPollRef.current = null;
                               setBackupRunning(false);
-                              setBackupOutputPath(statusData.outputPath || '备份完成');
+                              setBackupOutputPath(job.outputPath || '备份完成');
                               setBackupStatus('备份完成');
-                            } else if (statusData.status === 'error') {
+                            } else if (job?.status === 'error') {
                               if (backupPollRef.current) clearInterval(backupPollRef.current);
                               backupPollRef.current = null;
                               setBackupRunning(false);
-                              setBackupStatus(`备份失败: ${statusData.error || '未知错误'}`);
+                              setBackupStatus(`备份失败: ${job.error || '未知错误'}`);
                             } else {
-                              setBackupStatus(`备份中... ${statusData.progress || ''}`);
+                              setBackupStatus(`备份中... (${job?.status || 'running'})`);
                             }
                           } catch {
                             if (backupPollRef.current) clearInterval(backupPollRef.current);

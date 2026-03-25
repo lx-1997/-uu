@@ -170,7 +170,7 @@ export default function Ros() {
       const installOk = await installRosbridge(currentDevice.id);
       if (!installOk) {
         setPhase('error');
-        setStatusText('rosbridge 自动安装失败，请手动安装: sudo apt install ros-${ROS_DISTRO}-rosbridge-server');
+        setStatusText('rosbridge 自动安装失败，请手动安装: sudo apt install ros-<distro>-rosbridge-server（将 <distro> 替换为你的 ROS 发行版名）');
         appendLog('自动安装失败');
         addToast('rosbridge 自动安装失败', 'error');
         return;

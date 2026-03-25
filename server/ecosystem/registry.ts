@@ -21,7 +21,7 @@ import type {
   RdkPlatform,
 } from '../../shared/ecosystem-types.js';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.RDK_DATA_DIR ?? path.resolve(process.cwd(), 'data');
 const REGISTRY_FILE = path.join(DATA_DIR, 'ecosystem-registry.json');
 
 export class EcosystemRegistry {

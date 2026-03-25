@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog } from 'electron';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -267,7 +267,7 @@ function getRendererUrl() {
     return process.env.RDK_STUDIO_RENDERER_URL;
   }
   if (isPacked) {
-    return `file://${path.join(__dirname, '../dist/index.html')}`;
+    return pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
   }
   return 'http://localhost:5173';
 }

@@ -112,14 +112,60 @@ export async function extractAttachments(
       }
 
       case 4: {
-        const name = item.file_item?.file_name || "文件";
-        textParts.push(`[文件] ${name}`);
+        const fileName = item.file_item?.file_name || "文件";
+        const fileCdn = item.file_item?.cdn_media;
+        if (fileCdn?.encrypt_query_param && fileCdn.aes_key) {
+          try {
+            const buf = await client.downloadMedia(fileCdn);
+            const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
+            const mime = ext === "pdf" ? "application/pdf"
+              : ext === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              : ext === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              : ext === "pptx" ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              : ext === "zip" ? "application/zip"
+              : "application/octet-stream";
+            attachments.push({
+              id: genId(),
+              type: "file",
+              name: `weixin-file-${Date.now()}-${fileName}`,
+              mimeType: mime,
+              size: buf.length,
+              contentBase64: buf.toString("base64"),
+              source: "weixin",
+            });
+          } catch (err) {
+            console.warn("[WeixinMedia] file download failed:", (err as Error).message);
+            textParts.push(`[文件-下载失败] ${fileName}`);
+          }
+        } else {
+          textParts.push(`[文件] ${fileName}`);
+        }
         break;
       }
 
-      case 5:
-        textParts.push("[视频]");
+      case 5: {
+        const videoCdn = item.video_item?.cdn_media;
+        if (videoCdn?.encrypt_query_param && videoCdn.aes_key) {
+          try {
+            const buf = await client.downloadMedia(videoCdn);
+            attachments.push({
+              id: genId(),
+              type: "video",
+              name: `weixin-video-${Date.now()}.mp4`,
+              mimeType: "video/mp4",
+              size: buf.length,
+              contentBase64: buf.toString("base64"),
+              source: "weixin",
+            });
+          } catch (err) {
+            console.warn("[WeixinMedia] video download failed:", (err as Error).message);
+            textParts.push("[视频-下载失败]");
+          }
+        } else {
+          textParts.push("[视频]");
+        }
         break;
+      }
     }
   }
 
