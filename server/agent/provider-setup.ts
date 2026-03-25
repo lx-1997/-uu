@@ -357,8 +357,7 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
   } as any;
 }
 
-let _warmupKey = '';
-let _warmupPromise: Promise<void> | null = null;
+const _warmupCache = new Map<string, Promise<void>>();
 
 /**
  * 启动时尝试从 Provider API 获取模型能力并更新注册表。
@@ -366,9 +365,9 @@ let _warmupPromise: Promise<void> | null = null;
  */
 export async function warmupModelCapabilities(config: ProviderConfig): Promise<void> {
   const key = `${config.provider}:${config.model}`;
-  if (_warmupKey === key && _warmupPromise) return _warmupPromise;
-  _warmupKey = key;
-  _warmupPromise = (async () => {
+  const existing = _warmupCache.get(key);
+  if (existing) return existing;
+  const promise = (async () => {
     try {
       const baseUrl = resolveProviderBaseUrl(config);
       const caps = await fetchModelCapabilitiesFromProvider({
@@ -383,7 +382,8 @@ export async function warmupModelCapabilities(config: ProviderConfig): Promise<v
       // 静默失败
     }
   })();
-  return _warmupPromise;
+  _warmupCache.set(key, promise);
+  return promise;
 }
 
 export function buildStreamFn(config: ProviderConfig): StreamFunction {

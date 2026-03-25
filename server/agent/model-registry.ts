@@ -40,10 +40,12 @@ function loadUserModelOverrides(): void {
     if (!overrides || typeof overrides !== 'object') return;
     for (const [model, caps] of Object.entries(overrides)) {
       const c = caps as Partial<ModelCapabilities>;
-      if (typeof c.contextWindow === 'number' || typeof c.maxOutputTokens === 'number') {
+      const ctxValid = Number.isFinite(c.contextWindow) && (c.contextWindow as number) > 0;
+      const outValid = Number.isFinite(c.maxOutputTokens) && (c.maxOutputTokens as number) > 0;
+      if (ctxValid || outValid) {
         USER_OVERRIDES[model] = {
-          contextWindow: c.contextWindow ?? FALLBACK_CAPABILITIES.contextWindow,
-          maxOutputTokens: c.maxOutputTokens ?? FALLBACK_CAPABILITIES.maxOutputTokens,
+          contextWindow: ctxValid ? (c.contextWindow as number) : FALLBACK_CAPABILITIES.contextWindow,
+          maxOutputTokens: outValid ? (c.maxOutputTokens as number) : FALLBACK_CAPABILITIES.maxOutputTokens,
         };
       }
     }
@@ -233,9 +235,10 @@ export function lookupModelCapabilities(
   const exact = MODEL_CAPABILITIES[model];
   if (exact) return exact;
 
-  for (const [key, caps] of Object.entries(MODEL_CAPABILITIES)) {
-    if (model.startsWith(key)) return caps;
-  }
+  const prefixEntries = Object.entries(MODEL_CAPABILITIES)
+    .filter(([key]) => model.startsWith(key))
+    .sort((a, b) => b[0].length - a[0].length);
+  if (prefixEntries.length > 0) return prefixEntries[0][1];
 
   const inferred = inferContextWindowFromName(model);
   if (inferred) {
@@ -307,10 +310,12 @@ export async function fetchModelCapabilitiesFromProvider(params: {
   apiKey: string;
   model: string;
 }): Promise<ModelCapabilities | null> {
+  if (!params.baseUrl || typeof params.baseUrl !== 'string') return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const url = `${params.baseUrl.replace(/\/+$/, '')}/models`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
 
     const res = await fetch(url, {
       headers: {
@@ -319,7 +324,6 @@ export async function fetchModelCapabilitiesFromProvider(params: {
       },
       signal: controller.signal,
     });
-    clearTimeout(timeout);
 
     if (!res.ok) return null;
 
@@ -344,5 +348,7 @@ export async function fetchModelCapabilitiesFromProvider(params: {
     return null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }

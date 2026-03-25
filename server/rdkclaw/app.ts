@@ -252,10 +252,10 @@ function mapMiniEvent(
     case "retry":
       return {
         type: "retry",
-        data: { attempt: event.attempt, delay: event.delay, error: event.error, ...base },
+        data: { attempt: event.attempt, delay: event.delay, error: sanitizeSecrets(String(event.error ?? '')), ...base },
       };
     case "agent_error":
-      return { type: "error", data: { error: event.error, ...base } };
+      return { type: "error", data: { error: sanitizeSecrets(String(event.error ?? '')), ...base } };
     case "compaction":
       return {
         type: "meta",
@@ -1009,6 +1009,9 @@ export class RDKClawApp {
           runMetrics.localToolCalls += 1;
         }
         runMetrics.toolCallNames.push(event.toolName);
+        if (runMetrics.toolCallNames.length > 50) {
+          runMetrics.toolCallNames = runMetrics.toolCallNames.slice(-30);
+        }
       }
       const mapped = mapMiniEvent(event, base);
       if (mapped) pushEvent(mapped);

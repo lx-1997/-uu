@@ -139,13 +139,18 @@ function isSensitiveReadPath(targetPath: string, workspaceDir: string): boolean 
   return SENSITIVE_READ_PATTERNS.some((pat) => normalized.includes(pat));
 }
 
+function normalizeDevicePath(devicePath: string): string {
+  const posixNorm = path.posix.normalize(normalizePathLike(devicePath));
+  return posixNorm.toLowerCase();
+}
+
 function isBlockedDevicePath(targetPath: string): boolean {
-  const normalized = normalizePathLike(targetPath).toLowerCase();
+  const normalized = normalizeDevicePath(targetPath);
   return DEVICE_BLOCKED_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
 }
 
 function isAllowedDeviceWritePath(targetPath: string): boolean {
-  const normalized = normalizePathLike(targetPath).toLowerCase();
+  const normalized = normalizeDevicePath(targetPath);
   return DEVICE_ALLOWED_WRITE_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
 }
 

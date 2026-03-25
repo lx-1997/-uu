@@ -155,6 +155,13 @@ export default function Flasher() {
   const [backupRunning, setBackupRunning] = useState(false);
   const [backupStatus, setBackupStatus] = useState('');
   const [backupOutputPath, setBackupOutputPath] = useState('');
+  const backupPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (backupPollRef.current) clearInterval(backupPollRef.current);
+    };
+  }, []);
 
   /* ── wifi config state ── */
   const [showWifiConfig, setShowWifiConfig] = useState(false);
@@ -967,13 +974,14 @@ export default function Flasher() {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                     });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     setBackupAvailable(!!data.available);
                     if (!data.available) {
                       setBackupStatus('板端未安装 rdk-backup 工具。可在终端中执行 apt install rdk-backup 安装。');
                     }
-                  } catch {
-                    setBackupStatus('检查备份能力失败，请确认设备已连接');
+                  } catch (err) {
+                    setBackupStatus(`检查备份能力失败: ${err instanceof Error ? err.message : '请确认设备已连接'}`);
                     setBackupAvailable(false);
                   } finally {
                     setBackupChecking(false);
@@ -990,6 +998,7 @@ export default function Flasher() {
                   type="button"
                   className="btn btn-primary"
                   onClick={async () => {
+                    if (backupPollRef.current) clearInterval(backupPollRef.current);
                     setBackupRunning(true);
                     setBackupStatus('正在启动备份...');
                     try {
@@ -998,29 +1007,35 @@ export default function Flasher() {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({}),
                       });
+                      if (!res.ok) throw new Error(`HTTP ${res.status}`);
                       const data = await res.json();
                       if (data.ok && data.jobId) {
                         setBackupStatus(`备份任务已启动 (${data.jobId.slice(0, 8)}...)，请等待完成`);
-                        const pollInterval = setInterval(async () => {
+                        const devId = currentDevice.id;
+                        backupPollRef.current = setInterval(async () => {
                           try {
                             const statusRes = await fetch(
-                              `/api/devices/${currentDevice.id}/flash/backup/status?jobId=${data.jobId}`,
+                              `/api/devices/${devId}/flash/backup/status?jobId=${data.jobId}`,
                             );
+                            if (!statusRes.ok) throw new Error(`HTTP ${statusRes.status}`);
                             const statusData = await statusRes.json();
                             if (statusData.status === 'done') {
-                              clearInterval(pollInterval);
+                              if (backupPollRef.current) clearInterval(backupPollRef.current);
+                              backupPollRef.current = null;
                               setBackupRunning(false);
                               setBackupOutputPath(statusData.outputPath || '备份完成');
                               setBackupStatus('备份完成');
                             } else if (statusData.status === 'error') {
-                              clearInterval(pollInterval);
+                              if (backupPollRef.current) clearInterval(backupPollRef.current);
+                              backupPollRef.current = null;
                               setBackupRunning(false);
                               setBackupStatus(`备份失败: ${statusData.error || '未知错误'}`);
                             } else {
                               setBackupStatus(`备份中... ${statusData.progress || ''}`);
                             }
                           } catch {
-                            clearInterval(pollInterval);
+                            if (backupPollRef.current) clearInterval(backupPollRef.current);
+                            backupPollRef.current = null;
                             setBackupRunning(false);
                             setBackupStatus('备份状态查询失败');
                           }
@@ -1029,9 +1044,9 @@ export default function Flasher() {
                         setBackupRunning(false);
                         setBackupStatus(`启动失败: ${data.error || '未知错误'}`);
                       }
-                    } catch {
+                    } catch (err) {
                       setBackupRunning(false);
-                      setBackupStatus('启动备份请求失败');
+                      setBackupStatus(`启动备份请求失败: ${err instanceof Error ? err.message : '未知错误'}`);
                     }
                   }}
                 >

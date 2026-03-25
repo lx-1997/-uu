@@ -1245,7 +1245,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               case 'run_progress': {
                 const msg = String(event.data.message || '仍在处理中...');
-                const tick = Number(event.data.tick || 0);
                 const existingIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && (b as any)._runProgress,
                 );
@@ -1267,7 +1266,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   (b) => b.type === 'status' && (b as any)._runProgress,
                 );
                 if (progressIdx >= 0) {
-                  aiBlocks.splice(progressIdx, 1);
+                  aiBlocks[progressIdx] = { type: 'status' as const, items: [] };
                 }
                 const elapsed = String(event.data.elapsed_display || '');
                 const calls = Number(event.data.tool_calls || 0);
