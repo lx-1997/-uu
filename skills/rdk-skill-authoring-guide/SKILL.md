@@ -15,6 +15,31 @@ category: Meta
 
 # Skill Manager — 技能创建与管理
 
+## 零、开发者如何扩展 RDKClaw 技能
+
+### 技能存储位置
+RDKClaw 从以下目录加载技能（优先级从高到低）：
+1. **用户工作区**：`~/.rdkstudio/rdkclaw-workspaces/<user-id>/skills/` — 用户自定义技能，最高优先级
+2. **应用内置**：安装目录下 `skills/` — 随应用发布的预置技能
+3. **仓库根**：`{workspaceDir}/skills/` — 开发模式下的仓库技能
+
+### 桌面版用户扩展技能
+1. 打开用户目录 `~/.rdkstudio/rdkclaw-workspaces/<your-id>/skills/`
+2. 创建子目录如 `my-custom-skill/`
+3. 在子目录内创建 `SKILL.md`，按下方模板填写
+4. 重启会话即可生效（技能缓存 3 秒自动刷新）
+
+### 通过对话扩展技能
+直接告诉 RDKClaw "帮我创建一个技能：[描述]"，RDKClaw 会自动：
+- 在用户工作区的 `skills/` 目录下创建新技能
+- 生成符合规范的 SKILL.md
+- 立即可用于后续对话
+
+### 技能热加载
+- 技能注册表每 3 秒检查一次变更
+- 新增/修改/删除 SKILL.md 后无需重启应用
+- 用户工作区的技能会覆盖同名内置技能
+
 ## 一、创建新技能
 
 ### 触发条件
