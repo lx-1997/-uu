@@ -64,6 +64,65 @@ doc_reference: {相关文档链接}
 | 导航 | Nav2 | Nav2 | Nav2 |
 | 关节控制 | - | - | MCU (R52+) |
 
+## 常见问题速查
+
+### 网络/WiFi
+```bash
+# 查看网络接口
+ip addr show
+# 连接 WiFi
+nmcli dev wifi list
+nmcli dev wifi connect "SSID" password "密码"
+# 查看当前连接
+nmcli connection show --active
+# 设置静态 IP
+nmcli con mod "连接名" ipv4.addresses 192.168.1.100/24 ipv4.method manual
+```
+
+### 摄像头
+```bash
+# USB 摄像头检测
+ls /dev/video*
+v4l2-ctl --list-devices
+# MIPI 摄像头（禁止热插拔！）
+ls /dev/video* | grep -v "video[0-3]$"
+# 查看摄像头参数
+v4l2-ctl -d /dev/video0 --all
+# 快速拍照测试
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=1920,height=1080,pixelformat=MJPG --stream-mmap --stream-count=1 --stream-to=test.jpg
+```
+
+### 系统信息
+```bash
+# 系统版本
+rdkos_info           # 新系统
+cat /etc/version     # 通用
+# 已安装 hobot 包
+apt list --installed | grep hobot
+# 磁盘空间
+df -h
+# 内核版本
+uname -a
+```
+
+### 供电/启动故障
+- 必须 5V/5A USB-C 适配器，禁止电脑 USB 供电
+- 绿色指示灯亮 = 上电正常；不亮 = 供电问题
+- 反复重启 = 大概率供电不足或 SD 卡损坏
+- 超过 2 分钟无显示 = 需串口调试
+
+### 进程管理
+```bash
+# 查找占用端口的进程
+ss -tlnp | grep :8080
+# 按 CPU 排序进程
+top -bn1 | head -15
+# 停止指定名称的进程
+pkill -f "进程关键字"
+# 强制停止 PID
+kill -9 <PID>
+```
+
 ## 文档入口
 - X3/X5: https://developer.d-robotics.cc/rdk_doc/
 - S100: https://developer.d-robotics.cc/rdk_doc/rdk_s/

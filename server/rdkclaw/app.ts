@@ -119,6 +119,7 @@ function buildCollaborationPrompt(
       boardSnapshot.skillDetails.length > 0
         ? `板端技能(${boardSnapshot.skillDetails.length}个): ${boardSnapshot.skillDetails.map((s) => s.name).join(', ')}`
         : "板端技能快照为空，需先生成技能再委派。",
+      "常用: WiFi→nmcli | 摄像头→ls /dev/video* | 版本→rdkos_info | 进程→pkill -f | 温度→thermal_zone0",
     ].join("\n");
   }
   return [
@@ -154,6 +155,15 @@ function buildCollaborationPrompt(
     "",
     "### 你的本地能力速查",
     "图片→attachment_describe_image | 联网→web_search/web_fetch | 设备命令→device_exec | 文件→device_file_* | 诊断→device_diagnose",
+    "",
+    "### 用户常见问题快答（无需搜索，直接用 device_exec 执行）",
+    "- WiFi: `nmcli dev wifi list` → `nmcli dev wifi connect \"SSID\" password \"密码\"`",
+    "- 摄像头: `ls /dev/video*` + `v4l2-ctl --list-devices`",
+    "- 系统版本: `rdkos_info` 或 `cat /etc/version`",
+    "- 进程停止: `pkill -f \"关键字\"` 或 `kill -9 <PID>`",
+    "- 端口占用: `ss -tlnp | grep :端口号`",
+    "- BPU状态: `hrut_smi` 或 `bputop`",
+    "- 温度: `cat /sys/class/thermal/thermal_zone0/temp`（除以1000=摄氏度）",
   ].join("\n");
 }
 
