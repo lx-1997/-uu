@@ -1,7 +1,7 @@
-import { useAppState } from '../hooks/useAppState';
+import { useUIStore } from '../hooks/useUIStore';
 
 export default function ConfirmDialog() {
-  const { confirmDialog, setConfirmDialog } = useAppState();
+  const { confirmDialog, setConfirmDialog } = useUIStore();
 
   if (!confirmDialog?.show) return null;
 

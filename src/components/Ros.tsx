@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useAppState } from '../hooks/useAppState';
+import { useDeviceStore } from '../hooks/useDeviceStore';
+import { useToastStore } from '../hooks/useToastStore';
 import { executeDeviceCommand } from '../api';
 
 /* ── ROS 可视化 — 内嵌 Webviz + 自动启动 rosbridge ── */
@@ -9,7 +10,8 @@ const ROSBRIDGE_PORT = 9090;
 type Phase = 'idle' | 'checking' | 'starting' | 'connecting' | 'connected' | 'error';
 
 export default function Ros() {
-  const { currentDevice, addToast } = useAppState();
+  const { currentDevice } = useDeviceStore();
+  const { addToast } = useToastStore();
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [statusText, setStatusText] = useState('');

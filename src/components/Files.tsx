@@ -6,11 +6,13 @@ import { Loader2, RefreshCw, Upload, ArrowLeft } from 'lucide-react';
 loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
 
 import { downloadDeviceFile, listDeviceFiles, readDeviceFile, writeDeviceFile, uploadDeviceFile, executeDeviceCommand } from '../api';
-import { useAppState } from '../hooks/useAppState';
+import { useDeviceStore } from '../hooks/useDeviceStore';
+import { useToastStore } from '../hooks/useToastStore';
 import DeviceGuard from './DeviceGuard';
 
 export default function Files() {
-  const { currentDevice, addToast } = useAppState();
+  const { currentDevice } = useDeviceStore();
+  const { addToast } = useToastStore();
   if (!currentDevice) return <DeviceGuard feature="文件管理" />;
   const [currentPath, setCurrentPath] = useState('/root');
   const [entries, setEntries] = useState<Array<{ name: string; isDir: boolean; size?: string; date?: string }>>([]);

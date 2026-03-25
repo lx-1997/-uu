@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { fetchDeviceDiagnostics } from '../api';
-import { useAppState } from '../hooks/useAppState';
+import { useDeviceStore } from '../hooks/useDeviceStore';
+import { useToastStore } from '../hooks/useToastStore';
 import { parseMetrics } from '../utils/diagnostics';
 
 /* ── 环形进度条（白底浅色主题） ── */
@@ -27,7 +28,8 @@ function RingGauge({ value, max = 100, color, label, display }: { value: number;
 }
 
 export default function Hardware() {
-  const { currentDevice, addToast } = useAppState();
+  const { currentDevice } = useDeviceStore();
+  const { addToast } = useToastStore();
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);

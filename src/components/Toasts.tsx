@@ -1,7 +1,7 @@
-import { useAppState } from '../hooks/useAppState';
+import { useToastStore } from '../hooks/useToastStore';
 
 export default function Toasts() {
-  const { toasts } = useAppState();
+  const { toasts } = useToastStore();
 
   if (toasts.length === 0) return null;
 

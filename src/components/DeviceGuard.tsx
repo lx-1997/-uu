@@ -1,7 +1,7 @@
-import { useAppState } from '../hooks/useAppState';
+import { useDeviceStore } from '../hooks/useDeviceStore';
 
 export default function DeviceGuard({ children, feature }: { children?: React.ReactNode; feature?: string }) {
-  const { currentDevice, setShowAddDevice } = useAppState();
+  const { currentDevice, setShowAddDevice } = useDeviceStore();
 
   if (currentDevice) return <>{children}</>;
 

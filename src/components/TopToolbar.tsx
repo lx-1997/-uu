@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useAppState } from '../hooks/useAppState';
+import { useDeviceStore } from '../hooks/useDeviceStore';
+import { useToastStore } from '../hooks/useToastStore';
 import { useAuth } from '../hooks/useAuth';
 import { executeDeviceCommand } from '../api';
 import WifiConfigModal from './wifi/WifiConfigModal';
@@ -157,7 +158,8 @@ async function copyToClipboard(text: string) {
 }
 
 export default function TopToolbar() {
-  const { currentDevice, addToast } = useAppState();
+  const { currentDevice } = useDeviceStore();
+  const { addToast } = useToastStore();
   const { ssoEnabled, user, logout } = useAuth();
   const [copied, setCopied] = useState(false);
   const [showWifiModal, setShowWifiModal] = useState(false);

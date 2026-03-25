@@ -1,12 +1,16 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { executeDeviceCommand, fetchVncStatus } from '../api';
-import { useAppState } from '../hooks/useAppState';
+import { useDeviceStore } from '../hooks/useDeviceStore';
+import { useToastStore } from '../hooks/useToastStore';
+import { useUIStore } from '../hooks/useUIStore';
 import { isDesktop } from '../utils/env';
 import DeviceGuard from './DeviceGuard';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
-  const { currentDevice, vncConnected, startVncSession, addToast } = useAppState();
+  const { currentDevice } = useDeviceStore();
+  const { vncConnected, startVncSession } = useUIStore();
+  const { addToast } = useToastStore();
 
   const [phase, setPhase] = useState<'idle' | 'checking' | 'connecting' | 'connected' | 'error'>('idle');
   const [statusText, setStatusText] = useState('');
@@ -27,7 +31,7 @@ export default function Vnc() {
 
   // 桌面端：tab 切换时同步 WebContentsView 可见性
   // 由于 Vnc 是持久化组件（不卸载），需要监听 activeTab 变化
-  const { activeTab } = useAppState();
+  const { activeTab } = useUIStore();
   useEffect(() => {
     if (!isDesktop() || !activeUrlRef.current) return;
     const rdk = (window as any).rdkDesktop;

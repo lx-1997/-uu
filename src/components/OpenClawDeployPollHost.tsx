@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
-import { useAppState } from '../hooks/useAppState';
+import { useDeviceStore } from '../hooks/useDeviceStore';
+import { useToastStore } from '../hooks/useToastStore';
 import { syncOpenClawDeployPollFromStorage } from '../utils/openclawDeployPoll';
 
 /**
  * 全局保持 OpenClaw 部署任务轮询：离开 OpenClaw 页面后仍会继续直到完成，并弹出结果提示。
  */
 export default function OpenClawDeployPollHost() {
-  const { currentDevice, addToast } = useAppState();
+  const { currentDevice } = useDeviceStore();
+  const { addToast } = useToastStore();
 
   useEffect(() => {
     syncOpenClawDeployPollFromStorage(currentDevice?.id ?? '');
