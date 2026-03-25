@@ -143,9 +143,10 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   // ── Theme ──
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('rdk-theme') as ThemeMode) || 'aurora';
+      const saved = localStorage.getItem('rdk-theme') as ThemeMode | null;
+      if (saved && ['aurora', 'cyber', 'cozy'].includes(saved)) return saved;
     }
-    return 'aurora';
+    return 'cyber';
   });
   const setTheme = (t: ThemeMode) => {
     setThemeState(t);

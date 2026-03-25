@@ -6,17 +6,17 @@ import type { AgentAttachmentPayload } from '../api';
 
 import { ToastProvider, useToastStore } from './useToastStore';
 import { DeviceProvider, useDeviceStore } from './useDeviceStore';
-import { UIProvider, useUIStore } from './useUIStore';
+import { UIProvider, useUIStore, type ThemeMode } from './useUIStore';
 import { TerminalProvider, useTerminalStore } from './useTerminalStore';
 import { AIChatProvider, useAIChatStore } from './useAIChatStore';
 
 // ---- State shape (unchanged — backward compatible) ----
-export type { ThemeMode } from './useUIStore';
+export type { ThemeMode };
 
 export interface AppState {
   // Theme
-  theme: 'aurora' | 'cyber';
-  setTheme: (t: 'aurora' | 'cyber') => void;
+  theme: ThemeMode;
+  setTheme: (t: ThemeMode) => void;
   toggleTheme: () => void;
 
   // Device

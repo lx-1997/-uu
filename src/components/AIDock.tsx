@@ -709,7 +709,7 @@ export default function AIDock() {
     setPendingAttachments(prev => [...prev, att]);
   }, [addToast]);
 
-  const sessionIdRef = useRef(`ui-${Date.now()}`);
+  const uploadSessionRef = useRef(`upload-${Date.now()}`);
 
   const uploadLargeAttachment = useCallback(async (file: File, type: string): Promise<{ id: string; storedPath: string }> => {
     const buffer = await file.arrayBuffer();
@@ -719,7 +719,7 @@ export default function AIDock() {
         'Content-Type': file.type || 'application/octet-stream',
         'X-Attachment-Name': encodeURIComponent(file.name),
         'X-Attachment-Type': type,
-        'X-Session-Id': sessionIdRef.current,
+        'X-Session-Id': uploadSessionRef.current,
       },
       body: buffer,
     });
