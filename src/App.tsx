@@ -132,12 +132,13 @@ function useThemeSync() {
 }
 
 function AppShell() {
-  const { activeTab, currentDevice, theme, railExpanded } = useAppState();
+  const { activeTab, currentDevice, theme, railExpanded, obStep } = useAppState();
   useDesktopTabSync(activeTab);
   useDesktopViewBounds(activeTab);
   useThemeSync();
 
   const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
+  const onboardingActive = obStep !== 'done';
 
   return (
     <div className={`app-shell ${railExpanded ? 'rail-expanded' : ''}`}>
@@ -165,7 +166,7 @@ function AppShell() {
         <ErrorBoundary>
           <MainContent />
         </ErrorBoundary>
-        <AIDock />
+        {!onboardingActive && <AIDock />}
       </main>
 
       <Toasts />
