@@ -138,11 +138,26 @@ export default function OnboardingWizard() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  const [ocHealthCheckedForSkip, setOcHealthCheckedForSkip] = useState(false);
+
   useEffect(() => {
     if (obStep === 'connect' && currentDevice) {
       setObStep('model');
     }
   }, [obStep, currentDevice]);
+
+  useEffect(() => {
+    if (obStep !== 'model' || !currentDevice || ocHealthCheckedForSkip) return;
+    setOcHealthCheckedForSkip(true);
+    fetchDeviceOpenClawHealth(currentDevice.id)
+      .then(r => {
+        if (r.status?.aiReady) {
+          addToast('OpenClaw 已就绪，已跳过部署步骤', 'success');
+          setObStep('rdkclaw');
+        }
+      })
+      .catch(() => {});
+  }, [obStep, currentDevice?.id]);
 
   useEffect(() => {
     if (obStep !== 'model' && obStep !== 'openclaw') return;
@@ -598,7 +613,9 @@ export default function OnboardingWizard() {
       {obStep === 'model' && (
         <div className="ob-content">
           <p className="ob-desc">
-            先完成模型配置（必填），然后再执行 OpenClaw 一键部署。该配置会作为板端模型网关的默认参数。
+            {modelConfigured
+              ? '模型已配置完成。如需修改可在下方更新，否则直接点击「下一步」继续。'
+              : '先完成模型配置（必填），然后再执行 OpenClaw 一键部署。该配置会作为板端模型网关的默认参数。'}
           </p>
           <div className="ob-oc-status">
             <div className="config-row">
@@ -669,13 +686,29 @@ export default function OnboardingWizard() {
           </div>
           <div className="ob-actions">
             <button className="btn btn-ghost" onClick={() => setObStep('connect')}>上一步</button>
-            <button className="btn btn-ghost" onClick={() => void handleSaveModelConfig()} disabled={modelSaving}>
-              {modelSaving ? '保存中...' : '仅保存'}
-            </button>
-            <button className="btn btn-primary" onClick={() => void handleGoDeploy()} disabled={modelSaving}>
-              保存并继续部署
-            </button>
+            {modelConfigured ? (
+              <>
+                <button className="btn btn-ghost" onClick={() => void handleSaveModelConfig()} disabled={modelSaving}>
+                  {modelSaving ? '保存中...' : '更新配置'}
+                </button>
+                <button className="btn btn-primary" onClick={() => setObStep('openclaw')}>
+                  下一步
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-ghost" onClick={() => void handleSaveModelConfig()} disabled={modelSaving}>
+                  {modelSaving ? '保存中...' : '仅保存'}
+                </button>
+                <button className="btn btn-primary" onClick={() => void handleGoDeploy()} disabled={modelSaving}>
+                  保存并继续部署
+                </button>
+              </>
+            )}
           </div>
+          <button className="ob-skip" onClick={() => setObStep('rdkclaw')}>
+            跳过引导，直接使用
+          </button>
         </div>
       )}
 
@@ -841,11 +874,19 @@ export default function OnboardingWizard() {
                 下一步
               </button>
             ) : (
-              <button className="btn btn-ghost" onClick={() => setShowSkipWarning(true)}>
-                跳过此步骤
-              </button>
+              <>
+                <button className="btn btn-ghost" onClick={() => setShowSkipWarning(true)}>
+                  跳过此步骤
+                </button>
+                <button className="btn btn-primary" onClick={handleInstallOC} disabled={ocInstalling || deviceOnline === false || !modelConfigured}>
+                  {ocInstalling ? '部署中...' : '一键部署'}
+                </button>
+              </>
             )}
           </div>
+          <button className="ob-skip" onClick={() => { setObStep('done'); addToast('引导已跳过，你可以随时在设置中重新进入', 'info'); }}>
+            跳过引导，直接使用
+          </button>
         </div>
       )}
 
