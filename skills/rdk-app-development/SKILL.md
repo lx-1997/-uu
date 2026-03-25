@@ -6,7 +6,7 @@ trigger: 做应用,开发应用,生成应用,创建应用,写应用,一句话开
 risk: medium
 permissions: workspace_read,device_exec,network
 delegate_preference: collaborative
-requires_board: true
+requires_board: false
 approval_level: confirm
 cooldown_seconds: 0
 scheduler_template: app_development

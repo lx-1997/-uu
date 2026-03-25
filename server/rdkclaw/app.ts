@@ -160,15 +160,17 @@ function selectDelegateDecision(
       confidence: 1,
     };
   }
-  const requiresBoardSkill = matchedSkills.find((s) => s.runtimePolicy?.requiresBoard);
-  if (requiresBoardSkill) {
+  const collaborativeSkill = matchedSkills.find(
+    (s) => s.runtimePolicy?.delegatePreference === "collaborative" || s.runtimePolicy?.delegatePreference === "hybrid",
+  );
+  if (collaborativeSkill) {
     return {
-      path: "board_primary",
+      path: "collaborative",
       canLocalComplete: false,
       needsBoardCollaboration: true,
       source: "skill_policy",
-      reason: `Skill(${requiresBoardSkill.name}) 要求板端执行`,
-      confidence: 0.95,
+      reason: `Skill(${collaborativeSkill.name}) 偏好协同执行`,
+      confidence: 0.88,
     };
   }
   const boardPreferredSkill = matchedSkills.find((s) => s.runtimePolicy?.delegatePreference === "board");
@@ -182,17 +184,15 @@ function selectDelegateDecision(
       confidence: 0.9,
     };
   }
-  const collaborativeSkill = matchedSkills.find(
-    (s) => s.runtimePolicy?.delegatePreference === "collaborative" || s.runtimePolicy?.delegatePreference === "hybrid",
-  );
-  if (collaborativeSkill) {
+  const requiresBoardSkill = matchedSkills.find((s) => s.runtimePolicy?.requiresBoard);
+  if (requiresBoardSkill) {
     return {
-      path: "collaborative",
+      path: "board_primary",
       canLocalComplete: false,
       needsBoardCollaboration: true,
       source: "skill_policy",
-      reason: `Skill(${collaborativeSkill.name}) 偏好协同执行`,
-      confidence: 0.88,
+      reason: `Skill(${requiresBoardSkill.name}) 要求板端执行`,
+      confidence: 0.95,
     };
   }
   if (/板端|openclaw|插件|系统服务|刷写|烧录|gateway|配网|升级固件|守护进程/.test(text)) {
