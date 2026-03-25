@@ -649,7 +649,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, backgroundCurrentRun,
+    handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
@@ -1323,7 +1323,8 @@ export default function AIDock() {
                   <div className="dock-typing">
                     <div className="typing-dots"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
                     <button className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>转后台</button>
-                    <button className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>结束任务</button>
+                    <button className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>结束当前</button>
+                    <button className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>全部停止</button>
                   </div>
                 </div>
               </div>

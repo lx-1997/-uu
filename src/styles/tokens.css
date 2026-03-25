@@ -198,27 +198,27 @@
 }
 
 /* ══════════════════════════════════════════
-   Cozy Logic — Creamy Latte + Warm Amber
+   Cozy Logic — Oatmeal & Soft Indigo
    "Marshmallow-minimalism" aesthetic
    ══════════════════════════════════════════ */
 [data-theme="cozy"] {
-  --bg-primary: #FCF9F2;
-  --bg-secondary: #F5EFE4;
-  --bg-surface: rgba(255, 252, 245, 0.88);
-  --bg-elevated: #FFFBF5;
-  --bg-inset: rgba(74, 68, 63, 0.04);
-  --bg-overlay: rgba(74, 68, 63, 0.32);
+  --bg-primary: #F9F9F8;
+  --bg-secondary: #F0F0EE;
+  --bg-surface: rgba(249, 249, 248, 0.88);
+  --bg-elevated: #FFFFFF;
+  --bg-inset: rgba(44, 44, 42, 0.04);
+  --bg-overlay: rgba(44, 44, 42, 0.32);
 
-  --text-primary: #4A443F;
-  --text-secondary: #7A7067;
-  --text-muted: #A89F94;
-  --text-on-accent: #FFFBF5;
+  --text-primary: #2C2C2A;
+  --text-secondary: #6B6B66;
+  --text-muted: #A3A39E;
+  --text-on-accent: #FFFFFF;
 
-  --accent: #C8956A;
-  --accent-hover: #B8855A;
-  --accent-subtle: rgba(200, 149, 106, 0.12);
-  --accent-glow: rgba(200, 149, 106, 0.18);
-  --accent-border: rgba(200, 149, 106, 0.25);
+  --accent: #6C7A9C;
+  --accent-hover: #5A6685;
+  --accent-subtle: rgba(108, 122, 156, 0.12);
+  --accent-glow: rgba(108, 122, 156, 0.18);
+  --accent-border: rgba(108, 122, 156, 0.25);
 
   --ok: #8BA87A;
   --ok-subtle: rgba(139, 168, 122, 0.12);
@@ -270,16 +270,16 @@
   --chip-bg-active: var(--accent-subtle);
   --chip-text-active: var(--accent);
 
-  --selection-bg: rgba(200, 149, 106, 0.18);
+  --selection-bg: rgba(108, 122, 156, 0.18);
   --selection-text: inherit;
 
   /* ── Cozy-exclusive tokens ── */
-  --cozy-sage: #B5C1A5;
-  --cozy-sage-subtle: rgba(181, 193, 165, 0.15);
-  --cozy-apricot: #FFDAB9;
-  --cozy-apricot-subtle: rgba(255, 218, 185, 0.30);
-  --cozy-amber-gummy: rgba(233, 196, 106, 0.35);
-  --cozy-warm-glow: rgba(200, 149, 106, 0.08);
+  --cozy-sage: #D5D7DB;
+  --cozy-sage-subtle: rgba(213, 215, 219, 0.25);
+  --cozy-apricot: #E8E9EC;
+  --cozy-apricot-subtle: rgba(232, 233, 236, 0.40);
+  --cozy-indigo-gummy: rgba(108, 122, 156, 0.25);
+  --cozy-warm-glow: rgba(108, 122, 156, 0.06);
 
   color-scheme: light;
 }

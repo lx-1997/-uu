@@ -55,6 +55,18 @@
   background: #DC2626;
 }
 
+.btn-danger-ghost {
+  background: transparent;
+  color: var(--danger, #EF4444);
+  border: 1px solid var(--danger, #EF4444);
+}
+
+.btn-danger-ghost:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+  color: #DC2626;
+  border-color: #DC2626;
+}
+
 .btn-sm {
   padding: 5px 10px;
   font-size: 0.75rem;

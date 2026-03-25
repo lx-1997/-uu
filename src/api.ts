@@ -624,6 +624,19 @@ export function stopRDKClawTask(taskId: string) {
   });
 }
 
+export function cancelAllRDKClawRuns() {
+  return request<{ ok: boolean; cancelled: number }>('/api/rdkclaw/runs/cancel-all', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function getActiveRDKClawRuns() {
+  return request<{ ok: boolean; runs: string[] }>('/api/rdkclaw/runs/active', {
+    method: 'GET',
+  });
+}
+
 export function bindRDKClawFeishuCode(code: string, sessionId?: string) {
   return request<{ ok: boolean; openId?: string; message?: string }>('/api/rdkclaw/feishu/auth/bind', {
     method: 'POST',

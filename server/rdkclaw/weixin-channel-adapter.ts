@@ -40,6 +40,15 @@ export class WeixinChannelAdapter {
     text: string;
     events: RDKClawEvent[];
   }> {
+    const trimmed = payload.text.trim();
+    if (/^(?:停止|stop|全部停止|停止所有任务|stop\s*all)$/i.test(trimmed)) {
+      const count = this.app.cancelAllRuns();
+      return {
+        text: `已停止所有运行中的任务（${count} 个）`,
+        events: [],
+      };
+    }
+
     const sessionId = this.getSessionKey(payload.userId);
     const events: RDKClawEvent[] = [];
     let text = "";

@@ -4,6 +4,7 @@ import { CMD_SUGGESTIONS } from '../constants';
 import {
   bindRDKClawFeishuCode,
   cancelRDKClawRun,
+  cancelAllRDKClawRuns,
   decideRDKClawApproval,
   sendRecommendationChoice,
   sendSoulUpdateDecision,
@@ -63,6 +64,7 @@ export interface AIChatStoreState {
   handleRecommendationChoice: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
   handleSoulUpdateDecision: (proposalId: string, accepted: boolean) => void;
   stopCurrentRun: () => void;
+  stopAllRuns: () => void;
   backgroundCurrentRun: () => void;
   backgroundRuns: Array<{
     runId: string;
@@ -691,26 +693,38 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        const stopAllMatch = requestAttachments.length === 0
+          && /^(?:停止所有任务|全部停止|stop\s*all)$/i.test(userMsg);
+        if (stopAllMatch) {
+          await stopAllRuns();
+          setAiTyping(false);
+          return;
+        }
+
         const stopTaskMatch = requestAttachments.length === 0
-          ? userMsg.match(/^(?:停止任务|暂停任务|stop\s*task)\s+([a-zA-Z0-9_-]+)$/i)
+          ? userMsg.match(/^(?:停止任务|暂停任务|停止|stop\s*task|stop)\s*([a-zA-Z0-9_-]*)$/i)
           : null;
         if (stopTaskMatch) {
-          const taskId = stopTaskMatch[1];
-          try {
-            await stopRDKClawTask(taskId);
-            setChatMessages(prev => [...prev, {
-              id: msgId + 1,
-              role: 'ai',
-              text: `已停止任务：${taskId}（当前轮次会被中断，状态切换为 paused）`,
-              source: 'studio',
-            }]);
-          } catch (error) {
-            setChatMessages(prev => [...prev, {
-              id: msgId + 1,
-              role: 'ai',
-              text: `停止任务失败：${error instanceof Error ? error.message : '未知错误'}`,
-              source: 'studio',
-            }]);
+          const taskId = stopTaskMatch[1]?.trim();
+          if (!taskId) {
+            await stopAllRuns();
+          } else {
+            try {
+              await stopRDKClawTask(taskId);
+              setChatMessages(prev => [...prev, {
+                id: msgId + 1,
+                role: 'ai',
+                text: `已停止任务：${taskId}（当前轮次会被中断，状态切换为 paused）`,
+                source: 'studio',
+              }]);
+            } catch (error) {
+              setChatMessages(prev => [...prev, {
+                id: msgId + 1,
+                role: 'ai',
+                text: `停止任务失败：${error instanceof Error ? error.message : '未知错误'}`,
+                source: 'studio',
+              }]);
+            }
           }
           setAiTyping(false);
           return;
@@ -1376,6 +1390,25 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     abortInFlightRun(true);
   };
 
+  const stopAllRuns = async () => {
+    abortInFlightRun(false);
+    try {
+      const res = await cancelAllRDKClawRuns();
+      const count = res.cancelled ?? 0;
+      setChatMessages((prev) => [...prev, {
+        id: Date.now(),
+        role: 'ai',
+        text: '',
+        blocks: [{ type: 'task-result', success: true, title: `已停止所有运行中的任务（${count} 个）`, detail: '包括来自 Studio、飞书、微信的任务' }],
+        source: 'studio',
+      }]);
+      setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
+      addToast(`已停止 ${count} 个运行中的任务`, 'info');
+    } catch {
+      addToast('停止所有任务失败', 'error');
+    }
+  };
+
   const backgroundCurrentRun = () => {
     const runId = currentRunIdRef.current;
     const nextSessionId = `ui-${Date.now()}`;
@@ -1737,7 +1770,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     aiTyping, setAiTyping, handleCommand,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentMode, setAgentMode, agentPlan, agentExecution,
-    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, backgroundCurrentRun,
+    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
   };
 

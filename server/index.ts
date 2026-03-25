@@ -3929,6 +3929,16 @@ app.post('/api/rdkclaw/soul-updates/:proposalId/decision', async (request, respo
   response.json({ ok: true, applied: true });
 });
 
+app.post('/api/rdkclaw/runs/cancel-all', (_request, response) => {
+  const count = rdkclaw.cancelAllRuns();
+  response.json({ ok: true, cancelled: count });
+});
+
+app.get('/api/rdkclaw/runs/active', (_request, response) => {
+  const ids = rdkclaw.getActiveRunIds();
+  response.json({ ok: true, runs: ids });
+});
+
 app.post('/api/rdkclaw/runs/:runId/cancel', (request, response) => {
   const ok = rdkclaw.cancelRun(request.params.runId);
   if (!ok) {
