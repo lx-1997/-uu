@@ -1171,7 +1171,13 @@ onFrame = (frame) => {
     return;
   }
   if (stream === 'thinking') return;
-  if (stream === 'tool') return;
+  if (stream === 'tool') {
+    const tn = d.name || d.tool || '';
+    const tp = d.phase || d.status || 'call';
+    const tr = d.result ? (typeof d.result === 'string' ? d.result.slice(0, 200) : JSON.stringify(d.result).slice(0, 200)) : '';
+    process.stdout.write('\\n[TOOL:' + tp + '] ' + tn + (tr ? ' -> ' + tr : '') + '\\n');
+    return;
+  }
   if (stream === 'lifecycle') {
     if (d.phase === 'end' || d.phase === 'complete') return finish(true, collected || '(done)');
     if (d.phase === 'error') return finish(false, d.error || d.message || 'lifecycle error');

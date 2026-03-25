@@ -85,6 +85,13 @@ export interface RDKClawPolicy {
     mode: ApprovalMode;
     riskThreshold: RiskLevel;
   };
+  permission: {
+    workspaceBoundaryEnabled: boolean;
+    devicePathBoundaryEnabled: boolean;
+    hostMutationGuardEnabled: boolean;
+    commandDangerGuardEnabled: boolean;
+    auditLogEnabled: boolean;
+  };
   memory: {
     mainSessionReadsMemory: boolean;
     sharedSessionBlocksMemory: boolean;
@@ -143,7 +150,7 @@ export interface SkillPermission {
 }
 
 export interface SkillRuntimePolicy {
-  delegatePreference?: "local" | "board" | "hybrid";
+  delegatePreference?: "local" | "board" | "hybrid" | "collaborative";
   requiresBoard?: boolean;
   approvalLevel?: "none" | "confirm" | "strict";
   cooldownSeconds?: number;

@@ -889,7 +889,7 @@ export default function AIDock() {
     dashboard: [
       { id: 'diag', icon: '🩺', label: '一键体检', text: '帮我全面检查设备健康状态，包括温度、负载和网络' },
       { id: 'stat', icon: '📊', label: '能力盘点', text: '同步 NodeHub 和 ModelZoo 板端状态，汇总当前可编排能力' },
-      { id: 'appgen', icon: '✨', label: '一句话做应用', text: '只根据我这一句话，帮我生成一个最小可运行的 RDK 应用，并直接开始第一步实现与验证' },
+      { id: 'appgen', icon: '✨', label: '一句话做应用', text: '', placeholder: '描述你想做的机器人应用，如"人脸检测""巡线小车"...' },
       { id: 'new-device', icon: '🧭', label: '新设备接管', text: '把当前设备当成一台全新设备，检查连接、OpenClaw、模型/应用依赖和可开发环境是否就绪' },
     ],
     terminal: [
@@ -948,8 +948,18 @@ export default function AIDock() {
   const quickPrompts = promptsByTab[effectiveTab] ?? defaultPrompts;
   const isFlasherTab = activeTab === 'flasher';
 
-  /* 直接提交快捷提示 */
-  const submitQuickPrompt = (text: string) => {
+  const submitQuickPrompt = (text: string, placeholder?: string) => {
+    if (!text && placeholder) {
+      setCmd('');
+      requestAnimationFrame(() => {
+        const input = document.querySelector('.dock-input input, .dock-input textarea') as HTMLInputElement | null;
+        if (input) {
+          input.placeholder = placeholder;
+          input.focus();
+        }
+      });
+      return;
+    }
     if (activeTab === 'openclaw' && dockOcMode && openclawSendMessage) {
       openclawSendMessage(text);
       return;
@@ -1264,7 +1274,7 @@ export default function AIDock() {
             </button>
           )}
           {quickPrompts.map((p) => (
-            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text)}>
+            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, (p as any).placeholder)}>
               {p.label}
             </button>
           ))}

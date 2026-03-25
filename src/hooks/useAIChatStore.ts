@@ -362,10 +362,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           if (requestAttachments.length > 0) return '';
           const explicit = userMsg.match(/^(?:\/one-shot-app|一句话生成(?:rdk)?应用)\s+(.+)$/i);
           if (explicit) return explicit[1].trim();
-          if (userMsg.startsWith('/')) return '';
-          const implicit = /(?:生成|创建|做一个|写一个).{0,24}(?:rdk).{0,24}(?:应用|app|项目|脚手架)/i.test(userMsg)
-            || /(?:rdk).{0,24}(?:应用|app|项目).{0,24}(?:生成|创建|搭建)/i.test(userMsg);
-          return implicit ? userMsg.trim() : '';
+          return '';
         };
         const oneShotPrompt = resolveOneShotPrompt();
         if (oneShotPrompt) {

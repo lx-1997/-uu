@@ -57,6 +57,8 @@ import {
   getExternalChannelPolicy,
   validateExecCommand,
 } from "./channel-safety.js";
+import { evaluatePermissionGuard } from "./permission-guard.js";
+import { appendSecurityAuditLog } from "./security-audit-store.js";
 
 const DEFAULT_CONFIG: ProviderConfig = {
   provider: "qwen",
@@ -66,8 +68,12 @@ const DEFAULT_CONFIG: ProviderConfig = {
 
 function resolveProviderConfig(): ProviderConfig {
   const config = loadProviderConfig();
-  if (config?.apiKey) {
-    return config;
+  if (config) {
+    return {
+      ...config,
+      apiKey: config.apiKey || process.env.OPENAI_API_KEY || "",
+      baseUrl: config.baseUrl || process.env.OPENAI_BASE_URL || DEFAULT_CONFIG.baseUrl,
+    };
   }
   return {
     ...DEFAULT_CONFIG,
@@ -165,6 +171,30 @@ function selectDelegateDecision(
       confidence: 0.95,
     };
   }
+  const boardPreferredSkill = matchedSkills.find((s) => s.runtimePolicy?.delegatePreference === "board");
+  if (boardPreferredSkill) {
+    return {
+      path: "board_primary",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "skill_policy",
+      reason: `Skill(${boardPreferredSkill.name}) 偏好板端执行`,
+      confidence: 0.9,
+    };
+  }
+  const collaborativeSkill = matchedSkills.find(
+    (s) => s.runtimePolicy?.delegatePreference === "collaborative" || s.runtimePolicy?.delegatePreference === "hybrid",
+  );
+  if (collaborativeSkill) {
+    return {
+      path: "collaborative",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "skill_policy",
+      reason: `Skill(${collaborativeSkill.name}) 偏好协同执行`,
+      confidence: 0.88,
+    };
+  }
   if (/板端|openclaw|插件|系统服务|刷写|烧录|gateway|配网|升级固件|守护进程/.test(text)) {
     return {
       path: "board_primary",
@@ -193,6 +223,16 @@ function selectDelegateDecision(
       needsBoardCollaboration: true,
       source: "user_mode",
       reason: "用户要求优先尝试板端协同",
+      confidence: 0.85,
+    };
+  }
+  if (/(做|开发|生成|创建|搭建|写).{0,20}(应用|app|项目|程序|机器人)|一句话开发/.test(text)) {
+    return {
+      path: "collaborative",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "task_analysis",
+      reason: "任务涉及应用开发，需本地知识准备 + 板端执行协同",
       confidence: 0.85,
     };
   }
@@ -468,26 +508,21 @@ export class RDKClawApp {
     return true;
   }
 
-  private resolveToolRisk(toolName: string): RiskLevel {
-    if (toolName === "web_fetch") return "high";
-    if (toolName === "web_search" || toolName === "web_extract") return "medium";
-    if (toolName === "forum_drobotics_create_post") return "high";
-    if (toolName === "forum_drobotics_set_credentials") return "medium";
-    if (toolName === "forum_drobotics_auth_status" || toolName === "forum_drobotics_latest" || toolName === "forum_drobotics_topic") return "low";
-    if (toolName === "board_openclaw_delegate") return "high";
-    if (/write|exec|restart|flash|upload|set_/i.test(toolName)) return "high";
-    if (/diagnose|status|read|list|topics|nodes/i.test(toolName)) return "low";
-    return "medium";
-  }
-
   private isRiskAtLeast(risk: RiskLevel, threshold: RiskLevel) {
     const map: Record<RiskLevel, number> = { low: 1, medium: 2, high: 3 };
     return map[risk] >= map[threshold];
   }
 
-  private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string, toolName: string): boolean {
+  private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string, toolName: string, channel: ChannelSource): boolean {
     if (/^web_/i.test(toolName) && !policy.network.requireApproval) return false;
     if (this.sessionAutoApprove.get(sessionId)) return false;
+
+    // Studio 端默认由 RDKClaw 自动管控：低/中风险直接放行，高风险再触发审批。
+    if (channel === "studio") {
+      if (risk !== "high") return false;
+      return policy.approval.mode !== "auto";
+    }
+
     if (policy.approval.mode === "auto") return false;
     if (policy.approval.mode === "always") return true;
     return this.isRiskAtLeast(risk, policy.approval.riskThreshold);
@@ -523,12 +558,53 @@ export class RDKClawApp {
           }
         }
 
-        const risk = this.resolveToolRisk(tool.name);
+        const guardResult = evaluatePermissionGuard({
+          toolName: tool.name,
+          args: input,
+          workspaceDir: this.workspaceDir,
+          channel,
+          permission: policy.permission,
+        });
+        if (guardResult.blocked) {
+          if (policy.permission.auditLogEnabled) {
+            appendSecurityAuditLog({
+              channel,
+              toolName: tool.name,
+              risk: guardResult.risk,
+              action: "blocked",
+              reason: guardResult.reason,
+              runId: base.runId,
+              sessionId: base.sessionId,
+            });
+          }
+          throw new Error(`安全边界拦截：${guardResult.reason || "请求超出允许范围"}`);
+        }
+        const risk = guardResult.risk;
         const forceApproval = isExternal && getExternalChannelPolicy(tool.name) === "force_approval";
-        if (!forceApproval && !this.shouldRequireApproval(policy, risk, base.sessionId, tool.name)) {
+        if (!forceApproval && !this.shouldRequireApproval(policy, risk, base.sessionId, tool.name, channel)) {
+          if (policy.permission.auditLogEnabled) {
+            appendSecurityAuditLog({
+              channel,
+              toolName: tool.name,
+              risk,
+              action: "auto_allow",
+              runId: base.runId,
+              sessionId: base.sessionId,
+            });
+          }
           return tool.execute(input, ctx);
         }
         const approvalId = `approval-${crypto.randomUUID()}`;
+        if (policy.permission.auditLogEnabled) {
+          appendSecurityAuditLog({
+            channel,
+            toolName: tool.name,
+            risk,
+            action: "approval_required",
+            runId: base.runId,
+            sessionId: base.sessionId,
+          });
+        }
         emitEvent({
           type: "approval_required",
           data: {
@@ -568,6 +644,17 @@ export class RDKClawApp {
             decision,
           },
         });
+        if (policy.permission.auditLogEnabled) {
+          appendSecurityAuditLog({
+            channel,
+            toolName: tool.name,
+            risk,
+            action: "approval_decision",
+            decision,
+            runId: base.runId,
+            sessionId: base.sessionId,
+          });
+        }
         if (decision === "allow_session_auto") {
           this.sessionAutoApprove.set(base.sessionId, true);
         } else if (decision === "allow_global_auto") {
@@ -762,6 +849,7 @@ export class RDKClawApp {
 
     process.env.OPENAI_BASE_URL = baseUrl;
     process.env.OPENAI_API_KEY = apiKey;
+    process.env.OPENAI_MODEL = providerConfig.model;
     process.env.RDKCLAW_DAILY_MEMORY_DAYS = String(Math.max(1, policy.memory.dailyMemoryDays || 2));
     process.env.RDKCLAW_MAIN_READS_MEMORY = policy.memory.mainSessionReadsMemory ? "1" : "0";
     process.env.RDKCLAW_SHARED_BLOCKS_MEMORY = policy.memory.sharedSessionBlocksMemory ? "1" : "0";

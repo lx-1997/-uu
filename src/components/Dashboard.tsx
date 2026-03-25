@@ -173,12 +173,19 @@ export default function Dashboard() {
       .catch(() => {});
   }, [currentDevice?.id]);
 
-  const prompt = useCallback((text: string) => {
+  const prompt = useCallback((text: string, autoSubmit = true) => {
     setChatExpanded(true);
     setCmd(text);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      (document.querySelector('.dock-input') as HTMLFormElement | null)?.requestSubmit();
-    }));
+    if (autoSubmit) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        (document.querySelector('.dock-input') as HTMLFormElement | null)?.requestSubmit();
+      }));
+    } else {
+      requestAnimationFrame(() => {
+        const input = document.querySelector('.dock-input input, .dock-input textarea') as HTMLElement | null;
+        input?.focus();
+      });
+    }
   }, [setChatExpanded, setCmd]);
 
   const parallax = useParallax();
@@ -267,7 +274,7 @@ export default function Dashboard() {
 
       {/* ── CTA: primary action ── */}
       <div className={`lp-cta ${mounted ? 'lp-enter lp-d2' : ''}`}>
-        <button className="lp-cta-btn primary" onClick={() => prompt('帮我生成一个最小可运行的 RDK 应用，并直接开始实现')}>
+        <button className="lp-cta-btn primary" onClick={() => prompt('', false)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
           一句话开发
         </button>

@@ -104,7 +104,7 @@ export class SkillRegistry {
           risk,
           permissions: parsePermissions(fm.permissions),
           runtimePolicy: {
-            delegatePreference: (fm.delegate_preference as "local" | "board" | "hybrid") || "hybrid",
+            delegatePreference: (fm.delegate_preference as "local" | "board" | "hybrid" | "collaborative") || "hybrid",
             requiresBoard: fm.requires_board === "true",
             approvalLevel: (fm.approval_level as "none" | "confirm" | "strict") || "confirm",
             cooldownSeconds: Number(fm.cooldown ?? fm.cooldown_seconds ?? "0") || undefined,

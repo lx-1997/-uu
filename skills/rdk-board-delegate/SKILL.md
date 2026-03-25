@@ -22,26 +22,39 @@ category: Delegation
 - **何时直接用 `device_exec`**：目标是单条 shell 命令且不涉及 OpenClaw 技能编排（如 `ls`、`cat`、`systemctl status`），此时无需走委派链路。
 
 ## 执行流程
-1. **评估可行性**：调用 `board_openclaw_assess` 确认板端 OpenClaw 在线、目标技能/插件已就绪。
-2. **查询生态能力**（可选）：若任务涉及特定插件或模型，调用 `ecosystem_query` 查询版本与兼容性。
-3. **结构化任务描述**：组装委派输入：
-   - `intent`：`diagnose` / `deploy` / `repair` / `automation`
+1. **知识准备**（推荐）：调用 `ecosystem_query` 查询目标任务涉及的插件、模型、pipeline 的注册信息与版本兼容性；调用 `web_search` 搜索官方文档和最佳实践。此步骤与 SOUL.md「先查后委」原则对齐。
+2. **评估可行性**：调用 `board_openclaw_assess` 确认板端 OpenClaw 在线、目标技能/插件已就绪。
+3. **结构化任务描述**：组装委派输入，guidance 应包含以下结构：
+   - `intent`：`diagnose` / `deploy` / `repair` / `automation` / `development`
    - `task`：明确目标与验收条件
    - `context`：设备现状、限制条件、日志摘要
+   - `guidance` 结构化内容：
+     ```
+     ## 技术方案
+     - 推荐技术栈: {基于 ecosystem_query 结果}
+     - 推荐模型/插件: {具体名称和版本}
+     ## 参考资料
+     - 官方文档: {web_search 查到的链接}
+     - 相关 EcoSkill: {名称及 installCmd}
+     ## 验收标准
+     - {可观测的成功标志}
+     ```
 4. **提交委派**：调用 `board_openclaw_delegate` 将结构化任务提交给板端 OpenClaw。
 5. **等待与监控**：等待板端返回结果；若超时主动轮询，若报错提炼可操作原因。
-6. **汇总与验证**：板端完成后，汇报执行结果；如有异常，给出原因分析与修复建议。如任务可拆分，由软件端完成收尾验证。
+6. **独立验证**：板端完成后，用 `device_exec` 独立验证执行结果（如检查进程、端口、日志），不仅依赖板端自报。
+7. **汇总报告**：汇报执行结果；如有异常，给出原因分析与修复建议。输出中标注"软件端执行"和"板端执行"各自的结果。
 
-> **降级路径**：若步骤 1 判定 OpenClaw 不可达，降级为 `device_exec` 执行简单操作并告知用户。
+> **降级路径**：若步骤 2 判定 OpenClaw 不可达，降级为 `device_exec` 执行简单操作并告知用户。
 
 ## 工具映射
 
 | 工具 | 用途 | 必需 |
 |------|------|------|
+| `ecosystem_query` | 查询插件、模型、pipeline 的注册与版本信息 | 推荐 |
+| `web_search` | 搜索官方文档和最佳实践 | 推荐 |
 | `board_openclaw_assess` | 评估板端 OpenClaw 可达性与技能就绪状态 | 是 |
 | `board_openclaw_delegate` | 将结构化任务委派给板端 OpenClaw 执行 | 是 |
-| `ecosystem_query` | 查询插件、模型、pipeline 的注册与版本信息 | 否 |
-| `device_exec` | 降级路径 / 简单命令直接执行（不经过 OpenClaw 编排） | 否 |
+| `device_exec` | 独立验证 / 降级路径 / 简单命令直接执行 | 是 |
 
 ## 输出要求
 - 委派后必须汇报：任务是否完成（成功 / 部分完成 / 失败）。
