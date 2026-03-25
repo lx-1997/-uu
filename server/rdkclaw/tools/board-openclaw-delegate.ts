@@ -60,18 +60,25 @@ export function boardOpenClawDelegateTool(
   task: string;
   intent?: string;
   context?: string;
+  guidance?: string;
+  encourageSkills?: boolean;
   sessionId?: string;
 }> {
   return {
     name: "board_openclaw_delegate",
     description:
-      "将复杂板端任务委派给板端 OpenClaw Agent 执行。适用于设备真实操作、板端插件流程、需要板端上下文的复杂任务。同一对话内自动复用会话，板端保留上下文。",
+      "将板端任务委派给 OpenClaw Agent 执行。" +
+      "调用前，你应该先利用 ecosystem_query 和 web_search 了解该任务的最佳做法，" +
+      "然后在 guidance 字段给 OpenClaw 提供你的建议（方案选择、注意事项、推荐的技能或工具链）。" +
+      "同一对话内自动复用会话，板端保留上下文。",
     inputSchema: {
       type: "object",
       properties: {
         task: { type: "string", description: "要交给板端执行的完整任务描述" },
         intent: { type: "string", description: "可选意图标签，如 diagnose/deploy/repair" },
         context: { type: "string", description: "可选补充上下文（设备状态、约束条件）" },
+        guidance: { type: "string", description: "RDKClaw 对 OpenClaw 的执行建议：推荐方案、注意事项、参考文档链接等。帮助 OpenClaw 更高效地完成任务" },
+        encourageSkills: { type: "boolean", description: "是否鼓励 OpenClaw 优先使用自身已安装的技能来完成任务（默认 true）" },
         sessionId: { type: "string", description: "可选会话ID，用于连续对话" },
       },
       required: ["task"],
@@ -83,14 +90,17 @@ export function boardOpenClawDelegateTool(
 
       const boardDevice = toBoardDevice(device);
       const platform = (device as any).platform as RdkPlatform | undefined;
+      const useSkills = input.encourageSkills !== false;
       const msgParts = [
         input.intent ? `intent: ${input.intent}` : "",
         input.context ? `context: ${input.context}` : "",
         `task: ${input.task}`,
       ];
+      if (input.guidance?.trim()) {
+        msgParts.push(`\nrdkclaw_guidance: ${input.guidance.trim()}`);
+      }
       if (ecosystemRegistry) {
-        const taskKeywords = input.task;
-        const skills = ecosystemRegistry.findRelevantSkills(taskKeywords, platform, 5);
+        const skills = ecosystemRegistry.findRelevantSkills(input.task, platform, 5);
         if (skills.length > 0) {
           const skillLines = skills.map((s) => {
             const note = platform && s.platformNotes?.[platform] ? ` (${s.platformNotes[platform]})` : "";
@@ -99,6 +109,13 @@ export function boardOpenClawDelegateTool(
           });
           msgParts.push(`\navailable_skills:\n${skillLines.join("\n")}`);
         }
+      }
+      if (useSkills) {
+        msgParts.push(
+          "\nhint: 优先使用你已安装的技能来完成任务。" +
+          "如果没有匹配的技能，可以用 clawhub 搜索和安装新技能。" +
+          "完成后简要说明你用了哪些技能或工具链，帮助我了解你的能力成长。",
+        );
       }
       const msg = msgParts.filter(Boolean).join("\n");
       const sessionId = input.sessionId?.trim() || `rdkclaw-board-${deviceId}-${conversationId || Date.now()}`;
@@ -159,7 +176,11 @@ export function boardOpenClawDelegateTool(
       for (let attempt = 0; attempt <= DELEGATE_MAX_RETRIES; attempt++) {
         const { output, success } = await runOnce();
         if (success) {
-          return output.trim() || "板端 OpenClaw 执行完成（无文本输出）";
+          const result = output.trim() || "板端 OpenClaw 执行完成（无文本输出）";
+          return result + "\n\n---\n[RDKClaw 提示：请评估 OpenClaw 的执行结果。" +
+            "如果它用了好的技能或方案，记在记忆中以备推荐；" +
+            "如果有可改进之处，下次委派时在 guidance 中补充。" +
+            "如果发现可复用的板端经验，建议创建为 OpenClaw 技能。]";
         }
         lastOutput = output;
         const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();

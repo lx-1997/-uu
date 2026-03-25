@@ -745,6 +745,15 @@ export class RDKClawApp {
         : decision.path === "collaborative"
           ? "执行路径判定：本任务需本地+板端协同。RDKClaw 负责编排，本地工具与 board_openclaw_delegate 按步骤协同完成。"
           : "执行路径判定：本任务由 RDKClaw 本地链路独立完成，除非执行中发现板端依赖才触发委派。",
+      req.deviceId ? [
+        "## 委派 OpenClaw 的工作策略",
+        "你是 OpenClaw 的导师和协作者。委派前：",
+        "1. **先想后委**：先用 ecosystem_query 查平台能力和可用技能，复杂任务先 web_search 了解最佳实践",
+        "2. **带建议委派**：调用 board_openclaw_delegate 时，在 guidance 字段写上你的分析和建议（方案选择、注意事项、文档链接）",
+        "3. **鼓励技能**：提醒 OpenClaw 优先使用已安装的技能，有合适的 ClawHub 技能可推荐安装",
+        "4. **成长反馈**：委派完成后，评估 OpenClaw 的执行方式——用了什么技能？有没有更好的做法？如果发现可复用的经验，建议用户创建新技能",
+        "5. **知识传递**：你掌握 RDK 文档和生态知识，OpenClaw 只了解板端本地状态——将你的知识融入 guidance 帮它做得更好",
+      ].join("\n") : "",
     ].filter(Boolean).join("\n");
     const modelDef = buildModelDef(providerConfig);
     const streamFn = buildStreamFn(providerConfig);

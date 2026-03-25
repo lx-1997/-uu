@@ -368,8 +368,31 @@ export class WeixinPollingChannel {
           if (delta) chunks.push(delta);
         } else if (event.type === "message_end") {
           finalText = String(event.data?.text ?? "").trim();
+        } else if (event.type === "tool_start") {
+          const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
+          const executor = String(event.data?.executor || (toolName === "board_openclaw_delegate" ? "board_openclaw" : "rdkclaw_local"));
+          this.publishMirror("channel_message_ack", "微信流程", `开始执行工具：${toolName}`, {
+            channel: "weixin", direction: "ack", fromUserId: maskedUser,
+            rdkEventKind: "tool_start", toolName, executor,
+          });
+        } else if (event.type === "tool_progress") {
+          const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
+          const chunk = String(event.data?.chunk || "").trim();
+          if (chunk) {
+            const previewLine = chunk.split("\n").map((l) => l.trim()).filter(Boolean).slice(-1)[0] || chunk;
+            this.publishMirror("channel_message_ack", "微信流程", `${toolName}: ${previewLine.slice(0, 200)}`, {
+              channel: "weixin", direction: "ack", fromUserId: maskedUser,
+              rdkEventKind: "tool_progress", toolName,
+            });
+          }
         } else if (event.type === "tool_result") {
+          const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
+          const isError = Boolean(event.data?.isError);
           const result = String(event.data?.result ?? "");
+          this.publishMirror("channel_message_ack", "微信流程", `${toolName} ${isError ? "失败" : "完成"}`, {
+            channel: "weixin", direction: "ack", fromUserId: maskedUser,
+            rdkEventKind: "tool_result", toolName, isError,
+          });
           for (const mp of extractMediaPathsFromResult(result)) {
             if (fs.existsSync(mp.path)) mediaPaths.push(mp);
           }
