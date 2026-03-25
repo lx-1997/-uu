@@ -29,6 +29,7 @@ export interface ChatAttachmentInput {
   mimeType?: string;
   size?: number;
   contentBase64?: string;
+  storedPath?: string;
   transcript?: string;
   textContent?: string;
   source?: "studio" | "feishu" | "weixin";
@@ -587,7 +588,16 @@ export async function prepareSessionAttachments(
       source: attachment.source,
     };
 
-    if (attachment.contentBase64) {
+    if (attachment.storedPath) {
+      candidate.storedPath = attachment.storedPath;
+      if (!candidate.textContent && candidate.type !== "video") {
+        try {
+          const buffer = await fs.readFile(attachment.storedPath);
+          const extracted = await readTextFromBufferAsync(buffer, name, attachment.mimeType);
+          candidate.textContent = extracted || undefined;
+        } catch { /* file read failed, skip text extraction */ }
+      }
+    } else if (attachment.contentBase64) {
       const buffer = Buffer.from(attachment.contentBase64, "base64");
       if (buffer.length > MAX_ATTACHMENT_BYTES) {
         throw new Error(`附件 ${name} 过大，请控制在 ${Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB 以内`);

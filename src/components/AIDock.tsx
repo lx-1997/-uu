@@ -75,6 +75,7 @@ type BrowserSpeechRecognition = {
 type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
 const MAX_PENDING_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+const MAX_PENDING_VIDEO_BYTES = 50 * 1024 * 1024;
 
 const OFFICE_DOC_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -684,15 +685,16 @@ export default function AIDock() {
   const voiceTranscriptRef = useRef('');
 
   const addAttachment = useCallback((file: File, extras?: { transcript?: string; textContent?: string }) => {
-    if (file.size > MAX_PENDING_ATTACHMENT_BYTES) {
-      addToast(`附件 ${file.name} 过大，请控制在 ${Math.floor(MAX_PENDING_ATTACHMENT_BYTES / (1024 * 1024))}MB 以内`, 'warning');
-      return;
-    }
-    const url = URL.createObjectURL(file);
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
     const isImage = file.type.startsWith('image/') || /^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?)$/.test(ext);
     const isVideo = file.type.startsWith('video/') || /^(mp4|webm|avi|mov|mkv|flv|wmv|m4v|3gp)$/.test(ext);
     const isAudio = file.type.startsWith('audio/') || /^(mp3|wav|ogg|flac|aac|wma|m4a)$/.test(ext);
+    const sizeLimit = isVideo ? MAX_PENDING_VIDEO_BYTES : MAX_PENDING_ATTACHMENT_BYTES;
+    if (file.size > sizeLimit) {
+      addToast(`附件 ${file.name} 过大，请控制在 ${Math.floor(sizeLimit / (1024 * 1024))}MB 以内`, 'warning');
+      return;
+    }
+    const url = URL.createObjectURL(file);
     const att: PendingAttachment = {
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'file',
@@ -707,6 +709,28 @@ export default function AIDock() {
     setPendingAttachments(prev => [...prev, att]);
   }, [addToast]);
 
+  const sessionIdRef = useRef(`ui-${Date.now()}`);
+
+  const uploadLargeAttachment = useCallback(async (file: File, type: string): Promise<{ id: string; storedPath: string }> => {
+    const buffer = await file.arrayBuffer();
+    const res = await fetch(resolveApiUrl('/api/agent/upload-attachment'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Attachment-Name': encodeURIComponent(file.name),
+        'X-Attachment-Type': type,
+        'X-Session-Id': sessionIdRef.current,
+      },
+      body: buffer,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: '上传失败' }));
+      throw new Error(String(err.error || '上传失败'));
+    }
+    const data = await res.json() as { attachment: { id: string; storedPath: string } };
+    return { id: data.attachment.id, storedPath: data.attachment.storedPath };
+  }, []);
+
   const materializeAgentAttachments = useCallback(async (attachments: PendingAttachment[]): Promise<AgentAttachmentPayload[]> => {
     return Promise.all(attachments.map(async (attachment) => {
       const payload: AgentAttachmentPayload = {
@@ -720,7 +744,12 @@ export default function AIDock() {
         source: 'studio',
       };
 
-      if (attachment.file.size > 0) {
+      const UPLOAD_THRESHOLD = 5 * 1024 * 1024;
+      if (attachment.file.size > UPLOAD_THRESHOLD) {
+        const uploaded = await uploadLargeAttachment(attachment.file, attachment.type);
+        payload.id = uploaded.id;
+        payload.storedPath = uploaded.storedPath;
+      } else if (attachment.file.size > 0) {
         payload.contentBase64 = await fileToBase64(attachment.file);
       }
 
@@ -734,7 +763,7 @@ export default function AIDock() {
 
       return payload;
     }));
-  }, []);
+  }, [uploadLargeAttachment]);
 
   const removeAttachment = useCallback((id: string) => {
     setPendingAttachments(prev => {

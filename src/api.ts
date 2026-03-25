@@ -422,6 +422,7 @@ export interface AgentAttachmentPayload {
   mimeType?: string;
   size?: number;
   contentBase64?: string;
+  storedPath?: string;
   transcript?: string;
   textContent?: string;
   source?: 'studio' | 'feishu' | 'weixin';

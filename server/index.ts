@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { v4 as uuid } from 'uuid';
 import crypto from 'node:crypto';
 import { promises as fs, existsSync } from 'node:fs';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import type { ChatMessage, Device } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
@@ -4550,6 +4551,45 @@ app.post('/api/channels/feishu/webhook', async (request, response) => {
     response.status(500).json({
       error: error instanceof Error ? error.message : 'Feishu webhook 处理失败',
     });
+  }
+});
+
+// ─── Agent Attachment Upload (for large files like video) ───
+
+app.post('/api/agent/upload-attachment', express.raw({ type: '*/*', limit: '50mb' }), async (request, response) => {
+  try {
+    const fileName = decodeURIComponent(String(request.headers['x-attachment-name'] || `upload-${Date.now()}`));
+    const mimeType = String(request.headers['content-type'] || 'application/octet-stream');
+    const sessionId = String(request.headers['x-session-id'] || `upload-${Date.now()}`);
+    const fileType = String(request.headers['x-attachment-type'] || 'file') as 'image' | 'file' | 'audio' | 'video';
+
+    const body = request.body as Buffer;
+    if (!body || body.length === 0) {
+      response.status(400).json({ error: '空文件' });
+      return;
+    }
+
+    const attachmentDir = path.join(os.homedir(), '.rdkstudio', 'chat-attachments', sessionId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || 'default');
+    await fs.mkdir(attachmentDir, { recursive: true });
+    const safeFileName = `${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100)}`;
+    const storedPath = path.join(attachmentDir, safeFileName);
+    await fs.writeFile(storedPath, body);
+
+    const attachmentId = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    response.json({
+      ok: true,
+      attachment: {
+        id: attachmentId,
+        type: fileType,
+        name: fileName,
+        mimeType,
+        size: body.length,
+        storedPath,
+      },
+    });
+  } catch (error) {
+    console.error('[upload-attachment] failed:', error);
+    response.status(500).json({ error: error instanceof Error ? error.message : '上传失败' });
   }
 });
 
