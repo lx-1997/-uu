@@ -16,6 +16,7 @@ export {
   resolveBootstrapMaxChars,
   type BootstrapFile,
   type BootstrapFileName,
+  type MemoryPolicy,
 } from "./bootstrap.js";
 export {
   DEFAULT_CONTEXT_PRUNING_SETTINGS,

@@ -2,6 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { isSubagentSessionKey } from "../session-key.js";
 
+export type MemoryPolicy = {
+  dailyMemoryDays?: number;
+  mainReadsMemory?: boolean;
+  sharedBlocksMemory?: boolean;
+};
+
 export const DEFAULT_AGENTS_FILENAME = "AGENTS.md";
 export const DEFAULT_SOUL_FILENAME = "SOUL.md";
 export const DEFAULT_TOOLS_FILENAME = "TOOLS.md";
@@ -152,10 +158,12 @@ function formatDateToken(date: Date): string {
 
 async function resolveDailyMemoryEntries(
   resolvedDir: string,
+  policy?: MemoryPolicy,
 ): Promise<Array<{ name: `memory/${string}.md`; filePath: string }>> {
   const memoryDir = path.join(resolvedDir, "memory");
   const now = new Date();
-  const days = Math.max(1, Number(process.env.RDKCLAW_DAILY_MEMORY_DAYS || "2"));
+  const envDays = process.env.RDKCLAW_DAILY_MEMORY_DAYS;
+  const days = Math.max(1, policy?.dailyMemoryDays ?? (envDays ? Number(envDays) : 2));
   const candidates: string[] = [];
   for (let i = 0; i < days; i += 1) {
     const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
@@ -193,7 +201,7 @@ async function resolveBootstrapRoot(dir: string): Promise<string> {
   }
 }
 
-export async function loadWorkspaceBootstrapFiles(dir: string): Promise<BootstrapFile[]> {
+export async function loadWorkspaceBootstrapFiles(dir: string, policy?: MemoryPolicy): Promise<BootstrapFile[]> {
   const resolvedDir = await resolveBootstrapRoot(dir);
   const entries: Array<{
     name: BootstrapFileName | `memory/${string}.md`;
@@ -230,7 +238,7 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Bootstra
   ];
 
   entries.push(...(await resolveMemoryBootstrapEntries(resolvedDir)));
-  entries.push(...(await resolveDailyMemoryEntries(resolvedDir)));
+  entries.push(...(await resolveDailyMemoryEntries(resolvedDir, policy)));
 
   const result: BootstrapFile[] = [];
   for (const entry of entries) {
@@ -252,6 +260,7 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Bootstra
 export function filterBootstrapFilesForSession(
   files: BootstrapFile[],
   sessionKey?: string,
+  policy?: MemoryPolicy,
 ): BootstrapFile[] {
   if (!sessionKey) return files;
   if (isSubagentSessionKey(sessionKey)) {
@@ -262,8 +271,8 @@ export function filterBootstrapFilesForSession(
     sessionKey.startsWith("weixin:") ||
     sessionKey.startsWith("auto:") ||
     sessionKey.startsWith("channel:");
-  const mainReadsMemory = process.env.RDKCLAW_MAIN_READS_MEMORY !== "0";
-  const sharedBlocksMemory = process.env.RDKCLAW_SHARED_BLOCKS_MEMORY !== "0";
+  const mainReadsMemory = policy?.mainReadsMemory ?? (process.env.RDKCLAW_MAIN_READS_MEMORY !== "0");
+  const sharedBlocksMemory = policy?.sharedBlocksMemory ?? (process.env.RDKCLAW_SHARED_BLOCKS_MEMORY !== "0");
   if (!nonMain) {
     if (mainReadsMemory) return files;
     return files.filter((file) => !NON_MAIN_BLOCKLIST.has(file.name as BootstrapFileName));

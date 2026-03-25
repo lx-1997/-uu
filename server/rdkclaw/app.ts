@@ -925,17 +925,17 @@ export class RDKClawApp {
     const apiKey = getApiKey(providerConfig);
     const baseUrl = getBaseUrl(providerConfig);
 
-    // TODO: 全局 env 写入在并发请求时存在竞态风险，后续应改为通过 Agent 构造参数传入
-    process.env.OPENAI_BASE_URL = baseUrl;
-    process.env.OPENAI_API_KEY = apiKey;
-    process.env.OPENAI_MODEL = providerConfig.model;
-    process.env.RDKCLAW_DAILY_MEMORY_DAYS = String(Math.max(1, policy.memory.dailyMemoryDays || 2));
-    process.env.RDKCLAW_MAIN_READS_MEMORY = policy.memory.mainSessionReadsMemory ? "1" : "0";
-    process.env.RDKCLAW_SHARED_BLOCKS_MEMORY = policy.memory.sharedSessionBlocksMemory ? "1" : "0";
-    process.env.RDKCLAW_CONTEXT_MAX_HISTORY_SHARE = String(policy.context.maxHistoryShare);
-    process.env.RDKCLAW_CONTEXT_SOFT_TRIM_RATIO = String(policy.context.softTrimRatio);
-    process.env.RDKCLAW_CONTEXT_HARD_CLEAR_RATIO = String(policy.context.hardClearRatio);
-    process.env.RDKCLAW_CONTEXT_KEEP_LAST_ASSISTANTS = String(policy.context.keepLastAssistants);
+    const runtimePolicy = {
+      dailyMemoryDays: Math.max(1, policy.memory.dailyMemoryDays || 2),
+      mainReadsMemory: policy.memory.mainSessionReadsMemory,
+      sharedBlocksMemory: policy.memory.sharedSessionBlocksMemory,
+      pruning: {
+        maxHistoryShare: policy.context.maxHistoryShare,
+        softTrimRatio: policy.context.softTrimRatio,
+        hardClearRatio: policy.context.hardClearRatio,
+        keepLastAssistants: policy.context.keepLastAssistants,
+      },
+    };
 
     const runId = crypto.randomUUID();
     const base = { runId, sessionId: sessionKey };
@@ -1041,6 +1041,7 @@ export class RDKClawApp {
       temperature: 0.5,
       reasoning: "medium",
       contextTokens: Math.max(16_000, Number(policy.context.contextTokens) || modelCaps.contextWindow),
+      runtimePolicy,
     });
     let finished = false;
     let failed: unknown = null;

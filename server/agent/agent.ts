@@ -160,6 +160,22 @@ export interface AgentConfig {
   maxConcurrentRuns?: number;
   /** 额外允许读写的根目录（打包后用户工作区等） */
   extraAllowedRoots?: string[];
+  /**
+   * 运行级策略参数（替代 process.env.RDKCLAW_* 写入）
+   *
+   * 直接传入 Agent 构造，避免全局 env 在并发请求间竞态。
+   */
+  runtimePolicy?: {
+    dailyMemoryDays?: number;
+    mainReadsMemory?: boolean;
+    sharedBlocksMemory?: boolean;
+    pruning?: {
+      maxHistoryShare?: number;
+      softTrimRatio?: number;
+      hardClearRatio?: number;
+      keepLastAssistants?: number;
+    };
+  };
 }
 
 export interface RunResult {
@@ -225,6 +241,7 @@ export class Agent {
   private onApprovalRequest?: ApprovalHandler;
   private allowlist: AllowlistManager;
   private contextTokens: number;
+  private runtimePolicy: NonNullable<AgentConfig['runtimePolicy']>;
   private sandbox?: {
     enabled: boolean;
     allowExec: boolean;
@@ -358,6 +375,7 @@ export class Agent {
       1,
       Math.floor(config.contextTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS),
     );
+    this.runtimePolicy = config.runtimePolicy ?? {};
     this.sandbox = {
       enabled: config.sandbox?.enabled ?? false,
       allowExec: config.sandbox?.allowExec ?? false,
@@ -369,6 +387,11 @@ export class Agent {
     this.memory = new MemoryManager(config.memoryDir ?? "./.mini-agent/memory");
     this.context = new ContextLoader(this.workspaceDir, {
       bootstrapDir: this.bootstrapDir,
+      memoryPolicy: {
+        dailyMemoryDays: this.runtimePolicy.dailyMemoryDays,
+        mainReadsMemory: this.runtimePolicy.mainReadsMemory,
+        sharedBlocksMemory: this.runtimePolicy.sharedBlocksMemory,
+      },
     });
     const extraSkillsDirs = this.extraAllowedRoots
       ?.map((r) => path.join(r, "skills"))
@@ -463,6 +486,7 @@ export class Agent {
       summarize: this.createSummarizeFn(),
       messages: params.messages,
       contextWindowTokens: this.contextTokens,
+      pruningSettings: this.runtimePolicy.pruning,
     });
 
     if (compacted.summary && compacted.summaryMessage) {

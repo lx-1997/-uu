@@ -6,6 +6,7 @@ import {
   DEFAULT_SOUL_FILENAME,
   type BootstrapFile,
   type ContextFile,
+  type MemoryPolicy,
 } from "./bootstrap.js";
 
 export class ContextLoader {
@@ -13,6 +14,7 @@ export class ContextLoader {
   private bootstrapDir?: string;
   private maxChars?: number;
   private warn?: (message: string) => void;
+  private memoryPolicy?: MemoryPolicy;
 
   constructor(
     workspaceDir: string,
@@ -20,12 +22,14 @@ export class ContextLoader {
       bootstrapDir?: string;
       maxChars?: number;
       warn?: (message: string) => void;
+      memoryPolicy?: MemoryPolicy;
     },
   ) {
     this.workspaceDir = workspaceDir;
     this.bootstrapDir = opts?.bootstrapDir;
     this.maxChars = opts?.maxChars;
     this.warn = opts?.warn;
+    this.memoryPolicy = opts?.memoryPolicy;
   }
 
   /**
@@ -34,8 +38,11 @@ export class ContextLoader {
   async loadBootstrapFiles(params?: {
     sessionKey?: string;
   }): Promise<BootstrapFile[]> {
-    const files = await loadWorkspaceBootstrapFiles(this.bootstrapDir || this.workspaceDir);
-    return filterBootstrapFilesForSession(files, params?.sessionKey);
+    const files = await loadWorkspaceBootstrapFiles(
+      this.bootstrapDir || this.workspaceDir,
+      this.memoryPolicy,
+    );
+    return filterBootstrapFilesForSession(files, params?.sessionKey, this.memoryPolicy);
   }
 
   /**
