@@ -473,11 +473,13 @@ export default function OnboardingWizard() {
   };
 
   const handleTryRDKClaw = () => {
+    setObStep('done');
+    addToast('新手引导已完成！', 'success');
     setChatExpanded(true);
     setCmd('帮我全面检查当前设备的健康状态，包括温度、内存、BPU 负载和网络，并给出优化建议');
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    setTimeout(() => {
       (document.querySelector('.dock-input') as HTMLFormElement | null)?.requestSubmit();
-    }));
+    }, 500);
   };
 
   const finish = () => {
