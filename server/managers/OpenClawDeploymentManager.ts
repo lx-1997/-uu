@@ -426,7 +426,7 @@ export class OpenClawDeploymentManager {
           if (err) {
             this.destroyConnection(device.ip);
             if (retriesLeft > 0 && !aborted && OpenClawDeploymentManager.isTransientSshError(err)) {
-              onOutput(`[SSH] transient error, retrying (${retriesLeft} left): ${err.message}\n`);
+              console.warn(`[OCM] exec transient error on ${device.ip}, retrying (${retriesLeft} left): ${err.message}`);
               setTimeout(() => attemptExec(retriesLeft - 1), OpenClawDeploymentManager.SSH_RETRY_DELAY_MS);
               return;
             }
@@ -442,7 +442,7 @@ export class OpenClawDeploymentManager {
       }).catch((err: any) => {
         this.destroyConnection(device.ip);
         if (retriesLeft > 0 && !aborted && OpenClawDeploymentManager.isTransientSshError(err)) {
-          onOutput(`[SSH] connection error, retrying (${retriesLeft} left): ${err.message}\n`);
+          console.warn(`[OCM] connection error on ${device.ip}, retrying (${retriesLeft} left): ${err.message}`);
           setTimeout(() => attemptExec(retriesLeft - 1), OpenClawDeploymentManager.SSH_RETRY_DELAY_MS);
           return;
         }
@@ -963,7 +963,7 @@ onFrame = (frame) => {
   if (p.type === 'agent_error') { clearTimeout(timer); return finish(false, p.error || 'agent error'); }
 };
 
-wsOnClose = () => { if (!done) { clearTimeout(timer); finish(true, text || '(connection closed)'); } };
+wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket closed unexpectedly'); } };
 `;
     const jsB64 = Buffer.from(jsScript, 'utf8').toString('base64');
     const cmd = [
@@ -1196,7 +1196,7 @@ onFrame = (frame) => {
   if (p.type === 'agent_error') return finish(false, p.error || 'agent error');
 };
 
-wsOnClose = () => { if (!done) { finish(!!collected.trim(), collected || 'websocket closed before response'); } };
+wsOnClose = () => { if (!done) { finish(false, 'websocket closed unexpectedly'); } };
 `;
     const scriptBase64 = Buffer.from(wsScript, 'utf8').toString('base64');
     const cmd = [
