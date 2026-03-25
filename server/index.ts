@@ -4095,6 +4095,63 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
   }
 });
 
+app.post('/api/rdkclaw/weixin/bind-start', async (_request, response) => {
+  const ILINK_BASE = 'https://ilinkai.weixin.qq.com';
+  const BOT_TYPE = '3';
+  try {
+    const qrRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`);
+    if (!qrRes.ok) {
+      response.status(502).json({ ok: false, error: `获取二维码失败: HTTP ${qrRes.status}` });
+      return;
+    }
+    const qrData = await qrRes.json() as { qrcode?: string; qrcode_img_content?: string };
+    if (!qrData.qrcode || !qrData.qrcode_img_content) {
+      response.status(502).json({ ok: false, error: '获取二维码失败: 响应缺少 qrcode' });
+      return;
+    }
+    const qrDataUrl = await QRCode.toDataURL(qrData.qrcode_img_content, { width: 400, margin: 2 });
+    response.json({ ok: true, qrcode: qrData.qrcode, qrDataUrl });
+
+    const pollForBind = async () => {
+      const deadline = Date.now() + 5 * 60_000;
+      let currentQr = qrData.qrcode!;
+      while (Date.now() < deadline) {
+        try {
+          const statusRes = await fetch(
+            `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(currentQr)}`,
+            { headers: { 'iLink-App-ClientVersion': '1' }, signal: AbortSignal.timeout(40_000) },
+          );
+          if (!statusRes.ok) { await new Promise(r => setTimeout(r, 2000)); continue; }
+          const status = await statusRes.json() as {
+            status?: string; bot_token?: string; ilink_bot_id?: string; baseurl?: string;
+          };
+          if (status.status === 'confirmed' && status.ilink_bot_id) {
+            const account = {
+              accountId: status.ilink_bot_id,
+              token: status.bot_token || '',
+              baseUrl: status.baseurl || ILINK_BASE,
+              nickname: '',
+              boundAt: Date.now(),
+            };
+            weixinAccountStore.addAccount(account);
+            weixinChannel.addAccount(account);
+            console.log(`[WeixinBind] background poll: bound ${status.ilink_bot_id}`);
+            return;
+          }
+          if (status.status === 'expired') {
+            console.log('[WeixinBind] background poll: qrcode expired, stopping');
+            return;
+          }
+        } catch { await new Promise(r => setTimeout(r, 2000)); }
+      }
+      console.log('[WeixinBind] background poll: timeout');
+    };
+    pollForBind().catch(() => {});
+  } catch (err: any) {
+    response.status(500).json({ ok: false, error: err.message || '启动绑定流程失败' });
+  }
+});
+
 app.get('/api/rdkclaw/feishu/config', (_request, response) => {
   const cfg = feishuConfigStore.getConfig();
   response.json({

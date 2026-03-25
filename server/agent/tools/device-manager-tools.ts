@@ -266,6 +266,43 @@ export const deviceQuickConnectQrTool: Tool<{ label?: string }> = {
   },
 };
 
+export const weixinBindQrTool: Tool<Record<string, never>> = {
+  name: "weixin_bind_qrcode",
+  description:
+    "生成微信 ClawBot 绑定二维码。用户扫码后即可将个人微信与 RDK Studio 绑定，之后可通过微信与 AI 对话。二维码有效期约 5 分钟。",
+  inputSchema: { type: "object", properties: {} },
+  async execute(_input, ctx) {
+    const port = process.env.PORT || "23456";
+    const res = await fetch(`http://127.0.0.1:${port}/api/rdkclaw/weixin/bind-start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = (await res.json()) as { ok?: boolean; qrDataUrl?: string; error?: string };
+    if (!data.ok || !data.qrDataUrl) {
+      return `获取微信绑定二维码失败: ${data.error || "未知错误"}`;
+    }
+
+    const base64Data = data.qrDataUrl.replace(/^data:image\/png;base64,/, "");
+    const downloadsDir = ctx.workspaceDir
+      ? `${ctx.workspaceDir}/downloads`
+      : `${process.cwd()}/downloads`;
+    const fileName = `weixin-bind-qr-${Date.now()}.png`;
+    const filePath = `${downloadsDir}/${fileName}`;
+
+    const { promises: fsP } = await import("node:fs");
+    await fsP.mkdir(downloadsDir, { recursive: true });
+    await fsP.writeFile(filePath, Buffer.from(base64Data, "base64"));
+
+    return JSON.stringify({
+      __type: "image_download",
+      localPath: filePath,
+      bytes: Buffer.from(base64Data, "base64").length,
+      imageUrl: `/api/local-files/${encodeURIComponent(fileName)}`,
+      fileName,
+    });
+  },
+};
+
 export function createDeviceManagerTools(): Tool[] {
   return [
     deviceListTool,
@@ -273,5 +310,6 @@ export function createDeviceManagerTools(): Tool[] {
     deviceConnectTool,
     deviceRemoveTool,
     deviceQuickConnectQrTool,
+    weixinBindQrTool,
   ];
 }
