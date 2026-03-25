@@ -30,6 +30,7 @@ import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager
 import { readDevices } from "../storage.js";
 import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
+import { boardOpenClawChatTool } from "./tools/board-openclaw-chat.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { createEcosystemQueryTool } from "./tools/ecosystem-query.js";
 import { createSoulUpdateTool } from "./tools/soul-update.js";
@@ -631,6 +632,7 @@ export class RDKClawApp {
       });
       tools.push(...deviceTools);
       tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager));
+      tools.push(boardOpenClawChatTool(req.deviceId, this.openClawManager, base.sessionId));
       tools.push(
         boardOpenClawDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
           emitEvent({
@@ -773,17 +775,19 @@ export class RDKClawApp {
         "- 不擅长：网页搜索、文档分析（这些是你的本地专属能力）",
         "- 图像理解能力取决于双方各自配置的模型——你先本地尝试，失败时可将图片传到设备让 OpenClaw 尝试",
         "",
-        "### 协作流程：你先想，你先做，需要时再请教",
+        "### 协作流程：你先想，你先做，需要时和 OpenClaw 沟通",
         "1. **你先分析**：收到任务后，判断需要什么能力、你能否直接完成",
-        "2. **能做就做**：图片分析、搜索、文件处理、知识问答、简单 device_exec——先用你的工具尝试",
-        "3. **需要时请教外脑**：两种情况下咨询 OpenClaw：",
-        "   - 你的本地能力受限（如模型不支持视觉，可将图片上传到设备后让 OpenClaw 尝试分析）",
-        "   - 任务需要板端专长（复杂板端操作、OpenClaw 技能链、板端应用开发）",
-        "4. **带着建议委派**：确认后在 guidance 中融入你的分析和 RDK 生态知识，委派给 OpenClaw",
-        "5. **结果回收**：委派完成后下载产出文件、评估执行质量，失败时立即用本地工具兜底",
+        "2. **能做就做**：搜索、文件处理、知识问答、简单 device_exec——直接用你的工具",
+        "3. **需要时和 OpenClaw 沟通**——你有三种方式互动，像和伙伴协作一样自然使用：",
+        "   - **交流** (board_openclaw_chat)：和 OpenClaw 聊聊——了解它的模型能力、分享你的分析、讨论方案、获取板端状态。不一定要派活，先沟通也可以",
+        "   - **评估** (board_openclaw_assess)：让 OpenClaw 判断某个具体任务它能否处理",
+        "   - **委派** (board_openclaw_delegate)：确认可行后把任务交给 OpenClaw，在 guidance 中融入你的知识",
+        "4. **结果回收**：委派完成后下载产出文件、评估执行质量，失败时用本地工具兜底",
+        "",
+        "交流、评估、委派共享同一会话——你们聊过的内容双方都记得，不必重复说明背景。",
         "",
         "### 你的本地工具箱",
-        "- 图片/视频理解 → attachment_describe_image（本地 Vision API，失败时可考虑让 OpenClaw 处理）",
+        "- 图片/视频理解 → attachment_describe_image（本地 Vision API；失败时可先 chat 问问 OpenClaw 是否能处理）",
         "- 网页搜索 → web_search / web_fetch",
         "- 附件和文档 → attachment_read / attachment_list",
         "- 设备命令 → device_exec（简单命令直接执行，无需委派）",
