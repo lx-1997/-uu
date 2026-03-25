@@ -471,7 +471,7 @@ export default function SkillBrowser() {
                   {sourceKind && (
                     <span className="badge badge-accent" style={{ alignSelf: 'flex-start' }}>识别类型: {getSourceKindLabel(sourceKind)}</span>
                   )}
-                  <textarea className="input" value={skillGoal} onChange={(e) => setSkillGoal(e.target.value)} rows={2} placeholder="可选：补充目标说明（如"提取 YOLO 推理相关命令"）" style={{ resize: 'vertical', minHeight: 56 }} />
+                  <textarea className="input" value={skillGoal} onChange={(e) => setSkillGoal(e.target.value)} rows={2} placeholder="可选：补充目标说明（如：提取 YOLO 推理相关命令）" style={{ resize: 'vertical', minHeight: 56 }} />
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button className="btn btn-primary btn-sm" onClick={startUrlBasedSkillCreate} disabled={!sourceUrl.trim()}>
                       AI 生成并部署
