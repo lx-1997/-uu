@@ -308,6 +308,13 @@ export interface RDKClawPolicy {
     mode: 'always' | 'risk-based' | 'auto';
     riskThreshold: 'low' | 'medium' | 'high';
   };
+  permission: {
+    workspaceBoundaryEnabled: boolean;
+    devicePathBoundaryEnabled: boolean;
+    hostMutationGuardEnabled: boolean;
+    commandDangerGuardEnabled: boolean;
+    auditLogEnabled: boolean;
+  };
   memory: {
     mainSessionReadsMemory: boolean;
     sharedSessionBlocksMemory: boolean;
@@ -325,6 +332,19 @@ export interface RDKClawPolicy {
     hardClearRatio: number;
     keepLastAssistants: number;
   };
+}
+
+export interface SecurityAuditLogEntry {
+  id: string;
+  timestamp: number;
+  channel: 'studio' | 'weixin' | 'feishu';
+  toolName: string;
+  risk: 'low' | 'medium' | 'high';
+  action: 'blocked' | 'auto_allow' | 'approval_required' | 'approval_decision';
+  reason?: string;
+  decision?: string;
+  sessionId?: string;
+  runId?: string;
 }
 
 export interface FeishuRuntimeStatus {
@@ -480,6 +500,7 @@ export function fetchAgentConfig() {
     hasApiKey?: boolean;
     baseUrl?: string;
     activeModelId?: string | null;
+    envApiKeyAvailable?: boolean;
     models?: Array<{
       id: string;
       label: string;
@@ -519,6 +540,18 @@ export function saveRDKClawPolicy(patch: Partial<RDKClawPolicy>) {
   return request<{ ok: boolean; policy: RDKClawPolicy }>('/api/rdkclaw/policy', {
     method: 'POST',
     body: JSON.stringify(patch),
+  });
+}
+
+export function fetchRDKClawSecurityAudit(limit = 30) {
+  const qp = new URLSearchParams({ limit: String(limit) }).toString();
+  return request<{ ok: boolean; items: SecurityAuditLogEntry[] }>(`/api/rdkclaw/security-audit?${qp}`);
+}
+
+export function clearRDKClawSecurityAudit() {
+  return request<{ ok: boolean }>('/api/rdkclaw/security-audit/clear', {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 
@@ -767,7 +800,16 @@ export function saveAgentConfig(config: {
   baseUrl?: string;
   setActive?: boolean;
 }) {
-  return request<{ ok: boolean }>('/api/agent/config', {
+  return request<{
+    ok: boolean;
+    active?: {
+      id: string;
+      provider: string;
+      model: string;
+      baseUrl?: string;
+      hasApiKey: boolean;
+    };
+  }>('/api/agent/config', {
     method: 'POST',
     body: JSON.stringify(config),
   });

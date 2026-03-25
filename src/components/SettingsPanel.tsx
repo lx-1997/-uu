@@ -23,6 +23,9 @@ import {
   saveRDKClawPolicy,
   type PersonaProfile,
   type RDKClawPolicy,
+  fetchRDKClawSecurityAudit,
+  clearRDKClawSecurityAudit,
+  type SecurityAuditLogEntry,
   fetchRDKClawForumAuth,
   saveRDKClawForumCredential,
   clearRDKClawForumAuth,
@@ -132,6 +135,7 @@ export default function SettingsPanel() {
   }>>([]);
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
+  const [aiEnvApiKeyAvailable, setAiEnvApiKeyAvailable] = useState(false);
   const importAgentConfigRef = useRef<HTMLInputElement | null>(null);
   const loadedAiProviderRef = useRef('');
 
@@ -149,10 +153,15 @@ export default function SettingsPanel() {
     const cfg = await fetchAgentConfig();
     const models = cfg.models || [];
     setAiSavedModels(models);
-    const active = models.find((item) => item.isActive) || models[0];
-    if (active) {
-      applyAiModelToForm(active);
-      setAiConfigured(!!active.hasApiKey);
+    setAiEnvApiKeyAvailable(!!cfg.envApiKeyAvailable);
+    const aid = cfg.activeModelId?.trim();
+    const active = aid
+      ? models.find((item) => item.id === aid)
+      : models.find((item) => item.isActive);
+    const resolved = active || models[0];
+    if (resolved) {
+      applyAiModelToForm(resolved);
+      setAiConfigured(!!resolved.hasApiKey || !!cfg.envApiKeyAvailable);
       return;
     }
     setAiConfigured(false);
@@ -195,10 +204,19 @@ export default function SettingsPanel() {
   });
   const [policy, setPolicy] = useState<RDKClawPolicy>({
     approval: { mode: 'risk-based', riskThreshold: 'medium' },
+    permission: {
+      workspaceBoundaryEnabled: true,
+      devicePathBoundaryEnabled: true,
+      hostMutationGuardEnabled: true,
+      commandDangerGuardEnabled: true,
+      auditLogEnabled: true,
+    },
     memory: { mainSessionReadsMemory: true, sharedSessionBlocksMemory: false, dailyMemoryDays: 7 },
     network: { enabled: true, maxFetchChars: 30000, requireApproval: false },
     context: { contextTokens: 128000, maxHistoryShare: 0.5, softTrimRatio: 0.3, hardClearRatio: 0.5, keepLastAssistants: 3 },
   });
+  const [securityAudit, setSecurityAudit] = useState<SecurityAuditLogEntry[]>([]);
+  const [securityAuditLoading, setSecurityAuditLoading] = useState(false);
   const [rdkclawLoading, setRdkclawLoading] = useState(false);
   const [rdkclawSaving, setRdkclawSaving] = useState(false);
 
@@ -225,12 +243,38 @@ export default function SettingsPanel() {
      ═══════════════════════════════════════════ */
 
   const refreshRdkclawData = async () => {
-    const [personaRes, policyRes, forumAuthRes] = await Promise.all([
-      fetchRDKClawPersona(), fetchRDKClawPolicy(), fetchRDKClawForumAuth(),
+    const [personaRes, policyRes, forumAuthRes, auditRes] = await Promise.all([
+      fetchRDKClawPersona(), fetchRDKClawPolicy(), fetchRDKClawForumAuth(), fetchRDKClawSecurityAudit(20),
     ]);
     setPersona(personaRes.persona);
     setPolicy(policyRes.policy);
     setForumAuth(forumAuthRes.auth);
+    setSecurityAudit(auditRes.items || []);
+  };
+
+  const refreshSecurityAudit = async () => {
+    setSecurityAuditLoading(true);
+    try {
+      const res = await fetchRDKClawSecurityAudit(30);
+      setSecurityAudit(res.items || []);
+    } catch {
+      addToast('读取安全审计失败', 'error');
+    } finally {
+      setSecurityAuditLoading(false);
+    }
+  };
+
+  const handleClearSecurityAudit = async () => {
+    setSecurityAuditLoading(true);
+    try {
+      await clearRDKClawSecurityAudit();
+      setSecurityAudit([]);
+      addToast('安全审计已清空', 'success');
+    } catch {
+      addToast('清空安全审计失败', 'error');
+    } finally {
+      setSecurityAuditLoading(false);
+    }
   };
 
   const refreshFeishuData = async () => {
@@ -399,31 +443,28 @@ export default function SettingsPanel() {
         setActive: true,
       });
       await refreshAiConfig();
-      addToast(selectedAiModelId ? '模型已更新' : '模型已新增并启用', 'success');
-    } catch { addToast('保存失败', 'error'); }
-    finally { setAiSaving(false); }
-  };
-
-  const handleSwitchAiModel = async () => {
-    if (!selectedAiModelId) { addToast('请先选择一个模型', 'warning'); return; }
-    setAiSaving(true);
-    try {
-      await saveAgentConfig({ action: 'switch', id: selectedAiModelId });
-      await refreshAiConfig();
-      addToast('模型切换成功', 'success');
-    } catch { addToast('模型切换失败', 'error'); }
-    finally { setAiSaving(false); }
+      const savedModel = `${aiProvider}/${effectiveModel}`;
+      addToast(selectedAiModelId ? `模型已更新: ${savedModel}` : `已新增并启用: ${savedModel}`, 'success');
+    } catch (err) {
+      addToast(`保存失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+    } finally {
+      setAiSaving(false);
+    }
   };
 
   const handleDeleteAiModel = async () => {
     if (!selectedAiModelId) { addToast('请先选择一个模型', 'warning'); return; }
+    const entry = aiSavedModels.find((item) => item.id === selectedAiModelId);
     setAiSaving(true);
     try {
       await saveAgentConfig({ action: 'delete', id: selectedAiModelId });
       await refreshAiConfig();
-      addToast('模型已删除', 'success');
-    } catch { addToast('删除失败', 'error'); }
-    finally { setAiSaving(false); }
+      addToast(`已删除: ${entry ? `${entry.provider}/${entry.model}` : selectedAiModelId}`, 'success');
+    } catch (err) {
+      addToast(`删除失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+    } finally {
+      setAiSaving(false);
+    }
   };
 
   const handleCreateNewAiModel = () => {
@@ -616,26 +657,54 @@ export default function SettingsPanel() {
                   <div className="settings-row">
                     <span className="settings-row-label">当前模型</span>
                     <div className="settings-row-value">
-                      <select className="select" title="已保存模型" aria-label="已保存模型" value={selectedAiModelId}
+                      <select className="select" title="已保存模型" aria-label="已保存模型" value={selectedAiModelId} disabled={aiSaving}
                         onChange={async (e) => {
                           const id = e.target.value;
                           if (!id) { handleCreateNewAiModel(); return; }
                           const entry = aiSavedModels.find(i => i.id === id);
                           if (!entry) return;
-                          applyAiModelToForm(entry);
                           if (!entry.isActive) {
+                            if (!entry.hasApiKey && !aiEnvApiKeyAvailable) {
+                              applyAiModelToForm(entry);
+                              addToast('该模型未配置 API Key，请先编辑并保存后再切换（或配置环境变量 OPENAI_API_KEY）', 'warning');
+                              return;
+                            }
+                            applyAiModelToForm(entry);
+                            setAiSaving(true);
                             try {
-                              await saveAgentConfig({ action: 'switch', id });
+                              const result = await saveAgentConfig({ action: 'switch', id });
+                              if (result.active?.id === id) {
+                                applyAiModelToForm({
+                                  id: result.active.id,
+                                  label: entry.label,
+                                  provider: result.active.provider,
+                                  model: result.active.model,
+                                  hasApiKey: result.active.hasApiKey,
+                                  baseUrl: result.active.baseUrl,
+                                  isActive: true,
+                                });
+                              }
                               await refreshAiConfig();
-                              addToast('模型已切换', 'success');
-                            } catch { addToast('切换失败', 'error'); }
+                              const name = result.active
+                                ? `${result.active.provider}/${result.active.model}`
+                                : `${entry.provider}/${entry.model}`;
+                              addToast(`已切换到 ${name}`, 'success');
+                            } catch (err) {
+                              await refreshAiConfig().catch(() => {});
+                              addToast(`切换失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+                            } finally {
+                              setAiSaving(false);
+                            }
+                            return;
                           }
+                          applyAiModelToForm(entry);
                         }}>
                         <option value="">+ 新建配置</option>
                         {aiSavedModels.map(i => {
                           const realName = `${i.provider}/${i.model}`;
                           const display = (i.label && i.label !== realName) ? `${i.label} (${realName})` : realName;
-                          return <option key={i.id} value={i.id}>{display}{i.isActive ? ' ✓' : ''}</option>;
+                          const keyStatus = i.hasApiKey ? '' : ' [未配置Key]';
+                          return <option key={i.id} value={i.id}>{display}{keyStatus}{i.isActive ? ' ✓' : ''}</option>;
                         })}
                       </select>
                       {aiConfigured && <span className="settings-status-badge ok">已配置</span>}
@@ -719,6 +788,45 @@ export default function SettingsPanel() {
                     <span className="settings-row-label">风险阈值</span>
                     <div className="settings-row-value"><select className="select" title="风险阈值" aria-label="风险阈值" value={policy.approval.riskThreshold} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } }))}><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
                   </div>
+                </div>
+                <div className="settings-card">
+                  <h4 className="settings-card-title">权限边界（RDKClaw 自主掌控）</h4>
+                  <div className="settings-row">
+                    <span className="settings-row-label">本机工作区边界</span>
+                    <input type="checkbox" title="本机工作区边界" aria-label="本机工作区边界" checked={policy.permission.workspaceBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, workspaceBoundaryEnabled: e.target.checked } }))} />
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">板端路径白名单</span>
+                    <input type="checkbox" title="板端路径白名单" aria-label="板端路径白名单" checked={policy.permission.devicePathBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, devicePathBoundaryEnabled: e.target.checked } }))} />
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">宿主机防污染</span>
+                    <input type="checkbox" title="宿主机防污染" aria-label="宿主机防污染" checked={policy.permission.hostMutationGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, hostMutationGuardEnabled: e.target.checked } }))} />
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">危险命令拦截</span>
+                    <input type="checkbox" title="危险命令拦截" aria-label="危险命令拦截" checked={policy.permission.commandDangerGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, commandDangerGuardEnabled: e.target.checked } }))} />
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">记录安全审计</span>
+                    <input type="checkbox" title="记录安全审计" aria-label="记录安全审计" checked={policy.permission.auditLogEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, auditLogEnabled: e.target.checked } }))} />
+                  </div>
+                  <span className="settings-hint">范围内自动执行，范围外直接拦截；高风险按审批策略处理。</span>
+                </div>
+                <div className="settings-card">
+                  <h4 className="settings-card-title">安全审计（最近 30 条）</h4>
+                  <div className="settings-actions">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={refreshSecurityAudit} disabled={securityAuditLoading}>{securityAuditLoading ? '刷新中...' : '刷新'}</button>
+                    <button type="button" className="btn btn-danger btn-sm" onClick={handleClearSecurityAudit} disabled={securityAuditLoading}>清空</button>
+                  </div>
+                  {securityAudit.length === 0 ? (
+                    <span className="settings-hint">暂无审计记录</span>
+                  ) : securityAudit.map((item) => (
+                    <div className="settings-row" key={item.id}>
+                      <span className="settings-row-label">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                      <span className="settings-hint">{`${item.action} · ${item.toolName} · ${item.risk}${item.reason ? ` · ${item.reason}` : ''}`}</span>
+                    </div>
+                  ))}
                 </div>
                 <div className="settings-card">
                   <h4 className="settings-card-title">记忆</h4>

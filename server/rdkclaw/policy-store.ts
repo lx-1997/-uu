@@ -8,8 +8,15 @@ const POLICY_FILE = path.join(CONFIG_DIR, "rdkclaw-policy.json");
 
 const DEFAULT_POLICY: RDKClawPolicy = {
   approval: {
-    mode: "always",
-    riskThreshold: "medium",
+    mode: "risk-based",
+    riskThreshold: "high",
+  },
+  permission: {
+    workspaceBoundaryEnabled: true,
+    devicePathBoundaryEnabled: true,
+    hostMutationGuardEnabled: true,
+    commandDangerGuardEnabled: true,
+    auditLogEnabled: true,
   },
   memory: {
     mainSessionReadsMemory: true,
@@ -56,6 +63,7 @@ export class RDKClawPolicyStore {
         ...DEFAULT_POLICY,
         ...parsed,
         approval: { ...DEFAULT_POLICY.approval, ...(parsed.approval ?? {}) },
+        permission: { ...DEFAULT_POLICY.permission, ...(parsed.permission ?? {}) },
         memory: { ...DEFAULT_POLICY.memory, ...(parsed.memory ?? {}) },
         network: { ...DEFAULT_POLICY.network, ...(parsed.network ?? {}) },
         context: {
@@ -74,6 +82,7 @@ export class RDKClawPolicyStore {
       ...prev,
       ...patch,
       approval: { ...prev.approval, ...(patch.approval ?? {}) },
+      permission: { ...prev.permission, ...(patch.permission ?? {}) },
       memory: { ...prev.memory, ...(patch.memory ?? {}) },
       network: { ...prev.network, ...(patch.network ?? {}) },
       context: { ...prev.context, ...(patch.context ?? {}) },

@@ -48,6 +48,7 @@ import { WeixinPollingChannel } from './agent/channels/weixin.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
+import { clearSecurityAuditLogs, listSecurityAuditLogs } from './rdkclaw/security-audit-store.js';
 import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
@@ -3529,8 +3530,10 @@ app.post('/api/agent/plan', async (request, response) => {
 // ─── Agent Provider Config ───
 
 app.get('/api/agent/config', (_request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
   const config = loadProviderConfig();
   const registry = loadProviderRegistry();
+  const envApiKeyAvailable = Boolean(String(process.env.OPENAI_API_KEY || '').trim());
   const models = registry.entries.map((entry) => ({
     id: entry.id,
     label: entry.label,
@@ -3541,7 +3544,12 @@ app.get('/api/agent/config', (_request, response) => {
     isActive: entry.id === registry.activeId,
   }));
   if (!config) {
-    response.json({ configured: false, models, activeModelId: registry.activeId || null });
+    response.json({
+      configured: false,
+      models,
+      activeModelId: registry.activeId || null,
+      envApiKeyAvailable,
+    });
     return;
   }
   response.json({
@@ -3552,6 +3560,7 @@ app.get('/api/agent/config', (_request, response) => {
     baseUrl: config.baseUrl,
     models,
     activeModelId: registry.activeId || null,
+    envApiKeyAvailable,
   });
 });
 
@@ -3574,12 +3583,35 @@ app.post('/api/agent/config', (request, response) => {
       response.status(400).json({ error: '缺少模型 ID' });
       return;
     }
+    const registry = loadProviderRegistry();
+    const entry = registry.entries.find((item) => item.id === id);
+    if (!entry) {
+      response.status(404).json({ error: '模型不存在' });
+      return;
+    }
+    const effectiveKey = entry.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
+    if (!effectiveKey) {
+      response.status(400).json({ error: '目标模型未配置 API Key，请先编辑并保存或在环境变量中配置 OPENAI_API_KEY' });
+      return;
+    }
     const ok = switchActiveProviderConfig(id);
     if (!ok) {
       response.status(404).json({ error: '模型不存在' });
       return;
     }
-    response.json({ ok: true });
+    const next = loadProviderConfig();
+    response.json({
+      ok: true,
+      active: next
+        ? {
+            id,
+            provider: next.provider,
+            model: next.model,
+            baseUrl: next.baseUrl,
+            hasApiKey: Boolean(next.apiKey?.trim() || process.env.OPENAI_API_KEY?.trim()),
+          }
+        : { id, provider: entry.provider, model: entry.model, baseUrl: entry.baseUrl, hasApiKey: Boolean(effectiveKey) },
+    });
     return;
   }
 
@@ -3742,6 +3774,17 @@ app.get('/api/rdkclaw/policy', (_request, response) => {
 app.post('/api/rdkclaw/policy', (request, response) => {
   const patch = request.body ?? {};
   response.json({ ok: true, policy: rdkclaw.savePolicy(patch) });
+});
+
+app.get('/api/rdkclaw/security-audit', (request, response) => {
+  const limitRaw = Number(request.query.limit ?? 30);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.floor(limitRaw))) : 30;
+  response.json({ ok: true, items: listSecurityAuditLogs(limit) });
+});
+
+app.post('/api/rdkclaw/security-audit/clear', (_request, response) => {
+  clearSecurityAuditLogs();
+  response.json({ ok: true });
 });
 
 app.get('/api/rdkclaw/forum/auth', (_request, response) => {
