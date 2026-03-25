@@ -21,6 +21,7 @@
  */
 
 import crypto from "node:crypto";
+import path from "node:path";
 import type { Tool, ToolContext } from "./tools/types.js";
 import { builtinTools } from "./tools/builtin.js";
 import { wrapToolWithAbortSignal } from "./tools/abort.js";
@@ -157,6 +158,8 @@ export interface AgentConfig {
    * - global lane 控制不同 session 间可同时跑几个（默认 2）
    */
   maxConcurrentRuns?: number;
+  /** 额外允许读写的根目录（打包后用户工作区等） */
+  extraAllowedRoots?: string[];
 }
 
 export interface RunResult {
@@ -216,6 +219,7 @@ export class Agent {
   private maxTurns: number;
   private workspaceDir: string;
   private bootstrapDir?: string;
+  private extraAllowedRoots?: string[];
   private toolPolicy?: ToolPolicy;
   private approval?: ApprovalConfig;
   private onApprovalRequest?: ApprovalHandler;
@@ -342,6 +346,7 @@ export class Agent {
     this.maxTurns = config.maxTurns ?? 20;
     this.workspaceDir = config.workspaceDir ?? process.cwd();
     this.bootstrapDir = config.bootstrapDir;
+    this.extraAllowedRoots = config.extraAllowedRoots;
     this.apiKey = config.apiKey ?? getEnvApiKey(provider);
     this.temperature = config.temperature;
     this.reasoning = config.reasoning ?? "medium";
@@ -365,7 +370,14 @@ export class Agent {
     this.context = new ContextLoader(this.workspaceDir, {
       bootstrapDir: this.bootstrapDir,
     });
-    this.skills = new SkillManager(this.workspaceDir);
+    const extraSkillsDirs = this.extraAllowedRoots
+      ?.map((r) => path.join(r, "skills"))
+      .filter((d) => d !== path.join(this.workspaceDir, "skills"));
+    this.skills = new SkillManager(
+      this.workspaceDir,
+      undefined,
+      extraSkillsDirs && extraSkillsDirs.length > 0 ? extraSkillsDirs : undefined,
+    );
     this.heartbeat = new HeartbeatManager(this.workspaceDir, {
       intervalMs: config.heartbeatInterval,
     });
@@ -692,6 +704,7 @@ export class Agent {
           const toolCtx: ToolContext = {
             workspaceDir: this.workspaceDir,
             bootstrapDir: this.bootstrapDir,
+            extraAllowedRoots: this.extraAllowedRoots,
             sessionKey,
             sessionId: sessionIdOrKey,
             agentId: resolveAgentIdFromSessionKey(sessionKey),

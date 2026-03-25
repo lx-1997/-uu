@@ -1,4 +1,5 @@
 import * as crypto from "node:crypto";
+import * as path from "node:path";
 import {
   Agent,
   builtinTools,
@@ -710,6 +711,9 @@ export class RDKClawApp {
     const boardSnapshotMs = Date.now() - boardSnapshotStartedAt;
     const workspace = await workspacePromise;
     const workspaceInitMs = Date.now() - workspaceStartedAt;
+    if (workspace.workspaceDir !== this.workspaceDir) {
+      this.skills.addExtraDir(path.join(workspace.workspaceDir, "skills"));
+    }
     const attachmentPrompt = buildAttachmentPrompt(attachmentState.newAttachments);
     const effectiveMessage = [String(req.message || "").trim(), attachmentPrompt].filter(Boolean).join("\n\n");
     const persona = this.personaStore.getPersona();
@@ -828,6 +832,10 @@ export class RDKClawApp {
         setup_board_snapshot_ms: boardSnapshotMs,
       },
     });
+    const extraRoots: string[] = [];
+    if (workspace.workspaceDir !== this.workspaceDir) {
+      extraRoots.push(workspace.workspaceDir);
+    }
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
@@ -841,6 +849,7 @@ export class RDKClawApp {
       bootstrapDir: workspace.workspaceDir,
       sessionDir: workspace.sessionDir,
       memoryDir: workspace.memoryDir,
+      extraAllowedRoots: extraRoots.length > 0 ? extraRoots : undefined,
       enableContext: true,
       enableSkills: true,
       enableMemory: true,

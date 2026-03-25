@@ -135,10 +135,11 @@ function resolveInvocationPolicy(fm: ParsedSkillFrontmatter): SkillInvocationPol
 async function loadSkillEntries(
   workspaceDir: string,
   managedDir: string,
+  extraSkillsDirs?: string[],
 ): Promise<SkillEntry[]> {
   const merged = new Map<string, Skill>();
 
-  // 优先级: managed < workspace（对应 OpenClaw 的 extra < bundled < managed < workspace）
+  // 优先级: managed < workspace < extraDirs（后加载覆盖先加载）
   const managedSkills = await loadSkillsFromDir({ dir: managedDir, source: "managed" });
   for (const skill of managedSkills) {
     merged.set(skill.name, skill);
@@ -151,6 +152,15 @@ async function loadSkillEntries(
   });
   for (const skill of workspaceSkills) {
     merged.set(skill.name, skill);
+  }
+
+  if (extraSkillsDirs) {
+    for (const dir of extraSkillsDirs) {
+      const extra = await loadSkillsFromDir({ dir, source: "workspace" });
+      for (const skill of extra) {
+        merged.set(skill.name, skill);
+      }
+    }
   }
 
   // 丰富为 SkillEntry（重读文件提取编排层元数据）
@@ -307,6 +317,7 @@ function resolveCommandInvocation(
 export class SkillManager {
   private workspaceDir: string;
   private managedDir: string;
+  private extraSkillsDirs?: string[];
   /** 加载后的全部 entry（按 name 去重，后加载覆盖） */
   private entries: SkillEntry[] = [];
   /** 构建好的斜杠命令列表 */
@@ -314,10 +325,11 @@ export class SkillManager {
   private loaded = false;
 
   /**
-   * @param workspaceDir 工作目录（最高优先级 skill 来源）
+   * @param workspaceDir 工作目录（skill 来源之一）
    * @param managedDir 用户全局目录（~/.mini-agent/skills/）
+   * @param extraSkillsDirs 额外 skills 目录（用户工作区等，最高优先级）
    */
-  constructor(workspaceDir: string, managedDir?: string) {
+  constructor(workspaceDir: string, managedDir?: string, extraSkillsDirs?: string[]) {
     this.workspaceDir = workspaceDir;
     this.managedDir =
       managedDir ??
@@ -326,16 +338,12 @@ export class SkillManager {
         ".mini-agent",
         "skills",
       );
+    this.extraSkillsDirs = extraSkillsDirs;
   }
 
-  /**
-   * 加载所有 skill（多层合并 + 命令列表构建）
-   *
-   * 对应 OpenClaw: loadSkillEntries() + buildWorkspaceSkillCommandSpecs()
-   */
   async loadAll(): Promise<void> {
     if (this.loaded) return;
-    this.entries = await loadSkillEntries(this.workspaceDir, this.managedDir);
+    this.entries = await loadSkillEntries(this.workspaceDir, this.managedDir, this.extraSkillsDirs);
     this.commands = buildSkillCommandSpecs(this.entries);
     this.loaded = true;
   }

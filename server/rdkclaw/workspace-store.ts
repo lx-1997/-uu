@@ -145,6 +145,7 @@ export class UserWorkspaceStore {
   async ensureInitialized(target: ResolvedWorkspace, userId?: string): Promise<void> {
     await fs.mkdir(target.workspaceDir, { recursive: true });
     await fs.mkdir(path.join(target.workspaceDir, "memory"), { recursive: true });
+    await fs.mkdir(path.join(target.workspaceDir, "skills"), { recursive: true });
     await fs.mkdir(target.sessionDir, { recursive: true });
     await fs.mkdir(target.memoryDir, { recursive: true });
 
@@ -158,6 +159,28 @@ export class UserWorkspaceStore {
         content = `${content.trimEnd()}\n\n- userId: ${userId?.trim() || "unknown-user"}\n`;
       }
       await fs.writeFile(filePath, content, "utf-8");
+    }
+
+    await this.seedBundledSkills(target.workspaceDir);
+  }
+
+  private async seedBundledSkills(workspaceDir: string): Promise<void> {
+    const bundledSkillsDir = path.join(this.defaultWorkspaceDir, "skills");
+    const userSkillsDir = path.join(workspaceDir, "skills");
+    try {
+      const entries = await fs.readdir(bundledSkillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const destDir = path.join(userSkillsDir, entry.name);
+        const destSkill = path.join(destDir, "SKILL.md");
+        if (await fileExists(destSkill)) continue;
+        const srcSkill = path.join(bundledSkillsDir, entry.name, "SKILL.md");
+        if (!(await fileExists(srcSkill))) continue;
+        await fs.mkdir(destDir, { recursive: true });
+        await fs.copyFile(srcSkill, destSkill);
+      }
+    } catch {
+      // bundled skills dir may not exist in some environments
     }
   }
 

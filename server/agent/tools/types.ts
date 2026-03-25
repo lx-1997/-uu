@@ -43,6 +43,8 @@ export interface ToolContext {
   workspaceDir: string;
   /** Bootstrap 根目录: AGENTS/SOUL/USER/MEMORY 等文件所在目录 */
   bootstrapDir?: string;
+  /** 额外允许访问的根目录（用户工作区等，读写均可） */
+  extraAllowedRoots?: string[];
   /** 会话 Key: 用于隔离不同 agent / 会话的状态 */
   sessionKey: string;
   /** 兼容字段：保留 sessionId（便于 CLI/调试显示） */

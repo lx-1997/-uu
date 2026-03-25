@@ -54,13 +54,13 @@ export const readTool: Tool<{ file_path: string; limit?: number }> = {
     required: ["file_path"],
   },
   async execute(input, ctx) {
-    // 安全: 确保路径在 workspaceDir 内，并拒绝符号链接逃逸
     let filePath: string;
     try {
       const resolved = await assertSandboxPath({
         filePath: input.file_path,
         cwd: ctx.workspaceDir,
         root: ctx.workspaceDir,
+        extraRoots: ctx.extraAllowedRoots,
       });
       filePath = resolved.resolved;
     } catch (err) {
@@ -111,6 +111,7 @@ export const writeTool: Tool<{ file_path: string; content: string }> = {
         filePath: input.file_path,
         cwd: ctx.workspaceDir,
         root: ctx.workspaceDir,
+        extraRoots: ctx.extraAllowedRoots,
       });
       filePath = resolved.resolved;
     } catch (err) {
@@ -118,7 +119,6 @@ export const writeTool: Tool<{ file_path: string; content: string }> = {
     }
 
     try {
-      // 自动创建父目录
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, input.content, "utf-8");
       return `成功写入 ${input.file_path}`;
@@ -169,6 +169,7 @@ export const editTool: Tool<{
         filePath: input.file_path,
         cwd: ctx.workspaceDir,
         root: ctx.workspaceDir,
+        extraRoots: ctx.extraAllowedRoots,
       });
       filePath = resolved.resolved;
     } catch (err) {
@@ -341,6 +342,7 @@ export const listTool: Tool<{ path?: string; limit?: number }> = {
         filePath: input.path ?? ".",
         cwd: ctx.workspaceDir,
         root: ctx.workspaceDir,
+        extraRoots: ctx.extraAllowedRoots,
       });
       dirPath = resolved.resolved;
     } catch (err) {
@@ -414,6 +416,7 @@ export const grepTool: Tool<{ pattern: string; path?: string }> = {
         filePath: input.path ?? ".",
         cwd: ctx.workspaceDir,
         root: ctx.workspaceDir,
+        extraRoots: ctx.extraAllowedRoots,
       });
       const searchPath = resolved.resolved;
 

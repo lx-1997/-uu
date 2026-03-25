@@ -4,6 +4,7 @@ import type { RDKClawSkillMeta, SkillPermission } from "../types.js";
 
 interface SkillRegistryOptions {
   workspaceDir: string;
+  extraDirs?: string[];
 }
 
 function parseFrontmatter(content: string): Record<string, string> {
@@ -57,11 +58,20 @@ function collectSkillFiles(dir: string): string[] {
 
 export class SkillRegistry {
   private workspaceDir: string;
+  private extraDirs: string[];
   private cache: RDKClawSkillMeta[] = [];
   private lastLoadedAt = 0;
 
   constructor(opts: SkillRegistryOptions) {
     this.workspaceDir = opts.workspaceDir;
+    this.extraDirs = opts.extraDirs ?? [];
+  }
+
+  addExtraDir(dir: string): void {
+    if (!this.extraDirs.includes(dir)) {
+      this.extraDirs.push(dir);
+      this.lastLoadedAt = 0;
+    }
   }
 
   loadAll(force = false): RDKClawSkillMeta[] {
@@ -73,6 +83,7 @@ export class SkillRegistry {
       path.join(this.workspaceDir, "skills"),
       path.join(this.workspaceDir, "agent", "skills"),
       path.join(this.workspaceDir, ".cursor", "skills"),
+      ...this.extraDirs,
     ];
     const files = sources.flatMap((d) => collectSkillFiles(d));
     const metas: RDKClawSkillMeta[] = [];
