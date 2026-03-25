@@ -2603,6 +2603,33 @@ app.get('/api/devices/:id/openclaw/skill-content', async (request, response) => 
   }
 });
 
+app.post('/api/devices/:id/openclaw/skill-write', async (request, response) => {
+  const { id } = request.params;
+  const { skillId, content } = request.body as { skillId?: string; content?: string };
+  const name = String(skillId || '').trim();
+  const md = String(content || '').trim();
+  if (!name || !md) {
+    sendApiError(response, 400, 'INVALID_SKILL_WRITE', 'skillId 和 content 不能为空', { retryable: false });
+    return;
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    sendApiError(response, 400, 'INVALID_SKILL_ID', 'skillId 只能包含字母、数字、下划线和横线', { retryable: false });
+    return;
+  }
+  const skillDir = `/root/.openclaw/workspace/skills/${name}`;
+  const b64 = Buffer.from(md, 'utf-8').toString('base64');
+  const run = await runOnDevice(request, response, id, [
+    `bash -lc "mkdir -p '${skillDir}' && echo '${b64}' | base64 -d > '${skillDir}/SKILL.md' && echo OK"`,
+  ]);
+  if (!run) return;
+  const ok = String(run.output || '').trim().endsWith('OK');
+  if (ok) {
+    response.json({ ok: true, path: `${skillDir}/SKILL.md`, message: `技能 ${name} 已写入板端` });
+  } else {
+    sendApiError(response, 500, 'SKILL_WRITE_FAILED', '写入失败', { retryable: true, details: { output: run.output } });
+  }
+});
+
 app.post('/api/devices/:id/openclaw/pairing/list', async (request, response) => {
   const { id } = request.params;
   const { channel } = request.body as { channel?: string };

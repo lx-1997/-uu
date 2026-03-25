@@ -9,6 +9,7 @@ interface OpenClawSkillsPayload {
 }
 
 type SourceKind = 'github' | 'nodehub' | 'web';
+type RightTab = 'view' | 'create' | 'link';
 
 function looksLikeHttpUrl(v: string): boolean {
   try {
@@ -37,70 +38,98 @@ function getSourceKindLabel(kind: SourceKind): string {
   return '普通网页';
 }
 
+const SKILL_TEMPLATE = `---
+name: my-skill
+description: "一句话描述技能的能力边界"
+version: 1.0.0
+trigger: 关键词1,关键词2,keyword1,keyword2
+risk: low
+permissions: device_exec
+delegate_preference: board
+requires_board: true
+approval_level: none
+cooldown_seconds: 0
+scheduler_template: none
+category: Custom
+---
+
+# 技能标题
+
+## 适用场景
+- 具体场景描述
+
+## 执行流程
+1. 步骤一（对应具体命令或工具）
+2. 步骤二
+3. 步骤三
+
+## 前置条件
+- 需要的环境或依赖
+
+## 验证步骤
+- 如何验证技能执行成功
+`;
+
 function buildQualityPromptBySource(
   kind: SourceKind,
   url: string,
   goal: string,
   deviceHint: string,
 ): string {
-  const skillTemplate = [
-    'SKILL.md 模板（必须严格遵循）：',
-    '---',
-    'name: <skill-name>',
-    'description: "<一句话描述边界>"',
-    'version: 1.0.0',
-    'trigger: <逗号分隔关键词，含中英文>',
-    'risk: low|medium|high',
-    'permissions: <最小必要权限，逗号分隔>',
-    'delegate_preference: local|board|hybrid',
-    'requires_board: true|false',
-    'approval_level: none|auto|confirm|strict',
-    '---',
-    '# <标题>',
-    '## 场景',
-    '## 执行流程（3-6步，动作句）',
-    '## 失败回退',
-    '## 验证步骤',
-  ].join('\n');
-
   const common = [
-    '通用质量要求：',
+    '【重要】你必须使用 board_openclaw_write_skill 工具将生成的 SKILL.md 直接写入板端。不要只输出文本。',
+    '如果没有该工具可用，请生成完整的 SKILL.md 内容并明确告知用户需要手动部署。',
+    '',
+    '质量要求：',
     '1) 必须给出可执行命令，不允许只给概念描述。',
-    '2) 若关键信息缺失，必须明确列出“缺失项 + 风险 + 建议补充”。',
-    '3) 必须输出完整 SKILL.md（name/description/trigger/risk/permissions/delegate_preference/approval_level）。',
-    '4) 给出推荐 skillId 与 slug，并说明命名依据。',
+    '2) 若关键信息缺失，必须明确列出"缺失项 + 风险 + 建议补充"。',
+    '3) 必须输出完整 SKILL.md，包含所有 frontmatter 字段（name/description/version/trigger/risk/permissions/delegate_preference/requires_board/approval_level/cooldown_seconds/scheduler_template/category）。',
+    '4) 给出推荐的技能名（kebab-case），并说明命名依据。',
     `5) 目标设备：${deviceHint}`,
-    '6) 若设备在线：执行安装与验证；若不在线：输出一键安装命令与验证命令。',
-    '7) 最终输出结构：A. 信息来源摘要 B. 生成的 SKILL.md C. 安装/验证步骤 D. 风险与回滚方案。',
-    '必须进行三轮自检验证：格式、可执行性、可用性。',
-    skillTemplate,
+    '6) 最终输出结构：A. 信息来源摘要 B. 生成的 SKILL.md C. 部署结果 D. 风险与回滚方案。',
   ];
 
   if (kind === 'github') {
     return [
-      '这是 GitHub 仓库链接，请按“代码仓库技能化”流程执行。',
+      `请将以下 GitHub 仓库转化为 OpenClaw 技能并部署到板端。`,
       `链接: ${url}`,
       `目标: ${goal}`,
-      'GitHub 专项要求：README/依赖文件/构建与运行拆分/版本锁定建议。',
+      'GitHub 专项：分析 README、依赖文件，提取构建与运行命令，锁定版本。',
       ...common,
     ].join('\n');
   }
   if (kind === 'nodehub') {
     return [
-      '这是 NodeHub 链接，请按“应用页面技能化”流程执行。',
+      `请将以下 NodeHub 应用转化为 OpenClaw 技能并部署到板端。`,
       `链接: ${url}`,
       `目标: ${goal}`,
-      'NodeHub 专项要求：应用ID、安装/运行/停止、配置项、资源占用与长期驻留判断。',
+      'NodeHub 专项：提取应用 ID、安装/运行/停止命令、配置项、资源占用。',
       ...common,
     ].join('\n');
   }
   return [
-    '这是普通网页链接，请按“文档到技能”流程执行。',
+    `请将以下网页内容转化为 OpenClaw 技能并部署到板端。`,
     `链接: ${url}`,
     `目标: ${goal}`,
-    '网页专项要求：抓取正文 + 抽取要点 + 至少一个来源交叉验证。',
+    '网页专项：抓取正文要点，提取可执行的操作步骤。',
     ...common,
   ].join('\n');
+}
+
+async function writeSkillToBoard(deviceId: string, skillId: string, content: string): Promise<{ ok: boolean; message: string; path?: string }> {
+  const res = await fetch(resolveApiUrl(`/api/devices/${deviceId}/openclaw/skill-write`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skillId, content }),
+  });
+  const data = await res.json();
+  if (!res.ok) return { ok: false, message: data?.error || `HTTP ${res.status}` };
+  return { ok: !!data.ok, message: data.message || '写入完成', path: data.path };
+}
+
+function extractSkillName(content: string): string {
+  const match = content.match(/^name:\s*(.+)$/m);
+  return match ? match[1].trim() : '';
 }
 
 export default function SkillBrowser() {
@@ -115,8 +144,21 @@ export default function SkillBrowser() {
   const [skillContentPath, setSkillContentPath] = useState('');
   const [skillContentLoading, setSkillContentLoading] = useState(false);
 
+  const [rightTab, setRightTab] = useState<RightTab>('view');
+
+  // Create skill state
+  const [newSkillId, setNewSkillId] = useState('');
+  const [newSkillContent, setNewSkillContent] = useState(SKILL_TEMPLATE);
+  const [deploying, setDeploying] = useState(false);
+
+  // Link-to-skill state
   const [sourceUrl, setSourceUrl] = useState('');
   const [skillGoal, setSkillGoal] = useState('');
+
+  // Edit mode
+  const [editContent, setEditContent] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const loadBoardSkills = useCallback(async () => {
     if (!currentDevice) {
@@ -151,6 +193,7 @@ export default function SkillBrowser() {
     setSkillContentLoading(true);
     setSkillContent('');
     setSkillContentPath('');
+    setEditing(false);
     try {
       const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/skill-content?skillId=${encodeURIComponent(skillId)}`));
       const data = await res.json() as { ok?: boolean; content?: string; path?: string; error?: string };
@@ -189,7 +232,10 @@ export default function SkillBrowser() {
   }, [boardSkills, selectedBoardSkill]);
 
   useEffect(() => {
-    if (selectedBoardSkill) void loadSkillContent(selectedBoardSkill.split('|')[0]);
+    if (selectedBoardSkill) {
+      void loadSkillContent(selectedBoardSkill.split('|')[0]);
+      setRightTab('view');
+    }
   }, [selectedBoardSkill, loadSkillContent]);
 
   const filteredBoardSkills = useMemo(() => {
@@ -200,9 +246,50 @@ export default function SkillBrowser() {
 
   const sourceKind = useMemo(() => (looksLikeHttpUrl(sourceUrl) ? detectSourceKind(sourceUrl) : null), [sourceUrl]);
 
-  const startCreateDialog = (prompt: string) => {
-    setCmd(prompt);
-    setChatExpanded(true);
+  const handleDeploy = async () => {
+    if (!currentDevice) return addToast?.('请先连接设备', 'warning');
+    const id = newSkillId.trim() || extractSkillName(newSkillContent);
+    if (!id) return addToast?.('请填写技能名称（或在 SKILL.md 中设置 name 字段）', 'warning');
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) return addToast?.('技能名只能包含字母、数字、下划线和横线', 'warning');
+    if (!newSkillContent.trim()) return addToast?.('SKILL.md 内容不能为空', 'warning');
+
+    setDeploying(true);
+    try {
+      const result = await writeSkillToBoard(currentDevice.id, id, newSkillContent.trim());
+      if (result.ok) {
+        addToast?.(`技能 ${id} 已部署到板端: ${result.path || ''}`, 'success');
+        await loadBoardSkills();
+        setRightTab('view');
+      } else {
+        addToast?.(`部署失败: ${result.message}`, 'error');
+      }
+    } catch (e: any) {
+      addToast?.(`部署失败: ${e?.message || '网络错误'}`, 'error');
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!currentDevice || !selectedBoardSkill) return;
+    const id = selectedBoardSkill.split('|')[0];
+    if (!id) return;
+    setSaving(true);
+    try {
+      const result = await writeSkillToBoard(currentDevice.id, id, editContent.trim());
+      if (result.ok) {
+        addToast?.(`技能 ${id} 已更新`, 'success');
+        setEditing(false);
+        setSkillContent(editContent);
+        await loadBoardSkills();
+      } else {
+        addToast?.(`保存失败: ${result.message}`, 'error');
+      }
+    } catch (e: any) {
+      addToast?.(`保存失败: ${e?.message || '网络错误'}`, 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const startUrlBasedSkillCreate = () => {
@@ -216,29 +303,40 @@ export default function SkillBrowser() {
       goal,
       currentDevice ? `${currentDevice.name} (${currentDevice.id})` : '当前未连接设备，先只生成定义',
     );
-    startCreateDialog(prompt);
+    setCmd(prompt);
+    setChatExpanded(true);
+  };
+
+  const startEdit = () => {
+    setEditContent(skillContent);
+    setEditing(true);
   };
 
   return (
     <div className="config-page" style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <strong style={{ fontSize: '1rem' }}>OpenClaw 技能工坊</strong>
-          <span className="badge badge-muted">{boardSkills.length} 个板端真实技能</span>
+          <span className="badge badge-muted">{boardSkills.length} 个板端技能</span>
+          {openclawHealth && (
+            <span className={`badge ${openclawHealth.gatewayRunning ? 'badge-ok' : 'badge-muted'}`}>
+              {openclawHealth.gatewayRunning ? '网关运行中' : '网关未运行'}
+            </span>
+          )}
         </div>
         <button className="btn btn-ghost btn-sm" onClick={loadBoardSkills} disabled={loading}>{loading ? '...' : '刷新'}</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {/* Sidebar */}
         <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>板端真实技能列表</div>
-            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索板端技能..." style={{ fontSize: '0.8125rem' }} />
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索技能..." style={{ fontSize: '0.8125rem' }} />
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {filteredBoardSkills.length === 0 && (
               <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-                当前设备无已安装技能
+                {currentDevice ? '当前设备无已安装技能' : '请先连接设备'}
               </div>
             )}
             {filteredBoardSkills.map((s) => {
@@ -250,69 +348,142 @@ export default function SkillBrowser() {
                   className={`config-sidebar-item ${selectedBoardSkill === s ? 'active' : ''}`}
                   onClick={() => setSelectedBoardSkill(s)}
                   title={desc || name}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px' }}
                 >
-                  <span className="badge badge-ok" style={{ fontSize: '0.56rem' }}>real</span>
                   <strong style={{ fontSize: '0.75rem', flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</strong>
                 </button>
               );
             })}
           </div>
+          <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)' }}>
+            <button className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: '0.75rem' }} onClick={() => setRightTab('create')}>+ 创建新技能</button>
+          </div>
         </div>
 
+        {/* Right panel */}
         <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ background: 'var(--accent-subtle)', borderRadius: 'var(--radius-md)', padding: '16px', border: '1px solid var(--accent-border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <strong style={{ fontSize: '0.875rem' }}>链接转技能（高质量模式）</strong>
-                <span className="badge badge-accent">AI 驱动</span>
-              </div>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-                支持 GitHub / NodeHub / 普通网页；会按来源类型应用不同的制作规范与三轮验证。
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <input className="input" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="粘贴链接（GitHub / NodeHub / 文档 URL）" />
-                {sourceKind && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="badge badge-accent">识别类型: {getSourceKindLabel(sourceKind)}</span>
-                  </div>
+          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            {(['view', 'create', 'link'] as RightTab[]).map((t) => (
+              <button key={t} className={`btn btn-ghost btn-sm ${rightTab === t ? 'active' : ''}`}
+                onClick={() => setRightTab(t)}
+                style={{ borderRadius: 0, borderBottom: rightTab === t ? '2px solid var(--accent)' : '2px solid transparent', fontSize: '0.75rem', padding: '8px 16px' }}>
+                {t === 'view' ? '查看 / 编辑' : t === 'create' ? '创建技能' : '链接转技能'}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+            {/* Tab: View / Edit */}
+            {rightTab === 'view' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {!selectedBoardSkill ? (
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>请在左侧选择一个板端技能查看内容。</p>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <strong style={{ fontSize: '0.875rem' }}>{selectedBoardSkill.split('|')[0]}</strong>
+                        {skillContentPath && <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.625rem' }}>{skillContentPath}</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {!editing && (
+                          <button className="btn btn-ghost btn-sm" onClick={startEdit} disabled={skillContentLoading || !skillContent}>编辑</button>
+                        )}
+                        {editing && (
+                          <>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>取消</button>
+                            <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>{saving ? '保存中...' : '保存到板端'}</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {editing ? (
+                      <textarea
+                        className="input"
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        style={{ fontFamily: 'monospace', fontSize: '0.75rem', minHeight: 400, resize: 'vertical', whiteSpace: 'pre', lineHeight: 1.5 }}
+                      />
+                    ) : (
+                      <div className="config-terminal" style={{ maxHeight: 'none' }}>
+                        <pre style={{ margin: 0, fontSize: '0.75rem' }}>
+                          {skillContentLoading ? '正在读取板端 SKILL.md ...' : (skillContent || '未读取到内容')}
+                        </pre>
+                      </div>
+                    )}
+                  </>
                 )}
-                <textarea className="input" value={skillGoal} onChange={(e) => setSkillGoal(e.target.value)} rows={3} placeholder="可选：补充目标" style={{ resize: 'vertical', minHeight: 74 }} />
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn btn-primary btn-sm" onClick={startUrlBasedSkillCreate}>解析链接并生成 Skill</button>
+              </div>
+            )}
+
+            {/* Tab: Create */}
+            {rightTab === 'create' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <strong style={{ fontSize: '0.875rem' }}>创建自定义技能</strong>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                    编写 SKILL.md 内容，一键部署到板端 OpenClaw 技能目录。
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>技能 ID（kebab-case）</label>
+                  <input
+                    className="input"
+                    value={newSkillId}
+                    onChange={(e) => setNewSkillId(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+                    placeholder="例如: my-custom-skill"
+                    style={{ fontSize: '0.8125rem' }}
+                  />
+                  <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)' }}>
+                    留空则自动从 SKILL.md 的 name 字段提取。部署路径: ~/.openclaw/workspace/skills/{'{'}skillId{'}'}/SKILL.md
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>SKILL.md 内容</label>
+                  <textarea
+                    className="input"
+                    value={newSkillContent}
+                    onChange={(e) => setNewSkillContent(e.target.value)}
+                    style={{ fontFamily: 'monospace', fontSize: '0.75rem', minHeight: 360, resize: 'vertical', whiteSpace: 'pre', lineHeight: 1.5 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button className="btn btn-primary btn-sm" onClick={handleDeploy} disabled={deploying || !currentDevice}>
+                    {deploying ? '部署中...' : '部署到板端'}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setNewSkillContent(SKILL_TEMPLATE)}>重置模板</button>
+                  {!currentDevice && <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>请先连接设备</span>}
                 </div>
               </div>
-            </div>
+            )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <strong style={{ fontSize: '0.875rem' }}>板端 OpenClaw 状态</strong>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <span className={`badge ${openclawHealth?.installed ? 'badge-ok' : 'badge-muted'}`}>已安装: {openclawHealth?.installed ? '是' : '否'}</span>
-                <span className={`badge ${openclawHealth?.gatewayRunning ? 'badge-ok' : 'badge-muted'}`}>网关运行: {openclawHealth?.gatewayRunning ? '是' : '否'}</span>
-                <span className={`badge ${openclawHealth?.aiReady ? 'badge-ok' : 'badge-muted'}`}>AI就绪: {openclawHealth?.aiReady ? '是' : '否'}</span>
-              </div>
-            </div>
-
-            <div className="divider" />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <strong style={{ fontSize: '0.875rem' }}>Skill 内容</strong>
-                {skillContentPath && <span className="badge badge-muted">{skillContentPath}</span>}
-              </div>
-              {!selectedBoardSkill && (
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>请在左侧选择一个板端真实技能查看内容。</p>
-              )}
-              {selectedBoardSkill && (
-                <>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>当前技能: {selectedBoardSkill.split('|')[0]}</div>
-                  <div className="config-terminal" style={{ maxHeight: 360 }}>
-                    <pre style={{ margin: 0 }}>
-                      {skillContentLoading ? '正在读取板端 SKILL.md ...' : (skillContent || '未读取到内容')}
-                    </pre>
+            {/* Tab: Link-to-Skill */}
+            {rightTab === 'link' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <strong style={{ fontSize: '0.875rem' }}>链接转技能（AI 辅助）</strong>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                    输入 GitHub / NodeHub / 文档链接，AI 将分析内容并生成可部署的 OpenClaw 技能。
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <input className="input" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="粘贴链接（GitHub / NodeHub / 文档 URL）" />
+                  {sourceKind && (
+                    <span className="badge badge-accent" style={{ alignSelf: 'flex-start' }}>识别类型: {getSourceKindLabel(sourceKind)}</span>
+                  )}
+                  <textarea className="input" value={skillGoal} onChange={(e) => setSkillGoal(e.target.value)} rows={2} placeholder="可选：补充目标说明（如"提取 YOLO 推理相关命令"）" style={{ resize: 'vertical', minHeight: 56 }} />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn btn-primary btn-sm" onClick={startUrlBasedSkillCreate} disabled={!sourceUrl.trim()}>
+                      AI 生成并部署
+                    </button>
                   </div>
-                </>
-              )}
-            </div>
+                  <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
+                    流程说明：点击后将跳转到 AI 对话，AI 会分析链接内容、生成 SKILL.md 并通过工具直接写入板端。
+                    如果 AI 仅输出了文本模板，你可以复制内容到「创建技能」标签页手动部署。
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
