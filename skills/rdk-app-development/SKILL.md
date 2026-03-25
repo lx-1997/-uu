@@ -26,34 +26,36 @@ category: Development
 
 ## 执行流程
 
-### 第 1 步：需求理解与知识准备（RDKClaw 本地）
+### 第 1 步：需求理解 + 并行信息收集（关键！）
 
-**目标**：在委派前充分了解平台能力和最佳实践，避免盲目委派。
+**目标**：在一个 turn 中同时完成知识准备和板端评估，大幅缩短准备时间。
 
 1. 解析用户意图，提取关键词（应用类型、传感器需求、AI 能力需求）
-2. 调用 `ecosystem_query` 查询当前平台可用的技能、模型、框架：
-   - query 应包含应用类型 + 硬件需求（如"人脸检测 BPU 摄像头"）
-   - 记录匹配到的 EcoSkill（名称、installCmd、文档链接）
-3. 调用 `web_search` 搜索官方文档和参考实现：
-   - 搜索词："RDK {平台型号} {应用类型} 示例/教程"
-   - 记录关键参考链接和代码片段
+2. **在同一轮同时发起以下工具调用**（框架会自动并行执行）：
+   - `ecosystem_query`：查询当前平台可用的技能、模型、框架
+   - `web_search`：搜索官方文档和参考实现
+   - `board_openclaw_assess`：评估板端环境和能力
+   - `device_diagnose`（如需）：获取设备当前资源状态
+
+```
+# 并行调用示例（在同一个 turn 中同时发起）
+ecosystem_query(query="人脸检测 BPU 摄像头")
+web_search(query="RDK X5 人脸检测 示例 教程")
+board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
+```
+
+3. 等所有结果回来后，综合分析：
+   - ecosystem_query → 可用技能和推荐方案
+   - web_search → 官方文档和代码参考
+   - board_openclaw_assess → 板端能力和环境就绪度
+   - 如 assess 返回 canHandle: false，根据 reason 判断：缺依赖则调整方案，能力不足则降级
 
 > **原则**：SOUL.md 要求「先查后委」—— 不跳过知识准备直接委派。
-
-### 第 2 步：板端评估（跨 Agent）
-
-**目标**：确认板端环境就绪，避免委派后因环境问题失败。
-
-1. 调用 `board_openclaw_assess` 发送评估请求：
-   - task: 明确描述要执行的任务（如"创建并运行一个 Python 人脸检测应用，使用 BPU 加速"）
-   - context: 附带第 1 步查到的 EcoSkill 信息和硬件需求
-2. 解读评估结果：
-   - `canHandle: true` → 继续第 3 步
-   - `canHandle: false` → 根据 `reason` 判断：缺依赖则先安装，能力不足则调整方案或降级
+> **并行优势**：传统串行（搜索→评估→查询）需要 3 个 turn，并行只需 1 个 turn。
 
 > **降级路径**：若 OpenClaw 不可达，降级为 `device_exec` 直接执行简单命令，并告知用户。
 
-### 第 3 步：方案组装（RDKClaw 本地）
+### 第 2 步：方案组装（RDKClaw 本地）
 
 **目标**：将知识准备成果整理为结构化 guidance，确保 OpenClaw 拿到充分信息。
 
@@ -79,7 +81,7 @@ category: Development
 - {应用应达到的可观测效果，如"进程在运行""可通过浏览器访问 :8080"}
 ```
 
-### 第 4 步：带建议委派（跨 Agent）
+### 第 3 步：带建议委派（跨 Agent）
 
 **目标**：将任务和完整方案交给 OpenClaw 在板端实施。
 
@@ -95,7 +97,7 @@ category: Development
 
 > **注意**：delegate 会自动附加最多 5 个相关 ecosystem skills，无需手动注入。
 
-### 第 5 步：验证回收（RDKClaw + 板端）
+### 第 4 步：验证回收（RDKClaw + 板端）
 
 **目标**：不依赖 OpenClaw 自报，独立验证应用确实在运行。
 
@@ -106,7 +108,7 @@ category: Development
 2. 对比第 3 步的验收标准，判断是否达标
 3. 如未达标，尝试查看错误日志定位问题
 
-### 第 6 步：结果报告与经验沉淀
+### 第 5 步：结果报告与经验沉淀
 
 **目标**：给用户清晰的结果报告，并沉淀可复用的知识。
 
@@ -137,9 +139,34 @@ category: Development
 - 验证结果必须包含可复现的命令
 - 失败时给出明确的错误摘要和建议操作
 
+## 并行执行模式
+
+### 并行安全工具列表
+以下工具可以在同一 turn 中并行调用，框架会自动识别并并行执行：
+- `ecosystem_query`, `web_search`, `web_extract`
+- `board_openclaw_assess`, `board_openclaw_chat`
+- `board_openclaw_status`, `board_openclaw_health`, `board_openclaw_check`, `board_openclaw_logs`
+- `device_file_read`, `device_file_list`, `device_diagnose`
+- `attachment_describe_image`, `attachment_list`, `attachment_read`
+- `read`, `list`, `grep`, `memory_search`
+
+### 推荐并行模式
+
+**模式 A：信息收集并行（第 1 步）**
+同一 turn 中同时发起 ecosystem_query + web_search + board_openclaw_assess，一次性获取所有决策依据。
+
+**模式 B：委派 + 监控并行（第 3 步后）**
+委派 OpenClaw 执行后，在等待结果的同时可以：
+- 用 `web_search` 预查后续可能用到的资料
+- 用 `device_diagnose` 检查设备资源
+
+**模式 C：多维验证并行（第 4 步）**
+同一 turn 中同时发起多个 `device_exec` 检查进程、端口、日志。
+
 ## 禁止事项
 - **不跳过知识准备直接委派**：必须先 ecosystem_query + web_search 了解平台能力
 - **不跳过评估直接委派**：必须先 board_openclaw_assess 确认板端就绪
 - **不省略 guidance 中的技术方案**：guidance 不能是一句话，必须包含结构化方案
 - **不跳过独立验证**：委派完成后必须用 device_exec 独立确认运行状态
 - **不静默吞掉错误**：任何步骤失败都必须如实报告给用户
+- **不串行执行可并行的工具调用**：信息收集阶段的工具必须并行发起
