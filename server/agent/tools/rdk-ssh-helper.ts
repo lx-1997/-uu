@@ -24,6 +24,19 @@ function passwordCandidates(username: string): string[] {
   return Array.from(new Set(candidates));
 }
 
+function isTransientSshError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(msg);
+}
+
+function isSshAuthError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return /all configured authentication methods failed|permission denied|authentication failure|auth fail/.test(msg);
+}
+
+const TRANSIENT_RETRY_DELAY_MS = 1500;
+const MAX_TRANSIENT_RETRIES = 2;
+
 export async function getDevice(deviceId: string): Promise<Device | null> {
   const devices = await readDevices();
   return devices.find((d) => d.id === deviceId) ?? null;
@@ -46,18 +59,27 @@ export async function execOnDevice(deviceId: string, commands: string[]): Promis
   return runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
     const pwd = await getDevicePassword(device);
-    const candidates = [pwd, ...passwordCandidates(device.username)];
+    const candidates = [...new Set([pwd, ...passwordCandidates(device.username)])];
     let lastError: unknown = null;
-    for (const p of [...new Set(candidates)]) {
-      try {
-        const output = await runRemoteCommands(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: p },
-          commands,
-        );
-        devicePasswordCache.set(key, p);
-        return output;
-      } catch (err) {
-        lastError = err;
+    for (const p of candidates) {
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        try {
+          const output = await runRemoteCommands(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+            commands,
+          );
+          devicePasswordCache.set(key, p);
+          return output;
+        } catch (err) {
+          lastError = err;
+          if (isSshAuthError(err)) break;
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+            console.warn(`[SSH] transient error on ${device.host}, retry ${attempt + 1}/${MAX_TRANSIENT_RETRIES}: ${err instanceof Error ? err.message : err}`);
+            await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          break;
+        }
       }
     }
     throw lastError instanceof Error ? lastError : new Error('SSH 命令执行失败');
@@ -80,19 +102,27 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
   await runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
     const pwd = await getDevicePassword(device);
-    const candidates = [pwd, ...passwordCandidates(device.username)];
+    const candidates = [...new Set([pwd, ...passwordCandidates(device.username)])];
     let lastError: unknown = null;
-    for (const p of [...new Set(candidates)]) {
-      try {
-        await uploadFileSftp(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: p },
-          filePath,
-          Buffer.from(content, 'utf-8'),
-        );
-        devicePasswordCache.set(key, p);
-        return;
-      } catch (err) {
-        lastError = err;
+    for (const p of candidates) {
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        try {
+          await uploadFileSftp(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+            filePath,
+            Buffer.from(content, 'utf-8'),
+          );
+          devicePasswordCache.set(key, p);
+          return;
+        } catch (err) {
+          lastError = err;
+          if (isSshAuthError(err)) break;
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+            await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          break;
+        }
       }
     }
     throw lastError instanceof Error ? lastError : new Error('设备文件写入失败');
@@ -141,19 +171,27 @@ export async function uploadLocalFileToDevice(
   return runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
     const pwd = await getDevicePassword(device);
-    const candidates = [pwd, ...passwordCandidates(device.username)];
+    const candidates = [...new Set([pwd, ...passwordCandidates(device.username)])];
     let lastError: unknown = null;
-    for (const p of [...new Set(candidates)]) {
-      try {
-        await uploadFileSftp(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: p },
-          remotePath,
-          buffer,
-        );
-        devicePasswordCache.set(key, p);
-        return { bytes: buffer.length, remotePath };
-      } catch (err) {
-        lastError = err;
+    for (const p of candidates) {
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        try {
+          await uploadFileSftp(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: p },
+            remotePath,
+            buffer,
+          );
+          devicePasswordCache.set(key, p);
+          return { bytes: buffer.length, remotePath };
+        } catch (err) {
+          lastError = err;
+          if (isSshAuthError(err)) break;
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+            await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          break;
+        }
       }
     }
     throw lastError instanceof Error ? lastError : new Error('本地文件上传到设备失败');

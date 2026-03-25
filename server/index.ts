@@ -350,7 +350,7 @@ function passwordCandidates(username: string) {
 
 function isTransientSshError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return /timed out|timeout|handshake|econnreset|socket closed|connection reset|connect failed/.test(message);
+  return /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(message);
 }
 
 function isSshTimeoutError(error: unknown) {

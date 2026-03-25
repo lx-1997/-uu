@@ -362,6 +362,14 @@ export class OpenClawDeploymentManager {
     }
   }
 
+  private static isTransientSshError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(msg);
+  }
+
+  private static SSH_RETRY_DELAY_MS = 1500;
+  private static SSH_MAX_RETRIES = 2;
+
   execCommand(
     device: Device,
     command: string,
@@ -371,6 +379,7 @@ export class OpenClawDeploymentManager {
   ): { abort: () => void } {
     let finished = false;
     let activeStream: any = null;
+    let aborted = false;
     const finish = (success: boolean, code?: number) => {
       if (finished) return;
       finished = true;
@@ -395,6 +404,7 @@ export class OpenClawDeploymentManager {
     const handle = {
       abort: () => {
         if (finished) return;
+        aborted = true;
         if (activeStream) {
           try { activeStream.close(); } catch (_) {}
           try { activeStream.signal('KILL'); } catch (_) {}
@@ -408,24 +418,40 @@ export class OpenClawDeploymentManager {
       opts.pty = { cols: 120, rows: 30, term: 'xterm-256color' };
     }
 
-    this.getClient(device).then((client) => {
-      client.exec(command, opts, (err, stream) => {
-        if (err) {
-          onOutput(`[ERROR] ${err.message}\n`);
-          this.destroyConnection(device.ip);
-          finish(false);
+    const attemptExec = (retriesLeft: number) => {
+      if (finished || aborted) return;
+      this.getClient(device).then((client) => {
+        if (finished || aborted) return;
+        client.exec(command, opts, (err, stream) => {
+          if (err) {
+            this.destroyConnection(device.ip);
+            if (retriesLeft > 0 && !aborted && OpenClawDeploymentManager.isTransientSshError(err)) {
+              onOutput(`[SSH] transient error, retrying (${retriesLeft} left): ${err.message}\n`);
+              setTimeout(() => attemptExec(retriesLeft - 1), OpenClawDeploymentManager.SSH_RETRY_DELAY_MS);
+              return;
+            }
+            onOutput(`[ERROR] ${err.message}\n`);
+            finish(false);
+            return;
+          }
+          activeStream = stream;
+          stream.on('data', (data: Buffer) => { if (!finished) onOutput(data.toString()); });
+          stream.stderr?.on('data', (data: Buffer) => { if (!finished) onOutput(data.toString()); });
+          stream.on('close', (code: number) => finish(code === 0, code));
+        });
+      }).catch((err: any) => {
+        this.destroyConnection(device.ip);
+        if (retriesLeft > 0 && !aborted && OpenClawDeploymentManager.isTransientSshError(err)) {
+          onOutput(`[SSH] connection error, retrying (${retriesLeft} left): ${err.message}\n`);
+          setTimeout(() => attemptExec(retriesLeft - 1), OpenClawDeploymentManager.SSH_RETRY_DELAY_MS);
           return;
         }
-        activeStream = stream;
-        stream.on('data', (data: Buffer) => { if (!finished) onOutput(data.toString()); });
-        stream.stderr?.on('data', (data: Buffer) => { if (!finished) onOutput(data.toString()); });
-        stream.on('close', (code: number) => finish(code === 0, code));
+        onOutput(`[SSH Error] ${err.message}\n`);
+        finish(false);
       });
-    }).catch((err: any) => {
-      onOutput(`[SSH Error] ${err.message}\n`);
-      finish(false);
-    });
+    };
 
+    attemptExec(OpenClawDeploymentManager.SSH_MAX_RETRIES);
     return handle;
   }
 

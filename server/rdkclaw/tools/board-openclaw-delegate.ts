@@ -32,6 +32,15 @@ function parseBoardError(raw: string): string {
   return text;
 }
 
+function isRetryableFailure(output: string): boolean {
+  const lower = output.toLowerCase();
+  return /__openclaw_ws_failed__/i.test(output)
+    || /ssh error|econnreset|econnrefused|connection reset|socket closed|timed out|timeout|handshake|broken pipe|network|websocket connect failed/i.test(lower);
+}
+
+const DELEGATE_MAX_RETRIES = 1;
+const DELEGATE_RETRY_DELAY_MS = 2000;
+
 export function boardOpenClawDelegateTool(
   deviceId: string,
   manager: OpenClawDeploymentManager,
@@ -85,69 +94,83 @@ export function boardOpenClawDelegateTool(
       const msg = msgParts.filter(Boolean).join("\n");
       const sessionId = input.sessionId?.trim() || `rdkclaw-board-${deviceId}-${conversationId || Date.now()}`;
 
-      return await new Promise<string>((resolve, reject) => {
-        if (ctx.abortSignal?.aborted) {
-          reject(new Error("操作已中止"));
-          return;
-        }
-
-        let settled = false;
-        const settle = (fn: () => void) => {
-          if (settled) return;
-          settled = true;
-          fn();
-        };
-        let output = "";
-        let pending = "";
-        let lastEmitAt = 0;
-        let handle: { abort: () => void } | null = null;
-        const flushProgress = (force = false) => {
-          const now = Date.now();
-          if (!force && now - lastEmitAt < 400) return;
-          if (!pending.trim()) return;
-          const toSend = pending.length > 1200 ? pending.slice(-1200) : pending;
-          pending = "";
-          lastEmitAt = now;
-          onProgress?.(toSend);
-        };
-
-        const onAbort = () => {
-          try {
-            handle?.abort();
-          } catch {
-            // ignore abort failures
+      const runOnce = (): Promise<{ output: string; success: boolean }> =>
+        new Promise((resolve, reject) => {
+          if (ctx.abortSignal?.aborted) {
+            reject(new Error("操作已中止"));
+            return;
           }
-          settle(() => reject(new Error("操作已中止")));
-        };
-        ctx.abortSignal?.addEventListener("abort", onAbort, { once: true });
 
-        handle = manager.sendAgentMessage(
-          msg,
-          (chunk) => {
+          let settled = false;
+          const settle = (fn: () => void) => {
             if (settled) return;
-            output += chunk;
-            pending += chunk;
-            flushProgress(false);
-          },
-          (success) => {
-            if (settled) return;
-            ctx.abortSignal?.removeEventListener("abort", onAbort);
-            flushProgress(true);
-            if (success) {
-              settle(() => resolve(output.trim() || "板端 OpenClaw 执行完成（无文本输出）"));
-              return;
-            }
-            const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
-            if (cleanOutput.length > 20) {
-              settle(() => resolve(cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]"));
-            } else {
-              settle(() => reject(new Error(parseBoardError(output))));
-            }
-          },
-          sessionId,
-          boardDevice,
-        );
-      });
+            settled = true;
+            fn();
+          };
+          let output = "";
+          let pending = "";
+          let lastEmitAt = 0;
+          let handle: { abort: () => void } | null = null;
+          const flushProgress = (force = false) => {
+            const now = Date.now();
+            if (!force && now - lastEmitAt < 400) return;
+            if (!pending.trim()) return;
+            const toSend = pending.length > 1200 ? pending.slice(-1200) : pending;
+            pending = "";
+            lastEmitAt = now;
+            onProgress?.(toSend);
+          };
+
+          const onAbort = () => {
+            try { handle?.abort(); } catch { /* ignore */ }
+            settle(() => reject(new Error("操作已中止")));
+          };
+          ctx.abortSignal?.addEventListener("abort", onAbort, { once: true });
+
+          handle = manager.sendAgentMessage(
+            msg,
+            (chunk) => {
+              if (settled) return;
+              output += chunk;
+              pending += chunk;
+              flushProgress(false);
+            },
+            (success) => {
+              if (settled) return;
+              ctx.abortSignal?.removeEventListener("abort", onAbort);
+              flushProgress(true);
+              settle(() => resolve({ output, success }));
+            },
+            sessionId,
+            boardDevice,
+          );
+        });
+
+      let lastOutput = "";
+      for (let attempt = 0; attempt <= DELEGATE_MAX_RETRIES; attempt++) {
+        const { output, success } = await runOnce();
+        if (success) {
+          return output.trim() || "板端 OpenClaw 执行完成（无文本输出）";
+        }
+        lastOutput = output;
+        const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
+        if (cleanOutput.length > 20 && !isRetryableFailure(output)) {
+          return cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+        }
+        if (attempt < DELEGATE_MAX_RETRIES && isRetryableFailure(output)) {
+          console.warn(`[board-delegate] retryable failure on attempt ${attempt + 1}, retrying in ${DELEGATE_RETRY_DELAY_MS}ms`);
+          onProgress?.("\n[连接中断，正在自动重试...]\n");
+          manager.destroyConnection(boardDevice.ip);
+          await new Promise((r) => setTimeout(r, DELEGATE_RETRY_DELAY_MS));
+          continue;
+        }
+        break;
+      }
+      const finalClean = lastOutput.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
+      if (finalClean.length > 20) {
+        return finalClean + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+      }
+      throw new Error(parseBoardError(lastOutput));
     },
   };
 }
