@@ -1050,6 +1050,84 @@
   padding: 4px 8px;
 }
 
+/* ── Chat attachment renderers ── */
+.chat-attachment {
+  border-radius: var(--radius-sm, 8px);
+  overflow: hidden;
+  max-width: 320px;
+}
+
+.chat-attachment-image img {
+  max-width: 280px;
+  max-height: 200px;
+  border-radius: var(--radius-sm, 8px);
+  object-fit: contain;
+  cursor: pointer;
+  display: block;
+}
+
+.chat-attachment-video video {
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: var(--radius-sm, 8px);
+  display: block;
+  background: #000;
+}
+
+.chat-attachment-audio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-inset, rgba(128,128,128,0.06));
+  border-radius: var(--radius-sm, 8px);
+}
+
+.chat-attachment-audio audio {
+  height: 32px;
+  max-width: 220px;
+}
+
+.audio-msg-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.chat-attachment-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-inset, rgba(128,128,128,0.06));
+  border-radius: var(--radius-sm, 8px);
+}
+
+.file-attachment-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.file-attachment-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.file-attachment-name {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-attachment-size {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .dock {

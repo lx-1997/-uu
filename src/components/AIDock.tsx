@@ -102,12 +102,17 @@ function isDocumentFile(file: File) {
 
 function getAttachmentIcon(name: string, mimeType?: string): string {
   const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (/^(mp4|webm|avi|mov|mkv|flv|wmv|m4v)$/.test(ext) || mimeType?.startsWith('video/')) return '🎬';
+  if (/^(mp3|wav|ogg|flac|aac|wma|m4a|webm)$/.test(ext) || mimeType?.startsWith('audio/')) return '🎵';
+  if (/^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?)$/.test(ext) || mimeType?.startsWith('image/')) return '🖼️';
   if (/^docx?$/.test(ext) || mimeType?.includes('word')) return '📄';
   if (/^pptx?$/.test(ext) || mimeType?.includes('presentation') || mimeType?.includes('powerpoint')) return '📊';
   if (/^xlsx?$/.test(ext) || mimeType?.includes('spreadsheet') || mimeType?.includes('excel')) return '📋';
   if (ext === 'pdf' || mimeType === 'application/pdf') return '📕';
   if (ext === 'md') return '📝';
-  if (/^(zip|tar|gz|rar|7z)$/.test(ext)) return '📦';
+  if (/^(zip|tar|gz|rar|7z|bz2|xz|zst)$/.test(ext)) return '📦';
+  if (/^(exe|msi|deb|rpm|dmg|appimage|bin)$/.test(ext)) return '⚙️';
+  if (/^(py|js|ts|jsx|tsx|c|cpp|h|java|go|rs|rb|php|sh|lua|swift|kt|scala|dart|sql|r)$/.test(ext)) return '💻';
   return '📎';
 }
 
@@ -626,15 +631,16 @@ export default function AIDock() {
       return;
     }
     const url = URL.createObjectURL(file);
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/');
-    const isAudio = file.type.startsWith('audio/');
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const isImage = file.type.startsWith('image/') || /^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?)$/.test(ext);
+    const isVideo = file.type.startsWith('video/') || /^(mp4|webm|avi|mov|mkv|flv|wmv|m4v|3gp)$/.test(ext);
+    const isAudio = file.type.startsWith('audio/') || /^(mp3|wav|ogg|flac|aac|wma|m4a)$/.test(ext);
     const att: PendingAttachment = {
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'file',
       name: file.name,
       url,
-      mimeType: file.type,
+      mimeType: file.type || undefined,
       size: file.size,
       transcript: extras?.transcript,
       textContent: extras?.textContent,
@@ -1009,7 +1015,6 @@ export default function AIDock() {
         attachments: attachmentPayloads,
         displayAttachments,
       });
-      pendingAttachments.forEach((attachment) => URL.revokeObjectURL(attachment.url));
       setPendingAttachments([]);
       setRecordingTranscript('');
     } catch (error) {
@@ -1204,6 +1209,8 @@ export default function AIDock() {
             {pendingAttachments.map(att => (
               <div key={att.id} className="dock-att-item">
                 {att.type === 'image' && att.url && <img src={att.url} alt="" />}
+                {att.type === 'video' && att.url && <video src={att.url} muted preload="metadata" style={{ maxHeight: 48, maxWidth: 80, borderRadius: 4 }} />}
+                {att.type === 'audio' && <span className="dock-att-icon">🎙️</span>}
                 {att.type === 'file' && <span className="dock-att-icon">{getAttachmentIcon(att.name, att.mimeType)}</span>}
                 <span className="truncate">{att.name}</span>
                 {att.size !== undefined && <span className="dock-att-size">{att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${(att.size / 1024).toFixed(0)}KB` : `${(att.size / 1048576).toFixed(1)}MB`}</span>}
@@ -1222,7 +1229,7 @@ export default function AIDock() {
         )}
 
         <form className="dock-form dock-input" onSubmit={handleUnifiedCommand}>
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*,audio/*,.pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.zip,.tar,.gz,.py,.js,.ts,.json,.txt,.md,.csv,.yaml,.yml,.toml,.xml,.html,.css,.rst,.tex,.rtf,.c,.cpp,.h,.java,.go,.rs,.rb,.php,.sql,.lua,.swift,.kt" title="选择文件" className="sr-only" />
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple title="选择文件" className="sr-only" />
 
           <div className="dock-form-actions">
             <button type="button" className="dock-action-btn" onClick={handleFilePick} title="附件">
