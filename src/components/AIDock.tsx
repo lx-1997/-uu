@@ -950,7 +950,8 @@ export default function AIDock() {
     };
   }, [currentDevice, setOpenclawConnected]);
 
-  const promptsByTab: Record<string, typeof defaultPrompts> = {
+  type QuickPrompt = { id: string; icon: string; label: string; text: string; placeholder?: string };
+  const promptsByTab: Record<string, QuickPrompt[]> = {
     dashboard: [
       { id: 'diag', icon: '🩺', label: '一键体检', text: '帮我全面检查设备健康状态，包括温度、负载和网络' },
       { id: 'stat', icon: '📊', label: '能力盘点', text: '同步 NodeHub 和 ModelZoo 板端状态，汇总当前可编排能力' },
@@ -1004,7 +1005,7 @@ export default function AIDock() {
       { id: 'oc-diag', icon: '🔧', label: '诊断修复', text: '帮我诊断为什么会连接失败，并给修复命令' },
     ],
   };
-  const defaultPrompts = [
+  const defaultPrompts: QuickPrompt[] = [
     { id: 'diag', icon: '🔍', label: '分析异常日志', text: '请结合终端最近输出，帮我定位异常并给出修复步骤' },
     { id: 'hw', icon: '🌡️', label: '硬件状态', text: '检查当前设备的 BPU 负载和芯片温度' },
     { id: 'plan', icon: '📋', label: '执行计划', text: '把当前需求拆成 3 步并立即开始执行第一步' },
@@ -1350,7 +1351,7 @@ export default function AIDock() {
             </button>
           )}
           {quickPrompts.map((p) => (
-            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, (p as any).placeholder)}>
+            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, p.placeholder)}>
               {p.label}
             </button>
           ))}

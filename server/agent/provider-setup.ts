@@ -357,7 +357,7 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
 export function buildStreamFn(config: ProviderConfig): StreamFunction {
   const protocol = resolveProtocol(config);
   if (protocol === 'anthropic') {
-    return streamSimpleAnthropic;
+    return streamSimpleAnthropic as unknown as StreamFunction;
   }
   return streamSimple;
 }
