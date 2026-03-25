@@ -868,7 +868,7 @@ except Exception as e:
       'export PATH="$HOME/.npm-global/bin:$PATH"',
       `echo '${base64Script}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}'`,
       ENSURE_GATEWAY_LOCAL_MODE,
-      '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart)',
+      RESTART_GATEWAY_FALLBACK,
       'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete);
