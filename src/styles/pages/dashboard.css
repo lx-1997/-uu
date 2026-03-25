@@ -156,6 +156,12 @@
 
 .dash-empty-hero .dash-brand { font-size: 3rem; }
 
+.dash-nodevice-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
 /* ── Entrance animations ── */
 .dash-enter { animation: dashFadeUp 0.6s var(--ease-out) both; }
 .dash-enter-d1 { animation-delay: 200ms; }

@@ -116,6 +116,13 @@ export function boardOpenClawDelegateTool(
           "完成后简要说明你用了哪些技能或工具链，帮助我了解你的能力成长。",
         );
       }
+      msgParts.push(
+        "\n[reverse_consultation] 如果你在执行过程中需要联网搜索、查文档、查生态能力等信息" +
+        "（这些是 RDKClaw 的专属能力，你无法直接获取），" +
+        "请在回复中用 [NEED_RDKCLAW]...[/NEED_RDKCLAW] 格式告诉我，例如：\n" +
+        "[NEED_RDKCLAW]\ntype: web_search\nquery: RDK X5 如何安装 hobot_dnn\nreason: 需要确认官方安装命令\n[/NEED_RDKCLAW]\n" +
+        "我会在后续消息中把结果发给你，我们共享同一会话，你可以继续基于新信息完成任务。",
+      );
       const msg = msgParts.filter(Boolean).join("\n");
       const sessionId = input.sessionId?.trim() || conversationId || `rdkclaw-board-${deviceId}-${Date.now()}`;
 
@@ -176,10 +183,17 @@ export function boardOpenClawDelegateTool(
         const { output, success } = await runOnce();
         if (success) {
           const result = output.trim() || "板端 OpenClaw 执行完成（无文本输出）";
-          return result + "\n\n---\n[RDKClaw 提示：请评估 OpenClaw 的执行结果。" +
-            "如果它用了好的技能或方案，记在记忆中以备推荐；" +
-            "如果有可改进之处，下次委派时在 guidance 中补充。" +
-            "如果发现可复用的板端经验，建议创建为 OpenClaw 技能。]";
+          const hasConsultationRequest = /\[NEED_RDKCLAW\]/i.test(result);
+          const suffix = hasConsultationRequest
+            ? "\n\n---\n[RDKClaw 提示：OpenClaw 在回复中发出了求助信号 [NEED_RDKCLAW]。" +
+              "请提取其中的 type/query/reason，用你的本地工具（web_search、ecosystem_query 等）获取所需信息，" +
+              "然后通过 board_openclaw_chat 把结果发回给 OpenClaw，让它继续完成任务。" +
+              "共享同一会话，OpenClaw 能看到你的补充信息。]"
+            : "\n\n---\n[RDKClaw 提示：请评估 OpenClaw 的执行结果。" +
+              "如果它用了好的技能或方案，记在记忆中以备推荐；" +
+              "如果有可改进之处，下次委派时在 guidance 中补充。" +
+              "如果发现可复用的板端经验，建议创建为 OpenClaw 技能。]";
+          return result + suffix;
         }
         lastOutput = output;
         const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();

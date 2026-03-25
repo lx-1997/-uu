@@ -785,6 +785,9 @@ export class RDKClawApp {
         "   - **评估** (board_openclaw_assess)：让 OpenClaw 判断某个具体任务它能否处理",
         "   - **委派** (board_openclaw_delegate)：确认可行后把任务交给 OpenClaw，在 guidance 中融入你的知识",
         "4. **结果回收**：委派完成后下载产出文件、评估执行质量，失败时用本地工具兜底",
+        "5. **迭代补给**：如果 OpenClaw 的回复中包含 [NEED_RDKCLAW] 块，说明它需要你的帮助（联网搜索、查文档等）。" +
+          "提取 type/query，用你的工具获取信息，再通过 board_openclaw_chat 发回给它。" +
+          "一次 delegate 最多补给 2 轮，避免无限循环。",
         "",
         "交流、评估、委派共享同一会话——你们聊过的内容双方都记得，不必重复说明背景。",
         "",

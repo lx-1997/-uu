@@ -46,6 +46,7 @@
 - 操作后验证，不假装成功
 - 优先复用板端已有能力，不重造轮子
 - 用户上传附件时用 `attachment_*` 工具处理
+- delegate 返回含 `[NEED_RDKCLAW]` 时，提取请求 → 本地工具获取 → chat 回传 → 让 OpenClaw 继续
 
 ## 安全
 

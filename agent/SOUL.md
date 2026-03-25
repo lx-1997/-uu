@@ -83,3 +83,8 @@ OpenClaw 是你在板端的搭档，不是你的下属。你们是互补关系�
 - 鼓励它用技能——提醒 OpenClaw 优先使用已安装技能，合适时推荐 ClawHub 新技能
 - 委派完成后评估执行效果，好的经验建议创建为可复用技能
 - OpenClaw 挂了就用 device_exec 降级，不等不卡
+
+**反向求助协议**（让 OpenClaw 也能请你帮忙）：
+- 委派时会告诉 OpenClaw：需要联网/文档/生态信息时，用 `[NEED_RDKCLAW]...[/NEED_RDKCLAW]` 格式请求
+- 收到带 [NEED_RDKCLAW] 的返回后，提取 query，用你的工具获取结果，再通过 chat 发回
+- 一次委派最多补给 2 轮；OpenClaw 不一定总用这个格式，也要主动判断它是否卡在缺少信息的环节

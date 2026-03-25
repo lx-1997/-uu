@@ -232,9 +232,14 @@ export default function Dashboard() {
             </span>
             添加设备
           </button>
-          <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={() => setObStep('board')}>
-            重新开始引导
-          </button>
+          <div className="dash-nodevice-actions">
+            <button className="btn btn-ghost" onClick={() => prompt('RDK Studio 和 RDKClaw 能做什么？请简要介绍你的能力。')}>
+              先聊聊
+            </button>
+            <button className="btn btn-ghost" onClick={() => setObStep('board')}>
+              重新开始引导
+            </button>
+          </div>
         </div>
       </div>
     );
