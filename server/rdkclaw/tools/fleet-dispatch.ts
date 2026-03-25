@@ -2,6 +2,8 @@ import type { Tool } from '../../agent/tools/types.js';
 import { readDevices } from '../../storage.js';
 import { OpenClawDeploymentManager } from '../../managers/OpenClawDeploymentManager.js';
 import type { Device } from '../../../shared/types.js';
+import { DEVICE_PROFILES, type DeviceProfile } from '../../ecosystem/device-profiles.js';
+import type { RdkPlatform } from '../../../shared/ecosystem-types.js';
 
 function resolveDevicePassword(device: Device) {
   const persisted = (device as Device & { password?: string }).password ?? '';
@@ -86,6 +88,26 @@ function deduplicateDevices(devices: Device[]): Device[] {
   return result;
 }
 
+function getDeviceCapability(device: Device): {
+  platform: string | null;
+  profile: { displayName: string; bpuTops: number; ramGb: number; cpu: string; capabilities: string[] } | null;
+} {
+  const platform = (device as any).platform as RdkPlatform | undefined;
+  if (!platform) return { platform: null, profile: null };
+  const p = DEVICE_PROFILES[platform];
+  if (!p) return { platform, profile: null };
+  return {
+    platform,
+    profile: {
+      displayName: p.displayName,
+      bpuTops: p.bpuTops,
+      ramGb: p.ramGb,
+      cpu: p.cpu,
+      capabilities: p.capabilityNotes,
+    },
+  };
+}
+
 /**
  * Lists all connected devices with dedup warnings and coordination context.
  */
@@ -96,9 +118,9 @@ export function fleetBoardListTool(
   return {
     name: 'fleet_board_list',
     description:
-      '列出所有已注册的板卡设备，包含去重检测和当前协调状态。' +
-      '用于多板卡协作：了解可用板卡、检测重复设备、查看各板卡当前任务。' +
-      '会自动检测同 IP 的重复注册并给出警告。',
+      '列出所有已注册的板卡设备，包含硬件能力画像、去重检测和协调状态。' +
+      '返回每个板卡的型号/BPU算力/内存/CPU等信息，帮助智能调度。' +
+      '自动检测同 IP 重复注册，展示各板卡当前任务状态。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const devices = await readDevices();
@@ -114,6 +136,7 @@ export function fleetBoardListTool(
         const ipKey = `${d.host}:${d.port ?? 22}`;
         const dupeGroup = duplicates.get(ipKey);
         const activeTask = activeTasks.find((t) => t.deviceId === d.id);
+        const cap = getDeviceCapability(d);
         return {
           id: d.id,
           name: `${d.username}@${d.host}:${d.port ?? 22}`,
@@ -121,6 +144,13 @@ export function fleetBoardListTool(
           isCurrent: d.id === currentDeviceId,
           busy: !!activeTask,
           currentTask: activeTask ? activeTask.task.slice(0, 60) : null,
+          hardware: cap.profile ? {
+            model: cap.profile.displayName,
+            bpuTops: cap.profile.bpuTops,
+            ramGb: cap.profile.ramGb,
+            cpu: cap.profile.cpu,
+            strengths: cap.profile.capabilities.slice(0, 3),
+          } : (cap.platform ? { model: cap.platform } : null),
           duplicateWarning: dupeGroup && dupeGroup.length > 1
             ? `同 IP 注册了 ${dupeGroup.length} 次（IDs: ${dupeGroup.map((x) => x.id).join(', ')}），可能是同一设备`
             : null,
@@ -150,11 +180,12 @@ export function fleetBoardListTool(
             task: t.task.slice(0, 40),
             status: t.status,
           })),
-          hint: '多板卡协作原则：' +
-            '1) 同一板卡上的任务自动串行（DeviceQueue 保证）；' +
-            '2) busy 状态的板卡建议等待完成后再派新任务；' +
-            '3) 同 IP 设备只派其一，避免 SSH 冲突；' +
-            '4) 用 fleet_board_delegate 委派任务时会自动记录协调状态。',
+          hint: '多板卡智能调度原则：' +
+            '1) 根据硬件能力分配任务：重计算任务优先分配给 bpuTops/ramGb 更大的板卡；' +
+            '2) 模型格式注意兼容：X3(Bernoulli2) 和 X5/Ultra(Bayes) 和 S100(Nash) 模型不通用；' +
+            '3) 同一板卡任务自动串行，busy 板卡建议等待；' +
+            '4) 同 IP 设备只派其一，避免 SSH 冲突；' +
+            '5) 角色分工：让高算力板卡做推理(executor)，低算力板卡做数据预处理或监控(advisor)。',
         },
       }, null, 2);
     },
@@ -218,6 +249,7 @@ export function fleetBoardDelegateTool(
       const boardDevice = toBoardDevice(device);
       const deviceLabel = `${device.username}@${device.host}`;
       const role = input.role || 'executor';
+      const cap = getDeviceCapability(device);
 
       recordFleetTask({
         deviceId: input.targetDeviceId,
@@ -226,7 +258,6 @@ export function fleetBoardDelegateTool(
         status: 'running',
       });
 
-      // Build context-rich message with fleet coordination info
       const otherBoardTasks = activeTasks
         .filter((t) => t.deviceId !== input.targetDeviceId)
         .map((t) => `  - ${t.deviceId.slice(0, 8)}: ${t.task.slice(0, 40)}`)
@@ -236,8 +267,13 @@ export function fleetBoardDelegateTool(
         `[fleet dispatch] role: ${role}`,
         `from: ${currentDeviceId} (coordinator)`,
         `to: ${input.targetDeviceId} (${deviceLabel})`,
-        `\ntask: ${input.task}`,
       ];
+      if (cap.profile) {
+        msgParts.push(
+          `[your hardware] ${cap.profile.displayName} | ${cap.profile.bpuTops}TOPS BPU | ${cap.profile.ramGb}GB RAM | ${cap.profile.cpu}`,
+        );
+      }
+      msgParts.push(`\ntask: ${input.task}`);
       if (input.guidance?.trim()) {
         msgParts.push(`\nguidance: ${input.guidance.trim()}`);
       }
