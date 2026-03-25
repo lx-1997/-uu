@@ -669,6 +669,11 @@ export default function AIDock() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTranscript, setRecordingTranscript] = useState('');
+  const activeDeviceName = currentDevice?.name?.trim() || '';
+  const activeDeviceEndpoint = currentDevice ? `${currentDevice.ip || '-'}:${currentDevice.port ?? 22}` : '';
+  const activeRdkclawDeviceLabel = currentDevice
+    ? `${activeDeviceName || '未命名设备'} · ${activeDeviceEndpoint}`
+    : '未绑定设备';
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
@@ -1089,7 +1094,12 @@ export default function AIDock() {
         <div className="dock-chat">
           <div className="dock-header">
             <div className="dock-header-left">
-              <span className="dock-header-title">RDKClaw</span>
+              <div className="dock-header-title-wrap">
+                <span className="dock-header-title">RDKClaw</span>
+                <span className="dock-header-subtitle" title={activeRdkclawDeviceLabel}>
+                  当前设备: {activeRdkclawDeviceLabel}
+                </span>
+              </div>
               <div className="dock-header-badges">
                 <span className={`badge ${agentExecution.lastError ? 'badge-danger' : 'badge-accent'}`}>
                   {agentExecution.lastError ? 'Error' : 'ON'}

@@ -74,10 +74,26 @@
   min-width: 0;
 }
 
+.dock-header-title-wrap {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .dock-header-title {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.dock-header-subtitle {
+  margin-top: 1px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
 }
 
 .dock-header-badges {

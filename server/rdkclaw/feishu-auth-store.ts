@@ -270,6 +270,19 @@ export class FeishuAuthStore {
     this.scheduleSave();
   }
 
+  clearLatestUiDeviceIfMatch(deviceId: string): void {
+    this.gc();
+    const target = String(deviceId || "").trim();
+    if (!target) return;
+    const current = String(this.data.meta?.latestUiDeviceId || "").trim();
+    if (!current || current !== target) return;
+    this.ensureMeta();
+    this.data.meta!.latestUiDeviceId = "";
+    this.data.meta!.latestUiDeviceUpdatedAt = now();
+    this.data.meta!.updatedAt = now();
+    this.scheduleSave();
+  }
+
   getLatestUiSession(): string {
     this.gc();
     return String(this.data.meta?.latestUiSessionId || "").trim();

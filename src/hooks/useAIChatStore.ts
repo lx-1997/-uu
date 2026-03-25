@@ -82,7 +82,7 @@ export function useAIChatStore(): AIChatStoreState {
 
 export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const { addToast } = useToastStore();
-  const { currentDevice } = useDeviceStore();
+  const { currentDevice, setActiveDevice, devices } = useDeviceStore();
   const { activeTab, setShowSettings } = useUIStore();
 
   // ── State ──
@@ -243,8 +243,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         }
       });
   };
-  const reportActiveDevice = (reason: string) => {
-    const deviceId = String(currentDevice?.id || '').trim();
+  const reportActiveDevice = (reason: string, explicitDeviceId?: string) => {
+    const deviceId = String(explicitDeviceId || currentDevice?.id || '').trim();
     if (!deviceId) return;
     setActiveRdkclawDevice(deviceId)
       .then(() => {
@@ -985,6 +985,19 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     });
                   }
                 }
+
+                // 对话里执行 switch_device 成功后，主动同步 UI 当前设备，
+                // 保证“侧边栏切换”和“对话切换”两种方式始终一致。
+                if (!isError && toolName === 'switch_device') {
+                  const matchedId = result.match(/\[id:\s*([^\]\s]+)\]/)?.[1]?.trim();
+                  if (matchedId && matchedId !== currentDevice?.id) {
+                    const target = devices.find((item) => item.id === matchedId);
+                    setActiveDevice(matchedId);
+                    reportActiveDevice('tool-switch', matchedId);
+                    addToast(`RDKClaw 已切换到设备：${target?.name || matchedId}`, 'info');
+                  }
+                }
+
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }

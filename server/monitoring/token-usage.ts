@@ -177,3 +177,16 @@ export function resetTokenUsage() {
   return { ok: true };
 }
 
+export function removeTokenUsageByDevice(deviceId: string) {
+  ensureLoaded();
+  const id = String(deviceId || '').trim();
+  if (!id) return { ok: true, removed: 0 };
+  const before = store.entries.length;
+  store.entries = store.entries.filter((entry) => (entry.deviceId || '').trim() !== id);
+  const removed = before - store.entries.length;
+  if (removed > 0) {
+    persist();
+  }
+  return { ok: true, removed };
+}
+

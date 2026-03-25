@@ -50,7 +50,7 @@ import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
 import { clearSecurityAuditLogs, listSecurityAuditLogs } from './rdkclaw/security-audit-store.js';
 import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
-import { getTokenUsageReport, recordTokenUsage, resetTokenUsage } from './monitoring/token-usage.js';
+import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
 
 const app = express();
@@ -330,6 +330,41 @@ function resolveStoredDevicePassword(device: Device) {
   const cachedPassword = devicePasswordCache.get(key);
   const persistedPassword = (device as Device & { password?: string }).password ?? '';
   return cachedPassword || persistedPassword || defaultSshPassword || device.username;
+}
+
+function purgeDeviceSoftwareState(device: Device) {
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+  devicePasswordCache.delete(key);
+  bgProvisionActive.delete(device.id);
+
+  let removedDeployJobs = 0;
+  for (const [jobId, job] of openClawDeployJobs.entries()) {
+    if (job.deviceId === device.id) {
+      openClawDeployJobs.delete(jobId);
+      removedDeployJobs += 1;
+    }
+  }
+
+  let removedFlashJobs = 0;
+  for (const [jobId, job] of flashBackupJobs.entries()) {
+    if (job.deviceId === device.id) {
+      flashBackupJobs.delete(jobId);
+      removedFlashJobs += 1;
+    }
+  }
+
+  if (removedDeployJobs > 0 || removedFlashJobs > 0) {
+    schedulePersistRuntimeJobs();
+  }
+
+  feishuAuth.clearLatestUiDeviceIfMatch(device.id);
+  const tokenCleanup = removeTokenUsageByDevice(device.id);
+
+  return {
+    removedDeployJobs,
+    removedFlashJobs,
+    removedTokenUsageEntries: tokenCleanup.removed,
+  };
 }
 
 function toOpenClawDevice(device: Device, password?: string) {
@@ -2012,14 +2047,16 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
 app.delete('/api/devices/:id', async (request, response) => {
   const { id } = request.params;
   const devices = await readDevices();
+  const target = devices.find((device) => device.id === id);
 
-  if (!devices.some((device) => device.id === id)) {
+  if (!target) {
     response.status(404).json({ error: '设备不存在' });
     return;
   }
 
   await writeDevices(devices.filter((device) => device.id !== id));
-  response.json({ removedId: id });
+  const cleanup = purgeDeviceSoftwareState(target);
+  response.json({ removedId: id, cleanup });
 });
 
 app.post('/api/devices/:id/openclaw', async (request, response) => {
