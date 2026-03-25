@@ -133,6 +133,7 @@ export default function SettingsPanel() {
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
   const importAgentConfigRef = useRef<HTMLInputElement | null>(null);
+  const loadedAiProviderRef = useRef('');
 
   const applyAiModelToForm = (entry: typeof aiSavedModels[number]) => {
     setSelectedAiModelId(entry.id);
@@ -141,6 +142,7 @@ export default function SettingsPanel() {
     setAiModel(entry.model || '');
     setAiBaseUrl(entry.baseUrl || '');
     setAiApiKey('');
+    loadedAiProviderRef.current = entry.provider || 'qwen';
   };
 
   const refreshAiConfig = async () => {
@@ -379,20 +381,25 @@ export default function SettingsPanel() {
     const selectedEntry = aiSavedModels.find((item) => item.id === selectedAiModelId);
     if (!aiApiKey.trim() && !selectedEntry?.hasApiKey) { addToast('请填写 API Key', 'warning'); return; }
     const providerDefaults = AI_PROVIDER_DEFAULTS[aiProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
+    const effectiveModel = aiModel || providerDefaults.model;
+    const providerChanged = selectedEntry && selectedEntry.provider !== aiProvider;
+    const modelChanged = selectedEntry && selectedEntry.model !== effectiveModel;
+    const autoLabel = `${aiProvider}/${effectiveModel}`;
+    const label = (providerChanged || modelChanged) ? autoLabel : (aiLabel.trim() || autoLabel);
     setAiSaving(true);
     try {
       await saveAgentConfig({
         action: 'upsert',
         id: selectedAiModelId || undefined,
-        label: aiLabel.trim() || `${aiProvider}/${aiModel || providerDefaults.model}`,
+        label,
         provider: aiProvider,
-        model: aiModel || providerDefaults.model,
+        model: effectiveModel,
         apiKey: aiApiKey || undefined,
         baseUrl: aiBaseUrl || providerDefaults.baseUrl || undefined,
         setActive: true,
       });
       await refreshAiConfig();
-      addToast(selectedAiModelId ? '模型配置已更新并切换' : '模型已新增并切换', 'success');
+      addToast(selectedAiModelId ? '模型已更新' : '模型已新增并启用', 'success');
     } catch { addToast('保存失败', 'error'); }
     finally { setAiSaving(false); }
   };
@@ -465,6 +472,7 @@ export default function SettingsPanel() {
     const nextDefaults = AI_PROVIDER_DEFAULTS[nextProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
     const shouldReplaceModel = !aiModel || aiModel === prevDefaults?.model;
     const shouldReplaceBaseUrl = !aiBaseUrl || aiBaseUrl === prevDefaults?.baseUrl;
+    setAiLabel('');
     setAiProvider(nextProvider);
     if (shouldReplaceModel) setAiModel(nextDefaults.model);
     if (shouldReplaceBaseUrl) setAiBaseUrl(nextDefaults.baseUrl);
@@ -624,7 +632,11 @@ export default function SettingsPanel() {
                           }
                         }}>
                         <option value="">+ 新建配置</option>
-                        {aiSavedModels.map(i => <option key={i.id} value={i.id}>{i.label || `${i.provider}/${i.model}`}{i.isActive ? ' (当前)' : ''}</option>)}
+                        {aiSavedModels.map(i => {
+                          const realName = `${i.provider}/${i.model}`;
+                          const display = (i.label && i.label !== realName) ? `${i.label} (${realName})` : realName;
+                          return <option key={i.id} value={i.id}>{display}{i.isActive ? ' ✓' : ''}</option>;
+                        })}
                       </select>
                       {aiConfigured && <span className="settings-status-badge ok">已配置</span>}
                     </div>
@@ -639,11 +651,11 @@ export default function SettingsPanel() {
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">模型</span>
-                    <div className="settings-row-value"><input type="text" className="input" title="模型" aria-label="模型" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model} value={aiModel} onChange={e => setAiModel(e.target.value)} /></div>
+                    <div className="settings-row-value"><input type="text" className="input" title="模型" aria-label="模型" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model} value={aiModel} onChange={e => { setAiModel(e.target.value); setAiLabel(''); }} /></div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">API Key</span>
-                    <div className="settings-row-value"><input type="password" className="input" title="API Key" aria-label="API Key" placeholder={aiConfigured ? '已保存，留空不更新' : '请输入 API Key'} value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} /></div>
+                    <div className="settings-row-value"><input type="password" className="input" title="API Key" aria-label="API Key" placeholder={(aiConfigured && aiProvider === loadedAiProviderRef.current) ? '已保存，留空不更新' : '请输入 API Key'} value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} /></div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">Base URL</span>

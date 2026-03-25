@@ -170,9 +170,12 @@ function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
     const model = normalizeText(item.model);
     if (!provider || !model) continue;
     const now = Date.now();
+    const storedLabel = normalizeText(item.label);
+    const canonical = `${provider}/${model}`;
+    const labelMatchesContent = storedLabel && (storedLabel.includes(model) || storedLabel === canonical);
     entries.push({
       id: normalizeText(item.id) || `cfg-${Math.random().toString(36).slice(2, 10)}`,
-      label: normalizeText(item.label) || `${provider}/${model}`,
+      label: labelMatchesContent ? storedLabel : canonical,
       provider,
       model,
       apiKey: normalizeText(item.apiKey),
