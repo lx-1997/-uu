@@ -118,10 +118,8 @@ function resolveDelegationExpectationText(decision: DelegateDecision) {
 function selectDelegateDecision(
   req: RDKClawChatRequest,
   matchedSkills: RDKClawSkillMeta[],
-  boardSnapshot: { skills: string[]; plugins: string[] },
-  sessionAttachments?: Array<{ type: string }>,
+  _boardSnapshot: { skills: string[]; plugins: string[] },
 ): DelegateDecision {
-  const text = String(req.message || "").toLowerCase();
   if (!req.deviceId) {
     return {
       path: "local_only",
@@ -132,16 +130,7 @@ function selectDelegateDecision(
       confidence: 0.95,
     };
   }
-  if (/已有|已经有|现成|不要重复|别重复|重复造轮子|复用|复用板端|直接用板端/.test(text)) {
-    return {
-      path: "collaborative",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "task_analysis",
-      reason: "任务明确要求复用板端现有能力，需走协同路径",
-      confidence: 0.95,
-    };
-  }
+
   if (req.mode === "board") {
     return {
       path: "board_primary",
@@ -162,43 +151,17 @@ function selectDelegateDecision(
       confidence: 1,
     };
   }
-  const currentMsgHasMedia = req.attachments?.some((a) => a.type === "image" || a.type === "video");
-  const sessionHasMedia = sessionAttachments?.some((a) => a.type === "image" || a.type === "video");
-  const textMentionsMedia = /图片|照片|截图|图像|画面|image|photo|picture|这张|这个图|拍的/.test(text);
-  if (currentMsgHasMedia || (sessionHasMedia && textMentionsMedia)) {
-    return {
-      path: "local_only",
-      canLocalComplete: true,
-      needsBoardCollaboration: false,
-      source: "task_analysis",
-      reason: "任务涉及图片/视频理解，Vision 能力在本地 AI 模型端，优先本地处理",
-      confidence: 0.93,
-    };
-  }
-  const collaborativeSkill = matchedSkills.find(
-    (s) => s.runtimePolicy?.delegatePreference === "collaborative" || s.runtimePolicy?.delegatePreference === "hybrid",
-  );
-  if (collaborativeSkill) {
+  if (req.mode === "board-preferred") {
     return {
       path: "collaborative",
-      canLocalComplete: false,
+      canLocalComplete: true,
       needsBoardCollaboration: true,
-      source: "skill_policy",
-      reason: `Skill(${collaborativeSkill.name}) 偏好协同执行`,
-      confidence: 0.88,
+      source: "user_mode",
+      reason: "用户要求优先尝试板端协同",
+      confidence: 0.85,
     };
   }
-  const boardPreferredSkill = matchedSkills.find((s) => s.runtimePolicy?.delegatePreference === "board");
-  if (boardPreferredSkill) {
-    return {
-      path: "board_primary",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "skill_policy",
-      reason: `Skill(${boardPreferredSkill.name}) 偏好板端执行`,
-      confidence: 0.9,
-    };
-  }
+
   const requiresBoardSkill = matchedSkills.find((s) => s.runtimePolicy?.requiresBoard);
   if (requiresBoardSkill) {
     return {
@@ -210,64 +173,14 @@ function selectDelegateDecision(
       confidence: 0.95,
     };
   }
-  if (/板端|openclaw|插件|系统服务|刷写|烧录|gateway|配网|升级固件|守护进程/.test(text)) {
-    return {
-      path: "board_primary",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "task_analysis",
-      reason: "任务直接涉及板端能力或系统级操作，需板端主执行",
-      confidence: 0.9,
-    };
-  }
-  const boardReusable = boardSnapshot.skills.length > 0 && /(复用|已有能力|已安装|现有技能|能力链路)/.test(text);
-  if (boardReusable) {
-    return {
-      path: "collaborative",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "task_analysis",
-      reason: "任务命中板端可复用能力，采用协同执行更稳妥",
-      confidence: 0.88,
-    };
-  }
-  if (req.mode === "board-preferred") {
-    return {
-      path: "collaborative",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "user_mode",
-      reason: "用户要求优先尝试板端协同",
-      confidence: 0.85,
-    };
-  }
-  if (/(做|开发|生成|创建|搭建|写).{0,20}(应用|app|项目|程序|机器人)|一句话开发/.test(text)) {
-    return {
-      path: "collaborative",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "task_analysis",
-      reason: "任务涉及应用开发，需本地知识准备 + 板端执行协同",
-      confidence: 0.85,
-    };
-  }
-  if (/诊断|修复|部署|日志|状态|温度|负载|摄像头|ros|vnc|设备/.test(text)) {
-    return {
-      path: "collaborative",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "task_analysis",
-      reason: "任务包含设备实操链路，建议本地编排 + 板端协同执行",
-      confidence: 0.78,
-    };
-  }
+
   return {
     path: "collaborative",
     canLocalComplete: true,
-    needsBoardCollaboration: true,
+    needsBoardCollaboration: false,
     source: "default",
-    reason: "已连接设备，默认协同模式：RDKClaw 编排 + OpenClaw 辅助",
-    confidence: 0.72,
+    reason: "设备已连接，Agent 根据能力分布自主决策执行路径",
+    confidence: 0.8,
   };
 }
 
@@ -822,7 +735,7 @@ export class RDKClawApp {
     const policy = this.policyStore.getPolicy();
     const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
     const setupElapsedMs = Date.now() - runStartedAt;
-    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot, attachmentState.allAttachments);
+    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot);
     const detectedPlatform = (req as any).platform as RdkPlatform | undefined;
     const deviceProfile = detectedPlatform ? getDeviceProfile(detectedPlatform) : null;
     const systemPrompt = [
@@ -844,37 +757,39 @@ export class RDKClawApp {
           ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件（含图片: ${attachmentState.allAttachments.filter((a) => a.type === "image").map((a) => `[${a.id}] ${a.name}`).join("、")}）。用户提及图片/照片时，请先调用 attachment_describe_image 分析后再回复。`
           : `当前会话已有 ${attachmentState.allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
         : "",
-      decision.path === "board_primary"
-        ? "执行路径判定：本任务需板端主执行。先调用 board_openclaw_assess，再调用 board_openclaw_delegate；若评估失败或委派失败，立刻切换本地工具兜底完成。"
-        : decision.path === "collaborative"
-          ? "执行路径判定：本任务需本地+板端协同。RDKClaw 负责编排，本地工具与 board_openclaw_delegate 按步骤协同完成。"
-          : "执行路径判定：本任务由 RDKClaw 本地链路独立完成，除非执行中发现板端依赖才触发委派。",
       req.deviceId ? [
-        "## 委派 OpenClaw 的工作策略",
-        "你是 OpenClaw 的导师和协作者。按以下决策树执行：",
+        "## 能力分布与工具决策",
         "",
-        "### 步骤 1：评估（必做）",
-        "调用 board_openclaw_assess 评估板端能力。",
+        "你拥有两套工具链，请根据任务自主判断使用哪些工具，无需遵循固定路径。",
         "",
-        "### 步骤 2：根据评估结果决定下一步",
-        "- **canHandle=true 且 confidence≥0.7**：板端有能力，直接进入步骤 3 委派。",
-        "  无需额外查资料，OpenClaw 已有技能可以处理。",
-        "- **canHandle=false 或 confidence<0.7**：板端能力不足，先做知识准备：",
-        "  1. ecosystem_query 查平台可用技能和推荐方案",
-        "  2. 复杂任务可 web_search 查最佳实践和官方文档",
-        "  3. 将查到的信息整理到 guidance 中再委派",
-        "- **canHandle=false 且无可行方案**：告知用户并建议替代方案",
+        "### 本地能力（RDKClaw 直接处理，无需板端参与）",
+        "- 图片/视频/截图理解分析 → attachment_describe_image（通过 Vision API，板端 OpenClaw 通常不具备此能力）",
+        "- 网页搜索和资料查询 → web_search / web_fetch",
+        "- 附件读取和文档解析（PDF/Word/Excel/代码）→ attachment_read",
+        "- 对话、知识问答、方案设计",
+        "- 设备文件下载到本机后的本地处理",
         "",
-        "### 步骤 3：带建议委派",
-        "调用 board_openclaw_delegate 时：",
-        "- guidance 中写明你的分析和建议（方案选择、注意事项、文档链接）",
-        "- 鼓励 OpenClaw 优先使用已安装技能，有合适的 ClawHub 技能可推荐安装",
-        "- 你掌握 RDK 文档和生态知识，OpenClaw 只了解板端本地状态——将知识融入 guidance",
+        "### 板端能力（通过设备工具或 OpenClaw）",
+        "- 设备 SSH 命令执行 → device_exec",
+        "- 设备文件读写和上传下载 → device_file_*",
+        "- OpenClaw 技能调用与管理 → board_openclaw_*",
+        "- ROS 话题/节点操作 → ros_*",
+        "- VNC 远程桌面 → vnc_*",
+        "- TTS/STT 语音处理 → tts_* / stt_* / sherpa_*",
+        "- 设备诊断和系统监控 → device_diagnose",
         "",
-        "### 步骤 4：结果处理",
-        "- 委派完成后，如果产生了文件（图片/视频/数据），用 device_file_download_to_local 下载到本地",
-        "- 评估 OpenClaw 的执行方式——用了什么技能？有没有更好的做法？",
-        "- 如发现可复用的经验，建议用户创建新技能",
+        "### 决策原则",
+        "- 自主判断：根据任务实际需要选择工具，不需要把所有任务都经过板端评估",
+        "- 本地优先：图片分析、搜索、文档处理、知识问答等，直接用本地工具完成",
+        "- 按需委派：仅在任务确实涉及板端操作（设备命令、技能执行、ROS、系统管理等）时才使用板端工具",
+        "- 评估先行：需要委派 OpenClaw 时，先 board_openclaw_assess 确认能力，canHandle=true 且 confidence≥0.7 时再委派",
+        "- 失败兜底：委派失败时立即用本地工具或 device_exec 完成任务",
+        "- 产出回收：板端产生文件后，用 device_file_download_to_local 下载到本地",
+        "",
+        "### OpenClaw 协作指南",
+        "你是 OpenClaw 的导师和协作者。委派时在 guidance 中融入你掌握的 RDK 文档和生态知识；",
+        "OpenClaw 只了解板端本地状态，你负责提供全局视野和方案建议。",
+        "执行完成后评估结果，如发现可复用经验可建议用户创建新技能。",
       ].join("\n") : "",
     ].filter(Boolean).join("\n");
     const modelDef = buildModelDef(providerConfig);
