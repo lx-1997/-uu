@@ -3,7 +3,6 @@ import * as path from "node:path";
 import {
   Agent,
   builtinTools,
-  type MiniAgentEvent,
   type Tool,
 } from "../agent/openclaw-index.js";
 import {
@@ -61,8 +60,22 @@ import {
   getExternalChannelPolicy,
   validateExecCommand,
 } from "./channel-safety.js";
-import { sanitizeSecrets } from "./secret-sanitizer.js";
 import { evaluatePermissionGuard } from "./permission-guard.js";
+import { mapMiniEvent, resolveExecutor } from "./event-mapper.js";
+import {
+  classifyModelTier,
+  buildPersonaPrompt,
+  buildCollaborationPrompt,
+  type BoardSnapshot,
+  type BoardSkillDetail,
+  type ModelTier,
+} from "./system-prompt-builder.js";
+import {
+  selectDelegateDecision,
+  resolveDelegationModeText,
+  resolveDelegationExpectationText,
+  type DelegateDecision,
+} from "./delegation.js";
 import { appendSecurityAuditLog } from "./security-audit-store.js";
 
 const DEFAULT_CONFIG: ProviderConfig = {
@@ -87,293 +100,6 @@ function resolveProviderConfig(): ProviderConfig {
   };
 }
 
-type ModelTier = 'large' | 'medium' | 'small';
-
-function classifyModelTier(contextWindow: number, maxOutputTokens: number): ModelTier {
-  if (contextWindow >= 64_000 && maxOutputTokens >= 8_000) return 'large';
-  if (contextWindow >= 16_000 && maxOutputTokens >= 2_000) return 'medium';
-  return 'small';
-}
-
-function buildPersonaPrompt(persona: PersonaProfile) {
-  const lines = [
-    `你是 ${persona.name}。`,
-    `风险偏好: ${persona.riskLevel}，委派: ${persona.delegationBias}，自治: ${persona.autonomyLevel}。`,
-  ];
-  if (persona.extraInstructions?.trim()) {
-    lines.push(`额外指令: ${persona.extraInstructions.trim()}`);
-  }
-  return lines.join("\n");
-}
-
-function buildCollaborationPrompt(
-  boardSnapshot: BoardSnapshot,
-  tier: ModelTier,
-): string {
-  if (tier === 'small') {
-    return [
-      "## 协作（简版）",
-      "你=主脑，板端 OpenClaw=执行者。",
-      "- chat: 交流 | assess: 评估 | delegate: 委派",
-      "先做能做的；需板端时先 assess 再 delegate。",
-      boardSnapshot.skillDetails.length > 0
-        ? `板端技能(${boardSnapshot.skillDetails.length}个): ${boardSnapshot.skillDetails.map((s) => s.name).join(', ')}`
-        : "板端技能快照为空，需先生成技能再委派。",
-      "常用: WiFi→nmcli | 摄像头→ls /dev/video* | 版本→rdkos_info | 进程→pkill -f | 温度→thermal_zone0",
-    ].join("\n");
-  }
-  return [
-    "## 双 Agent 协作",
-    "你=RDKClaw（主脑），板端 OpenClaw=外脑。你先分析、能做就做；需板端能力时用三种工具协作：",
-    "- **chat** (board_openclaw_chat)：轻量交流——了解能力、讨论方案、分享信息",
-    "- **assess** (board_openclaw_assess)：评估——让 OpenClaw 判断某任务能否处理",
-    "- **delegate** (board_openclaw_delegate)：委派——确认可行后交付执行，guidance 中注入你的知识",
-    "三者共享会话，不必重复背景。委派后评估结果质量，失败时本地兜底。",
-    "OpenClaw 擅长：板端多步操作、技能链、应用部署。不擅长：联网搜索、文档分析（你的专属能力）。",
-    "若 OpenClaw 回复含 [NEED_RDKCLAW] 块，提取 type/query 后用你的工具获取信息，再 chat 发回。最多补给 2 轮。",
-    "",
-    "### 并行执行（重要）",
-    "同一个 turn 中，以下工具可以并行调用（框架自动并行，你只需在同一轮同时发起）：",
-    "web_search + board_openclaw_assess + ecosystem_query + device_diagnose + attachment_describe_image",
-    "**典型并行模式**：收到复杂任务时，在同一轮同时调用 web_search（查资料）+ board_openclaw_assess（评估板端能力）+ ecosystem_query（查生态），",
-    "等三者结果都回来后再制定方案和委派，而不是一个一个串行调用。",
-    "",
-    "### 子 Agent（sessions_spawn）",
-    "你有 sessions_spawn 工具，可以在后台启动子 agent 执行耗时任务，主线程不阻塞。",
-    "适用场景：",
-    "- 委派 OpenClaw 执行部署后，spawn 子 agent 做验证/监控",
-    "- 长时间 web 研究可以 spawn 子 agent，主线程继续和用户交互",
-    "子 agent 完成后会自动将摘要写入当前会话。",
-    "",
-    boardSnapshot.skillDetails.length > 0
-      ? `当前板端已安装 OpenClaw 技能（${boardSnapshot.skillDetails.length} 个）:\n` +
-        boardSnapshot.skillDetails.map((s) =>
-          `- ${s.name}${s.description ? `: ${s.description}` : ""}${s.path ? ` [${s.path}]` : ""}`
-        ).join("\n") +
-        "\n委派任务时可在 guidance 中引用这些技能名称和路径，帮助 OpenClaw 更快定位。"
-      : "当前板端技能快照为空（可能未安装或读取失败）。如任务匹配不到现有技能，请优先生成并下发新技能，再继续执行。",
-    "",
-    "### 你的本地能力速查",
-    "图片→attachment_describe_image | 联网→web_search/web_fetch | 设备命令→device_exec | 文件→device_file_* | 诊断→device_diagnose",
-    "",
-    "### 用户常见问题快答（无需搜索，直接用 device_exec 执行）",
-    "- WiFi: `nmcli dev wifi list` → `nmcli dev wifi connect \"SSID\" password \"密码\"`",
-    "- 摄像头: `ls /dev/video*` + `v4l2-ctl --list-devices`",
-    "- 系统版本: `rdkos_info` 或 `cat /etc/version`",
-    "- 进程停止: `pkill -f \"关键字\"` 或 `kill -9 <PID>`",
-    "- 端口占用: `ss -tlnp | grep :端口号`",
-    "- BPU状态: `hrut_smi` 或 `bputop`",
-    "- 温度: `cat /sys/class/thermal/thermal_zone0/temp`（除以1000=摄氏度）",
-  ].join("\n");
-}
-
-interface BoardSkillDetail {
-  name: string;
-  path: string;
-  description: string;
-  trigger: string;
-}
-
-interface BoardSnapshot {
-  skills: string[];
-  skillDetails: BoardSkillDetail[];
-  plugins: string[];
-}
-
-interface DelegateDecision {
-  path: "local_only" | "collaborative" | "board_primary";
-  canLocalComplete: boolean;
-  needsBoardCollaboration: boolean;
-  source: "user_mode" | "skill_policy" | "task_analysis" | "default";
-  reason: string;
-  confidence: number;
-}
-
-function resolveDelegationModeText(decision: DelegateDecision) {
-  if (decision.path === "board_primary") return "板端主执行（本地兜底）";
-  if (decision.path === "collaborative") return "本地 + 板端协同";
-  return "本地独立完成";
-}
-
-function resolveDelegationExpectationText(decision: DelegateDecision) {
-  if (decision.path === "board_primary") return "先板端评估与委派，若失败再本地兜底补完";
-  if (decision.path === "collaborative") return "本地负责编排，涉及板端能力时并行调用 OpenClaw";
-  return "由 RDKClaw 本地工具链直接完成，不依赖板端委派";
-}
-
-function selectDelegateDecision(
-  req: RDKClawChatRequest,
-  matchedSkills: RDKClawSkillMeta[],
-  boardSnapshot: BoardSnapshot,
-): DelegateDecision {
-  if (!req.deviceId) {
-    return {
-      path: "local_only",
-      canLocalComplete: true,
-      needsBoardCollaboration: false,
-      source: "default",
-      reason: "未绑定设备上下文，任务按本地链路执行",
-      confidence: 0.95,
-    };
-  }
-
-  if (req.mode === "board") {
-    return {
-      path: "board_primary",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "user_mode",
-      reason: "用户指定 board 模式",
-      confidence: 1,
-    };
-  }
-  if (req.mode === "local") {
-    return {
-      path: "local_only",
-      canLocalComplete: true,
-      needsBoardCollaboration: false,
-      source: "user_mode",
-      reason: "用户指定 local 模式",
-      confidence: 1,
-    };
-  }
-  if (req.mode === "board-preferred") {
-    return {
-      path: "collaborative",
-      canLocalComplete: true,
-      needsBoardCollaboration: true,
-      source: "user_mode",
-      reason: "用户要求优先尝试板端协同",
-      confidence: 0.85,
-    };
-  }
-
-  const requiresBoardSkill = matchedSkills.find((s) => s.runtimePolicy?.requiresBoard);
-  if (requiresBoardSkill) {
-    return {
-      path: "board_primary",
-      canLocalComplete: false,
-      needsBoardCollaboration: true,
-      source: "skill_policy",
-      reason: `Skill(${requiresBoardSkill.name}) 要求板端执行`,
-      confidence: 0.95,
-    };
-  }
-
-  const hasBoardSkills = boardSnapshot.skills.length > 0;
-  return {
-    path: "collaborative",
-    canLocalComplete: true,
-    needsBoardCollaboration: true,
-    source: "default",
-    reason: hasBoardSkills
-      ? `设备已连接，板端有 ${boardSnapshot.skills.length} 个技能可用，Agent 根据能力分布自主决策`
-      : "设备已连接但板端无已安装技能，Agent 自主决策执行路径",
-    confidence: hasBoardSkills ? 0.85 : 0.75,
-  };
-}
-
-function resolveExecutor(toolName?: string) {
-  if (!toolName) return "rdkclaw_local";
-  return toolName.startsWith("board_openclaw_") ? "board_openclaw" : "rdkclaw_local";
-}
-
-function mapMiniEvent(
-  event: MiniAgentEvent,
-  base: { runId: string; sessionId: string },
-): RDKClawEvent | null {
-  switch (event.type) {
-    case "message_delta":
-      return { type: "text", data: { delta: sanitizeSecrets(event.delta), ...base } };
-    case "turn_start":
-      return { type: "turn_start", data: { turn: event.turn, ...base } };
-    case "turn_end":
-      return { type: "turn_end", data: { turn: event.turn, ...base } };
-    case "message_end":
-      return { type: "message_end", data: { text: sanitizeSecrets(event.text), ...base } };
-    case "tool_execution_start":
-      return {
-        type: "tool_start",
-        data: {
-          ...base,
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          name: event.toolName,
-          args: event.args,
-          phase: "start",
-          executor: resolveExecutor(event.toolName),
-        },
-      };
-    case "tool_execution_end":
-      return {
-        type: "tool_result",
-        data: {
-          ...base,
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          name: event.toolName,
-          result: typeof event.result === 'string' ? sanitizeSecrets(event.result) : event.result,
-          isError: event.isError,
-          phase: event.isError ? "error" : "end",
-          executor: resolveExecutor(event.toolName),
-        },
-      };
-    case "retry":
-      return {
-        type: "retry",
-        data: { attempt: event.attempt, delay: event.delay, error: sanitizeSecrets(String(event.error ?? '')), ...base },
-      };
-    case "agent_error":
-      return { type: "error", data: { error: sanitizeSecrets(String(event.error ?? '')), ...base } };
-    case "compaction":
-      return {
-        type: "meta",
-        data: {
-          ...base,
-          executor: "rdkclaw_local",
-          phase: "running",
-          message: `上下文压缩完成：收缩 ${event.droppedMessages} 条历史消息`,
-          compaction_summary_chars: event.summaryChars,
-          compaction_dropped_messages: event.droppedMessages,
-        },
-      };
-    case "context_overflow_compact":
-      return {
-        type: "meta",
-        data: {
-          ...base,
-          executor: "rdkclaw_local",
-          phase: "running",
-          message: "检测到上下文超限，已自动触发压缩重试",
-          context_overflow_error: event.error,
-        },
-      };
-    case "subagent_summary":
-      return {
-        type: "meta",
-        data: {
-          ...base,
-          executor: "rdkclaw_local",
-          phase: "end",
-          message: `子代理完成: ${event.label || "task"}`,
-          subagent_summary: event.summary,
-        },
-      };
-    case "subagent_error":
-      return {
-        type: "error",
-        data: {
-          ...base,
-          error: `子代理失败: ${event.error}`,
-          subagent_label: event.label,
-        },
-      };
-    case "agent_end":
-      return null;
-    default:
-      return null;
-  }
-}
 
 function resolveBoardDevicePassword(device: { username: string; password?: string }) {
   const persisted = device.password ?? "";
