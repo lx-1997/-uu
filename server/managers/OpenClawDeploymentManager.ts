@@ -542,7 +542,7 @@ export class OpenClawDeploymentManager {
 
       'echo "[OpenClaw] 卸载完成，已彻底清理"',
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 0 });
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 300000 });
   }
 
   getGatewayStatus(device: Device, onResult: (status: GatewayStatus) => void, onOutput?: (chunk: string) => void): void {
@@ -759,7 +759,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       } catch (_) {
         onResult(null, false);
       }
-    });
+    }, { timeout: 30000 });
   }
 
   runOnboard(
@@ -781,7 +781,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       `openclaw onboard --non-interactive ${acceptRisk} ${skipHealth} ${gatewayBind} --auth-choice ${provider} --${provider} '${escapedKey}' --install-daemon 2>&1`,
       'echo "[OpenClaw] 初始化完成"'
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { pty: true });
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 300000 });
   }
 
   updateConfig(
@@ -871,26 +871,26 @@ except Exception as e:
       RESTART_GATEWAY_FALLBACK,
       'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete);
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
   }
 
   runRestartGateway(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
       'export PATH="$HOME/.npm-global/bin:$PATH"',
       ENSURE_GATEWAY_LOCAL_MODE,
-      '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true)',
+      RESTART_GATEWAY_FALLBACK,
       'echo "[OpenClaw] Gateway 重启命令已执行，等待端口就绪..."',
       `ok=0; for i in 1 2 3 4 5 6; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
       `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${START_GATEWAY_FALLBACK}; fi`,
       `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
       `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete);
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
   }
 
   runGetVersion(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = 'export PATH="$HOME/.npm-global/bin:$PATH" && (openclaw --version 2>/dev/null || echo "未安装")';
-    this.execCommand(device, cmd, onOutput, onComplete);
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 15000 });
   }
 
   runDoctor(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -980,7 +980,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       'curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH" && npm install -g openclaw@latest --loglevel info 2>&1)',
       'echo "[OpenClaw] 安装完成"',
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 0 });
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 600000 });
   }
 
   runLogs(
