@@ -212,7 +212,7 @@ export default function Flasher() {
   const needsXburn = requiresXburn(selectedDeviceKey);
 
   const appendLog = useCallback(
-    (text: string) => setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${text}`]),
+    (text: string) => setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${text}`].slice(-300)),
     [],
   );
 

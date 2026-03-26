@@ -16,9 +16,10 @@ import { emitFlashProgress } from '../progress.mjs';
 import { FlashErrorCode } from '../types.mjs';
 
 let activeOp = null;
-const IO_CHUNK_BYTES = 2 * 1024 * 1024;
-const IO_YIELD_INTERVAL_BYTES = 32 * 1024 * 1024;
-const IO_THROTTLE_MS = 3;
+const IO_CHUNK_BYTES = 512 * 1024;
+const IO_YIELD_INTERVAL_BYTES = 4 * 1024 * 1024;
+const IO_THROTTLE_MS = 8;
+const PROGRESS_EMIT_INTERVAL_MS = 250;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -174,6 +175,8 @@ export async function writeImage(imagePath, drivePath, options = {}) {
   let readBytes = 0;
   let offset = 0;
   let bytesSinceYield = 0;
+  let lastProgressPercent = -1;
+  let lastProgressEmitAt = 0;
   let verify = { ok: true, detail: '跳过校验' };
 
   try {
@@ -186,7 +189,16 @@ export async function writeImage(imagePath, drivePath, options = {}) {
       offset += readBytes;
       bytesSinceYield += readBytes;
       const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
-      emitFlashProgress({ stage: 'flashing', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
+      const now = Date.now();
+      const shouldEmitProgress =
+        percent >= lastProgressPercent + 1
+        || now - lastProgressEmitAt >= PROGRESS_EMIT_INTERVAL_MS
+        || offset >= total;
+      if (shouldEmitProgress) {
+        lastProgressPercent = percent;
+        lastProgressEmitAt = now;
+        emitFlashProgress({ stage: 'flashing', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
+      }
       if (bytesSinceYield >= IO_YIELD_INTERVAL_BYTES) {
         bytesSinceYield = 0;
         await new Promise((resolve) => setImmediate(resolve));
@@ -250,6 +262,8 @@ export async function backupDrive(drivePath, destPath) {
   const buffer = Buffer.allocUnsafe(IO_CHUNK_BYTES);
   let offset = 0;
   let bytesSinceYield = 0;
+  let lastProgressPercent = -1;
+  let lastProgressEmitAt = 0;
   try {
     emitFlashProgress({ stage: 'backup', message: '开始备份磁盘镜像', percent: 2 });
     while (offset < driveMeta.sizeBytes) {
@@ -261,7 +275,16 @@ export async function backupDrive(drivePath, destPath) {
       offset += read;
       bytesSinceYield += read;
       const percent = Math.min(99, Math.max(2, Math.round((offset / driveMeta.sizeBytes) * 98) + 1));
-      emitFlashProgress({ stage: 'backup', message: `已备份 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(driveMeta.sizeBytes / 1024 / 1024).toFixed(1)} MB`, percent });
+      const now = Date.now();
+      const shouldEmitProgress =
+        percent >= lastProgressPercent + 1
+        || now - lastProgressEmitAt >= PROGRESS_EMIT_INTERVAL_MS
+        || offset >= driveMeta.sizeBytes;
+      if (shouldEmitProgress) {
+        lastProgressPercent = percent;
+        lastProgressEmitAt = now;
+        emitFlashProgress({ stage: 'backup', message: `已备份 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(driveMeta.sizeBytes / 1024 / 1024).toFixed(1)} MB`, percent });
+      }
       if (bytesSinceYield >= IO_YIELD_INTERVAL_BYTES) {
         bytesSinceYield = 0;
         await new Promise((resolve) => setImmediate(resolve));
