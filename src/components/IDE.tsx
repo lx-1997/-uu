@@ -50,7 +50,7 @@ export default function IDE() {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const activeUrlRef = useRef<string>('');
-  const loadingTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     return () => { clearTimeout(loadingTimerRef.current); };

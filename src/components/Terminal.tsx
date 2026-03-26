@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { getRememberedDevicePassword } from '../api';
-import { resolveSocketUrl } from '../utils/socket';
+import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import io from 'socket.io-client';
@@ -34,7 +34,7 @@ function spawnTerm(
   term.open(el);
   requestAnimationFrame(() => { try { fitAddon.fit(); } catch { /* noop */ } });
 
-  const socket = io(resolveSocketUrl());
+  const socket = io(resolveSocketUrl(), socketIoClientOptions);
   socket.on('connect', () => {
     term.clear();
     term.writeln('\x1b[32m[Connected to RDK Server, initializing PTY...]\x1b[0m');

@@ -91,18 +91,38 @@ const LARGE_DATA_URL_STORAGE_CHARS = 48_000;
 /** 写入 localStorage 前去掉较早消息里巨型 data: URL，减轻 quota 与反序列化压力 */
 function stripHeavyDataUrlsForStorage(messages: ChatMessage[]): ChatMessage[] {
   const keepLast = 6;
+  const keepFrom = Math.max(0, messages.length - keepLast);
   return messages.map((m, i) => {
-    if (i >= messages.length - keepLast || !m.attachments?.length) return m;
-    return {
-      ...m,
-      attachments: m.attachments.map((a: ChatAttachment) => {
+    if (i >= keepFrom) return m;
+
+    let attachments = m.attachments;
+    if (attachments?.length) {
+      const next = attachments.map((a: ChatAttachment) => {
         const u = a.url;
         if (typeof u === 'string' && u.startsWith('data:') && u.length > LARGE_DATA_URL_STORAGE_CHARS) {
           return { ...a, url: '[omitted-large-data-url]' };
         }
         return a;
-      }),
-    };
+      });
+      if (next.some((a, j) => a !== attachments![j])) attachments = next;
+    }
+
+    let blocks = m.blocks;
+    if (blocks?.length) {
+      const next = blocks.map((b) => {
+        if (b.type === 'image' || b.type === 'video') {
+          const src = b.src;
+          if (typeof src === 'string' && src.startsWith('data:') && src.length > LARGE_DATA_URL_STORAGE_CHARS) {
+            return { ...b, src: '[omitted-large-data-url]' };
+          }
+        }
+        return b;
+      });
+      if (next.some((b, j) => b !== blocks![j])) blocks = next;
+    }
+
+    if (attachments === m.attachments && blocks === m.blocks) return m;
+    return { ...m, attachments, blocks };
   });
 }
 
@@ -136,9 +156,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    setChatMessages((prev) =>
-      (prev.length > MAX_CHAT_MESSAGES_IN_MEMORY ? prev.slice(-MAX_CHAT_MESSAGES_IN_MEMORY) : prev),
-    );
+    if (chatMessages.length <= MAX_CHAT_MESSAGES_IN_MEMORY) return;
+    setChatMessages((prev) => prev.slice(-MAX_CHAT_MESSAGES_IN_MEMORY));
   }, [chatMessages.length]);
 
   const [chatExpanded, setChatExpanded] = useState(false);

@@ -234,24 +234,32 @@ export class RDKClawApp {
     const now = Date.now();
     const approvalStaleMs = 10 * 60 * 1000;
     const recommendationStaleMs = 30 * 60 * 1000;
+    const staleApprovalIds: string[] = [];
     for (const [id, p] of this.pendingApprovals) {
-      if (now - p.createdAt > approvalStaleMs) {
-        this.pendingApprovals.delete(id);
-        try {
-          p.reject(new Error("审批已过期（服务端清理）"));
-        } catch {
-          /* ignore double-reject */
-        }
+      if (now - p.createdAt > approvalStaleMs) staleApprovalIds.push(id);
+    }
+    for (const id of staleApprovalIds) {
+      const p = this.pendingApprovals.get(id);
+      if (!p) continue;
+      this.pendingApprovals.delete(id);
+      try {
+        p.reject(new Error("审批已过期（服务端清理）"));
+      } catch {
+        /* ignore double-reject */
       }
     }
+    const staleRecIds: string[] = [];
     for (const [id, p] of this.pendingRecommendations) {
-      if (now - p.createdAt > recommendationStaleMs) {
-        this.pendingRecommendations.delete(id);
-        try {
-          p.resolve({ choiceId: "__expired__", autoExecute: false });
-        } catch {
-          /* ignore */
-        }
+      if (now - p.createdAt > recommendationStaleMs) staleRecIds.push(id);
+    }
+    for (const id of staleRecIds) {
+      const p = this.pendingRecommendations.get(id);
+      if (!p) continue;
+      this.pendingRecommendations.delete(id);
+      try {
+        p.resolve({ choiceId: "__expired__", autoExecute: false });
+      } catch {
+        /* ignore */
       }
     }
   }

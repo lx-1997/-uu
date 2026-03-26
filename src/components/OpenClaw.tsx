@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { renderMarkdown } from './MarkdownRenderer';
-import { resolveSocketUrl } from '../utils/socket';
+import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl } from '../utils/apiBase';
 import {
   subscribeOpenClawDeployJob,
@@ -404,13 +404,7 @@ export default function OpenClaw() {
       return;
     }
 
-    const socket = io(resolveSocketUrl(), {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 800,
-      timeout: 10000,
-    });
+    const socket = io(resolveSocketUrl(), socketIoClientOptions);
     socketRef.current = socket;
 
     socket.on('connect', () => {

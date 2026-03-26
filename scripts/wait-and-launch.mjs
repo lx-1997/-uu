@@ -5,7 +5,11 @@
 import { spawn } from 'node:child_process';
 
 const VITE_URL = 'http://localhost:5173';
+const apiPortRaw = Number.parseInt(String(process.env.PORT || '8787'), 10);
+const API_PORT = Number.isFinite(apiPortRaw) && apiPortRaw > 0 ? apiPortRaw : 8787;
+const API_HEALTH_URL = `http://localhost:${API_PORT}/api/health`;
 const MAX_RETRIES = 30;
+const API_MAX_RETRIES = 90;
 const RETRY_INTERVAL = 1000;
 
 function isRdkPage(html) {
@@ -53,6 +57,31 @@ async function waitForVite() {
   return { ok: false, reason: 'timeout' };
 }
 
+/**
+ * 等待本地 Express（tsx watch 首次编译可能较慢）。仅等 Vite 就打开窗口会导致
+ * 渲染进程大量连 8787 失败（ERR_CONNECTION_REFUSED）。
+ */
+async function waitForApiServer() {
+  for (let i = 0; i < API_MAX_RETRIES; i++) {
+    try {
+      const res = await fetch(API_HEALTH_URL, { signal: AbortSignal.timeout(1500) });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json().catch(() => ({}));
+      if (data && data.ok === true) {
+        console.log('[desktop] API server is ready (http://localhost:8787)');
+        return { ok: true };
+      }
+    } catch {
+      // 尚未监听或仍在启动
+    }
+    console.log(`[desktop] Waiting for API server :${API_PORT}... (${i + 1}/${API_MAX_RETRIES})`);
+    await new Promise((r) => setTimeout(r, RETRY_INTERVAL));
+  }
+  return { ok: false, reason: 'api-timeout' };
+}
+
 const waitResult = await waitForVite();
 if (!waitResult.ok) {
   if (waitResult.reason === 'foreign-page') {
@@ -63,6 +92,14 @@ if (!waitResult.ok) {
   }
   console.error('[desktop] Diagnose with: Get-NetTCPConnection -LocalPort 5173 | Select-Object OwningProcess -Unique');
   console.error('[desktop] Then stop process: Stop-Process -Id <PID> -Force');
+  process.exit(1);
+}
+
+const apiWait = await waitForApiServer();
+if (!apiWait.ok) {
+  console.error('[desktop] API server on :8787 did not become ready in time. Abort launching Electron.');
+  console.error('[desktop] Ensure `npm run desktop` runs dev:server, or start: npm run dev:server');
+  console.error(`[desktop] Diagnose: Get-NetTCPConnection -LocalPort ${API_PORT} | Select-Object OwningProcess -Unique`);
   process.exit(1);
 }
 

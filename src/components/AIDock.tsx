@@ -3,7 +3,7 @@ import { useAppState } from '../hooks/useAppState';
 import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload } from '../api';
 import { getCapability } from '../ai';
-import { resolveSocketUrl } from '../utils/socket';
+import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl } from '../utils/apiBase';
 import { renderMarkdown } from './MarkdownRenderer';
 import io from 'socket.io-client';
@@ -616,7 +616,7 @@ function chatMessageToPlainText(msg: ChatMessage): string {
       } else if (b.type === 'video') {
         parts.push(b.caption || b.src || '[视频]');
       } else if (b.type === 'file') {
-        parts.push(b.name || b.src || '[文件]');
+        parts.push(b.fileName || b.src || '[文件]');
       }
     }
   }
@@ -955,13 +955,7 @@ export default function AIDock() {
       return;
     }
 
-    const socket = io(resolveSocketUrl(), {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 800,
-      timeout: 10000,
-    });
+    const socket = io(resolveSocketUrl(), socketIoClientOptions);
     socketRef.current = socket;
 
     socket.on('connect', () => {

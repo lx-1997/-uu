@@ -1,4 +1,17 @@
 /**
+ * Default Socket.IO client options: gentler reconnect backoff so DevTools
+ * is not flooded when the API is briefly down or restarting.
+ */
+export const socketIoClientOptions = {
+  transports: ['websocket', 'polling'] as ('websocket' | 'polling')[],
+  reconnection: true,
+  reconnectionAttempts: 25,
+  reconnectionDelay: 2000,
+  reconnectionDelayMax: 15000,
+  timeout: 15000,
+};
+
+/**
  * Resolve the Socket.IO / API base URL.
  *
  * In dev mode we always connect to the local dev server.
