@@ -47,9 +47,6 @@ interface FlasherUiState {
   useLocalImage: boolean;
   localImagePath: string;
   selectedDrive: string;
-  backupBeforeFlash: boolean;
-  backupDestPath: string;
-  backupResultPath: string;
   verifyDetail: string;
 }
 
@@ -191,25 +188,8 @@ export default function Flasher() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
-  const [backupBeforeFlash, setBackupBeforeFlash] = useState(true);
-  const [backupDestPath, setBackupDestPath] = useState('');
-  const [backupResultPath, setBackupResultPath] = useState('');
   const [verifyDetail, setVerifyDetail] = useState('');
   const abortRef = useRef(false);
-
-  /* ── board backup state ── */
-  const [backupChecking, setBackupChecking] = useState(false);
-  const [backupAvailable, setBackupAvailable] = useState<boolean | null>(null);
-  const [backupRunning, setBackupRunning] = useState(false);
-  const [backupStatus, setBackupStatus] = useState('');
-  const [backupOutputPath, setBackupOutputPath] = useState('');
-  const backupPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (backupPollRef.current) clearInterval(backupPollRef.current);
-    };
-  }, []);
 
   /* ── wifi config state ── */
   const [showWifiConfig, setShowWifiConfig] = useState(false);
@@ -274,9 +254,6 @@ export default function Flasher() {
       if (typeof parsed.progress === 'number') setProgress(parsed.progress);
       if (typeof parsed.error === 'string') setError(parsed.error);
       if (Array.isArray(parsed.logs)) setLogs(parsed.logs.slice(-200));
-      if (typeof parsed.backupBeforeFlash === 'boolean') setBackupBeforeFlash(parsed.backupBeforeFlash);
-      if (typeof parsed.backupDestPath === 'string') setBackupDestPath(parsed.backupDestPath);
-      if (typeof parsed.backupResultPath === 'string') setBackupResultPath(parsed.backupResultPath);
       if (typeof parsed.verifyDetail === 'string') setVerifyDetail(parsed.verifyDetail);
     } catch {
       // ignore invalid saved state
@@ -320,9 +297,6 @@ export default function Flasher() {
       useLocalImage,
       localImagePath,
       selectedDrive,
-      backupBeforeFlash,
-      backupDestPath,
-      backupResultPath,
       verifyDetail,
     };
     try {
@@ -331,9 +305,6 @@ export default function Flasher() {
       // ignore quota errors
     }
   }, [
-    backupBeforeFlash,
-    backupDestPath,
-    backupResultPath,
     error,
     localImagePath,
     logs,
@@ -490,7 +461,6 @@ export default function Flasher() {
     }
 
     abortRef.current = false;
-    setBackupResultPath('');
     setVerifyDetail('');
     setPhase('flashing');
     setProgress(0);
@@ -498,19 +468,6 @@ export default function Flasher() {
     appendLog(`镜像文件: ${imgPath}`);
 
     try {
-      if (backupBeforeFlash && window.rdkDesktop?.flashBackupLocal) {
-        setPhase('backup');
-        appendLog('开始备份目标盘（可恢复）...');
-        const backup = await window.rdkDesktop.flashBackupLocal({
-          drivePath: selectedDrive,
-          destPath: backupDestPath.trim() || undefined,
-        });
-        if (!backup.ok) throw new Error(backup.error || '备份失败');
-        const backupPath = backup.path || '';
-        setBackupResultPath(backupPath);
-        appendLog(`备份完成: ${backupPath}`);
-      }
-
       const result = await window.rdkDesktop!.flashWriteLocal!({
         imagePath: imgPath,
         drivePath: selectedDrive,
@@ -906,28 +863,6 @@ export default function Flasher() {
                   </div>
                 </div>
                 {!needsXburn && (
-                  <div className="config-section">
-                    <div className="config-row">
-                      <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', width: '100%' }}>
-                        <input
-                          type="checkbox"
-                          checked={backupBeforeFlash}
-                          onChange={(e) => setBackupBeforeFlash(e.target.checked)}
-                        />
-                        写盘前先备份目标盘（推荐）
-                      </label>
-                    </div>
-                    {backupBeforeFlash && (
-                      <input
-                        className="input"
-                        placeholder="备份文件路径（可选，默认 Downloads）"
-                        value={backupDestPath}
-                        onChange={(e) => setBackupDestPath(e.target.value)}
-                      />
-                    )}
-                  </div>
-                )}
-                {!needsXburn && (
                   <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                     <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
                       写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。
@@ -1003,16 +938,15 @@ export default function Flasher() {
 
             {/* Phase indicators */}
             <div className="config-section">
-              {(['backup', 'downloading', 'decompressing', 'flashing', 'verifying'] as const).map((p) => {
+              {(['downloading', 'decompressing', 'flashing', 'verifying'] as const).map((p) => {
                 const labels = {
-                  backup: '备份目标盘',
                   downloading: '下载镜像',
                   decompressing: '解压镜像',
                   flashing: needsXburn ? 'xburn 烧录' : '写盘',
                   verifying: '写后校验',
                 };
                 let state: 'wait' | 'run' | 'done' | 'error' | 'skip' = 'wait';
-                const order: readonly string[] = ['backup', 'downloading', 'decompressing', 'flashing', 'verifying', 'done', 'error'];
+                const order: readonly string[] = ['downloading', 'decompressing', 'flashing', 'verifying', 'done', 'error'];
                 const ci = order.indexOf(phase);
                 const pi = order.indexOf(p);
                 if (ci === pi) state = 'run';
@@ -1021,7 +955,6 @@ export default function Flasher() {
                 else if (phase === 'error' && pi < ci) state = 'done';
                 else if (phase === 'error' && pi === ci) state = 'error';
 
-                if (p === 'backup' && !backupBeforeFlash) state = 'skip';
                 if (p === 'downloading' && useLocalImage) state = 'skip';
                 if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath)) state = 'skip';
 
@@ -1062,12 +995,10 @@ export default function Flasher() {
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
               </div>
             )}
-            {!error && (backupResultPath || verifyDetail) && (
+            {!error && verifyDetail && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--ok)', background: 'var(--ok-subtle)' }}>
                 <p className="config-card-desc" style={{ color: 'var(--ok)', margin: 0 }}>
-                  {backupResultPath ? `备份文件: ${backupResultPath}` : ''}
-                  {backupResultPath && verifyDetail ? ' | ' : ''}
-                  {verifyDetail ? `校验: ${verifyDetail}` : ''}
+                  {`校验: ${verifyDetail}`}
                 </p>
               </div>
             )}
@@ -1099,155 +1030,6 @@ export default function Flasher() {
                   )}
                 </div>
               </div>
-            )}
-          </section>
-        )}
-
-        {/* ═══════ Board Backup ═══════ */}
-        {currentDevice && step === 0 && phase === 'idle' && (
-          <section className="card card-compact" style={{ marginTop: 16 }}>
-            <div className="config-header">
-              <h3 style={{ margin: 0, fontSize: '1rem' }}>板端镜像备份</h3>
-              <span className="section-label" style={{ fontSize: '0.8rem', opacity: 0.7 }}>
-                设备: {currentDevice.name || currentDevice.ip}
-              </span>
-            </div>
-            <p className="config-card-desc">
-              将已连接 RDK 设备的当前系统镜像备份到板端存储，可用于后续恢复。
-            </p>
-
-            {backupAvailable === null && (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={backupChecking}
-                onClick={async () => {
-                  setBackupChecking(true);
-                  setBackupStatus('');
-                  try {
-                    const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/flash/backup/check`), {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                    });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    setBackupAvailable(!!data.available);
-                    if (!data.available) {
-                      setBackupStatus('板端未安装 rdk-backup 工具。可在终端中执行 apt install rdk-backup 安装。');
-                    }
-                  } catch (err) {
-                    setBackupStatus(`检查备份能力失败: ${err instanceof Error ? err.message : '请确认设备已连接'}`);
-                    setBackupAvailable(false);
-                  } finally {
-                    setBackupChecking(false);
-                  }
-                }}
-              >
-                {backupChecking ? '检查中...' : '检查备份能力'}
-              </button>
-            )}
-
-            {backupAvailable === true && !backupRunning && !backupOutputPath && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={async () => {
-                    if (backupPollRef.current) clearInterval(backupPollRef.current);
-                    setBackupRunning(true);
-                    setBackupStatus('正在启动备份...');
-                    try {
-                      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/flash/backup/start`), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({}),
-                      });
-                      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                      const data = await res.json();
-                      if (data.ok && data.jobId) {
-                        setBackupStatus(`备份任务已启动 (${data.jobId.slice(0, 8)}...)，请等待完成`);
-                        const devId = currentDevice.id;
-                        backupPollRef.current = setInterval(async () => {
-                          try {
-                            const statusRes = await fetch(
-                              resolveApiUrl(`/api/devices/${devId}/flash/backup/status?jobId=${data.jobId}`),
-                            );
-                            if (!statusRes.ok) throw new Error(`HTTP ${statusRes.status}`);
-                            const statusData = await statusRes.json();
-                            const job = statusData.job;
-                            if (job?.status === 'done') {
-                              if (backupPollRef.current) clearInterval(backupPollRef.current);
-                              backupPollRef.current = null;
-                              setBackupRunning(false);
-                              setBackupOutputPath(job.outputPath || '备份完成');
-                              setBackupStatus('备份完成');
-                            } else if (job?.status === 'error') {
-                              if (backupPollRef.current) clearInterval(backupPollRef.current);
-                              backupPollRef.current = null;
-                              setBackupRunning(false);
-                              setBackupStatus(`备份失败: ${job.error || '未知错误'}`);
-                            } else {
-                              setBackupStatus(`备份中... (${job?.status || 'running'})`);
-                            }
-                          } catch {
-                            if (backupPollRef.current) clearInterval(backupPollRef.current);
-                            backupPollRef.current = null;
-                            setBackupRunning(false);
-                            setBackupStatus('备份状态查询失败');
-                          }
-                        }, 5000);
-                      } else {
-                        setBackupRunning(false);
-                        setBackupStatus(`启动失败: ${data.error || '未知错误'}`);
-                      }
-                    } catch (err) {
-                      setBackupRunning(false);
-                      setBackupStatus(`启动备份请求失败: ${err instanceof Error ? err.message : '未知错误'}`);
-                    }
-                  }}
-                >
-                  开始备份
-                </button>
-              </div>
-            )}
-
-            {backupRunning && (
-              <div className="config-card" style={{ borderColor: 'var(--accent)' }}>
-                <p className="config-card-desc" style={{ margin: 0, color: 'var(--accent)' }}>
-                  ⏳ {backupStatus}
-                </p>
-              </div>
-            )}
-
-            {backupOutputPath && (
-              <div className="config-card" style={{ borderColor: 'var(--ok)', background: 'var(--ok-subtle)' }}>
-                <p className="config-card-desc" style={{ margin: 0, color: 'var(--ok)' }}>
-                  ✓ {backupStatus} — 路径: {backupOutputPath}
-                </p>
-              </div>
-            )}
-
-            {backupAvailable === false && backupStatus && (
-              <div className="config-card" style={{ borderColor: 'var(--warning)' }}>
-                <p className="config-card-desc" style={{ margin: 0, color: 'var(--warning)' }}>
-                  {backupStatus}
-                </p>
-              </div>
-            )}
-
-            {(backupOutputPath || backupAvailable === false) && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{ marginTop: 4 }}
-                onClick={() => {
-                  setBackupAvailable(null);
-                  setBackupOutputPath('');
-                  setBackupStatus('');
-                }}
-              >
-                重新检查
-              </button>
             )}
           </section>
         )}
