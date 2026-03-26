@@ -81,8 +81,8 @@ const CLAWHUB_AUTO_LOGIN_CMD = [
   `clawhub login --token ${CLAWHUB_TOKEN} 2>&1 || echo "[OpenClaw] ClawHub 自动登录失败"`
 ].join(' && ');
 const BOARD_ENV_EXPORT = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH"';
-const RESTART_GATEWAY_FALLBACK = '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true)';
-const START_GATEWAY_FALLBACK = '(openclaw gateway start 2>&1 || openclaw start 2>&1 || clawctl start 2>&1 || true)';
+const RESTART_GATEWAY_FALLBACK = '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart 2>/dev/null || "$OPENCLAW_CMD" restart 2>/dev/null; else false; fi) || clawctl gateway restart || true)';
+const START_GATEWAY_FALLBACK = '((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway start 2>&1 || "$OPENCLAW_CMD" start 2>&1; else false; fi) || clawctl start 2>&1 || true)';
 const ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64 = Buffer.from(`
 import json
 import os
@@ -112,8 +112,15 @@ const ENSURE_GATEWAY_LOCAL_MODE = [
   `echo '${ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_mode.py`,
   'python3 /tmp/oc_fix_gateway_mode.py 2>&1 || echo "[OpenClaw] gateway mode 修复失败"',
 ].join(' && ');
-const RUN_DOCTOR = '(openclaw doctor --fix --yes 2>&1 || openclaw doctor --fix 2>&1 || openclaw doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查")';
-const RUN_HEALTH = '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || echo "[OpenClaw] health 检查失败")';
+const RUN_DOCTOR = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查"; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 doctor"; fi)';
+const RUN_HEALTH = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health --json 2>&1 || "$OPENCLAW_CMD" status --all 2>&1 || "$OPENCLAW_CMD" status 2>&1 || echo "[OpenClaw] health 检查失败"; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 health"; fi)';
+const RESOLVE_OPENCLAW_CMD = [
+  'OPENCLAW_CMD="$(command -v openclaw 2>/dev/null || true)"',
+  'if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.npm-global/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.npm-global/bin/openclaw"; fi',
+  'if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.local/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.local/bin/openclaw"; fi',
+  'if [ -z "$OPENCLAW_CMD" ]; then OPENCLAW_CMD="$(npm prefix -g 2>/dev/null)/bin/openclaw"; fi',
+  'if [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi',
+].join(' && ');
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
   'anthropic-messages',
@@ -263,6 +270,7 @@ const NPM_INSTALL_CMD = [
   'echo "[OpenClaw] 开始安装（官方推荐流程）..."',
   // 优先官方安装脚本，失败回退 npm latest
   '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 安装失败，重试 $i/3..."; sleep 10; done))',
+  RESOLVE_OPENCLAW_CMD,
   CLAWHUB_AUTO_LOGIN_CMD,
   ENSURE_GATEWAY_LOCAL_MODE,
   NPM_NVM_CLEANUP,
@@ -272,11 +280,11 @@ const NPM_INSTALL_CMD = [
   'echo "[OpenClaw] 安装流程完成"'
 ].join(' && ');
 
-const GATEWAY_RESTART_CMD = `${BOARD_ENV_EXPORT} && ${RESTART_GATEWAY_FALLBACK} && echo "[OpenClaw] Gateway 已重启"`;
+const GATEWAY_RESTART_CMD = `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && ${RESTART_GATEWAY_FALLBACK} && echo "[OpenClaw] Gateway 已重启"`;
 const GATEWAY_PORT_CHECK = `python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_STREAM); s.settimeout(1.0); ok=(s.connect_ex(("127.0.0.1",18789))==0); s.close(); print("OPEN" if ok else "CLOSED")'`;
 const GATEWAY_DIAG_LOGS = [
   'echo "--- openclaw logs ---"',
-  '(openclaw logs --limit 200 2>&1 || true)',
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" logs --limit 200 2>&1 || true; else echo "openclaw CLI 未找到，跳过 openclaw logs"; fi)',
   'echo "--- journalctl (user/openclaw-gateway) ---"',
   '(journalctl --user -u openclaw-gateway --no-pager -n 120 2>&1 || true)',
   'echo "--- /tmp/openclaw log files ---"',
@@ -285,9 +293,10 @@ const GATEWAY_DIAG_LOGS = [
 
 const NPM_UPGRADE_CMD = [
   BOARD_ENV_EXPORT,
+  RESOLVE_OPENCLAW_CMD,
   'echo "[OpenClaw] 开始升级（官方推荐流程）..."',
   // 优先 CLI update，失败回退 npm latest
-  '(openclaw update --no-restart 2>&1 || openclaw update 2>&1 || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 10; done))',
+  '((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 10; done))',
   ENSURE_GATEWAY_LOCAL_MODE,
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
@@ -458,19 +467,20 @@ export class OpenClawDeploymentManager {
   runCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
       BOARD_ENV_EXPORT,
+      RESOLVE_OPENCLAW_CMD,
       'echo "=== OpenClaw 诊断 ==="',
       'echo "--- 版本 ---"',
-      'openclaw --version 2>&1 || echo "openclaw 未安装"',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo "openclaw 未安装"; fi)',
       'echo ""',
       'echo "--- Gateway 状态 ---"',
       `${GATEWAY_PORT_CHECK} 2>/dev/null || echo "CLOSED"`,
       '(systemctl --user status openclaw-gateway --no-pager -n 20 2>&1 || true)',
       'echo ""',
       'echo "--- Health ---"',
-      'openclaw health 2>&1 || echo "health 不可用"',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health 2>&1 || echo "health 不可用"; else echo "health 不可用"; fi)',
       'echo ""',
       'echo "--- Doctor ---"',
-      'openclaw doctor 2>&1 || echo "doctor 不可用"',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor 2>&1 || echo "doctor 不可用"; else echo "doctor 不可用"; fi)',
       'echo ""',
       'echo "--- Node/NPM ---"',
       'node --version 2>&1 || echo "node 未安装"',
@@ -483,6 +493,7 @@ export class OpenClawDeploymentManager {
   runPrepare(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
       BOARD_ENV_EXPORT,
+      RESOLVE_OPENCLAW_CMD,
       'echo "=== 环境准备 ==="',
       'echo "--- 检查 Node.js ---"',
       'node --version 2>&1 || echo "node 未安装，请先安装 Node.js 18+"',
@@ -493,7 +504,7 @@ export class OpenClawDeploymentManager {
       'echo "--- 配置 npm ---"',
       'npm config set prefix "$HOME/.npm-global" 2>/dev/null ; npm config set fund false 2>/dev/null ; npm config set update-notifier false 2>/dev/null ; echo "npm 配置完成"',
       'echo "--- 检查 openclaw ---"',
-      'openclaw --version 2>&1 || echo "openclaw 尚未安装（可点击安装按钮）"',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo "openclaw 尚未安装（可点击安装按钮）"; fi)',
       'echo "--- 修复网关模式 ---"',
       ENSURE_GATEWAY_LOCAL_MODE,
       'echo "=== 准备完成 ==="',
@@ -512,17 +523,18 @@ export class OpenClawDeploymentManager {
   runUninstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
       BOARD_ENV_EXPORT,
+      RESOLVE_OPENCLAW_CMD,
       'echo "[OpenClaw] 开始卸载..."',
 
       'echo "[1/6] 停止 gateway 服务..."',
-      '(openclaw gateway stop 2>/dev/null || true)',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway stop 2>/dev/null || true; fi)',
       '(systemctl --user stop openclaw-gateway 2>/dev/null || true)',
 
       'echo "[2/6] 执行官方卸载..."',
-      '(openclaw uninstall --all --yes --non-interactive 2>&1 || true)',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" uninstall --all --yes --non-interactive 2>&1 || true; else echo "[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续执行兜底清理）"; fi)',
 
       'echo "[3/6] 卸载 systemd 服务..."',
-      '(openclaw gateway uninstall 2>/dev/null || true)',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway uninstall 2>/dev/null || true; fi)',
       '(systemctl --user disable openclaw-gateway 2>/dev/null || true)',
       '(rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true)',
       '(systemctl --user daemon-reload 2>/dev/null || true)',
@@ -866,6 +878,7 @@ except Exception as e:
     const base64Script = Buffer.from(pyScript, 'utf8').toString('base64');
     const cmd = [
       'export PATH="$HOME/.npm-global/bin:$PATH"',
+      RESOLVE_OPENCLAW_CMD,
       `echo '${base64Script}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}'`,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
@@ -877,6 +890,7 @@ except Exception as e:
   runRestartGateway(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
       'export PATH="$HOME/.npm-global/bin:$PATH"',
+      RESOLVE_OPENCLAW_CMD,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
       'echo "[OpenClaw] Gateway 重启命令已执行，等待端口就绪..."',
@@ -889,12 +903,12 @@ except Exception as e:
   }
 
   runGetVersion(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const cmd = 'export PATH="$HOME/.npm-global/bin:$PATH" && (openclaw --version 2>/dev/null || echo "未安装")';
+    const cmd = `export PATH="$HOME/.npm-global/bin:$PATH" && ${RESOLVE_OPENCLAW_CMD} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>/dev/null; else echo "未安装"; fi)`;
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 15000 });
   }
 
   runDoctor(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const cmd = `export PATH="$HOME/.npm-global/bin:$PATH" && ${ENSURE_GATEWAY_LOCAL_MODE} && (openclaw doctor --fix 2>&1 || openclaw doctor 2>&1 || echo "[OpenClaw] doctor 命令不可用，可能未安装")`;
+    const cmd = `export PATH="$HOME/.npm-global/bin:$PATH" && ${RESOLVE_OPENCLAW_CMD} && ${ENSURE_GATEWAY_LOCAL_MODE} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 命令不可用，可能未安装"; else echo "[OpenClaw] doctor 命令不可用，可能未安装"; fi)`;
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000 });
   }
 
@@ -992,7 +1006,8 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     const maxLines = Number.isFinite(limit) ? Math.max(20, Math.min(1000, Math.floor(limit))) : 200;
     const cmd = [
       BOARD_ENV_EXPORT,
-      `echo "--- openclaw logs ---" ; (openclaw logs --limit ${maxLines} 2>&1 || true) ; echo "--- journalctl ---" ; (journalctl --user -u openclaw-gateway --no-pager -n ${maxLines} 2>&1 || true) ; echo "--- /tmp/openclaw ---" ; (ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 3 | while read f; do echo "=== $f ==="; tail -n ${Math.max(40, Math.min(300, Math.floor(maxLines / 2)))} "$f" 2>/dev/null || true; done || true)`,
+      RESOLVE_OPENCLAW_CMD,
+      `echo "--- openclaw logs ---" ; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" logs --limit ${maxLines} 2>&1 || true; else echo "openclaw CLI 未找到"; fi) ; echo "--- journalctl ---" ; (journalctl --user -u openclaw-gateway --no-pager -n ${maxLines} 2>&1 || true) ; echo "--- /tmp/openclaw ---" ; (ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 3 | while read f; do echo "=== $f ==="; tail -n ${Math.max(40, Math.min(300, Math.floor(maxLines / 2)))} "$f" 2>/dev/null || true; done || true)`,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000, pty: false });
   }
@@ -1033,7 +1048,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void
   ): void {
-    const cmd = `${BOARD_ENV_EXPORT} && (openclaw pairing list ${channel} 2>&1 || echo "[OpenClaw] pairing list 失败")`;
+    const cmd = `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing list ${channel} 2>&1 || echo "[OpenClaw] pairing list 失败"; else echo "[OpenClaw] pairing list 失败：未找到 openclaw CLI"; fi)`;
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 20000, pty: false });
   }
 
@@ -1044,7 +1059,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void
   ): void {
-    const cmd = `${BOARD_ENV_EXPORT} && (openclaw pairing approve ${channel} ${code} 2>&1 || echo "[OpenClaw] pairing approve 失败")`;
+    const cmd = `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing approve ${channel} ${code} 2>&1 || echo "[OpenClaw] pairing approve 失败"; else echo "[OpenClaw] pairing approve 失败：未找到 openclaw CLI"; fi)`;
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 20000, pty: false });
   }
 
@@ -1055,7 +1070,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void
   ): void {
-    const cmd = `${BOARD_ENV_EXPORT} && (openclaw pairing reject ${channel} ${code} 2>&1 || echo "[OpenClaw] 当前版本可能不支持 pairing reject")`;
+    const cmd = `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing reject ${channel} ${code} 2>&1 || echo "[OpenClaw] 当前版本可能不支持 pairing reject"; else echo "[OpenClaw] pairing reject 失败：未找到 openclaw CLI"; fi)`;
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 20000, pty: false });
   }
 

@@ -69,6 +69,15 @@ export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks):
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.avi', '.mov', '.mkv']);
 const DOC_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf', '.csv', '.txt', '.md', '.zip', '.rar', '.7z']);
+const OPENCLAW_RESOLVE_SNIPPET = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global"; export PATH="$HOME/.npm-global/bin:$PATH"; OPENCLAW_CMD="$(command -v openclaw 2>/dev/null || true)"; if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.local/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.local/bin/openclaw"; fi; if [ -z "$OPENCLAW_CMD" ] && [ -x "$(npm prefix -g 2>/dev/null)/bin/openclaw" ]; then OPENCLAW_CMD="$(npm prefix -g 2>/dev/null)/bin/openclaw"; fi; if [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi';
+
+function assertShellSafeToken(name: string, value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed || !/^[A-Za-z0-9._:-]+$/.test(trimmed)) {
+    throw new Error(`${name} 包含非法字符`);
+  }
+  return trimmed;
+}
 
 function deviceFileDownloadToLocalTool(
   deviceId: string,
@@ -250,7 +259,7 @@ function boardOpenClawStatusTool(deviceId: string): Tool<Record<string, never>> 
     },
     async execute() {
       return execOnDevice(deviceId, [
-        'bash -lc "(openclaw status || clawctl status || systemctl --user status openclaw-gateway --no-pager || ps -ef | grep -E \'openclaw|claw\' | grep -v grep || echo OpenClaw_NOT_FOUND)"',
+        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status; else false; fi) || clawctl status || systemctl --user status openclaw-gateway --no-pager || ps -ef | grep -E "openclaw|claw" | grep -v grep || echo OpenClaw_NOT_FOUND'`,
       ]);
     },
   };
@@ -283,10 +292,12 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
         'bash -lc',
         '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
         'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
+        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
         '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || npm install -g openclaw@latest 2>&1);',
-        '(openclaw doctor --yes 2>&1 || openclaw doctor 2>&1 || true);',
-        '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true);',
-        '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || true)"',
+        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
+        '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
+        '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
+        '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
       ].join(' ');
       return execOnDevice(deviceId, [cmd]);
     },
@@ -303,10 +314,11 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
         'bash -lc',
         '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
         'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
-        '(openclaw update --no-restart 2>&1 || openclaw update 2>&1 || npm install -g openclaw@latest 2>&1);',
-        '(openclaw doctor --yes 2>&1 || openclaw doctor 2>&1 || true);',
-        '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true);',
-        '(openclaw health --json 2>&1 || openclaw status --all 2>&1 || openclaw status 2>&1 || true)"',
+        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
+        '((if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" update --no-restart 2>&1 || \\\"$OPENCLAW_CMD\\\" update 2>&1; else false; fi) || npm install -g openclaw@latest 2>&1);',
+        '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
+        '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
+        '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
       ].join(' ');
       return execOnDevice(deviceId, [cmd]);
     },
@@ -321,9 +333,10 @@ function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never
     async execute() {
       const steps = [
         'export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\"; export PATH=\\"$HOME/.npm-global/bin:$PATH\\"',
-        'echo \\"[1/6] 停止 gateway...\\"; (openclaw gateway stop 2>/dev/null || true); (systemctl --user stop openclaw-gateway 2>/dev/null || true)',
-        'echo \\"[2/6] 官方卸载...\\"; (openclaw uninstall --all --yes --non-interactive 2>&1 || true)',
-        'echo \\"[3/6] 清理 systemd...\\"; (openclaw gateway uninstall 2>/dev/null || true); (systemctl --user disable openclaw-gateway 2>/dev/null || true); (rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true); (systemctl --user daemon-reload 2>/dev/null || true)',
+        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi',
+        'echo \\"[1/6] 停止 gateway...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway stop 2>/dev/null || true; fi); (systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+        'echo \\"[2/6] 官方卸载...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" uninstall --all --yes --non-interactive 2>&1 || true; else echo \\\"[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续兜底清理）\\\"; fi)',
+        'echo \\"[3/6] 清理 systemd...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway uninstall 2>/dev/null || true; fi); (systemctl --user disable openclaw-gateway 2>/dev/null || true); (rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true); (systemctl --user daemon-reload 2>/dev/null || true)',
         'echo \\"[4/6] 清除 ClawHub 登录态...\\"; (clawhub logout 2>/dev/null || true)',
         'echo \\"[5/6] 清理配置/日志/缓存...\\"; (rm -rf ~/.openclaw /tmp/openclaw-* /tmp/clawhub-* ~/.cache/openclaw ~/.local/share/openclaw 2>/dev/null || true)',
         'echo \\"[6/6] 移除 npm 包...\\"; (npm rm -g openclaw 2>/dev/null || true); (npm rm -g clawhub 2>/dev/null || true)',
@@ -369,7 +382,7 @@ model["primary"]=f"{args['provider']}/{args['modelId']}"
 json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
 print(model["primary"])`;
       const pyB64 = Buffer.from(py, 'utf8').toString('base64');
-      const cmd = `bash -lc "echo '${pyB64}' | base64 -d >/tmp/rdk_oc_switch_model.py && python3 /tmp/rdk_oc_switch_model.py '${payload}' && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true) && (openclaw status 2>&1 || true)"`;
+      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_switch_model.py && python3 /tmp/rdk_oc_switch_model.py ${payload} && (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true) && ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status 2>&1 || true; fi) || true)'`;
       return execOnDevice(deviceId, [cmd]);
     },
   };
@@ -438,7 +451,7 @@ if cfg["connectionMode"]=="webhook":
 json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
 print(json.dumps({"ok":True,"mode":feishu["connectionMode"],"domain":feishu["domain"],"dmPolicy":feishu["dmPolicy"]},ensure_ascii=False))`;
       const pyB64 = Buffer.from(py, 'utf8').toString('base64');
-      const cmd = `bash -lc "echo '${pyB64}' | base64 -d >/tmp/rdk_oc_feishu_cfg.py && python3 /tmp/rdk_oc_feishu_cfg.py '${payload}' && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true) && (openclaw gateway status 2>&1 || openclaw status 2>&1 || true)"`;
+      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_feishu_cfg.py && python3 /tmp/rdk_oc_feishu_cfg.py ${payload} && (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true) && ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway status 2>&1 || "$OPENCLAW_CMD" status 2>&1 || true; fi) || true)'`;
       return execOnDevice(deviceId, [cmd]);
     },
   };
@@ -473,7 +486,7 @@ entries["openclaw-weixin"]={"enabled":${enabled ? 'True' : 'False'}}
 json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
 print(json.dumps({"ok":True,"enabled":${enabled ? 'true' : 'false'}},ensure_ascii=False))`;
       const pyB64 = Buffer.from(py, 'utf8').toString('base64');
-      const cmd = `bash -lc "echo '${pyB64}' | base64 -d >/tmp/rdk_oc_wx_cfg.py && python3 /tmp/rdk_oc_wx_cfg.py && (systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true) && (openclaw gateway status 2>&1 || openclaw status 2>&1 || true)"`;
+      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_wx_cfg.py && python3 /tmp/rdk_oc_wx_cfg.py && (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true) && ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway status 2>&1 || "$OPENCLAW_CMD" status 2>&1 || true; fi) || true)'`;
       return execOnDevice(deviceId, [cmd]);
     },
   };
@@ -490,8 +503,8 @@ function boardOpenClawPairingListTool(deviceId: string): Tool<{ channel?: string
       },
     },
     async execute(input) {
-      const channel = (input.channel || 'feishu').trim();
-      return execOnDevice(deviceId, [`bash -lc "openclaw pairing list ${channel} 2>&1 || echo pairing_list_failed"`]);
+      const channel = assertShellSafeToken('channel', input.channel || 'feishu');
+      return execOnDevice(deviceId, [`bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing list ${channel} 2>&1 || echo pairing_list_failed; else echo pairing_list_failed; fi)'`]);
     },
   };
 }
@@ -509,9 +522,9 @@ function boardOpenClawPairingApproveTool(deviceId: string): Tool<{ code: string;
       required: ['code'],
     },
     async execute(input) {
-      const channel = (input.channel || 'feishu').trim();
-      const code = input.code.trim();
-      return execOnDevice(deviceId, [`bash -lc "openclaw pairing approve ${channel} ${code} 2>&1"`]);
+      const channel = assertShellSafeToken('channel', input.channel || 'feishu');
+      const code = assertShellSafeToken('code', input.code);
+      return execOnDevice(deviceId, [`bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing approve ${channel} ${code} 2>&1; else echo pairing_approve_failed:openclaw_not_found; fi'`]);
     },
   };
 }
@@ -529,9 +542,9 @@ function boardOpenClawPairingRejectTool(deviceId: string): Tool<{ code: string; 
       required: ['code'],
     },
     async execute(input) {
-      const channel = (input.channel || 'feishu').trim();
-      const code = input.code.trim();
-      return execOnDevice(deviceId, [`bash -lc "openclaw pairing reject ${channel} ${code} 2>&1"`]);
+      const channel = assertShellSafeToken('channel', input.channel || 'feishu');
+      const code = assertShellSafeToken('code', input.code);
+      return execOnDevice(deviceId, [`bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing reject ${channel} ${code} 2>&1; else echo pairing_reject_failed:openclaw_not_found; fi'`]);
     },
   };
 }
@@ -548,7 +561,7 @@ function boardOpenClawLogsTool(deviceId: string): Tool<{ limit?: number }> {
     },
     async execute(input) {
       const limit = Math.max(20, Math.min(1000, Number.isFinite(input.limit) ? Number(input.limit) : 200));
-      return execOnDevice(deviceId, [`bash -lc "openclaw logs --limit ${limit} 2>&1 || journalctl --user -u openclaw-gateway --no-pager -n ${limit} 2>&1 || echo no_logs"`]);
+      return execOnDevice(deviceId, [`bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" logs --limit ${limit} 2>&1 || true; else false; fi) || journalctl --user -u openclaw-gateway --no-pager -n ${limit} 2>&1 || echo no_logs'`]);
     },
   };
 }
@@ -563,7 +576,7 @@ function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, 
     },
     async execute() {
       return execOnDevice(deviceId, [
-        'bash -lc "(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || clawctl gateway restart || true) && (openclaw status || clawctl status || echo restarted)"',
+        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || clawctl gateway restart || true) && ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status; else false; fi) || clawctl status || echo restarted)'`,
       ]);
     },
   };
@@ -576,7 +589,7 @@ function boardOpenClawDoctorTool(deviceId: string): Tool<Record<string, never>> 
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [
-        'bash -lc "export PATH=\\"$HOME/.npm-global/bin:$PATH\\"; (openclaw doctor --fix --yes 2>&1 || openclaw doctor --fix 2>&1 || openclaw doctor 2>&1 || echo doctor_not_available)"',
+        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo doctor_not_available; else echo doctor_not_available; fi)'`,
       ]);
     },
   };
@@ -589,7 +602,7 @@ function boardOpenClawModelTestTool(deviceId: string): Tool<Record<string, never
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [
-        `bash -lc 'export PATH="$HOME/.npm-global/bin:$PATH"; (openclaw message --message "reply OK" --timeout 30 2>&1 || openclaw message "reply OK" 2>&1 || echo MODEL_TEST_UNAVAILABLE)'`,
+        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" message --message "reply OK" --timeout 30 2>&1 || "$OPENCLAW_CMD" message "reply OK" 2>&1 || echo MODEL_TEST_UNAVAILABLE; else echo MODEL_TEST_UNAVAILABLE; fi)'`,
       ]);
     },
   };
@@ -609,13 +622,13 @@ def mask(o):
  return o
 print(json.dumps(mask(d),indent=2))`.replace(/\n/g, ';');
       const cmds = [
-        'export PATH="$HOME/.npm-global/bin:$PATH"',
+        OPENCLAW_RESOLVE_SNIPPET,
         'echo "--- node ---"; node --version 2>&1 || echo not_installed',
         'echo "--- npm ---"; npm --version 2>&1 || echo not_installed',
-        'echo "--- openclaw ---"; openclaw --version 2>&1 || echo not_installed',
+        'echo "--- openclaw ---"; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo not_installed; fi)',
         'echo "--- gateway port ---"; (ss -lntp 2>/dev/null || netstat -tlnp 2>/dev/null) | grep 18789 || echo port_not_listening',
-        'echo "--- health ---"; (openclaw health --json 2>&1 || openclaw status --all 2>&1 || echo no_health)',
-        `echo "--- config (keys masked) ---"; python3 -c "${maskPy}" 2>/dev/null || (openclaw config get 2>&1 || echo no_config)`,
+        'echo "--- health ---"; ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health --json 2>&1 || "$OPENCLAW_CMD" status --all 2>&1 || true; else false; fi) || echo no_health)',
+        `echo "--- config (keys masked) ---"; python3 -c "${maskPy}" 2>/dev/null || ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" config get 2>&1 || true; else false; fi) || echo no_config)`,
       ].join('; ');
       return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
     },
@@ -629,7 +642,7 @@ function boardOpenClawHealthTool(deviceId: string): Tool<Record<string, never>> 
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [
-        `bash -lc 'export PATH="$HOME/.npm-global/bin:$PATH"; (openclaw health --json 2>&1 || openclaw status --all --json 2>&1 || echo "{\\"installed\\":false}")'`,
+        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health --json 2>&1 || "$OPENCLAW_CMD" status --all --json 2>&1 || true; else false; fi) || echo "{\\"installed\\":false}")'`,
       ]);
     },
   };
@@ -642,8 +655,8 @@ function boardOpenClawSkillsListTool(deviceId: string): Tool<Record<string, neve
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmds = [
-        'export PATH="$HOME/.npm-global/bin:$PATH"',
-        'echo "--- installed skills ---"; (clawhub list 2>&1 || openclaw skills list 2>&1 || echo no_skills)',
+        OPENCLAW_RESOLVE_SNIPPET,
+        'echo "--- installed skills ---"; (clawhub list 2>&1 || ((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" skills list 2>&1 || true; else false; fi)) || echo no_skills)',
         'echo "--- plugins.allow ---"; cat ~/.openclaw/openclaw.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get(\'plugins\',{}).get(\'allow\',[]),indent=2))" 2>/dev/null || echo no_plugins_config',
       ].join('; ');
       return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
@@ -666,12 +679,12 @@ function boardOpenClawSkillInstallTool(deviceId: string): Tool<{ skillId: string
       const id = input.skillId.replace(/[;&|`$()'"\\]/g, '');
       const pyAdd = `import json,os;p=os.path.expanduser('~/.openclaw/openclaw.json');d=json.load(open(p)) if os.path.exists(p) else {};a=d.setdefault('plugins',{}).setdefault('allow',[]);x='${id}';a.append(x) if x not in a else None;json.dump(d,open(p,'w'),indent=2);print('added',x)`;
       const cmds = [
-        'export PATH="$HOME/.npm-global/bin:$PATH"',
+        OPENCLAW_RESOLVE_SNIPPET,
         `echo "[OpenClaw] 安装技能 ${id}..."`,
         `(clawhub install ${id} 2>&1 || echo install_failed)`,
         'echo "[OpenClaw] 添加到 plugins.allow..."',
         `python3 -c "${pyAdd}" 2>&1`,
-        '(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart || true)',
+        '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true)',
         'echo "[OpenClaw] 技能安装完成"',
       ].join('; ');
       return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
