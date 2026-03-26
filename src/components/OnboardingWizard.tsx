@@ -7,6 +7,12 @@ import {
   saveAgentConfig,
 } from '../api';
 import { resolveApiUrl } from '../utils/apiBase';
+import {
+  deployJobStorageKey as ocDeployJobLsKey,
+  startOpenClawDeployPoll,
+  subscribeOpenClawDeployJob,
+  syncOpenClawDeployPollFromStorage,
+} from '../utils/openclawDeployPoll';
 
 type Step = 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
 
@@ -14,8 +20,6 @@ const STEPS: { key: Step; label: string }[] = [
   { key: 'board', label: '选择硬件' },
   { key: 'flash', label: '烧录系统' },
   { key: 'connect', label: '连接设备' },
-  { key: 'model', label: '模型配置' },
-  { key: 'openclaw', label: 'OpenClaw' },
   { key: 'rdkclaw', label: '试用 AI' },
 ];
 
@@ -136,13 +140,12 @@ export default function OnboardingWizard() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const logContainerRef = useRef<HTMLPreElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   const [ocHealthCheckedForSkip, setOcHealthCheckedForSkip] = useState(false);
 
   useEffect(() => {
     if (obStep === 'connect' && currentDevice) {
-      setObStep('model');
+      setObStep('rdkclaw');
     }
   }, [obStep, currentDevice]);
 
@@ -208,9 +211,80 @@ export default function OnboardingWizard() {
   }, [ocInstallLog, ocGwLog]);
 
   useEffect(() => {
+    if (!ocInstalling) {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+    if (timerRef.current) return;
+    timerRef.current = setInterval(() => {
+      setInstallElapsed((prev) => prev + 1);
+    }, 1000);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [ocInstalling]);
+
+  useEffect(() => {
+    if (!currentDevice) return;
+    const deviceId = currentDevice.id;
+    const storageKey = ocDeployJobLsKey(deviceId);
+    if (obStep === 'openclaw') {
+      syncOpenClawDeployPollFromStorage(deviceId);
+    }
+    const unsubscribe = subscribeOpenClawDeployJob((job) => {
+      if (job.deviceId !== deviceId) return;
+      setDeployJobId(job.id || '');
+      if (typeof job.output === 'string') setOcInstallLog(job.output);
+      setOcInstalling(job.status === 'running');
+      if (job.status === 'running') return;
+
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        // ignore
+      }
+
+      if (job.status === 'error') {
+        const msg = job.error || '部署失败，请查看日志';
+        setOcInstallLog((prev) => `${prev}\n[错误] ${msg}\n`);
+        addToast('OpenClaw 一键部署失败，请查看日志', 'warning');
+        return;
+      }
+
+      void fetchDeviceOpenClawHealth(deviceId)
+        .then((health) => {
+          const status = health.status;
+          setOcInstalled(!!status?.installed);
+          setOcGatewayRunning(!!status?.gatewayRunning);
+          setOcReady(!!status?.aiReady);
+          setOcSummary(status?.summary || '');
+          setOcVersion(status?.version || '');
+          setOcInstallLog((prev) => `${prev}\n[验通] 网关状态: ${status?.gatewayRunning ? '运行中' : '未运行'}\n[验通] ${status?.summary || ''}\n`);
+          if (status?.gatewayRunning) {
+            addToast('OpenClaw 部署完成', 'success');
+          } else {
+            addToast('部署完成，但网关未就绪，请点击“启动网关”', 'warning');
+          }
+        })
+        .catch(() => {
+          addToast('部署完成，但状态验通失败，请稍后重试', 'warning');
+        })
+        .finally(() => {
+          setAutoVerifying(false);
+        });
+    });
+    return unsubscribe;
+  }, [addToast, currentDevice, obStep]);
+
+  useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      abortRef.current?.abort();
     };
   }, []);
 
@@ -242,13 +316,6 @@ export default function OnboardingWizard() {
     setInstallElapsed(0);
     setShowSkipWarning(false);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    timerRef.current = setInterval(() => {
-      setInstallElapsed(prev => prev + 1);
-    }, 1000);
-
     try {
       const startResponse = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/start`), {
         method: 'POST',
@@ -260,7 +327,6 @@ export default function OnboardingWizard() {
           modelId: modelName.trim(),
           api: 'openai-completions',
         }),
-        signal: controller.signal,
       });
       const startPayload = await startResponse.json().catch(() => ({} as { error?: string; code?: string; message?: string; jobId?: string }));
       if (!startResponse.ok || !startPayload?.jobId) {
@@ -268,61 +334,19 @@ export default function OnboardingWizard() {
       }
       setDeployJobId(startPayload.jobId);
       setOcInstallLog((prev) => `${prev}[部署] 已启动任务 ${startPayload.jobId}\n`);
-
-      let deployOk = false;
-      let done = false;
-      while (!done) {
-        await new Promise((r) => setTimeout(r, 1800));
-        const statusResponse = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/status?jobId=${encodeURIComponent(startPayload.jobId)}`), { signal: controller.signal });
-        const statusPayload = await statusResponse.json().catch(() => ({} as { code?: string; message?: string; error?: string; job?: { status?: string; output?: string; error?: string } }));
-        const job = statusPayload?.job;
-        if (!statusResponse.ok || !job) {
-          throw new Error(toDeployHint(String(statusPayload?.code || ''), String(statusPayload?.message || statusPayload?.error || `部署状态查询失败（HTTP ${statusResponse.status}）`)));
-        }
-        setOcInstallLog(job.output || '');
-        if (job.status === 'done') {
-          deployOk = true;
-          done = true;
-        } else if (job.status === 'error') {
-          throw new Error(job.error || '部署失败');
-        }
+      try {
+        localStorage.setItem(ocDeployJobLsKey(currentDevice.id), startPayload.jobId);
+      } catch {
+        // ignore
       }
-
-      if (deployOk) {
-        setAutoVerifying(true);
-        setOcInstallLog((prev) => `${prev}\n[验通] 部署完成，开始自动验通...\n`);
-        const health = await fetchDeviceOpenClawHealth(currentDevice.id);
-        const modelTestRes = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/model-test`), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        const modelTest = await modelTestRes.json().catch(() => ({ ok: false, output: '模型调用测试响应异常' }));
-        setOcInstalled(!!health.status?.installed);
-        setOcGatewayRunning(!!health.status?.gatewayRunning);
-        setOcReady(!!health.status?.aiReady && !!modelTest.ok);
-        setOcSummary(health.status?.summary || '');
-        setOcVersion(health.status?.version || '');
-        setOcInstallLog((prev) => (
-          `${prev}[验通] 网关状态: ${health.status?.gatewayRunning ? '运行中' : '未运行'}\n` +
-          `[验通] 模型测试: ${modelTest.ok ? '通过' : '失败'}\n` +
-          `${modelTest.output ? `${modelTest.output}\n` : ''}`
-        ));
-        if (health.status?.gatewayRunning && modelTest.ok) {
-          addToast('OpenClaw 部署并验通成功', 'success');
-        } else {
-          addToast('部署完成，但验通未全部通过，请查看日志', 'warning');
-        }
-      }
+      startOpenClawDeployPoll(currentDevice.id, startPayload.jobId);
     } catch (err) {
-      if ((err as Error).name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : String(err);
       setOcInstallLog(prev => prev + `\n[错误] ${msg}\n`);
       addToast('OpenClaw 一键部署失败，请查看日志', 'warning');
-    } finally {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       setOcInstalling(false);
+    } finally {
       setAutoVerifying(false);
-      abortRef.current = null;
     }
   }, [
     currentDevice,
@@ -446,7 +470,6 @@ export default function OnboardingWizard() {
   const handleSkipConfirm = () => {
     if (ocInstalling) {
       addToast('OpenClaw 安装仍在后台进行，完成后可在 OpenClaw 页面查看', 'info');
-      abortRef.current?.abort();
     }
     setShowSkipWarning(false);
     setObStep('rdkclaw');
@@ -473,8 +496,7 @@ export default function OnboardingWizard() {
   };
 
   const handleTryRDKClaw = () => {
-    setObStep('done');
-    addToast('新手引导已完成！', 'success');
+    addToast('已发送到 AI 对话区，你可以继续在这里点击“完成”结束引导', 'success');
     setChatExpanded(true);
     setCmd('帮我全面检查当前设备的健康状态，包括温度、内存、BPU 负载和网络，并给出优化建议');
     setTimeout(() => {
@@ -605,7 +627,7 @@ export default function OnboardingWizard() {
               添加设备
             </button>
           </div>
-          <button className="ob-skip" onClick={() => { setObStep('done'); }}>
+          <button className="ob-skip" onClick={() => { setObStep('rdkclaw'); addToast('已跳过设备连接，可先体验 AI，稍后再补连设备', 'info'); }}>
             稍后连接，跳过引导
           </button>
         </div>
@@ -871,19 +893,22 @@ export default function OnboardingWizard() {
           </div>
           <div className="ob-actions">
             <button className="btn btn-ghost" onClick={() => setObStep('model')}>上一步</button>
-            {ocReady ? (
-              <button className="btn btn-primary" onClick={() => setObStep('rdkclaw')}>
-                下一步
+            {!ocReady && (
+              <button className="btn btn-ghost" onClick={() => setShowSkipWarning(true)}>
+                跳过此步骤
               </button>
-            ) : (
-              <>
-                <button className="btn btn-ghost" onClick={() => setShowSkipWarning(true)}>
-                  跳过此步骤
-                </button>
-                <button className="btn btn-primary" onClick={handleInstallOC} disabled={ocInstalling || deviceOnline === false || !modelConfigured}>
-                  {ocInstalling ? '部署中...' : '一键部署'}
-                </button>
-              </>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={() => setObStep('rdkclaw')}
+              disabled={ocInstalling}
+            >
+              {ocReady ? '下一步' : (ocInstalled ? '继续下一步' : '下一步（可稍后完善）')}
+            </button>
+            {!ocReady && !ocInstalled && (
+              <button className="btn btn-ghost" onClick={handleInstallOC} disabled={ocInstalling || deviceOnline === false || !modelConfigured}>
+                {ocInstalling ? '部署中...' : '一键部署'}
+              </button>
             )}
           </div>
           <button className="ob-skip" onClick={() => { setObStep('done'); addToast('引导已跳过，你可以随时在设置中重新进入', 'info'); }}>
@@ -911,11 +936,23 @@ export default function OnboardingWizard() {
               发送
             </button>
           </div>
+          <div className="ob-flash-card" style={{ marginTop: 12 }}>
+            <div className="ob-flash-info">
+              <strong>配置 OpenClaw（推荐）</strong>
+              <span className="badge badge-muted">配置后会更聪明</span>
+            </div>
+            <p className="ob-desc">完成 OpenClaw 一键部署后，板端 AI 能力更完整，任务执行更稳定。</p>
+            <div className="ob-flash-actions">
+              <button className="btn btn-ghost btn-sm" onClick={goOpenClaw}>
+                前往 OpenClaw 配置
+              </button>
+            </div>
+          </div>
           <p className="ob-desc ob-try-hint">
             你也可以在底部对话框中随时输入任何任务，RDKClaw 会自动规划并执行。
           </p>
           <div className="ob-actions">
-            <button className="btn btn-ghost" onClick={() => setObStep('openclaw')}>上一步</button>
+            <button className="btn btn-ghost" onClick={() => setObStep('connect')}>上一步</button>
             <button className="btn btn-primary" onClick={finish}>
               完成引导
             </button>

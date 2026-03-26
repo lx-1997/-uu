@@ -107,10 +107,45 @@ with open(p, "w", encoding="utf-8") as f:
 print("[OpenClaw] gateway.mode=local, gateway.bind=loopback")
 `.trim(), 'utf8').toString('base64');
 
+const ENSURE_GATEWAY_AUTH_TOKEN_SCRIPT_B64 = Buffer.from(`
+import json
+import os
+import secrets
+
+p = os.path.expanduser("~/.openclaw/openclaw.json")
+os.makedirs(os.path.dirname(p), exist_ok=True)
+
+try:
+  with open(p, "r", encoding="utf-8") as f:
+    d = json.load(f)
+except Exception:
+  d = {}
+
+g = d.get("gateway") if isinstance(d.get("gateway"), dict) else {}
+auth = g.get("auth") if isinstance(g.get("auth"), dict) else {}
+token = str(auth.get("token") or "").strip()
+
+if not token:
+  token = secrets.token_urlsafe(32)
+  auth["token"] = token
+  g["auth"] = auth
+  d["gateway"] = g
+  with open(p, "w", encoding="utf-8") as f:
+    json.dump(d, f, indent=2, ensure_ascii=False)
+  print("[OpenClaw] 已生成 gateway.auth.token")
+else:
+  print("[OpenClaw] gateway.auth.token 已存在")
+`.trim(), 'utf8').toString('base64');
+
 const ENSURE_GATEWAY_LOCAL_MODE = [
   'echo "[OpenClaw] 确保 gateway.mode=local 与 bind=loopback"',
   `echo '${ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_mode.py`,
   'python3 /tmp/oc_fix_gateway_mode.py 2>&1 || echo "[OpenClaw] gateway mode 修复失败"',
+].join(' && ');
+const ENSURE_GATEWAY_AUTH_TOKEN = [
+  'echo "[OpenClaw] 确保 gateway.auth.token 存在"',
+  `echo '${ENSURE_GATEWAY_AUTH_TOKEN_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_token.py`,
+  'python3 /tmp/oc_fix_gateway_token.py 2>&1 || echo "[OpenClaw] gateway token 修复失败"',
 ].join(' && ');
 const RUN_DOCTOR = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查"; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 doctor"; fi)';
 const RUN_HEALTH = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health --json 2>&1 || "$OPENCLAW_CMD" status --all 2>&1 || "$OPENCLAW_CMD" status 2>&1 || echo "[OpenClaw] health 检查失败"; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 health"; fi)';
@@ -273,6 +308,7 @@ const NPM_INSTALL_CMD = [
   RESOLVE_OPENCLAW_CMD,
   CLAWHUB_AUTO_LOGIN_CMD,
   ENSURE_GATEWAY_LOCAL_MODE,
+  ENSURE_GATEWAY_AUTH_TOKEN,
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
@@ -298,6 +334,7 @@ const NPM_UPGRADE_CMD = [
   // 优先 CLI update，失败回退 npm latest
   '((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 3; done))',
   ENSURE_GATEWAY_LOCAL_MODE,
+  ENSURE_GATEWAY_AUTH_TOKEN,
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
@@ -477,7 +514,7 @@ export class OpenClawDeploymentManager {
       '(systemctl --user status openclaw-gateway --no-pager -n 20 2>&1 || true)',
       'echo ""',
       'echo "--- Health ---"',
-      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health 2>&1 || echo "health 不可用"; else echo "health 不可用"; fi)',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status --all 2>&1 || "$OPENCLAW_CMD" status 2>&1 || echo "status 不可用"; else echo "status 不可用"; fi)',
       'echo ""',
       'echo "--- Doctor ---"',
       '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor 2>&1 || echo "doctor 不可用"; else echo "doctor 不可用"; fi)',
@@ -507,6 +544,8 @@ export class OpenClawDeploymentManager {
       '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo "openclaw 尚未安装（可点击安装按钮）"; fi)',
       'echo "--- 修复网关模式 ---"',
       ENSURE_GATEWAY_LOCAL_MODE,
+      'echo "--- 修复网关 token ---"',
+      ENSURE_GATEWAY_AUTH_TOKEN,
       'echo "=== 准备完成 ==="',
     ].join(' ; ');
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });

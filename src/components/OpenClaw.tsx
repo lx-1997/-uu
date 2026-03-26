@@ -238,6 +238,8 @@ export default function OpenClaw() {
   const [deployRunning, setDeployRunning] = useState(false);
   const [deploySteps, setDeploySteps] = useState<DeployStepState[]>([]);
   const [deployJobId, setDeployJobId] = useState('');
+  const [deployOutput, setDeployOutput] = useState('');
+  const [showDeployGuideModal, setShowDeployGuideModal] = useState(false);
 
   // ─── Post-install Guide State ───
   const [showSetupGuide, setShowSetupGuide] = useState(false);
@@ -256,6 +258,7 @@ export default function OpenClaw() {
   const modelDropdownRef = useRef<HTMLDivElement | null>(null);
   const messageIdRef = useRef(0);
   const ocDeployLsKey = currentDevice ? ocDeployJobLsKey(currentDevice.id) : '';
+  const ocDeployGuideModalKey = currentDevice ? `oc-deploy-guide-modal-${currentDevice.id}` : '';
   const applyDeployJobRef = useRef<(job: DeployJob) => void>(() => {});
   const nextChatMessageId = useCallback(() => {
     const now = Date.now();
@@ -269,6 +272,7 @@ export default function OpenClaw() {
   const applyDeployJob = (job: DeployJob) => {
     const stepOrder: DeployStepName[] = ['check', 'prepare', 'install', 'config'];
     setDeploySteps(stepOrder.map((name) => job.steps?.[name] || 'pending'));
+    setDeployOutput(job.output || '');
     if (job.status === 'running') {
       setDeployRunning(true);
       return;
@@ -348,6 +352,31 @@ export default function OpenClaw() {
       void Promise.all([loadStatus(), loadConfig(), loadBoardSkills(), loadEcoSkillCatalog()]);
     }
   }, [currentDevice, activeTab]);
+
+  useEffect(() => {
+    if (!currentDevice || activeTab !== 'openclaw') return;
+    if (status?.running) {
+      setShowDeployGuideModal(false);
+      if (ocDeployGuideModalKey) {
+        try { localStorage.removeItem(ocDeployGuideModalKey); } catch { /* ignore */ }
+      }
+      return;
+    }
+    let saved = '';
+    if (ocDeployGuideModalKey) {
+      try { saved = localStorage.getItem(ocDeployGuideModalKey) || ''; } catch { saved = ''; }
+    }
+    if (saved !== 'dismissed') {
+      setShowDeployGuideModal(true);
+    }
+  }, [activeTab, currentDevice, ocDeployGuideModalKey, status?.running]);
+
+  useEffect(() => {
+    if (!ocDeployGuideModalKey) return;
+    if (showDeployGuideModal) {
+      try { localStorage.setItem(ocDeployGuideModalKey, 'open'); } catch { /* ignore */ }
+    }
+  }, [ocDeployGuideModalKey, showDeployGuideModal]);
 
   useEffect(() => {
     if (status !== null && config !== null && needsSetup()) {
@@ -799,6 +828,8 @@ export default function OpenClaw() {
       const api = deployApi || preset?.api || 'openai-completions';
       setDeployRunning(true);
       setDeploySteps(['running', 'pending', 'pending', 'pending']);
+      setDeployOutput('');
+      setShowDeployGuideModal(true);
       const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/start`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1216,6 +1247,11 @@ export default function OpenClaw() {
                     ))}
                   </div>
                 )}
+                {(deployRunning || deployOutput) && (
+                  <pre className="oc-log" style={{ marginTop: 8, maxHeight: 220, overflow: 'auto' }}>
+                    {deployOutput || '部署任务已启动，等待日志输出...'}
+                  </pre>
+                )}
               </div>
             )}
           </div>
@@ -1432,6 +1468,70 @@ export default function OpenClaw() {
 
   return (
     <div className={`oc-layout ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''}`}>
+      {showDeployGuideModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1200, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+          <div className="card" style={{ width: 'min(720px, 96vw)', maxHeight: '90vh', overflow: 'auto', padding: 12 }}>
+            <div className="config-header">
+              <strong>OpenClaw 一键部署引导</strong>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setShowDeployGuideModal(false);
+                  if (ocDeployGuideModalKey) {
+                    try { localStorage.setItem(ocDeployGuideModalKey, 'dismissed'); } catch { /* ignore */ }
+                  }
+                }}
+                disabled={deployRunning}
+              >
+                {deployRunning ? '部署中...' : '稍后配置'}
+              </button>
+            </div>
+            <p className="config-card-desc" style={{ marginTop: 4, marginBottom: 8 }}>
+              完成部署后，OpenClaw 会更稳定更智能。安装完成以网关可用为准；若模型测试失败可稍后再修复。
+            </p>
+            <div className="oc-form-row">
+              <span className="oc-form-label">Base URL</span>
+              <input className="input" type="text" value={deployBaseUrl} onChange={(e) => { setDeployBaseUrl(e.target.value); setDeployProvider(''); }} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+            </div>
+            <div className="oc-form-row">
+              <span className="oc-form-label">模型 ID</span>
+              <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
+            </div>
+            <div className="oc-form-row">
+              <span className="oc-form-label">API Key</span>
+              <input className="input" type="password" value={deployApiKey} onChange={(e) => setDeployApiKey(e.target.value)} placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'} />
+            </div>
+            <div className="oc-form-row">
+              <span className="oc-form-label">协议</span>
+              <select className="select" value={deployApi} onChange={(e) => setDeployApi(e.target.value)} aria-label="API 协议">
+                {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ width: '100%', marginTop: 8 }}>
+              {deployRunning ? '部署中...' : '开始部署'}
+            </button>
+            {deploySteps.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: '0.625rem' }}>
+                {['诊断', '依赖', '安装', '配置'].map((label, idx) => (
+                  <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {idx > 0 && <span style={{ width: 10, height: 1, background: 'var(--border)', display: 'inline-block' }} />}
+                    <span className={`badge ${deploySteps[idx] === 'done' ? 'badge-ok' : deploySteps[idx] === 'running' ? 'badge-accent' : deploySteps[idx] === 'error' ? 'badge-danger' : 'badge-muted'}`}>{label}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {(deployRunning || deployOutput) && (
+              <pre className="oc-log" style={{ marginTop: 8, maxHeight: 260, overflow: 'auto' }}>
+                {deployOutput || '部署任务已启动，等待日志输出...'}
+              </pre>
+            )}
+            {!deployRunning && status?.running && (
+              <div className="badge badge-ok" style={{ marginTop: 8 }}>网关已可用，安装完成</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ════════════ Left: Chat ════════════ */}
       <div className="oc-main">
         {/* Status bar */}
