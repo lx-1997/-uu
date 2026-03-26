@@ -42,7 +42,17 @@ export default function Ros() {
     try {
       const result = await executeDeviceCommand(
         deviceId,
-        `bash -lc "ss -lntp 2>/dev/null | grep -q ':${ROSBRIDGE_PORT}' && echo ROSBRIDGE_ACTIVE || echo ROSBRIDGE_INACTIVE"`
+        `bash -lc "
+          if command -v ss >/dev/null 2>&1; then
+            ss -lntp 2>/dev/null | grep -q ':${ROSBRIDGE_PORT}' && echo ROSBRIDGE_ACTIVE || echo ROSBRIDGE_INACTIVE
+          elif command -v netstat >/dev/null 2>&1; then
+            netstat -lnt 2>/dev/null | grep -q ':${ROSBRIDGE_PORT}' && echo ROSBRIDGE_ACTIVE || echo ROSBRIDGE_INACTIVE
+          elif command -v lsof >/dev/null 2>&1; then
+            lsof -iTCP:${ROSBRIDGE_PORT} -sTCP:LISTEN 2>/dev/null | grep -q LISTEN && echo ROSBRIDGE_ACTIVE || echo ROSBRIDGE_INACTIVE
+          else
+            pgrep -af 'rosbridge_websocket|rosbridge_server' >/dev/null 2>&1 && echo ROSBRIDGE_ACTIVE || echo ROSBRIDGE_INACTIVE
+          fi
+        "`
       );
       const output = result.output || '';
       appendLog(output.trim());
@@ -59,10 +69,16 @@ export default function Ros() {
       const result = await executeDeviceCommand(
         deviceId,
         `bash -lc "
+          probe_port() {
+            if command -v ss >/dev/null 2>&1; then ss -lntp 2>/dev/null | grep -q ':${ROSBRIDGE_PORT}' && return 0; fi
+            if command -v netstat >/dev/null 2>&1; then netstat -lnt 2>/dev/null | grep -q ':${ROSBRIDGE_PORT}' && return 0; fi
+            if command -v lsof >/dev/null 2>&1; then lsof -iTCP:${ROSBRIDGE_PORT} -sTCP:LISTEN 2>/dev/null | grep -q LISTEN && return 0; fi
+            return 1
+          }
+          source /opt/ros/*/setup.bash 2>/dev/null || true
+          source /opt/tros/*/setup.bash 2>/dev/null || true
           # 尝试 ROS2 方式启动
           if command -v ros2 &>/dev/null; then
-            source /opt/ros/*/setup.bash 2>/dev/null || true
-            source /opt/tros/*/setup.bash 2>/dev/null || true
             nohup ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=${ROSBRIDGE_PORT} &>/tmp/rosbridge.log &
             sleep 3
           # 尝试 ROS1 方式启动
@@ -72,7 +88,7 @@ export default function Ros() {
             sleep 3
           fi
           # 检查是否启动成功
-          ss -lntp 2>/dev/null | grep -q ':${ROSBRIDGE_PORT}' && echo ROSBRIDGE_STARTED || echo ROSBRIDGE_FAILED
+          probe_port && echo ROSBRIDGE_STARTED || echo ROSBRIDGE_FAILED
         "`
       );
       const output = result.output || '';

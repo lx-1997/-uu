@@ -87,6 +87,48 @@ const AIChatContext = createContext<AIChatStoreState | null>(null);
 /** 内存中对话条数上限，避免长会话撑爆渲染进程 */
 const MAX_CHAT_MESSAGES_IN_MEMORY = 100;
 const LARGE_DATA_URL_STORAGE_CHARS = 48_000;
+const CHAT_HISTORY_LEGACY_KEY = 'rdk-chat-history';
+const CHAT_HISTORY_KEY_PREFIX = 'rdk-chat-history:';
+const CHAT_SESSION_KEY_PREFIX = 'rdk:chat:session-id:';
+const CHAT_DRAFT_KEY_PREFIX = 'rdk:chat:draft:';
+const GLOBAL_CHAT_DEVICE_ID = '__global__';
+
+function toChatDeviceId(deviceId?: string | null) {
+  const normalized = String(deviceId || '').trim();
+  return normalized || GLOBAL_CHAT_DEVICE_ID;
+}
+
+function chatHistoryStorageKey(deviceId: string) {
+  return `${CHAT_HISTORY_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
+}
+
+function chatSessionStorageKey(deviceId: string) {
+  return `${CHAT_SESSION_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
+}
+
+function chatDraftStorageKey(deviceId: string) {
+  return `${CHAT_DRAFT_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
+}
+
+function loadChatHistoryForDevice(deviceId: string): ChatMessage[] {
+  try {
+    const specific = localStorage.getItem(chatHistoryStorageKey(deviceId));
+    const legacy = !specific && toChatDeviceId(deviceId) === GLOBAL_CHAT_DEVICE_ID
+      ? localStorage.getItem(CHAT_HISTORY_LEGACY_KEY)
+      : null;
+    const raw = specific ?? legacy;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ChatMessage[];
+    return parsed
+      .slice(-MAX_CHAT_MESSAGES_IN_MEMORY)
+      .map(m => ({
+        ...m,
+        blocks: m.blocks?.filter(b => b.type !== 'confirm' && b.type !== 'progress'),
+      }));
+  } catch {
+    return [];
+  }
+}
 
 /** 写入 localStorage 前去掉较早消息里巨型 data: URL，减轻 quota 与反序列化压力 */
 function stripHeavyDataUrlsForStorage(messages: ChatMessage[]): ChatMessage[] {
@@ -136,24 +178,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const { addToast } = useToastStore();
   const { currentDevice, setActiveDevice, devices } = useDeviceStore();
   const { activeTab, setShowSettings } = useUIStore();
+  const initialChatDeviceId = toChatDeviceId(currentDevice?.id);
 
   // ── State ──
   const [cmd, setCmd] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem('rdk-chat-history');
-      if (saved) {
-        const parsed = JSON.parse(saved) as ChatMessage[];
-        const capped = parsed.slice(-MAX_CHAT_MESSAGES_IN_MEMORY);
-        return capped.map(m => ({
-          ...m,
-          blocks: m.blocks?.filter(b => b.type !== 'confirm' && b.type !== 'progress'),
-        }));
-      }
-    } catch { /* ignore */ }
-    return [];
-  });
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => loadChatHistoryForDevice(initialChatDeviceId));
 
   useEffect(() => {
     if (chatMessages.length <= MAX_CHAT_MESSAGES_IN_MEMORY) return;
@@ -212,7 +242,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
   const clearChatHistory = () => {
     setChatMessages([]);
-    localStorage.removeItem('rdk-chat-history');
+    try {
+      const deviceId = chatDeviceIdRef.current;
+      localStorage.removeItem(chatHistoryStorageKey(deviceId));
+      localStorage.removeItem(chatDraftStorageKey(deviceId));
+      if (toChatDeviceId(deviceId) === GLOBAL_CHAT_DEVICE_ID) {
+        localStorage.removeItem(CHAT_HISTORY_LEGACY_KEY);
+      }
+    } catch {
+      // ignore
+    }
     addToast('对话记录已清空', 'info');
   };
 
@@ -250,7 +289,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
   const approvalBlockRef = useRef<Record<string, number>>({});
-  const sessionStorageKey = 'rdk:chat:session-id';
+  const chatDeviceIdRef = useRef<string>(initialChatDeviceId);
+  const sessionStorageKey = chatSessionStorageKey(initialChatDeviceId);
   const userStorageKey = 'rdk:chat:user-id';
   const readOrCreateStableId = (key: string, prefix: string) => {
     try {
@@ -270,7 +310,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     if (!next) return;
     sessionIdRef.current = next;
     try {
-      localStorage.setItem(sessionStorageKey, next);
+      localStorage.setItem(chatSessionStorageKey(chatDeviceIdRef.current), next);
     } catch {
       // ignore persistence failures
     }
@@ -1491,6 +1531,34 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const nextDeviceId = toChatDeviceId(currentDevice?.id);
+    const prevDeviceId = chatDeviceIdRef.current;
+    if (nextDeviceId === prevDeviceId) return;
+
+    try {
+      const prevToSave = stripHeavyDataUrlsForStorage(chatMessages.slice(-50));
+      localStorage.setItem(chatHistoryStorageKey(prevDeviceId), JSON.stringify(prevToSave));
+      localStorage.setItem(chatDraftStorageKey(prevDeviceId), cmd);
+    } catch {
+      // ignore
+    }
+
+    chatDeviceIdRef.current = nextDeviceId;
+    setChatMessages(loadChatHistoryForDevice(nextDeviceId));
+
+    try {
+      const nextDraft = localStorage.getItem(chatDraftStorageKey(nextDeviceId)) ?? '';
+      setCmd(nextDraft);
+    } catch {
+      setCmd('');
+    }
+
+    sessionIdRef.current = readOrCreateStableId(chatSessionStorageKey(nextDeviceId), 'ui');
+    reportActiveSession('device-switch');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDevice?.id]);
+
+  useEffect(() => {
     if (!currentDevice?.id) return;
     reportActiveDevice('device-change');
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1764,7 +1832,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     chatPersistTimerRef.current = setTimeout(() => {
       try {
         const toSave = stripHeavyDataUrlsForStorage(chatMessages.slice(-50));
-        localStorage.setItem('rdk-chat-history', JSON.stringify(toSave));
+        localStorage.setItem(chatHistoryStorageKey(chatDeviceIdRef.current), JSON.stringify(toSave));
+        localStorage.setItem(chatDraftStorageKey(chatDeviceIdRef.current), cmd);
+        if (toChatDeviceId(chatDeviceIdRef.current) === GLOBAL_CHAT_DEVICE_ID) {
+          localStorage.setItem(CHAT_HISTORY_LEGACY_KEY, JSON.stringify(toSave));
+        }
       } catch { /* quota exceeded */ }
     }, aiTyping ? 2000 : 300);
     return () => {
@@ -1773,7 +1845,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         chatPersistTimerRef.current = null;
       }
     };
-  }, [chatMessages, aiTyping]);
+  }, [chatMessages, aiTyping, cmd]);
 
   // Cleanup task intervals on unmount
   useEffect(() => {

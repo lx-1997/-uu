@@ -3194,7 +3194,7 @@ app.get('/api/devices/:id/services/node-red', async (request, response) => {
   );
   if (!executed) return;
 
-  const active = /active|node-red/i.test(executed.output);
+  const active = /\bactive\b|node-red/i.test(executed.output);
   response.json({ ok: true, active, output: executed.output });
 });
 
@@ -3208,7 +3208,7 @@ app.get('/api/devices/:id/services/vnc', async (request, response) => {
   );
   if (!executed) return;
 
-  const active = /active|vnc/i.test(executed.output);
+  const active = /\bactive\b|x11vnc|Xtigervnc|vncserver/i.test(executed.output);
   response.json({ ok: true, active, output: executed.output });
 });
 

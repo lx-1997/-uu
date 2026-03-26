@@ -1,0 +1,13 @@
+{
+  "activeId": "preset-qwen",
+  "entries": [
+    {
+      "id": "preset-qwen",
+      "label": "RDKClaw Default / Qwen",
+      "provider": "qwen",
+      "model": "qwen3.5-plus",
+      "apiKey": "${RDK_PROVIDER_API_KEY}",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    }
+  ]
+}

@@ -604,9 +604,9 @@ export default function Flasher() {
 
         {/* ═══════ Step 0: Select Device ═══════ */}
         {step === 0 && (
-          <section className="card card-compact">
+          <section className="card card-compact flasher-step-card">
             <div className="section-label">选择设备型号</div>
-            <div className="config-grid">
+            <div className="config-grid flasher-device-grid">
               {DEVICE_LIST.map((dev) => (
                 <div
                   key={dev.key}
@@ -672,8 +672,8 @@ export default function Flasher() {
 
         {/* ═══════ Step 1: Select Image ═══════ */}
         {step === 1 && (
-          <section className="card card-compact">
-            <div className="config-grid">
+          <section className="card card-compact flasher-step-card">
+            <div className="config-grid flasher-step1-grid">
               {/* Official images */}
               <div>
                 <div className="section-label">官方镜像</div>
@@ -777,8 +777,8 @@ export default function Flasher() {
 
         {/* ═══════ Step 2: Select Drive / Confirm ═══════ */}
         {step === 2 && (
-          <section className="card card-compact">
-            <div className="config-grid">
+          <section className="card card-compact flasher-step-card">
+            <div className="config-grid flasher-step2-grid">
               {needsXburn ? (
                 /* xburn guidance */
                 <div className="card card-compact">
@@ -810,7 +810,7 @@ export default function Flasher() {
                 </div>
               ) : (
                 /* drive selection */
-                <div>
+                <div className="flasher-drive-pane">
                   <div className="config-header" style={{ alignItems: 'flex-start' }}>
                     <div className="section-label" style={{ marginBottom: 0 }}>选择目标磁盘</div>
                     <span className="badge badge-danger">写盘将清空目标磁盘全部数据！</span>
@@ -846,7 +846,7 @@ export default function Flasher() {
               )}
 
               {/* Confirm summary */}
-              <div>
+              <div className="flasher-summary-pane">
                 <div className="section-label">确认信息</div>
                 <div className="config-section">
                   <div className="config-row">

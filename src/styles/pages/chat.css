@@ -510,6 +510,93 @@
   background: var(--accent-hover);
 }
 
+.dock-device-strip {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dock-device-strip::-webkit-scrollbar {
+  height: 0;
+}
+
+.dock-device-chip {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  background: var(--chip-bg);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.dock-device-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-border);
+}
+
+.dock-device-chip.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+}
+
+.dock-status-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 0 6px;
+}
+
+.dock-channel-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.dock-channel-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.dock-input-context-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 136px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+
+.dock-input-context-menu button {
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.dock-input-context-menu button:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
 [data-theme="cyber"] .dock-send-btn.ready {
   box-shadow: 0 0 12px var(--accent-glow);
 }

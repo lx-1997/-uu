@@ -36,6 +36,8 @@ export interface ProviderConfigRegistry {
 const CONFIG_DIR = path.join(os.homedir(), '.rdkstudio');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'agent-config.json');
 const DEFAULT_ENTRY_ID = 'default';
+const BOOTSTRAP_PROVIDER_FILE_ENV = 'RDK_PROVIDER_BOOTSTRAP_FILE';
+const BOOTSTRAP_PROVIDER_FALLBACK = path.join(process.cwd(), 'config', 'rdkclaw-provider.defaults.json');
 
 type ProviderProtocol = 'openai' | 'anthropic';
 
@@ -158,6 +160,19 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function expandEnvVars(template: string): string {
+  return template.replace(/\$\{([A-Z0-9_]+)\}/g, (_full, name: string) => {
+    const value = process.env[name];
+    return typeof value === 'string' ? value : '';
+  });
+}
+
+function resolveBootstrapProviderConfigPath(): string | null {
+  const envPath = normalizeText(process.env[BOOTSTRAP_PROVIDER_FILE_ENV]);
+  if (envPath) return envPath;
+  return fs.existsSync(BOOTSTRAP_PROVIDER_FALLBACK) ? BOOTSTRAP_PROVIDER_FALLBACK : null;
+}
+
 function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
   if (!input || typeof input !== 'object') {
     return { activeId: null, entries: [] };
@@ -192,9 +207,39 @@ function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
   };
 }
 
+function loadBootstrapProviderRegistry(): ProviderConfigRegistry | null {
+  const bootstrapPath = resolveBootstrapProviderConfigPath();
+  if (!bootstrapPath) return null;
+  try {
+    const raw = fs.readFileSync(bootstrapPath, 'utf-8');
+    const parsed = JSON.parse(raw) as unknown;
+    const normalized = ensureRegistryShape(parsed);
+    if (normalized.entries.length === 0) return null;
+    const entries = normalized.entries.map((entry) => {
+      const apiKey = expandEnvVars(normalizeText(entry.apiKey));
+      const baseUrlExpanded = expandEnvVars(normalizeText(entry.baseUrl));
+      const modelExpanded = expandEnvVars(normalizeText(entry.model));
+      return {
+        ...entry,
+        apiKey,
+        baseUrl: baseUrlExpanded || entry.baseUrl,
+        model: modelExpanded || entry.model,
+      };
+    });
+    const activeId = entries.some((entry) => entry.id === normalized.activeId)
+      ? normalized.activeId
+      : entries[0]?.id || null;
+    return { activeId, entries };
+  } catch {
+    return null;
+  }
+}
+
 export function loadProviderRegistry(): ProviderConfigRegistry {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) return { activeId: null, entries: [] };
+    if (!fs.existsSync(CONFIG_FILE)) {
+      return loadBootstrapProviderRegistry() || { activeId: null, entries: [] };
+    }
     const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
     const parsed = JSON.parse(raw) as unknown;
 
@@ -225,7 +270,7 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
 
     return ensureRegistryShape(parsed);
   } catch {
-    return { activeId: null, entries: [] };
+    return loadBootstrapProviderRegistry() || { activeId: null, entries: [] };
   }
 }
 

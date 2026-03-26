@@ -61,6 +61,7 @@
       "dist-server/**",
       "electron/**",
       "public/**",
+      "config/**",
       "data/**",
       "agent/**",
       "skills/**",

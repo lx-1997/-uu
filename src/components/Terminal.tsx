@@ -70,6 +70,7 @@ export default function Terminal() {
   const deviceIdRef = useRef<string | undefined>(undefined);
   const passwordRef = useRef('');
   const [terminalPassword, setTerminalPassword] = useState('');
+  const [terminalContextMenu, setTerminalContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   // ── resolve device password ──
   useEffect(() => {
@@ -161,6 +162,22 @@ export default function Terminal() {
     return () => window.removeEventListener('xterm-send', handler);
   }, [activeSessionId]);
 
+  useEffect(() => {
+    if (!terminalContextMenu) return;
+    const close = () => setTerminalContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setTerminalContextMenu(null);
+    };
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [terminalContextMenu]);
+
   // ── actions ──
   const handleClear = () => poolRef.current.get(activeSessionId)?.term.clear();
 
@@ -172,6 +189,24 @@ export default function Terminal() {
     } else {
       addToast('请在终端中用鼠标选择内容后重试', 'warning');
     }
+  };
+
+  const pasteClipboard = async () => {
+    const d = poolRef.current.get(activeSessionId);
+    if (!d) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) d.socket.emit('data', text);
+    } catch {
+      addToast('无法读取剪贴板，请使用系统快捷键粘贴', 'warning');
+    }
+  };
+
+  const selectAllTerminal = () => {
+    const d = poolRef.current.get(activeSessionId);
+    if (!d) return;
+    d.term.selectAll();
+    addToast('已全选当前终端内容', 'info');
   };
 
   const handleCloseSession = (id: string) => {
@@ -239,7 +274,28 @@ export default function Terminal() {
         </div>
       </div>
 
-      <div className="immersive-viewport" ref={hostRef} style={{ padding: 0, overflow: 'hidden' }} />
+      <div
+        className="immersive-viewport"
+        ref={hostRef}
+        style={{ padding: 0, overflow: 'hidden' }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setTerminalContextMenu({ x: e.clientX, y: e.clientY });
+        }}
+      >
+        {terminalContextMenu && (
+          <div
+            className="immersive-context-menu"
+            style={{ left: terminalContextMenu.x, top: terminalContextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" onClick={() => { copySelection(); setTerminalContextMenu(null); }}>复制</button>
+            <button type="button" onClick={() => { void pasteClipboard(); setTerminalContextMenu(null); }}>粘贴</button>
+            <button type="button" onClick={() => { selectAllTerminal(); setTerminalContextMenu(null); }}>全选</button>
+            <button type="button" onClick={() => { handleClear(); setTerminalContextMenu(null); }}>清屏</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload } from '../api';
@@ -647,6 +647,7 @@ async function copyDockPlainText(text: string): Promise<boolean> {
 
 export default function AIDock() {
   const {
+    activeDevice, setActiveDevice, devices,
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, setChatMessages, chatExpanded, setChatExpanded, aiTyping, setAiTyping,
     handleCommand, setActiveTab, activeTab,
@@ -673,11 +674,31 @@ export default function AIDock() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTranscript, setRecordingTranscript] = useState('');
+  const [inputContextMenu, setInputContextMenu] = useState<{ x: number; y: number } | null>(null);
   const activeDeviceName = currentDevice?.name?.trim() || '';
   const activeDeviceEndpoint = currentDevice ? `${currentDevice.ip || '-'}:${currentDevice.port ?? 22}` : '';
   const activeRdkclawDeviceLabel = currentDevice
     ? `${activeDeviceName || '未命名设备'} · ${activeDeviceEndpoint}`
     : '未绑定设备';
+  const channelStats = useMemo(() => {
+    let feishuInbound = 0;
+    let feishuTotal = 0;
+    let weixinInbound = 0;
+    let weixinTotal = 0;
+    for (const message of chatMessages) {
+      const channel = message.channelMeta?.channel;
+      if (!channel) continue;
+      const inbound = message.channelMeta?.direction === 'inbound';
+      if (channel === 'feishu') {
+        feishuTotal += 1;
+        if (inbound) feishuInbound += 1;
+      } else if (channel === 'weixin') {
+        weixinTotal += 1;
+        if (inbound) weixinInbound += 1;
+      }
+    }
+    return { feishuInbound, feishuTotal, weixinInbound, weixinTotal };
+  }, [chatMessages]);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   /** 实际滚动容器是 .dock-stream（仅 chatExpanded 时挂载），不能用仅首屏执行的 scrollIntoView */
   const streamScrollRef = useRef<HTMLDivElement | null>(null);
@@ -687,6 +708,48 @@ export default function AIDock() {
   const audioChunksRef = useRef<Blob[]>([]);
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const voiceTranscriptRef = useRef('');
+
+  useEffect(() => {
+    if (!inputContextMenu) return;
+    const handleClose = () => setInputContextMenu(null);
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setInputContextMenu(null);
+    };
+    window.addEventListener('click', handleClose);
+    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('scroll', handleClose, true);
+    return () => {
+      window.removeEventListener('click', handleClose);
+      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('scroll', handleClose, true);
+    };
+  }, [inputContextMenu]);
+
+  const executeInputCommand = useCallback(async (command: 'cut' | 'copy' | 'paste' | 'selectAll') => {
+    const input = chatInputRef.current;
+    if (!input) return;
+    input.focus();
+    if (command === 'paste') {
+      try {
+        const text = await navigator.clipboard.readText();
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? input.value.length;
+        const next = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+        setCmd(next);
+        const caret = start + text.length;
+        window.requestAnimationFrame(() => input.setSelectionRange(caret, caret));
+        return;
+      } catch {
+        document.execCommand('paste');
+        return;
+      }
+    }
+    if (command === 'selectAll') {
+      input.select();
+      return;
+    }
+    document.execCommand(command);
+  }, [setCmd]);
 
   const addAttachment = useCallback((file: File, extras?: { transcript?: string; textContent?: string }) => {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -1399,6 +1462,10 @@ export default function AIDock() {
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setInputContextMenu({ x: e.clientX, y: e.clientY });
+            }}
             onFocus={() => { setInputFocused(true); if (!chatExpanded) setShowSuggestions(true); }}
             onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
             onKeyDown={(e) => { if (e.key === 'Escape' && chatExpanded) { closeDock(); e.preventDefault(); } }}
@@ -1421,6 +1488,55 @@ export default function AIDock() {
             {Icon.send}
           </button>
         </form>
+
+        {inputContextMenu && (
+          <div
+            className="dock-input-context-menu"
+            style={{ left: inputContextMenu.x, top: inputContextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" onClick={() => { void executeInputCommand('cut'); setInputContextMenu(null); }}>剪切</button>
+            <button type="button" onClick={() => { void executeInputCommand('copy'); setInputContextMenu(null); }}>复制</button>
+            <button type="button" onClick={() => { void executeInputCommand('paste'); setInputContextMenu(null); }}>粘贴</button>
+            <button type="button" onClick={() => { void executeInputCommand('selectAll'); setInputContextMenu(null); }}>全选</button>
+          </div>
+        )}
+
+        {(devices.length > 1 || channelStats.feishuTotal > 0 || channelStats.weixinTotal > 0) && (
+          <div className="dock-status-strip">
+            {devices.length > 1 && (
+              <div className="dock-device-strip" role="tablist" aria-label="AI 设备窗口">
+                {devices.map((device) => (
+                  <button
+                    key={device.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeDevice === device.id}
+                    className={`dock-device-chip ${activeDevice === device.id ? 'active' : ''}`}
+                    onClick={() => setActiveDevice(device.id)}
+                    title={`${device.name} · ${device.ip}`}
+                  >
+                    {device.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {(channelStats.feishuTotal > 0 || channelStats.weixinTotal > 0) && (
+              <div className="dock-channel-strip" aria-label="渠道消息概览">
+                {channelStats.feishuTotal > 0 && (
+                  <span className="dock-channel-chip" title="飞书消息">
+                    飞书 {channelStats.feishuInbound > 0 ? `来信 ${channelStats.feishuInbound}` : `消息 ${channelStats.feishuTotal}`}
+                  </span>
+                )}
+                {channelStats.weixinTotal > 0 && (
+                  <span className="dock-channel-chip" title="微信消息">
+                    微信 {channelStats.weixinInbound > 0 ? `来信 ${channelStats.weixinInbound}` : `消息 ${channelStats.weixinTotal}`}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Context strip (AI Native) */}
         <div className="dock-context-strip">

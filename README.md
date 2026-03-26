@@ -63,6 +63,26 @@ npm run verify:modules
 - `OPENAI_MODEL`
 - `PORT`
 
+## 打包版预置 RDKClaw 大模型
+
+从当前版本开始，桌面包支持在首启时自动读取预置模型配置：
+
+- 默认文件：`config/rdkclaw-provider.defaults.json`
+- 可通过环境变量覆盖文件路径：`RDK_PROVIDER_BOOTSTRAP_FILE`
+- `apiKey` / `model` / `baseUrl` 支持 `${ENV_NAME}` 占位符（运行时替换）
+
+示例（PowerShell）：
+
+```powershell
+$env:RDK_PROVIDER_API_KEY = "your_api_key"
+npm run build:desktop:win
+```
+
+说明：
+
+- 当用户本地还没有 `~/.rdkstudio/agent-config.json` 时，会自动使用预置配置。
+- 用户后续在设置页保存的新配置优先级更高，不会被预置文件覆盖。
+
 ## 设备与 OpenClaw
 
 设备连接接口会实际尝试 SSH 登录校验，成功后把设备基本信息写入 `data/devices.json`。

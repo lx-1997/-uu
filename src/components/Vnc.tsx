@@ -124,7 +124,25 @@ export default function Vnc() {
 
     executeDeviceCommand(
       currentDevice.id,
-      `bash -lc "mkdir -p ~/.vnc && (echo -e '88888888\\n88888888' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true); sudo mkdir -p /etc/.vnc 2>/dev/null || true; sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd 2>/dev/null || true; (systemctl is-active x11vnc >/dev/null 2>&1 && (sudo systemctl restart x11vnc 2>/dev/null || systemctl --user restart x11vnc 2>/dev/null || true)) || (sudo systemctl start x11vnc 2>/dev/null || systemctl --user start x11vnc 2>/dev/null || true) || (sudo systemctl restart vncserver 2>/dev/null || systemctl --user restart vncserver 2>/dev/null || true) || (sudo systemctl start vncserver 2>/dev/null || systemctl --user start vncserver 2>/dev/null || true) || true; sleep 4; if ss -lntp 2>/dev/null | grep -q ':5900'; then echo VNC_READY; else echo VNC_START_FAILED; fi"`
+      `bash -lc "
+        probe_port() {
+          if command -v ss >/dev/null 2>&1; then ss -lntp 2>/dev/null | grep -q ':5900' && return 0; fi
+          if command -v netstat >/dev/null 2>&1; then netstat -lnt 2>/dev/null | grep -q ':5900' && return 0; fi
+          if command -v lsof >/dev/null 2>&1; then lsof -iTCP:5900 -sTCP:LISTEN 2>/dev/null | grep -q LISTEN && return 0; fi
+          return 1
+        }
+        mkdir -p ~/.vnc
+        (echo -e '88888888\\n88888888' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true)
+        sudo mkdir -p /etc/.vnc 2>/dev/null || true
+        sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd 2>/dev/null || true
+        (systemctl is-active x11vnc >/dev/null 2>&1 && (sudo systemctl restart x11vnc 2>/dev/null || systemctl --user restart x11vnc 2>/dev/null || true)) \
+          || (sudo systemctl start x11vnc 2>/dev/null || systemctl --user start x11vnc 2>/dev/null || true) \
+          || (sudo systemctl restart vncserver 2>/dev/null || systemctl --user restart vncserver 2>/dev/null || true) \
+          || (sudo systemctl start vncserver 2>/dev/null || systemctl --user start vncserver 2>/dev/null || true)
+        probe_port || (command -v x11vnc >/dev/null 2>&1 && nohup x11vnc -display :0 -rfbport 5900 -passwd 88888888 -shared -forever -bg >/tmp/x11vnc.log 2>&1 || true)
+        sleep 3
+        if probe_port; then echo VNC_READY; else echo VNC_START_FAILED; fi
+      "`
     ).then(res => {
       const output = res.output || '';
       setLogLines(prev => [...prev, ...output.split(/\r?\n/).filter(Boolean)]);

@@ -57,11 +57,11 @@
   --text-muted: #94A3B8;
   --text-on-accent: #FFFFFF;
 
-  --accent: #FF6B00;
-  --accent-hover: #F97316;
-  --accent-subtle: rgba(255, 107, 0, 0.10);
-  --accent-glow: rgba(255, 107, 0, 0.15);
-  --accent-border: rgba(255, 107, 0, 0.22);
+  --accent: #4F7BFF;
+  --accent-hover: #3F68EA;
+  --accent-subtle: rgba(79, 123, 255, 0.10);
+  --accent-glow: rgba(79, 123, 255, 0.16);
+  --accent-border: rgba(79, 123, 255, 0.24);
 
   --ok: #16A34A;
   --ok-subtle: rgba(22, 163, 74, 0.10);
@@ -113,7 +113,7 @@
   --chip-bg-active: var(--accent-subtle);
   --chip-text-active: var(--accent);
 
-  --selection-bg: rgba(255, 107, 0, 0.14);
+  --selection-bg: rgba(79, 123, 255, 0.16);
   --selection-text: inherit;
 
   color-scheme: light;
@@ -123,23 +123,23 @@
    Cyber Dark — Neon + Deep Blue
    ══════════════════════════════════════════ */
 [data-theme="cyber"] {
-  --bg-primary: #060A14;
-  --bg-secondary: #0C1222;
-  --bg-surface: rgba(12, 18, 34, 0.88);
-  --bg-elevated: #111827;
+  --bg-primary: #0B1324;
+  --bg-secondary: #121C32;
+  --bg-surface: rgba(18, 28, 50, 0.88);
+  --bg-elevated: #18233B;
   --bg-inset: rgba(148, 163, 184, 0.04);
   --bg-overlay: rgba(0, 0, 0, 0.6);
 
   --text-primary: #E2E8F0;
   --text-secondary: #94A3B8;
   --text-muted: #64748B;
-  --text-on-accent: #060A14;
+  --text-on-accent: #0B1324;
 
-  --accent: #00F0FF;
-  --accent-hover: #22D3EE;
-  --accent-subtle: rgba(0, 240, 255, 0.08);
-  --accent-glow: rgba(0, 240, 255, 0.20);
-  --accent-border: rgba(0, 240, 255, 0.28);
+  --accent: #7C9BFF;
+  --accent-hover: #6E8EF7;
+  --accent-subtle: rgba(124, 155, 255, 0.10);
+  --accent-glow: rgba(124, 155, 255, 0.20);
+  --accent-border: rgba(124, 155, 255, 0.30);
 
   --ok: #4ADE80;
   --ok-subtle: rgba(74, 222, 128, 0.10);
@@ -184,14 +184,14 @@
 
   --dock-bg: rgba(12, 18, 34, 0.82);
   --dock-border: var(--accent-border);
-  --dock-shadow: 0 0 40px rgba(0, 240, 255, 0.08), var(--shadow-xl);
+  --dock-shadow: 0 0 40px rgba(124, 155, 255, 0.10), var(--shadow-xl);
 
   --chip-bg: rgba(148, 163, 184, 0.08);
   --chip-text: var(--text-secondary);
   --chip-bg-active: var(--accent-subtle);
   --chip-text-active: var(--accent);
 
-  --selection-bg: rgba(0, 240, 255, 0.20);
+  --selection-bg: rgba(124, 155, 255, 0.22);
   --selection-text: inherit;
 
   color-scheme: dark;

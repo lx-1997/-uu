@@ -444,11 +444,18 @@
 }
 
 .flasher-page .tool-content {
-  padding: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .flasher-page .card.card-compact {
-  padding: 12px 14px;
+  padding: 14px 16px;
+}
+
+.flasher-page .flasher-step-card {
+  border-radius: var(--radius-xl);
 }
 
 .flasher-page .flash-steps {
@@ -476,9 +483,36 @@
 }
 
 .flasher-page .flasher-image-list {
-  max-height: 48vh;
+  max-height: 52vh;
   overflow: auto;
   padding-right: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.flasher-page .flasher-device-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.flasher-page .flasher-step1-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr);
+  align-items: start;
+}
+
+.flasher-page .flasher-step2-grid {
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 1fr);
+  align-items: start;
+}
+
+.flasher-page .flasher-summary-pane .config-row {
+  padding: 12px 0;
+}
+
+.flasher-page .flasher-summary-pane .config-value {
+  max-width: 60%;
+}
+
+.flasher-page .flasher-drive-pane .config-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 
 .flasher-page .flasher-nav-row {
@@ -491,6 +525,19 @@
 @media (min-width: 1100px) {
   .flasher-page .config-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .flasher-page .flasher-device-grid,
+  .flasher-page .flasher-step1-grid,
+  .flasher-page .flasher-step2-grid,
+  .flasher-page .flasher-image-list {
+    grid-template-columns: 1fr;
+  }
+
+  .flasher-page .flasher-summary-pane .config-value {
+    max-width: 70%;
   }
 }
 
