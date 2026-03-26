@@ -25,6 +25,14 @@
   transform: translateX(-50%);
 }
 
+.dock.expanded.subpage-compact {
+  bottom: 16px;
+  width: min(var(--dock-max-width), calc(100vw - var(--rail-current-width, var(--rail-width)) - 40px));
+  margin-left: calc(var(--rail-current-width, var(--rail-width)) / 2);
+  height: min(68vh, 700px);
+  max-height: min(68vh, 700px);
+}
+
 .dock.workspace {
   inset: 0;
   width: 100vw;
@@ -54,6 +62,10 @@
 
 .dock.workspace .dock-chat {
   border-radius: 0;
+}
+
+.dock.subpage-compact .dock-chat {
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
 }
 
 /* Header */
@@ -368,6 +380,35 @@
   border-right: none;
   border-bottom: none;
   box-shadow: none;
+}
+
+.dock.expanded.subpage-compact .dock-input-area {
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  border: 1px solid var(--dock-border);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--dock-shadow);
+}
+
+.dock-restore-btn {
+  position: fixed;
+  right: 18px;
+  bottom: 20px;
+  z-index: var(--z-dock);
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--accent-border);
+  background: var(--dock-bg);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
+  box-shadow: var(--shadow-md);
+}
+
+.dock-restore-btn:hover {
+  background: var(--accent-subtle);
 }
 
 /* Attachment preview */
@@ -1289,5 +1330,18 @@
   .dock.expanded {
     width: 100vw;
     margin-left: 0;
+  }
+
+  .dock.expanded.subpage-compact {
+    width: calc(100vw - 20px);
+    margin-left: 0;
+    height: min(62vh, 620px);
+    max-height: min(62vh, 620px);
+    bottom: 12px;
+  }
+
+  .dock-restore-btn {
+    right: 12px;
+    bottom: 14px;
   }
 }

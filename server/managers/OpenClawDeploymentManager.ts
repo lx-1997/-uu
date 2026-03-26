@@ -551,6 +551,19 @@ export class OpenClawDeploymentManager {
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
   }
 
+  runNetworkCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
+    const cmd = [
+      BOARD_ENV_EXPORT,
+      'echo "=== 网络连通性检查 ==="',
+      '(ip route 2>/dev/null | head -n 5 || true)',
+      'net_ok=0',
+      '((ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1) && net_ok=1 || true)',
+      'if [ "$net_ok" != "1" ]; then ((curl -I --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1 || wget -q --spider --timeout=6 https://registry.npmjs.org >/dev/null 2>&1) && net_ok=1 || true); fi',
+      'if [ "$net_ok" = "1" ]; then echo "NETWORK_READY"; else echo "NETWORK_OFFLINE"; exit 1; fi',
+    ].join(' ; ');
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 25000 });
+  }
+
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: 600000 });
   }

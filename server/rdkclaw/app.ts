@@ -135,6 +135,7 @@ export class RDKClawApp {
   private modelCapWarmedUp = new Set<string>();
   private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
   private readonly deviceQueue = new DeviceQueue();
+  private cancelQueuedBeforeTs = 0;
   private switchDeviceCallback?: (deviceId: string) => void;
   private pendingMapsCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -328,6 +329,7 @@ export class RDKClawApp {
   }
 
   cancelAllRuns(): number {
+    this.cancelQueuedBeforeTs = Date.now();
     let count = 0;
     for (const [_id, agent] of this.runAgents) {
       try { agent.abort(); count++; } catch { /* ignore */ }
@@ -625,12 +627,28 @@ export class RDKClawApp {
     }
 
     const channel: import("./types.js").ChannelSource = req.channel || "studio";
+    const enqueuedAt = Date.now();
     const slot = await this.deviceQueue.acquireSlot(deviceLane, {
       channel,
       messageSummary: String(req.message || "").slice(0, 60),
     });
 
     try {
+      if (enqueuedAt <= this.cancelQueuedBeforeTs) {
+        yield {
+          type: "run_complete",
+          data: {
+            runId: crypto.randomUUID(),
+            sessionId: sessionKey,
+            message: "任务在队列中被取消",
+            cancelled: true,
+            elapsed_ms: 0,
+            elapsed_display: "0 秒",
+            tool_calls: 0,
+          },
+        };
+        return;
+      }
       yield* this._executeChat(req, sessionKey, providerConfig, slot);
     } finally {
       slot.release();

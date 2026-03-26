@@ -17,6 +17,7 @@ export default function Vnc() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showIframe, setShowIframe] = useState(false);
   const [quality, setQuality] = useState<'auto' | 'high' | 'low'>('auto');
+  const [vncPort, setVncPort] = useState<number>(5900);
   const [showLogs, setShowLogs] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -72,9 +73,9 @@ export default function Vnc() {
     const backendPort = isDesktopMode ? 8787 : ((import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80));
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
     const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;
-    const wsPath = `websockify?target=${hostOrIp}:5900`;
+    const wsPath = `websockify?target=${hostOrIp}:${vncPort}`;
     return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
-  }, [currentDevice, quality, urlVersion]);
+  }, [currentDevice, quality, urlVersion, vncPort]);
 
   // 画质切换时强制刷新 iframe
   const handleQualityChange = (q: 'auto' | 'high' | 'low') => {
@@ -94,7 +95,7 @@ export default function Vnc() {
       .then(res => {
         const output = res.output || '';
         setLogLines(output.split(/\r?\n/).filter(Boolean));
-        if (res.active || output.includes('5900')) {
+        if (res.active) {
           setPhase('idle');
           setStatusText('VNC 服务就绪');
         } else {
@@ -126,32 +127,63 @@ export default function Vnc() {
       currentDevice.id,
       `bash -lc "
         probe_port() {
-          if command -v ss >/dev/null 2>&1; then ss -lntp 2>/dev/null | grep -q ':5900' && return 0; fi
-          if command -v netstat >/dev/null 2>&1; then netstat -lnt 2>/dev/null | grep -q ':5900' && return 0; fi
-          if command -v lsof >/dev/null 2>&1; then lsof -iTCP:5900 -sTCP:LISTEN 2>/dev/null | grep -q LISTEN && return 0; fi
+          for p in 5900 5901; do
+            if command -v ss >/dev/null 2>&1; then ss -lntp 2>/dev/null | grep -q ":$p" && echo "$p" && return 0; fi
+            if command -v netstat >/dev/null 2>&1; then netstat -lnt 2>/dev/null | grep -q ":$p" && echo "$p" && return 0; fi
+            if command -v lsof >/dev/null 2>&1; then lsof -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN && echo "$p" && return 0; fi
+          done
           return 1
         }
+        PORT=\"\$(probe_port || true)\"
         mkdir -p ~/.vnc
-        (echo -e '88888888\\n88888888' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true)
+        (printf '88888888\\n' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true)
         sudo mkdir -p /etc/.vnc 2>/dev/null || true
         sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd 2>/dev/null || true
-        (systemctl is-active x11vnc >/dev/null 2>&1 && (sudo systemctl restart x11vnc 2>/dev/null || systemctl --user restart x11vnc 2>/dev/null || true)) \
-          || (sudo systemctl start x11vnc 2>/dev/null || systemctl --user start x11vnc 2>/dev/null || true) \
-          || (sudo systemctl restart vncserver 2>/dev/null || systemctl --user restart vncserver 2>/dev/null || true) \
-          || (sudo systemctl start vncserver 2>/dev/null || systemctl --user start vncserver 2>/dev/null || true)
-        probe_port || (command -v x11vnc >/dev/null 2>&1 && nohup x11vnc -display :0 -rfbport 5900 -passwd 88888888 -shared -forever -bg >/tmp/x11vnc.log 2>&1 || true)
+        if [ -z \"$PORT\" ]; then
+          (systemctl is-active x11vnc >/dev/null 2>&1 && (sudo systemctl restart x11vnc 2>/dev/null || systemctl --user restart x11vnc 2>/dev/null || true)) \
+            || (sudo systemctl start x11vnc 2>/dev/null || systemctl --user start x11vnc 2>/dev/null || true) \
+            || (sudo systemctl restart vncserver 2>/dev/null || systemctl --user restart vncserver 2>/dev/null || true) \
+            || (sudo systemctl start vncserver 2>/dev/null || systemctl --user start vncserver 2>/dev/null || true)
+          PORT=\"\$(probe_port || true)\"
+        fi
+        if [ -z \"$PORT\" ] && command -v x11vnc >/dev/null 2>&1; then
+          for d in \"\${DISPLAY:-:0}\" :0 :1 :2; do
+            nohup x11vnc -display \"$d\" -rfbport 5900 -passwd 88888888 -shared -forever -bg >/tmp/x11vnc.log 2>&1 || true
+            sleep 1
+            PORT=\"\$(probe_port || true)\"
+            [ -n \"$PORT\" ] && break
+          done
+        fi
+        if [ -z \"$PORT\" ] && command -v vncserver >/dev/null 2>&1; then
+          (vncserver :0 >/tmp/vncserver.log 2>&1 || vncserver :1 >/tmp/vncserver.log 2>&1 || true)
+          sleep 1
+          PORT=\"\$(probe_port || true)\"
+        fi
         sleep 3
-        if probe_port; then echo VNC_READY; else echo VNC_START_FAILED; fi
+        PORT=\"\$(probe_port || true)\"
+        if [ -n \"$PORT\" ]; then echo VNC_READY; echo VNC_PORT=$PORT; else echo VNC_START_FAILED; fi
       "`
     ).then(res => {
       const output = res.output || '';
       setLogLines(prev => [...prev, ...output.split(/\r?\n/).filter(Boolean)]);
 
       if (output.includes('VNC_READY')) {
-        const vncUrl = getVncUrl();
+        const portMatch = output.match(/VNC_PORT=(\d+)/);
+        const detectedPort = Number(portMatch?.[1] || 5900);
+        if (Number.isFinite(detectedPort) && detectedPort > 0) {
+          setVncPort(detectedPort);
+        }
+        const isDesktopMode = !!(window as any).rdkDesktop?.isDesktop;
+        const host = isDesktopMode ? 'localhost' : (window.location.hostname || 'localhost');
+        const backendPort = isDesktopMode ? 8787 : ((import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80));
+        const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
+        const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;
+        const targetPort = Number.isFinite(detectedPort) && detectedPort > 0 ? detectedPort : 5900;
+        const wsPath = `websockify?target=${hostOrIp}:${targetPort}`;
+        const vncUrl = `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
         setPhase('connected');
         setShowIframe(true);
-        addToast('VNC 连接成功', 'success');
+        addToast(`VNC 连接成功（端口 ${Number.isFinite(detectedPort) && detectedPort > 0 ? detectedPort : 5900}）`, 'success');
         startVncSession();
         // 桌面端用 WebContentsView 嵌入 noVNC
         if (isDesktop()) {

@@ -161,6 +161,30 @@ export class AutonomyScheduler {
     this.audit({ type: "task_stop", taskId, runId: runId || "" });
   }
 
+  stopAll(): { pausedTasks: number; cancelledRuns: number } {
+    const activeTaskIds = this.tasks
+      .filter((t) => t.status === "active" || this.running.has(t.id))
+      .map((t) => t.id);
+    let cancelledRuns = 0;
+    for (const taskId of activeTaskIds) {
+      this.cancelledByUser.add(taskId);
+      const runId = this.runIdByTaskId.get(taskId);
+      if (runId && this.app.cancelRun(runId)) {
+        cancelledRuns += 1;
+      }
+    }
+    if (activeTaskIds.length > 0) {
+      this.tasks = this.tasks.map((t) => (
+        activeTaskIds.includes(t.id)
+          ? { ...t, status: "paused" }
+          : t
+      ));
+      this.saveTasks();
+    }
+    this.audit({ type: "task_stop_all", pausedTasks: activeTaskIds.length, cancelledRuns });
+    return { pausedTasks: activeTaskIds.length, cancelledRuns };
+  }
+
   resume(taskId: string) {
     this.tasks = this.tasks.map((t) => {
       if (t.id !== taskId) return t;

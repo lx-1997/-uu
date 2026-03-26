@@ -625,7 +625,7 @@ export function stopRDKClawTask(taskId: string) {
 }
 
 export function cancelAllRDKClawRuns() {
-  return request<{ ok: boolean; cancelled: number }>('/api/rdkclaw/runs/cancel-all', {
+  return request<{ ok: boolean; cancelled: number; cancelledAutonomyRuns?: number; pausedAutonomyTasks?: number }>('/api/rdkclaw/runs/cancel-all', {
     method: 'POST',
     body: JSON.stringify({}),
   });

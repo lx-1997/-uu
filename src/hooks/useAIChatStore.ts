@@ -859,9 +859,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           requestAttachments,
           (event: AgentSSEEvent) => {
             if (generation !== streamGenerationRef.current) return;
+            const eventRunId = String(event.data.runId || '').trim();
+            if (eventRunId) {
+              currentRunId = eventRunId;
+              currentRunIdRef.current = eventRunId;
+            }
             switch (event.type) {
               case 'meta': {
-                currentRunId = String(event.data.runId || currentRunId || '');
+                currentRunId = eventRunId || currentRunId;
                 currentRunIdRef.current = currentRunId;
                 const executor = String(event.data.executor || 'rdkclaw_local');
                 const phase = String(event.data.phase || 'start');
@@ -1485,11 +1490,20 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await cancelAllRDKClawRuns();
       const count = res.cancelled ?? 0;
+      const pausedAutonomyTasks = Number(res.pausedAutonomyTasks ?? 0);
+      const cancelledAutonomyRuns = Number(res.cancelledAutonomyRuns ?? 0);
+      const detailParts = ['包括来自 Studio、飞书、微信的任务'];
+      if (pausedAutonomyTasks > 0) {
+        detailParts.push(`已暂停定时任务 ${pausedAutonomyTasks} 个`);
+      }
+      if (cancelledAutonomyRuns > 0) {
+        detailParts.push(`已中断定时任务运行 ${cancelledAutonomyRuns} 个`);
+      }
       setChatMessages((prev) => [...prev, {
         id: Date.now(),
         role: 'ai',
         text: '',
-        blocks: [{ type: 'task-result', success: true, title: `已停止所有运行中的任务（${count} 个）`, detail: '包括来自 Studio、飞书、微信的任务' }],
+        blocks: [{ type: 'task-result', success: true, title: `已停止所有运行中的任务（${count} 个）`, detail: detailParts.join('；') }],
         source: 'studio',
       }]);
       setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));

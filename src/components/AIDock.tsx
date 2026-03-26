@@ -669,6 +669,13 @@ export default function AIDock() {
       return true;
     }
   });
+  const [hideDockInSubpage, setHideDockInSubpage] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('rdk:dock:hide-subpage') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -982,6 +989,14 @@ export default function AIDock() {
     }
   }, [compactFlowMode]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('rdk:dock:hide-subpage', hideDockInSubpage ? '1' : '0');
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [hideDockInSubpage]);
+
   const scrollStreamToBottom = useCallback(() => {
     const el = streamScrollRef.current;
     if (!el) return;
@@ -1157,6 +1172,8 @@ export default function AIDock() {
   const effectiveTab = (activeTab === 'openclaw' && !dockOcMode) ? '_rdkclaw_fallback' : activeTab;
   const quickPrompts = promptsByTab[effectiveTab] ?? defaultPrompts;
   const isFlasherTab = activeTab === 'flasher';
+  const isSubpageTab = activeTab !== 'dashboard';
+  const shouldHideDock = isSubpageTab && hideDockInSubpage;
 
   const submitQuickPrompt = (text: string, placeholder?: string, forceRdkclaw?: boolean) => {
     if (!text && placeholder) {
@@ -1227,8 +1244,34 @@ export default function AIDock() {
     setShowAllMessages(false);
   };
 
+  const toggleSubpageDockVisibility = () => {
+    if (!isSubpageTab) return;
+    setHideDockInSubpage((prev) => {
+      const next = !prev;
+      if (next) {
+        setChatExpanded(false);
+        setWorkspaceMode(false);
+        setShowSuggestions(false);
+      }
+      return next;
+    });
+  };
+
+  if (shouldHideDock) {
+    return (
+      <button
+        type="button"
+        className="dock-restore-btn"
+        title="显示 AI Dock"
+        onClick={() => setHideDockInSubpage(false)}
+      >
+        显示 AI Dock
+      </button>
+    );
+  }
+
   return (
-    <div className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''}`}>
+    <div className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''} ${chatExpanded && isSubpageTab && !workspaceMode ? 'subpage-compact' : ''}`}>
       {/* ── Chat panel (expanded) ── */}
       {chatExpanded && (
         <div className="dock-chat">
@@ -1250,6 +1293,19 @@ export default function AIDock() {
               </div>
             </div>
             <div className="dock-header-right">
+              {isSubpageTab && (
+                <button
+                  className="btn-icon"
+                  onClick={toggleSubpageDockVisibility}
+                  title="隐藏 AI Dock"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32"/>
+                    <path d="M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.89 11 8a11.8 11.8 0 01-4.17 5.94"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                </button>
+              )}
               <button
                 className={`btn-icon dock-view-toggle ${compactFlowMode ? 'active' : ''}`}
                 onClick={() => setCompactFlowMode((prev) => !prev)}
@@ -1482,6 +1538,20 @@ export default function AIDock() {
               title="打开聊天面板"
             >
               {Icon.expand}
+            </button>
+          )}
+          {isSubpageTab && (
+            <button
+              type="button"
+              className="dock-action-btn"
+              onClick={toggleSubpageDockVisibility}
+              title="隐藏 AI Dock"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32"/>
+                <path d="M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.89 11 8a11.8 11.8 0 01-4.17 5.94"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
             </button>
           )}
           <button type="submit" className={`dock-send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`} disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping} title="发送">

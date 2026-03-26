@@ -2182,6 +2182,10 @@ async function executeOpenClawDeployJob(
     api: string;
   },
 ) {
+  const readHealthStatus = () => new Promise<import('./managers/OpenClawDeploymentManager.js').OpenClawHealthStatus>((resolve) => {
+    openClawManager.getHealthStatus(deviceObj, (status) => resolve(status));
+  });
+
   const runStep = async (
     step: OpenClawDeployStepName,
     runner: () => Promise<{ ok: boolean; output: string }>,
@@ -2204,9 +2208,18 @@ async function executeOpenClawDeployJob(
   };
 
   try {
-    await runStep('check', () => runOpenClawManagerStep((onOutput, onComplete) => {
-      openClawManager.runCheck(deviceObj, onOutput, onComplete);
-    }), false);
+    await runStep('check', async () => {
+      const diagnostic = await runOpenClawManagerStep((onOutput, onComplete) => {
+        openClawManager.runCheck(deviceObj, onOutput, onComplete);
+      });
+      const network = await runOpenClawManagerStep((onOutput, onComplete) => {
+        openClawManager.runNetworkCheck(deviceObj, onOutput, onComplete);
+      });
+      return {
+        ok: network.ok,
+        output: `${diagnostic.output || ''}\n${network.output || ''}`,
+      };
+    }, true);
     await runStep('prepare', () => runOpenClawManagerStep((onOutput, onComplete) => {
       openClawManager.runPrepare(deviceObj, onOutput, onComplete);
     }), true);
@@ -2229,6 +2242,12 @@ async function executeOpenClawDeployJob(
         onComplete,
       );
     }), true);
+
+    const healthStatus = await readHealthStatus();
+    if (!healthStatus.installed || !healthStatus.gatewayRunning || !healthStatus.aiReady) {
+      throw new Error(`部署后健康检查未通过：${healthStatus.summary || 'OpenClaw 状态异常'}`);
+    }
+
     job.status = 'done';
     job.finishedAt = Date.now();
     schedulePersistRuntimeJobs();
@@ -3204,11 +3223,11 @@ app.get('/api/devices/:id/services/vnc', async (request, response) => {
     request,
     response,
     id,
-    ['bash -lc "(systemctl is-active vncserver || systemctl is-active x11vnc || pgrep -af \'x11vnc|Xtigervnc|vncserver\' || echo inactive)"'],
+    ['bash -lc "_ss=\"$(ss -lntp 2>/dev/null || true)\"; _ns=\"$(netstat -lnt 2>/dev/null || true)\"; _ps=\"$(pgrep -af \'x11vnc|Xtigervnc|vncserver\' 2>/dev/null || true)\"; if (echo \"$_ss\" | grep -q \":5900\\|:5901\") || (echo \"$_ns\" | grep -q \":5900\\|:5901\") || [ -n \"$_ps\" ]; then echo VNC_ACTIVE; else echo VNC_INACTIVE; fi; systemctl is-active x11vnc 2>/dev/null || true; systemctl is-active vncserver 2>/dev/null || true; echo \"$_ps\""'],
   );
   if (!executed) return;
 
-  const active = /\bactive\b|x11vnc|Xtigervnc|vncserver/i.test(executed.output);
+  const active = /\bVNC_ACTIVE\b/.test(executed.output);
   response.json({ ok: true, active, output: executed.output });
 });
 
@@ -3217,10 +3236,10 @@ app.get('/api/devices/:id/services/vnc', async (request, response) => {
 app.post('/api/devices/:id/services/vnc/start', async (request, response) => {
   const { id } = request.params;
   const executed = await runOnDevice(request, response, id, [
-    'bash -lc "if command -v x11vnc >/dev/null 2>&1; then nohup x11vnc -display :0 -rfbport 5900 -passwd 88888888 -shared -forever -bg 2>/dev/null; echo VNC_STARTED_X11VNC; elif command -v vncserver >/dev/null 2>&1; then vncserver :0 2>&1; echo VNC_STARTED_VNCSERVER; else echo VNC_NOT_INSTALLED; fi"',
+    'bash -lc "probe_port(){ for p in 5900 5901; do if ss -lnt 2>/dev/null | grep -q \":$p\"; then echo $p; return 0; fi; if netstat -lnt 2>/dev/null | grep -q \":$p\"; then echo $p; return 0; fi; done; return 1; }; PORT=\"$(probe_port || true)\"; if [ -z \"$PORT\" ] && command -v x11vnc >/dev/null 2>&1; then for d in \"${DISPLAY:-:0}\" :0 :1 :2; do nohup x11vnc -display \"$d\" -rfbport 5900 -passwd 88888888 -shared -forever -bg >/tmp/x11vnc.log 2>&1 || true; sleep 1; PORT=\"$(probe_port || true)\"; [ -n \"$PORT\" ] && break; done; fi; if [ -z \"$PORT\" ] && command -v vncserver >/dev/null 2>&1; then (vncserver :0 >/tmp/vncserver.log 2>&1 || vncserver :1 >/tmp/vncserver.log 2>&1 || true); sleep 1; PORT=\"$(probe_port || true)\"; fi; if [ -n \"$PORT\" ]; then echo VNC_STARTED; echo VNC_PORT=$PORT; else echo VNC_START_FAILED; fi"',
   ]);
   if (!executed) return;
-  const started = /VNC_STARTED/i.test(executed.output);
+  const started = /\bVNC_STARTED\b/.test(executed.output);
   response.json({ ok: started, output: executed.output });
 });
 
@@ -4004,7 +4023,13 @@ app.post('/api/rdkclaw/soul-updates/:proposalId/decision', async (request, respo
 
 app.post('/api/rdkclaw/runs/cancel-all', (_request, response) => {
   const count = rdkclaw.cancelAllRuns();
-  response.json({ ok: true, cancelled: count });
+  const auto = autonomyScheduler.stopAll();
+  response.json({
+    ok: true,
+    cancelled: count,
+    cancelledAutonomyRuns: auto.cancelledRuns,
+    pausedAutonomyTasks: auto.pausedTasks,
+  });
 });
 
 app.get('/api/rdkclaw/runs/active', (_request, response) => {

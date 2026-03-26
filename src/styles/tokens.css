@@ -57,11 +57,11 @@
   --text-muted: #94A3B8;
   --text-on-accent: #FFFFFF;
 
-  --accent: #4F7BFF;
-  --accent-hover: #3F68EA;
-  --accent-subtle: rgba(79, 123, 255, 0.10);
-  --accent-glow: rgba(79, 123, 255, 0.16);
-  --accent-border: rgba(79, 123, 255, 0.24);
+  --accent: #FF6B00;
+  --accent-hover: #E35D00;
+  --accent-subtle: rgba(255, 107, 0, 0.12);
+  --accent-glow: rgba(255, 107, 0, 0.18);
+  --accent-border: rgba(255, 107, 0, 0.28);
 
   --ok: #16A34A;
   --ok-subtle: rgba(22, 163, 74, 0.10);
@@ -113,7 +113,7 @@
   --chip-bg-active: var(--accent-subtle);
   --chip-text-active: var(--accent);
 
-  --selection-bg: rgba(79, 123, 255, 0.16);
+  --selection-bg: rgba(255, 107, 0, 0.16);
   --selection-text: inherit;
 
   color-scheme: light;
