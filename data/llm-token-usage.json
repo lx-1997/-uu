@@ -1728,6 +1728,84 @@
       "totalTokens": 444,
       "estimated": true,
       "success": true
+    },
+    {
+      "id": "1774541076716-o1r5jy",
+      "ts": 1774541076716,
+      "source": "rdkclaw",
+      "deviceId": "f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "sessionId": "device:f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "model": "doubao-seed-2.0-lite",
+      "promptTokens": 1988,
+      "completionTokens": 31,
+      "totalTokens": 2019,
+      "estimated": true,
+      "success": true
+    },
+    {
+      "id": "1774541093077-wp29nz",
+      "ts": 1774541093077,
+      "source": "rdkclaw",
+      "deviceId": "f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "sessionId": "device:f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "model": "doubao-seed-2.0-lite",
+      "promptTokens": 1992,
+      "completionTokens": 17,
+      "totalTokens": 2009,
+      "estimated": true,
+      "success": true
+    },
+    {
+      "id": "1774542254505-6d9syr",
+      "ts": 1774542254505,
+      "source": "rdkclaw",
+      "deviceId": "f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "sessionId": "device:f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "model": "doubao-seed-2.0-lite",
+      "promptTokens": 1988,
+      "completionTokens": 26,
+      "totalTokens": 2014,
+      "estimated": true,
+      "success": true
+    },
+    {
+      "id": "1774542525346-bevfnu",
+      "ts": 1774542525346,
+      "source": "rdkclaw",
+      "deviceId": "f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "sessionId": "device:f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "model": "doubao-seed-2.0-lite",
+      "promptTokens": 1994,
+      "completionTokens": 1,
+      "totalTokens": 1995,
+      "estimated": true,
+      "success": true
+    },
+    {
+      "id": "1774542563021-7gnfx1",
+      "ts": 1774542563021,
+      "source": "rdkclaw",
+      "deviceId": "f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "sessionId": "device:f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "model": "doubao-seed-2.0-lite",
+      "promptTokens": 1993,
+      "completionTokens": 45,
+      "totalTokens": 2038,
+      "estimated": true,
+      "success": true
+    },
+    {
+      "id": "1774542566275-syvkhg",
+      "ts": 1774542566275,
+      "source": "rdkclaw",
+      "deviceId": "f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "sessionId": "device:f4b0f2ac-0db1-459c-8802-29b5dfd01bf4",
+      "model": "doubao-seed-2.0-lite",
+      "promptTokens": 1993,
+      "completionTokens": 41,
+      "totalTokens": 2034,
+      "estimated": true,
+      "success": true
     }
   ]
 }

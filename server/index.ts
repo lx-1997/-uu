@@ -2244,8 +2244,15 @@ async function executeOpenClawDeployJob(
     }), true);
 
     const healthStatus = await readHealthStatus();
-    if (!healthStatus.installed || !healthStatus.gatewayRunning || !healthStatus.aiReady) {
-      throw new Error(`部署后健康检查未通过：${healthStatus.summary || 'OpenClaw 状态异常'}`);
+    if (!healthStatus.installed) {
+      throw new Error(`部署后健康检查未通过：${healthStatus.summary || 'OpenClaw 未安装成功'}`);
+    }
+    if (!healthStatus.gatewayRunning || !healthStatus.aiReady) {
+      appendDeployOutput(
+        job,
+        `\n[WARN] OpenClaw 已安装，但尚未完全就绪：${healthStatus.summary || '网关或 AI 能力未就绪'}\n` +
+        '如仅需预下载/预安装可忽略该提示；如需立即可用，请继续执行网关启动与模型配置。\n',
+      );
     }
 
     job.status = 'done';

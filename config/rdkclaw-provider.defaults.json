@@ -1,13 +1,13 @@
 {
-  "activeId": "preset-qwen",
+  "activeId": "preset-doubao-seed-2.0-lite",
   "entries": [
     {
-      "id": "preset-qwen",
-      "label": "RDKClaw Default / Qwen",
-      "provider": "qwen",
-      "model": "qwen3.5-plus",
-      "apiKey": "${RDK_PROVIDER_API_KEY}",
-      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      "id": "preset-doubao-seed-2.0-lite",
+      "label": "RDKClaw Default / doubao-seed-2.0-lite",
+      "provider": "doubao-seed-2.0-lite",
+      "model": "doubao-seed-2.0-lite",
+      "apiKey": "1cb7274d-4684-4984-99c2-3b177a6a66ad",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3"
     }
   ]
 }
