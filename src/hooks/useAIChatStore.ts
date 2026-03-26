@@ -7,7 +7,6 @@ import {
   cancelAllRDKClawRuns,
   decideRDKClawApproval,
   sendRecommendationChoice,
-  sendSoulUpdateDecision,
   executeDeviceCommand,
   deployOneShotApp,
   generateOneShotApp,
@@ -1172,24 +1171,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               }
               case 'recommendation_choice':
                 break;
-              case 'soul_update_proposal': {
-                const proposalId = String(event.data.proposalId || '');
-                if (!proposalId) break;
-                aiBlocks.push({
-                  type: 'soul-update',
-                  proposalId,
-                  section: String(event.data.section || ''),
-                  action: (event.data.action as 'add' | 'modify' | 'remove') || 'add',
-                  content: String(event.data.content || ''),
-                  reason: String(event.data.reason || ''),
-                  currentSnippet: event.data.currentSnippet ? String(event.data.currentSnippet) : undefined,
-                  accepted: null,
-                });
-                updateAiMessage(aiText, aiBlocks);
-                break;
-              }
-              case 'soul_update_applied':
-                break;
               case 'approval_decision': {
                 const approvalId = String(event.data.approvalId || '');
                 const decision = String(event.data.decision || 'allow_once');
@@ -1433,25 +1414,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const handleSoulUpdateDecision = async (proposalId: string, accepted: boolean) => {
-    try {
-      await sendSoulUpdateDecision(proposalId, accepted);
-      setChatMessages((prev) => prev.map((msg) => ({
-        ...msg,
-        blocks: msg.blocks?.map((b) => {
-          if (b.type !== 'soul-update' || b.proposalId !== proposalId) return b;
-          return { ...b, accepted };
-        }),
-      })));
-    } catch {
-      setChatMessages((prev) => prev.map((msg) => ({
-        ...msg,
-        blocks: msg.blocks?.map((b) => {
-          if (b.type !== 'soul-update' || b.proposalId !== proposalId) return b;
-          return { ...b, accepted: false };
-        }),
-      })));
-      addToast('SOUL 更新提议已过期或处理失败', 'error');
-    }
+    void proposalId;
+    void accepted;
+    addToast('SOUL 更新入口已关闭：请通过 USER.md 调整偏好', 'info');
   };
 
   const stopCurrentRun = async () => {

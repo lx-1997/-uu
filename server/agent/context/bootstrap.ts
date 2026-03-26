@@ -201,8 +201,13 @@ async function resolveBootstrapRoot(dir: string): Promise<string> {
   }
 }
 
-export async function loadWorkspaceBootstrapFiles(dir: string, policy?: MemoryPolicy): Promise<BootstrapFile[]> {
+export async function loadWorkspaceBootstrapFiles(
+  dir: string,
+  policy?: MemoryPolicy,
+  fallbackDir?: string,
+): Promise<BootstrapFile[]> {
   const resolvedDir = await resolveBootstrapRoot(dir);
+  const fallbackResolvedDir = fallbackDir ? await resolveBootstrapRoot(fallbackDir) : null;
   const entries: Array<{
     name: BootstrapFileName | `memory/${string}.md`;
     filePath: string;
@@ -251,6 +256,25 @@ export async function loadWorkspaceBootstrapFiles(dir: string, policy?: MemoryPo
         missing: false,
       });
     } catch {
+      const canFallback =
+        fallbackResolvedDir &&
+        entry.name === DEFAULT_SOUL_FILENAME;
+      if (canFallback) {
+        const fallbackPath = path.join(fallbackResolvedDir, entry.name);
+        try {
+          const fallbackContent = await fs.readFile(fallbackPath, "utf-8");
+          result.push({
+            name: entry.name,
+            path: fallbackPath,
+            content: fallbackContent,
+            missing: false,
+          });
+          continue;
+        } catch {
+          // fallback unavailable
+        }
+      }
+
       result.push({ name: entry.name, path: entry.filePath, missing: true });
     }
   }

@@ -8,7 +8,7 @@ const POLICY_FILE = path.join(CONFIG_DIR, "rdkclaw-policy.json");
 
 const DEFAULT_POLICY: RDKClawPolicy = {
   approval: {
-    mode: "risk-based",
+    mode: "auto",
     riskThreshold: "high",
   },
   permission: {
@@ -26,7 +26,7 @@ const DEFAULT_POLICY: RDKClawPolicy = {
   network: {
     enabled: true,
     maxFetchChars: 16000,
-    requireApproval: true,
+    requireApproval: false,
   },
   context: {
     contextTokens: 128000,

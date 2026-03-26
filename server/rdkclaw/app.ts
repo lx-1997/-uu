@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import * as path from "node:path";
+import * as fs from "node:fs";
 import {
   Agent,
   builtinTools,
@@ -34,7 +35,6 @@ import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawChatTool } from "./tools/board-openclaw-chat.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { createEcosystemQueryTool } from "./tools/ecosystem-query.js";
-import { createSoulUpdateTool } from "./tools/soul-update.js";
 import { fleetBoardListTool, fleetBoardDelegateTool, fleetBoardBroadcastTool } from "./tools/fleet-dispatch.js";
 import { planTools } from "../agent/tools/plan-tool.js";
 import type { EcosystemRegistry } from "../ecosystem/registry.js";
@@ -79,6 +79,7 @@ import {
 } from "./delegation.js";
 import { appendSecurityAuditLog } from "./security-audit-store.js";
 import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from "../utils/stream-output-limit.js";
+import { syncWorkspaceMarkdownMemory } from "./memory-markdown-sync.js";
 
 const DEFAULT_CONFIG: ProviderConfig = {
   provider: "qwen",
@@ -108,6 +109,14 @@ function resolveBoardDevicePassword(device: { username: string; password?: strin
   const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
   return persisted || envPwd || device.username;
 }
+
+type RuntimeHealthReport = {
+  safeMode: boolean;
+  reasons: string[];
+  missingRequiredFiles: string[];
+  enabledSkills: number;
+  totalSkills: number;
+};
 
 export class RDKClawApp {
   private readonly workspaceDir: string;
@@ -349,9 +358,32 @@ export class RDKClawApp {
   private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string, toolName: string, _channel: ChannelSource): boolean {
     if (/^web_/i.test(toolName) && !policy.network.requireApproval) return false;
     if (this.sessionAutoApprove.get(sessionId)) return false;
+    if (policy.approval.mode === "auto") return false;
+    if (policy.approval.mode === "always") return true;
+    return this.isRiskAtLeast(risk, policy.approval.riskThreshold);
+  }
 
-    if (risk !== "high") return false;
-    return policy.approval.mode !== "auto";
+  private evaluateRuntimeHealth(workspaceDir: string): RuntimeHealthReport {
+    const requiredFiles = ["AGENTS.md", "USER.md", "HEARTBEAT.md"];
+    const missingRequiredFiles = requiredFiles.filter((name) => !fs.existsSync(path.join(workspaceDir, name)));
+    const allSkills = this.skills.list();
+    const enabledSkills = allSkills.filter((s) => s.enabled).length;
+    const reasons: string[] = [];
+
+    if (missingRequiredFiles.length > 0) {
+      reasons.push(`missing_required_files:${missingRequiredFiles.join(",")}`);
+    }
+    if (allSkills.length > 0 && enabledSkills === 0) {
+      reasons.push("all_skills_disabled");
+    }
+
+    return {
+      safeMode: reasons.length > 0,
+      reasons,
+      missingRequiredFiles,
+      enabledSkills,
+      totalSkills: allSkills.length,
+    };
   }
 
   private wrapToolWithApproval(
@@ -364,6 +396,7 @@ export class RDKClawApp {
     return {
       ...tool,
       execute: async (input, ctx) => {
+        let forceApprovalByChannel = false;
         if (tool.name.startsWith("web_") && !policy.network.enabled) {
           throw new Error("联网工具已禁用，请在策略面板中开启网络能力。");
         }
@@ -375,6 +408,7 @@ export class RDKClawApp {
           if (chanPolicy === "block") {
             throw new Error(`安全限制：外部通道(${channel})禁止使用工具 ${tool.name}`);
           }
+          forceApprovalByChannel = chanPolicy === "force_approval";
 
           if ((tool.name === "exec" || tool.name === "device_exec") && (input as any)?.command) {
             const cmdCheck = validateExecCommand(String((input as any).command), channel);
@@ -406,7 +440,10 @@ export class RDKClawApp {
           throw new Error(`安全边界拦截：${guardResult.reason || "请求超出允许范围"}`);
         }
         const risk = guardResult.risk;
-        if (!this.shouldRequireApproval(policy, risk, base.sessionId, tool.name, channel)) {
+        const needApproval = forceApprovalByChannel
+          ? true
+          : this.shouldRequireApproval(policy, risk, base.sessionId, tool.name, channel);
+        if (!needApproval) {
           if (policy.permission.auditLogEnabled) {
             appendSecurityAuditLog({
               channel,
@@ -505,6 +542,7 @@ export class RDKClawApp {
     policy: RDKClawPolicy,
     providerConfig: ProviderConfig,
     sessionAttachments: Awaited<ReturnType<typeof prepareSessionAttachments>>["allAttachments"],
+    safeMode: boolean,
     boardSnapshot?: BoardSnapshot,
   ): Tool[] {
     const tools: Tool[] = [
@@ -593,8 +631,25 @@ export class RDKClawApp {
         });
       }));
     }
-    tools.push(createSoulUpdateTool(emitEvent, base));
     tools.push(...planTools);
+
+    if (safeMode) {
+      const blockPatterns = [
+        /^exec$/i,
+        /^device_exec$/i,
+        /^write$/i,
+        /^edit$/i,
+        /flash/i,
+        /delegate/i,
+        /remove|delete/i,
+        /restart|reboot/i,
+        /soul_update/i,
+      ];
+      const filtered = tools.filter((tool) => !blockPatterns.some((pattern) => pattern.test(tool.name)));
+      const channel = req.channel || "studio";
+      return filtered.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base, channel));
+    }
+
     const channel = req.channel || "studio";
     return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base, channel));
   }
@@ -698,6 +753,7 @@ export class RDKClawApp {
     if (workspace.workspaceDir !== this.workspaceDir) {
       this.skills.addExtraDir(path.join(workspace.workspaceDir, "skills"));
     }
+    const health = this.evaluateRuntimeHealth(workspace.workspaceDir);
     const attachmentPrompt = buildAttachmentPrompt(attachmentState.newAttachments);
     const effectiveMessage = [String(req.message || "").trim(), attachmentPrompt].filter(Boolean).join("\n\n");
     const persona = this.personaStore.getPersona();
@@ -842,6 +898,13 @@ export class RDKClawApp {
         setup_workspace_ms: workspaceInitMs,
         setup_attachments_ms: attachmentPrepareMs,
         setup_board_snapshot_ms: boardSnapshotMs,
+        runtime_health: {
+          safe_mode: health.safeMode,
+          reasons: health.reasons,
+          missing_required_files: health.missingRequiredFiles,
+          enabled_skills: health.enabledSkills,
+          total_skills: health.totalSkills,
+        },
       },
     });
     const extraRoots: string[] = [];
@@ -851,7 +914,7 @@ export class RDKClawApp {
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
-      tools: this.createTools(req, (event) => pushEvent(event), base, decision, policy, providerConfig, attachmentState.allAttachments, boardSnapshot),
+      tools: this.createTools(req, (event) => pushEvent(event), base, decision, policy, providerConfig, attachmentState.allAttachments, health.safeMode, boardSnapshot),
       streamFn,
       modelDef,
       apiKey,
@@ -872,6 +935,24 @@ export class RDKClawApp {
       contextTokens: Math.max(16_000, Number(policy.context.contextTokens) || modelCaps.contextWindow),
       runtimePolicy,
     });
+
+    const markdownMemorySync = await syncWorkspaceMarkdownMemory({
+      workspaceDir: workspace.workspaceDir,
+      memory: agent.getMemory(),
+    });
+    if (markdownMemorySync.imported > 0) {
+      pushEvent({
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "memory_sync",
+          message: `已同步 ${markdownMemorySync.imported} 条 Markdown 记忆到结构化主存`,
+          projection_path: markdownMemorySync.projectionPath,
+          projection_count: markdownMemorySync.projectionCount,
+        },
+      });
+    }
     let finished = false;
     let failed: unknown = null;
     let runResult:

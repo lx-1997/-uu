@@ -32,6 +32,31 @@ import {
   STDERR_STREAM_CHAR_LIMIT,
 } from "../../utils/stream-output-limit.js";
 
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveMemoryRoot(ctx: ToolContext): Promise<string> {
+  const candidates = [
+    ctx.bootstrapDir,
+    ctx.workspaceDir,
+    path.join(ctx.workspaceDir, "agent"),
+  ].filter((item): item is string => Boolean(item && item.trim()));
+
+  for (const candidate of candidates) {
+    if (await pathExists(path.join(candidate, "AGENTS.md"))) {
+      return candidate;
+    }
+  }
+
+  return ctx.bootstrapDir || ctx.workspaceDir;
+}
+
 // ============== 文件读取 ==============
 
 /**
@@ -608,7 +633,7 @@ export const memorySaveTool: Tool<{
   content: string;
 }> = {
   name: "memory_save",
-  description: "将重要信息写入长期记忆（仅当信息值得长期保存时使用：用户偏好、关键决策、重要待办等）",
+  description: "将重要信息写入长期记忆，并同步记录到 daily memory（memory/YYYY-MM-DD.md）",
   inputSchema: {
     type: "object",
     properties: {
@@ -621,8 +646,26 @@ export const memorySaveTool: Tool<{
     if (!memory) {
       return "记忆系统未启用";
     }
-    const id = await memory.add(input.content, "memory");
-    return `已保存到长期记忆: ${id}`;
+    const content = input.content.trim();
+    if (!content) {
+      return "错误: 记忆内容不能为空";
+    }
+
+    const id = await memory.add(content, "memory");
+
+    try {
+      const root = await resolveMemoryRoot(ctx);
+      const memoryDir = path.join(root, "memory");
+      const day = new Date().toISOString().slice(0, 10);
+      const dailyFile = path.join(memoryDir, `${day}.md`);
+      const lineContent = content.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
+      const row = `- ${new Date().toISOString()} ${lineContent}\n`;
+      await fs.mkdir(memoryDir, { recursive: true });
+      await fs.appendFile(dailyFile, row, "utf-8");
+      return `已保存到长期记忆: ${id}\n已写入 daily memory: ${dailyFile}`;
+    } catch (err) {
+      return `已保存到长期记忆: ${id}\n警告: daily memory 写入失败: ${(err as Error).message}`;
+    }
   },
 };
 

@@ -58,6 +58,10 @@ const SENSITIVE_READ_PATTERNS = [
   '/oauth',
 ];
 
+const SYSTEM_MANAGED_FILENAMES = [
+  'soul.md',
+];
+
 const DEVICE_ALLOWED_WRITE_PREFIXES = [
   '/userdata',
   '/tmp',
@@ -139,6 +143,12 @@ function isSensitiveReadPath(targetPath: string, workspaceDir: string): boolean 
   return SENSITIVE_READ_PATTERNS.some((pat) => normalized.includes(pat));
 }
 
+function isSystemManagedPath(targetPath: string): boolean {
+  const normalized = normalizePathLike(targetPath).toLowerCase();
+  const baseName = path.posix.basename(normalized);
+  return SYSTEM_MANAGED_FILENAMES.includes(baseName);
+}
+
 function normalizeDevicePath(devicePath: string): string {
   const posixNorm = path.posix.normalize(normalizePathLike(devicePath));
   return posixNorm.toLowerCase();
@@ -201,6 +211,9 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
 
   if ((toolName === 'write' || toolName === 'edit') && permission.workspaceBoundaryEnabled) {
     const targetPath = extractString(args, 'file_path');
+    if (targetPath && isSystemManagedPath(targetPath)) {
+      return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
+    }
     if (targetPath && isProtectedLocalPath(targetPath, workspaceDir)) {
       return { blocked: true, reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules/.env 等）', risk: 'high' };
     }
@@ -211,6 +224,9 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
 
   if (toolName === 'read' && permission.workspaceBoundaryEnabled) {
     const targetPath = extractString(args, 'file_path');
+    if (targetPath && isSystemManagedPath(targetPath)) {
+      return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
+    }
     if (targetPath && isSensitiveReadPath(targetPath, workspaceDir)) {
       return { blocked: true, reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）', risk: 'high' };
     }

@@ -387,6 +387,10 @@ export class Agent {
     this.memory = new MemoryManager(config.memoryDir ?? "./.mini-agent/memory");
     this.context = new ContextLoader(this.workspaceDir, {
       bootstrapDir: this.bootstrapDir,
+      fallbackBootstrapDir:
+        this.bootstrapDir && path.resolve(this.bootstrapDir) !== path.resolve(this.workspaceDir)
+          ? this.workspaceDir
+          : undefined,
       memoryPolicy: {
         dailyMemoryDays: this.runtimePolicy.dailyMemoryDays,
         mainReadsMemory: this.runtimePolicy.mainReadsMemory,
@@ -401,7 +405,7 @@ export class Agent {
       undefined,
       extraSkillsDirs && extraSkillsDirs.length > 0 ? extraSkillsDirs : undefined,
     );
-    this.heartbeat = new HeartbeatManager(this.workspaceDir, {
+    this.heartbeat = new HeartbeatManager(this.bootstrapDir ?? this.workspaceDir, {
       intervalMs: config.heartbeatInterval,
     });
 
@@ -969,16 +973,36 @@ export class Agent {
    * 启动 Heartbeat 监控
    *
    * 对齐 openclaw: heartbeat 是独立的主动通知系统，
-   * 回调接收 HEARTBEAT.md 原始内容（不做任务解析），
-   * 由调用方决定如何处理（通常是调用 LLM）
+   * 定时触发后会走一次后台巡检运行（独立 session），
+   * 仅在检测到异常或修复动作时通过回调通知调用方。
    */
   startHeartbeat(callback?: (content: string, reason: string) => void): void {
-    if (callback) {
-      this.heartbeat.onHeartbeat(async (opts): Promise<{ text?: string } | null> => {
-        callback(opts.content, opts.reason);
-        return null;
-      });
-    }
+    this.heartbeat.onHeartbeat(async (opts): Promise<{ text?: string } | null> => {
+      const heartbeatSessionKey = `auto:heartbeat:${this.agentId}`;
+      const prompt = [
+        "这是一次后台 HEARTBEAT 巡检触发。",
+        `触发原因: ${opts.reason}`,
+        "请严格依据以下 HEARTBEAT.md 指令执行必要检查与修复。",
+        "仅在发现异常或已采取修复动作时输出告警摘要；若一切正常请只回复 HEARTBEAT_OK。",
+        "",
+        opts.content,
+      ].join("\n");
+
+      try {
+        const run = await this.run(heartbeatSessionKey, prompt);
+        const text = (run.text || "").trim();
+        if (!text || /^HEARTBEAT_OK$/i.test(text)) {
+          return null;
+        }
+        callback?.(text, opts.reason);
+        return { text };
+      } catch (error) {
+        const errorText = error instanceof Error ? error.message : String(error);
+        callback?.(`[heartbeat failed] ${errorText}`, opts.reason);
+        return { text: `[heartbeat failed] ${errorText}` };
+      }
+    });
+
     this.heartbeat.start();
   }
 

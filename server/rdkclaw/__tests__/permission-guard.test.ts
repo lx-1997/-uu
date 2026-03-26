@@ -128,6 +128,21 @@ describe('workspace boundary (write/edit)', () => {
     const result = guard('read', { file_path: 'credentials.json' });
     expect(result.blocked).toBe(true);
   });
+
+  it('blocks reading SOUL.md', () => {
+    const result = guard('read', { file_path: 'SOUL.md' });
+    expect(result.blocked).toBe(true);
+  });
+
+  it('blocks writing SOUL.md', () => {
+    const result = guard('write', { file_path: 'SOUL.md', content: 'x' });
+    expect(result.blocked).toBe(true);
+  });
+
+  it('blocks editing SOUL.md', () => {
+    const result = guard('edit', { file_path: 'SOUL.md', old_string: 'a', new_string: 'b' });
+    expect(result.blocked).toBe(true);
+  });
 });
 
 describe('device path boundary', () => {

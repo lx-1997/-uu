@@ -8,7 +8,6 @@ const WORKSPACES_DIR = path.join(CONFIG_DIR, "rdkclaw-workspaces");
 
 const CORE_FILES = [
   "AGENTS.md",
-  "SOUL.md",
   "TOOLS.md",
   "USER.md",
   "HEARTBEAT.md",
@@ -36,20 +35,6 @@ function defaultContentFor(file: CoreFileName, userId?: string): string {
     const who = userId?.trim() || "unknown-user";
     return `# USER.md\n\n- userId: ${who}\n- 偏好: （待补充）\n- 约束: （待补充）\n`;
   }
-  if (file === "SOUL.md") {
-    return [
-      "# SOUL.md",
-      "",
-      "你叫小地瓜，是该用户的长期协作助手：有趣但克制，逻辑严密，行动优先。",
-      "",
-      "## 行为准则",
-      "- 先结论，后依据，再给下一步动作。",
-      "- 优先最小可验证路径，避免空泛建议。",
-      "- 可加入轻量幽默，但每次最多一处，不能影响专业性和安全性。",
-      "- 不虚构执行结果；高风险操作先确认。",
-      "",
-    ].join("\n");
-  }
   if (file === "TOOLS.md") {
     return "# TOOLS.md\n\n记录本地可用工具、约束和最佳实践。\n";
   }
@@ -59,7 +44,7 @@ function defaultContentFor(file: CoreFileName, userId?: string): string {
   if (file === "MEMORY.md") {
     return "# MEMORY.md - 长期记忆\n\n- 仅保留长期有效结论，不写流水账。\n";
   }
-  return "# AGENTS.md\n\n把这个目录当成家。会话开始前先读取 SOUL/USER/memory/MEMORY。\n";
+  return "# AGENTS.md\n\n把这个目录当成家。会话开始前先读取 USER/HEARTBEAT/memory/MEMORY（SOUL 由系统层注入）。\n";
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -69,6 +54,10 @@ async function fileExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function currentDayToken(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export class UserWorkspaceStore {
@@ -159,6 +148,15 @@ export class UserWorkspaceStore {
         content = `${content.trimEnd()}\n\n- userId: ${userId?.trim() || "unknown-user"}\n`;
       }
       await fs.writeFile(filePath, content, "utf-8");
+    }
+
+    const todayFile = path.join(target.workspaceDir, "memory", `${currentDayToken()}.md`);
+    if (!(await fileExists(todayFile))) {
+      await fs.writeFile(
+        todayFile,
+        `# Daily Memory ${currentDayToken()}\n\n`,
+        "utf-8",
+      );
     }
 
     await this.seedBundledSkills(target.workspaceDir);

@@ -12,6 +12,7 @@ import {
 export class ContextLoader {
   private workspaceDir: string;
   private bootstrapDir?: string;
+  private fallbackBootstrapDir?: string;
   private maxChars?: number;
   private warn?: (message: string) => void;
   private memoryPolicy?: MemoryPolicy;
@@ -20,6 +21,7 @@ export class ContextLoader {
     workspaceDir: string,
     opts?: {
       bootstrapDir?: string;
+      fallbackBootstrapDir?: string;
       maxChars?: number;
       warn?: (message: string) => void;
       memoryPolicy?: MemoryPolicy;
@@ -27,6 +29,7 @@ export class ContextLoader {
   ) {
     this.workspaceDir = workspaceDir;
     this.bootstrapDir = opts?.bootstrapDir;
+    this.fallbackBootstrapDir = opts?.fallbackBootstrapDir;
     this.maxChars = opts?.maxChars;
     this.warn = opts?.warn;
     this.memoryPolicy = opts?.memoryPolicy;
@@ -41,6 +44,7 @@ export class ContextLoader {
     const files = await loadWorkspaceBootstrapFiles(
       this.bootstrapDir || this.workspaceDir,
       this.memoryPolicy,
+      this.fallbackBootstrapDir,
     );
     return filterBootstrapFilesForSession(files, params?.sessionKey, this.memoryPolicy);
   }
@@ -64,8 +68,8 @@ export class ContextLoader {
 
     const lines: string[] = [
       "",
-      "## 工作区文件 (已注入)",
-      "以下文件为可编辑上下文，已注入到 Project Context：",
+      "## 上下文文件 (已注入)",
+      "以下文件已注入到 Project Context（含用户可编辑文件与系统托管文件）：",
       "",
       "# Project Context",
       "",
@@ -89,7 +93,11 @@ export class ContextLoader {
    * 检查 HEARTBEAT.md 是否有待办任务
    */
   async hasHeartbeatTasks(): Promise<boolean> {
-    const files = await loadWorkspaceBootstrapFiles(this.bootstrapDir || this.workspaceDir);
+    const files = await loadWorkspaceBootstrapFiles(
+      this.bootstrapDir || this.workspaceDir,
+      undefined,
+      this.fallbackBootstrapDir,
+    );
     const heartbeat = files.find((f) => f.name === DEFAULT_HEARTBEAT_FILENAME);
     if (!heartbeat?.content) return false;
 

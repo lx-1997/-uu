@@ -289,8 +289,6 @@ export interface AgentSSEEvent {
     | 'approval_decision'
     | 'recommendation'
     | 'recommendation_choice'
-    | 'soul_update_proposal'
-    | 'soul_update_applied'
     | 'turn_start'
     | 'turn_end'
     | 'message_end'
@@ -600,13 +598,6 @@ export function sendRecommendationChoice(recommendationId: string, choiceId: str
   return request<{ ok: boolean }>(`/api/rdkclaw/recommendations/${recommendationId}/choice`, {
     method: 'POST',
     body: JSON.stringify({ choiceId, autoExecute }),
-  });
-}
-
-export function sendSoulUpdateDecision(proposalId: string, accepted: boolean) {
-  return request<{ ok: boolean; applied: boolean }>(`/api/rdkclaw/soul-updates/${proposalId}/decision`, {
-    method: 'POST',
-    body: JSON.stringify({ accepted }),
   });
 }
 

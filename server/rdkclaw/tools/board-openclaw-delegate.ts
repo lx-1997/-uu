@@ -1,6 +1,6 @@
 import type { Tool } from "../../agent/tools/types.js";
 import { readDevices } from "../../storage.js";
-import { OpenClawDeploymentManager } from "../../managers/OpenClawDeploymentManager.js";
+import { OpenClawDeploymentManager, type OpenClawHealthStatus } from "../../managers/OpenClawDeploymentManager.js";
 import type { Device } from "../../../shared/types.js";
 import type { EcosystemRegistry } from "../../ecosystem/registry.js";
 import type { RdkPlatform } from "../../../shared/ecosystem-types.js";
@@ -50,6 +50,60 @@ function abortAwareDelay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+function getBoardHealth(
+  manager: OpenClawDeploymentManager,
+  boardDevice: { ip: string; userName: string; id?: string; password?: string },
+): Promise<OpenClawHealthStatus> {
+  return new Promise((resolve) => {
+    manager.getHealthStatus(boardDevice, (status) => resolve(status));
+  });
+}
+
+function restartGateway(
+  manager: OpenClawDeploymentManager,
+  boardDevice: { ip: string; userName: string; id?: string; password?: string },
+  onProgress?: (chunk: string) => void,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    manager.runRestartGateway(
+      boardDevice,
+      (chunk) => onProgress?.(chunk),
+      (success) => resolve(success),
+    );
+  });
+}
+
+async function ensureBoardGatewayReady(
+  manager: OpenClawDeploymentManager,
+  boardDevice: { ip: string; userName: string; id?: string; password?: string },
+  onProgress?: (chunk: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) throw new Error("操作已中止");
+  let health = await getBoardHealth(manager, boardDevice);
+  if (health.aiReady) return;
+
+  if (health.installed && !health.gatewayRunning) {
+    onProgress?.("\n[预检] 板端网关未就绪，尝试自动重启...\n");
+    await restartGateway(manager, boardDevice, onProgress);
+    if (signal?.aborted) throw new Error("操作已中止");
+    health = await getBoardHealth(manager, boardDevice);
+    if (health.aiReady) return;
+  }
+
+  const reason = health.summary?.trim() || "板端 OpenClaw 未就绪";
+  const advice = !health.installed
+    ? "请先安装 OpenClaw 并完成初始化。"
+    : !health.gatewayRunning
+      ? "请先启动或修复板端 Gateway。"
+      : health.tokenStatus === "missing"
+        ? "请先生成并配置 Gateway token。"
+        : health.tokenStatus === "invalid"
+          ? "请先修复 Gateway token（无效或过期）。"
+          : "请先执行 OpenClaw 健康检查并修复后重试。";
+  throw new Error(`${reason}（${advice}）`);
+}
+
 export interface BoardSkillInfo {
   name: string;
   path: string;
@@ -95,6 +149,7 @@ export function boardOpenClawDelegateTool(
       if (!device) throw new Error("设备不存在，无法委派板端 OpenClaw");
 
       const boardDevice = toBoardDevice(device);
+      await ensureBoardGatewayReady(manager, boardDevice, onProgress, ctx.abortSignal);
       const platform = (device as any).platform as RdkPlatform | undefined;
       const useSkills = input.encourageSkills !== false;
       const msgParts = [

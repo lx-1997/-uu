@@ -1,8 +1,12 @@
 /**
  * RDK Studio Agent — 轻量版 Agent 入口
  *
+ * @deprecated 仅保留兼容用途。Studio 主链路已迁移到 RDKClaw (`server/rdkclaw/app.ts`)。
+ *             为避免与系统托管人格(SOUL)策略冲突，此入口不再读取 SOUL.md。
+ *             新功能请勿接入本文件。
+ *
  * 替代 openclaw-mini 的 agent.ts（710行），只保留核心功能：
- * - 构建 system prompt（从 TOOLS.md + SKILLS.md + SOUL.md）
+ * - 构建 system prompt（从 TOOLS.md + SKILLS.md）
  * - 创建 session
  * - 调用 runAgentLoop
  * - 事件分发
@@ -45,13 +49,12 @@ function readAgentFile(filename: string): string {
 }
 
 async function buildSystemPrompt(): Promise<string> {
-  const soul = readAgentFile('SOUL.md');
   const tools = readAgentFile('TOOLS.md');
 
   const skillManager = new SkillManager(process.cwd());
   const skillsPrompt = await skillManager.buildSkillsPrompt();
 
-  const parts = [soul, tools, skillsPrompt].filter(Boolean);
+  const parts = [tools, skillsPrompt].filter(Boolean);
   return parts.join('\n\n---\n\n');
 }
 

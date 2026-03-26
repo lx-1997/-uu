@@ -759,7 +759,7 @@ export default function SettingsPanel() {
 
               {/* ══ 2. 人格与行为 ══ */}
               <section id="persona" className="settings-section" ref={registerSectionRef('persona')}>
-                <H title="人格与行为" desc="核心性格由 SOUL.md 管理，这里调整风险偏好和自治程度。" />
+                <H title="人格与行为" desc="核心人格由系统层托管（非用户可编辑文件），这里调整运行偏好和自治程度。" />
                 <div className="settings-card">
                   <div className="settings-row">
                     <span className="settings-row-label">名称</span>
