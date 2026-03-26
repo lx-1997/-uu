@@ -70,6 +70,8 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bm
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.avi', '.mov', '.mkv']);
 const DOC_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf', '.csv', '.txt', '.md', '.zip', '.rar', '.7z']);
 const OPENCLAW_RESOLVE_SNIPPET = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global"; export PATH="$HOME/.npm-global/bin:$PATH"; OPENCLAW_CMD="$(command -v openclaw 2>/dev/null || true)"; if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.local/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.local/bin/openclaw"; fi; if [ -z "$OPENCLAW_CMD" ] && [ -x "$(npm prefix -g 2>/dev/null)/bin/openclaw" ]; then OPENCLAW_CMD="$(npm prefix -g 2>/dev/null)/bin/openclaw"; fi; if [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi';
+const OPENCLAW_FAST_REGISTRY_SNIPPET = 'if curl -fsS --connect-timeout 2 --max-time 3 https://registry.npmmirror.com/-/ping >/dev/null 2>&1; then NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org; else NPM_FAST_REG=https://registry.npmjs.org; ALT_REG=https://registry.npmmirror.com; fi; echo [OpenClaw]\ npm\ registry\ first\ try:\ $NPM_FAST_REG';
+const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = '(for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --registry=$NPM_FAST_REG --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; echo [OpenClaw]\ 主\ registry\ 失败，尝试备用:\ $ALT_REG; if CI=1 npm install -g openclaw@latest --loglevel info --registry=$ALT_REG --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; [ $i = 3 ] && exit 1; echo [OpenClaw]\ 安装失败，重试\ $i/3...; sleep 3; done)';
 
 function assertShellSafeToken(name: string, value: string): string {
   const trimmed = value.trim();
@@ -292,8 +294,9 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
         'bash -lc',
         '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
         'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
+        OPENCLAW_FAST_REGISTRY_SNIPPET,
         'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
-        '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || npm install -g openclaw@latest 2>&1);',
+        `(curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || ${OPENCLAW_NPM_FAST_INSTALL_SNIPPET});`,
         'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
@@ -314,8 +317,9 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
         'bash -lc',
         '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
         'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
+        OPENCLAW_FAST_REGISTRY_SNIPPET,
         'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
-        '((if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" update --no-restart 2>&1 || \\\"$OPENCLAW_CMD\\\" update 2>&1; else false; fi) || npm install -g openclaw@latest 2>&1);',
+        `((if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" update --no-restart 2>&1 || \\\"$OPENCLAW_CMD\\\" update 2>&1; else false; fi) || ${OPENCLAW_NPM_FAST_INSTALL_SNIPPET});`,
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
