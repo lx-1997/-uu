@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { isDesktop as checkIsDesktop } from '../utils/env';
-import { resolveApiUrl } from '../utils/apiBase';
 import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
 
 /* ═══════════════════════════════════════════════════════════
@@ -9,6 +8,7 @@ import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
    ═══════════════════════════════════════════════════════════ */
 type WizardStep = 0 | 1 | 2 | 3 | 4;
 type FlashPhase = 'idle' | 'backup' | 'downloading' | 'decompressing' | 'flashing' | 'verifying' | 'done' | 'error';
+type FlashPerformanceProfile = 'balanced' | 'turbo';
 
 interface DeviceItem {
   key: string;
@@ -47,6 +47,7 @@ interface FlasherUiState {
   useLocalImage: boolean;
   localImagePath: string;
   selectedDrive: string;
+  performanceProfile: FlashPerformanceProfile;
   verifyDetail: string;
 }
 
@@ -169,7 +170,7 @@ function normalizeStageToPhase(stage: string | undefined): FlashPhase {
    Component
    ═══════════════════════════════════════════════════════════ */
 export default function Flasher() {
-  const { setActiveTab, addToast, startFlash, currentDevice } = useAppState();
+  const { setActiveTab, addToast, startFlash } = useAppState();
 
   /* ── wizard state ── */
   const [step, setStep] = useState<WizardStep>(0);
@@ -188,6 +189,7 @@ export default function Flasher() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
+  const [performanceProfile, setPerformanceProfile] = useState<FlashPerformanceProfile>('balanced');
   const [verifyDetail, setVerifyDetail] = useState('');
   const abortRef = useRef(false);
 
@@ -254,6 +256,9 @@ export default function Flasher() {
       if (typeof parsed.progress === 'number') setProgress(parsed.progress);
       if (typeof parsed.error === 'string') setError(parsed.error);
       if (Array.isArray(parsed.logs)) setLogs(parsed.logs.slice(-200));
+      if (parsed.performanceProfile === 'balanced' || parsed.performanceProfile === 'turbo') {
+        setPerformanceProfile(parsed.performanceProfile);
+      }
       if (typeof parsed.verifyDetail === 'string') setVerifyDetail(parsed.verifyDetail);
     } catch {
       // ignore invalid saved state
@@ -297,19 +302,26 @@ export default function Flasher() {
       useLocalImage,
       localImagePath,
       selectedDrive,
+      performanceProfile,
       verifyDetail,
     };
-    try {
-      localStorage.setItem(FLASHER_UI_STATE_KEY, JSON.stringify(nextState));
-    } catch {
-      // ignore quota errors
-    }
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(FLASHER_UI_STATE_KEY, JSON.stringify(nextState));
+      } catch {
+        // ignore quota errors
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [
     error,
     localImagePath,
     logs,
     phase,
     progress,
+    performanceProfile,
     selectedDeviceKey,
     selectedDrive,
     selectedImageKey,
@@ -466,12 +478,14 @@ export default function Flasher() {
     setProgress(0);
     appendLog(`写盘目标: ${selectedDrive}`);
     appendLog(`镜像文件: ${imgPath}`);
+    appendLog(`性能模式: ${performanceProfile === 'turbo' ? '极速模式' : '常规模式'}`);
 
     try {
       const result = await window.rdkDesktop!.flashWriteLocal!({
         imagePath: imgPath,
         drivePath: selectedDrive,
         verifyMode: 'sample',
+        performanceProfile,
       });
       if (abortRef.current) throw new Error('用户取消');
       if (!result.ok) throw new Error(result.error || '写盘失败');
@@ -861,6 +875,25 @@ export default function Flasher() {
                       <strong>{needsXburn ? 'xburn 管理' : (selectedDriveValid ? selectedDrive : '未选择')}</strong>
                     </span>
                   </div>
+                  {!needsXburn && (
+                    <div className="config-row" style={{ alignItems: 'flex-start' }}>
+                      <span className="config-label">烧录模式</span>
+                      <span className="config-value" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                        <select
+                          className="input"
+                          style={{ minWidth: 180 }}
+                          value={performanceProfile}
+                          onChange={(e) => setPerformanceProfile(e.target.value === 'turbo' ? 'turbo' : 'balanced')}
+                        >
+                          <option value="balanced">常规烧录（更稳）</option>
+                          <option value="turbo">极速烧录（更快）</option>
+                        </select>
+                        {performanceProfile === 'turbo' && (
+                          <span className="badge badge-danger">极速模式会占用更多 CPU/磁盘资源，可能造成卡顿</span>
+                        )}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 {!needsXburn && (
                   <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>

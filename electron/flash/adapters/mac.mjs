@@ -16,13 +16,26 @@ import { emitFlashProgress } from '../progress.mjs';
 import { FlashErrorCode } from '../types.mjs';
 
 let activeOp = null;
-const IO_CHUNK_BYTES = 512 * 1024;
-const IO_YIELD_INTERVAL_BYTES = 4 * 1024 * 1024;
-const IO_THROTTLE_MS = 8;
 const PROGRESS_EMIT_INTERVAL_MS = 250;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveIoPolicy(options = {}) {
+  const turbo = options.performanceProfile === 'turbo';
+  if (turbo) {
+    return {
+      chunkBytes: 2 * 1024 * 1024,
+      yieldIntervalBytes: 32 * 1024 * 1024,
+      throttleMs: 3,
+    };
+  }
+  return {
+    chunkBytes: 512 * 1024,
+    yieldIntervalBytes: 4 * 1024 * 1024,
+    throttleMs: 8,
+  };
 }
 
 function exec(cmd, args) {
@@ -143,6 +156,7 @@ function buildDefaultBackupPath(drivePath) {
 
 export async function writeImage(imagePath, drivePath, options = {}) {
   const verifyMode = options.verifyMode || 'sample';
+  const ioPolicy = resolveIoPolicy(options);
   const drives = await listDrives();
   const driveMeta = drives.find((d) => d.path === drivePath || d.rawPath === drivePath) || null;
   if (!driveMeta) throw Object.assign(new Error('未找到目标磁盘，请刷新后重试'), { code: FlashErrorCode.DEVICE_NOT_FOUND });
@@ -171,7 +185,7 @@ export async function writeImage(imagePath, drivePath, options = {}) {
   activeOp = { id: crypto.randomUUID(), cancelled: false };
   const imageFd = fs.openSync(imagePath, 'r');
   const targetFd = fs.openSync(rawPath, 'r+');
-  const buffer = Buffer.allocUnsafe(IO_CHUNK_BYTES);
+  const buffer = Buffer.allocUnsafe(ioPolicy.chunkBytes);
   let readBytes = 0;
   let offset = 0;
   let bytesSinceYield = 0;
@@ -199,10 +213,10 @@ export async function writeImage(imagePath, drivePath, options = {}) {
         lastProgressEmitAt = now;
         emitFlashProgress({ stage: 'flashing', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
       }
-      if (bytesSinceYield >= IO_YIELD_INTERVAL_BYTES) {
+      if (bytesSinceYield >= ioPolicy.yieldIntervalBytes) {
         bytesSinceYield = 0;
         await new Promise((resolve) => setImmediate(resolve));
-        await delay(IO_THROTTLE_MS);
+        await delay(ioPolicy.throttleMs);
       }
     }
     fs.fsyncSync(targetFd);
@@ -236,6 +250,7 @@ export async function verifyImage(imagePath, drivePath) {
 }
 
 export async function backupDrive(drivePath, destPath) {
+  const ioPolicy = resolveIoPolicy();
   const drives = await listDrives();
   const driveMeta = drives.find((d) => d.path === drivePath || d.rawPath === drivePath) || null;
   if (!driveMeta) throw Object.assign(new Error('未找到目标磁盘，请刷新后重试'), { code: FlashErrorCode.DEVICE_NOT_FOUND });
@@ -259,7 +274,7 @@ export async function backupDrive(drivePath, destPath) {
   activeOp = { id: crypto.randomUUID(), cancelled: false };
   const sourceFd = fs.openSync(rawPath, 'r');
   const targetFd = fs.openSync(outputPath, 'w');
-  const buffer = Buffer.allocUnsafe(IO_CHUNK_BYTES);
+  const buffer = Buffer.allocUnsafe(ioPolicy.chunkBytes);
   let offset = 0;
   let bytesSinceYield = 0;
   let lastProgressPercent = -1;
@@ -285,10 +300,10 @@ export async function backupDrive(drivePath, destPath) {
         lastProgressEmitAt = now;
         emitFlashProgress({ stage: 'backup', message: `已备份 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(driveMeta.sizeBytes / 1024 / 1024).toFixed(1)} MB`, percent });
       }
-      if (bytesSinceYield >= IO_YIELD_INTERVAL_BYTES) {
+      if (bytesSinceYield >= ioPolicy.yieldIntervalBytes) {
         bytesSinceYield = 0;
         await new Promise((resolve) => setImmediate(resolve));
-        await delay(IO_THROTTLE_MS);
+        await delay(ioPolicy.throttleMs);
       }
     }
     fs.fsyncSync(targetFd);

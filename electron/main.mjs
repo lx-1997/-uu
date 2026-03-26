@@ -63,12 +63,20 @@ function downloadFile(url, destPath) {
       }
       const total = Number(res.headers['content-length'] || 0);
       let done = 0;
+      let lastPercent = -1;
+      let lastEmitAt = 0;
       const writer = fs.createWriteStream(destPath);
       res.on('data', (chunk) => {
         done += chunk.length;
         if (total > 0) {
           const percent = Math.min(98, Math.max(1, Math.round((done / total) * 96) + 1));
-          emitFlashProgress({ stage: 'downloading', message: `下载 ${(done / 1024 / 1024).toFixed(1)}MB / ${(total / 1024 / 1024).toFixed(1)}MB`, percent });
+          const now = Date.now();
+          const shouldEmit = percent >= lastPercent + 1 || now - lastEmitAt >= 250 || done >= total;
+          if (shouldEmit) {
+            lastPercent = percent;
+            lastEmitAt = now;
+            emitFlashProgress({ stage: 'downloading', message: `下载 ${(done / 1024 / 1024).toFixed(1)}MB / ${(total / 1024 / 1024).toFixed(1)}MB`, percent });
+          }
         }
       });
       res.pipe(writer);
@@ -465,9 +473,9 @@ ipcMain.handle('rdk:flash:pick-image', async () => {
 });
 
 ipcMain.handle('rdk:flash:write-local', async (_event, payload) => {
-  const { imagePath, drivePath, verifyMode } = payload ?? {};
+  const { imagePath, drivePath, verifyMode, performanceProfile } = payload ?? {};
   if (!imagePath || !drivePath) return { ok: false, error: '缺少镜像路径或目标磁盘' };
-  return flashService.writeImage(imagePath, drivePath, { verifyMode });
+  return flashService.writeImage(imagePath, drivePath, { verifyMode, performanceProfile });
 });
 
 ipcMain.handle('rdk:flash:verify-local', async (_event, payload) => {

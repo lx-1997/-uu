@@ -8,6 +8,8 @@
 let _sender = null;
 let _lastPayload = null;
 let _history = [];
+let _lastHistoryMessage = '';
+let _lastHistoryAt = 0;
 
 const MAX_PROGRESS_HISTORY = 400;
 
@@ -18,6 +20,8 @@ export function setProgressSender(webContentsSend) {
 export function resetFlashProgressHistory() {
   _lastPayload = null;
   _history = [];
+  _lastHistoryMessage = '';
+  _lastHistoryAt = 0;
 }
 
 export function getFlashProgressSnapshot() {
@@ -30,10 +34,17 @@ export function getFlashProgressSnapshot() {
 export function emitFlashProgress(payload) {
   _lastPayload = payload;
   if (payload?.message) {
-    const time = new Date().toLocaleTimeString();
-    _history.push(`[${time}] ${payload.message}`);
-    if (_history.length > MAX_PROGRESS_HISTORY) {
-      _history = _history.slice(-MAX_PROGRESS_HISTORY);
+    const now = Date.now();
+    const message = String(payload.message);
+    const shouldRecord = message !== _lastHistoryMessage || now - _lastHistoryAt >= 1000;
+    if (shouldRecord) {
+      _lastHistoryMessage = message;
+      _lastHistoryAt = now;
+      const time = new Date().toLocaleTimeString();
+      _history.push(`[${time}] ${message}`);
+      if (_history.length > MAX_PROGRESS_HISTORY) {
+        _history = _history.slice(-MAX_PROGRESS_HISTORY);
+      }
     }
   }
   if (typeof _sender === 'function') {
