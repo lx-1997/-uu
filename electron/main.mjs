@@ -486,6 +486,10 @@ ipcMain.handle('rdk:flash:cancel', async () => {
   return flashService.cancelActiveOp();
 });
 
+ipcMain.handle('rdk:flash:get-active-op', async () => {
+  return flashService.getActiveOperation();
+});
+
 ipcMain.handle('rdk:flash:launch-xburn', async (_event, payload) => {
   let toolPath = payload?.exePath;
   if (!toolPath) {

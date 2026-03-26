@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   flashVerifyLocal: (payload) => ipcRenderer.invoke('rdk:flash:verify-local', payload),
   flashBackupLocal: (payload) => ipcRenderer.invoke('rdk:flash:backup-local', payload),
   flashCancelLocal: () => ipcRenderer.invoke('rdk:flash:cancel'),
+  flashGetActiveOperation: () => ipcRenderer.invoke('rdk:flash:get-active-op'),
   flashDownloadImage: (payload) => ipcRenderer.invoke('rdk:flash:download-image', payload),
   flashDecompressImage: (payload) => ipcRenderer.invoke('rdk:flash:decompress-image', payload),
   launchXburn: (payload) => ipcRenderer.invoke('rdk:flash:launch-xburn', payload),

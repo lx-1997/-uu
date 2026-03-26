@@ -94,10 +94,31 @@ export default function Ros() {
           source /opt/ros/*/setup.bash 2>/dev/null || source /opt/tros/*/setup.bash 2>/dev/null || true
           ROS_DISTRO=\$(printenv ROS_DISTRO 2>/dev/null || ls /opt/ros/ 2>/dev/null | head -1 || ls /opt/tros/ 2>/dev/null | head -1 || echo humble)
           echo INSTALLING_FOR_DISTRO=\$ROS_DISTRO
-          sudo apt-get update -qq 2>/dev/null
-          if sudo apt-get install -y -qq ros-\$ROS_DISTRO-rosbridge-server 2>/dev/null; then
-            echo ROSBRIDGE_INSTALL_OK
-          elif pip3 install rosbridge-suite 2>/dev/null; then
+          if [ \"\$(id -u)\" = \"0\" ]; then
+            SUDO=''
+          elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+            SUDO='sudo -n'
+          else
+            SUDO=''
+            echo NEED_SUDO_PRIVILEGE
+          fi
+          if [ -n \"\$SUDO\" ] || [ \"\$(id -u)\" = \"0\" ]; then
+            i=0
+            while fuser /var/lib/dpkg/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+              i=\$((i+1))
+              [ \$i -gt 60 ] && break
+              echo WAITING_APT_LOCK_\$i
+              sleep 2
+            done
+            \${SUDO} apt-get update -qq 2>/dev/null || true
+          fi
+          if [ -n \"\$SUDO\" ] || [ \"\$(id -u)\" = \"0\" ]; then
+            if \${SUDO} apt-get install -y -qq ros-\$ROS_DISTRO-rosbridge-server 2>/dev/null; then
+              echo ROSBRIDGE_INSTALL_OK
+            else
+              echo ROSBRIDGE_APT_INSTALL_FAILED
+            fi
+          elif python3 -m pip install --user rosbridge-suite 2>/dev/null; then
             echo ROSBRIDGE_INSTALL_OK
           else
             echo ROSBRIDGE_INSTALL_FAILED
@@ -106,6 +127,9 @@ export default function Ros() {
       );
       const output = result.output || '';
       output.split(/\r?\n/).filter(Boolean).forEach(l => appendLog(l));
+      if (output.includes('NEED_SUDO_PRIVILEGE')) {
+        appendLog('当前用户无免密 sudo，apt 安装可能失败，请在设备端授权 sudo 或改用 root 用户。');
+      }
       return output.includes('ROSBRIDGE_INSTALL_OK');
     } catch (err) {
       appendLog(`安装失败: ${err instanceof Error ? err.message : String(err)}`);

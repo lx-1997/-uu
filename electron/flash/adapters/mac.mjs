@@ -299,6 +299,13 @@ export function cancelActiveOp() {
   if (activeOp) activeOp.cancelled = true;
 }
 
+export function getActiveOperation() {
+  return {
+    running: !!activeOp,
+    id: activeOp?.id || '',
+  };
+}
+
 export async function launchThirdPartyTool(toolPath, _options) {
   if (toolPath && toolPath.endsWith('.app')) {
     const child = spawn('open', ['-a', toolPath], { detached: true, stdio: 'ignore' });

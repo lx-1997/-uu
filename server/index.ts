@@ -2538,7 +2538,8 @@ app.post('/api/devices/:id/openclaw/model-test', async (request, response) => {
   openClawManager.runModelTest(deviceObj, (chunk) => { output += chunk; }, (success) => {
     const text = output.trim();
     const ok = success && /MODEL_TEST_OK/.test(text);
-    response.json({ ok, output: text });
+    const pairingRequired = /pairing required/i.test(text);
+    response.json({ ok, output: text, pairingRequired });
   });
 });
 
@@ -2921,8 +2922,8 @@ echo "===VERIFY_DONE==="
 app.post('/api/devices/:id/flash/backup/check', async (request, response) => {
   const { id } = request.params;
   const executed = await runOnDevice(request, response, id, [
-    'bash -lc "if command -v rdk-backup >/dev/null 2>&1; then echo RDK_BACKUP_AVAILABLE; rdk-backup --help 2>&1 | head -60; else echo RDK_BACKUP_NOT_FOUND; fi"',
-  ]);
+    'bash -lc "if command -v rdk-backup >/dev/null 2>&1; then echo RDK_BACKUP_AVAILABLE; (rdk-backup --version 2>/dev/null || true); else echo RDK_BACKUP_NOT_FOUND; fi"',
+  ], { timeoutMs: 20_000 });
   if (!executed) return;
   const available = /RDK_BACKUP_AVAILABLE/.test(executed.output);
   response.json({ ok: true, available, output: executed.output });

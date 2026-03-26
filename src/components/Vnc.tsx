@@ -124,7 +124,7 @@ export default function Vnc() {
 
     executeDeviceCommand(
       currentDevice.id,
-      `bash -lc "mkdir -p ~/.vnc && (echo -e '88888888\\n88888888' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true); sudo mkdir -p /etc/.vnc && sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd 2>/dev/null || true; (systemctl is-active x11vnc >/dev/null 2>&1 && sudo systemctl restart x11vnc || sudo systemctl start x11vnc || sudo systemctl restart vncserver || sudo systemctl start vncserver || true); sleep 4; echo VNC_READY"`
+      `bash -lc "mkdir -p ~/.vnc && (echo -e '88888888\\n88888888' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true); sudo mkdir -p /etc/.vnc 2>/dev/null || true; sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd 2>/dev/null || true; (systemctl is-active x11vnc >/dev/null 2>&1 && (sudo systemctl restart x11vnc 2>/dev/null || systemctl --user restart x11vnc 2>/dev/null || true)) || (sudo systemctl start x11vnc 2>/dev/null || systemctl --user start x11vnc 2>/dev/null || true) || (sudo systemctl restart vncserver 2>/dev/null || systemctl --user restart vncserver 2>/dev/null || true) || (sudo systemctl start vncserver 2>/dev/null || systemctl --user start vncserver 2>/dev/null || true) || true; sleep 4; if ss -lntp 2>/dev/null | grep -q ':5900'; then echo VNC_READY; else echo VNC_START_FAILED; fi"`
     ).then(res => {
       const output = res.output || '';
       setLogLines(prev => [...prev, ...output.split(/\r?\n/).filter(Boolean)]);
@@ -143,8 +143,8 @@ export default function Vnc() {
         }
       } else {
         setPhase('error');
-        setStatusText('端口 5900 未就绪');
-        addToast('VNC 端口未就绪，请检查设备配置', 'warning');
+        setStatusText('VNC 服务未成功启动（5900 未监听）');
+        addToast('VNC 启动失败：5900 端口未监听，请检查板端权限/服务状态', 'warning');
       }
     }).catch(err => {
       setPhase('error');

@@ -6,12 +6,36 @@
  */
 
 let _sender = null;
+let _lastPayload = null;
+let _history = [];
+
+const MAX_PROGRESS_HISTORY = 400;
 
 export function setProgressSender(webContentsSend) {
   _sender = webContentsSend;
 }
 
+export function resetFlashProgressHistory() {
+  _lastPayload = null;
+  _history = [];
+}
+
+export function getFlashProgressSnapshot() {
+  return {
+    lastPayload: _lastPayload,
+    logs: _history,
+  };
+}
+
 export function emitFlashProgress(payload) {
+  _lastPayload = payload;
+  if (payload?.message) {
+    const time = new Date().toLocaleTimeString();
+    _history.push(`[${time}] ${payload.message}`);
+    if (_history.length > MAX_PROGRESS_HISTORY) {
+      _history = _history.slice(-MAX_PROGRESS_HISTORY);
+    }
+  }
   if (typeof _sender === 'function') {
     _sender('rdk:flash:progress', payload);
   }

@@ -653,8 +653,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns, backgroundCurrentRun,
-    backgroundRuns, stopBackgroundRun,
+    handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
     currentDevice, addToast,
@@ -946,7 +945,8 @@ export default function AIDock() {
 
   /* OpenClaw Socket.IO connection */
   useEffect(() => {
-    if (!currentDevice) {
+    const shouldConnectOpenclawSocket = Boolean(currentDevice && (chatExpanded || (activeTab === 'openclaw' && dockOcMode)));
+    if (!shouldConnectOpenclawSocket) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -954,13 +954,15 @@ export default function AIDock() {
       }
       return;
     }
+    const connectedDeviceId = currentDevice?.id;
+    if (!connectedDeviceId) return;
 
     const socket = io(resolveSocketUrl(), socketIoClientOptions);
     socketRef.current = socket;
 
     socket.on('connect', () => {
       setOpenclawConnected(false);
-      socket.emit('openclaw:start', { deviceId: currentDevice.id });
+      socket.emit('openclaw:start', { deviceId: connectedDeviceId });
     });
 
     socket.on('openclaw:ready', () => {
@@ -972,7 +974,7 @@ export default function AIDock() {
     socket.on('openclaw:complete', () => {});
     socket.on('openclaw:error', (data: { error: string }) => {
       if (/not connected/i.test(data.error || '')) {
-        socket.emit('openclaw:start', { deviceId: currentDevice?.id });
+        socket.emit('openclaw:start', { deviceId: connectedDeviceId });
       }
     });
 
@@ -999,7 +1001,7 @@ export default function AIDock() {
       socketRef.current = null;
       setOpenclawConnected(false);
     };
-  }, [currentDevice, setOpenclawConnected]);
+  }, [activeTab, chatExpanded, currentDevice, dockOcMode, setOpenclawConnected]);
 
   type QuickPrompt = { id: string; icon: string; label: string; text: string; placeholder?: string; forceRdkclaw?: boolean };
   const promptsByTab: Record<string, QuickPrompt[]> = {
@@ -1207,18 +1209,6 @@ export default function AIDock() {
           {/* Task panel */}
           {showTaskPanel && (
             <div className="dock-tasks">
-              {backgroundRuns.length > 0 && backgroundRuns.map((run) => (
-                <div key={run.runId} className="dock-task-item">
-                  <span className={`dock-task-dot ${run.status === 'running' ? 'running' : 'cancelled'}`} />
-                  <span className="dock-task-label">板端后台任务</span>
-                  <span className="dock-task-status">
-                    {run.status === 'running' ? '后台执行中' : '已结束'}
-                  </span>
-                  {run.status === 'running' && (
-                    <button className="btn btn-sm btn-ghost" onClick={() => stopBackgroundRun(run.runId)}>结束</button>
-                  )}
-                </div>
-              ))}
               {taskHistory.map(task => (
                 <div key={task.id} className="dock-task-item">
                   <span className={`dock-task-dot ${task.status}`} />
@@ -1339,7 +1329,6 @@ export default function AIDock() {
                 <div className="dock-bubble ai">
                   <div className="dock-typing">
                     <div className="typing-dots"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
-                    <button className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>转后台</button>
                     <button className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>结束当前</button>
                     <button className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>全部停止</button>
                   </div>

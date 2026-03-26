@@ -28,6 +28,14 @@ declare global {
     percent: number;
   }
 
+  interface FlashActiveOperationSnapshot {
+    ok: boolean;
+    running: boolean;
+    opId?: string;
+    lastPayload?: FlashProgressPayload | null;
+    logs?: string[];
+  }
+
   interface Window {
     rdkDesktop?: {
       isDesktop?: boolean;
@@ -48,6 +56,7 @@ declare global {
       flashVerifyLocal?: (payload: { imagePath: string; drivePath: string }) => Promise<{ ok: boolean; detail?: string; error?: string }>;
       flashBackupLocal?: (payload: { drivePath: string; destPath?: string }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string }>;
       flashCancelLocal?: () => Promise<{ ok: boolean; error?: string }>;
+      flashGetActiveOperation?: () => Promise<FlashActiveOperationSnapshot>;
       flashDownloadImage?: (payload: { url: string; destDir: string }) => Promise<{ ok: boolean; path?: string; error?: string }>;
       flashDecompressImage?: (payload: { filePath: string }) => Promise<{ ok: boolean; outputPath?: string; error?: string }>;
       launchXburn?: (payload?: { exePath?: string; imagePath?: string }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;

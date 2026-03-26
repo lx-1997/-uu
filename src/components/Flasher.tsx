@@ -8,6 +8,7 @@ import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
    Types
    ═══════════════════════════════════════════════════════════ */
 type WizardStep = 0 | 1 | 2 | 3 | 4;
+type FlashPhase = 'idle' | 'backup' | 'downloading' | 'decompressing' | 'flashing' | 'verifying' | 'done' | 'error';
 
 interface DeviceItem {
   key: string;
@@ -33,6 +34,23 @@ interface WifiConfig {
   mode: 'station' | 'ap';
   ssid: string;
   password: string;
+}
+
+interface FlasherUiState {
+  step: WizardStep;
+  phase: FlashPhase;
+  progress: number;
+  error: string;
+  logs: string[];
+  selectedDeviceKey: string;
+  selectedImageKey: string;
+  useLocalImage: boolean;
+  localImagePath: string;
+  selectedDrive: string;
+  backupBeforeFlash: boolean;
+  backupDestPath: string;
+  backupResultPath: string;
+  verifyDetail: string;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -119,7 +137,36 @@ function isCompressedFile(filePath: string): boolean {
   return lower.endsWith('.xz') || lower.endsWith('.zip');
 }
 
+function isSafeFlashTargetDrive(drive: FlashDrive): boolean {
+  const removable = drive.removable === true;
+  if (!removable) return false;
+  const label = String(drive.label || '').toLowerCase();
+  const bus = String(drive.bus || '').toLowerCase();
+  const mediaType = String(drive.mediaType || '').toLowerCase();
+  const path = String(drive.path || '').toLowerCase();
+  const combined = `${label} ${mediaType} ${bus}`;
+  const allowByBus = /\bsd\b|\bmmc\b/.test(bus);
+  const allowByKeyword = /\bsd\b|microsd|sdxc|sdhc|tf\b|\bmmc\b|emmc|card\s*reader|cardreader|realtek|alcor|genesys|storage\s*device/.test(combined);
+  const denyByKeyword = /\bnvme\b|\bssd\b|\bhdd\b|sata|hard\s*disk|portable\s*(ssd|hdd|drive)|expansion|backup\s*plus|external\s*hdd/.test(combined);
+  const devicePathLikely = /\/dev\/disk|physicaldrive/.test(path);
+  if (!devicePathLikely) return false;
+  if (denyByKeyword && !allowByBus) return false;
+  return allowByBus || allowByKeyword;
+}
+
 const STEP_LABELS = ['选择设备', '选择镜像', '烧录写盘', '完成'];
+const FLASHER_UI_STATE_KEY = 'rdk:flasher:ui-state:v1';
+
+function normalizeStageToPhase(stage: string | undefined): FlashPhase {
+  if (stage === 'backup') return 'backup';
+  if (stage === 'downloading') return 'downloading';
+  if (stage === 'decompressing') return 'decompressing';
+  if (stage === 'flashing') return 'flashing';
+  if (stage === 'verifying') return 'verifying';
+  if (stage === 'done') return 'done';
+  if (stage === 'error') return 'error';
+  return 'idle';
+}
 
 /* ═══════════════════════════════════════════════════════════
    Component
@@ -139,7 +186,7 @@ export default function Flasher() {
   const [selectedDrive, setSelectedDrive] = useState('');
 
   /* ── flash execution state ── */
-  const [phase, setPhase] = useState<'idle' | 'backup' | 'downloading' | 'decompressing' | 'flashing' | 'verifying' | 'done' | 'error'>('idle');
+  const [phase, setPhase] = useState<FlashPhase>('idle');
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -178,6 +225,10 @@ export default function Flasher() {
     () => imageCandidates.find((i) => i.key === selectedImageKey) ?? imageCandidates[0],
     [imageCandidates, selectedImageKey],
   );
+  const selectedDriveValid = useMemo(
+    () => drives.some((d) => d.path === selectedDrive),
+    [drives, selectedDrive],
+  );
   const needsXburn = requiresXburn(selectedDeviceKey);
 
   const appendLog = useCallback(
@@ -193,12 +244,12 @@ export default function Flasher() {
     const handler = (payload: FlashProgressPayload) => {
       if (payload.percent >= 0) setProgress(payload.percent);
       if (payload.message) appendLog(payload.message);
-      if (payload.stage) {
-        if (payload.stage === 'backup') setPhase('backup');
-        else if (payload.stage === 'downloading') setPhase('downloading');
-        else if (payload.stage === 'decompressing') setPhase('decompressing');
-        else if (payload.stage === 'flashing') setPhase('flashing');
-        else if (payload.stage === 'verifying') setPhase('verifying');
+      const mappedPhase = normalizeStageToPhase(payload.stage);
+      if (mappedPhase !== 'idle') {
+        setPhase(mappedPhase);
+      }
+      if (mappedPhase !== 'done' && mappedPhase !== 'error' && step !== 3) {
+        setStep(3);
       }
     };
     const unsub = window.rdkDesktop.onFlashProgress(handler);
@@ -206,7 +257,95 @@ export default function Flasher() {
       if (typeof unsub === 'function') unsub();
       else window.rdkDesktop?.offFlashProgress?.(handler);
     };
-  }, [appendLog]);
+  }, [appendLog, step]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(FLASHER_UI_STATE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Partial<FlasherUiState>;
+      if (parsed.selectedDeviceKey) setSelectedDeviceKey(parsed.selectedDeviceKey);
+      if (typeof parsed.selectedImageKey === 'string') setSelectedImageKey(parsed.selectedImageKey);
+      if (typeof parsed.useLocalImage === 'boolean') setUseLocalImage(parsed.useLocalImage);
+      if (typeof parsed.localImagePath === 'string') setLocalImagePath(parsed.localImagePath);
+      if (typeof parsed.selectedDrive === 'string') setSelectedDrive(parsed.selectedDrive);
+      if (typeof parsed.step === 'number') setStep(parsed.step as WizardStep);
+      if (typeof parsed.phase === 'string') setPhase(normalizeStageToPhase(parsed.phase));
+      if (typeof parsed.progress === 'number') setProgress(parsed.progress);
+      if (typeof parsed.error === 'string') setError(parsed.error);
+      if (Array.isArray(parsed.logs)) setLogs(parsed.logs.slice(-200));
+      if (typeof parsed.backupBeforeFlash === 'boolean') setBackupBeforeFlash(parsed.backupBeforeFlash);
+      if (typeof parsed.backupDestPath === 'string') setBackupDestPath(parsed.backupDestPath);
+      if (typeof parsed.backupResultPath === 'string') setBackupResultPath(parsed.backupResultPath);
+      if (typeof parsed.verifyDetail === 'string') setVerifyDetail(parsed.verifyDetail);
+    } catch {
+      // ignore invalid saved state
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!window.rdkDesktop?.flashGetActiveOperation) return;
+    let active = true;
+    const restoreActive = async () => {
+      try {
+        const snapshot = await window.rdkDesktop!.flashGetActiveOperation!();
+        if (!active || !snapshot?.ok) return;
+        const payload = snapshot.lastPayload;
+        const mappedPhase = normalizeStageToPhase(payload?.stage);
+        const shouldShowProgress = snapshot.running || mappedPhase === 'done' || mappedPhase === 'error';
+        if (!shouldShowProgress) return;
+        setStep(3);
+        if (mappedPhase !== 'idle') setPhase(mappedPhase);
+        if (typeof payload?.percent === 'number') setProgress(payload.percent);
+        if (Array.isArray(snapshot.logs) && snapshot.logs.length > 0) {
+          setLogs(snapshot.logs.slice(-200));
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void restoreActive();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const nextState: FlasherUiState = {
+      step,
+      phase,
+      progress,
+      error,
+      logs: logs.slice(-200),
+      selectedDeviceKey,
+      selectedImageKey,
+      useLocalImage,
+      localImagePath,
+      selectedDrive,
+      backupBeforeFlash,
+      backupDestPath,
+      backupResultPath,
+      verifyDetail,
+    };
+    try {
+      localStorage.setItem(FLASHER_UI_STATE_KEY, JSON.stringify(nextState));
+    } catch {
+      // ignore quota errors
+    }
+  }, [
+    backupBeforeFlash,
+    backupDestPath,
+    backupResultPath,
+    error,
+    localImagePath,
+    logs,
+    phase,
+    progress,
+    selectedDeviceKey,
+    selectedDrive,
+    selectedImageKey,
+    step,
+    useLocalImage,
+    verifyDetail,
+  ]);
 
   /* ── device selection ── */
   const chooseDevice = (key: string) => {
@@ -237,10 +376,17 @@ export default function Flasher() {
         return;
       }
       const list = result.drives ?? [];
-      setDrives(list);
-      if (list[0]) {
-        setSelectedDrive((prev) => prev || list[0].path);
-        addToast(`检测到 ${list.length} 个可写盘设备`, 'info');
+      const safeList = list.filter(isSafeFlashTargetDrive);
+      setDrives(safeList);
+      setSelectedDrive((prev) => {
+        if (!safeList.length) return '';
+        if (prev && safeList.some((drive) => drive.path === prev)) return prev;
+        return safeList[0].path;
+      });
+      if (safeList[0]) {
+        addToast(`检测到 ${safeList.length} 个可用 SD/eMMC 目标盘`, 'info');
+      } else {
+        addToast('未检测到可用 SD/eMMC 目标盘', 'warning');
       }
     } catch (e: any) {
       setError(e?.message || '磁盘扫描异常');
@@ -438,8 +584,16 @@ export default function Flasher() {
     setStep(target);
   };
 
+  const clearPersistedState = () => {
+    try {
+      localStorage.removeItem(FLASHER_UI_STATE_KEY);
+    } catch {
+      // ignore
+    }
+  };
+
   const canProceedFromImage = useLocalImage ? !!localImagePath.trim() : !!selectedImageKey;
-  const canProceedFromDrive = needsXburn || !!selectedDrive;
+  const canProceedFromDrive = needsXburn || selectedDriveValid;
 
   const requestCancel = () => {
     abortRef.current = true;
@@ -454,7 +608,7 @@ export default function Flasher() {
      RENDER
      ═══════════════════════════════════════════════════════════ */
   return (
-    <div className="tool-page">
+    <div className="tool-page flasher-page">
       <div className="tool-content">
         {/* ── Header ── */}
         <section className="card card-compact">
@@ -529,7 +683,7 @@ export default function Flasher() {
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
               </div>
             )}
-            <div className="config-header" style={{ marginTop: 12 }}>
+            <div className="config-header flasher-nav-row" style={{ marginTop: 12 }}>
               <div className="tool-bar-left" />
               <div className="tool-bar-right">
                 <button
@@ -552,7 +706,7 @@ export default function Flasher() {
               {/* Official images */}
               <div>
                 <div className="section-label">官方镜像</div>
-                <div className="config-grid">
+                <div className="config-grid flasher-image-list">
                   {imageCandidates.map((img) => (
                     <div
                       key={img.key}
@@ -632,7 +786,7 @@ export default function Flasher() {
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
               </div>
             )}
-            <div className="config-header" style={{ marginTop: 12 }}>
+            <div className="config-header flasher-nav-row" style={{ marginTop: 12 }}>
               <div className="tool-bar-left">
                 <button type="button" className="btn btn-ghost" onClick={() => goToStep(0)}>&larr; 上一步</button>
               </div>
@@ -693,7 +847,7 @@ export default function Flasher() {
                   <div className="config-grid">
                     {drives.length === 0 ? (
                       <div className="config-card-desc">
-                        {caps.supportsDriveScan ? '未检测到可写盘设备，请插入 TF 卡后刷新' : '当前环境暂不支持磁盘检测'}
+                        {caps.supportsDriveScan ? '未检测到可用 SD/eMMC 目标盘，请插入 TF/SD 卡后刷新' : '当前环境暂不支持磁盘检测'}
                       </div>
                     ) : (
                       drives.map((d) => (
@@ -747,7 +901,7 @@ export default function Flasher() {
                   <div className="config-row">
                     <span className="config-label">目标磁盘</span>
                     <span className="config-value">
-                      <strong>{needsXburn ? 'xburn 管理' : (selectedDrive || '未选择')}</strong>
+                      <strong>{needsXburn ? 'xburn 管理' : (selectedDriveValid ? selectedDrive : '未选择')}</strong>
                     </span>
                   </div>
                 </div>
@@ -787,7 +941,7 @@ export default function Flasher() {
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
               </div>
             )}
-            <div className="config-header" style={{ marginTop: 12 }}>
+            <div className="config-header flasher-nav-row" style={{ marginTop: 12 }}>
               <div className="tool-bar-left">
                 <button type="button" className="btn btn-ghost" onClick={() => goToStep(1)}>&larr; 上一步</button>
               </div>
@@ -919,12 +1073,13 @@ export default function Flasher() {
             )}
 
             {(phase === 'done' || phase === 'error') && (
-              <div className="config-header" style={{ marginTop: 12 }}>
+              <div className="config-header flasher-nav-row" style={{ marginTop: 12 }}>
                 <div className="tool-bar-left">
                   <button
                     type="button"
                     className="btn btn-ghost"
                     onClick={() => {
+                      clearPersistedState();
                       setStep(0);
                       setPhase('idle');
                       setProgress(0);
@@ -1194,6 +1349,7 @@ export default function Flasher() {
               className="btn btn-ghost"
               style={{ marginTop: 8 }}
               onClick={() => {
+                clearPersistedState();
                 setStep(0);
                 setPhase('idle');
                 setProgress(0);

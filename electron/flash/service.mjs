@@ -8,7 +8,11 @@
  * IPC layer stay unchanged.
  */
 
-import { setProgressSender } from './progress.mjs';
+import {
+  getFlashProgressSnapshot,
+  resetFlashProgressHistory,
+  setProgressSender,
+} from './progress.mjs';
 
 let adapter = null;
 
@@ -60,6 +64,7 @@ export async function writeImage(imagePath, drivePath, options) {
   const a = await getAdapter();
   if (!a) return { ok: false, error: '当前平台暂不支持磁盘写入', code: 'UNSUPPORTED_PLATFORM' };
   try {
+    resetFlashProgressHistory();
     const result = await a.writeImage(imagePath, drivePath, options);
     return { ok: true, output: result.output, verify: result.verify };
   } catch (error) {
@@ -82,6 +87,7 @@ export async function backupDrive(drivePath, destPath) {
   const a = await getAdapter();
   if (!a) return { ok: false, error: '当前平台暂不支持磁盘备份', code: 'UNSUPPORTED_PLATFORM' };
   try {
+    resetFlashProgressHistory();
     const result = await a.backupDrive(drivePath, destPath);
     return { ok: true, path: result.path, bytes: result.bytes };
   } catch (error) {
@@ -94,6 +100,7 @@ export async function decompressXz(inputPath) {
   const a = await getAdapter();
   if (!a) return { ok: false, error: '当前平台暂不支持自动解压', code: 'UNSUPPORTED_PLATFORM' };
   try {
+    resetFlashProgressHistory();
     const outputPath = inputPath.replace(/\.xz$/i, '');
     const resolved = await a.decompressXz(inputPath, outputPath);
     return { ok: true, outputPath: resolved };
@@ -106,6 +113,21 @@ export async function cancelActiveOp() {
   const a = await getAdapter();
   if (a) a.cancelActiveOp();
   return { ok: true };
+}
+
+export async function getActiveOperation() {
+  const a = await getAdapter();
+  const adapterState = typeof a?.getActiveOperation === 'function'
+    ? a.getActiveOperation()
+    : { running: false, id: '' };
+  const snapshot = getFlashProgressSnapshot();
+  return {
+    ok: true,
+    running: !!adapterState?.running,
+    opId: adapterState?.id || '',
+    lastPayload: snapshot.lastPayload,
+    logs: snapshot.logs,
+  };
 }
 
 export async function launchThirdPartyTool(toolPath, options) {

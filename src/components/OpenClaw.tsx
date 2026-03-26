@@ -743,8 +743,17 @@ export default function OpenClaw() {
       const data = await res.json();
       const passed = !!data?.ok;
       setTestResult(passed ? 'ok' : 'fail');
-      if (passed) addToast?.('模型调用测试通过', 'success');
-      else addToast?.(data?.output || '模型调用测试失败', 'warning');
+      if (passed) {
+        addToast?.('模型调用测试通过', 'success');
+      } else {
+        const output = String(data?.output || '');
+        if (Boolean(data?.pairingRequired) || /pairing required/i.test(output)) {
+          setAccordion('pairing');
+          addToast?.('模型测试失败：需要先通过配对审批（已展开配对面板）', 'warning');
+        } else {
+          addToast?.(output || '模型调用测试失败', 'warning');
+        }
+      }
     } catch {
       setTestResult('fail');
       addToast?.('模型调用测试失败', 'error');

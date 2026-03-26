@@ -1409,8 +1409,35 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const stopCurrentRun = () => {
-    abortInFlightRun(true);
+  const stopCurrentRun = async () => {
+    const runId = currentRunIdRef.current;
+    abortInFlightRun(false);
+    try {
+      if (runId) {
+        await cancelRDKClawRun(runId);
+      } else {
+        await cancelAllRDKClawRuns();
+      }
+      setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
+      setChatMessages((prev) => [...prev, {
+        id: Date.now(),
+        role: 'ai',
+        text: '停止指令已发送，当前任务将尽快结束。',
+        blocks: [{
+          type: 'task-result',
+          success: true,
+          title: '已请求停止任务',
+          detail: runId ? `runId: ${runId}` : '已请求停止所有运行中的任务',
+        }],
+        source: 'studio',
+      }]);
+    } catch {
+      addToast('停止任务失败，请重试“全部停止”', 'error');
+    } finally {
+      setAiTyping(false);
+      commandLockRef.current = false;
+      currentRunIdRef.current = '';
+    }
   };
 
   const stopAllRuns = async () => {
@@ -1433,32 +1460,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const backgroundCurrentRun = () => {
-    const runId = currentRunIdRef.current;
-    const nextSessionId = `ui-${Date.now()}`;
-    persistSessionId(nextSessionId);
-    reportActiveSession('background-detach');
-    if (runId) {
-      setBackgroundRuns((prev) => {
-        if (prev.some((item) => item.runId === runId)) return prev;
-        const next: typeof prev = [{ runId, status: 'running' as const, detachedAt: Date.now() }, ...prev].slice(0, 20);
-        return next;
-      });
-    }
-    setAiTyping(false);
-    commandLockRef.current = false;
-    setChatMessages((prev) => [...prev, {
-      id: Date.now(),
-      role: 'ai',
-      text: '当前任务已转入后台继续执行，你可以直接继续新的对话。',
-      blocks: [{
-        type: 'task-result',
-        success: true,
-        title: '任务已转后台',
-        detail: runId
-          ? `后台运行中（runId: ${runId}），已切换到新会话继续对话`
-          : '已切换到新会话继续对话',
-      }],
-    }]);
+    void stopCurrentRun();
   };
 
   const stopBackgroundRun = (runId: string) => {
@@ -1765,6 +1767,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('rdk-chat-history', JSON.stringify(toSave));
       } catch { /* quota exceeded */ }
     }, aiTyping ? 2000 : 300);
+    return () => {
+      if (chatPersistTimerRef.current) {
+        clearTimeout(chatPersistTimerRef.current);
+        chatPersistTimerRef.current = null;
+      }
+    };
   }, [chatMessages, aiTyping]);
 
   // Cleanup task intervals on unmount

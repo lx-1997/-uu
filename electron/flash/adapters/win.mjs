@@ -84,21 +84,23 @@ export function getCapabilities() {
 }
 
 export async function listDrives() {
-  const script = `$drives = Get-CimInstance Win32_DiskDrive | Select-Object Index,Model,Size,InterfaceType,DeviceID,MediaType; $drives | ConvertTo-Json -Depth 3`;
+  const script = `$drives = Get-Disk | Select-Object Number,FriendlyName,BusType,Size,IsBoot,IsSystem,OperationalStatus,Path; $drives | ConvertTo-Json -Depth 3`;
   const output = await runPowerShell(script);
   if (!output) return [];
   const parsed = JSON.parse(output);
   const arr = Array.isArray(parsed) ? parsed : [parsed];
-  return arr.map((item) => ({
-    id: String(item.Index),
-    path: item.DeviceID,
-    label: item.Model || `PhysicalDrive${item.Index}`,
-    size: item.Size || '',
-    sizeBytes: Number(item.Size || 0),
-    bus: item.InterfaceType || '',
-    mediaType: item.MediaType || '',
-    removable: /removable|external/i.test(String(item.MediaType || '')) || ['USB', 'SD'].includes(String(item.InterfaceType || '').toUpperCase()),
-  }));
+  return arr
+    .filter((item) => !item.IsSystem && !item.IsBoot)
+    .map((item) => ({
+      id: String(item.Number),
+      path: `\\\\.\\PhysicalDrive${item.Number}`,
+      label: item.FriendlyName || `PhysicalDrive${item.Number}`,
+      size: item.Size || '',
+      sizeBytes: Number(item.Size || 0),
+      bus: item.BusType || '',
+      mediaType: item.OperationalStatus || '',
+      removable: ['USB', 'SD', 'MMC'].includes(String(item.BusType || '').toUpperCase()),
+    }));
 }
 
 export async function writeImage(imagePath, drivePath, options = {}) {
@@ -228,6 +230,13 @@ export async function decompressXz(inputPath, outputPath) {
 
 export function cancelActiveOp() {
   if (activeOp) activeOp.cancelled = true;
+}
+
+export function getActiveOperation() {
+  return {
+    running: !!activeOp,
+    id: activeOp?.id || '',
+  };
 }
 
 export async function launchThirdPartyTool(toolPath, _options) {
