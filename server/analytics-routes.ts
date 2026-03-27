@@ -9,6 +9,7 @@ import { forwardAnalyticsCloudWebhook } from './analytics-cloud-forward.js';
 import { decryptAnalyticsEnvelope, isEncryptedAnalyticsBody } from './analytics-payload-crypto.js';
 import { getAnalyticsPayloadSecret } from './analytics-payload-secret.js';
 import { getAnalyticsEventsFilePath, getAnalyticsEventsMirrorFilePath } from './storage.js';
+import { performDailyActiveInsert } from './supabase-daily-usage.js';
 
 const MAX_BATCH = 80;
 
@@ -101,6 +102,35 @@ export function registerAnalyticsRoutes(app: Express): void {
     forwardAnalyticsCloudWebhook(body);
 
     res.json({ ok: true, accepted: lines.length });
+  });
+
+  /** 匿名日活：每客户端每日最多一行写入 Supabase（已配置凭证时默认开启，见 supabase-daily-usage） */
+  app.post('/api/analytics/daily-active', async (req: Request, res: Response) => {
+    const body = req.body as { anonymousId?: string; appVersion?: string };
+    const anonymousId = String(body?.anonymousId || '').trim().slice(0, 64);
+    const appVersion = String(body?.appVersion || '').trim().slice(0, 48);
+    if (!anonymousId) {
+      res.status(400).json({ ok: false, error: 'anonymousId required' });
+      return;
+    }
+    const result = await performDailyActiveInsert(anonymousId, appVersion);
+    if (!result.ok) {
+      res.status(500).json({ ok: false, error: result.error });
+      return;
+    }
+    if (!result.persisted) {
+      res.json({
+        ok: true,
+        persisted: false,
+        reason: result.reason,
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      persisted: true,
+      duplicate: result.duplicate === true,
+    });
   });
 }
 

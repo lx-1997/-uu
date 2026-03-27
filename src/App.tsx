@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type ReactNode } from 'react';
 import { initAnalyticsFlushListeners } from './analytics/client';
 import { useStudioPresence } from './analytics/useStudioPresence';
+import { useDailyActivePing } from './analytics/useDailyActivePing';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import { useI18n } from './i18n/use-i18n';
 import { AuthProvider, useAuth } from './hooks/useAuth';
@@ -126,6 +127,11 @@ function useThemeSync() {
   }, [theme]);
 }
 
+function DailyActivePingHost() {
+  useDailyActivePing();
+  return null;
+}
+
 function AppShell() {
   const { activeTab, currentDevice, theme, railExpanded, obStep } = useAppState();
   const { t } = useI18n();
@@ -220,6 +226,7 @@ export default function App() {
   }, []);
   return (
     <AuthProvider>
+      <DailyActivePingHost />
       <AppProvider>
         <SSOGate>
           <AppShell />
