@@ -695,7 +695,7 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
       text: '',
       blocks: [
         { type: 'status', items: [
-          { label: t('orc.oc.currentModel', '当前模型'), value: 'qwen3.5-plus', ok: true },
+          { label: t('orc.oc.currentModel', '当前模型'), value: 'qwen-plus', ok: true },
           { label: t('orc.oc.targetModel', '目标模型'), value: target, ok: true },
         ]},
         { type: 'confirm', text: tf('orc.oc.confirmSwitch', '确认切换到 {{model}}？', { model: target }), confirmId: cid },

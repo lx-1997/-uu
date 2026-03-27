@@ -2,6 +2,15 @@
 
 import type { DetailedHTMLProps, HTMLAttributes } from 'react';
 
+interface ImportMetaEnv {
+  /** 设为 0 时关闭前端埋点上报 */
+  readonly VITE_ANALYTICS_ENABLED?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 export {};
 
 declare global {

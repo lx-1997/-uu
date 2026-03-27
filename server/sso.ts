@@ -279,6 +279,29 @@ async function resolveUserForDesktopBootstrap(accessToken: string): Promise<SSOU
   return await resolveSSOUser(accessToken, undefined, true, false);
 }
 
+/**
+ * 对话归档 `sso_user_name` 列（语义为展示名）：优先 SSO 姓名 → 邮箱前缀 → 账户 id（`SSO·…`）；
+ * 未登录或未启用 SSO 时，用前端 Stable userId（`Studio·…`），避免整列为 NULL。
+ */
+export function formatConversationArchiveUserName(
+  ssoUser: SSOUser | undefined,
+  clientUserId?: string,
+): string | undefined {
+  if (ssoUser) {
+    const name = String(ssoUser.name || '').trim();
+    if (name) return name;
+    const email = String(ssoUser.email || '').trim();
+    const at = email.indexOf('@');
+    const fromEmail = at > 0 ? email.slice(0, at) : email;
+    if (fromEmail) return fromEmail;
+    const id = String(ssoUser.id || '').trim();
+    if (id) return id.length > 28 ? `SSO·${id.slice(0, 12)}…${id.slice(-8)}` : `SSO·${id}`;
+  }
+  const uid = String(clientUserId ?? '').trim();
+  if (uid) return `Studio·${uid}`;
+  return undefined;
+}
+
 /** 写入 forum-auth 展示用用户名（与 forum-tools 中 derive 逻辑对齐） */
 function forumUsernameHintFromSsoUser(user: SSOUser): string | undefined {
   const name = String(user.name || '').trim();
@@ -327,6 +350,12 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
     req.method === 'POST'
     && (req.path === '/api/rdkclaw/session/active' || req.path === '/api/rdkclaw/device/active')
   ) {
+    next();
+    return;
+  }
+
+  /** 匿名行为埋点，不含聊天正文；便于未登录/跨源场景上报 */
+  if (req.method === 'POST' && req.path === '/api/analytics/events') {
     next();
     return;
   }

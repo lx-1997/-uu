@@ -56,7 +56,16 @@ import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
 import { clearSecurityAuditLogs, listSecurityAuditLogs } from './rdkclaw/security-audit-store.js';
-import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes, restoreSsoSessionsFromDisk } from './sso.js';
+import {
+  isSSOEnabled,
+  isSSORequired,
+  ssoAuthMiddleware,
+  registerSSORoutes,
+  restoreSsoSessionsFromDisk,
+  formatConversationArchiveUserName,
+  type SSOUser,
+} from './sso.js';
+import { registerAnalyticsRoutes } from './analytics-routes.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
 
@@ -112,9 +121,10 @@ wss.on('connection', (ws, req) => {
 });
 
 const port = Number(process.env.PORT ?? 8787);
-const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://coding.dashscope.aliyuncs.com/v1';
+/** 与仓库 `config/rdkclaw-provider.defaults.json` 对齐；RDKClaw 主链路以 ~/.rdkstudio/agent-config.json 为准 */
+const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
-const model = process.env.OPENAI_MODEL ?? 'qwen3.5-plus';
+const model = process.env.OPENAI_MODEL ?? 'doubao-seed-2.0-lite';
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
 const devicePasswordCache = new Map<string, string>();
 const SUPPORTED_OPENCLAW_APIS = new Set([
@@ -1307,6 +1317,7 @@ app.use(express.json({ limit: '50mb' }));
 
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)
 registerSSORoutes(app);
+registerAnalyticsRoutes(app);
 if (isSSOEnabled() || isSSORequired()) {
   app.use(ssoAuthMiddleware);
   if (isSSOEnabled()) {
@@ -2010,7 +2021,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   const persistedPassword = (target as Device & { password?: string }).password ?? '';
   const password = providedPassword || cachedPassword || persistedPassword || defaultSshPassword;
 
-  const targetModel = modelName?.trim() || 'qwen3.5-plus';
+  const targetModel = modelName?.trim() || 'doubao-seed-2.0-lite';
   if (!isSafeName(targetModel)) {
     sendApiError(response, 400, 'INVALID_MODEL_NAME', '模型名称不合法', { retryable: false });
     return;
@@ -4805,12 +4816,13 @@ app.post('/api/agent/upload-attachment', express.raw({ type: '*/*', limit: '50mb
 // ─── Agent Chat (SSE) ───
 
 app.post('/api/agent/chat', async (request, response) => {
-  const { message, deviceId, sessionId, userId, mode, attachments } = request.body as {
+  const { message, deviceId, sessionId, userId, mode, attachments, trainingDataOptIn } = request.body as {
     message?: string;
     deviceId?: string;
     sessionId?: string;
     userId?: string;
     mode?: RDKClawExecutionMode;
+    trainingDataOptIn?: boolean;
     attachments?: Array<{
       id: string;
       type: 'image' | 'file' | 'audio' | 'video';
@@ -4872,13 +4884,21 @@ app.post('/api/agent/chat', async (request, response) => {
     }, 15000);
 
     try {
+      const headerOptIn = String(request.headers['x-rdk-training-opt-in'] ?? '').trim() === '1';
+      const resolvedTrainingOptIn = trainingDataOptIn === true || headerOptIn;
+
+      const ssoUser = (request as { ssoUser?: SSOUser }).ssoUser;
+      const ssoUserName = formatConversationArchiveUserName(ssoUser, userId);
+
       for await (const event of rdkclaw.streamChat({
         message: String(message || '').trim(),
         deviceId,
         sessionId,
         userId,
+        ssoUserName,
         mode,
         attachments,
+        trainingDataOptIn: resolvedTrainingOptIn,
         abortSignal: requestAbortController.signal,
       })) {
         sendEvent(event.type, event.data);

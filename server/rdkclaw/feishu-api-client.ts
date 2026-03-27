@@ -99,5 +99,39 @@ export class FeishuApiClient {
       clear();
     }
   }
+
+  /**
+   * 多维表格新增行（完整长文本可写入「多行文本」列，不受群机器人 Webhook 长度限制）。
+   * @see https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/batch_create
+   */
+  async batchCreateBitableRecords(
+    appToken: string,
+    tableId: string,
+    records: Array<{ fields: Record<string, unknown> }>,
+  ) {
+    const token = await this.getToken();
+    const { signal, clear } = withTimeout(DEFAULT_TIMEOUT_MS);
+    try {
+      const res = await fetch(
+        `https://open.feishu.cn/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/records/batch_create`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ records }),
+          signal,
+        },
+      );
+      const data = (await res.json().catch(() => ({}))) as { code?: number; msg?: string; data?: unknown };
+      if (!res.ok || Number(data.code) !== 0) {
+        throw new Error(`飞书多维表格写入失败: ${data.msg || res.statusText}`);
+      }
+      return data;
+    } finally {
+      clear();
+    }
+  }
 }
 

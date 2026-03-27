@@ -1,0 +1,100 @@
+/**
+ * 匿名/低敏感行为事件采集：页面停留、Tab 切换、自定义操作等。
+ * 不落用户聊天正文；训练数据需单独合规与脱敏流程后再接入。
+ */
+import type { Express, Request, Response } from 'express';
+import { appendFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { forwardAnalyticsCloudWebhook } from './analytics-cloud-forward.js';
+import { getAnalyticsEventsFilePath, getAnalyticsEventsMirrorFilePath } from './storage.js';
+
+const MAX_BATCH = 80;
+
+function ingestEnabled(): boolean {
+  return process.env.ANALYTICS_INGEST_ENABLED !== '0';
+}
+
+export function registerAnalyticsRoutes(app: Express): void {
+  app.post('/api/analytics/events', async (req: Request, res: Response) => {
+    if (!ingestEnabled()) {
+      res.status(204).end();
+      return;
+    }
+    const body = req.body as {
+      clientSessionId?: string;
+      schema?: string;
+      consent?: { trainingDataOptIn?: boolean; recordedAt?: number };
+      events?: unknown[];
+    };
+    const clientSessionId = String(body?.clientSessionId || '').slice(0, 64);
+    const schema = String(body?.schema || 'rdk.studio.analytics.v1');
+    const consentEnvelope = body?.consent && typeof body.consent === 'object'
+      ? {
+          trainingDataOptIn: body.consent.trainingDataOptIn === true,
+          recordedAt: typeof body.consent.recordedAt === 'number' ? body.consent.recordedAt : undefined,
+        }
+      : undefined;
+    const raw = body?.events;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      res.status(400).json({ ok: false, error: 'events 必须为非空数组' });
+      return;
+    }
+    if (raw.length > MAX_BATCH) {
+      res.status(400).json({ ok: false, error: `events 单次最多 ${MAX_BATCH} 条` });
+      return;
+    }
+
+    const receivedAt = Date.now();
+    const ua = String(req.headers['user-agent'] || '').slice(0, 400);
+    const lines: string[] = [];
+    for (let i = 0; i < raw.length; i += 1) {
+      const ev = raw[i];
+      if (!ev || typeof ev !== 'object') continue;
+      const row = {
+        schema,
+        receivedAt,
+        clientSessionId: clientSessionId || undefined,
+        consent: consentEnvelope,
+        remoteIp: anonymizeIp(req.socket?.remoteAddress),
+        userAgent: ua || undefined,
+        event: ev as Record<string, unknown>,
+      };
+      lines.push(JSON.stringify(row));
+    }
+    if (lines.length === 0) {
+      res.status(400).json({ ok: false, error: '无有效事件' });
+      return;
+    }
+
+    const blob = `${lines.join('\n')}\n`;
+    try {
+      const file = getAnalyticsEventsFilePath();
+      await mkdir(path.dirname(file), { recursive: true });
+      await appendFile(file, blob, 'utf-8');
+      const mirror = getAnalyticsEventsMirrorFilePath();
+      if (mirror && mirror !== file) {
+        await mkdir(path.dirname(mirror), { recursive: true });
+        await appendFile(mirror, blob, 'utf-8');
+      }
+    } catch (err) {
+      console.warn('[analytics] append failed:', err instanceof Error ? err.message : err);
+      res.status(500).json({ ok: false, error: 'persist_failed' });
+      return;
+    }
+
+    forwardAnalyticsCloudWebhook(body);
+
+    res.json({ ok: true, accepted: lines.length });
+  });
+}
+
+function anonymizeIp(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).replace(/^::ffff:/, '');
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) {
+    const p = s.split('.');
+    return `${p[0]}.${p[1]}.${p[2]}.0`;
+  }
+  if (s.includes(':')) return `${s.split(':').slice(0, 4).join(':')}::`;
+  return s.slice(0, 32);
+}

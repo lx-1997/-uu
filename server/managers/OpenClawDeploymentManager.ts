@@ -773,7 +773,7 @@ print(json.dumps(result, ensure_ascii=False))`;
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {
     const pyScript = `import json,os
 p=os.path.expanduser('~/.openclaw/openclaw.json')
-result={"modelGateway":{"baseUrl":"","apiKey":"","api":"openai-completions","modelId":"qwen3.5-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
+result={"modelGateway":{"baseUrl":"","apiKey":"","api":"openai-completions","modelId":"qwen-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
 if os.path.exists(p):
   d=json.load(open(p))
   provider=((d.get('models') or {}).get('providers') or {}).get('custom-gateway') or {}
@@ -794,7 +794,7 @@ if os.path.exists(p):
     api_value='openai-completions'
   elif api_value=='google-genai':
     api_value='google-generative-ai'
-  result["modelGateway"].update({"baseUrl":provider.get('baseUrl','') or '',"apiKey":provider.get('apiKey','') or '',"api":api_value,"modelId":model.get('id','qwen3.5-plus') or 'qwen3.5-plus',"modelName":model.get('name','Custom Model') or 'Custom Model'})
+  result["modelGateway"].update({"baseUrl":provider.get('baseUrl','') or '',"apiKey":provider.get('apiKey','') or '',"api":api_value,"modelId":model.get('id','qwen-plus') or 'qwen-plus',"modelName":model.get('name','Custom Model') or 'Custom Model'})
   result["feishu"].update({
     "appId":feishu.get('appId','') or '',
     "appSecret":feishu.get('appSecret','') or '',

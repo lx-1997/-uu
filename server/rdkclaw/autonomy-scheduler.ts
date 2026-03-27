@@ -272,6 +272,7 @@ export class AutonomyScheduler {
         message: task.prompt,
         sessionId: `auto:${task.id}`,
         userId: "autonomy",
+        ssoUserName: `定时任务:${task.name}`,
         mode: task.mode,
       })) {
         if (event.type === "meta") {

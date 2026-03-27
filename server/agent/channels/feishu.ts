@@ -639,6 +639,7 @@ export class FeishuWebSocketChannel {
       for await (const event of this.rdkclaw.streamChat({
         message: text || "请结合我刚通过飞书发送的附件继续处理当前请求。",
         userId: openId,
+        ssoUserName: `飞书·${openIdMasked}`,
         deviceId: latestUiDeviceId || undefined,
         mode: "auto",
         attachments,

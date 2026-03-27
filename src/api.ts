@@ -1,6 +1,7 @@
 import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
 import { resolveApiUrl } from './utils/apiBase';
+import { getTrainingDataOptIn } from './analytics/consent';
 
 export interface DeviceExecResult {
   ok: boolean;
@@ -444,8 +445,18 @@ export function streamAgentChat(
     try {
       const res = await fetch(resolveUrl('/api/agent/chat'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, deviceId, sessionId, userId, attachments }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-RDK-Training-Opt-In': getTrainingDataOptIn() ? '1' : '0',
+        },
+        body: JSON.stringify({
+          message,
+          deviceId,
+          sessionId,
+          userId,
+          attachments,
+          trainingDataOptIn: getTrainingDataOptIn(),
+        }),
         signal: controller.signal,
         credentials: 'include',
       });

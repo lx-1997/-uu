@@ -74,11 +74,16 @@ export class FeishuChannelAdapter {
     let text = "";
     let toolCalls = 0;
     let elapsedDisplay = "";
+    const uid = payload.userId;
+    const masked =
+      uid.length > 8 ? `${uid.slice(0, 4)}***${uid.slice(-4)}` : `user:${uid.slice(0, 12)}`;
     for await (const event of this.app.streamChat({
       message: payload.text,
       userId: payload.userId,
+      ssoUserName: `飞书·${masked}`,
       sessionId,
       mode: "board-preferred",
+      channel: "feishu",
     })) {
       events.push(event);
       if (event.type === "text") {

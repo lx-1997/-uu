@@ -414,6 +414,7 @@ export class WeixinPollingChannel {
       for await (const event of this.rdkclaw.streamChat({
         message: displayText,
         userId: fromUserId,
+        ssoUserName: `微信·${maskedUser}`,
         deviceId: deviceId || undefined,
         mode: deviceId ? "board-preferred" : "local",
         attachments: attachments.length > 0 ? attachments : undefined,

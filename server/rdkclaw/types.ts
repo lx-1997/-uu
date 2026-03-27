@@ -23,9 +23,15 @@ export interface RDKClawChatRequest {
   deviceId?: string;
   sessionId?: string;
   userId?: string;
+  /**
+   * 归档用「用户名」：Studio 为 SSO 展示名；飞书/微信为 `飞书·ou_12***34` 等形式；定时任务为任务名等。
+   */
+  ssoUserName?: string;
   mode?: RDKClawExecutionMode;
   attachments?: RDKClawAttachment[];
   channel?: ChannelSource;
+  /** Studio 设置「用于模型与产品改进」；影响系统提示中的合规表述 */
+  trainingDataOptIn?: boolean;
   // 服务端内部字段：用于在 SSE 断连时中止当前 run
   abortSignal?: AbortSignal;
 }

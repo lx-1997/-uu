@@ -50,7 +50,7 @@ interface ProviderDefault {
 const PROVIDER_DEFAULTS: Record<string, ProviderDefault> = {
   qwen: {
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.5-plus',
+    model: 'qwen-plus',
   },
   deepseek: {
     baseUrl: 'https://api.deepseek.com/v1',

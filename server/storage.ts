@@ -27,6 +27,30 @@ export function getSsoSessionsFilePath() {
   return path.join(resolveDataDir(), 'sso-sessions.json');
 }
 
+/**
+ * 前端埋点/行为事件 JSONL（每行一条 JSON）。
+ * 优先 `RDK_ANALYTICS_JSONL_PATH`（可指向用户工作区下的路径，如 .../workspace/.rdk-studio/analytics-events.jsonl）；
+ * 未设置时用 `RDK_DATA_DIR` 或 ~/.rdk-studio/data/analytics-events.jsonl。
+ */
+export function getAnalyticsEventsFilePath() {
+  const override = String(process.env.RDK_ANALYTICS_JSONL_PATH ?? '').trim();
+  if (override) return path.resolve(override);
+  return path.join(resolveDataDir(), 'analytics-events.jsonl');
+}
+
+/** 可选第二份镜像（同一内容再写一份，便于工作区与全局数据目录各留一份） */
+export function getAnalyticsEventsMirrorFilePath(): string | undefined {
+  const mirror = String(process.env.RDK_ANALYTICS_JSONL_MIRROR ?? '').trim();
+  return mirror ? path.resolve(mirror) : undefined;
+}
+
+/** 完整对话轮次 JSONL（用户提问 + AI 最终回复）；见 CONVERSATION_LOG_ENABLED */
+export function getConversationTurnsFilePath() {
+  const override = String(process.env.CONVERSATION_LOG_JSONL_PATH ?? '').trim();
+  if (override) return path.resolve(override);
+  return path.join(resolveDataDir(), 'conversation-turns.jsonl');
+}
+
 function getDataFilePath() {
   const dataDir = resolveDataDir();
   return path.join(dataDir, 'devices.json');

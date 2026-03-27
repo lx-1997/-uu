@@ -361,7 +361,7 @@ function boardOpenClawModelSwitchTool(deviceId: string): Tool<{ provider?: strin
       type: 'object',
       properties: {
         provider: { type: 'string', description: '可选 provider，默认 custom-gateway' },
-        modelId: { type: 'string', description: '目标模型 ID，例如 qwen3.5-plus' },
+        modelId: { type: 'string', description: '目标模型 ID，例如 qwen-plus' },
       },
       required: ['modelId'],
     },

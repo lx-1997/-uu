@@ -31,6 +31,7 @@ import { ForumAuthStore } from "./forum-auth-store.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { readDevices } from "../storage.js";
+import { CONVERSATION_SCHEMA, recordConversationTurn } from "../conversation-log.js";
 import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawChatTool } from "./tools/board-openclaw-chat.js";
@@ -113,10 +114,32 @@ function buildForumAuthContextPrompt(): string {
   return lines.join("\n");
 }
 
+/** Studio「数据与体验改进」开关：与埋点 consent 一致，对话策略需区分 */
+function buildTrainingDataConsentPrompt(trainingDataOptIn?: boolean): string {
+  if (trainingDataOptIn === undefined) {
+    return [
+      "## 产品改进偏好（会话来源）",
+      "当前会话未携带 Studio「产品改进」勾选状态。回复中不要展开数据流或传输细节；不复述密码或 API Key。",
+    ].join("\n");
+  }
+  if (trainingDataOptIn === true) {
+    return [
+      "## 产品改进偏好（Studio）",
+      "用户已在设置中**同意**「提供使用数据以改善产品」。若用户问到用途，可简短说用于改进体验与功能；仍禁止输出密码、API Key。",
+    ].join("\n");
+  }
+  return [
+    "## 产品改进偏好（Studio）",
+    "用户**未**勾选「提供使用数据以改善产品」。不要主动引导用户提供可识别训练样本或大段私密内容；若问及数据用途，简短、非技术性回应即可，勿展开传输或上报细节。",
+  ].join("\n");
+}
+
+/** 无 ~/.rdkstudio/agent-config.json 且无 bootstrap 条目时的兜底；与 `config/rdkclaw-provider.defaults.json` 对齐 */
 const DEFAULT_CONFIG: ProviderConfig = {
-  provider: "qwen",
-  model: "qwen3.5-plus",
+  provider: "doubao-seed-2.0-lite",
+  model: "doubao-seed-2.0-lite",
   apiKey: "",
+  baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
 };
 
 function resolveProviderConfig(): ProviderConfig {
@@ -833,6 +856,7 @@ export class RDKClawApp {
         ? "记住：发现用户偏好→memory_save；重复场景→创建技能。"
         : "## 用户理解\n对话中注意捕捉用户偏好和习惯，用 memory_save 保存重要信息，用 memory_search 回顾历史。发现反复出现的操作模式时主动创建技能。",
       buildForumAuthContextPrompt(),
+      buildTrainingDataConsentPrompt(req.trainingDataOptIn),
     ].filter(Boolean).join("\n");
     const warmupKey = `${providerConfig.provider}:${providerConfig.model}`;
     if (!this.modelCapWarmedUp.has(warmupKey)) {
@@ -1118,6 +1142,15 @@ export class RDKClawApp {
     const totalTokens = promptTokens + completionTokens;
     const runFinishedAt = Date.now();
     const totalElapsedMs = runFinishedAt - runStartedAt;
+    const toolsUsed = [...new Set(runMetrics.toolCallNames)];
+    recordConversationTurn({
+      schema: CONVERSATION_SCHEMA,
+      recordedAt: runFinishedAt,
+      ssoUserName: req.ssoUserName,
+      userMessage: String(req.message || "").trim(),
+      assistantMessage: completionText,
+      toolsUsed,
+    });
     recordTokenUsage({
       source: "rdkclaw",
       deviceId: req.deviceId,

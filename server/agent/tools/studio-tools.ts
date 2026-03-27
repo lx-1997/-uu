@@ -54,7 +54,7 @@ function setStudioAgentConfigTool(): Tool<{
       type: 'object',
       properties: {
         provider: { type: 'string', description: 'qwen/deepseek/openai/custom' },
-        model: { type: 'string', description: '模型名，如 qwen3.5-plus' },
+        model: { type: 'string', description: '模型名，如 qwen-plus' },
         apiKey: { type: 'string', description: '可选，API key（留空则不改）' },
         baseUrl: { type: 'string', description: '可选，自定义 base URL' },
       },
