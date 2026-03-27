@@ -7,6 +7,10 @@ interface ImportMetaEnv {
   readonly VITE_ANALYTICS_ENABLED?: string;
   /** 与后端 ANALYTICS_PAYLOAD_SECRET 相同则埋点 JSON 以 AES-256-GCM 封装，Network 中仅见密文 envelope */
   readonly VITE_ANALYTICS_PAYLOAD_SECRET?: string;
+  /** package.json version，构建时注入 */
+  readonly VITE_APP_VERSION: string;
+  /** 构建 UTC 日期 YYYY-MM-DD */
+  readonly VITE_APP_BUILD_DATE: string;
 }
 
 interface ImportMeta {

@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
+import StudioVersionFooter from './StudioVersionFooter';
 
 interface NavItemDef {
   tab: Tab;
@@ -119,6 +120,7 @@ export default function IconRail() {
         </div>
 
         <div className="rail-footer">
+          <StudioVersionFooter railExpanded={railExpanded} />
           {obReturnStep && (
             <button
               className="rail-btn rail-return-guide"

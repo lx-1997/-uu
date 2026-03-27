@@ -1,0 +1,198 @@
+/* 版本说明、服务条款、隐私政策 — 居中模态 */
+.legal-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn var(--duration-fast) var(--ease-out);
+}
+
+.legal-modal-overlay--elevated {
+  z-index: 10150;
+}
+
+.legal-modal-card {
+  width: min(520px, 100%);
+  max-height: min(86vh, 720px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.version-about-modal {
+  max-width: 480px;
+}
+
+.legal-doc-modal {
+  max-width: min(640px, 100%);
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.legal-doc-modal-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.legal-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 0;
+  flex-shrink: 0;
+}
+
+.legal-modal-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.legal-modal-close {
+  flex-shrink: 0;
+  font-size: 1.35rem;
+  line-height: 1;
+  padding: 0 4px;
+  color: var(--text-muted);
+}
+
+.legal-modal-body {
+  padding: 12px 18px 16px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.legal-doc-intro {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+}
+
+.legal-doc-section {
+  margin-bottom: 14px;
+}
+
+.legal-doc-h3 {
+  margin: 0 0 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.legal-doc-p {
+  margin: 0 0 8px;
+}
+
+.legal-modal-footer {
+  padding: 0 18px 14px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.version-modal-build {
+  margin: 0 0 10px;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.version-modal-sub {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.version-modal-list {
+  margin: 0 0 16px;
+  padding-left: 1.1rem;
+  color: var(--text-secondary);
+}
+
+.version-modal-list li {
+  margin-bottom: 4px;
+}
+
+.version-modal-legal-line {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-btn:hover {
+  color: var(--text-primary);
+}
+
+/* 左侧栏底部版本入口 */
+.rail-version-btn {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.625rem;
+  line-height: 1.2;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.icon-rail.expanded .rail-version-btn {
+  justify-content: flex-start;
+  padding: 4px 10px;
+}
+
+.rail-version-btn:hover {
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+}
+
+.rail-version-icon {
+  font-size: 0.75rem;
+  opacity: 0.85;
+  line-height: 1;
+}
+
+.rail-version-text {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}

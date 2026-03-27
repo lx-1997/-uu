@@ -6,6 +6,7 @@
 @import './reset.css';
 @import './animations.css';
 @import './shell.css';
+@import './legal-modal.css';
 @import './components.css';
 @import './pages/dashboard.css';
 @import './pages/chat.css';

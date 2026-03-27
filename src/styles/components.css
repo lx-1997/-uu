@@ -346,6 +346,16 @@
   z-index: var(--z-modal);
   animation: fadeIn var(--duration-fast);
   padding: 20px;
+  box-sizing: border-box;
+}
+
+/* 高于 SSO 全屏登录层（10000），用于条款/隐私/关于等全屏遮罩 */
+.modal-overlay--stack {
+  z-index: 10160;
+}
+
+.modal-overlay--stack-elevated {
+  z-index: 10200;
 }
 
 .modal-content {

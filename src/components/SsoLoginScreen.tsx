@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useAppState } from '../hooks/useAppState';
+import { useI18n } from '../i18n/use-i18n';
 import { ssoTranslate as st } from '../i18n/sso-translate';
+import LegalDocumentModal, { type LegalDocKind } from './LegalDocumentModal';
 import { fetchApi } from '../utils/apiBase';
 
 type Phase = 'preparing' | 'ready' | 'error';
@@ -11,6 +13,8 @@ const FALLBACK_SSO = 'https://sso.d-robotics.cc/';
 
 export default function SsoLoginScreen() {
   const { ssoConfigured, loginUrl, refresh } = useAuth();
+  const { t } = useI18n();
+  const [legalKind, setLegalKind] = useState<LegalDocKind | null>(null);
 
   /** 浏览器内嵌：服务端 OAuth URL；缺失时仍展示官方 SSO 门户 */
   const displayLoginUrl = loginUrl || FALLBACK_SSO;
@@ -317,6 +321,19 @@ export default function SsoLoginScreen() {
           </div>
         </>
       )}
+
+      <div className="sso-login-legal" role="note">
+        <span>{t('login.legal.prefix', '登录即表示您已阅读并同意')}</span>{' '}
+        <button type="button" className="sso-login-legal-link" onClick={() => setLegalKind('terms')}>
+          {t('legal.terms', '服务条款')}
+        </button>
+        <span>{t('login.legal.mid', '与')}</span>{' '}
+        <button type="button" className="sso-login-legal-link" onClick={() => setLegalKind('privacy')}>
+          {t('legal.privacy', '隐私政策')}
+        </button>
+      </div>
+
+      {legalKind && <LegalDocumentModal kind={legalKind} onClose={() => setLegalKind(null)} />}
     </div>
   );
 }

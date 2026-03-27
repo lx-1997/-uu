@@ -140,6 +140,21 @@ async function fetchBoardIpRows(device: BoardIpDevice): Promise<{
   return { rows, warn };
 }
 
+/** 与 server/sso `formatConversationArchiveUserName` 展示策略一致：姓名 → 邮箱前缀 → 账户 id */
+function getSsoDisplayLabel(user: { name?: string; email?: string; id?: string }): string {
+  const name = String(user.name || '').trim();
+  if (name) return name;
+  const email = String(user.email || '').trim();
+  if (email) {
+    const at = email.indexOf('@');
+    if (at > 0) return email.slice(0, at);
+    return email;
+  }
+  const id = String(user.id || '').trim();
+  if (id) return id.length > 36 ? `${id.slice(0, 14)}…${id.slice(-10)}` : id;
+  return '';
+}
+
 async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -308,7 +323,7 @@ export default function TopToolbar() {
         <div className="sso-user-chip" style={{ position: 'relative' }}>
           <button
             className="btn-icon sso-avatar-btn"
-            title={`${user.name || user.email}`}
+            title={getSsoDisplayLabel(user) || user.email || user.id}
             onClick={() => setShowUserMenu(v => !v)}
           >
             {user.avatar ? (
@@ -331,7 +346,9 @@ export default function TopToolbar() {
               onMouseLeave={() => setShowUserMenu(false)}
             >
               <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>{user.name || 'User'}</div>
+                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {getSsoDisplayLabel(user) || t('topbar.user.fallback', '用户')}
+                </div>
                 {user.email && <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 2 }}>{user.email}</div>}
               </div>
               <button

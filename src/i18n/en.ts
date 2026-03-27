@@ -56,6 +56,22 @@ export const EN: Record<string, string> = {
   'rail.collapse.aria': 'Collapse navigation',
   'rail.lang.tip': 'Display language (click to toggle)',
   'rail.lang.aria': 'Display language',
+  'rail.version.tooltip': 'Version & release notes',
+  'rail.version.label': 'About',
+  'rail.version.open': 'Open version and release notes',
+
+  'version.modal.title': 'About RDK Studio',
+  'version.modal.subtitle': 'Version & product',
+  'version.modal.features': 'Features',
+  'version.modal.sub': 'Features',
+
+  'legal.terms': 'Terms of Service',
+  'legal.privacy': 'Privacy Policy',
+
+  'login.legal.prefix': 'By signing in, you agree to our ',
+  'login.legal.mid': ' and ',
+
+  'topbar.user.fallback': 'User',
 
   'chat.lang.switched': 'Language updated',
 
