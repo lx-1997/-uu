@@ -183,6 +183,13 @@
   max-width: 320px;
 }
 
+.immersive-welcome-desc.ros-tros-note {
+  margin-top: -4px;
+  max-width: 380px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
 /* ── Error ── */
 .immersive-error {
   display: flex;

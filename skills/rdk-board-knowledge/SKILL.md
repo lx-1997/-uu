@@ -1,7 +1,7 @@
 ---
 name: RDK Board Knowledge
 description: RDK 全系列硬件能力感知与协作决策框架。当用户提到设备操作、AI推理、摄像头、GPIO、模型部署、板端能力时激活。
-version: 1.0.0
+version: 1.0.1
 trigger: 设备,能力,推理,摄像头,GPIO,模型,BPU,检测,分割,跟踪,语音,TTS,SLAM,导航,板端,硬件,X3,X5,S100
 risk: low
 permissions: none
@@ -104,6 +104,12 @@ df -h
 # 内核版本
 uname -a
 ```
+
+### TROS 与「ROS 环境」（易误判）
+
+- 板上中间件是 **TROS**（ROS2 兼容），不是独立安装的通用 ROS 发行版；用户问「有没有 ROS」时，**勿**仅凭非交互环境里 `which ros2` 为空就结论「无环境」。
+- 先查：`test -f /opt/tros/humble/setup.bash`（或 `ls /opt/tros/*/setup.bash`）；再查登录 shell 是否已 source：`grep -E 'tros|setup.bash' ~/.bashrc ~/.profile`。
+- 已装 TROS 但未写入 bashrc：可临时 `source /opt/tros/humble/setup.bash`；持久化需在用户同意下往 `~/.bashrc` 追加 source 行（路径以板上为准）。详情见技能 **RDK ROS**（`rdk-ros`）。
 
 ### 供电/启动故障
 - 必须 5V/5A USB-C 适配器，禁止电脑 USB 供电

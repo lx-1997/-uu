@@ -1,7 +1,7 @@
 ---
 name: RDK Terminal
 description: SSH 终端会话管理与命令执行，支持 exec 单次执行和 PTY 交互两种模式。触发词：终端、命令行、terminal、ssh、执行命令、run。
-version: 1.0.0
+version: 1.0.1
 trigger: 终端,命令行,terminal,ssh,执行命令,run,exec,控制台,shell
 risk: medium
 permissions: device_exec
@@ -21,10 +21,12 @@ disableModelInvocation: true
 - 用户说：执行、运行、run、exec + 具体命令。
 - 用户直接输入 shell 命令（ls、top、cat、ros2 等）。
 
+> **ros2 / TROS**：板上多为 **TROS**（`/opt/tros/.../setup.bash`）。非交互 exec 若未先 `source`，`ros2` 可能不在 PATH；勿据此断言「无 ROS」。见 `rdk-ros` 技能。
+
 ## 执行流程
 
 ### exec 模式（单次命令执行）
-1. **识别命令**：如果用户输入看起来像 shell 命令（以 ls/cat/top/ros2/pip 等开头），提取命令部分。
+1. **识别命令**：如果用户输入看起来像 shell 命令（以 ls/cat/top/ros2/pip 等开头），提取命令部分。若用户要跑 `ros2 ...`，可建议命令前缀 `bash -lc 'source /opt/tros/humble/setup.bash 2>/dev/null; ros2 ...'`（路径以板上存在为准）。
 2. **执行命令**：调用 `POST /api/devices/{deviceId}/exec` 执行单条命令，或 `POST /api/devices/{deviceId}/batch-exec` 批量执行。
 3. **返回结果**：展示命令输出。
 

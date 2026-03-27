@@ -11,6 +11,21 @@ const ROSBRIDGE_PORT = 9090;
 
 type Phase = 'idle' | 'checking' | 'starting' | 'connecting' | 'connected' | 'error';
 
+/** 板端 TROS setup.bash 路径（仅允许 /opt/tros 或 /opt/ros 下） */
+function isAllowedTrosSetupPath(p: string): boolean {
+  return /^\/opt\/(tros|ros)\/[a-zA-Z0-9._/-]+\/setup\.bash$/.test(p);
+}
+
+export type RosInstallInfo = {
+  ros2: boolean;
+  tros: boolean;
+  rosbridge: boolean;
+  /** 探测到的 setup.bash，用于写入 bashrc */
+  setupFile: string;
+  /** ~/.bashrc 中是否已有 TROS source */
+  bashrcSourcesTros: boolean;
+};
+
 export default function Ros() {
   const { currentDevice } = useDeviceStore();
   const { addToast } = useToastStore();
@@ -28,6 +43,8 @@ export default function Ros() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  /** 最近一次环境检测结果，用于错误态下展示「写入 bashrc」等 */
+  const lastInstallRef = useRef<RosInstallInfo | null>(null);
 
   const appendLog = (line: string) => {
     const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -79,15 +96,14 @@ export default function Ros() {
             if command -v lsof >/dev/null 2>&1; then lsof -iTCP:${ROSBRIDGE_PORT} -sTCP:LISTEN 2>/dev/null | grep -q LISTEN && return 0; fi
             return 1
           }
-          source /opt/ros/*/setup.bash 2>/dev/null || true
-          source /opt/tros/*/setup.bash 2>/dev/null || true
+          for sf in /opt/tros/*/setup.bash /opt/ros/*/setup.bash; do [ -f "\$sf" ] && . "\$sf" 2>/dev/null; done
           # 尝试 ROS2 方式启动
           if command -v ros2 &>/dev/null; then
             nohup ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=${ROSBRIDGE_PORT} &>/tmp/rosbridge.log &
             sleep 3
           # 尝试 ROS1 方式启动
           elif command -v roslaunch &>/dev/null; then
-            source /opt/ros/*/setup.bash 2>/dev/null || true
+            for sf in /opt/tros/*/setup.bash /opt/ros/*/setup.bash; do [ -f "\$sf" ] && . "\$sf" 2>/dev/null; done
             nohup roslaunch rosbridge_server rosbridge_websocket.launch port:=${ROSBRIDGE_PORT} &>/tmp/rosbridge.log &
             sleep 3
           fi
@@ -111,7 +127,7 @@ export default function Ros() {
       const result = await executeDeviceCommand(
         deviceId,
         `bash -lc "
-          source /opt/ros/*/setup.bash 2>/dev/null || source /opt/tros/*/setup.bash 2>/dev/null || true
+          for sf in /opt/tros/*/setup.bash /opt/ros/*/setup.bash; do [ -f "\$sf" ] && . "\$sf" 2>/dev/null; done
           ROS_DISTRO=\$(printenv ROS_DISTRO 2>/dev/null || ls /opt/ros/ 2>/dev/null | head -1 || ls /opt/tros/ 2>/dev/null | head -1 || echo humble)
           echo INSTALLING_FOR_DISTRO=\$ROS_DISTRO
           if [ \"\$(id -u)\" = \"0\" ]; then
@@ -157,28 +173,83 @@ export default function Ros() {
     }
   }, [t]);
 
-  /* 检查 ROS2/TROS 和 rosbridge 安装状态 */
-  const checkInstallation = useCallback(async (deviceId: string): Promise<{ ros2: boolean; tros: boolean; rosbridge: boolean }> => {
+  /**
+   * 检查 ROS2/TROS 与 rosbridge。
+   * RDK 官方环境为 TROS（兼容 ros2 CLI），不能用「未装标准 ROS」简单判断；
+   * 用循环 source 替代 `source /opt/tros/*`（多发行版并存时 glob 行为不稳定）。
+   */
+  const checkInstallation = useCallback(async (deviceId: string): Promise<RosInstallInfo> => {
+    const empty: RosInstallInfo = {
+      ros2: false,
+      tros: false,
+      rosbridge: false,
+      setupFile: '',
+      bashrcSourcesTros: false,
+    };
     try {
       const result = await executeDeviceCommand(
         deviceId,
-        `bash -lc "
-          source /opt/tros/*/setup.bash 2>/dev/null || source /opt/ros/*/setup.bash 2>/dev/null || true
-          command -v ros2 &>/dev/null && echo ROS2_OK || echo ROS2_MISSING
-          test -d /opt/tros && echo TROS_OK || echo TROS_MISSING
-          dpkg -l 2>/dev/null | grep -qE 'rosbridge|tros' && echo ROSBRIDGE_PKG_OK || (pip3 list 2>/dev/null | grep -qi rosbridge && echo ROSBRIDGE_PKG_OK || echo ROSBRIDGE_PKG_MISSING)
-        "`
+        `bash -lc 'ros2_ok=0; tros_ok=0; setup_file=""; bashrc_flag=0;
+for f in /opt/tros/*/setup.bash /opt/ros/*/setup.bash; do [ -f "\$f" ] || continue; . "\$f" 2>/dev/null || true; if command -v ros2 >/dev/null 2>&1; then ros2_ok=1; [ -z "\$setup_file" ] && setup_file="\$f"; break; fi; done;
+if [ "\$ros2_ok" != 1 ]; then while IFS= read -r f; do [ -f "\$f" ] || continue; . "\$f" 2>/dev/null || true; if command -v ros2 >/dev/null 2>&1; then ros2_ok=1; [ -z "\$setup_file" ] && setup_file="\$f"; break; fi; done < <(find /opt/tros /opt/ros -maxdepth 6 -name setup.bash 2>/dev/null | head -16); fi;
+if [ "\$ros2_ok" != 1 ]; then for r in /opt/tros/*/bin/ros2 /opt/ros/*/bin/ros2; do [ -x "\$r" ] && ros2_ok=1 && break; done; fi;
+[ -d /opt/tros ] && tros_ok=1;
+dpkg -l 2>/dev/null | grep -qE "^ii[[:space:]]+tros-" && tros_ok=1;
+for f in /opt/tros/*/setup.bash; do [ -f "\$f" ] && { tros_ok=1; break; }; done;
+[ -z "\$setup_file" ] && setup_file=\$(find /opt/tros -maxdepth 6 -name setup.bash 2>/dev/null | head -1);
+[ -n "\${HOME:-}" ] && [ -f "\$HOME/.bashrc" ] && grep -qE "(tros|/opt/tros).*setup\\.bash" "\$HOME/.bashrc" 2>/dev/null && bashrc_flag=1;
+[ "\$ros2_ok" = 1 ] && echo ROS2_OK || echo ROS2_MISSING;
+[ "\$tros_ok" = 1 ] && echo TROS_OK || echo TROS_MISSING;
+[ -n "\$setup_file" ] && echo "SETUP_FILE=\$setup_file" || echo "SETUP_FILE=";
+echo "BASHRC_TROS=\$bashrc_flag";
+dpkg -l 2>/dev/null | grep -qi rosbridge && echo ROSBRIDGE_PKG_OK || (pip3 list 2>/dev/null | grep -qi rosbridge && echo ROSBRIDGE_PKG_OK || echo ROSBRIDGE_PKG_MISSING)'`
       );
       const out = result.output || '';
+      let setupFile = '';
+      const setupLine = out.split(/\r?\n/).find(l => l.startsWith('SETUP_FILE='));
+      if (setupLine) setupFile = setupLine.slice('SETUP_FILE='.length).trim();
+      const bashrcLine = out.split(/\r?\n/).find(l => l.startsWith('BASHRC_TROS='));
+      const bashrcSourcesTros = bashrcLine?.includes('BASHRC_TROS=1') ?? false;
       return {
         ros2: out.includes('ROS2_OK'),
         tros: out.includes('TROS_OK'),
         rosbridge: out.includes('ROSBRIDGE_PKG_OK'),
+        setupFile,
+        bashrcSourcesTros,
       };
     } catch {
-      return { ros2: false, tros: false, rosbridge: false };
+      return empty;
     }
   }, []);
+
+  /** 将 TROS source 块追加到设备 ~/.bashrc（便于 SSH 交互终端中直接使用 ros2） */
+  const appendTrosToBashrc = useCallback(async (deviceId: string, setupPath: string): Promise<boolean> => {
+    if (!isAllowedTrosSetupPath(setupPath)) {
+      appendLog(t('ros.log.bashrcBadPath', '拒绝：setup 路径不在允许范围内'));
+      return false;
+    }
+    const markBegin = '# >>> RDK Studio TROS';
+    const block = `\n${markBegin}\n[ -f ${JSON.stringify(setupPath)} ] && . ${JSON.stringify(setupPath)}\n# <<< RDK Studio TROS\n`;
+    const b64 = btoa(block);
+    try {
+      const result = await executeDeviceCommand(
+        deviceId,
+        `bash -lc 'f="$HOME/.bashrc"; touch "$f"; grep -qF ${JSON.stringify(markBegin)} "$f" 2>/dev/null && echo BASHRC_ALREADY || { echo ${JSON.stringify(b64)} | base64 -d >> "$f"; echo BASHRC_OK; }'`
+      );
+      const o = result.output || '';
+      if (o.includes('BASHRC_ALREADY')) {
+        appendLog(t('ros.log.bashrcExists', '~/.bashrc 中已有 RDK Studio 追加的 TROS 块'));
+        return true;
+      }
+      if (o.includes('BASHRC_OK')) {
+        appendLog(t('ros.log.bashrcOk', '已写入 ~/.bashrc，重新登录 SSH 或执行 source ~/.bashrc 后可在终端使用 ros2'));
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, [appendLog, t]);
 
   /* 完整连接流程：检查安装 → 安装 → 启动 → 连接 Webviz */
   const handleConnect = useCallback(async () => {
@@ -193,6 +264,7 @@ export default function Ros() {
     appendLog(t('ros.log.checkStart', '开始检查 ROS 环境...'));
 
     const install = await checkInstallation(currentDevice.id);
+    lastInstallRef.current = install;
 
     const rosLabel = install.tros ? t('ros.tros', 'TROS') : t('ros.ros2', 'ROS2');
     const rosState = install.ros2 ? rosLabel : t('ros.detect.noRos', '未安装 ROS2/TROS');
@@ -201,11 +273,20 @@ export default function Ros() {
       rb: install.rosbridge ? t('ros.rb.installed', '已安装') : t('ros.rb.notInstalled', '未安装'),
     }));
 
+    if (!install.ros2 && install.tros) {
+      setPhase('error');
+      setStatusText(t('ros.err.trosNoRos2', '已检测到 TROS 目录或相关包，但未能加载 ros2。请检查 /opt/tros 下安装是否完整，或在终端执行: source /opt/tros/<发行版>/setup.bash'));
+      appendLog(t('ros.log.trosNoRos2', 'TROS 已探测到，但 source 后仍无 ros2 命令'));
+      addToast(t('ros.toast.trosNoRos2', 'TROS 环境异常，无法启动 rosbridge'), 'warning');
+      return;
+    }
+
     if (!install.ros2 && !install.tros) {
       setPhase('error');
-      setStatusText(t('ros.err.noRos', '设备上未安装 ROS2 或 TROS。请先安装 TROS (sudo apt install tros) 或 ROS2。'));
-      appendLog(t('ros.log.noRos', 'ROS2/TROS 均未安装'));
-      addToast(t('ros.toast.noRos', '设备未安装 ROS2/TROS，请先在终端中安装'), 'warning');
+      setStatusText(t('ros.err.noRos', '未检测到 ROS2/TROS（相关包未安装或路径异常）。RDK 官方镜像通常使用 TROS（兼容 ros2 CLI，并非未装「标准 ROS」）；可尝试: sudo apt install tros-humble-ros-base（以镜像文档为准）。'));
+      appendLog(t('ros.log.noRos', '未检测到 ROS2/TROS'));
+      appendLog(t('ros.log.rdkTrosHint', '说明：板端多为 TROS，若已刷官方镜像仍提示未安装，请在设备上确认 /opt/tros 是否存在、dpkg 是否含 tros- 包。'));
+      addToast(t('ros.toast.noRos', '设备未检测到 ROS2/TROS'), 'warning');
       return;
     }
 
@@ -259,6 +340,19 @@ export default function Ros() {
     setIframeLoading(true);
     setShowIframe(true);
   }, [currentDevice, addToast, checkRosbridge, startRosbridge, buildWebvizUrl, checkInstallation, installRosbridge, t, tf]);
+
+  const handleAppendTrosBashrc = useCallback(async () => {
+    const device = currentDevice;
+    const setup = lastInstallRef.current?.setupFile;
+    if (!device || !setup) return;
+    setPhase('checking');
+    setStatusText(t('ros.phase.writeBashrc', '正在写入 ~/.bashrc...'));
+    const ok = await appendTrosToBashrc(device.id, setup);
+    if (ok) addToast(t('ros.toast.bashrcOk', '已写入 ~/.bashrc'), 'success');
+    else addToast(t('ros.toast.bashrcFail', '写入失败，请在设备上手动编辑 ~/.bashrc'), 'error');
+    setPhase('idle');
+    setStatusText('');
+  }, [appendTrosToBashrc, currentDevice, addToast, t]);
 
   /* 断开连接 */
   const handleDisconnect = () => {
@@ -326,6 +420,7 @@ export default function Ros() {
   /* 设备切换时断开 */
   useEffect(() => {
     handleDisconnect();
+    lastInstallRef.current = null;
   }, [currentDevice?.id]);
 
   return (
@@ -449,6 +544,9 @@ export default function Ros() {
             <p className="immersive-welcome-desc">
               {t('ros.welcome.desc', '自动启动 rosbridge_websocket 并通过 Webviz 实时可视化 ROS 话题、TF、点云等数据')}
             </p>
+            <p className="immersive-welcome-desc ros-tros-note">
+              {t('ros.welcome.trosNote', 'RDK 板卡默认使用 TROS（与 ROS2 工具链兼容）。若仅因终端未 source 而提示找不到 ros2，可在检测后选择将环境写入 ~/.bashrc。')}
+            </p>
 
             {phase === 'checking' && (
               <div className="immersive-loading">
@@ -467,8 +565,14 @@ export default function Ros() {
             {phase === 'error' && (
               <div className="immersive-error">
                 <span>⚠️ {statusText}</span>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                   <button className="btn btn-primary" onClick={handleConnect}>{t('ros.retry', '重试')}</button>
+                  {lastInstallRef.current?.setupFile && !lastInstallRef.current.bashrcSourcesTros
+                    && !lastInstallRef.current.ros2 && lastInstallRef.current.tros && (
+                    <button type="button" className="btn btn-ghost" onClick={handleAppendTrosBashrc}>
+                      {t('ros.appendBashrc', '将 TROS 写入 ~/.bashrc')}
+                    </button>
+                  )}
                   {statusText.includes(t('ros.marker.notInstalled', '未安装')) && (
                     <button className="btn btn-ghost" onClick={() => {
                       if (currentDevice) {

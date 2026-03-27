@@ -1,8 +1,8 @@
 ---
 name: RDK ROS
-description: ROS2 话题管理与 rosbag 录制：扫描话题、列出节点、录制/停止。触发词：ROS、话题、节点、rosbag、录制、rosbridge。
-version: 1.0.0
-trigger: ros,topic,话题,节点,rosbag,录制,rosbridge,ROS2,扫描话题
+description: TROS（板端 ROS2 兼容栈）话题与 rosbag：扫描话题、列出节点、录制/停止。RDK 默认是 TROS 而非独立「ROS 发行版」；勿因 which ros2 为空就断言无环境。触发词：ROS、ROS2、TROS、tros、话题、节点、rosbag、录制、rosbridge。
+version: 1.1.0
+trigger: ros,topic,话题,节点,rosbag,录制,rosbridge,ROS2,扫描话题,TROS,tros,setup.bash,bashrc
 risk: low
 permissions: device_exec
 delegate_preference: local
@@ -14,10 +14,35 @@ category: Procedure
 disableModelInvocation: true
 ---
 
-# RDK ROS
+# RDK ROS（TROS / ROS2）
+
+## TROS 与「有没有 ROS 环境」
+
+- RDK 板端中间件是 **TROS**（TogetheROS.Bot，常见路径 `/opt/tros/<distro>/`），与 **ROS2** 接口兼容；用户口语里的「ROS」在板上多数指 **已 source TROS 后的 ros2 CLI**。
+- **误判来源**：非交互 SSH/脚本里若未 `source`，`which ros2` 可能为空、`ros2 topic list` 会失败，**不等于**未安装 TROS。应先检查是否已安装 setup 脚本，以及 **登录 shell 是否自动 source**。
+- **推荐表述**：向用户说明「板上是 TROS（ROS2 兼容），需先加载 `/opt/tros/.../setup.bash`」，避免说「没有 ROS」。
+
+### 检测 TROS 是否在 shell 中生效（`device_exec` 或本机终端）
+
+```bash
+# 典型安装路径是否存在（Humble 最常见，其它发行版可能是 foxy 等，以板上为准）
+test -f /opt/tros/humble/setup.bash && echo "TROS humble setup 存在" || ls -d /opt/tros/*/setup.bash 2>/dev/null
+# 当前用户 bashrc / profile 是否已自动 source TROS
+grep -nE 'tros|setup\.bash|local_setup' ~/.bashrc ~/.profile 2>/dev/null || true
+```
+
+若 **`setup.bash` 存在** 但 **bashrc 中无 source**：交互式登录可临时执行 `source /opt/tros/humble/setup.bash`（路径以探测为准）。需要**持久化**时，在用户确认后可在 `~/.bashrc` 末尾追加一行，例如：
+
+```bash
+# 仅当用户明确要求写入且路径已确认存在时
+echo 'source /opt/tros/humble/setup.bash' >> ~/.bashrc
+```
+
+追加后新开终端或 `source ~/.bashrc` 再测 `ros2 --help`。
 
 ## 适用场景
-- 用户说：ROS、topic、话题、节点、扫描话题。
+- 用户说：ROS、ROS2、TROS、topic、话题、节点、扫描话题。
+- 用户问「板上有没有 ROS」——先按上文区分 **TROS 已装未 source** vs **未安装**。
 - 用户想录制或回放 rosbag。
 - 用户想查看 ROS2 节点状态。
 
@@ -74,6 +99,7 @@ Response: { ok: boolean, output: string }
 - 录制操作需报告：录制状态、输出路径、涉及的话题。
 
 ## 禁止事项
-- **ROS2 依赖环境**：命令依赖 `/opt/tros/humble/setup.bash`，如返回 ROS2_NOT_INSTALLED 需告知用户安装 TROS。
-- **不在 TROS 未安装时强行执行 ROS 命令**：应先引导用户安装 TROS。
+- **ROS2 依赖环境**：底层为 **TROS**；API/命令依赖已加载的 overlay（常见 `source /opt/tros/humble/setup.bash`）。若接口返回 `ROS2_NOT_INSTALLED` 或明显失败，先区分 **未安装 TROS** vs **未 source**（见上文检测命令），勿笼统说「没有 ROS」。
+- **不在 TROS 未安装时强行执行 ROS 命令**：应先引导用户按官方文档安装 TROS；若仅未写入 bashrc，说明 source 与持久化方式。
+- **修改 `~/.bashrc` 须用户确认**：不静默覆盖用户环境。
 - **Webviz 可视化依赖 rosbridge**：如需可视化需先确认 rosbridge 服务运行。
