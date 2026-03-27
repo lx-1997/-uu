@@ -123,6 +123,19 @@ function getAppRoot() {
   return path.join(__dirname, '..');
 }
 
+/** 开发态 Windows/Linux 任务栏图标（与 build-resources / branding 一致） */
+function resolveWindowIcon() {
+  if (process.platform === 'darwin') return undefined;
+  const root = path.join(__dirname, '..');
+  const ico = path.join(root, 'build-resources', 'icon.ico');
+  const png = path.join(root, 'build-resources', 'icon.png');
+  const branding = path.join(root, 'public', 'branding', 'icon.png');
+  if (fs.existsSync(ico)) return ico;
+  if (fs.existsSync(png)) return png;
+  if (fs.existsSync(branding)) return branding;
+  return undefined;
+}
+
 /* ── 启动内嵌 Express 服务器（仅生产模式） ── */
 function stopEmbeddedServer() {
   const proc = serverProcess;
@@ -305,6 +318,7 @@ async function createMainWindow() {
     minHeight: 760,
     autoHideMenuBar: true,
     title: 'RDK Studio',
+    icon: resolveWindowIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,

@@ -3,6 +3,7 @@ dist/
 dist-server/
 .env
 release/
+# 克隆前端参考仓后，桌面打包会优先使用其中的 icon（见 scripts/desktop-icons.mjs）
 rdkstudio_frontend-master/
 build-resources/
 openclaw-main/

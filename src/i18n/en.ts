@@ -158,7 +158,6 @@ export const EN: Record<string, string> = {
   'settings.feishu.save': 'Save',
   'settings.feishu.saveConfig': 'Save configuration',
   'settings.feishu.maskKeep': '(leave blank to keep)',
-  'settings.feishu.boundCount': 'Bound ({count})',
   'settings.persona.save': 'Save',
   'settings.feishu.stepsTitle': 'Setup',
   'settings.feishu.step1': 'Create a Feishu app and copy App ID / Secret',

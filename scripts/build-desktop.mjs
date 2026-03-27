@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
+import { prepareBuildResources } from './desktop-icons.mjs';
 
 const target = String(process.argv[2] || '').trim();
 const mode = String(process.argv[3] || '').trim().toLowerCase();
@@ -38,25 +39,6 @@ if (platform !== expectedPlatform) {
 const buildResourcesDir = path.join(rootDir, 'build-resources');
 const packageJsonPath = path.join(rootDir, 'package.json');
 const strictResourceCheck = String(process.env.RDK_DESKTOP_STRICT_RESOURCES || '').trim() === '1';
-
-const resourcesPlan = [
-  { source: path.join(rootDir, 'public', 'vnc', 'app', 'images', 'icons', 'novnc.ico'), target: 'icon.ico' },
-  { source: path.join(rootDir, 'public', 'vnc', 'app', 'images', 'icons', 'novnc-ios-180.png'), target: 'icon.png' },
-];
-
-function ensureBuildResourcesPrepared() {
-  fs.mkdirSync(buildResourcesDir, { recursive: true });
-  for (const { source, target: name } of resourcesPlan) {
-    const dest = path.join(buildResourcesDir, name);
-    if (fs.existsSync(dest)) continue;
-    if (!fs.existsSync(source)) {
-      console.warn(`[build:desktop] icon source not found: ${source}`);
-      continue;
-    }
-    fs.copyFileSync(source, dest);
-    console.log(`[build:desktop] prepared ${name}`);
-  }
-}
 
 function validateBuildResources() {
   const requiredByTarget = {
@@ -174,7 +156,7 @@ async function cleanReleaseDirWithRetry(dir, maxRetries = 6, delayMs = 3000) {
 }
 
 try {
-  ensureBuildResourcesPrepared();
+  await prepareBuildResources(rootDir);
   validateBuildResources();
   validateBuildConfig();
   if (cleanReleaseDir) {
