@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
+import { useI18n } from '../i18n/use-i18n';
 
-interface NavItem {
+interface NavItemDef {
   tab: Tab;
-  label: string;
-  desc: string;
+  labelKey: string;
+  descKey: string;
+  zhLabel: string;
+  zhDesc: string;
   paths: string[];
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { tab: 'dashboard', label: '工作台', desc: '设备总览与快捷操作',
+const NAV_ITEMS: NavItemDef[] = [
+  { tab: 'dashboard', labelKey: 'nav.dashboard.label', descKey: 'nav.dashboard.desc', zhLabel: '工作台', zhDesc: '设备总览与快捷操作',
     paths: ['M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4'] },
-  { tab: 'openclaw', label: 'OpenClaw', desc: '板端 AI Agent 管理',
+  { tab: 'openclaw', labelKey: 'nav.openclaw.label', descKey: 'nav.openclaw.desc', zhLabel: 'OpenClaw', zhDesc: '板端 AI Agent 管理',
     paths: [
       'M8 5c0-1.5 1.8-3 4-3s4 1.5 4 3',
       'M7 8c-2-1-4 0-4 2s1 3 2 3',
@@ -21,27 +24,27 @@ const NAV_ITEMS: NavItem[] = [
       'M9.5 7a1 1 0 100-2 1 1 0 000 2z',
       'M14.5 7a1 1 0 100-2 1 1 0 000 2z',
     ] },
-  { tab: 'skills', label: '技能工坊', desc: 'OpenClaw 技能生成与部署',
+  { tab: 'skills', labelKey: 'nav.skills.label', descKey: 'nav.skills.desc', zhLabel: '技能工坊', zhDesc: 'OpenClaw 技能生成与部署',
     paths: ['M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z'] },
 ];
 
-const CONNECT_ITEMS: NavItem[] = [
-  { tab: 'terminal', label: '终端', desc: 'SSH 远程命令行',
+const CONNECT_ITEMS: NavItemDef[] = [
+  { tab: 'terminal', labelKey: 'nav.terminal.label', descKey: 'nav.terminal.desc', zhLabel: '终端', zhDesc: 'SSH 远程命令行',
     paths: ['M6.75 7.5l3 2.25-3 2.25m4.5 0h3M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15A2.25 2.25 0 002.25 6.75v10.5A2.25 2.25 0 004.5 19.5z'] },
-  { tab: 'files', label: '文件', desc: '设备文件管理器',
+  { tab: 'files', labelKey: 'nav.files.label', descKey: 'nav.files.desc', zhLabel: '文件', zhDesc: '设备文件管理器',
     paths: ['M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z'] },
-  { tab: 'vnc', label: '远程桌面', desc: 'noVNC 可视化桌面连接',
+  { tab: 'vnc', labelKey: 'nav.vnc.label', descKey: 'nav.vnc.desc', zhLabel: '远程桌面', zhDesc: 'noVNC 可视化桌面连接',
     paths: ['M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25h-13.5A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25'] },
-  { tab: 'ide', label: 'IDE', desc: '在线代码编辑器',
+  { tab: 'ide', labelKey: 'nav.ide.label', descKey: 'nav.ide.desc', zhLabel: 'IDE', zhDesc: '在线代码编辑器',
     paths: ['M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5'] },
 ];
 
-const CAPABILITY_ITEMS: NavItem[] = [
-  { tab: 'hardware', label: '硬件', desc: 'GPIO / 传感器管理',
+const CAPABILITY_ITEMS: NavItemDef[] = [
+  { tab: 'hardware', labelKey: 'nav.hardware.label', descKey: 'nav.hardware.desc', zhLabel: '硬件', zhDesc: 'GPIO / 传感器管理',
     paths: ['M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z'] },
-  { tab: 'flasher', label: '烧录/备份', desc: '系统镜像烧录与备份',
+  { tab: 'flasher', labelKey: 'nav.flasher.label', descKey: 'nav.flasher.desc', zhLabel: '烧录/备份', zhDesc: '系统镜像烧录与备份',
     paths: ['M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3'] },
-  { tab: 'ros', label: 'ROS', desc: 'ROS2 话题与节点管理',
+  { tab: 'ros', labelKey: 'nav.ros.label', descKey: 'nav.ros.desc', zhLabel: 'ROS', zhDesc: 'ROS2 话题与节点管理',
     paths: ['M12 12m-3 0a3 3 0 106 0 3 3 0 10-6 0', 'M12 4.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M20 12a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M12 20a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M4 12a1.5 1.5 0 110-3 1.5 1.5 0 010 3z'] },
 ];
 
@@ -64,22 +67,27 @@ export default function IconRail() {
     railExpanded, setRailExpanded,
     obReturnStep, setObReturnStep,
   } = useAppState();
+  const { t } = useI18n();
 
   const [showDevicePanel, setShowDevicePanel] = useState(false);
   const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
 
-  const renderGroup = (items: NavItem[]) =>
-    items.map((item) => (
-      <button
-        key={item.tab}
-        className={`rail-btn ${activeTab === item.tab ? 'active' : ''}`}
-        data-tooltip={!railExpanded ? `${item.label} · ${item.desc}` : undefined}
-        onClick={() => setActiveTab(item.tab)}
-      >
-        <NavIcon paths={item.paths} />
-        {railExpanded && <span className="rail-label">{item.label}</span>}
-      </button>
-    ));
+  const renderGroup = (items: NavItemDef[]) =>
+    items.map((item) => {
+      const label = t(item.labelKey, item.zhLabel);
+      const desc = t(item.descKey, item.zhDesc);
+      return (
+        <button
+          key={item.tab}
+          className={`rail-btn ${activeTab === item.tab ? 'active' : ''}`}
+          data-tooltip={!railExpanded ? `${label} · ${desc}` : undefined}
+          onClick={() => setActiveTab(item.tab)}
+        >
+          <NavIcon paths={item.paths} />
+          {railExpanded && <span className="rail-label">{label}</span>}
+        </button>
+      );
+    });
 
   return (
     <>
@@ -100,31 +108,31 @@ export default function IconRail() {
           {obReturnStep && (
             <button
               className="rail-btn rail-return-guide"
-              data-tooltip={!railExpanded ? '返回新手引导' : undefined}
+              data-tooltip={!railExpanded ? t('rail.returnGuide.tip', '返回新手引导') : undefined}
               onClick={() => { setActiveTab('dashboard'); setObReturnStep(null); }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
               </svg>
-              {railExpanded && <span className="rail-label">返回引导</span>}
+              {railExpanded && <span className="rail-label">{t('rail.returnGuide', '返回引导')}</span>}
             </button>
           )}
           <button
             className="rail-btn"
-            data-tooltip={!railExpanded ? (currentDevice ? currentDevice.name : '选择设备') : undefined}
+            data-tooltip={!railExpanded ? (currentDevice ? currentDevice.name : t('rail.pickDevice', '选择设备')) : undefined}
             onClick={() => setShowDevicePanel(!showDevicePanel)}
           >
             <span className={`rail-device-dot ${deviceOnline ? 'online' : ''}`} />
-            {railExpanded && <span className="rail-label">{currentDevice ? currentDevice.name : '设备'}</span>}
+            {railExpanded && <span className="rail-label">{currentDevice ? currentDevice.name : t('rail.device', '设备')}</span>}
           </button>
 
           <button
             className="rail-theme-toggle"
             onClick={toggleTheme}
             data-tooltip={!railExpanded ? (
-              theme === 'aurora' ? '切换到奶咖模式' :
-              theme === 'cozy'  ? '切换到赛博模式' :
-                                  '切换到极光模式'
+              theme === 'aurora' ? t('theme.switch.cozy', '切换到奶咖模式') :
+              theme === 'cozy'  ? t('theme.switch.cyber', '切换到赛博模式') :
+                                  t('theme.switch.aurora', '切换到极光模式')
             ) : undefined}
           >
             {theme === 'aurora' ? '🍪' : theme === 'cozy' ? '🌙' : '☀️'}
@@ -132,21 +140,21 @@ export default function IconRail() {
 
           <button
             className="rail-btn"
-            data-tooltip={!railExpanded ? '设置' : undefined}
+            data-tooltip={!railExpanded ? t('rail.settings.tip', '设置') : undefined}
             onClick={() => setShowSettings(true)}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
               <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            {railExpanded && <span className="rail-label">设置</span>}
+            {railExpanded && <span className="rail-label">{t('rail.settings', '设置')}</span>}
           </button>
 
           <button
             className="rail-expand-btn"
             onClick={() => setRailExpanded(!railExpanded)}
-            data-tooltip={!railExpanded ? '展开导航' : undefined}
-            aria-label={railExpanded ? '收起导航' : '展开导航'}
+            data-tooltip={!railExpanded ? t('rail.expand.tip', '展开导航') : undefined}
+            aria-label={railExpanded ? t('rail.collapse.aria', '收起导航') : t('rail.expand.aria', '展开导航')}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: railExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
               <path d="M9 18l6-6-6-6" />
@@ -159,10 +167,10 @@ export default function IconRail() {
         <>
           <div className="device-panel-overlay" onClick={() => setShowDevicePanel(false)} />
           <div className="device-panel">
-            <div className="device-panel-title">设备列表</div>
+            <div className="device-panel-title">{t('device.listTitle', '设备列表')}</div>
             {devices.length === 0 && (
               <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', padding: '12px 0' }}>
-                还没有设备，请先添加一台 RDK 开发板。
+                {t('device.empty', '还没有设备，请先添加一台 RDK 开发板。')}
               </div>
             )}
             {devices.map((dev) => (
@@ -184,7 +192,7 @@ export default function IconRail() {
                 <button
                   type="button"
                   className="btn-icon"
-                  title="删除设备"
+                  title={t('device.remove', '删除设备')}
                   onClick={(e) => {
                     e.stopPropagation();
                     removeDevice(dev.id);
@@ -201,7 +209,7 @@ export default function IconRail() {
               className="device-panel-add-btn"
               onClick={() => { setShowAddDevice(true); setShowDevicePanel(false); }}
             >
-              + 扫描 / 添加设备
+              {t('device.add', '+ 扫描 / 添加设备')}
             </button>
           </div>
         </>

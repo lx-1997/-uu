@@ -657,7 +657,7 @@ export default function AIDock() {
     handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
-    currentDevice, addToast,
+    currentDevice, addToast, language,
   } = useAppState();
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
@@ -894,7 +894,7 @@ export default function AIDock() {
           const recognition = new SpeechRecognitionCtor();
           recognition.continuous = true;
           recognition.interimResults = true;
-          recognition.lang = 'zh-CN';
+          recognition.lang = language === 'en' ? 'en-US' : 'zh-CN';
           recognition.onresult = (event) => {
             const finalTranscript: string[] = [];
             for (let i = 0; i < event.results.length; i += 1) {
@@ -943,7 +943,7 @@ export default function AIDock() {
     } catch {
       addToast('无法访问麦克风，请检查浏览器或桌面端权限', 'warning');
     }
-  }, [isRecording, addAttachment, addToast, cmd, setCmd]);
+  }, [isRecording, addAttachment, addToast, cmd, setCmd, language]);
 
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);

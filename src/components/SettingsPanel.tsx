@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppState } from '../hooks/useAppState';
+import { useI18n } from '../i18n/use-i18n';
 import {
   approveFeishuPairing,
   fetchAgentConfig,
@@ -69,26 +70,27 @@ const AI_PROVIDER_OPTIONS = Object.entries(AI_PROVIDER_DEFAULTS).map(([value, it
 
 type SectionId = 'ai-engine' | 'persona' | 'policy' | 'feishu' | 'weixin' | 'connection' | 'forum';
 
-const SECTIONS: { id: SectionId; label: string }[] = [
-  { id: 'ai-engine', label: 'AI 引擎' },
-  { id: 'persona', label: '人格与行为' },
-  { id: 'policy', label: '执行策略' },
-  { id: 'feishu', label: '飞书' },
-  { id: 'weixin', label: '微信' },
-  { id: 'connection', label: '设备连接' },
-  { id: 'forum', label: '社区论坛' },
-];
-
 /* ═══════════════════════════════════════════
    Component
    ═══════════════════════════════════════════ */
 
 export default function SettingsPanel() {
   const {
-    showSettings, setShowSettings, settingsTab, setSettingsTab,
+    showSettings, setShowSettings,
     language, setLanguage, autoReconnect, setAutoReconnect,
     connectionTimeout, setConnectionTimeout, addToast,
   } = useAppState();
+  const { t, isEn } = useI18n();
+
+  const SECTIONS = useMemo(() => [
+    { id: 'ai-engine' as const, label: t('settings.sec.ai', 'AI 引擎') },
+    { id: 'persona' as const, label: t('settings.sec.persona', '人格与行为') },
+    { id: 'policy' as const, label: t('settings.sec.policy', '执行策略') },
+    { id: 'feishu' as const, label: t('settings.sec.feishu', '飞书') },
+    { id: 'weixin' as const, label: t('settings.sec.weixin', '微信') },
+    { id: 'connection' as const, label: t('settings.sec.connection', '设备连接') },
+    { id: 'forum' as const, label: t('settings.sec.forum', '社区论坛') },
+  ], [t]);
 
   /* ── Active nav section (IntersectionObserver) ── */
   const [activeSection, setActiveSection] = useState<SectionId>('ai-engine');
@@ -102,7 +104,7 @@ export default function SettingsPanel() {
 
   useEffect(() => {
     const root = scrollAreaRef.current;
-    if (!root || settingsTab !== 'rdkclaw') return;
+    if (!root) return;
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -116,7 +118,7 @@ export default function SettingsPanel() {
     );
     for (const el of sectionRefs.current.values()) observer.observe(el);
     return () => observer.disconnect();
-  }, [settingsTab, showSettings]);
+  }, [showSettings]);
 
   const scrollToSection = (id: SectionId) => {
     sectionRefs.current.get(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -272,7 +274,7 @@ export default function SettingsPanel() {
       const res = await fetchRDKClawSecurityAudit(30);
       setSecurityAudit(res.items || []);
     } catch {
-      addToast('读取安全审计失败', 'error');
+      addToast(t('toast.readAuditFail', '读取安全审计失败'), 'error');
     } finally {
       setSecurityAuditLoading(false);
     }
@@ -283,9 +285,9 @@ export default function SettingsPanel() {
     try {
       await clearRDKClawSecurityAudit();
       setSecurityAudit([]);
-      addToast('安全审计已清空', 'success');
+      addToast(t('toast.auditCleared', '安全审计已清空'), 'success');
     } catch {
-      addToast('清空安全审计失败', 'error');
+      addToast(t('toast.auditClearFail', '清空安全审计失败'), 'error');
     } finally {
       setSecurityAuditLoading(false);
     }
@@ -324,7 +326,7 @@ export default function SettingsPanel() {
   };
 
   useEffect(() => {
-    if (!showSettings || settingsTab !== 'rdkclaw') return;
+    if (!showSettings) return;
     setRdkclawLoading(true);
     Promise.all([
       refreshAiConfig(),
@@ -332,9 +334,9 @@ export default function SettingsPanel() {
       refreshFeishuData().then(() => setFeishuLoading(false)),
       loadWeixinData(),
     ])
-      .catch(() => addToast('读取配置失败', 'error'))
+      .catch(() => addToast(t('toast.readConfigFail', '读取配置失败'), 'error'))
       .finally(() => setRdkclawLoading(false));
-  }, [showSettings, settingsTab]);
+  }, [showSettings, t]);
 
   /* ═══════════════════════════════════════════
      Handlers
@@ -345,8 +347,8 @@ export default function SettingsPanel() {
     try {
       const res = await saveRDKClawPersona(persona);
       setPersona(res.persona);
-      addToast('人格设定已保存', 'success');
-    } catch { addToast('保存人格设定失败', 'error'); }
+      addToast(t('toast.personaSaved', '人格设定已保存'), 'success');
+    } catch { addToast(t('toast.personaSaveFail', '保存人格设定失败'), 'error'); }
     finally { setRdkclawSaving(false); }
   };
 
@@ -355,15 +357,15 @@ export default function SettingsPanel() {
     try {
       const res = await saveRDKClawPolicy(policy);
       setPolicy(res.policy);
-      addToast('执行策略已保存', 'success');
-    } catch { addToast('保存执行策略失败', 'error'); }
+      addToast(t('toast.policySaved', '执行策略已保存'), 'success');
+    } catch { addToast(t('toast.policySaveFail', '保存执行策略失败'), 'error'); }
     finally { setRdkclawSaving(false); }
   };
 
   const handleSaveForumCredential = async () => {
     const username = forumUsernameInput.trim();
     const password = forumPasswordInput.trim();
-    if (!username || !password) { addToast('请填写论坛用户名和密码', 'warning'); return; }
+    if (!username || !password) { addToast(t('toast.forumNeedCreds', '请填写论坛用户名和密码'), 'warning'); return; }
     setForumSaving(true);
     setForumVerifyMsg(null);
     try {
@@ -372,11 +374,16 @@ export default function SettingsPanel() {
       setForumAuth(res.auth);
       setForumVerifyMsg({
         ok: res.verified,
-        text: res.verified ? '凭据已保存，SSO 验证通过' : `凭据已保存，但验证未通过: ${res.verifyDetail}`,
+        text: res.verified
+          ? t('settings.forum.verifyOk', '凭据已保存，SSO 验证通过')
+          : (isEn ? `Saved; SSO verification failed: ${res.verifyDetail}` : `凭据已保存，但验证未通过: ${res.verifyDetail}`),
       });
-      addToast(res.verified ? '论坛凭据验证成功' : '凭据已保存，SSO 验证未通过', res.verified ? 'success' : 'warning');
+      addToast(
+        res.verified ? t('toast.forumSavedOk', '论坛凭据验证成功') : t('toast.forumSavedWarn', '凭据已保存，SSO 验证未通过'),
+        res.verified ? 'success' : 'warning',
+      );
     } catch (error) {
-      addToast(error instanceof Error ? error.message : '保存失败', 'error');
+      addToast(error instanceof Error ? error.message : t('toast.forumSaveFail', '保存失败'), 'error');
     } finally { setForumSaving(false); }
   };
 
@@ -386,9 +393,9 @@ export default function SettingsPanel() {
       const res = await clearRDKClawForumAuth();
       setForumUsernameInput(''); setForumPasswordInput('');
       await refreshRdkclawData();
-      addToast(res.message || '论坛认证已清空', 'success');
+      addToast(res.message || t('toast.forumCleared', '论坛认证已清空'), 'success');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : '清空论坛认证失败', 'error');
+      addToast(error instanceof Error ? error.message : t('toast.forumClearFail', '清空论坛认证失败'), 'error');
     } finally { setForumSaving(false); }
   };
 
@@ -407,9 +414,9 @@ export default function SettingsPanel() {
       });
       setFeishuAppSecret(''); setFeishuVerificationToken(''); setFeishuEncryptKey('');
       await refreshFeishuData();
-      addToast('飞书配置已保存', 'success');
+      addToast(t('toast.feishuSaved', '飞书配置已保存'), 'success');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : '保存飞书配置失败', 'error');
+      addToast(error instanceof Error ? error.message : t('toast.feishuSaveFail', '保存飞书配置失败'), 'error');
     } finally { setFeishuSaving(false); }
   };
 
@@ -419,25 +426,30 @@ export default function SettingsPanel() {
       if (action === 'stop') await stopFeishuRuntime();
       if (action === 'restart') await restartFeishuRuntime();
       await refreshFeishuData();
-      addToast(`飞书通道已${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}`, 'success');
+      addToast(
+        isEn
+          ? `Feishu channel ${action === 'start' ? 'started' : action === 'stop' ? 'stopped' : 'restarted'}`
+          : `飞书通道已${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}`,
+        'success',
+      );
     } catch (error) {
-      addToast(error instanceof Error ? error.message : '飞书运行态操作失败', 'error');
+      addToast(error instanceof Error ? error.message : t('toast.feishuRuntimeFail', '飞书运行态操作失败'), 'error');
     }
   };
 
   const handlePairingDecision = async (code: string, decision: 'approve' | 'reject') => {
     try {
-      if (decision === 'approve') { await approveFeishuPairing(code); addToast('配对审批已通过', 'success'); }
-      else { await rejectFeishuPairing(code); addToast('配对请求已拒绝', 'success'); }
+      if (decision === 'approve') { await approveFeishuPairing(code); addToast(t('toast.pairApprove', '配对审批已通过'), 'success'); }
+      else { await rejectFeishuPairing(code); addToast(t('toast.pairReject', '配对请求已拒绝'), 'success'); }
       await refreshFeishuData();
     } catch (error) {
-      addToast(error instanceof Error ? error.message : '处理配对请求失败', 'error');
+      addToast(error instanceof Error ? error.message : t('toast.pairFail', '处理配对请求失败'), 'error');
     }
   };
 
   const handleSaveAiConfig = async () => {
     const selectedEntry = aiSavedModels.find((item) => item.id === selectedAiModelId);
-    if (!aiApiKey.trim() && !selectedEntry?.hasApiKey) { addToast('请填写 API Key', 'warning'); return; }
+    if (!aiApiKey.trim() && !selectedEntry?.hasApiKey) { addToast(t('toast.needApiKey', '请填写 API Key'), 'warning'); return; }
     const providerDefaults = AI_PROVIDER_DEFAULTS[aiProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
     const effectiveModel = aiModel || providerDefaults.model;
     const providerChanged = selectedEntry && selectedEntry.provider !== aiProvider;
@@ -458,24 +470,38 @@ export default function SettingsPanel() {
       });
       await refreshAiConfig();
       const savedModel = `${aiProvider}/${effectiveModel}`;
-      addToast(selectedAiModelId ? `模型已更新: ${savedModel}` : `已新增并启用: ${savedModel}`, 'success');
+      addToast(
+        isEn
+          ? (selectedAiModelId ? `Model updated: ${savedModel}` : `Added and enabled: ${savedModel}`)
+          : (selectedAiModelId ? `模型已更新: ${savedModel}` : `已新增并启用: ${savedModel}`),
+        'success',
+      );
     } catch (err) {
-      addToast(`保存失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+      addToast(
+        `${isEn ? 'Save failed' : '保存失败'}: ${err instanceof Error ? err.message : t('toast.unknownErr', '未知错误')}`,
+        'error',
+      );
     } finally {
       setAiSaving(false);
     }
   };
 
   const handleDeleteAiModel = async () => {
-    if (!selectedAiModelId) { addToast('请先选择一个模型', 'warning'); return; }
+    if (!selectedAiModelId) { addToast(t('toast.pickModel', '请先选择一个模型'), 'warning'); return; }
     const entry = aiSavedModels.find((item) => item.id === selectedAiModelId);
     setAiSaving(true);
     try {
       await saveAgentConfig({ action: 'delete', id: selectedAiModelId });
       await refreshAiConfig();
-      addToast(`已删除: ${entry ? `${entry.provider}/${entry.model}` : selectedAiModelId}`, 'success');
+      addToast(
+        `${isEn ? 'Deleted' : '已删除'}: ${entry ? `${entry.provider}/${entry.model}` : selectedAiModelId}`,
+        'success',
+      );
     } catch (err) {
-      addToast(`删除失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+      addToast(
+        `${isEn ? 'Delete failed' : '删除失败'}: ${err instanceof Error ? err.message : t('toast.unknownErr', '未知错误')}`,
+        'error',
+      );
     } finally {
       setAiSaving(false);
     }
@@ -499,9 +525,9 @@ export default function SettingsPanel() {
       anchor.href = url; anchor.download = fileName;
       document.body.appendChild(anchor); anchor.click();
       document.body.removeChild(anchor); URL.revokeObjectURL(url);
-      addToast('模型配置已导出', 'success');
+      addToast(t('toast.exportOk', '模型配置已导出'), 'success');
     } catch (error) {
-      addToast(error instanceof Error ? error.message : '导出失败', 'error');
+      addToast(error instanceof Error ? error.message : t('toast.exportFail', '导出失败'), 'error');
     }
   };
 
@@ -510,12 +536,15 @@ export default function SettingsPanel() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as AgentConfigExportPayload;
-      if (!Array.isArray(parsed?.entries) || parsed.entries.length === 0) throw new Error('导入文件无有效 entries');
+      if (!Array.isArray(parsed?.entries) || parsed.entries.length === 0) throw new Error(t('err.importNoEntries', '导入文件无有效 entries'));
       await importAgentConfig({ registry: parsed, setActiveId: parsed.activeId || undefined, merge: true });
       await refreshAiConfig();
-      addToast('模型配置导入成功', 'success');
+      addToast(t('toast.importOk', '模型配置导入成功'), 'success');
     } catch (error) {
-      addToast(error instanceof Error ? `导入失败：${error.message}` : '导入失败', 'error');
+      addToast(
+        error instanceof Error ? `${isEn ? 'Import failed' : '导入失败'}：${error.message}` : t('toast.importFail', '导入失败'),
+        'error',
+      );
     } finally {
       setAiSaving(false);
       if (importAgentConfigRef.current) importAgentConfigRef.current.value = '';
@@ -546,7 +575,7 @@ export default function SettingsPanel() {
   const startWeixinLogin = () => {
     closeWeixinLogin();
     setWeixinLoginLoading(true);
-    setWeixinLoginStatus('正在获取二维码...');
+    setWeixinLoginStatus(t('settings.weixin.fetchQr', '正在获取二维码...'));
 
     let settled = false;
     const es = new EventSource(resolveApiUrl('/api/rdkclaw/weixin/login'));
@@ -557,12 +586,12 @@ export default function SettingsPanel() {
         const data = JSON.parse(e.data);
         if (data.qrcode) {
           setWeixinQrCode(data.qrcode);
-          setWeixinLoginStatus('请用微信扫描下方二维码');
+          setWeixinLoginStatus(t('settings.weixin.scanBelow', '请用微信扫描下方二维码'));
         }
       } catch { /* ignore */ }
     });
     es.addEventListener('scanned', () => {
-      setWeixinLoginStatus('已扫码，请在微信中确认...');
+      setWeixinLoginStatus(t('settings.weixin.confirmInWechat', '已扫码，请在微信中确认...'));
     });
     es.addEventListener('log', (e) => {
       try {
@@ -575,7 +604,7 @@ export default function SettingsPanel() {
       settled = true;
       try {
         const data = JSON.parse(e.data);
-        addToast(`微信已绑定: ${data.nickname || data.accountId}`, 'success');
+        addToast(`${isEn ? 'WeChat bound' : '微信已绑定'}: ${data.nickname || data.accountId}`, 'success');
         loadWeixinData();
       } catch { /* ignore */ }
       closeWeixinLogin();
@@ -585,7 +614,7 @@ export default function SettingsPanel() {
       settled = true;
       try {
         const data = JSON.parse((e as any).data || '{}');
-        addToast(`登录失败: ${data.message || '未知错误'}`, 'error');
+        addToast(`${isEn ? 'Login failed' : '登录失败'}: ${data.message || t('toast.unknownErr', '未知错误')}`, 'error');
       } catch { /* ignore */ }
       closeWeixinLogin();
     });
@@ -593,7 +622,7 @@ export default function SettingsPanel() {
     es.onerror = () => {
       if (settled) return;
       settled = true;
-      addToast('连接中断，请重试', 'error');
+      addToast(isEn ? 'Connection lost, please retry' : '连接中断，请重试', 'error');
       closeWeixinLogin();
     };
   };
@@ -618,41 +647,11 @@ export default function SettingsPanel() {
     <div className="settings-overlay" onClick={() => setShowSettings(false)}>
       <div className="settings-drawer" onClick={e => e.stopPropagation()}>
         <div className="settings-header">
-          <div className="settings-title">RDKClaw 设置</div>
+          <div className="settings-title">{t('settings.title', 'RDKClaw 设置')}</div>
           <button type="button" className="btn-icon" onClick={() => setShowSettings(false)}>×</button>
         </div>
 
-        <div className="settings-nav">
-          {([['rdkclaw', 'RDKClaw'], ['about', '关于']] as const).map(([key, label]) => (
-            <button key={key} type="button"
-              className={settingsTab === key ? 'settings-nav-btn active' : 'settings-nav-btn'}
-              onClick={() => setSettingsTab(key)}
-            >{label}</button>
-          ))}
-        </div>
-
-        {/* ═══════ About ═══════ */}
-        {settingsTab === 'about' && (
-          <div className="settings-body">
-            <div className="settings-card">
-              <div className="settings-row"><span className="settings-row-label">RDK Studio</span><span className="settings-row-static">v0.2.0 (Preview)</span></div>
-              <div className="settings-row"><span className="settings-row-label">目标固件</span><span className="settings-row-static">RDK OS 2.x</span></div>
-              <div className="settings-row">
-                <span className="settings-row-label">界面语言</span>
-                <div className="settings-row-value">
-                  <select className="select" title="界面语言" aria-label="界面语言" value={language} onChange={e => { setLanguage(e.target.value); addToast('语言偏好已保存', 'success'); }}>
-                    <option value="zh-CN">简体中文</option>
-                    <option value="en">English</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ═══════ RDKClaw ═══════ */}
-        {settingsTab === 'rdkclaw' && (
-          <div className="settings-layout">
+        <div className="settings-layout">
             <nav className="settings-section-nav">
               {SECTIONS.map((s) => (
                 <button key={s.id} type="button"
@@ -666,12 +665,12 @@ export default function SettingsPanel() {
 
               {/* ══ 1. AI 引擎 ══ */}
               <section id="ai-engine" className="settings-section" ref={registerSectionRef('ai-engine')}>
-                <H title="AI 引擎" desc="RDKClaw 的思考核心。选择服务商、填入 API Key 即可启用。" />
+                <H title={t('settings.ai.title', 'AI 引擎')} desc={t('settings.ai.desc', 'RDKClaw 的思考核心。选择服务商、填入 API Key 即可启用。')} />
                 <div className="settings-card">
                   <div className="settings-row">
-                    <span className="settings-row-label">当前模型</span>
+                    <span className="settings-row-label">{t('settings.ai.currentModel', '当前模型')}</span>
                     <div className="settings-row-value">
-                      <select className="select" title="已保存模型" aria-label="已保存模型" value={selectedAiModelId} disabled={aiSaving}
+                      <select className="select" title={t('settings.ai.savedModels.title', '已保存模型')} aria-label={t('settings.ai.savedModels.aria', '已保存模型')} value={selectedAiModelId} disabled={aiSaving}
                         onChange={async (e) => {
                           const id = e.target.value;
                           if (!id) { handleCreateNewAiModel(); return; }
@@ -680,7 +679,7 @@ export default function SettingsPanel() {
                           if (!entry.isActive) {
                             if (!entry.hasApiKey && !aiEnvApiKeyAvailable) {
                               applyAiModelToForm(entry);
-                              addToast('该模型未配置 API Key，请先编辑并保存后再切换（或配置环境变量 OPENAI_API_KEY）', 'warning');
+                              addToast(t('toast.aiNoKeyWarn', '该模型未配置 API Key，请先编辑并保存后再切换（或配置环境变量 OPENAI_API_KEY）'), 'warning');
                               return;
                             }
                             applyAiModelToForm(entry);
@@ -702,10 +701,13 @@ export default function SettingsPanel() {
                               const name = result.active
                                 ? `${result.active.provider}/${result.active.model}`
                                 : `${entry.provider}/${entry.model}`;
-                              addToast(`已切换到 ${name}`, 'success');
+                              addToast(`${isEn ? 'Switched to' : '已切换到'} ${name}`, 'success');
                             } catch (err) {
                               await refreshAiConfig().catch(() => {});
-                              addToast(`切换失败: ${err instanceof Error ? err.message : '未知错误'}`, 'error');
+                              addToast(
+                                `${isEn ? 'Switch failed' : '切换失败'}: ${err instanceof Error ? err.message : t('toast.unknownErr', '未知错误')}`,
+                                'error',
+                              );
                             } finally {
                               setAiSaving(false);
                             }
@@ -713,45 +715,45 @@ export default function SettingsPanel() {
                           }
                           applyAiModelToForm(entry);
                         }}>
-                        <option value="">+ 新建配置</option>
+                        <option value="">{t('settings.ai.newProfile', '+ 新建配置')}</option>
                         {aiSavedModels.map(i => {
                           const realName = `${i.provider}/${i.model}`;
                           const display = (i.label && i.label !== realName) ? `${i.label} (${realName})` : realName;
-                          const keyStatus = i.hasApiKey ? '' : ' [未配置Key]';
+                          const keyStatus = i.hasApiKey ? '' : t('settings.ai.noKeySuffix', ' [未配置Key]');
                           return <option key={i.id} value={i.id}>{display}{keyStatus}{i.isActive ? ' ✓' : ''}</option>;
                         })}
                       </select>
-                      {aiConfigured && <span className="settings-status-badge ok">已配置</span>}
+                      {aiConfigured && <span className="settings-status-badge ok">{t('settings.ai.configured', '已配置')}</span>}
                     </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">服务商</span>
+                    <span className="settings-row-label">{t('settings.ai.provider', '服务商')}</span>
                     <div className="settings-row-value">
-                      <select className="select" title="服务商" aria-label="服务商" value={aiProvider} onChange={e => applyAiProviderPreset(e.target.value)}>
+                      <select className="select" title={t('settings.ai.provider', '服务商')} aria-label={t('settings.ai.provider', '服务商')} value={aiProvider} onChange={e => applyAiProviderPreset(e.target.value)}>
                         {AI_PROVIDER_OPTIONS.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
                       </select>
                     </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">模型</span>
-                    <div className="settings-row-value"><input type="text" className="input" title="模型" aria-label="模型" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model} value={aiModel} onChange={e => { setAiModel(e.target.value); setAiLabel(''); }} /></div>
+                    <span className="settings-row-label">{t('settings.ai.model', '模型')}</span>
+                    <div className="settings-row-value"><input type="text" className="input" title={t('settings.ai.model', '模型')} aria-label={t('settings.ai.model', '模型')} placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model} value={aiModel} onChange={e => { setAiModel(e.target.value); setAiLabel(''); }} /></div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">API Key</span>
-                    <div className="settings-row-value"><input type="password" className="input" title="API Key" aria-label="API Key" placeholder={(aiConfigured && aiProvider === loadedAiProviderRef.current) ? '已保存，留空不更新' : '请输入 API Key'} value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} /></div>
+                    <div className="settings-row-value"><input type="password" className="input" title="API Key" aria-label="API Key" placeholder={(aiConfigured && aiProvider === loadedAiProviderRef.current) ? t('settings.ai.apiKey.placeholder.saved', '已保存，留空不更新') : t('settings.ai.apiKey.placeholder.input', '请输入 API Key')} value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} /></div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">Base URL</span>
                     <div className="settings-row-value"><input type="text" className="input" title="Base URL" aria-label="Base URL" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl || 'https://...'} value={aiBaseUrl} onChange={e => setAiBaseUrl(e.target.value)} /></div>
                   </div>
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveAiConfig} disabled={aiSaving}>{aiSaving ? '...' : (selectedAiModelId ? '保存' : '新增并启用')}</button>
-                    {selectedAiModelId && <button type="button" className="btn btn-danger btn-sm" onClick={handleDeleteAiModel} disabled={aiSaving}>删除</button>}
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={handleExportAgentConfig} disabled={aiSaving}>导出</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => importAgentConfigRef.current?.click()} disabled={aiSaving}>导入</button>
-                    <input ref={importAgentConfigRef} type="file" className="sr-only" accept=".json" onChange={e => { const f = e.target.files?.[0]; if (f) void handleImportAgentConfig(f); }} title="导入" />
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveAiConfig} disabled={aiSaving}>{aiSaving ? '...' : (selectedAiModelId ? t('settings.ai.save', '保存') : t('settings.ai.addEnable', '新增并启用'))}</button>
+                    {selectedAiModelId && <button type="button" className="btn btn-danger btn-sm" onClick={handleDeleteAiModel} disabled={aiSaving}>{t('settings.ai.delete', '删除')}</button>}
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={handleExportAgentConfig} disabled={aiSaving}>{t('settings.ai.export', '导出')}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => importAgentConfigRef.current?.click()} disabled={aiSaving}>{t('settings.ai.import', '导入')}</button>
+                    <input ref={importAgentConfigRef} type="file" className="sr-only" accept=".json" onChange={e => { const f = e.target.files?.[0]; if (f) void handleImportAgentConfig(f); }} title={t('settings.ai.import.title', '导入')} />
                   </div>
-                  <span className="settings-hint">支持多模型快速切换，配置保存在本地。</span>
+                  <span className="settings-hint">{t('settings.ai.hint', '支持多模型快速切换，配置保存在本地。')}</span>
                 </div>
               </section>
 
@@ -759,30 +761,30 @@ export default function SettingsPanel() {
 
               {/* ══ 2. 人格与行为 ══ */}
               <section id="persona" className="settings-section" ref={registerSectionRef('persona')}>
-                <H title="人格与行为" desc="核心人格由系统层托管（非用户可编辑文件），这里调整运行偏好和自治程度。" />
+                <H title={t('settings.persona.title', '人格与行为')} desc={t('settings.persona.desc', '核心人格由系统层托管（非用户可编辑文件），这里调整运行偏好和自治程度。')} />
                 <div className="settings-card">
                   <div className="settings-row">
-                    <span className="settings-row-label">名称</span>
-                    <div className="settings-row-value"><input className="input" title="名称" aria-label="名称" value={persona.name} onChange={e => setPersona(p => ({ ...p, name: e.target.value }))} /></div>
+                    <span className="settings-row-label">{t('settings.persona.name', '名称')}</span>
+                    <div className="settings-row-value"><input className="input" title={t('settings.persona.name', '名称')} aria-label={t('settings.persona.name', '名称')} value={persona.name} onChange={e => setPersona(p => ({ ...p, name: e.target.value }))} /></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">额外指令</span>
-                    <div className="settings-row-value"><textarea className="input" title="额外指令" aria-label="额外指令" rows={2} value={persona.extraInstructions} onChange={e => setPersona(p => ({ ...p, extraInstructions: e.target.value }))} placeholder="如「本次优先用英文回复」" /></div>
+                    <span className="settings-row-label">{t('settings.persona.extra', '额外指令')}</span>
+                    <div className="settings-row-value"><textarea className="input" title={t('settings.persona.extra', '额外指令')} aria-label={t('settings.persona.extra', '额外指令')} rows={2} value={persona.extraInstructions} onChange={e => setPersona(p => ({ ...p, extraInstructions: e.target.value }))} placeholder={t('settings.persona.extra.ph', '如「本次优先用英文回复」')} /></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">风险偏好</span>
-                    <div className="settings-row-value"><select className="select" title="风险偏好" aria-label="风险偏好" value={persona.riskLevel} onChange={e => setPersona(p => ({ ...p, riskLevel: e.target.value as PersonaProfile['riskLevel'] }))}><option value="conservative">保守</option><option value="balanced">均衡</option><option value="aggressive">激进</option></select></div>
+                    <span className="settings-row-label">{t('settings.persona.risk', '风险偏好')}</span>
+                    <div className="settings-row-value"><select className="select" title={t('settings.persona.risk', '风险偏好')} aria-label={t('settings.persona.risk', '风险偏好')} value={persona.riskLevel} onChange={e => setPersona(p => ({ ...p, riskLevel: e.target.value as PersonaProfile['riskLevel'] }))}><option value="conservative">{t('settings.persona.risk.conservative', '保守')}</option><option value="balanced">{t('settings.persona.risk.balanced', '均衡')}</option><option value="aggressive">{t('settings.persona.risk.aggressive', '激进')}</option></select></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">自治等级</span>
-                    <div className="settings-row-value"><select className="select" title="自治等级" aria-label="自治等级" value={persona.autonomyLevel} onChange={e => setPersona(p => ({ ...p, autonomyLevel: e.target.value as PersonaProfile['autonomyLevel'] }))}><option value="manual">手动</option><option value="assisted">辅助</option><option value="autonomous">自主</option></select></div>
+                    <span className="settings-row-label">{t('settings.persona.autonomy', '自治等级')}</span>
+                    <div className="settings-row-value"><select className="select" title={t('settings.persona.autonomy', '自治等级')} aria-label={t('settings.persona.autonomy', '自治等级')} value={persona.autonomyLevel} onChange={e => setPersona(p => ({ ...p, autonomyLevel: e.target.value as PersonaProfile['autonomyLevel'] }))}><option value="manual">{t('settings.persona.autonomy.manual', '手动')}</option><option value="assisted">{t('settings.persona.autonomy.assisted', '辅助')}</option><option value="autonomous">{t('settings.persona.autonomy.autonomous', '自主')}</option></select></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">委派倾向</span>
-                    <div className="settings-row-value"><select className="select" title="委派倾向" aria-label="委派倾向" value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="local-first">Studio 优先</option><option value="balanced">均衡</option><option value="board-first">板端优先</option></select></div>
+                    <span className="settings-row-label">{t('settings.persona.delegation', '委派倾向')}</span>
+                    <div className="settings-row-value"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation', '委派倾向')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先')}</option><option value="balanced">{t('settings.persona.delegation.balanced', '均衡')}</option><option value="board-first">{t('settings.persona.delegation.board', '板端优先')}</option></select></div>
                   </div>
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePersona} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : '保存'}</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePersona} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : t('settings.persona.save', '保存')}</button>
                   </div>
                 </div>
               </section>
@@ -791,50 +793,50 @@ export default function SettingsPanel() {
 
               {/* ══ 3. 执行策略 ══ */}
               <section id="policy" className="settings-section" ref={registerSectionRef('policy')}>
-                <H title="执行策略" desc="审批、记忆和联网行为。" />
+                <H title={t('settings.policy.title', '执行策略')} desc={t('settings.policy.desc', '审批、记忆和联网行为。')} />
                 <div className="settings-card">
-                  <h4 className="settings-card-title">审批</h4>
+                  <h4 className="settings-card-title">{t('settings.policy.approval', '审批')}</h4>
                   <div className="settings-row">
-                    <span className="settings-row-label">模式</span>
-                    <div className="settings-row-value"><select className="select" title="审批模式" aria-label="审批模式" value={policy.approval.mode} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } }))}><option value="always">始终审批</option><option value="risk-based">基于风险</option><option value="auto">全自动</option></select></div>
+                    <span className="settings-row-label">{t('settings.policy.mode', '模式')}</span>
+                    <div className="settings-row-value"><select className="select" title={t('settings.policy.mode', '模式')} aria-label={t('settings.policy.mode', '模式')} value={policy.approval.mode} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } }))}><option value="always">{t('settings.policy.mode.always', '始终审批')}</option><option value="risk-based">{t('settings.policy.mode.risk', '基于风险')}</option><option value="auto">{t('settings.policy.mode.auto', '全自动')}</option></select></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">风险阈值</span>
-                    <div className="settings-row-value"><select className="select" title="风险阈值" aria-label="风险阈值" value={policy.approval.riskThreshold} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } }))}><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div>
+                    <span className="settings-row-label">{t('settings.policy.riskThreshold', '风险阈值')}</span>
+                    <div className="settings-row-value"><select className="select" title={t('settings.policy.riskThreshold', '风险阈值')} aria-label={t('settings.policy.riskThreshold', '风险阈值')} value={policy.approval.riskThreshold} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } }))}><option value="low">{t('settings.policy.risk.low', '低')}</option><option value="medium">{t('settings.policy.risk.medium', '中')}</option><option value="high">{t('settings.policy.risk.high', '高')}</option></select></div>
                   </div>
                 </div>
                 <div className="settings-card">
-                  <h4 className="settings-card-title">权限边界（RDKClaw 自主掌控）</h4>
+                  <h4 className="settings-card-title">{t('settings.policy.permissionTitle', '权限边界（RDKClaw 自主掌控）')}</h4>
                   <div className="settings-row">
-                    <span className="settings-row-label">本机工作区边界</span>
-                    <input type="checkbox" title="本机工作区边界" aria-label="本机工作区边界" checked={policy.permission.workspaceBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, workspaceBoundaryEnabled: e.target.checked } }))} />
+                    <span className="settings-row-label">{t('settings.policy.workspaceBoundary', '本机工作区边界')}</span>
+                    <input type="checkbox" title={t('settings.policy.workspaceBoundary', '本机工作区边界')} aria-label={t('settings.policy.workspaceBoundary', '本机工作区边界')} checked={policy.permission.workspaceBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, workspaceBoundaryEnabled: e.target.checked } }))} />
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">板端路径白名单</span>
-                    <input type="checkbox" title="板端路径白名单" aria-label="板端路径白名单" checked={policy.permission.devicePathBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, devicePathBoundaryEnabled: e.target.checked } }))} />
+                    <span className="settings-row-label">{t('settings.policy.devicePathAllow', '板端路径白名单')}</span>
+                    <input type="checkbox" title={t('settings.policy.devicePathAllow', '板端路径白名单')} aria-label={t('settings.policy.devicePathAllow', '板端路径白名单')} checked={policy.permission.devicePathBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, devicePathBoundaryEnabled: e.target.checked } }))} />
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">宿主机防污染</span>
-                    <input type="checkbox" title="宿主机防污染" aria-label="宿主机防污染" checked={policy.permission.hostMutationGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, hostMutationGuardEnabled: e.target.checked } }))} />
+                    <span className="settings-row-label">{t('settings.policy.hostGuard', '宿主机防污染')}</span>
+                    <input type="checkbox" title={t('settings.policy.hostGuard', '宿主机防污染')} aria-label={t('settings.policy.hostGuard', '宿主机防污染')} checked={policy.permission.hostMutationGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, hostMutationGuardEnabled: e.target.checked } }))} />
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">危险命令拦截</span>
-                    <input type="checkbox" title="危险命令拦截" aria-label="危险命令拦截" checked={policy.permission.commandDangerGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, commandDangerGuardEnabled: e.target.checked } }))} />
+                    <span className="settings-row-label">{t('settings.policy.cmdGuard', '危险命令拦截')}</span>
+                    <input type="checkbox" title={t('settings.policy.cmdGuard', '危险命令拦截')} aria-label={t('settings.policy.cmdGuard', '危险命令拦截')} checked={policy.permission.commandDangerGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, commandDangerGuardEnabled: e.target.checked } }))} />
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">记录安全审计</span>
-                    <input type="checkbox" title="记录安全审计" aria-label="记录安全审计" checked={policy.permission.auditLogEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, auditLogEnabled: e.target.checked } }))} />
+                    <span className="settings-row-label">{t('settings.policy.auditLog', '记录安全审计')}</span>
+                    <input type="checkbox" title={t('settings.policy.auditLog', '记录安全审计')} aria-label={t('settings.policy.auditLog', '记录安全审计')} checked={policy.permission.auditLogEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, auditLogEnabled: e.target.checked } }))} />
                   </div>
-                  <span className="settings-hint">范围内自动执行，范围外直接拦截；高风险按审批策略处理。</span>
+                  <span className="settings-hint">{t('settings.policy.permissionHint', '范围内自动执行，范围外直接拦截；高风险按审批策略处理。')}</span>
                 </div>
                 <div className="settings-card">
-                  <h4 className="settings-card-title">安全审计（最近 30 条）</h4>
+                  <h4 className="settings-card-title">{t('settings.policy.auditTitle', '安全审计（最近 30 条）')}</h4>
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={refreshSecurityAudit} disabled={securityAuditLoading}>{securityAuditLoading ? '刷新中...' : '刷新'}</button>
-                    <button type="button" className="btn btn-danger btn-sm" onClick={handleClearSecurityAudit} disabled={securityAuditLoading}>清空</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={refreshSecurityAudit} disabled={securityAuditLoading}>{securityAuditLoading ? t('settings.policy.audit.refreshing', '刷新中...') : t('settings.policy.audit.refresh', '刷新')}</button>
+                    <button type="button" className="btn btn-danger btn-sm" onClick={handleClearSecurityAudit} disabled={securityAuditLoading}>{t('settings.policy.audit.clear', '清空')}</button>
                   </div>
                   {securityAudit.length === 0 ? (
-                    <span className="settings-hint">暂无审计记录</span>
+                    <span className="settings-hint">{t('settings.policy.audit.empty', '暂无审计记录')}</span>
                   ) : securityAudit.map((item) => (
                     <div className="settings-row" key={item.id}>
                       <span className="settings-row-label">{new Date(item.timestamp).toLocaleTimeString()}</span>
@@ -843,28 +845,28 @@ export default function SettingsPanel() {
                   ))}
                 </div>
                 <div className="settings-card">
-                  <h4 className="settings-card-title">记忆</h4>
+                  <h4 className="settings-card-title">{t('settings.policy.memoryTitle', '记忆')}</h4>
                   <div className="settings-row">
-                    <span className="settings-row-label">读取历史记忆</span>
-                    <input type="checkbox" title="读取历史记忆" aria-label="读取历史记忆" checked={policy.memory.mainSessionReadsMemory} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, mainSessionReadsMemory: e.target.checked } }))} />
+                    <span className="settings-row-label">{t('settings.policy.readMemory', '读取历史记忆')}</span>
+                    <input type="checkbox" title={t('settings.policy.readMemory', '读取历史记忆')} aria-label={t('settings.policy.readMemory', '读取历史记忆')} checked={policy.memory.mainSessionReadsMemory} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, mainSessionReadsMemory: e.target.checked } }))} />
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">保留天数</span>
-                    <div className="settings-row-value"><input type="number" className="input" title="天数" aria-label="天数" value={policy.memory.dailyMemoryDays} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, dailyMemoryDays: Number(e.target.value) || 7 } }))} min={1} max={90} /></div>
+                    <span className="settings-row-label">{t('settings.policy.retention', '保留天数')}</span>
+                    <div className="settings-row-value"><input type="number" className="input" title={t('settings.policy.days', '天数')} aria-label={t('settings.policy.days', '天数')} value={policy.memory.dailyMemoryDays} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, dailyMemoryDays: Number(e.target.value) || 7 } }))} min={1} max={90} /></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">上下文预算</span>
-                    <div className="settings-row-value"><input type="number" className="input" title="tokens" aria-label="tokens" value={policy.context.contextTokens} onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, contextTokens: Math.max(16000, Number(e.target.value) || 128000) } }))} min={16000} max={256000} /></div>
+                    <span className="settings-row-label">{t('settings.policy.contextBudget', '上下文预算')}</span>
+                    <div className="settings-row-value"><input type="number" className="input" title={t('settings.policy.tokens', 'tokens')} aria-label={t('settings.policy.tokens', 'tokens')} value={policy.context.contextTokens} onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, contextTokens: Math.max(16000, Number(e.target.value) || 128000) } }))} min={16000} max={256000} /></div>
                   </div>
                 </div>
                 <div className="settings-card">
-                  <h4 className="settings-card-title">联网</h4>
+                  <h4 className="settings-card-title">{t('settings.policy.networkTitle', '联网')}</h4>
                   <div className="settings-row">
-                    <span className="settings-row-label">允许联网</span>
-                    <input type="checkbox" title="允许联网" aria-label="允许联网" checked={policy.network.enabled} onChange={e => setPolicy(p => ({ ...p, network: { ...p.network, enabled: e.target.checked } }))} />
+                    <span className="settings-row-label">{t('settings.policy.networkAllow', '允许联网')}</span>
+                    <input type="checkbox" title={t('settings.policy.networkAllow', '允许联网')} aria-label={t('settings.policy.networkAllow', '允许联网')} checked={policy.network.enabled} onChange={e => setPolicy(p => ({ ...p, network: { ...p.network, enabled: e.target.checked } }))} />
                   </div>
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePolicy} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : '保存策略'}</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePolicy} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : t('settings.policy.savePolicy', '保存策略')}</button>
                   </div>
                 </div>
               </section>
@@ -873,18 +875,18 @@ export default function SettingsPanel() {
 
               {/* ══ 4. 飞书 ══ */}
               <section id="feishu" className="settings-section" ref={registerSectionRef('feishu')}>
-                <H title="消息渠道 · 飞书" desc="通过飞书机器人收发消息，让 RDKClaw 成为你的飞书助手。" />
+                <H title={t('settings.feishu.title', '消息渠道 · 飞书')} desc={t('settings.feishu.desc', '通过飞书机器人收发消息，让 RDKClaw 成为你的飞书助手。')} />
                 <div className="settings-card">
                   <div className="settings-row">
-                    <span className="settings-row-label">通道状态</span>
+                    <span className="settings-row-label">{t('settings.feishu.channelStatus', '通道状态')}</span>
                     <span className={`settings-status-badge ${feishuConnected ? 'ok' : feishuRunning ? 'ok' : 'off'}`}>
-                      {feishuConnected ? '已连接' : feishuRunning ? '等待事件' : '未启动'}
+                      {feishuConnected ? t('settings.feishu.status.connected', '已连接') : feishuRunning ? t('settings.feishu.status.waiting', '等待事件') : t('settings.feishu.status.off', '未启动')}
                     </span>
                   </div>
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleFeishuRuntime('start')}>启动</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleFeishuRuntime('stop')}>停止</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleFeishuRuntime('restart')}>重启</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleFeishuRuntime('start')}>{t('settings.feishu.start', '启动')}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleFeishuRuntime('stop')}>{t('settings.feishu.stop', '停止')}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleFeishuRuntime('restart')}>{t('settings.feishu.restart', '重启')}</button>
                   </div>
                 </div>
                 <div className="settings-card">
@@ -894,47 +896,47 @@ export default function SettingsPanel() {
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">App Secret</span>
-                    <div className="settings-row-value"><input type="password" className="input" title="App Secret" aria-label="App Secret" placeholder={feishuMasks.appSecretMasked ? `${feishuMasks.appSecretMasked}（留空不改）` : '请输入'} value={feishuAppSecret} onChange={e => setFeishuAppSecret(e.target.value)} /></div>
+                    <div className="settings-row-value"><input type="password" className="input" title="App Secret" aria-label="App Secret" placeholder={feishuMasks.appSecretMasked ? `${feishuMasks.appSecretMasked}${t('settings.feishu.maskKeep', '（留空不改）')}` : t('settings.feishu.enter', '请输入')} value={feishuAppSecret} onChange={e => setFeishuAppSecret(e.target.value)} /></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">连接模式</span>
-                    <div className="settings-row-value"><select className="select" title="连接模式" aria-label="连接模式" value={feishuConnectionMode} onChange={e => setFeishuConnectionMode(e.target.value as 'websocket' | 'webhook')}><option value="websocket">WebSocket</option><option value="webhook">Webhook</option></select></div>
+                    <span className="settings-row-label">{t('settings.feishu.connMode', '连接模式')}</span>
+                    <div className="settings-row-value"><select className="select" title={t('settings.feishu.connMode', '连接模式')} aria-label={t('settings.feishu.connMode', '连接模式')} value={feishuConnectionMode} onChange={e => setFeishuConnectionMode(e.target.value as 'websocket' | 'webhook')}><option value="websocket">WebSocket</option><option value="webhook">Webhook</option></select></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">私信策略</span>
-                    <div className="settings-row-value"><select className="select" title="私信策略" aria-label="私信策略" value={feishuDmPolicy} onChange={e => setFeishuDmPolicy(e.target.value as 'pairing' | 'allowlist' | 'open')}><option value="pairing">配对</option><option value="allowlist">白名单</option><option value="open">开放</option></select></div>
+                    <span className="settings-row-label">{t('settings.feishu.dmPolicy', '私信策略')}</span>
+                    <div className="settings-row-value"><select className="select" title={t('settings.feishu.dmPolicy', '私信策略')} aria-label={t('settings.feishu.dmPolicy', '私信策略')} value={feishuDmPolicy} onChange={e => setFeishuDmPolicy(e.target.value as 'pairing' | 'allowlist' | 'open')}><option value="pairing">{t('settings.feishu.dm.pairing', '配对')}</option><option value="allowlist">{t('settings.feishu.dm.allowlist', '白名单')}</option><option value="open">{t('settings.feishu.dm.open', '开放')}</option></select></div>
                   </div>
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveFeishu} disabled={feishuSaving}>{feishuSaving ? '...' : '保存配置'}</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveFeishu} disabled={feishuSaving}>{feishuSaving ? '...' : t('settings.feishu.saveConfig', '保存配置')}</button>
                   </div>
                 </div>
 
                 <div className="settings-card">
-                  <h4 className="settings-card-title">接入步骤</h4>
+                  <h4 className="settings-card-title">{t('settings.feishu.stepsTitle', '接入步骤')}</h4>
                   <ol className="settings-steps">
-                    <li className="settings-step"><span className="settings-step-num">1</span>在飞书开放平台创建自建应用，获取 App ID / Secret</li>
-                    <li className="settings-step"><span className="settings-step-num">2</span>开启事件订阅 im.message.receive_v1，选择 WebSocket 模式</li>
-                    <li className="settings-step"><span className="settings-step-num">3</span>填入上方配置并保存，点击「启动」</li>
-                    <li className="settings-step"><span className="settings-step-num">4</span>在飞书私信机器人，使用配对码完成绑定</li>
+                    <li className="settings-step"><span className="settings-step-num">1</span>{t('settings.feishu.step1', '在飞书开放平台创建自建应用，获取 App ID / Secret')}</li>
+                    <li className="settings-step"><span className="settings-step-num">2</span>{t('settings.feishu.step2', '开启事件订阅 im.message.receive_v1，选择 WebSocket 模式')}</li>
+                    <li className="settings-step"><span className="settings-step-num">3</span>{t('settings.feishu.step3', '填入上方配置并保存，点击「启动」')}</li>
+                    <li className="settings-step"><span className="settings-step-num">4</span>{t('settings.feishu.step4', '在飞书私信机器人，使用配对码完成绑定')}</li>
                   </ol>
                 </div>
 
                 {(feishuPairings.length > 0 || feishuBoundUsers.length > 0) && (
                   <div className="settings-card">
                     {feishuPairings.length > 0 && <>
-                      <h4 className="settings-card-title">待审批配对</h4>
+                      <h4 className="settings-card-title">{t('settings.feishu.pending', '待审批配对')}</h4>
                       {feishuPairings.map(item => (
                         <div className="settings-row" key={item.code}>
                           <span className="settings-row-label">{item.code}</span>
                           <div className="settings-actions">
-                            <button type="button" className="btn btn-primary btn-sm" onClick={() => handlePairingDecision(item.code, 'approve')}>批准</button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => handlePairingDecision(item.code, 'reject')}>拒绝</button>
+                            <button type="button" className="btn btn-primary btn-sm" onClick={() => handlePairingDecision(item.code, 'approve')}>{t('settings.feishu.approve', '批准')}</button>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => handlePairingDecision(item.code, 'reject')}>{t('settings.feishu.reject', '拒绝')}</button>
                           </div>
                         </div>
                       ))}
                     </>}
                     {feishuBoundUsers.length > 0 && <>
-                      <h4 className="settings-card-title">已绑定 ({feishuBoundUsers.length})</h4>
+                      <h4 className="settings-card-title">{isEn ? `Bound (${feishuBoundUsers.length})` : `已绑定 (${feishuBoundUsers.length})`}</h4>
                       {feishuBoundUsers.map(u => (
                         <div className="settings-row" key={u.openId}>
                           <span className="settings-row-label">{u.openId}</span>
@@ -950,23 +952,23 @@ export default function SettingsPanel() {
 
               {/* ══ 5. 微信 ══ */}
               <section id="weixin" className="settings-section" ref={registerSectionRef('weixin')}>
-                <H title="消息渠道 · 微信" desc="扫码绑定个人微信，随时随地与 RDKClaw 对话。" />
+                <H title={t('settings.weixin.title', '消息渠道 · 微信')} desc={t('settings.weixin.desc', '扫码绑定个人微信，随时随地与 RDKClaw 对话。')} />
                 <div className="settings-card">
                   {weixinAccounts.length > 0 ? weixinAccounts.map(a => (
                     <div className="settings-row" key={a.accountId}>
                       <span className="settings-row-label">{a.nickname || a.accountId.slice(0, 10)}</span>
                       <div className="settings-actions">
                         <span className="settings-hint">{new Date(a.boundAt).toLocaleDateString()}</span>
-                        <button type="button" className="btn btn-danger btn-sm" onClick={async () => { await removeWeixinAccount(a.accountId); loadWeixinData(); addToast('已移除', 'info'); }}>移除</button>
+                        <button type="button" className="btn btn-danger btn-sm" onClick={async () => { await removeWeixinAccount(a.accountId); loadWeixinData(); addToast(isEn ? 'Removed' : '已移除', 'info'); }}>{t('settings.weixin.remove', '移除')}</button>
                       </div>
                     </div>
-                  )) : <span className="settings-hint">暂未绑定微信账号</span>}
+                  )) : <span className="settings-hint">{t('settings.weixin.none', '暂未绑定微信账号')}</span>}
 
                   <div className="settings-actions">
                     <button type="button" className="btn btn-primary btn-sm" onClick={startWeixinLogin} disabled={weixinLoginLoading}>
-                      扫码连接
+                      {t('settings.weixin.scan', '扫码连接')}
                     </button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={async () => { await restartWeixinChannel(); addToast('已重启', 'info'); }}>重启渠道</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={async () => { await restartWeixinChannel(); addToast(isEn ? 'Channel restarted' : '已重启', 'info'); }}>{t('settings.weixin.restartCh', '重启渠道')}</button>
                   </div>
                 </div>
               </section>
@@ -976,24 +978,24 @@ export default function SettingsPanel() {
                 <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeWeixinLogin(); }}>
                   <div className="modal-card" style={{ maxWidth: 380 }}>
                     <div className="modal-header">
-                      <span className="modal-title">微信扫码连接</span>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={closeWeixinLogin} aria-label="关闭">&times;</button>
+                      <span className="modal-title">{t('settings.weixin.modalTitle', '微信扫码连接')}</span>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={closeWeixinLogin} aria-label={t('settings.modal.close', '关闭')}>&times;</button>
                     </div>
                     <div className="modal-body" style={{ textAlign: 'center' }}>
                       {weixinQrCode ? (
                         <>
                           <div className="settings-qr-container">
-                            <img src={weixinQrCode} alt="微信扫码" className="settings-qr-img" />
+                            <img src={weixinQrCode} alt={t('settings.weixin.qrAlt', '微信扫码')} className="settings-qr-img" />
                           </div>
                           <p style={{ margin: '12px 0 4px', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                            {weixinLoginStatus || '请用微信扫一扫'}
+                            {weixinLoginStatus || t('settings.weixin.scanHint', '请用微信扫一扫')}
                           </p>
                         </>
                       ) : (
                         <div style={{ padding: '40px 0' }}>
                           <div className="spinner" style={{ margin: '0 auto 12px' }} />
                           <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                            {weixinLoginStatus || '正在获取二维码...'}
+                            {weixinLoginStatus || t('settings.weixin.fetchQr', '正在获取二维码...')}
                           </p>
                         </div>
                       )}
@@ -1006,15 +1008,24 @@ export default function SettingsPanel() {
 
               {/* ══ 6. 设备连接 ══ */}
               <section id="connection" className="settings-section" ref={registerSectionRef('connection')}>
-                <H title="设备连接" desc="SSH 连接参数。" />
+                <H title={t('settings.conn.title', '设备连接')} desc={t('settings.conn.desc', 'SSH 连接参数与界面语言。')} />
                 <div className="settings-card">
                   <div className="settings-row">
-                    <span className="settings-row-label">连接超时 (秒)</span>
-                    <div className="settings-row-value"><input type="number" className="input" title="超时" aria-label="超时" value={connectionTimeout} onChange={e => setConnectionTimeout(Number(e.target.value))} /></div>
+                    <span className="settings-row-label">{t('settings.conn.lang', '界面语言')}</span>
+                    <div className="settings-row-value">
+                      <select className="select" title={t('settings.conn.lang', '界面语言')} aria-label={t('settings.conn.lang', '界面语言')} value={language} onChange={e => { setLanguage(e.target.value); addToast(t('settings.conn.lang.saved', '语言偏好已保存'), 'success'); }}>
+                        <option value="zh-CN">{t('settings.conn.lang.zh', '简体中文')}</option>
+                        <option value="en">{t('settings.conn.lang.en', 'English')}</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">启动时自动连接</span>
-                    <input type="checkbox" title="自动连接" aria-label="自动连接" checked={autoReconnect} onChange={e => { setAutoReconnect(e.target.checked); addToast('已更新', 'success'); }} />
+                    <span className="settings-row-label">{t('settings.conn.timeout', '连接超时 (秒)')}</span>
+                    <div className="settings-row-value"><input type="number" className="input" title={t('settings.conn.timeout.title', '超时')} aria-label={t('settings.conn.timeout.title', '超时')} value={connectionTimeout} onChange={e => setConnectionTimeout(Number(e.target.value))} /></div>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">{t('settings.conn.auto', '启动时自动连接')}</span>
+                    <input type="checkbox" title={t('settings.conn.auto', '启动时自动连接')} aria-label={t('settings.conn.auto', '启动时自动连接')} checked={autoReconnect} onChange={e => { setAutoReconnect(e.target.checked); addToast(t('settings.conn.updated', '已更新'), 'success'); }} />
                   </div>
                 </div>
               </section>
@@ -1023,23 +1034,23 @@ export default function SettingsPanel() {
 
               {/* ══ 7. 社区论坛 ══ */}
               <section id="forum" className="settings-section" ref={registerSectionRef('forum')}>
-                <H title="社区论坛" desc="授权后 RDKClaw 可帮你在 D-Robotics 社区发帖互动。也可在对话中直接告诉 RDKClaw 你的论坛账号密码，会自动保存。" />
+                <H title={t('settings.forum.title', '社区论坛')} desc={t('settings.forum.desc', '授权后 RDKClaw 可帮你在 D-Robotics 社区发帖互动。也可在对话中直接告诉 RDKClaw 你的论坛账号密码，会自动保存。')} />
                 <div className="settings-card">
                   <div className="settings-row">
-                    <span className="settings-row-label">论坛用户</span>
+                    <span className="settings-row-label">{t('settings.forum.user', '论坛用户')}</span>
                     <div className="settings-actions">
-                      <span className="settings-row-static">{forumAuth.username || '未配置'}</span>
-                      {forumAuth.lastVerifyResult === 'ok' && <span className="settings-status-badge ok">SSO 验证通过</span>}
-                      {forumAuth.lastVerifyResult === 'failed' && <span className="settings-status-badge error">验证失败</span>}
+                      <span className="settings-row-static">{forumAuth.username || t('settings.forum.notSet', '未配置')}</span>
+                      {forumAuth.lastVerifyResult === 'ok' && <span className="settings-status-badge ok">{t('settings.forum.ssoOk', 'SSO 验证通过')}</span>}
+                      {forumAuth.lastVerifyResult === 'failed' && <span className="settings-status-badge error">{t('settings.forum.ssoFail', '验证失败')}</span>}
                     </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">用户名</span>
-                    <div className="settings-row-value"><input type="text" className="input" title="用户名" aria-label="用户名" placeholder="论坛用户名" value={forumUsernameInput} onChange={e => setForumUsernameInput(e.target.value)} /></div>
+                    <span className="settings-row-label">{t('settings.forum.username', '用户名')}</span>
+                    <div className="settings-row-value"><input type="text" className="input" title={t('settings.forum.username', '用户名')} aria-label={t('settings.forum.username', '用户名')} placeholder={t('settings.forum.username.ph', '论坛用户名')} value={forumUsernameInput} onChange={e => setForumUsernameInput(e.target.value)} /></div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">密码</span>
-                    <div className="settings-row-value"><input type="password" className="input" title="密码" aria-label="密码" placeholder="论坛密码" value={forumPasswordInput} onChange={e => setForumPasswordInput(e.target.value)} /></div>
+                    <span className="settings-row-label">{t('settings.forum.password', '密码')}</span>
+                    <div className="settings-row-value"><input type="password" className="input" title={t('settings.forum.password', '密码')} aria-label={t('settings.forum.password', '密码')} placeholder={t('settings.forum.password.ph', '论坛密码')} value={forumPasswordInput} onChange={e => setForumPasswordInput(e.target.value)} /></div>
                   </div>
                   {forumVerifyMsg && (
                     <div className={`settings-status-badge ${forumVerifyMsg.ok ? 'ok' : 'error'}`}>
@@ -1047,16 +1058,15 @@ export default function SettingsPanel() {
                     </div>
                   )}
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveForumCredential} disabled={forumSaving}>{forumSaving ? '验证中...' : '保存并验证'}</button>
-                    <button type="button" className="btn btn-danger btn-sm" onClick={handleClearForumAuth} disabled={forumSaving}>清空</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveForumCredential} disabled={forumSaving}>{forumSaving ? t('settings.forum.verify', '验证中...') : t('settings.forum.saveVerify', '保存并验证')}</button>
+                    <button type="button" className="btn btn-danger btn-sm" onClick={handleClearForumAuth} disabled={forumSaving}>{t('settings.forum.clear', '清空')}</button>
                   </div>
-                  <span className="settings-hint">保存后自动通过 SSO 验证密码是否有效，凭据持久化到本地。</span>
+                  <span className="settings-hint">{t('settings.forum.hint', '保存后自动通过 SSO 验证密码是否有效，凭据持久化到本地。')}</span>
                 </div>
               </section>
 
             </div>
           </div>
-        )}
       </div>
     </div>
   );

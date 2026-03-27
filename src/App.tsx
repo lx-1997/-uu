@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AppProvider, useAppState } from './hooks/useAppState';
+import { useI18n } from './i18n/use-i18n';
 import { useAuth } from './hooks/useAuth';
 import IconRail from './components/IconRail';
 import TopToolbar from './components/TopToolbar';
@@ -20,20 +21,6 @@ import Ros from './components/Ros';
 import SkillBrowser from './components/SkillBrowser';
 import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
-
-const TAB_NAMES: Record<string, string> = {
-  dashboard: '工作台',
-  openclaw: 'OpenClaw',
-  skills: '技能工坊',
-  terminal: '终端',
-  files: '文件',
-  vnc: '远程桌面',
-  ide: 'IDE',
-  hardware: '硬件监控',
-  flasher: '烧录工具',
-  
-  ros: 'ROS',
-};
 
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
@@ -131,9 +118,26 @@ function useThemeSync() {
 
 function AppShell() {
   const { activeTab, currentDevice, theme, railExpanded, obStep } = useAppState();
+  const { t } = useI18n();
   useDesktopTabSync(activeTab);
   useDesktopViewBounds(activeTab);
   useThemeSync();
+
+  const tabTitle = useMemo(() => {
+    const names: Record<string, string> = {
+      dashboard: t('tabs.dashboard', '工作台'),
+      openclaw: 'OpenClaw',
+      skills: t('tabs.skills', '技能工坊'),
+      terminal: t('tabs.terminal', '终端'),
+      files: t('tabs.files', '文件'),
+      vnc: t('tabs.vnc', '远程桌面'),
+      ide: t('tabs.ide', 'IDE'),
+      hardware: t('tabs.hardware', '硬件监控'),
+      flasher: t('tabs.flasher', '烧录工具'),
+      ros: t('tabs.ros', 'ROS'),
+    };
+    return names[activeTab] ?? activeTab;
+  }, [activeTab, t]);
 
   const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
   const onboardingActive = obStep !== 'done';
@@ -145,7 +149,7 @@ function AppShell() {
 
       <header className="top-bar">
         <div className="topbar-left">
-          <span className="topbar-page-name">{TAB_NAMES[activeTab] || activeTab}</span>
+          <span className="topbar-page-name">{tabTitle}</span>
         </div>
         <div className="topbar-right">
           {currentDevice && (

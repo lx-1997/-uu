@@ -1,9 +1,16 @@
-import React, { createContext, useContext, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import type { Tab, ConfirmDialogState, TransferItem } from '../app-types';
 import { FLASH_IMAGES } from '../constants';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { fetchNodeRedStatus, fetchRosTopics, fetchVncStatus, executeDeviceCommand } from '../api';
+
+const UI_LOCALE_KEY = 'rdk-ui-locale';
+
+function readStoredLocale(): 'zh-CN' | 'en' {
+  if (typeof window === 'undefined') return 'zh-CN';
+  return localStorage.getItem(UI_LOCALE_KEY) === 'en' ? 'en' : 'zh-CN';
+}
 
 export type ThemeMode = 'aurora' | 'cyber' | 'cozy';
 
@@ -113,8 +120,6 @@ export interface UIStoreState {
   // Settings
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
-  settingsTab: 'rdkclaw' | 'about';
-  setSettingsTab: (v: 'rdkclaw' | 'about') => void;
   autoReconnect: boolean;
   setAutoReconnect: (v: boolean) => void;
   connectionTimeout: number;
@@ -340,10 +345,18 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
 
   // ── Settings ──
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'rdkclaw' | 'about'>('rdkclaw');
   const [autoReconnect, setAutoReconnect] = useState(true);
   const [connectionTimeout, setConnectionTimeout] = useState(30);
-  const [language, setLanguage] = useState('zh-CN');
+  const [language, setLanguageState] = useState<'zh-CN' | 'en'>(readStoredLocale);
+  const setLanguage = (v: string) => {
+    const next: 'zh-CN' | 'en' = v === 'en' ? 'en' : 'zh-CN';
+    setLanguageState(next);
+    if (typeof window !== 'undefined') localStorage.setItem(UI_LOCALE_KEY, next);
+  };
+
+  useEffect(() => {
+    document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
+  }, [language]);
 
   // ── Confirm dialog ──
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
@@ -373,7 +386,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     examplePreset, setExamplePreset,
     rosTopic, setRosTopic, rosRecording, setRosRecording,
     diagnosticOpen, setDiagnosticOpen, diagnosticStep, setDiagnosticStep,
-    showSettings, setShowSettings, settingsTab, setSettingsTab,
+    showSettings, setShowSettings,
     autoReconnect, setAutoReconnect, connectionTimeout, setConnectionTimeout,
     language, setLanguage,
     confirmDialog, setConfirmDialog, showConfirm,
