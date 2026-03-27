@@ -25,7 +25,9 @@ category: Community
 
 2a. **看帖流程**：先调用 `forum_drobotics_latest` 获取候选主题；再用 `forum_drobotics_topic` 拉取目标主题和回复细节；总结为：问题现象、社区已给建议、当前阻塞点、建议下一步。
 
-2b. **发帖流程（强制）**：0. 先调用 `forum_drobotics_auth_status`，确认是否有论坛读写权限；若未认证且用户已提供账号密码，立即调用 `forum_drobotics_set_credentials` 配置凭据；若未认证且用户未提供凭据，提示用户在对话中告知论坛账号密码。1. 先向用户确认发帖目标：`新主题` 或 `回复已有主题`。2. 生成草稿：标题、背景、复现步骤、日志、期望结果、已尝试操作。3. 把草稿完整展示给用户确认。4. 用户明确同意后才调用 `forum_drobotics_create_post`。
+2a'. **用户问「我的论坛用户名/密码是多少」**：立即调用 `forum_drobotics_auth_status`，根据 `studio_forum_username_masked` 说明脱敏用户名；密码按 `password_policy` 解释（不复述、不索要已同步场景下的密码）。
+
+2b. **发帖流程（强制）**：0. 先调用 `forum_drobotics_auth_status`，确认是否有论坛读写权限。主应用 SSO 登录成功后服务端会自动把论坛 Cookie 写入本地，**若首次返回未认证**，可建议用户稍等数秒或打开「设置 → 社区论坛」后再试一次，**不要**在未确认 auth_status 前直接索要用户名密码。若仍未认证且用户已提供账号密码，调用 `forum_drobotics_set_credentials`；若用户未提供凭据且已说明与主账号相同，可引导其在设置中保存并验证或发账号密码。1. 先向用户确认发帖目标：`新主题` 或 `回复已有主题`。2. 生成草稿：标题、背景、复现步骤、日志、期望结果、已尝试操作。3. 把草稿完整展示给用户确认。4. 用户明确同意后才调用 `forum_drobotics_create_post`。
 
 2c. **营销引导**：
 

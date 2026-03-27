@@ -4,7 +4,7 @@ import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { renderMarkdown } from './MarkdownRenderer';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
-import { resolveApiUrl } from '../utils/apiBase';
+import { fetchApi } from '../utils/apiBase';
 import {
   subscribeOpenClawDeployJob,
   startOpenClawDeployPoll,
@@ -289,7 +289,7 @@ export default function OpenClaw() {
         if (deployFeishuAppId.trim() && deployFeishuAppSecret.trim()) {
           appendSystemMessage(tRef.current('oc.deploy.feishuWriting', '正在写入飞书配置...'));
           try {
-            await fetch(resolveApiUrl(`/api/devices/${currentDevice?.id}/openclaw/config`), {
+            await fetchApi(`/api/devices/${currentDevice?.id}/openclaw/config`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -497,7 +497,7 @@ export default function OpenClaw() {
     if (!currentDevice) return null;
     setStatusLoading(true);
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/status`));
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/status`);
       if (!res.ok) {
         addToast?.(tf('oc.toast.statusFail', '获取状态失败: HTTP {{status}}', { status: res.status }), 'error');
         return null;
@@ -526,7 +526,7 @@ export default function OpenClaw() {
   const loadConfig = async (): Promise<ConfigData | null> => {
     if (!currentDevice) return null;
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/config`));
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/config`);
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         addToast?.(tf('oc.toast.configHttp', '加载配置失败: {{detail}}', { detail: String(errBody.error || `HTTP ${res.status}`) }), 'error');
@@ -592,7 +592,7 @@ export default function OpenClaw() {
     const fetchTimer = setTimeout(() => controller.abort(), fetchTimeout);
 
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/${action}`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/${action}`, {
         method: action === 'status' || action === 'version' ? 'GET' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,
@@ -729,7 +729,7 @@ export default function OpenClaw() {
 
     setLoading(true);
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/config`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: payload }),
@@ -766,7 +766,7 @@ export default function OpenClaw() {
     if (!currentDevice) return;
     setTestResult('testing');
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/model-test`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/model-test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -796,7 +796,7 @@ export default function OpenClaw() {
     setShowModelSelector(false);
     setLoading(true);
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/config`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ config: { modelGateway: { ...modelConfig, modelId } } }),
@@ -831,7 +831,7 @@ export default function OpenClaw() {
       setDeploySteps(['running', 'pending', 'pending', 'pending']);
       setDeployOutput('');
       setShowDeployGuideModal(true);
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/start`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/deploy/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -862,7 +862,7 @@ export default function OpenClaw() {
     if (!currentDevice || !name) return;
     setSkillInstalling(true);
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -891,7 +891,7 @@ export default function OpenClaw() {
   const loadBoardSkills = async () => {
     if (!currentDevice) return;
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/skills`));
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/skills`);
       if (!res.ok) {
         addToast?.(tf('oc.skills.listFail', '获取技能列表失败: HTTP {{status}}', { status: res.status }), 'error');
         return;

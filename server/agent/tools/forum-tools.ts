@@ -142,13 +142,17 @@ function mergeCookieHeader(existing: string, setCookies: string[]): string {
     .join("; ");
 }
 
-async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
-  const creds = buildCredentialAuth();
-  if (!creds) {
-    return { ok: false as const, reason: "missing_credentials" };
-  }
-  if (forumSessionCookieCache && Date.now() - forumSessionCookieCache.fetchedAt < SSO_COOKIE_TTL_MS) {
-    return { ok: true as const, cookie: forumSessionCookieCache.value, source: "cache" as const };
+/**
+ * 使用已获得的 SSO token（密码登录或 OAuth access_token）完成论坛 Discourse 会话。
+ */
+async function completeForumSsoBridgeWithToken(
+  ssoTokenRaw: string,
+  base: string,
+  timeoutMs: number,
+): Promise<{ ok: true; cookie: string } | { ok: false; reason: string }> {
+  const ssoToken = ssoTokenRaw.replace(/^Bearer\s+/i, "").trim();
+  if (!ssoToken) {
+    return { ok: false, reason: "missing_sso_token" };
   }
   const forumCookies = new Map<string, string>();
   const toCookieHeader = (bag: Map<string, string>) =>
@@ -160,7 +164,69 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
     }
   };
 
-  // 1) Login to sso.d-robotics.cc with AES-encrypted credentials
+  const ssoStart = await fetchWithCookie(`${base}/session/sso`, {
+    method: "GET",
+    redirect: "manual",
+    timeoutMs,
+    headers: {
+      "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+      Accept: "text/html,application/json",
+    },
+    cookie: toCookieHeader(forumCookies),
+  });
+  mergeCookies(forumCookies, getResponseSetCookies(ssoStart));
+  const devSsoUrl = ssoStart.headers.get("location") || "";
+  if (!devSsoUrl || !/developer\.d-robotics\.cc\/communityApi\/discourseApi\/sso/i.test(devSsoUrl)) {
+    return { ok: false, reason: "forum_sso_redirect_missing" };
+  }
+
+  const devResp = await fetchWithCookie(devSsoUrl, {
+    method: "GET",
+    redirect: "manual",
+    timeoutMs,
+    headers: {
+      "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+      Accept: "text/html,application/json",
+    },
+    cookie: `token=${ssoToken}`,
+  });
+  const forumBackUrl = devResp.headers.get("location") || "";
+
+  if (forumBackUrl && /forum\.d-robotics\.cc/i.test(forumBackUrl)) {
+    const backResp = await fetchWithCookie(forumBackUrl, {
+      method: "GET",
+      redirect: "manual",
+      timeoutMs,
+      headers: {
+        "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+        Accept: "text/html,application/json",
+      },
+      cookie: toCookieHeader(forumCookies),
+    });
+    mergeCookies(forumCookies, getResponseSetCookies(backResp));
+  } else {
+    return { ok: false, reason: "forum_sso_bridge_failed" };
+  }
+
+  const userToken = forumCookies.get(FORUM_TOKEN_COOKIE_NAME);
+  const session = forumCookies.get(FORUM_SESSION_COOKIE_NAME);
+  if (!userToken && !session) {
+    return { ok: false, reason: "forum_session_not_obtained" };
+  }
+  const cookie = toCookieHeader(forumCookies);
+  forumSessionCookieCache = { value: cookie, fetchedAt: Date.now() };
+  return { ok: true, cookie };
+}
+
+async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
+  const creds = buildCredentialAuth();
+  if (!creds) {
+    return { ok: false as const, reason: "missing_credentials" };
+  }
+  if (forumSessionCookieCache && Date.now() - forumSessionCookieCache.fetchedAt < SSO_COOKIE_TTL_MS) {
+    return { ok: true as const, cookie: forumSessionCookieCache.value, source: "cache" as const };
+  }
+
   const encrypted = aesEncryptEcb(SSO_AES_KEY, JSON.stringify({
     username: creds.username,
     password: creds.password,
@@ -185,71 +251,106 @@ async function tryLoginForumBySsoCredential(base: string, timeoutMs: number) {
     return { ok: false as const, reason: "sso_login_parse_error" };
   }
 
-  // 2) Get forum SSO redirect URL
-  const ssoStart = await fetchWithCookie(`${base}/session/sso`, {
-    method: "GET",
-    redirect: "manual",
-    timeoutMs,
-    headers: {
-      "User-Agent": "RDKClaw/1.0 (+forum-tool)",
-      Accept: "text/html,application/json",
-    },
-    cookie: toCookieHeader(forumCookies),
+  const bridge = await completeForumSsoBridgeWithToken(ssoToken, base, timeoutMs);
+  if (!bridge.ok) {
+    return { ok: false as const, reason: bridge.reason };
+  }
+  return { ok: true as const, cookie: bridge.cookie, source: "sso_credential" as const };
+}
+
+function deriveForumUsernameFromSsoUser(user?: { name?: string; email?: string; id?: string }): string {
+  if (!user) return "";
+  const name = String(user.name || "").trim();
+  if (name) return name;
+  const email = String(user.email || "").trim();
+  const at = email.indexOf("@");
+  if (at > 0) return email.slice(0, at);
+  if (email) return email;
+  return String(user.id || "").trim();
+}
+
+/** 每次解析鉴权前从 ~/.rdkstudio/forum-auth.json 刷新到 process.env，避免 SSO 异步写入后 Agent 仍读到旧 env。 */
+function refreshForumEnvFromDisk(): void {
+  new ForumAuthStore().load();
+}
+
+/**
+ * 主应用 OAuth 登录成功后，用 access_token 走与密码登录相同的开发者桥接，写入论坛 Cookie。
+ */
+export async function applyForumAuthFromAppSsoAccessToken(
+  accessToken: string,
+  userHint?: { name?: string; email?: string; id?: string },
+): Promise<{ ok: boolean; detail: string }> {
+  let base: string;
+  try {
+    base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
+  } catch {
+    return { ok: false, detail: "bad_forum_base" };
+  }
+  forumSessionCookieCache = null;
+  const bridge = await completeForumSsoBridgeWithToken(accessToken, base, DEFAULT_TIMEOUT_MS);
+  if (!bridge.ok) {
+    return { ok: false, detail: bridge.reason };
+  }
+  const store = new ForumAuthStore();
+  const usernameHint = deriveForumUsernameFromSsoUser(userHint);
+  store.applyAppSsoForumBridge(bridge.cookie, usernameHint || undefined);
+  store.markVerified("ok");
+  return { ok: true, detail: "app_sso_token" };
+}
+
+/** 在 HttpOnly 会话提交后异步触发，避免阻塞 OAuth 回调重定向。 */
+export function scheduleForumSyncFromSso(
+  accessToken: string,
+  userHint?: { name?: string; email?: string; id?: string },
+): void {
+  void applyForumAuthFromAppSsoAccessToken(accessToken, userHint).then((r) => {
+    if (r.ok) {
+      console.log("[Forum] synced session from app SSO (access_token bridge)");
+    } else {
+      console.warn("[Forum] app SSO → forum sync skipped:", r.detail);
+    }
+  }).catch((err) => {
+    console.warn("[Forum] app SSO → forum sync error:", err instanceof Error ? err.message : err);
   });
-  mergeCookies(forumCookies, getResponseSetCookies(ssoStart));
-  const devSsoUrl = ssoStart.headers.get("location") || "";
-  if (!devSsoUrl || !/developer\.d-robotics\.cc\/communityApi\/discourseApi\/sso/i.test(devSsoUrl)) {
-    return { ok: false as const, reason: "forum_sso_redirect_missing" };
-  }
+}
 
-  // 3) Request developer SSO bridge with JWT token as cookie
-  const devResp = await fetchWithCookie(devSsoUrl, {
-    method: "GET",
-    redirect: "manual",
-    timeoutMs,
-    headers: {
-      "User-Agent": "RDKClaw/1.0 (+forum-tool)",
-      Accept: "text/html,application/json",
-    },
-    cookie: `token=${ssoToken}`,
-  });
-  const forumBackUrl = devResp.headers.get("location") || "";
-
-  // 4) Follow forum redirect to obtain session cookies
-  if (forumBackUrl && /forum\.d-robotics\.cc/i.test(forumBackUrl)) {
-    const backResp = await fetchWithCookie(forumBackUrl, {
-      method: "GET",
-      redirect: "manual",
-      timeoutMs,
-      headers: {
-        "User-Agent": "RDKClaw/1.0 (+forum-tool)",
-        Accept: "text/html,application/json",
-      },
-      cookie: toCookieHeader(forumCookies),
-    });
-    mergeCookies(forumCookies, getResponseSetCookies(backResp));
-  } else {
-    return { ok: false as const, reason: "forum_sso_bridge_failed" };
-  }
-
-  // 带上 SSO 回跳后论坛返回的全部 Cookie（仅 _t/_forum_session 可能缺字段，导致 CSRF/写操作失败）
-  const userToken = forumCookies.get(FORUM_TOKEN_COOKIE_NAME);
-  const session = forumCookies.get(FORUM_SESSION_COOKIE_NAME);
-  if (!userToken && !session) {
-    return { ok: false as const, reason: "forum_session_not_obtained" };
-  }
-  const cookie = toCookieHeader(forumCookies);
-  forumSessionCookieCache = { value: cookie, fetchedAt: Date.now() };
-  return { ok: true as const, cookie, source: "sso_credential" as const };
+/** 主应用退出登录时调用：清除由 SSO 同步的论坛 Cookie。 */
+export function clearForumAuthOnAppSsoLogout(): void {
+  forumSessionCookieCache = null;
+  new ForumAuthStore().clearAppSsoLinkedForumState();
 }
 
 async function resolveForumAuth(base: string, timeoutMs: number) {
+  refreshForumEnvFromDisk();
   const apiHeaders = buildAuthHeaders();
   if (apiHeaders) {
     return { mode: "api_key" as const, headers: apiHeaders, detail: "api_key" };
   }
-  // Prefer credential-based SSO attempt over static cookie.
-  // This avoids stale cookie masking newly saved username/password.
+
+  if (forumSessionCookieCache && Date.now() - forumSessionCookieCache.fetchedAt < SSO_COOKIE_TTL_MS) {
+    return {
+      mode: "cookie" as const,
+      headers: { Cookie: forumSessionCookieCache.value },
+      detail: "cache",
+    };
+  }
+
+  const disk = new ForumAuthStore().get();
+  const appToken = disk.appSsoAccessToken?.trim();
+  if (appToken) {
+    const bridge = await completeForumSsoBridgeWithToken(appToken, base, timeoutMs);
+    if (bridge.ok) {
+      new ForumAuthStore().applyAppSsoForumBridge(bridge.cookie, undefined);
+      return {
+        mode: "cookie" as const,
+        headers: { Cookie: bridge.cookie },
+        detail: "app_sso_token",
+      };
+    }
+  }
+
+  // 用户名+密码换 SSO 再进论坛（与用户手填设置一致）
   const ssoResult = await tryLoginForumBySsoCredential(base, timeoutMs);
   if (ssoResult.ok) {
     return {
@@ -262,20 +363,25 @@ async function resolveForumAuth(base: string, timeoutMs: number) {
   if (cookieHeaders) {
     return { mode: "cookie" as const, headers: cookieHeaders, detail: "env_cookie" };
   }
+  const fallbackDetail = appToken ? "app_sso_token_bridge_failed" : ssoResult.reason;
   return {
     mode: "none" as const,
     headers: {} as Record<string, string>,
-    detail: ssoResult.reason,
+    detail: fallbackDetail,
   };
 }
 
 function resolveAuthDetailText(detail: string) {
   if (detail === "missing_credentials") return "未检测到论坛用户名/密码或 API/Cookie 配置。";
+  if (detail === "app_sso_token_bridge_failed") {
+    return "已保存主应用登录令牌，但用其换取论坛会话失败（令牌类型不符或网络/SSO 异常）。请在设置中「保存并验证」论坛密码，或重新登录主账号。";
+  }
   if (detail === "interactive_login_required") return "已检测到账号密码，但 SSO 返回交互登录页（需要人工完成一次登录/验证）。";
   if (detail === "forum_sso_redirect_missing") return "论坛 SSO 跳转地址获取失败。";
   if (detail === "forum_session_not_obtained") return "SSO 已请求，但未拿到论坛会话 Cookie。";
   if (detail === "env_cookie") return "当前使用环境变量 Cookie 登录态。";
   if (detail === "sso_credential") return "当前使用用户名/密码自动换取的 SSO 会话。";
+  if (detail === "app_sso_token") return "当前使用主应用 SSO access_token 自动同步的论坛会话。";
   if (detail === "cache") return "当前使用缓存的论坛会话。";
   if (detail === "api_key") return "当前使用 API Key 模式。";
   return detail || "unknown";
@@ -288,11 +394,26 @@ function authHint(base: string, detail = "") {
     "当前论坛访问需要登录认证（实测匿名 latest/about/topic 均会 403）。",
     "该论坛开启了 SSO，/u/login 会跳转到 /session/sso，不能直接用用户名密码调用 /session 登录。",
     "可用方式：",
-    "1) 在对话中告诉我你的论坛用户名和密码，我会调用 forum_drobotics_set_credentials 自动配置（最快）",
+    "0) 已用主账号登录 Studio 时，论坛可能已自动同步；可重试 forum_drobotics_auth_status 或让用户重新打开设置刷新状态",
+    "1) 在对话中告诉我你的论坛用户名和密码，我会调用 forum_drobotics_set_credentials 自动配置",
     "2) 在 RDK Studio 设置面板中配置论坛账号",
     "3) 配置 API 凭据（FORUM_DROBOTICS_API_KEY + FORUM_DROBOTICS_API_USERNAME）",
     "4) 浏览器登录后导出 Cookie 到 FORUM_DROBOTICS_COOKIE",
   ].filter(Boolean).join("\n");
+}
+
+/** 供 auth_status 返回：与设置页同源，避免模型谎称「查不到」 */
+function formatStudioForumConfigAudit(): string {
+  const v = new ForumAuthStore().getView();
+  return [
+    "--- studio_forum_config (本机 forum-auth，与「设置 → 社区论坛」一致) ---",
+    `studio_forum_username_masked: ${v.username || "未配置"}`,
+    `studio_linked_from_app_sso: ${v.linkedFromAppSso ? "yes" : "no"}`,
+    `studio_has_password_saved_locally: ${v.hasPassword ? "yes" : "no"}`,
+    `studio_has_forum_cookie: ${v.hasCookie ? "yes" : "no"}`,
+    `studio_has_app_sso_token_saved: ${v.hasAppSsoAccessTokenSaved ? "yes" : "no"}`,
+    "password_policy: 助手不得复述明文密码（模型上下文无密码）。已保存/已同步时由服务端工具代用，勿让用户把密码发到聊天。",
+  ].join("\n");
 }
 
 function decodeForumErrorBody(raw: string) {
@@ -642,12 +763,14 @@ function forumAuthStatusTool(options: ForumToolOptions): Tool<Record<string, nev
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   return {
     name: "forum_drobotics_auth_status",
-    description: "检测论坛 API 是否已具备读写权限，并返回下一步配置建议。",
+    description:
+      "检测论坛读写权限，并返回本机论坛配置摘要（脱敏用户名等）。用户问「我的论坛用户名/密码是多少」「是否已同步」时必须先调用；根据 studio_forum_username_masked 与 auth_status 作答，禁止未调用就说「查不到你的隐私」。密码永不输出，说明见 password_policy。",
     inputSchema: {
       type: "object",
       properties: {},
     },
     async execute() {
+      const audit = formatStudioForumConfigAudit();
       const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
       const auth = await resolveForumAuth(base, timeoutMs);
       const timeout = withTimeout(timeoutMs);
@@ -666,6 +789,8 @@ function forumAuthStatusTool(options: ForumToolOptions): Tool<Record<string, nev
         const parsed = decodeForumErrorBody(bodyText);
         if (res.ok) {
           return [
+            audit,
+            "",
             `forum: ${base}`,
             "auth_status: ok",
             `auth_mode: ${auth.mode}`,
@@ -676,9 +801,11 @@ function forumAuthStatusTool(options: ForumToolOptions): Tool<Record<string, nev
           ].join("\n");
         }
         if (res.status === 403 && parsed.errorType === "not_logged_in") {
-          return authHint(base, auth.detail);
+          return [audit, "", authHint(base, auth.detail)].join("\n");
         }
         return [
+          audit,
+          "",
           `forum: ${base}`,
           "auth_status: failed",
           `auth_detail: ${auth.detail}`,
@@ -700,6 +827,7 @@ function forumAuthStatusTool(options: ForumToolOptions): Tool<Record<string, nev
 export async function verifyForumSsoLogin(
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<{ ok: boolean; detail: string }> {
+  refreshForumEnvFromDisk();
   const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
   forumSessionCookieCache = null;
   const auth = await resolveForumAuth(base, timeoutMs);

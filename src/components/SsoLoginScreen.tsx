@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useAppState } from '../hooks/useAppState';
 import { ssoTranslate as st } from '../i18n/sso-translate';
-import { resolveApiUrl } from '../utils/apiBase';
+import { fetchApi } from '../utils/apiBase';
 
 type Phase = 'preparing' | 'ready' | 'error';
 
@@ -11,6 +11,9 @@ const FALLBACK_SSO = 'https://sso.d-robotics.cc/';
 
 export default function SsoLoginScreen() {
   const { ssoConfigured, loginUrl, refresh } = useAuth();
+
+  /** 浏览器内嵌：服务端 OAuth URL；缺失时仍展示官方 SSO 门户 */
+  const displayLoginUrl = loginUrl || FALLBACK_SSO;
   const { addToast } = useAppState();
   const [phase, setPhase] = useState<Phase>('preparing');
   const [loadError, setLoadError] = useState('');
@@ -25,11 +28,13 @@ export default function SsoLoginScreen() {
   const desktopCapable = typeof window !== 'undefined' && !!window.rdkDesktop?.prepareSsoEmbedded;
 
   const loginFrameUrl = useMemo(() => {
-    if (!loginUrl) return '';
-    if (loginUrl.includes('redirect=')) return loginUrl;
-    const sep = loginUrl.includes('?') ? '&' : '?';
-    return `${loginUrl}${sep}embed=1`;
-  }, [loginUrl]);
+    if (!displayLoginUrl) return '';
+    if (displayLoginUrl.includes('redirect=') || displayLoginUrl.includes('redirectUrl=')) {
+      return displayLoginUrl;
+    }
+    const sep = displayLoginUrl.includes('?') ? '&' : '?';
+    return `${displayLoginUrl}${sep}embed=1`;
+  }, [displayLoginUrl]);
 
   const scheduleReady = useCallback(() => {
     window.clearTimeout(readyTimerRef.current);
@@ -43,15 +48,10 @@ export default function SsoLoginScreen() {
     window.clearTimeout(readyTimerRef.current);
   }, []);
 
-  /* 浏览器：依赖服务端下发的 OAuth loginUrl */
+  /* 浏览器：内嵌 SSO 门户（有 OAuth 配置时 loginUrl 为 authorize 或带 redirect 的门户链接） */
   useEffect(() => {
-    if (!ssoConfigured) {
-      setPhase('error');
-      setLoadError('');
-      return;
-    }
     if (desktopCapable) return;
-    if (!loginUrl) {
+    if (!displayLoginUrl) {
       setPhase('error');
       setLoadError(st('sso.embedFailed', '无法启动登录回调服务，请重试。'));
       return;
@@ -59,11 +59,11 @@ export default function SsoLoginScreen() {
     setEmbedLoadFailed(false);
     setLoadError('');
     scheduleReady();
-  }, [loginUrl, ssoConfigured, scheduleReady, prepareBump, desktopCapable]);
+  }, [displayLoginUrl, scheduleReady, prepareBump, desktopCapable, st]);
 
   /* 桌面端：主进程起 127.0.0.1 回调，与 rdkstudio_frontend-master 一致 */
   useEffect(() => {
-    if (!desktopCapable || !ssoConfigured) return;
+    if (!desktopCapable) return;
     let cancelled = false;
     setPhase('preparing');
     setLoadError('');
@@ -94,7 +94,7 @@ export default function SsoLoginScreen() {
       void window.rdkDesktop?.stopSsoEmbedded?.();
       setDesktopSsoUrl('');
     };
-  }, [desktopCapable, ssoConfigured, scheduleReady, prepareBump]);
+  }, [desktopCapable, scheduleReady, prepareBump, st]);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,15 +120,28 @@ export default function SsoLoginScreen() {
       const token = payload?.token;
       if (!token) return;
       try {
-        const r = await fetch(resolveApiUrl('/api/sso/bootstrap'), {
+        const r = await fetchApi('/api/sso/bootstrap', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({ accessToken: token }),
         });
-        const data = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        const data = (await r.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          code?: string;
+        };
         if (!r.ok || !data?.ok) {
-          addToast(data?.error || st('sso.bootstrapFail', '会话建立失败'), 'error');
+          if (data?.code === 'SSO_CLIENT_NOT_CONFIGURED') {
+            addToast(
+              st(
+                'sso.bootstrapNeedConfig',
+                '您已在 SSO 登录成功，但本应用尚未在服务端完成 OAuth 对接。请联系管理员配置 SSO_CLIENT_ID 与 SSO_CLIENT_SECRET。',
+              ),
+              'error',
+            );
+          } else {
+            addToast(data?.error || st('sso.bootstrapFail', '会话建立失败'), 'error');
+          }
           return;
         }
         addToast(st('sso.loginSuccess', '登录成功'), 'success');
@@ -172,12 +185,6 @@ export default function SsoLoginScreen() {
   };
 
   const errorMessage = useMemo(() => {
-    if (!ssoConfigured) {
-      return st(
-        'sso.configMissing',
-        '当前服务端未完成 SSO 客户端配置（缺少 `SSO_CLIENT_ID` / `SSO_CLIENT_SECRET`），请先配置后再登录。',
-      );
-    }
     if (embedLoadFailed) {
       return st(
         'sso.embedLoadFailed',
@@ -185,13 +192,22 @@ export default function SsoLoginScreen() {
       );
     }
     return loadError || st('sso.embedFailed', '无法启动登录回调服务，请重试。');
-  }, [ssoConfigured, embedLoadFailed, loadError]);
+  }, [embedLoadFailed, loadError, st]);
+
+  const configBannerText = !ssoConfigured
+    ? st(
+        'sso.configMissing',
+        '当前为浏览器内嵌登录：在下方完成 D-Robotics 账号认证后，若无法进入工作台，需在本服务器配置 SSO_CLIENT_ID / SSO_CLIENT_SECRET（授权码回调）。桌面客户端使用环回 token，无需此项。',
+      )
+    : '';
 
   const showErrorLayer = phase === 'error' || embedLoadFailed;
   const showPreparingLayer = phase === 'preparing' && !showErrorLayer;
 
-  const showDesktopWebview = desktopCapable && phase === 'ready' && !embedLoadFailed && !!desktopSsoUrl && ssoConfigured;
-  const showBrowserIframe = !desktopCapable && phase === 'ready' && !embedLoadFailed && !!loginUrl && ssoConfigured;
+  const showDesktopWebview = desktopCapable && phase === 'ready' && !embedLoadFailed && !!desktopSsoUrl;
+  const showBrowserIframe = !desktopCapable && phase === 'ready' && !embedLoadFailed && !!loginFrameUrl;
+  /** 桌面环回 token 与参考工程一致，不依赖服务端 OAuth 客户端；横幅仅提示纯浏览器内嵌时的限制 */
+  const showConfigBanner = !!configBannerText && showBrowserIframe;
 
   useEffect(() => {
     if (!showDesktopWebview) return;
@@ -222,6 +238,11 @@ export default function SsoLoginScreen() {
 
   return (
     <div className="sso-login-root">
+      {showConfigBanner && (
+        <p className="sso-login-config-banner" role="status">
+          {configBannerText}
+        </p>
+      )}
       {showPreparingLayer && (
         <div className="sso-login-state">
           <div className="sso-login-spinner" aria-hidden />
@@ -233,11 +254,9 @@ export default function SsoLoginScreen() {
         <div className="sso-login-state sso-login-error">
           <p className="sso-login-state-text">{errorMessage}</p>
           <div className="sso-login-actions">
-            {ssoConfigured && (
-              <button type="button" className="sso-login-btn-primary" onClick={() => { void retryEmbedded(); }}>
-                {st('sso.retryEmbed', '重试内嵌')}
-              </button>
-            )}
+            <button type="button" className="sso-login-btn-primary" onClick={() => { void retryEmbedded(); }}>
+              {st('sso.retryEmbed', '重试内嵌')}
+            </button>
             <button type="button" className="sso-login-btn-secondary" onClick={openSsoPopup}>
               {st('sso.openSsoInWindow', '独立窗口登录')}
             </button>
@@ -252,7 +271,7 @@ export default function SsoLoginScreen() {
           className="sso-login-iframe"
           src={desktopSsoUrl}
           partition="persist:sso"
-          allowpopups={true}
+          {...({ allowpopups: 'true' } as React.HTMLAttributes<HTMLElement>)}
           webpreferences={'contextIsolation=yes,nodeIntegration=no' as never}
         />
       )}
@@ -263,7 +282,7 @@ export default function SsoLoginScreen() {
             key={iframeKey}
             title={st('sso.iframeTitle', 'D-Robotics SSO')}
             className="sso-login-iframe"
-            src={loginFrameUrl || loginUrl}
+            src={loginFrameUrl}
             onError={() => {
               setEmbedLoadFailed(true);
               setPhase('error');

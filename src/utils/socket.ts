@@ -4,6 +4,8 @@
  */
 export const socketIoClientOptions = {
   transports: ['websocket', 'polling'] as ('websocket' | 'polling')[],
+  /** 与 fetch credentials:'include' 一致，便于携带 SSO Cookie（轮询降级时经 Express） */
+  withCredentials: true,
   reconnection: true,
   reconnectionAttempts: 25,
   reconnectionDelay: 2000,

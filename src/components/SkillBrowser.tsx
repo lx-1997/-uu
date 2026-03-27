@@ -3,7 +3,7 @@ import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
 import { fetchDeviceOpenClawHealth } from '../api';
-import { resolveApiUrl } from '../utils/apiBase';
+import { fetchApi } from '../utils/apiBase';
 
 interface OpenClawSkillsPayload {
   ok?: boolean;
@@ -121,7 +121,7 @@ function buildQualityPromptBySource(
 }
 
 async function writeSkillToBoard(deviceId: string, skillId: string, content: string): Promise<{ ok: boolean; message: string; path?: string }> {
-  const res = await fetch(resolveApiUrl(`/api/devices/${deviceId}/openclaw/skill-write`), {
+  const res = await fetchApi(`/api/devices/${deviceId}/openclaw/skill-write`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ skillId, content }),
@@ -192,7 +192,7 @@ export default function SkillBrowser() {
     }
     try {
       const [skillsRes, healthRes] = await Promise.all([
-        fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/skills`)),
+        fetchApi(`/api/devices/${currentDevice.id}/openclaw/skills`),
         fetchDeviceOpenClawHealth(currentDevice.id),
       ]);
       if (skillsRes.ok) {
@@ -219,7 +219,9 @@ export default function SkillBrowser() {
     setSkillContentPath('');
     setEditing(false);
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/skill-content?skillId=${encodeURIComponent(skillId)}`));
+      const res = await fetchApi(
+        `/api/devices/${currentDevice.id}/openclaw/skill-content?skillId=${encodeURIComponent(skillId)}`,
+      );
       const data = await res.json() as { ok?: boolean; content?: string; path?: string; error?: string };
       if (!res.ok || !data.ok) {
         setSkillContent(data.error || tf('skillBrowser.err.readHttp', '无法读取该技能内容（HTTP {{status}}）', { status: res.status }));

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, type ReactNode } from 'react';
 import { AppProvider, useAppState } from './hooks/useAppState';
 import { useI18n } from './i18n/use-i18n';
-import { useAuth } from './hooks/useAuth';
+import { AuthProvider, useAuth } from './hooks/useAuth';
 import SsoLoginScreen from './components/SsoLoginScreen';
 import { ssoTranslate as st } from './i18n/sso-translate';
 import IconRail from './components/IconRail';
@@ -213,10 +213,12 @@ function SSOGate({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
-    <AppProvider>
-      <SSOGate>
-        <AppShell />
-      </SSOGate>
-    </AppProvider>
+    <AuthProvider>
+      <AppProvider>
+        <SSOGate>
+          <AppShell />
+        </SSOGate>
+      </AppProvider>
+    </AuthProvider>
   );
 }

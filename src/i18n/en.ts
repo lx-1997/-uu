@@ -78,6 +78,14 @@ export const EN: Record<string, string> = {
 
   // Settings — chrome
   'settings.title': 'RDKClaw Settings',
+  'settings.sec.account': 'Account & security',
+  'settings.account.title': 'Account & security',
+  'settings.account.desc':
+    'You are signed in with D-Robotics SSO. Signing out clears this session; your device list stays on this machine and on the server.',
+  'settings.account.signedIn': 'Signed in as',
+  'settings.account.sessionOnly': 'Session active',
+  'settings.account.email': 'Email',
+  'settings.account.logout': 'Sign out',
   'settings.sec.ai': 'AI engine',
   'settings.sec.persona': 'Persona & behavior',
   'settings.sec.policy': 'Execution policy',
@@ -215,9 +223,10 @@ export const EN: Record<string, string> = {
   'settings.modal.close': 'Close',
 
   'settings.forum.title': 'Community forum',
-  'settings.forum.desc': 'Authorize RDKClaw to post on the D-Robotics forum. You can also tell credentials in chat.',
+  'settings.forum.desc': 'Uses the same D-Robotics account as app sign-in: after you log in, the forum session syncs automatically. If that fails, save username and password here or in chat.',
   'settings.forum.user': 'Forum user',
   'settings.forum.notSet': 'Not set',
+  'settings.forum.linkedSso': 'Synced with app account',
   'settings.forum.verifyOk': 'Credentials saved; SSO verification passed',
   'settings.forum.ssoOk': 'SSO verified',
   'settings.forum.ssoFail': 'Verification failed',
@@ -228,7 +237,8 @@ export const EN: Record<string, string> = {
   'settings.forum.verify': 'Verifying…',
   'settings.forum.saveVerify': 'Save & verify',
   'settings.forum.clear': 'Clear',
-  'settings.forum.hint': 'Saved credentials are verified via SSO and stored locally.',
+  'settings.forum.tokenHeldNoCookie': 'Your app login token is saved; if posting still fails, the forum bridge may not accept this token—use Save & verify with your forum password, or sign in again.',
+  'settings.forum.hint': 'Signing out clears the forum cookie that was synced from app login; manually saved username/password stay until you clear them. Manual save runs SSO password verification.',
   'settings.forum.verifyFailDetail': 'Saved; SSO verification failed: {{detail}}',
 
   'settings.feishu.boundCount': 'Bound ({{n}})',
@@ -316,7 +326,9 @@ export const EN: Record<string, string> = {
   'sso.retryEmbed': 'Retry embedded',
   'sso.openSsoInWindow': 'Open login in new window',
   'sso.configMissing':
-    'SSO client is not configured on the server (missing `SSO_CLIENT_ID` / `SSO_CLIENT_SECRET`). Please configure and try again.',
+    'Embedded browser login only: after you sign in below, this server needs an OAuth client (SSO_CLIENT_ID / SSO_CLIENT_SECRET) to complete the redirect handoff. The desktop app uses a different flow and does not require these variables.',
+  'sso.bootstrapNeedConfig':
+    'SSO sign-in succeeded, but this workstation is not linked to the SSO server yet. Ask an administrator to configure SSO_CLIENT_ID and SSO_CLIENT_SECRET (OAuth callback) on the RDK Studio server.',
   'sso.statusChecking': 'Checking login status…',
   'sso.statusFailed': 'Login check failed. Retry or check your network.',
   'sso.statusIdle': 'You will enter the workspace automatically after a successful login.',

@@ -7,7 +7,7 @@ import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
-import { resolveApiUrl } from '../utils/apiBase';
+import { resolveApiUrl, fetchApi } from '../utils/apiBase';
 import { renderMarkdown } from './MarkdownRenderer';
 import io from 'socket.io-client';
 
@@ -815,7 +815,7 @@ export default function AIDock() {
 
   const uploadLargeAttachment = useCallback(async (file: File, type: string): Promise<{ id: string; storedPath: string }> => {
     const buffer = await file.arrayBuffer();
-    const res = await fetch(resolveApiUrl('/api/agent/upload-attachment'), {
+    const res = await fetchApi('/api/agent/upload-attachment', {
       method: 'POST',
       headers: {
         'Content-Type': file.type || 'application/octet-stream',

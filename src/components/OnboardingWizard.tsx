@@ -8,7 +8,7 @@ import {
   fetchAgentConfig,
   saveAgentConfig,
 } from '../api';
-import { resolveApiUrl } from '../utils/apiBase';
+import { fetchApi } from '../utils/apiBase';
 import {
   deployJobStorageKey as ocDeployJobLsKey,
   startOpenClawDeployPoll,
@@ -336,7 +336,7 @@ export default function OnboardingWizard() {
     setShowSkipWarning(false);
 
     try {
-      const startResponse = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/deploy/start`), {
+      const startResponse = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/deploy/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -406,7 +406,7 @@ export default function OnboardingWizard() {
     setOcGwLog(`${t('onboard.gw.sending', '[网关] 正在发送启动指令...')}\n`);
 
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/restart-gateway`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/restart-gateway`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });

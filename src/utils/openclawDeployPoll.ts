@@ -60,7 +60,9 @@ export async function fetchOpenClawDeployJob(
   );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), POLL_REQUEST_TIMEOUT_MS);
-  const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timeout));
+  const res = await fetch(url, { signal: controller.signal, credentials: 'include' }).finally(() =>
+    clearTimeout(timeout),
+  );
   if (!res.ok) return null;
   const data = (await res.json()) as { ok?: boolean; job?: OpenClawDeployJobPayload };
   if (!data?.ok || !data.job) return null;

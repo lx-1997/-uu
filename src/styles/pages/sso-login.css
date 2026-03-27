@@ -7,6 +7,31 @@
   background: #fff;
 }
 
+.sso-login-config-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10002;
+  margin: 0;
+  padding: 10px 16px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(28, 72, 128, 0.94);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  text-align: center;
+}
+
+.sso-login-root:has(.sso-login-config-banner) .sso-login-iframe {
+  top: 44px;
+  height: calc(100% - 44px);
+}
+
+.sso-login-root:has(.sso-login-config-banner) .sso-login-ready-footer {
+  padding-bottom: 20px;
+}
+
 .sso-login-state {
   position: absolute;
   inset: 0;

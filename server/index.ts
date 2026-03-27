@@ -1,4 +1,4 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import QRCode from 'qrcode';
@@ -56,14 +56,15 @@ import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
 import { clearSecurityAuditLogs, listSecurityAuditLogs } from './rdkclaw/security-audit-store.js';
-import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes } from './sso.js';
+import { isSSOEnabled, isSSORequired, ssoAuthMiddleware, registerSSORoutes, restoreSsoSessionsFromDisk } from './sso.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
 
 const app = express();
 const httpServer = http.createServer(app);
 const io = new SocketIOServer(httpServer, {
-  cors: { origin: '*' }
+  // 与 Express cors({ credentials: true, origin: true }) 对齐，便于浏览器携带 SSO Cookie
+  cors: { origin: true, credentials: true },
 });
 
 const wss = new WebSocketServer({ noServer: true });
@@ -1309,9 +1310,11 @@ registerSSORoutes(app);
 if (isSSOEnabled() || isSSORequired()) {
   app.use(ssoAuthMiddleware);
   if (isSSOEnabled()) {
-    console.log('[SSO] D-Robotics SSO enabled');
+    console.log('[SSO] D-Robotics OAuth client configured (authorize + callback)');
   } else {
-    console.warn('[SSO] SSO required but client credentials are missing; login will be blocked until configured');
+    console.warn(
+      '[SSO] OAuth client not set: browser code flow unavailable; Electron redirectUrl + /api/sso/bootstrap still works',
+    );
   }
 } else {
   console.log('[SSO] SSO not configured (set SSO_CLIENT_ID & SSO_CLIENT_SECRET to enable)');
@@ -5167,6 +5170,7 @@ io.on('connection', (socket) => {
 });
 
 async function startServer() {
+  await restoreSsoSessionsFromDisk();
   await restoreRuntimeJobsState();
   httpServer.once('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {

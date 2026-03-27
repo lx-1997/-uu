@@ -12,7 +12,7 @@ let cachedSkills: SkillManifest[] | null = null;
 export async function fetchSkills(): Promise<SkillManifest[]> {
   if (cachedSkills) return cachedSkills;
   try {
-    const res = await fetch(`${API_BASE}/api/skills`);
+    const res = await fetch(`${API_BASE}/api/skills`, { credentials: 'include' });
     if (!res.ok) return [];
     const data = await res.json();
     cachedSkills = data.skills ?? [];
@@ -24,7 +24,9 @@ export async function fetchSkills(): Promise<SkillManifest[]> {
 
 export async function fetchSkillMd(name: string): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/md`);
+    const res = await fetch(`${API_BASE}/api/skills/${encodeURIComponent(name)}/md`, {
+      credentials: 'include',
+    });
     if (!res.ok) return null;
     return await res.text();
   } catch {
@@ -34,7 +36,7 @@ export async function fetchSkillMd(name: string): Promise<string | null> {
 
 export async function reloadSkills(): Promise<SkillManifest[]> {
   try {
-    await fetch(`${API_BASE}/api/skills/reload`, { method: 'POST' });
+    await fetch(`${API_BASE}/api/skills/reload`, { method: 'POST', credentials: 'include' });
     cachedSkills = null;
     return fetchSkills();
   } catch {

@@ -16,10 +16,15 @@ import type { Device } from '../shared/types.js';
 
 let _legacyMigrated = false;
 
-function resolveDataDir() {
+export function resolveDataDir() {
   const envDataDir = String(process.env.RDK_DATA_DIR ?? '').trim();
   if (envDataDir) return envDataDir;
   return path.join(os.homedir(), '.rdk-studio', 'data');
+}
+
+/** SSO 会话落盘路径（与 devices.json 同目录，重启后端后可恢复登录态） */
+export function getSsoSessionsFilePath() {
+  return path.join(resolveDataDir(), 'sso-sessions.json');
 }
 
 function getDataFilePath() {

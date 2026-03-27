@@ -53,6 +53,7 @@ async function callSkillAPI(
     const opts: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
     };
     if (body && method !== 'GET') {
       opts.body = JSON.stringify(body);
@@ -118,6 +119,7 @@ async function generateAndExecuteCommand(
     const res = await fetch(`${getApiBase()}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         messages: [
           {

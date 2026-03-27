@@ -2,6 +2,36 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { Device } from '../app-types';
 import { connectDevice, checkDevicePing, fetchDevices, forgetDevicePassword, rememberDevicePassword, removeDevice as removeDeviceApi } from '../api';
 import { useToastStore } from './useToastStore';
+import { useAuth } from './useAuth';
+
+const DEVICES_CACHE_KEY = 'rdk-studio-devices-cache-v1';
+
+type DevicesCacheV1 = { v: 1; devices: Device[]; activeDevice: string };
+
+function loadDevicesFromCache(): DevicesCacheV1 | null {
+  try {
+    const raw = localStorage.getItem(DEVICES_CACHE_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as DevicesCacheV1;
+    if (o?.v !== 1 || !Array.isArray(o.devices)) return null;
+    return o;
+  } catch {
+    return null;
+  }
+}
+
+function saveDevicesToCache(deviceList: Device[], activeId: string) {
+  try {
+    if (deviceList.length === 0) {
+      localStorage.removeItem(DEVICES_CACHE_KEY);
+      return;
+    }
+    const payload: DevicesCacheV1 = { v: 1, devices: deviceList, activeDevice: activeId };
+    localStorage.setItem(DEVICES_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    /* ignore */
+  }
+}
 
 export interface DeviceStoreState {
   activeDevice: string;
@@ -35,6 +65,10 @@ export function useDeviceStore(): DeviceStoreState {
 
 export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const { addToast, addActivity } = useToastStore();
+  const { user, ssoEnabled, ssoRequired, loading: authLoading } = useAuth();
+  const gateActive = ssoEnabled || ssoRequired;
+  /** 须等 /api/sso/me 完成后再判断门禁，避免误判「未开 SSO」而过早请求 /api/devices 导致 401 */
+  const authReady = !authLoading && (!gateActive || !!user);
 
   const [activeDevice, setActiveDevice] = useState('');
   const [devices, setDevices] = useState<Device[]>([]);
@@ -136,10 +170,17 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  // Fetch device list on mount
+  /**
+   * SSO 开启时，在登录页也会挂载 DeviceProvider；此前在 401 时拉列表会失败且 effect 只跑一次，
+   * 登录成功后不会重试。改为「认证就绪后再拉取」，并做本机缓存兜底。
+   */
   useEffect(() => {
-    fetchDevices()
-      .then((res) => {
+    if (!authReady) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetchDevices();
+        if (cancelled) return;
         const next = res.devices.map((device) => ({
           id: device.id,
           name: `${device.username}@${device.host}:${device.port ?? 22}`,
@@ -150,15 +191,36 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         }));
         setDevices(next);
         setActiveDevice((prev) => (prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? '')));
-      })
-      .catch(() => {
-        addToast('设备列表读取失败，请检查后端服务', 'warning');
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      } catch {
+        if (cancelled) return;
+        const cached = loadDevicesFromCache();
+        if (cached?.devices.length) {
+          setDevices(cached.devices);
+          setActiveDevice((prev) => {
+            if (prev && cached.devices.some((d) => d.id === prev)) return prev;
+            if (cached.activeDevice && cached.devices.some((d) => d.id === cached.activeDevice)) {
+              return cached.activeDevice;
+            }
+            return cached.devices[0]?.id ?? '';
+          });
+          addToast('已从本机恢复设备列表（服务端暂不可用或未携带登录态）', 'info');
+        } else {
+          addToast('设备列表读取失败，请检查后端服务', 'warning');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, user?.id, addToast]);
+
+  useEffect(() => {
+    saveDevicesToCache(devices, activeDevice);
+  }, [devices, activeDevice]);
 
   // Background ping
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
     let pinging = false;
     const pingAll = async () => {
@@ -192,7 +254,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     void pingAll();
 
     return () => { cancelled = true; clearInterval(timer); };
-  }, []);
+  }, [authReady]);
 
   const value: DeviceStoreState = {
     activeDevice, setActiveDevice, devices, setDevices, currentDevice,

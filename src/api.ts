@@ -154,6 +154,7 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
       const response = await fetch(input, {
         ...init,
         headers,
+        credentials: init?.credentials ?? 'include',
       });
 
       if (!response.ok) {
@@ -264,6 +265,7 @@ export function fetchAIReply(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, deviceName, deviceIp }),
     signal: controller.signal,
+    credentials: 'include',
   })
     .then(async (r) => {
       clearTimeout(timer);
@@ -445,6 +447,7 @@ export function streamAgentChat(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, deviceId, sessionId, userId, attachments }),
         signal: controller.signal,
+        credentials: 'include',
       });
 
       if (!res.ok) {
@@ -560,6 +563,10 @@ export interface ForumAuthView {
   username: string;
   hasPassword: boolean;
   hasCookie: boolean;
+  /** 本地已保存主应用 access_token（供服务端换论坛会话，前端不可见内容） */
+  hasAppSsoAccessTokenSaved: boolean;
+  /** 论坛 Cookie 是否由主应用 SSO 登录自动写入 */
+  linkedFromAppSso: boolean;
   hasApiKey: boolean;
   hasApiUsername: boolean;
   lastVerified: number | null;
@@ -863,6 +870,7 @@ export function fetchAgentPlan(goal: string, deviceName?: string, deviceIp?: str
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ goal, deviceName, deviceIp }),
     signal: controller.signal,
+    credentials: 'include',
   })
     .then(async (r) => {
       clearTimeout(timer);
@@ -886,6 +894,7 @@ export function runOpenClawAgentAction(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...params }),
     signal: controller.signal,
+    credentials: 'include',
   })
     .then(async (r) => {
       clearTimeout(timer);

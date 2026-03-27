@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchDeviceWifiList } from '../../api';
-import { resolveApiUrl } from '../../utils/apiBase';
+import { fetchApi } from '../../utils/apiBase';
 import { useAppState } from '../../hooks/useAppState';
 import { useI18n } from '../../i18n/use-i18n';
 import { fillTemplate } from '../../i18n/en-extras';
@@ -42,7 +42,7 @@ export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
     setConnecting(true);
     setConnectLog('');
     try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/wifi-connect`), {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/wifi-connect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wifiName: ssid, wifiPassword: password }),

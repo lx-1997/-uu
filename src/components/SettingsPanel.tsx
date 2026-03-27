@@ -37,6 +37,7 @@ import {
 } from '../api';
 import { resolveApiUrl } from '../utils/apiBase';
 import { fillTemplate } from '../i18n/en-extras';
+import { useAuth } from '../hooks/useAuth';
 
 /* ═══════════════════════════════════════════
    Constants
@@ -69,7 +70,7 @@ const AI_PROVIDER_OPTIONS = Object.entries(AI_PROVIDER_DEFAULTS).map(([value, it
   label: item.label,
 }));
 
-type SectionId = 'ai-engine' | 'persona' | 'policy' | 'feishu' | 'weixin' | 'connection' | 'forum';
+type SectionId = 'account' | 'ai-engine' | 'persona' | 'policy' | 'feishu' | 'weixin' | 'connection' | 'forum';
 
 /* ═══════════════════════════════════════════
    Component
@@ -81,6 +82,8 @@ export default function SettingsPanel() {
     autoReconnect, setAutoReconnect,
     connectionTimeout, setConnectionTimeout, addToast,
   } = useAppState();
+  const { user, ssoEnabled, ssoRequired, logout } = useAuth();
+  const showAccountSection = ssoEnabled || ssoRequired;
   const { t } = useI18n();
   const tf = useCallback(
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
@@ -88,6 +91,9 @@ export default function SettingsPanel() {
   );
 
   const SECTIONS = useMemo(() => [
+    ...(showAccountSection
+      ? [{ id: 'account' as const, label: t('settings.sec.account', '账户与安全') }]
+      : []),
     { id: 'ai-engine' as const, label: t('settings.sec.ai', 'AI 引擎') },
     { id: 'persona' as const, label: t('settings.sec.persona', '人格与行为') },
     { id: 'policy' as const, label: t('settings.sec.policy', '执行策略') },
@@ -95,7 +101,7 @@ export default function SettingsPanel() {
     { id: 'weixin' as const, label: t('settings.sec.weixin', '微信') },
     { id: 'connection' as const, label: t('settings.sec.connection', '设备连接') },
     { id: 'forum' as const, label: t('settings.sec.forum', '社区论坛') },
-  ], [t]);
+  ], [t, showAccountSection]);
 
   /* ── Active nav section (IntersectionObserver) ── */
   const [activeSection, setActiveSection] = useState<SectionId>('ai-engine');
@@ -229,7 +235,7 @@ export default function SettingsPanel() {
 
   /* ── Forum State ── */
   const [forumAuth, setForumAuth] = useState<ForumAuthView>({
-    username: '', hasPassword: false, hasCookie: false,
+    username: '', hasPassword: false, hasCookie: false, hasAppSsoAccessTokenSaved: false, linkedFromAppSso: false,
     hasApiKey: false, hasApiUsername: false,
     lastVerified: null, lastVerifyResult: null,
   });
@@ -683,6 +689,50 @@ export default function SettingsPanel() {
 
             <div className="settings-scroll-area" ref={scrollAreaRef}>
 
+              {showAccountSection && (
+                <>
+                  <section id="account" className="settings-section" ref={registerSectionRef('account')}>
+                    <H
+                      title={t('settings.account.title', '账户与安全')}
+                      desc={t(
+                        'settings.account.desc',
+                        '当前通过 D-Robotics 统一登录使用工作台。退出后将清除本会话，设备列表仍保存在本机与服务端。',
+                      )}
+                    />
+                    <div className="settings-card">
+                      <div className="settings-row">
+                        <span className="settings-row-label">{t('settings.account.signedIn', '已登录')}</span>
+                        <div className="settings-row-value">
+                          <span className="settings-row-static">
+                            {user?.name || user?.email || user?.id || t('settings.account.sessionOnly', '已建立会话')}
+                          </span>
+                        </div>
+                      </div>
+                      {user?.email && (
+                        <div className="settings-row">
+                          <span className="settings-row-label">{t('settings.account.email', '邮箱')}</span>
+                          <div className="settings-row-value">
+                            <span className="settings-row-static">{user.email}</span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="settings-actions">
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => {
+                            void logout();
+                          }}
+                        >
+                          {t('settings.account.logout', '退出登录')}
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+                  <hr className="settings-section-divider" />
+                </>
+              )}
+
               {/* ══ 1. AI 引擎 ══ */}
               <section id="ai-engine" className="settings-section" ref={registerSectionRef('ai-engine')}>
                 <H title={t('settings.ai.title', 'AI 引擎')} desc={t('settings.ai.desc', 'RDKClaw 的思考核心。选择服务商、填入 API Key 即可启用。')} />
@@ -1047,13 +1097,17 @@ export default function SettingsPanel() {
 
               {/* ══ 7. 社区论坛 ══ */}
               <section id="forum" className="settings-section" ref={registerSectionRef('forum')}>
-                <H title={t('settings.forum.title', '社区论坛')} desc={t('settings.forum.desc', '授权后 RDKClaw 可帮你在 D-Robotics 社区发帖互动。也可在对话中直接告诉 RDKClaw 你的论坛账号密码，会自动保存。')} />
+                <H title={t('settings.forum.title', '社区论坛')} desc={t('settings.forum.desc', '与主应用登录为同一套 D-Robotics 账号：登录成功后论坛会话会自动同步，无需重复填写。若自动同步失败，可在此手动保存用户名与密码并完成验证；也可在对话中告诉 RDKClaw 账号密码。')} />
                 <div className="settings-card">
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.forum.user', '论坛用户')}</span>
                     <div className="settings-actions">
                       <span className="settings-row-static">{forumAuth.username || t('settings.forum.notSet', '未配置')}</span>
-                      {forumAuth.lastVerifyResult === 'ok' && <span className="settings-status-badge ok">{t('settings.forum.ssoOk', 'SSO 验证通过')}</span>}
+                      {forumAuth.linkedFromAppSso ? (
+                        <span className="settings-status-badge ok">{t('settings.forum.linkedSso', '已与主账号同步')}</span>
+                      ) : forumAuth.lastVerifyResult === 'ok' ? (
+                        <span className="settings-status-badge ok">{t('settings.forum.ssoOk', 'SSO 验证通过')}</span>
+                      ) : null}
                       {forumAuth.lastVerifyResult === 'failed' && <span className="settings-status-badge error">{t('settings.forum.ssoFail', '验证失败')}</span>}
                     </div>
                   </div>
@@ -1074,7 +1128,12 @@ export default function SettingsPanel() {
                     <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveForumCredential} disabled={forumSaving}>{forumSaving ? t('settings.forum.verify', '验证中...') : t('settings.forum.saveVerify', '保存并验证')}</button>
                     <button type="button" className="btn btn-danger btn-sm" onClick={handleClearForumAuth} disabled={forumSaving}>{t('settings.forum.clear', '清空')}</button>
                   </div>
-                  <span className="settings-hint">{t('settings.forum.hint', '保存后自动通过 SSO 验证密码是否有效，凭据持久化到本地。')}</span>
+                  {forumAuth.hasAppSsoAccessTokenSaved && !forumAuth.hasCookie && (
+                    <span className="settings-hint" style={{ display: 'block', marginBottom: '0.5rem' }}>
+                      {t('settings.forum.tokenHeldNoCookie', '已保存主账号登录令牌；若助手仍无法发帖，可能是令牌与论坛桥接不兼容，请使用下方「保存并验证」提交论坛密码，或重新登录主账号后再试。')}
+                    </span>
+                  )}
+                  <span className="settings-hint">{t('settings.forum.hint', '主账号退出登录时会清除由登录自动同步的论坛 Cookie；手动保存的用户名与密码仍保留在本地，直至你点击清空。手动保存后会通过 SSO 验证密码是否有效。')}</span>
                 </div>
               </section>
 
