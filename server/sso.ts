@@ -20,6 +20,8 @@ const SSO_CALLBACK_PATH = '/api/sso/callback';
 
 const TOKEN_COOKIE = 'rdk_sso_token';
 const SESSION_COOKIE = 'rdk_sso_session';
+/** 与 Cookie 等价：Electron file:// 或跨源时 Cookie 偶发不带，客户端用 localStorage 镜像后通过此头补传 */
+const SESSION_HEADER = 'x-rdk-sso-session';
 /** 默认 14 天；可通过环境变量 SSO_SESSION_MAX_AGE_MS（毫秒）调整 */
 const TOKEN_EXPIRY_MS = (() => {
   const n = Number(process.env.SSO_SESSION_MAX_AGE_MS);
@@ -306,8 +308,18 @@ export function formatConversationArchiveUserName(
  * 从请求 Cookie 解析当前 SSO 会话用户。
  * 供先于 ssoAuthMiddleware 注册的 API（如 /api/analytics/daily-active）使用。
  */
+function getSessionIdFromRequest(req: Request): string {
+  const fromCookie = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
+  if (fromCookie && /^[a-f0-9]{64}$/i.test(fromCookie)) return fromCookie;
+  const raw = req.headers[SESSION_HEADER];
+  const h = Array.isArray(raw) ? raw[0] : raw;
+  const s = String(h || '').trim();
+  if (s && /^[a-f0-9]{64}$/i.test(s)) return s;
+  return '';
+}
+
 export function getSessionSsoUser(req: Request): SSOUser | null {
-  const sessionId = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
+  const sessionId = getSessionIdFromRequest(req);
   if (!sessionId || !sessions.has(sessionId)) return null;
   const session = sessions.get(sessionId)!;
   if (session.expiresAt <= Date.now()) {
@@ -330,7 +342,7 @@ function forumUsernameHintFromSsoUser(user: SSOUser): string | undefined {
   return id || undefined;
 }
 
-function commitSSOSession(res: Response, user: SSOUser, accessToken: string, refreshToken?: string): void {
+function commitSSOSession(res: Response, user: SSOUser, accessToken: string, refreshToken?: string): string {
   const sessionId = crypto.randomBytes(32).toString('hex');
   const expiresAt = Date.now() + TOKEN_EXPIRY_MS;
   sessions.set(sessionId, {
@@ -345,6 +357,7 @@ function commitSSOSession(res: Response, user: SSOUser, accessToken: string, ref
   res.setHeader('Set-Cookie', [
     `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(TOKEN_EXPIRY_MS / 1000)}`,
   ]);
+  return sessionId;
 }
 
 export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
@@ -376,7 +389,7 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  const sessionId = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
+  const sessionId = getSessionIdFromRequest(req);
   if (sessionId && sessions.has(sessionId)) {
     const session = sessions.get(sessionId)!;
     if (session.expiresAt > Date.now()) {
@@ -486,8 +499,8 @@ export function registerSSORoutes(app: any): void {
     }
     try {
       const user = await resolveUserForDesktopBootstrap(raw);
-      commitSSOSession(res, user, raw, undefined);
-      res.json({ ok: true, user });
+      const sessionId = commitSSOSession(res, user, raw, undefined);
+      res.json({ ok: true, user, sessionId });
     } catch (err) {
       console.warn('[SSO] bootstrap failed:', err instanceof Error ? err.message : err);
       res.status(401).json({ ok: false, error: 'invalid or expired token' });
@@ -499,11 +512,17 @@ export function registerSSORoutes(app: any): void {
       res.json({ enabled: false, required: false, configured: isSSOEnabled(), user: null });
       return;
     }
-    const sessionId = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
+    const sessionId = getSessionIdFromRequest(req);
     if (sessionId && sessions.has(sessionId)) {
       const session = sessions.get(sessionId)!;
       if (session.expiresAt > Date.now()) {
-        res.json({ enabled: true, required: true, configured: isSSOEnabled(), user: session.user });
+        res.json({
+          enabled: true,
+          required: true,
+          configured: isSSOEnabled(),
+          user: session.user,
+          sessionId,
+        });
         return;
       }
       sessions.delete(sessionId);
@@ -513,7 +532,7 @@ export function registerSSORoutes(app: any): void {
   });
 
   app.post('/api/sso/logout', (req: Request, res: Response) => {
-    const sessionId = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
+    const sessionId = getSessionIdFromRequest(req);
     if (sessionId) {
       sessions.delete(sessionId);
       schedulePersistSsoSessions();

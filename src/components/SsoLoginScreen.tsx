@@ -4,7 +4,7 @@ import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import { ssoTranslate as st } from '../i18n/sso-translate';
 import LegalDocumentModal, { type LegalDocKind } from './LegalDocumentModal';
-import { fetchApi } from '../utils/apiBase';
+import { fetchApi, setSsoSessionMirror } from '../utils/apiBase';
 
 type Phase = 'preparing' | 'ready' | 'error';
 
@@ -133,6 +133,7 @@ export default function SsoLoginScreen() {
           ok?: boolean;
           error?: string;
           code?: string;
+          sessionId?: string;
         };
         if (!r.ok || !data?.ok) {
           if (data?.code === 'SSO_CLIENT_NOT_CONFIGURED') {
@@ -148,6 +149,7 @@ export default function SsoLoginScreen() {
           }
           return;
         }
+        if (data.sessionId) setSsoSessionMirror(data.sessionId);
         addToast(st('sso.loginSuccess', '登录成功'), 'success');
         void window.rdkDesktop?.stopSsoEmbedded?.();
         await refresh();

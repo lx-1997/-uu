@@ -7,7 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { useSessionDailyActivePing, useGuestDailyActivePing } from '../analytics/useDailyActivePing';
-import { resolveApiUrl, fetchApi } from '../utils/apiBase';
+import { fetchApi, setSsoSessionMirror } from '../utils/apiBase';
 
 export interface SSOUser {
   id: string;
@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     const [meRes, loginRes] = await Promise.all([
-      fetch(resolveApiUrl('/api/sso/me'), { credentials: 'include' }),
+      fetchApi('/api/sso/me'),
       fetchApi('/api/sso/login'),
     ]);
     const meData = (await meRes.json()) as {
@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       required?: boolean;
       configured?: boolean;
       user?: SSOUser | null;
+      sessionId?: string;
     };
     const loginData = (await loginRes.json()) as {
       enabled?: boolean;
@@ -70,6 +71,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSsoConfigured(configured);
     setUser(fetchedUser);
     setLoginUrl(fetchedLoginUrl);
+    if (fetchedUser && meData.sessionId) {
+      setSsoSessionMirror(meData.sessionId);
+    } else if (!fetchedUser) {
+      setSsoSessionMirror(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -96,12 +102,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      const res = await fetch(resolveApiUrl('/api/sso/logout'), {
+      const res = await fetchApi('/api/sso/logout', {
         method: 'POST',
-        credentials: 'include',
       });
       const data = (await res.json()) as { logoutUrl?: string };
       setUser(null);
+      setSsoSessionMirror(null);
       if (data.logoutUrl) {
         window.location.href = data.logoutUrl;
       } else {

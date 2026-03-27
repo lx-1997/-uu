@@ -1,7 +1,7 @@
 import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
 import { readStudioUiHintsForDevice } from './studio-ui-hints';
-import { resolveApiUrl } from './utils/apiBase';
+import { applySsoMirrorToHeaders, resolveApiUrl } from './utils/apiBase';
 
 export interface DeviceExecResult {
   ok: boolean;
@@ -136,6 +136,7 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
+  applySsoMirrorToHeaders(headers);
 
   const deviceId = extractDeviceId(input);
   if (deviceId && !headers.has('x-device-password')) {
@@ -261,9 +262,11 @@ export function fetchAIReply(
 ) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
+  const chatHeaders = new Headers({ 'Content-Type': 'application/json' });
+  applySsoMirrorToHeaders(chatHeaders);
   return fetch(resolveUrl('/api/chat'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: chatHeaders,
     body: JSON.stringify({ messages, deviceName, deviceIp }),
     signal: controller.signal,
     credentials: 'include',
@@ -444,11 +447,11 @@ export function streamAgentChat(
   const done = (async () => {
     try {
       const studioUiHints = readStudioUiHintsForDevice(deviceId);
+      const agentHeaders = new Headers({ 'Content-Type': 'application/json' });
+      applySsoMirrorToHeaders(agentHeaders);
       const res = await fetch(resolveUrl('/api/agent/chat'), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: agentHeaders,
         body: JSON.stringify({
           message,
           deviceId,
@@ -876,9 +879,11 @@ export function importAgentConfig(payload: {
 export function fetchAgentPlan(goal: string, deviceName?: string, deviceIp?: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
+  const planHeaders = new Headers({ 'Content-Type': 'application/json' });
+  applySsoMirrorToHeaders(planHeaders);
   return fetch(resolveUrl('/api/agent/plan'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: planHeaders,
     body: JSON.stringify({ goal, deviceName, deviceIp }),
     signal: controller.signal,
     credentials: 'include',
@@ -900,9 +905,11 @@ export function runOpenClawAgentAction(
 ) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25000);
+  const ocHeaders = new Headers({ 'Content-Type': 'application/json' });
+  applySsoMirrorToHeaders(ocHeaders);
   return fetch(resolveUrl('/api/openclaw/agent-action'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: ocHeaders,
     body: JSON.stringify({ action, ...params }),
     signal: controller.signal,
     credentials: 'include',

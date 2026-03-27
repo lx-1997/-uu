@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { resolveApiUrl } from '../utils/apiBase';
+import { fetchApi } from '../utils/apiBase';
 
 const STORAGE_ANON = 'rdk:studio-anon-id';
 
@@ -33,10 +33,9 @@ function tryMarkPvOnceThisDocument(markKey: string): boolean {
 
 async function postDailyActive(body: Record<string, string>): Promise<boolean> {
   try {
-    const res = await fetch(resolveApiUrl('/api/analytics/daily-active'), {
+    const res = await fetchApi('/api/analytics/daily-active', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify(body),
     });
     if (!res.ok) return false;

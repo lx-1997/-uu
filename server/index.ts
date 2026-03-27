@@ -1312,7 +1312,13 @@ async function runOnDevice(
   return null;
 }
 
-app.use(cors({ credentials: true, origin: true }));
+app.use(
+  cors({
+    credentials: true,
+    origin: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-Password', 'X-RDK-Sso-Session', 'X-Requested-With'],
+  }),
+);
 app.use(express.json({ limit: '50mb' }));
 
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)

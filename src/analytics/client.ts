@@ -1,4 +1,4 @@
-import { resolveApiUrl } from '../utils/apiBase';
+import { fetchApi } from '../utils/apiBase';
 import { getTrainingDataOptIn } from './consent';
 import { buildAnalyticsRequestBody } from './payload-crypto';
 import { ANALYTICS_SCHEMA, type StudioAnalyticsEvent } from './types';
@@ -57,10 +57,9 @@ export async function flushNow(): Promise<void> {
       consent: consentPayload(),
       events: batch,
     });
-    await fetch(resolveApiUrl('/api/analytics/events'), {
+    await fetchApi('/api/analytics/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: bodyStr,
     });
   } catch {
@@ -86,10 +85,9 @@ export async function reportConsentSnapshot(reason: string): Promise<void> {
         },
       ],
     });
-    await fetch(resolveApiUrl('/api/analytics/events'), {
+    await fetchApi('/api/analytics/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: bodyStr,
     });
   } catch {
