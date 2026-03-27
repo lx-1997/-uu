@@ -77,3 +77,12 @@ export function useGuestDailyActivePing(
     void postDailyActive({ anonymousId, appVersion });
   }, [loading, ssoRequired, user]);
 }
+
+/**
+ * @deprecated 日活 PV 已迁至 `AuthProvider`（`useSessionDailyActivePing` / `useGuestDailyActivePing`）。
+ * 保留同名空 hook，避免旧代码或 Vite HMR 缓存仍 `import { useDailyActivePing }` 时整页模块加载失败，
+ * 进而触发「useAuth 不在 AuthProvider 内」等连锁报错。
+ */
+export function useDailyActivePing(): void {
+  /* no-op */
+}

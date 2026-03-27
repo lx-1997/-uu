@@ -54,9 +54,33 @@ function spawnTerm(
 }
 
 function killTerm(d: TermData) {
-  d.socket.disconnect();
-  d.term.dispose();
-  d.el.remove();
+  try {
+    d.socket.removeAllListeners();
+    if (d.socket.connected) {
+      d.socket.disconnect();
+    } else {
+      // 握手未完成时走 Manager.close，减少 “WebSocket is closed before established” 控制台噪音
+      const mgr = (d.socket as unknown as { io?: { close?: () => void } }).io;
+      if (typeof mgr?.close === 'function') mgr.close();
+      else d.socket.disconnect();
+    }
+  } catch {
+    try {
+      d.socket.disconnect();
+    } catch {
+      /* noop */
+    }
+  }
+  try {
+    d.term.dispose();
+  } catch {
+    /* noop */
+  }
+  try {
+    d.el.remove();
+  } catch {
+    /* noop */
+  }
 }
 
 export default function Terminal() {
