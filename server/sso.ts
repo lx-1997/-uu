@@ -360,6 +360,12 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
     return;
   }
 
+  /** 匿名日活（与 events 相同：未登录也需写入 Supabase；须与 analytics-routes 放行策略一致） */
+  if (req.method === 'POST' && req.path === '/api/analytics/daily-active') {
+    next();
+    return;
+  }
+
   const sessionId = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
   if (sessionId && sessions.has(sessionId)) {
     const session = sessions.get(sessionId)!;

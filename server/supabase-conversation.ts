@@ -21,7 +21,8 @@ export function isSupabaseConversationConfigured(): boolean {
   return !!(url && key);
 }
 
-function getClient(): SupabaseClient | null {
+/** 与 conversation_turns、studio_daily_usage 共用同一客户端与凭证解析逻辑 */
+export function getSharedSupabaseClient(): SupabaseClient | null {
   const url = getResolvedSupabaseUrl();
   const key = getResolvedSupabaseKey();
   if (!url || !key) return null;
@@ -33,6 +34,10 @@ function getClient(): SupabaseClient | null {
     clientCacheKey = cacheKey;
   }
   return client;
+}
+
+function getClient(): SupabaseClient | null {
+  return getSharedSupabaseClient();
 }
 
 export function scheduleSupabaseConversationInsert(record: ConversationTurnRecord): void {

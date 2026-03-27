@@ -1,16 +1,16 @@
 /**
- * 匿名日活写入 Supabase（与 conversation 共用 URL/密钥，表名默认 studio_daily_usage）。
+ * 匿名日活写入 Supabase（与 conversation_turns 共用 Supabase 客户端与凭证，表名默认 studio_daily_usage）。
  * 需在库中执行 supabase/studio_daily_usage.sql。
  * 默认：已解析到 Supabase URL 与密钥时即写入；仅当 SUPABASE_DAILY_USAGE_ENABLED=0|false 时关闭。
  */
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   getResolvedSupabaseKey,
   getResolvedSupabaseUrl,
 } from './supabase-embedded-config.js';
-
-let client: SupabaseClient | null = null;
-let clientCacheKey = '';
+import {
+  getSharedSupabaseClient,
+  isSupabaseConversationConfigured,
+} from './supabase-conversation.js';
 
 function isDailyUsageExplicitlyDisabled(): boolean {
   const v = String(process.env.SUPABASE_DAILY_USAGE_ENABLED ?? '').trim().toLowerCase();
@@ -20,6 +20,9 @@ function isDailyUsageExplicitlyDisabled(): boolean {
 /** 与 performDailyActiveInsert 的开关逻辑一致（供运维/测试查询） */
 export function isDailyUsageWriteEnabled(): boolean {
   if (isDailyUsageExplicitlyDisabled()) return false;
+  // 与对话归档同口径时优先（conversation_turns 能写则日活同凭证）
+  if (isSupabaseConversationConfigured()) return true;
+  // 仅关闭对话归档、仍要写日活：具备 URL+密钥即可
   return !!(getResolvedSupabaseUrl() && getResolvedSupabaseKey());
 }
 
@@ -31,20 +34,6 @@ export type DailyActiveInsertResult =
 export function getResolvedDailyUsageTable(): string {
   const env = String(process.env.SUPABASE_DAILY_USAGE_TABLE ?? '').trim();
   return env || 'studio_daily_usage';
-}
-
-function getClient(): SupabaseClient | null {
-  const url = getResolvedSupabaseUrl();
-  const key = getResolvedSupabaseKey();
-  if (!url || !key) return null;
-  const cacheKey = `${url}\0${key}`;
-  if (!client || clientCacheKey !== cacheKey) {
-    client = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    clientCacheKey = cacheKey;
-  }
-  return client;
 }
 
 /**
@@ -59,7 +48,7 @@ export async function performDailyActiveInsert(
     return { ok: true, persisted: false, reason: 'disabled' };
   }
   const table = getResolvedDailyUsageTable();
-  const sb = getClient();
+  const sb = getSharedSupabaseClient();
   if (!sb) {
     return { ok: true, persisted: false, reason: 'no_credentials' };
   }
@@ -78,13 +67,16 @@ export async function performDailyActiveInsert(
       app_version: ver || null,
     });
     if (!error) {
+      console.log('[daily-usage] inserted', { table, usage_date: usageDate, app_version: ver || null });
       return { ok: true, persisted: true };
     }
     const msg = error.message || '';
-    if (/duplicate|unique|23505/i.test(msg)) {
+    const code = (error as { code?: string }).code || '';
+    if (/duplicate|unique|23505/i.test(msg) || code === '23505') {
+      console.log('[daily-usage] duplicate (already counted today)', { table, usage_date: usageDate });
       return { ok: true, persisted: true, duplicate: true };
     }
-    console.warn('[daily-usage] supabase:', msg);
+    console.warn('[daily-usage] supabase insert failed:', { code, message: msg, table });
     return { ok: false, error: msg };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
