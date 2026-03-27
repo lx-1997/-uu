@@ -22,7 +22,7 @@ category: Delegation
 - **何时直接用 `device_exec`**：目标是单条 shell 命令且不涉及 OpenClaw 技能编排（如 `ls`、`cat`、`systemctl status`），此时无需走委派链路。
 
 ## 执行流程
-1. **知识准备**（推荐）：调用 `ecosystem_query` 查询目标任务涉及的插件、模型、pipeline 的注册信息与版本兼容性；调用 `web_search` 搜索官方文档和最佳实践。此步骤与 SOUL.md「先查后委」原则对齐。
+1. **知识准备**（推荐）：调用 `web_search` / `web_fetch` 查官方文档与仓库；结合设备信息与 `board_openclaw_assess` 核对插件、模型、pipeline 是否就绪。此步骤与 SOUL.md「先查后委」原则对齐。
 2. **评估可行性**：调用 `board_openclaw_assess` 确认板端 OpenClaw 在线、目标技能/插件已就绪。
 3. **结构化任务描述**：组装委派输入，guidance 应包含以下结构：
    - `intent`：`diagnose` / `deploy` / `repair` / `automation` / `development`
@@ -31,11 +31,11 @@ category: Delegation
    - `guidance` 结构化内容：
      ```
      ## 技术方案
-     - 推荐技术栈: {基于 ecosystem_query 结果}
+     - 推荐技术栈: {基于文档检索与 assess 结论}
      - 推荐模型/插件: {具体名称和版本}
      ## 参考资料
      - 官方文档: {web_search 查到的链接}
-     - 相关 EcoSkill: {名称及 installCmd}
+     - 相关板端技能 / ClawHub: {名称及安装方式}
      ## 验收标准
      - {可观测的成功标志}
      ```
@@ -50,8 +50,7 @@ category: Delegation
 
 | 工具 | 用途 | 必需 |
 |------|------|------|
-| `ecosystem_query` | 查询插件、模型、pipeline 的注册与版本信息 | 推荐 |
-| `web_search` | 搜索官方文档和最佳实践 | 推荐 |
+| `web_search` / `web_fetch` | 搜索并拉取官方文档与仓库；结合 assess 核对版本与依赖 | 推荐 |
 | `board_openclaw_assess` | 评估板端 OpenClaw 可达性与技能就绪状态 | 是 |
 | `board_openclaw_delegate` | 将结构化任务委派给板端 OpenClaw 执行 | 是 |
 | `device_exec` | 独立验证 / 降级路径 / 简单命令直接执行 | 是 |

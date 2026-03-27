@@ -24,7 +24,7 @@ category: Knowledge
 - **RDK X5**: 主力级，10TOPS BPU，4-8GB RAM。跑 YOLO/分割/姿态/DOSOD(12fps)/小LLM(≤2B)
 - **RDK S100**: 旗舰级，80-128TOPS Nash BPU，12-24GB RAM + MCU。跑大模型(LLM/VLM)、DOSOD(45fps)、具身智能
 
-不确定时用 ecosystem_query 工具查询。
+不确定时用 web_search / web_fetch 查文档，并结合 board_openclaw_assess 判断板端是否具备能力。
 
 ## 协作决策树
 ```
@@ -42,7 +42,7 @@ category: Knowledge
 task: {具体任务描述}
 platform_context: 当前平台 {型号}，BPU {TOPS}TOPS
 recommended_approach: {基于平台的推荐方案}
-available_skills: {从 ecosystem_query 查到的相关技能}
+available_skills: {从 board_openclaw_chat/assess 或设备侧技能列表整理的相关技能}
 doc_reference: {相关文档链接}
 ```
 
@@ -133,7 +133,7 @@ kill -9 <PID>
 
 | 工具 | 用途 |
 |------|------|
-| ecosystem_query | 查平台能力 |
+| web_search / web_fetch | 查文档与仓库；平台能力以设备与 OpenClaw 为准 |
 | board_openclaw_assess | 评估可行性 |
 | board_openclaw_delegate | 委派执行 |
 | device_exec | SSH直接执行 |

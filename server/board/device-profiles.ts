@@ -1,14 +1,13 @@
-/**
+﻿/**
  * Device Profiles — Hardware capability matrix for each RDK board variant.
  *
- * Used by the Ecosystem Registry to filter skills by device compatibility,
- * and by AI Dock to understand what the current device can / cannot do.
+ * Used by RDKClaw and the board detect API to understand device capabilities.
  *
  * When a device connects, we resolve its profile from board info
  * (e.g. /sys/class/socinfo/board_id, /proc/device-tree/model, or hrut_smi).
  */
 
-import type { RdkPlatform } from '../../shared/ecosystem-types.js';
+import type { RdkPlatform } from '../../shared/board-types.js';
 
 export interface DeviceProfile {
   platform: RdkPlatform;
@@ -149,6 +148,23 @@ export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
   },
 };
 
+const DEFAULT_RESEARCH_SEEDS = [
+  'https://developer.d-robotics.cc/rdk_doc/',
+  'https://github.com/D-Robotics',
+];
+
+/** URLs to prioritize for web_fetch / web_search on RDK tasks. */
+export function getResearchSeeds(platform: RdkPlatform | null): string[] {
+  if (!platform) return [...DEFAULT_RESEARCH_SEEDS];
+  const p = DEVICE_PROFILES[platform];
+  if (!p) return [...DEFAULT_RESEARCH_SEEDS];
+  const out = [p.docBaseUrl];
+  for (const u of DEFAULT_RESEARCH_SEEDS) {
+    if (!out.includes(u)) out.push(u);
+  }
+  return out;
+}
+
 /**
  * Detect board platform from raw board info string
  * (output of cat /proc/device-tree/model or cat /sys/class/socinfo/board_id).
@@ -212,3 +228,5 @@ export function parseBoardDetection(output: string): {
 
   return { platform, model: model || boardId, osVersion };
 }
+
+

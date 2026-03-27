@@ -45,8 +45,8 @@ priority: high | medium | low
 2. **提取**：解析 type、query、reason、priority
 3. **执行**：
    - `web_search` → 调用 web_search 工具
-   - `documentation` → 调用 web_fetch 或 ecosystem_query
-   - `ecosystem` → 调用 ecosystem_query
+   - `documentation` → 调用 web_fetch 拉取页面
+   - `ecosystem` → 调用 web_search / web_fetch；板端清单用 board_openclaw_chat 或 assess
    - `analysis` → RDKClaw 自身分析并给出结论
 4. **回传**：通过 board_openclaw_chat 将结果发回给 OpenClaw
 5. **继续**：OpenClaw 收到补充信息后继续执行原任务

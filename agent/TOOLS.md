@@ -17,10 +17,11 @@
 | `board_openclaw_chat` | 和板端 OpenClaw 交流 | 了解能力、讨论方案、共享分析，不执行任务 |
 | `board_openclaw_assess` | 评估板端是否能干 | delegate 之前先 assess |
 | `board_openclaw_delegate` | 委派复杂任务给板端 | 适用于模型部署、pipeline、深度诊断 |
-| `board_openclaw_health/check/doctor` | OpenClaw 状态检查/修复 | |
-| `ecosystem_query` | 查平台可用能力 | 不确定能不能做时先查这个 |
+| `board_openclaw_status` | 轻量看进程/服务摘要 | **日常优先**；界面已显示 OpenClaw 正常时不要为聊天重复查 |
+| `board_openclaw_health` | 结构化 JSON 健康（慢） | **非例行**：仅报障、装/升/重启后验收、或 delegate 失败再调 |
+| `board_openclaw_check` / `doctor` | 全面诊断 / 自动修复 | 深度排障时用 |
 | `text_to_speech` / `speech_to_text` | TTS/STT | 离线优先，在线降级 |
-| `web_search` / `web_fetch` | 联网搜索 | 结论给来源链接 |
+| `web_search` / `web_fetch` | 联网搜索与拉取页面 | 结论给来源链接；不确定能不能做时先搜再 fetch；板型与能力看设备记录与 board_openclaw_assess |
 | `ros_topics` / `ros_nodes` | ROS2 操作 | 设备可能未装 ROS2 |
 | `vnc_start/stop/status` | 远程桌面 | |
 | `navigate:{tab}` | 页面跳转 | dashboard/flasher/terminal/files/vnc/ide/openclaw/hardware 等 |
@@ -31,8 +32,8 @@
 ## 工具组合模式
 
 - **设备排障**: diagnose → 针对异常 exec 排查
-- **OpenClaw 检查**: health（JSON）或 check（全面文本）
-- **OpenClaw 修复**: doctor → restart_gateway → health 验证
+- **OpenClaw 检查**: 日常用 `board_openclaw_status`；仅在需要 JSON 或排障时用 health；全面体检用 check
+- **OpenClaw 修复**: doctor → restart_gateway → **此时**再用 health 做验收闭环
 - **文件传输**: download/upload + 验证
 - **日志分析**: openclaw_logs + exec(journalctl/dmesg)
 - **板端协作**: chat(了解能力) → assess(评估可行性) → delegate(委派执行) → 验证结果

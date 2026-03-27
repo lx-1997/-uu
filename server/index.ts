@@ -1,4 +1,4 @@
-import 'dotenv/config';
+﻿import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import QRCode from 'qrcode';
@@ -17,7 +17,13 @@ import { WebSocketServer } from 'ws';
 import * as net from 'net';
 import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
 import * as path from 'path';
-import { initEcosystem, createEcosystemRouter } from './ecosystem/index.js';
+import {
+  buildBoardDetectionCommand,
+  parseBoardDetection,
+  getDeviceProfile,
+  getResearchSeeds,
+} from './board/device-profiles.js';
+import type { RdkPlatform } from '../shared/board-types.js';
 import { shellEscape, isSafeName } from './utils/shell-escape.js';
 import {
   DEFAULT_VNC_PORT, OPENCLAW_GATEWAY_PORT,
@@ -244,8 +250,7 @@ const WORKSPACE_HEALTH_COMMAND = `bash -lc ${shellEscape(WORKSPACE_HEALTH_SCRIPT
 // OpenClaw Manager
 const resourcesPath = path.join(process.cwd(), 'build-resources');
 const openClawManager = new OpenClawDeploymentManager(resourcesPath);
-const ecosystem = initEcosystem();
-const rdkclaw = new RDKClawApp(process.cwd(), openClawManager, ecosystem.registry);
+const rdkclaw = new RDKClawApp(process.cwd(), openClawManager);
 const notificationHub = new NotificationHub(io);
 const feishuAdapter = new FeishuChannelAdapter(rdkclaw);
 const feishuConfigStore = new FeishuConfigStore();
@@ -1345,7 +1350,7 @@ app.get('/api/local-files/:filename', (req, res) => {
 
 // ─── Ecosystem Bridge ───
 
-async function ecoRunOnDevice(deviceId: string, commands: string[]): Promise<{ output: string } | null> {
+async function sshRunOnDevice(deviceId: string, commands: string[]): Promise<{ output: string } | null> {
   const devices = await readDevices();
   const device = devices.find((d) => d.id === deviceId);
   if (!device) return null;
@@ -1375,8 +1380,6 @@ async function ecoRunOnDevice(deviceId: string, commands: string[]): Promise<{ o
   }
   return null;
 }
-
-app.use('/api/ecosystem', createEcosystemRouter(ecosystem, ecoRunOnDevice));
 
 // ─── Background Auto-Provision ───
 // Silently installs missing optional components (rosbridge, vnc, code-server)
@@ -1420,7 +1423,7 @@ function triggerBackgroundProvision(deviceId: string, values: Record<string, str
 
   for (const task of tasks) {
     active.add(task.key);
-    ecoRunOnDevice(deviceId, [task.cmd])
+    sshRunOnDevice(deviceId, [task.cmd])
       .then((r) => console.log(`[bg-provision] ${deviceId}/${task.key}: ${r ? 'triggered' : 'device unreachable'}`))
       .catch((e: unknown) => console.log(`[bg-provision] ${deviceId}/${task.key}: error`, e instanceof Error ? e.message : e))
       .finally(() => active.delete(task.key));
@@ -2839,6 +2842,55 @@ app.get('/api/devices/:id/diagnostics', async (request, response) => {
     ok: true,
     output: executed.output,
     device: sanitizeDevice(executed.device as Device & { password?: string }),
+  });
+});
+
+
+/** SSH board detect; ?persist=1 writes board* + researchSeeds to devices.json */
+app.post('/api/devices/:id/board/detect', async (request, response) => {
+  const { id } = request.params;
+  const persistRaw = String(request.query.persist ?? '').toLowerCase();
+  const persist = persistRaw === '1' || persistRaw === 'true';
+
+  const detectCmd = buildBoardDetectionCommand();
+  const executed = await runOnDevice(request, response, id, [`bash -lc ${shEscape(detectCmd)}`], { timeoutMs: 45_000 });
+  if (!executed) return;
+
+  const parsed = parseBoardDetection(executed.output);
+  const platform = parsed.platform;
+  const researchSeeds = getResearchSeeds(platform);
+
+  let deviceJson = sanitizeDevice(executed.device as Device & { password?: string });
+
+  if (persist) {
+    const devices = await readDevices();
+    const nextDevices = devices.map((d) => {
+      if (d.id !== id) return d;
+      return {
+        ...d,
+        boardPlatform: platform ?? null,
+        boardModel: parsed.model || undefined,
+        boardOsVersion: parsed.osVersion || undefined,
+        boardDetectedAt: new Date().toISOString(),
+        researchSeeds,
+      };
+    });
+    await writeDevices(nextDevices);
+    const refreshed = nextDevices.find((d) => d.id === id);
+    if (refreshed) {
+      deviceJson = sanitizeDevice(refreshed as Device & { password?: string });
+    }
+  }
+
+  response.json({
+    ok: true,
+    platform,
+    model: parsed.model,
+    osVersion: parsed.osVersion,
+    researchSeeds,
+    output: executed.output,
+    device: deviceJson,
+    persisted: persist,
   });
 });
 

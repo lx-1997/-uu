@@ -93,7 +93,7 @@ describe('getExternalChannelPolicy', () => {
     expect(getExternalChannelPolicy('device_diagnose')).toBe('allow');
     expect(getExternalChannelPolicy('ros_topics')).toBe('allow');
     expect(getExternalChannelPolicy('web_search')).toBe('allow');
-    expect(getExternalChannelPolicy('ecosystem_query')).toBe('allow');
+    expect(getExternalChannelPolicy('web_fetch')).toBe('allow');
   });
 });
 

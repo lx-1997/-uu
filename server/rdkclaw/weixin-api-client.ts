@@ -185,7 +185,15 @@ export class WeixinApiClient {
       },
     }, DEFAULT_TIMEOUT_MS);
     if (res.ret !== undefined && res.ret !== 0) {
-      console.warn(`[WeixinApiClient] sendMessage failed: ret=${res.ret} errmsg=${res.errmsg || ""}`);
+      const msg = `sendmessage ret=${res.ret} errmsg=${res.errmsg || ""}`;
+      console.warn(`[WeixinApiClient] ${msg}`);
+      throw new Error(msg);
+    }
+    const errcode = (res as { errcode?: number }).errcode;
+    if (errcode !== undefined && errcode !== 0) {
+      const msg = `sendmessage errcode=${errcode} errmsg=${res.errmsg || ""}`;
+      console.warn(`[WeixinApiClient] ${msg}`);
+      throw new Error(msg);
     }
     return res;
   }

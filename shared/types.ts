@@ -14,6 +14,13 @@ export interface Device {
   username: string;
   status: 'connected' | 'disconnected';
   lastCheckedAt: string;
+  /** Normalized RDK platform id from board detect, e.g. rdk-x5 */
+  boardPlatform?: string | null;
+  boardModel?: string;
+  boardOsVersion?: string;
+  boardDetectedAt?: string;
+  /** Suggested web_fetch / search entry points for this board */
+  researchSeeds?: string[];
 }
 
 export interface DevicePayload {

@@ -10,12 +10,13 @@
   - [1.1 飞书 (Feishu/Lark)](#11-飞书-feishulark)
   - [1.2 微信 (Weixin ClawBot)](#12-微信-weixin-clawbot)
   - [1.3 通道对比](#13-通道对比)
-- [2. 生态系统](#2-生态系统)
-  - [2.1 生态注册表](#21-生态注册表)
-  - [2.2 四大 Provider](#22-四大-provider)
-  - [2.3 板端状态同步](#23-板端状态同步)
-  - [2.4 设备画像](#24-设备画像)
-  - [2.5 技能分发](#25-技能分发)
+- [2. 板卡画像与知识来源（替代原「生态系统」模块）](#2-板卡画像与知识来源替代原生态系统模块)
+  - [2.1 设计原则](#21-设计原则)
+  - [2.2 板型探测 API](#22-板型探测-api)
+  - [2.3 支持的板型（画像表）](#23-支持的板型画像表)
+  - [2.4 设备侧示例与模型（保留路径）](#24-设备侧示例与模型保留路径)
+  - [2.5 用户可感知技能文档](#25-用户可感知技能文档)
+  - [2.6 历史组件（已删除，仅供对照）](#26-历史组件已删除仅供对照)
 - [3. 安全体系](#3-安全体系)
   - [3.1 SSO 认证](#31-sso-认证)
   - [3.2 权限守卫](#32-权限守卫)
@@ -186,195 +187,53 @@ RDK Studio 支持通过即时通讯工具远程控制设备。用户无需打开
 
 ---
 
-## 2. 生态系统
+## 2. 板卡画像与知识来源（替代原「生态系统」模块）
 
-### 2.1 生态注册表
+> **架构变更**：原 `server/ecosystem/*`（注册表、Provider、board-sync、skill-provisioner）、`initEcosystem`、`/api/ecosystem/*` 与运行时对 `data/ecosystem-registry.json` 的依赖已移除。以下描述与当前代码一致。
 
-**核心文件**: `server/ecosystem/registry.ts`
+### 2.1 设计原则
 
-生态注册表是所有外部能力（应用、模型、ROS 包、OpenClaw 技能）的统一索引。
-
-#### 数据结构 (`EcoSkill`)
-
-```typescript
-interface EcoSkill {
-  id: string;                    // 唯一标识
-  source: EcoSource;             // 来源: nodehub | modelzoo | tros | openclaw_skill
-  name: string;                  // 显示名称
-  description: string;           // 描述
-  platforms: RdkPlatform[];      // 支持的板型
-  category: string;              // 分类
-  tags: string[];                // 标签
-  installCmd?: string;           // 安装命令
-  runCmd?: string;               // 运行命令
-  stopCmd?: string;              // 停止命令
-  uninstallCmd?: string;         // 卸载命令
-  boardStatusByDevice: Record<string, BoardStatus>;  // 每设备安装/运行状态
-  lastRefreshedAt: string;       // 最后刷新时间
-  // ...更多字段因来源而异
-}
-```
-
-#### 操作
-
-| 操作 | 说明 |
+| 层级 | 职责 |
 |------|------|
-| `upsertSkill` | 插入或更新技能（合并 boardStatusByDevice） |
-| `search(query)` | 按来源、平台、分类、标签、关键词、设备状态过滤 |
-| `batchUpdateBoardStatus` | 批量更新指定设备的安装/运行状态 |
-| `buildAIContext` | 为 AI Dock 生成上下文文本 |
-| `findRelevantSkills` | 为委派工具检索相关技能 |
-| `flush()` | 写入 `data/ecosystem-registry.json` |
+| **设备记录** | `data/devices.json` 中可选字段 `boardPlatform`、`boardModel`、`boardOsVersion`、`boardDetectedAt`、`researchSeeds`，由板型探测 API 写入 |
+| **板卡画像** | `server/board/device-profiles.ts`：`DEVICE_PROFILES`、`detectPlatform`、`buildBoardDetectionCommand`、`parseBoardDetection`、`getResearchSeeds` |
+| **联网知识** | RDKClaw 使用 `web_search` / `web_fetch` 拉取官方文档与 GitHub，不再调用本地生态搜索 API |
+| **板端真相** | `board_openclaw_assess` / `board_openclaw_chat` / `board_openclaw_delegate` 与 `device_exec` 反映真实已装技能与环境 |
 
-#### 刷新机制
+### 2.2 板型探测 API
 
-- 启动时 `initEcosystem()` → `refreshAll()`
-- 每 **6 小时** 定时自动刷新
-- 手动触发: `POST /api/ecosystem/refresh`
+- **端点**: `POST /api/devices/:deviceId/board/detect`
+- **查询参数**: `persist=1`（或 `true`）— 将结果写回该设备在 `devices.json` 中的板卡字段与 `researchSeeds`
+- **实现要点**: 经现有设备 SSH 通道执行 `buildBoardDetectionCommand()`，输出由 `parseBoardDetection()` 解析；`getResearchSeeds(platform)` 为 RDKClaw 提示文档入口
 
----
+### 2.3 支持的板型（画像表）
 
-### 2.2 四大 Provider
+与 `DEVICE_PROFILES` 一致（节选）：
 
-#### NodeHub (`server/ecosystem/providers/nodehub.ts`)
+| 板型 | SoC | BPU TOPS | 说明 |
+|------|-----|---------|------|
+| **RDK X3** | Sunrise 3 | 5 | 入门 |
+| **RDK X5** | Sunrise 5 | 10 | 主力视觉 |
+| **RDK Ultra** | Sunrise 5 Ultra | 高算力 | 高性能 |
+| **RDK S100** | S100 (Nash) | 80 / 128（视型号） | 具身 / 大模型向 |
 
-| 字段 | 说明 |
-|------|------|
-| 来源标识 | `nodehub` |
-| 数据结构 | `NodeHubSkill`（pkgName, processKey, dependencies） |
-| 内容 | 高层应用包（如 NodeHub 社区应用） |
-| 操作 | install → run → stop → uninstall |
-| 当前状态 | 种子数据 `SEED_APPS`，未来对接 NodeHub API |
+每个画像含 `detectionPatterns`、`docBaseUrl`、`capabilityNotes`、`limitations` 等，供系统提示与检索种子使用。
 
-#### ModelZoo (`server/ecosystem/providers/modelzoo.ts`)
+### 2.4 设备侧示例与模型（保留路径）
 
-| 字段 | 说明 |
-|------|------|
-| 来源标识 | `modelzoo` |
-| 数据结构 | `ModelZooSkill`（modelPath, samplePath, processKey） |
-| 内容 | rdk_model_zoo AI 模型 |
-| 操作 | deploy → run → remove |
-| 模型路径 | `/opt/rdk_model_zoo/models/` |
+不经过生态注册表，直接走设备 API（与 `server/index.ts` 路由一致）：
 
-#### TROS (`server/ecosystem/providers/tros.ts`)
+- `POST /api/devices/:id/examples/run` — Body: `{ command }`
+- `GET /api/devices/:id/models/list` — 扫描板端模型线索
+- `POST /api/devices/:id/models/deploy` — Body: `{ command }`
 
-| 字段 | 说明 |
-|------|------|
-| 来源标识 | `tros` |
-| 数据结构 | `TrosSkill`（rosNodes, rosTopics） |
-| 内容 | ROS2/TROS 功能包 |
-| 操作 | install → run (ros2 launch/run) → stop |
+### 2.5 用户可感知技能文档
 
-#### OpenClaw Skills (`server/ecosystem/providers/openclaw-skills.ts`)
+仓库 `skills/rdk-ecosystem/SKILL.md` 等已改为描述 **无 `/api/ecosystem`** 下的推荐工作流（探测 → 联网 → assess → delegate / exec）。
 
-| 字段 | 说明 |
-|------|------|
-| 来源标识 | `openclaw_skill` |
-| 数据结构 | `OpenClawSkillDef`（skillMdContent, requiredBins） |
-| 内容 | 板端 OpenClaw 能力（含自动生成的 SKILL.md） |
-| 操作 | provision → deprovision |
+### 2.6 历史组件（已删除，仅供对照）
 
----
-
-### 2.3 板端状态同步 (Board Sync)
-
-**文件**: `server/ecosystem/board-sync.ts`
-
-#### 同步流程
-
-```
-POST /api/ecosystem/sync/:deviceId
-  │
-  ▼
-buildSyncCommand()
-  │  构造 bash 脚本，一次 SSH 采集：
-  │  - TROS/APT 已安装包名
-  │  - /opt/rdk_model_zoo/models 目录列表
-  │  - 过滤后的进程列表
-  │  - /opt/openclaw/skills 目录
-  │  - ros2 node list
-  │
-  ▼
-SSH 执行 → 返回段标记分隔的文本
-  │
-  ▼
-parseSyncOutput()
-  │  按 ===TROS=== / ===MODELS=== / ===PROCESSES=== 等段标记解析
-  │
-  ▼
-applyBoardSync(deviceId, output, registry)
-  │  将解析结果与 registry 中的 EcoSkill 匹配
-  │  更新每个技能在该设备上的 installed / running 状态
-  │
-  ▼
-返回 BoardSyncResult
-  │  含 installedPackages, runningProcesses, openclawSkills, rosNodes
-```
-
----
-
-### 2.4 设备画像 (Device Profiles)
-
-**文件**: `server/ecosystem/device-profiles.ts`
-
-支持的板型及其关键参数：
-
-| 板型 | SoC | BPU TOPS | 模型格式 | 说明 |
-|------|-----|---------|---------|------|
-| **RDK X3** | Sunrise X3 | 5 TOPS | `.bin` (Bernoulli) | 入门级开发板 |
-| **RDK X5** | Sunrise X5 | 10 TOPS | `.bin` (Bayes) | 中端开发板 |
-| **RDK Ultra** | Sunrise Ultra | 高算力 | `.bin` | 高性能开发板 |
-| **RDK S100** | S100 | — | — | 特殊场景板 |
-
-每个画像包含：
-- `detectionPatterns`: 板型自动检测规则
-- `bpuCmd`: BPU 状态查询命令
-- `trosPath`: TROS 安装路径
-- `limitations`: 已知限制
-- `docBaseUrl`: 文档链接
-- `capabilityNotes`: 能力备注
-
-#### 板型自动检测
-
-`POST /api/ecosystem/detect/:deviceId`:
-- SSH 执行 `buildBoardDetectionCommand()`
-- 读取 device-tree model、board_id、OS 版本、BPU 信息
-- `parseBoardDetection(output)` 匹配 `detectionPatterns`
-- 返回检测到的 `RdkPlatform`
-
----
-
-### 2.5 技能分发 (Skill Provisioner)
-
-**文件**: `server/ecosystem/skill-provisioner.ts`
-
-将生态注册表中的任意 `EcoSkill` 转化为板端 OpenClaw 可识别的 SKILL.md 并部署。
-
-#### Provision 流程
-
-```
-POST /api/ecosystem/skills/:id/provision
-  │
-  ├─ validateProvision(skill, platform)     // 校验平台兼容性
-  ├─ generateSkillMd(skill)                 // 生成 SKILL.md 内容
-  │   └─ YAML frontmatter + Markdown 正文
-  ├─ buildProvisionCommands(skill, path)    // 构造部署命令
-  │   ├─ mkdir -p /opt/openclaw/skills/<name>/
-  │   ├─ heredoc 写入 SKILL.md
-  │   └─ openclaw skill reload（或 clawctl skill reload）
-  └─ SSH 执行命令序列
-```
-
-#### Deprovision 流程
-
-```
-POST /api/ecosystem/skills/:id/deprovision
-  │
-  ├─ buildDeprovisionCommands(skill)
-  │   ├─ rm -rf /opt/openclaw/skills/<name>/
-  │   └─ reload
-  └─ SSH 执行
-```
+若需对照旧版行为，可在 Git 历史中查找：`server/ecosystem/registry.ts`、各 `providers/*`、`board-sync.ts`、`skill-provisioner.ts` 及 `/api/ecosystem/*` 路由。
 
 ---
 
@@ -701,7 +560,7 @@ npm run desktop
 |------|------|
 | `dist/` | Vite 构建的前端静态文件 |
 | `dist-server/` | TypeScript 编译后的服务端代码 |
-| `data/` | 数据文件（devices.json, ecosystem-registry.json 等） |
+| `data/` | 数据文件（`devices.json` 等；`ecosystem-registry.json` 若存在仅为遗留，服务端不读） |
 | `agent/` | Agent 人格文件（SOUL.md, TOOLS.md 等） |
 | `skills/` | 技能定义（28 个 SKILL.md） |
 | `electron/` | Electron 主进程代码 |

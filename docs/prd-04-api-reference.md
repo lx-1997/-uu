@@ -14,7 +14,7 @@
 - [6. RDKClaw 配置 API](#6-rdkclaw-配置-api)
 - [7. 飞书集成 API](#7-飞书集成-api)
 - [8. 微信集成 API](#8-微信集成-api)
-- [9. 生态系统 API](#9-生态系统-api)
+- [9. 板卡探测与设备扩展 API](#9-板卡探测与设备扩展-api)
 - [10. 自治调度 API](#10-自治调度-api)
 - [11. 认证与运维 API](#11-认证与运维-api)
 - [12. WebSocket / Socket.IO 协议](#12-websocket--socketio-协议)
@@ -49,12 +49,13 @@
 | `/api/devices` | 设备管理与操作 |
 | `/api/agent` | Agent 聊天与配置 |
 | `/api/rdkclaw` | RDKClaw 业务配置 |
-| `/api/ecosystem` | 生态系统 |
 | `/api/channels` | 外部通道 Webhook |
 | `/api/sso` | 认证 |
 | `/api/skills` | 本地技能 |
 | `/api/apps` | One-shot 应用生成 |
 | `/api/token-usage` | Token 监控 |
+
+> **说明**：历史版本中的 `/api/ecosystem` 前缀已不再挂载；板型与「生态」类能力见 [第 9 节](#9-板卡探测与设备扩展-api)。
 
 ---
 
@@ -489,50 +490,49 @@
 
 ---
 
-## 9. 生态系统 API
+## 9. 板卡探测与设备扩展 API
 
-所有端点挂载在 `/api/ecosystem` 下。
+> **与旧版差异**：集中式「生态注册表」REST（`/api/ecosystem/*`）、`server/ecosystem/*` Provider 与 `initEcosystem` 已从当前实现移除。平台能力以 **设备记录中的板卡字段**、**SSH 探测**、**RDKClaw 的 web_search / web_fetch** 以及 **板端 OpenClaw（assess / delegate）** 为准。技能说明见仓库 `skills/`（含 `rdk-ecosystem` 等）。
 
-### 搜索与查询
+### 板型探测（设备域）
+
+经 SSH 在板端执行 `server/board/device-profiles.ts` 中的 `buildBoardDetectionCommand()`，输出由 `parseBoardDetection()` 解析为 `RdkPlatform`（若可识别）。
 
 | 端点 | 方法 | 功能 |
 |------|------|------|
-| `/api/ecosystem/search` | GET | 搜索技能/模型/应用 |
-| `/api/ecosystem/skills/:id` | GET | 获取单个技能详情 |
-| `/api/ecosystem/stats` | GET | 聚合统计 |
-| `/api/ecosystem/ai-context/:deviceId` | GET | 给 AI Dock 的上下文 + 相关技能 |
+| `/api/devices/:id/board/detect` | POST | 返回 `platform`、`model`、`osVersion`、`researchSeeds`、原始 `output`。查询参数 **`persist=1`**（或 `true`）时合并写回 `data/devices.json`：`boardPlatform`、`boardModel`、`boardOsVersion`、`boardDetectedAt`、`researchSeeds` |
 
-**搜索参数**:
+**查询参数**: `persist` — `1` / `true` 表示写回设备记录。
 
+**响应**（节选）:
+
+```json
+{
+  "ok": true,
+  "platform": "rdk-x5",
+  "model": "RDK X5 ...",
+  "osVersion": "...",
+  "researchSeeds": ["https://developer.d-robotics.cc/rdk_doc/", "https://github.com/D-Robotics"],
+  "output": "...",
+  "device": { "id": "...", "boardPlatform": "rdk-x5" },
+  "persisted": true
+}
 ```
-?source=nodehub|modelzoo|tros|openclaw_skill
-&platform=rdk-x3|rdk-x5|rdk-ultra|rdk-s100
-&category=vision|audio|navigation
-&tag=bpu,camera
-&q=目标检测
-&deviceId=abc123
-&installed=true
-&running=true
-```
 
-### 刷新与同步
+### 示例应用与模型（设备域，仍提供）
+
+与历史「生态安装」解耦；由设备 API 直接在板端执行命令或扫描路径。
 
 | 端点 | 方法 | 功能 |
 |------|------|------|
-| `/api/ecosystem/refresh` | POST | 从各 Provider 拉取最新数据 |
-| `/api/ecosystem/sync/:deviceId` | POST | SSH 采集板端状态并更新 registry |
-| `/api/ecosystem/detect/:deviceId` | POST | 检测设备板型 |
+| `/api/devices/:id/examples/run` | POST | Body: `{ command }`，在设备上执行示例启动命令 |
+| `/api/devices/:id/models/list` | GET | 扫描板端模型相关路径，返回列表线索 |
+| `/api/devices/:id/models/deploy` | POST | Body: `{ command }`，执行模型部署类 shell |
 
-### 技能生命周期
+### RDKClaw 侧（非本文件 REST 枚举）
 
-| 端点 | 方法 | 功能 |
-|------|------|------|
-| `/api/ecosystem/skills/:id/install` | POST | 在设备上安装技能 |
-| `/api/ecosystem/skills/:id/run` | POST | 启动技能 |
-| `/api/ecosystem/skills/:id/stop` | POST | 停止技能 |
-| `/api/ecosystem/skills/:id/uninstall` | POST | 卸载技能 |
-| `/api/ecosystem/skills/:id/provision` | POST | 注入为 OpenClaw 技能 |
-| `/api/ecosystem/skills/:id/deprovision` | POST | 从 OpenClaw 移除技能 |
+- **联网**：`web_search`、`web_fetch`（见 `server/agent/...` 工具注册与 RDKClaw 工具层）。
+- **板端编排**：`board_openclaw_chat`、`board_openclaw_assess`、`board_openclaw_delegate` 等（见 `server/rdkclaw/tools/`）。
 
 ---
 
@@ -674,8 +674,8 @@
 
 | 数据 | 路径 | 格式 | 容量 |
 |------|------|------|------|
-| 设备列表 | `data/devices.json` | JSON Array | 无硬限制 |
-| 生态注册表 | `data/ecosystem-registry.json` | JSON Array (`EcoSkill[]`) | 全量种子 + 板端状态 |
+| 设备列表 | `data/devices.json` | JSON Array | 无硬限制；含可选板卡字段见下 |
+| （遗留文件） | `data/ecosystem-registry.json` | JSON | 若仓库中仍存在则为历史数据，**当前服务端不再读取或刷新** |
 | Token 用量 | `data/llm-token-usage.json` | JSON Object (`{ entries }`) | ~4000 条 |
 | Agent 会话 | `~/.rdkstudio/rdkclaw-workspaces/<id>/sessions/*.jsonl` | JSONL | 按会话文件 |
 | Agent 记忆 | `~/.rdkstudio/rdkclaw-workspaces/<id>/memory/*.md` | Markdown | 按天 |
@@ -706,9 +706,16 @@
   "status": "connected",
   "description": "工位1",
   "addedAt": "2026-03-20T10:00:00Z",
-  "lastSeenAt": "2026-03-25T08:30:00Z"
+  "lastSeenAt": "2026-03-25T08:30:00Z",
+  "boardPlatform": "rdk-x5",
+  "boardModel": "RDK X5",
+  "boardOsVersion": "Ubuntu 22.04 ...",
+  "boardDetectedAt": "2026-03-27T12:00:00.000Z",
+  "researchSeeds": ["https://developer.d-robotics.cc/rdk_doc/"]
 }
 ```
+
+字段 `boardPlatform` / `boardModel` / `boardOsVersion` / `boardDetectedAt` / `researchSeeds` 均为可选；可由 `POST /api/devices/:id/board/detect?persist=1` 写入。
 
 ### 会话 JSONL 格式 (sessions/*.jsonl)
 
@@ -722,29 +729,9 @@
 {"type":"compaction","summary":"用户要求检查设备温度，Agent 执行了 device_exec...","messageCount":12,"compactedAt":"..."}
 ```
 
-### 生态技能数据模型 (EcoSkill)
+### ~~生态技能数据模型 (EcoSkill)~~（已废弃）
 
-```json
-{
-  "id": "modelzoo-yolov5",
-  "source": "modelzoo",
-  "name": "YOLOv5 目标检测",
-  "description": "基于 YOLOv5 的实时目标检测模型",
-  "platforms": ["rdk-x3", "rdk-x5"],
-  "category": "vision",
-  "tags": ["detection", "bpu", "realtime"],
-  "modelPath": "/opt/rdk_model_zoo/models/yolov5.bin",
-  "samplePath": "/opt/rdk_model_zoo/samples/yolov5/",
-  "processKey": "yolov5_sample",
-  "installCmd": "apt install rdk-model-zoo-yolov5",
-  "runCmd": "cd /opt/rdk_model_zoo/samples/yolov5 && python3 detect.py",
-  "stopCmd": "pkill -f yolov5_sample",
-  "boardStatusByDevice": {
-    "abc123": { "installed": true, "running": false, "lastSyncAt": "..." }
-  },
-  "lastRefreshedAt": "2026-03-25T02:00:00Z"
-}
-```
+历史实现中 `EcoSkill` 与 `data/ecosystem-registry.json` 由 `server/ecosystem` 维护；该模块已移除。新流程下「有什么可装、怎么装」由 **官方文档/仓库（web）** + **板端实际环境（SSH / OpenClaw）** 决定，不再在 Studio 侧维护统一 JSON 注册表。若需归档旧字段定义，请参考移除前的 Git 历史。
 
 ---
 

@@ -254,7 +254,8 @@ function deviceDiagnoseTool(deviceId: string): Tool<Record<string, never>> {
 function boardOpenClawStatusTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_status',
-    description: '快速查看板端 OpenClaw 运行状态（进程/服务/版本摘要）。如需结构化 JSON 用 board_openclaw_health；如需全面诊断用 board_openclaw_check。',
+    description: '快速查看板端 OpenClaw 运行状态（进程/服务/版本摘要）。普通对话优先用这个；Studio UI 已显示 OpenClaw 正常时不要为闲聊重复 SSH 检查。' +
+      '需要结构化 JSON 或排障、装/升/重启后验收时再用 board_openclaw_health；全面体检用 board_openclaw_check。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -642,7 +643,8 @@ print(json.dumps(mask(d),indent=2))`.replace(/\n/g, ';');
 function boardOpenClawHealthTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_health',
-    description: '获取板端 OpenClaw 结构化健康状态（JSON 格式：installed、gatewayRunning、version、hasToken、aiReady 等）。用于操作后快速验证服务是否正常。',
+    description: '获取板端 OpenClaw 结构化健康状态（JSON：installed、gatewayRunning、version、hasToken、aiReady 等）。较慢（SSH + 板端 CLI）。' +
+      '不要在每轮对话中例行调用；若 Studio 已显示 OpenClaw 在线则默认跳过。仅在用户报障、安装/升级/重启后需验收、delegate/chat 失败、或 UI 异常时再调用。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [

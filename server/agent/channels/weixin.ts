@@ -169,10 +169,13 @@ export class WeixinPollingChannel {
     maskedId: string,
     lastMessageText: string,
   ) {
+    const prev = this.recentUsers.get(userId);
+    // iLink 要求 sendmessage 必须带最近一次有效的 context_token；若本条缺省则沿用该用户缓存（协议建议按 userId 持久化 token）
+    const token = contextToken?.trim() || prev?.contextToken || "";
     this.recentUsers.set(userId, {
       userId,
       maskedId,
-      contextToken,
+      contextToken: token,
       accountId,
       lastMessageText: lastMessageText.slice(0, 500),
       lastSeenAt: Date.now(),
@@ -301,7 +304,8 @@ export class WeixinPollingChannel {
 
         const msgs = res.msgs || [];
         for (const msg of msgs) {
-          if (msg.message_type !== 1) continue; // only process USER messages
+          // 仅跳过机器人自己发出的消息（2）；用户侧可能是 1 或未填 message_type，误过滤会导致「能连上但永远不回」
+          if (msg.message_type === 2) continue;
           if (!msg.from_user_id) continue;
           this.handleMessage(poller, msg).catch((err) => {
             console.error(`${tag} handleMessage error:`, err instanceof Error ? err.message : err);
@@ -335,7 +339,8 @@ export class WeixinPollingChannel {
     if (!cfg.enabled) return;
 
     const fromUserId = msg.from_user_id!;
-    const contextToken = msg.context_token || "";
+    const prevUser = this.recentUsers.get(fromUserId);
+    const contextToken = (msg.context_token?.trim() || prevUser?.contextToken || "");
     const tag = `[WeixinChannel:${poller.account.accountId.slice(0, 8)}]`;
 
     const { text, attachments } = await extractAttachments(poller.client, msg.item_list);
@@ -354,7 +359,11 @@ export class WeixinPollingChannel {
     const mediaTag = attachments.length ? ` +${attachments.length}附件` : "";
     console.log(`${tag} inbound from ${maskedUser}: ${displayText.slice(0, 80)}${mediaTag}`);
 
-    this.recordRecentUser(fromUserId, contextToken, poller.account.accountId, maskedUser, displayText);
+    this.recordRecentUser(fromUserId, msg.context_token?.trim() || "", poller.account.accountId, maskedUser, displayText);
+
+    if (!contextToken) {
+      console.warn(`${tag} 入站缺少 context_token 且无缓存，发往微信可能失败；建议用户重新发一条或重新绑定`);
+    }
 
     if (text && this.tryHandleApprovalReply(poller, fromUserId, contextToken, text, tag, maskedUser)) {
       return;

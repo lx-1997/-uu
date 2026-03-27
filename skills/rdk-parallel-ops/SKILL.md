@@ -23,10 +23,10 @@ category: Meta
 - "同时查一下设备状态和 OpenClaw 服务状态"
 - "帮我一起检查 CPU 温度和磁盘空间"
 - "顺便把日志也拉下来"
-- 信息收集：`device_diagnose` + `board_openclaw_health`（设备状态 + 服务状态）
+- 信息收集：`device_diagnose` +（仅当需要 JSON 或 UI 异常时）`board_openclaw_health`；日常可看 `board_openclaw_status` 或信任界面 **ON / OpenClaw**
 - 多文件读取：`device_file_read` 同时读取多个独立配置文件
 - 混合查询：`board_openclaw_logs` + `device_exec`（journalctl）
-- 修复后验证：`board_openclaw_health` + `device_exec`（端口检查）
+- 修复后验证：`board_openclaw_health`（需 JSON 验收时）+ `device_exec`（端口检查）；非修复场景不要例行 health
 
 ## 执行流程
 
@@ -41,10 +41,11 @@ category: Meta
 
 | 并行组合 | 场景 | 说明 |
 |----------|------|------|
-| `device_diagnose` + `board_openclaw_health` | 全面状态收集 | 设备硬件状态与 OpenClaw 服务状态互不依赖 |
+| `device_diagnose` + `board_openclaw_status` | 全面状态收集（推荐） | 硬件与轻量服务摘要；避免无意义重复 `health` |
+| `device_diagnose` + `board_openclaw_health` | 需 JSON 或明确排障 | 仅用户报障 / UI 异常 / 装升重启后验收 |
 | `device_file_read` × N | 多配置文件读取 | 读取多个独立文件可同时发起 |
 | `board_openclaw_logs` + `device_exec` | 日志 + 系统信息 | 日志查询与命令执行互不影响 |
-| `board_openclaw_health` + `device_exec`（端口检查） | 修复后验证 | 服务健康检查与端口验证可并行 |
+| `board_openclaw_health` + `device_exec`（端口检查） | 修复/重启后验收 | 有明确验收需求时再并行 |
 | `device_exec` × N | 批量只读命令 | 多条无副作用的查询命令可并行（如 df、free、uptime） |
 
 ### 必须串行的场景

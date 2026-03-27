@@ -125,13 +125,6 @@ const QUICK_PROMPTS = [
   { label: '诊断修复', prompt: '帮我诊断为什么会连接失败，并给修复命令' },
 ];
 
-type EcoCatalogSkill = {
-  id: string;
-  name: string;
-  description: string;
-  category?: string;
-  tags?: string[];
-};
 
 const PLUGIN_CATALOG = [
   { id: 'feishu', name: '飞书', emoji: '💬' },
@@ -140,20 +133,6 @@ const PLUGIN_CATALOG = [
   { id: 'memory', name: '对话记忆', emoji: '🧠' },
   { id: 'web_search', name: '网络搜索', emoji: '🔍' },
 ];
-
-function skillEmojiByCategory(category?: string) {
-  const c = (category || '').toLowerCase();
-  if (c.includes('ai')) return '🧠';
-  if (c.includes('系统')) return '🖥️';
-  if (c.includes('硬件')) return '⚡';
-  if (c.includes('机器人')) return '🤖';
-  if (c.includes('示例')) return '📦';
-  return '🧩';
-}
-
-function normalizeSkillIdForMatch(id: string): string {
-  return id.startsWith('openclaw.') ? id.split('.').slice(1).join('.') : id;
-}
 
 /* ═══════════════════════════════════════════
    Component
@@ -221,7 +200,6 @@ export default function OpenClaw() {
   const [skillInstalling, setSkillInstalling] = useState(false);
   const [boardSkills, setBoardSkills] = useState<string[]>([]);
   const [boardPlugins, setBoardPlugins] = useState<string[]>([]);
-  const [ecoSkillCatalog, setEcoSkillCatalog] = useState<EcoCatalogSkill[]>([]);
 
   // ─── Operations State ───
   const [activeOp, setActiveOp] = useState<string | null>(null);
@@ -349,7 +327,7 @@ export default function OpenClaw() {
 
   useEffect(() => {
     if (currentDevice && activeTab === 'openclaw') {
-      void Promise.all([loadStatus(), loadConfig(), loadBoardSkills(), loadEcoSkillCatalog()]);
+      void Promise.all([loadStatus(), loadConfig(), loadBoardSkills()]);
     }
   }, [currentDevice, activeTab]);
 
@@ -886,78 +864,6 @@ export default function OpenClaw() {
     }
   };
 
-  const loadEcoSkillCatalog = async () => {
-    try {
-      const res = await fetch(resolveApiUrl('/api/ecosystem/search?source=openclaw_skill&limit=100'));
-      if (!res.ok) return;
-      const data = await res.json() as { skills?: Array<{ id: string; name: string; description: string; category?: string; tags?: string[] }> };
-      const list = (data.skills || []).map((s) => ({
-        id: s.id,
-        name: s.name,
-        description: s.description,
-        category: s.category,
-        tags: s.tags,
-      }));
-      setEcoSkillCatalog(list);
-    } catch {
-      setEcoSkillCatalog([]);
-    }
-  };
-
-  const checkBoardHasSkill = async (skillId: string): Promise<boolean> => {
-    if (!currentDevice) return false;
-    try {
-      const res = await fetch(resolveApiUrl(`/api/devices/${currentDevice.id}/openclaw/skills`));
-      if (!res.ok) return false;
-      const data = await res.json() as { ok?: boolean; skills?: string[] };
-      const skillNames = (data.skills || []).map((s) => s.split('|')[0]);
-      const normalized = normalizeSkillIdForMatch(skillId);
-      return skillNames.includes(skillId) || skillNames.includes(normalized);
-    } catch {
-      return false;
-    }
-  };
-
-  const handleProvisionEcoSkill = async (skillId: string, displayName: string) => {
-    if (!currentDevice) {
-      addToast?.('请先连接设备', 'warning');
-      return;
-    }
-    setSkillInstalling(true);
-    try {
-      const res = await fetch(resolveApiUrl(`/api/ecosystem/skills/${encodeURIComponent(skillId)}/provision`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId: currentDevice.id }),
-      });
-      const data = await res.json() as { ok?: boolean; output?: string; message?: string; error?: string };
-      const text = (data.output || data.message || data.error || '').trim();
-      if (text) {
-        appendSystemMessage(`\`>>> provision ${skillId}\`\n\n\`\`\`\n${text}\n\`\`\``);
-      }
-      if (!res.ok || data.ok === false) {
-        addToast?.(`注册失败: ${data.error || data.message || `HTTP ${res.status}`}`, 'warning');
-        return;
-      }
-
-      let installed = false;
-      for (let i = 0; i < 4; i++) {
-        await new Promise((r) => setTimeout(r, 1500));
-        installed = await checkBoardHasSkill(skillId);
-        if (installed) break;
-      }
-      await loadBoardSkills();
-      if (installed) {
-        addToast?.(`技能 ${displayName} 已注册并验证可见`, 'success');
-      } else {
-        addToast?.(`技能 ${displayName} 已注册，正在等待板端刷新`, 'info');
-      }
-    } catch (err: any) {
-      addToast?.(`注册失败: ${err?.message || '网络错误'}`, 'error');
-    } finally {
-      setSkillInstalling(false);
-    }
-  };
 
   const loadBoardSkills = async () => {
     if (!currentDevice) return;
@@ -1417,28 +1323,7 @@ export default function OpenClaw() {
                   <button className="btn btn-primary btn-sm" onClick={() => { handleInstallSkill(); setTimeout(loadBoardSkills, 3000); }} disabled={skillInstalling || !skillInstallName.trim()} style={{ fontSize: '0.6875rem' }}>{skillInstalling ? '...' : '安装'}</button>
                 </div>
                 <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  手动安装会直接执行 `clawhub install`。如需稳定可验证安装，建议使用下方“生态技能（已校验）”。
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 6 }}>
-                  {ecoSkillCatalog.length === 0 && (
-                    <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)' }}>暂无可用生态技能，请点击刷新。</span>
-                  )}
-                  {(() => { const boardSkillNames = boardSkills.map((b) => b.split('|')[0]); return ecoSkillCatalog.map((s) => {
-                    const normalized = normalizeSkillIdForMatch(s.id);
-                    const installed = boardSkillNames.includes(s.id) || boardSkillNames.includes(normalized);
-                    return (
-                      <button
-                        key={s.id}
-                        className={`chip ${installed ? 'active' : ''}`}
-                        onClick={() => { handleProvisionEcoSkill(s.id, s.name); }}
-                        disabled={skillInstalling}
-                        title={`${s.id}\n${s.description || ''}`}
-                        style={{ fontSize: '0.625rem', padding: '2px 6px' }}
-                      >
-                        {skillEmojiByCategory(s.category)} {s.name} {installed && '✓'}
-                      </button>
-                    );
-                  }); })()}
+                  手动安装会直接执行 clawhub install。复杂技能请用 RDKClaw「技能工坊」或对话生成 SKILL.md 并写入板端。
                 </div>
                 <div className="divider" style={{ margin: '8px 0' }} />
                 <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>插件开关</div>

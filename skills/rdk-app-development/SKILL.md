@@ -32,21 +32,20 @@ category: Development
 
 1. 解析用户意图，提取关键词（应用类型、传感器需求、AI 能力需求）
 2. **在同一轮同时发起以下工具调用**（框架会自动并行执行）：
-   - `ecosystem_query`：查询当前平台可用的技能、模型、框架
    - `web_search`：搜索官方文档和参考实现
+   - `web_fetch`：拉取关键文档/GitHub 页面正文（有 URL 时）
    - `board_openclaw_assess`：评估板端环境和能力
    - `device_diagnose`（如需）：获取设备当前资源状态
 
 ```
 # 并行调用示例（在同一个 turn 中同时发起）
-ecosystem_query(query="人脸检测 BPU 摄像头")
-web_search(query="RDK X5 人脸检测 示例 教程")
+web_search(query="RDK X5 人脸检测 BPU 摄像头 教程")
+web_fetch(url="https://...")  # 有明确文档链接时
 board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 ```
 
 3. 等所有结果回来后，综合分析：
-   - ecosystem_query → 可用技能和推荐方案
-   - web_search → 官方文档和代码参考
+   - web_search / web_fetch → 官方文档和代码参考
    - board_openclaw_assess → 板端能力和环境就绪度
    - 如 assess 返回 canHandle: false，根据 reason 判断：缺依赖则调整方案，能力不足则降级
 
@@ -65,12 +64,12 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 ## 技术方案
 - 应用类型: {用户需求概要}
 - 推荐技术栈: {基于平台能力的推荐，如 Python + hobot_dnn + OpenCV}
-- 推荐模型: {从 ecosystem_query 结果中选择的模型}
+- 推荐模型: {从文档检索与 assess 结论中选择的模型}
 
 ## 参考资料
 - 官方文档: {web_search 查到的链接}
 - 参考代码: {关键代码片段或仓库链接}
-- 相关 EcoSkill: {名称及 installCmd}
+- 相关 OpenClaw 技能 / ClawHub: {名称及安装方式}
 
 ## 代码结构建议
 - 主文件: main.py (或 main.cpp)
@@ -95,7 +94,7 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
    - 可修复 → 调整 guidance 重新委派（最多重试 1 次）
    - 不可修复 → 告知用户并给出手动操作建议
 
-> **注意**：delegate 会自动附加最多 5 个相关 ecosystem skills，无需手动注入。
+> **注意**：委派时可在 guidance 中写明建议使用的板端技能名称与路径（来自 assess/chat）。
 
 ### 第 4 步：验证回收（RDKClaw + 板端）
 
@@ -126,8 +125,7 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 
 | 工具 | 用途 | 必需 |
 |------|------|------|
-| `ecosystem_query` | 查询平台可用技能、模型、框架 | 是 |
-| `web_search` | 搜索官方文档和参考实现 | 推荐 |
+| `web_search` / `web_fetch` | 搜索并拉取官方文档与仓库信息 | 是 |
 | `board_openclaw_assess` | 评估板端环境和能力 | 是 |
 | `board_openclaw_delegate` | 将任务和方案委派给板端 OpenClaw | 是 |
 | `device_exec` | 独立验证应用运行状态 | 是 |
@@ -143,9 +141,9 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 
 ### 并行安全工具列表
 以下工具可以在同一 turn 中并行调用，框架会自动识别并并行执行：
-- `ecosystem_query`, `web_search`, `web_extract`
+- `web_search`, `web_fetch`, `web_extract`
 - `board_openclaw_assess`, `board_openclaw_chat`
-- `board_openclaw_status`, `board_openclaw_health`, `board_openclaw_check`, `board_openclaw_logs`
+- `board_openclaw_status`, `board_openclaw_logs`；`board_openclaw_health` 仅排障/验收；`board_openclaw_check` 深度体检
 - `device_file_read`, `device_file_list`, `device_diagnose`
 - `attachment_describe_image`, `attachment_list`, `attachment_read`
 - `read`, `list`, `grep`, `memory_search`
@@ -153,7 +151,7 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 ### 推荐并行模式
 
 **模式 A：信息收集并行（第 1 步）**
-同一 turn 中同时发起 ecosystem_query + web_search + board_openclaw_assess，一次性获取所有决策依据。
+同一 turn 中同时发起 web_search + web_fetch（有 URL 时）+ board_openclaw_assess，一次性获取所有决策依据。
 
 **模式 B：委派 + 监控并行（第 3 步后）**
 委派 OpenClaw 执行后，在等待结果的同时可以：
@@ -164,7 +162,7 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 同一 turn 中同时发起多个 `device_exec` 检查进程、端口、日志。
 
 ## 禁止事项
-- **不跳过知识准备直接委派**：必须先 ecosystem_query + web_search 了解平台能力
+- **不跳过知识准备直接委派**：必须先 web_search / web_fetch 了解文档与方案，并结合 assess 判断板端能力
 - **不跳过评估直接委派**：必须先 board_openclaw_assess 确认板端就绪
 - **不省略 guidance 中的技术方案**：guidance 不能是一句话，必须包含结构化方案
 - **不跳过独立验证**：委派完成后必须用 device_exec 独立确认运行状态

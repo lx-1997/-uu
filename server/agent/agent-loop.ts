@@ -136,7 +136,6 @@ const PARALLEL_SAFE_TOOLS = new Set([
   "device_file_read", "device_file_list",
   "device_diagnose",
   "attachment_list", "attachment_read", "attachment_describe_image",
-  "ecosystem_query",
   "board_openclaw_assess", "board_openclaw_chat",
   "board_openclaw_status", "board_openclaw_health",
   "board_openclaw_check", "board_openclaw_logs",

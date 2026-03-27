@@ -45,7 +45,7 @@ category: Strategy
 | recommendation 事件 | 向用户展示多方案选择面板 |
 | approval_required 事件 | 向用户展示风险操作确认面板 |
 | board_openclaw_assess | 评估板端是否可执行（用于判断方案可行性） |
-| ecosystem_query | 查询平台能力（用于生成推荐方案） |
+| web_search / web_fetch | 查文档与仓库（用于生成推荐方案）；板端能力用 assess |
 
 ## 输出要求
 - 方案列表格式：方案ID + 标题 + 描述 + 推荐标记

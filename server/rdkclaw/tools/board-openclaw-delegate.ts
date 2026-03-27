@@ -2,8 +2,7 @@ import type { Tool } from "../../agent/tools/types.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager, type OpenClawHealthStatus } from "../../managers/OpenClawDeploymentManager.js";
 import type { Device } from "../../../shared/types.js";
-import type { EcosystemRegistry } from "../../ecosystem/registry.js";
-import type { RdkPlatform } from "../../../shared/ecosystem-types.js";
+import type { RdkPlatform } from "../../../shared/board-types.js";
 
 function resolveDevicePassword(device: Device) {
   const persisted = (device as Device & { password?: string }).password ?? "";
@@ -115,7 +114,6 @@ export function boardOpenClawDelegateTool(
   manager: OpenClawDeploymentManager,
   onProgress?: (chunk: string) => void,
   conversationId?: string,
-  ecosystemRegistry?: EcosystemRegistry,
   boardSkills?: BoardSkillInfo[],
 ): Tool<{
   task: string;
@@ -129,7 +127,7 @@ export function boardOpenClawDelegateTool(
     name: "board_openclaw_delegate",
     description:
       "将任务委派给板端 OpenClaw 执行。通常在 board_openclaw_assess 确认可行后调用。" +
-      "在 guidance 中融入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、生态方案）对它很重要。" +
+      "在 guidance 中融入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索）对它很重要。" +
       "同一对话内自动复用会话，板端保留上下文。",
     inputSchema: {
       type: "object",
@@ -150,7 +148,7 @@ export function boardOpenClawDelegateTool(
 
       const boardDevice = toBoardDevice(device);
       await ensureBoardGatewayReady(manager, boardDevice, onProgress, ctx.abortSignal);
-      const platform = (device as any).platform as RdkPlatform | undefined;
+      const platform = device.boardPlatform as RdkPlatform | undefined;
       const useSkills = input.encourageSkills !== false;
       const msgParts = [
         input.intent ? `intent: ${input.intent}` : "",
@@ -159,17 +157,6 @@ export function boardOpenClawDelegateTool(
       ];
       if (input.guidance?.trim()) {
         msgParts.push(`\nrdkclaw_guidance: ${input.guidance.trim()}`);
-      }
-      if (ecosystemRegistry) {
-        const skills = ecosystemRegistry.findRelevantSkills(input.task, platform, 5);
-        if (skills.length > 0) {
-          const skillLines = skills.map((s) => {
-            const note = platform && s.platformNotes?.[platform] ? ` (${s.platformNotes[platform]})` : "";
-            const doc = s.docUrl ? ` 文档:${s.docUrl}` : "";
-            return `  - ${s.name}: ${s.description}${note}${doc}`;
-          });
-          msgParts.push(`\navailable_skills:\n${skillLines.join("\n")}`);
-        }
       }
       if (boardSkills && boardSkills.length > 0) {
         const installed = boardSkills.map((s) =>
@@ -254,7 +241,7 @@ export function boardOpenClawDelegateTool(
           const hasConsultationRequest = /\[NEED_RDKCLAW\]/i.test(result);
           const suffix = hasConsultationRequest
             ? "\n\n---\n[RDKClaw 提示：OpenClaw 在回复中发出了求助信号 [NEED_RDKCLAW]。" +
-              "请提取其中的 type/query/reason，用你的本地工具（web_search、ecosystem_query 等）获取所需信息，" +
+              "请提取其中的 type/query/reason，用你的本地工具（web_search、web_fetch 等）获取所需信息，" +
               "然后通过 board_openclaw_chat 把结果发回给 OpenClaw，让它继续完成任务。" +
               "共享同一会话，OpenClaw 能看到你的补充信息。]"
             : "\n\n---\n[RDKClaw 提示：请评估 OpenClaw 的执行结果。" +

@@ -34,13 +34,14 @@ import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawChatTool } from "./tools/board-openclaw-chat.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
-import { createEcosystemQueryTool } from "./tools/ecosystem-query.js";
 import { fleetBoardListTool, fleetBoardDelegateTool, fleetBoardBroadcastTool } from "./tools/fleet-dispatch.js";
 import { planTools } from "../agent/tools/plan-tool.js";
-import type { EcosystemRegistry } from "../ecosystem/registry.js";
-import { getDeviceProfile, type DeviceProfile } from "../ecosystem/device-profiles.js";
-import { detectPlatform } from "../ecosystem/device-profiles.js";
-import type { RdkPlatform } from "../../shared/ecosystem-types.js";
+import {
+  getDeviceProfile,
+  getResearchSeeds,
+  type DeviceProfile,
+} from "../board/device-profiles.js";
+import type { RdkPlatform } from "../../shared/board-types.js";
 import { PersonaStore } from "./persona-store.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { RDKClawPolicyStore } from "./policy-store.js";
@@ -121,7 +122,6 @@ type RuntimeHealthReport = {
 export class RDKClawApp {
   private readonly workspaceDir: string;
   private readonly openClawManager: OpenClawDeploymentManager;
-  private readonly ecosystemRegistry?: EcosystemRegistry;
   private readonly personaStore: PersonaStore;
   private readonly skills: SkillRegistry;
   private readonly policyStore: RDKClawPolicyStore;
@@ -226,10 +226,9 @@ export class RDKClawApp {
     });
   }
 
-  constructor(workspaceDir: string, openClawManager: OpenClawDeploymentManager, ecosystemRegistry?: EcosystemRegistry) {
+  constructor(workspaceDir: string, openClawManager: OpenClawDeploymentManager) {
     this.workspaceDir = workspaceDir;
     this.openClawManager = openClawManager;
-    this.ecosystemRegistry = ecosystemRegistry;
     this.personaStore = new PersonaStore();
     this.skills = new SkillRegistry({ workspaceDir });
     this.policyStore = new RDKClawPolicyStore();
@@ -595,12 +594,8 @@ export class RDKClawApp {
               chunk,
             },
           });
-        }, base.sessionId, this.ecosystemRegistry, skillsForBoard),
+        }, base.sessionId, skillsForBoard),
       );
-      if (this.ecosystemRegistry) {
-        const platform = (req as any).platform as RdkPlatform | undefined;
-        tools.push(createEcosystemQueryTool(this.ecosystemRegistry, platform));
-      }
       tools.push(fleetBoardListTool(req.deviceId, this.openClawManager));
       tools.push(fleetBoardDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
         emitEvent({
@@ -748,6 +743,14 @@ export class RDKClawApp {
     );
     const boardSnapshot = await boardSnapshotPromise;
     const boardSnapshotMs = Date.now() - boardSnapshotStartedAt;
+    if (req.deviceId) {
+      const devices = await readDevices();
+      const d = devices.find((x) => x.id === req.deviceId);
+      const bp = d?.boardPlatform;
+      if (bp && getDeviceProfile(bp as RdkPlatform)) {
+        (req as { platform?: RdkPlatform }).platform = bp as RdkPlatform;
+      }
+    }
     const workspace = await workspacePromise;
     const workspaceInitMs = Date.now() - workspaceStartedAt;
     if (workspace.workspaceDir !== this.workspaceDir) {
@@ -770,19 +773,18 @@ export class RDKClawApp {
       deviceProfile
         ? `当前平台: ${deviceProfile.displayName} (${deviceProfile.bpuTops}TOPS, ${deviceProfile.cpu}, ${deviceProfile.ramGb}GB RAM)。${deviceProfile.capabilityNotes?.length ? '能力: ' + deviceProfile.capabilityNotes.join('；') : ''}${deviceProfile.limitations.length ? '。限制: ' + deviceProfile.limitations.join('；') : ''}`
         : "",
-      this.ecosystemRegistry
-        ? (modelTier === 'small'
-          ? "用 ecosystem_query 查可用模型/技能，返回的 installCmd/runCmd/stopCmd 可直接用 device_exec 执行。"
-          : [
-            "## 生态资源（ModelZoo / NodeHub / TROS）",
-            "用 ecosystem_query 工具查询可用模型和技能。它会返回安装命令（installCmd）、运行命令（runCmd）和停止命令（stopCmd）。",
-            "当用户想运行成熟的 AI 应用（目标检测、人体姿态、语音识别等）时：",
-            "1. 先用 ecosystem_query 搜索匹配的模型/技能",
-            "2. 用 device_exec 执行返回的 installCmd 安装（如果需要）",
-            "3. 用 device_exec 执行 runCmd 启动",
-            "4. 用 device_exec 执行 stopCmd 停止",
-            "不要尝试手写运行脚本——生态资源库已包含经过验证的命令。",
-          ].join("\n"))
+      req.deviceId
+        ? [
+            "## 资料与命令来源（无本地生态注册表）",
+            "需要官方安装步骤、示例或硬件说明时：用 web_search / web_fetch，优先 D-Robotics 文档与 GitHub（developer.d-robotics.cc/rdk_doc、github.com/D-Robotics），可检索 rdk_dock 等关键词。",
+            (() => {
+              const plat = (req as { platform?: RdkPlatform }).platform;
+              return plat
+                ? "当前板型已识别，建议 web_fetch 入口：" + getResearchSeeds(plat).join(" | ")
+                : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。";
+            })(),
+            "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。",
+          ].join("\n")
         : "",
       req.deviceId
         ? ""

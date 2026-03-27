@@ -344,7 +344,6 @@ interface ToolContext {
 |--------|------|------|
 | `board_openclaw_assess` | 评估板端是否能处理任务 | 发送评估请求到 OpenClaw，解析 JSON 得到 canHandle/confidence/reason |
 | `board_openclaw_delegate` | 委派复杂任务给板端执行 | 拼装 task/context/guidance，流式 onProgress，支持重试与恢复 |
-| `ecosystem_query` | 查询平台可用能力与技能 | 结合 DeviceProfile + Registry 返回 Markdown 文档 |
 | `propose_soul_update` | 提议更新 SOUL.md | 不直接写文件，发出 `soul_update_proposal` 事件等待用户确认 |
 
 #### Studio 侧工具 (studio-tools.ts)
@@ -425,30 +424,31 @@ agent/skills/                    # Agent 级技能
 
 ```yaml
 ---
-name: rdk-ecosystem
-description: 查询 RDK 生态系统中可用的技能、模型和应用
+name: rdk-example-skill
+description: 示例：通过联网与板端 assess 完成知识准备
 version: "1.0"
-trigger: 查询生态|搜索技能|有什么模型|有什么应用
+trigger: 示例|演示
 risk: low
 permissions:
-  - ecosystem_query
+  - web_search
+  - web_fetch
 delegate_preference: local
 requires_board: false
 approval_level: auto
 cooldown_seconds: 0
 scheduler_template: null
-category: ecosystem
+category: example
 ---
 
 ## 适用场景
 ...
 
 ## 执行流程
-1. 调用 ecosystem_query 工具...
-2. ...
+1. 调用 web_search / web_fetch 获取文档...
+2. 需要时调用 board_openclaw_assess 评估板端能力...
 
 ## 工具映射
-- ecosystem_query → GET /api/ecosystem/search
+- web_search / web_fetch → 联网工具；板型与探测 → POST /api/devices/:id/board/detect
 
 ## 输出要求
 ...
@@ -502,7 +502,7 @@ category: ecosystem
 | 层级 | 能力来源 | 示例 |
 |------|---------|------|
 | **L1 — Agent 自身** | 决策、编排、文件操作 | 分析用户意图、制定执行计划 |
-| **L2 — 外脑知识** | `ecosystem_query` + `web_search` | 查询平台可用模型、搜索最新文档 |
+| **L2 — 外脑知识** | `web_search` + `web_fetch` | 搜索并拉取官方文档；平台与板卡信息以设备记录与板端 assess 为准 |
 | **L3 — 板端执行** | `board_openclaw_delegate` + `device_exec` | 模型部署、硬件操作、进程管理 |
 
 ---

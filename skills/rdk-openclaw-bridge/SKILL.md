@@ -23,7 +23,7 @@ category: Delegation
 
 ## 执行流程
 1. **评估可行性**：调用 `board_openclaw_assess` 确认板端 OpenClaw 是否可达、是否具备目标能力（插件/技能已安装）。
-2. **查询平台能力**：调用 `ecosystem_query` 查询所需插件、模型、pipeline 的注册信息与版本兼容性。
+2. **查询平台能力**：用 `web_search` / `web_fetch` 查文档与仓库；用 `board_openclaw_chat` 或已装技能列表核对插件、模型、pipeline 是否满足任务。
 3. **组装上下文消息**：将软件端已收集的状态信息（设备状态、日志摘要、用户意图）结构化为 `intent` + `task` + `context`，确保板端理解无歧义。
 4. **委派执行**：调用 `board_openclaw_delegate` 将任务提交到板端 OpenClaw，附带结构化上下文。
 5. **监控进度**：等待板端返回，若超时则主动轮询状态；若中途报错，提炼可操作的错误原因。
@@ -37,7 +37,7 @@ category: Delegation
 |------|------|------|
 | `board_openclaw_assess` | 评估板端 OpenClaw 可达性与能力覆盖 | 是 |
 | `board_openclaw_delegate` | 将结构化任务委派给板端 OpenClaw 执行 | 是 |
-| `ecosystem_query` | 查询生态注册信息（插件、模型、pipeline 版本） | 是 |
+| `web_search` / `web_fetch` | 查文档与仓库；版本与就绪度以 assess 与板端为准 | 推荐 |
 | `device_exec` | 降级路径：OpenClaw 不可用时直接在板端执行简单命令 | 否 |
 
 ## 输出要求

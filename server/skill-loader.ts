@@ -194,68 +194,6 @@ export function getRawSkillMd(name: string): string | null {
 }
 
 /**
- * Convert an EcoSkill from the ecosystem registry into a SkillManifest.
- * This bridges ecosystem packages into the unified skill system.
- */
-export function bridgeEcoSkill(eco: {
-  id: string;
-  name: string;
-  description: string;
-  source: string;
-  category: string;
-  tags: string[];
-  platforms: string[];
-  installCmd?: string;
-  runCmd?: string;
-  stopCmd?: string;
-  routingKeywords: string[];
-}): SkillManifest {
-  const apis: SkillAPI[] = [];
-  const safeId = eco.id.replace(/\./g, '-');
-
-  apis.push({
-    name: '安装',
-    method: 'POST',
-    path: `/api/ecosystem/skills/${eco.id}/install`,
-    body: '{ deviceId: string }',
-  });
-  if (eco.runCmd) {
-    apis.push({
-      name: '运行',
-      method: 'POST',
-      path: `/api/ecosystem/skills/${eco.id}/run`,
-      body: '{ deviceId: string }',
-    });
-  }
-  if (eco.stopCmd) {
-    apis.push({
-      name: '停止',
-      method: 'POST',
-      path: `/api/ecosystem/skills/${eco.id}/stop`,
-      body: '{ deviceId: string }',
-    });
-  }
-
-  return {
-    name: `eco-${safeId}`,
-    description: `[${eco.source}] ${eco.description} Tags: ${eco.tags.join(', ')}.`,
-    version: '1.0.0',
-    metadata: {
-      rdkstudio: {
-        category: eco.category,
-        source: eco.source,
-        originalId: eco.id,
-        platforms: eco.platforms,
-      },
-    },
-    body: '',
-    apis,
-    clientActions: [],
-    filePath: `ecosystem:${eco.id}`,
-  };
-}
-
-/**
  * Build system prompt from loaded skills + personality.
  * Merges the tuned "RDK Studio Claw" personality with skill-based routing.
  */

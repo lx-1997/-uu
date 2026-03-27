@@ -19,8 +19,8 @@ import type { Tool } from '../../agent/tools/types.js';
 import { readDevices } from '../../storage.js';
 import { OpenClawDeploymentManager } from '../../managers/OpenClawDeploymentManager.js';
 import type { Device } from '../../../shared/types.js';
-import { DEVICE_PROFILES, type DeviceProfile } from '../../ecosystem/device-profiles.js';
-import type { RdkPlatform } from '../../../shared/ecosystem-types.js';
+import { DEVICE_PROFILES, type DeviceProfile } from '../../board/device-profiles.js';
+import type { RdkPlatform } from '../../../shared/board-types.js';
 
 function resolveDevicePassword(device: Device) {
   const persisted = (device as Device & { password?: string }).password ?? '';
@@ -109,7 +109,7 @@ function getDeviceCapability(device: Device): {
   platform: string | null;
   profile: { displayName: string; bpuTops: number; ramGb: number; cpu: string; capabilities: string[] } | null;
 } {
-  const platform = (device as any).platform as RdkPlatform | undefined;
+  const platform = device.boardPlatform as RdkPlatform | undefined;
   if (!platform) return { platform: null, profile: null };
   const p = DEVICE_PROFILES[platform];
   if (!p) return { platform, profile: null };
