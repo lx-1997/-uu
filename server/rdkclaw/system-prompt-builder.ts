@@ -1,3 +1,4 @@
+import type { StudioUiHints } from "../../shared/types.js";
 import type { PersonaProfile } from "./types.js";
 
 export type ModelTier = 'large' | 'medium' | 'small';
@@ -30,6 +31,56 @@ export interface BoardSnapshot {
   skills: string[];
   skillDetails: BoardSkillDetail[];
   plugins: string[];
+}
+
+function yn(v: boolean | undefined, yes: string, no: string) {
+  if (v === true) return yes;
+  if (v === false) return no;
+  return "未知";
+}
+
+/**
+ * 将 Studio 已展示的设备/OpenClaw 状态注入系统提示，避免「问一句状态」就重复 board_openclaw_health，
+ * 并区分网关/AI 就绪/飞书插件等与联网检索失败之间的关系。
+ */
+export function buildStudioUiHintsPrompt(hints: StudioUiHints | undefined): string {
+  if (!hints?.capturedAt || typeof hints.capturedAt !== "number") return "";
+  const ageSec = Math.max(0, Math.round((Date.now() - hints.capturedAt) / 1000));
+  const ageLabel = ageSec < 90 ? "约 1 分钟内" : `${Math.floor(ageSec / 60)} 分钟前`;
+
+  const oc = hints.openclaw;
+  const gw = hints.gateway;
+  const lines: string[] = [
+    "## Studio UI 已校验快照（优先采信）",
+    `- 快照时间: ${ageLabel}（约 ${ageSec}s 前）`,
+  ];
+
+  if (oc) {
+    lines.push(
+      `- OpenClaw（health）: 已安装=${yn(oc.installed, "是", "否")} · 网关=${yn(oc.gatewayRunning, "运行中", "未运行")} · AI就绪=${yn(oc.aiReady, "是", "否")}${oc.version ? ` · 版本 ${oc.version}` : ""}`,
+    );
+  }
+  if (gw && (gw.running !== undefined || gw.version)) {
+    lines.push(
+      `- 网关状态条: ${gw.running === undefined ? "未知" : gw.running ? "运行中" : "停止"}${gw.version ? ` · ${gw.version}` : ""}`,
+    );
+  }
+  if (hints.feishuConnected !== undefined) {
+    lines.push(
+      `- 板端网关·飞书插件连接: ${hints.feishuConnected ? "已连接" : "未连接"}（指设备侧插件；与 Studio 设置里的飞书机器人通道不是同一概念）`,
+    );
+  }
+
+  lines.push(
+    "",
+    "**约束**",
+    "- 若用户仅询问「设备 / 板端兄弟 / OpenClaw 是否正常」类问题：优先用本段快照直接回答，**不要**再调用 `board_openclaw_health`，除非用户明确要求体检、排障或你刚完成安装/重启需验收。",
+    "- 若本轮 `web_search` / 联网工具失败：不要为此去「补」一轮 `board_openclaw_health`；网络问题与板端 OpenClaw 进程是否启动是不同层面；可说明联网失败，并继续用本地工具或 RDKClaw 兜底。",
+    "- 若快照显示网关运行中但 `AI就绪=否`：可说明板端网关已起但板端模型链路未就绪，需要推理或编排的任务优先由 **RDKClaw 本地**完成；仍可通过 SSH 做 `device_exec` 等。",
+    "- 若需委派板端 OpenClaw 执行多步任务且快照与实际情况可能不一致时，再考虑 `board_openclaw_assess`，而不是例行 health。",
+  );
+
+  return lines.join("\n");
 }
 
 export function buildCollaborationPrompt(

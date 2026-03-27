@@ -1,5 +1,6 @@
 import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
+import { readStudioUiHintsForDevice } from './studio-ui-hints';
 import { resolveApiUrl } from './utils/apiBase';
 
 export interface DeviceExecResult {
@@ -442,6 +443,7 @@ export function streamAgentChat(
 
   const done = (async () => {
     try {
+      const studioUiHints = readStudioUiHintsForDevice(deviceId);
       const res = await fetch(resolveUrl('/api/agent/chat'), {
         method: 'POST',
         headers: {
@@ -453,6 +455,7 @@ export function streamAgentChat(
           sessionId,
           userId,
           attachments,
+          ...(studioUiHints ? { studioUiHints } : {}),
         }),
         signal: controller.signal,
         credentials: 'include',

@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import type { ChatMessage, Device } from '../shared/types.js';
+import type { ChatMessage, Device, StudioUiHints } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
 import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js';
 import http from 'http';
@@ -4813,16 +4813,64 @@ app.post('/api/agent/upload-attachment', express.raw({ type: '*/*', limit: '50mb
   }
 });
 
+function parseStudioUiHintsPayload(raw: unknown): StudioUiHints | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.capturedAt !== 'number' || !Number.isFinite(o.capturedAt)) return undefined;
+  const ocRaw = o.openclaw;
+  const gwRaw = o.gateway;
+  const openclaw =
+    ocRaw && typeof ocRaw === 'object'
+      ? {
+          installed: typeof (ocRaw as { installed?: unknown }).installed === 'boolean'
+            ? (ocRaw as { installed: boolean }).installed
+            : undefined,
+          gatewayRunning: typeof (ocRaw as { gatewayRunning?: unknown }).gatewayRunning === 'boolean'
+            ? (ocRaw as { gatewayRunning: boolean }).gatewayRunning
+            : undefined,
+          aiReady: typeof (ocRaw as { aiReady?: unknown }).aiReady === 'boolean'
+            ? (ocRaw as { aiReady: boolean }).aiReady
+            : undefined,
+          version:
+            typeof (ocRaw as { version?: unknown }).version === 'string'
+              ? (ocRaw as { version: string }).version.slice(0, 120)
+              : undefined,
+        }
+      : undefined;
+  const gateway =
+    gwRaw && typeof gwRaw === 'object'
+      ? {
+          running: typeof (gwRaw as { running?: unknown }).running === 'boolean'
+            ? (gwRaw as { running: boolean }).running
+            : undefined,
+          version:
+            typeof (gwRaw as { version?: unknown }).version === 'string'
+              ? (gwRaw as { version: string }).version.slice(0, 120)
+              : undefined,
+        }
+      : undefined;
+  const hints: StudioUiHints = {
+    capturedAt: o.capturedAt,
+    source: typeof o.source === 'string' ? o.source.slice(0, 64) : undefined,
+    openclaw: openclaw && Object.values(openclaw).some((v) => v !== undefined) ? openclaw : undefined,
+    gateway: gateway && Object.values(gateway).some((v) => v !== undefined) ? gateway : undefined,
+    feishuConnected:
+      typeof o.feishuConnected === 'boolean' ? o.feishuConnected : undefined,
+  };
+  return hints;
+}
+
 // ─── Agent Chat (SSE) ───
 
 app.post('/api/agent/chat', async (request, response) => {
-  const { message, deviceId, sessionId, userId, mode, attachments } = request.body as {
-    message?: string;
-    deviceId?: string;
-    sessionId?: string;
-    userId?: string;
-    mode?: RDKClawExecutionMode;
-    attachments?: Array<{
+  const { message, deviceId, sessionId, userId, mode, attachments, studioUiHints: studioUiHintsRaw } = request.body as {
+  message?: string;
+  deviceId?: string;
+  sessionId?: string;
+  userId?: string;
+  mode?: RDKClawExecutionMode;
+  studioUiHints?: unknown;
+  attachments?: Array<{
       id: string;
       type: 'image' | 'file' | 'audio' | 'video';
       name: string;
@@ -4885,6 +4933,7 @@ app.post('/api/agent/chat', async (request, response) => {
     try {
       const ssoUser = (request as { ssoUser?: SSOUser }).ssoUser;
       const ssoUserName = formatConversationArchiveUserName(ssoUser, userId);
+      const studioUiHints = parseStudioUiHintsPayload(studioUiHintsRaw);
 
       for await (const event of rdkclaw.streamChat({
         message: String(message || '').trim(),
@@ -4896,6 +4945,7 @@ app.post('/api/agent/chat', async (request, response) => {
         attachments,
         channel: 'studio',
         trainingDataOptIn: false,
+        studioUiHints,
         abortSignal: requestAbortController.signal,
       })) {
         sendEvent(event.type, event.data);

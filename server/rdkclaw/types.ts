@@ -1,3 +1,5 @@
+import type { StudioUiHints } from "../../shared/types.js";
+
 export type RDKClawExecutionMode =
   | "auto"
   | "local"
@@ -32,6 +34,8 @@ export interface RDKClawChatRequest {
   channel?: ChannelSource;
   /** 保留字段；客户端不再展示相关开关，应视为未勾选 */
   trainingDataOptIn?: boolean;
+  /** Studio 界面已校验的设备/OpenClaw 快照（可选） */
+  studioUiHints?: StudioUiHints;
   // 服务端内部字段：用于在 SSE 断连时中止当前 run
   abortSignal?: AbortSignal;
 }

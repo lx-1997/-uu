@@ -3,6 +3,7 @@ import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
 import { fetchDeviceOpenClawHealth } from '../api';
+import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
 import { fetchApi } from '../utils/apiBase';
 
 interface OpenClawSkillsPayload {
@@ -201,11 +202,13 @@ export default function SkillBrowser() {
       } else {
         setBoardSkills([]);
       }
+      const st = healthRes.status;
       setOpenclawHealth({
-        installed: !!healthRes.status?.installed,
-        gatewayRunning: !!healthRes.status?.gatewayRunning,
-        aiReady: !!healthRes.status?.aiReady,
+        installed: !!st?.installed,
+        gatewayRunning: !!st?.gatewayRunning,
+        aiReady: !!st?.aiReady,
       });
+      if (st) persistOpenClawHealthSnapshot(currentDevice.id, st);
     } catch {
       setBoardSkills([]);
       setOpenclawHealth(null);

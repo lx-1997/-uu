@@ -18,9 +18,12 @@ import {
   setActiveRdkclawSession,
   stopRDKClawTask,
   streamAgentChat,
+  fetchDeviceOpenClawHealth,
   type AgentAttachmentPayload,
   type AgentSSEEvent,
 } from '../api';
+import { persistOpenClawHealthSnapshot, persistGatewayStatusSnapshot } from '../studio-ui-hints';
+import { fetchApi } from '../utils/apiBase';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
@@ -1694,6 +1697,37 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     if (!currentDevice?.id) return;
     reportActiveDevice('device-change');
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDevice?.id]);
+
+  /** 选中设备后自动拉一次 OpenClaw 状态写入 sessionStorage，供 Agent 请求携带 studioUiHints（无需先打开 Dashboard） */
+  useEffect(() => {
+    const id = String(currentDevice?.id || '').trim();
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const healthRes = await fetchDeviceOpenClawHealth(id);
+        if (cancelled) return;
+        if (healthRes.status) persistOpenClawHealthSnapshot(id, healthRes.status);
+      } catch {
+        /* ignore */
+      }
+      try {
+        const res = await fetchApi(`/api/devices/${encodeURIComponent(id)}/openclaw/status`);
+        if (cancelled || !res.ok) return;
+        const data = (await res.json()) as { running?: boolean; version?: string; feishuConnected?: boolean };
+        persistGatewayStatusSnapshot(id, {
+          running: !!data.running,
+          version: typeof data.version === 'string' ? data.version : '',
+          feishuConnected: !!data.feishuConnected,
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [currentDevice?.id]);
 
   useEffect(() => {

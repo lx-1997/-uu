@@ -16,6 +16,7 @@ import {
   DASHBOARD_CHAT_INTRO_PROMPT_EN,
 } from '../i18n/prompts';
 import { parseMetrics } from '../utils/diagnostics';
+import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
 import OnboardingWizard from './OnboardingWizard';
 
 /**
@@ -195,7 +196,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (!currentDevice) { setOpenclawHealth(null); setWsHealth(null); return; }
     fetchDeviceOpenClawHealth(currentDevice.id)
-      .then((r) => setOpenclawHealth(r.status))
+      .then((r) => {
+        setOpenclawHealth(r.status);
+        persistOpenClawHealthSnapshot(currentDevice.id, r.status);
+      })
       .catch(() => {});
     fetchDeviceWorkspaceHealth(currentDevice.id)
       .then((r) => setWsHealth(r.status?.modules ?? null))

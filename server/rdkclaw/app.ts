@@ -71,6 +71,7 @@ import {
   classifyModelTier,
   buildPersonaPrompt,
   buildCollaborationPrompt,
+  buildStudioUiHintsPrompt,
   type BoardSnapshot,
   type BoardSkillDetail,
   type ModelTier,
@@ -867,6 +868,7 @@ export class RDKClawApp {
       req.deviceId && boardSnapshot.plugins.length > 0
         ? `当前板端允许插件: ${boardSnapshot.plugins.join(", ")}`
         : "",
+      req.deviceId ? buildStudioUiHintsPrompt(req.studioUiHints) : "",
       attachmentState.allAttachments.length > 0
         ? attachmentState.allAttachments.some((a) => a.type === "image")
           ? `当前会话已有 ${attachmentState.allAttachments.length} 个附件（含图片: ${attachmentState.allAttachments.filter((a) => a.type === "image").map((a) => `[${a.id}] ${a.name}`).join("、")}）。用户提及图片/照片时，请先调用 attachment_describe_image 分析后再回复。`
@@ -976,6 +978,10 @@ export class RDKClawApp {
         setup_workspace_ms: workspaceInitMs,
         setup_attachments_ms: attachmentPrepareMs,
         setup_board_snapshot_ms: boardSnapshotMs,
+        studio_ui_hints_age_ms:
+          req.studioUiHints?.capturedAt != null
+            ? Math.max(0, Date.now() - req.studioUiHints.capturedAt)
+            : null,
         runtime_health: {
           safe_mode: health.safeMode,
           reasons: health.reasons,

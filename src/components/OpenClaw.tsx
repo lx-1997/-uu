@@ -5,6 +5,7 @@ import { useI18n } from '../i18n/use-i18n';
 import { renderMarkdown } from './MarkdownRenderer';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { fetchApi } from '../utils/apiBase';
+import { persistGatewayStatusSnapshot } from '../studio-ui-hints';
 import {
   subscribeOpenClawDeployJob,
   startOpenClawDeployPoll,
@@ -504,6 +505,11 @@ export default function OpenClaw() {
       }
       const data = await res.json();
       setStatus(data);
+      persistGatewayStatusSnapshot(currentDevice.id, {
+        running: !!data.running,
+        version: typeof data.version === 'string' ? data.version : '',
+        feishuConnected: !!data.feishuConnected,
+      });
       return data;
     } catch (e: any) {
       addToast?.(tf('oc.toast.statusNet', '获取状态失败: {{msg}}', { msg: e?.message || t('oc.err.network', '网络错误') }), 'error');
