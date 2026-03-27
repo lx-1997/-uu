@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { isDesktop as checkIsDesktop } from '../utils/env';
 import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
+import { fillTemplate } from '../i18n/en-extras';
+import { useI18n } from '../i18n/use-i18n';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -62,6 +64,9 @@ const DEVICE_LIST: DeviceItem[] = [
     name: 'RDK S100(P)',
     infoUrl: 'https://developer.d-robotics.cc/rdks100',
     imageDownloadUrl: 'https://archive.d-robotics.cc/downloads/os_images/rdk_s100/',
+    toolDownloadUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_amd64.deb',
+    toolDmgUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_universal.dmg',
+    toolWinUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_x64-setup.exe',
   },
   { key: 'x3-module', name: 'RDK X3 Module (TF Card)', infoUrl: 'https://developer.d-robotics.cc/rdkx3' },
   {
@@ -114,6 +119,16 @@ const XBURN_DOWNLOAD_URLS: Record<string, string> = {
   linux: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_amd64.deb',
 };
 
+/** 与 rdkstudio_frontend-master Imager.vue 一致：S100 手动烧录说明 */
+const S100_MANUAL_FLASH_DOC =
+  'https://developer.d-robotics.cc/rdk_doc/rdk_s/Quick_start/install_os/rdk_s100/instruction';
+
+function resolveXburnToolUrl(dev: DeviceItem, plat: string): string | undefined {
+  if (plat === 'win32' && dev.toolWinUrl) return dev.toolWinUrl;
+  if (plat === 'darwin' && dev.toolDmgUrl) return dev.toolDmgUrl;
+  return dev.toolDownloadUrl;
+}
+
 /* ═══════════════════════════════════════════════════════════
    Helpers
    ═══════════════════════════════════════════════════════════ */
@@ -152,7 +167,19 @@ function isSafeFlashTargetDrive(drive: FlashDrive): boolean {
   return allowByBus || allowByKeyword;
 }
 
-const STEP_LABELS = ['选择设备', '选择镜像', '烧录写盘', '完成'];
+function flashImageTagLabel(tag: string, t: (key: string, zh: string) => string): string {
+  if (tag === '图形界面') return t('flasher.tag.gui', '图形界面');
+  if (tag === '无图形界面') return t('flasher.tag.headless', '无图形界面');
+  return tag;
+}
+
+function isFlashUserCancelled(msg: string): boolean {
+  const m = String(msg).trim();
+  if (m === '用户取消' || m === '用户取消写盘') return true;
+  if (/^cancel(led)?$/i.test(m)) return true;
+  return false;
+}
+
 const FLASHER_UI_STATE_KEY = 'rdk:flasher:ui-state:v1';
 
 function normalizeStageToPhase(stage: string | undefined): FlashPhase {
@@ -171,6 +198,20 @@ function normalizeStageToPhase(stage: string | undefined): FlashPhase {
    ═══════════════════════════════════════════════════════════ */
 export default function Flasher() {
   const { setActiveTab, addToast, startFlash } = useAppState();
+  const { t, language } = useI18n();
+  const tf = useCallback(
+    (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
+    [t],
+  );
+  const stepLabels = useMemo(
+    () => [
+      t('flasher.step.device', '选择设备'),
+      t('flasher.step.image', '选择镜像'),
+      t('flasher.step.flash', '烧录写盘'),
+      t('flasher.step.done', '完成'),
+    ],
+    [t, language],
+  );
 
   /* ── wizard state ── */
   const [step, setStep] = useState<WizardStep>(0);
@@ -213,6 +254,41 @@ export default function Flasher() {
   );
   const needsXburn = requiresXburn(selectedDeviceKey);
 
+  const flashPhaseRowLabels = useMemo(
+    () => ({
+      downloading: t('flasher.phaseLabel.downloading', '下载镜像'),
+      decompressing: t('flasher.phaseLabel.decompressing', '解压镜像'),
+      flashing: needsXburn
+        ? t('flasher.phaseLabel.flashingXburn', 'xburn 烧录')
+        : t('flasher.phaseLabel.flashing', '写盘'),
+      verifying: t('flasher.phaseLabel.verifying', '写后校验'),
+    }),
+    [needsXburn, t, language],
+  );
+
+  const flashPhaseTitle = useMemo(() => {
+    switch (phase) {
+      case 'downloading':
+        return t('flasher.phase.downloading', '下载镜像中...');
+      case 'backup':
+        return t('flasher.phase.backup', '备份目标盘中...');
+      case 'decompressing':
+        return t('flasher.phase.decompressing', '解压镜像中...');
+      case 'flashing':
+        return needsXburn
+          ? t('flasher.phase.flashingXburn', 'xburn 烧录中...')
+          : t('flasher.phase.flashing', '写盘执行中...');
+      case 'verifying':
+        return t('flasher.phase.verifying', '写后校验中...');
+      case 'done':
+        return t('flasher.phase.done', '烧录完成');
+      case 'error':
+        return t('flasher.phase.error', '烧录失败');
+      default:
+        return t('flasher.phase.idle', '准备中...');
+    }
+  }, [phase, needsXburn, t, language]);
+
   const appendLog = useCallback(
     (text: string) => setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${text}`].slice(-300)),
     [],
@@ -247,7 +323,11 @@ export default function Flasher() {
       if (!saved) return;
       const parsed = JSON.parse(saved) as Partial<FlasherUiState>;
       if (parsed.selectedDeviceKey) setSelectedDeviceKey(parsed.selectedDeviceKey);
-      if (typeof parsed.selectedImageKey === 'string') setSelectedImageKey(parsed.selectedImageKey);
+      if (parsed.selectedDeviceKey === 's100') {
+        setSelectedImageKey('');
+      } else if (typeof parsed.selectedImageKey === 'string') {
+        setSelectedImageKey(parsed.selectedImageKey);
+      }
       if (typeof parsed.useLocalImage === 'boolean') setUseLocalImage(parsed.useLocalImage);
       if (typeof parsed.localImagePath === 'string') setLocalImagePath(parsed.localImagePath);
       if (typeof parsed.selectedDrive === 'string') setSelectedDrive(parsed.selectedDrive);
@@ -336,11 +416,16 @@ export default function Flasher() {
     if (dev?.disabled) return;
     setSelectedDeviceKey(key);
     const list = IMAGE_LIST[resolveImageKey(key)] ?? [];
-    if (list[0]) setSelectedImageKey(list[0].key);
+    /* S100：官方镜像行仅作版本目录（与 reference FlashSteps 一致），不作为「已选安装镜像」 */
+    if (key === 's100') {
+      setSelectedImageKey('');
+    } else if (list[0]) {
+      setSelectedImageKey(list[0].key);
+    }
     setUseLocalImage(false);
     setLocalImagePath('');
     if (requiresXburn(key)) {
-      addToast('该设备推荐使用 xburn 工具烧录', 'info');
+      addToast(t('flasher.toast.xburnRecommend', '该设备推荐使用 xburn 工具烧录'), 'info');
     }
   };
 
@@ -349,13 +434,17 @@ export default function Flasher() {
 
   const scanDrives = async () => {
     if (!window.rdkDesktop?.flashListDrives) {
-      setError(isDesktop ? '当前环境暂不支持磁盘扫描' : '磁盘扫描仅支持桌面客户端');
+      setError(
+        isDesktop
+          ? t('flasher.err.scanUnsupportedDesktop', '当前环境暂不支持磁盘扫描')
+          : t('flasher.err.scanWebOnly', '磁盘扫描仅支持桌面客户端'),
+      );
       return;
     }
     try {
       const result = await window.rdkDesktop.flashListDrives();
       if (!result.ok) {
-        setError(result.error || '磁盘扫描失败');
+        setError(result.error || t('flasher.err.scanFail', '磁盘扫描失败'));
         return;
       }
       const list = result.drives ?? [];
@@ -367,12 +456,12 @@ export default function Flasher() {
         return safeList[0].path;
       });
       if (safeList[0]) {
-        addToast(`检测到 ${safeList.length} 个可用 SD/eMMC 目标盘`, 'info');
+        addToast(tf('flasher.toast.drivesFound', '检测到 {{n}} 个可用 SD/eMMC 目标盘', { n: safeList.length }), 'info');
       } else {
-        addToast('未检测到可用 SD/eMMC 目标盘', 'warning');
+        addToast(t('flasher.toast.noDrives', '未检测到可用 SD/eMMC 目标盘'), 'warning');
       }
     } catch (e: any) {
-      setError(e?.message || '磁盘扫描异常');
+      setError(e?.message || t('flasher.err.scanException', '磁盘扫描异常'));
     }
   };
 
@@ -386,16 +475,39 @@ export default function Flasher() {
   /* ── pick local image ── */
   const pickLocalImage = async () => {
     if (!window.rdkDesktop?.flashPickImage) {
-      setError('当前环境不支持文件选择');
+      setError(t('flasher.err.pickUnsupported', '当前环境不支持文件选择'));
       return;
     }
-    const ext = selectedDeviceKey === 's100' ? ['zip'] : ['img', 'xz'];
-    const result = await window.rdkDesktop.flashPickImage({ extensions: ext });
+    const ext = selectedDeviceKey === 's100' ? ['zip', 'img'] : ['img', 'xz'];
+    const result = await window.rdkDesktop.flashPickImage({
+      extensions: ext,
+      title:
+        selectedDeviceKey === 's100'
+          ? t('flasher.s100.pickZipTitle', '选择 S100 镜像（product.zip 或已解压的 .img）')
+          : undefined,
+    });
     if (result.ok && result.path) {
       setLocalImagePath(result.path);
       setUseLocalImage(true);
       setSelectedImageKey('');
-      addToast('已选择镜像文件', 'success');
+      addToast(t('flasher.toast.imagePicked', '已选择镜像文件'), 'success');
+    }
+  };
+
+  const pickLocalImageFolder = async () => {
+    if (!window.rdkDesktop?.flashPickImage) {
+      setError(t('flasher.err.pickUnsupported', '当前环境不支持文件选择'));
+      return;
+    }
+    const result = await window.rdkDesktop.flashPickImage({
+      mode: 'directory',
+      title: t('flasher.s100.pickFolderTitle', '选择解压后的固件目录（含 product 的文件夹）'),
+    });
+    if (result.ok && result.path) {
+      setLocalImagePath(result.path);
+      setUseLocalImage(true);
+      setSelectedImageKey('');
+      addToast(t('flasher.toast.imagePicked', '已选择镜像目录'), 'success');
     }
   };
 
@@ -404,18 +516,18 @@ export default function Flasher() {
     if (window.rdkDesktop?.flashDownloadImage) {
       setPhase('downloading');
       setProgress(0);
-      appendLog(`开始下载: ${url}`);
+      appendLog(tf('flasher.log.downloadStart', '开始下载: {{url}}', { url }));
       const result = await window.rdkDesktop.flashDownloadImage({ url, destDir: '' });
       if (!result.ok) {
-        setError(result.error || '下载失败');
+        setError(result.error || t('flasher.err.downloadFail', '下载失败'));
         setPhase('error');
         return null;
       }
-      appendLog('下载完成');
+      appendLog(t('flasher.log.downloadDone', '下载完成'));
       return result.path ?? null;
     }
     openExternal(url);
-    addToast('已在浏览器中打开下载链接，下载完成后请使用"选择本机文件"选取镜像', 'info');
+    addToast(t('flasher.toast.browserDownload', '已在浏览器中打开下载链接，下载完成后请使用"选择本机文件"选取镜像'), 'info');
     return null;
   };
 
@@ -423,20 +535,20 @@ export default function Flasher() {
   const decompressImage = async (filePath: string): Promise<string | null> => {
     if (!isCompressedFile(filePath)) return filePath;
     if (!window.rdkDesktop?.flashDecompressImage) {
-      appendLog('当前环境暂不支持自动解压，请手动解压后选择 .img 文件');
-      setError('请手动解压镜像文件为 .img 后重新选择');
+      appendLog(t('flasher.log.decompressUnsupported', '当前环境暂不支持自动解压，请手动解压后选择 .img 文件'));
+      setError(t('flasher.err.decompressManual', '请手动解压镜像文件为 .img 后重新选择'));
       return null;
     }
     setPhase('decompressing');
     setProgress(0);
-    appendLog('开始解压镜像...');
+    appendLog(t('flasher.log.decompressStart', '开始解压镜像...'));
     const result = await window.rdkDesktop.flashDecompressImage({ filePath });
     if (!result.ok) {
-      setError(result.error || '解压失败');
+      setError(result.error || t('flasher.err.decompressFail', '解压失败'));
       setPhase('error');
       return null;
     }
-    appendLog('解压完成');
+    appendLog(t('flasher.log.decompressDone', '解压完成'));
     return result.outputPath ?? null;
   };
 
@@ -444,7 +556,11 @@ export default function Flasher() {
   const executeFlash = async () => {
     if (needsXburn) return;
     if (!isDesktop || !window.rdkDesktop?.flashWriteLocal) {
-      setError(isDesktop ? '当前环境暂不支持直接写盘' : '写盘功能仅支持桌面客户端');
+      setError(
+        isDesktop
+          ? t('flasher.err.writeUnsupportedDesktop', '当前环境暂不支持直接写盘')
+          : t('flasher.err.writeWebOnly', '写盘功能仅支持桌面客户端'),
+      );
       return;
     }
 
@@ -457,7 +573,7 @@ export default function Flasher() {
     }
 
     if (!imgPath.trim()) {
-      setError('缺少镜像文件路径');
+      setError(t('flasher.err.missingImagePath', '缺少镜像文件路径'));
       return;
     }
 
@@ -468,7 +584,7 @@ export default function Flasher() {
     }
 
     if (!selectedDrive.trim()) {
-      setError('请先选择目标磁盘');
+      setError(t('flasher.err.selectDriveFirst', '请先选择目标磁盘'));
       return;
     }
 
@@ -476,9 +592,13 @@ export default function Flasher() {
     setVerifyDetail('');
     setPhase('flashing');
     setProgress(0);
-    appendLog(`写盘目标: ${selectedDrive}`);
-    appendLog(`镜像文件: ${imgPath}`);
-    appendLog(`性能模式: ${performanceProfile === 'turbo' ? '极速模式' : '常规模式'}`);
+    appendLog(tf('flasher.log.target', '写盘目标: {{drive}}', { drive: selectedDrive }));
+    appendLog(tf('flasher.log.imagePath', '镜像文件: {{path}}', { path: imgPath }));
+    appendLog(
+      performanceProfile === 'turbo'
+        ? t('flasher.log.perfTurbo', '性能模式: 极速模式')
+        : t('flasher.log.perfBalanced', '性能模式: 常规模式'),
+    );
 
     try {
       const result = await window.rdkDesktop!.flashWriteLocal!({
@@ -487,46 +607,47 @@ export default function Flasher() {
         verifyMode: 'sample',
         performanceProfile,
       });
-      if (abortRef.current) throw new Error('用户取消');
-      if (!result.ok) throw new Error(result.error || '写盘失败');
-      appendLog(result.output || '写盘完成');
+      if (abortRef.current) throw new Error(t('flasher.err.userCancel', '用户取消'));
+      if (!result.ok) throw new Error(result.error || t('flasher.err.writeFail', '写盘失败'));
+      appendLog(result.output || t('flasher.log.writeDone', '写盘完成'));
       if (result.verify) {
         setVerifyDetail(result.verify.detail);
-        appendLog(`校验结果: ${result.verify.detail}`);
+        appendLog(tf('flasher.log.verify', '校验结果: {{detail}}', { detail: result.verify.detail }));
       }
       setProgress(100);
       setPhase('done');
       startFlash();
-      addToast('镜像写盘完成', 'success');
+      addToast(t('flasher.toast.writeDone', '镜像写盘完成'), 'success');
       setStep(4);
     } catch (e: any) {
-      const msg = e?.message || '写盘失败';
-      setError(msg);
+      const msg = e?.message || t('flasher.err.writeFail', '写盘失败');
+      const userCancelled = isFlashUserCancelled(msg);
+      setError(userCancelled ? '' : msg);
       setPhase('error');
-      appendLog(`失败: ${msg}`);
-      addToast(msg, 'error');
+      appendLog(userCancelled ? t('flasher.log.cancelledByUser', '操作已由用户取消') : tf('flasher.log.fail', '失败: {{msg}}', { msg }));
+      addToast(userCancelled ? t('flasher.toast.writeCancelled', '写盘已取消') : msg, userCancelled ? 'info' : 'error');
     }
   };
 
   /* ── launch xburn for S100/eMMC ── */
   const launchXburn = async () => {
     if (!window.rdkDesktop?.launchXburn) {
-      setError('当前环境未启用 xburn 工具启动，请手动安装并打开 xburn-gui');
+      setError(t('flasher.err.xburnUnavailable', '当前环境未启用 xburn 工具启动，请手动安装并打开 xburn-gui'));
       return;
     }
     const result = await window.rdkDesktop.launchXburn({
       imagePath: localImagePath.trim() || undefined,
     });
     if (result.ok) {
-      addToast('xburn 已启动', 'success');
-      appendLog(`已启动 xburn: ${result.path || ''}`);
+      addToast(t('flasher.toast.xburnStarted', 'xburn 已启动'), 'success');
+      appendLog(tf('flasher.log.xburnLaunched', '已启动 xburn: {{path}}', { path: result.path || '' }));
       setStep(3);
       setPhase('flashing');
-      appendLog('请在 xburn 工具中完成烧录操作...');
+      appendLog(t('flasher.log.xburnWait', '请在 xburn 工具中完成烧录操作...'));
     } else if (result.canceled) {
-      addToast('已取消', 'info');
+      addToast(t('flasher.toast.cancelled', '已取消'), 'info');
     } else {
-      setError(result.error || '启动 xburn 失败');
+      setError(result.error || t('flasher.err.xburnLaunchFail', '启动 xburn 失败'));
     }
   };
 
@@ -563,13 +684,23 @@ export default function Flasher() {
     }
   };
 
-  const canProceedFromImage = useLocalImage ? !!localImagePath.trim() : !!selectedImageKey;
+  const isS100Device = selectedDeviceKey === 's100';
+  const canProceedFromImage = useMemo(() => {
+    if (useLocalImage) return !!localImagePath.trim();
+    if (isS100Device) return true;
+    return !!selectedImageKey;
+  }, [useLocalImage, localImagePath, isS100Device, selectedImageKey]);
   const canProceedFromDrive = needsXburn || selectedDriveValid;
 
   const requestCancel = () => {
     abortRef.current = true;
-    window.rdkDesktop?.flashCancelLocal?.().catch(() => null);
-    addToast('已请求取消', 'warning');
+    void window.rdkDesktop?.flashCancelLocal?.().then((r) => {
+      if (r && r.ok === false && r.error) addToast(r.error, 'error');
+    }).catch((e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      addToast(msg || t('flasher.err.cancelSendFail', '取消指令发送失败'), 'error');
+    });
+    addToast(t('flasher.toast.cancelRequested', '已请求取消，正在停止写盘…'), 'info');
   };
 
   /* ── xburn download url for current platform ── */
@@ -583,14 +714,14 @@ export default function Flasher() {
       <div className="tool-content">
         {/* ── Header ── */}
         <section className="card card-compact">
-          <div className="section-label">RDK 镜像烧录</div>
-          <h1>镜像烧录向导</h1>
-          <p className="config-card-desc">支持 RDK X3 / X5 / S100 全系列，TF 卡直写或 xburn 工具烧录。</p>
+          <div className="section-label">{t('flasher.header.badge', 'RDK 镜像烧录')}</div>
+          <h1>{t('flasher.title', '镜像烧录向导')}</h1>
+          <p className="config-card-desc">{t('flasher.subtitle', '支持 RDK X3 / X5 / S100 全系列，TF 卡直写或 xburn 工具烧录。')}</p>
         </section>
 
         {/* ── Step Indicator ── */}
         <section className="flash-steps">
-          {STEP_LABELS.map((label, idx) => (
+          {stepLabels.map((label, idx) => (
             <div
               key={label}
               className={`flash-step ${step > idx ? 'done' : ''} ${step === idx ? 'active' : ''}`}
@@ -605,7 +736,7 @@ export default function Flasher() {
         {/* ═══════ Step 0: Select Device ═══════ */}
         {step === 0 && (
           <section className="card card-compact flasher-step-card">
-            <div className="section-label">选择设备型号</div>
+            <div className="section-label">{t('flasher.section.pickDevice', '选择设备型号')}</div>
             <div className="config-grid flasher-device-grid">
               {DEVICE_LIST.map((dev) => (
                 <div
@@ -617,7 +748,7 @@ export default function Flasher() {
                     <div className="config-card-name">{dev.name}</div>
                   </div>
                   {dev.disabled && dev.disabledNotice && (
-                    <div className="config-card-desc">{dev.disabledNotice}</div>
+                    <div className="config-card-desc">{t('flasher.disabledNotice.xburn', dev.disabledNotice)}</div>
                   )}
                   <div className="config-card-meta">
                     <button
@@ -625,7 +756,7 @@ export default function Flasher() {
                       className="btn btn-ghost btn-sm"
                       onClick={(e) => { e.stopPropagation(); openExternal(dev.infoUrl); }}
                     >
-                      了解设备
+                      {t('flasher.link.deviceInfo', '了解设备')}
                     </button>
                     {dev.imageDownloadUrl && (
                       <button
@@ -633,25 +764,39 @@ export default function Flasher() {
                         className="btn btn-ghost btn-sm"
                         onClick={(e) => { e.stopPropagation(); openExternal(dev.imageDownloadUrl!); }}
                       >
-                        镜像下载
+                        {t('flasher.link.imageDl', '镜像下载')}
                       </button>
                     )}
-                    {dev.toolDownloadUrl && (
+                    {resolveXburnToolUrl(dev, platform) && (
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        onClick={(e) => { e.stopPropagation(); openExternal(dev.toolDownloadUrl!); }}
+                        onClick={(e) => { e.stopPropagation(); openExternal(resolveXburnToolUrl(dev, platform)!); }}
                       >
-                        烧录工具
+                        {t('flasher.link.flashTool', '烧录工具')}
                       </button>
                     )}
                   </div>
                 </div>
               ))}
             </div>
+            {selectedDeviceKey === 's100' && (
+              <div className="card card-compact" style={{ marginTop: 12, borderColor: 'var(--accent)', background: 'var(--accent-subtle)' }}>
+                <p className="config-card-desc" style={{ margin: 0 }}>
+                  {t('flasher.s100.typecHint', 'S100 烧录请使用 USB Type-C 连接开发板，并在 xburn 中按提示进入烧录模式。')}
+                </p>
+              </div>
+            )}
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                {selectedDeviceKey === 's100' && (
+                  <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
+                    <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
+                      {t('flasher.s100.manualDocLink', '查看 S100 官方手动烧录说明')}
+                    </a>
+                  </p>
+                )}
               </div>
             )}
             <div className="config-header flasher-nav-row" style={{ marginTop: 12 }}>
@@ -663,7 +808,7 @@ export default function Flasher() {
                   disabled={!selectedDeviceKey}
                   onClick={() => goToStep(1)}
                 >
-                  下一步 &rarr; 选择镜像
+                  {t('flasher.btn.nextPickImage', '下一步 → 选择镜像')}
                 </button>
               </div>
             </div>
@@ -673,16 +818,30 @@ export default function Flasher() {
         {/* ═══════ Step 1: Select Image ═══════ */}
         {step === 1 && (
           <section className="card card-compact flasher-step-card">
+            {isS100Device && (
+              <div className="card card-compact" style={{ marginBottom: 12, borderColor: 'var(--line-strong, var(--line))' }}>
+                <p className="config-card-desc" style={{ margin: 0 }}>
+                  {t(
+                    'flasher.s100.officialCatalogHint',
+                    '下列为官方固件版本目录，点击「手动下载」获取 product.zip；烧录请在 xburn 中选择本机 zip / 解压目录或 .img。',
+                  )}
+                </p>
+              </div>
+            )}
             <div className="config-grid flasher-step1-grid">
               {/* Official images */}
               <div>
-                <div className="section-label">官方镜像</div>
+                <div className="section-label">{t('flasher.section.officialImages', '官方镜像')}</div>
                 <div className="config-grid flasher-image-list">
                   {imageCandidates.map((img) => (
                     <div
                       key={img.key}
-                      className={`config-card ${!useLocalImage && selectedImageKey === img.key ? 'selected' : ''}`}
-                      onClick={() => { setSelectedImageKey(img.key); setUseLocalImage(false); }}
+                      className={`config-card ${!isS100Device && !useLocalImage && selectedImageKey === img.key ? 'selected' : ''}`}
+                      onClick={() => {
+                        if (isS100Device) return;
+                        setSelectedImageKey(img.key);
+                        setUseLocalImage(false);
+                      }}
                     >
                       <div className="config-card-head">
                         <div className="config-card-name">{img.name}</div>
@@ -691,15 +850,15 @@ export default function Flasher() {
                         {img.tags.map((tag) => (
                           <span
                             key={`${img.key}-${tag}`}
-                            className={`badge ${tag.includes('图形') ? 'badge-ok' : 'badge-muted'}`}
+                            className={`badge ${img.type === 'desktop' ? 'badge-ok' : 'badge-muted'}`}
                           >
-                            {tag}
+                            {flashImageTagLabel(tag, t)}
                           </span>
                         ))}
                       </div>
                       <div className="config-card-meta">
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openExternal(img.infoUrl); }}>详情</button>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openExternal(img.downloadUrl); }}>手动下载</button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openExternal(img.infoUrl); }}>{t('flasher.btn.details', '详情')}</button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); openExternal(img.downloadUrl); }}>{t('flasher.btn.manualDownload', '手动下载')}</button>
                       </div>
                     </div>
                   ))}
@@ -708,14 +867,16 @@ export default function Flasher() {
 
               {/* Local image */}
               <div>
-                <div className="section-label">本机镜像文件</div>
+                <div className="section-label">{t('flasher.section.localFile', '本机镜像文件')}</div>
                 <div className="config-section">
                   <div
                     className={`config-card ${useLocalImage ? 'selected' : ''}`}
                     onClick={pickLocalImage}
                   >
                     <div className="config-card-head">
-                      <div className="config-card-name">{localImagePath ? '已选择本机文件' : '选择本机镜像文件...'}</div>
+                      <div className="config-card-name">
+                        {localImagePath ? t('flasher.localFile.picked', '已选择本机文件') : t('flasher.localFile.pick', '选择本机镜像文件...')}
+                      </div>
                     </div>
                     {localImagePath && <div className="config-card-desc" style={{ wordBreak: 'break-all' }}>{localImagePath}</div>}
                   </div>
@@ -723,20 +884,31 @@ export default function Flasher() {
                     <input
                       className="input"
                       style={{ flex: 1, minWidth: 0 }}
-                      placeholder="或手动输入路径 (.img / .xz / .zip)"
+                      placeholder={
+                        isS100Device
+                          ? t('flasher.s100.pathPlaceholder', 'product.zip、解压目录或 .img 的路径（建议英文路径）')
+                          : t('flasher.localFile.placeholder', '或手动输入路径 (.img / .xz / .zip)')
+                      }
                       value={localImagePath}
                       onChange={(e) => { setLocalImagePath(e.target.value); if (e.target.value) setUseLocalImage(true); }}
                     />
                     {isDesktop && (
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocalImage}>
-                        浏览
-                      </button>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocalImage}>
+                          {t('flasher.localFile.browse', '浏览')}
+                        </button>
+                        {isS100Device && (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocalImageFolder}>
+                            {t('flasher.s100.pickFolder', '选择文件夹')}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                   {needsXburn && (
                     <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                       <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
-                        该设备走 xburn 流程，本机镜像文件可选（也可在 xburn 内选择镜像）。
+                        {t('flasher.hint.xburnOptional', '该设备走 xburn 流程，本机镜像文件可选（也可在 xburn 内选择镜像）。')}
                       </p>
                     </div>
                   )}
@@ -744,8 +916,8 @@ export default function Flasher() {
                     <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                       <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
                         {isDesktop
-                          ? '当前系统需要额外配置才能使用直接写盘功能，可使用第三方工具完成介质制作。'
-                          : '当前为浏览器环境，本机烧录功能需在桌面客户端中使用。'}
+                          ? t('flasher.hint.desktopWrite', '当前系统需要额外配置才能使用直接写盘功能，可使用第三方工具完成介质制作。')
+                          : t('flasher.hint.browserOnly', '当前为浏览器环境，本机烧录功能需在桌面客户端中使用。')}
                       </p>
                     </div>
                   )}
@@ -755,20 +927,29 @@ export default function Flasher() {
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                {isS100Device && (
+                  <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
+                    <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
+                      {t('flasher.s100.manualDocLink', '查看 S100 官方手动烧录说明')}
+                    </a>
+                  </p>
+                )}
               </div>
             )}
             <div className="config-header flasher-nav-row" style={{ marginTop: 12 }}>
               <div className="tool-bar-left">
-                <button type="button" className="btn btn-ghost" onClick={() => goToStep(0)}>&larr; 上一步</button>
+                <button type="button" className="btn btn-ghost" onClick={() => goToStep(0)}>{t('flasher.btn.back', '← 上一步')}</button>
               </div>
               <div className="tool-bar-right">
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={!canProceedFromImage && !needsXburn}
+                  disabled={!canProceedFromImage}
                   onClick={() => goToStep(2)}
                 >
-                  下一步 &rarr; {needsXburn ? '烧录' : '选择磁盘'}
+                  {tf('flasher.btn.nextDisk', '下一步 → {{target}}', {
+                    target: needsXburn ? t('flasher.next.flash', '烧录') : t('flasher.next.pickDisk', '选择磁盘'),
+                  })}
                 </button>
               </div>
             </div>
@@ -782,21 +963,21 @@ export default function Flasher() {
               {needsXburn ? (
                 /* xburn guidance */
                 <div className="card card-compact">
-                  <div className="section-label">推荐流程：使用 xburn</div>
+                  <div className="section-label">{t('flasher.section.xburnFlow', '推荐流程：使用 xburn')}</div>
                   <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                     <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
-                      S100 / eMMC 机型建议使用 xburn-gui 完成烧录。
+                      {t('flasher.xburn.desc', 'S100 / eMMC 机型建议使用 xburn-gui 完成烧录。')}
                     </p>
                   </div>
                   <p className="config-card-desc">
-                    1. 确认已安装 xburn-gui<br />
-                    2. 通过 USB Type-C 连接开发板<br />
-                    3. 点击下方按钮启动 xburn 并在工具中选择镜像
+                    {t('flasher.xburn.step1', '1. 确认已安装 xburn-gui')}<br />
+                    {t('flasher.xburn.step2', '2. 通过 USB Type-C 连接开发板')}<br />
+                    {t('flasher.xburn.step3', '3. 点击下方按钮启动 xburn 并在工具中选择镜像')}
                   </p>
                   <div className="config-actions">
                     {caps.supportsLaunchThirdPartyTool && (
                       <button type="button" className="btn btn-primary" onClick={launchXburn}>
-                        启动 xburn 工具
+                        {t('flasher.btn.launchXburn', '启动 xburn 工具')}
                       </button>
                     )}
                     <button
@@ -804,7 +985,7 @@ export default function Flasher() {
                       className="btn btn-ghost btn-sm"
                       onClick={() => openExternal(xburnUrl)}
                     >
-                      下载 xburn-gui
+                      {t('flasher.btn.downloadXburn', '下载 xburn-gui')}
                     </button>
                   </div>
                 </div>
@@ -812,13 +993,15 @@ export default function Flasher() {
                 /* drive selection */
                 <div className="flasher-drive-pane">
                   <div className="config-header" style={{ alignItems: 'flex-start' }}>
-                    <div className="section-label" style={{ marginBottom: 0 }}>选择目标磁盘</div>
-                    <span className="badge badge-danger">写盘将清空目标磁盘全部数据！</span>
+                    <div className="section-label" style={{ marginBottom: 0 }}>{t('flasher.section.targetDisk', '选择目标磁盘')}</div>
+                    <span className="badge badge-danger">{t('flasher.warn.erase', '写盘将清空目标磁盘全部数据！')}</span>
                   </div>
                   <div className="config-grid">
                     {drives.length === 0 ? (
                       <div className="config-card-desc">
-                        {caps.supportsDriveScan ? '未检测到可用 SD/eMMC 目标盘，请插入 TF/SD 卡后刷新' : '当前环境暂不支持磁盘检测'}
+                        {caps.supportsDriveScan
+                          ? t('flasher.drives.empty', '未检测到可用 SD/eMMC 目标盘，请插入 TF/SD 卡后刷新')
+                          : t('flasher.drives.unsupported', '当前环境暂不支持磁盘检测')}
                       </div>
                     ) : (
                       drives.map((d) => (
@@ -858,7 +1041,13 @@ export default function Flasher() {
                   <div className="config-row">
                     <span className="config-label">镜像</span>
                     <span className="config-value">
-                      <strong>{useLocalImage ? '本机文件' : (selectedImage?.name ?? '--')}</strong>
+                      <strong>
+                        {useLocalImage
+                          ? t('flasher.summary.local', '本机路径')
+                          : isS100Device
+                            ? t('flasher.s100.summaryOfficial', '官方目录（请在 xburn 中选镜像）')
+                            : (selectedImage?.name ?? '--')}
+                      </strong>
                     </span>
                   </div>
                   <div className="config-row">
@@ -907,21 +1096,28 @@ export default function Flasher() {
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                {selectedDeviceKey === 's100' && (
+                  <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
+                    <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
+                      {t('flasher.s100.manualDocLink', '查看 S100 官方手动烧录说明')}
+                    </a>
+                  </p>
+                )}
               </div>
             )}
             <div className="config-header flasher-nav-row" style={{ marginTop: 12 }}>
               <div className="tool-bar-left">
-                <button type="button" className="btn btn-ghost" onClick={() => goToStep(1)}>&larr; 上一步</button>
+                <button type="button" className="btn btn-ghost" onClick={() => goToStep(1)}>{t('flasher.btn.back', '← 上一步')}</button>
               </div>
               <div className="tool-bar-right">
                 {needsXburn ? (
                   caps.supportsLaunchThirdPartyTool ? (
                     <button type="button" className="btn btn-primary" onClick={() => startFlashWorkflow()}>
-                      启动 xburn 烧录
+                      {t('flasher.btn.startXburnFlash', '启动 xburn 烧录')}
                     </button>
                   ) : (
                     <button type="button" className="btn btn-primary" onClick={() => openExternal(xburnUrl)}>
-                      前往下载 xburn
+                      {t('flasher.btn.getXburn', '前往下载 xburn')}
                     </button>
                   )
                 ) : (
@@ -931,7 +1127,7 @@ export default function Flasher() {
                     disabled={!canProceedFromDrive || loading || (!capsLoading && !caps.supportsDirectWrite)}
                     onClick={() => startFlashWorkflow()}
                   >
-                    {loading ? '执行中...' : '开始写盘'}
+                    {loading ? t('flasher.btn.writing', '执行中...') : t('flasher.btn.startWrite', '开始写盘')}
                   </button>
                 )}
               </div>
@@ -943,18 +1139,9 @@ export default function Flasher() {
         {step === 3 && (
           <section className="card card-compact">
             <div className="config-header">
-              <h3 style={{ margin: 0, fontSize: '1rem' }}>
-                {phase === 'downloading' && '下载镜像中...'}
-                {phase === 'backup' && '备份目标盘中...'}
-                {phase === 'decompressing' && '解压镜像中...'}
-                {phase === 'flashing' && (needsXburn ? 'xburn 烧录中...' : '写盘执行中...')}
-                {phase === 'verifying' && '写后校验中...'}
-                {phase === 'done' && '烧录完成'}
-                {phase === 'error' && '烧录失败'}
-                {phase === 'idle' && '准备中...'}
-              </h3>
+              <h3 style={{ margin: 0, fontSize: '1rem' }}>{flashPhaseTitle}</h3>
               {phase !== 'done' && phase !== 'error' && (
-                <button type="button" className="btn btn-ghost" onClick={requestCancel}>请求取消</button>
+                <button type="button" className="btn btn-ghost" onClick={requestCancel}>{t('flasher.btn.requestCancel', '请求取消')}</button>
               )}
             </div>
 
@@ -972,12 +1159,6 @@ export default function Flasher() {
             {/* Phase indicators */}
             <div className="config-section">
               {(['downloading', 'decompressing', 'flashing', 'verifying'] as const).map((p) => {
-                const labels = {
-                  downloading: '下载镜像',
-                  decompressing: '解压镜像',
-                  flashing: needsXburn ? 'xburn 烧录' : '写盘',
-                  verifying: '写后校验',
-                };
                 let state: 'wait' | 'run' | 'done' | 'error' | 'skip' = 'wait';
                 const order: readonly string[] = ['downloading', 'decompressing', 'flashing', 'verifying', 'done', 'error'];
                 const ci = order.indexOf(phase);
@@ -999,14 +1180,14 @@ export default function Flasher() {
 
                 return (
                   <div key={p} className="config-row">
-                    <span className="config-label">{labels[p]}</span>
+                    <span className="config-label">{flashPhaseRowLabels[p]}</span>
                     <span className="config-value">
                       <span className={`badge ${badgeClass}`}>
-                        {state === 'wait' && '等待'}
-                        {state === 'run' && '执行中'}
-                        {state === 'done' && '完成'}
-                        {state === 'error' && '失败'}
-                        {state === 'skip' && '跳过'}
+                        {state === 'wait' && t('flasher.state.wait', '等待')}
+                        {state === 'run' && t('flasher.state.run', '执行中')}
+                        {state === 'done' && t('flasher.state.done', '完成')}
+                        {state === 'error' && t('flasher.state.error', '失败')}
+                        {state === 'skip' && t('flasher.state.skip', '跳过')}
                       </span>
                     </span>
                   </div>
@@ -1017,7 +1198,7 @@ export default function Flasher() {
             {/* Log panel */}
             <div className="config-terminal">
               {logs.length === 0 ? (
-                <div className="config-card-desc">等待日志输出...</div>
+                <div className="config-card-desc">{t('flasher.log.empty', '等待日志输出...')}</div>
               ) : (
                 logs.map((line, idx) => <div key={idx}>{line}</div>)
               )}
@@ -1026,12 +1207,19 @@ export default function Flasher() {
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
                 <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                {selectedDeviceKey === 's100' && (
+                  <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
+                    <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
+                      {t('flasher.s100.manualDocLink', '查看 S100 官方手动烧录说明')}
+                    </a>
+                  </p>
+                )}
               </div>
             )}
             {!error && verifyDetail && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--ok)', background: 'var(--ok-subtle)' }}>
                 <p className="config-card-desc" style={{ color: 'var(--ok)', margin: 0 }}>
-                  {`校验: ${verifyDetail}`}
+                  {tf('flasher.verify.prefix', '校验: {{detail}}', { detail: verifyDetail })}
                 </p>
               </div>
             )}
@@ -1052,13 +1240,13 @@ export default function Flasher() {
                       scannedRef.current = false;
                     }}
                   >
-                    重新开始
+                    {t('flasher.btn.restart', '重新开始')}
                   </button>
                 </div>
                 <div className="tool-bar-right">
                   {phase === 'done' && (
                     <button type="button" className="btn btn-primary" onClick={() => setStep(4)}>
-                      完成 &rarr;
+                      {t('flasher.btn.finish', '完成 →')}
                     </button>
                   )}
                 </div>
@@ -1070,19 +1258,19 @@ export default function Flasher() {
         {/* ═══════ Step 4: Done ═══════ */}
         {step === 4 && (
           <section className="card card-compact">
-            <h2>写盘完成</h2>
-            <p className="config-card-desc">镜像已写入目标磁盘。请安全弹出介质并插入目标板卡进行启动验证。</p>
+            <h2>{t('flasher.done.title', '写盘完成')}</h2>
+            <p className="config-card-desc">{t('flasher.done.desc', '镜像已写入目标磁盘。请安全弹出介质并插入目标板卡进行启动验证。')}</p>
 
             {/* WiFi configuration */}
             <div className="card card-compact">
               <div className="config-header">
-                <span className="section-label" style={{ marginBottom: 0 }}>WiFi 预配置（可选）</span>
+                <span className="section-label" style={{ marginBottom: 0 }}>{t('flasher.wifi.section', 'WiFi 预配置（可选）')}</span>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
                   onClick={() => setShowWifiConfig(!showWifiConfig)}
                 >
-                  {showWifiConfig ? '收起' : '展开配置'}
+                  {showWifiConfig ? t('flasher.wifi.collapse', '收起') : t('flasher.wifi.expand', '展开配置')}
                 </button>
               </div>
               {showWifiConfig && (
@@ -1095,7 +1283,7 @@ export default function Flasher() {
                         checked={wifiConfig.mode === 'station'}
                         onChange={() => setWifiConfig((c) => ({ ...c, mode: 'station' }))}
                       />
-                      Station 模式
+                      {t('flasher.wifi.station', 'Station 模式')}
                     </label>
                     <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                       <input
@@ -1104,19 +1292,19 @@ export default function Flasher() {
                         checked={wifiConfig.mode === 'ap'}
                         onChange={() => setWifiConfig((c) => ({ ...c, mode: 'ap' }))}
                       />
-                      AP 模式
+                      {t('flasher.wifi.ap', 'AP 模式')}
                     </label>
                   </div>
                   <input
                     className="input"
-                    placeholder="WiFi 名称 (SSID)"
+                    placeholder={t('flasher.wifi.ssidPh', 'WiFi 名称 (SSID)')}
                     value={wifiConfig.ssid}
                     onChange={(e) => setWifiConfig((c) => ({ ...c, ssid: e.target.value }))}
                   />
                   <input
                     className="input"
                     type="password"
-                    placeholder="WiFi 密码（至少 8 位）"
+                    placeholder={t('flasher.wifi.pwPh', 'WiFi 密码（至少 8 位）')}
                     value={wifiConfig.password}
                     onChange={(e) => setWifiConfig((c) => ({ ...c, password: e.target.value }))}
                   />
@@ -1125,11 +1313,11 @@ export default function Flasher() {
                     className="btn btn-primary btn-sm"
                     disabled={!wifiConfig.ssid.trim() || wifiConfig.password.length < 8}
                     onClick={async () => {
-                      addToast('WiFi 配置将在设备首次启动时生效', 'info');
+                      addToast(t('flasher.wifi.toast', 'WiFi 配置将在设备首次启动时生效'), 'info');
                       setShowWifiConfig(false);
                     }}
                   >
-                    保存 WiFi 配置
+                    {t('flasher.wifi.save', '保存 WiFi 配置')}
                   </button>
                 </div>
               )}
@@ -1140,23 +1328,23 @@ export default function Flasher() {
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => { setActiveTab('terminal'); addToast('已切换到终端', 'info'); }}
+                onClick={() => { setActiveTab('terminal'); addToast(t('flasher.toast.tabTerminal', '已切换到终端'), 'info'); }}
               >
-                终端验证
+                {t('flasher.btn.terminal', '终端验证')}
               </button>
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => { setActiveTab('hardware'); addToast('已切换到硬件监控', 'info'); }}
+                onClick={() => { setActiveTab('hardware'); addToast(t('flasher.toast.tabHardware', '已切换到硬件监控'), 'info'); }}
               >
-                硬件状态
+                {t('flasher.btn.hardware', '硬件状态')}
               </button>
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => { setActiveTab('skills'); addToast('已切换到技能工坊', 'info'); }}
+                onClick={() => { setActiveTab('skills'); addToast(t('flasher.toast.tabSkills', '已切换到技能工坊'), 'info'); }}
               >
-                技能工坊
+                {t('flasher.btn.skills', '技能工坊')}
               </button>
             </div>
             <button
@@ -1175,7 +1363,7 @@ export default function Flasher() {
                 scannedRef.current = false;
               }}
             >
-              重新写盘
+              {t('flasher.btn.flashAgain', '重新写盘')}
             </button>
           </section>
         )}

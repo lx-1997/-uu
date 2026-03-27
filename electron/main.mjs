@@ -477,14 +477,33 @@ ipcMain.handle('rdk:flash:list-drives', async () => {
   return flashService.listDrives();
 });
 
-ipcMain.handle('rdk:flash:pick-image', async () => {
+ipcMain.handle('rdk:flash:pick-image', async (_event, payload = {}) => {
   const isMac = process.platform === 'darwin';
-  const filters = isMac
-    ? [{ name: 'Image Files', extensions: ['img', 'bin', 'wic', 'xz', 'zip', 'dmg'] }]
-    : [{ name: 'Image Files', extensions: ['img', 'bin', 'wic', 'wic.gz', 'img.xz', 'xz'] }];
+  const pickFolder = payload?.mode === 'directory' || payload?.pickFolder === true;
+  if (pickFolder) {
+    const result = await dialog.showOpenDialog(mainWin ?? undefined, {
+      properties: ['openDirectory'],
+      title: typeof payload?.title === 'string' ? payload.title : '选择文件夹',
+    });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true };
+    return { ok: true, path: result.filePaths[0] };
+  }
+
+  const rawExt = Array.isArray(payload?.extensions) ? payload.extensions : null;
+  const normalized = rawExt?.length
+    ? rawExt.map((e) => String(e).replace(/^\./, '').toLowerCase()).filter(Boolean)
+    : null;
+
+  const filters = normalized?.length
+    ? [{ name: 'Images', extensions: normalized }]
+    : isMac
+      ? [{ name: 'Image Files', extensions: ['img', 'bin', 'wic', 'xz', 'zip', 'dmg'] }]
+      : [{ name: 'Image Files', extensions: ['img', 'bin', 'wic', 'wic.gz', 'img.xz', 'xz', 'zip'] }];
+
   const result = await dialog.showOpenDialog(mainWin ?? undefined, {
     properties: ['openFile'],
     filters,
+    title: typeof payload?.title === 'string' ? payload.title : undefined,
   });
   if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true };
   return { ok: true, path: result.filePaths[0] };

@@ -1,6 +1,8 @@
 /**
  * 补充英文文案（chat 流、顶栏、通用组件等），由 en.ts 合并导出。
  */
+import { OPENCLAW_EN } from './openclaw-en-partial';
+
 export const EN_EXTRAS: Record<string, string> = {
   'api.err.default': 'Request failed',
   'api.err.deviceAuth': 'Device credentials expired; re-enter username and password',
@@ -700,6 +702,16 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.xburn.step1': '1. Install xburn-gui',
   'flasher.xburn.step2': '2. Connect the board via USB Type-C',
   'flasher.xburn.step3': '3. Launch xburn below and select the image in the tool',
+  'flasher.s100.typecHint': 'For S100, connect the board with USB Type-C and follow xburn prompts to enter flash mode.',
+  'flasher.s100.officialCatalogHint':
+    'The list below is the official firmware catalog only. Use “Manual download” for product.zip; in xburn pick the local zip, extracted folder, or .img.',
+  'flasher.s100.pickZipTitle': 'Choose S100 image (product.zip or extracted .img)',
+  'flasher.s100.pickFolderTitle': 'Choose extracted firmware folder (directory that contains product)',
+  'flasher.s100.pickFolder': 'Choose folder',
+  'flasher.s100.pathPlaceholder': 'Path to product.zip, extracted folder, or .img (ASCII path recommended)',
+  'flasher.s100.manualDocLink': 'Open official S100 manual flashing guide',
+  'flasher.s100.summaryOfficial': 'Official catalog (pick image in xburn)',
+  'flasher.summary.local': 'Local file',
   'flasher.btn.launchXburn': 'Launch xburn',
   'flasher.btn.downloadXburn': 'Download xburn-gui',
   'flasher.section.targetDisk': 'Target drive',
@@ -1036,34 +1048,14 @@ export const EN_EXTRAS: Record<string, string> = {
   'addDevice.toast.verifyFail': 'Verification failed — check IP and credentials',
   'addDevice.toast.serialOk': 'Serial {{port}} connected',
 
+  ...OPENCLAW_EN,
+
   'common.unknownError': 'Unknown error',
 
   'errorBoundary.title': 'Something went wrong',
   'errorBoundary.retry': 'Try again',
   'confirm.cancel': 'Cancel',
   'confirm.run': 'Confirm',
-
-  'openclaw.quick.health.label': 'Gateway health',
-  'openclaw.quick.health.prompt': 'Check gateway status and give one concise conclusion.',
-  'openclaw.quick.capabilities.label': 'Capability overview',
-  'openclaw.quick.capabilities.prompt': 'Summarize OpenClaw capabilities available on this device.',
-  'openclaw.quick.inspect.label': 'Device inspection',
-  'openclaw.quick.inspect.prompt': 'I want a device health inspection — give me the steps.',
-  'openclaw.quick.fix.label': 'Diagnose & fix',
-  'openclaw.quick.fix.prompt': 'Diagnose why connection fails and suggest fix commands.',
-
-  'openclaw.plugin.feishu': 'Feishu',
-  'openclaw.plugin.weixin': 'WeChat',
-  'openclaw.plugin.skillhub': 'SkillHub',
-  'openclaw.plugin.memory': 'Chat memory',
-  'openclaw.plugin.web_search': 'Web search',
-
-  'openclaw.provider.bailian.label': 'Alibaba Bailian',
-  'openclaw.provider.siliconflow.label': 'SiliconFlow',
-  'openclaw.provider.zhipu.label': 'Zhipu AI',
-  'openclaw.provider.volcengine.label': 'Volcengine',
-  'openclaw.provider.baichuan.label': 'Baichuan',
-  'openclaw.provider.stepfun.label': 'StepFun',
 };
 
 /** 替换 {{key}} 占位符 */

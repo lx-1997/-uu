@@ -51,7 +51,12 @@ declare global {
       onUrlLoaded?: (cb: (url: string) => void) => void;
       flashGetCapabilities?: () => Promise<FlashCapabilities>;
       flashListDrives?: () => Promise<{ ok: boolean; drives?: FlashDrive[]; error?: string }>;
-      flashPickImage?: (options?: { extensions?: string[] }) => Promise<{ ok: boolean; path?: string; canceled?: boolean }>;
+      flashPickImage?: (options?: {
+        extensions?: string[];
+        mode?: 'file' | 'directory';
+        pickFolder?: boolean;
+        title?: string;
+      }) => Promise<{ ok: boolean; path?: string; canceled?: boolean }>;
       flashWriteLocal?: (payload: { imagePath: string; drivePath: string; verifyMode?: 'none' | 'sample'; performanceProfile?: 'balanced' | 'turbo' }) => Promise<{ ok: boolean; output?: string; error?: string; verify?: { ok: boolean; detail: string } }>;
       flashVerifyLocal?: (payload: { imagePath: string; drivePath: string }) => Promise<{ ok: boolean; detail?: string; error?: string }>;
       flashBackupLocal?: (payload: { drivePath: string; destPath?: string }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string }>;
