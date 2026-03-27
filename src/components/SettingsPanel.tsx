@@ -36,6 +36,7 @@ import {
   restartWeixinChannel,
 } from '../api';
 import { resolveApiUrl } from '../utils/apiBase';
+import { fillTemplate } from '../i18n/en-extras';
 
 /* ═══════════════════════════════════════════
    Constants
@@ -77,10 +78,14 @@ type SectionId = 'ai-engine' | 'persona' | 'policy' | 'feishu' | 'weixin' | 'con
 export default function SettingsPanel() {
   const {
     showSettings, setShowSettings,
-    language, setLanguage, autoReconnect, setAutoReconnect,
+    autoReconnect, setAutoReconnect,
     connectionTimeout, setConnectionTimeout, addToast,
   } = useAppState();
-  const { t, isEn } = useI18n();
+  const { t } = useI18n();
+  const tf = useCallback(
+    (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
+    [t],
+  );
 
   const SECTIONS = useMemo(() => [
     { id: 'ai-engine' as const, label: t('settings.sec.ai', 'AI 引擎') },
@@ -376,7 +381,7 @@ export default function SettingsPanel() {
         ok: res.verified,
         text: res.verified
           ? t('settings.forum.verifyOk', '凭据已保存，SSO 验证通过')
-          : (isEn ? `Saved; SSO verification failed: ${res.verifyDetail}` : `凭据已保存，但验证未通过: ${res.verifyDetail}`),
+          : tf('settings.forum.verifyFailDetail', '凭据已保存，但验证未通过: {{detail}}', { detail: res.verifyDetail }),
       });
       addToast(
         res.verified ? t('toast.forumSavedOk', '论坛凭据验证成功') : t('toast.forumSavedWarn', '凭据已保存，SSO 验证未通过'),
@@ -427,9 +432,11 @@ export default function SettingsPanel() {
       if (action === 'restart') await restartFeishuRuntime();
       await refreshFeishuData();
       addToast(
-        isEn
-          ? `Feishu channel ${action === 'start' ? 'started' : action === 'stop' ? 'stopped' : 'restarted'}`
-          : `飞书通道已${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}`,
+        action === 'start'
+          ? t('toast.feishuCh.started', '飞书通道已启动')
+          : action === 'stop'
+            ? t('toast.feishuCh.stopped', '飞书通道已停止')
+            : t('toast.feishuCh.restarted', '飞书通道已重启'),
         'success',
       );
     } catch (error) {
@@ -471,14 +478,16 @@ export default function SettingsPanel() {
       await refreshAiConfig();
       const savedModel = `${aiProvider}/${effectiveModel}`;
       addToast(
-        isEn
-          ? (selectedAiModelId ? `Model updated: ${savedModel}` : `Added and enabled: ${savedModel}`)
-          : (selectedAiModelId ? `模型已更新: ${savedModel}` : `已新增并启用: ${savedModel}`),
+        selectedAiModelId
+          ? tf('toast.aiModelUpdated', '模型已更新: {{name}}', { name: savedModel })
+          : tf('toast.aiModelAdded', '已新增并启用: {{name}}', { name: savedModel }),
         'success',
       );
     } catch (err) {
       addToast(
-        `${isEn ? 'Save failed' : '保存失败'}: ${err instanceof Error ? err.message : t('toast.unknownErr', '未知错误')}`,
+        tf('toast.aiSaveFailMsg', '保存失败: {{msg}}', {
+          msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+        }),
         'error',
       );
     } finally {
@@ -494,12 +503,16 @@ export default function SettingsPanel() {
       await saveAgentConfig({ action: 'delete', id: selectedAiModelId });
       await refreshAiConfig();
       addToast(
-        `${isEn ? 'Deleted' : '已删除'}: ${entry ? `${entry.provider}/${entry.model}` : selectedAiModelId}`,
+        tf('toast.aiDeleted', '已删除: {{id}}', {
+          id: entry ? `${entry.provider}/${entry.model}` : selectedAiModelId,
+        }),
         'success',
       );
     } catch (err) {
       addToast(
-        `${isEn ? 'Delete failed' : '删除失败'}: ${err instanceof Error ? err.message : t('toast.unknownErr', '未知错误')}`,
+        tf('toast.aiDeleteFailMsg', '删除失败: {{msg}}', {
+          msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+        }),
         'error',
       );
     } finally {
@@ -542,7 +555,9 @@ export default function SettingsPanel() {
       addToast(t('toast.importOk', '模型配置导入成功'), 'success');
     } catch (error) {
       addToast(
-        error instanceof Error ? `${isEn ? 'Import failed' : '导入失败'}：${error.message}` : t('toast.importFail', '导入失败'),
+        error instanceof Error
+          ? tf('toast.importFailMsg', '导入失败：{{msg}}', { msg: error.message })
+          : t('toast.importFail', '导入失败'),
         'error',
       );
     } finally {
@@ -604,7 +619,7 @@ export default function SettingsPanel() {
       settled = true;
       try {
         const data = JSON.parse(e.data);
-        addToast(`${isEn ? 'WeChat bound' : '微信已绑定'}: ${data.nickname || data.accountId}`, 'success');
+        addToast(tf('toast.weixinBound', '微信已绑定: {{name}}', { name: data.nickname || data.accountId }), 'success');
         loadWeixinData();
       } catch { /* ignore */ }
       closeWeixinLogin();
@@ -614,7 +629,12 @@ export default function SettingsPanel() {
       settled = true;
       try {
         const data = JSON.parse((e as any).data || '{}');
-        addToast(`${isEn ? 'Login failed' : '登录失败'}: ${data.message || t('toast.unknownErr', '未知错误')}`, 'error');
+        addToast(
+          tf('toast.weixinLoginFailMsg', '登录失败: {{msg}}', {
+            msg: data.message || t('toast.unknownErr', '未知错误'),
+          }),
+          'error',
+        );
       } catch { /* ignore */ }
       closeWeixinLogin();
     });
@@ -622,7 +642,7 @@ export default function SettingsPanel() {
     es.onerror = () => {
       if (settled) return;
       settled = true;
-      addToast(isEn ? 'Connection lost, please retry' : '连接中断，请重试', 'error');
+      addToast(t('toast.weixinEsLost', '连接中断，请重试'), 'error');
       closeWeixinLogin();
     };
   };
@@ -701,11 +721,13 @@ export default function SettingsPanel() {
                               const name = result.active
                                 ? `${result.active.provider}/${result.active.model}`
                                 : `${entry.provider}/${entry.model}`;
-                              addToast(`${isEn ? 'Switched to' : '已切换到'} ${name}`, 'success');
+                              addToast(tf('toast.aiSwitchedTo', '已切换到 {{name}}', { name }), 'success');
                             } catch (err) {
                               await refreshAiConfig().catch(() => {});
                               addToast(
-                                `${isEn ? 'Switch failed' : '切换失败'}: ${err instanceof Error ? err.message : t('toast.unknownErr', '未知错误')}`,
+                                tf('toast.aiSwitchFailMsg', '切换失败: {{msg}}', {
+                                  msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+                                }),
                                 'error',
                               );
                             } finally {
@@ -936,7 +958,7 @@ export default function SettingsPanel() {
                       ))}
                     </>}
                     {feishuBoundUsers.length > 0 && <>
-                      <h4 className="settings-card-title">{isEn ? `Bound (${feishuBoundUsers.length})` : `已绑定 (${feishuBoundUsers.length})`}</h4>
+                      <h4 className="settings-card-title">{tf('settings.feishu.boundCount', '已绑定 ({{n}})', { n: feishuBoundUsers.length })}</h4>
                       {feishuBoundUsers.map(u => (
                         <div className="settings-row" key={u.openId}>
                           <span className="settings-row-label">{u.openId}</span>
@@ -959,7 +981,7 @@ export default function SettingsPanel() {
                       <span className="settings-row-label">{a.nickname || a.accountId.slice(0, 10)}</span>
                       <div className="settings-actions">
                         <span className="settings-hint">{new Date(a.boundAt).toLocaleDateString()}</span>
-                        <button type="button" className="btn btn-danger btn-sm" onClick={async () => { await removeWeixinAccount(a.accountId); loadWeixinData(); addToast(isEn ? 'Removed' : '已移除', 'info'); }}>{t('settings.weixin.remove', '移除')}</button>
+                        <button type="button" className="btn btn-danger btn-sm" onClick={async () => { await removeWeixinAccount(a.accountId); loadWeixinData(); addToast(t('toast.weixinRemoved', '已移除'), 'info'); }}>{t('settings.weixin.remove', '移除')}</button>
                       </div>
                     </div>
                   )) : <span className="settings-hint">{t('settings.weixin.none', '暂未绑定微信账号')}</span>}
@@ -968,7 +990,7 @@ export default function SettingsPanel() {
                     <button type="button" className="btn btn-primary btn-sm" onClick={startWeixinLogin} disabled={weixinLoginLoading}>
                       {t('settings.weixin.scan', '扫码连接')}
                     </button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={async () => { await restartWeixinChannel(); addToast(isEn ? 'Channel restarted' : '已重启', 'info'); }}>{t('settings.weixin.restartCh', '重启渠道')}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={async () => { await restartWeixinChannel(); addToast(t('toast.weixinRestarted', '已重启'), 'info'); }}>{t('settings.weixin.restartCh', '重启渠道')}</button>
                   </div>
                 </div>
               </section>
@@ -1008,17 +1030,8 @@ export default function SettingsPanel() {
 
               {/* ══ 6. 设备连接 ══ */}
               <section id="connection" className="settings-section" ref={registerSectionRef('connection')}>
-                <H title={t('settings.conn.title', '设备连接')} desc={t('settings.conn.desc', 'SSH 连接参数与界面语言。')} />
+                <H title={t('settings.conn.title', '设备连接')} desc={t('settings.conn.desc', 'SSH 连接参数。界面语言请在左侧栏底部切换。')} />
                 <div className="settings-card">
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.conn.lang', '界面语言')}</span>
-                    <div className="settings-row-value">
-                      <select className="select" title={t('settings.conn.lang', '界面语言')} aria-label={t('settings.conn.lang', '界面语言')} value={language} onChange={e => { setLanguage(e.target.value); addToast(t('settings.conn.lang.saved', '语言偏好已保存'), 'success'); }}>
-                        <option value="zh-CN">{t('settings.conn.lang.zh', '简体中文')}</option>
-                        <option value="en">{t('settings.conn.lang.en', 'English')}</option>
-                      </select>
-                    </div>
-                  </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.conn.timeout', '连接超时 (秒)')}</span>
                     <div className="settings-row-value"><input type="number" className="input" title={t('settings.conn.timeout.title', '超时')} aria-label={t('settings.conn.timeout.title', '超时')} value={connectionTimeout} onChange={e => setConnectionTimeout(Number(e.target.value))} /></div>

@@ -48,25 +48,76 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
 ];
 
 export const FLASH_IMAGES = [
-  { id: 'ubuntu-22.04', label: 'Ubuntu 22.04 LTS (官方推荐)', detail: '基础开发环境 + Docker runtime' },
-  { id: 'ros2-humble', label: 'ROS2 Humble 预装版', detail: '预装 TogetherROS.b 与调试工具链' },
-  { id: 'tros-ai', label: 'TROS AI 开发版', detail: '适合视觉算法与小龙虾示例快速验证' },
-  { id: 'local', label: '浏览本地文件...', detail: '导入自定义镜像包并保留元数据校验' },
+  {
+    id: 'ubuntu-22.04',
+    label: 'Ubuntu 22.04 LTS (官方推荐)',
+    labelEn: 'Ubuntu 22.04 LTS (recommended)',
+    detail: '基础开发环境 + Docker runtime',
+    detailEn: 'Base dev environment + Docker runtime',
+  },
+  {
+    id: 'ros2-humble',
+    label: 'ROS2 Humble 预装版',
+    labelEn: 'ROS2 Humble (preinstalled)',
+    detail: '预装 TogetherROS.b 与调试工具链',
+    detailEn: 'TogetherROS.b and debug toolchain preinstalled',
+  },
+  {
+    id: 'tros-ai',
+    label: 'TROS AI 开发版',
+    labelEn: 'TROS AI dev',
+    detail: '适合视觉算法与小龙虾示例快速验证',
+    detailEn: 'Vision algorithms and quick sample validation',
+  },
+  {
+    id: 'local',
+    label: '浏览本地文件...',
+    labelEn: 'Browse local file…',
+    detail: '导入自定义镜像包并保留元数据校验',
+    detailEn: 'Import a custom image with metadata checks',
+  },
 ];
+
+export function getFlashImageLabel(id: string, isEn: boolean): string {
+  const row = FLASH_IMAGES.find((i) => i.id === id);
+  if (!row) return id;
+  return isEn ? row.labelEn : row.label;
+}
 
 export const TERMINAL_PROFILES = [
-  { id: 'shell', label: '系统 Shell', desc: '命令行操作日志查看与环境配置' },
-  { id: 'openclaw', label: 'OpenClaw 对话', desc: 'AI 对话模式用自然语言操控设备' },
+  {
+    id: 'shell',
+    label: '系统 Shell',
+    labelEn: 'System shell',
+    desc: '命令行操作日志查看与环境配置',
+    descEn: 'CLI logs and environment setup',
+  },
+  {
+    id: 'openclaw',
+    label: 'OpenClaw 对话',
+    labelEn: 'OpenClaw chat',
+    desc: 'AI 对话模式用自然语言操控设备',
+    descEn: 'Natural-language device control via AI chat',
+  },
 ];
 
-export const CMD_SUGGESTIONS = [
-  { icon: '', text: '基于当前设备状态，给我一份可执行应用计划', keyword: '计划' },
-  { icon: '', text: '汇总当前设备可用能力并生成执行建议', keyword: '同步' },
-  { icon: '', text: '帮我烧录最新系统镜像并给出验证步骤', keyword: '烧录' },
-  { icon: '', text: '打开 SSH 终端并检查 ROS2 与 BPU 环境', keyword: '终端' },
-  { icon: '', text: '连接 VNC 并优化远程调试体验', keyword: 'vnc' },
-  { icon: '', text: '查看 ROS 话题异常并给出修复命令', keyword: 'ros' },
-  { icon: '', text: '部署一个可运行的视觉应用并回显结果', keyword: '示例' },
-  { icon: '', text: '生成 OpenClaw 工作流模板并执行', keyword: 'openclaw' },
+export function getTerminalProfileLabel(profileId: string, isEn: boolean): string {
+  const row = TERMINAL_PROFILES.find((p) => p.id === profileId);
+  if (!row) return isEn ? 'System shell' : '系统 Shell';
+  return isEn ? row.labelEn : row.label;
+}
+
+/** 命令建议：中英双语，筛选时同时匹配 zh/en/keyword */
+export const CMD_SUGGESTIONS: Array<{ icon: string; textZh: string; textEn: string; keyword: string }> = [
+  { icon: '', textZh: '基于当前设备状态，给我一份可执行应用计划', textEn: 'Based on the current device, give me an executable app plan', keyword: '计划' },
+  { icon: '', textZh: '汇总当前设备可用能力并生成执行建议', textEn: 'Summarize device capabilities and suggest next actions', keyword: '同步' },
+  { icon: '', textZh: '帮我烧录最新系统镜像并给出验证步骤', textEn: 'Flash the latest system image and list verification steps', keyword: '烧录' },
+  { icon: '', textZh: '打开 SSH 终端并检查 ROS2 与 BPU 环境', textEn: 'Open SSH terminal and check ROS2 and BPU environment', keyword: '终端' },
+  { icon: '', textZh: '连接 VNC 并优化远程调试体验', textEn: 'Connect VNC and tune remote debugging', keyword: 'vnc' },
+  { icon: '', textZh: '查看 ROS 话题异常并给出修复命令', textEn: 'Inspect ROS topic issues and suggest fix commands', keyword: 'ros' },
+  { icon: '', textZh: '部署一个可运行的视觉应用并回显结果', textEn: 'Deploy a runnable vision app and show results', keyword: '示例' },
+  { icon: '', textZh: '生成 OpenClaw 工作流模板并执行', textEn: 'Generate an OpenClaw workflow template and run it', keyword: 'openclaw' },
 ];
+
+export type CmdSuggestion = { icon: string; text: string; keyword: string; textZh: string; textEn: string };
 

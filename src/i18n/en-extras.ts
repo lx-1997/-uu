@@ -1,7 +1,12 @@
 /**
  * 补充英文文案（chat 流、顶栏、通用组件等），由 en.ts 合并导出。
  */
+import { ONBOARD_EN } from './onboard-en-partial';
 import { OPENCLAW_EN } from './openclaw-en-partial';
+import { SKILL_BROWSER_EN } from './skill-browser-en-partial';
+import { MODELS_EN } from './models-en-partial';
+import { EXAMPLES_EN } from './examples-en-partial';
+import { SIDEBAR_EN } from './sidebar-en-partial';
 
 export const EN_EXTRAS: Record<string, string> = {
   'api.err.default': 'Request failed',
@@ -87,6 +92,44 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.task.cancel': 'Cancel',
   'dock.empty.cleared': 'Chat cleared — send a message to continue.',
   'dock.moreHistory': 'Show {{n}} older messages',
+  'dock.compact.foldedHint': '{{n}} intermediate steps folded — switch to “Full” to view them.',
+
+  'dock.channel.short.feishu': 'F',
+  'dock.channel.short.weixin': 'W',
+  'dock.channel.feishu': 'Feishu',
+  'dock.channel.weixin': 'WeChat',
+  'dock.channel.inbound': ' · Inbound',
+  'dock.channel.outbound': ' · Outbound',
+  'dock.bubble.copyTitle': 'Copy full message (plain text)',
+  'dock.bubble.copyToastOk': 'Copied to clipboard',
+  'dock.bubble.copyToastFail': 'Copy failed — try selecting text manually',
+  'dock.bubble.copyBtn': 'Copy',
+
+  'dock.hide': 'Hide AI Dock',
+  'dock.attach.processFail': 'Attachment handling failed. Please try again.',
+  'dock.compact.titleOn': 'Compact flow view on — click to show full steps',
+  'dock.compact.titleOff': 'Full steps visible — click for compact view',
+  'dock.compact.btnCompact': 'Compact',
+  'dock.compact.btnFull': 'Full',
+  'dock.typing.stopCurrent': 'Stop current',
+  'dock.typing.stopAll': 'Stop all',
+  'dock.voice.recognizing': 'Recognizing: ',
+  'dock.input.pickFiles': 'Choose files',
+  'dock.input.attachments': 'Attachments',
+  'dock.input.voice': 'Voice',
+  'dock.input.voiceStop': 'Stop',
+  'dock.input.clearInput': 'Clear',
+  'dock.openChatPanel': 'Open chat panel',
+  'dock.strip.aria.devices': 'AI device selector',
+  'dock.strip.aria.channels': 'Channel message overview',
+  'dock.strip.feishuMsgsTitle': 'Feishu messages',
+  'dock.strip.weixinMsgsTitle': 'WeChat messages',
+  'dock.strip.feishuInbound': 'Feishu · inbound {{n}}',
+  'dock.strip.feishuTotal': 'Feishu · {{n}} msgs',
+  'dock.strip.weixinInbound': 'WeChat · inbound {{n}}',
+  'dock.strip.weixinTotal': 'WeChat · {{n}} msgs',
+  'dock.ocMode.titleOpenClaw': 'OpenClaw Agent mode — click to use RDKClaw',
+  'dock.ocMode.titleRdk': 'RDKClaw mode — click for OpenClaw Agent',
 
   'dock.status.fallback': 'Details',
   'dock.terminal.copyAllTitle': 'Copy all output',
@@ -443,7 +486,7 @@ export const EN_EXTRAS: Record<string, string> = {
 
   'topbar.ip.titleOn': 'Network: click to expand interfaces and copy',
   'topbar.ip.titleOff': 'No device',
-  'topbar.ip.hint': 'IPv4 from board `ip -br` / `ifconfig -a`, fallback `hostname -I`. Click Copy to clipboard.',
+  'topbar.ip.hint': 'IPv4 is read on the board via `ip -br` and `ifconfig -a` (wlan0 / eth0, etc.), falling back to `hostname -I` when needed. Click Copy to place an address on the clipboard.',
   'topbar.ip.warnStudio': 'Could not parse IPv4 on board; showing Studio connection IP only (retry refresh).',
   'topbar.ip.warnNone': 'Could not get device IP',
   'topbar.ip.loading': 'Reading interfaces…',
@@ -1048,7 +1091,38 @@ export const EN_EXTRAS: Record<string, string> = {
   'addDevice.toast.verifyFail': 'Verification failed — check IP and credentials',
   'addDevice.toast.serialOk': 'Serial {{port}} connected',
 
+  'wifiModal.title': 'Wi‑Fi',
+  'wifiModal.subtitle': 'Connect {{name}} to wireless',
+  'wifiModal.subtitleFallback': 'device',
+  'wifiModal.toast.scanFail': 'Wi‑Fi scan failed',
+  'wifiModal.toast.connected': 'Connected to {{ssid}}',
+  'wifiModal.toast.connectFail': 'Wi‑Fi failed — check password',
+  'wifiModal.toast.requestFail': 'Wi‑Fi request failed',
+  'wifiModal.networks': 'Available networks',
+  'wifiModal.scanning': 'Scanning…',
+  'wifiModal.refresh': 'Refresh',
+  'wifiModal.scanningList': 'Scanning…',
+  'wifiModal.empty': 'No networks found',
+  'wifiModal.retry': 'Retry',
+  'wifiModal.ssid': 'Wi‑Fi name (SSID)',
+  'wifiModal.ssidPh': 'Type or pick from above',
+  'wifiModal.password': 'Password',
+  'wifiModal.passwordPh': 'Leave empty if open network',
+  'wifiModal.hint': 'SSH may drop briefly while connecting; wait for the device to reconnect.',
+  'wifiModal.cancel': 'Cancel',
+  'wifiModal.connecting': 'Connecting…',
+  'wifiModal.connect': 'Connect',
+
+  ...ONBOARD_EN,
   ...OPENCLAW_EN,
+  ...SKILL_BROWSER_EN,
+  ...MODELS_EN,
+  ...EXAMPLES_EN,
+  ...SIDEBAR_EN,
+
+  'markdown.copy': 'Copy',
+
+  'lowcode.placeholder': 'Visual workflow editing is still evolving — use the terminal or AI Dock to draft flows for now.',
 
   'common.unknownError': 'Unknown error',
 

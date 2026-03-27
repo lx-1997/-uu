@@ -1,12 +1,16 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { executeDeviceCommand, fetchVncStatus } from '../api';
 import { useAppState } from '../hooks/useAppState';
+import { fillTemplate } from '../i18n/en-extras';
+import { useI18n } from '../i18n/use-i18n';
 import { isDesktop } from '../utils/env';
 import DeviceGuard from './DeviceGuard';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
   const { currentDevice, vncConnected, startVncSession, addToast } = useAppState();
+  const { t } = useI18n();
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
 
   const [phase, setPhase] = useState<'idle' | 'checking' | 'connecting' | 'connected' | 'error'>('idle');
   const [statusText, setStatusText] = useState('');
@@ -50,10 +54,10 @@ export default function Vnc() {
     });
     rdk.onUrlLoadFailed?.((url: string, _code: number, desc: string) => {
       if (url === activeUrlRef.current) {
-        setLoadError(desc || '连接失败');
+        setLoadError(desc || t('vnc.err.connect', '连接失败'));
         setPhase('error');
-        setStatusText(desc || '连接失败');
-        addToast(`noVNC 加载失败: ${desc}`, 'error');
+        setStatusText(desc || t('vnc.err.connect', '连接失败'));
+        addToast(tf('vnc.err.novncLoad', 'noVNC 加载失败: {{desc}}', { desc: desc || '' }), 'error');
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,7 +82,8 @@ export default function Vnc() {
     setQuality(q);
     if (showIframe) {
       setUrlVersion(v => v + 1);
-      addToast(`画质已切换为${q === 'auto' ? '自动' : q === 'high' ? '高清' : '流畅'}`, 'info');
+      const qLabel = q === 'auto' ? t('vnc.quality.toast.auto', '自动') : q === 'high' ? t('vnc.quality.toast.high', '高清') : t('vnc.quality.toast.low', '流畅');
+      addToast(tf('vnc.toast.quality', '画质已切换为{{q}}', { q: qLabel }), 'info');
     }
   };
 
@@ -92,17 +97,17 @@ export default function Vnc() {
         setLogLines(output.split(/\r?\n/).filter(Boolean));
         if (res.active || output.includes('5900')) {
           setPhase('idle');
-          setStatusText('VNC 服务就绪');
+          setStatusText(t('vnc.status.ready', 'VNC 服务就绪'));
         } else {
           setPhase('idle');
-          setStatusText('VNC 服务未启动');
+          setStatusText(t('vnc.status.notRunning', 'VNC 服务未启动'));
         }
       })
       .catch(() => {
         setPhase('idle');
-        setStatusText('无法获取状态');
+        setStatusText(t('vnc.status.unknown', '无法获取状态'));
       });
-  }, [currentDevice?.id]);
+  }, [currentDevice?.id, t]);
 
   useEffect(() => {
     if (!showIframe) { setLatency(null); return; }
@@ -115,11 +120,11 @@ export default function Vnc() {
   // ── 启动 VNC 并连接 ──
   const handleConnect = () => {
     if (!currentDevice) {
-      addToast('请先连接设备', 'warning');
+      addToast(t('vnc.toast.connectDevice', '请先连接设备'), 'warning');
       return;
     }
     setPhase('connecting');
-    addToast('正在检查并启动 VNC 服务...', 'info');
+    addToast(t('vnc.toast.starting', '正在检查并启动 VNC 服务...'), 'info');
 
     executeDeviceCommand(
       currentDevice.id,
@@ -132,7 +137,7 @@ export default function Vnc() {
         const vncUrl = getVncUrl();
         setPhase('connected');
         setShowIframe(true);
-        addToast('VNC 连接成功', 'success');
+        addToast(t('vnc.toast.ok', 'VNC 连接成功'), 'success');
         startVncSession();
         // 桌面端用 WebContentsView 嵌入 noVNC
         if (isDesktop()) {
@@ -142,13 +147,13 @@ export default function Vnc() {
         }
       } else {
         setPhase('error');
-        setStatusText('端口 5900 未就绪');
-        addToast('VNC 端口未就绪，请检查设备配置', 'warning');
+        setStatusText(t('vnc.err.port', '端口 5900 未就绪'));
+        addToast(t('vnc.toast.port', 'VNC 端口未就绪，请检查设备配置'), 'warning');
       }
     }).catch(err => {
       setPhase('error');
-      setStatusText(err.message || '连接失败');
-      addToast(err.message || '操作失败', 'error');
+      setStatusText(err.message || t('vnc.err.connect', '连接失败'));
+      addToast(err.message || t('vnc.toast.opFail', '操作失败'), 'error');
     });
   };
 
@@ -192,14 +197,14 @@ export default function Vnc() {
     return () => window.removeEventListener('keydown', handler);
   }, [showIframe]);
 
-  if (!currentDevice) return <DeviceGuard feature="远程桌面" />;
+  if (!currentDevice) return <DeviceGuard feature={t('vnc.guardFeature', '远程桌面')} />;
 
   return (
     <div className="immersive" ref={containerRef}>
       <div className="immersive-bar">
         <div className="immersive-bar-left">
           
-          <span className="immersive-bar-title">远程桌面</span>
+          <span className="immersive-bar-title">{t('vnc.title', '远程桌面')}</span>
           {currentDevice && (
             <span className="immersive-bar-meta">
               {(currentDevice as any).username || (currentDevice as any).name}@{(currentDevice as any).host || (currentDevice as any).ip}
@@ -212,7 +217,7 @@ export default function Vnc() {
             <>
               <span className={`immersive-bar-status ${phase === 'connected' ? 'live' : ''}`}>
                 <span className="status-dot" />
-                {phase === 'connected' ? '已连接' : '未连接'}
+                {phase === 'connected' ? t('vnc.status.connected', '已连接') : t('vnc.status.disconnected', '未连接')}
               </span>
               {latency !== null && (
                 <span className="immersive-bar-meta">{latency}ms</span>
@@ -232,21 +237,21 @@ export default function Vnc() {
                     className={`immersive-quality-btn ${quality === q ? 'active' : ''}`}
                     onClick={() => handleQualityChange(q)}
                   >
-                    {q === 'auto' ? '自动' : q === 'high' ? '高清' : '流畅'}
+                    {q === 'auto' ? t('vnc.quality.auto', '自动') : q === 'high' ? t('vnc.quality.high', '高清') : t('vnc.quality.low', '流畅')}
                   </button>
                 ))}
               </div>
 
               <div className="immersive-bar-sep" />
 
-              <button className="btn-icon" onClick={() => window.open(getVncUrl(), '_blank')} title="新窗口打开">
+              <button className="btn-icon" onClick={() => window.open(getVncUrl(), '_blank')} title={t('vnc.title.openNew', '新窗口打开')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
                   <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
                 </svg>
               </button>
 
-              <button className="btn-icon" onClick={toggleFullscreen} title="全屏 (F11)">
+              <button className="btn-icon" onClick={toggleFullscreen} title={t('vnc.title.fullscreen', '全屏 (F11)')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   {isFullscreen ? (
                     <><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></>
@@ -256,7 +261,7 @@ export default function Vnc() {
                 </svg>
               </button>
 
-              <button className="btn-icon" onClick={() => setShowLogs(!showLogs)} title="日志">
+              <button className="btn-icon" onClick={() => setShowLogs(!showLogs)} title={t('vnc.title.logs', '日志')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
                   <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
@@ -266,7 +271,7 @@ export default function Vnc() {
               <div className="immersive-bar-sep" />
 
               <button className="btn btn-danger" onClick={handleDisconnect}>
-                断开
+                {t('vnc.disconnect', '断开')}
               </button>
             </>
           )}
@@ -282,10 +287,10 @@ export default function Vnc() {
                 {loadError ? (
                   <>
                     <span className="immersive-error">⚠️ {loadError}</span>
-                    <button className="btn btn-primary" onClick={() => { handleDisconnect(); }}>返回重试</button>
+                    <button className="btn btn-primary" onClick={() => { handleDisconnect(); }}>{t('vnc.backRetry', '返回重试')}</button>
                   </>
                 ) : (
-                  <span>noVNC 已在独立视图中加载</span>
+                  <span>{t('vnc.desktop.loaded', 'noVNC 已在独立视图中加载')}</span>
                 )}
               </div>
             ) : (
@@ -301,7 +306,7 @@ export default function Vnc() {
             {showLogs && (
               <div className="immersive-logs">
                 <div className="immersive-logs-head">
-                  <span>代理日志</span>
+                  <span>{t('vnc.proxyLogs', '代理日志')}</span>
                   <button className="btn btn-ghost" onClick={() => setShowLogs(false)}>×</button>
                 </div>
                 <div className="immersive-logs-body">
@@ -309,7 +314,7 @@ export default function Vnc() {
                     <div key={i} className="vnc-log-line">{line}</div>
                   ))}
                   {logLines.length === 0 && (
-                    <div className="vnc-log-line">等待输出...</div>
+                    <div className="vnc-log-line">{t('vnc.log.waiting', '等待输出...')}</div>
                   )}
                 </div>
               </div>
@@ -330,29 +335,29 @@ export default function Vnc() {
               <div className="vnc-welcome-glow" />
             </div>
 
-            <h2 className="immersive-welcome-title">Web 远程桌面</h2>
+            <h2 className="immersive-welcome-title">{t('vnc.welcome.title', 'Web 远程桌面')}</h2>
             <p className="immersive-welcome-desc">
-              通过 WebSocket 代理直连设备桌面，零安装、低延迟
+              {t('vnc.welcome.desc', '通过 WebSocket 代理直连设备桌面，零安装、低延迟')}
             </p>
 
             {phase === 'checking' && (
               <div className="immersive-loading">
                 <div className="vnc-phase-spinner" />
-                <span>检查 VNC 服务状态...</span>
+                <span>{t('vnc.phase.checking', '检查 VNC 服务状态...')}</span>
               </div>
             )}
 
             {phase === 'connecting' && (
               <div className="immersive-loading">
                 <div className="vnc-phase-spinner" />
-                <span>正在启动并连接...</span>
+                <span>{t('vnc.phase.connecting', '正在启动并连接...')}</span>
               </div>
             )}
 
             {phase === 'error' && (
               <div className="immersive-error">
                 <span>⚠️ {statusText}</span>
-                <button className="btn btn-ghost" onClick={handleConnect}>重试</button>
+                <button className="btn btn-ghost" onClick={handleConnect}>{t('vnc.retry', '重试')}</button>
               </div>
             )}
 
@@ -365,26 +370,26 @@ export default function Vnc() {
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="5 3 19 12 5 21 5 3"/>
                 </svg>
-                启动并连接
+                {t('vnc.connect', '启动并连接')}
               </button>
             )}
 
             {!currentDevice && (
-              <p className="vnc-no-device">请先在左侧选择一个设备</p>
+              <p className="vnc-no-device">{t('vnc.pickDeviceLeft', '请先在左侧选择一个设备')}</p>
             )}
 
             <div className="vnc-welcome-hints">
               <div className="vnc-hint-item">
                 <kbd>F11</kbd>
-                <span>全屏模式</span>
+                <span>{t('vnc.hint.fullscreen', '全屏模式')}</span>
               </div>
               <div className="vnc-hint-item">
                 <span className="status-dot" />
-                <span>支持剪贴板同步</span>
+                <span>{t('vnc.hint.clipboard', '支持剪贴板同步')}</span>
               </div>
               <div className="vnc-hint-item">
                 <span className="status-dot" />
-                <span>自适应画质</span>
+                <span>{t('vnc.hint.quality', '自适应画质')}</span>
               </div>
             </div>
           </div>

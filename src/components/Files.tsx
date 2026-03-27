@@ -6,6 +6,8 @@ import { Loader2, RefreshCw, Upload, ArrowLeft } from 'lucide-react';
 loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
 
 import { downloadDeviceFile, listDeviceFiles, readDeviceFile, writeDeviceFile, uploadDeviceFile, executeDeviceCommand } from '../api';
+import { fillTemplate } from '../i18n/en-extras';
+import { useI18n } from '../i18n/use-i18n';
 import { useDeviceStore } from '../hooks/useDeviceStore';
 import { useToastStore } from '../hooks/useToastStore';
 import DeviceGuard from './DeviceGuard';
@@ -13,7 +15,9 @@ import DeviceGuard from './DeviceGuard';
 export default function Files() {
   const { currentDevice } = useDeviceStore();
   const { addToast } = useToastStore();
-  if (!currentDevice) return <DeviceGuard feature="文件管理" />;
+  const { t, isEn, language } = useI18n();
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
+  const locale = isEn ? 'en' : 'zh-Hans-CN';
   const [currentPath, setCurrentPath] = useState('/root');
   const [entries, setEntries] = useState<Array<{ name: string; isDir: boolean; size?: string; date?: string }>>([]);
   const [running, setRunning] = useState(false);
@@ -38,7 +42,7 @@ export default function Files() {
       const rawName = e.detail?.trim() || '';
       const fileName = rawName.split('/').pop() || rawName; // 提取纯文件名，忽略包含的路径或波浪号
       if (!fileName) {
-        addToast('请指定要下载的文件名，例如：下载 test.txt', 'warning');
+        addToast(t('files.download.specify', '请指定要下载的文件名，例如：下载 test.txt'), 'warning');
         return;
       }
       const target = entriesRef.current.find((en) => en.name === fileName);
@@ -46,10 +50,10 @@ export default function Files() {
         runDownloadRef.current?.(target.name, target.isDir);
       } else {
         if (!deviceRef.current) {
-          addToast('请先连接设备获取文件', 'warning');
+          addToast(t('files.connectFirst', '请先连接设备获取文件'), 'warning');
           return;
         }
-        addToast(`当前目录未找到，正在全盘深入搜索 ${fileName}...`, 'info');
+        addToast(tf('files.searchDeep', '当前目录未找到，正在全盘深入搜索 {{name}}...', { name: fileName }), 'info');
         try {
           const res = await executeDeviceCommand(deviceRef.current.id, `for p in $(find /userdata /root /home/sunrise /var/log /etc -name ${shellSafe(fileName)} 2>/dev/null | head -n 10); do if [ -d "$p" ]; then echo "DIR:$p"; else echo "FILE:$p"; fi; done`);
           const lines = res.output.split(/\r?\n/).map(l => l.trim().replace(/Command completed without output\.?/i, '')).filter(l => l && (l.startsWith('DIR:/') || l.startsWith('FILE:/')));
@@ -57,19 +61,19 @@ export default function Files() {
           if (lines.length === 1) {
             const isDir = lines[0].startsWith('DIR:');
             const foundPath = lines[0].substring(lines[0].indexOf('/'));
-            addToast(`🔍 自动获取匹配项：${foundPath}`, 'success');
+            addToast(tf('files.searchAutoPick', '🔍 自动获取匹配项：{{path}}', { path: foundPath }), 'success');
             runDownloadRef.current?.(foundPath, isDir);
           } else if (lines.length > 1) {
-            addToast(`🔍 找到 ${lines.length} 个结果，请手动选择`, 'info');
+            addToast(tf('files.searchMulti', '🔍 找到 {{n}} 个结果，请手动选择', { n: lines.length }), 'info');
             setSearchMatches(lines.map(l => ({
                path: l.substring(l.indexOf('/')),
                isDir: l.startsWith('DIR:')
             })));
           } else {
-            addToast(`全盘搜索失败，未找到: ${fileName}`, 'error');
+            addToast(tf('files.searchNotFound', '全盘搜索失败，未找到: {{name}}', { name: fileName }), 'error');
           }
         } catch (err) {
-          addToast('全盘搜索发生错误', 'error');
+          addToast(t('files.searchError', '全盘搜索发生错误'), 'error');
         }
       }
     };
@@ -79,14 +83,14 @@ export default function Files() {
       window.removeEventListener('AI_FILE_UPLOAD', handleUploadEvent);
       window.removeEventListener('AI_FILE_DOWNLOAD', handleDownloadEvent);
     };
-  }, []);
+  }, [addToast, language, t, tf]);
 
   const entriesRef = useRef(entries);
   useEffect(() => { entriesRef.current = entries; }, [entries]);
 
   const ensureDevice = () => {
     if (!currentDevice) {
-      addToast('请先连接真实设备', 'warning');
+      addToast(t('files.needDevice', '请先连接真实设备'), 'warning');
       return false;
     }
     return true;
@@ -117,7 +121,7 @@ export default function Files() {
         setCurrentPath(path);
         setSelectedName(null);
       })
-      .catch((err) => addToast(err instanceof Error ? err.message : '刷新目录失败', 'error'))
+      .catch((err) => addToast(err instanceof Error ? err.message : t('files.refreshFail', '刷新目录失败'), 'error'))
       .finally(() => setRunning(false));
   };
 
@@ -150,11 +154,11 @@ export default function Files() {
     if (!ensureDevice() || !currentDevice) return;
     const filePath = fileName.startsWith('/') ? fileName : (currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`);
     const actualName = fileName.split('/').pop() || 'download';
-    addToast(isFolder ? '开始压缩并下载...' : '开始下载...', 'info');
+    addToast(isFolder ? t('files.downloadZip', '开始压缩并下载...') : t('files.downloadStart', '开始下载...'), 'info');
     downloadDeviceFile(currentDevice.id, filePath)
       .then((res) => {
         if (!res.contentBase64) {
-          addToast('未获取到文件内容', 'warning');
+          addToast(t('files.noContent', '未获取到文件内容'), 'warning');
           return;
         }
         const binary = atob(res.contentBase64);
@@ -168,7 +172,7 @@ export default function Files() {
         link.click();
         URL.revokeObjectURL(href);
       })
-      .catch((err) => addToast(err instanceof Error ? err.message : '下载文件失败', 'error'));
+      .catch((err) => addToast(err instanceof Error ? err.message : t('files.downloadFail', '下载文件失败'), 'error'));
   };
 
   runDownloadRef.current = runDownload;
@@ -191,7 +195,7 @@ export default function Files() {
          }
          setEditorFile({ path: filePath, content: text });
       })
-      .catch((err) => addToast(err instanceof Error ? err.message : '读取文件失败', 'error'))
+      .catch((err) => addToast(err instanceof Error ? err.message : t('files.readFail', '读取文件失败'), 'error'))
       .finally(() => setRunning(false));
   };
 
@@ -200,11 +204,11 @@ export default function Files() {
     setRunning(true);
     writeDeviceFile(currentDevice.id, editorFile.path, editorFile.content)
       .then(() => {
-        addToast('文件已保存', 'success');
+        addToast(t('files.saved', '文件已保存'), 'success');
         setEditorFile(null);
         refreshList();
       })
-      .catch((err) => addToast(err instanceof Error ? err.message : '保存文件失败', 'error'))
+      .catch((err) => addToast(err instanceof Error ? err.message : t('files.saveFail', '保存文件失败'), 'error'))
       .finally(() => setRunning(false));
   };
 
@@ -223,14 +227,14 @@ export default function Files() {
     if (!ensureDevice() || !currentDevice) return;
     try {
       setRunning(true);
-      addToast(`正在上传 ${file.name}...`, 'info');
+      addToast(tf('files.uploading', '正在上传 {{name}}...', { name: file.name }), 'info');
       const base64 = await toBase64(file);
       const targetPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
       await uploadDeviceFile(currentDevice.id, targetPath, base64);
-      addToast('上传成功', 'success');
+      addToast(t('files.uploadOk', '上传成功'), 'success');
       refreshList();
     } catch (err: any) {
-      addToast(err.message || '上传失败', 'error');
+      addToast(err.message || t('files.uploadFail', '上传失败'), 'error');
     } finally {
       setRunning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -267,14 +271,14 @@ export default function Files() {
     return [...filtered].sort((a, b) => {
       if (sortBy === 'type') {
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-        return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+        return a.name.localeCompare(b.name, locale, { numeric: true, sensitivity: 'base' });
       }
       if (sortBy === 'name') {
-        return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+        return a.name.localeCompare(b.name, locale, { numeric: true, sensitivity: 'base' });
       }
       return parseDate(b.date) - parseDate(a.date);
     });
-  }, [entries, searchText, sortBy, showHidden]);
+  }, [entries, searchText, sortBy, showHidden, locale]);
 
   const selectedEntry = selectedName ? entries.find((entry) => entry.name === selectedName) || null : null;
 
@@ -282,33 +286,33 @@ export default function Files() {
 
   const createFolder = async () => {
     if (!ensureDevice() || !currentDevice) return;
-    const folderName = window.prompt('请输入新文件夹名称')?.trim();
+    const folderName = window.prompt(t('files.promptFolder', '请输入新文件夹名称'))?.trim();
     if (!folderName) return;
     const targetPath = currentPath === '/' ? `/${folderName}` : `${currentPath}/${folderName}`;
     setRunning(true);
     try {
       await executeDeviceCommand(currentDevice.id, `mkdir -p ${shellSafe(targetPath)}`);
-      addToast('文件夹创建成功', 'success');
+      addToast(t('files.folderOk', '文件夹创建成功'), 'success');
       refreshList();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : '创建文件夹失败', 'error');
+      addToast(err instanceof Error ? err.message : t('files.folderFail', '创建文件夹失败'), 'error');
       setRunning(false);
     }
   };
 
   const renameEntry = async (entryName: string) => {
     if (!ensureDevice() || !currentDevice) return;
-    const nextName = window.prompt('请输入新的名称', entryName)?.trim();
+    const nextName = window.prompt(t('files.promptRename', '请输入新的名称'), entryName)?.trim();
     if (!nextName || nextName === entryName) return;
     const from = currentPath === '/' ? `/${entryName}` : `${currentPath}/${entryName}`;
     const to = currentPath === '/' ? `/${nextName}` : `${currentPath}/${nextName}`;
     setRunning(true);
     try {
       await executeDeviceCommand(currentDevice.id, `mv ${shellSafe(from)} ${shellSafe(to)}`);
-      addToast('重命名成功', 'success');
+      addToast(t('files.renameOk', '重命名成功'), 'success');
       refreshList();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : '重命名失败', 'error');
+      addToast(err instanceof Error ? err.message : t('files.renameFail', '重命名失败'), 'error');
       setRunning(false);
     }
   };
@@ -337,22 +341,26 @@ export default function Files() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [editorFile, selectedEntry]);
 
+  if (!currentDevice) {
+    return <DeviceGuard feature={t('files.featureName', '文件管理')} />;
+  }
+
   return (
     <div className="center-stage wide-stage tool-page" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
       <div className="isolated-widget workflow-widget" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="tool-bar" style={{ display: 'flex', alignItems: 'center' }}>
-          <div className="tool-bar-left">📁 资源管理器</div>
+          <div className="tool-bar-left">📁 {t('files.title', '资源管理器')}</div>
           <div className="tool-bar-right">
             <button className="btn btn-ghost btn-sm" onClick={() => refreshList()} disabled={running}>
               {running ? <Loader2 size={16} className="spinner" /> : <RefreshCw size={16} />}
-              刷新
+              {t('files.refresh', '刷新')}
             </button>
             <button className="btn btn-primary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={running}>
               {running ? <Loader2 size={16} className="spinner" /> : <Upload size={16} />}
-              上传文件
+              {t('files.upload', '上传文件')}
             </button>
             <button className="btn btn-ghost btn-sm" onClick={createFolder} disabled={running}>
-              新建文件夹
+              {t('files.newFolder', '新建文件夹')}
             </button>
             <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
           </div>
@@ -362,7 +370,7 @@ export default function Files() {
           <div className="file-editor" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div className="file-editor-bar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', flexShrink: 0 }}>
               <button className="btn btn-ghost btn-sm" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }} onClick={() => setEditorFile(null)}>
-                <ArrowLeft size={16} /> 返回
+                <ArrowLeft size={16} /> {t('files.back', '返回')}
               </button>
               <div style={{ width: 1, height: 20, background: 'var(--border-strong)' }}></div>
               <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -389,7 +397,7 @@ export default function Files() {
                     default: return 'shell';
                   }
                 })()}
-                theme={document.documentElement.dataset.theme === 'cyber' ? 'vs-dark' : 'vs-light'}
+                theme="vs-light"
                 value={editorFile.content}
                 onChange={(val) => setEditorFile({ ...editorFile, content: val || '' })}
                 options={{ minimap: { enabled: false }, fontSize: 14, wordWrap: 'on' }}
@@ -398,7 +406,7 @@ export default function Files() {
             <div className="tool-bar" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
               <div className="tool-bar-right">
                 <button className="btn btn-primary btn-sm" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: 'var(--accent)', color: 'var(--text-on-accent)', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
-                  {running ? '保存中...' : '💾 保存修改'}
+                  {running ? t('files.saving', '保存中...') : `💾 ${t('files.save', '保存修改')}`}
                 </button>
               </div>
             </div>
@@ -407,9 +415,9 @@ export default function Files() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <div className="tool-bar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: 'var(--bg-secondary)', border: '1px solid var(--border)', flexShrink: 0 }}>
               <div className="tool-bar-left" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: 1 }}>
-                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 ~/ 主目录</button>
-                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>/ 根目录</button>
-                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => setShowHidden((v) => !v)} disabled={running}>{showHidden ? '隐藏 .文件' : '显示 .文件'}</button>
+                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 {t('files.home', '~/ 主目录')}</button>
+                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>{t('files.root', '/ 根目录')}</button>
+                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => setShowHidden((v) => !v)} disabled={running}>{showHidden ? t('files.hideDot', '隐藏 .文件') : t('files.showDot', '显示 .文件')}</button>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   {['/root', '/userdata', '/var/log', '/etc'].map((quickPath) => (
                     <button key={quickPath} className="btn btn-ghost btn-sm" style={{ padding: '5px 9px', fontSize: 12 }} onClick={() => refreshList(quickPath)} disabled={running}>
@@ -439,14 +447,14 @@ export default function Files() {
                 <input
                   className="input tool-bar-search"
                   ref={searchInputRef}
-                  placeholder="搜索当前目录..."
+                  placeholder={t('files.searchPh', '搜索当前目录...')}
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
                 />
                 <select className="input" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'type' | 'name' | 'date')}>
-                  <option value="type">按类型</option>
-                  <option value="name">按名称</option>
-                  <option value="date">按时间</option>
+                  <option value="type">{t('files.sort.type', '按类型')}</option>
+                  <option value="name">{t('files.sort.name', '按名称')}</option>
+                  <option value="date">{t('files.sort.date', '按时间')}</option>
                 </select>
               </div>
             </div>
@@ -454,16 +462,20 @@ export default function Files() {
             {selectedEntry && (
               <div className="tool-bar" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', flexShrink: 0 }}>
                 <div className="tool-bar-left">
-                  <span>已选择：{selectedEntry.isDir ? '📁' : '📄'} {selectedEntry.name} <span style={{ color: 'var(--text-muted)' }}>(Enter 打开 / F2 重命名 / Ctrl+F 搜索)</span></span>
+                  <span>
+                    {tf('files.selected', '已选择：{{name}} (Enter 打开 / F2 重命名 / Ctrl+F 搜索)', {
+                      name: `${selectedEntry.isDir ? '📁' : '📄'} ${selectedEntry.name}`,
+                    })}
+                  </span>
                 </div>
                 <div className="tool-bar-right" style={{ display: 'flex', gap: 8 }}>
                   {selectedEntry.isDir ? (
-                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => handleNavigate(selectedEntry.name)}>打开目录</button>
+                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => handleNavigate(selectedEntry.name)}>{t('files.openDir', '打开目录')}</button>
                   ) : (
-                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runEdit(selectedEntry.name)}>编辑</button>
+                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runEdit(selectedEntry.name)}>{t('files.edit', '编辑')}</button>
                   )}
-                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runDownload(selectedEntry.name, selectedEntry.isDir)}>下载</button>
-                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => renameEntry(selectedEntry.name)}>重命名</button>
+                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runDownload(selectedEntry.name, selectedEntry.isDir)}>{t('files.download', '下载')}</button>
+                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => renameEntry(selectedEntry.name)}>{t('files.rename', '重命名')}</button>
                 </div>
               </div>
             )}
@@ -485,23 +497,23 @@ export default function Files() {
             >
               {dragActive && (
                 <div className="files-drop-overlay" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-overlay)', zIndex: 10, fontSize: 20, color: 'var(--accent)', fontWeight: 600, pointerEvents: 'none' }}>
-                  松开鼠标以上传文件至此目录
+                  {t('files.drop', '松开鼠标以上传文件至此目录')}
                 </div>
               )}
               <table className="file-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
                 <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-secondary)', zIndex: 5, boxShadow: 'var(--shadow-sm)' }}>
                   <tr>
-                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '50%' }}>文件名称</th>
-                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '15%' }}>大小</th>
-                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '20%' }}>修改日期</th>
-                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '15%', textAlign: 'right' }}>操作</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '50%' }}>{t('files.col.name', '文件名称')}</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '15%' }}>{t('files.col.size', '大小')}</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '20%' }}>{t('files.col.date', '修改日期')}</th>
+                    <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '15%', textAlign: 'right' }}>{t('files.col.actions', '操作')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {currentPath !== '/' && (
                     <tr style={{ borderBottom: '1px solid var(--border)' }}>
                       <td className="td" style={{ padding: '14px 16px', cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 500 }} onClick={handleGoUp}>
-                        <span style={{ marginRight: 10, fontSize: 18 }}>📂</span>.. (上一级)
+                        <span style={{ marginRight: 10, fontSize: 18 }}>📂</span>{t('files.parent', '.. (上一级)')}
                       </td>
                       <td className="td"></td><td className="td"></td><td className="td"></td>
                     </tr>
@@ -530,10 +542,10 @@ export default function Files() {
                       <td className="td" style={{ padding: '14px 16px', textAlign: 'right' }}>
                         <div className="tool-bar-right" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                           {!entry.isDir && (
-                            <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => runEdit(entry.name)}>编辑</button>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => runEdit(entry.name)}>{t('files.edit', '编辑')}</button>
                           )}
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => renameEntry(entry.name)}>重命名</button>
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => runDownload(entry.name, entry.isDir)}>下载</button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => renameEntry(entry.name)}>{t('files.rename', '重命名')}</button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => runDownload(entry.name, entry.isDir)}>{t('files.download', '下载')}</button>
                         </div>
                       </td>
                     </tr>
@@ -541,7 +553,7 @@ export default function Files() {
                   {visibleEntries.length === 0 && !running && (
                     <tr>
                       <td colSpan={4} className="td" style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>
-                        {searchText.trim() ? '未找到匹配文件，请调整搜索关键词' : '此文件夹为空，您可以拖拽文件到此处上传'}
+                        {searchText.trim() ? t('files.empty.search', '未找到匹配文件，请调整搜索关键词') : t('files.empty.folder', '此文件夹为空，您可以拖拽文件到此处上传')}
                       </td>
                     </tr>
                   )}
@@ -555,8 +567,8 @@ export default function Files() {
       {searchMatches.length > 0 && (
         <div className="modal-overlay" onClick={() => setSearchMatches([])}>
           <div className="modal-card" onClick={e => e.stopPropagation()} style={{ width: 480 }}>
-            <div className="modal-title">发现同名文件/文件夹</div>
-            <div className="modal-desc" style={{ marginBottom: 16 }}>在设备中全盘搜寻到了共 {searchMatches.length} 个结果，请选择您需要下载的具体路径：</div>
+            <div className="modal-title">{t('files.modal.title', '发现同名文件/文件夹')}</div>
+            <div className="modal-desc" style={{ marginBottom: 16 }}>{tf('files.modal.desc', '在设备中全盘搜寻到了共 {{n}} 个结果，请选择您需要下载的具体路径：', { n: searchMatches.length })}</div>
             <div style={{ maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
               {searchMatches.map((m, i) => (
                 <button
@@ -569,12 +581,12 @@ export default function Files() {
                   }}
                 >
                   <span style={{ wordBreak: 'break-all' }}>📄 {m.path}</span>
-                  <span style={{ fontSize: 12, color: '#64748b', flexShrink: 0 }}>{m.isDir ? '文件夹' : '文件'}</span>
+                  <span style={{ fontSize: 12, color: '#64748b', flexShrink: 0 }}>{m.isDir ? t('files.type.dir', '文件夹') : t('files.type.file', '文件')}</span>
                 </button>
               ))}
             </div>
             <div className="modal-actions">
-              <button className="btn btn-ghost btn-sm" style={{ width: '100%' }} onClick={() => setSearchMatches([])}>取消下载</button>
+              <button className="btn btn-ghost btn-sm" style={{ width: '100%' }} onClick={() => setSearchMatches([])}>{t('files.modal.cancel', '取消下载')}</button>
             </div>
           </div>
         </div>

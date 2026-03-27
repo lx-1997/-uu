@@ -95,7 +95,7 @@ async function tick() {
         new CustomEvent('rdk-oc-deploy-finished', {
           detail: {
             status: 'error',
-            error: '部署状态轮询中断，请稍后手动刷新状态',
+            error: 'oc.deployPoll.interrupted',
           },
         }),
       );

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { fetchDeviceDiagnostics } from '../api';
 import { useDeviceStore } from '../hooks/useDeviceStore';
 import { useToastStore } from '../hooks/useToastStore';
+import { fillTemplate } from '../i18n/en-extras';
+import { useI18n } from '../i18n/use-i18n';
 import { parseMetrics } from '../utils/diagnostics';
 
 /* ── 环形进度条（白底浅色主题） ── */
@@ -30,6 +32,8 @@ function RingGauge({ value, max = 100, color, label, display }: { value: number;
 export default function Hardware() {
   const { currentDevice } = useDeviceStore();
   const { addToast } = useToastStore();
+  const { t } = useI18n();
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -40,9 +44,9 @@ export default function Hardware() {
     setLoading(true);
     fetchDeviceDiagnostics(currentDevice.id)
       .then(res => setOutput(res.output || ''))
-      .catch(err => addToast(err instanceof Error ? err.message : '诊断失败', 'error'))
+      .catch(err => addToast(err instanceof Error ? err.message : t('hw.toast.diagFail', '诊断失败'), 'error'))
       .finally(() => setLoading(false));
-  }, [currentDevice, addToast]);
+  }, [currentDevice, addToast, t]);
 
   useEffect(() => {
     if (currentDevice) refreshDiagnostics();
@@ -59,15 +63,17 @@ export default function Hardware() {
   const lines = useMemo(() => output.split(/\r?\n/).filter(Boolean), [output]);
   const alertMessages = useMemo(() => {
     const alerts: string[] = [];
-    if (m.tempC >= 85) alerts.push('芯片温度偏高');
-    if (m.memPercent >= 90) alerts.push('内存占用过高');
-    if (m.bpuValue >= 90) alerts.push('BPU 持续高负载');
-    if (m.diskPercent >= 90) alerts.push('磁盘空间不足');
+    if (m.tempC >= 85) alerts.push(t('hw.alert.temp', '芯片温度偏高'));
+    if (m.memPercent >= 90) alerts.push(t('hw.alert.mem', '内存占用过高'));
+    if (m.bpuValue >= 90) alerts.push(t('hw.alert.bpu', 'BPU 持续高负载'));
+    if (m.diskPercent >= 90) alerts.push(t('hw.alert.disk', '磁盘空间不足'));
     return alerts;
-  }, [m]);
+  }, [m, t]);
 
   const healthTone = alertMessages.length === 0 ? 'ok' : alertMessages.length >= 2 ? 'danger' : 'warn';
-  const healthText = alertMessages.length === 0 ? '运行稳定' : `发现 ${alertMessages.length} 个风险项`;
+  const healthText = alertMessages.length === 0
+    ? t('hw.health.stable', '运行稳定')
+    : tf('hw.health.risks', '发现 {{n}} 个风险项', { n: alertMessages.length });
 
   const toneColor = healthTone === 'ok' ? 'var(--ok)' : healthTone === 'danger' ? 'var(--danger)' : 'var(--warn)';
 
@@ -75,15 +81,15 @@ export default function Hardware() {
     return (
       <div className="tool-page">
         <div className="tool-bar">
-          <div className="tool-bar-left"><span className="tool-bar-title">硬件监控</span></div>
+          <div className="tool-bar-left"><span className="tool-bar-title">{t('hw.title', '硬件监控')}</span></div>
         </div>
         <div className="tool-content">
           <div className="empty-state">
             <div className="empty-state-icon">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z" /></svg>
             </div>
-            <div className="empty-state-title">请先连接设备</div>
-            <div className="empty-state-desc">连接 RDK 开发板后即可实时监控 CPU 温度、内存、BPU 负载等硬件指标。</div>
+            <div className="empty-state-title">{t('hw.empty.title', '请先连接设备')}</div>
+            <div className="empty-state-desc">{t('hw.empty.desc', '连接 RDK 开发板后即可实时监控 CPU 温度、内存、BPU 负载等硬件指标。')}</div>
           </div>
         </div>
       </div>
@@ -94,7 +100,7 @@ export default function Hardware() {
     <div className="tool-page">
       <div className="tool-bar">
         <div className="tool-bar-left">
-          <span className="tool-bar-title">硬件监控</span>
+          <span className="tool-bar-title">{t('hw.title', '硬件监控')}</span>
           {currentDevice && (
             <span className="tool-stat-chip live">
               <span className="num">{currentDevice.name}</span>
@@ -105,31 +111,31 @@ export default function Hardware() {
         <div className="tool-bar-right">
           <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', cursor: 'pointer' }}>
             <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
-            <span>自动刷新</span>
+            <span>{t('hw.autoRefresh', '自动刷新')}</span>
           </label>
           <button className="btn btn-ghost btn-sm" onClick={refreshDiagnostics} disabled={loading}>
-            {loading ? '刷新中...' : '立即刷新'}
+            {loading ? t('hw.refreshing', '刷新中...') : t('hw.refreshNow', '立即刷新')}
           </button>
         </div>
       </div>
 
       <div className="tool-content">
         <div className="config-section">
-          <div className="config-section-title">核心指标</div>
+          <div className="config-section-title">{t('hw.section.core', '核心指标')}</div>
           <div className="hw-gauges">
-            <RingGauge value={m.tempC} max={105} color="#ff6b00" label="芯片温度" display={m.temp} />
-            <RingGauge value={m.memPercent} max={100} color="#3b82f6" label="内存使用" display={m.memPercent >= 0 ? `${m.memPercent}%` : '--'} />
-            <RingGauge value={m.bpuValue} max={100} color="#a855f7" label="BPU 负载" display={m.bpu} />
-            <RingGauge value={m.diskPercent} max={100} color="#22c55e" label="磁盘使用" display={m.diskPercent >= 0 ? `${m.diskPercent}%` : '--'} />
+            <RingGauge value={m.tempC} max={105} color="#ff6b00" label={t('hw.label.temp', '芯片温度')} display={m.temp} />
+            <RingGauge value={m.memPercent} max={100} color="#3b82f6" label={t('hw.label.mem', '内存使用')} display={m.memPercent >= 0 ? `${m.memPercent}%` : '--'} />
+            <RingGauge value={m.bpuValue} max={100} color="#a855f7" label={t('hw.label.bpu', 'BPU 负载')} display={m.bpu} />
+            <RingGauge value={m.diskPercent} max={100} color="#22c55e" label={t('hw.label.disk', '磁盘使用')} display={m.diskPercent >= 0 ? `${m.diskPercent}%` : '--'} />
           </div>
         </div>
 
         {/* 运行状态 */}
         <div className="config-section" style={{ marginTop: 24 }}>
-          <div className="config-section-title">运行状态</div>
+          <div className="config-section-title">{t('hw.section.status', '运行状态')}</div>
 
           <div className="config-row">
-            <div className="config-label">健康状态</div>
+            <div className="config-label">{t('hw.label.health', '健康状态')}</div>
             <div className="config-value">
               <span style={{ color: toneColor, fontWeight: 600 }}>● {healthText}</span>
             </div>
@@ -144,31 +150,31 @@ export default function Hardware() {
               ))
             : (
               <div className="config-row">
-                <div className="config-label" style={{ color: 'var(--ok)' }}>✅ 关键资源状态正常</div>
+                <div className="config-label" style={{ color: 'var(--ok)' }}>✅ {t('hw.ok.resources', '关键资源状态正常')}</div>
                 <div className="config-value" />
               </div>
             )
           }
 
           <div className="config-row">
-            <div className="config-label">CPU 负载 (1m)</div>
+            <div className="config-label">{t('hw.label.cpuLoad', 'CPU 负载 (1m)')}</div>
             <div className="config-value"><strong>{m.cpuLoad}</strong></div>
           </div>
           <div className="config-row">
-            <div className="config-label">运行时长</div>
+            <div className="config-label">{t('hw.label.uptime', '运行时长')}</div>
             <div className="config-value"><strong>{m.uptime}</strong></div>
           </div>
         </div>
 
         {/* 详细指标 */}
         <div className="config-section" style={{ marginTop: 24 }}>
-          <div className="config-section-title">详细指标</div>
+          <div className="config-section-title">{t('hw.section.detail', '详细指标')}</div>
 
           <div className="config-row">
             <div className="config-label">
-              芯片温度
+              {t('hw.detail.temp', '芯片温度')}
               <div className="config-label-hint">
-                {m.tempC >= 85 ? '⚠️ 温度过高，建议检查散热' : m.tempC > 0 ? '温度正常' : '等待数据'}
+                {m.tempC >= 85 ? t('hw.hint.tempHigh', '⚠️ 温度过高，建议检查散热') : m.tempC > 0 ? t('hw.hint.tempOk', '温度正常') : t('hw.hint.tempWait', '等待数据')}
               </div>
             </div>
             <div className="config-value">{m.temp}</div>
@@ -176,9 +182,9 @@ export default function Hardware() {
 
           <div className="config-row">
             <div className="config-label">
-              内存
+              {t('hw.detail.mem', '内存')}
               <div className="config-label-hint">
-                {m.memPercent >= 90 ? '⚠️ 内存紧张' : m.memPercent >= 0 ? `使用率 ${m.memPercent}%` : '等待数据'}
+                {m.memPercent >= 90 ? t('hw.hint.memTight', '⚠️ 内存紧张') : m.memPercent >= 0 ? tf('hw.hint.memUse', '使用率 {{p}}%', { p: m.memPercent }) : t('hw.hint.wait', '等待数据')}
               </div>
             </div>
             <div className="config-value">{m.memUsed} / {m.memTotal}</div>
@@ -186,9 +192,9 @@ export default function Hardware() {
 
           <div className="config-row">
             <div className="config-label">
-              BPU 负载
+              {t('hw.detail.bpu', 'BPU 负载')}
               <div className="config-label-hint">
-                {m.bpuValue >= 90 ? '⚠️ 高负载' : m.bpuValue >= 0 ? '运行正常' : '等待数据'}
+                {m.bpuValue >= 90 ? t('hw.hint.bpuHigh', '⚠️ 高负载') : m.bpuValue >= 0 ? t('hw.hint.bpuOk', '运行正常') : t('hw.hint.wait', '等待数据')}
               </div>
             </div>
             <div className="config-value">{m.bpu}</div>
@@ -196,17 +202,17 @@ export default function Hardware() {
 
           <div className="config-row">
             <div className="config-label">
-              CPU 负载
-              <div className="config-label-hint">1分钟平均负载</div>
+              {t('hw.detail.cpu', 'CPU 负载')}
+              <div className="config-label-hint">{t('hw.hint.cpu1m', '1分钟平均负载')}</div>
             </div>
             <div className="config-value">{m.cpuLoad}</div>
           </div>
 
           <div className="config-row">
             <div className="config-label">
-              磁盘
+              {t('hw.detail.disk', '磁盘')}
               <div className="config-label-hint">
-                {m.diskPercent >= 90 ? '⚠️ 磁盘空间不足' : m.diskPercent >= 0 ? `使用率 ${m.diskPercent}%` : '等待数据'}
+                {m.diskPercent >= 90 ? t('hw.hint.diskLow', '⚠️ 磁盘空间不足') : m.diskPercent >= 0 ? tf('hw.hint.diskUse', '使用率 {{p}}%', { p: m.diskPercent }) : t('hw.hint.wait', '等待数据')}
               </div>
             </div>
             <div className="config-value">{m.diskUsed} / {m.diskTotal}</div>
@@ -214,8 +220,8 @@ export default function Hardware() {
 
           <div className="config-row">
             <div className="config-label">
-              运行时长
-              <div className="config-label-hint">自上次启动</div>
+              {t('hw.detail.uptimeRow', '运行时长')}
+              <div className="config-label-hint">{t('hw.hint.sinceBoot', '自上次启动')}</div>
             </div>
             <div className="config-value">{m.uptime}</div>
           </div>
@@ -224,14 +230,14 @@ export default function Hardware() {
         {/* 原始输出折叠 */}
         <div className="config-section" style={{ marginTop: 24 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowRaw(!showRaw)}>
-            {showRaw ? '▼' : '▶'} 原始诊断输出
+            {showRaw ? '▼' : '▶'} {t('hw.rawToggle', '原始诊断输出')}
           </button>
           {showRaw && (
             <div className="config-terminal" style={{ marginTop: 8, minHeight: 200, maxHeight: 320 }}>
               {lines.map((line, i) => (
                 <div key={`${line}-${i}`}>{line}</div>
               ))}
-              {lines.length === 0 && <div style={{ color: 'var(--text-muted)' }}>暂无数据</div>}
+              {lines.length === 0 && <div style={{ color: 'var(--text-muted)' }}>{t('hw.rawEmpty', '暂无数据')}</div>}
             </div>
           )}
         </div>

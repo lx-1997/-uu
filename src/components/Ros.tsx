@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useDeviceStore } from '../hooks/useDeviceStore';
 import { useToastStore } from '../hooks/useToastStore';
 import { executeDeviceCommand } from '../api';
+import { fillTemplate } from '../i18n/en-extras';
+import { useI18n } from '../i18n/use-i18n';
 
 /* ── ROS 可视化 — 内嵌 Webviz + 自动启动 rosbridge ── */
 const WEBVIZ_BASE = 'https://webviz.io/app/';
@@ -12,6 +14,8 @@ type Phase = 'idle' | 'checking' | 'starting' | 'connecting' | 'connected' | 'er
 export default function Ros() {
   const { currentDevice } = useDeviceStore();
   const { addToast } = useToastStore();
+  const { t } = useI18n();
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [statusText, setStatusText] = useState('');
@@ -95,15 +99,15 @@ export default function Ros() {
       output.split(/\r?\n/).filter(Boolean).forEach(l => appendLog(l));
       return output.includes('ROSBRIDGE_STARTED');
     } catch (err) {
-      appendLog(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
+      appendLog(tf('ros.log.startFail', '启动失败: {{msg}}', { msg: err instanceof Error ? err.message : String(err) }));
       return false;
     }
-  }, []);
+  }, [t]);
 
   /* 安装 rosbridge_server（ROS2） */
   const installRosbridge = useCallback(async (deviceId: string): Promise<boolean> => {
     try {
-      appendLog('开始安装 rosbridge_server...');
+      appendLog(t('ros.log.installStart', '开始安装 rosbridge_server...'));
       const result = await executeDeviceCommand(
         deviceId,
         `bash -lc "
@@ -144,14 +148,14 @@ export default function Ros() {
       const output = result.output || '';
       output.split(/\r?\n/).filter(Boolean).forEach(l => appendLog(l));
       if (output.includes('NEED_SUDO_PRIVILEGE')) {
-        appendLog('当前用户无免密 sudo，apt 安装可能失败，请在设备端授权 sudo 或改用 root 用户。');
+        appendLog(t('ros.log.sudoHint', '当前用户无免密 sudo，apt 安装可能失败，请在设备端授权 sudo 或改用 root 用户。'));
       }
       return output.includes('ROSBRIDGE_INSTALL_OK');
     } catch (err) {
-      appendLog(`安装失败: ${err instanceof Error ? err.message : String(err)}`);
+      appendLog(tf('ros.log.installFail', '安装失败: {{msg}}', { msg: err instanceof Error ? err.message : String(err) }));
       return false;
     }
-  }, []);
+  }, [t]);
 
   /* 检查 ROS2/TROS 和 rosbridge 安装状态 */
   const checkInstallation = useCallback(async (deviceId: string): Promise<{ ros2: boolean; tros: boolean; rosbridge: boolean }> => {
@@ -179,78 +183,82 @@ export default function Ros() {
   /* 完整连接流程：检查安装 → 安装 → 启动 → 连接 Webviz */
   const handleConnect = useCallback(async () => {
     if (!currentDevice) {
-      addToast('请先连接设备', 'warning');
+      addToast(t('ros.toast.connectDevice', '请先连接设备'), 'warning');
       return;
     }
 
     setLogLines([]);
     setPhase('checking');
-    setStatusText('检查 ROS 环境...');
-    appendLog('开始检查 ROS 环境...');
+    setStatusText(t('ros.phase.checkRos', '检查 ROS 环境...'));
+    appendLog(t('ros.log.checkStart', '开始检查 ROS 环境...'));
 
     const install = await checkInstallation(currentDevice.id);
 
-    const rosLabel = install.tros ? 'TROS' : 'ROS2';
-    appendLog(`检测到: ${install.ros2 ? rosLabel : '未安装 ROS2/TROS'}, rosbridge: ${install.rosbridge ? '已安装' : '未安装'}`);
+    const rosLabel = install.tros ? t('ros.tros', 'TROS') : t('ros.ros2', 'ROS2');
+    const rosState = install.ros2 ? rosLabel : t('ros.detect.noRos', '未安装 ROS2/TROS');
+    appendLog(tf('ros.log.detected', '检测到: {{ros}}, rosbridge: {{rb}}', {
+      ros: rosState,
+      rb: install.rosbridge ? t('ros.rb.installed', '已安装') : t('ros.rb.notInstalled', '未安装'),
+    }));
 
     if (!install.ros2 && !install.tros) {
       setPhase('error');
-      setStatusText('设备上未安装 ROS2 或 TROS。请先安装 TROS (sudo apt install tros) 或 ROS2。');
-      appendLog('ROS2/TROS 均未安装');
-      addToast('设备未安装 ROS2/TROS，请先在终端中安装', 'warning');
+      setStatusText(t('ros.err.noRos', '设备上未安装 ROS2 或 TROS。请先安装 TROS (sudo apt install tros) 或 ROS2。'));
+      appendLog(t('ros.log.noRos', 'ROS2/TROS 均未安装'));
+      addToast(t('ros.toast.noRos', '设备未安装 ROS2/TROS，请先在终端中安装'), 'warning');
       return;
     }
 
     if (!install.rosbridge) {
       setPhase('starting');
-      setStatusText('rosbridge_server 未安装，正在自动安装...');
-      appendLog('rosbridge 未安装，开始自动安装...');
-      addToast('正在为设备安装 rosbridge_server...', 'info');
+      setStatusText(t('ros.phase.installRb', 'rosbridge_server 未安装，正在自动安装...'));
+      appendLog(t('ros.log.rbMissing', 'rosbridge 未安装，开始自动安装...'));
+      addToast(t('ros.toast.installingRb', '正在为设备安装 rosbridge_server...'), 'info');
 
       const installOk = await installRosbridge(currentDevice.id);
       if (!installOk) {
         setPhase('error');
-        setStatusText('rosbridge 自动安装失败，请手动安装: sudo apt install ros-<distro>-rosbridge-server（将 <distro> 替换为你的 ROS 发行版名）');
-        appendLog('自动安装失败');
-        addToast('rosbridge 自动安装失败', 'error');
+        setStatusText(t('ros.err.rbInstall', 'rosbridge 自动安装失败，请手动安装: sudo apt install ros-<distro>-rosbridge-server（将 <distro> 替换为你的 ROS 发行版名）'));
+        appendLog(t('ros.log.autoInstallFail', '自动安装失败'));
+        addToast(t('ros.toast.rbInstallFail', 'rosbridge 自动安装失败'), 'error');
         return;
       }
-      appendLog('rosbridge 安装成功');
-      addToast('rosbridge_server 安装成功', 'success');
+      appendLog(t('ros.log.rbOk', 'rosbridge 安装成功'));
+      addToast(t('ros.toast.rbOk', 'rosbridge_server 安装成功'), 'success');
     }
 
-    setStatusText('检查 rosbridge 服务状态...');
-    appendLog('检查 rosbridge 是否运行中...');
+    setStatusText(t('ros.phase.checkRb', '检查 rosbridge 服务状态...'));
+    appendLog(t('ros.log.checkRb', '检查 rosbridge 是否运行中...'));
 
     let active = await checkRosbridge(currentDevice.id);
 
     if (!active) {
       setPhase('starting');
-      setStatusText('正在启动 rosbridge_websocket...');
-      appendLog('rosbridge 未运行，尝试启动...');
-      addToast('正在启动 rosbridge_websocket...', 'info');
+      setStatusText(t('ros.phase.startRb', '正在启动 rosbridge_websocket...'));
+      appendLog(t('ros.log.rbDown', 'rosbridge 未运行，尝试启动...'));
+      addToast(t('ros.toast.startingRb', '正在启动 rosbridge_websocket...'), 'info');
 
       active = await startRosbridge(currentDevice.id);
 
       if (!active) {
         setPhase('error');
-        setStatusText('rosbridge 启动失败，请检查设备 ROS 环境配置');
-        addToast('rosbridge 启动失败', 'warning');
-        appendLog('rosbridge 启动失败');
+        setStatusText(t('ros.err.rbStart', 'rosbridge 启动失败，请检查设备 ROS 环境配置'));
+        addToast(t('ros.toast.rbStartFail', 'rosbridge 启动失败'), 'warning');
+        appendLog(t('ros.log.rbStartFail', 'rosbridge 启动失败'));
         return;
       }
     }
 
     setPhase('connecting');
-    setStatusText('rosbridge 就绪，正在加载 Webviz...');
-    appendLog(`rosbridge 运行中 (端口 ${ROSBRIDGE_PORT})`);
-    addToast('rosbridge 已就绪，正在连接 Webviz', 'success');
+    setStatusText(t('ros.phase.loadWebviz', 'rosbridge 就绪，正在加载 Webviz...'));
+    appendLog(tf('ros.log.rbUp', 'rosbridge 运行中 (端口 {{port}})', { port: ROSBRIDGE_PORT }));
+    addToast(t('ros.toast.rbReady', 'rosbridge 已就绪，正在连接 Webviz'), 'success');
 
     const url = buildWebvizUrl(currentDevice.ip);
     setRosbridgeUrl(url);
     setIframeLoading(true);
     setShowIframe(true);
-  }, [currentDevice, addToast, checkRosbridge, startRosbridge, buildWebvizUrl, checkInstallation, installRosbridge]);
+  }, [currentDevice, addToast, checkRosbridge, startRosbridge, buildWebvizUrl, checkInstallation, installRosbridge, t, tf]);
 
   /* 断开连接 */
   const handleDisconnect = () => {
@@ -263,16 +271,16 @@ export default function Ros() {
   /* 停止 rosbridge */
   const handleStopRosbridge = async () => {
     if (!currentDevice) return;
-    appendLog('正在停止 rosbridge...');
+    appendLog(t('ros.log.stopRb', '正在停止 rosbridge...'));
     try {
       await executeDeviceCommand(
         currentDevice.id,
         `bash -lc "pkill -f rosbridge_websocket || pkill -f rosbridge_server || true; sleep 1; ss -lntp 2>/dev/null | grep -q ':${ROSBRIDGE_PORT}' && echo STILL_RUNNING || echo STOPPED"`
       );
-      appendLog('rosbridge 已停止');
-      addToast('rosbridge 已停止', 'info');
+      appendLog(t('ros.log.stopped', 'rosbridge 已停止'));
+      addToast(t('ros.toast.stopped', 'rosbridge 已停止'), 'info');
     } catch {
-      appendLog('停止 rosbridge 失败');
+      appendLog(t('ros.log.stopFail', '停止 rosbridge 失败'));
     }
     handleDisconnect();
   };
@@ -280,14 +288,14 @@ export default function Ros() {
   const handleIframeLoad = () => {
     setIframeLoading(false);
     setPhase('connected');
-    appendLog('Webviz 加载完成');
+    appendLog(t('ros.log.webvizLoaded', 'Webviz 加载完成'));
   };
 
   const handleReload = () => {
     if (iframeRef.current && rosbridgeUrl) {
       setIframeLoading(true);
       iframeRef.current.src = rosbridgeUrl;
-      appendLog('刷新 Webviz...');
+      appendLog(t('ros.log.reload', '刷新 Webviz...'));
     }
   };
 
@@ -326,7 +334,7 @@ export default function Ros() {
       <div className="immersive-bar">
         <div className="immersive-bar-left">
           
-          <span className="immersive-bar-title">ROS 可视化</span>
+          <span className="immersive-bar-title">{t('ros.title', 'ROS 可视化')}</span>
           <span className="badge badge-muted">Webviz</span>
           {currentDevice && (
             <span className="immersive-bar-meta">{currentDevice.name} · {currentDevice.ip}</span>
@@ -337,7 +345,7 @@ export default function Ros() {
           {showIframe && (
             <span className="immersive-bar-status">
               <span className={`status-dot ${phase === 'connected' ? 'online' : ''}`} />
-              {phase === 'connected' ? '已连接' : phase === 'connecting' ? '连接中' : '未连接'}
+              {phase === 'connected' ? t('ros.status.connected', '已连接') : phase === 'connecting' ? t('ros.status.connecting', '连接中') : t('ros.status.disconnected', '未连接')}
             </span>
           )}
         </div>
@@ -345,21 +353,21 @@ export default function Ros() {
         <div className="immersive-bar-right">
           {showIframe && (
             <>
-              <button className="btn-icon" onClick={handleReload} title="刷新">
+              <button className="btn-icon" onClick={handleReload} title={t('ros.title.refresh', '刷新')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
                   <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
                 </svg>
               </button>
 
-              <button className="btn-icon" onClick={() => window.open(rosbridgeUrl, '_blank')} title="新窗口打开">
+              <button className="btn-icon" onClick={() => window.open(rosbridgeUrl, '_blank')} title={t('ros.title.openNew', '新窗口打开')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
                   <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
                 </svg>
               </button>
 
-              <button className="btn-icon" onClick={toggleFullscreen} title="全屏 (F11)">
+              <button className="btn-icon" onClick={toggleFullscreen} title={t('ros.title.fullscreen', '全屏 (F11)')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   {isFullscreen ? (
                     <><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></>
@@ -369,7 +377,7 @@ export default function Ros() {
                 </svg>
               </button>
 
-              <button className="btn-icon" onClick={() => setShowLogs(!showLogs)} title="日志">
+              <button className="btn-icon" onClick={() => setShowLogs(!showLogs)} title={t('ros.title.logs', '日志')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                   <polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" />
@@ -379,7 +387,7 @@ export default function Ros() {
               <div className="immersive-bar-sep" />
 
               <button className="btn btn-danger btn-sm" onClick={handleStopRosbridge}>
-                停止并断开
+                {t('ros.stopDisconnect', '停止并断开')}
               </button>
             </>
           )}
@@ -393,7 +401,7 @@ export default function Ros() {
             {iframeLoading && (
               <div className="immersive-loading">
                 <div className="spinner" />
-                <span className="immersive-loading-text">正在加载 Webviz...</span>
+                <span className="immersive-loading-text">{t('ros.loadingWebviz', '正在加载 Webviz...')}</span>
               </div>
             )}
             <iframe
@@ -407,7 +415,7 @@ export default function Ros() {
             {showLogs && (
               <div className="immersive-logs">
                 <div className="immersive-logs-head">
-                  <span>连接日志</span>
+                  <span>{t('ros.connLogs', '连接日志')}</span>
                   <button className="btn-icon" onClick={() => setShowLogs(false)}>×</button>
                 </div>
                 <div className="immersive-logs-body">
@@ -415,7 +423,7 @@ export default function Ros() {
                     <div key={i} className="ros-log-line">{line}</div>
                   ))}
                   {logLines.length === 0 && (
-                    <div className="ros-log-line" style={{ color: '#555' }}>等待输出...</div>
+                    <div className="ros-log-line" style={{ color: '#555' }}>{t('ros.log.waiting', '等待输出...')}</div>
                   )}
                 </div>
               </div>
@@ -437,9 +445,9 @@ export default function Ros() {
               <div className="ros-welcome-glow" />
             </div>
 
-            <h2 className="immersive-welcome-title">ROS 可视化工作台</h2>
+            <h2 className="immersive-welcome-title">{t('ros.welcome.title', 'ROS 可视化工作台')}</h2>
             <p className="immersive-welcome-desc">
-              自动启动 rosbridge_websocket 并通过 Webviz 实时可视化 ROS 话题、TF、点云等数据
+              {t('ros.welcome.desc', '自动启动 rosbridge_websocket 并通过 Webviz 实时可视化 ROS 话题、TF、点云等数据')}
             </p>
 
             {phase === 'checking' && (
@@ -460,19 +468,19 @@ export default function Ros() {
               <div className="immersive-error">
                 <span>⚠️ {statusText}</span>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <button className="btn btn-primary" onClick={handleConnect}>重试</button>
-                  {statusText.includes('未安装') && (
+                  <button className="btn btn-primary" onClick={handleConnect}>{t('ros.retry', '重试')}</button>
+                  {statusText.includes(t('ros.marker.notInstalled', '未安装')) && (
                     <button className="btn btn-ghost" onClick={() => {
                       if (currentDevice) {
                         setPhase('starting');
-                        setStatusText('正在安装 rosbridge...');
+                        setStatusText(t('ros.phase.installingRbShort', '正在安装 rosbridge...'));
                         installRosbridge(currentDevice.id).then(ok => {
-                          if (ok) { addToast('安装成功，请点击重试', 'success'); setPhase('idle'); }
-                          else { setPhase('error'); setStatusText('安装失败，请手动安装'); }
+                          if (ok) { addToast(t('ros.toast.installOkRetry', '安装成功，请点击重试'), 'success'); setPhase('idle'); }
+                          else { setPhase('error'); setStatusText(t('ros.err.manualInstall', '安装失败，请手动安装')); }
                         });
                       }
                     }}>
-                      一键安装 rosbridge
+                      {t('ros.installRosbridge', '一键安装 rosbridge')}
                     </button>
                   )}
                 </div>
@@ -488,26 +496,26 @@ export default function Ros() {
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                启动 rosbridge 并连接
+                {t('ros.connect', '启动 rosbridge 并连接')}
               </button>
             )}
 
             {!currentDevice && (
-              <p className="ros-no-device">请先在左侧选择一个设备</p>
+              <p className="ros-no-device">{t('ros.pickDeviceLeft', '请先在左侧选择一个设备')}</p>
             )}
 
             <div className="ros-welcome-hints">
               <div className="ros-hint-item">
                 <kbd>F11</kbd>
-                <span>全屏模式</span>
+                <span>{t('ros.hint.fullscreen', '全屏模式')}</span>
               </div>
               <div className="ros-hint-item">
                 <span className="ros-hint-dot" />
-                <span>自动启动 rosbridge</span>
+                <span>{t('ros.hint.autoStart', '自动启动 rosbridge')}</span>
               </div>
               <div className="ros-hint-item">
                 <span className="ros-hint-dot" />
-                <span>支持 ROS1 / ROS2</span>
+                <span>{t('ros.hint.ros12', '支持 ROS1 / ROS2')}</span>
               </div>
             </div>
           </div>

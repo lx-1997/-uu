@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
-import { CMD_SUGGESTIONS } from '../constants';
+import { CMD_SUGGESTIONS, type CmdSuggestion } from '../constants';
+import { translate } from '../i18n/translate';
+import { fillTemplate } from '../i18n/en-extras';
 import {
   bindRDKClawFeishuCode,
   cancelRDKClawRun,
@@ -37,7 +39,7 @@ export interface AIChatStoreState {
   setCmd: (v: string) => void;
   showSuggestions: boolean;
   setShowSuggestions: (v: boolean) => void;
-  filteredSuggestions: typeof CMD_SUGGESTIONS;
+  filteredSuggestions: CmdSuggestion[];
   chatMessages: ChatMessage[];
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   chatExpanded: boolean;
@@ -176,7 +178,11 @@ export function useAIChatStore(): AIChatStoreState {
 export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const { addToast } = useToastStore();
   const { currentDevice, setActiveDevice, devices } = useDeviceStore();
-  const { activeTab, setShowSettings } = useUIStore();
+  const { activeTab, setShowSettings, language } = useUIStore();
+  const isEn = language === 'en';
+  const t = (key: string, zh: string) => translate(isEn, key, zh);
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) =>
+    fillTemplate(t(key, zh), vars);
   const initialChatDeviceId = toChatDeviceId(currentDevice?.id);
 
   // ── State ──
@@ -208,9 +214,27 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     detachedAt: number;
   }>>([]);
 
-  const filteredSuggestions = cmd.trim()
-    ? CMD_SUGGESTIONS.filter((s) => s.text.includes(cmd) || s.keyword.includes(cmd.toLowerCase()))
-    : CMD_SUGGESTIONS;
+  const allCmdSuggestions: CmdSuggestion[] = useMemo(
+    () =>
+      CMD_SUGGESTIONS.map((s) => ({
+        icon: s.icon,
+        text: isEn ? s.textEn : s.textZh,
+        keyword: s.keyword,
+        textZh: s.textZh,
+        textEn: s.textEn,
+      })),
+    [isEn],
+  );
+  const q = cmd.trim();
+  const filteredSuggestions = q
+    ? allCmdSuggestions.filter(
+        (s) =>
+          s.text.includes(cmd) ||
+          s.textZh.includes(cmd) ||
+          s.textEn.toLowerCase().includes(q.toLowerCase()) ||
+          s.keyword.toLowerCase().includes(q.toLowerCase()),
+      )
+    : allCmdSuggestions;
 
   // ── Confirm / Dismiss ──
   const executeConfirm = (confirmId: string) => {
@@ -220,7 +244,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     setChatMessages(prev => prev.map(msg => ({
       ...msg,
       blocks: msg.blocks?.map(b => b.type === 'confirm' && b.confirmId === confirmId
-        ? { type: 'task-result' as const, success: true, title: '已确认', detail: '正在执行...' }
+        ? { type: 'task-result' as const, success: true, title: t('chat.store.confirmed', '已确认'), detail: t('chat.store.executing', '正在执行...') }
         : b
       ),
     })));
@@ -233,7 +257,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     setChatMessages(prev => prev.map(msg => ({
       ...msg,
       blocks: msg.blocks?.map(b => b.type === 'confirm' && b.confirmId === confirmId
-        ? { type: 'task-result' as const, success: false, title: '已取消', detail: '操作已取消' }
+        ? { type: 'task-result' as const, success: false, title: t('chat.store.cancelled', '已取消'), detail: t('chat.store.cancelledDetail', '操作已取消') }
         : b
       ),
     })));
@@ -251,7 +275,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-    addToast('对话记录已清空', 'info');
+    addToast(t('chat.store.historyCleared', '对话记录已清空'), 'info');
   };
 
   // ── Cancel task ──
@@ -265,7 +289,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     setTaskHistory(prev => prev.map(t =>
       t.id === taskId ? { ...t, status: 'cancelled' } : t,
     ));
-    addToast('任务已取消', 'info');
+    addToast(t('chat.store.taskCancelled', '任务已取消'), 'info');
   };
 
   const commandLockRef = useRef(false);
@@ -337,7 +361,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const ts = Date.now();
         if (ts - syncWarnAtRef.current.session > 30_000) {
           syncWarnAtRef.current.session = ts;
-          addToast('会话同步上报失败，飞书可能无法接入当前会话', 'warning');
+          addToast(t('chat.sync.sessionFail', '会话同步上报失败，飞书可能无法接入当前会话'), 'warning');
         }
       });
   };
@@ -353,7 +377,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const ts = Date.now();
         if (ts - syncWarnAtRef.current.device > 30_000) {
           syncWarnAtRef.current.device = ts;
-          addToast('设备同步上报失败，飞书可能无法复用当前设备', 'warning');
+          addToast(t('chat.sync.deviceFail', '设备同步上报失败，飞书可能无法复用当前设备'), 'warning');
         }
       });
   };
@@ -377,12 +401,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       setChatMessages((prev) => [...prev, {
         id: Date.now(),
         role: 'ai',
-        text: '当前任务已结束。你可以继续输入新的指令。',
+        text: t('chat.abort.taskEnded', '当前任务已结束。你可以继续输入新的指令。'),
         blocks: [{
           type: 'task-result',
           success: false,
-          title: '任务已结束',
-          detail: runId ? `已发送结束指令（runId: ${runId}）` : '已结束当前流式响应',
+          title: t('chat.abort.title', '任务已结束'),
+          detail: runId
+            ? tf('chat.abort.detailRun', '已发送结束指令（runId: {{runId}}）', { runId })
+            : t('chat.abort.detailStream', '已结束当前流式响应'),
         }],
       }]);
     }
@@ -408,7 +434,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     if (commandLockRef.current || aiTyping) {
       abortInFlightRun(false);
     }
-    const requestMessage = userMsg || '请结合我刚上传的附件继续处理当前请求。';
+    const requestMessage = userMsg || t('chat.attach.continue', '请结合我刚上传的附件继续处理当前请求。');
     const transcriptText = displayAttachments
       .map((attachment) => attachment.transcript?.trim())
       .filter(Boolean)
@@ -436,7 +462,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         // /settings — quick command to open settings
         if (requestAttachments.length === 0 && userMsg === '/settings') {
           setShowSettings(true);
-          setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: '已打开设置面板。' }]);
+          setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: t('chat.cmd.settingsOpened', '已打开设置面板。') }]);
           setAiTyping(false);
           return;
         }
@@ -452,16 +478,20 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           const prompt = oneShotPrompt;
           try {
             const result = await generateOneShotApp(prompt);
-            let validationText = '未执行';
+            let validationText = t('chat.oneShot.validationPending', '未执行');
+            let validationOk = false;
             let validationBlocks: ChatBlock[] = [];
             try {
               const validation = await validateOneShotApp(result.app.rootDir);
-              validationText = validation.validation.ok ? '通过' : '未通过';
+              validationOk = validation.validation.ok;
+              validationText = validation.validation.ok
+                ? t('chat.oneShot.validationPass', '通过')
+                : t('chat.oneShot.validationFail', '未通过');
               validationBlocks = [{
                 type: 'status',
                 collapsible: true,
                 defaultCollapsed: true,
-                summary: `自动校验 · ${validationText}`,
+                summary: tf('chat.oneShot.summaryAuto', '自动校验 · {{text}}', { text: validationText }),
                 items: validation.validation.checks.map((c) => ({
                   label: c.name,
                   value: c.detail,
@@ -469,28 +499,28 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 })),
               }];
             } catch {
-              validationText = '校验失败';
+              validationText = t('chat.oneShot.validationErr', '校验失败');
             }
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: '已完成应用骨架生成。',
+              text: t('chat.oneShot.done', '已完成应用骨架生成。'),
               source: 'studio',
               blocks: [
                 {
                   type: 'status',
                   items: [
-                    { label: '应用名称', value: result.app.name, ok: true },
-                    { label: '生成目录', value: result.app.rootDir, ok: true },
-                    { label: '文件数量', value: String(result.app.files.length), ok: true },
-                    { label: '运行命令', value: result.app.runCommand, ok: true },
-                    { label: '生成模式', value: result.app.usedFallback ? '模板兜底' : 'AI 规划', ok: true },
-                    { label: '自动校验', value: validationText, ok: validationText === '通过' },
+                    { label: t('chat.oneShot.appName', '应用名称'), value: result.app.name, ok: true },
+                    { label: t('chat.oneShot.rootDir', '生成目录'), value: result.app.rootDir, ok: true },
+                    { label: t('chat.oneShot.fileCount', '文件数量'), value: String(result.app.files.length), ok: true },
+                    { label: t('chat.oneShot.runCmd', '运行命令'), value: result.app.runCommand, ok: true },
+                    { label: t('chat.oneShot.genMode', '生成模式'), value: result.app.usedFallback ? t('chat.oneShot.genFallback', '模板兜底') : t('chat.oneShot.genAi', 'AI 规划'), ok: true },
+                    { label: t('chat.oneShot.autoCheck', '自动校验'), value: validationText, ok: validationOk },
                   ],
                 },
                 {
                   type: 'terminal',
-                  label: '已生成文件',
+                  label: t('chat.oneShot.genFiles', '已生成文件'),
                   lines: result.app.files.map((f) => `- ${f}`),
                   collapsible: true,
                   previewLines: 8,
@@ -507,7 +537,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: `应用生成失败：${error instanceof Error ? error.message : '未知错误'}`,
+              text: tf('chat.oneShot.fail', '应用生成失败：{{msg}}', {
+                msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
+              }),
               source: 'studio',
             }]);
           }
@@ -525,7 +557,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: '还没有可运行的生成应用，请先执行一句话生成。',
+              text: t('chat.run.none', '还没有可运行的生成应用，请先执行一句话生成。'),
               source: 'studio',
             }]);
             setAiTyping(false);
@@ -540,21 +572,27 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: run.ok ? '应用已执行完成。' : '应用执行失败。',
+              text: run.ok ? t('chat.run.doneOk', '应用已执行完成。') : t('chat.run.doneFail', '应用执行失败。'),
               source: 'studio',
               blocks: [
                 {
                   type: 'status',
                   items: [
-                    { label: '运行命令', value: run.run.runner || runCommand, ok: true },
-                    { label: '执行结果', value: run.ok ? (run.run.timedOut ? '运行中（超时中断）' : '成功') : '失败', ok: run.ok },
-                    { label: '应用目录', value: appDir, ok: true },
+                    { label: t('chat.oneShot.runCmd', '运行命令'), value: run.run.runner || runCommand, ok: true },
+                    {
+                      label: t('chat.run.result', '执行结果'),
+                      value: run.ok
+                        ? (run.run.timedOut ? t('chat.run.timeout', '运行中（超时中断）') : t('chat.run.success', '成功'))
+                        : t('chat.run.fail', '失败'),
+                      ok: run.ok,
+                    },
+                    { label: t('chat.run.appDir', '应用目录'), value: appDir, ok: true },
                   ],
                 },
                 {
                   type: 'terminal',
-                  label: '运行输出',
-                  lines: outputLines.length > 0 ? outputLines : ['[无输出]'],
+                  label: t('chat.run.output', '运行输出'),
+                  lines: outputLines.length > 0 ? outputLines : [t('chat.run.noOutput', '[无输出]')],
                   collapsible: true,
                   previewLines: 10,
                 },
@@ -564,7 +602,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: `应用执行失败：${error instanceof Error ? error.message : '未知错误'}`,
+              text: tf('chat.run.err', '应用执行失败：{{msg}}', {
+                msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
+              }),
               source: 'studio',
             }]);
           }
@@ -582,7 +622,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: '请先连接目标设备，再执行部署。',
+              text: t('chat.deploy.needDevice', '请先连接目标设备，再执行部署。'),
               source: 'studio',
             }]);
             setAiTyping(false);
@@ -592,7 +632,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: '还没有可部署的生成应用，请先执行一句话生成。',
+              text: t('chat.deploy.none', '还没有可部署的生成应用，请先执行一句话生成。'),
               source: 'studio',
             }]);
             setAiTyping(false);
@@ -620,33 +660,46 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: '应用已部署到设备。',
+              text: t('chat.deploy.ok', '应用已部署到设备。'),
               source: 'studio',
               blocks: [
                 {
                   type: 'status',
                   items: [
-                    { label: '目标设备', value: `${currentDevice.name} (${currentDevice.ip})`, ok: true },
-                    { label: '部署目录', value: deploy.deploy.remoteDir, ok: true },
-                    { label: '文件数量', value: String(deploy.deploy.fileCount), ok: true },
-                    { label: '运行命令', value: deploy.deploy.runCommand || deployRunCommand, ok: true },
-                    { label: '运行结果', value: deploy.deploy.run?.ok ? '成功' : '失败', ok: Boolean(deploy.deploy.run?.ok) },
-                    ...(suggestions.length > 0 ? [{ label: '修复建议', value: `${suggestions.length} 条`, ok: true }] : []),
+                    { label: t('chat.deploy.target', '目标设备'), value: `${currentDevice.name} (${currentDevice.ip})`, ok: true },
+                    { label: t('chat.deploy.remoteDir', '部署目录'), value: deploy.deploy.remoteDir, ok: true },
+                    { label: t('chat.oneShot.fileCount', '文件数量'), value: String(deploy.deploy.fileCount), ok: true },
+                    { label: t('chat.oneShot.runCmd', '运行命令'), value: deploy.deploy.runCommand || deployRunCommand, ok: true },
+                    {
+                      label: t('chat.deploy.runResult', '运行结果'),
+                      value: deploy.deploy.run?.ok ? t('chat.run.success', '成功') : t('chat.run.fail', '失败'),
+                      ok: Boolean(deploy.deploy.run?.ok),
+                    },
+                    ...(suggestions.length > 0
+                      ? [{ label: t('chat.deploy.suggestions', '修复建议'), value: tf('chat.deploy.suggestionsCount', '{{n}} 条', { n: suggestions.length }), ok: true }]
+                      : []),
                   ],
                 },
                 ...(runOutput.length > 0 ? [{
                   type: 'terminal' as const,
-                  label: '设备运行输出',
+                  label: t('chat.deploy.deviceOut', '设备运行输出'),
                   lines: runOutput,
                   collapsible: true,
                   previewLines: 10,
                 }] : []),
                 ...(suggestions.length > 0 ? [{
                   type: 'terminal' as const,
-                  label: '建议下一步',
+                  label: t('chat.deploy.nextSteps', '建议下一步'),
                   lines: suggestions.map((item, idx) => {
-                    const cmd = item.command ? ` | 命令: ${item.command}` : '';
-                    return `${idx + 1}. ${item.title}: ${item.detail}${cmd}`;
+                    const cmd = item.command
+                      ? tf('chat.deploy.suggestionCmd', ' | 命令: {{cmd}}', { cmd: item.command })
+                      : '';
+                    return tf('chat.deploy.suggestionLine', '{{i}}. {{title}}: {{detail}}{{cmd}}', {
+                      i: idx + 1,
+                      title: item.title,
+                      detail: item.detail,
+                      cmd,
+                    });
                   }),
                   collapsible: true,
                   previewLines: 6,
@@ -657,7 +710,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: `部署失败：${error instanceof Error ? error.message : '未知错误'}`,
+              text: tf('chat.deploy.fail', '部署失败：{{msg}}', {
+                msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
+              }),
               source: 'studio',
             }]);
           }
@@ -676,7 +731,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: '暂无可执行修复建议，请先完成一次部署并产生建议。',
+              text: t('chat.fix.none', '暂无可执行修复建议，请先完成一次部署并产生建议。'),
               source: 'studio',
             }]);
             setAiTyping(false);
@@ -688,7 +743,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: `第 ${index} 条建议没有可执行命令，请手动处理。`,
+              text: tf('chat.fix.noCmd', '第 {{n}} 条建议没有可执行命令，请手动处理。', { n: index }),
               source: 'studio',
             }]);
             setAiTyping(false);
@@ -702,36 +757,40 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             const retryRunCommand = `cd ${fixState.remoteDir} && (${fixState.runCommand || 'python main.py'})`;
             const retryResult = await executeDeviceCommand(fixState.deviceId, retryRunCommand).catch((error) => ({
               ok: false,
-              output: error instanceof Error ? error.message : '自动重试运行失败',
+              output: error instanceof Error ? error.message : t('chat.fix.autoFail', '自动重试运行失败'),
             }));
             const retryLines = String(retryResult.output || '').split(/\r?\n/).filter(Boolean).slice(0, 60);
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: `已执行修复建议 #${index}：${selected.title}，并自动重试运行。`,
+              text: tf('chat.fix.done', '已执行修复建议 #{{n}}：{{title}}，并自动重试运行。', { n: index, title: selected.title }),
               source: 'studio',
               blocks: [
                 {
                   type: 'status',
                   items: [
-                    { label: '修复项', value: selected.title, ok: true },
-                    { label: '执行目录', value: fixState.remoteDir, ok: true },
-                    { label: '命令', value: selected.command || '', ok: true },
-                    { label: '重试命令', value: fixState.runCommand || 'python main.py', ok: true },
-                    { label: '重试运行', value: retryResult.ok ? '成功' : '失败', ok: Boolean(retryResult.ok) },
+                    { label: t('chat.fix.item', '修复项'), value: selected.title, ok: true },
+                    { label: t('chat.fix.dir', '执行目录'), value: fixState.remoteDir, ok: true },
+                    { label: t('chat.fix.cmd', '命令'), value: selected.command || '', ok: true },
+                    { label: t('chat.fix.retryCmd', '重试命令'), value: fixState.runCommand || 'python main.py', ok: true },
+                    {
+                      label: t('chat.fix.retryRun', '重试运行'),
+                      value: retryResult.ok ? t('chat.run.success', '成功') : t('chat.run.fail', '失败'),
+                      ok: Boolean(retryResult.ok),
+                    },
                   ],
                 },
                 {
                   type: 'terminal',
-                  label: '修复输出',
-                  lines: lines.length > 0 ? lines : ['[无输出]'],
+                  label: t('chat.fix.out', '修复输出'),
+                  lines: lines.length > 0 ? lines : [t('chat.run.noOutput', '[无输出]')],
                   collapsible: true,
                   previewLines: 10,
                 },
                 {
                   type: 'terminal',
-                  label: '重试运行输出',
-                  lines: retryLines.length > 0 ? retryLines : ['[无输出]'],
+                  label: t('chat.fix.retryOut', '重试运行输出'),
+                  lines: retryLines.length > 0 ? retryLines : [t('chat.run.noOutput', '[无输出]')],
                   collapsible: true,
                   previewLines: 10,
                 },
@@ -741,7 +800,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: `修复执行失败：${error instanceof Error ? error.message : '未知错误'}`,
+              text: tf('chat.fix.err', '修复执行失败：{{msg}}', {
+                msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
+              }),
               source: 'studio',
             }]);
           }
@@ -759,14 +820,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: result.message || `绑定成功，账号：${result.openId || '***'}`,
+              text: result.message || tf('chat.feishu.bindOk', '绑定成功，账号：{{id}}', { id: result.openId || '***' }),
               source: 'studio',
             }]);
           } catch (error) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
-              text: `绑定失败：${error instanceof Error ? error.message : '授权码无效或已过期'}`,
+              text: tf('chat.feishu.bindFail', '绑定失败：{{msg}}', {
+                msg: error instanceof Error ? error.message : t('chat.feishu.bindInvalid', '授权码无效或已过期'),
+              }),
               source: 'studio',
             }]);
           }
@@ -795,14 +858,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               setChatMessages(prev => [...prev, {
                 id: msgId + 1,
                 role: 'ai',
-                text: `已停止任务：${taskId}（当前轮次会被中断，状态切换为 paused）`,
+                text: tf('chat.stop.task', '已停止任务：{{id}}（当前轮次会被中断，状态切换为 paused）', { id: taskId }),
                 source: 'studio',
               }]);
             } catch (error) {
               setChatMessages(prev => [...prev, {
                 id: msgId + 1,
                 role: 'ai',
-                text: `停止任务失败：${error instanceof Error ? error.message : '未知错误'}`,
+                text: tf('chat.stop.fail', '停止任务失败：{{msg}}', {
+                  msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
+                }),
                 source: 'studio',
               }]);
             }
@@ -869,7 +934,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 currentRunIdRef.current = currentRunId;
                 const executor = String(event.data.executor || 'rdkclaw_local');
                 const phase = String(event.data.phase || 'start');
-                const message = String(event.data.message || '开始处理请求');
+                const message = String(event.data.message || t('chat.stream.start', '开始处理请求'));
 
                 if (phase === 'setup') {
                   aiBlocks.push({
@@ -884,7 +949,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   break;
                 }
 
-                const delegationMode = String(event.data.delegation_mode || '默认');
+                const delegationMode = String(event.data.delegation_mode || t('chat.stream.defaultMode', '默认'));
                 const matchedSkills = Array.isArray(event.data.matched_skills)
                   ? (event.data.matched_skills as string[]).filter(Boolean)
                   : [];
@@ -900,21 +965,37 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 } | undefined;
 
                 const summaryParts = [executorLabel(executor), delegationMode];
-                if (matchedSkills.length > 0) summaryParts.push(`技能: ${matchedSkills.join('/')}`);
-                if (networkEnabled) summaryParts.push('联网');
-                if (needsBoardCollaboration) summaryParts.push('板端协同');
+                if (matchedSkills.length > 0) {
+                  summaryParts.push(tf('chat.stream.skillsVal', '技能: {{list}}', { list: matchedSkills.join('/') }));
+                }
+                if (networkEnabled) summaryParts.push(t('chat.stream.network', '联网'));
+                if (needsBoardCollaboration) summaryParts.push(t('chat.stream.board', '板端协同'));
 
                 const metaItems: Array<{ label: string; value: string; ok: boolean }> = [
-                  { label: '执行路径', value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
-                  { label: '命中能力', value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : '通用流程', ok: matchedSkills.length > 0 },
+                  { label: t('chat.stream.path', '执行路径'), value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
+                  {
+                    label: t('chat.stream.hit', '命中能力'),
+                    value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : t('chat.stream.generic', '通用流程'),
+                    ok: matchedSkills.length > 0,
+                  },
                 ];
                 if (modelCaps?.model) {
                   const ctxK = modelCaps.contextWindow ? `${Math.round(modelCaps.contextWindow / 1024)}K` : '?';
                   const outK = modelCaps.maxOutputTokens ? `${Math.round(modelCaps.maxOutputTokens / 1024)}K` : '?';
-                  const tierLabel = modelCaps.tier === 'small' ? ' (精简模式)' : modelCaps.tier === 'large' ? '' : '';
-                  metaItems.push({ label: '模型', value: `${modelCaps.model} · 上下文 ${ctxK} · 输出 ${outK}${tierLabel}`, ok: true });
+                  const tierLabel = modelCaps.tier === 'small' ? t('chat.stream.tierSmall', ' (精简模式)') : modelCaps.tier === 'large' ? '' : '';
+                  metaItems.push({
+                    label: t('chat.stream.model', '模型'),
+                    value: tf('chat.stream.modelVal', '{{model}} · 上下文 {{ctx}} · 输出 {{out}}{{tier}}', {
+                      model: modelCaps.model,
+                      ctx: ctxK,
+                      out: outK,
+                      tier: tierLabel,
+                    }),
+                    ok: true,
+                  });
                 }
 
+                // 与 server/rdkclaw 下发的 setup 文案一致（固定中文），用于替换首条状态块
                 const existingSetupIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && b.items?.[0]?.value === '正在准备上下文...',
                 );
@@ -954,7 +1035,15 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 aiBlocks.push({
                   type: 'status',
                   items: [
-                    { label: `第 ${toolStepNo} 步 · ${toolName} · ${executorLabel(executor)}`, value: `${phase}... ${argStr}`, ok: true },
+                    {
+                      label: tf('chat.tool.step', '第 {{n}} 步 · {{tool}} · {{exec}}', {
+                        n: toolStepNo,
+                        tool: toolName,
+                        exec: executorLabel(executor),
+                      }),
+                      value: `${phase}... ${argStr}`,
+                      ok: true,
+                    },
                   ],
                 });
                 const toolCallId = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
@@ -981,7 +1070,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const state = toolTimelineRef.current[toolId];
                 const statusBlock = aiBlocks[state.statusIndex];
                 if (statusBlock?.type === 'status' && statusBlock.items[0]) {
-                  statusBlock.items[0].value = `执行中 · ${executorLabel(state.executor)} · 实时输出更新`;
+                  statusBlock.items[0].value = tf('chat.tool.runningVal', '执行中 · {{exec}} · 实时输出更新', {
+                    exec: executorLabel(state.executor),
+                  });
                 }
                 const progressLines = chunk.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20);
                 if (progressLines.length === 0) break;
@@ -994,7 +1085,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   state.rawIndex = aiBlocks.length;
                   aiBlocks.push({
                     type: 'terminal',
-                    label: `${state.toolName} · 原始中间输出`,
+                    label: tf('chat.tool.rawLabel', '{{tool}} · 原始中间输出', { tool: state.toolName }),
                     lines: progressLines,
                     collapsible: true,
                     previewLines: 10,
@@ -1014,8 +1105,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   const statusBlock = aiBlocks[state.statusIndex];
                   if (statusBlock?.type === 'status' && statusBlock.items[0]) {
                     statusBlock.items[0] = {
-                      label: `${state.toolName} · ${executorLabel(state.executor)}`,
-                      value: `${isError ? '失败' : '完成'} · ${Math.max(1, elapsedMs)}ms`,
+                      label: tf('chat.tool.resultLabel', '{{tool}} · {{exec}}', {
+                        tool: state.toolName,
+                        exec: executorLabel(state.executor),
+                      }),
+                      value: tf('chat.tool.doneMs', '{{state}} · {{ms}}ms', {
+                        state: isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成'),
+                        ms: Math.max(1, elapsedMs),
+                      }),
                       ok: !isError,
                     };
                   }
@@ -1029,14 +1126,20 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       aiBlocks.push({
                         type: 'image',
                         src: parsed.imageUrl as string,
-                        caption: `${parsed.fileName || '图片'} (${parsed.bytes || 0} bytes) — 来自设备`,
+                        caption: tf('chat.img.caption', '{{name}} ({{bytes}} bytes) — 来自设备', {
+                          name: String(parsed.fileName || t('chat.media.image', '图片')),
+                          bytes: String(parsed.bytes || 0),
+                        }),
                       });
                       mediaHandled = true;
                     } else if (parsed.__type === 'video_download' && typeof parsed.videoUrl === 'string') {
                       aiBlocks.push({
                         type: 'video',
                         src: parsed.videoUrl as string,
-                        caption: `${parsed.fileName || '视频'} (${((parsed.bytes as number) / 1024 / 1024).toFixed(1)} MB) — 来自设备`,
+                        caption: tf('chat.video.caption', '{{name}} ({{mb}} MB) — 来自设备', {
+                          name: String(parsed.fileName || t('chat.media.video', '视频')),
+                          mb: ((parsed.bytes as number) / 1024 / 1024).toFixed(1),
+                        }),
                       });
                       mediaHandled = true;
                     } else if (parsed.localPath && typeof parsed.fileName === 'string') {
@@ -1048,7 +1151,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                           type: 'file',
                           src: fileUrl,
                           fileName: parsed.fileName as string,
-                          caption: `${parsed.fileName} (${((parsed.bytes as number) / 1024).toFixed(0)} KB) — 来自设备`,
+                          caption: tf('chat.audio.caption', '{{name}} ({{kb}} KB) — 来自设备', {
+                            name: String(parsed.fileName),
+                            kb: ((parsed.bytes as number) / 1024).toFixed(0),
+                          }),
                         });
                         mediaHandled = true;
                       }
@@ -1063,14 +1169,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     aiBlocks.push({
                       type: 'terminal',
                       lines: result.split('\n').slice(0, 60),
-                      label: `${toolName} · 最终结果`,
+                      label: tf('chat.tool.finalLabel', '{{tool}} · 最终结果', { tool: toolName }),
                       collapsible: true,
                       previewLines: 10,
                     });
                   } else if (!state) {
                     aiBlocks.push({
                       type: 'status',
-                      items: [{ label: toolName, value: result || (isError ? '失败' : '完成'), ok: !isError }],
+                      items: [{
+                        label: toolName,
+                        value: result || (isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成')),
+                        ok: !isError,
+                      }],
                     });
                   }
                 }
@@ -1083,7 +1193,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     const target = devices.find((item) => item.id === matchedId);
                     setActiveDevice(matchedId);
                     reportActiveDevice('tool-switch', matchedId);
-                    addToast(`RDKClaw 已切换到设备：${target?.name || matchedId}`, 'info');
+                    addToast(tf('chat.device.switched', 'RDKClaw 已切换到设备：{{name}}', { name: target?.name || matchedId }), 'info');
                   }
                 }
 
@@ -1093,19 +1203,24 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               case 'turn_start': {
                 if (!showDebugTurnsRef.current) break;
                 const turn = Math.max(1, Number(event.data.turn || 0));
+                const thinkPrefix = t('chat.think.turn', '思考轮次');
                 const existing = aiBlocks.find(
-                  (b) => b.type === 'status' && b.summary?.startsWith('思考轮次'),
+                  (b) => b.type === 'status' && b.summary?.startsWith(thinkPrefix),
                 );
                 if (existing && existing.type === 'status') {
-                  existing.items[0] = { label: '思考轮次', value: `第 ${turn} 轮`, ok: true };
-                  existing.summary = `思考轮次 · 第 ${turn} 轮`;
+                  existing.items[0] = {
+                    label: thinkPrefix,
+                    value: tf('chat.think.roundN', '第 {{n}} 轮', { n: turn }),
+                    ok: true,
+                  };
+                  existing.summary = tf('chat.think.summaryRound', '思考轮次 · 第 {{n}} 轮', { n: turn });
                 } else {
                   aiBlocks.push({
                     type: 'status',
                     collapsible: true,
                     defaultCollapsed: true,
-                    summary: `思考轮次 · 第 ${turn} 轮`,
-                    items: [{ label: '思考轮次', value: `第 ${turn} 轮`, ok: true }],
+                    summary: tf('chat.think.summaryRound', '思考轮次 · 第 {{n}} 轮', { n: turn }),
+                    items: [{ label: thinkPrefix, value: tf('chat.think.roundN', '第 {{n}} 轮', { n: turn }), ok: true }],
                   });
                 }
                 updateAiMessage(aiText, aiBlocks);
@@ -1114,12 +1229,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               case 'turn_end': {
                 if (!showDebugTurnsRef.current) break;
                 const turn = Math.max(1, Number(event.data.turn || 0));
-                const existing = aiBlocks.find(
-                  (b) => b.type === 'status' && b.summary?.startsWith('思考轮次'),
+                const thinkPrefixEnd = t('chat.think.turn', '思考轮次');
+                const existingEnd = aiBlocks.find(
+                  (b) => b.type === 'status' && b.summary?.startsWith(thinkPrefixEnd),
                 );
-                if (existing && existing.type === 'status') {
-                  existing.items[0] = { label: '思考轮次', value: `共 ${turn} 轮`, ok: true };
-                  existing.summary = `思考轮次 · 共 ${turn} 轮`;
+                if (existingEnd && existingEnd.type === 'status') {
+                  existingEnd.items[0] = {
+                    label: thinkPrefixEnd,
+                    value: tf('chat.think.totalN', '共 {{n}} 轮', { n: turn }),
+                    ok: true,
+                  };
+                  existingEnd.summary = tf('chat.think.summaryTotal', '思考轮次 · 共 {{n}} 轮', { n: turn });
                 }
                 updateAiMessage(aiText, aiBlocks);
                 break;
@@ -1138,7 +1258,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const risk = String(event.data.risk || 'medium') as 'low' | 'medium' | 'high';
                 const runId = String(event.data.runId || currentRunId || '');
                 const executor = String(event.data.executor || (toolName === 'board_openclaw_delegate' ? 'board_openclaw' : 'rdkclaw_local'));
-                const summary = `${toolName} · ${executorLabel(executor)} · 风险 ${risk.toUpperCase()}`;
+                const summary = `${toolName} · ${executorLabel(executor)} · ${t('chat.approval.risk', '风险')} ${risk.toUpperCase()}`;
                 approvalBlockRef.current[approvalId] = aiBlocks.length;
                 aiBlocks.push({
                   type: 'approval',
@@ -1146,7 +1266,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   runId,
                   risk,
                   executor,
-                  text: `需要你的确认后才能执行：${summary}`,
+                  text: tf('chat.approval.need', '需要你的确认后才能执行：{{summary}}', { summary }),
                 });
                 updateAiMessage(aiText, aiBlocks);
                 break;
@@ -1179,8 +1299,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   aiBlocks[index] = {
                     type: 'task-result',
                     success: decision !== 'deny',
-                    title: decision === 'deny' ? '已拒绝执行' : '已确认执行',
-                    detail: `审批决策：${decision}`,
+                    title: decision === 'deny' ? t('chat.approval.denied', '已拒绝执行') : t('chat.approval.ok', '已确认执行'),
+                    detail: tf('chat.approval.detail', '审批决策：{{decision}}', { decision }),
                   };
                 }
                 updateAiMessage(aiText, aiBlocks);
@@ -1190,43 +1310,49 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const pos = Number(event.data.position ?? 0);
                 const current = String(event.data.currentTask ?? '');
                 const channel = String(event.data.currentChannel ?? '');
-                const channelLabel = channel === 'feishu' ? '飞书' : channel === 'weixin' ? '微信' : channel || '其他渠道';
-                const posLabel = pos > 0 ? `排在第 ${pos} 位` : '正在排队';
+                const channelLabel = channel === 'feishu'
+                  ? t('chat.queue.feishu', '飞书')
+                  : channel === 'weixin'
+                    ? t('chat.queue.weixin', '微信')
+                    : channel || t('chat.queue.other', '其他渠道');
+                const posLabel = pos > 0
+                  ? tf('chat.queue.pos', '排在第 {{n}} 位', { n: pos })
+                  : t('chat.queue.waiting', '正在排队');
                 aiBlocks.push({
                   type: 'status',
                   items: [
-                    { label: '队列状态', value: posLabel, ok: false },
-                    ...(current ? [{ label: '当前任务', value: `${channelLabel}: ${current}`, ok: true }] : []),
+                    { label: t('chat.queue.state', '队列状态'), value: posLabel, ok: false },
+                    ...(current ? [{ label: t('chat.queue.current', '当前任务'), value: `${channelLabel}: ${current}`, ok: true }] : []),
                   ],
-                  summary: `设备正忙，${posLabel}，请稍候...`,
+                  summary: tf('chat.queue.busy', '设备正忙，{{pos}}，请稍候...', { pos: posLabel }),
                 });
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
               case 'error': {
-                const errorMsg = (event.data.error as string) || 'Agent 执行出错';
+                const errorMsg = (event.data.error as string) || t('chat.err.agent', 'Agent 执行出错');
                 let friendlyText = '';
                 let friendlyDetail = errorMsg;
 
                 if (errorMsg.includes('未配置 AI 模型')) {
-                  friendlyText = '请先配置 AI 模型。打开设置 → AI 模型，选择服务商并填写 API Key。';
-                  friendlyDetail = '点击右上角 ⚙️ 设置图标即可配置';
+                  friendlyText = t('chat.err.noModel', '请先配置 AI 模型。打开设置 → AI 模型，选择服务商并填写 API Key。');
+                  friendlyDetail = t('chat.err.noModelHint', '点击右上角 ⚙️ 设置图标即可配置');
                 } else if (errorMsg.includes('401') || errorMsg.includes('Incorrect API key')) {
-                  friendlyText = 'API Key 无效或已过期，请在设置中重新配置。';
-                  friendlyDetail = '打开设置 → AI 模型，更新 API Key';
+                  friendlyText = t('chat.err.apiKey', 'API Key 无效或已过期，请在设置中重新配置。');
+                  friendlyDetail = t('chat.err.apiKeyHint', '打开设置 → AI 模型，更新 API Key');
                 } else if (errorMsg.includes('Connection error') || errorMsg.includes('ECONNREFUSED')) {
-                  friendlyText = '无法连接到 AI 服务，请检查网络或 API 地址。';
-                  friendlyDetail = '如果使用通义千问 sk-sp- 开头的 Key，请确认 Base URL 是否正确';
+                  friendlyText = t('chat.err.conn', '无法连接到 AI 服务，请检查网络或 API 地址。');
+                  friendlyDetail = t('chat.err.connHint', '如果使用通义千问 sk-sp- 开头的 Key，请确认 Base URL 是否正确');
                 } else if (errorMsg.toLowerCase().includes('network_error') || errorMsg.toLowerCase().includes('network error')) {
-                  friendlyText = '联网检索阶段出现网络错误。';
-                  friendlyDetail = '请检查本机网络、目标站点可达性及是否被限流；可稍后重试或先切换离线方案。';
+                  friendlyText = t('chat.err.netSearch', '联网检索阶段出现网络错误。');
+                  friendlyDetail = t('chat.err.netSearchHint', '请检查本机网络、目标站点可达性及是否被限流；可稍后重试或先切换离线方案。');
                 } else {
-                  friendlyText = aiText || '请求出错，请稍后重试。';
+                  friendlyText = aiText || t('chat.err.generic', '请求出错，请稍后重试。');
                 }
 
                 aiBlocks.push({
                   type: 'status',
-                  items: [{ label: '提示', value: friendlyDetail, ok: false }],
+                  items: [{ label: t('chat.err.hint', '提示'), value: friendlyDetail, ok: false }],
                 });
                 updateAiMessage(friendlyText, aiBlocks, true);
                 break;
@@ -1272,25 +1398,40 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const totalMs = Math.max(0, Math.round(Number(performanceStats.totalElapsedMs || 0)));
                       const firstTextMs = Number(performanceStats.firstTextDeltaMs);
                       const label = Number.isFinite(firstTextMs)
-                        ? `总 ${totalMs}ms · 首字 ${Math.round(firstTextMs)}ms`
-                        : `总 ${totalMs}ms`;
-                      usageItems.push({ label: '耗时', value: label, ok: true });
+                        ? tf('chat.perf.totalFirst', '总 {{ms}}ms · 首字 {{first}}ms', {
+                            ms: totalMs,
+                            first: Math.round(firstTextMs),
+                          })
+                        : tf('chat.perf.total', '总 {{ms}}ms', { ms: totalMs });
+                      usageItems.push({ label: t('chat.perf.time', '耗时'), value: label, ok: true });
                     }
                     if (tokenUsage) {
                       const total = Math.max(0, Number(tokenUsage.totalTokens || 0));
-                      usageItems.push({ label: 'Tokens', value: `${total}${tokenUsage.estimated ? ' (估)' : ''}`, ok: true });
+                      usageItems.push({
+                        label: 'Tokens',
+                        value: `${total}${tokenUsage.estimated ? t('chat.perf.est', ' (估)') : ''}`,
+                        ok: true,
+                      });
                     }
                     if (executionStats) {
                       const board = Math.max(0, Number(executionStats.boardToolCalls || 0));
                       const local = Math.max(0, Number(executionStats.localToolCalls || 0));
                       if (board + local > 0) {
-                        usageItems.push({ label: '工具调用', value: `本地 ${local} · 板端 ${board}`, ok: true });
+                        usageItems.push({
+                          label: t('chat.perf.tools', '工具调用'),
+                          value: tf('chat.perf.toolsVal', '本地 {{local}} · 板端 {{board}}', { local, board }),
+                          ok: true,
+                        });
                       }
                     }
                     if (contextStats) {
                       const compaction = Math.max(0, Number(contextStats.compactionCount || 0));
                       if (compaction > 0) {
-                        usageItems.push({ label: '上下文压缩', value: `${compaction} 次`, ok: true });
+                        usageItems.push({
+                          label: t('chat.perf.compact', '上下文压缩'),
+                          value: tf('chat.perf.compactVal', '{{n}} 次', { n: compaction }),
+                          ok: true,
+                        });
                       }
                     }
                     if (usageItems.length > 0) {
@@ -1307,14 +1448,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 }
                 break;
               case 'run_progress': {
-                const msg = String(event.data.message || '仍在处理中...');
+                const msg = String(event.data.message || t('chat.progress.wait', '仍在处理中...'));
                 const existingIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && (b as any)._runProgress,
                 );
                 const progressBlock = {
                   type: 'status' as const,
                   _runProgress: true,
-                  items: [{ label: '⏳ 进度', value: msg, ok: true }],
+                  items: [{ label: t('chat.progress.label', '⏳ 进度'), value: msg, ok: true }],
                 };
                 if (existingIdx >= 0) {
                   aiBlocks[existingIdx] = progressBlock;
@@ -1337,12 +1478,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const isCancelled = Boolean(event.data.cancelled);
                 const detail: string[] = [];
                 if (elapsed) detail.push(elapsed);
-                if (calls > 0) detail.push(`${calls} 步`);
+                if (calls > 0) detail.push(tf('chat.runComplete.steps', '{{n}} 步', { n: calls }));
                 const label = isCancelled
-                  ? '⊘ 已取消'
+                  ? t('chat.runComplete.cancelled', '⊘ 已取消')
                   : isError
-                    ? '✗ 执行出错'
-                    : '✓ 回复完成';
+                    ? t('chat.runComplete.err', '✗ 执行出错')
+                    : t('chat.runComplete.ok', '✓ 回复完成');
                 const ok = !isError && !isCancelled;
                 aiBlocks.push({
                   type: 'status',
@@ -1382,7 +1523,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         id: Date.now(),
         role: 'ai',
         text: '',
-        blocks: [{ type: 'task-result', success: false, title: '已取消当前任务', detail: `runId: ${runId}` }],
+        blocks: [{
+          type: 'task-result',
+          success: false,
+          title: t('chat.cancelled.title', '已取消当前任务'),
+          detail: tf('chat.stop.detailRun', 'runId: {{id}}', { id: runId }),
+        }],
       }]);
       return;
     }
@@ -1395,8 +1541,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         return {
           type: 'task-result',
           success: ok,
-          title: ok ? '已提交审批决策' : '已拒绝执行',
-          detail: ok ? `策略：${action}` : '该步骤不会执行',
+          title: ok ? t('chat.approval.submitted', '已提交审批决策') : t('chat.approval.rejected', '已拒绝执行'),
+          detail: ok ? tf('chat.approval.subDetail', '策略：{{action}}', { action }) : t('chat.approval.rejectDetail', '该步骤不会执行'),
         };
       }),
     })));
@@ -1416,7 +1562,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const handleSoulUpdateDecision = async (proposalId: string, accepted: boolean) => {
     void proposalId;
     void accepted;
-    addToast('SOUL 更新入口已关闭：请通过 USER.md 调整偏好', 'info');
+    addToast(t('chat.soul.closed', 'SOUL 更新入口已关闭：请通过 USER.md 调整偏好'), 'info');
   };
 
   const stopCurrentRun = async () => {
@@ -1432,17 +1578,19 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       setChatMessages((prev) => [...prev, {
         id: Date.now(),
         role: 'ai',
-        text: '停止指令已发送，当前任务将尽快结束。',
+        text: t('chat.stop.sent', '停止指令已发送，当前任务将尽快结束。'),
         blocks: [{
           type: 'task-result',
           success: true,
-          title: '已请求停止任务',
-          detail: runId ? `runId: ${runId}` : '已请求停止所有运行中的任务',
+          title: t('chat.stop.title', '已请求停止任务'),
+          detail: runId
+            ? tf('chat.stop.detailRun', 'runId: {{id}}', { id: runId })
+            : t('chat.stop.detailAll', '已请求停止所有运行中的任务'),
         }],
         source: 'studio',
       }]);
     } catch {
-      addToast('停止任务失败，请重试“全部停止”', 'error');
+      addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
     } finally {
       setAiTyping(false);
       commandLockRef.current = false;
@@ -1457,24 +1605,29 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       const count = res.cancelled ?? 0;
       const pausedAutonomyTasks = Number(res.pausedAutonomyTasks ?? 0);
       const cancelledAutonomyRuns = Number(res.cancelledAutonomyRuns ?? 0);
-      const detailParts = ['包括来自 Studio、飞书、微信的任务'];
+      const detailParts = [t('chat.stopAll.detail1', '包括来自 Studio、飞书、微信的任务')];
       if (pausedAutonomyTasks > 0) {
-        detailParts.push(`已暂停定时任务 ${pausedAutonomyTasks} 个`);
+        detailParts.push(tf('chat.stopAll.paused', '已暂停定时任务 {{n}} 个', { n: pausedAutonomyTasks }));
       }
       if (cancelledAutonomyRuns > 0) {
-        detailParts.push(`已中断定时任务运行 ${cancelledAutonomyRuns} 个`);
+        detailParts.push(tf('chat.stopAll.cancelled', '已中断定时任务运行 {{n}} 个', { n: cancelledAutonomyRuns }));
       }
       setChatMessages((prev) => [...prev, {
         id: Date.now(),
         role: 'ai',
         text: '',
-        blocks: [{ type: 'task-result', success: true, title: `已停止所有运行中的任务（${count} 个）`, detail: detailParts.join('；') }],
+        blocks: [{
+          type: 'task-result',
+          success: true,
+          title: tf('chat.stopAll.title', '已停止所有运行中的任务（{{n}} 个）', { n: count }),
+          detail: detailParts.join(t('chat.stopAll.sep', '；')),
+        }],
         source: 'studio',
       }]);
       setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
-      addToast(`已停止 ${count} 个运行中的任务`, 'info');
+      addToast(tf('chat.stopAll.toast', '已停止 {{n}} 个运行中的任务', { n: count }), 'info');
     } catch {
-      addToast('停止所有任务失败', 'error');
+      addToast(t('chat.stopAll.fail', '停止所有任务失败'), 'error');
     }
   };
 
@@ -1491,12 +1644,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     setChatMessages((prev) => [...prev, {
       id: Date.now(),
       role: 'ai',
-      text: '后台任务已结束。',
+      text: t('chat.bg.ended', '后台任务已结束。'),
       blocks: [{
         type: 'task-result',
         success: false,
-        title: '后台任务已结束',
-        detail: `runId: ${runId}`,
+        title: t('chat.bg.title', '后台任务已结束'),
+        detail: tf('chat.stop.detailRun', 'runId: {{id}}', { id: runId }),
       }],
     }]);
   };
@@ -1568,8 +1721,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       }>;
       const detail = e.detail ?? {};
       const ts = detail.ts ?? Date.now();
-      const title = detail.title || '系统推送';
-      const message = detail.message || '收到新的系统事件';
+      const title = detail.title || t('chat.push.title', '系统推送');
+      const message = detail.message || t('chat.push.msg', '收到新的系统事件');
       const ok = detail.level !== 'error';
       const payload = detail.payload || {};
       const isFeishuMirror = detail.type?.startsWith('channel_message_') && payload.channel === 'feishu';
@@ -1611,13 +1764,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         if (dedupKey !== '::' && feishuMirrorSeenRef.current.has(dedupKey)) return;
         if (dedupKey !== '::') feishuMirrorSeenRef.current.add(dedupKey);
         setChatExpanded(true);
-        const executorLabel = payload.executor === 'board_openclaw' ? '板端 OpenClaw' : payload.executor ? String(payload.executor) : 'RDKClaw';
+        const feishuExec = payload.executor === 'board_openclaw'
+          ? t('chat.feishu.exec.board', '板端 OpenClaw')
+          : payload.executor
+            ? String(payload.executor)
+            : 'RDKClaw';
         if (payload.rdkEventKind === 'tool_start' || payload.rdkEventKind === 'tool_progress' || payload.rdkEventKind === 'tool_result') {
           const phaseText = payload.rdkEventKind === 'tool_start'
-            ? '开始执行'
+            ? t('chat.feishu.start', '开始执行')
             : payload.rdkEventKind === 'tool_progress'
-              ? '执行中'
-              : (payload.isError ? '执行失败' : '执行完成');
+              ? t('chat.feishu.running', '执行中')
+              : (payload.isError ? t('chat.feishu.fail', '执行失败') : t('chat.feishu.done', '执行完成'));
           const toolName = payload.toolName || 'unknown_tool';
           const streamKeyRaw = resolveToolStreamKey();
           const streamKey = streamKeyRaw || feishuLastToolKeyRef.current;
@@ -1638,11 +1795,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 blocks: [
                   {
                     type: 'status',
-                    items: [{ label: `飞书流程 · ${toolName}`, value: `${executorLabel} · ${phaseText}`, ok: true }],
+                    items: [{ label: tf('chat.feishu.flow', '飞书流程 · {{tool}}', { tool: toolName }), value: `${feishuExec} · ${phaseText}`, ok: true }],
                   },
                   ...(lines.length > 0 ? [{
                     type: 'terminal' as const,
-                    label: `${toolName} · 实时反馈`,
+                    label: tf('chat.feishu.live', '{{tool}} · 实时反馈', { tool: toolName }),
                     lines,
                     collapsible: true,
                     previewLines: 8,
@@ -1670,28 +1827,28 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const statusBlock = nextBlocks[statusIdx];
                 if (statusBlock?.type === 'status' && statusBlock.items[0]) {
                   statusBlock.items[0] = {
-                    label: `飞书流程 · ${toolName}`,
-                    value: `${executorLabel} · ${phaseText}`,
+                    label: tf('chat.feishu.flow', '飞书流程 · {{tool}}', { tool: toolName }),
+                    value: `${feishuExec} · ${phaseText}`,
                     ok: payload.rdkEventKind !== 'tool_result' || !payload.isError,
                   };
                 }
               } else {
                 nextBlocks.unshift({
                   type: 'status',
-                  items: [{ label: `飞书流程 · ${toolName}`, value: `${executorLabel} · ${phaseText}`, ok: payload.rdkEventKind !== 'tool_result' || !payload.isError }],
+                  items: [{ label: tf('chat.feishu.flow', '飞书流程 · {{tool}}', { tool: toolName }), value: `${feishuExec} · ${phaseText}`, ok: payload.rdkEventKind !== 'tool_result' || !payload.isError }],
                 });
               }
               const terminalIdx = nextBlocks.findIndex((b) => b.type === 'terminal');
               if (terminalIdx >= 0) {
                 const terminalBlock = nextBlocks[terminalIdx];
                 if (terminalBlock?.type === 'terminal') {
-                  terminalBlock.label = `${toolName} · 实时反馈`;
+                  terminalBlock.label = tf('chat.feishu.live', '{{tool}} · 实时反馈', { tool: toolName });
                   terminalBlock.lines = dedupeLines(terminalBlock.lines, lines);
                 }
               } else if (lines.length > 0) {
                 nextBlocks.push({
                   type: 'terminal',
-                  label: `${toolName} · 实时反馈`,
+                  label: tf('chat.feishu.live', '{{tool}} · 实时反馈', { tool: toolName }),
                   lines,
                   collapsible: true,
                   previewLines: 8,
@@ -1717,11 +1874,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               blocks: [
                 {
                   type: 'status',
-                  items: [{ label: `飞书流程 · ${toolName}`, value: `${executorLabel} · ${phaseText}`, ok: payload.rdkEventKind !== 'tool_result' || !payload.isError }],
+                  items: [{ label: tf('chat.feishu.flow', '飞书流程 · {{tool}}', { tool: toolName }), value: `${feishuExec} · ${phaseText}`, ok: payload.rdkEventKind !== 'tool_result' || !payload.isError }],
                 },
                 ...(lines.length > 0 ? [{
                   type: 'terminal' as const,
-                  label: `${toolName} · 实时反馈`,
+                  label: tf('chat.feishu.live', '{{tool}} · 实时反馈', { tool: toolName }),
                   lines,
                   collapsible: true,
                   previewLines: 8,
@@ -1739,7 +1896,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         if (payload.direction === 'ack' || payload.direction === 'error') {
-          const label = payload.direction === 'error' ? '飞书通道' : '飞书回执';
+          const label = payload.direction === 'error' ? t('chat.feishu.recv', '飞书通道') : t('chat.feishu.receipt', '飞书回执');
           setChatMessages((prev) => [
             ...prev,
             {
@@ -1802,7 +1959,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener('rdkclaw-notify', onNotify as EventListener);
     return () => window.removeEventListener('rdkclaw-notify', onNotify as EventListener);
-  }, []);
+  }, [language]);
 
   // Persist chat history (debounced to avoid blocking main thread during streaming)
   const chatPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

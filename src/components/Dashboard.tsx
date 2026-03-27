@@ -6,19 +6,17 @@ import {
   type OpenClawHealthStatus,
 } from '../api';
 import { useAppState } from '../hooks/useAppState';
+import { useI18n } from '../i18n/use-i18n';
+import {
+  ONE_SHOT_DEV_WORKFLOW_PROMPT_ZH,
+  ONE_SHOT_DEV_WORKFLOW_PROMPT_EN,
+  DASHBOARD_HEALTH_CHECK_PROMPT_ZH,
+  DASHBOARD_HEALTH_CHECK_PROMPT_EN,
+  DASHBOARD_CHAT_INTRO_PROMPT_ZH,
+  DASHBOARD_CHAT_INTRO_PROMPT_EN,
+} from '../i18n/prompts';
 import { parseMetrics } from '../utils/diagnostics';
 import OnboardingWizard from './OnboardingWizard';
-
-const ONE_SHOT_DEV_WORKFLOW_PROMPT = [
-  '我想一句话开发一个功能，请严格按以下通用流程执行，并在关键节点先给我确认：',
-  '1) 需求澄清：先复述目标、输入输出和成功标准；',
-  '2) 硬件可行性：检查当前板卡型号、已连接传感器/相机/麦克风、系统与依赖状态，判断是否满足；',
-  '3) 能力匹配：以设备板卡探测、板端 assess 与实时环境为准，判断技能与依赖是否真可用；',
-  '4) 联网检索：搜索官网/文档/代码仓库，确认是否已有成熟方案与实现路径；',
-  '5) 方案产出：给出最小可行实现（涉及 skill 时先给草案），列出风险与前置条件；',
-  '6) 二次确认：明确问我"是否按该方案执行"；',
-  '7) 我确认后再执行，不要直接动手。',
-].join('\n');
 
 /**
  * Throttled canvas gradient animation — renders at ~20 FPS instead of 60 FPS.
@@ -157,13 +155,13 @@ function AnimatedNumber({ value, suffix }: { value: string; suffix?: string }) {
 export default function Dashboard() {
   const {
     currentDevice,
-    addToast,
     setShowAddDevice,
     setActiveTab,
     setChatExpanded,
     setCmd,
     obStep, setObStep,
   } = useAppState();
+  const { t, isEn } = useI18n();
 
   const [openclawHealth, setOpenclawHealth] = useState<OpenClawHealthStatus | null>(null);
   const [metrics, setMetrics] = useState({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
@@ -245,19 +243,19 @@ export default function Dashboard() {
         <div className="dash-morph-halo secondary" />
         <div className={`dash-empty-hero ${mounted ? 'dash-enter' : ''}`}>
           <div className="dash-brand">RDK Studio</div>
-          <p className="dash-tagline">连接你的 RDK 开发板，开始构建</p>
+          <p className="dash-tagline">{t('dashboard.tagline', '连接你的 RDK 开发板，开始构建')}</p>
           <button className="dash-action primary" onClick={() => setShowAddDevice(true)}>
             <span className="dash-action-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
             </span>
-            添加设备
+            {t('dashboard.addDevice', '添加设备')}
           </button>
           <div className="dash-nodevice-actions">
-            <button className="btn btn-ghost" onClick={() => prompt('RDK Studio 和 RDKClaw 能做什么？请简要介绍你的能力。')}>
-              先聊聊
+            <button className="btn btn-ghost" onClick={() => prompt(isEn ? DASHBOARD_CHAT_INTRO_PROMPT_EN : DASHBOARD_CHAT_INTRO_PROMPT_ZH)}>
+              {t('dashboard.chatFirst', '先聊聊')}
             </button>
             <button className="btn btn-ghost" onClick={() => setObStep('board')}>
-              重新开始引导
+              {t('dashboard.restartOnboarding', '重新开始引导')}
             </button>
           </div>
         </div>
@@ -266,10 +264,10 @@ export default function Dashboard() {
   }
 
   const stats = [
-    { key: 'mem', val: metrics.memory, label: 'MEM' },
-    { key: 'temp', val: metrics.temp, label: 'TEMP', warn: metrics.tempC >= 85 },
-    { key: 'bpu', val: metrics.bpu, label: 'BPU', warn: metrics.bpuVal >= 90 },
-    { key: 'up', val: metrics.uptime, label: 'UPTIME' },
+    { key: 'mem', val: metrics.memory, label: t('dashboard.metric.mem', 'MEM') },
+    { key: 'temp', val: metrics.temp, label: t('dashboard.metric.temp', 'TEMP'), warn: metrics.tempC >= 85 },
+    { key: 'bpu', val: metrics.bpu, label: t('dashboard.metric.bpu', 'BPU'), warn: metrics.bpuVal >= 90 },
+    { key: 'up', val: metrics.uptime, label: t('dashboard.metric.uptime', 'UPTIME') },
   ];
 
   return (
@@ -291,7 +289,7 @@ export default function Dashboard() {
           </span>
           <span className={`lp-pill ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : ''}`}>
             <span className={`status-dot ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : 'offline'}`} />
-            设备在线
+            {t('dashboard.deviceOnline', '设备在线')}
           </span>
         </div>
         <h1 className="lp-device-name">{currentDevice.name}</h1>
@@ -310,22 +308,22 @@ export default function Dashboard() {
 
       {/* ── CTA: primary action ── */}
       <div className={`lp-cta ${mounted ? 'lp-enter lp-d2' : ''}`}>
-        <button className="lp-cta-btn primary" onClick={() => prompt(ONE_SHOT_DEV_WORKFLOW_PROMPT)}>
+        <button className="lp-cta-btn primary" onClick={() => prompt(isEn ? ONE_SHOT_DEV_WORKFLOW_PROMPT_EN : ONE_SHOT_DEV_WORKFLOW_PROMPT_ZH)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
-          一句话开发
+          {t('dashboard.oneShotDev', '一句话开发')}
         </button>
         <button className="lp-cta-btn" onClick={() => setActiveTab('terminal')}>Terminal</button>
         <button className="lp-cta-btn" onClick={() => setActiveTab('openclaw')}>OpenClaw</button>
-        <button className="lp-cta-btn" onClick={() => prompt('帮我全面检查设备健康状态')}>设备体检</button>
+        <button className="lp-cta-btn" onClick={() => prompt(isEn ? DASHBOARD_HEALTH_CHECK_PROMPT_EN : DASHBOARD_HEALTH_CHECK_PROMPT_ZH)}>{t('dashboard.healthCheck', '设备体检')}</button>
       </div>
 
       {/* ── Workspace capability badges ── */}
       {wsHealth && (
         <div className={`lp-caps ${mounted ? 'lp-enter lp-d3' : ''}`}>
           {([
-            { key: 'development', label: '开发环境', tab: 'terminal' as const },
+            { key: 'development', label: t('dashboard.cap.dev', '开发环境'), tab: 'terminal' as const },
             { key: 'codeServer', label: 'IDE', tab: 'ide' as const },
-            { key: 'vnc', label: '远程桌面', tab: 'vnc' as const },
+            { key: 'vnc', label: t('dashboard.cap.vnc', '远程桌面'), tab: 'vnc' as const },
             { key: 'ros', label: 'ROS', tab: 'ros' as const },
           ]).map(item => {
             const mod = wsHealth[item.key] as WorkspaceModule | undefined;
@@ -334,7 +332,7 @@ export default function Dashboard() {
               <button key={item.key} className={`lp-cap ${mod.ready ? 'ready' : ''}`} onClick={() => setActiveTab(item.tab)}>
                 <span className={`lp-cap-dot ${mod.ready ? 'ok' : mod.installed ? 'partial' : ''}`} />
                 <span className="lp-cap-name">{item.label}</span>
-                <span className="lp-cap-status">{mod.ready ? '就绪' : mod.installed ? '未启动' : '未安装'}</span>
+                <span className="lp-cap-status">{mod.ready ? t('dashboard.cap.ready', '就绪') : mod.installed ? t('dashboard.cap.notRunning', '未启动') : t('dashboard.cap.notInstalled', '未安装')}</span>
               </button>
             );
           })}

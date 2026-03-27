@@ -1,10 +1,19 @@
 import React, { createContext, useContext, useState } from 'react';
 import type { TerminalSession } from '../app-types';
-import { TERMINAL_PROFILES } from '../constants';
+import { getTerminalProfileLabel } from '../constants';
+import { fillTemplate } from '../i18n/en-extras';
+import { translate } from '../i18n/translate';
 import { executeDeviceCommand, rememberDevicePassword } from '../api';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { useUIStore } from './useUIStore';
+
+const TERM_UI_LOCALE_KEY = 'rdk-ui-locale';
+
+function readStoredLocaleForTerminal(): 'zh-CN' | 'en' {
+  if (typeof window === 'undefined') return 'zh-CN';
+  return localStorage.getItem(TERM_UI_LOCALE_KEY) === 'en' ? 'en' : 'zh-CN';
+}
 
 export interface TerminalStoreState {
   terminalProfile: string;
@@ -32,23 +41,32 @@ export function useTerminalStore(): TerminalStoreState {
 export function TerminalProvider({ children }: { children: React.ReactNode }) {
   const { addToast, addActivity } = useToastStore();
   const { currentDevice, setShowAddDevice } = useDeviceStore();
-  const { activeTab } = useUIStore();
+  const { activeTab, language } = useUIStore();
+  const isEn = language === 'en';
+  const t = (key: string, zh: string) => translate(isEn, key, zh);
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
 
   const [terminalProfile, setTerminalProfile] = useState('shell');
   const [terminalDraft, setTerminalDraft] = useState('');
-  const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([
-    { id: 'session-1', name: '主会话', profile: 'shell', status: 'attached', lines: ['Welcome to RDK OS.', 'root@rdk:~#'] },
+  const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>(() => [
+    {
+      id: 'session-1',
+      name: translate(readStoredLocaleForTerminal() === 'en', 'terminal.session.main', '主会话'),
+      profile: 'shell',
+      status: 'attached',
+      lines: ['Welcome to RDK OS.', 'root@rdk:~#'],
+    },
   ]);
   const [activeSessionId, setActiveSessionId] = useState('session-1');
   const currentSession = terminalSessions.find((s) => s.id === activeSessionId) ?? terminalSessions[0];
 
   const createSession = () => {
     const nextId = `session-${Date.now()}`;
-    const profileLabel = TERMINAL_PROFILES.find((p) => p.id === terminalProfile)?.label ?? '系统 Shell';
+    const profileLabel = getTerminalProfileLabel(terminalProfile, isEn);
     setTerminalSessions((prev) => [...prev, { id: nextId, name: `${profileLabel} ${prev.length + 1}`, profile: terminalProfile, status: 'warm', lines: [] }]);
     setActiveSessionId(nextId);
-    addToast(`终端会话 "${profileLabel}" 已创建`, 'success');
-    addActivity(`创建终端会话: ${profileLabel}`);
+    addToast(tf('terminal.session.created', '终端会话 "{{name}}" 已创建', { name: profileLabel }), 'success');
+    addActivity(tf('terminal.session.activity', '创建终端会话: {{name}}', { name: profileLabel }));
   };
 
   const removeSession = (id: string) => {
@@ -65,22 +83,23 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
   const runTerminalCommand = (commandText: string, password?: string) => {
     if (!commandText.trim()) return;
     if (!currentDevice) {
-      addToast('请先连接真实设备', 'warning');
+      addToast(t('ui.needDevice', '请先连接真实设备'), 'warning');
       return;
     }
 
     const nlPatterns: Array<{ match: RegExp; cmd: string }> = [
-      { match: /查看.*话题|列出.*topic/i, cmd: 'ros2 topic list' },
-      { match: /温度|发热|散热/i, cmd: 'cat /sys/class/thermal/thermal_zone0/temp' },
-      { match: /内存|内存使用/i, cmd: 'free -h' },
-      { match: /磁盘|存储空间/i, cmd: 'df -h' },
-      { match: /进程|正在运行/i, cmd: 'top -bn1 | head -20' },
-      { match: /日志|系统日志/i, cmd: 'tail -f /var/log/syslog' },
-      { match: /网络|ip地址|ip 地址/i, cmd: 'ip addr show' },
+      { match: /查看.*话题|列出.*topic|list.*topics?|show.*topics?/i, cmd: 'ros2 topic list' },
+      { match: /温度|发热|散热|temperature|thermal/i, cmd: 'cat /sys/class/thermal/thermal_zone0/temp' },
+      { match: /内存|内存使用|^memory|^ram\b/i, cmd: 'free -h' },
+      { match: /磁盘|存储空间|^disk|^storage|^df\b/i, cmd: 'df -h' },
+      { match: /进程|正在运行|^processes|^running processes/i, cmd: 'top -bn1 | head -20' },
+      { match: /日志|系统日志|^logs?\b|syslog/i, cmd: 'tail -f /var/log/syslog' },
+      { match: /网络|ip地址|ip 地址|^ip addr|^network/i, cmd: 'ip addr show' },
       { match: /bpu|推理|加速器/i, cmd: 'hrut_smi' },
     ];
-    const isNL = /[\u4e00-\u9fff]/.test(commandText) && !commandText.startsWith('/') && !commandText.includes('--');
-    const nlHit = isNL ? nlPatterns.find((p) => p.match.test(commandText)) : null;
+    const nlHit = !commandText.startsWith('/') && !commandText.includes('--')
+      ? nlPatterns.find((p) => p.match.test(commandText))
+      : undefined;
     const actualCommand = nlHit?.cmd ?? commandText;
 
     if (activeTab === 'terminal') {
@@ -96,7 +115,9 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const prepend = nlHit ? [`✨ AI 翻译: "${commandText}" → ${actualCommand}`] : [];
+    const prepend = nlHit
+      ? [tf('terminal.nl.translate', '✨ AI 翻译: "{{in}}" → {{out}}', { in: commandText, out: actualCommand })]
+      : [];
     setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
       ? { ...s, status: 'running', lines: [...s.lines, ...prepend, `root@rdk:~# ${actualCommand}`] }
       : s));
@@ -111,19 +132,20 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
           .map((line) => line.trimEnd())
           .filter((line) => line.length > 0);
         setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
-          ? { ...s, status: 'attached', lines: [...s.lines, ...(outputLines.length ? outputLines : ['[无输出]']), 'root@rdk:~#'] }
+          ? { ...s, status: 'attached', lines: [...s.lines, ...(outputLines.length ? outputLines : [t('terminal.noOutput', '[无输出]')]), 'root@rdk:~#'] }
           : s));
       })
       .catch((error) => {
-        const rawMessage = error instanceof Error ? error.message : '命令执行失败';
-        const message = /设备密码缺失|缺少 SSH 密码|Authentication failure/i.test(rawMessage)
-          ? '设备认证失败，请在设备管理中重新连接并更新账号密码'
+        const rawMessage = error instanceof Error ? error.message : t('terminal.cmd.fail', '命令执行失败');
+        const authFailed = /设备密码缺失|缺少 SSH 密码|Authentication failure|authentication failed|password|auth fail/i.test(rawMessage);
+        const message = authFailed
+          ? t('terminal.auth.fail', '设备认证失败，请在设备管理中重新连接并更新账号密码')
           : rawMessage;
         setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
           ? { ...s, status: 'attached', lines: [...s.lines, `ERROR: ${message}`, 'root@rdk:~#'] }
           : s));
         addToast(message, 'error');
-        if (/设备认证失败/.test(message)) {
+        if (authFailed) {
           setShowAddDevice(true);
         }
       });
@@ -135,16 +157,27 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     const lastLines = currentSession.lines.slice(-8).filter((l) => !l.startsWith('root@') && !l.startsWith('🤖'));
     const hasError = lastLines.some((l) => /error|fail|denied|not found/i.test(l));
     const analysis = hasError
-      ? ['🔍 检测到异常输出，可能原因:', '   • 权限不足（sudo）', '   • 依赖缺失（安装对应软件包）', '   • 路径或命令拼写错误', '💡 建议: 根据上方真实报错逐条排查']
-      : ['🔍 终端输出分析:', `   • 共 ${currentSession.lines.length} 行历史输出`, '   • 当前片段未检测到明显错误关键字', '   • 如需精确结论，请继续执行诊断命令（如 hrut_smi/free -h/df -h）'];
-    const allLines = ['🤖 ─── AI 分析 ───', ...analysis, '────────────', 'root@rdk:~#'];
-    setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: [...s.lines, '🤖 ─── AI 分析中... ───'] } : s));
+      ? [
+          t('terminal.ai.err.title', '🔍 检测到异常输出，可能原因:'),
+          t('terminal.ai.err.sudo', '   • 权限不足（sudo）'),
+          t('terminal.ai.err.deps', '   • 依赖缺失（安装对应软件包）'),
+          t('terminal.ai.err.typo', '   • 路径或命令拼写错误'),
+          t('terminal.ai.err.hint', '💡 建议: 根据上方真实报错逐条排查'),
+        ]
+      : [
+          t('terminal.ai.ok.title', '🔍 终端输出分析:'),
+          tf('terminal.ai.ok.lines', '   • 共 {{n}} 行历史输出', { n: currentSession.lines.length }),
+          t('terminal.ai.ok.noKw', '   • 当前片段未检测到明显错误关键字'),
+          t('terminal.ai.ok.more', '   • 如需精确结论，请继续执行诊断命令（如 hrut_smi/free -h/df -h）'),
+        ];
+    const allLines = [t('terminal.ai.header', '🤖 ─── AI 分析 ───'), ...analysis, '────────────', 'root@rdk:~#'];
+    setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: [...s.lines, t('terminal.ai.running', '🤖 ─── AI 分析中... ───')] } : s));
     allLines.forEach((line, i) => {
       setTimeout(() => {
         setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: i === 0 ? [...s.lines.slice(0, -1), line] : [...s.lines, line] } : s));
       }, (i + 1) * 200);
     });
-    setTimeout(() => addToast('AI 分析完成', 'success'), allLines.length * 200 + 100);
+    setTimeout(() => addToast(t('terminal.ai.done', 'AI 分析完成'), 'success'), allLines.length * 200 + 100);
   };
 
   const value: TerminalStoreState = {

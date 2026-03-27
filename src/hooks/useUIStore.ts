@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import type { Tab, ConfirmDialogState, TransferItem } from '../app-types';
-import { FLASH_IMAGES } from '../constants';
+import { getFlashImageLabel } from '../constants';
+import { fillTemplate } from '../i18n/en-extras';
+import { translate } from '../i18n/translate';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { fetchNodeRedStatus, fetchRosTopics, fetchVncStatus, executeDeviceCommand } from '../api';
@@ -12,13 +14,11 @@ function readStoredLocale(): 'zh-CN' | 'en' {
   return localStorage.getItem(UI_LOCALE_KEY) === 'en' ? 'en' : 'zh-CN';
 }
 
-export type ThemeMode = 'aurora' | 'cyber' | 'cozy';
+/** 固定为橙色极光浅色主题（原 aurora），不再提供赛博/奶咖切换 */
+export type ThemeMode = 'aurora';
 
 export interface UIStoreState {
-  // Theme
   theme: ThemeMode;
-  setTheme: (t: ThemeMode) => void;
-  toggleTheme: () => void;
 
   // Navigation
   activeTab: Tab;
@@ -145,27 +145,31 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const { addToast, addActivity } = useToastStore();
   const { currentDevice } = useDeviceStore();
 
-  // ── Theme ──
-  const [theme, setThemeState] = useState<ThemeMode>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('rdk-theme') as ThemeMode | null;
-      if (saved && ['aurora', 'cyber', 'cozy'].includes(saved)) return saved;
-    }
-    return 'cyber';
-  });
-  const setTheme = (t: ThemeMode) => {
-    setThemeState(t);
-    localStorage.setItem('rdk-theme', t);
-    document.documentElement.setAttribute('data-theme', t);
-  };
-  const THEME_ORDER: ThemeMode[] = ['aurora', 'cozy', 'cyber'];
-  const toggleTheme = () => {
-    const idx = THEME_ORDER.indexOf(theme);
-    setTheme(THEME_ORDER[(idx + 1) % THEME_ORDER.length]);
-  };
+  // ── Theme（仅 aurora / 橙色） ──
+  const [theme] = useState<ThemeMode>('aurora');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('rdk-theme', 'aurora');
+    document.documentElement.setAttribute('data-theme', 'aurora');
+  }, []);
 
   // ── Navigation ──
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+
+  // ── Language（提前声明，供 Flash/VNC 等文案使用）──
+  const [language, setLanguageState] = useState<'zh-CN' | 'en'>(readStoredLocale);
+  const setLanguage = (v: string) => {
+    const next: 'zh-CN' | 'en' = v === 'en' ? 'en' : 'zh-CN';
+    setLanguageState(next);
+    if (typeof window !== 'undefined') localStorage.setItem(UI_LOCALE_KEY, next);
+  };
+  const isEn = language === 'en';
+  const t = (key: string, zh: string) => translate(isEn, key, zh);
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
+
+  useEffect(() => {
+    document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
+  }, [language]);
 
   // ── Onboarding (persisted) ──
   const [obStep, setObStepRaw] = useState<'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done'>(() => {
@@ -194,21 +198,25 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [flashVerify, setFlashVerify] = useState(true);
   const [flashBackup, setFlashBackup] = useState(false);
   const [flashProgress, setFlashProgress] = useState(0);
-  const [flashPhase, setFlashPhase] = useState('等待开始');
+  const [flashPhase, setFlashPhase] = useState(() => t('ui.flash.phase.wait', '等待开始'));
   const [isFlashing, setIsFlashing] = useState(false);
   const [flashStep, setFlashStep] = useState(1);
 
   const startFlash = () => {
     const doFlash = () => {
       setFlashProgress(0);
-      setFlashPhase('请在本机执行烧录工具（balenaEtcher / dd / rpi-imager）后回到此页确认');
+      setFlashPhase(t('ui.flash.phase.localTool', '请在本机执行烧录工具（balenaEtcher / dd / rpi-imager）后回到此页确认'));
       setFlashStep(1);
       setIsFlashing(false);
-      addToast('已进入真实烧录流程引导', 'info');
-      addActivity(`烧录准备: ${FLASH_IMAGES.find((i) => i.id === flashImage)?.label || flashImage}`);
+      addToast(t('ui.flash.toast.started', '已进入真实烧录流程引导'), 'info');
+      addActivity(tf('ui.flash.activityPrep', '烧录准备: {{label}}', { label: getFlashImageLabel(flashImage, isEn) }));
     };
     if (flashTarget === 'emmc') {
-      showConfirm('⚠️ eMMC 烧录确认', '当前目标为 eMMC 内置存储，写入后将覆盖原有系统。此操作不可撤销，建议先备份重要数据。确认继续？', doFlash);
+      showConfirm(
+        t('ui.flash.confirm.emmcTitle', '⚠️ eMMC 烧录确认'),
+        t('ui.flash.confirm.emmcMsg', '当前目标为 eMMC 内置存储，写入后将覆盖原有系统。此操作不可撤销，建议先备份重要数据。确认继续？'),
+        doFlash,
+      );
     } else {
       doFlash();
     }
@@ -220,11 +228,19 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [transferQueue, setTransferQueue] = useState<TransferItem[]>([]);
 
   const appendTransferTask = () => {
-    const direction = fileAction === 'upload' ? '上传' : fileAction === 'download' ? '下载' : '同步';
-    const name = fileAction === 'upload' ? '用户选择文件' : fileAction === 'download' ? '用户选择远程文件' : '用户选择同步目录';
+    const direction = fileAction === 'upload'
+      ? t('ui.transfer.upload', '上传')
+      : fileAction === 'download'
+        ? t('ui.transfer.download', '下载')
+        : t('ui.transfer.sync', '同步');
+    const name = fileAction === 'upload'
+      ? t('ui.transfer.name.upload', '用户选择文件')
+      : fileAction === 'download'
+        ? t('ui.transfer.name.download', '用户选择远程文件')
+        : t('ui.transfer.name.sync', '用户选择同步目录');
     setTransferQueue((prev) => [{ id: `queue-${prev.length + 1}`, name, direction, progress: 0, status: 'running' }, ...prev]);
-    addToast(`${direction}任务已记录，请在文件页执行真实命令`, 'info');
-    addActivity(`新增${direction}任务`);
+    addToast(tf('ui.transfer.toast', '{{dir}}任务已记录，请在文件页执行真实命令', { dir: direction }), 'info');
+    addActivity(tf('ui.transfer.activity', '新增{{dir}}任务', { dir: direction }));
   };
 
   // ── VNC ──
@@ -233,37 +249,37 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [vncOverlay] = useState(true);
   const [vncConnected, setVncConnected] = useState(false);
   const [vncProgress, setVncProgress] = useState(0);
-  const [vncPhase, setVncPhase] = useState('等待连接');
+  const [vncPhase, setVncPhase] = useState(() => t('ui.vnc.phase.wait', '等待连接'));
 
   const startVncSession = () => {
     if (!currentDevice) {
-      addToast('请先连接真实设备', 'warning');
+      addToast(t('ui.needDevice', '请先连接真实设备'), 'warning');
       return;
     }
     setVncConnected(false);
     setVncProgress(0);
-    setVncPhase('正在检查设备 VNC 服务状态');
+    setVncPhase(t('ui.vnc.phase.checking', '正在检查设备 VNC 服务状态'));
 
     fetchVncStatus(currentDevice.id)
       .then((result) => {
         if (result.active) {
           setVncConnected(true);
           setVncProgress(100);
-          setVncPhase('设备 VNC 服务已运行');
-          addToast('VNC 服务可用', 'success');
-          addActivity('设备 VNC 服务状态: active');
+          setVncPhase(t('ui.vnc.phase.running', '设备 VNC 服务已运行'));
+          addToast(t('ui.vnc.toast.ok', 'VNC 服务可用'), 'success');
+          addActivity(t('ui.vnc.activity.active', '设备 VNC 服务状态: active'));
         } else {
           setVncConnected(false);
           setVncProgress(0);
-          setVncPhase('设备未检测到 VNC 服务，请先在板端启动');
-          addToast('未检测到 VNC 服务，请先在设备上启动 x11vnc/vncserver', 'warning');
+          setVncPhase(t('ui.vnc.phase.missing', '设备未检测到 VNC 服务，请先在板端启动'));
+          addToast(t('ui.vnc.toast.missing', '未检测到 VNC 服务，请先在设备上启动 x11vnc/vncserver'), 'warning');
         }
       })
       .catch((error) => {
         setVncConnected(false);
         setVncProgress(0);
-        setVncPhase('VNC 状态检查失败');
-        addToast(error instanceof Error ? error.message : 'VNC 状态检查失败', 'error');
+        setVncPhase(t('ui.vnc.phase.checkFail', 'VNC 状态检查失败'));
+        addToast(error instanceof Error ? error.message : t('ui.vnc.toast.checkFail', 'VNC 状态检查失败'), 'error');
       });
   };
 
@@ -275,13 +291,13 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
 
   const runFlowValidation = () => {
     if (!currentDevice) {
-      addToast('请先连接真实设备', 'warning');
+      addToast(t('ui.needDevice', '请先连接真实设备'), 'warning');
       return;
     }
     setFlowCheckProgress(0);
     setIsFlowChecking(true);
-    addToast('部署前检查已开始', 'info');
-    addActivity('执行流程编排部署前检查');
+    addToast(t('ui.flow.toast.started', '部署前检查已开始'), 'info');
+    addActivity(t('ui.flow.activity', '执行流程编排部署前检查'));
 
     (async () => {
       try {
@@ -295,10 +311,13 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
           'bash -lc "(openclaw status || clawctl status || echo openclaw-unavailable); (systemctl is-active nodered || echo nodered-inactive)"',
         );
         setFlowCheckProgress(100);
-        addToast('流程编排部署前检查完成', 'success');
-        addActivity(`Node-RED: ${nodeRed.active ? 'active' : 'inactive'} · ROS topics: ${ros.topics.length}`);
+        addToast(t('ui.flow.toast.done', '流程编排部署前检查完成'), 'success');
+        addActivity(tf('ui.flow.activityResult', 'Node-RED: {{nr}} · ROS topics: {{n}}', {
+          nr: nodeRed.active ? 'active' : 'inactive',
+          n: ros.topics.length,
+        }));
       } catch (error) {
-        addToast(error instanceof Error ? error.message : '流程部署前检查失败', 'error');
+        addToast(error instanceof Error ? error.message : t('ui.flow.toast.fail', '流程部署前检查失败'), 'error');
       } finally {
         setIsFlowChecking(false);
       }
@@ -347,16 +366,6 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [showSettings, setShowSettings] = useState(false);
   const [autoReconnect, setAutoReconnect] = useState(true);
   const [connectionTimeout, setConnectionTimeout] = useState(30);
-  const [language, setLanguageState] = useState<'zh-CN' | 'en'>(readStoredLocale);
-  const setLanguage = (v: string) => {
-    const next: 'zh-CN' | 'en' = v === 'en' ? 'en' : 'zh-CN';
-    setLanguageState(next);
-    if (typeof window !== 'undefined') localStorage.setItem(UI_LOCALE_KEY, next);
-  };
-
-  useEffect(() => {
-    document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
-  }, [language]);
 
   // ── Confirm dialog ──
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
@@ -365,7 +374,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   };
 
   const value: UIStoreState = {
-    theme, setTheme, toggleTheme,
+    theme,
     activeTab, setActiveTab,
     obStep, setObStep, selectedBoard, setSelectedBoard, obReturnStep, setObReturnStep,
     isLoading, loadingMsg, openWorkspace,

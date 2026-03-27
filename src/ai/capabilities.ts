@@ -6,6 +6,7 @@
  */
 
 import type { Capability, IntentId } from './types';
+import { translate } from '../i18n/translate';
 
 /** Full catalog of app capabilities */
 export const CAPABILITIES: Capability[] = [
@@ -184,6 +185,13 @@ export const CAPABILITIES: Capability[] = [
 /** Lookup capability by ID */
 export function getCapability(id: IntentId): Capability | undefined {
   return CAPABILITIES.find((c) => c.id === id);
+}
+
+/** UI label for task list / badges (follows Studio language). */
+export function getCapabilityDisplayLabel(id: IntentId, isEn: boolean): string {
+  const c = CAPABILITIES.find((x) => x.id === id);
+  if (!c) return id;
+  return translate(isEn, `cap.${id}.label`, c.label);
 }
 
 /** Match user text to a capability via keyword overlap (fallback when AI fails) */

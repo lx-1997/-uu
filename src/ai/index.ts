@@ -15,7 +15,7 @@ export type { AppActions, OrchestratorOutput } from './types';
 export type { ParsedTag, ParsedAIResult } from './types';
 
 // Capabilities (legacy, kept for backward compat)
-export { CAPABILITIES, getCapability, matchCapabilityByKeyword } from './capabilities';
+export { CAPABILITIES, getCapability, getCapabilityDisplayLabel, matchCapabilityByKeyword } from './capabilities';
 
 // Intent
 export { parseAIResponse, parseAIResponseV2, detectIntentByKeyword } from './intent';

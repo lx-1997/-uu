@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useEffect, useRef } from 'react';
 import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
-import { CMD_SUGGESTIONS } from '../constants';
+import type { CmdSuggestion } from '../constants';
 import type { Task } from '../ai';
 import type { AgentAttachmentPayload } from '../api';
 
+import { translate } from '../i18n/translate';
+import { fillTemplate } from '../i18n/en-extras';
 import { ToastProvider, useToastStore } from './useToastStore';
 import { DeviceProvider, useDeviceStore } from './useDeviceStore';
 import { UIProvider, useUIStore, type ThemeMode } from './useUIStore';
@@ -14,10 +16,7 @@ import { AIChatProvider, useAIChatStore } from './useAIChatStore';
 export type { ThemeMode };
 
 export interface AppState {
-  // Theme
   theme: ThemeMode;
-  setTheme: (t: ThemeMode) => void;
-  toggleTheme: () => void;
 
   // Device
   activeDevice: string;
@@ -163,7 +162,7 @@ export interface AppState {
   setCmd: (v: string) => void;
   showSuggestions: boolean;
   setShowSuggestions: (v: boolean) => void;
-  filteredSuggestions: typeof CMD_SUGGESTIONS;
+  filteredSuggestions: CmdSuggestion[];
   chatMessages: ChatMessage[];
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   chatExpanded: boolean;
@@ -296,11 +295,16 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       retryable?: boolean;
     };
 
+    const isEn = ui.language === 'en';
+    const t = (key: string, zh: string) => translate(isEn, key, zh);
+    const tf = (key: string, zh: string, vars: Record<string, string | number>) =>
+      fillTemplate(t(key, zh), vars);
+
     const onApiError = (evt: Event) => {
       const e = evt as CustomEvent<ApiErrorDetail>;
       const detail = e.detail ?? {};
       const code = String(detail.code || '').trim();
-      const message = String(detail.message || '请求失败').trim();
+      const message = String(detail.message || t('api.err.default', '请求失败')).trim();
       const status = Number(detail.status || 0);
       const retryable = Boolean(detail.retryable);
 
@@ -311,18 +315,18 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       apiErrorSeenRef.current[key] = now;
 
       if (code === 'DEVICE_AUTH_REQUIRED') {
-        toast.addToast('设备认证失效，请重新填写账号密码', 'warning');
+        toast.addToast(t('api.err.deviceAuth', '设备认证失效，请重新填写账号密码'), 'warning');
         device.setShowAddDevice(true);
         return;
       }
 
       if (code === 'DEVICE_COMMAND_TIMEOUT') {
-        toast.addToast('设备响应超时，建议稍后重试或检查网络质量', 'warning');
+        toast.addToast(t('api.err.timeout', '设备响应超时，建议稍后重试或检查网络质量'), 'warning');
         return;
       }
 
       if (code === 'FILE_NOT_FOUND') {
-        toast.addToast('目标文件不存在，请刷新目录后重试', 'info');
+        toast.addToast(t('api.err.fileNotFound', '目标文件不存在，请刷新目录后重试'), 'info');
         return;
       }
 
@@ -332,12 +336,12 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       }
 
       if (retryable || status === 504) {
-        toast.addToast(`${message}（可重试）`, 'warning');
+        toast.addToast(tf('api.err.retryWrap', '{{msg}}（可重试）', { msg: message }), 'warning');
         return;
       }
 
       if (status >= 500) {
-        toast.addToast(`${message}（服务端错误）`, 'error');
+        toast.addToast(tf('api.err.serverWrap', '{{msg}}（服务端错误）', { msg: message }), 'error');
         return;
       }
 
@@ -346,7 +350,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
 
     window.addEventListener('rdk-api-error', onApiError as EventListener);
     return () => window.removeEventListener('rdk-api-error', onApiError as EventListener);
-  }, [device, toast]);
+  }, [device, toast, ui.language]);
 
   const value: AppState = {
     // Toast

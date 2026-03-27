@@ -1,6 +1,6 @@
 import React from 'react';
 
-export function renderMarkdown(text: string): React.ReactNode[] | null {
+export function renderMarkdown(text: string, copyLabel = '复制'): React.ReactNode[] | null {
   if (!text) return null;
 
   const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
@@ -18,7 +18,7 @@ export function renderMarkdown(text: string): React.ReactNode[] | null {
       <div key={`cb-${segments.length}`} className="md-code-block">
         <div className="md-code-header">
           <span className="md-code-lang">{lang || 'code'}</span>
-          <button className="md-code-copy" onClick={() => { navigator.clipboard.writeText(code); }}>复制</button>
+          <button type="button" className="md-code-copy" onClick={() => { navigator.clipboard.writeText(code); }}>{copyLabel}</button>
         </div>
         <pre className="md-code-body"><code>{code}</code></pre>
       </div>

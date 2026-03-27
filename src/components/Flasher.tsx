@@ -994,7 +994,7 @@ export default function Flasher() {
                 <div className="flasher-drive-pane">
                   <div className="config-header" style={{ alignItems: 'flex-start' }}>
                     <div className="section-label" style={{ marginBottom: 0 }}>{t('flasher.section.targetDisk', '选择目标磁盘')}</div>
-                    <span className="badge badge-danger">{t('flasher.warn.erase', '写盘将清空目标磁盘全部数据！')}</span>
+                    <span className="badge badge-danger">{t('flasher.warn.eraseAll', '写盘将清空目标磁盘全部数据！')}</span>
                   </div>
                   <div className="config-grid">
                     {drives.length === 0 ? (
@@ -1022,7 +1022,7 @@ export default function Flasher() {
                   </div>
                   {caps.supportsDriveScan && (
                     <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={scanDrives}>
-                      刷新磁盘列表
+                      {t('flasher.btn.refreshDrives', '刷新磁盘列表')}
                     </button>
                   )}
                 </div>
@@ -1030,16 +1030,16 @@ export default function Flasher() {
 
               {/* Confirm summary */}
               <div className="flasher-summary-pane">
-                <div className="section-label">确认信息</div>
+                <div className="section-label">{t('flasher.section.summary', '确认信息')}</div>
                 <div className="config-section">
                   <div className="config-row">
-                    <span className="config-label">设备</span>
+                    <span className="config-label">{t('flasher.label.device', '设备')}</span>
                     <span className="config-value">
                       <strong>{DEVICE_LIST.find((d) => d.key === selectedDeviceKey)?.name}</strong>
                     </span>
                   </div>
                   <div className="config-row">
-                    <span className="config-label">镜像</span>
+                    <span className="config-label">{t('flasher.label.image', '镜像')}</span>
                     <span className="config-value">
                       <strong>
                         {useLocalImage
@@ -1051,22 +1051,29 @@ export default function Flasher() {
                     </span>
                   </div>
                   <div className="config-row">
-                    <span className="config-label">本机路径</span>
+                    <span className="config-label">{t('flasher.label.localPath', '本机路径')}</span>
                     <span className="config-value">
                       <strong style={{ wordBreak: 'break-all' }}>
-                        {localImagePath || (needsXburn ? 'xburn 内选择' : (useLocalImage ? '未选择' : '在线镜像'))}
+                        {localImagePath
+                          || (needsXburn
+                            ? t('flasher.path.xburnPick', 'xburn 内选择')
+                            : (useLocalImage ? t('flasher.path.notChosen', '未选择') : t('flasher.path.onlineImage', '在线镜像')))}
                       </strong>
                     </span>
                   </div>
                   <div className="config-row">
-                    <span className="config-label">目标磁盘</span>
+                    <span className="config-label">{t('flasher.label.targetDrive', '目标磁盘')}</span>
                     <span className="config-value">
-                      <strong>{needsXburn ? 'xburn 管理' : (selectedDriveValid ? selectedDrive : '未选择')}</strong>
+                      <strong>
+                        {needsXburn
+                          ? t('flasher.drive.xburnManaged', 'xburn 管理')
+                          : (selectedDriveValid ? selectedDrive : t('flasher.drive.notChosen', '未选择'))}
+                      </strong>
                     </span>
                   </div>
                   {!needsXburn && (
                     <div className="config-row" style={{ alignItems: 'flex-start' }}>
-                      <span className="config-label">烧录模式</span>
+                      <span className="config-label">{t('flasher.label.flashMode', '烧录模式')}</span>
                       <span className="config-value" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
                         <select
                           className="input"
@@ -1074,11 +1081,11 @@ export default function Flasher() {
                           value={performanceProfile}
                           onChange={(e) => setPerformanceProfile(e.target.value === 'turbo' ? 'turbo' : 'balanced')}
                         >
-                          <option value="balanced">常规烧录（更稳）</option>
-                          <option value="turbo">极速烧录（更快）</option>
+                          <option value="balanced">{t('flasher.mode.balanced', '常规烧录（更稳）')}</option>
+                          <option value="turbo">{t('flasher.mode.turbo', '极速烧录（更快）')}</option>
                         </select>
                         {performanceProfile === 'turbo' && (
-                          <span className="badge badge-danger">极速模式会占用更多 CPU/磁盘资源，可能造成卡顿</span>
+                          <span className="badge badge-danger">{t('flasher.warn.turbo', '极速模式会占用更多 CPU/磁盘资源，可能造成卡顿')}</span>
                         )}
                       </span>
                     </div>
@@ -1087,7 +1094,7 @@ export default function Flasher() {
                 {!needsXburn && (
                   <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                     <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
-                      写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。
+                      {t('flasher.confirm.erase', '写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。')}
                     </p>
                   </div>
                 )}

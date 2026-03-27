@@ -6,6 +6,9 @@
  */
 
 import type { Tab } from '../app-types';
+import { fillTemplate } from '../i18n/en-extras';
+import { translate } from '../i18n/translate';
+import { tabDisplayTitle } from '../i18n/tab-display';
 import type { ClientActionType } from './types';
 
 export interface ActionDispatchContext {
@@ -18,6 +21,8 @@ export interface ActionDispatchContext {
   scanForDevices: () => void;
   runFlowValidation: () => void;
   addToast: (message: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
+  /** 与 Studio 语言一致；缺省中文 */
+  locale?: 'zh-CN' | 'en';
 }
 
 const TAB_ALIASES: Record<string, Tab> = {
@@ -56,7 +61,12 @@ export function resolveTab(input: string): Tab | null {
 export function dispatchAction(action: ClientActionType, ctx: ActionDispatchContext): void {
   switch (action.type) {
     case 'navigate': {
-      ctx.openWorkspace(action.tab, `正在打开 ${action.tab}...`);
+      const isEn = ctx.locale === 'en';
+      const t = (key: string, zh: string) => translate(isEn, key, zh);
+      const msg = fillTemplate(translate(isEn, 'orc.workspace.opening', '正在打开 {{tab}}…'), {
+        tab: tabDisplayTitle(t, action.tab),
+      });
+      ctx.openWorkspace(action.tab, msg);
       break;
     }
     case 'openSettings':

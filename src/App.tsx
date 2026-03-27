@@ -21,6 +21,9 @@ import OpenClaw from './components/OpenClaw';
 import Hardware from './components/Hardware';
 import Ros from './components/Ros';
 import SkillBrowser from './components/SkillBrowser';
+import Examples from './components/Examples';
+import Models from './components/Models';
+import LowcodeStub from './components/lowcode-stub';
 import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 
@@ -43,6 +46,9 @@ function MainContent() {
     hardware: <Hardware />,
     ros: <Ros />,
     skills: <SkillBrowser />,
+    examples: <Examples />,
+    models: <Models />,
+    lowcode: <LowcodeStub />,
   };
 
   return (
@@ -128,7 +134,7 @@ function AppShell() {
   const tabTitle = useMemo(() => {
     const names: Record<string, string> = {
       dashboard: t('tabs.dashboard', '工作台'),
-      openclaw: 'OpenClaw',
+      openclaw: t('tabs.openclaw', 'OpenClaw'),
       skills: t('tabs.skills', '技能工坊'),
       terminal: t('tabs.terminal', '终端'),
       files: t('tabs.files', '文件'),
@@ -137,6 +143,9 @@ function AppShell() {
       hardware: t('tabs.hardware', '硬件监控'),
       flasher: t('tabs.flasher', '烧录工具'),
       ros: t('tabs.ros', 'ROS'),
+      examples: t('tabs.examples', 'NodeHub'),
+      models: t('tabs.models', 'ModelZoo'),
+      lowcode: t('tabs.lowcode', '低代码'),
     };
     return names[activeTab] ?? activeTab;
   }, [activeTab, t]);

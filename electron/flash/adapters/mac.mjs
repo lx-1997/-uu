@@ -18,24 +18,12 @@ import { FlashErrorCode } from '../types.mjs';
 let activeOp = null;
 const PROGRESS_EMIT_INTERVAL_MS = 250;
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function resolveIoPolicy(options = {}) {
   const turbo = options.performanceProfile === 'turbo';
   if (turbo) {
-    return {
-      chunkBytes: 2 * 1024 * 1024,
-      yieldIntervalBytes: 32 * 1024 * 1024,
-      throttleMs: 3,
-    };
+    return { chunkBytes: 2 * 1024 * 1024 };
   }
-  return {
-    chunkBytes: 512 * 1024,
-    yieldIntervalBytes: 4 * 1024 * 1024,
-    throttleMs: 8,
-  };
+  return { chunkBytes: 512 * 1024 };
 }
 
 function exec(cmd, args) {
@@ -183,25 +171,30 @@ export async function writeImage(imagePath, drivePath, options = {}) {
   const rawPath = driveMeta.rawPath || driveMeta.path;
 
   activeOp = { id: crypto.randomUUID(), cancelled: false };
-  const imageFd = fs.openSync(imagePath, 'r');
-  const targetFd = fs.openSync(rawPath, 'r+');
+  /** 异步 I/O，保证主线程能及时处理 rdk:flash:cancel */
+  let imageFh;
+  let targetFh;
   const buffer = Buffer.allocUnsafe(ioPolicy.chunkBytes);
-  let readBytes = 0;
   let offset = 0;
-  let bytesSinceYield = 0;
   let lastProgressPercent = -1;
   let lastProgressEmitAt = 0;
   let verify = { ok: true, detail: '跳过校验' };
 
   try {
+    imageFh = await fs.promises.open(imagePath, 'r');
+    targetFh = await fs.promises.open(rawPath, 'r+');
     emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
-    while ((readBytes = fs.readSync(imageFd, buffer, 0, buffer.length, offset)) > 0) {
+    while (true) {
       if (activeOp?.cancelled) {
         throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
       }
-      fs.writeSync(targetFd, buffer, 0, readBytes, offset);
-      offset += readBytes;
-      bytesSinceYield += readBytes;
+      const { bytesRead } = await imageFh.read(buffer, 0, buffer.length, offset);
+      if (bytesRead === 0) break;
+      if (activeOp?.cancelled) {
+        throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
+      }
+      await targetFh.write(buffer, 0, bytesRead, offset);
+      offset += bytesRead;
       const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
       const now = Date.now();
       const shouldEmitProgress =
@@ -213,23 +206,18 @@ export async function writeImage(imagePath, drivePath, options = {}) {
         lastProgressEmitAt = now;
         emitFlashProgress({ stage: 'flashing', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
       }
-      if (bytesSinceYield >= ioPolicy.yieldIntervalBytes) {
-        bytesSinceYield = 0;
-        await new Promise((resolve) => setImmediate(resolve));
-        await delay(ioPolicy.throttleMs);
-      }
     }
-    fs.fsyncSync(targetFd);
+    await targetFh.sync();
     if (verifyMode === 'sample') {
       emitFlashProgress({ stage: 'verifying', message: '正在执行写后抽样校验', percent: 99 });
-      verify = verifyImageSample(imageFd, targetFd, total);
+      verify = verifyImageSample(imageFh.fd, targetFh.fd, total);
       if (!verify.ok) throw Object.assign(new Error(verify.detail), { code: FlashErrorCode.VERIFY_FAILED });
     }
     emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
     return { output: `镜像已写入 ${rawPath}`, verify };
   } finally {
-    fs.closeSync(imageFd);
-    fs.closeSync(targetFd);
+    await imageFh?.close().catch(() => {});
+    await targetFh?.close().catch(() => {});
     activeOp = null;
   }
 }
@@ -272,23 +260,24 @@ export async function backupDrive(drivePath, destPath) {
   const rawPath = driveMeta.rawPath || driveMeta.path;
 
   activeOp = { id: crypto.randomUUID(), cancelled: false };
-  const sourceFd = fs.openSync(rawPath, 'r');
-  const targetFd = fs.openSync(outputPath, 'w');
+  let sourceFh;
+  let targetFh;
   const buffer = Buffer.allocUnsafe(ioPolicy.chunkBytes);
   let offset = 0;
-  let bytesSinceYield = 0;
   let lastProgressPercent = -1;
   let lastProgressEmitAt = 0;
   try {
+    sourceFh = await fs.promises.open(rawPath, 'r');
+    targetFh = await fs.promises.open(outputPath, 'w');
     emitFlashProgress({ stage: 'backup', message: '开始备份磁盘镜像', percent: 2 });
     while (offset < driveMeta.sizeBytes) {
       if (activeOp?.cancelled) throw Object.assign(new Error('用户取消备份'), { code: FlashErrorCode.USER_CANCELLED });
       const toRead = Math.min(buffer.length, driveMeta.sizeBytes - offset);
-      const read = fs.readSync(sourceFd, buffer, 0, toRead, offset);
-      if (read <= 0) break;
-      fs.writeSync(targetFd, buffer, 0, read, offset);
-      offset += read;
-      bytesSinceYield += read;
+      const { bytesRead } = await sourceFh.read(buffer, 0, toRead, offset);
+      if (bytesRead <= 0) break;
+      if (activeOp?.cancelled) throw Object.assign(new Error('用户取消备份'), { code: FlashErrorCode.USER_CANCELLED });
+      await targetFh.write(buffer, 0, bytesRead, offset);
+      offset += bytesRead;
       const percent = Math.min(99, Math.max(2, Math.round((offset / driveMeta.sizeBytes) * 98) + 1));
       const now = Date.now();
       const shouldEmitProgress =
@@ -300,18 +289,13 @@ export async function backupDrive(drivePath, destPath) {
         lastProgressEmitAt = now;
         emitFlashProgress({ stage: 'backup', message: `已备份 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(driveMeta.sizeBytes / 1024 / 1024).toFixed(1)} MB`, percent });
       }
-      if (bytesSinceYield >= ioPolicy.yieldIntervalBytes) {
-        bytesSinceYield = 0;
-        await new Promise((resolve) => setImmediate(resolve));
-        await delay(ioPolicy.throttleMs);
-      }
     }
-    fs.fsyncSync(targetFd);
+    await targetFh.sync();
     emitFlashProgress({ stage: 'done', message: '备份完成', percent: 100 });
     return { path: outputPath, bytes: offset };
   } finally {
-    fs.closeSync(sourceFd);
-    fs.closeSync(targetFd);
+    await sourceFh?.close().catch(() => {});
+    await targetFh?.close().catch(() => {});
     activeOp = null;
   }
 }

@@ -1,5 +1,8 @@
+import { useCallback } from 'react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
+import { useI18n } from '../i18n/use-i18n';
+import { fillTemplate } from '../i18n/en-extras';
 
 const Icons: Record<string, React.ReactNode> = {
   dashboard: (
@@ -81,38 +84,28 @@ const Icons: Record<string, React.ReactNode> = {
   ),
 };
 
-const NAV_GROUPS: Array<{
-  title: string;
-  items: Array<{ tab: Tab; label: string; hint: string }>;
-}> = [
-  {
-    title: '工作台',
-    items: [
-      { tab: 'dashboard', label: '总览', hint: '新手流程与设备主控台' },
-      { tab: 'openclaw', label: 'OpenClaw', hint: 'AI 网关、渠道与技能中心' },
-      { tab: 'skills', label: '技能工坊', hint: '生成 OpenClaw 技能并部署到板端' },
-    ],
-  },
-  {
-    title: '连接控制',
-    items: [
-      { tab: 'terminal', label: '终端', hint: '直接执行命令与排障' },
-      { tab: 'files', label: '文件', hint: '上传、编辑、同步设备文件' },
-      { tab: 'vnc', label: '远程桌面', hint: '图形界面访问与调试' },
-      { tab: 'ide', label: '代码编辑', hint: '远程 code-server 工作区' },
-    ],
-  },
-  {
-    title: '能力与交付',
-    items: [
-      { tab: 'hardware', label: '硬件监控', hint: 'CPU/BPU/温度与健康态' },
-      { tab: 'flasher', label: '烧录与备份', hint: '镜像写盘、校验、备份' },
-      { tab: 'examples', label: 'NodeHub', hint: '应用安装、运行与生态同步' },
-      { tab: 'models', label: 'ModelZoo', hint: '模型部署、运行与扩展' },
-      { tab: 'ros', label: 'ROS 可视化', hint: 'Webviz 与 rosbridge 调试' },
-    ],
-  },
+const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> = [
+  { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'openclaw', 'skills'] },
+  { titleKey: 'sidebar.group.connect', titleZh: '连接控制', tabs: ['terminal', 'files', 'vnc', 'ide'] },
+  { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['hardware', 'flasher', 'examples', 'models', 'ros'] },
 ];
+
+/** 中文默认文案（英文走 en-extras sidebar.nav.* / sidebar.hint.*） */
+const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
+  dashboard: { nav: '总览', hint: '新手流程与设备主控台' },
+  openclaw: { nav: 'OpenClaw', hint: 'AI 网关、渠道与技能中心' },
+  skills: { nav: '技能工坊', hint: '生成 OpenClaw 技能并部署到板端' },
+  terminal: { nav: '终端', hint: '直接执行命令与排障' },
+  files: { nav: '文件', hint: '上传、编辑、同步设备文件' },
+  vnc: { nav: '远程桌面', hint: '图形界面访问与调试' },
+  ide: { nav: '代码编辑', hint: '远程 code-server 工作区' },
+  hardware: { nav: '硬件监控', hint: 'CPU/BPU/温度与健康态' },
+  flasher: { nav: '烧录与备份', hint: '镜像写盘、校验、备份' },
+  examples: { nav: 'NodeHub', hint: '应用安装、运行与生态同步' },
+  models: { nav: 'ModelZoo', hint: '模型部署、运行与扩展' },
+  ros: { nav: 'ROS 可视化', hint: 'Webviz 与 rosbridge 调试' },
+  lowcode: { nav: '低代码', hint: '可视化流程与节点编排' },
+};
 
 function isOnline(status: string) {
   return status === 'online' || status === 'connected';
@@ -130,6 +123,11 @@ export default function Sidebar() {
     setShowSettings,
     removeDevice,
   } = useAppState();
+  const { t } = useI18n();
+  const tf = useCallback(
+    (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
+    [t],
+  );
 
   const onlineCount = devices.filter((dev) => isOnline(dev.status)).length;
 
@@ -140,49 +138,51 @@ export default function Sidebar() {
           <span className="sidebar-brand-mark">R</span>
           <span className="sidebar-brand-copy">
             <strong>RDK Studio</strong>
-            <span>Apple 风桌面工作区</span>
+            <span>{t('sidebar.brand.tagline', 'Apple 风桌面工作区')}</span>
           </span>
         </button>
         <button
           type="button"
           className="sidebar-settings-trigger"
           onClick={() => setShowSettings(true)}
-          title="打开设置"
+          title={t('sidebar.settingsOpen', '打开设置')}
         >
           <span className="material-symbols-outlined">settings</span>
         </button>
       </div>
 
       <div className="sidebar-summary-card">
-        <div className="sidebar-summary-kicker">当前工作区</div>
+        <div className="sidebar-summary-kicker">{t('sidebar.summary.kicker', '当前工作区')}</div>
         <div className="sidebar-summary-title">
-          {currentDevice ? currentDevice.name : '未选择设备'}
+          {currentDevice ? currentDevice.name : t('sidebar.summary.noDevice', '未选择设备')}
         </div>
         <div className="sidebar-summary-meta">
           <span className={`sidebar-summary-pill ${currentDevice && isOnline(currentDevice.status) ? 'online' : ''}`}>
             <span className="status-dot" />
-            {currentDevice ? (isOnline(currentDevice.status) ? '设备在线' : '等待连接') : '需要先连接设备'}
+            {currentDevice
+              ? (isOnline(currentDevice.status) ? t('sidebar.summary.online', '设备在线') : t('sidebar.summary.waiting', '等待连接'))
+              : t('sidebar.summary.needConnect', '需要先连接设备')}
           </span>
-          <span className="sidebar-summary-pill">{devices.length} 台设备</span>
-          <span className="sidebar-summary-pill">{onlineCount} 台在线</span>
+          <span className="sidebar-summary-pill">{tf('sidebar.summary.devices', '{{n}} 台设备', { n: devices.length })}</span>
+          <span className="sidebar-summary-pill">{tf('sidebar.summary.onlineCount', '{{n}} 台在线', { n: onlineCount })}</span>
         </div>
       </div>
 
       <div className="sidebar-section-head">
         <div>
-          <div className="section-label">设备</div>
-          <div className="sidebar-section-copy">选择当前开发板或添加新设备</div>
+          <div className="section-label">{t('sidebar.devices.section', '设备')}</div>
+          <div className="sidebar-section-copy">{t('sidebar.devices.hint', '选择当前开发板或添加新设备')}</div>
         </div>
         <button className="sidebar-inline-action" type="button" onClick={() => setShowAddDevice(true)}>
-          添加
+          {t('sidebar.devices.add', '添加')}
         </button>
       </div>
 
       <div className="device-list">
         {devices.length === 0 && (
           <div className="sidebar-empty-state">
-            <div className="sidebar-empty-title">还没有设备</div>
-            <div className="sidebar-empty-desc">先添加一台 RDK 设备，所有工作区都会自动联动。</div>
+            <div className="sidebar-empty-title">{t('sidebar.empty.title', '还没有设备')}</div>
+            <div className="sidebar-empty-desc">{t('sidebar.empty.desc', '先添加一台 RDK 设备，所有工作区都会自动联动。')}</div>
           </div>
         )}
         {devices.map((dev) => (
@@ -199,13 +199,13 @@ export default function Sidebar() {
               <h4 className="device-name">{dev.name}</h4>
               <div className="device-status">
                 <span className={`status-dot ${isOnline(dev.status) ? '' : 'offline'}`}></span>
-                {isOnline(dev.status) ? `${dev.ip}:${dev.port ?? 22}` : '未连接'}
+                {isOnline(dev.status) ? `${dev.ip}:${dev.port ?? 22}` : t('sidebar.dev.disconnected', '未连接')}
               </div>
             </div>
             <button
               type="button"
               className="device-delete-btn"
-              title="删除设备"
+              title={t('sidebar.removeDevice', '删除设备')}
               onClick={(event) => {
                 event.stopPropagation();
                 removeDevice(dev.id);
@@ -219,29 +219,32 @@ export default function Sidebar() {
           </div>
         ))}
         <button className="clean-btn outline-btn sidebar-add-btn" type="button" onClick={() => setShowAddDevice(true)}>
-          + 扫描 / 添加设备
+          {t('sidebar.scanAdd', '+ 扫描 / 添加设备')}
         </button>
       </div>
 
       <div className="sidebar-groups">
-        {NAV_GROUPS.map((group) => (
-          <section key={group.title} className="sidebar-nav-group">
-            <div className="section-label">{group.title}</div>
+        {NAV_GROUP_DEFS.map((group) => (
+          <section key={group.titleKey} className="sidebar-nav-group">
+            <div className="section-label">{t(group.titleKey, group.titleZh)}</div>
             <div className="sidebar-tools">
-              {group.items.map((item) => (
+              {group.tabs.map((tab) => {
+                const zh = SIDEBAR_TAB_ZH[tab];
+                return (
                 <button
-                  key={item.tab}
+                  key={tab}
                   type="button"
-                  className={`tool-btn ${activeTab === item.tab ? 'active' : ''}`}
-                  onClick={() => setActiveTab(item.tab)}
+                  className={`tool-btn ${activeTab === tab ? 'active' : ''}`}
+                  onClick={() => setActiveTab(tab)}
                 >
-                  <span className="tool-icon">{Icons[item.tab]}</span>
+                  <span className="tool-icon">{Icons[tab]}</span>
                   <span className="tool-copy">
-                    <span className="tool-label">{item.label}</span>
-                    <span className="tool-hint">{item.hint}</span>
+                    <span className="tool-label">{t(`sidebar.nav.${tab}`, zh.nav)}</span>
+                    <span className="tool-hint">{t(`sidebar.hint.${tab}`, zh.hint)}</span>
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           </section>
         ))}
@@ -251,22 +254,22 @@ export default function Sidebar() {
         <button className="tool-btn" type="button" onClick={() => window.open('https://developer.d-robotics.cc/cloud', '_blank')}>
           <span className="material-symbols-outlined nav-icon">cloud</span>
           <span className="tool-copy">
-            <span className="tool-label">具身云平台</span>
-            <span className="tool-hint">查看远程云端工作流</span>
+            <span className="tool-label">{t('sidebar.footer.cloud', '具身云平台')}</span>
+            <span className="tool-hint">{t('sidebar.footer.cloudHint', '查看远程云端工作流')}</span>
           </span>
         </button>
         <button className="tool-btn" type="button" onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}>
           <span className="tool-icon">🍠</span>
           <span className="tool-copy">
-            <span className="tool-label">开发者社区</span>
-            <span className="tool-hint">文档、镜像、生态资源入口</span>
+            <span className="tool-label">{t('sidebar.footer.community', '开发者社区')}</span>
+            <span className="tool-hint">{t('sidebar.footer.communityHint', '文档、镜像、生态资源入口')}</span>
           </span>
         </button>
         <button className="tool-btn" type="button" onClick={() => setShowSettings(true)}>
           <span className="material-symbols-outlined nav-icon">settings</span>
           <span className="tool-copy">
-            <span className="tool-label">客户端设置</span>
-            <span className="tool-hint">AI、飞书、连接与体验</span>
+            <span className="tool-label">{t('sidebar.footer.settings', '客户端设置')}</span>
+            <span className="tool-hint">{t('sidebar.footer.settingsHint', 'AI、飞书、连接与体验')}</span>
           </span>
         </button>
       </div>

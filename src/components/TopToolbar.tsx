@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { fillTemplate } from '../i18n/en-extras';
+import { useI18n } from '../i18n/use-i18n';
 import { useDeviceStore } from '../hooks/useDeviceStore';
 import { useToastStore } from '../hooks/useToastStore';
 import { useAuth } from '../hooks/useAuth';
@@ -98,9 +100,11 @@ async function tryExec(deviceId: string, command: string): Promise<string | null
 }
 
 /** 纯拉取逻辑，供 effect / 刷新按钮复用；不在此处弹 Toast，避免依赖变化导致重复触发 */
+export type BoardIpWarn = 'studio' | 'none' | null;
+
 async function fetchBoardIpRows(device: BoardIpDevice): Promise<{
   rows: { iface: string; ip: string }[];
-  warn: string | null;
+  warn: BoardIpWarn;
 }> {
   let rows: { iface: string; ip: string }[] = [];
 
@@ -126,11 +130,11 @@ async function fetchBoardIpRows(device: BoardIpDevice): Promise<{
     rows = [{ iface: 'studio', ip: studioIp }, ...rows];
   }
 
-  const warn =
+  const warn: BoardIpWarn =
     !hadBoardParse && !!studioIp
-      ? '无法从板端解析 IPv4 地址，已仅显示当前连接 IP（可点刷新重试）'
+      ? 'studio'
       : !hadBoardParse && !studioIp
-      ? '无法获取设备 IP 地址'
+      ? 'none'
       : null;
 
   return { rows, warn };
@@ -161,13 +165,15 @@ export default function TopToolbar() {
   const { currentDevice } = useDeviceStore();
   const { addToast } = useToastStore();
   const { ssoEnabled, user, logout } = useAuth();
+  const { t } = useI18n();
+  const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const [copied, setCopied] = useState(false);
   const [showWifiModal, setShowWifiModal] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showIpMenu, setShowIpMenu] = useState(false);
   const [ipRows, setIpRows] = useState<{ iface: string; ip: string }[]>([]);
   const [ipLoading, setIpLoading] = useState(false);
-  const [ipListWarn, setIpListWarn] = useState<string | null>(null);
+  const [ipListWarn, setIpListWarn] = useState<BoardIpWarn>(null);
   const ipWrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -185,7 +191,7 @@ export default function TopToolbar() {
     return () => {
       cancelled = true;
     };
-  }, [showIpMenu, currentDevice?.id]);
+  }, [showIpMenu, currentDevice?.id, currentDevice?.ip]);
 
   const refreshIpListManual = () => {
     if (!currentDevice) return;
@@ -213,10 +219,10 @@ export default function TopToolbar() {
     const ok = await copyToClipboard(ip);
     if (ok) {
       setCopied(true);
-      addToast(`已复制 ${ip}`, 'success');
+      addToast(tf('topbar.ip.copied', '已复制 {{ip}}', { ip }), 'success');
       setTimeout(() => setCopied(false), 2000);
     } else {
-      addToast('复制失败，请手动选择文本', 'warning');
+      addToast(t('topbar.ip.copyFail', '复制失败，请手动选择文本'), 'warning');
     }
   };
 
@@ -228,7 +234,7 @@ export default function TopToolbar() {
         <button
           type="button"
           className="btn-icon"
-          title={studioIp ? `网络地址：单击展开多网卡列表，快速复制见菜单内` : '未连接设备'}
+          title={studioIp ? t('topbar.ip.titleOn', '网络地址：单击展开多网卡列表，快速复制见菜单内') : t('topbar.ip.titleOff', '未连接设备')}
           onClick={() => {
             if (!currentDevice) return;
             setShowIpMenu((v) => !v);
@@ -244,16 +250,21 @@ export default function TopToolbar() {
         {showIpMenu && currentDevice && (
           <div className="topbar-ip-menu">
             <div className="topbar-ip-menu-hint">
-              列表由板端 <code style={{ fontSize: '0.7rem' }}>ip -br</code> 与 <code style={{ fontSize: '0.7rem' }}>ifconfig -a</code> 解析 IPv4（wlan0 / eth0 等），必要时回退 <code style={{ fontSize: '0.7rem' }}>hostname -I</code>。点击「复制」写入剪贴板。
+              {t(
+                'topbar.ip.hint',
+                '列表由板端 `ip -br` 与 `ifconfig -a` 解析 IPv4（wlan0 / eth0 等），必要时回退 `hostname -I`。点击「复制」写入剪贴板。',
+              )}
             </div>
             {ipListWarn && (
               <div className="topbar-ip-warn" role="status">
-                {ipListWarn}
+                {ipListWarn === 'studio'
+                  ? t('topbar.ip.warnStudio', '无法从板端解析 IPv4 地址，已仅显示当前连接 IP（可点刷新重试）')
+                  : t('topbar.ip.warnNone', '无法获取设备 IP 地址')}
               </div>
             )}
-            {ipLoading && <div className="topbar-ip-row" style={{ color: 'var(--text-muted)' }}>正在读取网卡…</div>}
+            {ipLoading && <div className="topbar-ip-row" style={{ color: 'var(--text-muted)' }}>{t('topbar.ip.loading', '正在读取网卡…')}</div>}
             {!ipLoading && ipRows.length === 0 && (
-              <div className="topbar-ip-row" style={{ color: 'var(--text-muted)' }}>未获取到地址</div>
+              <div className="topbar-ip-row" style={{ color: 'var(--text-muted)' }}>{t('topbar.ip.empty', '未获取到地址')}</div>
             )}
             {ipRows.map((row) => (
               <div
@@ -261,7 +272,7 @@ export default function TopToolbar() {
                 className={`topbar-ip-row ${row.ip === studioIp ? 'is-current' : ''}`}
               >
                 <span className="topbar-ip-iface" title={row.iface}>
-                  {row.iface === 'studio' ? '已连接' : row.iface}
+                  {row.iface === 'studio' ? t('topbar.ip.studioIface', '已连接') : row.iface}
                 </span>
                 <span className="topbar-ip-val" title={row.ip}>{row.ip}</span>
                 <button
@@ -269,13 +280,13 @@ export default function TopToolbar() {
                   className="topbar-ip-copy"
                   onClick={() => { void handleCopyIp(row.ip); }}
                 >
-                  复制
+                  {t('topbar.ip.copy', '复制')}
                 </button>
               </div>
             ))}
             <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 6 }}>
               <button type="button" className="btn btn-ghost btn-sm" onClick={refreshIpListManual}>
-                刷新列表
+                {t('topbar.ip.refresh', '刷新列表')}
               </button>
             </div>
           </div>
@@ -284,7 +295,7 @@ export default function TopToolbar() {
 
       <button
         className="btn-icon"
-        title="配置 WiFi"
+        title={t('topbar.wifi.title', '配置 WiFi')}
         onClick={() => setShowWifiModal(true)}
         disabled={!currentDevice}
       >
@@ -333,7 +344,7 @@ export default function TopToolbar() {
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                退出登录
+                {t('topbar.user.logout', '退出登录')}
               </button>
             </div>
           )}
