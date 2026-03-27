@@ -27,7 +27,7 @@ export function isDailyUsageWriteEnabled(): boolean {
 }
 
 export type DailyActiveInsertResult =
-  | { ok: true; persisted: true; duplicate?: boolean }
+  | { ok: true; persisted: true }
   | { ok: true; persisted: false; reason: 'disabled' | 'no_credentials' }
   | { ok: false; error: string };
 
@@ -37,8 +37,7 @@ export function getResolvedDailyUsageTable(): string {
 }
 
 /**
- * 记录一次「当日活跃」；同一 usage_key + UTC 日仅第一条生效（依赖表唯一约束）。
- * usage_key：SSO 场景为展示名；无 SSO 时为匿名 id。
+ * 记录一次打开 PV（每验证/打开一行）。usage_key：SSO 为展示名；无 SSO 为匿名 id。
  */
 export async function performDailyActiveInsert(
   usageKey: string,
@@ -67,15 +66,11 @@ export async function performDailyActiveInsert(
       app_version: ver || null,
     });
     if (!error) {
-      console.log('[daily-usage] inserted', { table, usage_date: usageDate, app_version: ver || null });
+      console.log('[daily-usage] pv inserted', { table, usage_date: usageDate, app_version: ver || null });
       return { ok: true, persisted: true };
     }
     const msg = error.message || '';
     const code = (error as { code?: string }).code || '';
-    if (/duplicate|unique|23505/i.test(msg) || code === '23505') {
-      console.log('[daily-usage] duplicate (already counted today)', { table, usage_date: usageDate });
-      return { ok: true, persisted: true, duplicate: true };
-    }
     console.warn('[daily-usage] supabase insert failed:', { code, message: msg, table });
     return { ok: false, error: msg };
   } catch (e) {

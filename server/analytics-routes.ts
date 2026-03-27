@@ -106,7 +106,7 @@ export function registerAnalyticsRoutes(app: Express): void {
   });
 
   /**
-   * 日活：优先从 SSO Cookie 取用户，写入与对话归档一致的展示名（姓名 → 邮箱前缀 → 账户 id）；
+   * 打开 PV：每次请求插入一行。优先从 SSO Cookie 取用户，写入与对话归档一致的展示名；
    * 未启用/未登录 SSO 时允许 body.anonymousId（本地无门禁场景）。
    */
   app.post('/api/analytics/daily-active', async (req: Request, res: Response) => {
@@ -141,7 +141,6 @@ export function registerAnalyticsRoutes(app: Express): void {
     res.json({
       ok: true,
       persisted: true,
-      duplicate: result.duplicate === true,
     });
   });
 }

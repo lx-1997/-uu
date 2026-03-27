@@ -102,14 +102,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       const data = (await res.json()) as { logoutUrl?: string };
       setUser(null);
-      try {
-        for (let i = sessionStorage.length - 1; i >= 0; i--) {
-          const k = sessionStorage.key(i);
-          if (k?.startsWith('rdk:daily-active-session:')) sessionStorage.removeItem(k);
-        }
-      } catch {
-        /* ignore */
-      }
       if (data.logoutUrl) {
         window.location.href = data.logoutUrl;
       } else {

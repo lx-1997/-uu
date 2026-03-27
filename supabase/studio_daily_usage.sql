@@ -1,18 +1,20 @@
--- 匿名日活：每个匿名 ID 每个 UTC 日最多一行，便于在 Supabase 中统计「每日使用人数」
+-- 打开/会话 PV：每次身份验证成功（或访客每次打开）插入一行；同一用户同一天可多条，便于统计打开次数。
 -- 在 SQL Editor 中执行一次即可（与 conversation_turns 同一项目即可）
+-- 若曾创建过带「每日唯一」约束的旧表，请再执行 studio_daily_usage_migrate_pv.sql
 
 create table if not exists public.studio_daily_usage (
   id uuid primary key default gen_random_uuid(),
   usage_date date not null,
-  anonymous_id text not null, -- 业务含义：去重键；SSO 场景存登录展示名（与对话归档命名一致），无 SSO 时为浏览器匿名 id
+  anonymous_id text not null, -- SSO：登录展示名（与对话归档一致）；访客：浏览器匿名 id
   app_version text,
-  created_at timestamptz not null default now(),
-  constraint studio_daily_usage_date_anon unique (usage_date, anonymous_id)
+  created_at timestamptz not null default now()
 );
 
 create index if not exists idx_studio_daily_usage_usage_date on public.studio_daily_usage (usage_date);
+create index if not exists idx_studio_daily_usage_date_anon on public.studio_daily_usage (usage_date, anonymous_id);
 
-comment on table public.studio_daily_usage is 'RDK Studio 匿名日活；不含用户身份与聊天内容';
+comment on table public.studio_daily_usage is 'RDK Studio 打开 PV；一行一次验证/打开';
 
--- 示例：按日去重人数
--- select usage_date::text, count(*) as dau from public.studio_daily_usage group by usage_date order by usage_date desc;
+-- 示例：某日总 PV、按用户打开次数
+-- select count(*) as pv from public.studio_daily_usage where usage_date = current_date;
+-- select anonymous_id, count(*) as opens from public.studio_daily_usage where usage_date = current_date group by anonymous_id;
