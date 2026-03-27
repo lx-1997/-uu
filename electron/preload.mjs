@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+const RDK_SSO_TOKEN = 'rdk:sso:token';
+
 contextBridge.exposeInMainWorld('rdkDesktop', {
   isDesktop: true,
   platform: process.platform,
@@ -50,5 +52,14 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
     const wrapped = (_event, payload) => cb(payload);
     ipcRenderer.on('rdk:flash:progress', wrapped);
     return () => ipcRenderer.removeListener('rdk:flash:progress', wrapped);
+  },
+
+  prepareSsoEmbedded: () => ipcRenderer.invoke('rdk:sso:prepare-embedded'),
+  stopSsoEmbedded: () => ipcRenderer.invoke('rdk:sso:stop-embedded'),
+  openSsoLoginWindow: () => ipcRenderer.invoke('rdk:sso:open-login-window'),
+  onSsoToken: (cb) => {
+    const wrapped = (_event, payload) => cb(payload);
+    ipcRenderer.on(RDK_SSO_TOKEN, wrapped);
+    return () => ipcRenderer.removeListener(RDK_SSO_TOKEN, wrapped);
   },
 });

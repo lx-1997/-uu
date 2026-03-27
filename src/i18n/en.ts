@@ -2,6 +2,8 @@
  * English UI strings. Keys are stable; Chinese defaults live next to t() calls.
  * When language !== 'en', callers use the zh fallback directly.
  */
+import { EN_EXTRAS } from './en-extras';
+
 export const EN: Record<string, string> = {
   // Top bar tab titles
   'tabs.dashboard': 'Workspace',
@@ -49,9 +51,22 @@ export const EN: Record<string, string> = {
   'rail.collapse.tip': 'Collapse sidebar',
   'rail.expand.aria': 'Expand navigation',
   'rail.collapse.aria': 'Collapse navigation',
-  'theme.switch.cozy': 'Switch to Cozy theme',
-  'theme.switch.cyber': 'Switch to Cyber theme',
-  'theme.switch.aurora': 'Switch to Aurora theme',
+  'rail.lang.tip': 'Display language (click to toggle)',
+  'rail.lang.aria': 'Display language',
+
+  'chat.lang.switched': 'Language updated',
+
+  'dock.restore': 'Show AI Dock',
+  'dock.device.unbound': 'No device bound',
+  'dock.device.unnamed': 'Unnamed device',
+  'dock.device.current': 'Device',
+  'dock.input.openclaw': 'Message OpenClaw Agent…',
+  'dock.input.default': 'Message, command, or drop files…',
+  'dock.send': 'Send',
+  'dock.ctx.cut': 'Cut',
+  'dock.ctx.copy': 'Copy',
+  'dock.ctx.paste': 'Paste',
+  'dock.ctx.selectAll': 'Select all',
 
   'device.listTitle': 'Devices',
   'device.empty': 'No devices yet. Add an RDK board.',
@@ -184,7 +199,7 @@ export const EN: Record<string, string> = {
   'settings.weixin.confirmInWechat': 'Scanned — confirm in WeChat…',
 
   'settings.conn.title': 'Device & UI',
-  'settings.conn.desc': 'SSH options and display language.',
+  'settings.conn.desc': 'SSH options. Switch display language from the bottom of the left sidebar.',
   'settings.conn.lang': 'Display language',
   'settings.conn.lang.saved': 'Language preference saved',
   'settings.conn.timeout': 'Connection timeout (s)',
@@ -244,5 +259,51 @@ export const EN: Record<string, string> = {
   'toast.aiNoKeyWarn': 'This model has no API key; save a key before switching (or set OPENAI_API_KEY)',
   'toast.unknownErr': 'Unknown error',
 
+  // Dashboard
+  'dashboard.tagline': 'Connect your RDK board and start building',
+  'dashboard.addDevice': 'Add device',
+  'dashboard.chatFirst': 'Chat first',
+  'dashboard.restartOnboarding': 'Restart onboarding',
+  'dashboard.deviceOnline': 'Device online',
+  'dashboard.oneShotDev': 'Prompt-to-dev',
+  'dashboard.healthCheck': 'Health check',
+  'dashboard.metric.mem': 'MEM',
+  'dashboard.metric.temp': 'TEMP',
+  'dashboard.metric.bpu': 'BPU',
+  'dashboard.metric.uptime': 'UPTIME',
+  'dashboard.cap.dev': 'Dev environment',
+  'dashboard.cap.vnc': 'Remote desktop',
+  'dashboard.cap.ready': 'Ready',
+  'dashboard.cap.notRunning': 'Not running',
+  'dashboard.cap.notInstalled': 'Not installed',
+
+  // Chat store (AIChatProvider)
+  'chat.store.confirmed': 'Confirmed',
+  'chat.store.executing': 'Executing…',
+  'chat.store.cancelled': 'Cancelled',
+  'chat.store.cancelledDetail': 'Action cancelled',
+  'chat.store.historyCleared': 'Chat history cleared',
+  'chat.store.taskCancelled': 'Task cancelled',
+
   'err.importNoEntries': 'No valid entries in import file',
+
+  // SSO full-screen login (aligned with rdkstudio_frontend-master Login.vue)
+  'sso.verifying': 'Verifying identity…',
+  'sso.embedPreparing': 'Loading unified login…',
+  'sso.embedFailed': 'Could not start the login callback. Please retry.',
+  'sso.embedLoadFailed':
+    'Embedded login could not load (the site may block embedding). Use a separate window or contact support.',
+  'sso.retryEmbed': 'Retry embedded',
+  'sso.openSsoInWindow': 'Open login in new window',
+  'sso.configMissing':
+    'SSO client is not configured on the server (missing `SSO_CLIENT_ID` / `SSO_CLIENT_SECRET`). Please configure and try again.',
+  'sso.statusChecking': 'Checking login status…',
+  'sso.statusFailed': 'Login check failed. Retry or check your network.',
+  'sso.statusIdle': 'You will enter the workspace automatically after a successful login.',
+  'sso.refreshStatus': 'Refresh status',
+  'sso.iframeTitle': 'D-Robotics SSO',
+  'sso.bootstrapFail': 'Could not establish session; check the token or try again.',
+  'sso.loginSuccess': 'Signed in successfully',
+
+  ...EN_EXTRAS,
 };

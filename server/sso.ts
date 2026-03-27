@@ -68,6 +68,76 @@ function buildLoginUrl(req: Request, state: string): string {
   return `${SSO_BASE}/oauth2/authorize?${params.toString()}`;
 }
 
+/**
+ * 用 access_token 拉 userinfo / JWT 声明，供 OAuth 回调与桌面内嵌 token 引导入会话。
+ * @param strictUserinfo401 为 true 时（bootstrap）userinfo 返回 401 直接拒绝，避免接受伪造 token。
+ */
+async function resolveSSOUser(accessToken: string, idToken?: string, strictUserinfo401 = false): Promise<SSOUser> {
+  let user: SSOUser = { id: '', name: '', email: '' };
+  try {
+    const userRes = await fetch(`${SSO_BASE}/oauth2/userinfo`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (userRes.ok) {
+      const userData = (await userRes.json()) as Record<string, unknown>;
+      user = {
+        id: String(userData.sub || userData.id || userData.user_id || ''),
+        name: String(userData.name || userData.username || userData.nickname || ''),
+        email: String(userData.email || ''),
+        avatar: typeof userData.picture === 'string' ? userData.picture : undefined,
+      };
+    } else if (userRes.status === 401 && strictUserinfo401) {
+      throw Object.assign(new Error('invalid_token'), { code: 'INVALID_TOKEN' });
+    }
+  } catch (err) {
+    if (err && typeof err === 'object' && (err as any).code === 'INVALID_TOKEN') throw err;
+    console.warn('[SSO] userinfo fetch failed, trying token claims');
+  }
+
+  if (!user.id && idToken) {
+    try {
+      const [, payload] = idToken.split('.');
+      const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+      user = {
+        id: String(claims.sub || ''),
+        name: String(claims.name || claims.preferred_username || ''),
+        email: String(claims.email || ''),
+      };
+    } catch { /* ignore */ }
+  }
+
+  if (!user.id) {
+    try {
+      const parts = accessToken.split('.');
+      if (parts.length === 3) {
+        const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+        user = {
+          id: String(claims.sub || claims.user_id || claims.userId || ''),
+          name: String(claims.name || claims.preferred_username || ''),
+          email: String(claims.email || ''),
+        };
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (!user.id) user.id = `sso-${crypto.randomBytes(8).toString('hex')}`;
+  return user;
+}
+
+function commitSSOSession(res: Response, user: SSOUser, accessToken: string, refreshToken?: string): void {
+  const sessionId = crypto.randomBytes(32).toString('hex');
+  const expiresAt = Date.now() + TOKEN_EXPIRY_MS;
+  sessions.set(sessionId, {
+    user,
+    accessToken,
+    refreshToken,
+    expiresAt,
+  });
+  res.setHeader('Set-Cookie', [
+    `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(TOKEN_EXPIRY_MS / 1000)}`,
+  ]);
+}
+
 export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
   if (!isSSORequired()) {
     next();
@@ -158,54 +228,39 @@ export function registerSSORoutes(app: any): void {
         return;
       }
 
-      let user: SSOUser = { id: '', name: '', email: '' };
-      try {
-        const userRes = await fetch(`${SSO_BASE}/oauth2/userinfo`, {
-          headers: { Authorization: `Bearer ${tokenData.access_token}` },
-        });
-        if (userRes.ok) {
-          const userData = (await userRes.json()) as Record<string, unknown>;
-          user = {
-            id: String(userData.sub || userData.id || userData.user_id || ''),
-            name: String(userData.name || userData.username || userData.nickname || ''),
-            email: String(userData.email || ''),
-            avatar: typeof userData.picture === 'string' ? userData.picture : undefined,
-          };
-        }
-      } catch (err) {
-        console.warn('[SSO] userinfo fetch failed, using token claims');
-        if (tokenData.id_token) {
-          try {
-            const [, payload] = tokenData.id_token.split('.');
-            const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
-            user = {
-              id: String(claims.sub || ''),
-              name: String(claims.name || claims.preferred_username || ''),
-              email: String(claims.email || ''),
-            };
-          } catch { /* ignore */ }
-        }
-      }
-
-      if (!user.id) user.id = `sso-${crypto.randomBytes(8).toString('hex')}`;
-
-      const sessionId = crypto.randomBytes(32).toString('hex');
-      const expiresAt = Date.now() + TOKEN_EXPIRY_MS;
-      sessions.set(sessionId, {
-        user,
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
-        expiresAt,
-      });
-
-      res.setHeader('Set-Cookie', [
-        `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(TOKEN_EXPIRY_MS / 1000)}`,
-      ]);
+      const user = await resolveSSOUser(tokenData.access_token, tokenData.id_token);
+      commitSSOSession(res, user, tokenData.access_token, tokenData.refresh_token);
 
       res.redirect(302, `/?sso=ok`);
     } catch (err) {
       console.error('[SSO] callback error:', err instanceof Error ? err.message : err);
       res.status(500).send('SSO authentication failed');
+    }
+  });
+
+  /**
+   * 桌面端内嵌 SSO：本地环回收到 access_token 后，由渲染进程 POST 此接口建立与浏览器 OAuth 相同的 HttpOnly 会话。
+   */
+  app.post('/api/sso/bootstrap', async (req: Request, res: Response) => {
+    if (!isSSOEnabled()) {
+      res.status(503).json({ ok: false, error: 'SSO client is not configured' });
+      return;
+    }
+    const raw = String(req.body?.accessToken ?? '')
+      .replace(/^Bearer\s+/i, '')
+      .trim()
+      || String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
+    if (!raw) {
+      res.status(400).json({ ok: false, error: 'missing access token' });
+      return;
+    }
+    try {
+      const user = await resolveSSOUser(raw, undefined, true);
+      commitSSOSession(res, user, raw, undefined);
+      res.json({ ok: true, user });
+    } catch (err) {
+      console.warn('[SSO] bootstrap failed:', err instanceof Error ? err.message : err);
+      res.status(401).json({ ok: false, error: 'invalid or expired token' });
     }
   });
 

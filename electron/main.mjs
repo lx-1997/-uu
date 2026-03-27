@@ -7,6 +7,7 @@ import os from 'node:os';
 import http from 'node:http';
 import https from 'node:https';
 import * as flashService from './flash/index.mjs';
+import { registerSsoLoginIpc } from './sso-ipc.mjs';
 
 /* 开发态加载 Vite，CSP 需含 unsafe-eval（HMR）；Electron 会刷 CSP 警告，与业务漏洞无直接关系 */
 if (!app.isPackaged) {
@@ -25,6 +26,8 @@ const TOPBAR_H = 48;
 const DOCK_RESERVED_H = 170;
 
 let mainWin = null;
+
+registerSsoLoginIpc({ getMainWindow: () => mainWin });
 let serverProcess = null;
 // url -> WebContentsView 映射
 const viewsMap = {};
@@ -324,6 +327,7 @@ async function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true,
     },
   });
 

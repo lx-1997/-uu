@@ -62,6 +62,11 @@ declare global {
       launchXburn?: (payload?: { exePath?: string; imagePath?: string }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
       onFlashProgress?: (cb: (payload: FlashProgressPayload) => void) => (() => void) | void;
       offFlashProgress?: (cb: (payload: FlashProgressPayload) => void) => void;
+
+      prepareSsoEmbedded?: () => Promise<{ ok: boolean; ssoUrl?: string; error?: string }>;
+      stopSsoEmbedded?: () => Promise<{ ok: boolean }>;
+      openSsoLoginWindow?: () => Promise<void>;
+      onSsoToken?: (cb: (payload: { token?: string }) => void) => (() => void) | void;
     };
   }
 }
