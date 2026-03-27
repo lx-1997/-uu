@@ -6,6 +6,8 @@ import type { Express, Request, Response } from 'express';
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { forwardAnalyticsCloudWebhook } from './analytics-cloud-forward.js';
+import { decryptAnalyticsEnvelope, isEncryptedAnalyticsBody } from './analytics-payload-crypto.js';
+import { getAnalyticsPayloadSecret } from './analytics-payload-secret.js';
 import { getAnalyticsEventsFilePath, getAnalyticsEventsMirrorFilePath } from './storage.js';
 
 const MAX_BATCH = 80;
@@ -20,12 +22,26 @@ export function registerAnalyticsRoutes(app: Express): void {
       res.status(204).end();
       return;
     }
-    const body = req.body as {
+    let body = req.body as {
       clientSessionId?: string;
       schema?: string;
       consent?: { trainingDataOptIn?: boolean; recordedAt?: number };
       events?: unknown[];
     };
+    if (isEncryptedAnalyticsBody(body)) {
+      const secret = getAnalyticsPayloadSecret();
+      if (!secret) {
+        res.status(400).json({ ok: false, error: 'payload_encrypted_but_server_secret_missing' });
+        return;
+      }
+      try {
+        const json = decryptAnalyticsEnvelope(body.iv, body.payload, secret);
+        body = JSON.parse(json) as typeof body;
+      } catch {
+        res.status(400).json({ ok: false, error: 'payload_decrypt_failed' });
+        return;
+      }
+    }
     const clientSessionId = String(body?.clientSessionId || '').slice(0, 64);
     const schema = String(body?.schema || 'rdk.studio.analytics.v1');
     const consentEnvelope = body?.consent && typeof body.consent === 'object'

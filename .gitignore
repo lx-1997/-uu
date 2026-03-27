@@ -2,6 +2,8 @@ node_modules/
 dist/
 dist-server/
 .env
+# 本地/发行用 Supabase 内嵌密钥（勿提交）
+config/supabase-conversation.embedded.json
 release/
 # 克隆前端参考仓后，桌面打包会优先使用其中的 icon（见 scripts/desktop-icons.mjs）
 rdkstudio_frontend-master/

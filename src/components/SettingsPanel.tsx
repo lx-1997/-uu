@@ -38,8 +38,7 @@ import {
 import { resolveApiUrl } from '../utils/apiBase';
 import { fillTemplate } from '../i18n/en-extras';
 import { useAuth } from '../hooks/useAuth';
-import { trackUiAction, reportConsentSnapshot } from '../analytics/client';
-import { getTrainingDataOptIn, setTrainingDataOptIn, subscribeTrainingDataOptIn } from '../analytics/consent';
+import { trackUiAction } from '../analytics/client';
 
 /* ═══════════════════════════════════════════
    Constants
@@ -80,7 +79,6 @@ type SectionId =
   | 'feishu'
   | 'weixin'
   | 'connection'
-  | 'data-usage'
   | 'forum';
 
 /* ═══════════════════════════════════════════
@@ -105,9 +103,6 @@ export default function SettingsPanel() {
     if (showSettings) trackUiAction('settings_open', {});
   }, [showSettings]);
 
-  const [trainingDataOptIn, setTrainingDataOptInUi] = useState(getTrainingDataOptIn);
-  useEffect(() => subscribeTrainingDataOptIn(setTrainingDataOptInUi), []);
-
   const SECTIONS = useMemo(() => [
     ...(showAccountSection
       ? [{ id: 'account' as const, label: t('settings.sec.account', '账户与安全') }]
@@ -118,7 +113,6 @@ export default function SettingsPanel() {
     { id: 'feishu' as const, label: t('settings.sec.feishu', '飞书') },
     { id: 'weixin' as const, label: t('settings.sec.weixin', '微信') },
     { id: 'connection' as const, label: t('settings.sec.connection', '设备连接') },
-    { id: 'data-usage' as const, label: t('settings.sec.dataUsage', '产品改进') },
     { id: 'forum' as const, label: t('settings.sec.forum', '社区论坛') },
   ], [t, showAccountSection]);
 
@@ -1108,31 +1102,6 @@ export default function SettingsPanel() {
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.conn.auto', '启动时自动连接')}</span>
                     <input type="checkbox" title={t('settings.conn.auto', '启动时自动连接')} aria-label={t('settings.conn.auto', '启动时自动连接')} checked={autoReconnect} onChange={e => { setAutoReconnect(e.target.checked); addToast(t('settings.conn.updated', '已更新'), 'success'); }} />
-                  </div>
-                </div>
-              </section>
-
-              <hr className="settings-section-divider" />
-
-              {/* ══ 产品改进偏好（仅影响 consent 标记与助手表述；埋点由产品策略统一上报） ══ */}
-              <section id="data-usage" className="settings-section" ref={registerSectionRef('data-usage')}>
-                <H title={t('settings.dataUsage.title', '产品改进')} />
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.dataUsage.optIn', '愿意提供使用数据以改善产品')}</span>
-                    <input
-                      type="checkbox"
-                      title={t('settings.dataUsage.optIn', '愿意提供使用数据以改善产品')}
-                      aria-label={t('settings.dataUsage.optIn', '愿意提供使用数据以改善产品')}
-                      checked={trainingDataOptIn}
-                      onChange={(e) => {
-                        const on = e.target.checked;
-                        setTrainingDataOptIn(on);
-                        setTrainingDataOptInUi(on);
-                        void reportConsentSnapshot('settings_toggle');
-                        addToast(t('settings.dataUsage.saved', '已保存'), 'success');
-                      }}
-                    />
                   </div>
                 </div>
               </section>

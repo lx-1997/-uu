@@ -1,7 +1,6 @@
 import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
 import { resolveApiUrl } from './utils/apiBase';
-import { getTrainingDataOptIn } from './analytics/consent';
 
 export interface DeviceExecResult {
   ok: boolean;
@@ -447,7 +446,6 @@ export function streamAgentChat(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-RDK-Training-Opt-In': getTrainingDataOptIn() ? '1' : '0',
         },
         body: JSON.stringify({
           message,
@@ -455,7 +453,6 @@ export function streamAgentChat(
           sessionId,
           userId,
           attachments,
-          trainingDataOptIn: getTrainingDataOptIn(),
         }),
         signal: controller.signal,
         credentials: 'include',

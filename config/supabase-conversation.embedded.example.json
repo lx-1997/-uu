@@ -1,0 +1,6 @@
+{
+  "url": "https://YOUR_PROJECT.supabase.co",
+  "secretKey": "YOUR_SERVICE_ROLE_OR_SECRET_KEY",
+  "table": "conversation_turns",
+  "_comment": "可选兜底：一般只需在 server/supabase-embedded-config.ts 的 SUPABASE_SHIPPING_DEFAULTS 写死 URL/key；若仍要用独立 JSON，复制为 supabase-conversation.embedded.json（已 .gitignore）"
+}

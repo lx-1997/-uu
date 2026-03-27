@@ -12,7 +12,11 @@ import {
 } from './supabase-conversation.js';
 import type { ConversationTurnRecord } from './conversation-types.js';
 
-export { CONVERSATION_SCHEMA, type ConversationTurnRecord } from './conversation-types.js';
+export {
+  CONVERSATION_SCHEMA,
+  type ConversationOutcome,
+  type ConversationTurnRecord,
+} from './conversation-types.js';
 
 let appendChain: Promise<void> = Promise.resolve();
 

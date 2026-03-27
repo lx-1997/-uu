@@ -16,7 +16,7 @@ export interface RDKClawAttachment {
   source?: "studio" | "feishu" | "weixin";
 }
 
-export type ChannelSource = "studio" | "weixin" | "feishu";
+export type ChannelSource = "studio" | "weixin" | "feishu" | "autonomy";
 
 export interface RDKClawChatRequest {
   message: string;
@@ -30,7 +30,7 @@ export interface RDKClawChatRequest {
   mode?: RDKClawExecutionMode;
   attachments?: RDKClawAttachment[];
   channel?: ChannelSource;
-  /** Studio 设置「用于模型与产品改进」；影响系统提示中的合规表述 */
+  /** 保留字段；客户端不再展示相关开关，应视为未勾选 */
   trainingDataOptIn?: boolean;
   // 服务端内部字段：用于在 SSE 断连时中止当前 run
   abortSignal?: AbortSignal;

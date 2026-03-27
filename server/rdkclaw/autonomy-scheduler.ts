@@ -274,6 +274,7 @@ export class AutonomyScheduler {
         userId: "autonomy",
         ssoUserName: `定时任务:${task.name}`,
         mode: task.mode,
+        channel: "autonomy",
       })) {
         if (event.type === "meta") {
           const runId = String(event.data.runId || "");

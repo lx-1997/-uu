@@ -4816,13 +4816,12 @@ app.post('/api/agent/upload-attachment', express.raw({ type: '*/*', limit: '50mb
 // ─── Agent Chat (SSE) ───
 
 app.post('/api/agent/chat', async (request, response) => {
-  const { message, deviceId, sessionId, userId, mode, attachments, trainingDataOptIn } = request.body as {
+  const { message, deviceId, sessionId, userId, mode, attachments } = request.body as {
     message?: string;
     deviceId?: string;
     sessionId?: string;
     userId?: string;
     mode?: RDKClawExecutionMode;
-    trainingDataOptIn?: boolean;
     attachments?: Array<{
       id: string;
       type: 'image' | 'file' | 'audio' | 'video';
@@ -4884,9 +4883,6 @@ app.post('/api/agent/chat', async (request, response) => {
     }, 15000);
 
     try {
-      const headerOptIn = String(request.headers['x-rdk-training-opt-in'] ?? '').trim() === '1';
-      const resolvedTrainingOptIn = trainingDataOptIn === true || headerOptIn;
-
       const ssoUser = (request as { ssoUser?: SSOUser }).ssoUser;
       const ssoUserName = formatConversationArchiveUserName(ssoUser, userId);
 
@@ -4898,7 +4894,8 @@ app.post('/api/agent/chat', async (request, response) => {
         ssoUserName,
         mode,
         attachments,
-        trainingDataOptIn: resolvedTrainingOptIn,
+        channel: 'studio',
+        trainingDataOptIn: false,
         abortSignal: requestAbortController.signal,
       })) {
         sendEvent(event.type, event.data);

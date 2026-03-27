@@ -42,6 +42,9 @@ const row = {
   user_message: '【连通性测试】用户消息',
   assistant_message: '【连通性测试】助手回复',
   tools_used: ['memory_search', 'device_exec'],
+  channel: 'studio',
+  outcome: 'completed',
+  error_detail: null,
 };
 
 const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });

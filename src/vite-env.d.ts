@@ -5,6 +5,8 @@ import type { DetailedHTMLProps, HTMLAttributes } from 'react';
 interface ImportMetaEnv {
   /** 设为 0 时关闭前端埋点上报 */
   readonly VITE_ANALYTICS_ENABLED?: string;
+  /** 与后端 ANALYTICS_PAYLOAD_SECRET 相同则埋点 JSON 以 AES-256-GCM 封装，Network 中仅见密文 envelope */
+  readonly VITE_ANALYTICS_PAYLOAD_SECRET?: string;
 }
 
 interface ImportMeta {

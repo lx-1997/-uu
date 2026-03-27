@@ -1,4 +1,4 @@
-export type ChannelSource = "studio" | "weixin" | "feishu";
+export type ChannelSource = "studio" | "weixin" | "feishu" | "autonomy";
 
 export interface ChannelSafetyResult {
   blocked: boolean;

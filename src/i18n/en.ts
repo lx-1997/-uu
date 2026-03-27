@@ -93,10 +93,6 @@ export const EN: Record<string, string> = {
   'settings.sec.weixin': 'WeChat',
   'settings.sec.connection': 'Device & UI',
   'settings.sec.forum': 'Community forum',
-  'settings.sec.dataUsage': 'Product improvement',
-  'settings.dataUsage.title': 'Product improvement',
-  'settings.dataUsage.optIn': 'Share usage data to improve the product',
-  'settings.dataUsage.saved': 'Saved',
 
   'settings.ai.title': 'AI engine',
   'settings.ai.desc': 'Core brain for RDKClaw. Pick a provider and API key to enable.',

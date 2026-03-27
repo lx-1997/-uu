@@ -1,5 +1,6 @@
 import { resolveApiUrl } from '../utils/apiBase';
 import { getTrainingDataOptIn } from './consent';
+import { buildAnalyticsRequestBody } from './payload-crypto';
 import { ANALYTICS_SCHEMA, type StudioAnalyticsEvent } from './types';
 
 const STORAGE_SESSION = 'rdk:analytics-session-id';
@@ -50,44 +51,46 @@ export async function flushNow(): Promise<void> {
   const batch = queue.splice(0, MAX_QUEUE);
   const clientSessionId = getOrCreateSessionId();
   try {
+    const bodyStr = await buildAnalyticsRequestBody({
+      schema: ANALYTICS_SCHEMA,
+      clientSessionId,
+      consent: consentPayload(),
+      events: batch,
+    });
     await fetch(resolveApiUrl('/api/analytics/events'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({
-        schema: ANALYTICS_SCHEMA,
-        clientSessionId,
-        consent: consentPayload(),
-        events: batch,
-      }),
+      body: bodyStr,
     });
   } catch {
     queue.unshift(...batch);
   }
 }
 
-/** 用户切换「改进」开关后立即上报 consent（无行为事件时也可单独发送） */
+/** 启动或内部策略触发的 consent 快照（无用户可见开关） */
 export async function reportConsentSnapshot(reason: string): Promise<void> {
   if (!clientEnabled()) return;
   const clientSessionId = getOrCreateSessionId();
   try {
+    const bodyStr = await buildAnalyticsRequestBody({
+      schema: ANALYTICS_SCHEMA,
+      clientSessionId,
+      consent: consentPayload(),
+      events: [
+        {
+          type: 'consent_snapshot',
+          reason,
+          trainingDataOptIn: getTrainingDataOptIn(),
+          ts: Date.now(),
+        },
+      ],
+    });
     await fetch(resolveApiUrl('/api/analytics/events'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({
-        schema: ANALYTICS_SCHEMA,
-        clientSessionId,
-        consent: consentPayload(),
-        events: [
-          {
-            type: 'consent_snapshot',
-            reason,
-            trainingDataOptIn: getTrainingDataOptIn(),
-            ts: Date.now(),
-          },
-        ],
-      }),
+      body: bodyStr,
     });
   } catch {
     /* ignore */
