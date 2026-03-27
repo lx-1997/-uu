@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
@@ -48,6 +48,9 @@ const CAPABILITY_ITEMS: NavItemDef[] = [
     paths: ['M12 12m-3 0a3 3 0 106 0 3 3 0 10-6 0', 'M12 4.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M20 12a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M12 20a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M4 12a1.5 1.5 0 110-3 1.5 1.5 0 010 3z'] },
 ];
 
+/** 与 prepare:build-resources 写入的 `public/branding/icon.png` 一致；`base: './'` 下需相对根 */
+const RAIL_BRAND_SRC = `${import.meta.env.BASE_URL}branding/icon.png`;
+
 function NavIcon({ paths }: { paths: string[] }) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -63,13 +66,15 @@ export default function IconRail() {
     setActiveDevice, setShowAddDevice,
     removeDevice,
     setShowSettings,
-    theme, toggleTheme,
+    language, setLanguage, addToast,
     railExpanded, setRailExpanded,
     obReturnStep, setObReturnStep,
   } = useAppState();
   const { t } = useI18n();
 
   const [showDevicePanel, setShowDevicePanel] = useState(false);
+  const [railLogoFailed, setRailLogoFailed] = useState(false);
+  const onRailLogoError = useCallback(() => setRailLogoFailed(true), []);
   const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
 
   const renderGroup = (items: NavItemDef[]) =>
@@ -92,8 +97,17 @@ export default function IconRail() {
   return (
     <>
       <nav className={`icon-rail ${railExpanded ? 'expanded' : ''}`}>
-        <button className="rail-logo" onClick={() => setActiveTab('dashboard')} title="RDK Studio">
-          R
+        <button
+          type="button"
+          className={`rail-logo ${railLogoFailed ? 'rail-logo--fallback' : 'rail-logo--image'}`}
+          onClick={() => setActiveTab('dashboard')}
+          title="RDK Studio"
+        >
+          {!railLogoFailed ? (
+            <img src={RAIL_BRAND_SRC} alt="" width={36} height={36} decoding="async" onError={onRailLogoError} />
+          ) : (
+            <span className="rail-logo-letter">R</span>
+          )}
         </button>
 
         <div className="rail-nav">
@@ -126,17 +140,34 @@ export default function IconRail() {
             {railExpanded && <span className="rail-label">{currentDevice ? currentDevice.name : t('rail.device', '设备')}</span>}
           </button>
 
-          <button
-            className="rail-theme-toggle"
-            onClick={toggleTheme}
-            data-tooltip={!railExpanded ? (
-              theme === 'aurora' ? t('theme.switch.cozy', '切换到奶咖模式') :
-              theme === 'cozy'  ? t('theme.switch.cyber', '切换到赛博模式') :
-                                  t('theme.switch.aurora', '切换到极光模式')
-            ) : undefined}
-          >
-            {theme === 'aurora' ? '🍪' : theme === 'cozy' ? '🌙' : '☀️'}
-          </button>
+          {railExpanded ? (
+            <select
+              className="rail-lang-select"
+              aria-label={t('rail.lang.aria', '界面语言')}
+              title={t('rail.lang.tip', '界面语言')}
+              value={language}
+              onChange={(e) => {
+                setLanguage(e.target.value);
+                addToast(t('settings.conn.lang.saved', '语言偏好已保存'), 'success');
+              }}
+            >
+              <option value="zh-CN">{t('settings.conn.lang.zh', '简体中文')}</option>
+              <option value="en">{t('settings.conn.lang.en', 'English')}</option>
+            </select>
+          ) : (
+            <button
+              type="button"
+              className="rail-lang-toggle"
+              data-tooltip={t('rail.lang.tip', '界面语言')}
+              aria-label={t('rail.lang.aria', '界面语言')}
+              onClick={() => {
+                setLanguage(language === 'en' ? 'zh-CN' : 'en');
+                addToast(t('settings.conn.lang.saved', '语言偏好已保存'), 'success');
+              }}
+            >
+              {language === 'en' ? 'EN' : '中'}
+            </button>
+          )}
 
           <button
             className="rail-btn"

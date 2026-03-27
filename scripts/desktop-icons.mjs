@@ -7,11 +7,12 @@
  * 3. <repo>/../rdkstudio_frontend-master
  *
  * 在前端仓库内按文件名优先匹配（先找到先用）：
- * - .ico: build/icon.ico, resources/icon.ico, public/favicon.ico, electron/icons/icon.ico, app.ico
- * - .png: build/icon.png, resources/icon.png, public/icon.png, src/assets/logo.png, src/assets/icon.png
- * - .icns: build/icon.icns, resources/icon.icns
+ * - .ico: icon/icon.ico（rdkstudio_frontend-master/icon 常用）, build/icon.ico, …
+ * - .png: icon/icon.png, build/icon.png, …
+ * - .icns: icon/icon.icns, build/icon.icns, …
  *
- * 若前端缺少某项：用本仓库 public/branding/icon.png → 再退回 bundled noVNC 占位图。
+ * 若前端缺少某项：用本仓库 public/branding/icon.png（若已有）→ 再退回 bundled noVNC 占位图。
+ * 有 PNG 时会同步写入 public/branding/icon.png，供左侧栏等静态引用。
  * Windows 在仅有 PNG 时用 png-to-ico 生成 icon.ico（建议 PNG ≥256×256，否则回退 noVNC .ico）。
  */
 import fs from 'node:fs';
@@ -21,6 +22,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 const ICO_CANDIDATES = [
+  'icon/icon.ico',
   'build/icon.ico',
   'resources/icon.ico',
   'public/favicon.ico',
@@ -32,6 +34,7 @@ const ICO_CANDIDATES = [
 ];
 
 const PNG_CANDIDATES = [
+  'icon/icon.png',
   'build/icon.png',
   'resources/icon.png',
   'public/icon.png',
@@ -44,7 +47,7 @@ const PNG_CANDIDATES = [
   'electron/build/icon.png',
 ];
 
-const ICNS_CANDIDATES = ['build/icon.icns', 'resources/icon.icns'];
+const ICNS_CANDIDATES = ['icon/icon.icns', 'build/icon.icns', 'resources/icon.icns'];
 
 const FALLBACK_PNG = (root) => path.join(root, 'public', 'branding', 'icon.png');
 const FALLBACK_ICO = (root) => path.join(root, 'public', 'vnc', 'app', 'images', 'icons', 'novnc.ico');
@@ -152,6 +155,10 @@ export async function prepareBuildResources(rootDir, opts = {}) {
   if (pngForPack) {
     fs.copyFileSync(pngForPack, destPng);
     log(`→ build-resources/icon.png`);
+    const brandingPng = path.join(rootDir, 'public', 'branding', 'icon.png');
+    fs.mkdirSync(path.dirname(brandingPng), { recursive: true });
+    fs.copyFileSync(pngForPack, brandingPng);
+    log(`→ public/branding/icon.png (左侧栏 / 网页静态资源)`);
   } else {
     log('no icon.png — mac/linux 可能使用默认图标', 'warn');
   }
