@@ -71,6 +71,11 @@ export async function performDailyActiveInsert(
     }
     const msg = error.message || '';
     const code = (error as { code?: string }).code || '';
+    if (code === '23505' || /duplicate|unique constraint/i.test(msg)) {
+      console.warn(
+        '[daily-usage] insert rejected (likely old UNIQUE on date+user). Run supabase/studio_daily_usage_migrate_pv.sql on the DB.',
+      );
+    }
     console.warn('[daily-usage] supabase insert failed:', { code, message: msg, table });
     return { ok: false, error: msg };
   } catch (e) {

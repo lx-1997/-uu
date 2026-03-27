@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { resolveApiUrl } from '../utils/apiBase';
 
 const STORAGE_ANON = 'rdk:studio-anon-id';
@@ -15,7 +15,11 @@ function getOrCreateAnonymousId(): string {
   }
 }
 
-/** 同一文档生命周期内只执行一次（避免 React Strict Mode 开发态双次 effect 产生双条 PV）；整页刷新 timeOrigin 变，仍会记新 PV。 */
+/**
+ * 同一文档生命周期内、同一 markKey 只执行一次（避免 Strict Mode 双次 effect 双条 PV）。
+ * markKey 需随「登入轮次」变化（见 useSessionDailyActivePing），否则同页退出再登录不会记新 PV。
+ * 整页刷新后 timeOrigin 变，仍会记新 PV。
+ */
 function tryMarkPvOnceThisDocument(markKey: string): boolean {
   try {
     const key = `rdk:pv:${performance.timeOrigin}:${markKey}`;
@@ -49,12 +53,25 @@ async function postDailyActive(body: Record<string, string>): Promise<boolean> {
 }
 
 /**
- * SSO 验证通过、存在 user 后上报 PV（每次整页加载进入已登录态一条；换账号会再记）。
+ * SSO 验证通过、存在 user 后上报 PV。
+ * 每次「从登出到再次登入」或「换账号」spell 递增，与整页刷新一样可产生多条（同页退出再登录也会一条新 PV）。
  */
 export function useSessionDailyActivePing(loading: boolean, user: { id: string } | null) {
+  const prevUserIdRef = useRef<string | null>(null);
+  const spellRef = useRef(0);
+
   useEffect(() => {
-    if (loading || !user) return;
-    const markKey = `sso:${user.id}`;
+    if (loading) return;
+    const id = user?.id ?? null;
+    if (!id) {
+      prevUserIdRef.current = null;
+      return;
+    }
+    if (prevUserIdRef.current !== id) {
+      spellRef.current += 1;
+    }
+    prevUserIdRef.current = id;
+    const markKey = `sso:${id}:s${spellRef.current}`;
     if (!tryMarkPvOnceThisDocument(markKey)) return;
     const appVersion = import.meta.env.VITE_APP_VERSION || '';
     void postDailyActive({ appVersion });
