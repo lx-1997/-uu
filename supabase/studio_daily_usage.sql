@@ -4,7 +4,7 @@
 create table if not exists public.studio_daily_usage (
   id uuid primary key default gen_random_uuid(),
   usage_date date not null,
-  anonymous_id text not null,
+  anonymous_id text not null, -- 业务含义：去重键；SSO 场景存登录展示名（与对话归档命名一致），无 SSO 时为浏览器匿名 id
   app_version text,
   created_at timestamptz not null default now(),
   constraint studio_daily_usage_date_anon unique (usage_date, anonymous_id)

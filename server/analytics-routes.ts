@@ -9,6 +9,7 @@ import { forwardAnalyticsCloudWebhook } from './analytics-cloud-forward.js';
 import { decryptAnalyticsEnvelope, isEncryptedAnalyticsBody } from './analytics-payload-crypto.js';
 import { getAnalyticsPayloadSecret } from './analytics-payload-secret.js';
 import { getAnalyticsEventsFilePath, getAnalyticsEventsMirrorFilePath } from './storage.js';
+import { formatConversationArchiveUserName, getSessionSsoUser } from './sso.js';
 import { performDailyActiveInsert } from './supabase-daily-usage.js';
 
 const MAX_BATCH = 80;
@@ -104,16 +105,27 @@ export function registerAnalyticsRoutes(app: Express): void {
     res.json({ ok: true, accepted: lines.length });
   });
 
-  /** 匿名日活：每客户端每日最多一行写入 Supabase（已配置凭证时默认开启，见 supabase-daily-usage） */
+  /**
+   * 日活：优先从 SSO Cookie 取用户，写入与对话归档一致的展示名（姓名 → 邮箱前缀 → 账户 id）；
+   * 未启用/未登录 SSO 时允许 body.anonymousId（本地无门禁场景）。
+   */
   app.post('/api/analytics/daily-active', async (req: Request, res: Response) => {
     const body = req.body as { anonymousId?: string; appVersion?: string };
-    const anonymousId = String(body?.anonymousId || '').trim().slice(0, 64);
     const appVersion = String(body?.appVersion || '').trim().slice(0, 48);
-    if (!anonymousId) {
-      res.status(400).json({ ok: false, error: 'anonymousId required' });
-      return;
+    const ssoUser = getSessionSsoUser(req);
+    let usageKey: string;
+    if (ssoUser) {
+      const label = formatConversationArchiveUserName(ssoUser, undefined)?.trim();
+      usageKey = (label || ssoUser.id).slice(0, 256);
+    } else {
+      const anonymousId = String(body?.anonymousId || '').trim().slice(0, 128);
+      if (!anonymousId) {
+        res.status(400).json({ ok: false, error: 'sso_session_or_anonymousId_required' });
+        return;
+      }
+      usageKey = anonymousId;
     }
-    const result = await performDailyActiveInsert(anonymousId, appVersion);
+    const result = await performDailyActiveInsert(usageKey, appVersion);
     if (!result.ok) {
       res.status(500).json({ ok: false, error: result.error });
       return;

@@ -37,11 +37,11 @@ export function getResolvedDailyUsageTable(): string {
 }
 
 /**
- * 记录一次「当日活跃」；同一 anonymousId + UTC 日仅第一条生效（依赖表唯一约束）。
- * 返回 persisted 供前端决定是否写入「本日已上报」标记，避免误标成功而库中无行。
+ * 记录一次「当日活跃」；同一 usage_key + UTC 日仅第一条生效（依赖表唯一约束）。
+ * usage_key：SSO 场景为展示名；无 SSO 时为匿名 id。
  */
 export async function performDailyActiveInsert(
-  anonymousId: string,
+  usageKey: string,
   appVersion: string,
 ): Promise<DailyActiveInsertResult> {
   if (!isDailyUsageWriteEnabled()) {
@@ -54,10 +54,10 @@ export async function performDailyActiveInsert(
   }
 
   const usageDate = new Date().toISOString().slice(0, 10);
-  const aid = anonymousId.trim().slice(0, 64);
+  const aid = usageKey.trim().slice(0, 256);
   const ver = appVersion.trim().slice(0, 48);
   if (!aid) {
-    return { ok: false, error: 'anonymousId empty' };
+    return { ok: false, error: 'usage_key empty' };
   }
 
   try {

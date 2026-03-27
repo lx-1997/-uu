@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import { useSessionDailyActivePing, useGuestDailyActivePing } from '../analytics/useDailyActivePing';
 import { resolveApiUrl, fetchApi } from '../utils/apiBase';
 
 export interface SSOUser {
@@ -101,6 +102,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       const data = (await res.json()) as { logoutUrl?: string };
       setUser(null);
+      try {
+        for (let i = sessionStorage.length - 1; i >= 0; i--) {
+          const k = sessionStorage.key(i);
+          if (k?.startsWith('rdk:daily-active-session:')) sessionStorage.removeItem(k);
+        }
+      } catch {
+        /* ignore */
+      }
       if (data.logoutUrl) {
         window.location.href = data.logoutUrl;
       } else {
@@ -125,7 +134,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [loading, ssoEnabled, ssoRequired, ssoConfigured, user, loginUrl, refresh, logout],
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      <AuthDailyActiveHost />
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+/** 身份就绪后上报日活（SSO：登录展示名；非强制 SSO 且无用户：匿名） */
+function AuthDailyActiveHost() {
+  const { loading, user, ssoRequired } = useAuth();
+  useSessionDailyActivePing(loading, user);
+  useGuestDailyActivePing(loading, ssoRequired, user);
+  return null;
 }
 
 export function useAuth(): AuthState {

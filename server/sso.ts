@@ -302,6 +302,22 @@ export function formatConversationArchiveUserName(
   return undefined;
 }
 
+/**
+ * 从请求 Cookie 解析当前 SSO 会话用户。
+ * 供先于 ssoAuthMiddleware 注册的 API（如 /api/analytics/daily-active）使用。
+ */
+export function getSessionSsoUser(req: Request): SSOUser | null {
+  const sessionId = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
+  if (!sessionId || !sessions.has(sessionId)) return null;
+  const session = sessions.get(sessionId)!;
+  if (session.expiresAt <= Date.now()) {
+    sessions.delete(sessionId);
+    schedulePersistSsoSessions();
+    return null;
+  }
+  return session.user;
+}
+
 /** 写入 forum-auth 展示用用户名（与 forum-tools 中 derive 逻辑对齐） */
 function forumUsernameHintFromSsoUser(user: SSOUser): string | undefined {
   const name = String(user.name || '').trim();
@@ -356,12 +372,6 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
 
   /** 匿名行为埋点，不含聊天正文；便于未登录/跨源场景上报 */
   if (req.method === 'POST' && req.path === '/api/analytics/events') {
-    next();
-    return;
-  }
-
-  /** 匿名日活（与 events 相同：未登录也需写入 Supabase；须与 analytics-routes 放行策略一致） */
-  if (req.method === 'POST' && req.path === '/api/analytics/daily-active') {
     next();
     return;
   }
