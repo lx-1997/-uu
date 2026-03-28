@@ -67,6 +67,8 @@ import {
 } from "./channel-safety.js";
 import { evaluatePermissionGuard } from "./permission-guard.js";
 import { mapMiniEvent, resolveExecutor } from "./event-mapper.js";
+import { sanitizeSecrets } from "./secret-sanitizer.js";
+import { TextDeltaSmoother } from "./text-delta-smoother.js";
 import {
   classifyModelTier,
   buildPersonaPrompt,
@@ -1043,8 +1045,15 @@ export class RDKClawApp {
       | { runId?: string; text: string; turns: number; toolCalls: number; skillTriggered?: string; memoriesUsed?: number }
       | null = null;
     this.runAgents.set(runId, agent);
+    const textSmoother = TextDeltaSmoother.create(
+      (delta) => {
+        pushEvent({ type: "text", data: { delta, ...base } });
+      },
+      { tickMs: 8, minPerTick: 1 },
+    );
     const handleExternalAbort = () => {
       abortedByClient = true;
+      textSmoother.flushSync();
       agent.abort();
     };
     externalAbortSignal?.addEventListener("abort", handleExternalAbort, { once: true });
@@ -1067,6 +1076,11 @@ export class RDKClawApp {
           runMetrics.toolCallNames = runMetrics.toolCallNames.slice(-30);
         }
       }
+      if (event.type === "message_delta") {
+        textSmoother.push(sanitizeSecrets(event.delta));
+        return;
+      }
+      textSmoother.flushSync();
       const mapped = mapMiniEvent(event, base);
       if (mapped) pushEvent(mapped);
     });
@@ -1111,6 +1125,7 @@ export class RDKClawApp {
       .finally(() => {
         finished = true;
         clearInterval(progressTimer);
+        textSmoother.dispose();
         wakeQueue();
         unsubscribe();
         externalAbortSignal?.removeEventListener("abort", handleExternalAbort);

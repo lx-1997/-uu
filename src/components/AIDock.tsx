@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { parseUiLanguageCommand } from '../i18n/language-command';
+import { useStreamRevealSegments } from '../hooks/useStreamReveal';
 import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, fetchApi } from '../utils/apiBase';
+import { findStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import io from 'socket.io-client';
 
@@ -207,6 +209,81 @@ function StatusCollapsible({ block }: { block: Extract<ChatBlock, { type: 'statu
         </div>
       )}
     </div>
+  );
+}
+
+/** 流式阶段：稳定前缀 Markdown + 本步新字 plain 段 dock-stream-seg 渐入（安全切分避免截断 ** / `） */
+function DockStreamingPlainBody({ text }: { text: string }) {
+  const { t } = useI18n();
+  const copyLabel = t('markdown.copy', '复制');
+  /* natural：标点/空格变速 + 积压略加速，与对外「动态步频」表述一致；勿改 uniform 除非刻意做匀速演示 */
+  const { visible, tailKey, lastStepLen, singleInstant } = useStreamRevealSegments(text, true, 'natural');
+  const showWarmup = !text.trim();
+  const minTail = !singleInstant && lastStepLen > 0 ? lastStepLen : 0;
+  const instantCatchup = singleInstant && visible.length > 0 && visible.length === text.length;
+
+  let split =
+    visible.length === 0 || instantCatchup || minTail <= 0
+      ? visible.length
+      : findStreamingFadeSplitIndex(visible, minTail);
+  /*
+   * tail 若以 \\n 开头：在默认 white-space 下换行会塌成空格，进 Markdown 后变成 <br>，下一行首字会「跳」。
+   * 把前导换行并进 head，让断行始终由 Markdown 的 <br> 负责。
+   */
+  if (visible.length > 0 && !instantCatchup && minTail > 0 && split < visible.length) {
+    while (split < visible.length && visible[split] === '\n') {
+      split += 1;
+    }
+  }
+  const useTailFade =
+    visible.length > 0 && !instantCatchup && minTail > 0 && split < visible.length;
+  const head = useTailFade ? visible.slice(0, split) : visible;
+  const tail = useTailFade ? visible.slice(split) : '';
+
+  const headMd = useMemo(
+    () =>
+      head
+        ? renderMarkdown(head, { streaming: true, suppressInlineCaret: useTailFade, copyLabel })
+        : null,
+    [head, useTailFade, copyLabel],
+  );
+  const fullMd = useMemo(
+    () =>
+      visible.length > 0 && !useTailFade
+        ? renderMarkdown(visible, { streaming: !instantCatchup, copyLabel })
+        : null,
+    [visible, useTailFade, instantCatchup, copyLabel],
+  );
+
+  return (
+    <>
+      {showWarmup && (
+        <span className="dock-stream-warmup" aria-live="polite">
+          正在组织回答
+          <span className="dock-stream-warmup-dots" aria-hidden>…</span>
+        </span>
+      )}
+      {!showWarmup && (
+        <div className="msg-text msg-text--streaming-md">
+          {useTailFade ? (
+            <>
+              {headMd}
+              {tail ? (
+                <span
+                  key={tailKey}
+                  className="dock-stream-seg"
+                >
+                  {tail}
+                </span>
+              ) : null}
+              <span className="md-stream-caret md-stream-caret--inline" aria-hidden />
+            </>
+          ) : (
+            fullMd ?? <span className="md-stream-caret md-stream-caret--inline" aria-hidden />
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -734,6 +811,10 @@ export default function AIDock() {
   const chatInputRef = useRef<HTMLInputElement | null>(null);
   /** 实际滚动容器是 .dock-stream（仅 chatExpanded 时挂载），不能用仅首屏执行的 scrollIntoView */
   const streamScrollRef = useRef<HTMLDivElement | null>(null);
+  /** 用户是否在底部附近；为 false 时流式更新不再强行滚到底，避免打断阅读 */
+  const streamPinnedToBottomRef = useRef(true);
+  const prevChatLenRef = useRef(0);
+  const prevAiTypingRef = useRef(false);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -1026,29 +1107,42 @@ export default function AIDock() {
     }
   }, [hideDockInSubpage]);
 
-  const scrollStreamToBottom = useCallback(() => {
-    const el = streamScrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+  const streamScrollNearBottom = useCallback((el: HTMLElement, thresholdPx = 72) => {
+    const gap = el.scrollHeight - el.clientHeight - el.scrollTop;
+    return gap <= thresholdPx;
   }, []);
 
-  /* 展开 Dock、新消息、打字态或折叠/极简切换后，把消息区滚到底部 */
+  const handleStreamScroll = useCallback(() => {
+    const el = streamScrollRef.current;
+    if (!el) return;
+    streamPinnedToBottomRef.current = streamScrollNearBottom(el);
+  }, [streamScrollNearBottom]);
+
+  /* 新一轮生成开始：恢复「跟随底部」 */
   useEffect(() => {
+    if (aiTyping && !prevAiTypingRef.current) {
+      streamPinnedToBottomRef.current = true;
+    }
+    prevAiTypingRef.current = aiTyping;
+  }, [aiTyping]);
+
+  /* 展开 Dock、新消息、流式更新：仅在贴底时滚到底；单次赋值，避免每条 token 上双 rAF+多定时器抢主线程 */
+  useLayoutEffect(() => {
     if (!chatExpanded) return;
-    scrollStreamToBottom();
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(scrollStreamToBottom);
-    });
-    const t0 = setTimeout(scrollStreamToBottom, 0);
-    const t1 = setTimeout(scrollStreamToBottom, 80);
-    const t2 = setTimeout(scrollStreamToBottom, 240);
-    return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(t0);
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [chatExpanded, chatMessages.length, aiTyping, showAllMessages, compactFlowMode, scrollStreamToBottom]);
+
+    const len = chatMessages.length;
+    if (len > prevChatLenRef.current) {
+      streamPinnedToBottomRef.current = true;
+    }
+    prevChatLenRef.current = len;
+
+    if (!streamPinnedToBottomRef.current) return;
+
+    const el = streamScrollRef.current;
+    if (!el) return;
+
+    el.scrollTop = el.scrollHeight;
+  }, [chatExpanded, chatMessages, aiTyping, showAllMessages, compactFlowMode]);
 
   /* OpenClaw Socket.IO connection */
   useEffect(() => {
@@ -1392,7 +1486,7 @@ export default function AIDock() {
           )}
 
           {/* Chat stream */}
-          <div className="dock-stream" ref={streamScrollRef}>
+          <div className="dock-stream" ref={streamScrollRef} onScroll={handleStreamScroll}>
             {chatMessages.length === 0 && !aiTyping && (
               <div className="dock-empty-hint">{t('dock.empty.cleared', '聊天已清空，输入新消息即可继续。')}</div>
             )}
@@ -1402,9 +1496,13 @@ export default function AIDock() {
               </button>
             )}
 
-            {visibleMessages.map((msg) => {
+            {visibleMessages.map((msg, msgIndex) => {
               const channelClass = msg.channelMeta?.channel ? ` ch-${msg.channelMeta.channel}` : '';
               const directionClass = msg.channelMeta?.direction ? ` dir-${msg.channelMeta.direction}` : '';
+              const isStreamingBubble =
+                aiTyping
+                && msg.role === 'ai'
+                && msgIndex === visibleMessages.length - 1;
               return (
               <div key={msg.id} className={`dock-msg ${msg.role}${channelClass}${directionClass}`}>
                 <div className={`dock-avatar ${msg.role}`}>
@@ -1485,7 +1583,15 @@ export default function AIDock() {
                         const { cleanText, mediaBlocks } = extractMediaFromText(msg.text);
                         return (
                           <>
-                            {cleanText && <div className="msg-text">{renderMarkdown(cleanText, t('markdown.copy', '复制'))}</div>}
+                            {cleanText && (
+                              <div className={`msg-text${isStreamingBubble ? ' msg-text--streaming' : ''}`}>
+                                {isStreamingBubble ? (
+                                  <DockStreamingPlainBody key={msg.id} text={cleanText} />
+                                ) : (
+                                  renderMarkdown(cleanText, t('markdown.copy', '复制'))
+                                )}
+                              </div>
+                            )}
                             {mediaBlocks.map((mb, i) => (
                               <BlockRenderer key={`extracted-media-${i}`} block={mb} />
                             ))}

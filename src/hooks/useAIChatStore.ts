@@ -904,16 +904,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             m.id === aiMsgId ? { ...m, text: t, blocks: b } : m
           ));
         };
+        /** 文本增量仅合并到下一帧 paint（~60fps），不再额外 setTimeout 限频，避免「一顿一顿」 */
         const updateAiMessage = (text: string, blocks: ChatBlock[], immediate?: boolean) => {
           pendingText = text;
           pendingBlocks = blocks;
-          if (immediate || !rafHandle) {
+          if (immediate) {
             if (rafHandle) cancelAnimationFrame(rafHandle);
-            if (immediate) {
-              flushAiMessage();
-            } else {
-              rafHandle = requestAnimationFrame(flushAiMessage);
-            }
+            flushAiMessage();
+            return;
+          }
+          if (!rafHandle) {
+            rafHandle = requestAnimationFrame(flushAiMessage);
           }
         };
         let toolStepNo = 0;
@@ -1251,7 +1252,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (!aiText.trim()) {
                   aiText = String(event.data.text || '');
                 }
-                updateAiMessage(aiText, aiBlocks);
+                updateAiMessage(aiText, aiBlocks, true);
                 break;
               }
               case 'approval_required': {

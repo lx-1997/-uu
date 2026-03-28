@@ -434,6 +434,39 @@ export interface AgentAttachmentPayload {
 
 export type AgentEventCallback = (event: AgentSSEEvent) => void;
 
+/**
+ * 解析单个 SSE 事件块（以空行分隔）。支持多行 data: 拼接、忽略注释行、去除 CRLF。
+ */
+function parseSseEventBlock(raw: string): { type: string; data: string } | null {
+  const lines = raw.split('\n').map((line) => line.replace(/\r$/, ''));
+  let eventType = 'message';
+  const dataLines: string[] = [];
+  for (const line of lines) {
+    if (!line || line.startsWith(':')) continue;
+    if (line.startsWith('event:')) {
+      eventType = line.slice(6).trim() || 'message';
+      continue;
+    }
+    if (line.startsWith('data:')) {
+      const payload = line.slice(5).startsWith(' ') ? line.slice(6) : line.slice(5);
+      dataLines.push(payload);
+    }
+  }
+  if (dataLines.length === 0) return null;
+  return { type: eventType, data: dataLines.join('\n') };
+}
+
+function dispatchSseBlock(raw: string, onEvent?: AgentEventCallback) {
+  const parsed = parseSseEventBlock(raw);
+  if (!parsed) return;
+  try {
+    const data = JSON.parse(parsed.data) as Record<string, unknown>;
+    onEvent?.({ type: parsed.type as AgentSSEEvent['type'], data });
+  } catch {
+    /* skip malformed JSON */
+  }
+}
+
 export function streamAgentChat(
   message: string,
   deviceId?: string,
@@ -479,25 +512,26 @@ export function streamAgentChat(
       const decoder = new TextDecoder();
       let buffer = '';
 
+      const flushCompleteBlocks = () => {
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+        for (const block of parts) {
+          if (block.trim()) dispatchSseBlock(block, onEvent);
+        }
+      };
+
       while (true) {
         const { done: readerDone, value } = await reader.read();
         if (readerDone) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        flushCompleteBlocks();
+      }
 
-        let currentEventType = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEventType = line.slice(7).trim();
-          } else if (line.startsWith('data: ') && currentEventType) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              onEvent?.({ type: currentEventType as AgentSSEEvent['type'], data });
-            } catch { /* skip malformed JSON */ }
-            currentEventType = '';
-          }
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        for (const block of buffer.split('\n\n')) {
+          if (block.trim()) dispatchSseBlock(block, onEvent);
         }
       }
     } catch (err) {
@@ -979,8 +1013,27 @@ export function installDeviceOpenClaw(deviceId: string, password?: string) {
   });
 }
 
-export function checkDevicePing(deviceId: string) {
-  return request<{ ok: boolean; status: string }>(`/api/devices/${deviceId}/ping`, { method: 'GET' }).catch(() => ({ ok: false, status: 'offline' }));
+/**
+ * 设备可达性探测（后台轮询用）。不得走 request()：服务端在 ID 不存在时返回 404，
+ * 否则会触发全局 rdk-api-error，每十几秒弹一次「设备不存在」。
+ */
+export async function checkDevicePing(deviceId: string): Promise<{ ok: boolean; status: string }> {
+  const id = String(deviceId || '').trim();
+  if (!id) return { ok: false, status: 'offline' };
+  try {
+    const url = resolveUrl(`/api/devices/${encodeURIComponent(id)}/ping`);
+    const response = await fetch(url, { method: 'GET' });
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; status?: string };
+    if (!response.ok) {
+      return { ok: false, status: 'offline' };
+    }
+    return {
+      ok: Boolean(data.ok),
+      status: typeof data.status === 'string' ? data.status : (data.ok ? 'connected' : 'offline'),
+    };
+  } catch {
+    return { ok: false, status: 'offline' };
+  }
 }
 
 export function executeDeviceCommand(deviceId: string, command: string, password?: string) {

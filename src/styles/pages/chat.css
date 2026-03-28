@@ -243,6 +243,131 @@
   margin: 0;
 }
 
+/* 流式阶段：纯文本 + pre-wrap，避免每帧整段 Markdown 解析导致掉帧 */
+.dock-bubble .msg-text.msg-text--streaming {
+  transition: none;
+}
+
+.dock-bubble .msg-text--stream-plain {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font: inherit;
+  line-height: 1.55;
+  font-variant-ligatures: none;
+  contain: content;
+}
+
+/* 流式阶段：与成稿共用 Markdown 结构，加粗/标题/列表随出随显 */
+.dock-bubble .msg-text--streaming-md {
+  display: block;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font: inherit;
+  line-height: 1.55;
+  font-variant-ligatures: none;
+  contain: content;
+  /*
+   * opacity 动画 + 粗体易触发亚像素抗锯齿切换（边缘发糊/收束时变锐）。
+   * 整段流式容器用灰度抗锯齿 + 合成层，减轻 strong 与正文混排时的「脏边」感。
+   */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* 流式分段：轻量淡入（仅用 opacity，避免 inline 上 transform 与 CJK 换行问题） */
+.dock-bubble .dock-stream-seg {
+  display: inline;
+  /* 与默认 normal 不同：避免尾段里含 \\n 时与进 MD 后的 <br> 表现不一致 */
+  white-space: pre-line;
+  animation: dock-stream-seg-in 0.24s cubic-bezier(0.25, 0.8, 0.35, 1) both;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+.dock-bubble .dock-stream-seg--instant {
+  animation: none;
+}
+
+@keyframes dock-stream-seg-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-bubble .dock-stream-seg {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* 首 token 前：轻量占位，优化前几百毫秒的「死寂」感 */
+.dock-bubble .dock-stream-warmup {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+
+.dock-bubble .dock-stream-warmup-dots {
+  display: inline-block;
+  animation: dock-warmup-dots 1.2s steps(3, end) infinite;
+}
+
+@keyframes dock-warmup-dots {
+  0%, 20% { opacity: 0.35; }
+  50% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+
+.dock-bubble .md-code-block.md-streaming {
+  border: 1px dashed var(--card-border, #e5e7eb);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 6px 0;
+}
+
+.dock-bubble .md-streaming-badge {
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: var(--accent, #ff6b00);
+  letter-spacing: 0.04em;
+}
+
+.dock-bubble .md-stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  background: var(--accent, #ff6b00);
+  vertical-align: text-bottom;
+  animation: md-stream-blink 1s step-end infinite;
+}
+
+@keyframes md-stream-blink {
+  50% { opacity: 0; }
+}
+
+.dock-bubble .md-stream-caret--inline {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background: var(--accent, #ff6b00);
+  vertical-align: text-bottom;
+  animation: md-stream-blink 1s step-end infinite;
+}
+
 .dock-bubble .msg-text p { margin: 0 0 8px; }
 .dock-bubble .msg-text p:last-child { margin-bottom: 0; }
 

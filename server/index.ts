@@ -4920,6 +4920,8 @@ app.post('/api/agent/chat', async (request, response) => {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
+      /** 禁用 nginx / 部分反向代理对 SSE 的响应缓冲，避免 Token 被攒批后才下发 */
+      'X-Accel-Buffering': 'no',
       'X-Run-Id': runId,
       'X-Session-Key': sessionId || '',
     });
