@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Request, Response, NextFunction } from 'express';
+import type { IncomingMessage } from 'node:http';
 import { getSsoSessionsFilePath } from './storage.js';
 import { ForumAuthStore } from './rdkclaw/forum-auth-store.js';
 import { scheduleForumSyncFromSso, clearForumAuthOnAppSsoLogout } from './agent/tools/forum-tools.js';
@@ -315,11 +316,19 @@ function getSessionIdFromRequest(req: Request): string {
   const h = Array.isArray(raw) ? raw[0] : raw;
   const s = String(h || '').trim();
   if (s && /^[a-f0-9]{64}$/i.test(s)) return s;
+  /** EventSource 无法设置自定义头；Electron file:// 直连 :8787 时 Cookie 常丢失。允许与前端 localStorage 镜像同源的 query 传会话 id */
+  const q = req.query?.rdk_sso_session;
+  const qs = typeof q === 'string' ? q : Array.isArray(q) ? String(q[0] ?? '') : '';
+  if (qs && /^[a-f0-9]{64}$/i.test(qs)) return qs;
   return '';
 }
 
 export function getSessionSsoUser(req: Request): SSOUser | null {
   const sessionId = getSessionIdFromRequest(req);
+  return sessionId ? getSsoUserBySessionId(sessionId) : null;
+}
+
+function getSsoUserBySessionId(sessionId: string): SSOUser | null {
   if (!sessionId || !sessions.has(sessionId)) return null;
   const session = sessions.get(sessionId)!;
   if (session.expiresAt <= Date.now()) {
@@ -328,6 +337,29 @@ export function getSessionSsoUser(req: Request): SSOUser | null {
     return null;
   }
   return session.user;
+}
+
+/** WebSocket `upgrade` 无 Express req：从 Cookie / 头 / query 解析会话（与 getSessionSsoUser 对齐）。 */
+export function getSessionSsoUserFromIncomingMessage(req: IncomingMessage): SSOUser | null {
+  const sessionId = getSessionIdFromIncomingMessage(req);
+  return sessionId ? getSsoUserBySessionId(sessionId) : null;
+}
+
+function getSessionIdFromIncomingMessage(req: IncomingMessage): string {
+  const fromCookie = parseCookie(req.headers.cookie || '', SESSION_COOKIE);
+  if (fromCookie && /^[a-f0-9]{64}$/i.test(fromCookie)) return fromCookie;
+  const raw = req.headers[SESSION_HEADER];
+  const h = Array.isArray(raw) ? raw[0] : raw;
+  const s = String(h || '').trim();
+  if (s && /^[a-f0-9]{64}$/i.test(s)) return s;
+  try {
+    const u = new URL(req.url || '', 'http://localhost');
+    const qs = u.searchParams.get('rdk_sso_session') || '';
+    if (qs && /^[a-f0-9]{64}$/i.test(qs)) return qs;
+  } catch {
+    /* noop */
+  }
+  return '';
 }
 
 /** 写入 forum-auth 展示用用户名（与 forum-tools 中 derive 逻辑对齐） */
@@ -362,6 +394,15 @@ function commitSSOSession(res: Response, user: SSOUser, accessToken: string, ref
 
 export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunction): void {
   if (!isSSORequired()) {
+    next();
+    return;
+  }
+
+  /**
+   * 微信扫码预览图：img 标签请求无法带自定义 Header，且部分部署下路由顺序可能变化。
+   * 显式放行，避免返回 401 JSON 被当成图片解码失败。
+   */
+  if (req.method === 'GET' && req.path.startsWith('/api/rdkclaw/weixin/qr-preview')) {
     next();
     return;
   }

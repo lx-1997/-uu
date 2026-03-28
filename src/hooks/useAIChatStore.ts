@@ -23,6 +23,13 @@ import {
   type AgentSSEEvent,
 } from '../api';
 import { persistOpenClawHealthSnapshot, persistGatewayStatusSnapshot } from '../studio-ui-hints';
+import {
+  CHAT_HISTORY_LEGACY_KEY,
+  GLOBAL_CHAT_DEVICE_ID,
+  chatHistoryStorageKey,
+  loadChatHistoryFromStorage,
+  toChatDeviceId,
+} from '../utils/chat-history-storage';
 import { fetchApi } from '../utils/apiBase';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
@@ -91,20 +98,8 @@ const AIChatContext = createContext<AIChatStoreState | null>(null);
 /** 内存中对话条数上限，避免长会话撑爆渲染进程 */
 const MAX_CHAT_MESSAGES_IN_MEMORY = 100;
 const LARGE_DATA_URL_STORAGE_CHARS = 48_000;
-const CHAT_HISTORY_LEGACY_KEY = 'rdk-chat-history';
-const CHAT_HISTORY_KEY_PREFIX = 'rdk-chat-history:';
 const CHAT_SESSION_KEY_PREFIX = 'rdk:chat:session-id:';
 const CHAT_DRAFT_KEY_PREFIX = 'rdk:chat:draft:';
-const GLOBAL_CHAT_DEVICE_ID = '__global__';
-
-function toChatDeviceId(deviceId?: string | null) {
-  const normalized = String(deviceId || '').trim();
-  return normalized || GLOBAL_CHAT_DEVICE_ID;
-}
-
-function chatHistoryStorageKey(deviceId: string) {
-  return `${CHAT_HISTORY_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
-}
 
 function chatSessionStorageKey(deviceId: string) {
   return `${CHAT_SESSION_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
@@ -112,26 +107,6 @@ function chatSessionStorageKey(deviceId: string) {
 
 function chatDraftStorageKey(deviceId: string) {
   return `${CHAT_DRAFT_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
-}
-
-function loadChatHistoryForDevice(deviceId: string): ChatMessage[] {
-  try {
-    const specific = localStorage.getItem(chatHistoryStorageKey(deviceId));
-    const legacy = !specific && toChatDeviceId(deviceId) === GLOBAL_CHAT_DEVICE_ID
-      ? localStorage.getItem(CHAT_HISTORY_LEGACY_KEY)
-      : null;
-    const raw = specific ?? legacy;
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as ChatMessage[];
-    return parsed
-      .slice(-MAX_CHAT_MESSAGES_IN_MEMORY)
-      .map(m => ({
-        ...m,
-        blocks: m.blocks?.filter(b => b.type !== 'confirm' && b.type !== 'progress'),
-      }));
-  } catch {
-    return [];
-  }
 }
 
 /** 写入 localStorage 前去掉较早消息里巨型 data: URL，减轻 quota 与反序列化压力 */
@@ -191,7 +166,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   // ── State ──
   const [cmd, setCmd] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => loadChatHistoryForDevice(initialChatDeviceId));
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => loadChatHistoryFromStorage(initialChatDeviceId));
 
   useEffect(() => {
     if (chatMessages.length <= MAX_CHAT_MESSAGES_IN_MEMORY) return;
@@ -1680,7 +1655,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     chatDeviceIdRef.current = nextDeviceId;
-    setChatMessages(loadChatHistoryForDevice(nextDeviceId));
+    setChatMessages(loadChatHistoryFromStorage(nextDeviceId));
 
     try {
       const nextDraft = localStorage.getItem(chatDraftStorageKey(nextDeviceId)) ?? '';

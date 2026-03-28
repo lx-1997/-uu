@@ -1,7 +1,8 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { type Request } from 'express';
 import cors from 'cors';
-import QRCode from 'qrcode';
+import { prepareWeChatQrPreviewBuffer } from './rdkclaw/ilink-qrcode.js';
+import { putWeixinQrPreview, getWeixinQrPreview } from './rdkclaw/weixin-qr-preview.js';
 import { v4 as uuid } from 'uuid';
 import crypto from 'node:crypto';
 import { promises as fs, existsSync } from 'node:fs';
@@ -13,7 +14,7 @@ import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { Client } from 'ssh2';
-import { WebSocketServer } from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 import * as net from 'net';
 import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
 import * as path from 'path';
@@ -39,6 +40,9 @@ import {
   upsertProviderConfigEntry,
   switchActiveProviderConfig,
   deleteProviderConfigEntry,
+  getBootstrapStudioDefaultPresetMeta,
+  getActiveProviderEntry,
+  restoreStudioDefaultPresetFromBootstrap,
   type ProviderConfigRegistry,
 } from './agent/provider-setup.js';
 import { RDKClawApp } from './rdkclaw/app.js';
@@ -63,6 +67,7 @@ import {
   registerSSORoutes,
   restoreSsoSessionsFromDisk,
   formatConversationArchiveUserName,
+  getSessionSsoUserFromIncomingMessage,
   type SSOUser,
 } from './sso.js';
 import { registerAnalyticsRoutes } from './analytics-routes.js';
@@ -77,11 +82,106 @@ const io = new SocketIOServer(httpServer, {
 });
 
 const wss = new WebSocketServer({ noServer: true });
-httpServer.on('upgrade', (request, socket, head) => {
-  if (request.url?.startsWith('/websockify')) {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
-    });
+const rosbridgeWss = new WebSocketServer({ noServer: true });
+const ROSBRIDGE_DEVICE_PORT = 9090;
+
+async function handleRosbridgeProxy(clientWs: WebSocket, req: http.IncomingMessage) {
+  if (isSSORequired()) {
+    const user = getSessionSsoUserFromIncomingMessage(req);
+    if (!user) {
+      clientWs.close(1008, 'unauthorized');
+      return;
+    }
+  }
+  const u = new URL(req.url || '', 'http://localhost');
+  const deviceId = u.searchParams.get('deviceId')?.trim();
+  if (!deviceId) {
+    clientWs.close(1008, 'missing deviceId');
+    return;
+  }
+  let devices: Device[];
+  try {
+    devices = await readDevices();
+  } catch (err) {
+    console.warn('[rosbridge-ws] readDevices failed:', err instanceof Error ? err.message : err);
+    clientWs.close(1011, 'server error');
+    return;
+  }
+  const device = devices.find(d => d.id === deviceId);
+  if (!device) {
+    clientWs.close(1008, 'device not found');
+    return;
+  }
+  const host = device.host || device.ip;
+  const targetUrl = `ws://${host}:${ROSBRIDGE_DEVICE_PORT}/`;
+  const upstream = new WebSocket(targetUrl);
+
+  const pending: Buffer[] = [];
+  const pendingBinary: boolean[] = [];
+
+  clientWs.on('message', (data, isBinary) => {
+    const bin = !!isBinary;
+    if (upstream.readyState === WebSocket.OPEN) {
+      upstream.send(data, { binary: bin });
+    } else if (upstream.readyState === WebSocket.CONNECTING) {
+      pending.push(Buffer.from(data as Buffer));
+      pendingBinary.push(bin);
+    }
+  });
+
+  upstream.on('open', () => {
+    for (let i = 0; i < pending.length; i++) {
+      upstream.send(pending[i], { binary: pendingBinary[i] });
+    }
+    pending.length = 0;
+    pendingBinary.length = 0;
+  });
+
+  upstream.on('message', (data, isBinary) => {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(data, { binary: !!isBinary });
+    }
+  });
+
+  upstream.on('error', (err) => {
+    console.warn('[rosbridge-ws] upstream error:', err instanceof Error ? err.message : err);
+    try { clientWs.close(); } catch { /* noop */ }
+    try { upstream.close(); } catch { /* noop */ }
+  });
+  clientWs.on('error', () => {
+    try { upstream.close(); } catch { /* noop */ }
+  });
+  upstream.on('close', () => {
+    try { clientWs.close(); } catch { /* noop */ }
+  });
+  clientWs.on('close', () => {
+    try { upstream.close(); } catch { /* noop */ }
+  });
+}
+
+/**
+ * 必须在 Engine.IO 的 upgrade 监听之前处理自定义路径，否则 engine 会先对非 /socket.io 路径
+ * 安排 destroyUpgrade 定时器，与后续 handleUpgrade 竞态可能导致异常或连接被 RST。
+ * prependListener 保证先于 socket.io 已注册的监听器执行。
+ */
+httpServer.prependListener('upgrade', (request, socket, head) => {
+  const url = request.url || '';
+  try {
+    if (url.startsWith('/api/rosbridge-ws')) {
+      rosbridgeWss.handleUpgrade(request, socket, head, (ws) => {
+        void handleRosbridgeProxy(ws, request).catch((err) => {
+          console.warn('[rosbridge-ws] proxy error:', err instanceof Error ? err.message : err);
+          try { ws.close(); } catch { /* noop */ }
+        });
+      });
+    } else if (url.startsWith('/websockify')) {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    }
+  } catch (err) {
+    console.warn('[upgrade] custom path failed:', err instanceof Error ? err.message : err);
+    try { socket.destroy(); } catch { /* noop */ }
   }
 });
 
@@ -1324,6 +1424,20 @@ app.use(express.json({ limit: '50mb' }));
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)
 registerSSORoutes(app);
 registerAnalyticsRoutes(app);
+
+/** 微信扫码：短时图片预览（免检，凭不可猜测 id + TTL；避免 SSE 内嵌超长 data URL 导致裂图） */
+app.get('/api/rdkclaw/weixin/qr-preview', (req, res) => {
+  const id = String(req.query.id || '').trim();
+  const hit = getWeixinQrPreview(id);
+  if (!hit) {
+    res.status(404).json({ ok: false, error: 'not_found' });
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', hit.mime);
+  res.end(hit.buf);
+});
+
 if (isSSOEnabled() || isSSORequired()) {
   app.use(ssoAuthMiddleware);
   if (isSSOEnabled()) {
@@ -3763,6 +3877,15 @@ app.get('/api/agent/config', (_request, response) => {
   const config = loadProviderConfig();
   const registry = loadProviderRegistry();
   const envApiKeyAvailable = Boolean(String(process.env.OPENAI_API_KEY || '').trim());
+  const bootstrapPreset = getBootstrapStudioDefaultPresetMeta();
+  const studioDefaultPreset = bootstrapPreset
+    ? {
+        id: bootstrapPreset.id,
+        label: bootstrapPreset.label,
+        inRegistry: registry.entries.some((e) => e.id === bootstrapPreset.id),
+        isActive: registry.activeId === bootstrapPreset.id,
+      }
+    : null;
   const models = registry.entries.map((entry) => ({
     id: entry.id,
     label: entry.label,
@@ -3778,6 +3901,7 @@ app.get('/api/agent/config', (_request, response) => {
       models,
       activeModelId: registry.activeId || null,
       envApiKeyAvailable,
+      studioDefaultPreset,
     });
     return;
   }
@@ -3790,12 +3914,13 @@ app.get('/api/agent/config', (_request, response) => {
     models,
     activeModelId: registry.activeId || null,
     envApiKeyAvailable,
+    studioDefaultPreset,
   });
 });
 
 app.post('/api/agent/config', (request, response) => {
   const body = (request.body ?? {}) as {
-    action?: 'upsert' | 'switch' | 'delete';
+    action?: 'upsert' | 'switch' | 'delete' | 'restore_bootstrap_preset';
     id?: string;
     label?: string;
     provider?: string;
@@ -3806,6 +3931,29 @@ app.post('/api/agent/config', (request, response) => {
   };
 
   const action = body.action || 'upsert';
+  if (action === 'restore_bootstrap_preset') {
+    const result = restoreStudioDefaultPresetFromBootstrap();
+    if (!result.ok) {
+      response.status(400).json({ error: result.error || '恢复内置模型失败' });
+      return;
+    }
+    const next = loadProviderConfig();
+    const reg = loadProviderRegistry();
+    const activeEnt = getActiveProviderEntry(reg);
+    response.json({
+      ok: true,
+      active: next && activeEnt
+        ? {
+            id: activeEnt.id,
+            provider: next.provider,
+            model: next.model,
+            baseUrl: next.baseUrl,
+            hasApiKey: Boolean(next.apiKey?.trim() || process.env.OPENAI_API_KEY?.trim()),
+          }
+        : undefined,
+    });
+    return;
+  }
   if (action === 'switch') {
     const id = String(body.id || '').trim();
     if (!id) {
@@ -4317,8 +4465,14 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
       return;
     }
 
-    const qrDataUrl = await QRCode.toDataURL(qrData.qrcode_img_content, { width: 280, margin: 2 });
-    sendSSE('qrcode', { qrcode: qrDataUrl });
+    const { buf, mime } = await prepareWeChatQrPreviewBuffer({
+      qrcode: qrData.qrcode,
+      qrcodeImgContent: qrData.qrcode_img_content,
+    });
+    const previewId = putWeixinQrPreview(buf, mime);
+    /** 相对路径：由前端 resolveApiUrl 拼到当前页 / Electron apiBase，避免 Host/HTTPS 与 publicApiBaseUrl 不一致导致 img 404 或非图片响应 */
+    const qrPreviewUrl = `/api/rdkclaw/weixin/qr-preview?id=${encodeURIComponent(previewId)}`;
+    sendSSE('qrcode', { qrcode: qrPreviewUrl });
     sendSSE('log', { message: '请用微信扫描二维码' });
 
     const deadline = Date.now() + MAX_WAIT_MS;
@@ -4369,8 +4523,13 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
             const refreshData = await refreshRes.json() as { qrcode?: string; qrcode_img_content?: string };
             if (refreshData.qrcode && refreshData.qrcode_img_content) {
               qrcode = refreshData.qrcode;
-              const refreshQrDataUrl = await QRCode.toDataURL(refreshData.qrcode_img_content, { width: 280, margin: 2 });
-              sendSSE('qrcode', { qrcode: refreshQrDataUrl });
+              const rBuf = await prepareWeChatQrPreviewBuffer({
+                qrcode: refreshData.qrcode,
+                qrcodeImgContent: refreshData.qrcode_img_content,
+              });
+              const rId = putWeixinQrPreview(rBuf.buf, rBuf.mime);
+              const refreshPreviewUrl = `/api/rdkclaw/weixin/qr-preview?id=${encodeURIComponent(rId)}`;
+              sendSSE('qrcode', { qrcode: refreshPreviewUrl });
               sendSSE('log', { message: '新二维码已生成，请重新扫描' });
             } else {
               sendSSE('error', { message: '刷新二维码失败' });
@@ -4401,7 +4560,7 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
   }
 });
 
-app.post('/api/rdkclaw/weixin/bind-start', async (_request, response) => {
+app.post('/api/rdkclaw/weixin/bind-start', async (request, response) => {
   const ILINK_BASE = 'https://ilinkai.weixin.qq.com';
   const BOT_TYPE = '3';
   try {
@@ -4415,7 +4574,12 @@ app.post('/api/rdkclaw/weixin/bind-start', async (_request, response) => {
       response.status(502).json({ ok: false, error: '获取二维码失败: 响应缺少 qrcode' });
       return;
     }
-    const qrDataUrl = await QRCode.toDataURL(qrData.qrcode_img_content, { width: 400, margin: 2 });
+    const b = await prepareWeChatQrPreviewBuffer({
+      qrcode: qrData.qrcode,
+      qrcodeImgContent: qrData.qrcode_img_content,
+    });
+    const bindPreviewId = putWeixinQrPreview(b.buf, b.mime);
+    const qrDataUrl = `/api/rdkclaw/weixin/qr-preview?id=${encodeURIComponent(bindPreviewId)}`;
     response.json({ ok: true, qrcode: qrData.qrcode, qrDataUrl });
 
     const pollForBind = async () => {

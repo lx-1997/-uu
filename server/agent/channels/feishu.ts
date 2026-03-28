@@ -138,6 +138,15 @@ interface FeishuPendingApproval {
   createdAt: number;
 }
 
+/** 防抖合并后的入站内容（避免再次 resolveMessageAttachments） */
+interface FeishuPreResolvedInbound {
+  text: string;
+  inboundText: string;
+  attachments: ChatAttachmentInput[];
+  /** 合并条数；1 表示单条 */
+  mergeCount: number;
+}
+
 export interface FeishuRecentChat {
   chatId: string;
   openIdMasked: string;
@@ -167,6 +176,13 @@ export class FeishuWebSocketChannel {
   };
   private tenantToken: { value: string; expireAt: number } | null = null;
   private tenantTokenInflight: Promise<string> | null = null;
+  /** 与微信一致：短防抖合并连发；同会话串行执行 */
+  private static readonly INBOUND_DEBOUNCE_MS = 350;
+  private feishuPendingBuffers = new Map<string, {
+    items: Array<{ payload: any; resolve: () => void; reject: (e: unknown) => void }>;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>();
+  private feishuSerialTail = new Map<string, Promise<void>>();
 
   constructor(opts: FeishuChannelOptions) {
     this.rdkclaw = opts.rdkclaw;
@@ -271,9 +287,11 @@ export class FeishuWebSocketChannel {
           "im.message.receive_v1": async (data: any) => {
             this.status.lastEventAt = Date.now();
             this.status.connected = true;
-            void this.handleMessage(data).catch((err) => {
+            try {
+              await this.handleMessageInbound(data);
+            } catch (err) {
               this.status.lastError = err instanceof Error ? err.message : String(err);
-            });
+            }
           },
           "im.chat.access_event.bot_p2p_chat_entered_v1": async (data: any) => {
             this.status.lastEventAt = Date.now();
@@ -425,11 +443,29 @@ export class FeishuWebSocketChannel {
       }];
     }
 
+    /** 飞书部分客户端单独下发 video 类型，与 media/文件中的视频统一按 video 附件处理 */
+    if (msgType === "video") {
+      const fileKey = String(parsed.file_key || parsed.fileKey || "");
+      if (!fileKey) return [];
+      const file = await this.downloadMessageResource(messageId, fileKey, "file", `feishu-video-${messageId}`);
+      return [{
+        id: `feishu-${messageId}-video`,
+        type: "video",
+        name: file.name || `feishu-video-${messageId}.mp4`,
+        mimeType: file.mimeType || "video/mp4",
+        size: undefined,
+        contentBase64: file.contentBase64,
+        source: "feishu",
+      }];
+    }
+
     if (msgType === "file" || msgType === "audio" || msgType === "media") {
       const fileKey = String(parsed.file_key || parsed.fileKey || parsed.audio_key || parsed.audioKey || "");
       if (!fileKey) return [];
       const file = await this.downloadMessageResource(messageId, fileKey, "file", `feishu-${msgType}-${messageId}`);
-      const isVideo = msgType === "media" || /^video\//.test(file.mimeType);
+      const nameLower = file.name.toLowerCase();
+      const extVid = /\.(mp4|webm|avi|mov|mkv|m4v|mpeg|mpg)$/i.test(nameLower);
+      const isVideo = msgType === "media" || /^video\//.test(file.mimeType) || extVid;
       const resolvedType = msgType === "audio" ? "audio" : isVideo ? "video" : "file";
       return [{
         id: `feishu-${messageId}-${msgType}`,
@@ -456,12 +492,20 @@ export class FeishuWebSocketChannel {
     return false;
   }
 
-  private async handleMessage(payload: any): Promise<void> {
-    const cfg = this.getConfig();
+  private async enqueueFeishuSerial(key: string, fn: () => Promise<void>): Promise<void> {
+    const prev = this.feishuSerialTail.get(key) ?? Promise.resolve();
+    const next = prev.then(() => fn());
+    this.feishuSerialTail.set(key, next);
+    await next;
+  }
+
+  /**
+   * 去重 → 未配对仅串行（不合并，避免配对码被打散）→ 已配对防抖合并连发 → 同会话串行执行。
+   */
+  private async handleMessageInbound(payload: any): Promise<void> {
     const event = unwrapEventPayload(payload);
     const message = event?.message;
     const sender = event?.sender;
-
     const eventId = String(payload?.header?.event_id || payload?.event_id || "");
     const messageId = String(message?.message_id || "");
     const dedupKey = eventId || (messageId ? `msg:${messageId}` : "");
@@ -472,29 +516,153 @@ export class FeishuWebSocketChannel {
 
     const chatId = String(message?.chat_id || "");
     const openId = String(sender?.sender_id?.open_id || "");
+    if (!chatId || !openId) {
+      await this.handleMessageOriginal(payload);
+      return;
+    }
+    const key = `${openId}::${chatId}`;
+    const cfg = this.getConfig();
+    const pairingStrict = cfg.dmPolicy === "pairing" && !this.authStore.isBound(openId);
+    if (pairingStrict) {
+      await this.enqueueFeishuSerial(key, () => this.handleMessageOriginal(payload));
+      return;
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      let buf = this.feishuPendingBuffers.get(key);
+      if (!buf) {
+        buf = { items: [], timer: null };
+        this.feishuPendingBuffers.set(key, buf);
+      }
+      buf.items.push({ payload, resolve, reject });
+      if (buf.timer) clearTimeout(buf.timer);
+      buf.timer = setTimeout(() => {
+        buf!.timer = null;
+        const items = buf!.items;
+        this.feishuPendingBuffers.delete(key);
+        if (items.length === 0) {
+          return;
+        }
+        void this.enqueueFeishuSerial(key, async () => {
+          try {
+            if (items.length === 1) {
+              await this.handleMessageOriginal(items[0].payload);
+            } else {
+              await this.handleMessageMergedBatch(items.map((i) => i.payload));
+            }
+            items.forEach((i) => i.resolve());
+          } catch (e) {
+            items.forEach((i) => i.reject(e));
+          }
+        });
+      }, FeishuWebSocketChannel.INBOUND_DEBOUNCE_MS);
+    });
+  }
+
+  private async handleMessageMergedBatch(payloads: any[]): Promise<void> {
+    if (payloads.length === 0) return;
+    const parts: Array<{ text: string; inboundText: string; attachments: ChatAttachmentInput[] }> = [];
+    for (const payload of payloads) {
+      const event = unwrapEventPayload(payload);
+      const message = event?.message;
+      const sender = event?.sender;
+      const chatId = String(message?.chat_id || "");
+      const openId = String(sender?.sender_id?.open_id || "");
+      let attachments: ChatAttachmentInput[] = [];
+      try {
+        attachments = await this.resolveMessageAttachments(message);
+      } catch (error) {
+        const msgId = String(message?.message_id || "");
+        const openIdMasked = `${openId.slice(0, 4)}***${openId.slice(-4)}`;
+        const hint = `收到附件，但下载解析失败：${error instanceof Error ? error.message : "未知错误"}`;
+        if (chatId) {
+          await this.sendText(chatId, hint);
+        }
+        this.publishMirror("channel_message_error", "飞书附件", hint, {
+          channel: "feishu",
+          direction: "error",
+          openIdMasked,
+          chatId,
+          messageId: msgId,
+        });
+        throw error;
+      }
+      const text = parseText(message?.content);
+      const inboundText = text || summarizeInboundAttachments(attachments);
+      parts.push({ text, inboundText, attachments });
+    }
+    const textJoin = parts.map((p) => p.text).filter(Boolean).join("\n---\n").trim();
+    const allAttachments: ChatAttachmentInput[] = [];
+    const seenAtt = new Set<string>();
+    for (const p of parts) {
+      for (const a of p.attachments) {
+        if (seenAtt.has(a.id)) continue;
+        seenAtt.add(a.id);
+        allAttachments.push(a);
+      }
+    }
+    const baseInbound = textJoin || summarizeInboundAttachments(allAttachments);
+    const mergedInboundText = `[本轮连续 ${payloads.length} 条]\n${baseInbound}`;
+    const lastPayload = payloads[payloads.length - 1];
+    await this.handleMessageOriginal(lastPayload, {
+      text: textJoin,
+      inboundText: mergedInboundText,
+      attachments: allAttachments,
+      mergeCount: payloads.length,
+    });
+  }
+
+  private async handleMessageOriginal(payload: any, preResolved?: FeishuPreResolvedInbound): Promise<void> {
+    const cfg = this.getConfig();
+    const event = unwrapEventPayload(payload);
+    const message = event?.message;
+    const sender = event?.sender;
+
+    let eventId = "";
+    let messageId = "";
+    if (!preResolved) {
+      eventId = String(payload?.header?.event_id || payload?.event_id || "");
+      messageId = String(message?.message_id || "");
+      const dedupKey = eventId || (messageId ? `msg:${messageId}` : "");
+      if (dedupKey && this.markEventSeen(dedupKey)) {
+        console.log(`[FeishuWS] dedup: skipping duplicate event ${dedupKey.slice(0, 20)}`);
+        return;
+      }
+    }
+
+    const chatId = String(message?.chat_id || "");
+    const openId = String(sender?.sender_id?.open_id || "");
     const chatType = String(message?.chat_type || "");
     const senderType = String(sender?.sender_type || "");
     let attachments: ChatAttachmentInput[] = [];
-    try {
-      attachments = await this.resolveMessageAttachments(message);
-    } catch (error) {
-      const msgId = String(message?.message_id || "");
-      const openIdMasked = `${openId.slice(0, 4)}***${openId.slice(-4)}`;
-      const hint = `收到附件，但下载解析失败：${error instanceof Error ? error.message : "未知错误"}`;
-      if (chatId) {
-        await this.sendText(chatId, hint);
+    let text = "";
+    let inboundText = "";
+    if (preResolved) {
+      attachments = preResolved.attachments;
+      text = preResolved.text;
+      inboundText = preResolved.inboundText;
+    } else {
+      try {
+        attachments = await this.resolveMessageAttachments(message);
+      } catch (error) {
+        const msgId = String(message?.message_id || "");
+        const openIdMasked = `${openId.slice(0, 4)}***${openId.slice(-4)}`;
+        const hint = `收到附件，但下载解析失败：${error instanceof Error ? error.message : "未知错误"}`;
+        if (chatId) {
+          await this.sendText(chatId, hint);
+        }
+        this.publishMirror("channel_message_error", "飞书附件", hint, {
+          channel: "feishu",
+          direction: "error",
+          openIdMasked,
+          chatId,
+          messageId: msgId,
+        });
+        return;
       }
-      this.publishMirror("channel_message_error", "飞书附件", hint, {
-        channel: "feishu",
-        direction: "error",
-        openIdMasked,
-        chatId,
-        messageId: msgId,
-      });
-      return;
+      text = parseText(message?.content);
+      inboundText = text || summarizeInboundAttachments(attachments);
     }
-    const text = parseText(message?.content);
-    const inboundText = text || summarizeInboundAttachments(attachments);
     if (senderType === "app") return;
     if (!chatId || !openId || (!inboundText && attachments.length === 0)) {
       console.log(`[FeishuWS] skip message: chatId=${!!chatId} openId=${!!openId} text=${!!inboundText} attachments=${attachments.length}`);
@@ -504,7 +672,7 @@ export class FeishuWebSocketChannel {
     const openIdMasked = `${openId.slice(0, 4)}***${openId.slice(-4)}`;
     console.log(`[FeishuWS] inbound chatType=${chatType || "unknown"} openId=${openId.slice(0, 6)}*** chatId=${chatId}`);
 
-    if (text && this.tryHandleApprovalReply(openId, chatId, text, openIdMasked)) {
+    if ((!preResolved || preResolved.mergeCount <= 1) && text && this.tryHandleApprovalReply(openId, chatId, text, openIdMasked)) {
       return;
     }
 
@@ -595,7 +763,11 @@ export class FeishuWebSocketChannel {
     }
 
     if (cfg.ackOnReceive && cfg.ackStyle !== "off") {
-      const ack = cfg.ackStyle === "emoji" ? "👌" : "已收到，正在同步到 RDK Studio 会话...";
+      const ack = cfg.ackStyle === "emoji"
+        ? "👌"
+        : preResolved && preResolved.mergeCount > 1
+          ? `已收到 ${preResolved.mergeCount} 条消息，合并处理中…`
+          : "已收到，正在同步到 RDK Studio 会话...";
       await this.sendText(chatId, ack);
       this.publishMirror("channel_message_ack", "飞书回执", ack, {
         channel: "feishu",
@@ -635,9 +807,14 @@ export class FeishuWebSocketChannel {
       return compact.length > 180 ? `${compact.slice(0, 180)}...` : compact;
     };
 
+    const streamMessage =
+      preResolved && preResolved.mergeCount > 1
+        ? inboundText
+        : (text || "请结合我刚通过飞书发送的附件继续处理当前请求。");
+
     try {
       for await (const event of this.rdkclaw.streamChat({
-        message: text || "请结合我刚通过飞书发送的附件继续处理当前请求。",
+        message: streamMessage,
         userId: openId,
         ssoUserName: `飞书·${openIdMasked}`,
         deviceId: latestUiDeviceId || undefined,

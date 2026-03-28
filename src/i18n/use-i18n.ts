@@ -1,9 +1,10 @@
-import { useCallback } from 'react';
-import { useAppState } from '../hooks/useAppState';
+import { useCallback, useContext } from 'react';
+import { AppStateContext } from '../hooks/useAppState';
 import { translate } from './translate';
 
 export function useI18n() {
-  const { language } = useAppState();
+  const ctx = useContext(AppStateContext);
+  const language = ctx?.language ?? 'zh';
   const isEn = language === 'en';
 
   const t = useCallback(

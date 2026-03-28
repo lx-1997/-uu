@@ -282,7 +282,23 @@ export const weixinBindQrTool: Tool<Record<string, never>> = {
       return `获取微信绑定二维码失败: ${data.error || "未知错误"}`;
     }
 
-    const base64Data = data.qrDataUrl.replace(/^data:image\/png;base64,/, "");
+    const qrRef = data.qrDataUrl.trim();
+    let imageBuf: Buffer;
+    if (/^https?:\/\//i.test(qrRef)) {
+      const imgRes = await fetch(qrRef);
+      if (!imgRes.ok) {
+        return `拉取微信二维码图片失败: HTTP ${imgRes.status}`;
+      }
+      imageBuf = Buffer.from(await imgRes.arrayBuffer());
+    } else {
+      const path = qrRef.startsWith("/") ? qrRef : `/${qrRef}`;
+      const imgRes = await fetch(`http://127.0.0.1:${port}${path}`);
+      if (!imgRes.ok) {
+        return `拉取微信二维码图片失败: HTTP ${imgRes.status}`;
+      }
+      imageBuf = Buffer.from(await imgRes.arrayBuffer());
+    }
+
     const downloadsDir = ctx.workspaceDir
       ? `${ctx.workspaceDir}/downloads`
       : `${process.cwd()}/downloads`;
@@ -291,12 +307,12 @@ export const weixinBindQrTool: Tool<Record<string, never>> = {
 
     const { promises: fsP } = await import("node:fs");
     await fsP.mkdir(downloadsDir, { recursive: true });
-    await fsP.writeFile(filePath, Buffer.from(base64Data, "base64"));
+    await fsP.writeFile(filePath, imageBuf);
 
     return JSON.stringify({
       __type: "image_download",
       localPath: filePath,
-      bytes: Buffer.from(base64Data, "base64").length,
+      bytes: imageBuf.length,
       imageUrl: `/api/local-files/${encodeURIComponent(fileName)}`,
       fileName,
     });

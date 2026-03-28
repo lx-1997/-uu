@@ -358,6 +358,55 @@
   z-index: 10200;
 }
 
+/**
+ * 微信扫码：挂到 body 的全屏遮罩，高于设置抽屉（--z-modal），低于 Toast（--z-toast）
+ */
+.modal-overlay--weixin-qr {
+  z-index: 350;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+[data-theme="cyber"] .modal-overlay--weixin-qr {
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.settings-weixin-qr-modal {
+  text-align: center;
+}
+
+.settings-weixin-qr-header.modal-header {
+  padding-bottom: 10px;
+}
+
+.settings-weixin-qr-body.modal-body {
+  padding-top: 8px;
+  padding-bottom: 24px;
+}
+
+.settings-weixin-qr-hint {
+  margin: 18px 0 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.settings-weixin-qr-loading {
+  padding: 36px 0 28px;
+}
+
+.settings-weixin-qr-loading-text {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.settings-weixin-qr-fallback {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
 .modal-content {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

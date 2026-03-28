@@ -41,6 +41,41 @@ export function resolveApiUrl(path: string): string {
 }
 
 /**
+ * 与 resolveApiUrl 对齐的 WebSocket 基址：桌面端直连 apiBase；浏览器开发态与页面同 host（走 Vite 代理到 8787）。
+ */
+export function resolveApiWsUrl(path: string): string {
+  if (!path.startsWith('/')) return path;
+  const apiBase = (window as unknown as { rdkDesktop?: { apiBase?: string } }).rdkDesktop?.apiBase;
+  if (apiBase) {
+    try {
+      const u = new URL(apiBase);
+      const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${wsProto}//${u.host}${path}`;
+    } catch {
+      return path;
+    }
+  }
+  const loc = window.location;
+  const wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsProto}//${loc.host}${path}`;
+}
+
+/** Webviz iframe 内发起的 rosbridge WebSocket 需带会话 query（与 EventSource 一致），否则 iframe 跨源不带 Cookie。 */
+export function resolveRosbridgeWsUrlForDevice(deviceId: string): string {
+  const basePath = `/api/rosbridge-ws?deviceId=${encodeURIComponent(deviceId)}`;
+  let wsUrl = resolveApiWsUrl(basePath);
+  try {
+    const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
+    if (sid && /^[a-f0-9]{64}$/i.test(sid)) {
+      wsUrl += `&rdk_sso_session=${encodeURIComponent(sid)}`;
+    }
+  } catch {
+    /* noop */
+  }
+  return wsUrl;
+}
+
+/**
  * 跨端口请求后端（如 localhost:5173 → :8787）时必须带 Cookie（SSO 会话），
  * 默认 credentials 为 include；并附带 X-RDK-Sso-Session 镜像（与 Cookie 二选一即可被服务端识别）。
  */

@@ -418,13 +418,32 @@ function formatStudioForumConfigAudit(): string {
 
 function decodeForumErrorBody(raw: string) {
   try {
-    const json = JSON.parse(raw) as { error_type?: string; errors?: string[] };
+    const json = JSON.parse(raw) as { error_type?: string; errors?: string[]; message?: string };
     const errorType = String(json.error_type || "").trim().toLowerCase();
-    const errors = Array.isArray(json.errors) ? json.errors : [];
-    return { errorType, errors };
+    const errors = Array.isArray(json.errors) ? json.errors.map(String) : [];
+    const message = String(json.message || "").trim();
+    return { errorType, errors, message };
   } catch {
-    return { errorType: "", errors: [] as string[] };
+    return { errorType: "", errors: [] as string[], message: "" };
   }
+}
+
+/** 发帖/回复失败时的可读说明（含权限、分类、信任等级等） */
+function forumPostFailureHint(status: number, parsed: ReturnType<typeof decodeForumErrorBody>): string {
+  const detail = [...parsed.errors, parsed.message].filter(Boolean).join(" | ");
+  if (status === 403 && parsed.errorType === "not_allowed") {
+    return `（论坛拒绝该操作：常见于新账号信任等级不足、无目标分类发帖权、或需先在网页端完成验证。${detail ? ` 服务端提示：${detail}` : ""}）`;
+  }
+  if (status === 403 && parsed.errorType === "invalid_access") {
+    return `（无权访问：${detail || "请确认已登录且账号可发帖"}）`;
+  }
+  if (status === 403 && !parsed.errorType && /permission|权限|forbidden/i.test(detail)) {
+    return `（可能被拒绝发帖：${detail}。若 latest 可读但发帖失败，多为分类权限或信任等级限制。）`;
+  }
+  if (status === 422) {
+    return `（内容或分类校验失败：${detail || "请检查标题、分类 ID、正文长度"}）`;
+  }
+  return detail ? `（${detail}）` : "";
 }
 
 function forumLatestTool(options: ForumToolOptions): Tool<{ page?: number; limit?: number }> {
@@ -683,7 +702,8 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
           if (res.status === 403 && parsed.errorType === "not_logged_in") {
             return authHint(base, auth.detail);
           }
-          throw new Error(`发帖失败: HTTP ${res.status} · ${bodyText.slice(0, 300)}`);
+          const hint = forumPostFailureHint(res.status, parsed);
+          throw new Error(`发帖失败: HTTP ${res.status}${hint}\n${bodyText.slice(0, 500)}`);
         }
         let payload: Record<string, unknown> = {};
         try {
