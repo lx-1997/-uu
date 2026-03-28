@@ -368,6 +368,57 @@
   animation: md-stream-blink 1s step-end infinite;
 }
 
+/* Dock Markdown 扩展：GFM 表格、分隔线、引用、一级标题 */
+.dock-bubble .msg-text .md-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dock-bubble .msg-text .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.dock-bubble .msg-text .md-table th,
+.dock-bubble .msg-text .md-table td {
+  border: 1px solid var(--border, #e5e7eb);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dock-bubble .msg-text .md-table th {
+  font-weight: 600;
+  background: var(--card-bg, rgba(0, 0, 0, 0.03));
+}
+
+.dock-bubble .msg-text .md-hr {
+  border: none;
+  border-top: 1px solid var(--border, #e5e7eb);
+  margin: 10px 0;
+}
+
+.dock-bubble .msg-text .md-bq {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent, #ff6b00);
+  background: var(--card-bg, rgba(0, 0, 0, 0.03));
+  color: var(--text-secondary, #475569);
+  font-size: 0.8125rem;
+}
+
+.dock-bubble .msg-text .md-h2 {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 10px 0 6px;
+  color: var(--text-primary);
+}
+
 .dock-bubble .msg-text p { margin: 0 0 8px; }
 .dock-bubble .msg-text p:last-child { margin-bottom: 0; }
 

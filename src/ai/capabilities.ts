@@ -104,7 +104,7 @@ export const CAPABILITIES: Capability[] = [
     description: '扫描枚举活跃 ROS2 话题',
     phase: 'background',
     keywords: ['ros', 'topic', '话题', '扫描话题'],
-    tab: 'ros',
+    tab: 'terminal',
   },
   {
     id: 'ros_record_start',

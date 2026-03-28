@@ -25,7 +25,6 @@ const Vnc = lazy(() => import('./components/Vnc'));
 const IDE = lazy(() => import('./components/IDE'));
 const OpenClaw = lazy(() => import('./components/OpenClaw'));
 const Hardware = lazy(() => import('./components/Hardware'));
-const Ros = lazy(() => import('./components/Ros'));
 const SkillBrowser = lazy(() => import('./components/SkillBrowser'));
 const Examples = lazy(() => import('./components/Examples'));
 const Models = lazy(() => import('./components/Models'));
@@ -82,7 +81,6 @@ function MainContent() {
     flasher: <Flasher />,
     files: <Files />,
     hardware: <Hardware />,
-    ros: <Ros />,
     skills: <SkillBrowser />,
     examples: <Examples />,
     models: <Models />,

@@ -153,8 +153,11 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.setAttribute('data-theme', 'aurora');
   }, []);
 
-  // ── Navigation ──
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  // ── Navigation ──（ROS 可视化页面临时下线：仍请求 ros 时打开终端）
+  const [activeTab, setActiveTabState] = useState<Tab>('dashboard');
+  const setActiveTab = useCallback((tab: Tab) => {
+    setActiveTabState(tab === 'ros' ? 'terminal' : tab);
+  }, []);
 
   // ── Language（提前声明，供 Flash/VNC 等文案使用）──
   const [language, setLanguageState] = useState<'zh-CN' | 'en'>(readStoredLocale);

@@ -46,8 +46,6 @@ const CAPABILITY_ITEMS: NavItemDef[] = [
     paths: ['M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z'] },
   { tab: 'flasher', labelKey: 'nav.flasher.label', descKey: 'nav.flasher.desc', zhLabel: '烧录/备份', zhDesc: '系统镜像烧录与备份',
     paths: ['M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3'] },
-  { tab: 'ros', labelKey: 'nav.ros.label', descKey: 'nav.ros.desc', zhLabel: 'ROS', zhDesc: 'ROS2 话题与节点管理',
-    paths: ['M12 12m-3 0a3 3 0 106 0 3 3 0 10-6 0', 'M12 4.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M20 12a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M12 20a1.5 1.5 0 110-3 1.5 1.5 0 010 3z', 'M4 12a1.5 1.5 0 110-3 1.5 1.5 0 010 3z'] },
 ];
 
 /** 与 prepare:build-resources 写入的 `public/branding/icon.png` 一致；`base: './'` 下需相对根 */

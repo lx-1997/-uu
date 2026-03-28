@@ -88,7 +88,7 @@ const Icons: Record<string, React.ReactNode> = {
 const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> = [
   { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'openclaw', 'skills'] },
   { titleKey: 'sidebar.group.connect', titleZh: '连接控制', tabs: ['terminal', 'files', 'vnc', 'ide'] },
-  { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['hardware', 'flasher', 'examples', 'models', 'ros'] },
+  { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['hardware', 'flasher', 'examples', 'models'] },
 ];
 
 /** 中文默认文案（英文走 en-extras sidebar.nav.* / sidebar.hint.*） */

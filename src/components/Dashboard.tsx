@@ -436,7 +436,6 @@ export default function Dashboard() {
             { key: 'development', label: t('dashboard.cap.dev', '开发环境'), tab: 'terminal' as const },
             { key: 'codeServer', label: 'IDE', tab: 'ide' as const },
             { key: 'vnc', label: t('dashboard.cap.vnc', '远程桌面'), tab: 'vnc' as const },
-            { key: 'ros', label: 'ROS', tab: 'ros' as const },
           ]).map(item => {
             const mod = wsHealth[item.key] as WorkspaceModule | undefined;
             if (!mod) return null;

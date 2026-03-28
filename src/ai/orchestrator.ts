@@ -420,7 +420,7 @@ function getSkillTab(skill: string): string | null {
     'rdk-files': 'files',
     'rdk-hardware': 'hardware',
     'rdk-openclaw': 'openclaw',
-    'rdk-ros': 'ros',
+    'rdk-ros': 'terminal',
     'rdk-models': 'models',
     'rdk-examples': 'examples',
     'rdk-workflow': 'lowcode',
@@ -835,8 +835,9 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
   }),
 
   nav: (tab, actions) => {
-    const validTabs = ['dashboard','flasher','terminal','files','vnc','lowcode','openclaw','hardware','examples','ros','models'] as const;
-    const target = validTabs.find((id) => id === tab) ?? 'dashboard';
+    const normalized = tab === 'ros' ? 'terminal' : tab;
+    const validTabs = ['dashboard','flasher','terminal','files','vnc','lowcode','openclaw','hardware','examples','models','skills'] as const;
+    const target = validTabs.find((id) => id === normalized) ?? 'dashboard';
     return {
       text: '',
       sideEffect: () => {

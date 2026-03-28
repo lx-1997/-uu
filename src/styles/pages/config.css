@@ -294,6 +294,57 @@
   align-self: flex-start;
 }
 
+/* 与 Dock 共用 MarkdownRenderer：表格 / 分隔线 / 引用 */
+.config-chat-msg .md-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+.config-chat-msg .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.config-chat-msg .md-table th,
+.config-chat-msg .md-table td {
+  border: 1px solid var(--border, #e5e7eb);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.config-chat-msg .md-table th {
+  font-weight: 600;
+  background: var(--card-bg, rgba(0, 0, 0, 0.03));
+}
+
+.config-chat-msg .md-hr {
+  border: none;
+  border-top: 1px solid var(--border, #e5e7eb);
+  margin: 10px 0;
+}
+
+.config-chat-msg .md-bq {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent, #ff6b00);
+  background: var(--card-bg, rgba(0, 0, 0, 0.03));
+  color: var(--text-secondary, #475569);
+  font-size: 0.8125rem;
+}
+
+.config-chat-msg .md-h2 {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 10px 0 6px;
+  color: var(--text-primary);
+}
+
 .config-chat-input {
   display: flex;
   gap: 6px;

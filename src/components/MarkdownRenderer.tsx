@@ -80,6 +80,107 @@ function renderMarkdownComplete(text: string, streaming: boolean | undefined, co
   return segments;
 }
 
+function isTableSeparatorLine(line: string): boolean {
+  const t = line.trim();
+  if (!t.includes('|')) return false;
+  if (!/-{3,}/.test(t.replace(/\|/g, ''))) return false;
+  return /^[\s|:-]+$/.test(t);
+}
+
+function looksLikeTableRow(line: string): boolean {
+  const t = line.trim();
+  if (!t.includes('|')) return false;
+  if (isTableSeparatorLine(t)) return false;
+  return true;
+}
+
+function parseTableRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split('|').map((c) => c.trim());
+}
+
+/** GFM 风格：表头 + 分隔行 + 数据行；空行或非表格行结束 */
+function tryParseTable(lines: string[], start: number): { rows: string[][]; end: number } | null {
+  if (start + 1 >= lines.length) return null;
+  const headerLine = lines[start].trim();
+  const sepLine = lines[start + 1].trim();
+  if (!looksLikeTableRow(headerLine) || !isTableSeparatorLine(sepLine)) return null;
+  const rows: string[][] = [parseTableRow(headerLine)];
+  let i = start + 2;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (!t) break;
+    if (!looksLikeTableRow(t)) break;
+    if (isTableSeparatorLine(t)) {
+      i += 1;
+      continue;
+    }
+    rows.push(parseTableRow(t));
+    i += 1;
+  }
+  return { rows, end: i };
+}
+
+function isHorizontalRuleLine(line: string): boolean {
+  const t = line.trim();
+  if (t.length < 3) return false;
+  if (/^[-*_]{3,}$/.test(t)) return true;
+  if (/^(?:-\s*){3,}$/.test(t)) return true;
+  return false;
+}
+
+function renderTable(rows: string[][], keyOffset: number, keySuffix: number, streaming?: boolean): React.ReactNode {
+  if (rows.length === 0) return null;
+  const header = rows[0];
+  const colCount = Math.max(...rows.map((r) => r.length), header.length);
+  const norm = (r: string[]) => {
+    const x = [...r];
+    while (x.length < colCount) x.push('');
+    return x.slice(0, colCount);
+  };
+  return (
+    <div key={`tbl-${keyOffset}-${keySuffix}`} className="md-table-wrap">
+      <table className="md-table">
+        <thead>
+          <tr>
+            {norm(header).map((cell, j) => (
+              <th key={j}>{renderInlineWithBr(cell, streaming)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(1).map((row, ri) => (
+            <tr key={ri}>
+              {norm(row).map((cell, ci) => (
+                <td key={ci}>{renderInlineWithBr(cell, streaming)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** 将 &lt;br&gt; 解析为真实换行，再交给行内 Markdown */
+function renderInlineWithBr(text: string, streaming?: boolean): React.ReactNode {
+  if (!text) return null;
+  const parts = text.split(/<br\s*\/?>/gi);
+  if (parts.length === 1) return renderInline(text, streaming);
+  return (
+    <>
+      {parts.map((part, i) => (
+        <React.Fragment key={i}>
+          {i > 0 ? <br /> : null}
+          {renderInline(part, streaming)}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
 /**
  * 第二参数：`string` 为代码块复制按钮文案；`RenderMarkdownOptions` 为流式等高级选项（可含 copyLabel）。
  */
@@ -129,38 +230,94 @@ function renderInlineMarkdown(text: string, keyOffset: number, streaming?: boole
     if (listItems.length === 0) return;
     result.push(
       <ul key={`ul-${keyOffset}-${result.length}`} className="md-list">
-        {listItems.map((item, j) => <li key={j}>{renderInline(item, streaming)}</li>)}
+        {listItems.map((item, j) => (
+          <li key={j}>{renderInlineWithBr(item, streaming)}</li>
+        ))}
       </ul>,
     );
     listItems = [];
   };
 
-  lines.forEach((line, i) => {
-    const trimmed = line.trim();
+  let i = 0;
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+
+    const tableParsed = tryParseTable(lines, i);
+    if (tableParsed) {
+      flushList();
+      result.push(renderTable(tableParsed.rows, keyOffset, result.length, streaming));
+      i = tableParsed.end;
+      continue;
+    }
+
+    if (isHorizontalRuleLine(trimmed)) {
+      flushList();
+      result.push(<hr key={`hr-${keyOffset}-${i}`} className="md-hr" />);
+      i += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('>')) {
+      flushList();
+      const qStart = i;
+      const quoteLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('>')) {
+        quoteLines.push(lines[i].trim().replace(/^>\s?/, ''));
+        i += 1;
+      }
+      result.push(
+        <blockquote key={`bq-${keyOffset}-${qStart}`} className="md-bq">
+          {quoteLines.map((ql, qi) => (
+            <span key={qi}>
+              {qi > 0 ? <br /> : null}
+              {renderInlineWithBr(ql, streaming)}
+            </span>
+          ))}
+        </blockquote>,
+      );
+      continue;
+    }
 
     if (/^[-*•]\s+/.test(trimmed)) {
       listItems.push(trimmed.replace(/^[-*•]\s+/, ''));
-      return;
+      i += 1;
+      continue;
     }
     if (/^\d+\.\s+/.test(trimmed)) {
       listItems.push(trimmed.replace(/^\d+\.\s+/, ''));
-      return;
+      i += 1;
+      continue;
     }
     flushList();
+
     if (trimmed.startsWith('### ')) {
-      result.push(<h4 key={`h-${keyOffset}-${i}`} className="md-h4">{renderInline(trimmed.slice(4), streaming)}</h4>);
-      return;
+      result.push(<h4 key={`h-${keyOffset}-${i}`} className="md-h4">{renderInlineWithBr(trimmed.slice(4), streaming)}</h4>);
+      i += 1;
+      continue;
     }
     if (trimmed.startsWith('## ')) {
-      result.push(<h3 key={`h-${keyOffset}-${i}`} className="md-h3">{renderInline(trimmed.slice(3), streaming)}</h3>);
-      return;
+      result.push(<h3 key={`h-${keyOffset}-${i}`} className="md-h3">{renderInlineWithBr(trimmed.slice(3), streaming)}</h3>);
+      i += 1;
+      continue;
+    }
+    if (trimmed.startsWith('# ')) {
+      result.push(<h2 key={`h-${keyOffset}-${i}`} className="md-h2">{renderInlineWithBr(trimmed.slice(2), streaming)}</h2>);
+      i += 1;
+      continue;
     }
     if (!trimmed) {
       result.push(<br key={`br-${keyOffset}-${i}`} />);
-      return;
+      i += 1;
+      continue;
     }
-    result.push(<span key={`l-${keyOffset}-${i}`}>{renderInline(trimmed, streaming)}{i < lines.length - 1 ? <br /> : null}</span>);
-  });
+    result.push(
+      <span key={`l-${keyOffset}-${i}`}>
+        {renderInlineWithBr(trimmed, streaming)}
+        {i < lines.length - 1 ? <br /> : null}
+      </span>,
+    );
+    i += 1;
+  }
   flushList();
   return result;
 }

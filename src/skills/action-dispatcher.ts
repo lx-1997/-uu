@@ -38,7 +38,7 @@ const TAB_ALIASES: Record<string, Tab> = {
   openclaw: 'openclaw',
   hardware: 'hardware',
   examples: 'examples',
-  ros: 'ros',
+  ros: 'terminal',
   models: 'models',
   // Chinese aliases
   '仪表盘': 'dashboard',

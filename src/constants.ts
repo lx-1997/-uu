@@ -24,17 +24,6 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
     quickActions: [{ label: '快速巡检', icon: '🔍' }, { label: '环境检查', icon: '🧪' }],
   },
   {
-    tab: 'ros',
-    title: 'ROS 运行诊断',
-    description: '话题/节点/TF 全链路诊断，定位应用编排后的运行问题',
-    loading: '正在扫描 ROS2 话题...',
-    statusLabel: '实时可观测',
-    statusOk: true,
-    miniStats: [{ label: '活跃 Topic', value: '--' }, { label: '诊断方式', value: '实时命令' }],
-    cta: '进入 ROS 诊断',
-    quickActions: [{ label: '话题巡检', icon: '📡' }, { label: '节点健康', icon: '🧭' }],
-  },
-  {
     tab: 'hardware',
     title: '硬件监控',
     description: '持续观察 CPU/BPU/温度与系统资源，快速定位性能瓶颈',
