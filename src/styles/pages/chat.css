@@ -241,6 +241,9 @@
 
 .dock-bubble .msg-text {
   margin: 0;
+  /* CJK：避免在词内（含相邻汉字）被 anywhere/ break-word 强行拆开；长 URL/代码在下方选择器单独放开 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 /* 流式阶段：纯文本 + pre-wrap，避免每帧整段 Markdown 解析导致掉帧 */
@@ -251,8 +254,8 @@
 .dock-bubble .msg-text--stream-plain {
   display: block;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: keep-all;
   font: inherit;
   line-height: 1.55;
   font-variant-ligatures: none;
@@ -262,8 +265,8 @@
 /* 流式阶段：与成稿共用 Markdown 结构，加粗/标题/列表随出随显 */
 .dock-bubble .msg-text--streaming-md {
   display: block;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: keep-all;
   font: inherit;
   line-height: 1.55;
   font-variant-ligatures: none;
@@ -281,6 +284,8 @@
 /* 流式分段：轻量淡入（仅用 opacity，避免 inline 上 transform 与 CJK 换行问题） */
 .dock-bubble .dock-stream-seg {
   display: inline;
+  overflow-wrap: break-word;
+  word-break: keep-all;
   /* 与默认 normal 不同：避免尾段里含 \\n 时与进 MD 后的 <br> 表现不一致 */
   white-space: pre-line;
   animation: dock-stream-seg-in 0.24s cubic-bezier(0.25, 0.8, 0.35, 1) both;
@@ -379,6 +384,23 @@
   margin: 6px 0;
   cursor: pointer;
   object-fit: contain;
+}
+
+/* 代码与链接仍需折断超长 token（不受正文 keep-all 约束） */
+.dock-bubble .msg-text .md-code-body,
+.dock-bubble .msg-text .md-code-body code {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.dock-bubble .msg-text .md-inline-code {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.dock-bubble .msg-text a {
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .dock-hidden-hint {

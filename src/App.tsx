@@ -43,7 +43,6 @@ function MainContent() {
 
   const standardViews: Record<string, ReactNode> = {
     dashboard: <Dashboard />,
-    flasher: <Flasher />,
     files: <Files />,
     hardware: <Hardware />,
     ros: <Ros />,
@@ -62,6 +61,9 @@ function MainContent() {
       )}
       <div className={`persistent-pane ${activeTab === 'openclaw' ? 'is-active' : 'is-hidden'}`}>
         <OpenClaw />
+      </div>
+      <div className={`persistent-pane ${activeTab === 'flasher' ? 'is-active' : 'is-hidden'}`}>
+        <Flasher />
       </div>
       <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
         <Terminal />

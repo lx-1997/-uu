@@ -38,21 +38,6 @@ interface WifiConfig {
   password: string;
 }
 
-interface FlasherUiState {
-  step: WizardStep;
-  phase: FlashPhase;
-  progress: number;
-  error: string;
-  logs: string[];
-  selectedDeviceKey: string;
-  selectedImageKey: string;
-  useLocalImage: boolean;
-  localImagePath: string;
-  selectedDrive: string;
-  performanceProfile: FlashPerformanceProfile;
-  verifyDetail: string;
-}
-
 /* ═══════════════════════════════════════════════════════════
    Device & Image Data  (aligned with rdkstudio-front-main)
    ═══════════════════════════════════════════════════════════ */
@@ -123,6 +108,9 @@ const XBURN_DOWNLOAD_URLS: Record<string, string> = {
 const S100_MANUAL_FLASH_DOC =
   'https://developer.d-robotics.cc/rdk_doc/rdk_s/Quick_start/install_os/rdk_s100/instruction';
 
+/** 完成页 WiFi 预配置暂无持久化/写镜像能力，关闭展示；接入后再改为 true */
+const SHOW_FLASHER_WIFI_PRECONFIG = false;
+
 function resolveXburnToolUrl(dev: DeviceItem, plat: string): string | undefined {
   if (plat === 'win32' && dev.toolWinUrl) return dev.toolWinUrl;
   if (plat === 'darwin' && dev.toolDmgUrl) return dev.toolDmgUrl;
@@ -180,7 +168,8 @@ function isFlashUserCancelled(msg: string): boolean {
   return false;
 }
 
-const FLASHER_UI_STATE_KEY = 'rdk:flasher:ui-state:v1';
+/** 旧版曾写入 localStorage；仅用于「重新开始」时清理遗留数据 */
+const LEGACY_FLASHER_STORAGE_KEY = 'rdk:flasher:ui-state:v1';
 
 function normalizeStageToPhase(stage: string | undefined): FlashPhase {
   if (stage === 'backup') return 'backup';
@@ -197,7 +186,7 @@ function normalizeStageToPhase(stage: string | undefined): FlashPhase {
    Component
    ═══════════════════════════════════════════════════════════ */
 export default function Flasher() {
-  const { setActiveTab, addToast, startFlash } = useAppState();
+  const { setActiveTab, addToast } = useAppState();
   const { t, language } = useI18n();
   const tf = useCallback(
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
@@ -233,6 +222,8 @@ export default function Flasher() {
   const [performanceProfile, setPerformanceProfile] = useState<FlashPerformanceProfile>('balanced');
   const [verifyDetail, setVerifyDetail] = useState('');
   const abortRef = useRef(false);
+  const stepRef = useRef(step);
+  stepRef.current = step;
 
   /* ── wifi config state ── */
   const [showWifiConfig, setShowWifiConfig] = useState(false);
@@ -300,14 +291,19 @@ export default function Flasher() {
   useEffect(() => {
     if (!window.rdkDesktop?.onFlashProgress) return;
     const handler = (payload: FlashProgressPayload) => {
+      /* 已完成页 (step 4) 后仍可能收到迟到的进度，避免把步骤拉回写盘页或改写 phase */
+      if (stepRef.current >= 4) {
+        if (payload.message) appendLog(payload.message);
+        return;
+      }
       if (payload.percent >= 0) setProgress(payload.percent);
       if (payload.message) appendLog(payload.message);
       const mappedPhase = normalizeStageToPhase(payload.stage);
       if (mappedPhase !== 'idle') {
         setPhase(mappedPhase);
       }
-      if (mappedPhase !== 'done' && mappedPhase !== 'error' && step !== 3) {
-        setStep(3);
+      if (mappedPhase !== 'done' && mappedPhase !== 'error' && mappedPhase !== 'idle') {
+        setStep((s) => (s <= 2 ? 3 : s));
       }
     };
     const unsub = window.rdkDesktop.onFlashProgress(handler);
@@ -315,35 +311,7 @@ export default function Flasher() {
       if (typeof unsub === 'function') unsub();
       else window.rdkDesktop?.offFlashProgress?.(handler);
     };
-  }, [appendLog, step]);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(FLASHER_UI_STATE_KEY);
-      if (!saved) return;
-      const parsed = JSON.parse(saved) as Partial<FlasherUiState>;
-      if (parsed.selectedDeviceKey) setSelectedDeviceKey(parsed.selectedDeviceKey);
-      if (parsed.selectedDeviceKey === 's100') {
-        setSelectedImageKey('');
-      } else if (typeof parsed.selectedImageKey === 'string') {
-        setSelectedImageKey(parsed.selectedImageKey);
-      }
-      if (typeof parsed.useLocalImage === 'boolean') setUseLocalImage(parsed.useLocalImage);
-      if (typeof parsed.localImagePath === 'string') setLocalImagePath(parsed.localImagePath);
-      if (typeof parsed.selectedDrive === 'string') setSelectedDrive(parsed.selectedDrive);
-      if (typeof parsed.step === 'number') setStep(parsed.step as WizardStep);
-      if (typeof parsed.phase === 'string') setPhase(normalizeStageToPhase(parsed.phase));
-      if (typeof parsed.progress === 'number') setProgress(parsed.progress);
-      if (typeof parsed.error === 'string') setError(parsed.error);
-      if (Array.isArray(parsed.logs)) setLogs(parsed.logs.slice(-200));
-      if (parsed.performanceProfile === 'balanced' || parsed.performanceProfile === 'turbo') {
-        setPerformanceProfile(parsed.performanceProfile);
-      }
-      if (typeof parsed.verifyDetail === 'string') setVerifyDetail(parsed.verifyDetail);
-    } catch {
-      // ignore invalid saved state
-    }
-  }, []);
+  }, [appendLog]);
 
   useEffect(() => {
     if (!window.rdkDesktop?.flashGetActiveOperation) return;
@@ -370,45 +338,14 @@ export default function Flasher() {
     return () => { active = false; };
   }, []);
 
+  /* 升级后清掉旧版 localStorage，避免与其它逻辑冲突 */
   useEffect(() => {
-    const nextState: FlasherUiState = {
-      step,
-      phase,
-      progress,
-      error,
-      logs: logs.slice(-200),
-      selectedDeviceKey,
-      selectedImageKey,
-      useLocalImage,
-      localImagePath,
-      selectedDrive,
-      performanceProfile,
-      verifyDetail,
-    };
-    const timer = window.setTimeout(() => {
-      try {
-        localStorage.setItem(FLASHER_UI_STATE_KEY, JSON.stringify(nextState));
-      } catch {
-        // ignore quota errors
-      }
-    }, 250);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [
-    error,
-    localImagePath,
-    logs,
-    phase,
-    progress,
-    performanceProfile,
-    selectedDeviceKey,
-    selectedDrive,
-    selectedImageKey,
-    step,
-    useLocalImage,
-    verifyDetail,
-  ]);
+    try {
+      localStorage.removeItem(LEGACY_FLASHER_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   /* ── device selection ── */
   const chooseDevice = (key: string) => {
@@ -431,6 +368,10 @@ export default function Flasher() {
 
   /* ── scan drives ── */
   const scannedRef = useRef(false);
+
+  useEffect(() => {
+    if (step !== 2) scannedRef.current = false;
+  }, [step]);
 
   const scanDrives = async () => {
     if (!window.rdkDesktop?.flashListDrives) {
@@ -517,17 +458,45 @@ export default function Flasher() {
       setPhase('downloading');
       setProgress(0);
       appendLog(tf('flasher.log.downloadStart', '开始下载: {{url}}', { url }));
-      const result = await window.rdkDesktop.flashDownloadImage({ url, destDir: '' });
-      if (!result.ok) {
-        setError(result.error || t('flasher.err.downloadFail', '下载失败'));
+      try {
+        const result = await window.rdkDesktop.flashDownloadImage({ url, destDir: '' });
+        if (!result.ok) {
+          setError(result.error || t('flasher.err.downloadFail', '下载失败'));
+          setPhase('error');
+          return null;
+        }
+        const path = result.path?.trim();
+        if (!path) {
+          const msg = t(
+            'flasher.err.downloadNoPath',
+            '下载已完成，但未返回本地镜像路径。请使用「本机镜像文件」选择已下载的文件，或更新桌面客户端。',
+          );
+          setError(msg);
+          setPhase('error');
+          appendLog(msg);
+          return null;
+        }
+        appendLog(t('flasher.log.downloadDone', '下载完成'));
+        return path;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg || t('flasher.err.downloadFail', '下载失败'));
         setPhase('error');
+        appendLog(tf('flasher.log.fail', '失败: {{msg}}', { msg: msg || t('flasher.err.downloadFail', '下载失败') }));
         return null;
       }
-      appendLog(t('flasher.log.downloadDone', '下载完成'));
-      return result.path ?? null;
     }
     openExternal(url);
-    addToast(t('flasher.toast.browserDownload', '已在浏览器中打开下载链接，下载完成后请使用"选择本机文件"选取镜像'), 'info');
+    const msg = t(
+      'flasher.err.onlineImageNoInAppDownload',
+      '当前客户端不支持应用内下载在线镜像。已在浏览器打开链接；下载完成后请返回「选择镜像」步骤，用「本机镜像文件」选择该文件后再开始写盘。',
+    );
+    addToast(msg, 'info');
+    appendLog(msg);
+    setError('');
+    setPhase('idle');
+    setProgress(0);
+    setStep(1);
     return null;
   };
 
@@ -616,7 +585,6 @@ export default function Flasher() {
       }
       setProgress(100);
       setPhase('done');
-      startFlash();
       addToast(t('flasher.toast.writeDone', '镜像写盘完成'), 'success');
       setStep(4);
     } catch (e: any) {
@@ -676,9 +644,9 @@ export default function Flasher() {
     setStep(target);
   };
 
-  const clearPersistedState = () => {
+  const clearLegacyStoredState = () => {
     try {
-      localStorage.removeItem(FLASHER_UI_STATE_KEY);
+      localStorage.removeItem(LEGACY_FLASHER_STORAGE_KEY);
     } catch {
       // ignore
     }
@@ -1238,7 +1206,7 @@ export default function Flasher() {
                     type="button"
                     className="btn btn-ghost"
                     onClick={() => {
-                      clearPersistedState();
+                      clearLegacyStoredState();
                       setStep(0);
                       setPhase('idle');
                       setProgress(0);
@@ -1268,67 +1236,68 @@ export default function Flasher() {
             <h2>{t('flasher.done.title', '写盘完成')}</h2>
             <p className="config-card-desc">{t('flasher.done.desc', '镜像已写入目标磁盘。请安全弹出介质并插入目标板卡进行启动验证。')}</p>
 
-            {/* WiFi configuration */}
-            <div className="card card-compact">
-              <div className="config-header">
-                <span className="section-label" style={{ marginBottom: 0 }}>{t('flasher.wifi.section', 'WiFi 预配置（可选）')}</span>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setShowWifiConfig(!showWifiConfig)}
-                >
-                  {showWifiConfig ? t('flasher.wifi.collapse', '收起') : t('flasher.wifi.expand', '展开配置')}
-                </button>
-              </div>
-              {showWifiConfig && (
-                <div className="config-section">
-                  <div className="config-actions" style={{ flexWrap: 'wrap' }}>
-                    <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="wifi-mode"
-                        checked={wifiConfig.mode === 'station'}
-                        onChange={() => setWifiConfig((c) => ({ ...c, mode: 'station' }))}
-                      />
-                      {t('flasher.wifi.station', 'Station 模式')}
-                    </label>
-                    <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="wifi-mode"
-                        checked={wifiConfig.mode === 'ap'}
-                        onChange={() => setWifiConfig((c) => ({ ...c, mode: 'ap' }))}
-                      />
-                      {t('flasher.wifi.ap', 'AP 模式')}
-                    </label>
-                  </div>
-                  <input
-                    className="input"
-                    placeholder={t('flasher.wifi.ssidPh', 'WiFi 名称 (SSID)')}
-                    value={wifiConfig.ssid}
-                    onChange={(e) => setWifiConfig((c) => ({ ...c, ssid: e.target.value }))}
-                  />
-                  <input
-                    className="input"
-                    type="password"
-                    placeholder={t('flasher.wifi.pwPh', 'WiFi 密码（至少 8 位）')}
-                    value={wifiConfig.password}
-                    onChange={(e) => setWifiConfig((c) => ({ ...c, password: e.target.value }))}
-                  />
+            {SHOW_FLASHER_WIFI_PRECONFIG && (
+              <div className="card card-compact">
+                <div className="config-header">
+                  <span className="section-label" style={{ marginBottom: 0 }}>{t('flasher.wifi.section', 'WiFi 预配置（可选）')}</span>
                   <button
                     type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={!wifiConfig.ssid.trim() || wifiConfig.password.length < 8}
-                    onClick={async () => {
-                      addToast(t('flasher.wifi.toast', 'WiFi 配置将在设备首次启动时生效'), 'info');
-                      setShowWifiConfig(false);
-                    }}
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setShowWifiConfig(!showWifiConfig)}
                   >
-                    {t('flasher.wifi.save', '保存 WiFi 配置')}
+                    {showWifiConfig ? t('flasher.wifi.collapse', '收起') : t('flasher.wifi.expand', '展开配置')}
                   </button>
                 </div>
-              )}
-            </div>
+                {showWifiConfig && (
+                  <div className="config-section">
+                    <div className="config-actions" style={{ flexWrap: 'wrap' }}>
+                      <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="wifi-mode"
+                          checked={wifiConfig.mode === 'station'}
+                          onChange={() => setWifiConfig((c) => ({ ...c, mode: 'station' }))}
+                        />
+                        {t('flasher.wifi.station', 'Station 模式')}
+                      </label>
+                      <label className="config-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="wifi-mode"
+                          checked={wifiConfig.mode === 'ap'}
+                          onChange={() => setWifiConfig((c) => ({ ...c, mode: 'ap' }))}
+                        />
+                        {t('flasher.wifi.ap', 'AP 模式')}
+                      </label>
+                    </div>
+                    <input
+                      className="input"
+                      placeholder={t('flasher.wifi.ssidPh', 'WiFi 名称 (SSID)')}
+                      value={wifiConfig.ssid}
+                      onChange={(e) => setWifiConfig((c) => ({ ...c, ssid: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      type="password"
+                      placeholder={t('flasher.wifi.pwPh', 'WiFi 密码（至少 8 位）')}
+                      value={wifiConfig.password}
+                      onChange={(e) => setWifiConfig((c) => ({ ...c, password: e.target.value }))}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={!wifiConfig.ssid.trim() || wifiConfig.password.length < 8}
+                      onClick={async () => {
+                        addToast(t('flasher.wifi.toast', 'WiFi 配置将在设备首次启动时生效'), 'info');
+                        setShowWifiConfig(false);
+                      }}
+                    >
+                      {t('flasher.wifi.save', '保存 WiFi 配置')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Next actions */}
             <div className="config-actions" style={{ flexWrap: 'wrap', marginTop: 12 }}>
@@ -1359,7 +1328,7 @@ export default function Flasher() {
               className="btn btn-ghost"
               style={{ marginTop: 8 }}
               onClick={() => {
-                clearPersistedState();
+                clearLegacyStoredState();
                 setStep(0);
                 setPhase('idle');
                 setProgress(0);

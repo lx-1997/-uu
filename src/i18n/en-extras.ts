@@ -694,8 +694,11 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.toast.imagePicked': 'Image file selected',
   'flasher.log.downloadStart': 'Download started: {{url}}',
   'flasher.err.downloadFail': 'Download failed',
+  'flasher.err.downloadNoPath':
+    'Download finished but no local file path was returned. Pick the file under “Local image file”, or update the desktop app.',
+  'flasher.err.onlineImageNoInAppDownload':
+    'In-app download is not available. A browser tab was opened; after the download finishes, go back to “Choose image”, select the file under “Local image file”, then start the write again.',
   'flasher.log.downloadDone': 'Download finished',
-  'flasher.toast.browserDownload': 'Opened download link in the browser; when done use “Choose local file” to pick the image.',
   'flasher.log.decompressUnsupported': 'Auto-decompress not available; extract manually and choose a .img file.',
   'flasher.err.decompressManual': 'Extract the image to .img and select it again.',
   'flasher.log.decompressStart': 'Decompressing image…',
