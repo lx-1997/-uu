@@ -1320,6 +1320,126 @@
   color: var(--text-muted);
 }
 
+/* ── Chat history modal (localStorage 浏览) ── */
+.chat-history-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-dock, 1200) + 20);
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.chat-history-modal {
+  width: min(560px, 100%);
+  max-height: min(78vh, 720px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated, var(--bg-panel, #1a1a1e));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 12px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.chat-history-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.chat-history-modal-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chat-history-modal-hint {
+  margin: 0;
+  padding: 8px 14px 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.chat-history-modal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.chat-history-modal-label {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.chat-history-device-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-history-modal-body {
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  padding: 8px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-history-modal-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.chat-history-row {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg-inset, rgba(128, 128, 128, 0.06));
+}
+
+.chat-history-row.ai {
+  border-left: 3px solid var(--accent, #ff6b00);
+}
+
+.chat-history-row.user {
+  border-left: 3px solid var(--text-muted);
+}
+
+.chat-history-row-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.chat-history-role {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.chat-history-pre {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .dock {

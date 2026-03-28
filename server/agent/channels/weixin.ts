@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { RDKClawApp } from "../../rdkclaw/app.js";
+import type { RDKClawAttachment } from "../../rdkclaw/types.js";
 import { WeixinAccountStore, type WeixinAccount } from "../../rdkclaw/weixin-account-store.js";
 import type { WeixinRuntimeConfig } from "../../rdkclaw/weixin-config-store.js";
 import { WeixinApiClient, type WeixinMessage } from "../../rdkclaw/weixin-api-client.js";
@@ -303,13 +304,14 @@ export class WeixinPollingChannel {
         }
 
         const msgs = res.msgs || [];
-        for (const msg of msgs) {
-          // 仅跳过机器人自己发出的消息（2）；用户侧可能是 1 或未填 message_type，误过滤会导致「能连上但永远不回」
-          if (msg.message_type === 2) continue;
-          if (!msg.from_user_id) continue;
-          this.handleMessage(poller, msg).catch((err) => {
-            console.error(`${tag} handleMessage error:`, err instanceof Error ? err.message : err);
-          });
+        /** 同一轮 getUpdates 内、同一用户连续多条消息合并为一次对话，避免并发 handleMessage 抢 context_token；并串行 await 保证逐条处理 */
+        const groups = this.groupConsecutiveInboundMessages(msgs);
+        for (const group of groups) {
+          try {
+            await this.handleMessageGroup(poller, group);
+          } catch (err) {
+            console.error(`${tag} handleMessageGroup error:`, err instanceof Error ? err.message : err);
+          }
         }
       } catch (err: any) {
         if (err.name === "AbortError") break;
@@ -334,38 +336,78 @@ export class WeixinPollingChannel {
     });
   }
 
-  private async handleMessage(poller: AccountPoller, msg: WeixinMessage) {
+  /**
+   * 将一轮轮询结果按「同一发送方连续消息」分组（与 API 返回顺序一致）。
+   */
+  private groupConsecutiveInboundMessages(msgs: WeixinMessage[]): WeixinMessage[][] {
+    const groups: WeixinMessage[][] = [];
+    for (const msg of msgs) {
+      if (msg.message_type === 2) continue;
+      if (!msg.from_user_id) continue;
+      const prev = groups[groups.length - 1];
+      if (prev && prev[0].from_user_id === msg.from_user_id) {
+        prev.push(msg);
+      } else {
+        groups.push([msg]);
+      }
+    }
+    return groups;
+  }
+
+  private async handleMessageGroup(poller: AccountPoller, group: WeixinMessage[]) {
+    if (group.length === 0) return;
     const cfg = this.getConfig();
     if (!cfg.enabled) return;
 
-    const fromUserId = msg.from_user_id!;
+    const lastMsg = group[group.length - 1];
+    const fromUserId = lastMsg.from_user_id!;
     const prevUser = this.recentUsers.get(fromUserId);
-    const contextToken = (msg.context_token?.trim() || prevUser?.contextToken || "");
+    const contextToken = (lastMsg.context_token?.trim() || prevUser?.contextToken || "");
     const tag = `[WeixinChannel:${poller.account.accountId.slice(0, 8)}]`;
 
-    const { text, attachments } = await extractAttachments(poller.client, msg.item_list);
+    let text = "";
+    const attachments: RDKClawAttachment[] = [];
+    if (group.length === 1) {
+      const ext = await extractAttachments(poller.client, group[0].item_list);
+      text = ext.text;
+      attachments.push(...ext.attachments);
+    } else {
+      const textParts: string[] = [];
+      for (const m of group) {
+        const ext = await extractAttachments(poller.client, m.item_list);
+        if (ext.text) textParts.push(ext.text);
+        attachments.push(...ext.attachments);
+      }
+      text = textParts.join("\n---\n").trim();
+    }
 
     const hasContent = text || attachments.length > 0;
     if (!hasContent) {
-      console.log(`${tag} skipping empty message from ${fromUserId.slice(0, 6)}***`);
+      console.log(`${tag} skipping empty message group from ${fromUserId.slice(0, 6)}***`);
       return;
     }
 
     const hasVoice = attachments.some(a => a.type === "audio");
     const hasImage = attachments.some(a => a.type === "image");
-    const displayText = text || (hasVoice ? "(语音消息)" : hasImage ? "(图片)" : "(媒体消息)");
+    let displayText = text;
+    if (!displayText) {
+      displayText = hasVoice ? "(语音消息)" : hasImage ? "(图片)" : "(媒体消息)";
+    }
+    if (group.length > 1) {
+      displayText = `[本轮连续 ${group.length} 条]\n${displayText}`;
+    }
 
     const maskedUser = `${fromUserId.slice(0, 4)}***${fromUserId.slice(-4)}`;
     const mediaTag = attachments.length ? ` +${attachments.length}附件` : "";
-    console.log(`${tag} inbound from ${maskedUser}: ${displayText.slice(0, 80)}${mediaTag}`);
+    console.log(`${tag} inbound from ${maskedUser}: ${displayText.slice(0, 120)}${mediaTag}${group.length > 1 ? ` (merged×${group.length})` : ""}`);
 
-    this.recordRecentUser(fromUserId, msg.context_token?.trim() || "", poller.account.accountId, maskedUser, displayText);
+    this.recordRecentUser(fromUserId, lastMsg.context_token?.trim() || "", poller.account.accountId, maskedUser, displayText);
 
     if (!contextToken) {
       console.warn(`${tag} 入站缺少 context_token 且无缓存，发往微信可能失败；建议用户重新发一条或重新绑定`);
     }
 
-    if (text && this.tryHandleApprovalReply(poller, fromUserId, contextToken, text, tag, maskedUser)) {
+    if (group.length === 1 && text && this.tryHandleApprovalReply(poller, fromUserId, contextToken, text, tag, maskedUser)) {
       return;
     }
 
@@ -378,7 +420,11 @@ export class WeixinPollingChannel {
       });
 
     if (cfg.ackOnReceive && cfg.ackStyle !== "off") {
-      const ack = cfg.ackStyle === "emoji" ? "👌" : "小地瓜正在为您服务...";
+      const ack = cfg.ackStyle === "emoji"
+        ? "👌"
+        : group.length > 1
+          ? `已收到 ${group.length} 条消息，合并处理中…`
+          : "小地瓜正在为您服务...";
       await poller.client.sendText(fromUserId, contextToken, ack).catch(() => {});
     }
 

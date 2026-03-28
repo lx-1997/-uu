@@ -357,6 +357,57 @@ export function deleteProviderConfigEntry(id: string): boolean {
   return true;
 }
 
+/** 安装包/仓库 `config/rdkclaw-provider.defaults.json` 中的内置模型元信息（无文件时返回 null） */
+export function getBootstrapStudioDefaultPresetMeta(): { id: string; label: string } | null {
+  const bootstrap = loadBootstrapProviderRegistry();
+  if (!bootstrap || bootstrap.entries.length === 0) return null;
+  const targetId = bootstrap.activeId && bootstrap.entries.some((e) => e.id === bootstrap.activeId)
+    ? bootstrap.activeId
+    : bootstrap.entries[0].id;
+  const entry = bootstrap.entries.find((e) => e.id === targetId) || bootstrap.entries[0];
+  return { id: entry.id, label: entry.label };
+}
+
+/**
+ * 将 bootstrap 中的预设条目合并进用户 registry（缺失时补全），并切换 active 到内置默认模型。
+ * 用于用户改用自有 Key 后一键切回安装包自带的 Doubao 端点。
+ */
+export function restoreStudioDefaultPresetFromBootstrap(): { ok: boolean; error?: string } {
+  const bootstrap = loadBootstrapProviderRegistry();
+  if (!bootstrap || bootstrap.entries.length === 0) {
+    return { ok: false, error: '未找到内置模型配置（bootstrap 文件缺失）' };
+  }
+  let registry = loadProviderRegistry();
+  const ids = new Set(registry.entries.map((e) => e.id));
+  let merged = [...registry.entries];
+  for (const entry of bootstrap.entries) {
+    if (!ids.has(entry.id)) {
+      merged.push({ ...entry });
+      ids.add(entry.id);
+    }
+  }
+  if (merged.length !== registry.entries.length) {
+    saveProviderRegistry({ activeId: registry.activeId, entries: merged });
+    registry = loadProviderRegistry();
+  }
+  const targetId =
+    bootstrap.activeId && registry.entries.some((e) => e.id === bootstrap.activeId)
+      ? bootstrap.activeId
+      : bootstrap.entries[0].id;
+  const entry = registry.entries.find((e) => e.id === targetId);
+  if (!entry) {
+    return { ok: false, error: '内置模型条目合并失败' };
+  }
+  const effectiveKey = entry.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
+  if (!effectiveKey) {
+    return { ok: false, error: '内置模型未配置 API Key，且未设置环境变量 OPENAI_API_KEY' };
+  }
+  if (!switchActiveProviderConfig(targetId)) {
+    return { ok: false, error: '切换内置模型失败' };
+  }
+  return { ok: true };
+}
+
 /**
  * 构建 pi-ai Model 定义
  *

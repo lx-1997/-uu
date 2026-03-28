@@ -86,7 +86,7 @@ function useDesktopTabSync(activeTab: string) {
   }, [activeTab]);
 }
 
-function useDesktopViewBounds(activeTab: string) {
+function useDesktopViewBounds(activeTab: string, railExpanded: boolean) {
   useEffect(() => {
     const rdk = (window as any).rdkDesktop;
     if (!rdk?.updateViewBounds) return;
@@ -116,7 +116,7 @@ function useDesktopViewBounds(activeTab: string) {
       window.removeEventListener('resize', reportBounds);
       cancelAnimationFrame(rafId);
     };
-  }, [activeTab]);
+  }, [activeTab, railExpanded]);
 }
 
 function useThemeSync() {
@@ -131,7 +131,7 @@ function AppShell() {
   const { t } = useI18n();
   useStudioPresence(activeTab);
   useDesktopTabSync(activeTab);
-  useDesktopViewBounds(activeTab);
+  useDesktopViewBounds(activeTab, railExpanded);
   useThemeSync();
 
   const tabTitle = useMemo(() => {

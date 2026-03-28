@@ -4,6 +4,7 @@ import { useToastStore } from '../hooks/useToastStore';
 import { executeDeviceCommand } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
+import { resolveRosbridgeWsUrlForDevice } from '../utils/apiBase';
 
 /* ── ROS 可视化 — 内嵌 Webviz + 自动启动 rosbridge ── */
 const WEBVIZ_BASE = 'https://webviz.io/app/';
@@ -51,10 +52,9 @@ export default function Ros() {
     setLogLines(prev => [...prev, `[${ts}] ${line}`]);
   };
 
-  /* 构建带 rosbridge 连接的 Webviz URL */
-  const buildWebvizUrl = useCallback((deviceIp: string) => {
-    const wsUrl = `ws://${deviceIp}:${ROSBRIDGE_PORT}`;
-    // Webviz 支持通过 URL 参数指定 rosbridge 数据源
+  /* 构建带 rosbridge 连接的 Webviz URL（经 Studio 代理，避免 https://webviz.io 直连 ws://设备IP 的混合内容拦截） */
+  const buildWebvizUrl = useCallback((deviceId: string) => {
+    const wsUrl = resolveRosbridgeWsUrlForDevice(deviceId);
     return `${WEBVIZ_BASE}?rosbridge-websocket-url=${encodeURIComponent(wsUrl)}`;
   }, []);
 
@@ -335,7 +335,7 @@ dpkg -l 2>/dev/null | grep -qi rosbridge && echo ROSBRIDGE_PKG_OK || (pip3 list 
     appendLog(tf('ros.log.rbUp', 'rosbridge 运行中 (端口 {{port}})', { port: ROSBRIDGE_PORT }));
     addToast(t('ros.toast.rbReady', 'rosbridge 已就绪，正在连接 Webviz'), 'success');
 
-    const url = buildWebvizUrl(currentDevice.ip);
+    const url = buildWebvizUrl(currentDevice.id);
     setRosbridgeUrl(url);
     setIframeLoading(true);
     setShowIframe(true);

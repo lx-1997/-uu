@@ -220,10 +220,11 @@ export interface AppState {
   stopBackgroundRun: (runId: string) => void;
 }
 
-const AppContext = createContext<AppState | null>(null);
+/** 供 useI18n 等在 Provider 暂不可用时降级（避免 HMR 偶发崩溃） */
+export const AppStateContext = createContext<AppState | null>(null);
 
 export function useAppState() {
-  const ctx = useContext(AppContext);
+  const ctx = useContext(AppStateContext);
   if (!ctx) throw new Error('useAppState must be used within AppProvider');
   return ctx;
 }
@@ -365,7 +366,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
     ...chat,
   };
 
-  return React.createElement(AppContext.Provider, { value }, children);
+  return React.createElement(AppStateContext.Provider, { value }, children);
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {

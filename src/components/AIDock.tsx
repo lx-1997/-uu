@@ -9,6 +9,8 @@ import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, fetchApi } from '../utils/apiBase';
 import { renderMarkdown } from './MarkdownRenderer';
+import { chatMessageToPlainText } from '../utils/chat-message-plain';
+import { ChatHistoryModal } from './ChatHistoryModal';
 import io from 'socket.io-client';
 
 /* ─── Inline SVG icons (avoid emoji, keep crisp) ─── */
@@ -613,35 +615,6 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   );
 }
 
-function chatMessageToPlainText(msg: ChatMessage, tr: (key: string, zh: string) => string): string {
-  const parts: string[] = [];
-  if (msg.text?.trim()) parts.push(msg.text.trim());
-  if (msg.blocks?.length) {
-    for (const b of msg.blocks) {
-      if (b.type === 'terminal') {
-        parts.push((b.label ? `${b.label}\n` : '') + b.lines.join('\n'));
-      } else if (b.type === 'code') {
-        parts.push(`\`\`\`${b.lang}\n${b.content}\n\`\`\``);
-      } else if (b.type === 'status') {
-        parts.push(b.items.map((i) => `${i.label}: ${i.value}`).join('\n'));
-      } else if (b.type === 'confirm' || b.type === 'approval') {
-        parts.push(b.text);
-      } else if (b.type === 'progress') {
-        parts.push(b.steps.map((s) => `${s.label} (${s.status})`).join('\n'));
-      } else if (b.type === 'task-result') {
-        parts.push([b.title, b.detail].filter(Boolean).join('\n'));
-      } else if (b.type === 'image') {
-        parts.push(b.caption || b.src || tr('dock.plain.image', '[图片]'));
-      } else if (b.type === 'video') {
-        parts.push(b.caption || b.src || tr('dock.plain.video', '[视频]'));
-      } else if (b.type === 'file') {
-        parts.push(b.fileName || b.src || tr('dock.plain.file', '[文件]'));
-      }
-    }
-  }
-  return parts.join('\n\n').trim();
-}
-
 async function copyDockPlainText(text: string): Promise<boolean> {
   if (!text.trim()) return false;
   try {
@@ -701,6 +674,7 @@ export default function AIDock() {
     }
   });
   const [showAllMessages, setShowAllMessages] = useState(false);
+  const [showChatHistoryModal, setShowChatHistoryModal] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
@@ -1313,6 +1287,7 @@ export default function AIDock() {
   }
 
   return (
+    <>
     <div className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''} ${chatExpanded && isSubpageTab && !workspaceMode ? 'subpage-compact' : ''}`}>
       {/* ── Chat panel (expanded) ── */}
       {chatExpanded && (
@@ -1360,6 +1335,17 @@ export default function AIDock() {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
                 </button>
               )}
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowChatHistoryModal(true)}
+                title={t('dock.history.openTitle', '查看本地对话历史')}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
               <button className="btn-icon" onClick={clearChatHistory} title={t('dock.task.clearHistoryTitle', '清空')}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
               </button>
@@ -1596,14 +1582,27 @@ export default function AIDock() {
             <button type="button" className="dock-action-btn" onClick={() => setCmd('')} title={t('dock.input.clearInput', '清空')}>{Icon.close}</button>
           )}
           {!chatExpanded && (
-            <button
-              type="button"
-              className="dock-action-btn"
-              onClick={() => setChatExpanded(true)}
-              title={t('dock.openChatPanel', '打开聊天面板')}
-            >
-              {Icon.expand}
-            </button>
+            <>
+              <button
+                type="button"
+                className="dock-action-btn"
+                onClick={() => setShowChatHistoryModal(true)}
+                title={t('dock.history.openTitle', '查看本地对话历史')}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="dock-action-btn"
+                onClick={() => setChatExpanded(true)}
+                title={t('dock.openChatPanel', '打开聊天面板')}
+              >
+                {Icon.expand}
+              </button>
+            </>
           )}
           {isSubpageTab && (
             <button
@@ -1697,5 +1696,13 @@ export default function AIDock() {
         </div>
       </div>
     </div>
+    <ChatHistoryModal
+      open={showChatHistoryModal}
+      onClose={() => setShowChatHistoryModal(false)}
+      devices={devices}
+      preferredDeviceId={currentDevice?.id}
+      t={t}
+    />
+    </>
   );
 }

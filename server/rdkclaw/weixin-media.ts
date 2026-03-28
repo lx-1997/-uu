@@ -118,7 +118,11 @@ export async function extractAttachments(
           try {
             const buf = await client.downloadMedia(fileCdn);
             const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
-            const mime = ext === "pdf" ? "application/pdf"
+            const videoExt = new Set(["mp4", "webm", "avi", "mov", "mkv", "m4v", "mpeg", "mpg"]);
+            const isVideoFile = videoExt.has(ext);
+            const mime = isVideoFile
+              ? (ext === "webm" ? "video/webm" : ext === "mov" ? "video/quicktime" : "video/mp4")
+              : ext === "pdf" ? "application/pdf"
               : ext === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               : ext === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               : ext === "pptx" ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -126,8 +130,8 @@ export async function extractAttachments(
               : "application/octet-stream";
             attachments.push({
               id: genId(),
-              type: "file",
-              name: `weixin-file-${Date.now()}-${fileName}`,
+              type: isVideoFile ? "video" : "file",
+              name: `weixin-${isVideoFile ? "video" : "file"}-${Date.now()}-${fileName}`,
               mimeType: mime,
               size: buf.length,
               contentBase64: buf.toString("base64"),

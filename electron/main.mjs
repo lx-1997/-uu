@@ -20,10 +20,9 @@ const SERVER_PORT = 8787;
 const SERVER_BOOT_TIMEOUT_MS = 15_000;
 const SERVER_SHUTDOWN_GRACE_MS = 2_500;
 
-// 侧边栏宽度 + 顶部工具栏高度（与 src/styles/layout.css 保持一致）
-const SIDEBAR_W = 260;
+// 与 src/styles/tokens.css --rail-width（56）及 shell 网格一致；勿用旧版 260，否则回退 bounds 时左侧整段仍显示 React「前页」
+const RAIL_W = 56;
 const TOPBAR_H = 48;
-const DOCK_RESERVED_H = 170;
 
 let mainWin = null;
 
@@ -301,12 +300,13 @@ function getRendererUrl() {
   return 'http://localhost:5173';
 }
 
+/** 渲染进程未上报 .content-area 时的兜底（须与主界面网格一致：左侧 rail + 顶栏 + 下方主内容区） */
 function calcViewBounds(win) {
   const [w, h] = win.getContentSize();
-  const width = Math.max(100, w - SIDEBAR_W);
-  const height = Math.max(120, h - TOPBAR_H - DOCK_RESERVED_H);
+  const width = Math.max(100, w - RAIL_W);
+  const height = Math.max(120, h - TOPBAR_H);
   return {
-    x: SIDEBAR_W,
+    x: RAIL_W,
     y: TOPBAR_H,
     width,
     height,

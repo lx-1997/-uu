@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   isCommandDangerous,
   isPathProtected,
@@ -73,23 +73,34 @@ describe('isPathProtected', () => {
 });
 
 describe('getExternalChannelPolicy', () => {
+  const prev = process.env.RDK_EXTERNAL_FORCE_APPROVAL;
+
+  afterEach(() => {
+    if (prev === undefined) delete process.env.RDK_EXTERNAL_FORCE_APPROVAL;
+    else process.env.RDK_EXTERNAL_FORCE_APPROVAL = prev;
+  });
+
   it('blocks sessions_spawn', () => {
     expect(getExternalChannelPolicy('sessions_spawn')).toBe('block');
   });
 
-  it('requires approval for exec tools', () => {
-    expect(getExternalChannelPolicy('exec')).toBe('force_approval');
-    expect(getExternalChannelPolicy('device_exec')).toBe('force_approval');
-    expect(getExternalChannelPolicy('write')).toBe('force_approval');
+  it('defaults to allow (aligned with studio / AI Dock; policy governs approval)', () => {
+    delete process.env.RDK_EXTERNAL_FORCE_APPROVAL;
+    expect(getExternalChannelPolicy('exec')).toBe('allow');
+    expect(getExternalChannelPolicy('device_exec')).toBe('allow');
+    expect(getExternalChannelPolicy('write')).toBe('allow');
+    expect(getExternalChannelPolicy('device_file_write')).toBe('allow');
   });
 
-  it('requires approval for write-like tools by name pattern', () => {
+  it('when RDK_EXTERNAL_FORCE_APPROVAL=1, requires approval for risky tools', () => {
+    process.env.RDK_EXTERNAL_FORCE_APPROVAL = '1';
+    expect(getExternalChannelPolicy('exec')).toBe('force_approval');
+    expect(getExternalChannelPolicy('device_exec')).toBe('force_approval');
     expect(getExternalChannelPolicy('device_file_write')).toBe('force_approval');
-    expect(getExternalChannelPolicy('flash_execute')).toBe('force_approval');
-    expect(getExternalChannelPolicy('device_remove')).toBe('force_approval');
   });
 
   it('allows read-only tools', () => {
+    delete process.env.RDK_EXTERNAL_FORCE_APPROVAL;
     expect(getExternalChannelPolicy('device_diagnose')).toBe('allow');
     expect(getExternalChannelPolicy('ros_topics')).toBe('allow');
     expect(getExternalChannelPolicy('web_search')).toBe('allow');

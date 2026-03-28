@@ -519,6 +519,13 @@ export function fetchAgentConfig() {
     baseUrl?: string;
     activeModelId?: string | null;
     envApiKeyAvailable?: boolean;
+    /** 安装包内置默认模型（bootstrap），用于「恢复默认」 */
+    studioDefaultPreset?: {
+      id: string;
+      label: string;
+      inRegistry: boolean;
+      isActive: boolean;
+    } | null;
     models?: Array<{
       id: string;
       label: string;
@@ -819,7 +826,7 @@ export function restartWeixinChannel() {
 }
 
 export function saveAgentConfig(config: {
-  action?: 'upsert' | 'switch' | 'delete';
+  action?: 'upsert' | 'switch' | 'delete' | 'restore_bootstrap_preset';
   id?: string;
   label?: string;
   provider?: string;

@@ -44,7 +44,15 @@ const EXTERNAL_BLOCKED_TOOLS = new Set([
   "sessions_spawn",
 ]);
 
-const EXTERNAL_ALWAYS_APPROVE_TOOLS = new Set([
+/**
+ * 历史上外部通道（微信/飞书）对大量工具强制「先发 approval_required」，即使用户策略已是 auto，
+ * 体验与 AI Dock（studio 通道）不一致。现默认与 studio 一致：仅 block 名单内工具，
+ * 其余走全局策略 `shouldRequireApproval` + 权限守卫。
+ * 若需恢复旧行为（企业强制二次确认），设置环境变量：RDK_EXTERNAL_FORCE_APPROVAL=1
+ */
+const EXTERNAL_FORCE_APPROVAL_PATTERN = /write|exec|restart|flash|upload|set_|delete|remove|connect_ssh/i;
+
+const EXTERNAL_FORCE_APPROVAL_TOOLS = new Set([
   "exec",
   "write",
   "edit",
@@ -55,10 +63,16 @@ const EXTERNAL_ALWAYS_APPROVE_TOOLS = new Set([
   "board_openclaw_delegate",
 ]);
 
+function externalStrictApprovalEnabled(): boolean {
+  const v = process.env.RDK_EXTERNAL_FORCE_APPROVAL;
+  return v === "1" || v === "true" || v === "yes";
+}
+
 export function getExternalChannelPolicy(toolName: string): "block" | "force_approval" | "allow" {
   if (EXTERNAL_BLOCKED_TOOLS.has(toolName)) return "block";
-  if (EXTERNAL_ALWAYS_APPROVE_TOOLS.has(toolName)) return "force_approval";
-  if (/write|exec|restart|flash|upload|set_|delete|remove|connect_ssh/i.test(toolName)) return "force_approval";
+  if (!externalStrictApprovalEnabled()) return "allow";
+  if (EXTERNAL_FORCE_APPROVAL_TOOLS.has(toolName)) return "force_approval";
+  if (EXTERNAL_FORCE_APPROVAL_PATTERN.test(toolName)) return "force_approval";
   return "allow";
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import {
@@ -35,7 +36,7 @@ import {
   removeWeixinAccount,
   restartWeixinChannel,
 } from '../api';
-import { resolveApiUrl } from '../utils/apiBase';
+import { RDK_SSO_SESSION_MIRROR_KEY, fetchApi, resolveApiUrl } from '../utils/apiBase';
 import { fillTemplate } from '../i18n/en-extras';
 import { useAuth } from '../hooks/useAuth';
 import { trackUiAction } from '../analytics/client';
@@ -162,6 +163,12 @@ export default function SettingsPanel() {
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
   const [aiEnvApiKeyAvailable, setAiEnvApiKeyAvailable] = useState(false);
+  const [studioDefaultPreset, setStudioDefaultPreset] = useState<{
+    id: string;
+    label: string;
+    inRegistry: boolean;
+    isActive: boolean;
+  } | null>(null);
   const importAgentConfigRef = useRef<HTMLInputElement | null>(null);
   const loadedAiProviderRef = useRef('');
 
@@ -180,6 +187,7 @@ export default function SettingsPanel() {
     const models = cfg.models || [];
     setAiSavedModels(models);
     setAiEnvApiKeyAvailable(!!cfg.envApiKeyAvailable);
+    setStudioDefaultPreset(cfg.studioDefaultPreset ?? null);
     const aid = cfg.activeModelId?.trim();
     const active = aid
       ? models.find((item) => item.id === aid)
@@ -261,19 +269,28 @@ export default function SettingsPanel() {
   const [weixinAccounts, setWeixinAccounts] = useState<Array<{ accountId: string; nickname: string; boundAt: number }>>([]);
   const [weixinLoginLoading, setWeixinLoginLoading] = useState(false);
   const [weixinQrCode, setWeixinQrCode] = useState<string | null>(null);
+  const [weixinQrBroken, setWeixinQrBroken] = useState(false);
   const [weixinLoginStatus, setWeixinLoginStatus] = useState<string>('');
   const [weixinLoginEventSource, setWeixinLoginEventSource] = useState<EventSource | null>(null);
+  const weixinQrBlobUrlRef = useRef<string | null>(null);
 
   /**
    * Close EventSource when the panel unmounts or hides,
    * preventing leaked SSE connections when user dismisses settings.
    */
   useEffect(() => {
+    if (!showSettings) {
+      if (weixinQrBlobUrlRef.current) {
+        URL.revokeObjectURL(weixinQrBlobUrlRef.current);
+        weixinQrBlobUrlRef.current = null;
+      }
+    }
     if (!showSettings && weixinLoginEventSource) {
       weixinLoginEventSource.close();
       setWeixinLoginEventSource(null);
       setWeixinLoginLoading(false);
       setWeixinQrCode(null);
+      setWeixinQrBroken(false);
       setWeixinLoginStatus('');
     }
   }, [showSettings, weixinLoginEventSource]);
@@ -547,6 +564,28 @@ export default function SettingsPanel() {
     setAiApiKey('');
   };
 
+  const handleRestoreStudioDefaultModel = async () => {
+    if (!studioDefaultPreset) return;
+    setAiSaving(true);
+    try {
+      await saveAgentConfig({ action: 'restore_bootstrap_preset' });
+      await refreshAiConfig();
+      addToast(
+        t('toast.aiRestoredDefault', '已切换为 RDK Studio 内置默认模型（与首次安装一致）'),
+        'success',
+      );
+    } catch (err) {
+      addToast(
+        tf('toast.aiRestoreDefaultFail', '恢复默认模型失败: {{msg}}', {
+          msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+        }),
+        'error',
+      );
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
   const handleExportAgentConfig = async () => {
     try {
       const data = await exportAgentConfig(true);
@@ -598,11 +637,50 @@ export default function SettingsPanel() {
 
   /* ── WeChat Handlers ── */
 
+  /** 与 fetch 一致：相对路径走当前页 / rdkDesktop.apiBase，避免服务端拼的绝对 URL 与浏览器入口 Host/HTTPS 不一致导致二维码 404 */
+  const resolveWeixinQrImgSrc = (raw: string) => {
+    const s = String(raw || '').trim();
+    if (!s) return s;
+    try {
+      if (/^https?:\/\//i.test(s)) {
+        const u = new URL(s);
+        return resolveApiUrl(`${u.pathname}${u.search}`);
+      }
+    } catch {
+      /* ignore */
+    }
+    return resolveApiUrl(s.startsWith('/') ? s : `/${s}`);
+  };
+
+  /** 用 fetchApi 拉取二进制并生成 Blob URL，避免 img 直接请求时拿不到会话/拿到 401 JSON 却显示为裂图 */
+  const loadWeixinQrPreviewAsObjectUrl = async (raw: string): Promise<string> => {
+    const pathOrUrl = resolveWeixinQrImgSrc(raw);
+    const res = await fetchApi(pathOrUrl, { credentials: 'include' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} ${text.slice(0, 160)}`);
+    }
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (!ct.startsWith('image/')) {
+      throw new Error(`无效响应类型: ${ct || '(空)'}`);
+    }
+    const blob = await res.blob();
+    if (blob.size < 32) {
+      throw new Error('图片数据过短');
+    }
+    return URL.createObjectURL(blob);
+  };
+
   const closeWeixinLogin = () => {
+    if (weixinQrBlobUrlRef.current) {
+      URL.revokeObjectURL(weixinQrBlobUrlRef.current);
+      weixinQrBlobUrlRef.current = null;
+    }
     weixinLoginEventSource?.close();
     setWeixinLoginEventSource(null);
     setWeixinLoginLoading(false);
     setWeixinQrCode(null);
+    setWeixinQrBroken(false);
     setWeixinLoginStatus('');
   };
 
@@ -612,15 +690,43 @@ export default function SettingsPanel() {
     setWeixinLoginStatus(t('settings.weixin.fetchQr', '正在获取二维码...'));
 
     let settled = false;
-    const es = new EventSource(resolveApiUrl('/api/rdkclaw/weixin/login'));
+    const loginUrl = (() => {
+      const base = resolveApiUrl('/api/rdkclaw/weixin/login');
+      try {
+        const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
+        if (sid && /^[a-f0-9]{64}$/i.test(sid)) {
+          const sep = base.includes('?') ? '&' : '?';
+          return `${base}${sep}rdk_sso_session=${encodeURIComponent(sid)}`;
+        }
+      } catch { /* ignore */ }
+      return base;
+    })();
+    const es = new EventSource(loginUrl);
     setWeixinLoginEventSource(es);
 
     es.addEventListener('qrcode', (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.qrcode) {
-          setWeixinQrCode(data.qrcode);
-          setWeixinLoginStatus(t('settings.weixin.scanBelow', '请用微信扫描下方二维码'));
+          setWeixinQrBroken(false);
+          if (weixinQrBlobUrlRef.current) {
+            URL.revokeObjectURL(weixinQrBlobUrlRef.current);
+            weixinQrBlobUrlRef.current = null;
+          }
+          setWeixinQrCode(null);
+          void loadWeixinQrPreviewAsObjectUrl(data.qrcode)
+            .then((objectUrl) => {
+              weixinQrBlobUrlRef.current = objectUrl;
+              setWeixinQrCode(objectUrl);
+              setWeixinLoginStatus(t('settings.weixin.scanBelow', '请用微信扫描下方二维码'));
+            })
+            .catch(() => {
+              setWeixinQrBroken(true);
+              addToast(
+                t('settings.weixin.qrLoadFail', '二维码图片无法显示，请关闭后重试；若仍失败请更新 RDK Studio'),
+                'error',
+              );
+            });
         }
       } catch { /* ignore */ }
     });
@@ -670,8 +776,6 @@ export default function SettingsPanel() {
      Render
      ═══════════════════════════════════════════ */
 
-  if (!showSettings) return null;
-
   const H = ({ title, desc }: { title: string; desc?: string }) => (
     <div className="settings-section-header">
       <h3 className="settings-section-title">{title}</h3>
@@ -682,8 +786,80 @@ export default function SettingsPanel() {
   const feishuRunning = feishuStatus?.runtime?.running;
   const feishuConnected = feishuRunning && feishuStatus?.runtime?.connected;
 
+  /** 必须挂到 document.body：settings-drawer 的 transform 会让内部 position:fixed 只覆盖抽屉，主界面大字会透出 */
+  const weixinQrPortal =
+    weixinLoginLoading && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            className="modal-overlay modal-overlay--weixin-qr"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-weixin-qr-title"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) closeWeixinLogin();
+            }}
+          >
+            <div
+              className="modal-content settings-weixin-qr-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: 400, width: '100%' }}
+            >
+              <div className="modal-header settings-weixin-qr-header">
+                <span id="settings-weixin-qr-title" className="modal-title">
+                  {t('settings.weixin.modalTitle', '微信扫码连接')}
+                </span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={closeWeixinLogin} aria-label={t('settings.modal.close', '关闭')}>
+                  &times;
+                </button>
+              </div>
+              <div className="modal-body settings-weixin-qr-body">
+                {weixinQrCode ? (
+                  <>
+                    <div className="settings-qr-container">
+                      {!weixinQrBroken ? (
+                        <img
+                          src={weixinQrCode}
+                          alt={t('settings.weixin.qrAlt', '微信扫码')}
+                          className="settings-qr-img"
+                          onError={() => {
+                            setWeixinQrBroken(true);
+                            addToast(
+                              t('settings.weixin.qrLoadFail', '二维码图片无法显示，请关闭后重试；若仍失败请更新 RDK Studio'),
+                              'error',
+                            );
+                          }}
+                        />
+                      ) : (
+                        <p className="settings-hint settings-weixin-qr-fallback" style={{ margin: 0 }}>
+                          {t('settings.weixin.qrLoadFailHint', '图片解码失败，请关闭弹窗后重试「扫码连接」。')}
+                        </p>
+                      )}
+                    </div>
+                    <p className="settings-weixin-qr-hint">
+                      {weixinLoginStatus || t('settings.weixin.scanHint', '请用微信扫一扫')}
+                    </p>
+                  </>
+                ) : (
+                  <div className="settings-weixin-qr-loading">
+                    <div className="spinner" style={{ margin: '0 auto 16px' }} />
+                    <p className="settings-weixin-qr-loading-text">
+                      {weixinLoginStatus || t('settings.weixin.fetchQr', '正在获取二维码...')}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null;
+
+  if (!showSettings) return weixinQrPortal;
+
   return (
-    <div className="settings-overlay" onClick={() => setShowSettings(false)}>
+    <>
+      {weixinQrPortal}
+      <div className="settings-overlay" onClick={() => setShowSettings(false)}>
       <div className="settings-drawer" onClick={e => e.stopPropagation()}>
         <div className="settings-header">
           <div className="settings-title">{t('settings.title', 'RDKClaw 设置')}</div>
@@ -831,6 +1007,31 @@ export default function SettingsPanel() {
                     <span className="settings-row-label">Base URL</span>
                     <div className="settings-row-value"><input type="text" className="input" title="Base URL" aria-label="Base URL" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl || 'https://...'} value={aiBaseUrl} onChange={e => setAiBaseUrl(e.target.value)} /></div>
                   </div>
+                  {studioDefaultPreset && (
+                    <div className="settings-row">
+                      <span className="settings-row-label">{t('settings.ai.studioDefault', '内置默认')}</span>
+                      <div className="settings-row-value" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+                        <span className="settings-hint" style={{ margin: 0 }}>
+                          {studioDefaultPreset.label}
+                          {' · '}
+                          {t(
+                            'settings.ai.studioDefault.desc',
+                            '与安装包首次启动一致。若已配置自有 API Key，可一键切回该预设。',
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={aiSaving || studioDefaultPreset.isActive}
+                          onClick={() => void handleRestoreStudioDefaultModel()}
+                        >
+                          {studioDefaultPreset.isActive
+                            ? t('settings.ai.studioDefault.current', '当前已使用内置默认模型')
+                            : t('settings.ai.studioDefault.restore', '恢复内置默认模型')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="settings-actions">
                     <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveAiConfig} disabled={aiSaving}>{aiSaving ? '...' : (selectedAiModelId ? t('settings.ai.save', '保存') : t('settings.ai.addEnable', '新增并启用'))}</button>
                     {selectedAiModelId && <button type="button" className="btn btn-danger btn-sm" onClick={handleDeleteAiModel} disabled={aiSaving}>{t('settings.ai.delete', '删除')}</button>}
@@ -1058,37 +1259,6 @@ export default function SettingsPanel() {
                 </div>
               </section>
 
-              {/* 微信扫码弹窗 */}
-              {weixinLoginLoading && (
-                <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeWeixinLogin(); }}>
-                  <div className="modal-card" style={{ maxWidth: 380 }}>
-                    <div className="modal-header">
-                      <span className="modal-title">{t('settings.weixin.modalTitle', '微信扫码连接')}</span>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={closeWeixinLogin} aria-label={t('settings.modal.close', '关闭')}>&times;</button>
-                    </div>
-                    <div className="modal-body" style={{ textAlign: 'center' }}>
-                      {weixinQrCode ? (
-                        <>
-                          <div className="settings-qr-container">
-                            <img src={weixinQrCode} alt={t('settings.weixin.qrAlt', '微信扫码')} className="settings-qr-img" />
-                          </div>
-                          <p style={{ margin: '12px 0 4px', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-                            {weixinLoginStatus || t('settings.weixin.scanHint', '请用微信扫一扫')}
-                          </p>
-                        </>
-                      ) : (
-                        <div style={{ padding: '40px 0' }}>
-                          <div className="spinner" style={{ margin: '0 auto 12px' }} />
-                          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-                            {weixinLoginStatus || t('settings.weixin.fetchQr', '正在获取二维码...')}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <hr className="settings-section-divider" />
 
               {/* ══ 6. 设备连接 ══ */}
@@ -1154,5 +1324,6 @@ export default function SettingsPanel() {
           </div>
       </div>
     </div>
+    </>
   );
 }
