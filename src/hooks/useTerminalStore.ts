@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useCallback, useMemo, useState } from 'react';
 import type { TerminalSession } from '../app-types';
 import { getTerminalProfileLabel } from '../constants';
 import { fillTemplate } from '../i18n/en-extras';
@@ -60,16 +60,16 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
   const [activeSessionId, setActiveSessionId] = useState('session-1');
   const currentSession = terminalSessions.find((s) => s.id === activeSessionId) ?? terminalSessions[0];
 
-  const createSession = () => {
+  const createSession = useCallback(() => {
     const nextId = `session-${Date.now()}`;
     const profileLabel = getTerminalProfileLabel(terminalProfile, isEn);
     setTerminalSessions((prev) => [...prev, { id: nextId, name: `${profileLabel} ${prev.length + 1}`, profile: terminalProfile, status: 'warm', lines: [] }]);
     setActiveSessionId(nextId);
     addToast(tf('terminal.session.created', '终端会话 "{{name}}" 已创建', { name: profileLabel }), 'success');
     addActivity(tf('terminal.session.activity', '创建终端会话: {{name}}', { name: profileLabel }));
-  };
+  }, [terminalProfile, addToast, addActivity, tf]);
 
-  const removeSession = (id: string) => {
+  const removeSession = useCallback((id: string) => {
     setTerminalSessions((prev) => {
       const next = prev.filter((s) => s.id !== id);
       if (next.length === 0) return prev;
@@ -78,9 +78,9 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
       }
       return next;
     });
-  };
+  }, [activeSessionId]);
 
-  const runTerminalCommand = (commandText: string, password?: string) => {
+  const runTerminalCommand = useCallback((commandText: string, password?: string) => {
     if (!commandText.trim()) return;
     if (!currentDevice) {
       addToast(t('ui.needDevice', '请先连接真实设备'), 'warning');
@@ -151,9 +151,9 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
       });
 
     setTerminalDraft('');
-  };
+  }, [currentDevice, activeTab, activeSessionId, addToast, setShowAddDevice, t, tf]);
 
-  const runTerminalAIAnalysis = () => {
+  const runTerminalAIAnalysis = useCallback(() => {
     const lastLines = currentSession.lines.slice(-8).filter((l) => !l.startsWith('root@') && !l.startsWith('🤖'));
     const hasError = lastLines.some((l) => /error|fail|denied|not found/i.test(l));
     const analysis = hasError
@@ -178,13 +178,19 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
       }, (i + 1) * 200);
     });
     setTimeout(() => addToast(t('terminal.ai.done', 'AI 分析完成'), 'success'), allLines.length * 200 + 100);
-  };
+  }, [currentSession, activeSessionId, addToast, t, tf]);
 
-  const value: TerminalStoreState = {
-    terminalProfile, setTerminalProfile, terminalDraft, setTerminalDraft,
-    terminalSessions, activeSessionId, setActiveSessionId, currentSession,
-    createSession, removeSession, runTerminalCommand, runTerminalAIAnalysis,
-  };
+  const value = useMemo<TerminalStoreState>(
+    () => ({
+      terminalProfile, setTerminalProfile, terminalDraft, setTerminalDraft,
+      terminalSessions, activeSessionId, setActiveSessionId, currentSession,
+      createSession, removeSession, runTerminalCommand, runTerminalAIAnalysis,
+    }),
+    [
+      terminalProfile, terminalDraft, terminalSessions, activeSessionId, currentSession,
+      createSession, removeSession, runTerminalCommand, runTerminalAIAnalysis,
+    ],
+  );
 
   return React.createElement(TerminalContext.Provider, { value }, children);
 }

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useRef, useState } from 'react';
+import React, { createContext, useContext, useCallback, useMemo, useRef, useState } from 'react';
 import type { Toast, Activity } from '../app-types';
 
 export interface ToastStoreState {
@@ -20,11 +20,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastCounter = useRef(0);
 
-  const addToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+  const addToast = useCallback((message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
     const id = ++toastCounter.current;
     setToasts((prev) => [...prev, { id, message, type }]);
     window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 3500);
-  };
+  }, []);
 
   const [activities, setActivities] = useState<Activity[]>([
     { id: 1, text: '系统就绪，RDK Studio 启动完成', time: '刚刚' },
@@ -32,11 +32,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     { id: 3, text: '可通过设备管理添加 RDK 开发板', time: '2 分钟前' },
   ]);
 
-  const addActivity = (text: string) => {
+  const addActivity = useCallback((text: string) => {
     setActivities((prev) => [{ id: Date.now(), text, time: '刚刚' }, ...prev].slice(0, 10));
-  };
+  }, []);
 
-  const value: ToastStoreState = { toasts, addToast, activities, addActivity };
+  const value = useMemo<ToastStoreState>(
+    () => ({ toasts, addToast, activities, addActivity }),
+    [toasts, addToast, activities, addActivity],
+  );
 
   return React.createElement(ToastContext.Provider, { value }, children);
 }

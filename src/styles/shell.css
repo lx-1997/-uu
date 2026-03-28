@@ -616,6 +616,25 @@
   font-family: var(--font-mono);
 }
 
+.device-panel-delete {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  position: relative;
+  z-index: 2;
+  opacity: 0.75;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.device-panel-item:hover .device-panel-delete,
+.device-panel-delete:hover,
+.device-panel-delete:focus-visible {
+  opacity: 1;
+}
+
 .device-panel-add-btn {
   width: 100%;
   margin-top: 8px;

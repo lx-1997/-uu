@@ -90,6 +90,7 @@ export default function SettingsPanel() {
     showSettings, setShowSettings,
     autoReconnect, setAutoReconnect,
     connectionTimeout, setConnectionTimeout, addToast,
+    devices, removeDevice, setShowAddDevice,
   } = useAppState();
   const { user, ssoEnabled, ssoRequired, logout } = useAuth();
   const showAccountSection = ssoEnabled || ssoRequired;
@@ -1093,8 +1094,49 @@ export default function SettingsPanel() {
 
               {/* ══ 6. 设备连接 ══ */}
               <section id="connection" className="settings-section" ref={registerSectionRef('connection')}>
-                <H title={t('settings.conn.title', '设备连接')} desc={t('settings.conn.desc', 'SSH 连接参数。界面语言请在左侧栏底部切换。')} />
+                <H
+                  title={t('settings.conn.title', '设备连接')}
+                  desc={t('settings.conn.descWithDevices', 'SSH 连接参数；可从列表移除设备（仅剩一台也可删除）。界面语言请在左侧栏底部切换。')}
+                />
                 <div className="settings-card">
+                  <div className="settings-row">
+                    <span className="settings-row-label">{t('settings.conn.savedDevices', '已保存的设备')}</span>
+                    <div className="settings-row-value" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                      {devices.length === 0 ? (
+                        <span className="settings-row-static" style={{ color: 'var(--text-muted)' }}>{t('settings.conn.noDevices', '暂无设备')}</span>
+                      ) : (
+                        devices.map((d) => (
+                          <div
+                            key={d.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '8px 10px',
+                              borderRadius: 8,
+                              border: '1px solid var(--line, var(--border))',
+                              background: 'var(--bg-inset, rgba(0,0,0,0.04))',
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{d.name}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono, monospace)' }}>{d.ip}{d.port && d.port !== 22 ? `:${d.port}` : ''}</div>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => removeDevice(d.id)}
+                            >
+                              {t('settings.conn.removeDevice', '移除')}
+                            </button>
+                          </div>
+                        ))
+                      )}
+                      <button type="button" className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => { setShowAddDevice(true); setShowSettings(false); }}>
+                        {t('settings.conn.addDevice', '添加设备')}
+                      </button>
+                    </div>
+                  </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.conn.timeout', '连接超时 (秒)')}</span>
                     <div className="settings-row-value"><input type="number" className="input" title={t('settings.conn.timeout.title', '超时')} aria-label={t('settings.conn.timeout.title', '超时')} value={connectionTimeout} onChange={e => setConnectionTimeout(Number(e.target.value))} /></div>

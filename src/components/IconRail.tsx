@@ -224,13 +224,13 @@ export default function IconRail() {
                 </div>
                 <button
                   type="button"
-                  className="btn-icon"
-                  title={t('device.remove', '删除设备')}
+                  className="btn-icon device-panel-delete"
+                  title={t('device.removeFromList', '从列表移除此设备')}
+                  onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
                     removeDevice(dev.id);
                   }}
-                  style={{ marginLeft: 'auto', flexShrink: 0, width: 24, height: 24, opacity: 0.5 }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />

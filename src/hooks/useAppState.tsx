@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
 import type { CmdSuggestion } from '../constants';
 import type { Task } from '../ai';
@@ -325,6 +325,15 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      if (status === 404 && (code === 'DEVICE_NOT_FOUND' || /设备不存在/.test(message))) {
+        const url = String(detail.url || '');
+        if (/\/api\/devices\/[^/]+\/ping$/.test(url)) {
+          return;
+        }
+        toast.addToast('服务端没有该设备的记录，请打开设置 → 设备连接核对列表，或重新添加设备。', 'warning');
+        return;
+      }
+
       if (code === 'FILE_NOT_FOUND') {
         toast.addToast(t('api.err.fileNotFound', '目标文件不存在，请刷新目录后重试'), 'info');
         return;
@@ -352,18 +361,16 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('rdk-api-error', onApiError as EventListener);
   }, [device, toast, ui.language]);
 
-  const value: AppState = {
-    // Toast
-    ...toast,
-    // Device
-    ...device,
-    // UI (showConfirm from UI takes precedence over device's stub)
-    ...ui,
-    // Terminal
-    ...terminal,
-    // AI Chat
-    ...chat,
-  };
+  const value = useMemo<AppState>(
+    () => ({
+      ...toast,
+      ...device,
+      ...ui,
+      ...terminal,
+      ...chat,
+    }),
+    [toast, device, ui, terminal, chat],
+  );
 
   return React.createElement(AppContext.Provider, { value }, children);
 }

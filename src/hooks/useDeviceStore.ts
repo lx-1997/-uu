@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Device } from '../app-types';
 import { connectDevice, checkDevicePing, fetchDevices, forgetDevicePassword, rememberDevicePassword, removeDevice as removeDeviceApi } from '../api';
 import { useToastStore } from './useToastStore';
@@ -84,27 +84,23 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     devicesRef.current = devices;
   }, [devices]);
 
-  // Confirm helper — kept local; the full confirm dialog lives in UIStore,
-  // but device removal needs a simple callback-style confirm.
-  // We store the pending callback and expose showConfirm; the UIStore
-  // confirmDialog state is set via the facade in AppProvider.
-  // For now, use window.confirm as a lightweight bridge to avoid circular deps.
-  const showConfirm = (title: string, _message: string, onConfirm: () => void) => {
-    // Will be overridden by the facade wiring in AppProvider
-    void title;
-    onConfirm();
-  };
-  // Mutable ref so removeDevice always sees the latest showConfirm
+  // 与 UIStore 的 ConfirmDialog 解耦（DeviceProvider 在 UI 外层），删除设备用浏览器确认框即可。
+  const showConfirm = useCallback((title: string, message: string, onConfirm: () => void) => {
+    const text = [title, message].filter(Boolean).join('\n\n');
+    if (window.confirm(text)) {
+      onConfirm();
+    }
+  }, []);
   const showConfirmRef = React.useRef(showConfirm);
   showConfirmRef.current = showConfirm;
 
-  const scanForDevices = () => {
+  const scanForDevices = useCallback(() => {
     setIsScanning(false);
     setScannedDevices([]);
     addToast('请手动输入设备 IP 进行真实 SSH 连接', 'info');
-  };
+  }, [addToast]);
 
-  const addNewDevice = (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => {
+  const addNewDevice = useCallback((payload?: { host: string; port?: number; username: string; password: string; name?: string }) => {
     const host = payload?.host ?? newDeviceIp;
     const port = payload?.port ?? 22;
     const username = payload?.username ?? 'root';
@@ -138,16 +134,16 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       .catch((error) => {
         addToast(error instanceof Error ? error.message : '设备连接失败', 'error');
       });
-  };
+  }, [newDeviceIp, newDeviceName, addToast, addActivity]);
 
-  const addScannedDevice = (device: { name: string; ip: string }) => {
+  const addScannedDevice = useCallback((device: { name: string; ip: string }) => {
     const id = `device-${Date.now()}`;
     setDevices((prev) => [...prev, { id, name: device.name, status: 'online', ip: device.ip }]);
     addToast(`设备 "${device.name}" 已添加到列表`, 'success');
     addActivity(`通过扫描添加设备: ${device.name}`);
-  };
+  }, [addToast, addActivity]);
 
-  const removeDevice = (id: string) => {
+  const removeDevice = useCallback((id: string) => {
     const dev = devices.find(d => d.id === id);
     if (!dev) return;
     showConfirmRef.current('删除设备', `确定要删除设备 "${dev.name}" 吗？`, () => {
@@ -165,10 +161,24 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           addActivity(`删除设备: ${dev.name}`);
         })
         .catch((error) => {
-          addToast(error instanceof Error ? error.message : '删除设备失败', 'error');
+          const msg = error instanceof Error ? error.message : String(error);
+          const notOnServer = /\b404\b/.test(msg) || /设备不存在/i.test(msg) || /not\s*found/i.test(msg);
+          if (notOnServer) {
+            forgetDevicePassword(id);
+            setDevices((prev) => {
+              const remaining = prev.filter((d) => d.id !== id);
+              if (activeDevice === id) {
+                setActiveDevice(remaining[0]?.id ?? '');
+              }
+              return remaining;
+            });
+            addToast(`「${dev.name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
+            return;
+          }
+          addToast(msg || '删除设备失败', 'error');
         });
     });
-  };
+  }, [devices, activeDevice, addToast, addActivity]);
 
   /**
    * SSO 开启时，在登录页也会挂载 DeviceProvider；此前在 401 时拉列表会失败且 effect 只跑一次，
@@ -238,10 +248,18 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           }
         }));
         if (!cancelled) {
-          setDevices(prev => prev.map(p => {
-            const up = newDevices.find(n => n.id === p.id);
-            return (up && p.status !== up.status) ? { ...p, status: up.status } : p;
-          }));
+          setDevices((prev) => {
+            let changed = false;
+            const next = prev.map((p) => {
+              const up = newDevices.find((n) => n.id === p.id);
+              if (up && p.status !== up.status) {
+                changed = true;
+                return { ...p, status: up.status };
+              }
+              return p;
+            });
+            return changed ? next : prev;
+          });
         }
       } finally {
         pinging = false;
@@ -256,13 +274,20 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; clearInterval(timer); };
   }, [authReady]);
 
-  const value: DeviceStoreState = {
-    activeDevice, setActiveDevice, devices, setDevices, currentDevice,
-    showAddDevice, setShowAddDevice, newDeviceName, setNewDeviceName,
-    newDeviceIp, setNewDeviceIp, isScanning, scannedDevices,
-    scanForDevices, addNewDevice, addScannedDevice, removeDevice,
-    showConfirm,
-  };
+  const value = useMemo<DeviceStoreState>(
+    () => ({
+      activeDevice, setActiveDevice, devices, setDevices, currentDevice,
+      showAddDevice, setShowAddDevice, newDeviceName, setNewDeviceName,
+      newDeviceIp, setNewDeviceIp, isScanning, scannedDevices,
+      scanForDevices, addNewDevice, addScannedDevice, removeDevice,
+      showConfirm,
+    }),
+    [
+      activeDevice, devices, currentDevice, showAddDevice, newDeviceName, newDeviceIp,
+      isScanning, scannedDevices, scanForDevices, addNewDevice, addScannedDevice,
+      removeDevice, showConfirm,
+    ],
+  );
 
   return React.createElement(DeviceContext.Provider, { value }, children);
 }
