@@ -65,10 +65,12 @@ export function useDeviceStore(): DeviceStoreState {
 
 export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const { addToast, addActivity } = useToastStore();
-  const { user, ssoEnabled, ssoRequired, loading: authLoading } = useAuth();
-  const gateActive = ssoEnabled || ssoRequired;
-  /** 须等 /api/sso/me 完成后再判断门禁，避免误判「未开 SSO」而过早请求 /api/devices 导致 401 */
-  const authReady = !authLoading && (!gateActive || !!user);
+  const { user, ssoRequired, loading: authLoading } = useAuth();
+  /**
+   * 与后端 ssoAuthMiddleware 一致：仅 SSO_REQUIRED=1 时 API 才强制会话。
+   * 若用 (ssoEnabled || ssoRequired) 会把「已配置 OAuth 但未强制」的访客永远挡在设备拉取之外。
+   */
+  const authReady = !authLoading && (!ssoRequired || !!user);
 
   const [activeDevice, setActiveDevice] = useState('');
   const [devices, setDevices] = useState<Device[]>([]);
@@ -138,7 +140,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
   const addScannedDevice = useCallback((device: { name: string; ip: string }) => {
     const id = `device-${Date.now()}`;
-    setDevices((prev) => [...prev, { id, name: device.name, status: 'online', ip: device.ip }]);
+    setDevices((prev) => [...prev, { id, name: device.name, status: 'offline', ip: device.ip }]);
     addToast(`设备 "${device.name}" 已添加到列表`, 'success');
     addActivity(`通过扫描添加设备: ${device.name}`);
   }, [addToast, addActivity]);
@@ -205,7 +207,8 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         const cached = loadDevicesFromCache();
         if (cached?.devices.length) {
-          setDevices(cached.devices);
+          /* 缓存可能含过期的「在线」，恢复后一律先标离线，由后台 ping 再更新 */
+          setDevices(cached.devices.map((d) => ({ ...d, status: 'offline' })));
           setActiveDevice((prev) => {
             if (prev && cached.devices.some((d) => d.id === prev)) return prev;
             if (cached.activeDevice && cached.devices.some((d) => d.id === cached.activeDevice)) {
@@ -272,7 +275,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     void pingAll();
 
     return () => { cancelled = true; clearInterval(timer); };
-  }, [authReady]);
+  }, [authReady, devices.length]);
 
   const value = useMemo<DeviceStoreState>(
     () => ({

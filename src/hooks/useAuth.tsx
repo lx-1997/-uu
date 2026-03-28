@@ -42,9 +42,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    const SSO_FETCH_MS = 12_000;
+    const fetchSso = (path: string) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), SSO_FETCH_MS);
+      return fetchApi(path, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+    };
     const [meRes, loginRes] = await Promise.all([
-      fetchApi('/api/sso/me'),
-      fetchApi('/api/sso/login'),
+      fetchSso('/api/sso/me'),
+      fetchSso('/api/sso/login'),
     ]);
     const meData = (await meRes.json()) as {
       enabled?: boolean;

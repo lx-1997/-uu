@@ -1,9 +1,9 @@
-import { useEffect, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { initAnalyticsFlushListeners } from './analytics/client';
 import { useStudioPresence } from './analytics/useStudioPresence';
-import { AppProvider, useAppState } from './hooks/useAppState';
+import { useAppState } from './hooks/useAppState';
 import { useI18n } from './i18n/use-i18n';
-import { AuthProvider, useAuth } from './hooks/useAuth';
+import { useAuth } from './hooks/useAuth';
 import SsoLoginScreen from './components/SsoLoginScreen';
 import { ssoTranslate as st } from './i18n/sso-translate';
 import IconRail from './components/IconRail';
@@ -13,21 +13,57 @@ import Toasts from './components/Toasts';
 import AddDeviceModal from './components/AddDeviceModal';
 import SettingsPanel from './components/SettingsPanel';
 import ConfirmDialog from './components/ConfirmDialog';
-import Dashboard from './components/Dashboard';
-import Flasher from './components/Flasher';
-import Terminal from './components/Terminal';
-import Files from './components/Files';
-import Vnc from './components/Vnc';
-import IDE from './components/IDE';
-import OpenClaw from './components/OpenClaw';
-import Hardware from './components/Hardware';
-import Ros from './components/Ros';
-import SkillBrowser from './components/SkillBrowser';
-import Examples from './components/Examples';
-import Models from './components/Models';
-import LowcodeStub from './components/lowcode-stub';
 import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
+import { isDeviceSshConnected } from './utils/device-connection';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const Flasher = lazy(() => import('./components/Flasher'));
+const Terminal = lazy(() => import('./components/Terminal'));
+const Files = lazy(() => import('./components/Files'));
+const Vnc = lazy(() => import('./components/Vnc'));
+const IDE = lazy(() => import('./components/IDE'));
+const OpenClaw = lazy(() => import('./components/OpenClaw'));
+const Hardware = lazy(() => import('./components/Hardware'));
+const Ros = lazy(() => import('./components/Ros'));
+const SkillBrowser = lazy(() => import('./components/SkillBrowser'));
+const Examples = lazy(() => import('./components/Examples'));
+const Models = lazy(() => import('./components/Models'));
+const LowcodeStub = lazy(() => import('./components/lowcode-stub'));
+
+/**
+ * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：
+ * Suspense fallback 在部分并发渲染路径下可能拿不到上层 Context，会触发
+ * 「useAppState must be used within AppProvider」。
+ */
+function RouteFallback() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '52vh',
+        gap: 12,
+        color: '#64748b',
+        fontSize: 13,
+      }}
+    >
+      <div
+        style={{
+          width: 28,
+          height: 28,
+          border: '3px solid #e2e8f0',
+          borderTopColor: '#ff6b00',
+          borderRadius: '50%',
+          animation: 'rdk-boot-spin 0.75s linear infinite',
+        }}
+      />
+      <span>加载页面…</span>
+    </div>
+  );
+}
 
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
@@ -53,24 +89,35 @@ function MainContent() {
     lowcode: <LowcodeStub />,
   };
 
+  /* 各区域独立 Suspense，避免「一个 chunk 未好则整页 fallback」并错开并行请求 */
   return (
     <>
       {standardViews[activeTab] && (
-        <div className="page-slot page-enter">
-          {standardViews[activeTab]}
-        </div>
+        <Suspense fallback={<RouteFallback />}>
+          <div className="page-slot page-enter">
+            {standardViews[activeTab]}
+          </div>
+        </Suspense>
       )}
       <div className={`persistent-pane ${activeTab === 'openclaw' ? 'is-active' : 'is-hidden'}`}>
-        <OpenClaw />
+        <Suspense fallback={null}>
+          <OpenClaw />
+        </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
-        <Terminal />
+        <Suspense fallback={null}>
+          <Terminal />
+        </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'vnc' ? 'is-active' : 'is-hidden'}`}>
-        <Vnc />
+        <Suspense fallback={null}>
+          <Vnc />
+        </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'ide' ? 'is-active' : 'is-hidden'}`}>
-        <IDE />
+        <Suspense fallback={null}>
+          <IDE />
+        </Suspense>
       </div>
     </>
   );
@@ -153,7 +200,7 @@ function AppShell() {
     return names[activeTab] ?? activeTab;
   }, [activeTab, t]);
 
-  const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
+  const deviceOnline = !!currentDevice && isDeviceSshConnected(currentDevice.status);
   const onboardingActive = obStep !== 'done';
 
   return (
@@ -194,20 +241,43 @@ function AppShell() {
 }
 
 function SSOGate({ children }: { children: ReactNode }) {
-  const { loading, ssoEnabled, ssoRequired, user } = useAuth();
+  const { loading, ssoRequired, user } = useAuth();
 
   if (loading) {
+    /* 内联样式：在 index.css 尚未应用前也能呈现，避免验证阶段闪纯白 */
     return (
-      <div className="sso-login-root">
-        <div className="sso-login-state">
-          <div className="sso-login-spinner" aria-hidden />
-          <p className="sso-login-state-text">{st('sso.verifying', '正在验证身份…')}</p>
-        </div>
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 10000,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 16,
+          background: 'linear-gradient(135deg, #0f0f14 0%, #1a1a24 50%, #0f0f14 100%)',
+          color: 'rgba(255,255,255,0.9)',
+        }}
+      >
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            border: '3px solid rgba(255,255,255,0.2)',
+            borderTopColor: '#ff6b00',
+            borderRadius: '50%',
+            animation: 'rdk-boot-spin 0.75s linear infinite',
+          }}
+          aria-hidden
+        />
+        <p style={{ margin: 0, fontSize: 14 }}>{st('sso.verifying', '正在验证身份…')}</p>
       </div>
     );
   }
 
-  if ((ssoRequired || ssoEnabled) && !user) {
+  /** 仅「强制 SSO」时拦截；与 server ssoAuthMiddleware（!isSSORequired 则放行）一致 */
+  if (ssoRequired && !user) {
     return <SsoLoginScreen />;
   }
 
@@ -217,14 +287,14 @@ function SSOGate({ children }: { children: ReactNode }) {
 export default function App() {
   useEffect(() => {
     initAnalyticsFlushListeners();
+    /* 默认工作台分包预热，缩短首进工作台的等待 */
+    void import('./components/Dashboard');
   }, []);
   return (
-    <AuthProvider>
-      <AppProvider>
-        <SSOGate>
-          <AppShell />
-        </SSOGate>
-      </AppProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <SSOGate>
+        <AppShell />
+      </SSOGate>
+    </ErrorBoundary>
   );
 }

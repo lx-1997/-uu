@@ -21,8 +21,18 @@ function toBoardDevice(device: Device) {
 function parseBoardError(raw: string): string {
   const text = (raw || "").trim();
   if (!text) return "板端 OpenClaw 未返回结果";
+  if (/missing\s+scope|operator\.(read|write|admin)/i.test(text)) {
+    return (
+      "板端网关鉴权范围不足（scope）。请检查 RDK Studio 与板端 Gateway 的 token / pairing；"
+      + "若健康检查显示网关在运行，应说明为鉴权问题而非网关停机。"
+    );
+  }
   if (/__OPENCLAW_HTTP_FAILED__/i.test(text)) {
-    return text.replace(/__OPENCLAW_HTTP_FAILED__/gi, "").trim() || "板端 OpenClaw 网关调用失败";
+    const inner = text.replace(/__OPENCLAW_HTTP_FAILED__/gi, "").trim();
+    if (/missing\s+scope|operator\.(read|write|admin)/i.test(inner)) {
+      return parseBoardError(inner);
+    }
+    return inner || "板端 OpenClaw 网关调用失败";
   }
   if (/plugins\.allow is empty/i.test(text)) {
     return "板端 OpenClaw 插件策略阻止执行（plugins.allow 为空）";

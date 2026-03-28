@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { useAppState } from '../hooks/useAppState';
+import { useToastStore } from '../hooks/useToastStore';
 import { useI18n } from '../i18n/use-i18n';
 import { ssoTranslate as st } from '../i18n/sso-translate';
 import LegalDocumentModal, { type LegalDocKind } from './LegalDocumentModal';
@@ -18,7 +18,7 @@ export default function SsoLoginScreen() {
 
   /** 浏览器内嵌：服务端 OAuth URL；缺失时仍展示官方 SSO 门户 */
   const displayLoginUrl = loginUrl || FALLBACK_SSO;
-  const { addToast } = useAppState();
+  const { addToast } = useToastStore();
   const [phase, setPhase] = useState<Phase>('preparing');
   const [loadError, setLoadError] = useState('');
   const [embedLoadFailed, setEmbedLoadFailed] = useState(false);

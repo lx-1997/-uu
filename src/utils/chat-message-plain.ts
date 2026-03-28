@@ -11,6 +11,15 @@ export function chatMessageToPlainText(
     for (const b of msg.blocks) {
       if (b.type === 'terminal') {
         parts.push((b.label ? `${b.label}\n` : '') + b.lines.join('\n'));
+      } else if (b.type === 'collab') {
+        const head = [b.title, b.subtitle].filter(Boolean).join(' — ');
+        let role: string;
+        if (b.side === 'openclaw') role = '[OpenClaw]';
+        else if (b.collabRole === 'outbound') role = '[RDKClaw → OpenClaw]';
+        else if (b.collabRole === 'reverse') role = '[OpenClaw → RDKClaw]';
+        else if (b.collabRole === 'hint') role = '[RDKClaw 说明]';
+        else role = '[RDKClaw]';
+        parts.push(head ? `${role} ${head}\n${b.lines.join('\n')}` : `${role}\n${b.lines.join('\n')}`);
       } else if (b.type === 'code') {
         parts.push(`\`\`\`${b.lang}\n${b.content}\n\`\`\``);
       } else if (b.type === 'status') {

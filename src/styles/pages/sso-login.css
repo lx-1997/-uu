@@ -4,7 +4,8 @@
   position: fixed;
   inset: 0;
   z-index: 10000;
-  background: #fff;
+  /* 与主题页底色一致，避免验证身份首帧露白 */
+  background: #fafbfd;
 }
 
 /* 底部横条：登录即同意条款（保证在浅色/iframe 上可读；模态 z-index 高于本页） */

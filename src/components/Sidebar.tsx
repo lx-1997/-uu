@@ -3,6 +3,7 @@ import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
+import { isDeviceSshConnected } from '../utils/device-connection';
 
 const Icons: Record<string, React.ReactNode> = {
   dashboard: (
@@ -107,10 +108,6 @@ const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   lowcode: { nav: '低代码', hint: '可视化流程与节点编排' },
 };
 
-function isOnline(status: string) {
-  return status === 'online' || status === 'connected';
-}
-
 export default function Sidebar() {
   const {
     devices,
@@ -129,7 +126,7 @@ export default function Sidebar() {
     [t],
   );
 
-  const onlineCount = devices.filter((dev) => isOnline(dev.status)).length;
+  const onlineCount = devices.filter((dev) => isDeviceSshConnected(dev.status)).length;
 
   return (
     <aside className="app-sidebar">
@@ -157,10 +154,10 @@ export default function Sidebar() {
           {currentDevice ? currentDevice.name : t('sidebar.summary.noDevice', '未选择设备')}
         </div>
         <div className="sidebar-summary-meta">
-          <span className={`sidebar-summary-pill ${currentDevice && isOnline(currentDevice.status) ? 'online' : ''}`}>
+          <span className={`sidebar-summary-pill ${currentDevice && isDeviceSshConnected(currentDevice.status) ? 'online' : ''}`}>
             <span className="status-dot" />
             {currentDevice
-              ? (isOnline(currentDevice.status) ? t('sidebar.summary.online', '设备在线') : t('sidebar.summary.waiting', '等待连接'))
+              ? (isDeviceSshConnected(currentDevice.status) ? t('sidebar.summary.online', '设备在线') : t('sidebar.summary.waiting', '等待连接'))
               : t('sidebar.summary.needConnect', '需要先连接设备')}
           </span>
           <span className="sidebar-summary-pill">{tf('sidebar.summary.devices', '{{n}} 台设备', { n: devices.length })}</span>
@@ -198,8 +195,8 @@ export default function Sidebar() {
             <div className="device-info">
               <h4 className="device-name">{dev.name}</h4>
               <div className="device-status">
-                <span className={`status-dot ${isOnline(dev.status) ? '' : 'offline'}`}></span>
-                {isOnline(dev.status) ? `${dev.ip}:${dev.port ?? 22}` : t('sidebar.dev.disconnected', '未连接')}
+                <span className={`status-dot ${isDeviceSshConnected(dev.status) ? '' : 'offline'}`}></span>
+                {isDeviceSshConnected(dev.status) ? `${dev.ip}:${dev.port ?? 22}` : t('sidebar.dev.disconnected', '未连接')}
               </div>
             </div>
             <button

@@ -13,6 +13,9 @@ openclaw-main/
 # Build artifacts
 *.tsbuildinfo
 
+# 本地下载/测试资源（勿提交）
+downloads/
+
 # Logs & temp
 error.log
 *.log

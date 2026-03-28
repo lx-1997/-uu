@@ -215,7 +215,7 @@ export function fleetBoardListTool(
 export function fleetBoardDelegateTool(
   currentDeviceId: string,
   manager: OpenClawDeploymentManager,
-  onProgress?: (chunk: string) => void,
+  onProgress?: (chunk: string, toolCallId?: string) => void,
 ): Tool<{
   targetDeviceId: string;
   task: string;
@@ -334,7 +334,7 @@ export function fleetBoardDelegateTool(
           msg,
           (chunk) => {
             output += chunk;
-            onProgress?.(`[${deviceLabel}] ${chunk}`);
+            onProgress?.(`[${deviceLabel}] ${chunk}`, ctx.toolCallId);
           },
           (success) => {
             ctx.abortSignal?.removeEventListener('abort', onAbort);
@@ -370,7 +370,7 @@ export function fleetBoardDelegateTool(
 export function fleetBoardBroadcastTool(
   currentDeviceId: string,
   manager: OpenClawDeploymentManager,
-  onProgress?: (chunk: string) => void,
+  onProgress?: (chunk: string, toolCallId?: string) => void,
 ): Tool<{
   task: string;
   guidance?: string;
@@ -415,9 +415,9 @@ export function fleetBoardBroadcastTool(
 
       const skippedCount = (input.targetDeviceIds?.length || devices.length) - targets.length;
       if (skippedCount > 0) {
-        onProgress?.(`[fleet] 去重后跳过 ${skippedCount} 个重复设备\n`);
+        onProgress?.(`[fleet] 去重后跳过 ${skippedCount} 个重复设备\n`, ctx.toolCallId);
       }
-      onProgress?.(`[fleet] 正在向 ${targets.length} 个板卡广播任务...\n`);
+      onProgress?.(`[fleet] 正在向 ${targets.length} 个板卡广播任务...\n`, ctx.toolCallId);
 
       for (const t of targets) {
         recordFleetTask({ deviceId: t.id, task: input.task, startedAt: Date.now(), status: 'running' });
@@ -469,7 +469,7 @@ export function fleetBoardBroadcastTool(
       if (mode === 'fastest') {
         const first = await Promise.race(taskPromises);
         results = [first];
-        onProgress?.(`[fleet] 最快响应来自 ${first.label}\n`);
+        onProgress?.(`[fleet] 最快响应来自 ${first.label}\n`, ctx.toolCallId);
       } else {
         const settled = await Promise.allSettled(taskPromises);
         results = settled.map((r) =>
@@ -487,7 +487,7 @@ export function fleetBoardBroadcastTool(
       }));
 
       const succeeded = summary.filter((s) => s.success).length;
-      onProgress?.(`[fleet] 广播完成: ${succeeded}/${targets.length} 成功\n`);
+      onProgress?.(`[fleet] 广播完成: ${succeeded}/${targets.length} 成功\n`, ctx.toolCallId);
 
       return JSON.stringify({
         total: targets.length,

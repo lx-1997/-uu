@@ -310,6 +310,7 @@ function BlockRenderer({
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const [rosFrame, setRosFrame] = useState(0);
   const [expandedTerminal, setExpandedTerminal] = useState(false);
+  const [expandedCollab, setExpandedCollab] = useState(false);
 
   useEffect(() => {
     if (block.type !== 'image') return;
@@ -356,6 +357,73 @@ function BlockRenderer({
         <div className="terminal-block-body">
           {visibleLines.map((line, i) => (
             <div key={i} className="terminal-block-line">{line}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === 'collab') {
+    const previewLines = Math.max(3, block.previewLines ?? 8);
+    const collapsible = !!block.collapsible && block.lines.length > previewLines;
+    const visibleLines = collapsible && !expandedCollab
+      ? block.lines.slice(-previewLines)
+      : block.lines;
+    const role = block.collabRole;
+    const sideClass = block.side === 'openclaw'
+      ? 'collab-block--openclaw'
+      : role === 'reverse'
+        ? 'collab-block--reverse'
+        : role === 'outbound'
+          ? 'collab-block--outbound'
+          : role === 'hint'
+            ? 'collab-block--hint'
+            : role === 'wait_hint'
+              ? 'collab-block--wait-hint'
+              : 'collab-block--rdkclaw';
+    const badge = block.side === 'openclaw'
+      ? 'OpenClaw'
+      : role === 'reverse'
+        ? t('dock.collab.badgeReverse', 'OpenClaw → RDKClaw')
+        : role === 'outbound'
+          ? t('dock.collab.badgeOutbound', 'RDKClaw → OpenClaw')
+          : role === 'wait_hint'
+            ? t('dock.collab.badgeWaitHint', 'RDKClaw · 等板端')
+            : 'RDKClaw';
+    return (
+      <div className={`msg-block collab-block ${sideClass}`}>
+        <div className="collab-block-header">
+          <span className={`collab-block-badge ${sideClass}`}>{badge}</span>
+          <div className="collab-block-titles">
+            {block.title && <div className="collab-block-title">{block.title}</div>}
+            {block.subtitle && <div className="collab-block-subtitle">{block.subtitle}</div>}
+          </div>
+          <button
+            type="button"
+            className="chat-panel-action"
+            title={t('dock.terminal.copyAllTitle', '复制全部输出')}
+            onClick={() => {
+              void copyDockPlainText(block.lines.join('\n')).then(() => {});
+            }}
+          >
+            {t('dock.terminal.copyOut', '复制输出')}
+          </button>
+          {collapsible && (
+            <button
+              type="button"
+              className="chat-panel-action"
+              onClick={() => setExpandedCollab((prev) => !prev)}
+              title={expandedCollab ? t('dock.terminal.collapseOut', '收起输出') : t('dock.terminal.expandOut', '展开输出')}
+            >
+              {expandedCollab
+                ? t('dock.terminal.collapse', '收起')
+                : tf('dock.terminal.expandLines', '展开 ({{n}} 行)', { n: block.lines.length })}
+            </button>
+          )}
+        </div>
+        <div className="collab-block-body">
+          {visibleLines.map((line, i) => (
+            <div key={i} className="collab-block-line">{line}</div>
           ))}
         </div>
       </div>
@@ -1040,6 +1108,7 @@ export default function AIDock() {
     if (!compactFlowMode) return blocks;
     return blocks.filter((block) => {
       if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result' || block.type === 'recommendation' || block.type === 'soul-update') return true;
+      if (block.type === 'collab') return true;
       if (block.type === 'image' || block.type === 'video' || block.type === 'file' || block.type === 'code') return true;
       if (block.type === 'status') return shouldKeepStatusInCompact(block);
       return false;

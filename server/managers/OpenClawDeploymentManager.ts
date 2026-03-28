@@ -5,6 +5,7 @@
 import { Client } from 'ssh2';
 import * as fs from 'fs';
 import * as path from 'path';
+import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transport.js';
 
 export interface Device {
   ip: string;
@@ -346,12 +347,97 @@ export class OpenClawDeploymentManager {
   private sshPool: Map<string, Promise<Client>> = new Map();
   private resourcesPath: string;
 
+  /** 板端 ~/.rdk-studio/oc-bridge.mjs 已同步（按 IP 缓存） */
+  private ocBridgeScriptOk = new Set<string>();
+  /** 常驻 NDJSON 桥（每设备一条 exec 流） */
+  private ocBridgeTransportByIp = new Map<string, OcBridgeTransport>();
+  /** 同一设备串行发送，避免交错 reqId */
+  private ocBridgeSendChain = new Map<string, Promise<void>>();
+
   constructor(resourcesPath: string) {
     this.resourcesPath = resourcesPath;
   }
 
   private getScriptPath(name: string): string {
     return path.join(this.resourcesPath, 'openclaw', name);
+  }
+
+  /** 开发态：cwd/server/resources；打包：build-resources/openclaw */
+  private getOcBridgeSourcePath(): string {
+    const candidates = [
+      path.join(this.resourcesPath, 'openclaw', 'oc-bridge.mjs'),
+      path.join(process.cwd(), 'server/resources/openclaw/oc-bridge.mjs'),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+    throw new Error('oc-bridge.mjs not found (server/resources/openclaw/oc-bridge.mjs)');
+  }
+
+  private ensureOcBridgeScriptOnDevice(device: Device): Promise<boolean> {
+    const ip = device.ip;
+    if (this.ocBridgeScriptOk.has(ip)) return Promise.resolve(true);
+    let src: string;
+    try {
+      src = fs.readFileSync(this.getOcBridgeSourcePath(), 'utf8');
+    } catch {
+      return Promise.resolve(false);
+    }
+    const b64 = Buffer.from(src, 'utf8').toString('base64');
+    const cmd = [
+      'mkdir -p ~/.rdk-studio',
+      `echo '${b64}' | base64 -d > ~/.rdk-studio/oc-bridge.mjs`,
+      'chmod 700 ~/.rdk-studio/oc-bridge.mjs',
+      'test -s ~/.rdk-studio/oc-bridge.mjs',
+    ].join(' && ');
+    return new Promise((resolve) => {
+      this.execCommand(
+        device,
+        cmd,
+        () => {},
+        (ok) => {
+          if (ok) this.ocBridgeScriptOk.add(ip);
+          resolve(ok);
+        },
+        { timeout: 120000 },
+      );
+    });
+  }
+
+  private async getOrCreateBridgeTransport(device: Device): Promise<OcBridgeTransport | null> {
+    const ip = device.ip;
+    const existing = this.ocBridgeTransportByIp.get(ip);
+    if (existing) return existing;
+    const scriptOk = await this.ensureOcBridgeScriptOnDevice(device);
+    if (!scriptOk) return null;
+    const client = await this.getClient(device);
+    const remoteCmd =
+      'bash -lc \'export PATH="$HOME/.npm-global/bin:$PATH" && exec node ~/.rdk-studio/oc-bridge.mjs\'';
+    const transport = await startOcBridgeRemote(client, remoteCmd, () => {
+      this.ocBridgeTransportByIp.delete(ip);
+    });
+    if (!transport) return null;
+    try {
+      await transport.waitForBridgeReady(45000);
+    } catch (e) {
+      try {
+        transport.destroy();
+      } catch {
+        /* ignore */
+      }
+      this.ocBridgeTransportByIp.delete(ip);
+      return null;
+    }
+    this.ocBridgeTransportByIp.set(ip, transport);
+    return transport;
+  }
+
+  /** 同一设备上 oc-bridge 对话串行（板端桥内部也有队列，Studio 侧再串行避免 reqId 乱序） */
+  private runOcBridgeSerial<T>(ip: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.ocBridgeSendChain.get(ip) ?? Promise.resolve();
+    const p = prev.then(() => fn());
+    this.ocBridgeSendChain.set(ip, p.then(() => {}).catch(() => {}));
+    return p;
   }
 
   private async getClient(device: Device): Promise<Client> {
@@ -396,6 +482,16 @@ export class OpenClawDeploymentManager {
   }
 
   destroyConnection(ip: string): void {
+    const br = this.ocBridgeTransportByIp.get(ip);
+    if (br) {
+      try {
+        br.destroy();
+      } catch {
+        /* ignore */
+      }
+      this.ocBridgeTransportByIp.delete(ip);
+    }
+    this.ocBridgeSendChain.delete(ip);
     const p = this.sshPool.get(ip);
     if (!p) return;
     this.sshPool.delete(ip);
@@ -1192,7 +1288,123 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       });
   }
 
+  /**
+   * 优先走板端常驻 oc-bridge（单 WS + 多轮 chat），失败或未启用时回退到单次 /tmp/oc_chat_ws.js。
+   * 环境变量 RDK_OPENCLAW_BRIDGE=0 可强制仅用旧路径（排障）。
+   */
   sendAgentMessage(
+    message: string,
+    onChunk: (chunk: string) => void,
+    onComplete: (success: boolean) => void,
+    sessionId: string,
+    device: Device
+  ): { abort: () => void } {
+    if (process.env.RDK_OPENCLAW_BRIDGE === '0') {
+      return this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device);
+    }
+    const abortCtl = { aborted: false };
+    let legacyAbort: (() => void) | null = null;
+    let unsub: (() => void) | null = null;
+    let activeReqId = '';
+    let turnTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const abort = () => {
+      abortCtl.aborted = true;
+      if (turnTimer) {
+        clearTimeout(turnTimer);
+        turnTimer = null;
+      }
+      try {
+        unsub?.();
+      } catch {
+        /* ignore */
+      }
+      if (activeReqId) {
+        try {
+          this.ocBridgeTransportByIp.get(device.ip)?.send({ op: 'abort', reqId: activeReqId });
+        } catch {
+          /* ignore */
+        }
+      }
+      try {
+        legacyAbort?.();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    void this.runOcBridgeSerial(device.ip, async () => {
+      try {
+        const transport = await this.getOrCreateBridgeTransport(device);
+        if (!transport || abortCtl.aborted) {
+          if (!abortCtl.aborted) {
+            legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device).abort;
+          }
+          return;
+        }
+        activeReqId = `r-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = (success: boolean) => {
+            if (settled || abortCtl.aborted) return;
+            settled = true;
+            if (turnTimer) {
+              clearTimeout(turnTimer);
+              turnTimer = null;
+            }
+            try {
+              unsub?.();
+            } catch {
+              /* ignore */
+            }
+            unsub = null;
+            if (!abortCtl.aborted) onComplete(success);
+            resolve();
+          };
+          turnTimer = setTimeout(() => finish(false), 600000);
+          unsub = transport.onLine((line) => {
+            if (abortCtl.aborted) return;
+            const rid = line.reqId != null ? String(line.reqId) : '';
+            if (rid && rid !== activeReqId) return;
+            if (line.type === 'assistant' && typeof line.text === 'string') {
+              onChunk(line.text);
+            }
+            if (line.type === 'tool') {
+              const tn = String(line.name || '');
+              const tp = String(line.phase || '');
+              const det = String(line.detail || '').slice(0, 200);
+              onChunk(`\n[TOOL:${tp}] ${tn}${det ? ` -> ${det}` : ''}\n`);
+            }
+            if (line.type === 'error' && (!rid || rid === activeReqId)) {
+              onChunk(`__OPENCLAW_WS_FAILED__${String(line.message || '')}`);
+            }
+            if (line.type === 'done' && (!rid || rid === activeReqId)) {
+              finish(!!line.ok);
+            }
+          });
+          transport.send({
+            op: 'chat.send',
+            reqId: activeReqId,
+            sessionKey: sessionId || 'main',
+            message,
+            idempotencyKey: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          });
+        });
+      } catch {
+        if (!abortCtl.aborted) {
+          legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device).abort;
+        }
+      }
+    }).catch(() => {
+      if (!abortCtl.aborted) {
+        legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device).abort;
+      }
+    });
+
+    return { abort };
+  }
+
+  private sendAgentMessageOneShot(
     message: string,
     onChunk: (chunk: string) => void,
     onComplete: (success: boolean) => void,

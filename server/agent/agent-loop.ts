@@ -432,7 +432,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   const tool = toolsForRun.find((t) => t.name === call.name);
                   if (!tool) return { text: `未知工具: ${call.name}`, errFlag: true };
                   try {
-                    return { text: await tool.execute(call.input, toolCtx), errFlag: false };
+                    return { text: await tool.execute(call.input, { ...toolCtx, toolCallId: call.id }), errFlag: false };
                   } catch (err) {
                     return { text: `执行错误: ${(err as Error).message}`, errFlag: false };
                   }
@@ -495,7 +495,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                     }
                   }
                   try {
-                    result = await tool.execute(call.input, toolCtx);
+                    result = await tool.execute(call.input, { ...toolCtx, toolCallId: call.id });
                   } catch (err) {
                     result = `执行错误: ${(err as Error).message}`;
                   }

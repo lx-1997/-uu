@@ -73,6 +73,7 @@ import {
 import { registerAnalyticsRoutes } from './analytics-routes.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
+import { handleEnsurePartnerAdvisorySkill } from './rdkclaw/partner-advisory-skill-deploy.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -112,7 +113,7 @@ async function handleRosbridgeProxy(clientWs: WebSocket, req: http.IncomingMessa
     clientWs.close(1008, 'device not found');
     return;
   }
-  const host = device.host || device.ip;
+  const host = device.host;
   const targetUrl = `ws://${host}:${ROSBRIDGE_DEVICE_PORT}/`;
   const upstream = new WebSocket(targetUrl);
 
@@ -2093,9 +2094,11 @@ app.get('/api/devices/:id/ping', async (request, response) => {
   }
 
   const port = device.port ?? 22;
+  /* 与 SSH/诊断握手相比，过短的 TCP 超时易误判「离线」，导致顶栏红点与工作台指标不一致 */
+  const tcpProbeMs = 5000;
   try {
     await new Promise<void>((resolve, reject) => {
-      const socket = net.connect({ host: device.host, port, timeout: 1500 }, () => {
+      const socket = net.connect({ host: device.host, port, timeout: tcpProbeMs }, () => {
         socket.destroy();
         resolve();
       });
@@ -2809,6 +2812,24 @@ app.post('/api/devices/:id/openclaw/skill-write', async (request, response) => {
     response.json({ ok: true, path: `${skillDir}/SKILL.md`, message: `技能 ${name} 已写入板端` });
   } else {
     sendApiError(response, 500, 'SKILL_WRITE_FAILED', '写入失败', { retryable: true, details: { output: run.output } });
+  }
+});
+
+/** 若板端尚无或版本/内容与 Studio 内置不一致，则部署 rdk-rdkclaw-partner-advisory 并校验 sha256 */
+app.post('/api/devices/:id/openclaw/ensure-partner-advisory-skill', async (request, response) => {
+  const { id } = request.params;
+  try {
+    await handleEnsurePartnerAdvisorySkill(runOnDevice, request, response, id);
+  } catch (error) {
+    if (!response.headersSent) {
+      sendApiError(
+        response,
+        500,
+        'ENSURE_PARTNER_SKILL_FAILED',
+        error instanceof Error ? error.message : '同步内置同伴商量技能失败',
+        { retryable: true },
+      );
+    }
   }
 });
 

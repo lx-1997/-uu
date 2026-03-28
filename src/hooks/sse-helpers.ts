@@ -2,6 +2,63 @@ export function executorLabel(executor: string) {
   return executor === 'board_openclaw' ? '板端 OpenClaw' : 'RDK Studio Claw';
 }
 
+/** 委派/对话工具返回中，分隔 OpenClaw 正文与 RDKClaw 追加说明（\n---\n[RDKClaw 提示…） */
+export function splitOpenClawCollaborationResult(result: string): { body: string; rdkHint: string | null } {
+  const sep = '\n---\n';
+  const idx = result.indexOf(sep);
+  if (idx >= 0 && /\[RDKClaw 提示/.test(result.slice(idx))) {
+    return {
+      body: result.slice(0, idx).trim(),
+      rdkHint: result.slice(idx + sep.length).trim(),
+    };
+  }
+  return { body: result, rdkHint: null };
+}
+
+/** 从 OpenClaw 正文中拆出 [NEED_RDKCLAW]…[/NEED_RDKCLAW]，用于单独展示「板端向本机求助」 */
+export function extractNeedRdkclawBlocks(text: string): { cleaned: string; extracts: string[] } {
+  const extracts: string[] = [];
+  const re = /\[\s*NEED_RDKCLAW\s*\]([\s\S]*?)\[\s*\/\s*NEED_RDKCLAW\s*\]/gi;
+  let m: RegExpExecArray | null;
+  const src = text || '';
+  while ((m = re.exec(src)) !== null) {
+    const inner = (m[1] || '').trim();
+    if (inner) extracts.push(inner);
+  }
+  const cleaned = src
+    .replace(/\[\s*NEED_RDKCLAW\s*\]([\s\S]*?)\[\s*\/\s*NEED_RDKCLAW\s*\]/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { cleaned, extracts };
+}
+
+/** 从 tool_start 参数生成「发给板端 OpenClaw」的展示行（LLM 填写的委派/对话内容） */
+export function formatBoardOutboundLines(toolName: string, args: Record<string, unknown> | undefined): string[] {
+  if (!args) return [];
+  const lines: string[] = [];
+  if (toolName === 'board_openclaw_delegate') {
+    const task = String(args.task ?? '').trim();
+    if (task) lines.push(`task:\n${task}`);
+    const intent = String(args.intent ?? '').trim();
+    if (intent) lines.push(`intent: ${intent}`);
+    const context = String(args.context ?? '').trim();
+    if (context) lines.push(`context:\n${context}`);
+    const guidance = String(args.guidance ?? '').trim();
+    if (guidance) lines.push(`guidance (RDKClaw → OpenClaw):\n${guidance}`);
+    if (typeof args.encourageSkills === 'boolean') {
+      lines.push(`encourage_skills: ${args.encourageSkills}`);
+    }
+    const sid = String(args.sessionId ?? '').trim();
+    if (sid) lines.push(`session_id: ${sid}`);
+  } else if (toolName === 'board_openclaw_chat') {
+    const message = String(args.message ?? '').trim();
+    if (message) lines.push(`message:\n${message}`);
+    const context = String(args.context ?? '').trim();
+    if (context) lines.push(`context:\n${context}`);
+  }
+  return lines;
+}
+
 export function resolveToolName(data: Record<string, unknown>) {
   return String(data.toolName || data.name || 'unknown_tool');
 }

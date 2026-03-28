@@ -376,6 +376,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
   return React.createElement(AppStateContext.Provider, { value }, children);
 }
 
+/** 入口见 `main.tsx`：须位于 `AuthProvider` 之内、`App` 之外，勿把顺序反了（DeviceProvider 依赖 useAuth）。 */
 export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>

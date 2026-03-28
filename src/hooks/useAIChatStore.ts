@@ -42,6 +42,9 @@ import {
   resolvePhase,
   resolveDecisionSourceLabel,
   summarizeToolArgs,
+  splitOpenClawCollaborationResult,
+  extractNeedRdkclawBlocks,
+  formatBoardOutboundLines,
 } from './sse-helpers';
 
 export interface AIChatStoreState {
@@ -287,6 +290,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     startedAt: number;
     statusIndex: number;
     rawIndex?: number;
+    /** 板端 OpenClaw 协作流式块（与 terminal 二选一） */
+    collabIndex?: number;
+    /** board_openclaw_chat：Studio 插入的等待提示块（非板端输出） */
+    waitHintCollabIndex?: number;
+    /** 合并逐字/逐块 SSE，避免每个 chunk 被当成一行导致竖排假换行 */
+    openclawStreamBuf?: string;
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
   const approvalBlockRef = useRef<Record<string, number>>({});
@@ -1031,17 +1040,36 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   executor,
                   startedAt: Date.now(),
                   statusIndex,
+                  ...((toolName === 'board_openclaw_delegate' || toolName === 'board_openclaw_chat')
+                    ? { openclawStreamBuf: '' }
+                    : {}),
                 };
-                if (toolName === 'board_openclaw_delegate') {
+                if (toolName === 'board_openclaw_delegate' || toolName === 'board_openclaw_chat') {
                   latestBoardToolRef.current = toolCallId;
+                  const outboundLines = formatBoardOutboundLines(toolName, args);
+                  if (outboundLines.length > 0) {
+                    aiBlocks.push({
+                      type: 'collab',
+                      side: 'rdkclaw',
+                      collabRole: 'outbound',
+                      title: t('dock.collab.outboundTitle', '发给板端 OpenClaw'),
+                      subtitle: toolName === 'board_openclaw_chat'
+                        ? t('dock.collab.outboundChatSubtitle', 'RDKClaw 发出的交流内容')
+                        : t('dock.collab.outboundDelegateSubtitle', '委派任务与执行建议'),
+                      lines: outboundLines,
+                      collapsible: true,
+                      previewLines: 12,
+                    });
+                  }
                 }
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
               case 'tool_progress': {
                 const toolName = resolveToolName(event.data);
-                const chunk = String(event.data.chunk || '').trim();
-                if (!chunk) break;
+                const rawChunk = String(event.data.chunk ?? '');
+                if (!rawChunk) break;
+                const progressSource = String((event.data as { progressSource?: string }).progressSource || 'board');
                 const rawToolId = resolveToolId(event.data);
                 const fallbackId = latestBoardToolRef.current || '';
                 const toolId = rawToolId && toolTimelineRef.current[rawToolId] ? rawToolId : fallbackId;
@@ -1053,22 +1081,77 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     exec: executorLabel(state.executor),
                   });
                 }
-                const progressLines = chunk.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20);
-                if (progressLines.length === 0) break;
-                if (typeof state.rawIndex === 'number') {
-                  const rawBlock = aiBlocks[state.rawIndex];
-                  if (rawBlock?.type === 'terminal') {
-                    rawBlock.lines = [...rawBlock.lines, ...progressLines].slice(-240);
+                const isBoardOpenClaw =
+                  toolName === 'board_openclaw_delegate'
+                  || toolName === 'board_openclaw_chat'
+                  || state.executor === 'board_openclaw';
+                if (isBoardOpenClaw) {
+                  if (toolName === 'board_openclaw_chat' && progressSource === 'studio_wait') {
+                    const more = rawChunk.split('\n').map((l) => l.trimEnd()).filter((l) => l.length > 0);
+                    if (typeof state.waitHintCollabIndex === 'number') {
+                      const wb = aiBlocks[state.waitHintCollabIndex];
+                      if (wb?.type === 'collab' && wb.side === 'rdkclaw' && wb.collabRole === 'wait_hint') {
+                        wb.lines = [...wb.lines, ...more];
+                      }
+                    } else {
+                      state.waitHintCollabIndex = aiBlocks.length;
+                      aiBlocks.push({
+                        type: 'collab',
+                        side: 'rdkclaw',
+                        collabRole: 'wait_hint',
+                        title: t('dock.collab.waitHintTitle', '稍等片刻'),
+                        subtitle: t(
+                          'dock.collab.waitHintSubtitle',
+                          '等板端 OpenClaw 时的提示（由 Studio 插入，非板端模型生成）',
+                        ),
+                        lines: more,
+                        collapsible: true,
+                        previewLines: 6,
+                      });
+                    }
+                    updateAiMessage(aiText, aiBlocks);
+                    break;
+                  }
+                  if (typeof state.collabIndex === 'number') {
+                    const collabBlock = aiBlocks[state.collabIndex];
+                    if (collabBlock?.type === 'collab' && collabBlock.side === 'openclaw') {
+                      state.openclawStreamBuf = (state.openclawStreamBuf ?? '') + rawChunk;
+                      const bufLines = state.openclawStreamBuf.split('\n');
+                      collabBlock.lines = bufLines.length > 240 ? bufLines.slice(-240) : bufLines;
+                    }
+                  } else {
+                    state.collabIndex = aiBlocks.length;
+                    state.openclawStreamBuf = rawChunk;
+                    const bufLines = state.openclawStreamBuf.split('\n');
+                    const lines = bufLines.length > 240 ? bufLines.slice(-240) : bufLines;
+                    aiBlocks.push({
+                      type: 'collab',
+                      side: 'openclaw',
+                      title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
+                      subtitle: t('dock.collab.openclawSubtitle', '与 RDKClaw 协作中的回复'),
+                      lines,
+                      collapsible: true,
+                      previewLines: 8,
+                    });
                   }
                 } else {
-                  state.rawIndex = aiBlocks.length;
-                  aiBlocks.push({
-                    type: 'terminal',
-                    label: tf('chat.tool.rawLabel', '{{tool}} · 原始中间输出', { tool: state.toolName }),
-                    lines: progressLines,
-                    collapsible: true,
-                    previewLines: 10,
-                  });
+                  const progressLines = rawChunk.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20);
+                  if (progressLines.length === 0) break;
+                  if (typeof state.rawIndex === 'number') {
+                    const rawBlock = aiBlocks[state.rawIndex];
+                    if (rawBlock?.type === 'terminal') {
+                      rawBlock.lines = [...rawBlock.lines, ...progressLines].slice(-240);
+                    }
+                  } else {
+                    state.rawIndex = aiBlocks.length;
+                    aiBlocks.push({
+                      type: 'terminal',
+                      label: tf('chat.tool.rawLabel', '{{tool}} · 原始中间输出', { tool: state.toolName }),
+                      lines: progressLines,
+                      collapsible: true,
+                      previewLines: 10,
+                    });
+                  }
                 }
                 updateAiMessage(aiText, aiBlocks);
                 break;
@@ -1141,6 +1224,74 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   } catch {
                     // not JSON, fall through to normal handling
                   }
+                }
+
+                if (
+                  !mediaHandled
+                  && !isError
+                  && (toolName === 'board_openclaw_delegate' || toolName === 'board_openclaw_chat')
+                ) {
+                  const st = toolTimelineRef.current[toolCallId || ''];
+                  const { body, rdkHint } = splitOpenClawCollaborationResult(result);
+                  const { cleaned, extracts } = extractNeedRdkclawBlocks(body);
+                  const pushReverseBlocks = () => {
+                    for (const ex of extracts) {
+                      aiBlocks.push({
+                        type: 'collab',
+                        side: 'rdkclaw',
+                        collabRole: 'reverse',
+                        title: t('dock.collab.reverseTitle', '向 RDKClaw 求助'),
+                        subtitle: t(
+                          'dock.collab.reverseSubtitle',
+                          '板端在回复中请求本机能力（联网检索、文档等）；接下来由 RDKClaw 调用工具并再发回板端',
+                        ),
+                        lines: ex.split('\n').slice(0, 40),
+                        collapsible: true,
+                        previewLines: 8,
+                      });
+                    }
+                  };
+                  if (st && typeof st.collabIndex === 'number') {
+                    const collabBlock = aiBlocks[st.collabIndex];
+                    if (collabBlock?.type === 'collab' && collabBlock.side === 'openclaw') {
+                      delete st.openclawStreamBuf;
+                      const streamed = collabBlock.lines.join('\n').trim();
+                      const shouldReplace =
+                        cleaned.length > streamed.length + 8
+                        || extracts.length > 0
+                        || (cleaned.length > 0 && /\[NEED_RDKCLAW\]/i.test(streamed));
+                      if (shouldReplace) {
+                        collabBlock.lines = cleaned.split('\n').slice(0, 80);
+                      }
+                      pushReverseBlocks();
+                    }
+                  } else if (cleaned.trim()) {
+                    aiBlocks.push({
+                      type: 'collab',
+                      side: 'openclaw',
+                      title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
+                      subtitle: t('dock.collab.openclawSubtitle', '与 RDKClaw 协作中的回复'),
+                      lines: cleaned.split('\n').slice(0, 80),
+                      collapsible: true,
+                      previewLines: 8,
+                    });
+                    pushReverseBlocks();
+                  } else if (extracts.length > 0) {
+                    pushReverseBlocks();
+                  }
+                  if (rdkHint) {
+                    aiBlocks.push({
+                      type: 'collab',
+                      side: 'rdkclaw',
+                      collabRole: 'hint',
+                      title: t('dock.collab.rdkHintTitle', 'RDKClaw 协作说明'),
+                      subtitle: t('dock.collab.rdkHintSubtitle', '对本次协作的提示与下一步'),
+                      lines: rdkHint.split('\n').slice(0, 40),
+                      collapsible: true,
+                      previewLines: 6,
+                    });
+                  }
+                  mediaHandled = true;
                 }
 
                 if (!mediaHandled) {

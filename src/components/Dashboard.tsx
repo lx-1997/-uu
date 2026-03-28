@@ -3,6 +3,8 @@ import {
   fetchDeviceDiagnostics,
   fetchDeviceOpenClawHealth,
   fetchDeviceWorkspaceHealth,
+  fetchStudioHealth,
+  ensurePartnerAdvisorySkill,
   type OpenClawHealthStatus,
 } from '../api';
 import { useAppState } from '../hooks/useAppState';
@@ -16,6 +18,7 @@ import {
   DASHBOARD_CHAT_INTRO_PROMPT_EN,
 } from '../i18n/prompts';
 import { parseMetrics } from '../utils/diagnostics';
+import { isDeviceSshConnected } from '../utils/device-connection';
 import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
 import OnboardingWizard from './OnboardingWizard';
 
@@ -156,6 +159,7 @@ function AnimatedNumber({ value, suffix }: { value: string; suffix?: string }) {
 export default function Dashboard() {
   const {
     currentDevice,
+    setDevices,
     setShowAddDevice,
     setActiveTab,
     setChatExpanded,
@@ -165,45 +169,114 @@ export default function Dashboard() {
   const { t, isEn } = useI18n();
 
   const [openclawHealth, setOpenclawHealth] = useState<OpenClawHealthStatus | null>(null);
+  /** RDK Studio 本机服务（/api/health），与板端 OpenClaw 无关 */
+  const [studioBackendOk, setStudioBackendOk] = useState<boolean | null>(null);
   const [metrics, setMetrics] = useState({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => { requestAnimationFrame(() => setMounted(true)); }, []);
-
-  useEffect(() => {
-    if (!currentDevice) return;
-    let cancelled = false;
-    const load = () => {
-      fetchDeviceDiagnostics(currentDevice.id)
-        .then((r) => {
-          if (cancelled) return;
-          const m = parseMetrics(r.output);
-          setMetrics({
-            memory: m.memUsed !== '--' && m.memTotal !== '--' ? `${m.memUsed}/${m.memTotal}` : '--',
-            temp: m.temp, bpu: m.bpu, uptime: m.uptime, tempC: m.tempC, bpuVal: m.bpuValue,
-          });
-        })
-        .catch(() => { if (!cancelled) setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 }); });
-    };
-    load();
-    const t = setInterval(load, 10000);
-    return () => { cancelled = true; clearInterval(t); };
-  }, [currentDevice?.id]);
-
   type WorkspaceModule = { ready: boolean; installed: boolean; running?: boolean; summary: string; recommendedAction: string };
   const [wsHealth, setWsHealth] = useState<Record<string, WorkspaceModule> | null>(null);
 
   useEffect(() => {
-    if (!currentDevice) { setOpenclawHealth(null); setWsHealth(null); return; }
-    fetchDeviceOpenClawHealth(currentDevice.id)
-      .then((r) => {
-        setOpenclawHealth(r.status);
-        persistOpenClawHealthSnapshot(currentDevice.id, r.status);
-      })
-      .catch(() => {});
-    fetchDeviceWorkspaceHealth(currentDevice.id)
-      .then((r) => setWsHealth(r.status?.modules ?? null))
-      .catch(() => {});
+    let cancelled = false;
+    const poll = () => {
+      void fetchStudioHealth().then((r) => {
+        if (!cancelled) setStudioBackendOk(r.ok);
+      });
+    };
+    poll();
+    const st = setInterval(poll, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(st);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentDevice) return;
+    const deviceId = currentDevice.id;
+    let cancelled = false;
+    const load = () => {
+      fetchDeviceDiagnostics(deviceId)
+        .then((r) => {
+          if (cancelled) return;
+          const m = parseMetrics(r.output);
+          const memory =
+            m.memUsed !== '--' && m.memTotal !== '--' ? `${m.memUsed}/${m.memTotal}` : '--';
+          setMetrics({
+            memory,
+            temp: m.temp,
+            bpu: m.bpu,
+            uptime: m.uptime,
+            tempC: m.tempC,
+            bpuVal: m.bpuValue,
+          });
+          /* 诊断已能拉到设备数据时，与顶栏/设备列表统一为「在线」；避免仅 ping 滞后或 TCP 过短误判 */
+          const hasTelemetry =
+            memory !== '--'
+            || m.temp !== '--'
+            || m.bpu !== '--'
+            || m.uptime !== '--';
+          if (r.ok !== false && hasTelemetry) {
+            setDevices((prev) =>
+              prev.map((d) =>
+                d.id === deviceId && !isDeviceSshConnected(d.status)
+                  ? { ...d, status: 'online' as const }
+                  : d,
+              ),
+            );
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+          }
+        });
+    };
+    load();
+    const t = setInterval(load, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [currentDevice?.id, setDevices]);
+
+  const partnerSkillSyncedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!currentDevice) {
+      setOpenclawHealth(null);
+      setWsHealth(null);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      fetchDeviceOpenClawHealth(currentDevice.id)
+        .then((r) => {
+          if (!cancelled) {
+            setOpenclawHealth(r.status);
+            persistOpenClawHealthSnapshot(currentDevice.id, r.status);
+          }
+          /* SSH 可达时自动同步内置「同伴商量」技能：已存在且版本与校验一致则服务端跳过 */
+          if (!cancelled && r.ok && !partnerSkillSyncedRef.current.has(currentDevice.id)) {
+            void ensurePartnerAdvisorySkill(currentDevice.id)
+              .then((res) => {
+                if (res?.ok && res.verified === true) partnerSkillSyncedRef.current.add(currentDevice.id);
+              })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+      fetchDeviceWorkspaceHealth(currentDevice.id)
+        .then((r) => {
+          if (!cancelled) setWsHealth(r.status?.modules ?? null);
+        })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
   }, [currentDevice?.id]);
 
   const prompt = useCallback((text: string, autoSubmit = true) => {
@@ -245,7 +318,7 @@ export default function Dashboard() {
         <FlowingGradientBg accent={false} />
         <div className="dash-morph-halo" />
         <div className="dash-morph-halo secondary" />
-        <div className={`dash-empty-hero ${mounted ? 'dash-enter' : ''}`}>
+        <div className="dash-empty-hero dash-enter">
           <div className="dash-brand">RDK Studio</div>
           <p className="dash-tagline">{t('dashboard.tagline', '连接你的 RDK 开发板，开始构建')}</p>
           <button className="dash-action primary" onClick={() => setShowAddDevice(true)}>
@@ -274,6 +347,9 @@ export default function Dashboard() {
     { key: 'up', val: metrics.uptime, label: t('dashboard.metric.uptime', 'UPTIME') },
   ];
 
+  /** 与顶栏、设备列表同源：仅 `device.status`；成功拉取诊断时会将设备标为 online */
+  const deviceChannelOk = isDeviceSshConnected(currentDevice.status);
+
   return (
     <div className="dash" onMouseMove={parallax.onMove} onMouseLeave={parallax.onLeave}>
       <FlowingGradientBg accent={true} />
@@ -281,19 +357,51 @@ export default function Dashboard() {
       <div className="dash-morph-halo secondary" />
 
       {/* ── Hero: device name as the centerpiece ── */}
-      <div className={`lp-hero ${mounted ? 'lp-enter' : ''}`}>
+      <div className="lp-hero lp-enter">
         <div className="lp-status-row">
-          <span className={`lp-pill ${openclawHealth?.aiReady ? 'ok' : ''}`}>
-            <span className={`status-dot ${openclawHealth?.aiReady ? 'online' : 'warn'}`} />
+          <span
+            className={`lp-pill ${studioBackendOk ? 'ok' : ''}`}
+            title={t(
+              'dashboard.rdkclawPillHint',
+              'RDK Studio 后端（RDKClaw API）：通过本机 GET /api/health 探测服务是否响应',
+            )}
+          >
+            <span
+              className={`status-dot ${
+                studioBackendOk === null ? 'warn' : studioBackendOk ? 'online' : 'offline'
+              }`}
+            />
             RDKClaw
           </span>
-          <span className={`lp-pill ${openclawHealth?.gatewayRunning ? 'ok' : ''}`}>
-            <span className={`status-dot ${openclawHealth?.gatewayRunning ? 'online' : 'warn'}`} />
+          <span
+            className={`lp-pill ${openclawHealth?.gatewayRunning ? 'ok' : ''}`}
+            title={t(
+              'dashboard.openclawPillHint',
+              '板端 OpenClaw：网关进程是否在运行（SSH 拉取板端健康检查）',
+            )}
+          >
+            <span
+              className={`status-dot ${
+                openclawHealth == null
+                  ? 'warn'
+                  : openclawHealth.gatewayRunning
+                    ? 'online'
+                    : 'offline'
+              }`}
+            />
             OpenClaw
           </span>
-          <span className={`lp-pill ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : ''}`}>
-            <span className={`status-dot ${currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected' ? 'online' : 'offline'}`} />
-            {t('dashboard.deviceOnline', '设备在线')}
+          <span
+            className={`lp-pill ${deviceChannelOk ? 'online' : ''}`}
+            title={t(
+              'dashboard.devicePillHint',
+              '设备 SSH：与侧栏一致，由后台 ping 与诊断拉取共同更新在线状态',
+            )}
+          >
+            <span className={`status-dot ${deviceChannelOk ? 'online' : 'offline'}`} />
+            {deviceChannelOk
+              ? t('dashboard.deviceOnline', '设备在线')
+              : t('dashboard.deviceOffline', '设备离线')}
           </span>
         </div>
         <h1 className="lp-device-name">{currentDevice.name}</h1>
@@ -301,9 +409,9 @@ export default function Dashboard() {
       </div>
 
       {/* ── Live metrics strip ── */}
-      <div className={`lp-metrics ${mounted ? 'lp-enter lp-d1' : ''}`}>
+      <div className="lp-metrics lp-enter lp-d1">
         {stats.map((s, i) => (
-          <div key={s.key} className={`lp-metric ${(s as any).warn ? 'warn' : ''}`} style={mounted ? { animationDelay: `${200 + i * 60}ms` } : undefined}>
+          <div key={s.key} className={`lp-metric ${(s as any).warn ? 'warn' : ''}`} style={{ animationDelay: `${200 + i * 60}ms` }}>
             <span className="lp-metric-val"><AnimatedNumber value={s.val} /></span>
             <span className="lp-metric-lbl">{s.label}</span>
           </div>
@@ -311,7 +419,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── CTA: primary action ── */}
-      <div className={`lp-cta ${mounted ? 'lp-enter lp-d2' : ''}`}>
+      <div className="lp-cta lp-enter lp-d2">
         <button className="lp-cta-btn primary" onClick={() => prompt(isEn ? ONE_SHOT_DEV_WORKFLOW_PROMPT_EN : ONE_SHOT_DEV_WORKFLOW_PROMPT_ZH)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
           {t('dashboard.oneShotDev', '一句话开发')}
@@ -323,7 +431,7 @@ export default function Dashboard() {
 
       {/* ── Workspace capability badges ── */}
       {wsHealth && (
-        <div className={`lp-caps ${mounted ? 'lp-enter lp-d3' : ''}`}>
+        <div className="lp-caps lp-enter lp-d3">
           {([
             { key: 'development', label: t('dashboard.cap.dev', '开发环境'), tab: 'terminal' as const },
             { key: 'codeServer', label: 'IDE', tab: 'ide' as const },

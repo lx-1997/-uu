@@ -77,6 +77,7 @@ export function buildStudioUiHintsPrompt(hints: StudioUiHints | undefined): stri
     "- 若用户仅询问「设备 / 板端兄弟 / OpenClaw 是否正常」类问题：优先用本段快照直接回答，**不要**再调用 `board_openclaw_health`，除非用户明确要求体检、排障或你刚完成安装/重启需验收。",
     "- 若本轮 `web_search` / 联网工具失败：不要为此去「补」一轮 `board_openclaw_health`；网络问题与板端 OpenClaw 进程是否启动是不同层面；可说明联网失败，并继续用本地工具或 RDKClaw 兜底。",
     "- 若快照显示网关运行中但 `AI就绪=否`：可说明板端网关已起但板端模型链路未就绪，需要推理或编排的任务优先由 **RDKClaw 本地**完成；仍可通过 SSH 做 `device_exec` 等。",
+    "- 若板端或工具返回 `missing scope`、`operator.read` 等：属于 **Studio↔板端 Gateway 的鉴权/令牌权限**，不要笼统说成「网关坏了」或「网关没开」；若本段快照已写「网关=运行中」，你的解释必须与之一致。",
     "- 若需委派板端 OpenClaw 执行多步任务且快照与实际情况可能不一致时，再考虑 `board_openclaw_assess`，而不是例行 health。",
   );
 
@@ -107,7 +108,7 @@ export function buildCollaborationPrompt(
     "- **delegate** (board_openclaw_delegate)：委派——确认可行后交付执行，guidance 中注入你的知识",
     "三者共享会话，不必重复背景。委派后评估结果质量，失败时本地兜底。",
     "OpenClaw 擅长：板端多步操作、技能链、应用部署。不擅长：联网搜索、文档分析（你的专属能力）。",
-    "若 OpenClaw 回复含 [NEED_RDKCLAW] 块，提取 type/query 后用你的工具获取信息，再 chat 发回。最多补给 2 轮。",
+    "若 OpenClaw 回复含 [NEED_RDKCLAW] 块：界面会单独展示「OpenClaw→RDKClaw」求助卡；你应提取 type/query/reason。type=web_search/documentation 等以检索为主；**type=advisory** 时板端需要你的**建议与取舍**（可辅以检索），在 chat 回传中写清推荐顺序与理由。再 board_openclaw_chat 发回板端。最多补给 2 轮。",
     "",
     "### 并行执行（重要）",
     "同一个 turn 中，以下工具可以并行调用（框架自动并行，你只需在同一轮同时发起）：",

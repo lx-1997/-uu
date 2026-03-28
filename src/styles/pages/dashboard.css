@@ -169,7 +169,7 @@
 .dash-enter-d3 { animation-delay: 600ms; }
 
 @keyframes dashFadeUp {
-  from { opacity: 0; transform: translateY(20px) scale(0.97); }
+  from { opacity: 0.96; transform: translateY(12px) scale(0.99); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -392,7 +392,7 @@
 .lp-d3 { animation-delay: 600ms; }
 
 @keyframes lpFadeUp {
-  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  from { opacity: 0.96; transform: translateY(12px) scale(0.99); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 

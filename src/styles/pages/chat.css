@@ -878,6 +878,129 @@
   word-break: break-word;
 }
 
+/* RDKClaw ↔ 板端 OpenClaw 协作块 */
+.dock-bubble .collab-block {
+  border-left: 3px solid var(--border);
+}
+
+.dock-bubble .collab-block--openclaw {
+  border-left-color: #3b82f6;
+  background: color-mix(in srgb, #3b82f6 8%, var(--bg-inset));
+}
+
+.dock-bubble .collab-block--rdkclaw {
+  border-left-color: #a855f7;
+  background: color-mix(in srgb, #a855f7 8%, var(--bg-inset));
+}
+
+/* RDKClaw 发往板端（待发内容） */
+.dock-bubble .collab-block--outbound {
+  border-left-color: #059669;
+  background: color-mix(in srgb, #059669 9%, var(--bg-inset));
+}
+
+.dock-bubble .collab-block-badge.collab-block--outbound {
+  color: #047857;
+  background: color-mix(in srgb, #059669 18%, transparent);
+}
+
+/* OpenClaw 向本机求助（NEED_RDKCLAW） */
+.dock-bubble .collab-block--reverse {
+  border-left-color: #ea580c;
+  background: color-mix(in srgb, #f97316 9%, var(--bg-inset));
+}
+
+.dock-bubble .collab-block-badge.collab-block--reverse {
+  color: #c2410c;
+  background: color-mix(in srgb, #f97316 20%, transparent);
+}
+
+/* 等板端时 Studio 插入的闲句（非 OpenClaw 输出） */
+.dock-bubble .collab-block--wait-hint {
+  border-left-color: #14b8a6;
+  background: color-mix(in srgb, #14b8a6 9%, var(--bg-inset));
+}
+
+.dock-bubble .collab-block-badge.collab-block--wait-hint {
+  color: #0f766e;
+  background: color-mix(in srgb, #14b8a6 18%, transparent);
+}
+
+/* 结果中的 RDKClaw 追加说明 */
+.dock-bubble .collab-block--hint {
+  border-left-color: #c084fc;
+  background: color-mix(in srgb, #a855f7 6%, var(--bg-inset));
+}
+
+.dock-bubble .collab-block-badge.collab-block--hint {
+  color: #7c3aed;
+  background: color-mix(in srgb, #a855f7 14%, transparent);
+}
+
+.dock-bubble .collab-block-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+  flex-wrap: wrap;
+}
+
+.dock-bubble .collab-block-badge {
+  flex-shrink: 0;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+}
+
+.dock-bubble .collab-block-badge.collab-block--openclaw {
+  color: #1d4ed8;
+  background: color-mix(in srgb, #3b82f6 18%, transparent);
+}
+
+.dock-bubble .collab-block-badge.collab-block--rdkclaw {
+  color: #7c3aed;
+  background: color-mix(in srgb, #a855f7 18%, transparent);
+}
+
+.dock-bubble .collab-block-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.dock-bubble .collab-block-title {
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.dock-bubble .collab-block-subtitle {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.dock-bubble .collab-block-body {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow-y: auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.dock-bubble .collab-block-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .dock-bubble .chat-action-btn {
   display: inline-flex;
   align-items: center;

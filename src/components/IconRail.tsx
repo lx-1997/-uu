@@ -3,6 +3,7 @@ import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import StudioVersionFooter from './StudioVersionFooter';
+import { isDeviceSshConnected } from '../utils/device-connection';
 
 interface NavItemDef {
   tab: Tab;
@@ -76,7 +77,7 @@ export default function IconRail() {
   const [showDevicePanel, setShowDevicePanel] = useState(false);
   const [railLogoFailed, setRailLogoFailed] = useState(false);
   const onRailLogoError = useCallback(() => setRailLogoFailed(true), []);
-  const deviceOnline = !!currentDevice && currentDevice.status !== 'offline' && currentDevice.status !== 'disconnected';
+  const deviceOnline = !!currentDevice && isDeviceSshConnected(currentDevice.status);
 
   const renderGroup = (items: NavItemDef[]) =>
     items.map((item) => {
@@ -217,7 +218,7 @@ export default function IconRail() {
                 }}
                 style={{ cursor: 'pointer' }}
               >
-                <span className={`status-dot ${dev.status === 'connected' || dev.status === 'online' ? 'online' : 'offline'}`} />
+                <span className={`status-dot ${isDeviceSshConnected(dev.status) ? 'online' : 'offline'}`} />
                 <div className="device-panel-item-info">
                   <div className="device-panel-item-name">{dev.name}</div>
                   <div className="device-panel-item-addr">{dev.ip}</div>

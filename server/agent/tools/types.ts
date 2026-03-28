@@ -64,6 +64,8 @@ export interface ToolContext {
   }) => Promise<{ runId: string; sessionKey: string }>;
   /** 中止信号: 支持取消长时间运行的操作 */
   abortSignal?: AbortSignal;
+  /** 当前工具调用 ID（agent-loop 每次 execute 前注入，用于进度/前端关联） */
+  toolCallId?: string;
 }
 
 // ============== 工具定义 ==============

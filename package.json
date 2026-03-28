@@ -64,6 +64,7 @@
       "config/**",
       "data/**",
       "agent/**",
+      "server/resources/**",
       "skills/**",
       "node_modules/**",
       "package.json"

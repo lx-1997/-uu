@@ -639,16 +639,32 @@ export class RDKClawApp {
         description: s.description,
       }));
       tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager, base.sessionId, skillsForBoard));
-      tools.push(boardOpenClawChatTool(req.deviceId, this.openClawManager, base.sessionId));
       tools.push(
-        boardOpenClawDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
+        boardOpenClawChatTool(req.deviceId, this.openClawManager, base.sessionId, (chunk, toolCallId, meta) => {
+          emitEvent({
+            type: "tool_progress",
+            data: {
+              ...base,
+              toolName: "board_openclaw_chat",
+              name: "board_openclaw_chat",
+              toolCallId: toolCallId ?? "",
+              phase: "running",
+              executor: "board_openclaw",
+              chunk,
+              progressSource: meta?.progressSource ?? "board",
+            },
+          });
+        }),
+      );
+      tools.push(
+        boardOpenClawDelegateTool(req.deviceId, this.openClawManager, (chunk, toolCallId) => {
           emitEvent({
             type: "tool_progress",
             data: {
               ...base,
               toolName: "board_openclaw_delegate",
               name: "board_openclaw_delegate",
-              toolCallId: "board_openclaw_delegate", // TODO: 应传入真实 toolCallId，当前框架不支持 per-call callback
+              toolCallId: toolCallId ?? "",
               phase: "running",
               executor: "board_openclaw",
               chunk,
@@ -657,28 +673,28 @@ export class RDKClawApp {
         }, base.sessionId, skillsForBoard),
       );
       tools.push(fleetBoardListTool(req.deviceId, this.openClawManager));
-      tools.push(fleetBoardDelegateTool(req.deviceId, this.openClawManager, (chunk) => {
+      tools.push(fleetBoardDelegateTool(req.deviceId, this.openClawManager, (chunk, toolCallId) => {
         emitEvent({
           type: 'tool_progress',
           data: {
             ...base,
             toolName: 'fleet_board_delegate',
             name: 'fleet_board_delegate',
-            toolCallId: 'fleet_board_delegate',
+            toolCallId: toolCallId ?? '',
             phase: 'running',
             executor: 'fleet',
             chunk,
           },
         });
       }));
-      tools.push(fleetBoardBroadcastTool(req.deviceId, this.openClawManager, (chunk) => {
+      tools.push(fleetBoardBroadcastTool(req.deviceId, this.openClawManager, (chunk, toolCallId) => {
         emitEvent({
           type: 'tool_progress',
           data: {
             ...base,
             toolName: 'fleet_board_broadcast',
             name: 'fleet_board_broadcast',
-            toolCallId: 'fleet_board_broadcast',
+            toolCallId: toolCallId ?? '',
             phase: 'running',
             executor: 'fleet',
             chunk,

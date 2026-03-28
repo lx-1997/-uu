@@ -3,6 +3,11 @@ import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager, type OpenClawHealthStatus } from "../../managers/OpenClawDeploymentManager.js";
 import type { Device } from "../../../shared/types.js";
 import type { RdkPlatform } from "../../../shared/board-types.js";
+import {
+  getCachedOpenClawAiReady,
+  invalidateOpenClawHealthCache,
+  setCachedOpenClawAiReady,
+} from "../openclaw-health-cache.js";
 
 function resolveDevicePassword(device: Device) {
   const persisted = (device as Device & { password?: string }).password ?? "";
@@ -22,8 +27,19 @@ function toBoardDevice(device: Device) {
 function parseBoardError(raw: string): string {
   const text = (raw || "").trim();
   if (!text) return "板端 OpenClaw 未返回结果";
+  if (/missing\s+scope|operator\.(read|write|admin)/i.test(text)) {
+    return (
+      "板端网关鉴权范围不足（scope，例如 operator.read）。"
+      + "请检查 RDK Studio 与板端 Gateway 的 token / pairing；"
+      + "这与「网关进程未运行」不是同一类问题——若健康检查显示网关在跑，应说明为鉴权或权限配置。"
+    );
+  }
   if (/__OPENCLAW_HTTP_FAILED__/i.test(text)) {
-    return text.replace(/__OPENCLAW_HTTP_FAILED__/gi, "").trim() || "板端 OpenClaw 网关调用失败";
+    const inner = text.replace(/__OPENCLAW_HTTP_FAILED__/gi, "").trim();
+    if (/missing\s+scope|operator\.(read|write|admin)/i.test(inner)) {
+      return parseBoardError(inner);
+    }
+    return inner || "板端 OpenClaw 网关调用失败";
   }
   if (/plugins\.allow is empty/i.test(text)) {
     return "板端 OpenClaw 插件策略阻止执行（plugins.allow 为空），请先在板端配置受信任插件。";
@@ -79,17 +95,30 @@ async function ensureBoardGatewayReady(
   signal?: AbortSignal,
 ): Promise<void> {
   if (signal?.aborted) throw new Error("操作已中止");
+  const deviceId = String(boardDevice.id || "").trim();
+  if (deviceId && getCachedOpenClawAiReady(deviceId) === true) {
+    onProgress?.("\n[预检] 近期已确认板端 OpenClaw 就绪，跳过重复健康检测。\n");
+    return;
+  }
+
   let health = await getBoardHealth(manager, boardDevice);
-  if (health.aiReady) return;
+  if (health.aiReady) {
+    if (deviceId) setCachedOpenClawAiReady(deviceId, true);
+    return;
+  }
 
   if (health.installed && !health.gatewayRunning) {
     onProgress?.("\n[预检] 板端网关未就绪，尝试自动重启...\n");
     await restartGateway(manager, boardDevice, onProgress);
     if (signal?.aborted) throw new Error("操作已中止");
     health = await getBoardHealth(manager, boardDevice);
-    if (health.aiReady) return;
+    if (health.aiReady) {
+      if (deviceId) setCachedOpenClawAiReady(deviceId, true);
+      return;
+    }
   }
 
+  if (deviceId) invalidateOpenClawHealthCache(deviceId);
   const reason = health.summary?.trim() || "板端 OpenClaw 未就绪";
   const advice = !health.installed
     ? "请先安装 OpenClaw 并完成初始化。"
@@ -112,7 +141,7 @@ export interface BoardSkillInfo {
 export function boardOpenClawDelegateTool(
   deviceId: string,
   manager: OpenClawDeploymentManager,
-  onProgress?: (chunk: string) => void,
+  onProgress?: (chunk: string, toolCallId?: string) => void,
   conversationId?: string,
   boardSkills?: BoardSkillInfo[],
 ): Tool<{
@@ -147,7 +176,7 @@ export function boardOpenClawDelegateTool(
       if (!device) throw new Error("设备不存在，无法委派板端 OpenClaw");
 
       const boardDevice = toBoardDevice(device);
-      await ensureBoardGatewayReady(manager, boardDevice, onProgress, ctx.abortSignal);
+      await ensureBoardGatewayReady(manager, boardDevice, (chunk) => onProgress?.(chunk, ctx.toolCallId), ctx.abortSignal);
       const platform = device.boardPlatform as RdkPlatform | undefined;
       const useSkills = input.encourageSkills !== false;
       const msgParts = [
@@ -205,7 +234,7 @@ export function boardOpenClawDelegateTool(
             const toSend = pending.length > 1200 ? pending.slice(-1200) : pending;
             pending = "";
             lastEmitAt = now;
-            onProgress?.(toSend);
+            onProgress?.(toSend, ctx.toolCallId);
           };
 
           const onAbort = () => {
@@ -257,7 +286,7 @@ export function boardOpenClawDelegateTool(
         }
         if (attempt < DELEGATE_MAX_RETRIES && isRetryableFailure(output)) {
           console.warn(`[board-delegate] retryable failure on attempt ${attempt + 1}, retrying in ${DELEGATE_RETRY_DELAY_MS}ms`);
-          onProgress?.("\n[连接中断，正在自动重试...]\n");
+          onProgress?.("\n[连接中断，正在自动重试...]\n", ctx.toolCallId);
           manager.destroyConnection(boardDevice.ip);
           await abortAwareDelay(DELEGATE_RETRY_DELAY_MS, ctx.abortSignal);
           continue;

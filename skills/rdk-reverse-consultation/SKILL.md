@@ -1,8 +1,8 @@
 ---
 name: RDK Reverse Consultation Protocol
 description: 当板端 OpenClaw 在执行任务中需要 RDKClaw 的专属能力（联网搜索、文档查找、生态知识）时，教会 OpenClaw 以结构化格式发出求助信号，RDKClaw 会在后续消息中补充所需信息。
-version: 1.0.0
-trigger: 反向通道,求助,consultation,需要搜索,需要文档,OpenClaw请求帮助
+version: 1.0.1
+trigger: 反向通道,求助,consultation,需要搜索,需要文档,OpenClaw请求帮助,NEED_RDKCLAW,advisory
 risk: low
 permissions: network
 delegate_preference: hybrid
@@ -26,8 +26,8 @@ RDKClaw 和 OpenClaw 是互补关系：RDKClaw 有联网搜索、文档分析、
 
 ```
 [NEED_RDKCLAW]
-type: web_search | documentation | ecosystem | analysis
-query: 具体需要查找或分析的内容
+type: web_search | documentation | ecosystem | analysis | advisory
+query: 具体需要查找或分析的内容（advisory 时可写完整「请给建议」的问句）
 reason: 为什么需要这个信息
 priority: high | medium | low
 [/NEED_RDKCLAW]
@@ -38,6 +38,7 @@ priority: high | medium | low
 - `documentation`：需要查找 RDK 官方文档或第三方文档
 - `ecosystem`：需要查询生态技能注册表中的能力信息
 - `analysis`：需要 RDKClaw 分析某段日志、错误信息或方案可行性
+- `advisory`：需要 RDKClaw **基于上下文给建议、取舍、下一步**（不仅是链接）；板端遇阻、多方案选一、需第二意见时使用。详见技能 **`rdk-rdkclaw-partner-advisory`**。
 
 ## RDKClaw 侧处理流程
 
@@ -69,6 +70,6 @@ RDKClaw 在 delegate 时，在 guidance 末尾附加以下说明：
 
 ## 限制
 
-- 每次 delegate 最多触发 2 轮 consultation，避免无限循环
+- 每次 delegate 最多触发 10 轮 consultation，避免无限循环
 - 仅在 delegate 和 chat 的返回结果中检测，不在 assess 中检测
 - OpenClaw 不保证总是使用此协议（取决于其模型能力），RDKClaw 应同时主动分析返回结果中的隐性求助信号

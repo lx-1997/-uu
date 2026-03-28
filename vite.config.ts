@@ -12,6 +12,10 @@ const buildDate = new Date().toISOString().slice(0, 10);
 export default defineConfig({
   // Electron 生产环境用 file:// 加载 dist/index.html，必须用相对路径，否则 /assets/* 会指向盘符根目录导致白屏
   base: './',
+  /** 避免多份 react 导致 Context（AppProvider）在懒加载子树中失效 */
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
     'import.meta.env.VITE_APP_BUILD_DATE': JSON.stringify(buildDate),
@@ -25,6 +29,16 @@ export default defineConfig({
         target: 'http://localhost:8787',
         changeOrigin: true,
         ws: true,
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/react-dom')) return 'react-dom';
+          if (id.includes('node_modules/react/')) return 'react';
+        },
       },
     },
   },

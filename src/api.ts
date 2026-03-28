@@ -1,7 +1,7 @@
 import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
 import { readStudioUiHintsForDevice } from './studio-ui-hints';
-import { applySsoMirrorToHeaders, resolveApiUrl } from './utils/apiBase';
+import { applySsoMirrorToHeaders, fetchApi, resolveApiUrl } from './utils/apiBase';
 
 export interface DeviceExecResult {
   ok: boolean;
@@ -1010,6 +1010,42 @@ export function fetchDeviceWorkspaceHealth(deviceId: string, password?: string) 
   return request<{ ok: boolean; status: DeviceWorkspaceHealth }>(`/api/devices/${deviceId}/workspace/health`, {
     headers: password ? { 'x-device-password': password } : undefined,
   });
+}
+
+/** 将内置「同伴商量」技能同步到板端 ~/.openclaw/workspace/skills/（已一致则跳过） */
+export interface EnsurePartnerAdvisorySkillResult {
+  ok: boolean;
+  action?: 'skipped' | 'deployed' | 'error';
+  cached?: boolean;
+  version?: string;
+  verified?: boolean;
+  reason?: string;
+  message?: string;
+  remoteSha256?: string;
+  previous?: unknown;
+}
+
+export function ensurePartnerAdvisorySkill(deviceId: string, password?: string) {
+  return request<EnsurePartnerAdvisorySkillResult>(`/api/devices/${deviceId}/openclaw/ensure-partner-advisory-skill`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+    body: JSON.stringify({}),
+  });
+}
+
+/**
+ * 探测本机 RDK Studio 服务是否存活（含 RDKClaw 等 API）。
+ * 使用 fetchApi 而非 request()，避免失败时触发全局 rdk-api-error 弹窗。
+ */
+export async function fetchStudioHealth(): Promise<{ ok: boolean }> {
+  try {
+    const r = await fetchApi('/api/health');
+    if (!r.ok) return { ok: false };
+    const j = (await r.json().catch(() => ({}))) as { ok?: boolean };
+    return { ok: j.ok === true };
+  } catch {
+    return { ok: false };
+  }
 }
 
 export function installDeviceOpenClaw(deviceId: string, password?: string) {
