@@ -421,9 +421,9 @@ function getSkillTab(skill: string): string | null {
     'rdk-hardware': 'hardware',
     'rdk-openclaw': 'openclaw',
     'rdk-ros': 'terminal',
-    'rdk-models': 'models',
-    'rdk-examples': 'examples',
-    'rdk-workflow': 'lowcode',
+    'rdk-models': 'dashboard',
+    'rdk-examples': 'dashboard',
+    'rdk-workflow': 'dashboard',
     'rdk-ide': 'ide',
   };
   return map[skill] ?? null;
@@ -786,7 +786,7 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
     text: '',
     blocks: [
       { type: 'status', items: [
-        { label: t('orc.model.listLabel', '模型列表'), value: t('orc.model.listValue', '请在模型页执行板端查询命令'), ok: true },
+        { label: t('orc.model.listLabel', '模型列表'), value: t('orc.model.listValue', '请在终端执行板端模型目录查询命令'), ok: true },
       ]},
     ],
   }),
@@ -835,8 +835,8 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
   }),
 
   nav: (tab, actions) => {
-    const normalized = tab === 'ros' ? 'terminal' : tab;
-    const validTabs = ['dashboard','flasher','terminal','files','vnc','lowcode','openclaw','hardware','examples','models','skills'] as const;
+    const normalized = tab === 'ros' || tab === 'examples' || tab === 'models' || tab === 'lowcode' ? 'dashboard' : tab;
+    const validTabs = ['dashboard', 'flasher', 'terminal', 'files', 'vnc', 'ide', 'openclaw', 'hardware', 'skills'] as const;
     const target = validTabs.find((id) => id === normalized) ?? 'dashboard';
     return {
       text: '',

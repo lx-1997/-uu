@@ -17,7 +17,7 @@ export const SIDEBAR_EN: Record<string, string> = {
   'sidebar.empty.title': 'No devices yet',
   'sidebar.empty.desc': 'Add an RDK device — the workspace syncs automatically.',
   'sidebar.dev.disconnected': 'Disconnected',
-  'sidebar.scanAdd': '+ Scan / add device',
+  'sidebar.addDevice': '+ Add device',
   'sidebar.removeDevice': 'Remove device',
 
   'sidebar.group.workspace': 'Workspace',
@@ -44,14 +44,6 @@ export const SIDEBAR_EN: Record<string, string> = {
   'sidebar.hint.hardware': 'CPU / BPU / temperature / health',
   'sidebar.nav.flasher': 'Flash & backup',
   'sidebar.hint.flasher': 'Image write, verify, backup',
-  'sidebar.nav.examples': 'NodeHub',
-  'sidebar.hint.examples': 'Apps, install, ecosystem sync',
-  'sidebar.nav.models': 'ModelZoo',
-  'sidebar.hint.models': 'Model deploy, run, extend',
-  'sidebar.nav.ros': 'ROS viz',
-  'sidebar.hint.ros': 'Webviz and rosbridge',
-  'sidebar.nav.lowcode': 'Low-code',
-  'sidebar.hint.lowcode': 'Visual flows and Node-RED style wiring',
 
   'sidebar.footer.cloud': 'Embodied cloud',
   'sidebar.footer.cloudHint': 'Remote cloud workflows',

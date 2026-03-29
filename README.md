@@ -29,7 +29,7 @@ rdkos_info
 ip addr
 ```
 
-4. 再进入各模块验证：ROS、Node-RED、VNC、Files、OpenClaw。
+4. 再进入各模块验证：终端、文件、VNC、OpenClaw 等。
 
 ## 全模块验证
 

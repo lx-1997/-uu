@@ -5,12 +5,8 @@ export type Tab =
   | 'files'
   | 'vnc'
   | 'ide'
-  | 'lowcode'
   | 'openclaw'
   | 'hardware'
-  | 'examples'
-  | 'ros'
-  | 'models'
   | 'skills';
 
 export interface Device {

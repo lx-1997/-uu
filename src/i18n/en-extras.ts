@@ -4,8 +4,6 @@
 import { ONBOARD_EN } from './onboard-en-partial';
 import { OPENCLAW_EN } from './openclaw-en-partial';
 import { SKILL_BROWSER_EN } from './skill-browser-en-partial';
-import { MODELS_EN } from './models-en-partial';
-import { EXAMPLES_EN } from './examples-en-partial';
 import { SIDEBAR_EN } from './sidebar-en-partial';
 
 export const EN_EXTRAS: Record<string, string> = {
@@ -303,12 +301,6 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.quick.ros.nav.text': 'Check nav stack: costmap, planner, controller',
   'dock.quick.ros.launch.label': 'Launch file',
   'dock.quick.ros.launch.text': 'Generate a ROS2 launch for camera + AI inference',
-  'dock.quick.models.pick.label': 'Pick model',
-  'dock.quick.models.pick.text': 'Recommend a model for pedestrian/vehicle detection',
-  'dock.quick.models.conv.label': 'Convert',
-  'dock.quick.models.conv.text': 'Convert ONNX to BPU-ready format',
-  'dock.quick.lowcode.flow.label': 'Build flow',
-  'dock.quick.lowcode.flow.text': 'Build a camera → AI detect → notify workflow',
   'dock.quick.oc.vs.label': 'Two engines',
   'dock.quick.oc.vs.text': 'Compare RDKClaw vs OpenClaw and say which fits my task and why.',
   'dock.quick.oc.health.label': 'Gateway health',
@@ -621,7 +613,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'orc.model.deployValue': 'Runs real commands on device',
   'orc.model.confirmDeploy': 'Run the current model deploy command?',
   'orc.model.listLabel': 'Model list',
-  'orc.model.listValue': 'Run the query on the Models tab',
+  'orc.model.listValue': 'Run model directory queries in the terminal',
   'orc.example.step1': 'Check dependencies',
   'orc.example.step2': 'Start camera',
   'orc.example.step3': 'Load detector',
@@ -651,7 +643,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'orc.fallback.workflow': 'Flow editor:',
   'orc.fallback.device_scan': 'Scanning LAN for devices.',
   'orc.fallback.settings': 'Settings opened.',
-  'orc.fallback.general': 'Got it. I can help with flash, terminal, files, VNC, OpenClaw, hardware, ROS, models, and more on {{device}}. What would you like to do?',
+  'orc.fallback.general': 'Got it. I can help with flash, terminal, files, VNC, OpenClaw, hardware, and more on {{device}}. What would you like to do?',
 
   'cap.flash.label': 'Image flash',
   'cap.flash_backup.label': 'Image backup',
@@ -1139,13 +1131,10 @@ export const EN_EXTRAS: Record<string, string> = {
   ...ONBOARD_EN,
   ...OPENCLAW_EN,
   ...SKILL_BROWSER_EN,
-  ...MODELS_EN,
-  ...EXAMPLES_EN,
   ...SIDEBAR_EN,
 
   'markdown.copy': 'Copy',
 
-  'lowcode.placeholder': 'Visual workflow editing is still evolving — use the terminal or AI Dock to draft flows for now.',
 
   'common.unknownError': 'Unknown error',
 

@@ -59,11 +59,9 @@ export interface DeviceStoreState {
   setNewDeviceName: (v: string) => void;
   newDeviceIp: string;
   setNewDeviceIp: (v: string) => void;
-  isScanning: boolean;
-  scannedDevices: Array<{ name: string; ip: string }>;
+  /** 打开添加设备弹窗（原「扫描」入口已移除，由 AI/快捷方式统一引导手动填写 IP） */
   scanForDevices: () => void;
   addNewDevice: (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => void;
-  addScannedDevice: (dev: { name: string; ip: string }) => void;
   removeDevice: (id: string) => void;
   showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
@@ -92,8 +90,6 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [newDeviceName, setNewDeviceName] = useState('');
   const [newDeviceIp, setNewDeviceIp] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
-  const [scannedDevices, setScannedDevices] = useState<Array<{ name: string; ip: string }>>([]);
   const devicesRef = React.useRef<Device[]>([]);
   useEffect(() => {
     devicesRef.current = devices;
@@ -117,10 +113,9 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   showConfirmRef.current = showConfirm;
 
   const scanForDevices = useCallback(() => {
-    setIsScanning(false);
-    setScannedDevices([]);
-    addToast('请手动输入设备 IP 进行真实 SSH 连接', 'info');
-  }, [addToast]);
+    setShowAddDevice(true);
+    addToast('请填写设备 IP 与 SSH 凭据', 'info');
+  }, [addToast, setShowAddDevice]);
 
   const addNewDevice = useCallback((payload?: { host: string; port?: number; username: string; password: string; name?: string }) => {
     const host = payload?.host ?? newDeviceIp;
@@ -157,13 +152,6 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         addToast(error instanceof Error ? error.message : '设备连接失败', 'error');
       });
   }, [newDeviceIp, newDeviceName, addToast, addActivity]);
-
-  const addScannedDevice = useCallback((device: { name: string; ip: string }) => {
-    const id = `device-${Date.now()}`;
-    setDevices((prev) => [...prev, { id, name: device.name, status: 'offline', ip: device.ip }]);
-    addToast(`设备 "${device.name}" 已添加到列表`, 'success');
-    addActivity(`通过扫描添加设备: ${device.name}`);
-  }, [addToast, addActivity]);
 
   const removeDevice = useCallback((id: string) => {
     const dev = devices.find(d => d.id === id);
@@ -333,13 +321,13 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     () => ({
       activeDevice, setActiveDevice, devices, setDevices, currentDevice,
       showAddDevice, setShowAddDevice, newDeviceName, setNewDeviceName,
-      newDeviceIp, setNewDeviceIp, isScanning, scannedDevices,
-      scanForDevices, addNewDevice, addScannedDevice, removeDevice,
+      newDeviceIp, setNewDeviceIp,
+      scanForDevices, addNewDevice, removeDevice,
       showConfirm,
     }),
     [
       activeDevice, devices, currentDevice, showAddDevice, newDeviceName, newDeviceIp,
-      isScanning, scannedDevices, scanForDevices, addNewDevice, addScannedDevice,
+      scanForDevices, addNewDevice,
       removeDevice, showConfirm,
     ],
   );

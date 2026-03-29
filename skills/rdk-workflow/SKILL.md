@@ -24,7 +24,7 @@ disableModelInvocation: true
 ## 执行流程
 1. **检查状态**：调用 `GET /api/devices/{deviceId}/services/node-red`，确认 Node-RED 是否活跃。
 2. **启动服务**：若未活跃，调用 `POST /api/devices/{deviceId}/services/node-red/start`。
-3. **导航到编排页面**：发出 `navigate:lowcode` 客户端动作，打开 Node-RED 界面。
+3. **导航（可选）**：可发 `navigate:lowcode`（Studio 映射到工作台；无独立编排页）。Node-RED 请在浏览器访问 `http://{设备IP}:1880`。
 4. **流程验证**（可选）：发出 `runFlowValidation` 客户端动作，检查 Node-RED、ROS bridge、OpenClaw 的运行状态。
 5. **停止服务**（用户要求时）：调用 `POST /api/devices/{deviceId}/services/node-red/stop`。
 
@@ -37,7 +37,7 @@ disableModelInvocation: true
 | `GET /api/devices/{deviceId}/services/node-red` | 检查 Node-RED 服务状态 | 是 |
 | `POST /api/devices/{deviceId}/services/node-red/start` | 启动 Node-RED | 否 |
 | `POST /api/devices/{deviceId}/services/node-red/stop` | 停止 Node-RED | 否 |
-| `navigate:lowcode` | 打开编排页面 | 否 |
+| `navigate:lowcode` | 打开工作台（兼容别名；编排页已移除） | 否 |
 | `runFlowValidation` | 执行流程验证（多服务联动检查） | 否 |
 
 ## 输出要求

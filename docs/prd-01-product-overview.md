@@ -595,18 +595,18 @@ OpenClaw 管理
 
 ---
 
-## 7. 待完成 / 规划中功能
+## 7. 已下线 / 规划中功能
 
-代码审查发现以下组件已实现但未接入主界面（`App.tsx` 的 `MainContent` 中未渲染）：
+以下能力**曾规划独立页面**，当前版本已从 `Tab` 与主导航移除，相关操作用 **终端 + AI Dock + OpenClaw 技能** 覆盖：
 
-| 组件 | 文件 | 状态 | 说明 |
-|------|------|------|------|
-| **Models 页面** | `src/components/Models.tsx` | 类型已定义 (`models` tab) | ModelZoo 模型卡片，支持部署/运行/卸载。`Tab` 联合类型中有 `models`，但 `App.tsx` 的 `standardViews` 和 `persistent-pane` 中均未包含 |
-| **Examples 页面** | `src/components/Examples.tsx` | 类型已定义 (`examples` tab) | NodeHub 示例应用列表，支持安装/运行/卸载。同样有 import 但未在视图中渲染 |
-| **Sidebar 组件** | `src/components/Sidebar.tsx` | 无引用 | 另一套侧栏导航实现，仓库内无其它文件 import，疑似遗留代码或早期实验 |
-| **Low-code 页面** | Tab 类型含 `lowcode` | 无对应组件 | `Tab` 类型中定义了 `lowcode`（Node-RED），但无对应前端组件实现 |
-| **云端技能仓库** | 无 | 规划中 | 远程技能同步与热更新，详见 [prd-05-cloud-integration.md](prd-05-cloud-integration.md) |
-| **课程技能包** | 无 | 规划中 | 教学场景的技能化沉淀，详见 [prd-05-cloud-integration.md](prd-05-cloud-integration.md) |
+- **NodeHub / ModelZoo / 低代码 / ROS 可视化独立页**：不再提供；后端设备 API（如示例运行、模型列表）仍可由 Agent 工具调用。
+- **局域网设备扫描**：不提供；添加设备为手动填写 IP + SSH 凭据（AI 侧 `scanDevices` 动作将打开添加设备弹窗）。
+- **Sidebar 全幅侧栏**：`Sidebar.tsx` 保留为可选布局组件，主界面以 **IconRail** 为准。
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| **云端技能仓库** | 规划中 | 远程技能同步与热更新，详见 [prd-05-cloud-integration.md](prd-05-cloud-integration.md) |
+| **课程技能包** | 规划中 | 教学场景的技能化沉淀，详见 [prd-05-cloud-integration.md](prd-05-cloud-integration.md) |
 
 ---
 

@@ -33,13 +33,17 @@ const TAB_ALIASES: Record<string, Tab> = {
   files: 'files',
   vnc: 'vnc',
   ide: 'ide',
-  lowcode: 'lowcode',
-  workflow: 'lowcode',
   openclaw: 'openclaw',
   hardware: 'hardware',
-  examples: 'examples',
+  skills: 'skills',
+  /** 已移除独立页：旧技能/文档中的 navigate 仍映射到可用 Tab，避免静默失败 */
+  examples: 'dashboard',
+  models: 'dashboard',
+  lowcode: 'dashboard',
+  workflow: 'dashboard',
+  nodehub: 'dashboard',
+  modelzoo: 'dashboard',
   ros: 'terminal',
-  models: 'models',
   // Chinese aliases
   '仪表盘': 'dashboard',
   '首页': 'dashboard',
@@ -48,10 +52,12 @@ const TAB_ALIASES: Record<string, Tab> = {
   '文件': 'files',
   '桌面': 'vnc',
   '编辑': 'ide',
-  '编排': 'lowcode',
   '硬件': 'hardware',
-  '示例': 'examples',
-  '模型': 'models',
+  '技能': 'skills',
+  '技能工坊': 'skills',
+  '示例': 'dashboard',
+  '模型': 'dashboard',
+  '编排': 'dashboard',
 };
 
 export function resolveTab(input: string): Tab | null {

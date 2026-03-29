@@ -139,11 +139,8 @@ export interface AppState {
   setNewDeviceName: (v: string) => void;
   newDeviceIp: string;
   setNewDeviceIp: (v: string) => void;
-  isScanning: boolean;
-  scannedDevices: Array<{ name: string; ip: string }>;
   scanForDevices: () => void;
   addNewDevice: (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => void;
-  addScannedDevice: (dev: { name: string; ip: string }) => void;
   removeDevice: (id: string) => void;
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;

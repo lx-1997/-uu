@@ -747,12 +747,8 @@ type Tab =
   | 'files'       // 文件管理
   | 'vnc'         // 远程桌面
   | 'ide'         // 在线 IDE
-  | 'lowcode'     // Node-RED（未实现）
   | 'openclaw'    // OpenClaw 管理
   | 'hardware'    // 硬件监控
-  | 'examples'    // 示例应用（未挂载）
-  | 'ros'         // ROS 集成
-  | 'models'      // 模型管理（未挂载）
   | 'skills';     // 技能工坊
 ```
 

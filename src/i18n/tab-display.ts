@@ -8,12 +8,8 @@ export const TAB_TITLE_ZH: Record<Tab, string> = {
   files: '文件',
   vnc: '远程桌面',
   ide: 'IDE',
-  lowcode: '低代码',
   openclaw: 'OpenClaw',
   hardware: '硬件监控',
-  examples: 'NodeHub',
-  ros: 'ROS',
-  models: 'ModelZoo',
   skills: '技能工坊',
 };
 

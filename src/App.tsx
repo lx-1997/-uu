@@ -27,9 +27,6 @@ const IDE = lazy(() => import('./components/IDE'));
 const OpenClaw = lazy(() => import('./components/OpenClaw'));
 const Hardware = lazy(() => import('./components/Hardware'));
 const SkillBrowser = lazy(() => import('./components/SkillBrowser'));
-const Examples = lazy(() => import('./components/Examples'));
-const Models = lazy(() => import('./components/Models'));
-const LowcodeStub = lazy(() => import('./components/lowcode-stub'));
 
 /**
  * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：
@@ -82,9 +79,6 @@ function MainContent() {
     files: <Files />,
     hardware: <Hardware />,
     skills: <SkillBrowser />,
-    examples: <Examples />,
-    models: <Models />,
-    lowcode: <LowcodeStub />,
   };
 
   /* 各区域独立 Suspense，避免「一个 chunk 未好则整页 fallback」并错开并行请求 */
@@ -193,10 +187,6 @@ function AppShell() {
       ide: t('tabs.ide', 'IDE'),
       hardware: t('tabs.hardware', '硬件监控'),
       flasher: t('tabs.flasher', '烧录工具'),
-      ros: t('tabs.ros', 'ROS'),
-      examples: t('tabs.examples', 'NodeHub'),
-      models: t('tabs.models', 'ModelZoo'),
-      lowcode: t('tabs.lowcode', '低代码'),
     };
     return names[activeTab] ?? activeTab;
   }, [activeTab, t]);

@@ -1261,7 +1261,7 @@ export default function AIDock() {
     return {
     dashboard: [
       { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '一键体检'), text: t('dock.quick.dash.diag.text', '帮我全面检查设备健康状态，包括温度、负载和网络') },
-      { id: 'stat', icon: '📊', label: t('dock.quick.dash.stat.label', '能力盘点'), text: t('dock.quick.dash.stat.text', '同步 NodeHub 和 ModelZoo 板端状态，汇总当前可编排能力') },
+      { id: 'stat', icon: '📊', label: t('dock.quick.dash.stat.label', '能力盘点'), text: t('dock.quick.dash.stat.text', '汇总当前设备上应用、模型与 OpenClaw 技能等可编排能力') },
       {
         id: 'cap-report',
         icon: '🧭',
@@ -1276,7 +1276,7 @@ export default function AIDock() {
         text: t('dock.quick.dash.appgen.text', appgenZh),
         forceRdkclaw: true,
       },
-      { id: 'new-device', icon: '🔌', label: t('dock.quick.dash.newdev.label', '新设备接管'), text: t('dock.quick.dash.newdev.text', '把当前设备当成一台全新设备，检查连接、OpenClaw、模型/应用依赖和可开发环境是否就绪') },
+      { id: 'new-device', icon: '🔌', label: t('dock.quick.dash.newdev.label', '新设备接管'), text: t('dock.quick.dash.newdev.text', '把当前设备当成一台全新设备，检查连接、OpenClaw 与可开发环境是否就绪') },
     ],
     terminal: [
       { id: 'cmd', icon: '⌨️', label: t('dock.quick.term.cmd.label', '帮我写命令'), text: t('dock.quick.term.cmd.text', '我想做什么操作，帮我生成终端命令') },
@@ -1303,21 +1303,6 @@ export default function AIDock() {
     hardware: [
       { id: 'hot', icon: '🌡️', label: t('dock.quick.hw.hot.label', '散热建议'), text: t('dock.quick.hw.hot.text', '芯片温度偏高，帮我分析原因并给出降温方案') },
       { id: 'perf', icon: '⚡', label: t('dock.quick.hw.perf.label', '性能优化'), text: t('dock.quick.hw.perf.text', '帮我分析当前 BPU/CPU 使用情况，给出优化建议') },
-    ],
-    ros: [
-      { id: 'rosbridge', icon: '🌉', label: t('dock.quick.ros.bridge.label', 'Rosbridge'), text: t('dock.quick.ros.bridge.text', '帮我检查 rosbridge_websocket 服务状态，如果未运行请启动它并确认端口 9090 可用') },
-      { id: 'topic', icon: '📡', label: t('dock.quick.ros.topic.label', '话题巡检'), text: t('dock.quick.ros.topic.text', '帮我检查所有 ROS2 话题的发布频率，找出异常的话题并给出修复建议') },
-      { id: 'tf', icon: '🌳', label: t('dock.quick.ros.tf.label', 'TF 诊断'), text: t('dock.quick.ros.tf.text', '检查 TF 坐标树是否完整，分析 frame 之间的变换关系是否正常') },
-      { id: 'node', icon: '🔗', label: t('dock.quick.ros.node.label', '节点健康'), text: t('dock.quick.ros.node.text', '列出所有 ROS2 节点，检查哪些节点异常退出或未启动，给出重启命令') },
-      { id: 'nav', icon: '🗺️', label: t('dock.quick.ros.nav.label', '导航调试'), text: t('dock.quick.ros.nav.text', '帮我检查导航栈状态，包括 costmap、planner、controller 是否正常工作') },
-      { id: 'launch', icon: '🚀', label: t('dock.quick.ros.launch.label', '启动文件'), text: t('dock.quick.ros.launch.text', '帮我生成一个 ROS2 launch 文件，启动摄像头和 AI 推理节点') },
-    ],
-    models: [
-      { id: 'pick', icon: '🧠', label: t('dock.quick.models.pick.label', '选模型'), text: t('dock.quick.models.pick.text', '帮我推荐适合行人车辆检测的模型') },
-      { id: 'conv', icon: '🔄', label: t('dock.quick.models.conv.label', '转换部署'), text: t('dock.quick.models.conv.text', '帮我把 ONNX 模型转成 BPU 可用格式') },
-    ],
-    lowcode: [
-      { id: 'flow', icon: '🧩', label: t('dock.quick.lowcode.flow.label', '生成流程'), text: t('dock.quick.lowcode.flow.text', '帮我生成一个摄像头→AI检测→推送的工作流') },
     ],
     openclaw: [
       {

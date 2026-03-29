@@ -51,18 +51,6 @@ const Icons: Record<string, React.ReactNode> = {
       <circle cx="12" cy="12" r="3"></circle>
     </svg>
   ),
-  ros: (
-    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-      <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-    </svg>
-  ),
-  models: (
-    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-      <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-      <line x1="12" y1="22.08" x2="12" y2="12"></line>
-    </svg>
-  ),
   skills: (
     <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
       <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
@@ -76,19 +64,12 @@ const Icons: Record<string, React.ReactNode> = {
       <path d="M8 17h8"></path>
     </svg>
   ),
-  examples: (
-    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-      <path d="M12 20V10"></path>
-      <path d="M18 20V4"></path>
-      <path d="M6 20v-6"></path>
-    </svg>
-  ),
 };
 
 const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> = [
   { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'openclaw', 'skills'] },
   { titleKey: 'sidebar.group.connect', titleZh: '连接控制', tabs: ['terminal', 'files', 'vnc', 'ide'] },
-  { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['hardware', 'flasher', 'examples', 'models'] },
+  { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['hardware', 'flasher'] },
 ];
 
 /** 中文默认文案（英文走 en-extras sidebar.nav.* / sidebar.hint.*） */
@@ -102,10 +83,6 @@ const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   ide: { nav: '代码编辑', hint: '远程 code-server 工作区' },
   hardware: { nav: '硬件监控', hint: 'CPU/BPU/温度与健康态' },
   flasher: { nav: '烧录与备份', hint: '镜像写盘、校验、备份' },
-  examples: { nav: 'NodeHub', hint: '应用安装、运行与生态同步' },
-  models: { nav: 'ModelZoo', hint: '模型部署、运行与扩展' },
-  ros: { nav: 'ROS 可视化', hint: 'Webviz 与 rosbridge 调试' },
-  lowcode: { nav: '低代码', hint: '可视化流程与节点编排' },
 };
 
 export default function Sidebar() {
@@ -222,7 +199,7 @@ export default function Sidebar() {
           </div>
         ))}
         <button className="clean-btn outline-btn sidebar-add-btn" type="button" onClick={() => setShowAddDevice(true)}>
-          {t('sidebar.scanAdd', '+ 扫描 / 添加设备')}
+          {t('sidebar.addDevice', '+ 添加设备')}
         </button>
       </div>
 

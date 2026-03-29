@@ -37,12 +37,11 @@ disableModelInvocation: true
 > | `files` | 文件管理 | `navigate:files` |
 > | `vnc` | 远程桌面 | `navigate:vnc` |
 > | `ide` | 代码编辑 | `navigate:ide` |
-> | `lowcode` | 流程编排 | `navigate:lowcode` |
 > | `openclaw` | OpenClaw | `navigate:openclaw` |
 > | `hardware` | 硬件监控 | `navigate:hardware` |
-> | `examples` | 示例应用 | `navigate:examples` |
-> | `ros` | ROS2 | `navigate:ros` |
-> | `models` | 模型仓库 | `navigate:models` |
+> | `skills` | 技能工坊 | `navigate:skills` |
+>
+> 已移除独立 Tab（`lowcode` / `examples` / `models` / `ros`）：`navigate:*` 仍可用，分别映射到工作台或终端，见客户端 `action-dispatcher` 别名。
 
 > **常见导航模式**
 > - "打开终端" → `navigate:terminal`

@@ -14,11 +14,7 @@ export const EN: Record<string, string> = {
   'tabs.ide': 'IDE',
   'tabs.hardware': 'Hardware',
   'tabs.flasher': 'Flasher',
-  'tabs.ros': 'ROS',
   'tabs.openclaw': 'OpenClaw',
-  'tabs.examples': 'NodeHub',
-  'tabs.models': 'ModelZoo',
-  'tabs.lowcode': 'Low-code',
 
   // Icon rail — primary
   'nav.dashboard.label': 'Workspace',

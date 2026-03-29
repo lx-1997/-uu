@@ -66,8 +66,7 @@ category: Procedure
 | 直跑 shell | `device_exec` | 常用 |
 
 ### Client Actions
-- 打开示例页面: `navigate:examples`
-- 打开模型页面: `navigate:models`
+- `navigate:examples` / `navigate:models`：Studio 已无独立页，客户端会打开**工作台**；示例/模型请用上文 API 或终端执行。
 
 ## 输出要求
 - 说明板型与系统版本依据（设备字段或探测输出摘要）。

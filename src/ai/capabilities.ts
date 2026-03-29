@@ -126,7 +126,7 @@ export const CAPABILITIES: Capability[] = [
     description: '转换并部署AI模型到BPU',
     phase: 'confirm',
     keywords: ['部署', 'deploy', '转换', 'onnx', 'yolo', '模型部署'],
-    tab: 'models',
+    tab: 'dashboard',
   },
   {
     id: 'model_list',
@@ -134,7 +134,7 @@ export const CAPABILITIES: Capability[] = [
     description: '查看已部署和待转换的模型',
     phase: 'immediate',
     keywords: ['模型', 'model', '推理', '列表'],
-    tab: 'models',
+    tab: 'dashboard',
   },
   {
     id: 'example_run',
@@ -142,7 +142,7 @@ export const CAPABILITIES: Capability[] = [
     description: '运行内置示例应用（视觉跟随等）',
     phase: 'confirm',
     keywords: ['示例', 'demo', '跟随', '手势', '例子'],
-    tab: 'examples',
+    tab: 'dashboard',
   },
   {
     id: 'workflow',
@@ -150,14 +150,7 @@ export const CAPABILITIES: Capability[] = [
     description: '管理和验证低代码流程编排',
     phase: 'background',
     keywords: ['流程', '编排', 'node-red', '工作流', 'lowcode'],
-    tab: 'lowcode',
-  },
-  {
-    id: 'device_scan',
-    label: '设备扫描',
-    description: '扫描局域网发现RDK设备',
-    phase: 'background',
-    keywords: ['扫描', '设备', '发现', '搜索设备'],
+    tab: 'dashboard',
   },
   {
     id: 'nav',
