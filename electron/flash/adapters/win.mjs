@@ -92,6 +92,8 @@ Get-Partition -DiskNumber $n -ErrorAction SilentlyContinue | ForEach-Object {
   }
 }
 Start-Sleep -Milliseconds 500
+try { Update-Disk -Number $n -ErrorAction SilentlyContinue } catch { }
+Start-Sleep -Milliseconds 300
 `;
   await runPowerShell(script);
 }
@@ -99,11 +101,11 @@ Start-Sleep -Milliseconds 500
 /** 部分 USB/读卡器在卸载后短暂 EIO，短暂退避重试打开 PhysicalDrive */
 async function openPhysicalDriveWithRetry(drivePath, mode) {
   const m = mode || 'r+';
-  const maxAttempts = 4;
+  const maxAttempts = 6;
   let lastErr;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 450 * attempt));
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 500 * attempt));
       return await fs.promises.open(drivePath, m);
     } catch (e) {
       lastErr = e;
@@ -115,10 +117,21 @@ async function openPhysicalDriveWithRetry(drivePath, mode) {
   throw lastErr;
 }
 
-/** 写盘结束或异常后尽量恢复联机，便于用户看到盘符；失败则不抛，改由界面提示。 */
+/**
+ * 写盘结束或异常后尽量恢复联机，便于用户看到盘符；失败则不抛，改由界面提示。
+ * 注意：Windows PowerShell 5.1 自带 Storage 模块里 Set-Disk 常无 -Online 参数（会报 NamedParameterNotFound），
+ * 应使用 -IsOffline $false（与 Win10/Server 等版本兼容）。
+ */
 async function bringDiskOnlineBestEffort(diskNumber) {
+  const n = Number(diskNumber);
   try {
-    const script = `$ErrorActionPreference = 'Stop'; Set-Disk -Number ${diskNumber} -Online`;
+    const script = `
+$ErrorActionPreference = 'Stop'
+$n = ${n}
+$d = Get-Disk -Number $n -ErrorAction Stop
+# Use IsOffline only; OperationalStatus strings may be locale-dependent.
+if ($d.IsOffline) { $d | Set-Disk -IsOffline $false -ErrorAction Stop }
+`;
     await runPowerShell(script);
     return { ok: true };
   } catch (e) {

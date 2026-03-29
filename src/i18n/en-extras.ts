@@ -273,6 +273,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'terminal.serial.connectBtn': 'Connect',
   'terminal.serial.rdkNote': 'RDK official debug port: 115200 8N1, no flow control.',
   'terminal.serial.openFail': 'Could not open serial port: {{msg}}',
+  'terminal.serial.portAlreadyInUse':
+    'This serial port is already open here. Close its terminal tab first, or pick another COM. If another app is using it, close that app.',
   'terminal.serial.windowsComHint':
     'Windows desktop: COM names in the list match Device Manager → Ports (COM & LPT), so you can line them up with CH340/CP210x, etc.',
   'terminal.serial.systemComDetected':

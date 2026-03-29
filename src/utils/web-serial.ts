@@ -99,22 +99,59 @@ export function getSerialConnectBlockedReason(isEn: boolean): string | null {
   return isEn ? 'Web Serial is unavailable in this environment.' : '当前环境无法使用 Web Serial。';
 }
 
-/** 供已授权（getPorts）设备连接：必要时先关闭再按波特率打开 */
+/** 与 `openSerialPortWithOptions` 配合：Terminal 内将错误映射为可读提示 */
+export const SERIAL_PORT_ALREADY_OPEN_CODE = 'RDK_SERIAL_PORT_ALREADY_OPEN';
+
+function isSerialPortAlreadyOpenError(e: unknown): boolean {
+  if (e instanceof Error && e.message === SERIAL_PORT_ALREADY_OPEN_CODE) return true;
+  const msg = e instanceof Error ? e.message : String(e);
+  return /already open/i.test(msg);
+}
+
+type SerialPortWithOpened = SerialPort & { opened?: boolean };
+
+/**
+ * 是否「看起来像已打开、需要先关掉再 open」。
+ * - 若存在 `opened`（Chromium），只信它，避免未打开时 readable/writable 仍非 null 导致误判（会误走 close 甚至误抛「已占用」）。
+ * - 旧环境无 `opened` 时仍用 readable/writable。
+ */
+function serialPortAppearsOpen(port: SerialPort): boolean {
+  const p = port as SerialPortWithOpened;
+  if (typeof p.opened === 'boolean') {
+    return p.opened;
+  }
+  return !!(port.readable || port.writable);
+}
+
+/** 供已授权（getPorts）设备连接：若已打开则先取消读流并 close，再按波特率 open */
 export async function openSerialPortWithOptions(port: SerialPort, baudRate: number): Promise<void> {
-  if (port.readable || port.writable) {
+  if (serialPortAppearsOpen(port)) {
+    try {
+      if (port.readable) await port.readable.cancel();
+    } catch {
+      /* noop */
+    }
     try {
       await port.close();
     } catch {
       /* noop */
     }
+    // 不再在 close 后根据 readable/writable 仍非 null 就抛错：少数实现会短暂残留引用，交给下方 port.open() 判断
   }
-  await port.open({
-    baudRate,
-    dataBits: 8,
-    stopBits: 1,
-    parity: 'none',
-    flowControl: 'none',
-  });
+  try {
+    await port.open({
+      baudRate,
+      dataBits: 8,
+      stopBits: 1,
+      parity: 'none',
+      flowControl: 'none',
+    });
+  } catch (e) {
+    if (isSerialPortAlreadyOpenError(e)) {
+      throw new Error(SERIAL_PORT_ALREADY_OPEN_CODE);
+    }
+    throw e;
+  }
 }
 
 /** Windows 桌面版：WMI/PnP 与设备管理器中「端口」条目一致 */
@@ -285,9 +322,7 @@ export async function requestAndOpenSerialPort(
   baudRate: number,
   listMode: SerialPortListMode = 'all',
 ): Promise<SerialPort> {
-  const serial = navigator.serial;
-  const filters = listMode === 'common' ? USB_SERIAL_COMMON_FILTERS : [];
-  const port = await serial.requestPort({ filters });
+  const port = await requestSerialPortGrant(listMode);
   await openSerialPortWithOptions(port, baudRate);
   return port;
 }

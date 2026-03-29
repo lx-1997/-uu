@@ -14,8 +14,8 @@ import {
   type WindowsSerialPortRow,
   getSerialConnectBlockedReason,
   openSerialPortWithOptions,
-  requestAndOpenSerialPort,
   requestSerialPortGrant,
+  SERIAL_PORT_ALREADY_OPEN_CODE,
   RDK_DEFAULT_SERIAL_BAUD,
   RDK_OPEN_USB_SERIAL_EVENT,
   SERIAL_BAUD_OPTIONS,
@@ -200,6 +200,20 @@ async function killTermData(d: TermData) {
   }
 }
 
+function isUsbSerialPortBusy(
+  port: SerialPort,
+  pool: Map<string, TermData>,
+  pending: Map<string, SerialPort>,
+): boolean {
+  for (const d of pool.values()) {
+    if (d.kind === 'serial' && d.port === port) return true;
+  }
+  for (const p of pending.values()) {
+    if (p === port) return true;
+  }
+  return false;
+}
+
 export default function Terminal() {
   const {
     currentDevice,
@@ -361,10 +375,32 @@ export default function Terminal() {
         serialPortHasIdentifiableLabel(usbPorts[usbPortIndex], usbPortIndex, serialPortLabelCtx)
       ) {
         port = usbPorts[usbPortIndex];
+        if (isUsbSerialPortBusy(port, poolRef.current, pendingSerialPortsRef.current)) {
+          addToast(
+            t(
+              'terminal.serial.portAlreadyInUse',
+              '该串口已在当前页面打开。请先关闭对应终端标签页，或选择其他端口。若串口调试助手等其它程序占用，请先关闭。',
+            ),
+            'warning',
+          );
+          return;
+        }
         await openSerialPortWithOptions(port, usbBaudRate);
       } else {
-        port = await requestAndOpenSerialPort(usbBaudRate, usbListMode);
-        await consumeElectronSerialPortMeta(port);
+        const picked = await requestSerialPortGrant(usbListMode);
+        await consumeElectronSerialPortMeta(picked);
+        if (isUsbSerialPortBusy(picked, poolRef.current, pendingSerialPortsRef.current)) {
+          addToast(
+            t(
+              'terminal.serial.portAlreadyInUse',
+              '该串口已在当前页面打开。请先关闭对应终端标签页，或选择其他端口。若串口调试助手等其它程序占用，请先关闭。',
+            ),
+            'warning',
+          );
+          return;
+        }
+        await openSerialPortWithOptions(picked, usbBaudRate);
+        port = picked;
         await refreshUsbPorts();
       }
       const id = `serial-${Date.now()}`;
@@ -387,7 +423,27 @@ export default function Terminal() {
       setActiveTab('terminal');
     } catch (e) {
       if (e instanceof DOMException && e.name === 'NotFoundError') return;
+      if (e instanceof Error && e.message === SERIAL_PORT_ALREADY_OPEN_CODE) {
+        addToast(
+          t(
+            'terminal.serial.portAlreadyInUse',
+            '该串口已在当前页面打开。请先关闭对应终端标签页，或选择其他端口。若串口调试助手等其它程序占用，请先关闭。',
+          ),
+          'warning',
+        );
+        return;
+      }
       const msg = e instanceof Error ? e.message : String(e);
+      if (/already open/i.test(msg)) {
+        addToast(
+          t(
+            'terminal.serial.portAlreadyInUse',
+            '该串口已在当前页面打开。请先关闭对应终端标签页，或选择其他端口。若串口调试助手等其它程序占用，请先关闭。',
+          ),
+          'warning',
+        );
+        return;
+      }
       addToast(fillTemplate(t('terminal.serial.openFail', '无法打开串口：{{msg}}'), { msg }), 'error');
     } finally {
       usbSerialConnectLockRef.current = false;

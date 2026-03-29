@@ -24,6 +24,11 @@ interface OpenSerialOptions {
 interface SerialPort extends EventTarget {
   readonly readable: ReadableStream<Uint8Array> | null;
   readonly writable: WritableStream<Uint8Array> | null;
+  /**
+   * Chromium 实现：仅在端口已打开时为 true。
+   * 仅用 readable/writable 判断「是否已打开」在少数环境下会误判（未打开仍非 null），应优先用本字段。
+   */
+  readonly opened?: boolean;
   open(options: OpenSerialOptions): Promise<void>;
   close(): Promise<void>;
   getInfo(): SerialPortInfo;
