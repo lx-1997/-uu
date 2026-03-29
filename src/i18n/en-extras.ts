@@ -718,6 +718,40 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.log.xburnWait': 'Complete flashing in xburn…',
   'flasher.toast.cancelled': 'Cancelled',
   'flasher.err.xburnLaunchFail': 'Failed to start xburn',
+  'flasher.err.s100CliUnsupported': 'S100 CLI flash is not available; use “Launch xburn” or update the desktop app.',
+  'flasher.err.xburnFlashFail': 'xburn flash failed',
+  'flasher.btn.s100OneClick': 'One-click CLI flash',
+  'flasher.log.s100CliDone':
+    'xburn CLI exited successfully (code 0); the board may still be rebooting—verify on device shortly',
+  'flasher.log.s100CliDoneUncertain':
+    'xburn CLI exited (code 0) but the log did not show a definitive “flash completed” pattern. Do not assume success—verify on the board; if flash failed, bring the device to stable fastboot and retry.',
+  'flasher.log.s100EnvCheck': 'Running xburn environment probe…',
+  'flasher.s100.envCheckWarn':
+    'The xburn environment check did not fully pass. Click OK to continue one-click flash anyway, or Cancel to stop.',
+  'flasher.s100.envCheckInvokeFail':
+    'Environment check failed to run: {{msg}}\n\nContinue one-click flash anyway?',
+  'flasher.toast.s100FlashDone': 'S100 flash completed',
+  'flasher.toast.s100FlashUncertain': 'xburn exited—confirm on the board whether flashing succeeded',
+  'flasher.hint.s100OneClick':
+    'Windows one-click needs: (1) firmware (product.zip or folder — above); (2) xburn-gui’s xburn.exe (you can pick it on the flash step).',
+  'flasher.hint.s100OneClickMac':
+    'On Mac, one-click finds xburn under /Applications or your PATH, or downloads the official DMG into your user Applications if missing. Pick firmware above only; sudo will ask for your admin password — no xburn file picker.',
+  'flasher.s100.cliIntro':
+    'Recommended: “One-click CLI flash” runs xburn (USB + fastboot). On Windows, adb reboots into flash mode first. You can still use the graphical tool on the left.',
+  'flasher.s100.cliIntroMac':
+    'Recommended: “One-click CLI flash”. macOS auto-locates xburn (/Applications or PATH) or installs from the official DMG if needed; sudo asks for your password. You can still use “Launch xburn” on the left for manual GUI flashing.',
+  'flasher.s100.skipAdbReboot': 'Device already in download mode — skip adb reboot usb2',
+  'flasher.s100.err.needImagePath':
+    'One-click flash needs product.zip or a firmware folder on disk.',
+  'flasher.s100.xburnToolSection': 'Flash tool (xburn-gui)',
+  'flasher.s100.xburnToolExplain':
+    'This is not the same as the firmware zip/folder from the previous step. Choose xburn-gui.app (macOS) or xburn-gui.exe (Windows) from the official package.',
+  'flasher.s100.xburnToolNotSet':
+    'Not chosen on this page yet (one-click will open a system file dialog — pick the .app/.exe, not the firmware folder).',
+  'flasher.s100.xburnToolPick': 'Choose xburn program…',
+  'flasher.s100.xburnToolChange': 'Change xburn program…',
+  'flasher.s100.toast.xburnToolSaved':
+    'xburn program path saved; one-click will skip this prompt unless the file moves.',
   'flasher.err.cancelSendFail': 'Failed to send cancel',
   'flasher.toast.cancelRequested': 'Cancel requested; stopping write…',
   'flasher.header.badge': 'RDK image flash',
@@ -744,17 +778,26 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.next.flash': 'Flash',
   'flasher.next.pickDisk': 'Choose disk',
   'flasher.section.xburnFlow': 'Recommended: xburn',
+  'flasher.section.manualFlash': 'Manual flashing',
+  'flasher.section.autoFlash': 'Automatic flashing',
+  'flasher.auto.descFallback':
+    'Prefer the graphical tool on the left; if your desktop app supports it, use one-click CLI flash via the button below.',
   'flasher.xburn.desc': 'S100 / eMMC models should use xburn-gui.',
-  'flasher.xburn.step1': '1. Install xburn-gui',
-  'flasher.xburn.step2': '2. Connect the board via USB Type-C',
-  'flasher.xburn.step3': '3. Launch xburn below and select the image in the tool',
+  'flasher.xburn.step1': 'Install xburn-gui',
+  'flasher.xburn.step2': 'Connect the board via USB Type-C',
+  'flasher.xburn.step3': 'At the bottom of the left column, click “Launch xburn”, then pick the image in xburn',
   'flasher.s100.typecHint': 'For S100, connect the board with USB Type-C and follow xburn prompts to enter flash mode.',
   'flasher.s100.officialCatalogHint':
-    'The list below is the official firmware catalog only. Use “Manual download” for product.zip; in xburn pick the local zip, extracted folder, or .img.',
-  'flasher.s100.pickZipTitle': 'Choose S100 image (product.zip or extracted .img)',
-  'flasher.s100.pickFolderTitle': 'Choose extracted firmware folder (directory that contains product)',
-  'flasher.s100.pickFolder': 'Choose folder',
-  'flasher.s100.pathPlaceholder': 'Path to product.zip, extracted folder, or .img (ASCII path recommended)',
+    'The list below is the official firmware catalog. Use “Manual download” for product.zip. One-click flash can use that zip or an extracted folder (same as reference Studio). Non-ASCII paths may be copied to a temporary English folder first. You can also flash manually in xburn-gui.',
+  'flasher.s100.err.unsupportedFile':
+    'S100 one-click flash needs product.zip or a firmware folder.',
+  'flasher.err.unsupportedFileType': 'Unsupported file type. Choose a .img or .xz image.',
+  'flasher.s100.pickUnifiedDialogTitle': 'Choose product.zip or extracted firmware folder',
+  'flasher.s100.pickFolderOnlyTitle': 'Choose extracted firmware folder',
+  'flasher.s100.pickFirmware': 'Choose product.zip or extracted folder…',
+  'flasher.s100.pickedFirmware': 'Firmware selected (zip or folder)',
+  'flasher.s100.pathPlaceholder':
+    'Path to product.zip or extracted firmware folder',
   'flasher.s100.manualDocLink': 'Open official S100 manual flashing guide',
   'flasher.s100.summaryOfficial': 'Official catalog (pick image in xburn)',
   'flasher.summary.local': 'Local file',
@@ -785,6 +828,13 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.btn.getXburn': 'Get xburn',
   'flasher.btn.writing': 'Working…',
   'flasher.btn.startWrite': 'Start write',
+  'flasher.phase.preparing': 'Preparing environment (drivers / adb / paths)…',
+  'flasher.phaseLabel.preparing': 'Environment prep',
+  'flasher.phaseLabel.s100Preparing': 'Env prep (driver / adb)',
+  'flasher.phaseLabel.s100Download': 'Download (driver / tools)',
+  'flasher.phaseLabel.s100Decompress': 'Extract',
+  'flasher.toast.cancelRequestedS100':
+    'Cancel requested: stopping downloads, install, and xburn (if stuck on UAC, close the system elevation dialog first)…',
   'flasher.phase.downloading': 'Downloading image…',
   'flasher.phase.backup': 'Backing up target…',
   'flasher.phase.decompressing': 'Decompressing…',

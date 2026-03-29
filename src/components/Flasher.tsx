@@ -9,7 +9,19 @@ import { useI18n } from '../i18n/use-i18n';
    Types
    ═══════════════════════════════════════════════════════════ */
 type WizardStep = 0 | 1 | 2 | 3 | 4;
-type FlashPhase = 'idle' | 'backup' | 'downloading' | 'decompressing' | 'flashing' | 'verifying' | 'done' | 'error';
+type FlashPhase =
+  | 'idle'
+  | 'preparing'
+  | 'backup'
+  | 'downloading'
+  | 'decompressing'
+  | 'flashing'
+  | 'verifying'
+  | 'done'
+  | 'error';
+
+/** 烧录进度条左侧列（与主流程 phase 对应的子步骤） */
+type FlashProgressRowKey = 'preparing' | 'downloading' | 'decompressing' | 'flashing' | 'verifying';
 type FlashPerformanceProfile = 'balanced' | 'turbo';
 
 interface DeviceItem {
@@ -165,6 +177,7 @@ function isFlashUserCancelled(msg: string): boolean {
   const m = String(msg).trim();
   if (m === '用户取消' || m === '用户取消写盘') return true;
   if (/^cancel(led)?$/i.test(m)) return true;
+  if (m.includes('USER_CANCELLED')) return true;
   return false;
 }
 
@@ -172,6 +185,7 @@ function isFlashUserCancelled(msg: string): boolean {
 const LEGACY_FLASHER_STORAGE_KEY = 'rdk:flasher:ui-state:v1';
 
 function normalizeStageToPhase(stage: string | undefined): FlashPhase {
+  if (stage === 'prepare' || stage === 'preparing') return 'preparing';
   if (stage === 'backup') return 'backup';
   if (stage === 'downloading') return 'downloading';
   if (stage === 'decompressing') return 'decompressing';
@@ -222,13 +236,17 @@ export default function Flasher() {
   const [performanceProfile, setPerformanceProfile] = useState<FlashPerformanceProfile>('balanced');
   const [verifyDetail, setVerifyDetail] = useState('');
   const abortRef = useRef(false);
+  const cancelToastCooldownRef = useRef(0);
   const stepRef = useRef(step);
   stepRef.current = step;
 
   /* ── wifi config state ── */
   const [showWifiConfig, setShowWifiConfig] = useState(false);
   const [wifiConfig, setWifiConfig] = useState<WifiConfig>({ mode: 'station', ssid: '', password: '' });
-
+  /** Windows：跳过 adb reboot usb2（已手动进 fastboot 时使用） */
+  const [s100SkipAdbReboot, setS100SkipAdbReboot] = useState(false);
+  /** S100 一键：xburn-gui 程序路径（与固件 zip/文件夹不同；主进程亦有缓存） */
+  const [s100XburnGuiPath, setS100XburnGuiPath] = useState('');
   const isDesktop = checkIsDesktop();
   const platform = window.rdkDesktop?.platform ?? 'unknown';
   const { caps, loading: capsLoading } = useFlashCapabilities();
@@ -244,21 +262,58 @@ export default function Flasher() {
     [drives, selectedDrive],
   );
   const needsXburn = requiresXburn(selectedDeviceKey);
+  const isS100Device = selectedDeviceKey === 's100';
+  /** Windows + 支持 S100 CLI：存在「驱动 / adb」前置链，步骤条与文案单独展示 */
+  const isWinS100OneClick =
+    isS100Device && platform === 'win32' && Boolean(caps.supportsS100XburnCli);
+
+  const refreshS100XburnGuiPath = useCallback(async () => {
+    const api = window.rdkDesktop?.flashGetS100XburnGui;
+    if (!api) return;
+    try {
+      const r = await api();
+      setS100XburnGuiPath(r?.ok && r.path ? r.path : '');
+    } catch {
+      setS100XburnGuiPath('');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (step === 2 && isS100Device && caps.supportsS100XburnCli && isDesktop && platform !== 'darwin') {
+      void refreshS100XburnGuiPath();
+    }
+  }, [step, isS100Device, caps.supportsS100XburnCli, isDesktop, platform, refreshS100XburnGuiPath]);
+
+  const flashStepPhases = useMemo((): readonly FlashProgressRowKey[] => {
+    if (isWinS100OneClick) {
+      return ['preparing', 'downloading', 'decompressing', 'flashing', 'verifying'];
+    }
+    return ['downloading', 'decompressing', 'flashing', 'verifying'];
+  }, [isWinS100OneClick]);
 
   const flashPhaseRowLabels = useMemo(
-    () => ({
-      downloading: t('flasher.phaseLabel.downloading', '下载镜像'),
-      decompressing: t('flasher.phaseLabel.decompressing', '解压镜像'),
+    (): Record<FlashProgressRowKey, string> => ({
+      preparing: isWinS100OneClick
+        ? t('flasher.phaseLabel.s100Preparing', '环境准备（驱动 / adb）')
+        : t('flasher.phaseLabel.preparing', '环境准备'),
+      downloading: isWinS100OneClick
+        ? t('flasher.phaseLabel.s100Download', '下载资源（驱动 / 工具）')
+        : t('flasher.phaseLabel.downloading', '下载镜像'),
+      decompressing: isWinS100OneClick
+        ? t('flasher.phaseLabel.s100Decompress', '解压')
+        : t('flasher.phaseLabel.decompressing', '解压镜像'),
       flashing: needsXburn
         ? t('flasher.phaseLabel.flashingXburn', 'xburn 烧录')
         : t('flasher.phaseLabel.flashing', '写盘'),
       verifying: t('flasher.phaseLabel.verifying', '写后校验'),
     }),
-    [needsXburn, t, language],
+    [needsXburn, t, language, isWinS100OneClick],
   );
 
   const flashPhaseTitle = useMemo(() => {
     switch (phase) {
+      case 'preparing':
+        return t('flasher.phase.preparing', '环境准备中（驱动 / adb / 路径）…');
       case 'downloading':
         return t('flasher.phase.downloading', '下载镜像中...');
       case 'backup':
@@ -302,7 +357,11 @@ export default function Flasher() {
       if (mappedPhase !== 'idle') {
         setPhase(mappedPhase);
       }
-      if (mappedPhase !== 'done' && mappedPhase !== 'error' && mappedPhase !== 'idle') {
+      if (
+        mappedPhase !== 'done'
+        && mappedPhase !== 'error'
+        && mappedPhase !== 'idle'
+      ) {
         setStep((s) => (s <= 2 ? 3 : s));
       }
     };
@@ -419,36 +478,50 @@ export default function Flasher() {
       setError(t('flasher.err.pickUnsupported', '当前环境不支持文件选择'));
       return;
     }
-    const ext = selectedDeviceKey === 's100' ? ['zip', 'img'] : ['img', 'xz'];
+    const ext = ['img', 'xz'];
     const result = await window.rdkDesktop.flashPickImage({
       extensions: ext,
-      title:
-        selectedDeviceKey === 's100'
-          ? t('flasher.s100.pickZipTitle', '选择 S100 镜像（product.zip 或已解压的 .img）')
-          : undefined,
+      appendAllFilesFilter: true,
     });
     if (result.ok && result.path) {
-      setLocalImagePath(result.path);
+      const p = result.path;
+      const lower = p.toLowerCase();
+      if (!lower.endsWith('.img') && !lower.endsWith('.xz')) {
+        setError(t('flasher.err.unsupportedFileType', '不支持该文件类型，请选择 .img 或 .xz 镜像。'));
+        addToast(t('flasher.err.unsupportedFileType', '不支持该文件类型，请选择 .img 或 .xz 镜像。'), 'error');
+        return;
+      }
+      setLocalImagePath(p);
       setUseLocalImage(true);
       setSelectedImageKey('');
       addToast(t('flasher.toast.imagePicked', '已选择镜像文件'), 'success');
     }
   };
 
-  const pickLocalImageFolder = async () => {
+  /** S100：与参考 Studio 一致 — product.zip 或已解压目录 */
+  const pickS100UnifiedImage = async () => {
     if (!window.rdkDesktop?.flashPickImage) {
       setError(t('flasher.err.pickUnsupported', '当前环境不支持文件选择'));
       return;
     }
     const result = await window.rdkDesktop.flashPickImage({
-      mode: 'directory',
-      title: t('flasher.s100.pickFolderTitle', '选择解压后的固件目录（含 product 的文件夹）'),
+      mode: 's100-unified',
+      title: t('flasher.s100.pickUnifiedDialogTitle', '选择 product.zip 或已解压固件文件夹'),
+      titleDirectory: t('flasher.s100.pickFolderOnlyTitle', '选择已解压的固件文件夹'),
     });
-    if (result.ok && result.path) {
+    if (result.canceled) return;
+    if (!result.ok) {
+      if (result.error) {
+        setError(result.error);
+        addToast(result.error, 'error');
+      }
+      return;
+    }
+    if (result.path) {
       setLocalImagePath(result.path);
       setUseLocalImage(true);
       setSelectedImageKey('');
-      addToast(t('flasher.toast.imagePicked', '已选择镜像目录'), 'success');
+      addToast(t('flasher.toast.imagePicked', '已选择镜像'), 'success');
     }
   };
 
@@ -586,7 +659,7 @@ export default function Flasher() {
       setProgress(100);
       setPhase('done');
       addToast(t('flasher.toast.writeDone', '镜像写盘完成'), 'success');
-      setStep(4);
+      /* 保留在步骤 3，由用户点「完成 →」再进入写盘完成页，避免成功瞬间自动跳转 */
     } catch (e: any) {
       const msg = e?.message || t('flasher.err.writeFail', '写盘失败');
       const userCancelled = isFlashUserCancelled(msg);
@@ -619,21 +692,149 @@ export default function Flasher() {
     }
   };
 
+  /* ── S100：xburn 命令行一键烧写 ── */
+  const runS100XburnCli = async () => {
+    if (!window.rdkDesktop?.flashS100Xburn) {
+      setError(t('flasher.err.s100CliUnsupported', '当前环境不支持 S100 命令行烧写，请使用「启动 xburn 工具」或升级桌面客户端'));
+      return;
+    }
+    const p = localImagePath.trim();
+    if (!p) {
+      setError(t('flasher.s100.err.needImagePath', '一键烧写需要选择本机 product.zip 或固件文件夹'));
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setLogs([]);
+    setProgress(0);
+    setPhase('flashing');
+    setStep(3);
+
+    if (window.rdkDesktop.flashCheckS100XburnEnv) {
+      appendLog(t('flasher.log.s100EnvCheck', '正在检查 xburn 环境…'));
+      try {
+        const env = await window.rdkDesktop.flashCheckS100XburnEnv({
+          xburnGuiPath: s100XburnGuiPath.trim() || undefined,
+        });
+        if (!env.ok) {
+          const fails = (env.checks || []).filter((c) => c && c.pass === false);
+          const onlyMissingPath = fails.length === 1 && fails[0]?.id === 'xburn_path';
+          if (onlyMissingPath) {
+            const msg = fails[0]?.message || t('flasher.err.s100CliUnsupported', '未找到 xburn，请先安装或选择 xburn 程序路径');
+            setError(msg);
+            addToast(msg, 'error');
+            setLoading(false);
+            setPhase('error');
+            setStep(2);
+            return;
+          }
+          const lines = fails.map((c) => c.message || '').filter(Boolean);
+          const detail = [lines.join('\n'), env.rawLog ? `\n---\n${env.rawLog}` : ''].join('').trim();
+          const intro = t(
+            'flasher.s100.envCheckWarn',
+            'xburn 环境检查未完全通过。确定则仍继续一键烧写，取消则中止。',
+          );
+          if (!window.confirm(`${intro}\n\n${detail.slice(0, 1800)}`)) {
+            appendLog(t('flasher.log.cancelledByUser', '操作已由用户取消'));
+            setLoading(false);
+            setPhase('idle');
+            setStep(2);
+            addToast(t('flasher.toast.cancelled', '已取消'), 'info');
+            return;
+          }
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (
+          !window.confirm(
+            tf('flasher.s100.envCheckInvokeFail', '环境检查调用失败：{{msg}}\n\n仍要继续一键烧写？', { msg }),
+          )
+        ) {
+          appendLog(t('flasher.log.cancelledByUser', '操作已由用户取消'));
+          setLoading(false);
+          setPhase('idle');
+          setStep(2);
+          addToast(t('flasher.toast.cancelled', '已取消'), 'info');
+          return;
+        }
+      }
+    }
+
+    try {
+      const result = await window.rdkDesktop.flashS100Xburn({
+        imagePath: p,
+        xburnGuiPath: s100XburnGuiPath.trim() || undefined,
+        skipAdbReboot: platform === 'win32' && s100SkipAdbReboot,
+      });
+      if (result.canceled) {
+        setPhase('error');
+        setError('');
+        appendLog(t('flasher.log.cancelledByUser', '操作已由用户取消'));
+        addToast(t('flasher.toast.writeCancelled', '写盘已取消'), 'info');
+      } else if (result.ok) {
+        setProgress(100);
+        setPhase('done');
+        const uncertain = result.completedBurnEvidence === false;
+        appendLog(
+          uncertain
+            ? t(
+                'flasher.log.s100CliDoneUncertain',
+                'xburn 命令行已退出（退出码 0），但未从日志识别到固定「写盘完成」依据。请勿视为已成功，请在板端自行验证；若未写入请先让设备稳定进入 fastboot 再重试。',
+              )
+            : t(
+                'flasher.log.s100CliDone',
+                'xburn 命令行已正常结束（退出码 0）；设备可能仍在重启，请稍候再在板端验证',
+              ),
+        );
+        addToast(
+          uncertain
+            ? t('flasher.toast.s100FlashUncertain', 'xburn 已退出，请在板端确认是否刷写成功')
+            : t('flasher.toast.s100FlashDone', 'S100 烧录已完成'),
+          uncertain ? 'warning' : 'success',
+        );
+        /* 同上：不自动进入完成页，等待用户确认 */
+      } else {
+        const msg = result.error || t('flasher.err.xburnFlashFail', 'xburn 烧录失败');
+        setError(msg);
+        setPhase('error');
+        if (result.logTail) appendLog(result.logTail);
+        addToast(msg, 'error');
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      setPhase('error');
+      addToast(msg, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   /* ── start full flash workflow ── */
   const startFlashWorkflow = async () => {
+    if (needsXburn) {
+      if (selectedDeviceKey === 's100' && caps.supportsS100XburnCli && window.rdkDesktop?.flashS100Xburn) {
+        await runS100XburnCli();
+        return;
+      }
+      setLoading(true);
+      setError('');
+      setLogs([]);
+      setProgress(0);
+      setPhase('idle');
+      setStep(3);
+      await launchXburn();
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError('');
     setLogs([]);
     setProgress(0);
     setPhase('idle');
     setStep(3);
-
-    if (needsXburn) {
-      await launchXburn();
-      setLoading(false);
-      return;
-    }
-
     await executeFlash();
     setLoading(false);
   };
@@ -652,15 +853,18 @@ export default function Flasher() {
     }
   };
 
-  const isS100Device = selectedDeviceKey === 's100';
   const canProceedFromImage = useMemo(() => {
+    /* S100：官方列表仅供下载指引，有效镜像须为下方本机路径（zip / 文件夹） */
+    if (isS100Device) return !!localImagePath.trim();
     if (useLocalImage) return !!localImagePath.trim();
-    if (isS100Device) return true;
     return !!selectedImageKey;
   }, [useLocalImage, localImagePath, isS100Device, selectedImageKey]);
   const canProceedFromDrive = needsXburn || selectedDriveValid;
 
   const requestCancel = () => {
+    const now = Date.now();
+    if (now - cancelToastCooldownRef.current < 1800) return;
+    cancelToastCooldownRef.current = now;
     abortRef.current = true;
     void window.rdkDesktop?.flashCancelLocal?.().then((r) => {
       if (r && r.ok === false && r.error) addToast(r.error, 'error');
@@ -668,11 +872,92 @@ export default function Flasher() {
       const msg = e instanceof Error ? e.message : String(e);
       addToast(msg || t('flasher.err.cancelSendFail', '取消指令发送失败'), 'error');
     });
-    addToast(t('flasher.toast.cancelRequested', '已请求取消，正在停止写盘…'), 'info');
+    addToast(
+      isWinS100OneClick
+        ? t(
+          'flasher.toast.cancelRequestedS100',
+          '已请求取消：正在中断下载/安装与 xburn（若卡在 UAC 请先关闭系统提权窗口）…',
+        )
+        : t('flasher.toast.cancelRequested', '已请求取消，正在停止写盘…'),
+      'info',
+    );
   };
 
   /* ── xburn download url for current platform ── */
   const xburnUrl = XBURN_DOWNLOAD_URLS[platform] || XBURN_DOWNLOAD_URLS.linux;
+
+  const renderStep2Summary = () => (
+    <div className="flasher-summary-pane">
+      <div className="section-label">{t('flasher.section.summary', '确认信息')}</div>
+      <div className="config-section">
+        <div className="config-row">
+          <span className="config-label">{t('flasher.label.device', '设备')}</span>
+          <span className="config-value">
+            <strong>{DEVICE_LIST.find((d) => d.key === selectedDeviceKey)?.name}</strong>
+          </span>
+        </div>
+        <div className="config-row">
+          <span className="config-label">{t('flasher.label.image', '镜像')}</span>
+          <span className="config-value">
+            <strong>
+              {useLocalImage
+                ? t('flasher.summary.local', '本机路径')
+                : isS100Device
+                  ? t('flasher.s100.summaryOfficial', '官方目录（请在 xburn 中选镜像）')
+                  : (selectedImage?.name ?? '--')}
+            </strong>
+          </span>
+        </div>
+        <div className="config-row">
+          <span className="config-label">{t('flasher.label.localPath', '本机路径')}</span>
+          <span className="config-value">
+            <strong style={{ wordBreak: 'break-all' }}>
+              {localImagePath
+                || (needsXburn
+                  ? t('flasher.path.xburnPick', 'xburn 内选择')
+                  : (useLocalImage ? t('flasher.path.notChosen', '未选择') : t('flasher.path.onlineImage', '在线镜像')))}
+            </strong>
+          </span>
+        </div>
+        <div className="config-row">
+          <span className="config-label">{t('flasher.label.targetDrive', '目标磁盘')}</span>
+          <span className="config-value">
+            <strong>
+              {needsXburn
+                ? t('flasher.drive.xburnManaged', 'xburn 管理')
+                : (selectedDriveValid ? selectedDrive : t('flasher.drive.notChosen', '未选择'))}
+            </strong>
+          </span>
+        </div>
+        {!needsXburn && (
+          <div className="config-row" style={{ alignItems: 'flex-start' }}>
+            <span className="config-label">{t('flasher.label.flashMode', '烧录模式')}</span>
+            <span className="config-value" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+              <select
+                className="input"
+                style={{ minWidth: 180 }}
+                value={performanceProfile}
+                onChange={(e) => setPerformanceProfile(e.target.value === 'turbo' ? 'turbo' : 'balanced')}
+              >
+                <option value="balanced">{t('flasher.mode.balanced', '常规烧录（更稳）')}</option>
+                <option value="turbo">{t('flasher.mode.turbo', '极速烧录（更快）')}</option>
+              </select>
+              {performanceProfile === 'turbo' && (
+                <span className="badge badge-danger">{t('flasher.warn.turbo', '极速模式会占用更多 CPU/磁盘资源，可能造成卡顿')}</span>
+              )}
+            </span>
+          </div>
+        )}
+      </div>
+      {!needsXburn && (
+        <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
+          <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
+            {t('flasher.confirm.erase', '写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。')}
+          </p>
+        </div>
+      )}
+    </div>
+  );
 
   /* ═══════════════════════════════════════════════════════════
      RENDER
@@ -757,7 +1042,7 @@ export default function Flasher() {
             )}
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
                 {selectedDeviceKey === 's100' && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
@@ -791,7 +1076,7 @@ export default function Flasher() {
                 <p className="config-card-desc" style={{ margin: 0 }}>
                   {t(
                     'flasher.s100.officialCatalogHint',
-                    '下列为官方固件版本目录，点击「手动下载」获取 product.zip；烧录请在 xburn 中选择本机 zip / 解压目录或 .img。',
+                    '下列为官方固件版本目录，点击「手动下载」获取 product.zip。一键烧写可直接选择该 zip 或已解压文件夹（与参考 Studio 一致）；路径含中文时可能自动复制到临时英文目录。也可仅用下方图形工具手动烧录。',
                   )}
                 </p>
               </div>
@@ -839,11 +1124,25 @@ export default function Flasher() {
                 <div className="config-section">
                   <div
                     className={`config-card ${useLocalImage ? 'selected' : ''}`}
-                    onClick={pickLocalImage}
+                    onClick={() => void (isS100Device ? pickS100UnifiedImage() : pickLocalImage())}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        void (isS100Device ? pickS100UnifiedImage() : pickLocalImage());
+                      }
+                    }}
                   >
                     <div className="config-card-head">
                       <div className="config-card-name">
-                        {localImagePath ? t('flasher.localFile.picked', '已选择本机文件') : t('flasher.localFile.pick', '选择本机镜像文件...')}
+                        {isS100Device
+                          ? (localImagePath
+                            ? t('flasher.s100.pickedFirmware', '已选择固件（zip 或文件夹）')
+                            : t('flasher.s100.pickFirmware', '选择 product.zip 或已解压文件夹…'))
+                          : (localImagePath
+                            ? t('flasher.localFile.picked', '已选择本机文件')
+                            : t('flasher.localFile.pick', '选择本机镜像文件...'))}
                       </div>
                     </div>
                     {localImagePath && <div className="config-card-desc" style={{ wordBreak: 'break-all' }}>{localImagePath}</div>}
@@ -854,29 +1153,39 @@ export default function Flasher() {
                       style={{ flex: 1, minWidth: 0 }}
                       placeholder={
                         isS100Device
-                          ? t('flasher.s100.pathPlaceholder', 'product.zip、解压目录或 .img 的路径（建议英文路径）')
-                          : t('flasher.localFile.placeholder', '或手动输入路径 (.img / .xz / .zip)')
+                          ? t(
+                            'flasher.s100.pathPlaceholder',
+                            '请填写或浏览：product.zip 或已解压固件文件夹路径',
+                          )
+                          : t('flasher.localFile.placeholder', '或手动输入路径 (.img / .xz)')
                       }
                       value={localImagePath}
                       onChange={(e) => { setLocalImagePath(e.target.value); if (e.target.value) setUseLocalImage(true); }}
                     />
                     {isDesktop && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocalImage}>
-                          {t('flasher.localFile.browse', '浏览')}
-                        </button>
-                        {isS100Device && (
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocalImageFolder}>
-                            {t('flasher.s100.pickFolder', '选择文件夹')}
-                          </button>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => void (isS100Device ? pickS100UnifiedImage() : pickLocalImage())}
+                      >
+                        {t('flasher.localFile.browse', '浏览')}
+                      </button>
                     )}
                   </div>
                   {needsXburn && (
                     <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
                       <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
-                        {t('flasher.hint.xburnOptional', '该设备走 xburn 流程，本机镜像文件可选（也可在 xburn 内选择镜像）。')}
+                        {isS100Device && caps.supportsS100XburnCli
+                          ? platform === 'darwin'
+                            ? t(
+                              'flasher.hint.s100OneClickMac',
+                              'Mac 上一键烧写会自动使用 /Applications 或 PATH 里的 xburn；若未安装会尝试下载官方 DMG 并装到用户「应用程序」。你只需在上方选好固件；烧录时会弹管理员密码（sudo），无需再选 xburn 程序。',
+                            )
+                            : t(
+                              'flasher.hint.s100OneClick',
+                              'Windows 一键烧写需要：① 本机固件（product.zip 或文件夹，在上方选择）；② xburn-gui 目录下的 xburn.exe（可在烧录页提前选择，避免与固件混淆）。',
+                            )
+                          : t('flasher.hint.xburnOptional', '该设备走 xburn 流程，本机镜像文件可选（也可在 xburn 内选择镜像）。')}
                       </p>
                     </div>
                   )}
@@ -894,7 +1203,7 @@ export default function Flasher() {
             </div>
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
                 {isS100Device && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
@@ -927,150 +1236,166 @@ export default function Flasher() {
         {/* ═══════ Step 2: Select Drive / Confirm ═══════ */}
         {step === 2 && (
           <section className="card card-compact flasher-step-card">
-            <div className="config-grid flasher-step2-grid">
+            <div className={`config-grid flasher-step2-grid${needsXburn ? ' flasher-step2-xburn' : ''}`}>
               {needsXburn ? (
-                /* xburn guidance */
-                <div className="card card-compact">
-                  <div className="section-label">{t('flasher.section.xburnFlow', '推荐流程：使用 xburn')}</div>
-                  <div className="card card-compact" style={{ borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
-                    <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
-                      {t('flasher.xburn.desc', 'S100 / eMMC 机型建议使用 xburn-gui 完成烧录。')}
-                    </p>
+                <>
+                  <div className="card card-compact flasher-manual-pane">
+                    <div className="flasher-xburn-pane-title">
+                      <span className="flasher-xburn-pane-num" aria-hidden>1</span>
+                      <span>{t('flasher.section.manualFlash', '手动烧录')}</span>
+                    </div>
+                    <div className="flasher-manual-body">
+                      <p className="config-card-desc">
+                        {t('flasher.xburn.desc', 'S100 / eMMC 机型建议使用 xburn-gui 完成烧录。')}
+                      </p>
+                      <ol className="flasher-xburn-step-list">
+                        <li>{t('flasher.xburn.step1', '确认已安装 xburn-gui')}</li>
+                        <li>{t('flasher.xburn.step2', '通过 USB Type-C 连接开发板')}</li>
+                        <li>{t('flasher.xburn.step3', '在左栏底部点击「启动 xburn 工具」，随后在 xburn 中选择镜像')}</li>
+                      </ol>
+                    </div>
+                    <div className="flasher-manual-actions">
+                      {caps.supportsLaunchThirdPartyTool && (
+                        <button type="button" className="btn btn-ghost" onClick={launchXburn}>
+                          {t('flasher.btn.launchXburn', '启动 xburn 工具')}
+                        </button>
+                      )}
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => openExternal(xburnUrl)}>
+                        {t('flasher.btn.downloadXburn', '下载 xburn-gui')}
+                      </button>
+                    </div>
                   </div>
-                  <p className="config-card-desc">
-                    {t('flasher.xburn.step1', '1. 确认已安装 xburn-gui')}<br />
-                    {t('flasher.xburn.step2', '2. 通过 USB Type-C 连接开发板')}<br />
-                    {t('flasher.xburn.step3', '3. 点击下方按钮启动 xburn 并在工具中选择镜像')}
-                  </p>
-                  <div className="config-actions">
-                    {caps.supportsLaunchThirdPartyTool && (
-                      <button type="button" className="btn btn-primary" onClick={launchXburn}>
-                        {t('flasher.btn.launchXburn', '启动 xburn 工具')}
+                  <div className="card card-compact flasher-auto-pane">
+                    <div className="flasher-xburn-pane-title">
+                      <span className="flasher-xburn-pane-num" aria-hidden>2</span>
+                      <span>{t('flasher.section.autoFlash', '自动烧录')}</span>
+                    </div>
+                    <div className="flasher-auto-stack">
+                      {selectedDeviceKey === 's100' && caps.supportsS100XburnCli ? (
+                        <div className="card card-compact flasher-auto-reco-callout">
+                          <p className="config-card-desc">
+                            {platform === 'darwin'
+                              ? t(
+                                'flasher.s100.cliIntroMac',
+                                '推荐：使用「一键命令行烧写」。Mac 会自动定位 xburn（/Applications 或 PATH），必要时自动下载安装；通过系统对话框输入密码以 sudo 运行 xburn。也可改用左侧「启动 xburn 工具」手动操作。',
+                              )
+                              : t(
+                                'flasher.s100.cliIntro',
+                                '推荐：使用「一键命令行烧写」自动调用 xburn（USB + fastboot）。Windows 下将先通过 adb 进入烧录模式；也可改用左侧图形工具手动操作。',
+                              )}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="config-card-desc flasher-auto-fallback-hint">
+                          {t(
+                            'flasher.auto.descFallback',
+                            '优先使用左侧图形工具；若桌面端支持，可在底部使用一键命令行烧写。',
+                          )}
+                        </p>
+                      )}
+                      {selectedDeviceKey === 's100' && platform === 'win32' && caps.supportsS100XburnCli && (
+                        <label className="config-card-desc" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={s100SkipAdbReboot}
+                            onChange={(e) => setS100SkipAdbReboot(e.target.checked)}
+                          />
+                          {t('flasher.s100.skipAdbReboot', '已手动进入下载模式，跳过 adb reboot usb2')}
+                        </label>
+                      )}
+                      {selectedDeviceKey === 's100' && caps.supportsS100XburnCli && isDesktop && platform !== 'darwin' && window.rdkDesktop?.flashPickS100XburnGui && (
+                        <div className="card card-compact" style={{ borderColor: 'var(--border-strong)' }}>
+                          <div className="section-label" style={{ marginBottom: 6 }}>
+                            {t('flasher.s100.xburnToolSection', '烧写程序（xburn-gui）')}
+                          </div>
+                          <p className="config-card-desc" style={{ marginTop: 0 }}>
+                            {t(
+                              'flasher.s100.xburnToolExplain',
+                              '这与上一步的「固件 zip/文件夹」不是同一个文件：这里要选官方包里的 xburn-gui.app（Mac）或 xburn-gui.exe（Windows）。',
+                            )}
+                          </p>
+                          <p className="config-card-desc" style={{ wordBreak: 'break-all', marginBottom: 8 }}>
+                            {s100XburnGuiPath
+                              ? s100XburnGuiPath
+                              : t(
+                                'flasher.s100.xburnToolNotSet',
+                                '尚未在本页选择（点一键时仍会弹出系统文件框，请选 .app / .exe，不要选固件目录）。',
+                              )}
+                          </p>
+                          <div className="config-actions" style={{ flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              disabled={loading}
+                              onClick={async () => {
+                                const pick = window.rdkDesktop?.flashPickS100XburnGui;
+                                if (!pick) return;
+                                const r = await pick();
+                                if (r?.canceled) return;
+                                if (r?.ok && r.path) {
+                                  setS100XburnGuiPath(r.path);
+                                  addToast(
+                                    t('flasher.s100.toast.xburnToolSaved', '已保存 xburn 程序路径，一键烧写时不再问此项（除非文件被移动）'),
+                                    'success',
+                                  );
+                                }
+                              }}
+                            >
+                              {s100XburnGuiPath
+                                ? t('flasher.s100.xburnToolChange', '更换 xburn 程序…')
+                                : t('flasher.s100.xburnToolPick', '选择 xburn 程序…')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flasher-auto-summary-wrap">{renderStep2Summary()}</div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flasher-drive-pane">
+                    <div className="config-header" style={{ alignItems: 'flex-start' }}>
+                      <div className="section-label" style={{ marginBottom: 0 }}>{t('flasher.section.targetDisk', '选择目标磁盘')}</div>
+                      <span className="badge badge-danger">{t('flasher.warn.eraseAll', '写盘将清空目标磁盘全部数据！')}</span>
+                    </div>
+                    <div className="config-grid">
+                      {drives.length === 0 ? (
+                        <div className="config-card-desc">
+                          {caps.supportsDriveScan
+                            ? t('flasher.drives.empty', '未检测到可用 SD/eMMC 目标盘，请插入 TF/SD 卡后刷新')
+                            : t('flasher.drives.unsupported', '当前环境暂不支持磁盘检测')}
+                        </div>
+                      ) : (
+                        drives.map((d) => (
+                          <button
+                            type="button"
+                            key={d.path}
+                            className={`config-card ${selectedDrive === d.path ? 'selected' : ''}`}
+                            style={{ textAlign: 'left' }}
+                            onClick={() => setSelectedDrive(d.path)}
+                          >
+                            <div className="config-card-head">
+                              <div className="config-card-name">{d.label || d.path}</div>
+                            </div>
+                            <div className="config-card-desc">{d.bus} &middot; {d.size} &middot; {d.path}</div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    {caps.supportsDriveScan && (
+                      <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={scanDrives}>
+                        {t('flasher.btn.refreshDrives', '刷新磁盘列表')}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => openExternal(xburnUrl)}
-                    >
-                      {t('flasher.btn.downloadXburn', '下载 xburn-gui')}
-                    </button>
                   </div>
-                </div>
-              ) : (
-                /* drive selection */
-                <div className="flasher-drive-pane">
-                  <div className="config-header" style={{ alignItems: 'flex-start' }}>
-                    <div className="section-label" style={{ marginBottom: 0 }}>{t('flasher.section.targetDisk', '选择目标磁盘')}</div>
-                    <span className="badge badge-danger">{t('flasher.warn.eraseAll', '写盘将清空目标磁盘全部数据！')}</span>
-                  </div>
-                  <div className="config-grid">
-                    {drives.length === 0 ? (
-                      <div className="config-card-desc">
-                        {caps.supportsDriveScan
-                          ? t('flasher.drives.empty', '未检测到可用 SD/eMMC 目标盘，请插入 TF/SD 卡后刷新')
-                          : t('flasher.drives.unsupported', '当前环境暂不支持磁盘检测')}
-                      </div>
-                    ) : (
-                      drives.map((d) => (
-                        <button
-                          type="button"
-                          key={d.path}
-                          className={`config-card ${selectedDrive === d.path ? 'selected' : ''}`}
-                          style={{ textAlign: 'left' }}
-                          onClick={() => setSelectedDrive(d.path)}
-                        >
-                          <div className="config-card-head">
-                            <div className="config-card-name">{d.label || d.path}</div>
-                          </div>
-                          <div className="config-card-desc">{d.bus} &middot; {d.size} &middot; {d.path}</div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                  {caps.supportsDriveScan && (
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={scanDrives}>
-                      {t('flasher.btn.refreshDrives', '刷新磁盘列表')}
-                    </button>
-                  )}
-                </div>
+                  {renderStep2Summary()}
+                </>
               )}
-
-              {/* Confirm summary */}
-              <div className="flasher-summary-pane">
-                <div className="section-label">{t('flasher.section.summary', '确认信息')}</div>
-                <div className="config-section">
-                  <div className="config-row">
-                    <span className="config-label">{t('flasher.label.device', '设备')}</span>
-                    <span className="config-value">
-                      <strong>{DEVICE_LIST.find((d) => d.key === selectedDeviceKey)?.name}</strong>
-                    </span>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">{t('flasher.label.image', '镜像')}</span>
-                    <span className="config-value">
-                      <strong>
-                        {useLocalImage
-                          ? t('flasher.summary.local', '本机路径')
-                          : isS100Device
-                            ? t('flasher.s100.summaryOfficial', '官方目录（请在 xburn 中选镜像）')
-                            : (selectedImage?.name ?? '--')}
-                      </strong>
-                    </span>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">{t('flasher.label.localPath', '本机路径')}</span>
-                    <span className="config-value">
-                      <strong style={{ wordBreak: 'break-all' }}>
-                        {localImagePath
-                          || (needsXburn
-                            ? t('flasher.path.xburnPick', 'xburn 内选择')
-                            : (useLocalImage ? t('flasher.path.notChosen', '未选择') : t('flasher.path.onlineImage', '在线镜像')))}
-                      </strong>
-                    </span>
-                  </div>
-                  <div className="config-row">
-                    <span className="config-label">{t('flasher.label.targetDrive', '目标磁盘')}</span>
-                    <span className="config-value">
-                      <strong>
-                        {needsXburn
-                          ? t('flasher.drive.xburnManaged', 'xburn 管理')
-                          : (selectedDriveValid ? selectedDrive : t('flasher.drive.notChosen', '未选择'))}
-                      </strong>
-                    </span>
-                  </div>
-                  {!needsXburn && (
-                    <div className="config-row" style={{ alignItems: 'flex-start' }}>
-                      <span className="config-label">{t('flasher.label.flashMode', '烧录模式')}</span>
-                      <span className="config-value" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-                        <select
-                          className="input"
-                          style={{ minWidth: 180 }}
-                          value={performanceProfile}
-                          onChange={(e) => setPerformanceProfile(e.target.value === 'turbo' ? 'turbo' : 'balanced')}
-                        >
-                          <option value="balanced">{t('flasher.mode.balanced', '常规烧录（更稳）')}</option>
-                          <option value="turbo">{t('flasher.mode.turbo', '极速烧录（更快）')}</option>
-                        </select>
-                        {performanceProfile === 'turbo' && (
-                          <span className="badge badge-danger">{t('flasher.warn.turbo', '极速模式会占用更多 CPU/磁盘资源，可能造成卡顿')}</span>
-                        )}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                {!needsXburn && (
-                  <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--warn)', background: 'var(--warn-subtle)' }}>
-                    <p className="config-card-desc" style={{ color: 'var(--warn)', margin: 0 }}>
-                      {t('flasher.confirm.erase', '写盘将清空目标磁盘所有数据，请仔细确认目标路径和容量。')}
-                    </p>
-                  </div>
-                )}
-              </div>
             </div>
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
                 {selectedDeviceKey === 's100' && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
@@ -1086,7 +1411,21 @@ export default function Flasher() {
               </div>
               <div className="tool-bar-right">
                 {needsXburn ? (
-                  caps.supportsLaunchThirdPartyTool ? (
+                  isS100Device && caps.supportsS100XburnCli && isDesktop && window.rdkDesktop?.flashS100Xburn ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={loading || !localImagePath.trim()}
+                      title={
+                        !localImagePath.trim()
+                          ? t('flasher.s100.err.needImagePath', '一键烧写需要选择本机 product.zip 或固件文件夹')
+                          : undefined
+                      }
+                      onClick={() => startFlashWorkflow()}
+                    >
+                      {loading ? t('flasher.btn.writing', '执行中...') : t('flasher.btn.s100OneClick', '一键命令行烧写')}
+                    </button>
+                  ) : caps.supportsLaunchThirdPartyTool ? (
                     <button type="button" className="btn btn-primary" onClick={() => startFlashWorkflow()}>
                       {t('flasher.btn.startXburnFlash', '启动 xburn 烧录')}
                     </button>
@@ -1133,19 +1472,22 @@ export default function Flasher() {
 
             {/* Phase indicators */}
             <div className="config-section">
-              {(['downloading', 'decompressing', 'flashing', 'verifying'] as const).map((p) => {
+              {flashStepPhases.map((p) => {
                 let state: 'wait' | 'run' | 'done' | 'error' | 'skip' = 'wait';
-                const order: readonly string[] = ['downloading', 'decompressing', 'flashing', 'verifying', 'done', 'error'];
+                const order: readonly string[] = [...flashStepPhases, 'done', 'error'];
                 const ci = order.indexOf(phase);
                 const pi = order.indexOf(p);
                 if (ci === pi) state = 'run';
-                else if (ci > pi && ci < 6) state = 'done';
+                else if (ci > pi && ci < order.length) state = 'done';
                 else if (phase === 'done') state = 'done';
-                else if (phase === 'error' && pi < ci) state = 'done';
-                else if (phase === 'error' && pi === ci) state = 'error';
+                else if (phase === 'error' && ci >= 0 && pi < ci) state = 'done';
+                else if (phase === 'error' && ci >= 0 && pi === ci) state = 'error';
 
-                if (p === 'downloading' && useLocalImage) state = 'skip';
-                if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath)) state = 'skip';
+                if (p === 'downloading' && useLocalImage && !isWinS100OneClick) state = 'skip';
+                if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath) && !isWinS100OneClick) {
+                  state = 'skip';
+                }
+                if (p === 'verifying' && needsXburn) state = 'skip';
 
                 const badgeClass =
                   state === 'run' ? 'badge-accent'
@@ -1181,7 +1523,7 @@ export default function Flasher() {
 
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0 }}>{error}</p>
+                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
                 {selectedDeviceKey === 's100' && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">

@@ -33,6 +33,7 @@ const SkillBrowser = lazy(() => import('./components/SkillBrowser'));
  * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：
  * Suspense fallback 在部分并发渲染路径下可能拿不到上层 Context，会触发
  * 「useAppState must be used within AppProvider」。
+ * lazy() 子组件（含 Flasher）必须由 Suspense 包裹，否则懒加载解析时可能异常。
  */
 function RouteFallback() {
   return (

@@ -503,6 +503,133 @@
   align-items: start;
 }
 
+/* xburn：两列等高，右栏略宽承载说明 + 确认信息 */
+.flasher-page .flasher-step2-grid.flasher-step2-xburn {
+  grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.28fr);
+  align-items: stretch;
+  gap: 16px;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-manual-pane,
+.flasher-page .flasher-step2-xburn .flasher-auto-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  height: 100%;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-manual-pane {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+}
+
+.flasher-page .flasher-step2-xburn .flasher-xburn-pane-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0.01em;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.flasher-page .flasher-step2-xburn .flasher-xburn-pane-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-inset));
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-reco-callout {
+  margin: 0;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-inset));
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-reco-callout .config-card-desc {
+  margin: 0;
+  color: var(--text);
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-fallback-hint {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.flasher-page .flasher-step2-xburn .flasher-manual-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-manual-body > p.config-card-desc:first-of-type {
+  margin-top: 0;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-manual-actions {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.flasher-page .flasher-xburn-step-list {
+  margin: 0 0 4px 0;
+  padding-left: 1.1rem;
+  line-height: 1.55;
+  color: var(--text-secondary, var(--text-muted));
+}
+
+.flasher-page .flasher-xburn-step-list li + li {
+  margin-top: 6px;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-summary-wrap {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-pane .flasher-summary-pane > .section-label {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-pane .flasher-summary-pane .config-row:first-of-type {
+  padding-top: 2px;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-pane .flasher-summary-pane .config-row {
+  padding: 9px 0;
+}
+
+.flasher-page .flasher-step2-xburn .flasher-auto-pane .flasher-summary-pane .config-value {
+  max-width: 62%;
+}
+
 .flasher-page .flasher-summary-pane .config-row {
   padding: 12px 0;
 }
@@ -525,6 +652,10 @@
 @media (min-width: 1100px) {
   .flasher-page .config-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* 避免上一行覆盖 xburn 烧录页专用列宽 */
+  .flasher-page .flasher-step2-grid.flasher-step2-xburn {
+    grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.28fr);
   }
 }
 

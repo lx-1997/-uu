@@ -48,6 +48,10 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   flashDownloadImage: (payload) => ipcRenderer.invoke('rdk:flash:download-image', payload),
   flashDecompressImage: (payload) => ipcRenderer.invoke('rdk:flash:decompress-image', payload),
   launchXburn: (payload) => ipcRenderer.invoke('rdk:flash:launch-xburn', payload),
+  flashGetS100XburnGui: () => ipcRenderer.invoke('rdk:flash:get-s100-xburn-gui'),
+  flashPickS100XburnGui: () => ipcRenderer.invoke('rdk:flash:pick-s100-xburn-gui'),
+  flashCheckS100XburnEnv: (payload) => ipcRenderer.invoke('rdk:flash:check-s100-xburn-env', payload ?? {}),
+  flashS100Xburn: (payload) => ipcRenderer.invoke('rdk:flash:s100-xburn', payload),
   onFlashProgress: (cb) => {
     const wrapped = (_event, payload) => cb(payload);
     ipcRenderer.on('rdk:flash:progress', wrapped);

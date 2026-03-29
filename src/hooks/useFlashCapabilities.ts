@@ -8,6 +8,7 @@ const EMPTY_CAPS: FlashCapabilities = {
   supportsAutoDecompressXz: false,
   supportsVerifyAfterWrite: false,
   supportsLaunchThirdPartyTool: false,
+  supportsS100XburnCli: false,
 };
 
 let cachedCaps: FlashCapabilities | null = null;

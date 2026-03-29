@@ -17,6 +17,7 @@
     "clean:win-unpacked": "node scripts/clean-electron-win-unpacked.mjs",
     "build:desktop": "node scripts/build-desktop.mjs win",
     "build:desktop:win": "node scripts/build-desktop.mjs win",
+    "build:desktop:win:zip": "node scripts/build-desktop.mjs win zip",
     "build:desktop:win:dir": "node scripts/build-desktop.mjs win dir",
     "build:desktop:mac": "node scripts/build-desktop.mjs mac",
     "build:desktop:linux": "node scripts/build-desktop.mjs linux",
@@ -74,6 +75,10 @@
       {
         "from": "data",
         "to": "data"
+      },
+      {
+        "from": "electron/resources/flash",
+        "to": "flash"
       }
     ],
     "win": {
@@ -87,6 +92,12 @@
         },
         {
           "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64"
           ]
@@ -178,6 +189,7 @@
     "@types/socket.io-client": "^1.4.36",
     "@types/ssh2": "^1.15.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "chokidar": "^5.0.0",
     "concurrently": "^9.1.2",
     "electron": "^35.1.5",
     "electron-builder": "^26.8.1",

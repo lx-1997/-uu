@@ -9,15 +9,20 @@ const platform = process.platform;
 const rootDir = process.cwd();
 const releaseDir = path.join(rootDir, 'release');
 const cleanReleaseDir = String(process.env.RDK_DESKTOP_CLEAN_RELEASE || '1').trim() !== '0';
+const explicitCrossPackaging = String(process.env.RDK_DESKTOP_ALLOW_CROSS_PACKAGING || '').trim() === '1';
+/** 仅 zip/dir 时 electron-builder 不传 NSIS，跨平台构建通常可行，故默认放行。 */
+const winZipDirCross =
+  target === 'win' && (mode === 'zip' || mode === 'dir');
+const allowCrossPackaging = explicitCrossPackaging || winZipDirCross;
 const buildStartedAt = Date.now();
 
 const supportedTargets = new Set(['win', 'mac', 'linux']);
 if (!supportedTargets.has(target)) {
   console.error(`[build:desktop] Invalid target: ${target || '<empty>'}`);
-  console.error('[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir]');
+  console.error('[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir|zip]');
   process.exit(1);
 }
-if (mode && !(target === 'win' && mode === 'dir')) {
+if (mode && !(target === 'win' && (mode === 'dir' || mode === 'zip'))) {
   console.error(`[build:desktop] Unsupported mode "${mode}" for target "${target}"`);
   process.exit(1);
 }
@@ -29,11 +34,28 @@ const expectedPlatform = {
 }[target];
 
 if (platform !== expectedPlatform) {
-  console.error(
-    `[build:desktop] Target "${target}" must be built on ${expectedPlatform}, current platform is ${platform}.`,
-  );
-  console.error('[build:desktop] To keep artifacts stable, cross-platform packaging is disabled by policy.');
-  process.exit(1);
+  if (!allowCrossPackaging) {
+    console.error(
+      `[build:desktop] Target "${target}" must be built on ${expectedPlatform}, current platform is ${platform}.`,
+    );
+    console.error('[build:desktop] 在 macOS/Linux 上打 Windows 包可以：');
+    console.error(
+      '[build:desktop]   npm run build:desktop:win:zip   # 或 :win:dir（zip/dir 交叉打包已默认允许）',
+    );
+    console.error(
+      '[build:desktop]   RDK_DESKTOP_ALLOW_CROSS_PACKAGING=1 npm run build:desktop:win   # 含 NSIS/portable，本机常需 Wine，建议在 Windows 或 CI 上构建/复测',
+    );
+    process.exit(1);
+  }
+  if (winZipDirCross) {
+    console.warn(
+      `[build:desktop] Windows ${mode} 交叉打包：${platform} → ${expectedPlatform}（未打 NSIS；请在 Windows 上验证产物）。`,
+    );
+  } else {
+    console.warn(
+      `[build:desktop] 已开启交叉打包：${platform} → ${expectedPlatform}（RDK_DESKTOP_ALLOW_CROSS_PACKAGING=1）；请在目标系统上验证产物。`,
+    );
+  }
 }
 
 const buildResourcesDir = path.join(rootDir, 'build-resources');
@@ -86,8 +108,12 @@ function validateBuildConfig() {
     }
   }
   if (target === 'win') {
-    if (!hasTarget(build?.win, 'nsis') || !hasTarget(build?.win, 'portable')) {
-      throw new Error('build.win.target 配置不完整，必须同时包含 nsis 与 portable');
+    if (
+      !hasTarget(build?.win, 'nsis') ||
+      !hasTarget(build?.win, 'portable') ||
+      !hasTarget(build?.win, 'zip')
+    ) {
+      throw new Error('build.win.target 配置不完整，必须同时包含 nsis、portable 与 zip（x64 压缩包）');
     }
   }
 }
@@ -166,9 +192,14 @@ try {
   if (target === 'win') {
     await run(npmCmd, ['run', 'clean:win-unpacked']);
   }
-  const builderArgs = target === 'win' && mode === 'dir'
-    ? ['--win', 'dir']
-    : [`--${target}`];
+  const builderBaseArgs =
+    target === 'win' && mode === 'dir'
+      ? ['--win', 'dir']
+      : target === 'win' && mode === 'zip'
+        ? ['--win', 'zip']
+        : [`--${target}`];
+  /** 与 package.json build.win 一致为 x64；在 arm64 Mac 上若省略则会误打 win-arm64。 */
+  const builderArgs = target === 'win' ? [...builderBaseArgs, '--x64'] : builderBaseArgs;
   await run(builderBin, builderArgs);
   await runWithEnv(
     process.execPath,
@@ -176,6 +207,7 @@ try {
     {
       RDK_DESKTOP_BUILD_STARTED_AT: String(buildStartedAt),
       ...(target === 'win' && mode === 'dir' ? { RDK_DESKTOP_WIN_DIR_MODE: '1' } : {}),
+      ...(target === 'win' && mode === 'zip' ? { RDK_DESKTOP_WIN_ZIP_MODE: '1' } : {}),
     },
   );
   console.log(`[build:desktop] ${target}${mode ? `:${mode}` : ''} packaging completed successfully.`);

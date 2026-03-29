@@ -19,6 +19,8 @@ declare global {
     supportsAutoDecompressXz: boolean;
     supportsVerifyAfterWrite: boolean;
     supportsLaunchThirdPartyTool: boolean;
+    /** Windows / macOS：S100 xburn 命令行一键烧写 */
+    supportsS100XburnCli?: boolean;
     thirdPartyToolName?: string;
   }
 
@@ -53,10 +55,15 @@ declare global {
       flashListDrives?: () => Promise<{ ok: boolean; drives?: FlashDrive[]; error?: string }>;
       flashPickImage?: (options?: {
         extensions?: string[];
-        mode?: 'file' | 'directory';
+        mode?: 'file' | 'directory' | 's100-unified';
         pickFolder?: boolean;
         title?: string;
-      }) => Promise<{ ok: boolean; path?: string; canceled?: boolean }>;
+        /** Win：选目录对话框标题（s100-unified 先目录后 zip） */
+        titleDirectory?: string;
+        /** 在类型筛选后追加「所有文件」（与 Imager S100 / 通用镜像一致） */
+        appendAllFilesFilter?: boolean;
+        dialogFilters?: { name: string; extensions: string[] }[];
+      }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
       flashWriteLocal?: (payload: { imagePath: string; drivePath: string; verifyMode?: 'none' | 'sample'; performanceProfile?: 'balanced' | 'turbo' }) => Promise<{ ok: boolean; output?: string; error?: string; verify?: { ok: boolean; detail: string } }>;
       flashVerifyLocal?: (payload: { imagePath: string; drivePath: string }) => Promise<{ ok: boolean; detail?: string; error?: string }>;
       flashBackupLocal?: (payload: { drivePath: string; destPath?: string }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string }>;
@@ -65,6 +72,33 @@ declare global {
       flashDownloadImage?: (payload: { url: string; destDir: string }) => Promise<{ ok: boolean; path?: string; error?: string }>;
       flashDecompressImage?: (payload: { filePath: string }) => Promise<{ ok: boolean; outputPath?: string; error?: string }>;
       launchXburn?: (payload?: { exePath?: string; imagePath?: string }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
+      /** 读取已缓存的 S100 xburn-gui 路径（存在且文件仍在则返回） */
+      flashGetS100XburnGui?: () => Promise<{ ok: boolean; path?: string }>;
+      /** 弹出系统框选择 xburn-gui 并写入缓存（与固件路径无关） */
+      flashPickS100XburnGui?: () => Promise<{ ok: boolean; path?: string; canceled?: boolean }>;
+      /** S100：烧写前短跑 xburn 探测（与 Imager CHECK_XBURN_S100_ENV 对齐） */
+      flashCheckS100XburnEnv?: (payload?: { xburnGuiPath?: string }) => Promise<{
+        ok: boolean;
+        xburnPath?: string | null;
+        checks?: Array<{ id?: string; pass?: boolean; scenario?: string; message?: string }>;
+        rawLog?: string;
+        exitCode?: number | null;
+        timedOut?: boolean;
+      }>;
+      /** S100：固件目录或 product.zip + xburn CLI（Win：需 xburnGuiPath/缓存；Mac：自动 /Applications、PATH 或下载 DMG；mac 上 sudo -A） */
+      flashS100Xburn?: (payload: {
+        imagePath: string;
+        xburnGuiPath?: string;
+        skipAdbReboot?: boolean;
+      }) => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        error?: string;
+        code?: string;
+        logTail?: string;
+        /** false = 进程 0 退出但未识别到日志「写盘完成」强依据，勿当已成功 */
+        completedBurnEvidence?: boolean;
+      }>;
       onFlashProgress?: (cb: (payload: FlashProgressPayload) => void) => (() => void) | void;
       offFlashProgress?: (cb: (payload: FlashProgressPayload) => void) => void;
 

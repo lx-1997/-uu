@@ -55,6 +55,31 @@ async function isAdmin() {
   }
 }
 
+/** @param {string} drivePath e.g. `\\\\.\\PhysicalDrive1` */
+function parsePhysicalDriveNumber(drivePath) {
+  const m = String(drivePath).match(/PhysicalDrive(\d+)\s*$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/** 脱机整块磁盘，卸下卷占用，便于对 `\\.\PhysicalDriveN` 做原始读写（类似 macOS 上先 unmount）。 */
+async function takeDiskOfflineForRawAccess(diskNumber) {
+  const script = `$ErrorActionPreference = 'Stop'; Set-Disk -Number ${diskNumber} -Offline`;
+  await runPowerShell(script);
+}
+
+/** 写盘结束或异常后尽量恢复联机，便于用户看到盘符；失败则不抛，改由界面提示。 */
+async function bringDiskOnlineBestEffort(diskNumber) {
+  try {
+    const script = `$ErrorActionPreference = 'Stop'; Set-Disk -Number ${diskNumber} -Online`;
+    await runPowerShell(script);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 function readChunk(fd, position, size) {
   const buf = Buffer.allocUnsafe(size);
   const read = fs.readSync(fd, buf, 0, size, position);
@@ -128,7 +153,11 @@ export async function writeImage(imagePath, drivePath, options = {}) {
   if (Number.isFinite(driveMeta.sizeBytes) && driveMeta.sizeBytes > 0 && total > driveMeta.sizeBytes) {
     throw Object.assign(new Error(`镜像体积超出目标盘容量：image=${total}B, drive=${driveMeta.sizeBytes}B`), { code: FlashErrorCode.IMAGE_TOO_LARGE });
   }
-  emitFlashProgress({ stage: 'prepare', message: '开始打开镜像文件', percent: 2 });
+
+  const diskNo = parsePhysicalDriveNumber(drivePath);
+  if (diskNo === null) {
+    throw Object.assign(new Error('无效的 Windows 物理磁盘路径'), { code: FlashErrorCode.INVALID_PARAMS });
+  }
 
   activeOp = { id: crypto.randomUUID(), cancelled: false };
   /** 使用异步 read/write，避免同步 I/O 长时间占用主线程导致无法处理 rdk:flash:cancel */
@@ -139,8 +168,24 @@ export async function writeImage(imagePath, drivePath, options = {}) {
   let lastProgressPercent = -1;
   let lastProgressEmitAt = 0;
   let verify = { ok: true, detail: '跳过校验' };
+  let tookDiskOffline = false;
 
   try {
+    emitFlashProgress({ stage: 'prepare', message: '正在脱机目标磁盘以释放系统占用…', percent: 1 });
+    try {
+      await takeDiskOfflineForRawAccess(diskNo);
+      tookDiskOffline = true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw Object.assign(
+        new Error(
+          `无法脱机目标磁盘（可能被资源管理器、杀毒或正在访问该盘的程序占用）：${msg}。请关闭已打开的 U 盘/SD 窗口后重试，必要时重新插拔读卡器。`,
+        ),
+        { code: FlashErrorCode.WRITE_FAILED },
+      );
+    }
+
+    emitFlashProgress({ stage: 'prepare', message: '开始打开镜像文件', percent: 2 });
     imageFh = await fs.promises.open(imagePath, 'r');
     targetFh = await fs.promises.open(drivePath, 'r+');
     emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
@@ -178,6 +223,16 @@ export async function writeImage(imagePath, drivePath, options = {}) {
   } finally {
     await imageFh?.close().catch(() => {});
     await targetFh?.close().catch(() => {});
+    if (tookDiskOffline) {
+      const online = await bringDiskOnlineBestEffort(diskNo);
+      if (!online.ok) {
+        emitFlashProgress({
+          stage: 'prepare',
+          message: `磁盘重新联机失败：${online.detail || '未知错误'}。若此电脑中看不到该 U 盘/SD，请重新插拔介质。`,
+          percent: 2,
+        });
+      }
+    }
     activeOp = null;
   }
 }
@@ -205,6 +260,11 @@ export async function backupDrive(drivePath, destPath) {
   const admin = await isAdmin();
   if (!admin) throw Object.assign(new Error('请以管理员权限启动桌面端后重试备份'), { code: FlashErrorCode.PERMISSION_DENIED });
 
+  const diskNo = parsePhysicalDriveNumber(drivePath);
+  if (diskNo === null) {
+    throw Object.assign(new Error('无效的 Windows 物理磁盘路径'), { code: FlashErrorCode.INVALID_PARAMS });
+  }
+
   const outputPath = destPath?.trim() || buildDefaultBackupPath(drivePath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   activeOp = { id: crypto.randomUUID(), cancelled: false };
@@ -214,7 +274,22 @@ export async function backupDrive(drivePath, destPath) {
   let offset = 0;
   let lastProgressPercent = -1;
   let lastProgressEmitAt = 0;
+  let tookDiskOffline = false;
   try {
+    emitFlashProgress({ stage: 'backup', message: '正在脱机目标磁盘以释放系统占用…', percent: 1 });
+    try {
+      await takeDiskOfflineForRawAccess(diskNo);
+      tookDiskOffline = true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw Object.assign(
+        new Error(
+          `无法脱机目标磁盘（可能被资源管理器或其它程序占用）：${msg}。请关闭相关窗口后重试。`,
+        ),
+        { code: FlashErrorCode.BACKUP_FAILED },
+      );
+    }
+
     sourceFh = await fs.promises.open(drivePath, 'r');
     targetFh = await fs.promises.open(outputPath, 'w');
     emitFlashProgress({ stage: 'backup', message: '开始备份磁盘镜像', percent: 2 });
@@ -244,6 +319,16 @@ export async function backupDrive(drivePath, destPath) {
   } finally {
     await sourceFh?.close().catch(() => {});
     await targetFh?.close().catch(() => {});
+    if (tookDiskOffline) {
+      const online = await bringDiskOnlineBestEffort(diskNo);
+      if (!online.ok) {
+        emitFlashProgress({
+          stage: 'backup',
+          message: `磁盘重新联机失败：${online.detail || '未知错误'}。若看不到该盘，请重新插拔介质。`,
+          percent: 2,
+        });
+      }
+    }
     activeOp = null;
   }
 }

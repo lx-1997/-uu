@@ -48,7 +48,11 @@ export function emitFlashProgress(payload) {
     }
   }
   if (typeof _sender === 'function') {
-    _sender('rdk:flash:progress', payload);
+    try {
+      _sender('rdk:flash:progress', payload);
+    } catch {
+      /* 主窗口已关或 IPC 不可用时避免未捕获异常 */
+    }
   }
 }
 

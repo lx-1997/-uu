@@ -7,6 +7,7 @@ import os from 'node:os';
 import http from 'node:http';
 import https from 'node:https';
 import * as flashService from './flash/index.mjs';
+import { validateS100ImagePick } from './flash/xburn-s100.mjs';
 import { registerSsoLoginIpc } from './sso-ipc.mjs';
 
 /* 开发态加载 Vite，CSP 需含 unsafe-eval（HMR）；Electron 会刷 CSP 警告，与业务漏洞无直接关系 */
@@ -23,6 +24,55 @@ const SERVER_SHUTDOWN_GRACE_MS = 2_500;
 // 与 src/styles/tokens.css --rail-width（56）及 shell 网格一致；勿用旧版 260，否则回退 bounds 时左侧整段仍显示 React「前页」
 const RAIL_W = 56;
 const TOPBAR_H = 48;
+
+/** S100 一键烧写（主要为 Windows）：缓存已解析的 xburn 路径；首次在无缓存时尝试 `where xburn` + 常见安装目录，失败再弹窗选 xburn-gui.exe。macOS 另有自动解析。 */
+const S100_XBURN_GUI_CACHE_FILE = 's100-xburn-gui-path.txt';
+
+function getS100XburnGuiCachePath() {
+  return path.join(app.getPath('userData'), S100_XBURN_GUI_CACHE_FILE);
+}
+
+function readCachedS100XburnGuiPath() {
+  try {
+    const f = getS100XburnGuiCachePath();
+    if (!fs.existsSync(f)) return '';
+    const p = fs.readFileSync(f, 'utf8').trim();
+    if (!p) return '';
+    return fs.existsSync(p) ? p : '';
+  } catch {
+    return '';
+  }
+}
+
+function writeCachedS100XburnGuiPath(p) {
+  try {
+    const s = typeof p === 'string' ? p.trim() : '';
+    if (!s) return;
+    fs.writeFileSync(getS100XburnGuiCachePath(), s, 'utf8');
+  } catch {
+    /* ignore */
+  }
+}
+
+/** S100 一键烧写：选 xburn-gui（与「固件 zip/文件夹」无关，需在文案里写清楚） */
+function buildS100XburnGuiOpenDialogOptions() {
+  const isMac = process.platform === 'darwin';
+  const filters = isMac
+    ? [{ name: 'xburn-gui', extensions: ['app', 'dmg'] }]
+    : [{ name: 'xburn', extensions: ['exe'] }];
+  const title = isMac
+    ? '选择 xburn 烧写程序（不是固件镜像）'
+    : '选择 xburn-gui.exe（不是固件；须与同目录 xburn.exe 配套）';
+  const message = isMac
+    ? '固件已在应用内选好。此处请选官方工具包里的 xburn-gui.app 或 .dmg，用于调用命令行 xburn。'
+    : '固件已在应用内选好。此处请选 xburn-gui.exe（与压缩包内 xburn.exe 同目录）。';
+  return {
+    properties: ['openFile'],
+    filters,
+    title,
+    message,
+  };
+}
 
 let mainWin = null;
 /** 桌面悬浮球（仅桌面包；与主窗口独立） */
@@ -76,9 +126,26 @@ function getViewBounds(win) {
   }
   return calcViewBounds(win);
 }
+/** 向主窗口发 IPC；窗口未就绪或已销毁时静默跳过，避免 send 抛错 → uncaught → console.error → write EPIPE */
+function safeSendToMainRenderer(channel, ...payloadParts) {
+  try {
+    const win = mainWin;
+    if (!win || win.isDestroyed()) return;
+    const wc = win.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    if (payloadParts.length <= 1) {
+      wc.send(channel, payloadParts[0]);
+    } else {
+      wc.send(channel, ...payloadParts);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /* ── 镜像下载（跨平台公共逻辑，不依赖平台适配层） ── */
 function emitFlashProgress(payload) {
-  mainWin?.webContents.send('rdk:flash:progress', payload);
+  safeSendToMainRenderer('rdk:flash:progress', payload);
 }
 
 function downloadFile(url, destPath) {
@@ -883,9 +950,11 @@ ipcMain.handle('rdk:flash:list-drives', async () => {
 
 ipcMain.handle('rdk:flash:pick-image', async (_event, payload = {}) => {
   const isMac = process.platform === 'darwin';
+  const win = mainWin ?? undefined;
+
   const pickFolder = payload?.mode === 'directory' || payload?.pickFolder === true;
   if (pickFolder) {
-    const result = await dialog.showOpenDialog(mainWin ?? undefined, {
+    const result = await dialog.showOpenDialog(win, {
       properties: ['openDirectory'],
       title: typeof payload?.title === 'string' ? payload.title : '选择文件夹',
     });
@@ -893,18 +962,72 @@ ipcMain.handle('rdk:flash:pick-image', async (_event, payload = {}) => {
     return { ok: true, path: result.filePaths[0] };
   }
 
+  /** S100：与参考 Studio 一致 — 可选 product.zip 或固件目录（mac 单对话框；Win 先目录、取消后再选 zip） */
+  if (payload?.mode === 's100-unified') {
+    const titleMain = typeof payload?.title === 'string' ? payload.title : '选择固件（product.zip 或已解压目录）';
+    const titleDir = typeof payload?.titleDirectory === 'string'
+      ? payload.titleDirectory
+      : '选择已解压的固件文件夹';
+    const filters = [
+      { name: 'ZIP', extensions: ['zip'] },
+      { name: 'All Files', extensions: ['*'] },
+    ];
+
+    if (isMac) {
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openFile', 'openDirectory'],
+        title: titleMain,
+      });
+      if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true };
+      const picked = result.filePaths[0];
+      const v = validateS100ImagePick(picked);
+      if (!v.ok) return { ok: false, error: v.error };
+      return { ok: true, path: picked };
+    }
+
+    const dirDlg = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: titleDir,
+    });
+    if (dirDlg.canceled || dirDlg.filePaths.length === 0) {
+      const fileDlg = await dialog.showOpenDialog(win, {
+        properties: ['openFile'],
+        filters,
+        title: titleMain,
+      });
+      if (fileDlg.canceled || fileDlg.filePaths.length === 0) return { ok: false, canceled: true };
+      const picked = fileDlg.filePaths[0];
+      const v = validateS100ImagePick(picked);
+      if (!v.ok) return { ok: false, error: v.error };
+      return { ok: true, path: picked };
+    }
+    const picked = dirDlg.filePaths[0];
+    const v = validateS100ImagePick(picked);
+    if (!v.ok) return { ok: false, error: v.error };
+    return { ok: true, path: picked };
+  }
+
   const rawExt = Array.isArray(payload?.extensions) ? payload.extensions : null;
   const normalized = rawExt?.length
     ? rawExt.map((e) => String(e).replace(/^\./, '').toLowerCase()).filter(Boolean)
     : null;
 
-  const filters = normalized?.length
-    ? [{ name: 'Images', extensions: normalized }]
-    : isMac
+  let filters;
+  if (Array.isArray(payload?.dialogFilters) && payload.dialogFilters.length > 0) {
+    filters = payload.dialogFilters;
+  } else if (normalized?.length) {
+    const label = normalized.includes('zip') && normalized.length === 1 ? 'ZIP' : 'Images';
+    filters = [{ name: label, extensions: normalized }];
+    if (payload?.appendAllFilesFilter === true) {
+      filters = [...filters, { name: 'All Files', extensions: ['*'] }];
+    }
+  } else {
+    filters = isMac
       ? [{ name: 'Image Files', extensions: ['img', 'bin', 'wic', 'xz', 'zip', 'dmg'] }]
       : [{ name: 'Image Files', extensions: ['img', 'bin', 'wic', 'wic.gz', 'img.xz', 'xz', 'zip'] }];
+  }
 
-  const result = await dialog.showOpenDialog(mainWin ?? undefined, {
+  const result = await dialog.showOpenDialog(win, {
     properties: ['openFile'],
     filters,
     title: typeof payload?.title === 'string' ? payload.title : undefined,
@@ -963,14 +1086,71 @@ ipcMain.handle('rdk:flash:launch-xburn', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('rdk:flash:get-s100-xburn-gui', async () => {
+  if (process.platform === 'darwin') {
+    const { resolveMacS100XburnCliPath } = await import('./flash/xburn-s100.mjs');
+    const p = await resolveMacS100XburnCliPath('');
+    return { ok: true, path: p || undefined };
+  }
+  const cached = readCachedS100XburnGuiPath();
+  if (cached) return { ok: true, path: cached };
+  const { tryResolveWindowsXburnForProbe } = await import('./flash/xburn-s100-env-probe.mjs');
+  const auto = tryResolveWindowsXburnForProbe('');
+  return { ok: true, path: auto || undefined };
+});
+
+ipcMain.handle('rdk:flash:pick-s100-xburn-gui', async () => {
+  const picked = await dialog.showOpenDialog(mainWin ?? undefined, buildS100XburnGuiOpenDialogOptions());
+  if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true };
+  const xburnGuiPath = picked.filePaths[0];
+  writeCachedS100XburnGuiPath(xburnGuiPath);
+  return { ok: true, path: xburnGuiPath };
+});
+
+ipcMain.handle('rdk:flash:check-s100-xburn-env', async (_event, payload) => {
+  const isMac = process.platform === 'darwin';
+  let xburnGuiPath = typeof payload?.xburnGuiPath === 'string' ? payload.xburnGuiPath.trim() : '';
+  if (!xburnGuiPath && !isMac) {
+    xburnGuiPath = readCachedS100XburnGuiPath();
+  }
+  const { checkS100XburnEnv } = await import('./flash/xburn-s100-env-probe.mjs');
+  return checkS100XburnEnv({ xburnGuiPath });
+});
+
+ipcMain.handle('rdk:flash:s100-xburn', async (_event, payload) => {
+  const stagingBase = app.getPath('userData');
+  const isMac = process.platform === 'darwin';
+  let xburnGuiPath = typeof payload?.xburnGuiPath === 'string' ? payload.xburnGuiPath.trim() : '';
+  if (!xburnGuiPath && !isMac) {
+    xburnGuiPath = readCachedS100XburnGuiPath();
+  }
+  if (!xburnGuiPath && !isMac) {
+    const { tryResolveWindowsXburnForProbe } = await import('./flash/xburn-s100-env-probe.mjs');
+    const auto = tryResolveWindowsXburnForProbe('');
+    if (auto) xburnGuiPath = auto;
+  }
+  if (!xburnGuiPath && !isMac) {
+    const picked = await dialog.showOpenDialog(mainWin ?? undefined, buildS100XburnGuiOpenDialogOptions());
+    if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true };
+    xburnGuiPath = picked.filePaths[0];
+  }
+  if (xburnGuiPath) {
+    writeCachedS100XburnGuiPath(xburnGuiPath);
+  }
+  const imagePath = typeof payload?.imagePath === 'string' ? payload.imagePath.trim() : '';
+  if (!imagePath) {
+    return { ok: false, error: '缺少镜像路径（请选择固件文件夹或 product.zip）', code: 'INVALID_PARAMS' };
+  }
+  return flashService.runS100XburnFlash({
+    xburnGuiPath,
+    imagePath,
+    skipAdbReboot: !!payload?.skipAdbReboot,
+    stagingBase,
+  });
+});
+
 app.whenReady().then(async () => {
   registerBrowserCaptureHandlers();
-
-  // 初始化跨平台 flash service
-  flashService.initFlashService({
-    platform: process.platform,
-    webContentsSend: (...args) => mainWin?.webContents.send(...args),
-  });
 
   // 生产模式：先启动内嵌服务器
   if (isPacked) {
@@ -994,6 +1174,11 @@ app.whenReady().then(async () => {
 
   await createMainWindow();
   createFloatingBallWindow();
+
+  flashService.initFlashService({
+    platform: process.platform,
+    webContentsSend: (...args) => safeSendToMainRenderer(...args),
+  });
 
   app.on('activate', async () => {
     if (!mainWin || mainWin.isDestroyed()) {

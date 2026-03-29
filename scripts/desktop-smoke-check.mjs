@@ -10,6 +10,7 @@ const RUNTIME_HEALTH_RETRIES = Number.parseInt(String(process.env.RDK_DESKTOP_SM
 const smokeLogFile = String(process.env.RDK_DESKTOP_SMOKE_LOG_FILE || '').trim();
 const buildStartedAt = Number.parseInt(String(process.env.RDK_DESKTOP_BUILD_STARTED_AT || '0'), 10) || 0;
 const winDirMode = String(process.env.RDK_DESKTOP_WIN_DIR_MODE || '').trim() === '1';
+const winZipMode = String(process.env.RDK_DESKTOP_WIN_ZIP_MODE || '').trim() === '1';
 const processOutputLines = [];
 
 function nowIso() {
@@ -76,6 +77,11 @@ function ensureArtifacts() {
     if (winDirMode) {
       if (!hasUnpacked) {
         throw new Error('Windows dir 产物不完整：需要至少包含 win-unpacked');
+      }
+    } else if (winZipMode) {
+      const hasZip = names.some((name) => name.endsWith('.zip'));
+      if (!hasZip || !hasUnpacked) {
+        throw new Error('Windows zip 产物不完整：需要至少包含 .zip 与 win-unpacked');
       }
     } else if (!hasExe || !hasUnpacked) {
       throw new Error('Windows 产物不完整：需要至少包含 .exe 与 win-unpacked');
