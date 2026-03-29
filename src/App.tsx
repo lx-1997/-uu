@@ -78,7 +78,6 @@ function MainContent() {
 
   const standardViews: Record<string, ReactNode> = {
     dashboard: <Dashboard />,
-    flasher: <Flasher />,
     files: <Files />,
     hardware: <Hardware />,
     skills: <SkillBrowser />,
@@ -101,6 +100,9 @@ function MainContent() {
         <Suspense fallback={null}>
           <OpenClaw />
         </Suspense>
+      </div>
+      <div className={`persistent-pane ${activeTab === 'flasher' ? 'is-active' : 'is-hidden'}`}>
+        <Flasher />
       </div>
       <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
         <Suspense fallback={null}>

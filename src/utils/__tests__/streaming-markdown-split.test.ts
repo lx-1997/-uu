@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildNeutralPrefixFlags, findStreamingFadeSplitIndex } from '../streaming-markdown-split';
+import {
+  adjustFadeSplitAvoidHanAdjacent,
+  buildNeutralPrefixFlags,
+  findAdjustedStreamingFadeSplitIndex,
+  findStreamingFadeSplitIndex,
+} from '../streaming-markdown-split';
 
 describe('buildNeutralPrefixFlags', () => {
   it('empty prefix is neutral', () => {
@@ -40,5 +45,45 @@ describe('findStreamingFadeSplitIndex', () => {
     const tail = t.slice(idx);
     expect(t.slice(0, idx) + tail).toBe(t);
     expect(idx).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('findAdjustedStreamingFadeSplitIndex', () => {
+  it('matches find + adjust with single flags build (Han boundary)', () => {
+    const t = 'xx姿态yy';
+    const minTail = 3;
+    const raw = findStreamingFadeSplitIndex(t, minTail);
+    const chained = adjustFadeSplitAvoidHanAdjacent(t, raw);
+    expect(findAdjustedStreamingFadeSplitIndex(t, minTail)).toBe(chained);
+    expect(chained).toBe(2);
+  });
+
+  it('matches find + adjust for plain ASCII', () => {
+    const t = 'hello world';
+    const minTail = 5;
+    const raw = findStreamingFadeSplitIndex(t, minTail);
+    expect(findAdjustedStreamingFadeSplitIndex(t, minTail)).toBe(
+      adjustFadeSplitAvoidHanAdjacent(t, raw),
+    );
+  });
+});
+
+describe('adjustFadeSplitAvoidHanAdjacent', () => {
+  it('moves split left so adjacent Han chars are not head|tail boundary', () => {
+    const t = 'xx姿态yy';
+    const split = 3;
+    expect(t.slice(0, split)).toBe('xx姿');
+    expect(t.slice(split)).toBe('态yy');
+    const adj = adjustFadeSplitAvoidHanAdjacent(t, split);
+    expect(adj).toBe(2);
+    expect(t.slice(0, adj)).toBe('xx');
+    expect(t.slice(adj)).toBe('姿态yy');
+  });
+
+  it('does not cross into non-neutral markdown when moving left', () => {
+    const t = '**姿态**';
+    const split = 3;
+    const adj = adjustFadeSplitAvoidHanAdjacent(t, split);
+    expect(adj).toBe(split);
   });
 });

@@ -9,7 +9,7 @@ import type { AgentAttachmentPayload } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, fetchApi } from '../utils/apiBase';
-import { findStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
+import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText } from '../utils/chat-message-plain';
 import { ChatHistoryModal } from './ChatHistoryModal';
@@ -227,7 +227,7 @@ function DockStreamingPlainBody({ text }: { text: string }) {
   let split =
     visible.length === 0 || instantCatchup || minTail <= 0
       ? visible.length
-      : findStreamingFadeSplitIndex(visible, minTail);
+      : findAdjustedStreamingFadeSplitIndex(visible, minTail);
   /*
    * tail 若以 \\n 开头：在默认 white-space 下换行会塌成空格，进 Markdown 后变成 <br>，下一行首字会「跳」。
    * 把前导换行并进 head，让断行始终由 Markdown 的 <br> 负责。
@@ -1569,7 +1569,10 @@ export default function AIDock() {
                         ? t('dock.channel.short.weixin', '微')
                         : Icon.user}
                 </div>
-                <div className={`dock-bubble ${msg.role}`}>
+                <div
+                  className={`dock-bubble ${msg.role}`}
+                  lang={msg.role === 'ai' ? (isEn ? 'en' : 'zh-CN') : undefined}
+                >
                   {msg.channelMeta && (
                     <div className="dock-channel-badge">
                       {msg.channelMeta.channel === 'feishu'
