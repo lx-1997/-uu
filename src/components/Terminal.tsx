@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
@@ -8,6 +8,10 @@ import { isDesktopMac } from '../utils/env';
 import {
   canUseWebSerial,
   formatSerialPortLabel,
+  serialPortHasIdentifiableLabel,
+  consumeElectronSerialPortMeta,
+  forgetUnrecognizedSerialPorts,
+  type WindowsSerialPortRow,
   getSerialConnectBlockedReason,
   openSerialPortWithOptions,
   requestAndOpenSerialPort,
@@ -15,6 +19,7 @@ import {
   RDK_DEFAULT_SERIAL_BAUD,
   RDK_OPEN_USB_SERIAL_EVENT,
   SERIAL_BAUD_OPTIONS,
+  type SerialPortListMode,
 } from '../utils/web-serial';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -213,15 +218,62 @@ export default function Terminal() {
   const [terminalPassword, setTerminalPassword] = useState('');
   const [terminalContextMenu, setTerminalContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [usbBaudRate, setUsbBaudRate] = useState(RDK_DEFAULT_SERIAL_BAUD);
+  /** 「添加/连接」时 requestPort 过滤：默认「全部」以免非 CH340/CP210x 的 USB 转串口被过滤掉 */
+  const [usbListMode, setUsbListMode] = useState<SerialPortListMode>('all');
   /** 当前页已授权的本地串口（navigator.serial.getPorts），下拉即选设备 */
   const [usbPorts, setUsbPorts] = useState<SerialPort[]>([]);
+  /** Windows 桌面版：与设备管理器 COM 列表一致，用于下拉项 VID/PID → COM 名对齐 */
+  const [windowsSerialPorts, setWindowsSerialPorts] = useState<WindowsSerialPortRow[]>([]);
   const [usbPortIndex, setUsbPortIndex] = useState(-1);
   const [usbSerialConnecting, setUsbSerialConnecting] = useState(false);
   const usbSerialConnectLockRef = useRef(false);
 
-  const refreshUsbPorts = useCallback(async () => {
+  const serialPortLabelCtx = useMemo(
+    () => ({
+      ...(windowsSerialPorts.length > 0 ? { windows: windowsSerialPorts } : {}),
+      unnamedPortLabel: (i: number) =>
+        fillTemplate(t('terminal.serial.portUnnamed', '串口 #{{n}}（无 USB 标识）'), {
+          n: String(i + 1),
+        }),
+    }),
+    [windowsSerialPorts, t],
+  );
+
+  const identifiableSerialCount = useMemo(
+    () =>
+      usbPorts.reduce(
+        (n, p, i) => n + (serialPortHasIdentifiableLabel(p, i, serialPortLabelCtx) ? 1 : 0),
+        0,
+      ),
+    [usbPorts, serialPortLabelCtx],
+  );
+
+  useEffect(() => {
+    if (usbPortIndex < 0) return;
+    const p = usbPorts[usbPortIndex];
+    if (!p || !serialPortHasIdentifiableLabel(p, usbPortIndex, serialPortLabelCtx)) {
+      setUsbPortIndex(-1);
+    }
+  }, [usbPorts, usbPortIndex, serialPortLabelCtx]);
+
+  const refreshUsbPorts = useCallback(async (purgeStale?: boolean) => {
     if (!canUseWebSerial()) return;
+    if (typeof window !== 'undefined' && window.rdkDesktop?.listWindowsSerialPorts) {
+      try {
+        const r = await window.rdkDesktop.listWindowsSerialPorts();
+        if (r?.ok && Array.isArray(r.ports)) setWindowsSerialPorts(r.ports);
+        else setWindowsSerialPorts([]);
+      } catch {
+        setWindowsSerialPorts([]);
+      }
+    } else {
+      setWindowsSerialPorts([]);
+    }
     try {
+      if (purgeStale) {
+        const pre = await navigator.serial.getPorts();
+        await forgetUnrecognizedSerialPorts(pre);
+      }
       const list = await navigator.serial.getPorts();
       setUsbPorts(list);
       setUsbPortIndex((prev) => {
@@ -235,14 +287,18 @@ export default function Terminal() {
 
   useEffect(() => {
     if (!canUseWebSerial()) return;
-    void refreshUsbPorts();
+    let cancelled = false;
     const serial = navigator.serial as unknown as EventTarget;
     const onChange = () => {
       void refreshUsbPorts();
     };
+    void (async () => {
+      if (!cancelled) await refreshUsbPorts(true);
+    })();
     serial.addEventListener('connect', onChange);
     serial.addEventListener('disconnect', onChange);
     return () => {
+      cancelled = true;
       serial.removeEventListener('connect', onChange);
       serial.removeEventListener('disconnect', onChange);
     };
@@ -255,7 +311,8 @@ export default function Terminal() {
       return;
     }
     try {
-      const granted = await requestSerialPortGrant('all');
+      const granted = await requestSerialPortGrant(usbListMode);
+      await consumeElectronSerialPortMeta(granted);
       const list = await navigator.serial.getPorts();
       setUsbPorts(list);
       const idx = list.indexOf(granted);
@@ -265,7 +322,24 @@ export default function Terminal() {
       const msg = e instanceof Error ? e.message : String(e);
       addToast(fillTemplate(t('terminal.serial.openFail', '无法打开串口：{{msg}}'), { msg }), 'error');
     }
-  }, [addToast, isEn, t]);
+  }, [addToast, isEn, t, usbListMode]);
+
+  const clearUnrecognizedSerialAuth = useCallback(async () => {
+    if (usbPorts.length === 0) return;
+    const ok = window.confirm(
+      t(
+        'terminal.serial.forgetConfirm',
+        '将移除浏览器中「无 USB 硬件标识」的串口授权（例如误点的蓝牙耳机）。可稍后用「添加」重新授权需要的 COM。是否继续？',
+      ),
+    );
+    if (!ok) return;
+    const removed = await forgetUnrecognizedSerialPorts(usbPorts);
+    addToast(
+      fillTemplate(t('terminal.serial.forgetDone', '已移除 {{n}} 个未识别授权'), { n: String(removed) }),
+      removed > 0 ? 'success' : 'info',
+    );
+    await refreshUsbPorts();
+  }, [addToast, refreshUsbPorts, t, usbPorts]);
 
   const hasSerialTab = terminalSessions.some((s) => s.transport === 'serial');
   const allowTerminalUi = Boolean(currentDevice) || hasSerialTab;
@@ -281,11 +355,16 @@ export default function Terminal() {
     setUsbSerialConnecting(true);
     try {
       let port: SerialPort;
-      if (usbPortIndex >= 0 && usbPorts[usbPortIndex]) {
+      if (
+        usbPortIndex >= 0 &&
+        usbPorts[usbPortIndex] &&
+        serialPortHasIdentifiableLabel(usbPorts[usbPortIndex], usbPortIndex, serialPortLabelCtx)
+      ) {
         port = usbPorts[usbPortIndex];
         await openSerialPortWithOptions(port, usbBaudRate);
       } else {
-        port = await requestAndOpenSerialPort(usbBaudRate, 'all');
+        port = await requestAndOpenSerialPort(usbBaudRate, usbListMode);
+        await consumeElectronSerialPortMeta(port);
         await refreshUsbPorts();
       }
       const id = `serial-${Date.now()}`;
@@ -324,6 +403,8 @@ export default function Terminal() {
     setActiveTab,
     t,
     usbBaudRate,
+    serialPortLabelCtx,
+    usbListMode,
     usbPortIndex,
     usbPorts,
   ]);
@@ -537,7 +618,7 @@ export default function Terminal() {
       }
     >
       <div className="immersive-serial-bar-main">
-        <span className="immersive-serial-bar-label">{t('terminal.serial.sectionLabel', 'USB 串口')}</span>
+        <span className="immersive-serial-bar-label">{t('terminal.serial.sectionLabel', '本机串口')}</span>
         <select
           className="select immersive-serial-port-select"
           value={usbPortIndex < 0 ? '' : String(usbPortIndex)}
@@ -547,16 +628,18 @@ export default function Terminal() {
           }}
           title={t(
             'terminal.serial.portSelectTitle',
-            'RDK Studio：已授权的 USB 串口；列表为空时请点「添加」在系统对话框中选择设备。',
+            '仅列出可识别的已授权串口（含 COM/VID）；无 USB 标识的占位项不显示，可用「清除未识别」撤销授权。',
           )}
           disabled={usbSerialConnecting}
         >
           <option value="">{t('terminal.serial.portPlaceholder', '请选择串口…')}</option>
-          {usbPorts.map((p, i) => (
-            <option key={`${i}-${formatSerialPortLabel(p, i)}`} value={String(i)}>
-              {formatSerialPortLabel(p, i)}
-            </option>
-          ))}
+          {usbPorts.map((p, i) =>
+            serialPortHasIdentifiableLabel(p, i, serialPortLabelCtx) ? (
+              <option key={`usb-serial-port-${i}`} value={String(i)}>
+                {formatSerialPortLabel(p, i, serialPortLabelCtx)}
+              </option>
+            ) : null,
+          )}
         </select>
         <select
           className="select immersive-serial-baud-select"
@@ -569,10 +652,23 @@ export default function Terminal() {
             <option key={b} value={b}>{b}</option>
           ))}
         </select>
+        <select
+          className="select immersive-serial-baud-select"
+          value={usbListMode}
+          onChange={(e) => setUsbListMode(e.target.value as SerialPortListMode)}
+          title={t(
+            'terminal.serial.listModeTitle',
+            '仅影响「添加 / 连接」时系统弹出的设备列表：常见 USB 转串口芯片（CH340/CP210x 等）或全部端口。',
+          )}
+          disabled={usbSerialConnecting}
+        >
+          <option value="common">{t('terminal.serial.listShortCommon', '常见 USB')}</option>
+          <option value="all">{t('terminal.serial.listShortAll', '全部')}</option>
+        </select>
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          onClick={() => void refreshUsbPorts()}
+          onClick={() => void refreshUsbPorts(true)}
           title={t('terminal.serial.refreshPorts', '刷新串口列表')}
           disabled={usbSerialConnecting}
         >
@@ -587,7 +683,55 @@ export default function Terminal() {
         >
           {t('terminal.serial.addPort', '添加')}
         </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => void clearUnrecognizedSerialAuth()}
+          title={t(
+            'terminal.serial.forgetUnnamedTitle',
+            '清除浏览器中无 USB 厂商/产品标识的串口授权（需 Chromium 支持 forget）',
+          )}
+          disabled={usbSerialConnecting || usbPorts.length === 0}
+        >
+          {t('terminal.serial.forgetUnnamed', '清除未识别')}
+        </button>
       </div>
+      {usbPorts.length === 0 && (
+        <div className="immersive-serial-bar-hint" role="note">
+          {windowsSerialPorts.length > 0 ? (
+            <p>
+              {fillTemplate(
+                t(
+                  'terminal.serial.systemComDetected',
+                  '系统已检测到：{{list}}（与设备管理器一致，含 USB/蓝牙等）。',
+                ),
+                { list: windowsSerialPorts.map((w) => w.deviceId).join(', ') },
+              )}{' '}
+              {t(
+                'terminal.serial.mustAuthorizeWebSerial',
+                '浏览器不会自动列出它们：请先点「添加」，在弹出窗口中选择对应 COM 并授权；授权后下拉才会出现选项。',
+              )}
+            </p>
+          ) : (
+            <p>
+              {t(
+                'terminal.serial.emptyPortsGeneric',
+                '下拉仅显示已授权的串口。若为空，请先点「添加」在系统对话框中选择设备（与设备管理器中的 COM 对应）。',
+              )}
+            </p>
+          )}
+        </div>
+      )}
+      {usbPorts.length > 0 && identifiableSerialCount === 0 && (
+        <div className="immersive-serial-bar-hint" role="note">
+          <p>
+            {t(
+              'terminal.serial.allHiddenUnnamed',
+              '当前授权均为无 USB 标识项，已从下拉中隐藏。请点「清除未识别」或「刷新」清理，再用「添加」选择真实 COM。',
+            )}
+          </p>
+        </div>
+      )}
       <div className="immersive-serial-bar-connect">
         <button
           type="button"
@@ -620,12 +764,18 @@ export default function Terminal() {
             <p className="immersive-welcome-desc">
               {isDesktopMac()
                 ? t('terminal.ui.remoteDescMac', '在左下角连接 RDK 设备后可使用网络 SSH。')
-                : t('terminal.ui.remoteDesc', '在左下角连接 RDK 设备后可使用网络 SSH；亦可在下方使用本机 USB 串口调试。')}
+                : t(
+                    'terminal.ui.remoteDesc',
+                    '在左下角连接 RDK 设备后可使用网络 SSH；亦可在下方使用本机串口调试（USB 或蓝牙 COM 等，需先在「添加」中授权）。',
+                  )}
             </p>
             {canUseWebSerial() ? (
               <div className="terminal-serial-welcome">
                 <p className="terminal-serial-welcome-lead">
-                  {t('terminal.serial.rdkStudioLead', '选择串口与波特率后点「连接」；列表为空时请先点「添加」。默认 115200 8N1。')}
+                  {t(
+                    'terminal.serial.rdkStudioLead',
+                    '默认 115200 8N1。列表为空时请先点「添加」授权串口（浏览器不会自动同步设备管理器里的全部 COM）。',
+                  )}
                 </p>
                 {renderUsbSerialControls('welcome')}
               </div>
@@ -640,7 +790,7 @@ export default function Terminal() {
     );
   }
 
-  const barMeta = currentDevice?.name ?? t('terminal.ui.serialOnlyMeta', 'RDK Studio · USB 串口');
+  const barMeta = currentDevice?.name ?? t('terminal.ui.serialOnlyMeta', 'RDK Studio · 本机串口');
 
   return (
     <div className="immersive">

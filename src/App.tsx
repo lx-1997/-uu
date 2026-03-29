@@ -16,6 +16,7 @@ import ConfirmDialog from './components/ConfirmDialog';
 import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 import StudioBrowserCaptureBridge from './components/StudioBrowserCaptureBridge';
+import ElectronSerialPortPicker from './components/ElectronSerialPortPicker';
 import { isDeviceSshConnected } from './utils/device-connection';
 import type { Tab } from './app-types';
 
@@ -253,6 +254,7 @@ function AppShell() {
       </main>
 
       <Toasts />
+      <ElectronSerialPortPicker />
       <AddDeviceModal />
       <SettingsPanel />
       <ConfirmDialog />

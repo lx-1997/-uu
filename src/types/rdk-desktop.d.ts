@@ -30,6 +30,34 @@ declare global {
     percent: number;
   }
 
+  /** Windows：与设备管理器「端口(COM)」条目一致，供 USB 串口与 Web Serial 对照 */
+  interface WindowsSerialPortRow {
+    deviceId: string;
+    name: string;
+    usbVendorId: number | null;
+    usbProductId: number | null;
+    /** PNPDeviceID（蓝牙/USB 等）；仅系统枚举用 */
+    instanceId?: string;
+  }
+
+  /** 主进程在串口授权流程中给出的展示名（Windows 上 portName 多为 COMx） */
+  interface ElectronSerialPortMeta {
+    portName: string;
+    displayName: string;
+  }
+
+  interface SerialPickerPortRow {
+    portId: string;
+    portName: string;
+    displayName: string;
+    deviceInstanceId?: string;
+  }
+
+  interface SerialPickerPayload {
+    reqId: number;
+    ports: SerialPickerPortRow[];
+  }
+
   interface FlashActiveOperationSnapshot {
     ok: boolean;
     running: boolean;
@@ -43,6 +71,16 @@ declare global {
       isDesktop?: boolean;
       platform?: string;
       apiBase?: string;
+      /** Windows：枚举 COM 与友好名称（WMI），与设备管理器对齐 */
+      listWindowsSerialPorts?: () => Promise<{
+        ok: boolean;
+        ports?: WindowsSerialPortRow[];
+        error?: string;
+      }>;
+      /** 多串口时主进程弹出选择 UI（portName 与系统一致） */
+      onSerialPortShowPicker?: (cb: (payload: SerialPickerPayload) => void) => (() => void) | void;
+      sendSerialPortPickerResult?: (payload: { reqId: number; portId: string }) => void;
+      consumeLastSerialPortMeta?: () => Promise<ElectronSerialPortMeta | null>;
       openUrl?: (url: string) => void;
       hideUrl?: (url: string) => void;
       closeUrl?: (url: string) => void;

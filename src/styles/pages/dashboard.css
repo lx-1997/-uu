@@ -596,6 +596,19 @@
   padding-top: 8px;
 }
 
+.ob-actions--end {
+  justify-content: flex-end;
+}
+
+.ob-connect-sidebar-hint {
+  margin: 0;
+  padding-top: 8px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
 .ob-skip {
   align-self: center;
   font-size: 0.6875rem;
@@ -703,6 +716,12 @@ button.ob-connect-card:focus-visible {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* 覆盖 .ob-connect-card div 的 flex-direction:column，否则与 align-items:center 组合会把标题行水平居中 */
+.ob-connect-card .ob-connect-serial-title-row {
+  flex-direction: row;
+  justify-content: flex-start;
 }
 
 button.ob-connect-card--disabled,

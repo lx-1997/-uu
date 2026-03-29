@@ -27,11 +27,15 @@ interface SerialPort extends EventTarget {
   open(options: OpenSerialOptions): Promise<void>;
   close(): Promise<void>;
   getInfo(): SerialPortInfo;
+  /** 撤销授权并从 getPorts() 中移除（需关闭后调用） */
+  forget?(): Promise<void>;
 }
 
 interface SerialPortInfo {
   usbVendorId?: number;
   usbProductId?: number;
+  /** 蓝牙 RFCOMM 等；与 USB 互斥 */
+  bluetoothServiceClassId?: number;
 }
 
 interface Serial {

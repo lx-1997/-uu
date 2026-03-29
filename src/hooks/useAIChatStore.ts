@@ -19,6 +19,7 @@ import {
   stopRDKClawTask,
   streamAgentChat,
   fetchDevices,
+  forgetDevicePassword,
   fetchDeviceOpenClawHealth,
   type AgentAttachmentPayload,
   type AgentSSEEvent,
@@ -111,6 +112,18 @@ function chatSessionStorageKey(deviceId: string) {
 
 function chatDraftStorageKey(deviceId: string) {
   return `${CHAT_DRAFT_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
+}
+
+/** 无设备时的会话与某台设备会话合并（按 id 去重、按时间排序），避免「对话连上设备后整段消失」 */
+function mergeChatMessagesById(a: ChatMessage[], b: ChatMessage[]): ChatMessage[] {
+  const map = new Map<number, ChatMessage>();
+  for (const m of a) map.set(m.id, m);
+  for (const m of b) {
+    if (!map.has(m.id)) map.set(m.id, m);
+  }
+  return Array.from(map.values())
+    .sort((x, y) => x.id - y.id)
+    .slice(-MAX_CHAT_MESSAGES_IN_MEMORY);
 }
 
 /** 写入 localStorage 前去掉较早消息里巨型 data: URL，减轻 quota 与反序列化压力 */
@@ -1212,6 +1225,45 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   }
                 }
 
+                /** 对话里 device_remove 只改服务端存储，须拉列表并更新选中设备，否则侧栏/设备列表仍显示已删项 */
+                if (!isError && toolName === 'device_remove') {
+                  const m = result.match(/\[id:\s*([a-f0-9-]{36})\]/i);
+                  const removedId = m?.[1] ?? null;
+                  void (async () => {
+                    try {
+                      const res = await fetchDevices();
+                      const next = res.devices.map((device) => ({
+                        id: device.id,
+                        name: `${device.username}@${device.host}:${device.port ?? 22}`,
+                        status: device.status === 'connected' ? 'online' : 'offline',
+                        ip: device.host,
+                        port: device.port ?? 22,
+                        description: `SSH ${device.username}:${device.port ?? 22}`,
+                      }));
+                      setDevices(next);
+                      if (removedId) {
+                        forgetDevicePassword(removedId);
+                      }
+                      const ids = new Set(next.map((d) => d.id));
+                      let rdkclawDeviceToSync: string | null = null;
+                      setActiveDevice((prev) => {
+                        const stale = Boolean(prev && !ids.has(prev));
+                        const hitRemoved = Boolean(removedId && prev === removedId);
+                        if (stale || hitRemoved) {
+                          rdkclawDeviceToSync = next[0]?.id ?? '';
+                          return rdkclawDeviceToSync;
+                        }
+                        return prev;
+                      });
+                      if (rdkclawDeviceToSync) {
+                        await setActiveRdkclawDevice(rdkclawDeviceToSync);
+                      }
+                    } catch {
+                      /* ignore */
+                    }
+                  })();
+                }
+
                 let mediaHandled = false;
                 if (!isError && result.startsWith('{')) {
                   try {
@@ -1838,10 +1890,32 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     chatDeviceIdRef.current = nextDeviceId;
-    setChatMessages(loadChatHistoryFromStorage(nextDeviceId));
+
+    const loadedForDevice = loadChatHistoryFromStorage(nextDeviceId);
+    if (prevDeviceId === GLOBAL_CHAT_DEVICE_ID && nextDeviceId !== GLOBAL_CHAT_DEVICE_ID) {
+      const merged = mergeChatMessagesById(chatMessages, loadedForDevice);
+      setChatMessages(merged);
+      try {
+        localStorage.setItem(
+          chatHistoryStorageKey(nextDeviceId),
+          JSON.stringify(stripHeavyDataUrlsForStorage(merged.slice(-50))),
+        );
+      } catch {
+        /* ignore */
+      }
+    } else {
+      setChatMessages(loadedForDevice);
+    }
 
     try {
-      const nextDraft = localStorage.getItem(chatDraftStorageKey(nextDeviceId)) ?? '';
+      let nextDraft = localStorage.getItem(chatDraftStorageKey(nextDeviceId)) ?? '';
+      if (
+        !nextDraft.trim() &&
+        prevDeviceId === GLOBAL_CHAT_DEVICE_ID &&
+        nextDeviceId !== GLOBAL_CHAT_DEVICE_ID
+      ) {
+        nextDraft = localStorage.getItem(chatDraftStorageKey(GLOBAL_CHAT_DEVICE_ID)) ?? '';
+      }
       setCmd(nextDraft);
     } catch {
       setCmd('');

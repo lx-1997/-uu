@@ -36,6 +36,21 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   setActiveUrl: (url) => ipcRenderer.send('rdk:set-active-url', { url }),
   updateViewBounds: (bounds) => ipcRenderer.send('rdk:update-view-bounds', { bounds }),
 
+  /** Windows：列出与设备管理器一致的 COM 口（WMI），供 USB 串口标签与 Web Serial VID/PID 对照 */
+  listWindowsSerialPorts: () => ipcRenderer.invoke('rdk:serial:list-windows'),
+
+  /** 主进程拦截串口选择器时推送到渲染进程（多端口时展示真实 COM 名） */
+  onSerialPortShowPicker: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('rdk:serial:show-picker', h);
+    return () => ipcRenderer.removeListener('rdk:serial:show-picker', h);
+  },
+  sendSerialPortPickerResult: (payload) => {
+    ipcRenderer.send('rdk:serial:picker-result', payload);
+  },
+  /** `requestPort` resolve 后立即调用，取本次选择的 portName/displayName（一次性消费） */
+  consumeLastSerialPortMeta: () => ipcRenderer.invoke('rdk:serial:consume-last-chosen-meta'),
+
   // 本机烧录能力探测与操作
   flashGetCapabilities: () => ipcRenderer.invoke('rdk:flash:get-capabilities'),
   flashListDrives: () => ipcRenderer.invoke('rdk:flash:list-drives'),

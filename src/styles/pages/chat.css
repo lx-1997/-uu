@@ -561,6 +561,9 @@
 
 /* ── Input area ── */
 .dock-input-area {
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
   flex-shrink: 0;
   background: var(--dock-bg);
   -webkit-backdrop-filter: var(--glass);

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, screen, Menu } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, screen, Menu, session } from 'electron';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,6 +9,8 @@ import https from 'node:https';
 import * as flashService from './flash/index.mjs';
 import { validateS100ImagePick } from './flash/xburn-s100.mjs';
 import { registerSsoLoginIpc } from './sso-ipc.mjs';
+import { listWindowsSerialPorts } from './list-windows-serial-ports.mjs';
+import { registerSerialPortPickerHandlers } from './serial-port-picker.mjs';
 
 /* 开发态加载 Vite，CSP 需含 unsafe-eval（HMR）；Electron 会刷 CSP 警告，与业务漏洞无直接关系 */
 if (!app.isPackaged) {
@@ -210,6 +212,8 @@ ipcMain.handle('rdk:flash:decompress-image', async (_event, payload) => {
   if (!filePath.toLowerCase().endsWith('.xz')) return { ok: true, outputPath: filePath };
   return flashService.decompressXz(filePath);
 });
+
+ipcMain.handle('rdk:serial:list-windows', async () => listWindowsSerialPorts());
 
 /* ── 判断是否打包模式 ── */
 const isPacked = app.isPackaged;
@@ -1180,6 +1184,23 @@ ipcMain.handle('rdk:flash:s100-xburn', async (_event, payload) => {
 
 app.whenReady().then(async () => {
   registerBrowserCaptureHandlers();
+
+  /**
+   * Web Serial：需在 Session 上放行 serial 权限与设备，否则 `requestPort()` 无弹窗（表现为「添加」无反应）。
+   * 勿用 setPermissionRequestHandler 猜 `permission === 'serial'`（该 API 的请求类型不含 serial，会误拒其它权限）。
+   * @see https://www.electronjs.org/docs/latest/tutorial/devices#web-serial-api
+   */
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === 'serial') return true;
+    // 与本应用其它能力兼容（麦克风、剪贴板等），避免仅放行 serial 时误拒其它 PermissionCheck
+    if (permission === 'media') return true;
+    if (permission === 'clipboard-read' || permission === 'clipboard-sanitized-write') return true;
+    return false;
+  });
+  session.defaultSession.setDevicePermissionHandler((details) => details.deviceType === 'serial');
+
+  /** Web Serial：用主进程 portName（如 COM3）回填下拉标签，避免蓝牙等无 VID/PID 时仅显示 #n */
+  registerSerialPortPickerHandlers();
 
   // 生产模式：先启动内嵌服务器
   if (isPacked) {

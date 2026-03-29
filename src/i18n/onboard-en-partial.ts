@@ -31,7 +31,6 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.subtitle': 'Welcome — let’s set up your environment step by step',
   'onboard.board.pick': 'Pick your RDK board:',
   'onboard.board.learnMore': 'Learn more',
-  'onboard.btn.skipFlash': 'Skip — flash directly',
   'onboard.btn.next': 'Next',
   'onboard.flash.recoBefore': 'For your',
   'onboard.flash.recoAfter': 'we recommend these images:',
@@ -48,8 +47,8 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.connect.serialSub': 'Debug port — good for first-time setup',
   'onboard.connect.serialMacBadge': 'Not on Mac app',
   'onboard.connect.serialMacTitle': 'USB serial is not available in the macOS desktop app',
-  'onboard.connect.addDevice': 'Add device',
-  'onboard.connect.skipLater': 'Connect later — skip',
+  'onboard.connect.next': 'Next',
+  'onboard.connect.sidebarHint': 'You can also connect a device from the Device icon in the left sidebar.',
   'onboard.toast.skipConnect': 'Skipped device connection — try AI now and connect later',
 
   'onboard.model.descDone': 'Model is configured. Update below if needed, or continue.',
@@ -111,9 +110,9 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.oc.nextInstalled': 'Continue',
   'onboard.toast.skipWizard': 'Wizard skipped — reopen anytime in Settings',
 
-  'onboard.rdk.intro': 'RDKClaw is the built-in agent: natural language for device control, apps, and diagnostics. Try a task:',
-  'onboard.rdk.tryTitle': 'Device health check',
-  'onboard.rdk.tryQuote': '“Check temperature, memory, BPU load, and suggest optimizations”',
+  'onboard.rdk.intro': 'RDKClaw is the built-in agent: natural language for device control, apps, and diagnostics. Next step',
+  'onboard.rdk.tryTitle': 'Say hello',
+  'onboard.rdk.tryQuote': '“Hello, RDKClaw!”',
   'onboard.rdk.send': 'Send',
   'onboard.rdk.ocCardTitle': 'Configure OpenClaw (recommended)',
   'onboard.rdk.ocCardBadge': 'Smarter when configured',
@@ -164,5 +163,5 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.toast.copyFail': 'Copy failed',
   'onboard.toast.trySent': 'Sent to AI chat — you can tap Finish to exit',
   'onboard.toast.done': 'Onboarding complete — enjoy RDK Studio!',
-  'onboard.cmd.health': 'Run a full device health check: temperature, memory, BPU load, and network; give optimization tips.',
+  'onboard.cmd.health': 'Hello, RDKClaw!',
 };

@@ -117,24 +117,164 @@ export async function openSerialPortWithOptions(port: SerialPort, baudRate: numb
   });
 }
 
+/** Windows 桌面版：WMI/PnP 与设备管理器中「端口」条目一致 */
+export type WindowsSerialPortRow = {
+  deviceId: string;
+  name: string;
+  usbVendorId: number | null;
+  usbProductId: number | null;
+  instanceId?: string;
+};
+
+/** 用户在某次「添加/连接」中选择的串口展示名（Electron 主进程 portName，如 COM3） */
+const serialPortDisplayLabels = new WeakMap<SerialPort, string>();
+
+export function rememberSerialPortLabel(port: SerialPort, label: string): void {
+  const t = label.trim();
+  if (t) serialPortDisplayLabels.set(port, t);
+}
+
+export function getSerialPortLabel(port: SerialPort): string | undefined {
+  return serialPortDisplayLabels.get(port);
+}
+
 /**
- * 展示用标签（浏览器不暴露 COM 名，仅能显示 USB VID:PID 或序号）。
+ * 桌面端：在 `await navigator.serial.requestPort()` 解析后立即调用，
+ * 消费主进程在 `select-serial-port` 中写入的 COM 名（`serial-port-picker.mjs`）。
+ */
+export async function consumeElectronSerialPortMeta(port: SerialPort): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const rdk = window.rdkDesktop;
+  if (!rdk?.consumeLastSerialPortMeta) return;
+  const meta = await rdk.consumeLastSerialPortMeta();
+  if (!meta?.portName) return;
+  const line =
+    meta.displayName && meta.displayName.trim() && meta.displayName !== meta.portName
+      ? `${meta.portName} · ${meta.displayName.trim()}`
+      : meta.portName;
+  rememberSerialPortLabel(port, line);
+}
+
+type SerialPortWithForget = SerialPort & { forget?: () => Promise<void> };
+
+/**
+ * 撤销「无 USB VID/PID、无本地标签」的串口授权（需 Chromium 支持 `SerialPort.forget()`）。
+ * 用于清理历史误授权产生的「已授权串口 n」占位项。
+ */
+export async function forgetUnrecognizedSerialPorts(ports: SerialPort[]): Promise<number> {
+  let n = 0;
+  for (const port of ports) {
+    if (getSerialPortLabel(port)) continue;
+    let info: SerialPortInfo;
+    try {
+      info = port.getInfo();
+    } catch {
+      continue;
+    }
+    if (info.usbVendorId != null && info.usbProductId != null) continue;
+    /** 蓝牙 RFCOMM 等通常无 VID/PID，但不应当垃圾清掉 */
+    if (info.bluetoothServiceClassId != null) continue;
+    try {
+      if (port.readable || port.writable) await port.close();
+    } catch {
+      /* noop */
+    }
+    const f = port as SerialPortWithForget;
+    if (typeof f.forget !== 'function') continue;
+    try {
+      await f.forget();
+      n += 1;
+    } catch {
+      /* noop */
+    }
+  }
+  return n;
+}
+
+export type SerialPortLabelContext = {
+  /** Windows：由 Electron 主进程枚举，用于与 Web Serial 的 VID/PID 对齐显示 COMx */
+  windows?: WindowsSerialPortRow[];
+  /** 无法解析出 COM / VID 时的兜底文案（由 UI 注入 i18n） */
+  unnamedPortLabel?: (index: number) => string;
+};
+
+/**
+ * 展示用标签。
+ * - 纯浏览器：Chrome 不暴露 COM 名，仅能显示 USB VID:PID 或序号。
+ * - Windows 桌面版：传入 `windows` 时按 VID/PID 与设备管理器中的 COM 名称对齐。
+ * - 蓝牙等无 VID/PID 时：依赖 Electron 在授权时写入的 `rememberSerialPortLabel`（主进程 portName）。
  * @see https://developer.chrome.com/docs/capabilities/serial
  */
-export function formatSerialPortLabel(port: SerialPort, index: number): string {
+export function formatSerialPortLabel(
+  port: SerialPort,
+  index: number,
+  ctx?: SerialPortLabelContext,
+): string {
+  const remembered = getSerialPortLabel(port);
+  if (remembered) return remembered;
+
   try {
     const info = port.getInfo();
     const vid = info.usbVendorId;
     const pid = info.usbProductId;
-    if (vid != null && pid != null) {
-      const v = (vid & 0xffff).toString(16).padStart(4, '0');
-      const p = (pid & 0xffff).toString(16).padStart(4, '0');
-      return `${v}:${p} · #${index + 1}`;
+    const btClass = info.bluetoothServiceClassId;
+    const vStr =
+      vid != null && pid != null
+        ? `${(vid & 0xffff).toString(16).padStart(4, '0')}:${(pid & 0xffff).toString(16).padStart(4, '0')}`
+        : null;
+
+    if (vStr && ctx?.windows?.length && vid != null && pid != null) {
+      const matches = ctx.windows.filter(
+        (w) => w.usbVendorId === vid && w.usbProductId === pid,
+      );
+      if (matches.length === 1) {
+        const m = matches[0];
+        const com = m.deviceId || '';
+        const friendly = (m.name || '').trim();
+        if (com && friendly) return `${com} · ${friendly}`;
+        if (com) return `${com} · ${vStr}`;
+      }
+      if (matches.length > 1) {
+        const coms = matches.map((m) => m.deviceId).filter(Boolean).join(', ');
+        return `${vStr} · ${coms}`;
+      }
+    }
+
+    /** 蓝牙等：系统枚举有 BTHENUM/1101，而 getInfo 可能仅有 bluetoothServiceClassId */
+    if (btClass != null && ctx?.windows?.length) {
+      const btRows = ctx.windows.filter((w) => {
+        const id = (w.instanceId || '').toUpperCase();
+        return id.includes('BTHENUM') || id.includes('BLUETOOTH') || id.includes('00001101');
+      });
+      if (btRows.length === 1) {
+        const m = btRows[0];
+        const com = m.deviceId || '';
+        const friendly = (m.name || '').trim();
+        if (com && friendly) return `${com} · ${friendly}`;
+        if (com) return com;
+      }
+    }
+
+    if (vStr) {
+      return `${vStr} · ${index + 1}`;
     }
   } catch {
     /* noop */
   }
-  return `#${index + 1}`;
+  return ctx?.unnamedPortLabel?.(index) ?? `Port ${index + 1}`;
+}
+
+/**
+ * 下拉是否展示该端口：无 USB 标识、无 COM 名、仅「串口 #n」类占位的不展示（仍可通过「清除未识别」从浏览器撤销）。
+ */
+export function serialPortHasIdentifiableLabel(
+  port: SerialPort,
+  index: number,
+  ctx?: SerialPortLabelContext,
+): boolean {
+  const label = formatSerialPortLabel(port, index, ctx);
+  const fallback = ctx?.unnamedPortLabel?.(index) ?? `Port ${index + 1}`;
+  return label !== fallback;
 }
 
 /**

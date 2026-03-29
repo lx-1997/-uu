@@ -248,20 +248,20 @@ export const EN_EXTRAS: Record<string, string> = {
   'terminal.ui.ctx.paste': 'Paste',
   'terminal.ui.ctx.selectAll': 'Select all',
   'terminal.ui.ctx.clear': 'Clear',
-  'terminal.session.serial': 'USB Serial',
+  'terminal.session.serial': 'Local serial',
   'terminal.needDeviceForSshTab': 'Connect a device first to open SSH tabs',
   'terminal.ui.remoteTitle': 'RDK Studio Terminal',
   'terminal.ui.remoteDesc':
-    'Connect an RDK device in the dock for SSH, or use local USB serial below.',
+    'Connect an RDK device in the dock for SSH, or use local serial below (USB or Bluetooth COM, etc.). You must click Add once to authorize a port — the browser does not mirror every COM shown in Device Manager.',
   'terminal.ui.remoteDescMac':
     'Connect an RDK device in the dock to use SSH.',
-  'terminal.ui.serialOnlyMeta': 'RDK Studio · USB serial',
+  'terminal.ui.serialOnlyMeta': 'RDK Studio · Local serial',
   'terminal.serial.rdkStudioLead':
-    'Pick a port and baud, then Connect. If the list is empty, click Add first. Default 115200 8N1.',
-  'terminal.serial.sectionLabel': 'USB serial',
+    'Default 115200 8N1. If the list is empty, click Add to authorize a port — the browser does not auto-sync every COM from Device Manager.',
+  'terminal.serial.sectionLabel': 'Local serial',
   'terminal.serial.portPlaceholder': 'Choose a port…',
   'terminal.serial.portSelectTitle':
-    'RDK Studio: USB serial ports already allowed for this site. If empty, click Add and choose a device.',
+    'Only ports already allowed in the browser (not the same as Device Manager). If empty, click Add first.',
   'terminal.serial.refreshPorts': 'Refresh',
   'terminal.serial.addPort': 'Add',
   'terminal.serial.addPortTitle': 'Choose and allow a serial port in the system dialog',
@@ -273,14 +273,32 @@ export const EN_EXTRAS: Record<string, string> = {
   'terminal.serial.connectBtn': 'Connect',
   'terminal.serial.rdkNote': 'RDK official debug port: 115200 8N1, no flow control.',
   'terminal.serial.openFail': 'Could not open serial port: {{msg}}',
+  'terminal.serial.windowsComHint':
+    'Windows desktop: COM names in the list match Device Manager → Ports (COM & LPT), so you can line them up with CH340/CP210x, etc.',
+  'terminal.serial.systemComDetected':
+    'This PC has serial ports: {{list}} (same as Device Manager, USB / Bluetooth, etc.).',
+  'terminal.serial.mustAuthorizeWebSerial':
+    'The browser will not list them until you click Add, pick the matching COM in the dialog, and grant access — then they appear in the dropdown.',
+  'terminal.serial.emptyPortsGeneric':
+    'The dropdown only shows authorized ports. If it is empty, click Add and choose a device (match the COM in Device Manager).',
   'terminal.serial.baudTitle': 'Baud rate (RDK default 115200)',
   'terminal.serial.connectTitle': 'New USB serial session',
   'terminal.serial.listModeLabel': 'Port list',
-  'terminal.serial.listModeTitle': 'Affects only the Add dialog filter (all USB serial vs common bridge chips).',
-  'terminal.serial.listModeAll': 'All ports (recommended)',
-  'terminal.serial.listModeCommon': 'Common USB–UART only',
+  'terminal.serial.listModeTitle':
+    'Affects only Add / Connect: common bridge chips (CH340/CP210x/…) vs all ports including Bluetooth.',
+  'terminal.serial.listModeAll': 'All ports (incl. Bluetooth)',
+  'terminal.serial.listModeCommon': 'Common USB–UART (recommended for RDK cable)',
   'terminal.serial.listShortAll': 'All',
   'terminal.serial.listShortCommon': 'USB UART',
+  'terminal.serial.portUnnamed': 'Port #{{n}} (no USB ID)',
+  'terminal.serial.allHiddenUnnamed':
+    'Authorized ports have no USB ID — hidden from the list. Use Clear or Refresh, then Add to pick a real COM.',
+  'terminal.serial.forgetUnnamed': 'Clear unrecognized',
+  'terminal.serial.forgetUnnamedTitle':
+    'Remove browser authorization for ports with no USB vendor/product ID (e.g. mistaken Bluetooth picks). Requires forget() support.',
+  'terminal.serial.forgetConfirm':
+    'Remove authorization for ports that have no USB hardware ID? You can click Add again for the COM you need.',
+  'terminal.serial.forgetDone': 'Removed {{n}} unrecognized authorization(s).',
 
   'dock.quick.dash.diag.label': 'Health check',
   'dock.quick.dash.diag.text': 'Run a full device health check: temperature, load, network',
@@ -1240,6 +1258,9 @@ export const EN_EXTRAS: Record<string, string> = {
   'errorBoundary.retry': 'Try again',
   'confirm.cancel': 'Cancel',
   'confirm.run': 'Confirm',
+
+  /** Electron：主进程串口多选弹窗（与系统 COM 名一致） */
+  'electron.serialPicker.title': 'Choose a serial port',
 };
 
 /** 替换 {{key}} 占位符 */

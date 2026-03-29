@@ -521,7 +521,7 @@ export default function OnboardingWizard() {
   const handleTryRDKClaw = () => {
     addToast(t('onboard.toast.trySent', '已发送到 AI 对话区，你可以继续在这里点击“完成”结束引导'), 'success');
     setChatExpanded(true);
-    setCmd(t('onboard.cmd.health', '帮我全面检查当前设备的健康状态，包括温度、内存、BPU 负载和网络，并给出优化建议'));
+    setCmd(t('onboard.cmd.health', '你好，RDKClaw！'));
     setTimeout(() => {
       (document.querySelector('.dock-input') as HTMLFormElement | null)?.requestSubmit();
     }, 500);
@@ -583,10 +583,7 @@ export default function OnboardingWizard() {
               </button>
             ))}
           </div>
-          <div className="ob-actions">
-            <button type="button" className="btn btn-ghost" onClick={() => setObStep('flash')}>
-              {t('onboard.btn.skipFlash', '跳过，直接烧录')}
-            </button>
+          <div className="ob-actions ob-actions--end">
             <button type="button" className="btn btn-primary" disabled={!selectedBoard} onClick={() => setObStep('flash')}>
               {t('onboard.btn.next', '下一步')}
             </button>
@@ -678,13 +675,20 @@ export default function OnboardingWizard() {
           </div>
           <div className="ob-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setObStep(selectedBoard ? 'flash' : 'board')}>{t('onboard.btn.back', '上一步')}</button>
-            <button type="button" className="btn btn-primary" onClick={() => setShowAddDevice(true)}>
-              {t('onboard.connect.addDevice', '添加设备')}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setObStep('rdkclaw');
+                addToast(t('onboard.toast.skipConnect', '已跳过设备连接，可先体验 AI，稍后再补连设备'), 'info');
+              }}
+            >
+              {t('onboard.connect.next', '下一步')}
             </button>
           </div>
-          <button type="button" className="ob-skip" onClick={() => { setObStep('rdkclaw'); addToast(t('onboard.toast.skipConnect', '已跳过设备连接，可先体验 AI，稍后再补连设备'), 'info'); }}>
-            {t('onboard.connect.skipLater', '稍后连接，跳过引导')}
-          </button>
+          <p className="ob-desc ob-connect-sidebar-hint">
+            {t('onboard.connect.sidebarHint', '也可在左侧导航栏点击「设备」进行设备连接。')}
+          </p>
         </div>
       )}
 
@@ -980,15 +984,15 @@ export default function OnboardingWizard() {
       {obStep === 'rdkclaw' && (
         <div className="ob-content">
           <p className="ob-desc">
-            {t('onboard.rdk.intro', 'RDKClaw 是 RDK Studio 内置的 AI 智能体，可以用自然语言操控设备、开发应用、诊断问题。试试给它一个小任务：')}
+            {t('onboard.rdk.intro', 'RDKClaw 是 RDK Studio 内置的 AI 智能体，可以用自然语言操控设备、开发应用、诊断问题。下一步')}
           </p>
           <div className="ob-try-card">
             <div className="ob-try-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
             </div>
             <div className="ob-try-body">
-              <strong>{t('onboard.rdk.tryTitle', '设备健康检查')}</strong>
-              <span>{t('onboard.rdk.tryQuote', '“检查设备温度、内存、BPU 负载并给出优化建议”')}</span>
+              <strong>{t('onboard.rdk.tryTitle', '打个招呼')}</strong>
+              <span>{t('onboard.rdk.tryQuote', '“你好，RDKClaw！”')}</span>
             </div>
             <button type="button" className="btn btn-primary btn-sm" onClick={handleTryRDKClaw}>
               {t('onboard.rdk.send', '发送')}

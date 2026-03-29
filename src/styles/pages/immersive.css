@@ -358,6 +358,18 @@
   gap: 10px 12px;
 }
 
+.immersive-serial-bar-hint {
+  width: 100%;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  padding: 2px 2px 0;
+}
+
+.immersive-serial-bar-hint p {
+  margin: 0;
+}
+
 .immersive-serial-bar-connect {
   display: flex;
   justify-content: flex-end;
