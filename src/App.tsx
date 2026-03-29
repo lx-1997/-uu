@@ -174,7 +174,7 @@ function useThemeSync() {
 }
 
 function AppShell() {
-  const { activeTab, currentDevice, theme, railExpanded, obStep } = useAppState();
+  const { activeTab, currentDevice, theme, railExpanded } = useAppState();
   const { t } = useI18n();
   useStudioPresence(activeTab);
   useDesktopTabSync(activeTab);
@@ -201,7 +201,6 @@ function AppShell() {
   }, [activeTab, t]);
 
   const deviceOnline = !!currentDevice && isDeviceSshConnected(currentDevice.status);
-  const onboardingActive = obStep !== 'done';
 
   return (
     <div className={`app-shell ${railExpanded ? 'rail-expanded' : ''}`}>
@@ -229,7 +228,8 @@ function AppShell() {
         <ErrorBoundary>
           <MainContent />
         </ErrorBoundary>
-        {!onboardingActive && <AIDock />}
+        {/* 引导期间也需挂载：第 5 步「发送」会展开 Dock 并提交表单；若此处不渲染则 .dock-input 不存在 */}
+        <AIDock />
       </main>
 
       <Toasts />
