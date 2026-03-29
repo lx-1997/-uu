@@ -55,9 +55,3 @@ export function emitFlashProgress(payload) {
     }
   }
 }
-
-export function makeResult(ok, data) {
-  if (ok) return { ok: true, ...data };
-  const { error, code, ...rest } = data || {};
-  return { ok: false, error: error || '未知错误', code, ...rest };
-}

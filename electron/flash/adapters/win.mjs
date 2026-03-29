@@ -1,15 +1,10 @@
 /**
  * Windows flash adapter.
  *
- * Provides drive enumeration, image writing, backup, decompression and
- * xburn launching on Windows via PowerShell and direct file I/O.
- *
- * TF 卡：若 `electron/resources/flash/win32/x64/` 下同时存在 **dd.exe + ls.exe**（与 rdkstudio_frontend-master
- * `extraResources/flash/win32/x64` 一致），则**完全采用该前端的 FlashBehavior 流程**（ls 枚举、bat+runAs、dd）。
- * 否则回退：diskpart clean + PowerShell/.NET 或 Node 直写。
- *
- * Every public method mirrors the adapter interface consumed by the
- * flash service — no Electron-specific imports here.
+ * TF 卡写盘：仅使用与 rdkstudio_frontend 一致的捆绑工具（`electron/resources/flash/win32/x64/` 下
+ * dd.exe + ls.exe + msys 依赖，由 `npm run copy:win-flash` 或打包流程提供）。
+ * 枚举与烧录见 `win-dd-flash.mjs`（bat + UAC runAs + dd）。
+ * 备份 / 写后抽样校验仍用 PowerShell + .NET（读 raw 设备比 Node fs 更稳）。
  */
 
 import { spawn, execFile } from 'node:child_process';
@@ -22,7 +17,6 @@ import crypto from 'node:crypto';
 const execFileAsync = promisify(execFile);
 import { emitFlashProgress } from '../progress.mjs';
 import { FlashErrorCode } from '../types.mjs';
-import { etcherStyleDiskpartClean } from '../etcher-diskpart-clean.mjs';
 import {
   hasFrontendFlashBundle,
   listUsbDevicesViaLs,
@@ -32,9 +26,6 @@ import {
 } from '../win-dd-flash.mjs';
 
 let activeOp = null;
-
-/** Node 写盘进度节流（与 macOS 对齐） */
-const WIN_NODE_WRITE_PROGRESS_MS = 250;
 
 /** Win CreateProcess 命令行约 8191 字符；-EncodedCommand 的 Base64 单独控制长度，避免超长退回 -File */
 const ENCODED_COMMAND_B64_MAX = 7000;
@@ -99,101 +90,6 @@ function resolveIoPolicy(options = {}) {
    * 512KB 仍明显低于极速 1MB，一般读卡器可接受；若遇杀软拦截可再试环境变量或 turbo。
    */
   return { chunkBytes: 512 * 1024 };
-}
-
-/**
- * 尝试以 Node libuv 直接打开镜像与 \\.\PhysicalDriveN（与 macOS 同源，不经 PowerShell/.NET）。
- * 打包/杀软环境下首次 open 常因时机 EIO，故多次重试并间歇重申 mountvol /N。
- * 若仍失败则返回 null，由调用方回退 startDotNetRawWrite。
- */
-async function tryOpenWinNodeRawHandles(imagePath, drivePath) {
-  let imageFh;
-  try {
-    imageFh = await fs.promises.open(imagePath, 'r');
-  } catch {
-    return null;
-  }
-  const maxAttempts = 6;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 350 * attempt));
-      void setWindowsAutoMountNewVolumes(false);
-    }
-    try {
-      const targetFh = await fs.promises.open(drivePath, 'r+');
-      return { imageFh, targetFh };
-    } catch {
-      /* 下一轮 */
-    }
-  }
-  await imageFh.close().catch(() => {});
-  return null;
-}
-
-/**
- * Windows：优先用 Node 与 mac 相同循环写盘；句柄由本函数关闭。
- * 分区表出现后若单次 write 失败会重试并重申 mountvol /N（由外层 interval + 此处 void 调用）。
- */
-async function runWinNodeRawWriteWithHandles(imageFh, targetFh, chunkBytes, totalBytes) {
-  const buffer = Buffer.allocUnsafe(chunkBytes);
-  let offset = 0;
-  let lastProgressPercent = -1;
-  let lastProgressEmitAt = 0;
-  activeOp.nodeRawHandles = { imageFh, targetFh };
-  try {
-    emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
-    while (true) {
-      if (activeOp?.cancelled) {
-        throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
-      }
-      const res = await imageFh.read(buffer, 0, buffer.length, offset);
-      const bytesRead = res.bytesRead;
-      if (bytesRead === 0) break;
-
-      let writeOk = false;
-      let lastW = null;
-      for (let ti = 0; ti < 18; ti++) {
-        if (activeOp?.cancelled) {
-          throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
-        }
-        try {
-          await targetFh.write(buffer, 0, bytesRead, offset);
-          writeOk = true;
-          break;
-        } catch (w) {
-          lastW = w;
-          void setWindowsAutoMountNewVolumes(false);
-          await new Promise((r) => setTimeout(r, 280 + ti * 140));
-        }
-      }
-      if (!writeOk) {
-        const em = lastW instanceof Error ? lastW.message : String(lastW);
-        throw Object.assign(new Error(`写入物理磁盘失败：${em}`), { code: FlashErrorCode.WRITE_FAILED });
-      }
-
-      offset += bytesRead;
-      const percent = Math.min(98, Math.max(3, Math.round((offset / totalBytes) * 96) + 2));
-      const now = Date.now();
-      if (
-        percent >= lastProgressPercent + 1
-        || now - lastProgressEmitAt >= WIN_NODE_WRITE_PROGRESS_MS
-        || offset >= totalBytes
-      ) {
-        lastProgressPercent = percent;
-        lastProgressEmitAt = now;
-        emitFlashProgress({
-          stage: 'flashing',
-          message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(totalBytes / 1024 / 1024).toFixed(1)} MB`,
-          percent,
-        });
-      }
-    }
-    await targetFh.sync();
-  } finally {
-    activeOp.nodeRawHandles = null;
-    await imageFh.close().catch(() => {});
-    await targetFh.close().catch(() => {});
-  }
 }
 
 function runPowerShell(script) {
@@ -332,162 +228,10 @@ async function prepareDiskForRawWrite(diskNumber) {
 /** USB/读卡器在卸载卷后需再等一会儿，否则 CreateFile(\\.\PhysicalDriveN) 常短暂 EIO */
 const POST_UNMOUNT_SETTLE_MS = 2200;
 
-/** 写入过程中分区表出现后 Windows 可能再次尝试挂载新卷，主进程侧定期重申 mountvol /N */
-const AUTO_MOUNT_REASSERT_MS = 2500;
-
-/**
- * 写入前 mountvol /N：暂时关闭「新卷自动挂载」，减轻写入数 MB 后分区表已写入、系统识别分区并自动挂载、与 raw 写入争用导致的 UnauthorizedAccess。
- * 写入结束务必 mountvol /E 恢复，避免影响用户插拔其它 U 盘。
- */
-function setWindowsAutoMountNewVolumes(enable) {
-  if (process.platform !== 'win32') {
-    return Promise.resolve({ ok: false });
-  }
-  return new Promise((resolve) => {
-    execFile('mountvol', [enable ? '/E' : '/N'], { windowsHide: true }, (err) => {
-      resolve({ ok: !err });
-    });
-  });
-}
-
+/** 备份 / 校验脚本通过 stderr 输出 JSON 行进度 */
 const FLASH_PROGRESS_PREFIX = 'RDK_FLASH_PROGRESS_JSON=';
-/** 旧版明文（易因控制台代码页在 Node 侧变乱码） */
-const RDK_FLASH_FATAL_PREFIX = 'RDK_FLASH_FATAL:';
-/** UTF-8 经 Base64 输出（备用） */
-const RDK_FLASH_FATAL_B64_PREFIX = 'RDK_FLASH_FATAL_B64=';
-/** 首选：异常写入 %TEMP% 下 UTF-8 文件，stdout 只输出 ASCII 路径行，避免管道编码损坏中文 */
-const RDK_FLASH_FATAL_FILE_PREFIX = 'RDK_FLASH_FATAL_FILE=';
 
-function readFatalUtf8File(filePath) {
-  const fp = String(filePath || '').trim();
-  if (!fp) return null;
-  try {
-    const content = fs.readFileSync(fp, 'utf8');
-    try {
-      fs.unlinkSync(fp);
-    } catch {
-      /* ignore */
-    }
-    const t = content.trim();
-    return t || null;
-  } catch {
-    return null;
-  }
-}
-
-function parseFatalLineFromOutput(text) {
-  const s = String(text || '');
-  const fileIdx = s.indexOf(RDK_FLASH_FATAL_FILE_PREFIX);
-  if (fileIdx !== -1) {
-    const rest = s.slice(fileIdx + RDK_FLASH_FATAL_FILE_PREFIX.length);
-    const lineEnd = rest.search(/\r\n|\n|\r/);
-    const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
-    const fromFile = readFatalUtf8File(line);
-    if (fromFile) return fromFile;
-  }
-  const b64Idx = s.indexOf(RDK_FLASH_FATAL_B64_PREFIX);
-  if (b64Idx !== -1) {
-    const rest = s.slice(b64Idx + RDK_FLASH_FATAL_B64_PREFIX.length);
-    const lineEnd = rest.search(/\r\n|\n|\r/);
-    const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
-    if (!line) return null;
-    try {
-      return Buffer.from(line, 'base64').toString('utf8') || null;
-    } catch {
-      return null;
-    }
-  }
-  const idx = s.indexOf(RDK_FLASH_FATAL_PREFIX);
-  if (idx === -1) return null;
-  const rest = s.slice(idx + RDK_FLASH_FATAL_PREFIX.length);
-  const lineEnd = rest.search(/\r\n|\n|\r/);
-  const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
-  return line || null;
-}
-
-/** 从 PowerShell 5.1 写入 stderr 的 CLIXML 中抽出 <S S="Error"> 文本（便于展示，避免整段 XML） */
-function extractClixmlErrorStrings(raw) {
-  const s = String(raw || '');
-  const out = [];
-  const re = /<S\s+S="Error">([^<]*)<\/S>/gi;
-  let m;
-  while ((m = re.exec(s)) !== null) {
-    const t = String(m[1] || '')
-      .replace(/_x000D__x000A_/gi, '\n')
-      .replace(/_x000A_/gi, '\n')
-      .trim();
-    if (t) out.push(t);
-  }
-  return out;
-}
-
-/** IPC 或 stderr 拼接偶发导致同一段说明出现两遍，折叠后再进 UI/Toast */
-function collapseDuplicateFlashErrorText(s) {
-  const t = String(s || '').replace(/\r\n/g, '\n').trim();
-  if (t.length < 24) return t;
-  const half = Math.floor(t.length / 2);
-  if (half >= 12 && t.slice(0, half) === t.slice(half)) return t.slice(0, half).trim();
-  /** 整段重复、或连续两行/多行完全相同（长文本对半切分可能落在段中导致漏判） */
-  const lines = t.split('\n').map((x) => x.trim()).filter(Boolean);
-  const deduped = [];
-  for (const line of lines) {
-    if (deduped.length && deduped[deduped.length - 1] === line) continue;
-    deduped.push(line);
-  }
-  return deduped.join('\n');
-}
-
-/** 解析 .NET/PowerShell 失败信息，避免把整段 CLIXML 塞进 UI */
-function formatDotNetFlashWriteErrorRaw(stderrOrMessage) {
-  const raw = String(stderrOrMessage || '').trim();
-  /** Node 直写等路径已带「写入物理磁盘失败：」前缀，避免再包一层 */
-  if (/^写入物理磁盘失败[：:]/u.test(raw)) {
-    return collapseDuplicateFlashErrorText(raw);
-  }
-  const fatal = parseFatalLineFromOutput(raw);
-  if (fatal) {
-    let short = fatal.length > 520 ? `${fatal.slice(0, 520)}…` : fatal;
-    /** .NET 中文提示常以「。」结尾，避免与下文「。常见原因」连成「。。」 */
-    short = short.replace(/[。.]+$/u, '').trim();
-    if (
-      /UnauthorizedAccess|访问被拒绝|对路径的访问被拒绝|Access is denied|Access to the path/i.test(fatal)
-    ) {
-      return `写入被拒绝（UnauthorizedAccess）：${short}。常见原因：写入数 MB 后分区表已落盘，Windows 可能短暂挂载新卷并与 raw 写入争用；杀毒/Defender 实时扫描、资源管理器或读卡器不稳也会触发。请尝试：以管理员运行、将 RDK Studio 与镜像目录加入排除、关闭已打开的该介质窗口、换 USB 口后重试。若其它工具（如 Rufus）可写而此处失败，多为上述争用，可多试几次。仍失败可设置环境变量 RDK_FLASH_WIN_FORCE_NODE=1 后重启，改用 Node 直写物理盘（与默认 PowerShell/.NET 路径争用表现可能不同）。`;
-    }
-    return `写入物理磁盘失败：${short}`;
-  }
-  const clixmlErrors = extractClixmlErrorStrings(raw);
-  const joinedClixml = clixmlErrors.join('\n');
-  const looksLikeClixml = /<Objs\s+Version=|#<\s*CLIXML/i.test(raw);
-  /** 大镜像时旧脚本 [Math]::Min(int, long) 会按 Int32 解析第二个参数导致溢出 */
-  if (
-    /\[Math\]::Min|Math\]::Min/i.test(joinedClixml + raw) &&
-    /Int32|System\.Int32|val2|太小|太大|overflow/i.test(joinedClixml + raw)
-  ) {
-    return '写入物理磁盘失败：单次读取长度计算时发生 Int32 溢出（镜像或磁盘大于约 2GB 时，旧版 PowerShell 脚本会误将剩余字节数当作 32 位整数处理）。请更新并重启桌面端后重试；若已是最新版本仍失败，请向开发者反馈。';
-  }
-  if (looksLikeClixml && joinedClixml) {
-    const ascii = joinedClixml.replace(/[^\x09\x0a\x0d\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim();
-    const tail = ascii.length > 420 ? `${ascii.slice(0, 420)}…` : ascii;
-    return `写入物理磁盘失败：${tail || 'PowerShell 报错（CLIXML）。多为杀毒实时扫描或卷被重新挂载；请暂时排除该物理盘、关闭实时防护与资源管理器中该盘窗口后重试。'}`;
-  }
-  if (looksLikeClixml) {
-    return '写入物理磁盘失败：PowerShell 报错被序列化为 CLIXML（已写入部分数据后中断）。多为杀毒实时扫描或卷被重新挂载。请暂时排除该物理盘/关闭实时防护、关闭资源管理器中该盘窗口后重试。';
-  }
-  let short = raw.length > 900 ? `${raw.slice(0, 900)}…` : raw;
-  /** CLIXML / 控制台乱码里常重复同一行，避免「写入物理磁盘失败：… 写入物理磁盘失败：…」 */
-  short = short.replace(/(写入物理磁盘失败[：:]\s*)+/g, '写入物理磁盘失败：').trim();
-  return `写入物理磁盘失败：${short}`;
-}
-
-function formatDotNetFlashWriteError(stderrOrMessage) {
-  return collapseDuplicateFlashErrorText(formatDotNetFlashWriteErrorRaw(stderrOrMessage));
-}
-
-/**
- * Node 在 Windows 上对 \\.\PhysicalDriveN 会经 path.win32.toNamespacedPath 错误地追加尾部 \，
- * 导致 libuv CreateFile 稳定 EIO（见 nodejs/node#54025）。.NET FileStream 直接传设备路径，可绕过该问题。
- */
+/** 临时 meta 供 PowerShell 读路径与参数（备份、抽样校验）。 */
 function writeMetaFile(obj) {
   const p = path.join(os.tmpdir(), `rdk-flash-meta-${crypto.randomUUID()}.json`);
   fs.writeFileSync(p, JSON.stringify(obj), 'utf8');
@@ -509,194 +253,6 @@ function runPowerShellFileCaptureStdout(ps1Path) {
       else reject(new Error((stderrBuf || stdoutBuf || `powershell exit ${code}`).trim()));
     });
   });
-}
-
-/** 使用 .NET FileStream 整盘写入；返回 { child, done } 以便取消时 kill */
-function startDotNetRawWrite(imagePath, drivePath, chunkBytes) {
-  const metaPath = writeMetaFile({ imagePath, drivePath, chunkBytes });
-  const ps1Body = `$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-$metaPath = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(metaPath, 'utf8').toString('base64')}'))
-$meta = Get-Content -LiteralPath $metaPath -Encoding UTF8 | ConvertFrom-Json
-$imagePath = $meta.imagePath
-$drivePath = $meta.drivePath
-$chunk = [int]$meta.chunkBytes
-function Write-RdkFatalUtf8([string]$txt) {
-  $p = Join-Path $env:TEMP ('rdk-fatal-' + [guid]::NewGuid().ToString() + '.txt')
-  [System.IO.File]::WriteAllText($p, $txt, [System.Text.UTF8Encoding]::new($false))
-  [Console]::Out.WriteLine('${RDK_FLASH_FATAL_FILE_PREFIX}' + $p)
-  [Console]::Out.Flush()
-}
-function Invoke-RdkReassertNoAutoMount {
-  try {
-    $mv = Join-Path $env:SystemRoot 'System32\\mountvol.exe'
-    if (Test-Path -LiteralPath $mv) {
-      Start-Process -FilePath $mv -ArgumentList '/N' -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue | Out-Null
-    }
-  } catch { }
-}
-# 顺序读镜像，减轻系统缓存与 I/O 抖动
-$img = New-Object System.IO.FileStream($imagePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, $chunk, [System.IO.FileOptions]::SequentialScan)
-try {
-  # FileShare.Read：独占 None 时易与 Defender/卷枚举争用句柄导致 UnauthorizedAccess；允许读共享常可共存
-  $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read, $chunk)
-  try {
-    Invoke-RdkReassertNoAutoMount
-    # 多留 512 字节，末块扇区对齐填充时不会越界（对齐 rpi-imager / Win 物理盘写入要求）
-    $buf = New-Object byte[] ([int]$chunk + 512)
-    $total = $img.Length
-    $off = 0L
-    $lastMountVolPing = 0L
-    $lastProgressOff = 0L
-    # 约 120 条进度/盘；单步上限 16MB，下限 1MB（避免 9GB 镜像仍每 64KB 打一次 JSON）
-    $progressEvery = [long][Math]::Max(1048576L, [Math]::Min(16777216L, [Math]::Ceiling($total / 120.0)))
-    # 前 128MB：GPT/分区已可见，512KB 重申 mountvol；之后每 64MB 一次（避免全程过密拖慢）
-    $earlyGuardBytes = 134217728L
-    $sector = 512
-    while ($off -lt $total) {
-      # 与备份同源：必须用 Int64 参与 Min，否则 $total-$off 超过 Int32 时 [Math]::Min 会按 Int32 解析而抛错
-      $need = [int][Math]::Min([int64]$chunk, $total - $off)
-      $n = $img.Read($buf, 0, $need)
-      if ($n -le 0) { break }
-      $wlen = $n
-      if (($n % $sector) -ne 0) {
-        $pad = $sector - ($n % $sector)
-        for ($pi = 0; $pi -lt $pad; $pi++) { $buf[$n + $pi] = 0 }
-        $wlen = $n + $pad
-      }
-      $blockStart = $off
-      $maxStreamRecover = 8
-      $streamRecover = 0
-      $blockDone = $false
-      while (-not $blockDone) {
-        $writeOk = $false
-        $lastWriteErr = $null
-        for ($ti = 0; $ti -lt 18; $ti++) {
-          try {
-            $dst.Write($buf, 0, $wlen)
-            $writeOk = $true
-            break
-          } catch {
-            $lastWriteErr = $_
-            Invoke-RdkReassertNoAutoMount
-            Start-Sleep -Milliseconds (280 + $ti * 140)
-          }
-        }
-        if ($writeOk) {
-          $blockDone = $true
-          break
-        }
-        if ($streamRecover -ge $maxStreamRecover) {
-          $ex = $null
-          if ($lastWriteErr) { $ex = $lastWriteErr.Exception } else { $ex = (New-Object System.Exception('写入失败（无异常详情）')) }
-          $inner = $ex
-          while ($inner.InnerException) { $inner = $inner.InnerException }
-          $em = ($inner.Message -replace "\\s+", " ")
-          Write-RdkFatalUtf8 $em
-          exit 1
-        }
-        $streamRecover++
-        try { $dst.Dispose() } catch { }
-        Start-Sleep -Milliseconds 700
-        Invoke-RdkReassertNoAutoMount
-        try {
-          $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read, $chunk)
-          [void]$dst.Seek($blockStart, 'Begin')
-        } catch {
-          $inner = $_.Exception
-          while ($inner.InnerException) { $inner = $inner.InnerException }
-          $em = ($inner.Message -replace "\\s+", " ")
-          Write-RdkFatalUtf8 $em
-          exit 1
-        }
-      }
-      $off += $n
-      $mountVolStep = 67108864L
-      if ($off -le $earlyGuardBytes) { $mountVolStep = 524288L }
-      if (($off - $lastMountVolPing) -ge $mountVolStep) {
-        Invoke-RdkReassertNoAutoMount
-        $lastMountVolPing = $off
-      }
-      # 勿用 ConvertTo-Json 逐块输出（极慢）；字符串拼 JSON + 按间隔写 stdout
-      $emitProgress = ($off -ge $total) -or (($off - $lastProgressOff) -ge $progressEvery) -or (($lastProgressOff -eq 0L) -and ($off -ge [Math]::Min(1048576L, $total)))
-      if ($emitProgress) {
-        $line = '${FLASH_PROGRESS_PREFIX}{"offset":' + $off + ',"total":' + $total + '}'
-        [Console]::Out.WriteLine($line)
-        [Console]::Out.Flush()
-        $lastProgressOff = $off
-      }
-    }
-    $dst.Flush()
-  } finally { $dst.Dispose() }
-} finally { $img.Dispose() }
-`;
-  const spawnOpts = resolvePowerShellSpawnArgs(ps1Body);
-  const extraPs1 = spawnOpts.mode === 'file' ? spawnOpts.ps1Path : null;
-  const child = spawn(getPowerShellExe(), spawnOpts.args, {
-    windowsHide: true,
-  });
-  let stdoutBuf = '';
-  let stderrBuf = '';
-  let stdoutLineCarry = '';
-  const flushFlashLine = (line) => {
-    if (
-      line.startsWith(RDK_FLASH_FATAL_FILE_PREFIX) ||
-      line.startsWith(RDK_FLASH_FATAL_B64_PREFIX) ||
-      line.startsWith(RDK_FLASH_FATAL_PREFIX)
-    ) {
-      return;
-    }
-    if (!line.startsWith(FLASH_PROGRESS_PREFIX)) return;
-    try {
-      const { offset, total } = JSON.parse(line.slice(FLASH_PROGRESS_PREFIX.length));
-      const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
-      emitFlashProgress({
-        stage: 'flashing',
-        message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`,
-        percent,
-      });
-    } catch {
-      /* ignore malformed line */
-    }
-  };
-  const pushStdout = (d) => {
-    const chunk = d.toString();
-    stdoutBuf += chunk;
-    const text = stdoutLineCarry + chunk;
-    const lines = text.split(/\r?\n/);
-    stdoutLineCarry = lines.pop() || '';
-    for (const line of lines) {
-      flushFlashLine(line);
-    }
-  };
-  /** 仅 stdout 解析进度；PS 5.1 等会把同类输出同时打到 stderr，避免对 stderr 再 emit 一遍进度 */
-  const pushStderr = (d) => {
-    stderrBuf += d.toString();
-  };
-  child.stdout.on('data', pushStdout);
-  child.stderr.on('data', pushStderr);
-  const done = new Promise((resolve, reject) => {
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (stdoutLineCarry.trim()) flushFlashLine(stdoutLineCarry.trim());
-      try {
-        fs.unlinkSync(metaPath);
-      } catch {
-        /* ignore */
-      }
-      try {
-        if (extraPs1) fs.unlinkSync(extraPs1);
-      } catch {
-        /* ignore */
-      }
-      if (code === 0) resolve();
-      else {
-        const combined = `${stdoutBuf}\n${stderrBuf}`.trim();
-        reject(new Error(combined || `powershell exit ${code}`));
-      }
-    });
-  });
-  return { child, done };
 }
 
 /** 物理盘备份：.NET 读 PhysicalDrive，避免 Node fs.open 对 raw 设备 EIO */
@@ -972,7 +528,16 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
     ? drivePathRaw
     : normalizeWinPhysicalDrivePath(drivePathIn);
   const verifyMode = options.verifyMode || 'sample';
-  const ioPolicy = resolveIoPolicy(options);
+
+  if (!hasFrontendFlashBundle()) {
+    throw Object.assign(
+      new Error(
+        '未找到 Windows 烧录工具（dd.exe、ls.exe 及 msys 依赖）。请在仓库根目录执行 npm run copy:win-flash（需已安装 Git for Windows），或手动复制到 electron/resources/flash/win32/x64/ 后重启应用。',
+      ),
+      { code: FlashErrorCode.TOOL_MISSING },
+    );
+  }
+
   const drives = await listDrives();
   const driveMeta = findDriveMetaInList(drives, drivePathIn);
   if (!driveMeta) throw Object.assign(new Error('未找到目标磁盘，请刷新后重试'), { code: FlashErrorCode.DEVICE_NOT_FOUND });
@@ -984,221 +549,63 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
     throw Object.assign(new Error(`镜像体积超出目标盘容量：image=${total}B, drive=${driveMeta.sizeBytes}B`), { code: FlashErrorCode.IMAGE_TOO_LARGE });
   }
 
-  /** 与 rdkstudio_frontend FlashBehavior 一致：捆绑 dd+ls 时走 bat+runAs，不强制主进程管理员（UAC 在烧录时弹出） */
-  const useFrontendFlash =
-    hasFrontendFlashBundle() &&
-    process.env.RDK_FLASH_WIN_CLASSIC !== '1' &&
-    (process.env.RDK_FLASH_ENGINE || '').trim().toLowerCase() !== 'dotnet';
-
+  /** 与 rdkstudio_frontend 一致：bat + UAC runAs + dd，主进程无需管理员 */
   const physicalForOps = drivePath.startsWith('/dev/') ? msysDeviceToPhysicalDrive(drivePath) : drivePath;
-
-  if (useFrontendFlash) {
-    const ofDevice = drivePath.startsWith('/dev/') ? drivePath : physicalDriveToMsysOf(normalizeWinPhysicalDrivePath(drivePathIn));
-    if (!ofDevice) {
-      throw Object.assign(new Error('无效的烧录目标（需要 /dev/sd* 或 PhysicalDrive）'), { code: FlashErrorCode.INVALID_PARAMS });
-    }
-    const diskNoFe = parsePhysicalDriveNumber(physicalForOps || drivePath);
-    if (diskNoFe === null) {
-      throw Object.assign(new Error('无法将目标映射为 PhysicalDrive，请刷新磁盘列表后重试'), { code: FlashErrorCode.INVALID_PARAMS });
-    }
-
-    activeOp = { id: crypto.randomUUID(), cancelled: false, child: null, cancelDd: null };
-    let verifyFe = { ok: true, detail: '跳过校验' };
-
-    try {
-      emitFlashProgress({
-        stage: 'prepare',
-        message: '写盘引擎: RDK Studio 插件同款（dd + outer.bat + UAC runAs，与 rdkstudio_frontend 一致）…',
-        percent: 2,
-      });
-      const { done, cancelDd } = startFrontendStyleDdFlash({
-        imagePath,
-        ofDevice,
-        imageSizeBytes: total,
-        isCancelled: () => !!activeOp?.cancelled,
-        performanceProfile: options.performanceProfile,
-      });
-      activeOp.cancelDd = cancelDd;
-      emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘（请在 UAC 中允许），请勿拔出介质', percent: 3 });
-      await done;
-    } catch (e) {
-      const code = e && typeof e === 'object' && 'code' in e ? e.code : '';
-      if (activeOp?.cancelled || code === FlashErrorCode.USER_CANCELLED) {
-        throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
-      }
-      const msg = e instanceof Error ? e.message : String(e);
-      throw Object.assign(new Error(msg), { code: FlashErrorCode.WRITE_FAILED });
-    } finally {
-      activeOp.cancelDd = null;
-    }
-
-    if (verifyMode === 'sample' && physicalForOps) {
-      emitFlashProgress({ stage: 'verifying', message: '正在执行写后抽样校验', percent: 99 });
-      verifyFe = await verifyImageSampleDotNet(imagePath, physicalForOps, total);
-      if (!verifyFe.ok) throw Object.assign(new Error(verifyFe.detail), { code: FlashErrorCode.VERIFY_FAILED });
-    }
-    emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
-    activeOp = null;
-    const onlineFe = await bringDiskOnlineBestEffort(diskNoFe);
-    if (!onlineFe.ok) {
-      emitFlashProgress({
-        stage: 'prepare',
-        message: `磁盘重新联机提示：${onlineFe.detail || '未知'}。若看不到 U 盘/SD，请重新插拔介质。`,
-        percent: 2,
-      });
-    }
-    return { output: `镜像已写入 ${ofDevice}`, verify: verifyFe };
+  const ofDevice = drivePath.startsWith('/dev/') ? drivePath : physicalDriveToMsysOf(normalizeWinPhysicalDrivePath(drivePathIn));
+  if (!ofDevice) {
+    throw Object.assign(new Error('无效的烧录目标（需要 /dev/sd* 或 PhysicalDrive）'), { code: FlashErrorCode.INVALID_PARAMS });
   }
-
-  const admin = await isAdmin();
-  if (!admin) {
-    throw Object.assign(
-      new Error(
-        '未检测到管理员提升权限（打包版若已「以管理员身份运行」仍提示此项，多为杀软拦截 PowerShell、或从压缩包直接运行导致未真正提升）。请：右键安装目录中的 RDK Studio.exe →「以管理员身份运行」；将安装目录加入 Windows 安全中心排除项；勿从 zip 内直接运行，先解压到本地磁盘后再试。',
-      ),
-      { code: FlashErrorCode.PERMISSION_DENIED },
-    );
-  }
-
-  const diskNo = parsePhysicalDriveNumber(drivePath);
-  if (diskNo === null) {
-    throw Object.assign(new Error('无效的 Windows 物理磁盘路径'), { code: FlashErrorCode.INVALID_PARAMS });
+  const diskNoFe = parsePhysicalDriveNumber(physicalForOps || drivePath);
+  if (diskNoFe === null) {
+    throw Object.assign(new Error('无法将目标映射为 PhysicalDrive，请刷新磁盘列表后重试'), { code: FlashErrorCode.INVALID_PARAMS });
   }
 
   activeOp = { id: crypto.randomUUID(), cancelled: false, child: null, cancelDd: null };
-  let verify = { ok: true, detail: '跳过校验' };
-  /** 仅在为写盘执行了 mountvol /N 时为 true，finally 中必须 /E */
-  let autoMountDisabledByUs = false;
+  let verifyFe = { ok: true, detail: '跳过校验' };
 
   try {
-    emitFlashProgress({ stage: 'prepare', message: '正在卸载目标磁盘卷并移除盘符（与 Raspberry Pi Imager 一致）…', percent: 1 });
-    try {
-      await unmountPhysicalDriveVolumesRpiStyle(diskNo);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw Object.assign(
-        new Error(
-          `无法卸载目标磁盘卷（可能被资源管理器、杀毒或正在访问该盘的程序占用）：${msg}。请关闭已打开的 U 盘/SD 窗口后重试，必要时重新插拔读卡器。`,
-        ),
-        { code: FlashErrorCode.WRITE_FAILED },
-      );
+    emitFlashProgress({
+      stage: 'prepare',
+      message: '写盘引擎: dd + outer.bat + UAC runAs（与打包资源 flash/win32/x64 一致）…',
+      percent: 2,
+    });
+    const { done, cancelDd } = startFrontendStyleDdFlash({
+      imagePath,
+      ofDevice,
+      imageSizeBytes: total,
+      isCancelled: () => !!activeOp?.cancelled,
+      performanceProfile: options.performanceProfile,
+    });
+    activeOp.cancelDd = cancelDd;
+    emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘（请在 UAC 中允许），请勿拔出介质', percent: 3 });
+    await done;
+  } catch (e) {
+    const code = e && typeof e === 'object' && 'code' in e ? e.code : '';
+    if (activeOp?.cancelled || code === FlashErrorCode.USER_CANCELLED) {
+      throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
     }
-
-    if (process.env.RDK_FLASH_WIN_SKIP_DISK_CLEAN !== '1') {
-      emitFlashProgress({
-        stage: 'prepare',
-        message: '正在清空分区表（diskpart clean，与 balena Etcher / etcher-sdk 一致）…',
-        percent: 1,
-      });
-      try {
-        await etcherStyleDiskpartClean(drivePath);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw Object.assign(
-          new Error(`无法清空目标磁盘分区表：${msg}。请以管理员运行并关闭占用该磁盘的程序后重试。`),
-          { code: FlashErrorCode.WRITE_FAILED },
-        );
-      }
-    }
-
-    emitFlashProgress({ stage: 'prepare', message: '正在等待磁盘就绪（卸载后释放句柄）…', percent: 2 });
-    await new Promise((r) => setTimeout(r, POST_UNMOUNT_SETTLE_MS));
-    const am = await setWindowsAutoMountNewVolumes(false);
-    autoMountDisabledByUs = am.ok;
-    if (am.ok) {
-      emitFlashProgress({
-        stage: 'prepare',
-        message: '已暂时禁用新卷自动挂载（降低写入中途被系统占用概率），完成后自动恢复…',
-        percent: 2,
-      });
-    }
-    /**
-     * 经典回退：RDK_FLASH_ENGINE=dotnet 或未捆绑 dd+ls 时
-     * - RDK_FLASH_WIN_FORCE_NODE=1：Node 直写
-     * - 否则：PowerShell + .NET
-     */
-    const flashEngineEnv = (process.env.RDK_FLASH_ENGINE || '').trim().toLowerCase();
-    const forceNode = process.env.RDK_FLASH_WIN_FORCE_NODE === '1';
-
-    let handles = null;
-    if (forceNode) {
-      handles = await tryOpenWinNodeRawHandles(imagePath, drivePath);
-    }
-
-    const reassertNoAutoMount = setInterval(() => {
-      void setWindowsAutoMountNewVolumes(false);
-    }, AUTO_MOUNT_REASSERT_MS);
-    let writeEngine = 'dotnet';
-
-    try {
-      if (handles) {
-        writeEngine = 'node';
-        emitFlashProgress({
-          stage: 'prepare',
-          message: '写盘引擎: Node 原生流式写入（RDK_FLASH_WIN_FORCE_NODE=1，与 macOS 同源）…',
-          percent: 2,
-        });
-        await runWinNodeRawWriteWithHandles(handles.imageFh, handles.targetFh, ioPolicy.chunkBytes, total);
-      } else {
-        writeEngine = 'dotnet';
-        emitFlashProgress({
-          stage: 'prepare',
-          message: forceNode
-            ? '写盘引擎: PowerShell + .NET（Node 未能打开物理盘，已回退）…'
-            : '写盘引擎: PowerShell + .NET（未使用插件同款 dd 时回退）…',
-          percent: 2,
-        });
-        const { child, done } = startDotNetRawWrite(imagePath, drivePath, ioPolicy.chunkBytes);
-        activeOp.child = child;
-        emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
-        await done;
-      }
-    } catch (e) {
-      if (activeOp?.cancelled) {
-        throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
-      }
-      const msg = e instanceof Error ? e.message : String(e);
-      const formatted = writeEngine === 'dotnet' ? formatDotNetFlashWriteError(msg) : msg;
-      throw Object.assign(new Error(formatted), { code: FlashErrorCode.WRITE_FAILED });
-    } finally {
-      clearInterval(reassertNoAutoMount);
-    }
-    if (verifyMode === 'sample') {
-      emitFlashProgress({ stage: 'verifying', message: '正在执行写后抽样校验', percent: 99 });
-      verify = await verifyImageSampleDotNet(imagePath, drivePath, total);
-      if (!verify.ok) throw Object.assign(new Error(verify.detail), { code: FlashErrorCode.VERIFY_FAILED });
-    }
-    emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
-    return { output: `镜像已写入 ${drivePath}`, verify };
+    const msg = e instanceof Error ? e.message : String(e);
+    throw Object.assign(new Error(msg), { code: FlashErrorCode.WRITE_FAILED });
   } finally {
-    activeOp.child = null;
-    if (activeOp?.nodeRawHandles) {
-      const h = activeOp.nodeRawHandles;
-      activeOp.nodeRawHandles = null;
-      try {
-        void h.imageFh?.close();
-        void h.targetFh?.close();
-      } catch {
-        /* ignore */
-      }
-    }
-    if (autoMountDisabledByUs) {
-      try {
-        await setWindowsAutoMountNewVolumes(true);
-      } catch {
-        /* ignore */
-      }
-    }
-    const online = await bringDiskOnlineBestEffort(diskNo);
-    if (!online.ok) {
-      emitFlashProgress({
-        stage: 'prepare',
-        message: `磁盘重新联机提示：${online.detail || '未知'}。若看不到 U 盘/SD，请重新插拔介质。`,
-        percent: 2,
-      });
-    }
-    activeOp = null;
+    activeOp.cancelDd = null;
   }
+
+  if (verifyMode === 'sample' && physicalForOps) {
+    emitFlashProgress({ stage: 'verifying', message: '正在执行写后抽样校验', percent: 99 });
+    verifyFe = await verifyImageSampleDotNet(imagePath, physicalForOps, total);
+    if (!verifyFe.ok) throw Object.assign(new Error(verifyFe.detail), { code: FlashErrorCode.VERIFY_FAILED });
+  }
+  emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
+  activeOp = null;
+  const onlineFe = await bringDiskOnlineBestEffort(diskNoFe);
+  if (!onlineFe.ok) {
+    emitFlashProgress({
+      stage: 'prepare',
+      message: `磁盘重新联机提示：${onlineFe.detail || '未知'}。若看不到 U 盘/SD，请重新插拔介质。`,
+      percent: 2,
+    });
+  }
+  return { output: `镜像已写入 ${ofDevice}`, verify: verifyFe };
 }
 
 export async function verifyImage(imagePath, drivePathIn) {
@@ -1322,16 +729,6 @@ export function cancelActiveOp() {
   if (activeOp.child) {
     try {
       activeOp.child.kill();
-    } catch {
-      /* ignore */
-    }
-  }
-  if (activeOp.nodeRawHandles) {
-    const h = activeOp.nodeRawHandles;
-    activeOp.nodeRawHandles = null;
-    try {
-      void h.imageFh?.close();
-      void h.targetFh?.close();
     } catch {
       /* ignore */
     }
