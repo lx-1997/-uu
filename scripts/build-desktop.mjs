@@ -79,6 +79,27 @@ function validateBuildResources() {
   }
 }
 
+function validateWinFlashBundleForPackaging() {
+  const flashDir = path.join(rootDir, 'electron', 'resources', 'flash', 'win32', 'x64');
+  const dd = path.join(flashDir, 'dd.exe');
+  const ls = path.join(flashDir, 'ls.exe');
+  const msys = path.join(flashDir, 'msys-2.0.dll');
+  const ok = fs.existsSync(dd) && fs.existsSync(ls) && fs.existsSync(msys);
+  if (!ok) {
+    const msg =
+      '[build:desktop] Windows 烧录资源不完整：缺少 electron/resources/flash/win32/x64 下的 dd.exe、ls.exe 或 msys-2.0.dll。' +
+      ' 请在 Windows 上执行: npm run copy:win-flash（需已安装 Git for Windows），再重新打包。';
+    if (String(process.env.RDK_DESKTOP_STRICT_WIN_FLASH || '').trim() === '1') {
+      throw new Error(msg);
+    }
+    console.warn(msg);
+    console.warn('[build:desktop] 安装包仍可生成，但 TF 卡烧录将回退到经典模式（需管理员 + .NET）。');
+    return false;
+  }
+  console.log('[build:desktop] Windows flash bundle OK:', flashDir);
+  return true;
+}
+
 function validateBuildConfig() {
   const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
   const build = pkg?.build ?? {};
@@ -183,6 +204,18 @@ async function cleanReleaseDirWithRetry(dir, maxRetries = 6, delayMs = 3000) {
 
 try {
   await prepareBuildResources(rootDir);
+  if (target === 'win') {
+    const { copyWinFlashToolsFromGit } = await import('./copy-win-flash-tools.mjs');
+    const copyResult = copyWinFlashToolsFromGit();
+    if (copyResult.ok && !copyResult.skipped) {
+      console.log('[build:desktop] win flash tools copied:', copyResult.copied, 'files →', copyResult.dst);
+    } else if (!copyResult.ok && copyResult.reason === 'git-usr-bin-not-found') {
+      console.warn(
+        '[build:desktop] 未检测到 Git usr\\bin（无法自动复制 dd/ls）。若需插件同款烧录，请先安装 Git for Windows 后执行 npm run copy:win-flash',
+      );
+    }
+    validateWinFlashBundleForPackaging();
+  }
   validateBuildResources();
   validateBuildConfig();
   if (cleanReleaseDir) {

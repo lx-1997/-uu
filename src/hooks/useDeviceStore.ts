@@ -9,6 +9,32 @@ import {
   removeDevice as removeDeviceApi,
 } from '../api';
 import { isDeviceSshConnected } from '../utils/device-connection';
+
+/** 曾成功 SSH 验证过的设备 id（本机持久化，用于「先离线、验证后再显示在线」） */
+const SSH_VERIFIED_IDS_KEY = 'rdk-device-ssh-verified-ids-v1';
+
+function loadVerifiedIdSet(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SSH_VERIFIED_IDS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistVerifiedId(id: string) {
+  const s = loadVerifiedIdSet();
+  s.add(id);
+  localStorage.setItem(SSH_VERIFIED_IDS_KEY, JSON.stringify([...s]));
+}
+
+function removeVerifiedId(id: string) {
+  const s = loadVerifiedIdSet();
+  s.delete(id);
+  localStorage.setItem(SSH_VERIFIED_IDS_KEY, JSON.stringify([...s]));
+}
 import { useToastStore } from './useToastStore';
 import { useAuth } from './useAuth';
 
@@ -46,7 +72,8 @@ function saveDevicesToCache(deviceList: Device[], activeId: string) {
 
 export interface DeviceStoreState {
   activeDevice: string;
-  setActiveDevice: (id: string) => void;
+  /** 与 useState 一致，支持传入更新函数以避免异步闭包读到过期的 activeDevice */
+  setActiveDevice: React.Dispatch<React.SetStateAction<string>>;
   devices: Device[];
   setDevices: React.Dispatch<React.SetStateAction<Device[]>>;
   currentDevice: Device | undefined;
@@ -64,7 +91,6 @@ export interface DeviceStoreState {
   scanForDevices: () => void;
   addNewDevice: (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => void;
   removeDevice: (id: string) => void;
-  showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
 
 const DeviceContext = createContext<DeviceStoreState | null>(null);
@@ -104,16 +130,6 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
   const pingFailStreakRef = React.useRef<Record<string, number>>({});
 
-  // 与 UIStore 的 ConfirmDialog 解耦（DeviceProvider 在 UI 外层），删除设备用浏览器确认框即可。
-  const showConfirm = useCallback((title: string, message: string, onConfirm: () => void) => {
-    const text = [title, message].filter(Boolean).join('\n\n');
-    if (window.confirm(text)) {
-      onConfirm();
-    }
-  }, []);
-  const showConfirmRef = React.useRef(showConfirm);
-  showConfirmRef.current = showConfirm;
-
   const scanForDevices = useCallback(() => {
     setShowAddDevice(true);
     addToast('请填写设备 IP 与 SSH 凭据', 'info');
@@ -141,7 +157,9 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           ip: res.device.host,
           port: res.device.port ?? 22,
           description: `SSH ${res.device.username}:${res.device.port ?? 22}`,
+          sshSessionVerified: true,
         };
+        persistVerifiedId(device.id);
         setDevices((prev) => [device, ...prev.filter((item) => item.id !== device.id)]);
         setActiveDevice(device.id);
         setShowAddDevice(false);
@@ -151,47 +169,51 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         addActivity(`连接设备: ${device.name} (${device.ip})`);
       })
       .catch((error) => {
-        addToast(error instanceof Error ? error.message : '设备连接失败', 'error');
+        const raw = error instanceof Error ? error.message : '设备连接失败';
+        const msg = /timed out while waiting for handshake/i.test(raw)
+          ? 'SSH 握手超时：请确认设备已开机且网络可达；若正在本机烧录大镜像，可稍后再试或结束写盘后再连接。'
+          : raw;
+        addToast(msg, 'error');
       });
   }, [newDeviceIp, newDeviceName, addToast, addActivity]);
 
   const removeDevice = useCallback((id: string) => {
-    const dev = devices.find(d => d.id === id);
+    const dev = devices.find((d) => d.id === id);
     if (!dev) return;
-    showConfirmRef.current('删除设备', `确定要删除设备 "${dev.name}" 吗？`, () => {
-      removeDeviceApi(id)
-        .then(() => {
+    removeDeviceApi(id)
+      .then(() => {
+        forgetDevicePassword(id);
+        delete pingFailStreakRef.current[id];
+        removeVerifiedId(id);
+        setDevices((prev) => {
+          const remaining = prev.filter((d) => d.id !== id);
+          if (activeDevice === id) {
+            setActiveDevice(remaining[0]?.id ?? '');
+          }
+          return remaining;
+        });
+        addToast(`设备 "${dev.name}" 已删除`, 'info');
+        addActivity(`删除设备: ${dev.name}`);
+      })
+      .catch((error) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        const notOnServer = /\b404\b/.test(msg) || /设备不存在/i.test(msg) || /not\s*found/i.test(msg);
+        if (notOnServer) {
           forgetDevicePassword(id);
           delete pingFailStreakRef.current[id];
-          setDevices(prev => {
-            const remaining = prev.filter(d => d.id !== id);
+          removeVerifiedId(id);
+          setDevices((prev) => {
+            const remaining = prev.filter((d) => d.id !== id);
             if (activeDevice === id) {
               setActiveDevice(remaining[0]?.id ?? '');
             }
             return remaining;
           });
-          addToast(`设备 "${dev.name}" 已删除`, 'info');
-          addActivity(`删除设备: ${dev.name}`);
-        })
-        .catch((error) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          const notOnServer = /\b404\b/.test(msg) || /设备不存在/i.test(msg) || /not\s*found/i.test(msg);
-          if (notOnServer) {
-            forgetDevicePassword(id);
-            delete pingFailStreakRef.current[id];
-            setDevices((prev) => {
-              const remaining = prev.filter((d) => d.id !== id);
-              if (activeDevice === id) {
-                setActiveDevice(remaining[0]?.id ?? '');
-              }
-              return remaining;
-            });
-            addToast(`「${dev.name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
-            return;
-          }
-          addToast(msg || '删除设备失败', 'error');
-        });
-    });
+          addToast(`「${dev.name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
+          return;
+        }
+        addToast(msg || '删除设备失败', 'error');
+      });
   }, [devices, activeDevice, addToast, addActivity]);
 
   /**
@@ -205,13 +227,16 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       try {
         const res = await fetchDevices();
         if (cancelled) return;
+        const verifiedIds = loadVerifiedIdSet();
         const next = res.devices.map((device) => ({
           id: device.id,
           name: `${device.username}@${device.host}:${device.port ?? 22}`,
-          status: device.status === 'connected' ? 'online' : 'offline',
+          /* 进入应用时不采信服务端「已连接」，先标离线，由 ping 拉齐；曾验证过的设备仍带 verified 标记 */
+          status: 'offline' as const,
           ip: device.host,
           port: device.port ?? 22,
           description: `SSH ${device.username}:${device.port ?? 22}`,
+          sshSessionVerified: verifiedIds.has(device.id),
         }));
         setDevices(next);
         setActiveDevice((prev) => (prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? '')));
@@ -219,8 +244,14 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         const cached = loadDevicesFromCache();
         if (cached?.devices.length) {
-          /* 缓存可能含过期的「在线」，恢复后一律先标离线，由后台 ping 再更新 */
-          setDevices(cached.devices.map((d) => ({ ...d, status: 'offline' })));
+          const verifiedIds = loadVerifiedIdSet();
+          setDevices(
+            cached.devices.map((d) => ({
+              ...d,
+              status: 'offline',
+              sshSessionVerified: verifiedIds.has(d.id),
+            })),
+          );
           setActiveDevice((prev) => {
             if (prev && cached.devices.some((d) => d.id === prev)) return prev;
             if (cached.activeDevice && cached.devices.some((d) => d.id === cached.activeDevice)) {
@@ -259,12 +290,21 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       pinging = true;
       try {
         const newDevices = await Promise.all(snapshot.map(async (dev) => {
+          const verified = dev.sshSessionVerified === true;
           try {
             const res = await checkDevicePing(dev.id);
             const pingOk = res.status === 'connected';
             if (pingOk) {
               pingFailStreakRef.current[dev.id] = 0;
-              return dev.status === 'online' ? dev : { ...dev, status: 'online' as const };
+              persistVerifiedId(dev.id);
+              return {
+                ...dev,
+                status: 'online' as const,
+                sshSessionVerified: true,
+              };
+            }
+            if (!verified) {
+              return { ...dev, status: 'offline' as const, sshSessionVerified: false };
             }
             const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
             pingFailStreakRef.current[dev.id] = streak;
@@ -273,6 +313,9 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
             }
             return { ...dev, status: 'offline' as const };
           } catch {
+            if (!verified) {
+              return { ...dev, status: 'offline' as const, sshSessionVerified: false };
+            }
             const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
             pingFailStreakRef.current[dev.id] = streak;
             if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
@@ -286,9 +329,12 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
             let changed = false;
             const next = prev.map((p) => {
               const up = newDevices.find((n) => n.id === p.id);
-              if (up && p.status !== up.status) {
+              if (
+                up
+                && (p.status !== up.status || p.sshSessionVerified !== up.sshSessionVerified)
+              ) {
                 changed = true;
-                return { ...p, status: up.status };
+                return { ...p, status: up.status, sshSessionVerified: up.sshSessionVerified };
               }
               return p;
             });
@@ -316,13 +362,12 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       newDeviceName, setNewDeviceName,
       newDeviceIp, setNewDeviceIp,
       scanForDevices, addNewDevice, removeDevice,
-      showConfirm,
     }),
     [
       activeDevice, devices, currentDevice, showAddDevice, addDeviceInitialMethod, setAddDeviceInitialMethod,
       newDeviceName, newDeviceIp,
       scanForDevices, addNewDevice,
-      removeDevice, showConfirm,
+      removeDevice,
     ],
   );
 

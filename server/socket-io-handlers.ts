@@ -1,5 +1,6 @@
 import type { Server as SocketIOServer } from 'socket.io';
 import { Client } from 'ssh2';
+import { SSH_READY_TIMEOUT_MS } from './ssh.js';
 import type { Device } from '../shared/types.js';
 import { OPENCLAW_GATEWAY_PORT } from './constants.js';
 import type { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
@@ -188,7 +189,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
           port: device.port ?? 22,
           username: device.username,
           password: pwd,
-          readyTimeout: 8000,
+          readyTimeout: SSH_READY_TIMEOUT_MS,
         });
       } catch (e: any) {
         socket.emit('data', `\r\n\x1b[31m[Internal Error] ${e.message}\x1b[0m\r\n`);

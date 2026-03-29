@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   /** Windows：列出与设备管理器一致的 COM 口（WMI），供 USB 串口标签与 Web Serial VID/PID 对照 */
   listWindowsSerialPorts: () => ipcRenderer.invoke('rdk:serial:list-windows'),
 
+  /** 弹出系统「另存为」并写入文本（用于桌面端导出 JSON 等） */
+  saveTextFile: (payload) => ipcRenderer.invoke('rdk:save-text-file', payload),
+
   /** 主进程拦截串口选择器时推送到渲染进程（多端口时展示真实 COM 名） */
   onSerialPortShowPicker: (cb) => {
     const h = (_e, payload) => cb(payload);

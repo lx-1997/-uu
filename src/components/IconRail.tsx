@@ -3,7 +3,8 @@ import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import StudioVersionFooter from './StudioVersionFooter';
-import { isDeviceSshConnected } from '../utils/device-connection';
+import { isDeviceShownOnline } from '../utils/device-connection';
+import { useConfirmRemoveDevice } from '../hooks/useConfirmRemoveDevice';
 
 interface NavItemDef {
   tab: Tab;
@@ -64,18 +65,18 @@ export default function IconRail() {
     activeTab, setActiveTab,
     devices, activeDevice, currentDevice,
     setActiveDevice, setShowAddDevice,
-    removeDevice,
     setShowSettings,
     language, setLanguage, addToast,
     railExpanded, setRailExpanded,
     obReturnStep, setObReturnStep,
   } = useAppState();
+  const confirmRemoveDevice = useConfirmRemoveDevice();
   const { t } = useI18n();
 
   const [showDevicePanel, setShowDevicePanel] = useState(false);
   const [railLogoFailed, setRailLogoFailed] = useState(false);
   const onRailLogoError = useCallback(() => setRailLogoFailed(true), []);
-  const deviceOnline = !!currentDevice && isDeviceSshConnected(currentDevice.status);
+  const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
 
   const renderGroup = (items: NavItemDef[]) =>
     items.map((item) => {
@@ -216,7 +217,7 @@ export default function IconRail() {
                 }}
                 style={{ cursor: 'pointer' }}
               >
-                <span className={`status-dot ${isDeviceSshConnected(dev.status) ? 'online' : 'offline'}`} />
+                <span className={`status-dot ${isDeviceShownOnline(dev) ? 'online' : 'offline'}`} />
                 <div className="device-panel-item-info">
                   <div className="device-panel-item-name">{dev.name}</div>
                   <div className="device-panel-item-addr">{dev.ip}</div>
@@ -228,7 +229,7 @@ export default function IconRail() {
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
-                    removeDevice(dev.id);
+                    confirmRemoveDevice(dev);
                   }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -130,7 +130,12 @@ export interface UIStoreState {
   // Confirm dialog
   confirmDialog: ConfirmDialogState | null;
   setConfirmDialog: (v: ConfirmDialogState | null) => void;
-  showConfirm: (title: string, message: string, onConfirm: () => void) => void;
+  showConfirm: (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    options?: { variant?: 'default' | 'danger'; confirmLabel?: string },
+  ) => void;
 }
 
 const UIContext = createContext<UIStoreState | null>(null);
@@ -372,8 +377,20 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
 
   // ── Confirm dialog ──
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
-  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
-    setConfirmDialog({ show: true, title, message, onConfirm });
+  const showConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    options?: { variant?: 'default' | 'danger'; confirmLabel?: string },
+  ) => {
+    setConfirmDialog({
+      show: true,
+      title,
+      message,
+      onConfirm,
+      variant: options?.variant ?? 'default',
+      confirmLabel: options?.confirmLabel,
+    });
   };
 
   const value: UIStoreState = {

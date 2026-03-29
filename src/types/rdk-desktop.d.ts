@@ -77,6 +77,12 @@ declare global {
         ports?: WindowsSerialPortRow[];
         error?: string;
       }>;
+      /** 桌面端：系统另存为并写入 UTF-8 文本（file:// 下替代 Blob 下载） */
+      saveTextFile?: (payload: {
+        defaultPath?: string;
+        content: string;
+        title?: string;
+      }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
       /** 多串口时主进程弹出选择 UI（portName 与系统一致） */
       onSerialPortShowPicker?: (cb: (payload: SerialPickerPayload) => void) => (() => void) | void;
       sendSerialPortPickerResult?: (payload: { reqId: number; portId: string }) => void;

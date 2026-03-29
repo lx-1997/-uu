@@ -13,6 +13,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'api.err.fileNotFound': 'File not found; refresh the directory and try again',
   'api.err.retryWrap': '{{msg}} (retry)',
   'api.err.serverWrap': '{{msg}} (server error)',
+  'api.err.sshConnectTimeout':
+    'SSH timed out before handshake completed. Ensure the device is on and reachable; if this PC is writing a large image, try again later.',
 
   'deviceGuard.titleFeature': '{{feature}} requires a connected device',
   'deviceGuard.title': 'Connect a device first',
@@ -1260,6 +1262,11 @@ export const EN_EXTRAS: Record<string, string> = {
   'errorBoundary.retry': 'Try again',
   'confirm.cancel': 'Cancel',
   'confirm.run': 'Confirm',
+  'confirm.close': 'Close',
+  'confirm.remove': 'Remove',
+  'confirm.removeDeviceTitle': 'Remove device',
+  'confirm.removeDeviceMsg':
+    'Remove device "{{name}}" from the list? You can add it again anytime.',
 
   /** Electron：主进程串口多选弹窗（与系统 COM 名一致） */
   'electron.serialPicker.title': 'Choose a serial port',

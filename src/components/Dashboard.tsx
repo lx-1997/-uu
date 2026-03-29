@@ -18,7 +18,7 @@ import {
   DASHBOARD_CHAT_INTRO_PROMPT_EN,
 } from '../i18n/prompts';
 import { parseMetrics } from '../utils/diagnostics';
-import { isDeviceSshConnected } from '../utils/device-connection';
+import { isDeviceShownOnline } from '../utils/device-connection';
 import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
 import OnboardingWizard from './OnboardingWizard';
 
@@ -331,8 +331,8 @@ export default function Dashboard() {
     { key: 'up', val: metrics.uptime, label: t('dashboard.metric.uptime', 'UPTIME') },
   ];
 
-  /** 与顶栏、设备列表同源：仅 `device.status`；成功拉取诊断时会将设备标为 online */
-  const deviceChannelOk = isDeviceSshConnected(currentDevice.status);
+  /** 与顶栏同源：须本机已验证过 SSH 且当前 ping 为在线 */
+  const deviceChannelOk = !!currentDevice && isDeviceShownOnline(currentDevice);
 
   return (
     <div className="dash" onMouseMove={parallax.onMove} onMouseLeave={parallax.onLeave}>

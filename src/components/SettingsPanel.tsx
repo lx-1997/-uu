@@ -41,6 +41,7 @@ import { isDesktop } from '../utils/env';
 import { fillTemplate } from '../i18n/en-extras';
 import { useAuth } from '../hooks/useAuth';
 import { trackUiAction } from '../analytics/client';
+import { useConfirmRemoveDevice } from '../hooks/useConfirmRemoveDevice';
 
 /* ═══════════════════════════════════════════
    Constants
@@ -64,8 +65,9 @@ const AI_PROVIDER_DEFAULTS: Record<string, { label: string; model: string; baseU
   openrouter: { label: 'OpenRouter', model: 'openai/gpt-4o-mini', baseUrl: 'https://openrouter.ai/api/v1' },
   xai: { label: 'xAI (Grok)', model: 'grok-2-latest', baseUrl: 'https://api.x.ai/v1' },
   ollama: { label: 'Ollama (本地)', model: 'qwen2.5:7b', baseUrl: 'http://127.0.0.1:11434/v1' },
-  'openai-compatible': { label: 'OpenAI 兼容协议', model: '', baseUrl: '' },
-  'anthropic-compatible': { label: 'Anthropic 兼容协议', model: '', baseUrl: '', protocol: 'anthropic' },
+  /** 与 server/agent/provider-setup.ts PROVIDER_DEFAULTS 对齐，模型留空保存时才能回落到有效 model */
+  'openai-compatible': { label: 'OpenAI 兼容协议', model: 'gpt-4o-mini', baseUrl: '' },
+  'anthropic-compatible': { label: 'Anthropic 兼容协议', model: 'claude-sonnet-4-20250514', baseUrl: '', protocol: 'anthropic' },
 };
 
 const AI_PROVIDER_OPTIONS = Object.entries(AI_PROVIDER_DEFAULTS).map(([value, item]) => ({
@@ -92,8 +94,9 @@ export default function SettingsPanel() {
     showSettings, setShowSettings,
     autoReconnect, setAutoReconnect,
     connectionTimeout, setConnectionTimeout, addToast,
-    devices, removeDevice, setShowAddDevice,
+    devices, setShowAddDevice,
   } = useAppState();
+  const confirmRemoveDevice = useConfirmRemoveDevice();
   const { user, ssoEnabled, ssoRequired, logout } = useAuth();
   const showAccountSection = ssoEnabled || ssoRequired;
   const { t } = useI18n();
@@ -502,9 +505,17 @@ export default function SettingsPanel() {
 
   const handleSaveAiConfig = async () => {
     const selectedEntry = aiSavedModels.find((item) => item.id === selectedAiModelId);
-    if (!aiApiKey.trim() && !selectedEntry?.hasApiKey) { addToast(t('toast.needApiKey', '请填写 API Key'), 'warning'); return; }
+    if (!aiApiKey.trim() && !selectedEntry?.hasApiKey && !aiEnvApiKeyAvailable) {
+      addToast(t('toast.needApiKey', '请填写 API Key'), 'warning');
+      return;
+    }
     const providerDefaults = AI_PROVIDER_DEFAULTS[aiProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
-    const effectiveModel = aiModel || providerDefaults.model;
+    const trimmedModelInput = aiModel.trim();
+    const effectiveModel = (trimmedModelInput || providerDefaults.model || '').trim();
+    if (!effectiveModel) {
+      addToast(t('toast.needModelName', '请填写模型名称'), 'warning');
+      return;
+    }
     const providerChanged = selectedEntry && selectedEntry.provider !== aiProvider;
     const modelChanged = selectedEntry && selectedEntry.model !== effectiveModel;
     const autoLabel = `${aiProvider}/${effectiveModel}`;
@@ -521,14 +532,6 @@ export default function SettingsPanel() {
         baseUrl: aiBaseUrl || providerDefaults.baseUrl || undefined,
         setActive: true,
       });
-      await refreshAiConfig();
-      const savedModel = `${aiProvider}/${effectiveModel}`;
-      addToast(
-        selectedAiModelId
-          ? tf('toast.aiModelUpdated', '模型已更新: {{name}}', { name: savedModel })
-          : tf('toast.aiModelAdded', '已新增并启用: {{name}}', { name: savedModel }),
-        'success',
-      );
     } catch (err) {
       addToast(
         tf('toast.aiSaveFailMsg', '保存失败: {{msg}}', {
@@ -536,9 +539,22 @@ export default function SettingsPanel() {
         }),
         'error',
       );
+      return;
     } finally {
       setAiSaving(false);
     }
+    try {
+      await refreshAiConfig();
+    } catch {
+      /* 保存已成功，刷新失败不阻断成功提示 */
+    }
+    const savedModel = `${aiProvider}/${effectiveModel}`;
+    addToast(
+      selectedAiModelId
+        ? tf('toast.aiModelUpdated', '模型已更新: {{name}}', { name: savedModel })
+        : tf('toast.aiModelAdded', '已新增并启用: {{name}}', { name: savedModel }),
+      'success',
+    );
   };
 
   const handleDeleteAiModel = async () => {
@@ -547,13 +563,6 @@ export default function SettingsPanel() {
     setAiSaving(true);
     try {
       await saveAgentConfig({ action: 'delete', id: selectedAiModelId });
-      await refreshAiConfig();
-      addToast(
-        tf('toast.aiDeleted', '已删除: {{id}}', {
-          id: entry ? `${entry.provider}/${entry.model}` : selectedAiModelId,
-        }),
-        'success',
-      );
     } catch (err) {
       addToast(
         tf('toast.aiDeleteFailMsg', '删除失败: {{msg}}', {
@@ -561,15 +570,27 @@ export default function SettingsPanel() {
         }),
         'error',
       );
+      return;
     } finally {
       setAiSaving(false);
     }
+    try {
+      await refreshAiConfig();
+    } catch {
+      /* ignore */
+    }
+    addToast(
+      tf('toast.aiDeleted', '已删除: {{id}}', {
+        id: entry ? `${entry.provider}/${entry.model}` : selectedAiModelId,
+      }),
+      'success',
+    );
   };
 
   const handleCreateNewAiModel = () => {
     setSelectedAiModelId(''); setAiLabel('');
     setAiProvider('qwen');
-    setAiModel(AI_PROVIDER_DEFAULTS.qwen.model);
+    setAiModel('');
     setAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
     setAiApiKey('');
   };
@@ -579,11 +600,6 @@ export default function SettingsPanel() {
     setAiSaving(true);
     try {
       await saveAgentConfig({ action: 'restore_bootstrap_preset' });
-      await refreshAiConfig();
-      addToast(
-        t('toast.aiRestoredDefault', '已切换为 RDK Studio 内置默认模型（与首次安装一致）'),
-        'success',
-      );
     } catch (err) {
       addToast(
         tf('toast.aiRestoreDefaultFail', '恢复默认模型失败: {{msg}}', {
@@ -591,19 +607,47 @@ export default function SettingsPanel() {
         }),
         'error',
       );
+      return;
     } finally {
       setAiSaving(false);
     }
+    try {
+      await refreshAiConfig();
+    } catch {
+      /* ignore */
+    }
+    addToast(
+      t('toast.aiRestoredDefault', '已切换为 RDK Studio 内置默认模型（与首次安装一致）'),
+      'success',
+    );
   };
 
   const handleExportAgentConfig = async () => {
     try {
       const data = await exportAgentConfig(true);
+      const registry = data?.registry;
+      if (!registry || typeof registry !== 'object') {
+        throw new Error(t('toast.exportFail', '导出失败'));
+      }
       const fileName = `rdkstudio-agent-config-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-      const blob = new Blob([JSON.stringify(data.registry, null, 2)], { type: 'application/json' });
+      const json = JSON.stringify(registry, null, 2);
+      const save = typeof window !== 'undefined' ? window.rdkDesktop?.saveTextFile : undefined;
+      if (save) {
+        const r = await save({
+          defaultPath: fileName,
+          content: json,
+          title: t('settings.ai.export', '导出'),
+        });
+        if (r?.canceled) return;
+        if (!r?.ok) throw new Error(r?.error || t('toast.exportFail', '导出失败'));
+        addToast(t('toast.exportOk', '模型配置已导出'), 'success');
+        return;
+      }
+      const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url; anchor.download = fileName;
+      anchor.rel = 'noopener';
       document.body.appendChild(anchor); anchor.click();
       document.body.removeChild(anchor); URL.revokeObjectURL(url);
       addToast(t('toast.exportOk', '模型配置已导出'), 'success');
@@ -619,8 +663,6 @@ export default function SettingsPanel() {
       const parsed = JSON.parse(text) as AgentConfigExportPayload;
       if (!Array.isArray(parsed?.entries) || parsed.entries.length === 0) throw new Error(t('err.importNoEntries', '导入文件无有效 entries'));
       await importAgentConfig({ registry: parsed, setActiveId: parsed.activeId || undefined, merge: true });
-      await refreshAiConfig();
-      addToast(t('toast.importOk', '模型配置导入成功'), 'success');
     } catch (error) {
       addToast(
         error instanceof Error
@@ -628,10 +670,17 @@ export default function SettingsPanel() {
           : t('toast.importFail', '导入失败'),
         'error',
       );
+      return;
     } finally {
       setAiSaving(false);
       if (importAgentConfigRef.current) importAgentConfigRef.current.value = '';
     }
+    try {
+      await refreshAiConfig();
+    } catch {
+      /* ignore */
+    }
+    addToast(t('toast.importOk', '模型配置导入成功'), 'success');
   };
 
   const applyAiProviderPreset = (nextProvider: string) => {
@@ -953,24 +1002,20 @@ export default function SettingsPanel() {
                             }
                             applyAiModelToForm(entry);
                             setAiSaving(true);
+                            let switchResult: Awaited<ReturnType<typeof saveAgentConfig>> | null = null;
                             try {
-                              const result = await saveAgentConfig({ action: 'switch', id });
-                              if (result.active?.id === id) {
+                              switchResult = await saveAgentConfig({ action: 'switch', id });
+                              if (switchResult.active?.id === id) {
                                 applyAiModelToForm({
-                                  id: result.active.id,
+                                  id: switchResult.active.id,
                                   label: entry.label,
-                                  provider: result.active.provider,
-                                  model: result.active.model,
-                                  hasApiKey: result.active.hasApiKey,
-                                  baseUrl: result.active.baseUrl,
+                                  provider: switchResult.active.provider,
+                                  model: switchResult.active.model,
+                                  hasApiKey: switchResult.active.hasApiKey,
+                                  baseUrl: switchResult.active.baseUrl,
                                   isActive: true,
                                 });
                               }
-                              await refreshAiConfig();
-                              const name = result.active
-                                ? `${result.active.provider}/${result.active.model}`
-                                : `${entry.provider}/${entry.model}`;
-                              addToast(tf('toast.aiSwitchedTo', '已切换到 {{name}}', { name }), 'success');
                             } catch (err) {
                               await refreshAiConfig().catch(() => {});
                               addToast(
@@ -979,9 +1024,19 @@ export default function SettingsPanel() {
                                 }),
                                 'error',
                               );
+                              return;
                             } finally {
                               setAiSaving(false);
                             }
+                            try {
+                              await refreshAiConfig();
+                            } catch {
+                              /* ignore */
+                            }
+                            const name = switchResult?.active
+                              ? `${switchResult.active.provider}/${switchResult.active.model}`
+                              : `${entry.provider}/${entry.model}`;
+                            addToast(tf('toast.aiSwitchedTo', '已切换到 {{name}}', { name }), 'success');
                             return;
                           }
                           applyAiModelToForm(entry);
@@ -1007,7 +1062,26 @@ export default function SettingsPanel() {
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.ai.model', '模型')}</span>
-                    <div className="settings-row-value"><input type="text" className="input" title={t('settings.ai.model', '模型')} aria-label={t('settings.ai.model', '模型')} placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model} value={aiModel} onChange={e => { setAiModel(e.target.value); setAiLabel(''); }} /></div>
+                    <div className="settings-row-value" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                      <input type="text" className="input" style={{ flex: '1 1 200px', minWidth: 0 }} title={t('settings.ai.model', '模型')} aria-label={t('settings.ai.model', '模型')} placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model} value={aiModel} onChange={e => { setAiModel(e.target.value); setAiLabel(''); }} />
+                      {AI_PROVIDER_DEFAULTS[aiProvider]?.model ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={aiSaving}
+                          title={t('settings.ai.fillExampleHint', '填入该服务商占位符中的示例模型名与 Base URL，保存后生效')}
+                          onClick={() => {
+                            const d = AI_PROVIDER_DEFAULTS[aiProvider];
+                            if (!d?.model) return;
+                            setAiModel(d.model);
+                            if (d.baseUrl) setAiBaseUrl(d.baseUrl);
+                            setAiLabel('');
+                          }}
+                        >
+                          {t('settings.ai.fillExample', '填入示例模型')}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">API Key</span>
@@ -1019,25 +1093,18 @@ export default function SettingsPanel() {
                   </div>
                   {studioDefaultPreset && (
                     <div className="settings-row">
-                      <span className="settings-row-label">{t('settings.ai.studioDefault', '内置默认')}</span>
-                      <div className="settings-row-value" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
-                        <span className="settings-hint" style={{ margin: 0 }}>
-                          {studioDefaultPreset.label}
-                          {' · '}
-                          {t(
-                            'settings.ai.studioDefault.desc',
-                            '与安装包首次启动一致。若已配置自有 API Key，可一键切回该预设。',
-                          )}
-                        </span>
+                      <span className="settings-row-label">{t('settings.ai.builtin', '内置模型')}</span>
+                      <div className="settings-row-value">
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
                           disabled={aiSaving || studioDefaultPreset.isActive}
+                          title={studioDefaultPreset.label}
                           onClick={() => void handleRestoreStudioDefaultModel()}
                         >
                           {studioDefaultPreset.isActive
-                            ? t('settings.ai.studioDefault.current', '当前已使用内置默认模型')
-                            : t('settings.ai.studioDefault.restore', '恢复内置默认模型')}
+                            ? t('settings.ai.builtin.current', '当前为系统内置')
+                            : t('settings.ai.builtin.use', '使用系统内置模型')}
                         </button>
                       </div>
                     </div>
@@ -1049,7 +1116,6 @@ export default function SettingsPanel() {
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => importAgentConfigRef.current?.click()} disabled={aiSaving}>{t('settings.ai.import', '导入')}</button>
                     <input ref={importAgentConfigRef} type="file" className="sr-only" accept=".json" onChange={e => { const f = e.target.files?.[0]; if (f) void handleImportAgentConfig(f); }} title={t('settings.ai.import.title', '导入')} />
                   </div>
-                  <span className="settings-hint">{t('settings.ai.hint', '支持多模型快速切换，配置保存在本地。')}</span>
                 </div>
               </section>
 
@@ -1304,7 +1370,7 @@ export default function SettingsPanel() {
                             <button
                               type="button"
                               className="btn btn-danger btn-sm"
-                              onClick={() => removeDevice(d.id)}
+                              onClick={() => confirmRemoveDevice(d)}
                             >
                               {t('settings.conn.removeDevice', '移除')}
                             </button>

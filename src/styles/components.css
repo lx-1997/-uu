@@ -449,9 +449,98 @@
   padding: 0 24px 20px;
 }
 
-/* ══════════════════════════
-   Toast
-   ══════════════════════════ */
+/* 平台内确认框（替代 window.confirm / Electron 原生） */
+.confirm-dialog {
+  position: relative;
+  max-width: 420px;
+}
+
+.confirm-dialog--danger {
+  border-color: rgba(239, 68, 68, 0.28);
+  box-shadow: var(--shadow-xl), 0 0 0 1px rgba(239, 68, 68, 0.06);
+}
+
+.confirm-dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.confirm-dialog-close:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+.confirm-dialog-body {
+  display: flex;
+  gap: 16px;
+  padding: 22px 24px 8px;
+  padding-right: 44px;
+}
+
+.confirm-dialog-body--danger {
+  padding-top: 24px;
+}
+
+.confirm-dialog-icon-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.confirm-dialog-icon {
+  color: var(--warn, #f59e0b);
+}
+
+.confirm-dialog--danger .confirm-dialog-icon {
+  color: var(--danger, #ef4444);
+}
+
+.confirm-dialog-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.confirm-dialog-title {
+  margin: 0 0 8px;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.confirm-dialog-message {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.confirm-dialog-footer {
+  padding-top: 12px;
+  padding-bottom: 24px;
+  gap: 10px;
+}
+
+.confirm-dialog-footer .btn {
+  min-width: 88px;
+}
+
 .toast-container {
   position: fixed;
   bottom: 80px;

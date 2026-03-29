@@ -3,6 +3,7 @@
  * 移植自 rdkstudio_frontend-master
  */
 import { Client } from 'ssh2';
+import { SSH_READY_TIMEOUT_MS } from '../ssh.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transport.js';
@@ -471,7 +472,7 @@ export class OpenClawDeploymentManager {
           port: 22,
           username: device.userName,
           password: device.password || device.userName,
-          readyTimeout: 15000,
+          readyTimeout: SSH_READY_TIMEOUT_MS,
           keepaliveInterval: 30000,
           keepaliveCountMax: 3,
         });

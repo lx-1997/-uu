@@ -5,6 +5,9 @@ import {
   STDERR_STREAM_CHAR_LIMIT,
 } from './utils/stream-output-limit.js';
 
+/** ssh2 在 TCP 连通后等待 SSH 握手完成的最长时间。写盘等高 I/O 场景下 8s 易触发「Timed out while waiting for handshake」。 */
+export const SSH_READY_TIMEOUT_MS = 30_000;
+
 export interface SshCredentials {
   host: string;
   username: string;
@@ -33,7 +36,7 @@ export function verifySshConnection(credentials: SshCredentials) {
         port: credentials.port ?? 22,
         username: credentials.username,
         password: credentials.password,
-        readyTimeout: 8000,
+        readyTimeout: SSH_READY_TIMEOUT_MS,
       });
   });
 }
@@ -119,7 +122,7 @@ export function runRemoteCommands(
         port: credentials.port ?? 22,
         username: credentials.username,
         password: credentials.password,
-        readyTimeout: 8000,
+        readyTimeout: SSH_READY_TIMEOUT_MS,
       });
   });
 }
@@ -189,7 +192,7 @@ export function uploadFileSftp(credentials: SshCredentials, remotePath: string, 
         port: credentials.port ?? 22,
         username: credentials.username,
         password: credentials.password,
-        readyTimeout: 10000,
+        readyTimeout: SSH_READY_TIMEOUT_MS,
       });
   });
 }

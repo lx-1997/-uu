@@ -16,7 +16,7 @@ import {
   setDevicePasswordCache,
   deleteDevicePasswordCache,
 } from './device-password-cache.js';
-import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js';
+import { runRemoteCommands, verifySshConnection, uploadFileSftp, SSH_READY_TIMEOUT_MS } from './ssh.js';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { Client } from 'ssh2';
@@ -2115,7 +2115,13 @@ app.post('/api/devices/connect', async (request, response) => {
     response.json({ device: sanitizeDevice(nextDevice) });
   } catch (error) {
     if (isSshTimeoutError(error)) {
-      sendApiError(response, 504, 'SSH_CONNECT_TIMEOUT', error instanceof Error ? `SSH 连接超时: ${error.message}` : 'SSH 连接超时', { retryable: true });
+      sendApiError(
+        response,
+        504,
+        'SSH_CONNECT_TIMEOUT',
+        'SSH 连接超时（握手未完成）：请确认设备已开机、IP/端口正确且网络可达；若本机正在大量写盘（如烧录镜像），请稍后再试。',
+        { retryable: true },
+      );
       return;
     }
     if (isSshAuthError(error)) {
@@ -2144,7 +2150,13 @@ app.post('/api/devices/verify', async (request, response) => {
     response.json({ ok: true });
   } catch (error) {
     if (isSshTimeoutError(error)) {
-      sendApiError(response, 504, 'SSH_CONNECT_TIMEOUT', error instanceof Error ? `SSH 连接超时: ${error.message}` : 'SSH 连接超时', { retryable: true });
+      sendApiError(
+        response,
+        504,
+        'SSH_CONNECT_TIMEOUT',
+        'SSH 连接超时（握手未完成）：请确认设备已开机、IP/端口正确且网络可达；若本机正在大量写盘（如烧录镜像），请稍后再试。',
+        { retryable: true },
+      );
       return;
     }
     if (isSshAuthError(error)) {
@@ -4234,7 +4246,8 @@ app.post('/api/agent/config', (request, response) => {
   const legacyMode = !body.action;
   const existing = loadProviderConfig();
   const key = typeof body.apiKey === 'string' ? body.apiKey : undefined;
-  if (!key?.trim() && !existing?.apiKey) {
+  const envApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+  if (!key?.trim() && !existing?.apiKey?.trim() && !envApiKey) {
     response.status(400).json({ error: '缺少 apiKey' });
     return;
   }
@@ -5599,7 +5612,7 @@ io.on('connection', (socket) => {
         port: device.port ?? 22,
         username: device.username,
         password: pwd,
-        readyTimeout: 8000,
+        readyTimeout: SSH_READY_TIMEOUT_MS,
       });
 
     } catch (e: any) {

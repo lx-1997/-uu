@@ -156,7 +156,12 @@ export interface AppState {
   setLanguage: (v: string) => void;
   confirmDialog: ConfirmDialogState | null;
   setConfirmDialog: (v: ConfirmDialogState | null) => void;
-  showConfirm: (title: string, message: string, onConfirm: () => void) => void;
+  showConfirm: (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    options?: { variant?: 'default' | 'danger'; confirmLabel?: string },
+  ) => void;
 
   // AI Chat
   cmd: string;
@@ -322,8 +327,19 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      /* 板端命令/SSH 超时（含 Dashboard 轮询 diagnostics 等）：离线即显示为离线即可，勿反复弹窗 */
       if (code === 'DEVICE_COMMAND_TIMEOUT') {
-        toast.addToast(t('api.err.timeout', '设备响应超时，建议稍后重试或检查网络质量'), 'warning');
+        return;
+      }
+
+      if (code === 'SSH_CONNECT_TIMEOUT') {
+        toast.addToast(
+          t(
+            'api.err.sshConnectTimeout',
+            'SSH 连接超时（握手未完成）：请确认设备已开机、网络可达；若本机正在大量写盘（如烧录镜像），请稍后再试。',
+          ),
+          'warning',
+        );
         return;
       }
 

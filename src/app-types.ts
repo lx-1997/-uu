@@ -16,6 +16,11 @@ export interface Device {
   ip: string;
   port?: number;
   description?: string;
+  /**
+   * 本机是否至少成功完成过一次 SSH 可达验证（添加设备成功或 ping 成功）。
+   * 未验证前 UI 一律不显示「在线」，避免刚进应用就沿用服务端/缓存的误判。
+   */
+  sshSessionVerified?: boolean;
 }
 
 export interface Toast {
@@ -113,6 +118,10 @@ export interface ConfirmDialogState {
   title: string;
   message: string;
   onConfirm: () => void;
+  /** 危险操作（删除等）：强调色与主按钮样式 */
+  variant?: 'default' | 'danger';
+  /** 主按钮文案，默认「确认执行」 */
+  confirmLabel?: string;
 }
 
 export interface AgentPlanStep {

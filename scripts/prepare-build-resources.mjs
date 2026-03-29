@@ -1,10 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { prepareBuildResources } from './desktop-icons.mjs';
+import { copyWinFlashToolsFromGit } from './copy-win-flash-tools.mjs';
 
 const rootDir = process.cwd();
 
 try {
+  const flashCopy = copyWinFlashToolsFromGit();
+  if (flashCopy.ok && !flashCopy.skipped) {
+    console.log('[prepare:build-resources] win flash tools:', flashCopy.dst, `(${flashCopy.copied} files)`);
+  } else if (flashCopy.skipped) {
+    console.log('[prepare:build-resources] win flash tools: already present');
+  }
+
   const r = await prepareBuildResources(rootDir);
   const ocSrc = path.join(rootDir, 'server/resources/openclaw/oc-bridge.mjs');
   const ocDstDir = path.join(r.outDir || path.join(rootDir, 'build-resources'), 'openclaw');

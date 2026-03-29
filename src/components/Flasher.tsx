@@ -5,6 +5,23 @@ import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 
+/** 折叠重复错误文案（连续相同行、整段复制、NFKC 归一化后比对） */
+function dedupeFlashErrorDisplayText(msg: string): string {
+  let s = String(msg || '').replace(/\r\n/g, '\n').normalize('NFKC').trim();
+  if (!s) return s;
+  const lines = s.split('\n').map((x) => x.trim()).filter(Boolean);
+  if (lines.length >= 2 && lines.every((l) => l === lines[0])) return lines[0];
+  const out: string[] = [];
+  for (const line of lines) {
+    if (out.length && out[out.length - 1] === line) continue;
+    out.push(line);
+  }
+  s = out.join('\n');
+  const half = Math.floor(s.length / 2);
+  if (half >= 24 && s.slice(0, half) === s.slice(half)) return s.slice(0, half).trim();
+  return s;
+}
+
 /* ═══════════════════════════════════════════════════════════
    Types
    ═══════════════════════════════════════════════════════════ */
@@ -142,7 +159,8 @@ function isSafeFlashTargetDrive(drive: FlashDrive): boolean {
   const allowByBus = /\bsd\b|\bmmc\b/.test(bus);
   const allowByKeyword = /\bsd\b|microsd|sdxc|sdhc|tf\b|\bmmc\b|emmc|card\s*reader|cardreader|realtek|alcor|genesys|storage\s*device/.test(combined);
   const denyByKeyword = /\bnvme\b|\bssd\b|\bhdd\b|sata|hard\s*disk|portable\s*(ssd|hdd|drive)|expansion|backup\s*plus|external\s*hdd/.test(combined);
-  const devicePathLikely = /\/dev\/disk|physicaldrive/.test(path);
+  /** Windows：Get-Disk 为 \\.\PhysicalDriveN；ls 捆绑枚举为 /dev/sdb（与 rdkstudio_frontend 一致） */
+  const devicePathLikely = /\/dev\/disk|\/dev\/sd[a-z]|physicaldrive/.test(path);
   if (!devicePathLikely) return false;
   if (denyByKeyword && !allowByBus) return false;
   return allowByBus || allowByKeyword;
@@ -647,7 +665,8 @@ export default function Flasher() {
       addToast(t('flasher.toast.writeDone', '镜像写盘完成'), 'success');
       /* 保留在步骤 3，由用户点「完成 →」再进入写盘完成页，避免成功瞬间自动跳转 */
     } catch (e: any) {
-      const msg = e?.message || t('flasher.err.writeFail', '写盘失败');
+      const rawMsg = e?.message || t('flasher.err.writeFail', '写盘失败');
+      const msg = dedupeFlashErrorDisplayText(rawMsg);
       const userCancelled = isFlashUserCancelled(msg);
       setError(userCancelled ? '' : msg);
       setPhase('error');
@@ -1056,7 +1075,7 @@ export default function Flasher() {
             )}
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
+                <div className="config-card-desc flasher-error-msg" role="alert">{error}</div>
                 {selectedDeviceKey === 's100' && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
@@ -1217,7 +1236,7 @@ export default function Flasher() {
             </div>
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
+                <div className="config-card-desc flasher-error-msg" role="alert">{error}</div>
                 {isS100Device && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
@@ -1409,7 +1428,7 @@ export default function Flasher() {
             </div>
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
+                <div className="config-card-desc flasher-error-msg" role="alert">{error}</div>
                 {selectedDeviceKey === 's100' && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">
@@ -1466,7 +1485,7 @@ export default function Flasher() {
 
         {/* ═══════ Step 3: Flash Progress ═══════ */}
         {step === 3 && (
-          <section className="card card-compact">
+          <section className="card card-compact flasher-flash-progress-card">
             <div className="config-header">
               <h3 style={{ margin: 0, fontSize: '1rem' }}>{flashPhaseTitle}</h3>
               {phase !== 'done' && phase !== 'error' && (
@@ -1538,7 +1557,7 @@ export default function Flasher() {
 
             {error && (
               <div className="card card-compact" style={{ marginTop: 8, borderColor: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-                <p className="config-card-desc" style={{ color: 'var(--danger)', margin: 0, whiteSpace: 'pre-line' }}>{error}</p>
+                <div className="config-card-desc flasher-error-msg" role="alert">{error}</div>
                 {selectedDeviceKey === 's100' && (
                   <p className="config-card-desc" style={{ marginTop: 12, marginBottom: 0 }}>
                     <a href={S100_MANUAL_FLASH_DOC} target="_blank" rel="noreferrer noopener">

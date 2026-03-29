@@ -1,13 +1,13 @@
 /**
  * macOS flash adapter.
  *
- * 烧录（非 S100）：与 rdkstudio_frontend-master `FlashBehavior` / Imager FlashMac 一致：
- * `diskutil unmountDisk` 后 `sudo --askpass sh -c '/bin/dd bs=4m of=/dev/rdiskN if=… status=progress'`。
- * 备份仍为 Node 分块读写（需 root，行为未改）。
+ * Provides drive enumeration, image writing, backup, decompression and
+ * xburn launching on macOS via diskutil, dd, and native xz.
+ *
+ * Requires elevated privileges (sudo / osascript) for disk write operations.
  */
 
-import { spawn, execFile, execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { spawn, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -17,107 +17,6 @@ import { FlashErrorCode } from '../types.mjs';
 
 let activeOp = null;
 const PROGRESS_EMIT_INTERVAL_MS = 250;
-
-function shSingleQuote(s) {
-  return `'${String(s).replace(/'/g, `'\\''`)}'`;
-}
-
-/** GNU dd status=progress 行 */
-function parseDdCopiedBytes(line) {
-  const m = String(line || '').trim().match(/^(\d+)\s+bytes\b/i);
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  return Number.isFinite(n) ? n : null;
-}
-
-function resolveFlashDarwinAskpassPathOrThrow() {
-  const packaged = process.resourcesPath
-    ? path.join(process.resourcesPath, 'flash', 'darwin')
-    : '';
-  let base = '';
-  if (packaged && fs.existsSync(packaged)) {
-    base = packaged;
-  } else {
-    const dev = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'resources', 'flash', 'darwin');
-    if (fs.existsSync(dev)) base = path.resolve(dev);
-  }
-  if (!base) {
-    throw Object.assign(
-      new Error('未找到 flash/darwin 资源（sudo-askpass）。开发态请保留 electron/resources/flash/darwin。'),
-      { code: FlashErrorCode.TOOL_MISSING },
-    );
-  }
-  let lang = 'en';
-  try {
-    lang = Intl.DateTimeFormat().resolvedOptions().locale.slice(0, 2);
-  } catch {
-    /* ignore */
-  }
-  const pick = (lng) => path.join(base, `sudo-askpass.osascript-${lng}.js`);
-  if (fs.existsSync(pick(lang))) return pick(lang);
-  if (fs.existsSync(pick('en'))) return pick('en');
-  throw Object.assign(
-    new Error('缺少 sudo-askpass.osascript-zh.js / en.js'),
-    { code: FlashErrorCode.TOOL_MISSING },
-  );
-}
-
-/** 与 Imager FlashMac 一致：用 `/usr/bin/env` 取 PATH 再交给 sudo */
-function buildMacSudoDdEnv(askpassPath) {
-  let envOut = '';
-  try {
-    envOut = execFileSync('/usr/bin/env', [], { encoding: 'utf8' });
-  } catch {
-    envOut = '';
-  }
-  const pathLine = envOut.split('\n').find((l) => l.startsWith('PATH='));
-  const PATH = pathLine ? pathLine.slice(5) : process.env.PATH || '';
-  return {
-    ...process.env,
-    SUDO_ASKPASS: askpassPath,
-    PATH,
-  };
-}
-
-/** 与 Windows verifyImageSampleDotNet 一致：头尾各至多 1MB，且尾块在镜像与盘上的偏移均为 tailPos（非磁盘物理末尾） */
-async function verifySampleWithSudoMac(imagePath, rawPath, totalBytes, sudoEnv) {
-  const n = Math.min(1024 * 1024, totalBytes);
-  if (n <= 0) return { ok: false, detail: '镜像为空，无法校验' };
-  const tailPos = Math.max(0, totalBytes - n);
-  const script = `
-set -e
-IMG=${shSingleQuote(imagePath)}
-RAW=${shSingleQuote(rawPath)}
-T=$(mktemp -d /tmp/rdkvfy.XXXXXX)
-head -c ${n} "$IMG" > "$T/i"
-head -c ${n} "$RAW" > "$T/d"
-cmp -s "$T/i" "$T/d"
-/usr/bin/python3 -c "
-import sys
-img, raw, tail, n = sys.argv[1:5]
-tail, n = int(tail), int(n)
-with open(img, 'rb') as f:
-    f.seek(tail)
-    a = f.read(n)
-with open(raw, 'rb') as f:
-    f.seek(tail)
-    b = f.read(n)
-sys.exit(0 if a == b else 1)
-" "$IMG" "$RAW" ${tailPos} ${n}
-rm -rf "$T"
-`;
-  await new Promise((resolve, reject) => {
-    const child = spawn('sudo', ['--askpass', 'sh', '-c', script], { env: sudoEnv });
-    let err = '';
-    child.stderr.on('data', (d) => { err += d.toString(); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(err || `校验脚本退出 ${code}`));
-    });
-  });
-  return { ok: true, detail: `样本校验通过（${n}B 头尾抽样，sudo）` };
-}
 
 function resolveIoPolicy(options = {}) {
   const turbo = options.performanceProfile === 'turbo';
@@ -245,19 +144,21 @@ function buildDefaultBackupPath(drivePath) {
 
 export async function writeImage(imagePath, drivePath, options = {}) {
   const verifyMode = options.verifyMode || 'sample';
+  const ioPolicy = resolveIoPolicy(options);
   const drives = await listDrives();
   const driveMeta = drives.find((d) => d.path === drivePath || d.rawPath === drivePath) || null;
   if (!driveMeta) throw Object.assign(new Error('未找到目标磁盘，请刷新后重试'), { code: FlashErrorCode.DEVICE_NOT_FOUND });
   if (!driveMeta.removable) throw Object.assign(new Error('安全策略阻止：目标磁盘不是可移动介质'), { code: FlashErrorCode.DEVICE_NOT_REMOVABLE });
+
+  if (!checkIsRoot()) {
+    throw Object.assign(new Error('需要管理员权限才能写入磁盘，请使用 sudo 启动应用或在系统偏好设置中授予磁盘访问权限'), { code: FlashErrorCode.PERMISSION_DENIED });
+  }
 
   const stat = fs.statSync(imagePath);
   const total = stat.size;
   if (Number.isFinite(driveMeta.sizeBytes) && driveMeta.sizeBytes > 0 && total > driveMeta.sizeBytes) {
     throw Object.assign(new Error(`镜像体积超出目标盘容量：image=${total}B, drive=${driveMeta.sizeBytes}B`), { code: FlashErrorCode.IMAGE_TOO_LARGE });
   }
-
-  const askpassPath = resolveFlashDarwinAskpassPathOrThrow();
-  const sudoEnv = buildMacSudoDdEnv(askpassPath);
 
   emitFlashProgress({ stage: 'prepare', message: '正在卸载磁盘分区...', percent: 1 });
   try {
@@ -266,112 +167,57 @@ export async function writeImage(imagePath, drivePath, options = {}) {
     throw Object.assign(new Error(`无法卸载磁盘 ${driveMeta.id}: ${e.message}`), { code: FlashErrorCode.WRITE_FAILED });
   }
 
+  emitFlashProgress({ stage: 'prepare', message: '开始打开镜像文件', percent: 2 });
   const rawPath = driveMeta.rawPath || driveMeta.path;
-  emitFlashProgress({
-    stage: 'prepare',
-    message: '写盘引擎: /bin/dd（与 rdkstudio_frontend-master Imager FlashMac 一致）…',
-    percent: 2,
-  });
 
-  const bs = options.performanceProfile === 'turbo' ? '8m' : '4m';
-  /** BSD dd 无 GNU 的 conv=fsync；写后由 /bin/sync 刷盘（见 close 回调） */
-  const shellCmd = `/bin/dd bs=${bs} of=${shSingleQuote(rawPath)} if=${shSingleQuote(imagePath)} status=progress`;
-
-  activeOp = { id: crypto.randomUUID(), cancelled: false, child: null };
+  activeOp = { id: crypto.randomUUID(), cancelled: false };
+  /** 异步 I/O，保证主线程能及时处理 rdk:flash:cancel */
+  let imageFh;
+  let targetFh;
+  const buffer = Buffer.allocUnsafe(ioPolicy.chunkBytes);
+  let offset = 0;
+  let lastProgressPercent = -1;
+  let lastProgressEmitAt = 0;
   let verify = { ok: true, detail: '跳过校验' };
 
   try {
+    imageFh = await fs.promises.open(imagePath, 'r');
+    targetFh = await fs.promises.open(rawPath, 'r+');
     emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
-    await new Promise((resolve, reject) => {
-      const child = spawn('sudo', ['--askpass', 'sh', '-c', shellCmd], { env: sudoEnv });
-      activeOp.child = child;
-      let stderrCarry = '';
-      let ioBuf = '';
-      const onChunk = (d) => {
-        const chunk = d.toString();
-        ioBuf += chunk;
-        const text = stderrCarry + chunk;
-        const lines = text.split(/\r?\n/);
-        stderrCarry = lines.pop() || '';
-        for (const line of lines) {
-          const bytes = parseDdCopiedBytes(line);
-          if (bytes === null) continue;
-          const percent = Math.min(98, Math.max(3, Math.round((bytes / total) * 96) + 2));
-          emitFlashProgress({
-            stage: 'flashing',
-            message: `已写入 ${(bytes / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`,
-            percent,
-          });
-        }
-      };
-      child.stderr.on('data', onChunk);
-      child.stdout.on('data', onChunk);
-      child.on('error', reject);
-      child.on('close', (code) => {
-        activeOp.child = null;
-        if (stderrCarry.trim()) {
-          const bytes = parseDdCopiedBytes(stderrCarry.trim());
-          if (bytes !== null) {
-            const percent = Math.min(98, Math.max(3, Math.round((bytes / total) * 96) + 2));
-            emitFlashProgress({
-              stage: 'flashing',
-              message: `已写入 ${(bytes / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`,
-              percent,
-            });
-          }
-        }
-        if (activeOp?.cancelled) {
-          reject(Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED }));
-          return;
-        }
-        if (code === 0) {
-          try {
-            execFileSync('/bin/sync', [], { stdio: 'ignore' });
-          } catch {
-            /* ignore */
-          }
-          resolve();
-        } else {
-          reject(new Error((ioBuf || `dd 退出码 ${code}`).trim()));
-        }
-      });
-    });
-
+    while (true) {
+      if (activeOp?.cancelled) {
+        throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
+      }
+      const { bytesRead } = await imageFh.read(buffer, 0, buffer.length, offset);
+      if (bytesRead === 0) break;
+      if (activeOp?.cancelled) {
+        throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
+      }
+      await targetFh.write(buffer, 0, bytesRead, offset);
+      offset += bytesRead;
+      const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
+      const now = Date.now();
+      const shouldEmitProgress =
+        percent >= lastProgressPercent + 1
+        || now - lastProgressEmitAt >= PROGRESS_EMIT_INTERVAL_MS
+        || offset >= total;
+      if (shouldEmitProgress) {
+        lastProgressPercent = percent;
+        lastProgressEmitAt = now;
+        emitFlashProgress({ stage: 'flashing', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
+      }
+    }
+    await targetFh.sync();
     if (verifyMode === 'sample') {
       emitFlashProgress({ stage: 'verifying', message: '正在执行写后抽样校验', percent: 99 });
-      if (checkIsRoot()) {
-        let imageFd;
-        let targetFd;
-        try {
-          imageFd = fs.openSync(imagePath, 'r');
-          targetFd = fs.openSync(rawPath, 'r');
-          verify = verifyImageSample(imageFd, targetFd, total);
-        } finally {
-          try {
-            if (imageFd !== undefined) fs.closeSync(imageFd);
-          } catch {
-            /* ignore */
-          }
-          try {
-            if (targetFd !== undefined) fs.closeSync(targetFd);
-          } catch {
-            /* ignore */
-          }
-        }
-      } else {
-        try {
-          verify = await verifySampleWithSudoMac(imagePath, rawPath, total, sudoEnv);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          verify = { ok: false, detail: msg };
-        }
-      }
+      verify = verifyImageSample(imageFh.fd, targetFh.fd, total);
       if (!verify.ok) throw Object.assign(new Error(verify.detail), { code: FlashErrorCode.VERIFY_FAILED });
     }
-
     emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
     return { output: `镜像已写入 ${rawPath}`, verify };
   } finally {
+    await imageFh?.close().catch(() => {});
+    await targetFh?.close().catch(() => {});
     activeOp = null;
   }
 }
@@ -493,15 +339,7 @@ export async function decompressXz(inputPath, outputPath) {
 }
 
 export function cancelActiveOp() {
-  if (!activeOp) return;
-  activeOp.cancelled = true;
-  if (activeOp.child) {
-    try {
-      activeOp.child.kill('SIGTERM');
-    } catch {
-      /* ignore */
-    }
-  }
+  if (activeOp) activeOp.cancelled = true;
 }
 
 export function getActiveOperation() {

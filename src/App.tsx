@@ -17,7 +17,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 import StudioBrowserCaptureBridge from './components/StudioBrowserCaptureBridge';
 import ElectronSerialPortPicker from './components/ElectronSerialPortPicker';
-import { isDeviceSshConnected } from './utils/device-connection';
+import { isDeviceShownOnline } from './utils/device-connection';
 import type { Tab } from './app-types';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -221,7 +221,7 @@ function AppShell() {
     return names[activeTab] ?? activeTab;
   }, [activeTab, t]);
 
-  const deviceOnline = !!currentDevice && isDeviceSshConnected(currentDevice.status);
+  const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
 
   return (
     <div className={`app-shell ${railExpanded ? 'rail-expanded' : ''}`}>

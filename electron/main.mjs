@@ -226,6 +226,31 @@ ipcMain.handle('rdk:flash:decompress-image', async (_event, payload) => {
 
 ipcMain.handle('rdk:serial:list-windows', async () => listWindowsSerialPorts());
 
+/** 桌面端 file:// 下 Blob + <a download> 常无法弹出保存框，用系统另存为代替 */
+ipcMain.handle('rdk:save-text-file', async (_event, payload) => {
+  const defaultPath = String(payload?.defaultPath || 'export.json').trim() || 'export.json';
+  const content = typeof payload?.content === 'string' ? payload.content : '';
+  const title = String(payload?.title || '').trim() || '保存文件';
+  const win = BrowserWindow.getFocusedWindow() ?? mainWin;
+  try {
+    const result = await dialog.showSaveDialog(win ?? undefined, {
+      title,
+      defaultPath,
+      filters: [
+        { name: 'JSON', extensions: ['json'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true };
+    }
+    await fs.promises.writeFile(result.filePath, content, 'utf8');
+    return { ok: true, path: result.filePath };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 /* ── 判断是否打包模式 ── */
 const isPacked = app.isPackaged;
 

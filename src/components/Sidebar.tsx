@@ -3,7 +3,8 @@ import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
-import { isDeviceSshConnected } from '../utils/device-connection';
+import { isDeviceShownOnline } from '../utils/device-connection';
+import { useConfirmRemoveDevice } from '../hooks/useConfirmRemoveDevice';
 
 const Icons: Record<string, React.ReactNode> = {
   dashboard: (
@@ -95,15 +96,15 @@ export default function Sidebar() {
     activeTab,
     setShowAddDevice,
     setShowSettings,
-    removeDevice,
   } = useAppState();
+  const confirmRemoveDevice = useConfirmRemoveDevice();
   const { t } = useI18n();
   const tf = useCallback(
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
     [t],
   );
 
-  const onlineCount = devices.filter((dev) => isDeviceSshConnected(dev.status)).length;
+  const onlineCount = devices.filter((dev) => isDeviceShownOnline(dev)).length;
 
   return (
     <aside className="app-sidebar">
@@ -132,7 +133,7 @@ export default function Sidebar() {
         </div>
         <div className="sidebar-summary-meta">
           <span
-            className={`sidebar-summary-pill ${currentDevice && isDeviceSshConnected(currentDevice.status) ? 'online' : ''}`}
+            className={`sidebar-summary-pill ${currentDevice && isDeviceShownOnline(currentDevice) ? 'online' : ''}`}
             title={
               currentDevice
                 ? t(
@@ -144,11 +145,11 @@ export default function Sidebar() {
           >
             <span
               className={`status-dot ${
-                !currentDevice ? '' : isDeviceSshConnected(currentDevice.status) ? 'online' : 'offline'
+                !currentDevice ? '' : isDeviceShownOnline(currentDevice) ? 'online' : 'offline'
               }`}
             />
             {currentDevice
-              ? (isDeviceSshConnected(currentDevice.status) ? t('sidebar.summary.online', '设备在线') : t('sidebar.summary.waiting', '等待连接'))
+              ? (isDeviceShownOnline(currentDevice) ? t('sidebar.summary.online', '设备在线') : t('sidebar.summary.waiting', '等待连接'))
               : t('sidebar.summary.needConnect', '需要先连接设备')}
           </span>
           <span className="sidebar-summary-pill">{tf('sidebar.summary.devices', '{{n}} 台设备', { n: devices.length })}</span>
@@ -187,9 +188,9 @@ export default function Sidebar() {
               <h4 className="device-name">{dev.name}</h4>
               <div className="device-status">
                 <span
-                  className={`status-dot ${isDeviceSshConnected(dev.status) ? 'online' : 'offline'}`}
+                  className={`status-dot ${isDeviceShownOnline(dev) ? 'online' : 'offline'}`}
                 />
-                {isDeviceSshConnected(dev.status) ? `${dev.ip}:${dev.port ?? 22}` : t('sidebar.dev.disconnected', '未连接')}
+                {isDeviceShownOnline(dev) ? `${dev.ip}:${dev.port ?? 22}` : t('sidebar.dev.disconnected', '未连接')}
               </div>
             </div>
             <button
@@ -198,7 +199,7 @@ export default function Sidebar() {
               title={t('sidebar.removeDevice', '删除设备')}
               onClick={(event) => {
                 event.stopPropagation();
-                removeDevice(dev.id);
+                confirmRemoveDevice(dev);
               }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
