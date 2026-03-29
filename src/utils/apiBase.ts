@@ -43,6 +43,23 @@ export function resolveApiUrl(path: string): string {
 /**
  * 与 resolveApiUrl 对齐的 WebSocket 基址：桌面端直连 apiBase；浏览器开发态与页面同 host（走 Vite 代理到 8787）。
  */
+/** 一键部署日志 SSE：与 fetchApi 一样附带 rdk_sso_session，避免跨端口/iframe 下无 Cookie。 */
+export function resolveOpenClawDeployStreamUrl(deviceId: string, jobId: string): string {
+  let base = resolveApiUrl(
+    `/api/devices/${encodeURIComponent(deviceId)}/openclaw/deploy/stream?jobId=${encodeURIComponent(jobId)}`,
+  );
+  try {
+    const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
+    if (sid && /^[a-f0-9]{64}$/i.test(sid)) {
+      const sep = base.includes('?') ? '&' : '?';
+      base = `${base}${sep}rdk_sso_session=${encodeURIComponent(sid)}`;
+    }
+  } catch {
+    /* ignore */
+  }
+  return base;
+}
+
 export function resolveApiWsUrl(path: string): string {
   if (!path.startsWith('/')) return path;
   const apiBase = (window as unknown as { rdkDesktop?: { apiBase?: string } }).rdkDesktop?.apiBase;

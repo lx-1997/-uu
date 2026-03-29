@@ -267,6 +267,11 @@ export default function Flasher() {
   const isWinS100OneClick =
     isS100Device && platform === 'win32' && Boolean(caps.supportsS100XburnCli);
 
+  /** 桌面端 TF 直写需提升权限（与 electron/win 适配器 isAdmin 一致） */
+  const showDirectWriteAdminHint = Boolean(
+    isDesktop && !capsLoading && caps.supportsDirectWrite && !needsXburn,
+  );
+
   const refreshS100XburnGuiPath = useCallback(async () => {
     const api = window.rdkDesktop?.flashGetS100XburnGui;
     if (!api) return;
@@ -972,6 +977,34 @@ export default function Flasher() {
           <p className="config-card-desc">{t('flasher.subtitle', '支持 RDK X3 / X5 / S100 全系列，TF 卡直写或 xburn 工具烧录。')}</p>
         </section>
 
+        {showDirectWriteAdminHint && (
+          <section
+            className="card card-compact"
+            style={{
+              marginTop: 8,
+              borderColor: 'var(--accent)',
+              background: 'var(--accent-subtle)',
+            }}
+          >
+            <p className="config-card-desc" style={{ margin: 0, fontWeight: 500 }}>
+              {platform === 'win32'
+                ? t(
+                  'flasher.hint.adminWin',
+                  'Windows：直接写盘需管理员权限。请右键桌面端快捷方式 →「以管理员身份运行」后，再执行烧录。',
+                )
+                : platform === 'darwin'
+                  ? t(
+                    'flasher.hint.adminMac',
+                    'macOS：直接写盘需管理员权限。请使用管理员账户，或在系统提示时输入密码授权（sudo）后再烧录。',
+                  )
+                  : t(
+                    'flasher.hint.adminGeneric',
+                    '直接写盘需管理员权限：请以提升权限的方式启动桌面端后再烧录。',
+                  )}
+            </p>
+          </section>
+        )}
+
         {/* ── Step Indicator ── */}
         <section className="flash-steps">
           {stepLabels.map((label, idx) => (
@@ -1439,6 +1472,7 @@ export default function Flasher() {
                     type="button"
                     className="btn btn-primary"
                     disabled={!canProceedFromDrive || loading || (!capsLoading && !caps.supportsDirectWrite)}
+                    title={showDirectWriteAdminHint ? t('flasher.hint.adminTitle', '需管理员权限运行桌面端') : undefined}
                     onClick={() => startFlashWorkflow()}
                   >
                     {loading ? t('flasher.btn.writing', '执行中...') : t('flasher.btn.startWrite', '开始写盘')}

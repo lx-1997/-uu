@@ -247,12 +247,37 @@ function resolveFloatingBallIcon() {
   return undefined;
 }
 
+/** 欢迎气泡阶段窗口更大；收起后与历史逻辑一致为 72×72 */
+const FLOATING_BALL_COMPACT = 72;
+const FLOATING_BALL_WELCOME_W = 176;
+const FLOATING_BALL_WELCOME_H = 132;
+
 function positionFloatingBallWindow(win) {
   try {
     const { width, height, x, y } = screen.getPrimaryDisplay().workArea;
     const [w, h] = win.getSize();
     const margin = 20;
     win.setPosition(Math.round(x + width - w - margin), Math.round(y + height - h - margin));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 收起欢迎层时保持窗口右下角在屏幕上的位置不变（避免球突然跳位） */
+function shrinkFloatingBallWindowToCompact() {
+  if (!floatingBallWin || floatingBallWin.isDestroyed()) return;
+  try {
+    const b = floatingBallWin.getBounds();
+    const right = b.x + b.width;
+    const bottom = b.y + b.height;
+    const nw = FLOATING_BALL_COMPACT;
+    const nh = FLOATING_BALL_COMPACT;
+    floatingBallWin.setBounds({
+      x: Math.round(right - nw),
+      y: Math.round(bottom - nh),
+      width: nw,
+      height: nh,
+    });
   } catch {
     /* ignore */
   }
@@ -275,8 +300,8 @@ function createFloatingBallWindow() {
   }
 
   floatingBallWin = new BrowserWindow({
-    width: 72,
-    height: 72,
+    width: FLOATING_BALL_WELCOME_W,
+    height: FLOATING_BALL_WELCOME_H,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -326,6 +351,10 @@ function createFloatingBallWindow() {
     floatingBallWin = null;
   });
 }
+
+ipcMain.on('rdk:floating-ball:welcome-dismissed', () => {
+  shrinkFloatingBallWindowToCompact();
+});
 
 ipcMain.on('rdk:floating-ball:move-by', (_e, payload) => {
   const dx = Number(payload?.dx ?? 0);

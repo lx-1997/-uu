@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express, { type Request } from 'express';
+import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import { prepareWeChatQrPreviewBuffer } from './rdkclaw/ilink-qrcode.js';
 import { putWeixinQrPreview, getWeixinQrPreview } from './rdkclaw/weixin-qr-preview.js';
@@ -679,12 +679,55 @@ async function restoreRuntimeJobsState() {
   }
 }
 
+const deploySSEClients = new Map<string, Set<Response>>();
+
+function deploySseBroadcast(jobId: string, payload: unknown) {
+  const set = deploySSEClients.get(jobId);
+  if (!set?.size) return;
+  let line: string;
+  try {
+    line = `data: ${JSON.stringify(payload)}\n\n`;
+  } catch {
+    return;
+  }
+  for (const res of set) {
+    if (res.writableEnded) continue;
+    try {
+      res.write(line);
+    } catch {
+      set.delete(res);
+    }
+  }
+}
+
+function broadcastDeployJobToSse(job: OpenClawDeployJob) {
+  deploySseBroadcast(job.id, { type: 'job', job });
+}
+
+/** 任务结束：推送最终快照并关闭连接，释放服务端资源 */
+function deploySseSendFinalAndClose(job: OpenClawDeployJob) {
+  deploySseBroadcast(job.id, { type: 'job', job });
+  const set = deploySSEClients.get(job.id);
+  if (!set) return;
+  for (const res of [...set]) {
+    if (!res.writableEnded) {
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  deploySSEClients.delete(job.id);
+}
+
 function appendDeployOutput(job: OpenClawDeployJob, chunk: string) {
   job.output += chunk;
   if (job.output.length > 250_000) {
     job.output = job.output.slice(job.output.length - 250_000);
   }
   schedulePersistRuntimeJobs();
+  deploySseBroadcast(job.id, { type: 'log', text: chunk });
 }
 
 function gcFeishuSeen() {
@@ -2340,6 +2383,25 @@ function runOpenClawManagerStep(
   });
 }
 
+/** 一键部署：将 SSH 流式输出同步写入 job，避免前端轮询到空日志误以为卡住 */
+function runOpenClawManagerStepForDeploy(
+  job: OpenClawDeployJob,
+  invoke: (onOutput: (chunk: string) => void, onComplete: (success: boolean) => void) => void,
+): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    let output = '';
+    invoke(
+      (chunk) => {
+        output += chunk;
+        appendDeployOutput(job, chunk);
+      },
+      (success) => {
+        resolve({ ok: success, output });
+      },
+    );
+  });
+}
+
 async function executeOpenClawDeployJob(
   job: OpenClawDeployJob,
   deviceObj: ReturnType<typeof toOpenClawDevice>,
@@ -2362,11 +2424,13 @@ async function executeOpenClawDeployJob(
   ) => {
     job.steps[step] = 'running';
     schedulePersistRuntimeJobs();
+    broadcastDeployJobToSse(job);
+    appendDeployOutput(job, `\n>>> ${step}\n`);
     const result = await runner();
-    appendDeployOutput(job, `\n>>> ${step}\n${result.output || ''}\n`);
     if (!result.ok) {
       job.steps[step] = 'error';
       schedulePersistRuntimeJobs();
+      broadcastDeployJobToSse(job);
       if (required) {
         throw new Error(`${step} 步骤执行失败`);
       }
@@ -2374,14 +2438,15 @@ async function executeOpenClawDeployJob(
     }
     job.steps[step] = 'done';
     schedulePersistRuntimeJobs();
+    broadcastDeployJobToSse(job);
   };
 
   try {
     await runStep('check', async () => {
-      const diagnostic = await runOpenClawManagerStep((onOutput, onComplete) => {
+      const diagnostic = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
         openClawManager.runCheck(deviceObj, onOutput, onComplete);
       });
-      const network = await runOpenClawManagerStep((onOutput, onComplete) => {
+      const network = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
         openClawManager.runNetworkCheck(deviceObj, onOutput, onComplete);
       });
       return {
@@ -2389,13 +2454,13 @@ async function executeOpenClawDeployJob(
         output: `${diagnostic.output || ''}\n${network.output || ''}`,
       };
     }, true);
-    await runStep('prepare', () => runOpenClawManagerStep((onOutput, onComplete) => {
+    await runStep('prepare', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
       openClawManager.runPrepare(deviceObj, onOutput, onComplete);
     }), true);
-    await runStep('install', () => runOpenClawManagerStep((onOutput, onComplete) => {
+    await runStep('install', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
       openClawManager.runInstall(deviceObj, onOutput, onComplete);
     }), true);
-    await runStep('config', () => runOpenClawManagerStep((onOutput, onComplete) => {
+    await runStep('config', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
       openClawManager.updateConfig(
         deviceObj,
         {
@@ -2427,11 +2492,13 @@ async function executeOpenClawDeployJob(
     job.status = 'done';
     job.finishedAt = Date.now();
     schedulePersistRuntimeJobs();
+    deploySseSendFinalAndClose(job);
   } catch (error) {
     job.status = 'error';
     job.error = error instanceof Error ? error.message : '部署失败';
     job.finishedAt = Date.now();
     schedulePersistRuntimeJobs();
+    deploySseSendFinalAndClose(job);
   }
 }
 
@@ -2573,6 +2640,43 @@ app.get('/api/devices/:id/openclaw/deploy/status', async (request, response) => 
     return;
   }
   response.json({ ok: true, job });
+});
+
+/** 一键部署日志实时推送（SSE）；与轮询并行，前端以本通道为主 */
+app.get('/api/devices/:id/openclaw/deploy/stream', (request, response) => {
+  const { id } = request.params;
+  const jobId = String(request.query.jobId || '').trim();
+  if (!jobId) {
+    sendApiError(response, 400, 'INVALID_JOB_ID', '缺少 jobId', { retryable: false });
+    return;
+  }
+  cleanupOpenClawDeployJobs();
+  const job = openClawDeployJobs.get(jobId);
+  if (!job || job.deviceId !== id) {
+    sendApiError(response, 404, 'OPENCLAW_DEPLOY_JOB_NOT_FOUND', '部署任务不存在', { retryable: false });
+    return;
+  }
+  response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  response.setHeader('Cache-Control', 'no-cache, no-transform');
+  response.setHeader('Connection', 'keep-alive');
+  response.flushHeaders();
+
+  if (!deploySSEClients.has(jobId)) deploySSEClients.set(jobId, new Set());
+  deploySSEClients.get(jobId)!.add(response);
+
+  try {
+    response.write(`data: ${JSON.stringify({ type: 'job', job })}\n\n`);
+  } catch {
+    deploySSEClients.get(jobId)!.delete(response);
+    return;
+  }
+
+  request.on('close', () => {
+    const set = deploySSEClients.get(jobId);
+    if (!set) return;
+    set.delete(response);
+    if (set.size === 0) deploySSEClients.delete(jobId);
+  });
 });
 
 app.post('/api/devices/:id/openclaw/upgrade', async (request, response) => {

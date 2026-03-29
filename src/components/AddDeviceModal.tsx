@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { verifyDeviceConnection } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
@@ -10,6 +10,7 @@ type Step = 'method' | 'configure' | 'verify';
 export default function AddDeviceModal() {
   const {
     showAddDevice, setShowAddDevice,
+    addDeviceInitialMethod, setAddDeviceInitialMethod,
     newDeviceName, setNewDeviceName, newDeviceIp, setNewDeviceIp,
     addNewDevice, setActiveTab, addToast,
   } = useAppState();
@@ -18,8 +19,8 @@ export default function AddDeviceModal() {
 
   const [step, setStep] = useState<Step>('method');
   const [method, setMethod] = useState<ConnMethod>('manual');
-  const [sshUser, setSshUser] = useState('sunrise');
-  const [sshPass, setSshPass] = useState('sunrise');
+  const [sshUser, setSshUser] = useState('root');
+  const [sshPass, setSshPass] = useState('root');
   const [sshPort, setSshPort] = useState('22');
   const [serialPort, setSerialPort] = useState('/dev/ttyUSB0');
   const [baudRate, setBaudRate] = useState('921600');
@@ -29,6 +30,21 @@ export default function AddDeviceModal() {
   const [verifying, setVerifying] = useState(false);
   const [verifyOk, setVerifyOk] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const prevShowAddDeviceRef = useRef(false);
+
+  useEffect(() => {
+    const justOpened = showAddDevice && !prevShowAddDeviceRef.current;
+    prevShowAddDeviceRef.current = showAddDevice;
+    if (!justOpened) return;
+    if (addDeviceInitialMethod) {
+      setMethod(addDeviceInitialMethod);
+      setStep('configure');
+      setAddDeviceInitialMethod(null);
+    } else {
+      setStep('method');
+      setMethod('manual');
+    }
+  }, [showAddDevice, addDeviceInitialMethod, setAddDeviceInitialMethod]);
 
   const close = () => {
     setShowAddDevice(false);
@@ -38,8 +54,8 @@ export default function AddDeviceModal() {
     setVerifyOk(false);
     setNewDeviceName('');
     setNewDeviceIp('');
-    setSshUser('sunrise');
-    setSshPass('sunrise');
+    setSshUser('root');
+    setSshPass('root');
     setSshPort('22');
     setWifiSsid('');
     setWifiPass('');
@@ -53,7 +69,7 @@ export default function AddDeviceModal() {
     setVerifying(true);
     setVerifyOk(false);
     const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
-    verifyDeviceConnection({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'sunrise', password: sshPass.trim() })
+    verifyDeviceConnection({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'root', password: sshPass.trim() })
       .then(() => { setVerifying(false); setVerifyOk(true); })
       .catch((error) => {
         setVerifying(false);
@@ -77,7 +93,7 @@ export default function AddDeviceModal() {
 
   const confirmAdd = () => {
     const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
-    addNewDevice({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'sunrise', password: sshPass.trim(), name: newDeviceName });
+    addNewDevice({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'root', password: sshPass.trim(), name: newDeviceName });
     if (method === 'usb') { setActiveTab('terminal'); addToast(tf('addDevice.toast.serialOk', '串口 {{port}} 已连接', { port: serialPort }), 'success'); }
     close();
   };
@@ -194,9 +210,7 @@ export default function AddDeviceModal() {
                 </div>
                 <div className="add-device-presets">
                   <span className="add-device-presets-label">{t('addDevice.presets', '快捷填充：')}</span>
-                  <button className="chip" onClick={() => { setSshUser('sunrise'); setSshPass('sunrise'); }}>sunrise / sunrise</button>
-                  <button className="chip" onClick={() => { setSshUser('root'); setSshPass('root'); }}>root / root</button>
-                  <button className="chip" onClick={() => setNewDeviceIp('192.168.127.10')}>{t('addDevice.preset.wiredIp', '有线默认 IP')}</button>
+                  <button type="button" className="chip" onClick={() => setNewDeviceIp('192.168.127.10')}>{t('addDevice.preset.wiredIp', '有线默认 IP')}</button>
                 </div>
 
                 <div className="add-device-wifi-toggle">

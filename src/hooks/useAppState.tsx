@@ -71,6 +71,8 @@ export interface AppState {
   currentSession: TerminalSession;
   createSession: () => void;
   removeSession: (id: string) => void;
+  replaceTerminalSessions: (sessions: TerminalSession[], activeId: string) => void;
+  appendTerminalSession: (session: TerminalSession) => void;
   runTerminalCommand: (cmd: string, password?: string) => void;
   runTerminalAIAnalysis: () => void;
 
@@ -135,6 +137,8 @@ export interface AppState {
   // Modals
   showAddDevice: boolean;
   setShowAddDevice: (v: boolean) => void;
+  addDeviceInitialMethod: 'manual' | 'usb' | null;
+  setAddDeviceInitialMethod: (v: 'manual' | 'usb' | null) => void;
   newDeviceName: string;
   setNewDeviceName: (v: string) => void;
   newDeviceIp: string;

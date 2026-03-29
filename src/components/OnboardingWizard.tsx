@@ -91,7 +91,7 @@ function StepIndicator({ current, steps }: { current: Step; steps: { key: Step; 
 export default function OnboardingWizard() {
   const {
     obStep, setObStep, selectedBoard, setSelectedBoard,
-    setActiveTab, setShowAddDevice, currentDevice,
+    setActiveTab, setShowAddDevice, setAddDeviceInitialMethod, currentDevice,
     setChatExpanded, setCmd, addToast,
     setObReturnStep,
   } = useAppState();
@@ -638,20 +638,34 @@ export default function OnboardingWizard() {
         <div className="ob-content">
           <p className="ob-desc">{t('onboard.connect.desc', '将开发板通电并通过网线或 WiFi 连接到与本机同一局域网，然后添加设备。')}</p>
           <div className="ob-connect-methods">
-            <div className="ob-connect-card">
+            <button
+              type="button"
+              className="ob-connect-card"
+              onClick={() => {
+                setAddDeviceInitialMethod('manual');
+                setShowAddDevice(true);
+              }}
+            >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M5 12.55a11 11 0 0114 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg>
               <div>
                 <strong>{t('onboard.connect.sshTitle', 'SSH 网络')}</strong>
                 <span>{t('onboard.connect.sshSub', '输入 IP 地址，远程连接')}</span>
               </div>
-            </div>
-            <div className="ob-connect-card">
+            </button>
+            <button
+              type="button"
+              className="ob-connect-card"
+              onClick={() => {
+                setAddDeviceInitialMethod('usb');
+                setShowAddDevice(true);
+              }}
+            >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M12 18v-6"/><path d="M8 18v-2"/><path d="M16 18v-4"/><rect x="6" y="18" width="4" height="4" rx="1"/><rect x="14" y="18" width="4" height="4" rx="1"/><circle cx="12" cy="8" r="2"/><path d="M12 2v4"/></svg>
               <div>
                 <strong>{t('onboard.connect.serialTitle', 'USB 串口')}</strong>
                 <span>{t('onboard.connect.serialSub', '调试口直连，适合首次配网')}</span>
               </div>
-            </div>
+            </button>
           </div>
           <div className="ob-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setObStep(selectedBoard ? 'flash' : 'board')}>{t('onboard.btn.back', '上一步')}</button>

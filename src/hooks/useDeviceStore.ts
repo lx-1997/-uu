@@ -55,6 +55,9 @@ export interface DeviceStoreState {
 
   showAddDevice: boolean;
   setShowAddDevice: (v: boolean) => void;
+  /** 下次打开「添加设备」时直接进入对应配置页（与弹窗内 manual / usb 一致），用后清空 */
+  addDeviceInitialMethod: 'manual' | 'usb' | null;
+  setAddDeviceInitialMethod: (v: 'manual' | 'usb' | null) => void;
   newDeviceName: string;
   setNewDeviceName: (v: string) => void;
   newDeviceIp: string;
@@ -88,6 +91,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const currentDevice = devices.find((d) => d.id === activeDevice);
 
   const [showAddDevice, setShowAddDevice] = useState(false);
+  const [addDeviceInitialMethod, setAddDeviceInitialMethod] = useState<'manual' | 'usb' | null>(null);
   const [newDeviceName, setNewDeviceName] = useState('');
   const [newDeviceIp, setNewDeviceIp] = useState('');
   const devicesRef = React.useRef<Device[]>([]);
@@ -320,13 +324,16 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<DeviceStoreState>(
     () => ({
       activeDevice, setActiveDevice, devices, setDevices, currentDevice,
-      showAddDevice, setShowAddDevice, newDeviceName, setNewDeviceName,
+      showAddDevice, setShowAddDevice,
+      addDeviceInitialMethod, setAddDeviceInitialMethod,
+      newDeviceName, setNewDeviceName,
       newDeviceIp, setNewDeviceIp,
       scanForDevices, addNewDevice, removeDevice,
       showConfirm,
     }),
     [
-      activeDevice, devices, currentDevice, showAddDevice, newDeviceName, newDeviceIp,
+      activeDevice, devices, currentDevice, showAddDevice, addDeviceInitialMethod, setAddDeviceInitialMethod,
+      newDeviceName, newDeviceIp,
       scanForDevices, addNewDevice,
       removeDevice, showConfirm,
     ],

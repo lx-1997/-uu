@@ -30,6 +30,10 @@ export interface TerminalSession {
   profile: string;
   status: string;
   lines: string[];
+  /** 默认 ssh；usb 为浏览器 Web Serial，不经服务器 */
+  transport?: 'ssh' | 'serial';
+  /** 串口会话的波特率（仅 transport=serial 时使用） */
+  baudRate?: number;
 }
 
 export interface TransferItem {

@@ -1,7 +1,7 @@
 /**
- * OpenClaw 一键部署状态轮询：挂在全局，避免离开 OpenClaw 页面后 unmount 导致轮询被清掉、任务无后续。
+ * OpenClaw 一键部署状态：SSE 实时日志 + 轮询兜底（离开 OpenClaw 页后仍由全局 Host 续跑）。
  */
-import { resolveApiUrl } from './apiBase';
+import { resolveApiUrl, resolveOpenClawDeployStreamUrl } from './apiBase';
 
 export type DeployStepName = 'check' | 'prepare' | 'install' | 'config';
 export type DeployStepState = 'pending' | 'running' | 'done' | 'error';
@@ -26,9 +26,16 @@ let activeJobId = '';
 let lastEmittedTerminal: string | null = null;
 let consecutiveFailures = 0;
 
-const POLL_INTERVAL_MS = 2500;
+/** 无 SSE 时较快轮询，便于网络差时仍能更新 */
+const POLL_MS_NO_SSE = 800;
+/** SSE 已连接时降低轮询频率，仅作状态兜底 */
+const POLL_MS_WITH_SSE = 4500;
 const POLL_REQUEST_TIMEOUT_MS = 6000;
 const MAX_CONSECUTIVE_FAILURES = 6;
+
+let deployEventSource: EventSource | null = null;
+/** 与 SSE log 事件合并用的最新任务快照 */
+let sseJobMergeRef: OpenClawDeployJobPayload | null = null;
 
 export function deployJobStorageKey(deviceId: string) {
   return `oc-deploy-job-${deviceId}`;
@@ -80,6 +87,24 @@ function clearTimer() {
   }
 }
 
+function closeDeployEventSource() {
+  if (deployEventSource) {
+    deployEventSource.onopen = null;
+    deployEventSource.onmessage = null;
+    deployEventSource.onerror = null;
+    deployEventSource.close();
+    deployEventSource = null;
+  }
+  sseJobMergeRef = null;
+}
+
+function restartPollInterval(ms: number) {
+  clearTimer();
+  intervalId = setInterval(() => {
+    void tick();
+  }, ms);
+}
+
 async function tick() {
   let job: OpenClawDeployJobPayload | null = null;
   let failed = false;
@@ -93,6 +118,7 @@ async function tick() {
     if (failed) consecutiveFailures += 1;
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       clearTimer();
+      closeDeployEventSource();
       window.dispatchEvent(
         new CustomEvent('rdk-oc-deploy-finished', {
           detail: {
@@ -105,10 +131,12 @@ async function tick() {
     return;
   }
   consecutiveFailures = 0;
+  sseJobMergeRef = job;
   emit(job);
   if (job.status === 'running') return;
 
   clearTimer();
+  closeDeployEventSource();
   try {
     localStorage.removeItem(deployJobStorageKey(activeDeviceId));
   } catch {
@@ -129,21 +157,51 @@ async function tick() {
 /** 开始或继续轮询（与 OpenClaw 页内 beginDeployPolling 行为一致） */
 export function startOpenClawDeployPoll(deviceId: string, jobId: string) {
   if (!deviceId || !jobId) return;
+  closeDeployEventSource();
   clearTimer();
   activeDeviceId = deviceId;
   activeJobId = jobId;
   lastEmittedTerminal = null;
   consecutiveFailures = 0;
   void tick();
-  intervalId = setInterval(() => {
-    void tick();
-  }, POLL_INTERVAL_MS);
+  restartPollInterval(POLL_MS_NO_SSE);
+
+  const streamUrl = resolveOpenClawDeployStreamUrl(deviceId, jobId);
+  deployEventSource = new EventSource(streamUrl);
+  deployEventSource.onmessage = (ev: MessageEvent) => {
+    try {
+      const d = JSON.parse(ev.data) as { type?: string; text?: string; job?: OpenClawDeployJobPayload };
+      if (d.type === 'job' && d.job) {
+        sseJobMergeRef = d.job;
+        emit(d.job);
+        return;
+      }
+      if (d.type === 'log' && typeof d.text === 'string' && sseJobMergeRef) {
+        sseJobMergeRef = { ...sseJobMergeRef, output: (sseJobMergeRef.output || '') + d.text };
+        emit(sseJobMergeRef);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  deployEventSource.onopen = () => {
+    restartPollInterval(POLL_MS_WITH_SSE);
+  };
+  deployEventSource.onerror = () => {
+    const keepPolling =
+      sseJobMergeRef?.status !== 'done' && sseJobMergeRef?.status !== 'error';
+    closeDeployEventSource();
+    if (keepPolling && activeDeviceId && activeJobId) {
+      restartPollInterval(POLL_MS_NO_SSE);
+    }
+  };
 }
 
 /** 根据 localStorage 恢复轮询（设备切换时调用） */
 export function syncOpenClawDeployPollFromStorage(deviceId: string) {
   if (!deviceId) {
     clearTimer();
+    closeDeployEventSource();
     activeDeviceId = '';
     activeJobId = '';
     return;
@@ -158,6 +216,7 @@ export function syncOpenClawDeployPollFromStorage(deviceId: string) {
     startOpenClawDeployPoll(deviceId, saved.trim());
   } else {
     clearTimer();
+    closeDeployEventSource();
     activeDeviceId = '';
     activeJobId = '';
   }
@@ -165,6 +224,7 @@ export function syncOpenClawDeployPollFromStorage(deviceId: string) {
 
 export function stopOpenClawDeployPoll() {
   clearTimer();
+  closeDeployEventSource();
   activeDeviceId = '';
   activeJobId = '';
   consecutiveFailures = 0;

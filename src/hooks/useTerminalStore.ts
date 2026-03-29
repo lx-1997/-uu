@@ -26,6 +26,10 @@ export interface TerminalStoreState {
   currentSession: TerminalSession;
   createSession: () => void;
   removeSession: (id: string) => void;
+  /** 替换全部终端标签（如无网络设备时仅保留 USB 串口） */
+  replaceTerminalSessions: (sessions: TerminalSession[], activeId: string) => void;
+  /** 追加标签（已有设备时再开 USB 串口） */
+  appendTerminalSession: (session: TerminalSession) => void;
   runTerminalCommand: (cmd: string, password?: string) => void;
   runTerminalAIAnalysis: () => void;
 }
@@ -55,19 +59,31 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
       profile: 'shell',
       status: 'attached',
       lines: ['Welcome to RDK OS.', 'root@rdk:~#'],
+      transport: 'ssh',
     },
   ]);
   const [activeSessionId, setActiveSessionId] = useState('session-1');
   const currentSession = terminalSessions.find((s) => s.id === activeSessionId) ?? terminalSessions[0];
 
   const createSession = useCallback(() => {
+    if (!currentDevice) {
+      addToast(t('terminal.needDeviceForSshTab', 'SSH 会话需先在左下角连接设备'), 'warning');
+      return;
+    }
     const nextId = `session-${Date.now()}`;
     const profileLabel = getTerminalProfileLabel(terminalProfile, isEn);
-    setTerminalSessions((prev) => [...prev, { id: nextId, name: `${profileLabel} ${prev.length + 1}`, profile: terminalProfile, status: 'warm', lines: [] }]);
+    setTerminalSessions((prev) => [...prev, {
+      id: nextId,
+      name: `${profileLabel} ${prev.length + 1}`,
+      profile: terminalProfile,
+      status: 'warm',
+      lines: [],
+      transport: 'ssh',
+    }]);
     setActiveSessionId(nextId);
     addToast(tf('terminal.session.created', '终端会话 "{{name}}" 已创建', { name: profileLabel }), 'success');
     addActivity(tf('terminal.session.activity', '创建终端会话: {{name}}', { name: profileLabel }));
-  }, [terminalProfile, addToast, addActivity, tf]);
+  }, [currentDevice, terminalProfile, addToast, addActivity, tf, t]);
 
   const removeSession = useCallback((id: string) => {
     setTerminalSessions((prev) => {
@@ -79,6 +95,16 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, [activeSessionId]);
+
+  const replaceTerminalSessions = useCallback((sessions: TerminalSession[], activeId: string) => {
+    setTerminalSessions(sessions);
+    setActiveSessionId(activeId);
+  }, []);
+
+  const appendTerminalSession = useCallback((session: TerminalSession) => {
+    setTerminalSessions((prev) => [...prev, session]);
+    setActiveSessionId(session.id);
+  }, []);
 
   const runTerminalCommand = useCallback((commandText: string, password?: string) => {
     if (!commandText.trim()) return;
@@ -184,11 +210,13 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     () => ({
       terminalProfile, setTerminalProfile, terminalDraft, setTerminalDraft,
       terminalSessions, activeSessionId, setActiveSessionId, currentSession,
-      createSession, removeSession, runTerminalCommand, runTerminalAIAnalysis,
+      createSession, removeSession, replaceTerminalSessions, appendTerminalSession,
+      runTerminalCommand, runTerminalAIAnalysis,
     }),
     [
       terminalProfile, terminalDraft, terminalSessions, activeSessionId, currentSession,
-      createSession, removeSession, runTerminalCommand, runTerminalAIAnalysis,
+      createSession, removeSession, replaceTerminalSessions, appendTerminalSession,
+      runTerminalCommand, runTerminalAIAnalysis,
     ],
   );
 
