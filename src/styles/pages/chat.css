@@ -569,6 +569,12 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--dock-shadow);
   padding: 4px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dock-input-area.dock-input-drag-over {
+  border-color: var(--accent-border, rgba(59, 130, 246, 0.55));
+  box-shadow: 0 0 0 1px var(--accent-subtle, rgba(59, 130, 246, 0.2));
 }
 
 .dock.expanded .dock-input-area {

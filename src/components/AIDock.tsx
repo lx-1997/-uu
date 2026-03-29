@@ -173,6 +173,40 @@ function extractMediaFromText(text: string): { cleanText: string; mediaBlocks: C
   return { cleanText: t, mediaBlocks };
 }
 
+/** 从粘贴事件中收集文件。同一份内容常在 items.getAsFile() 与 files[] 各出现一次，且 lastModified 可能不一致，故不能合并两轮扫描。 */
+function collectClipboardFiles(evt: ClipboardEvent): File[] {
+  const cd = evt.clipboardData;
+  if (!cd) return [];
+  const seen = new Set<string>();
+  const out: File[] = [];
+  const push = (f: File) => {
+    if (f.size === 0) return;
+    const nameKey = (f.name || '').trim().toLowerCase() || '_';
+    const key = `${nameKey}|${f.size}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(f);
+  };
+
+  let fromItems = 0;
+  for (const item of Array.from(cd.items)) {
+    if (item.kind === 'file') {
+      const f = item.getAsFile();
+      if (f) {
+        push(f);
+        fromItems += 1;
+      }
+    }
+  }
+  // items 与 files 在多数浏览器里指向同一批文件；只扫 items 即可避免「粘一次出现两份」
+  if (fromItems > 0) return out;
+
+  for (let i = 0; i < cd.files.length; i += 1) {
+    push(cd.files[i]);
+  }
+  return out;
+}
+
 async function fileToBase64(file: File) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -825,6 +859,7 @@ export default function AIDock() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTranscript, setRecordingTranscript] = useState('');
   const [inputContextMenu, setInputContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [dragOverInput, setDragOverInput] = useState(false);
   const activeDeviceName = currentDevice?.name?.trim() || '';
   const activeDeviceEndpoint = currentDevice ? `${currentDevice.ip || '-'}:${currentDevice.port ?? 22}` : '';
   const activeRdkclawDeviceLabel = useMemo(() => {
@@ -1012,6 +1047,7 @@ export default function AIDock() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setDragOverInput(false);
     const files = e.dataTransfer.files;
     Array.from(files).forEach((file) => addAttachment(file));
   }, [addAttachment]);
@@ -1019,7 +1055,43 @@ export default function AIDock() {
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
   }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) {
+      setDragOverInput(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const related = e.relatedTarget as Node | null;
+    if (related && el.contains(related)) return;
+    setDragOverInput(false);
+  }, []);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    const files = collectClipboardFiles(e.nativeEvent);
+    if (files.length === 0) return;
+    e.preventDefault();
+    files.forEach((f) => addAttachment(f));
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+    const input = e.currentTarget;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const next = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+    setCmd(next);
+    window.requestAnimationFrame(() => {
+      const caret = start + text.length;
+      input.setSelectionRange(caret, caret);
+    });
+  }, [addAttachment, setCmd]);
 
   const toggleVoiceRecord = useCallback(async () => {
     if (isRecording) {
@@ -1684,7 +1756,13 @@ export default function AIDock() {
       )}
 
       {/* ── Input area ── */}
-      <div className="dock-input-area" onDrop={handleDrop} onDragOver={handleDragOver}>
+      <div
+        className={`dock-input-area${dragOverInput ? ' dock-input-drag-over' : ''}`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+      >
         {pendingAttachments.length > 0 && (
           <div className="dock-attachments">
             {pendingAttachments.map(att => (
@@ -1732,6 +1810,7 @@ export default function AIDock() {
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}
+            onPaste={handlePaste}
             onContextMenu={(e) => {
               e.preventDefault();
               setInputContextMenu({ x: e.clientX, y: e.clientY });

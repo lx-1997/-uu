@@ -2158,12 +2158,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Auto-scroll chat
-  useEffect(() => {
-    const el = document.querySelector('.chat-messages');
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [chatMessages, aiTyping]);
-
   const value: AIChatStoreState = {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, setChatMessages, chatExpanded, setChatExpanded,

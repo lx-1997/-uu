@@ -249,7 +249,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
                       target.closest('.xterm') !== null;
       if (e.key === '/' && !isInput) {
         e.preventDefault();
-        const input = document.querySelector('.cmd-input') as HTMLInputElement;
+        const input = document.querySelector('.dock-cmd-input') as HTMLInputElement;
         input?.focus();
       }
       if (e.key === 'Escape') {
@@ -260,7 +260,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
-        const input = document.querySelector('.cmd-input') as HTMLInputElement;
+        const input = document.querySelector('.dock-cmd-input') as HTMLInputElement;
         input?.focus();
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 't' && ui.activeTab === 'terminal') {
@@ -278,7 +278,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
 
   // Scroll viewport to top on tab change
   useEffect(() => {
-    const viewport = document.querySelector('.canvas-viewport');
+    const viewport = document.querySelector('.content-area');
     if (viewport) viewport.scrollTo({ top: 0, behavior: 'smooth' });
   }, [ui.activeTab]);
 

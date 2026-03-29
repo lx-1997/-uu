@@ -97,7 +97,9 @@ function MainContent() {
         </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'flasher' ? 'is-active' : 'is-hidden'}`}>
-        <Flasher />
+        <Suspense fallback={null}>
+          <Flasher />
+        </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
         <Suspense fallback={null}>
