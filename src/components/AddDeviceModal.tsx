@@ -3,7 +3,12 @@ import { useAppState } from '../hooks/useAppState';
 import { verifyDeviceConnection } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
-import { RDK_DEVELOPER_RESOURCE_URL, RDK_OPEN_USB_SERIAL_EVENT } from '../utils/web-serial';
+import {
+  RDK_DEVELOPER_RESOURCE_URL,
+  RDK_DRIVER_CH34X_WINDOWS_ZIP,
+  RDK_DRIVER_CP210X_USB2UART_ZIP,
+  RDK_OPEN_USB_SERIAL_EVENT,
+} from '../utils/web-serial';
 
 type ConnMethod = 'manual' | 'usb';
 type Step = 'method' | 'configure' | 'verify';
@@ -258,16 +263,20 @@ export default function AddDeviceModal() {
                   <div className="add-device-usb-step"><span className="add-device-usb-num">1</span>{t('addDevice.usb.step1', '将调试线连接到 RDK 调试口')}</div>
                   <div className="add-device-usb-step"><span className="add-device-usb-num">2</span>{t('addDevice.usb.step2', '确认 PC 已识别串口驱动 (CP210X / CH340)')}</div>
                 </div>
-                <p className="add-device-field-hint add-device-usb-driver-link">
-                  <a
-                    href={RDK_DEVELOPER_RESOURCE_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="add-device-external-link"
-                  >
-                    {t('addDevice.usb.driverLink', '驱动与工具下载：地瓜开发者资源中心')}
+                <div className="add-device-usb-driver-links">
+                  <span className="add-device-usb-driver-links-label">{t('addDevice.usb.driverLinksLabel', '串口驱动（与资源中心一致，直链）：')}</span>
+                  <a href={RDK_DRIVER_CP210X_USB2UART_ZIP} target="_blank" rel="noreferrer" className="add-device-external-link">
+                    {t('addDevice.usb.driverCp210x', 'CP210x USB2UART')}
                   </a>
-                </p>
+                  <span className="add-device-usb-driver-links-sep"> · </span>
+                  <a href={RDK_DRIVER_CH34X_WINDOWS_ZIP} target="_blank" rel="noreferrer" className="add-device-external-link">
+                    {t('addDevice.usb.driverCh340', 'CH340（CH34x 安装包）')}
+                  </a>
+                  <span className="add-device-usb-driver-links-sep"> · </span>
+                  <a href={RDK_DEVELOPER_RESOURCE_URL} target="_blank" rel="noreferrer" className="add-device-external-link">
+                    {t('addDevice.usb.driverMore', '更多资源')}
+                  </a>
+                </div>
               </div>
             )}
 

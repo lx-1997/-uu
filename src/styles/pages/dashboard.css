@@ -647,9 +647,10 @@
 .ob-connect-card {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   padding: 14px;
+  min-width: 0;
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -670,20 +671,31 @@ button.ob-connect-card:focus-visible {
   outline-offset: 2px;
 }
 
+.ob-connect-card > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .ob-connect-card div {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .ob-connect-card strong {
   font-size: 0.8125rem;
+  line-height: 1.35;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .ob-connect-card span {
   font-size: 0.6875rem;
+  line-height: 1.45;
   color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 /* OpenClaw status */

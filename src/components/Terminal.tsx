@@ -11,6 +11,8 @@ import {
   requestAndOpenSerialPort,
   RDK_DEFAULT_SERIAL_BAUD,
   RDK_DEVELOPER_RESOURCE_URL,
+  RDK_DRIVER_CH34X_WINDOWS_ZIP,
+  RDK_DRIVER_CP210X_USB2UART_ZIP,
   RDK_OPEN_USB_SERIAL_EVENT,
   SERIAL_BAUD_OPTIONS,
   type SerialPortListMode,
@@ -478,10 +480,10 @@ export default function Terminal() {
                 <p className="immersive-welcome-desc" style={{ marginBottom: 12 }}>
                   {t('terminal.serial.hint', '或使用 USB 调试串口（Chrome / Edge，本地直连，无需设备 IP）：')}
                 </p>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' as const }}>
-                  <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('terminal.serial.baudLabel', '波特率')}</label>
+                <div className="terminal-serial-welcome-controls">
+                  <label className="terminal-serial-welcome-label">{t('terminal.serial.baudLabel', '波特率')}</label>
                   <select
-                    className="select"
+                    className="select terminal-serial-welcome-select"
                     value={usbBaudRate}
                     onChange={(e) => setUsbBaudRate(Number(e.target.value))}
                   >
@@ -489,9 +491,9 @@ export default function Terminal() {
                       <option key={b} value={b}>{b}</option>
                     ))}
                   </select>
-                  <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('terminal.serial.listModeLabel', '串口列表')}</label>
+                  <label className="terminal-serial-welcome-label">{t('terminal.serial.listModeLabel', '串口列表')}</label>
                   <select
-                    className="select"
+                    className="select terminal-serial-welcome-select"
                     title={t('terminal.serial.listModeTitle', '「全部」与常见 Web 烧录工具一致，兼容 Windows/macOS 各类 COM/cu 口；若列表过长可改为仅常见 USB 芯片。')}
                     value={usbSerialListMode}
                     onChange={(e) => setUsbSerialListMode(e.target.value as SerialPortListMode)}
@@ -501,7 +503,7 @@ export default function Terminal() {
                   </select>
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn btn-primary terminal-serial-welcome-connect"
                     disabled={usbSerialConnecting}
                     onClick={() => void connectUsbSerial()}
                   >
@@ -513,15 +515,18 @@ export default function Terminal() {
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
                   {t('terminal.serial.rdkNote', 'RDK 官方调试口默认 115200 8N1，无流控。')}
                 </p>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.55 }}>
                   {getSerialDriverHint(isEn)}{' '}
-                  <a
-                    href={RDK_DEVELOPER_RESOURCE_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: 'var(--accent)' }}
-                  >
-                    {t('terminal.serial.driverResourceLink', '驱动下载：地瓜资源中心')}
+                  <a href={RDK_DRIVER_CP210X_USB2UART_ZIP} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
+                    {t('terminal.serial.driverCp210x', 'CP210x')}
+                  </a>
+                  {' · '}
+                  <a href={RDK_DRIVER_CH34X_WINDOWS_ZIP} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
+                    {t('terminal.serial.driverCh340', 'CH340')}
+                  </a>
+                  {' · '}
+                  <a href={RDK_DEVELOPER_RESOURCE_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
+                    {t('terminal.serial.driverMore', '更多')}
                   </a>
                 </p>
               </div>
@@ -568,10 +573,12 @@ export default function Terminal() {
               +
             </button>
             {canUseWebSerial() && (
-              <>
+              <div
+                className="terminal-serial-bar-tools"
+                title={t('terminal.serial.barToolsTitle', 'USB 串口：波特率、端口筛选、新建会话')}
+              >
                 <select
-                  className="select"
-                  style={{ marginLeft: 6, maxWidth: 110, fontSize: 12, height: 28 }}
+                  className="select terminal-serial-bar-select"
                   value={usbBaudRate}
                   onChange={(e) => setUsbBaudRate(Number(e.target.value))}
                   title={t('terminal.serial.baudTitle', '新 USB 串口会话的波特率（RDK 默认 115200）')}
@@ -581,8 +588,7 @@ export default function Terminal() {
                   ))}
                 </select>
                 <select
-                  className="select"
-                  style={{ maxWidth: 130, fontSize: 12, height: 28 }}
+                  className="select terminal-serial-bar-select"
                   value={usbSerialListMode}
                   onChange={(e) => setUsbSerialListMode(e.target.value as SerialPortListMode)}
                   title={t('terminal.serial.listModeTitle', '「全部」与常见 Web 烧录工具一致，兼容 Windows/macOS 各类 COM/cu 口；若列表过长可改为仅常见 USB 芯片。')}
@@ -592,8 +598,7 @@ export default function Terminal() {
                 </select>
                 <button
                   type="button"
-                  className="immersive-tab immersive-tab-add"
-                  style={{ minWidth: 'auto', padding: '0 10px' }}
+                  className="immersive-tab immersive-tab-add terminal-serial-bar-usb-btn"
                   disabled={usbSerialConnecting}
                   onClick={() => void connectUsbSerial()}
                   title={
@@ -604,7 +609,7 @@ export default function Terminal() {
                 >
                   {usbSerialConnecting ? '…' : 'USB'}
                 </button>
-              </>
+              </div>
             )}
           </div>
         </div>

@@ -5,6 +5,17 @@ export const RDK_OPEN_USB_SERIAL_EVENT = 'rdk-open-usb-serial';
 export const RDK_DEVELOPER_RESOURCE_URL = 'https://developer.d-robotics.cc/resource';
 
 /**
+ * 与 [资源中心](https://developer.d-robotics.cc/resource) 表格中「串口驱动」两行一致，文件托管在官方静态站：
+ * @see https://archive.d-robotics.cc/downloads/software_tools/serial_to_usb_drivers/
+ */
+export const RDK_DRIVER_CP210X_USB2UART_ZIP =
+  'https://archive.d-robotics.cc/downloads/software_tools/serial_to_usb_drivers/CP210x_USB2UART_Driver.zip';
+
+/** CH340/CH341 系（资源中心文案为「串口驱动 CH340」） */
+export const RDK_DRIVER_CH34X_WINDOWS_ZIP =
+  'https://archive.d-robotics.cc/downloads/software_tools/serial_to_usb_drivers/CH34x_Install_Windows_v3_4.zip';
+
+/**
  * Web Serial API（Chromium：Chrome / Edge；桌面端 Windows、macOS 均可用同一套 API）。
  *
  * 与市面常见实现一致（如 ESP Web Flasher、Arduino 云端工具、Chrome Samples）：

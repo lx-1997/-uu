@@ -339,6 +339,63 @@
   color: var(--text-primary);
 }
 
+/* USB 串口工具条：与标签页同排，单独分组避免 immersive-tabs 的 2px gap 挤在一起 */
+.terminal-serial-bar-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-left: 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+/* 与全局 .select 的 padding:10px 14px 冲突：再设 height:28px 时 border-box 下文字区≈8px，会压扁不可读 */
+select.terminal-serial-bar-select.select {
+  max-width: 130px;
+  min-width: 72px;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 4px 26px 4px 8px;
+  min-height: 30px;
+  height: auto;
+  flex-shrink: 0;
+  color: var(--text-primary);
+  background-color: var(--input-bg);
+}
+
+.terminal-serial-bar-usb-btn {
+  min-width: auto;
+  padding: 0 10px;
+}
+
+/* 欢迎页：波特率 / 列表 / 连接按钮一行（可换行） */
+.terminal-serial-welcome-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.terminal-serial-welcome-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.terminal-serial-welcome-select {
+  min-width: 120px;
+  max-width: min(100%, 220px);
+  flex-shrink: 0;
+  line-height: 1.4;
+  padding: 8px 12px;
+  min-height: 38px;
+}
+
+.terminal-serial-welcome-connect {
+  flex-shrink: 0;
+}
+
 /* ── Desktop placeholder ── */
 .immersive-desktop-placeholder {
   width: 100%;
