@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Device } from '../app-types';
-import { connectDevice, checkDevicePing, fetchDevices, forgetDevicePassword, rememberDevicePassword, removeDevice as removeDeviceApi } from '../api';
+import {
+  connectDevice,
+  checkDevicePing,
+  fetchDevices,
+  fetchDeviceDiagnostics,
+  forgetDevicePassword,
+  rememberDevicePassword,
+  removeDevice as removeDeviceApi,
+} from '../api';
+import { diagnosticsOutputImpliesReachable } from '../utils/diagnostics';
 import { isDeviceSshConnected } from '../utils/device-connection';
 import { useToastStore } from './useToastStore';
 import { useAuth } from './useAuth';
@@ -89,6 +98,11 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     devicesRef.current = devices;
   }, [devices]);
+
+  const activeDeviceRef = React.useRef(activeDevice);
+  useEffect(() => {
+    activeDeviceRef.current = activeDevice;
+  }, [activeDevice]);
 
   const pingFailStreakRef = React.useRef<Record<string, number>>({});
 
@@ -257,7 +271,18 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         const newDevices = await Promise.all(snapshot.map(async (dev) => {
           try {
             const res = await checkDevicePing(dev.id);
-            const pingOk = res.status === 'connected';
+            let pingOk = res.status === 'connected';
+            /* 当前选中设备：ping 偶发失败时用诊断遥测补判，与是否打开工作台页面无关 */
+            if (!pingOk && dev.id === activeDeviceRef.current) {
+              try {
+                const dr = await fetchDeviceDiagnostics(dev.id);
+                if (dr.ok !== false && diagnosticsOutputImpliesReachable(dr.output)) {
+                  pingOk = true;
+                }
+              } catch {
+                /* 忽略：与 ping 一致，不弹错 */
+              }
+            }
             if (pingOk) {
               pingFailStreakRef.current[dev.id] = 0;
               return dev.status === 'online' ? dev : { ...dev, status: 'online' as const };

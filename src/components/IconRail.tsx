@@ -137,7 +137,7 @@ export default function IconRail() {
             data-tooltip={!railExpanded ? (currentDevice ? currentDevice.name : t('rail.pickDevice', '选择设备')) : undefined}
             onClick={() => setShowDevicePanel(!showDevicePanel)}
           >
-            <span className={`rail-device-dot ${deviceOnline ? 'online' : ''}`} />
+            <span className={`rail-device-dot ${deviceOnline ? 'online' : 'offline'}`} />
             {railExpanded && <span className="rail-label">{currentDevice ? currentDevice.name : t('rail.device', '设备')}</span>}
           </button>
 

@@ -271,6 +271,10 @@
   box-shadow: 0 0 6px var(--ok-subtle);
 }
 
+.rail-device-dot.offline {
+  background: var(--danger);
+}
+
 /* Language (bottom rail) */
 .rail-lang-toggle {
   position: relative;

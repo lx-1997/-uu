@@ -155,7 +155,11 @@ export default function Sidebar() {
         </div>
         <div className="sidebar-summary-meta">
           <span className={`sidebar-summary-pill ${currentDevice && isDeviceSshConnected(currentDevice.status) ? 'online' : ''}`}>
-            <span className="status-dot" />
+            <span
+              className={`status-dot ${
+                !currentDevice ? '' : isDeviceSshConnected(currentDevice.status) ? 'online' : 'offline'
+              }`}
+            />
             {currentDevice
               ? (isDeviceSshConnected(currentDevice.status) ? t('sidebar.summary.online', '设备在线') : t('sidebar.summary.waiting', '等待连接'))
               : t('sidebar.summary.needConnect', '需要先连接设备')}
@@ -195,7 +199,9 @@ export default function Sidebar() {
             <div className="device-info">
               <h4 className="device-name">{dev.name}</h4>
               <div className="device-status">
-                <span className={`status-dot ${isDeviceSshConnected(dev.status) ? '' : 'offline'}`}></span>
+                <span
+                  className={`status-dot ${isDeviceSshConnected(dev.status) ? 'online' : 'offline'}`}
+                />
                 {isDeviceSshConnected(dev.status) ? `${dev.ip}:${dev.port ?? 22}` : t('sidebar.dev.disconnected', '未连接')}
               </div>
             </div>

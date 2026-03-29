@@ -136,3 +136,14 @@ export function parseMetrics(output: string): DeviceMetrics {
 
   return { temp, tempC, memUsed, memTotal, memPercent, bpu, bpuValue, cpuLoad, uptime, diskUsed, diskTotal, diskPercent };
 }
+
+/**
+ * 与设备列表「在线」判定补全逻辑一致：诊断输出含有效遥测时认为 SSH 已能执行采集，
+ * 用于在轻量 ping 误判时仍标为在线（由 DeviceProvider 全局轮询调用，与当前页面无关）。
+ */
+export function diagnosticsOutputImpliesReachable(output: string): boolean {
+  const m = parseMetrics(output);
+  const memory =
+    m.memUsed !== '--' && m.memTotal !== '--' ? `${m.memUsed}/${m.memTotal}` : '--';
+  return memory !== '--' || m.temp !== '--' || m.bpu !== '--' || m.uptime !== '--';
+}

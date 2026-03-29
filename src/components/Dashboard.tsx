@@ -159,7 +159,6 @@ function AnimatedNumber({ value, suffix }: { value: string; suffix?: string }) {
 export default function Dashboard() {
   const {
     currentDevice,
-    setDevices,
     setShowAddDevice,
     setActiveTab,
     setChatExpanded,
@@ -209,21 +208,6 @@ export default function Dashboard() {
             tempC: m.tempC,
             bpuVal: m.bpuValue,
           });
-          /* 诊断已能拉到设备数据时，与顶栏/设备列表统一为「在线」；避免仅 ping 滞后或 TCP 过短误判 */
-          const hasTelemetry =
-            memory !== '--'
-            || m.temp !== '--'
-            || m.bpu !== '--'
-            || m.uptime !== '--';
-          if (r.ok !== false && hasTelemetry) {
-            setDevices((prev) =>
-              prev.map((d) =>
-                d.id === deviceId && !isDeviceSshConnected(d.status)
-                  ? { ...d, status: 'online' as const }
-                  : d,
-              ),
-            );
-          }
         })
         .catch(() => {
           if (!cancelled) {
@@ -237,7 +221,7 @@ export default function Dashboard() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [currentDevice?.id, setDevices]);
+  }, [currentDevice?.id]);
 
   const partnerSkillSyncedRef = useRef<Set<string>>(new Set());
 
