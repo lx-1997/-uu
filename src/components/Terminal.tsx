@@ -212,6 +212,8 @@ export default function Terminal() {
   const [usbBaudRate, setUsbBaudRate] = useState(RDK_DEFAULT_SERIAL_BAUD);
   /** 与 ESP Web Flasher 等一致：默认列出全部串口，跨 Windows/macOS 最稳 */
   const [usbSerialListMode, setUsbSerialListMode] = useState<SerialPortListMode>('all');
+  const [usbSerialConnecting, setUsbSerialConnecting] = useState(false);
+  const usbSerialConnectLockRef = useRef(false);
 
   const hasSerialTab = terminalSessions.some((s) => s.transport === 'serial');
   const allowTerminalUi = Boolean(currentDevice) || hasSerialTab;
@@ -222,6 +224,9 @@ export default function Terminal() {
       addToast(blocked, 'warning');
       return;
     }
+    if (usbSerialConnectLockRef.current) return;
+    usbSerialConnectLockRef.current = true;
+    setUsbSerialConnecting(true);
     try {
       const port = await requestAndOpenSerialPort(usbBaudRate, usbSerialListMode);
       const id = `serial-${Date.now()}`;
@@ -246,6 +251,9 @@ export default function Terminal() {
       if (e instanceof DOMException && e.name === 'NotFoundError') return;
       const msg = e instanceof Error ? e.message : String(e);
       addToast(fillTemplate(t('terminal.serial.openFail', '无法打开串口：{{msg}}'), { msg }), 'error');
+    } finally {
+      usbSerialConnectLockRef.current = false;
+      setUsbSerialConnecting(false);
     }
   }, [addToast, appendTerminalSession, currentDevice, isEn, replaceTerminalSessions, setActiveTab, t, usbBaudRate, usbSerialListMode]);
 
@@ -481,8 +489,15 @@ export default function Terminal() {
                     <option value="all">{t('terminal.serial.listModeAll', '全部（推荐）')}</option>
                     <option value="common">{t('terminal.serial.listModeCommon', '仅常见 USB 转串口')}</option>
                   </select>
-                  <button type="button" className="btn btn-primary" onClick={() => void connectUsbSerial()}>
-                    {t('terminal.serial.connectBtn', '连接 USB 串口')}
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={usbSerialConnecting}
+                    onClick={() => void connectUsbSerial()}
+                  >
+                    {usbSerialConnecting
+                      ? t('terminal.serial.connecting', '正在打开串口…')
+                      : t('terminal.serial.connectBtn', '连接 USB 串口')}
                   </button>
                 </div>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
@@ -561,10 +576,15 @@ export default function Terminal() {
                   type="button"
                   className="immersive-tab immersive-tab-add"
                   style={{ minWidth: 'auto', padding: '0 10px' }}
+                  disabled={usbSerialConnecting}
                   onClick={() => void connectUsbSerial()}
-                  title={t('terminal.serial.connectTitle', '新建 USB 串口会话')}
+                  title={
+                    usbSerialConnecting
+                      ? t('terminal.serial.connecting', '正在打开串口…')
+                      : t('terminal.serial.connectTitle', '新建 USB 串口会话')
+                  }
                 >
-                  USB
+                  {usbSerialConnecting ? '…' : 'USB'}
                 </button>
               </>
             )}

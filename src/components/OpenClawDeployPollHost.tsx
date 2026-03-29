@@ -25,10 +25,17 @@ export default function OpenClawDeployPollHost() {
       if (d.status === 'done') addToast(tr('oc.deployPoll.doneToast', 'OpenClaw 一键部署已完成'), 'success');
       else if (d.status === 'error') {
         const err = d.error;
-        const msg = err === 'oc.deployPoll.interrupted'
-          ? tr('oc.deployPoll.interrupted', '部署状态轮询中断，请稍后手动刷新状态')
-          : (err || tr('oc.deployPoll.failToast', 'OpenClaw 部署失败'));
-        addToast(msg, 'error');
+        if (err === 'oc.deployPoll.interrupted') {
+          addToast(
+            tr(
+              'oc.deployPoll.interrupted',
+              '多次无法获取部署进度（网络或服务端可能异常）。请打开「OpenClaw」页面查看日志，或检查网络后重新发起一键部署。',
+            ),
+            'warning',
+          );
+        } else {
+          addToast(err || tr('oc.deployPoll.failToast', 'OpenClaw 部署失败，请查看 OpenClaw 页日志并重试'), 'error');
+        }
       }
     };
     window.addEventListener('rdk-oc-deploy-finished', fn as EventListener);

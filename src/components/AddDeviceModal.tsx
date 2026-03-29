@@ -1,11 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { verifyDeviceConnection } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
+import { RDK_DEFAULT_SERIAL_BAUD, SERIAL_BAUD_OPTIONS } from '../utils/web-serial';
 
 type ConnMethod = 'manual' | 'usb';
 type Step = 'method' | 'configure' | 'verify';
+
+const SERIAL_DATALIST_ID = 'add-device-serial-suggestions';
+
+function buildSerialDatalistOptions(): string[] {
+  const linux = ['/dev/ttyUSB0', '/dev/ttyUSB1', '/dev/ttyACM0', '/dev/ttyACM1'];
+  const com = Array.from({ length: 24 }, (_, i) => `COM${i + 1}`);
+  return [...linux, ...com];
+}
 
 export default function AddDeviceModal() {
   const {
@@ -22,8 +31,9 @@ export default function AddDeviceModal() {
   const [sshUser, setSshUser] = useState('root');
   const [sshPass, setSshPass] = useState('root');
   const [sshPort, setSshPort] = useState('22');
-  const [serialPort, setSerialPort] = useState('/dev/ttyUSB0');
-  const [baudRate, setBaudRate] = useState('921600');
+  const [serialPort, setSerialPort] = useState('');
+  const [baudRate, setBaudRate] = useState(String(RDK_DEFAULT_SERIAL_BAUD));
+  const serialDatalistOptions = useMemo(() => buildSerialDatalistOptions(), []);
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPass, setWifiPass] = useState('');
   const [showWifiConfig, setShowWifiConfig] = useState(false);
@@ -60,6 +70,8 @@ export default function AddDeviceModal() {
     setWifiSsid('');
     setWifiPass('');
     setShowWifiConfig(false);
+    setSerialPort('');
+    setBaudRate(String(RDK_DEFAULT_SERIAL_BAUD));
   };
 
   const goToConfigure = (m: ConnMethod) => { setMethod(m); setStep('configure'); };
@@ -94,7 +106,11 @@ export default function AddDeviceModal() {
   const confirmAdd = () => {
     const host = method === 'usb' ? (newDeviceIp.trim() || '127.0.0.1') : newDeviceIp.trim();
     addNewDevice({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'root', password: sshPass.trim(), name: newDeviceName });
-    if (method === 'usb') { setActiveTab('terminal'); addToast(tf('addDevice.toast.serialOk', '串口 {{port}} 已连接', { port: serialPort }), 'success'); }
+    if (method === 'usb') {
+      setActiveTab('terminal');
+      const portLabel = serialPort.trim() || t('addDevice.serial.notSpecified', '未填写');
+      addToast(tf('addDevice.toast.serialOk', '串口 {{port}} 已连接', { port: portLabel }), 'success');
+    }
     close();
   };
 
@@ -238,21 +254,39 @@ export default function AddDeviceModal() {
                   <div className="add-device-usb-step"><span className="add-device-usb-num">1</span>{t('addDevice.usb.step1', '将调试线连接到 RDK 调试口')}</div>
                   <div className="add-device-usb-step"><span className="add-device-usb-num">2</span>{t('addDevice.usb.step2', '确认 PC 已识别串口驱动 (CP210X / CH340)')}</div>
                 </div>
-                <div className="add-device-field-row">
-                  <div className="add-device-field">
-                    <label>{t('addDevice.label.serial', '串口号')}</label>
-                    <select className="select" value={serialPort} onChange={e => setSerialPort(e.target.value)} title={t('addDevice.title.serial', '串口号')}>
-                      <option value="/dev/ttyUSB0">/dev/ttyUSB0</option>
-                      <option value="/dev/ttyUSB1">/dev/ttyUSB1</option>
-                      <option value="COM3">COM3</option><option value="COM4">COM4</option>
-                    </select>
-                  </div>
-                  <div className="add-device-field">
-                    <label>{t('addDevice.label.baud', '波特率')}</label>
-                    <select className="select" value={baudRate} onChange={e => setBaudRate(e.target.value)} title={t('addDevice.title.baud', '波特率')}>
-                      <option value="921600">921600</option><option value="115200">115200</option>
-                    </select>
-                  </div>
+                <div className="add-device-field">
+                  <label htmlFor="add-device-serial-input">{t('addDevice.label.serial', '串口号')}</label>
+                  <input
+                    id="add-device-serial-input"
+                    className="input"
+                    list={SERIAL_DATALIST_ID}
+                    value={serialPort}
+                    onChange={(e) => setSerialPort(e.target.value)}
+                    placeholder={t('addDevice.serial.placeholder', '如 COM5 或 /dev/ttyUSB0')}
+                    title={t('addDevice.title.serial', '串口号')}
+                    autoComplete="off"
+                  />
+                  <datalist id={SERIAL_DATALIST_ID}>
+                    {serialDatalistOptions.map((v) => (
+                      <option key={v} value={v} />
+                    ))}
+                  </datalist>
+                  <p className="add-device-field-hint">{t('addDevice.serial.hint', '请填写与系统设备管理器中一致的名称（Windows 多为 COMx；Linux/macOS 多为 /dev/ttyUSB*）。若不确定，连接后可在「终端」页用浏览器的串口选择器查看。')}</p>
+                </div>
+                <div className="add-device-field">
+                  <label htmlFor="add-device-baud-select">{t('addDevice.label.baud', '波特率')}</label>
+                  <select
+                    id="add-device-baud-select"
+                    className="select"
+                    value={baudRate}
+                    onChange={(e) => setBaudRate(e.target.value)}
+                    title={t('addDevice.title.baud', '波特率')}
+                  >
+                    {SERIAL_BAUD_OPTIONS.map((b) => (
+                      <option key={b} value={String(b)}>{b}</option>
+                    ))}
+                  </select>
+                  <p className="add-device-field-hint">{t('addDevice.baud.hint', 'RDK 官方调试串口默认 115200 8N1；仅在与板端约定高速传输时再选 921600 等，否则可能出现乱码。')}</p>
                 </div>
                 <div className="add-device-field-row">
                   <div className="add-device-field"><label>{t('addDevice.label.user', '用户名')}</label><input className="input" value={sshUser} onChange={e => setSshUser(e.target.value)} title={t('addDevice.title.user', '用户名')} /></div>

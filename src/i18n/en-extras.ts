@@ -255,6 +255,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'terminal.ui.serialOnlyMeta': 'USB Serial (local)',
   'terminal.serial.hint': 'Or use a USB debug serial port (Chrome / Edge, local, no device IP):',
   'terminal.serial.baudLabel': 'Baud rate',
+  'terminal.serial.connecting': 'Opening serial port…',
   'terminal.serial.connectBtn': 'Connect USB serial',
   'terminal.serial.rdkNote': 'RDK official debug port: 115200 8N1, no flow control.',
   'terminal.serial.openFail': 'Could not open serial port: {{msg}}',
@@ -1176,6 +1177,10 @@ export const EN_EXTRAS: Record<string, string> = {
   'addDevice.toast.timeout': 'Timeout — check network, IP, and port',
   'addDevice.toast.needFields': 'Enter IP, username, and password',
   'addDevice.toast.verifyFail': 'Verification failed — check IP and credentials',
+  'addDevice.serial.placeholder': 'e.g. COM5 or /dev/ttyUSB0',
+  'addDevice.serial.hint': 'Use the exact name from Device Manager (Windows: COMx) or /dev/ttyUSB* on Linux/macOS. If unsure, open the Terminal tab and use the browser’s serial picker.',
+  'addDevice.baud.hint': 'RDK’s official debug UART defaults to 115200 8N1. Use 921600 only when your board uses a high-speed link; otherwise you may see garbled text.',
+  'addDevice.serial.notSpecified': '(not filled in)',
   'addDevice.toast.serialOk': 'Serial {{port}} connected',
 
   'wifiModal.title': 'Wi‑Fi',

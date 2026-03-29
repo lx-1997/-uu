@@ -983,6 +983,13 @@
   flex-shrink: 0;
 }
 
+.add-device-field-hint {
+  margin: 6px 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
 /* ── Verify Status ── */
 .verify-status {
   display: flex;
