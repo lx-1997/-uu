@@ -176,7 +176,22 @@ export function startOpenClawDeployPoll(deviceId: string, jobId: string) {
         emit(d.job);
         return;
       }
-      if (d.type === 'log' && typeof d.text === 'string' && sseJobMergeRef) {
+      if (d.type === 'log' && typeof d.text === 'string') {
+        // 日志可能先于首次 poll / job 事件到达；若仍要求 sseJobMergeRef 非空会丢字导致「一直卡在检测且无日志」
+        if (!sseJobMergeRef) {
+          sseJobMergeRef = {
+            id: activeJobId,
+            deviceId: activeDeviceId,
+            status: 'running',
+            steps: {
+              check: 'running',
+              prepare: 'pending',
+              install: 'pending',
+              config: 'pending',
+            },
+            output: '',
+          };
+        }
         sseJobMergeRef = { ...sseJobMergeRef, output: (sseJobMergeRef.output || '') + d.text };
         emit(sseJobMergeRef);
       }

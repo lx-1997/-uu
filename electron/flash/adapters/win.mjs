@@ -17,7 +17,44 @@ import { emitFlashProgress } from '../progress.mjs';
 import { FlashErrorCode } from '../types.mjs';
 
 let activeOp = null;
-const PROGRESS_EMIT_INTERVAL_MS = 250;
+
+/** Win CreateProcess 命令行约 8191 字符；-EncodedCommand 的 Base64 单独控制长度，避免超长退回 -File */
+const ENCODED_COMMAND_B64_MAX = 7000;
+
+/**
+ * 32 位进程在 64 位 Windows 上应调用 Sysnative 下的 PowerShell，否则可能拿到 WOW64 环境导致打开物理盘异常。
+ */
+function getPowerShellExe() {
+  if (process.platform !== 'win32') return 'powershell.exe';
+  try {
+    const sysnative = path.join(process.env.SystemRoot || 'C:\\Windows', 'Sysnative', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    if (fs.existsSync(sysnative)) return sysnative;
+  } catch {
+    /* ignore */
+  }
+  const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  if (fs.existsSync(system32)) return system32;
+  return 'powershell.exe';
+}
+
+/** PowerShell -EncodedCommand：脚本须为 UTF-16LE 再 Base64（无 BOM） */
+function encodePowerShellCommand(script) {
+  return Buffer.from(script, 'utf16le').toString('base64');
+}
+
+function writePs1WithBom(ps1Path, body) {
+  fs.writeFileSync(ps1Path, `\ufeff${body}`, 'utf8');
+}
+
+function resolvePowerShellSpawnArgs(scriptBody) {
+  const enc = encodePowerShellCommand(scriptBody);
+  if (enc.length <= ENCODED_COMMAND_B64_MAX) {
+    return { mode: 'encoded', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc] };
+  }
+  const ps1Path = path.join(os.tmpdir(), `rdk-flash-script-${crypto.randomUUID()}.ps1`);
+  writePs1WithBom(ps1Path, scriptBody);
+  return { mode: 'file', ps1Path, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1Path] };
+}
 
 function resolveIoPolicy(options = {}) {
   const turbo = options.performanceProfile === 'turbo';
@@ -29,7 +66,7 @@ function resolveIoPolicy(options = {}) {
 
 function runPowerShell(script) {
   return new Promise((resolve, reject) => {
-    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+    const child = spawn(getPowerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
       windowsHide: true,
     });
     let stdout = '';
@@ -93,10 +130,16 @@ async function prepareDiskForRawWrite(diskNumber) {
 $ErrorActionPreference = 'Continue'
 $n = ${Number(diskNumber)}
 Get-Partition -DiskNumber $n -ErrorAction SilentlyContinue | ForEach-Object {
-  if ($_.DriveLetter) {
+  $p = $_
+  if ($p.DriveLetter) {
     try {
-      Dismount-Volume -DriveLetter $_.DriveLetter -Confirm:$false -ErrorAction Stop
+      Dismount-Volume -DriveLetter $p.DriveLetter -Confirm:$false -ErrorAction Stop
     } catch { }
+  }
+  foreach ($ap in @($p.AccessPaths)) {
+    if ($ap -match '^\\\\\?\\Volume\{') {
+      try { Dismount-Volume -Path $ap -ErrorAction SilentlyContinue } catch { }
+    }
   }
 }
 Start-Sleep -Milliseconds 800
@@ -109,25 +152,246 @@ Start-Sleep -Milliseconds 600
 /** USB/读卡器在卸载卷后需再等一会儿，否则 CreateFile(\\.\PhysicalDriveN) 常短暂 EIO */
 const POST_UNMOUNT_SETTLE_MS = 1400;
 
-/** 部分 USB/读卡器在卸载后短暂 EIO，退避重试打开 PhysicalDrive */
-async function openPhysicalDriveWithRetry(drivePath, mode) {
-  const m = mode || 'r+';
-  const maxAttempts = 12;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+const FLASH_PROGRESS_PREFIX = 'RDK_FLASH_PROGRESS_JSON=';
+
+/**
+ * Node 在 Windows 上对 \\.\PhysicalDriveN 会经 path.win32.toNamespacedPath 错误地追加尾部 \，
+ * 导致 libuv CreateFile 稳定 EIO（见 nodejs/node#54025）。.NET FileStream 直接传设备路径，可绕过该问题。
+ */
+function writeMetaFile(obj) {
+  const p = path.join(os.tmpdir(), `rdk-flash-meta-${crypto.randomUUID()}.json`);
+  fs.writeFileSync(p, JSON.stringify(obj), 'utf8');
+  return p;
+}
+
+function runPowerShellFileCaptureStdout(ps1Path) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(getPowerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1Path], {
+      windowsHide: true,
+    });
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    child.stdout.on('data', (d) => { stdoutBuf += d.toString(); });
+    child.stderr.on('data', (d) => { stderrBuf += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve(stdoutBuf.trim());
+      else reject(new Error((stderrBuf || stdoutBuf || `powershell exit ${code}`).trim()));
+    });
+  });
+}
+
+/** 使用 .NET FileStream 整盘写入；返回 { child, done } 以便取消时 kill */
+function startDotNetRawWrite(imagePath, drivePath, chunkBytes) {
+  const metaPath = writeMetaFile({ imagePath, drivePath, chunkBytes });
+  const ps1Body = `$ErrorActionPreference = 'Stop'
+$metaPath = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(metaPath, 'utf8').toString('base64')}'))
+$meta = Get-Content -LiteralPath $metaPath -Encoding UTF8 | ConvertFrom-Json
+$imagePath = $meta.imagePath
+$drivePath = $meta.drivePath
+$chunk = [int]$meta.chunkBytes
+$img = [System.IO.File]::OpenRead($imagePath)
+try {
+  $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+  try {
+    $buf = New-Object byte[] $chunk
+    $total = $img.Length
+    $off = 0L
+    while (($n = $img.Read($buf, 0, $buf.Length)) -gt 0) {
+      $dst.Write($buf, 0, $n)
+      $off += $n
+      $line = '${FLASH_PROGRESS_PREFIX}' + (@{ offset = $off; total = $total } | ConvertTo-Json -Compress)
+      [Console]::Error.WriteLine($line)
+    }
+    $dst.Flush()
+  } finally { $dst.Dispose() }
+} finally { $img.Dispose() }
+`;
+  const spawnOpts = resolvePowerShellSpawnArgs(ps1Body);
+  const extraPs1 = spawnOpts.mode === 'file' ? spawnOpts.ps1Path : null;
+  const child = spawn(getPowerShellExe(), spawnOpts.args, {
+    windowsHide: true,
+  });
+  let stderrBuf = '';
+  let stderrLineCarry = '';
+  const flushFlashProgressLine = (line) => {
+    if (!line.startsWith(FLASH_PROGRESS_PREFIX)) return;
     try {
-      if (attempt > 0) {
-        const backoff = Math.min(2500, 350 + 450 * attempt);
-        await new Promise((r) => setTimeout(r, backoff));
+      const { offset, total } = JSON.parse(line.slice(FLASH_PROGRESS_PREFIX.length));
+      const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
+      emitFlashProgress({
+        stage: 'flashing',
+        message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`,
+        percent,
+      });
+    } catch {
+      /* ignore malformed line */
+    }
+  };
+  child.stderr.on('data', (d) => {
+    const chunk = d.toString();
+    stderrBuf += chunk;
+    const text = stderrLineCarry + chunk;
+    const lines = text.split(/\r?\n/);
+    stderrLineCarry = lines.pop() || '';
+    for (const line of lines) {
+      flushFlashProgressLine(line);
+    }
+  });
+  child.stdout.on('data', (d) => { stderrBuf += d.toString(); });
+  const done = new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (stderrLineCarry.trim()) flushFlashProgressLine(stderrLineCarry.trim());
+      try {
+        fs.unlinkSync(metaPath);
+      } catch {
+        /* ignore */
       }
-      return await fs.promises.open(drivePath, m);
-    } catch (e) {
-      const code = e && e.code;
-      const retryable =
-        code === 'EIO'
-        || code === 'EBUSY'
-        || code === 'EPERM'
-        || code === 'EACCES';
-      if (!retryable || attempt === maxAttempts - 1) throw e;
+      try {
+        if (extraPs1) fs.unlinkSync(extraPs1);
+      } catch {
+        /* ignore */
+      }
+      if (code === 0) resolve();
+      else reject(new Error((stderrBuf || `powershell exit ${code}`).trim()));
+    });
+  });
+  return { child, done };
+}
+
+/** 物理盘备份：.NET 读 PhysicalDrive，避免 Node fs.open 对 raw 设备 EIO */
+function startDotNetRawBackup(drivePath, outputPath, totalBytes, chunkBytes) {
+  const metaPath = writeMetaFile({ drivePath, outputPath, totalBytes, chunkBytes });
+  const ps1Body = `$ErrorActionPreference = 'Stop'
+$metaPath = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(metaPath, 'utf8').toString('base64')}'))
+$meta = Get-Content -LiteralPath $metaPath -Encoding UTF8 | ConvertFrom-Json
+$src = New-Object System.IO.FileStream($meta.drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+try {
+  $dst = New-Object System.IO.FileStream($meta.outputPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+  try {
+    $buf = New-Object byte[] ([int]$meta.chunkBytes)
+    $total = [int64]$meta.totalBytes
+    $off = 0L
+    while ($off -lt $total) {
+      $need = [int][Math]::Min($buf.Length, $total - $off)
+      $n = $src.Read($buf, 0, $need)
+      if ($n -le 0) { break }
+      $dst.Write($buf, 0, $n)
+      $off += $n
+      $line = '${FLASH_PROGRESS_PREFIX}' + (@{ offset = $off; total = $total } | ConvertTo-Json -Compress)
+      [Console]::Error.WriteLine($line)
+    }
+    $dst.Flush()
+  } finally { $dst.Dispose() }
+} finally { $src.Dispose() }
+`;
+  const spawnOpts = resolvePowerShellSpawnArgs(ps1Body);
+  const extraPs1 = spawnOpts.mode === 'file' ? spawnOpts.ps1Path : null;
+  const child = spawn(getPowerShellExe(), spawnOpts.args, {
+    windowsHide: true,
+  });
+  let stderrBuf = '';
+  let stderrLineCarry = '';
+  const flushBackupProgressLine = (line) => {
+    if (!line.startsWith(FLASH_PROGRESS_PREFIX)) return;
+    try {
+      const { offset, total } = JSON.parse(line.slice(FLASH_PROGRESS_PREFIX.length));
+      const percent = Math.min(99, Math.max(2, Math.round((offset / total) * 98) + 1));
+      emitFlashProgress({
+        stage: 'backup',
+        message: `已备份 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`,
+        percent,
+      });
+    } catch {
+      /* ignore */
+    }
+  };
+  child.stderr.on('data', (d) => {
+    const chunk = d.toString();
+    stderrBuf += chunk;
+    const text = stderrLineCarry + chunk;
+    const lines = text.split(/\r?\n/);
+    stderrLineCarry = lines.pop() || '';
+    for (const line of lines) {
+      flushBackupProgressLine(line);
+    }
+  });
+  child.stdout.on('data', (d) => { stderrBuf += d.toString(); });
+  const done = new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (stderrLineCarry.trim()) flushBackupProgressLine(stderrLineCarry.trim());
+      try {
+        fs.unlinkSync(metaPath);
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (extraPs1) fs.unlinkSync(extraPs1);
+      } catch {
+        /* ignore */
+      }
+      if (code === 0) resolve();
+      else reject(new Error((stderrBuf || `powershell exit ${code}`).trim()));
+    });
+  });
+  return { child, done };
+}
+
+/** 抽样校验：.NET 读盘与镜像对比（避免对 PhysicalDrive 使用 fs.open） */
+async function verifyImageSampleDotNet(imagePath, drivePath, totalBytes) {
+  const sampleSize = Math.min(1024 * 1024, totalBytes);
+  if (sampleSize <= 0) return { ok: false, detail: '镜像为空，无法校验' };
+  const tailPos = Math.max(0, totalBytes - sampleSize);
+  const metaPath = writeMetaFile({ imagePath, drivePath, sampleSize, tailPos });
+  const ps1Path = path.join(os.tmpdir(), `rdk-flash-verify-${crypto.randomUUID()}.ps1`);
+  const ps1Body = `$ErrorActionPreference = 'Stop'
+function Test-RdkByteEqual([byte[]]$a, [byte[]]$b) {
+  if ($a.Length -ne $b.Length) { return $false }
+  for ($i = 0; $i -lt $a.Length; $i++) { if ($a[$i] -ne $b[$i]) { return $false } }
+  return $true
+}
+$metaPath = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(metaPath, 'utf8').toString('base64')}'))
+$meta = Get-Content -LiteralPath $metaPath -Encoding UTF8 | ConvertFrom-Json
+$imgFs = [System.IO.File]::OpenRead($meta.imagePath)
+$diskFs = New-Object System.IO.FileStream($meta.drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+try {
+  $sz = [int]$meta.sampleSize
+  $bImg = New-Object byte[] $sz
+  $bDisk = New-Object byte[] $sz
+  [void]$imgFs.Read($bImg, 0, $sz)
+  [void]$diskFs.Read($bDisk, 0, $sz)
+  if (-not (Test-RdkByteEqual $bImg $bDisk)) { Write-Output 'RESULT:HEAD_FAIL'; exit 0 }
+  $tail = [int64]$meta.tailPos
+  [void]$imgFs.Seek($tail, 'Begin')
+  [void]$diskFs.Seek($tail, 'Begin')
+  [void]$imgFs.Read($bImg, 0, $sz)
+  [void]$diskFs.Read($bDisk, 0, $sz)
+  if (-not (Test-RdkByteEqual $bImg $bDisk)) { Write-Output 'RESULT:TAIL_FAIL'; exit 0 }
+  Write-Output 'RESULT:OK'
+} finally {
+  $imgFs.Dispose()
+  $diskFs.Dispose()
+}
+`;
+  writePs1WithBom(ps1Path, ps1Body);
+  try {
+    const out = await runPowerShellFileCaptureStdout(ps1Path);
+    try {
+      fs.unlinkSync(metaPath);
+    } catch {
+      /* ignore */
+    }
+    if (String(out).includes('RESULT:HEAD_FAIL')) return { ok: false, detail: '头部样本校验失败' };
+    if (String(out).includes('RESULT:TAIL_FAIL')) return { ok: false, detail: '尾部样本校验失败' };
+    if (String(out).includes('RESULT:OK')) return { ok: true, detail: `样本校验通过（${sampleSize}B 头尾抽样）` };
+    return { ok: false, detail: '校验输出异常' };
+  } finally {
+    try {
+      fs.unlinkSync(ps1Path);
+    } catch {
+      /* ignore */
     }
   }
 }
@@ -152,25 +416,6 @@ if ($d.IsOffline) { $d | Set-Disk -IsOffline $false -ErrorAction Stop }
   } catch (e) {
     return { ok: false, detail: e instanceof Error ? e.message : String(e) };
   }
-}
-
-function readChunk(fd, position, size) {
-  const buf = Buffer.allocUnsafe(size);
-  const read = fs.readSync(fd, buf, 0, size, position);
-  return buf.subarray(0, read);
-}
-
-function verifyImageSample(imageFd, targetFd, totalBytes) {
-  const sampleSize = Math.min(1024 * 1024, totalBytes);
-  if (sampleSize <= 0) return { ok: false, detail: '镜像为空，无法校验' };
-  const imageHead = readChunk(imageFd, 0, sampleSize);
-  const targetHead = readChunk(targetFd, 0, sampleSize);
-  if (!imageHead.equals(targetHead)) return { ok: false, detail: '头部样本校验失败' };
-  const tailPos = Math.max(0, totalBytes - sampleSize);
-  const imageTail = readChunk(imageFd, tailPos, sampleSize);
-  const targetTail = readChunk(targetFd, tailPos, sampleSize);
-  if (!imageTail.equals(targetTail)) return { ok: false, detail: '尾部样本校验失败' };
-  return { ok: true, detail: `样本校验通过（${sampleSize}B 头尾抽样）` };
 }
 
 function buildDefaultBackupPath(drivePath) {
@@ -234,14 +479,7 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
     throw Object.assign(new Error('无效的 Windows 物理磁盘路径'), { code: FlashErrorCode.INVALID_PARAMS });
   }
 
-  activeOp = { id: crypto.randomUUID(), cancelled: false };
-  /** 使用异步 read/write，避免同步 I/O 长时间占用主线程导致无法处理 rdk:flash:cancel */
-  let imageFh;
-  let targetFh;
-  const buffer = Buffer.allocUnsafe(ioPolicy.chunkBytes);
-  let offset = 0;
-  let lastProgressPercent = -1;
-  let lastProgressEmitAt = 0;
+  activeOp = { id: crypto.randomUUID(), cancelled: false, child: null };
   let verify = { ok: true, detail: '跳过校验' };
 
   try {
@@ -260,44 +498,35 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
 
     emitFlashProgress({ stage: 'prepare', message: '正在等待磁盘就绪（卸载后释放句柄）…', percent: 2 });
     await new Promise((r) => setTimeout(r, POST_UNMOUNT_SETTLE_MS));
-    emitFlashProgress({ stage: 'prepare', message: '正在打开镜像与目标磁盘…', percent: 2 });
-    imageFh = await fs.promises.open(imagePath, 'r');
-    targetFh = await openPhysicalDriveWithRetry(drivePath);
+    emitFlashProgress({
+      stage: 'prepare',
+      message: '写盘引擎: .NET PowerShell（RDK_FLASH_ENGINE_V2）— 正在打开镜像与目标磁盘…',
+      percent: 2,
+    });
+    const { child, done } = startDotNetRawWrite(imagePath, drivePath, ioPolicy.chunkBytes);
+    activeOp.child = child;
     emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
-    while (true) {
+    try {
+      await done;
+    } catch (e) {
       if (activeOp?.cancelled) {
         throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
       }
-      const { bytesRead } = await imageFh.read(buffer, 0, buffer.length, offset);
-      if (bytesRead === 0) break;
-      if (activeOp?.cancelled) {
-        throw Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED });
-      }
-      await targetFh.write(buffer, 0, bytesRead, offset);
-      offset += bytesRead;
-      const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
-      const now = Date.now();
-      const shouldEmitProgress =
-        percent >= lastProgressPercent + 1
-        || now - lastProgressEmitAt >= PROGRESS_EMIT_INTERVAL_MS
-        || offset >= total;
-      if (shouldEmitProgress) {
-        lastProgressPercent = percent;
-        lastProgressEmitAt = now;
-        emitFlashProgress({ stage: 'flashing', message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`, percent });
-      }
+      const msg = e instanceof Error ? e.message : String(e);
+      throw Object.assign(
+        new Error(`写入物理磁盘失败：${msg}`),
+        { code: FlashErrorCode.WRITE_FAILED },
+      );
     }
-    await targetFh.sync();
     if (verifyMode === 'sample') {
       emitFlashProgress({ stage: 'verifying', message: '正在执行写后抽样校验', percent: 99 });
-      verify = verifyImageSample(imageFh.fd, targetFh.fd, total);
+      verify = await verifyImageSampleDotNet(imagePath, drivePath, total);
       if (!verify.ok) throw Object.assign(new Error(verify.detail), { code: FlashErrorCode.VERIFY_FAILED });
     }
     emitFlashProgress({ stage: 'done', message: '镜像写入完成', percent: 100 });
     return { output: `镜像已写入 ${drivePath}`, verify };
   } finally {
-    await imageFh?.close().catch(() => {});
-    await targetFh?.close().catch(() => {});
+    activeOp.child = null;
     const online = await bringDiskOnlineBestEffort(diskNo);
     if (!online.ok) {
       emitFlashProgress({
@@ -313,15 +542,7 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
 export async function verifyImage(imagePath, drivePathIn) {
   const drivePath = normalizeWinPhysicalDrivePath(drivePathIn);
   const total = fs.statSync(imagePath).size;
-  const imageFh = await fs.promises.open(imagePath, 'r');
-  let driveFh;
-  try {
-    driveFh = await openPhysicalDriveWithRetry(drivePath, 'r');
-    return verifyImageSample(imageFh.fd, driveFh.fd, total);
-  } finally {
-    await imageFh.close().catch(() => {});
-    await driveFh?.close().catch(() => {});
-  }
+  return verifyImageSampleDotNet(imagePath, drivePath, total);
 }
 
 export async function backupDrive(drivePathIn, destPath) {
@@ -343,13 +564,7 @@ export async function backupDrive(drivePathIn, destPath) {
 
   const outputPath = destPath?.trim() || buildDefaultBackupPath(drivePath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  activeOp = { id: crypto.randomUUID(), cancelled: false };
-  let sourceFh;
-  let targetFh;
-  const buffer = Buffer.allocUnsafe(ioPolicy.chunkBytes);
-  let offset = 0;
-  let lastProgressPercent = -1;
-  let lastProgressEmitAt = 0;
+  activeOp = { id: crypto.randomUUID(), cancelled: false, child: null };
   try {
     emitFlashProgress({ stage: 'backup', message: '正在卸载目标磁盘卷以释放占用…', percent: 1 });
     try {
@@ -366,35 +581,22 @@ export async function backupDrive(drivePathIn, destPath) {
 
     emitFlashProgress({ stage: 'backup', message: '正在等待磁盘就绪…', percent: 1 });
     await new Promise((r) => setTimeout(r, POST_UNMOUNT_SETTLE_MS));
-    sourceFh = await openPhysicalDriveWithRetry(drivePath, 'r');
-    targetFh = await fs.promises.open(outputPath, 'w');
+    const { child, done } = startDotNetRawBackup(drivePath, outputPath, driveMeta.sizeBytes, ioPolicy.chunkBytes);
+    activeOp.child = child;
     emitFlashProgress({ stage: 'backup', message: '开始备份磁盘镜像', percent: 2 });
-    while (offset < driveMeta.sizeBytes) {
-      if (activeOp?.cancelled) throw Object.assign(new Error('用户取消备份'), { code: FlashErrorCode.USER_CANCELLED });
-      const toRead = Math.min(buffer.length, driveMeta.sizeBytes - offset);
-      const { bytesRead } = await sourceFh.read(buffer, 0, toRead, offset);
-      if (bytesRead <= 0) break;
-      if (activeOp?.cancelled) throw Object.assign(new Error('用户取消备份'), { code: FlashErrorCode.USER_CANCELLED });
-      await targetFh.write(buffer, 0, bytesRead, offset);
-      offset += bytesRead;
-      const percent = Math.min(99, Math.max(2, Math.round((offset / driveMeta.sizeBytes) * 98) + 1));
-      const now = Date.now();
-      const shouldEmitProgress =
-        percent >= lastProgressPercent + 1
-        || now - lastProgressEmitAt >= PROGRESS_EMIT_INTERVAL_MS
-        || offset >= driveMeta.sizeBytes;
-      if (shouldEmitProgress) {
-        lastProgressPercent = percent;
-        lastProgressEmitAt = now;
-        emitFlashProgress({ stage: 'backup', message: `已备份 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(driveMeta.sizeBytes / 1024 / 1024).toFixed(1)} MB`, percent });
+    try {
+      await done;
+    } catch (e) {
+      if (activeOp?.cancelled) {
+        throw Object.assign(new Error('用户取消备份'), { code: FlashErrorCode.USER_CANCELLED });
       }
+      const msg = e instanceof Error ? e.message : String(e);
+      throw Object.assign(new Error(`备份失败：${msg}`), { code: FlashErrorCode.BACKUP_FAILED });
     }
-    await targetFh.sync();
     emitFlashProgress({ stage: 'done', message: '备份完成', percent: 100 });
-    return { path: outputPath, bytes: offset };
+    return { path: outputPath, bytes: driveMeta.sizeBytes };
   } finally {
-    await sourceFh?.close().catch(() => {});
-    await targetFh?.close().catch(() => {});
+    activeOp.child = null;
     const online = await bringDiskOnlineBestEffort(diskNo);
     if (!online.ok) {
       emitFlashProgress({
@@ -411,7 +613,7 @@ export async function decompressXz(inputPath, outputPath) {
   if (!inputPath.toLowerCase().endsWith('.xz')) return inputPath;
   return new Promise((resolve, reject) => {
     emitFlashProgress({ stage: 'decompressing', message: '正在解压 xz 镜像', percent: 3 });
-    const child = spawn('powershell.exe', [
+    const child = spawn(getPowerShellExe(), [
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
       `if (Get-Command xz -ErrorAction SilentlyContinue) { xz -dc "${inputPath.replace(/"/g, '""')}" > "${outputPath.replace(/"/g, '""')}" } else { exit 127 }`,
     ], { windowsHide: true });
@@ -431,7 +633,15 @@ export async function decompressXz(inputPath, outputPath) {
 }
 
 export function cancelActiveOp() {
-  if (activeOp) activeOp.cancelled = true;
+  if (!activeOp) return;
+  activeOp.cancelled = true;
+  if (activeOp.child) {
+    try {
+      activeOp.child.kill();
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function getActiveOperation() {

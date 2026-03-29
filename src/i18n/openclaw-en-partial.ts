@@ -166,7 +166,15 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.skills.savePlugins': 'Save plugins',
   'oc.modal.deployTitle': 'OpenClaw one-click deploy',
   'oc.modal.later': 'Later',
+  'oc.modal.backgroundRun': 'Run in background',
   'oc.modal.deployDesc': 'After deploy, OpenClaw is more stable. Finish when gateway is up; fix model test later if needed.',
+  'oc.deploy.bannerHint': 'OpenClaw deploy in progress…',
+  'oc.deploy.bannerWithId': 'OpenClaw deploy in progress (#{{id}})…',
+  'oc.deploy.bannerOpenLog': 'View log',
+  'oc.deploy.logWorking':
+    'Running diagnosis over SSH; first log lines may be delayed. If the log stays empty, check the device is online and the network is OK.',
+  'oc.deploy.wifiPrereq':
+    'One-click deploy needs the board online to download packages. Connect Wi‑Fi or Ethernet first. If Wi‑Fi is not set up yet, click the Wi‑Fi icon in the top-right corner to configure Wi‑Fi, then run deploy.',
   'oc.gw.readyBadge': 'Gateway ready; install complete',
   'oc.status.gateway': 'Gateway',
   'oc.status.model': 'Model',

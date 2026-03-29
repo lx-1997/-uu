@@ -83,7 +83,8 @@ const CLAWHUB_AUTO_LOGIN_CMD = [
 ].join(' && ');
 const BOARD_ENV_EXPORT = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH"';
 const RESTART_GATEWAY_FALLBACK = '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart 2>/dev/null || "$OPENCLAW_CMD" restart 2>/dev/null; else false; fi) || clawctl gateway restart || true)';
-const START_GATEWAY_FALLBACK = '((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway start 2>&1 || "$OPENCLAW_CMD" start 2>&1; else false; fi) || clawctl start 2>&1 || true)';
+/** 与 RESTART_GATEWAY_FALLBACK 一致：单重 ( ) 子 shell，禁止 (( ))——否则 bash 按算术解析会失败 */
+const START_GATEWAY_FALLBACK = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway start 2>&1 || "$OPENCLAW_CMD" start 2>&1; else false; fi) || clawctl start 2>&1 || true';
 const ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64 = Buffer.from(`
 import json
 import os
@@ -333,7 +334,7 @@ const NPM_UPGRADE_CMD = [
   RESOLVE_OPENCLAW_CMD,
   'echo "[OpenClaw] 开始升级（官方推荐流程）..."',
   // 优先 CLI update，失败回退 npm latest
-  '((if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 3; done))',
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && for i in 1 2 3; do if CI=1 npm install -g openclaw@latest --loglevel info --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; echo "[OpenClaw] 官方源失败，尝试国内镜像..."; if CI=1 npm install -g openclaw@latest --loglevel info --registry=https://registry.npmmirror.com --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi; [ "$i" = 3 ] && exit 1; echo "[OpenClaw] 升级失败，重试 $i/3..."; sleep 3; done)',
   ENSURE_GATEWAY_LOCAL_MODE,
   ENSURE_GATEWAY_AUTH_TOKEN,
   NPM_NVM_CLEANUP,
@@ -648,13 +649,14 @@ export class OpenClawDeploymentManager {
   }
 
   runNetworkCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
+    // 注意：必须用 if/( ) 子shell，不能用 (( ))——后者在 bash 中是算术扩展，无法执行 ping/curl，会导致误判 NETWORK_OFFLINE
     const cmd = [
       BOARD_ENV_EXPORT,
       'echo "=== 网络连通性检查 ==="',
       '(ip route 2>/dev/null | head -n 5 || true)',
       'net_ok=0',
-      '((ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1) && net_ok=1 || true)',
-      'if [ "$net_ok" != "1" ]; then ((curl -I --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1 || wget -q --spider --timeout=6 https://registry.npmjs.org >/dev/null 2>&1) && net_ok=1 || true); fi',
+      'if ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then net_ok=1; fi',
+      'if [ "$net_ok" != "1" ]; then if curl -sI --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1 || wget -q --spider --timeout=6 https://registry.npmjs.org >/dev/null 2>&1; then net_ok=1; fi; fi',
       'if [ "$net_ok" = "1" ]; then echo "NETWORK_READY"; else echo "NETWORK_OFFLINE"; exit 1; fi',
     ].join(' ; ');
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 25000 });

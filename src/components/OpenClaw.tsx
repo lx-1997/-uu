@@ -980,6 +980,35 @@ export default function OpenClaw() {
     <span className={`material-symbols-outlined ${cls || ''}`}>{name}</span>
   );
 
+  /** 一键部署前：板端需能访问外网；与新手引导「先联网」一致 */
+  const deployWifiPrereqNotice = (
+    <div
+      role="note"
+      className="oc-deploy-wifi-prereq"
+      style={{
+        marginTop: 10,
+        marginBottom: 6,
+        padding: '10px 12px',
+        borderRadius: 'var(--radius-md)',
+        borderLeft: '3px solid var(--accent)',
+        background: 'var(--accent-subtle)',
+        fontSize: '0.8125rem',
+        lineHeight: 1.55,
+        color: 'var(--text-primary)',
+      }}
+    >
+      <span style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        <span style={{ flexShrink: 0, color: 'var(--accent)', marginTop: 1 }} aria-hidden>{MI('wifi')}</span>
+        <span>
+          {t(
+            'oc.deploy.wifiPrereq',
+            '一键部署需要从板端下载依赖，请先为开发板连接 Wi‑Fi（或网线）并确保能访问互联网。若尚未配网，可点击界面右上角的 Wi‑Fi 图标进行配网，完成后再开始部署。',
+          )}
+        </span>
+      </span>
+    </div>
+  );
+
   const toggleAccordion = (key: typeof accordion) => {
     setAccordion((prev) => prev === key ? null : key);
     if (key === 'model' || key === 'feishu' || key === 'skills') {
@@ -1134,6 +1163,7 @@ export default function OpenClaw() {
             <AccTrigger id="deploy" icon="rocket_launch" label={t('oc.deploy.title', '一键部署')} hint={deployRunning ? (deployJobId ? tf('oc.deploy.runningId', '部署中 #{{id}}', { id: deployJobId.slice(0, 8) }) : t('oc.deploy.runningShort', '部署中...')) : undefined} />
             {accordion === 'deploy' && (
               <div className="oc-accordion-content">
+                {deployWifiPrereqNotice}
                 <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>{t('oc.deploy.quickPick', '快速选择（自动填充，填充后可手动修改）')}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 8 }}>
                   {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'china').map(([k, p]) => (
@@ -1186,7 +1216,14 @@ export default function OpenClaw() {
                 )}
                 {(deployRunning || deployOutput) && (
                   <pre className="oc-log" style={{ marginTop: 8, maxHeight: 220, overflow: 'auto' }}>
-                    {deployOutput || t('oc.deploy.logWait', '部署任务已启动，等待日志输出...')}
+                    {deployOutput.trim()
+                      ? deployOutput
+                      : deployRunning
+                        ? t(
+                            'oc.deploy.logWorking',
+                            '正在通过 SSH 执行诊断与依赖检查，首条日志可能略有延迟；若长时间仍为空，请确认设备在线且本页网络正常。',
+                          )
+                        : t('oc.deploy.logWait', '部署任务已启动，等待日志输出...')}
                   </pre>
                 )}
               </div>
@@ -1384,9 +1421,61 @@ export default function OpenClaw() {
 
   return (
     <div className={`oc-layout ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''}`}>
+      {deployRunning && !showDeployGuideModal && (
+        <div
+          className="oc-deploy-float-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+            padding: '8px 12px',
+            marginBottom: 8,
+            borderRadius: 'var(--radius-md)',
+            background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-surface))',
+            border: '1px solid color-mix(in srgb, var(--accent) 35%, var(--border))',
+            fontSize: '0.8125rem',
+          }}
+        >
+          <span>
+            {deployJobId
+              ? tf('oc.deploy.bannerWithId', 'OpenClaw 部署进行中（#{{id}}）…', { id: deployJobId.slice(0, 8) })
+              : t('oc.deploy.bannerHint', 'OpenClaw 部署进行中…')}
+          </span>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowDeployGuideModal(true)}>
+            {t('oc.deploy.bannerOpenLog', '查看日志')}
+          </button>
+        </div>
+      )}
       {showDeployGuideModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1200, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
-          <div className="card" style={{ width: 'min(720px, 96vw)', maxHeight: '90vh', overflow: 'auto', padding: 12 }}>
+        <div
+          role="presentation"
+          style={{
+            position: 'fixed',
+            left: 'var(--rail-current-width, var(--rail-width, 56px))',
+            top: 'var(--topbar-height, 48px)',
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.4)',
+            zIndex: 1200,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 16,
+          }}
+          onClick={() => setShowDeployGuideModal(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShowDeployGuideModal(false);
+          }}
+        >
+          <div
+            className="card"
+            role="dialog"
+            aria-modal="true"
+            style={{ width: 'min(720px, 96vw)', maxHeight: '90vh', overflow: 'auto', padding: 12 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="config-header">
               <strong>{t('oc.modal.deployTitle', 'OpenClaw 一键部署引导')}</strong>
               <button
@@ -1394,18 +1483,18 @@ export default function OpenClaw() {
                 className="btn btn-ghost btn-sm"
                 onClick={() => {
                   setShowDeployGuideModal(false);
-                  if (ocDeployGuideModalKey) {
+                  if (ocDeployGuideModalKey && !deployRunning) {
                     try { localStorage.setItem(ocDeployGuideModalKey, 'dismissed'); } catch { /* ignore */ }
                   }
                 }}
-                disabled={deployRunning}
               >
-                {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.modal.later', '稍后配置')}
+                {deployRunning ? t('oc.modal.backgroundRun', '后台运行') : t('oc.modal.later', '稍后配置')}
               </button>
             </div>
             <p className="config-card-desc" style={{ marginTop: 4, marginBottom: 8 }}>
               {t('oc.modal.deployDesc', '完成部署后，OpenClaw 会更稳定更智能。安装完成以网关可用为准；若模型测试失败可稍后再修复。')}
             </p>
+            {deployWifiPrereqNotice}
             <div className="oc-form-row">
               <span className="oc-form-label">{t('oc.form.baseUrl', 'Base URL')}</span>
               <input className="input" type="text" value={deployBaseUrl} onChange={(e) => { setDeployBaseUrl(e.target.value); setDeployProvider(''); }} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
@@ -1439,7 +1528,14 @@ export default function OpenClaw() {
             )}
             {(deployRunning || deployOutput) && (
               <pre className="oc-log" style={{ marginTop: 8, maxHeight: 260, overflow: 'auto' }}>
-                {deployOutput || t('oc.deploy.logWait', '部署任务已启动，等待日志输出...')}
+                {deployOutput.trim()
+                  ? deployOutput
+                  : deployRunning
+                    ? t(
+                        'oc.deploy.logWorking',
+                        '正在通过 SSH 执行诊断与依赖检查，首条日志可能略有延迟；若长时间仍为空，请确认设备在线且本页网络正常。',
+                      )
+                    : t('oc.deploy.logWait', '部署任务已启动，等待日志输出...')}
               </pre>
             )}
             {!deployRunning && status?.running && (
