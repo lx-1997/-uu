@@ -1,5 +1,6 @@
-import type { Tool } from "./types.js";
+import type { Tool, ToolContext } from "./types.js";
 import { readDevices, writeDevices } from "../../storage.js";
+import { setDevicePasswordCache, deleteDevicePasswordCache } from "../../device-password-cache.js";
 import { verifySshConnection } from "../../ssh.js";
 import { v4 as uuid } from "uuid";
 import * as net from "node:net";
@@ -119,7 +120,7 @@ export const deviceConnectTool: Tool<{
 }> = {
   name: "device_connect_ssh",
   description:
-    "通过 SSH 连接一台新的 RDK 设备并添加到 Studio。需要提供 IP 地址，用户名和密码可选（默认 root/sunrise）。连接成功后设备将自动可用于后续操作。",
+    "通过 SSH 连接一台新的 RDK 设备并添加到 Studio。需要提供 IP 地址，用户名和密码可选（默认 root/sunrise）。在 RDK Studio 主会话中连接成功后会刷新本回合可用工具（含 device_exec 等板端能力）；若当前渠道未注入会话回调，则需再发一条消息。",
   inputSchema: {
     type: "object",
     properties: {
@@ -130,7 +131,7 @@ export const deviceConnectTool: Tool<{
     },
     required: ["host"],
   },
-  async execute(input) {
+  async execute(input, ctx: ToolContext) {
     const host = input.host.trim();
     const port = input.port ?? 22;
     const username = input.username?.trim() || DEFAULT_SSH_USER;
@@ -179,8 +180,10 @@ export const deviceConnectTool: Tool<{
       ),
     ];
     await writeDevices(nextDevices);
+    setDevicePasswordCache(host, username, port, connectedPassword);
+    ctx.onStudioDeviceBound?.(device.id);
 
-    return `设备连接成功!\n• IP: ${host}:${port}\n• 用户: ${username}\n• 设备ID: ${device.id}\n• 状态: connected\n\n现在可以对该设备执行命令、文件操作等。`;
+    return `设备连接成功!\n• IP: ${host}:${port}\n• 用户: ${username}\n• 设备ID: ${device.id}\n• 状态: connected\n\n说明：已保存凭据并尝试刷新本会话工具列表（含板端工具）。若模型仍看不到 device_exec，请再发一条短消息。`;
   },
 };
 
@@ -194,7 +197,7 @@ export const deviceRemoveTool: Tool<{ deviceId?: string; host?: string }> = {
       host: { type: "string", description: "设备 IP 地址" },
     },
   },
-  async execute(input) {
+  async execute(input, ctx: ToolContext) {
     if (!input.deviceId && !input.host) {
       return "请提供 deviceId 或 host 来指定要移除的设备。";
     }
@@ -208,7 +211,9 @@ export const deviceRemoveTool: Tool<{ deviceId?: string; host?: string }> = {
     }
 
     const nextDevices = devices.filter((d) => d.id !== target.id);
+    deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
     await writeDevices(nextDevices);
+    ctx.onStudioDeviceRemoved?.(target.id);
     return `已移除设备 ${target.host}:${target.port ?? 22} (${target.username}) [id: ${target.id}]`;
   },
 };
@@ -326,7 +331,7 @@ export const switchDeviceTool = (
 ): Tool<{ device: string }> => ({
   name: "switch_device",
   description:
-    "切换当前会话绑定的 RDK 设备。后续所有渠道（AI Dock、飞书、微信）的消息将路由到新设备。接受设备 IP 或设备 ID。切换在下一条消息生效。",
+    "切换当前会话绑定的 RDK 设备。接受设备 IP 或设备 ID。在 Studio 主会话中会立即刷新可用工具（含板端工具）；飞书/微信等渠道仍会同步「当前设备」上下文。",
   inputSchema: {
     type: "object",
     properties: {
@@ -337,7 +342,7 @@ export const switchDeviceTool = (
     },
     required: ["device"],
   },
-  async execute(input) {
+  async execute(input, ctx: ToolContext) {
     const query = (input.device || "").trim();
     if (!query) return "请提供目标设备的 IP 地址或设备 ID。";
 
@@ -353,7 +358,11 @@ export const switchDeviceTool = (
       return `设备 ${match.host} 当前状态为 ${match.status}，需要先连接才能切换。可以用 device_connect_ssh 重新连接。`;
     }
 
-    onSwitch(match.id);
+    if (ctx.onStudioDeviceBound) {
+      ctx.onStudioDeviceBound(match.id);
+    } else {
+      onSwitch(match.id);
+    }
     return `已切换到设备 ${match.host}:${match.port ?? 22} (${match.username}) [id: ${match.id}]。后续消息将路由到该设备。`;
   },
 });

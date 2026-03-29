@@ -10,6 +10,12 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import type { ChatMessage, Device, StudioUiHints } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
+import {
+  devicePasswordCache,
+  credentialCacheKey,
+  setDevicePasswordCache,
+  deleteDevicePasswordCache,
+} from './device-password-cache.js';
 import { runRemoteCommands, verifySshConnection, uploadFileSftp } from './ssh.js';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -234,7 +240,6 @@ const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://ark.cn-beijing.volces.co
 const apiKey = process.env.OPENAI_API_KEY ?? '';
 const model = process.env.OPENAI_MODEL ?? 'doubao-seed-2.0-lite';
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
-const devicePasswordCache = new Map<string, string>();
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
   'anthropic-messages',
@@ -441,7 +446,6 @@ syncFeishuRuntime().catch((error) => {
   console.error('[Feishu] websocket 初始化失败:', error instanceof Error ? error.message : error);
 });
 
-const credentialCacheKey = (host: string, username: string, port = 22) => `${host}:${port}::${username}`;
 const shEscape = (raw: string) => `'${raw.replace(/'/g, `'"'"'`)}'`;
 const sanitizeDevice = (device: Device & { password?: string }) => {
   const { password: _password, ...safe } = device;
@@ -2105,7 +2109,7 @@ app.post('/api/devices/connect', async (request, response) => {
       ...devices.filter((device) => !(device.host === host && (device.port ?? 22) === normalizedPort && device.username === username)),
     ];
 
-    devicePasswordCache.set(credentialCacheKey(host, username, normalizedPort), password);
+    setDevicePasswordCache(host, username, normalizedPort, password);
 
     await writeDevices(nextDevices);
     response.json({ device: sanitizeDevice(nextDevice) });
@@ -2297,6 +2301,7 @@ app.delete('/api/devices/:id', async (request, response) => {
     return;
   }
 
+  deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
   await writeDevices(devices.filter((device) => device.id !== id));
   const cleanup = purgeDeviceSoftwareState(target);
   response.json({ removedId: id, cleanup });
@@ -5556,7 +5561,13 @@ io.on('connection', (socket) => {
         return;
       }
       
-      const pwd = password || devicePasswordCache.get(credentialCacheKey(device.host, device.username, device.port ?? 22)) || defaultSshPassword;
+      const passKey = credentialCacheKey(device.host, device.username, device.port ?? 22);
+      const persistedPassword = (device as Device & { password?: string }).password ?? '';
+      const pwd =
+        password
+        || devicePasswordCache.get(passKey)
+        || persistedPassword
+        || defaultSshPassword;
 
       sshClient = new Client();
       sshClient.on('ready', () => {

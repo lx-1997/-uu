@@ -66,6 +66,12 @@ export interface ToolContext {
   abortSignal?: AbortSignal;
   /** 当前工具调用 ID（agent-loop 每次 execute 前注入，用于进度/前端关联） */
   toolCallId?: string;
+  /**
+   * RDK Studio：device_connect_ssh / switch_device 成功后绑定设备，宿主可刷新本会话工具列表（注入 device_exec 等）。
+   */
+  onStudioDeviceBound?: (deviceId: string) => void;
+  /** RDK Studio：device_remove 成功后若移除的是当前绑定设备，宿主清空绑定并刷新工具列表 */
+  onStudioDeviceRemoved?: (deviceId: string) => void;
 }
 
 // ============== 工具定义 ==============

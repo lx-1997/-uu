@@ -160,6 +160,8 @@ export interface AgentConfig {
   maxConcurrentRuns?: number;
   /** 额外允许读写的根目录（打包后用户工作区等） */
   extraAllowedRoots?: string[];
+  /** 合并进每次工具执行的 ToolContext（如 RDK Studio 的设备绑定回调） */
+  toolContextExtras?: Partial<ToolContext>;
   /**
    * 运行级策略参数（替代 process.env.RDKCLAW_* 写入）
    *
@@ -232,6 +234,7 @@ export class Agent {
   private agentId: string;
   private baseSystemPrompt: string;
   private tools: Tool[];
+  private toolContextExtras?: Partial<ToolContext>;
   private maxTurns: number;
   private workspaceDir: string;
   private bootstrapDir?: string;
@@ -360,6 +363,7 @@ export class Agent {
     this.agentId = normalizeAgentId(config.agentId ?? "main");
     this.baseSystemPrompt = config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.tools = config.tools ?? builtinTools;
+    this.toolContextExtras = config.toolContextExtras;
     this.maxTurns = config.maxTurns ?? 20;
     this.workspaceDir = config.workspaceDir ?? process.cwd();
     this.bootstrapDir = config.bootstrapDir;
@@ -422,6 +426,11 @@ export class Agent {
 
     // Tool Result Guard（对应 OpenClaw: attempt.ts → guardSessionManager()）
     this.toolResultGuard = installSessionToolResultGuard(this.sessions);
+  }
+
+  /** 运行时替换工具列表（如 RDK Studio 在对话中连接设备后注入板端工具） */
+  setTools(tools: Tool[]) {
+    this.tools = tools;
   }
 
   // ============== 事件订阅（对齐 pi-agent-core Agent） ==============
@@ -749,6 +758,7 @@ export class Agent {
                 cleanup,
                 toolScope,
               }),
+            ...this.toolContextExtras,
           };
 
           let processedMessage = userMessage;
@@ -814,14 +824,16 @@ export class Agent {
           // 构建系统提示
           const systemPrompt = await this.buildSystemPrompt({ sessionKey });
 
-          // 工具包装: 注入 run-level abort signal + 子代理范围过滤
-          let rawTools = this.resolveToolsForRun();
-          const scopeName = this.subagentToolScopes.get(sessionKey);
-          if (scopeName) {
-            const allowed = Agent.TOOL_SCOPE_SETS[scopeName];
-            if (allowed) rawTools = rawTools.filter((t) => allowed.has(t.name));
-          }
-          const toolsForRun = rawTools.map((t) => wrapToolWithAbortSignal(t, runAbortController.signal));
+          // 工具包装: 注入 run-level abort signal + 子代理范围过滤（每轮重新 resolve，避免 setTools 后仍用旧列表）
+          const buildToolsForRun = () => {
+            let raw = this.resolveToolsForRun();
+            const scopeName = this.subagentToolScopes.get(sessionKey);
+            if (scopeName) {
+              const allowed = Agent.TOOL_SCOPE_SETS[scopeName];
+              if (allowed) raw = raw.filter((t) => allowed.has(t.name));
+            }
+            return raw.map((t) => wrapToolWithAbortSignal(t, runAbortController.signal));
+          };
 
           // ===== Agent Loop（EventStream 模式） =====
           // 对应 pi-agent-core: Agent._runLoop() → for await (const event of stream)
@@ -876,7 +888,8 @@ export class Agent {
             currentMessages,
             compactionSummary,
             systemPrompt,
-            toolsForRun,
+            toolsForRun: buildToolsForRun(),
+            getToolsForRun: buildToolsForRun,
             toolCtx,
             modelDef: this.modelDef,
             streamFn: this.streamFn,

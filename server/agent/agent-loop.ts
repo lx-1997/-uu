@@ -55,6 +55,8 @@ export interface AgentLoopParams {
   compactionSummary: Message | undefined;
   systemPrompt: string;
   toolsForRun: Tool[];
+  /** 若提供，则每个 LLM 回合前重新获取工具列表（支持对话中连接设备后注入板端工具） */
+  getToolsForRun?: () => Tool[];
   toolCtx: ToolContext;
   modelDef: Model<any>;
   streamFn: StreamFunction;
@@ -195,7 +197,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
       agentId,
       currentMessages,
       systemPrompt,
-      toolsForRun,
+      getToolsForRun,
       toolCtx,
       modelDef,
       streamFn,
@@ -234,6 +236,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
           turns++;
           stream.push({ type: "turn_start", turn: turns });
+
+          const toolsForRun = getToolsForRun ? getToolsForRun() : params.toolsForRun;
 
           // 注入 pending 消息（steering 或 follow-up）
           if (pendingMessages.length > 0) {

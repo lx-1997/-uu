@@ -882,7 +882,12 @@ export class RDKClawApp {
         : "",
       req.deviceId
         ? ""
-        : "当前无 RDK 设备连接。板端功能（SSH 命令、OpenClaw 委派、设备监控等）暂不可用。用户可通过对话提供设备 IP 来连接设备。",
+        : [
+            "当前请求未携带 Studio 初始选中的设备 ID：在调用 device_connect_ssh / switch_device **成功之前**，可能没有 device_exec、device_diagnose、device_file_list 等板端工具。",
+            "exec 与 list 仅在 **RDK Studio 服务端工作区**（代码目录，常见含 server/、src/、skills/）执行，**不是**开发板上的文件系统；禁止把它们的输出描述为「在设备上」「板端 /root」或 SSH 在板子上的结果。",
+            "在 Studio 主会话中：连接或切换设备成功后会刷新**后续 LLM 回合**的工具列表；同一回合内若已出现 device_exec 等工具，即可在板端执行。若仍看不到板端工具，请再发一条短消息。",
+            "若仅有 exec/list 的输出却声称已检查板端硬件或设备目录，属于错误回复。",
+          ].join("\n"),
       req.deviceId && boardSnapshot.plugins.length > 0
         ? `当前板端允许插件: ${boardSnapshot.plugins.join(", ")}`
         : "",
@@ -1013,10 +1018,41 @@ export class RDKClawApp {
     if (workspace.workspaceDir !== this.workspaceDir) {
       extraRoots.push(workspace.workspaceDir);
     }
+
+    const sessionDeviceIdRef: { current: string | undefined } = {
+      current: req.deviceId?.trim() || undefined,
+    };
+    let agentInstance: Agent | null = null;
+    const buildSessionTools = () =>
+      this.createTools(
+        { ...req, deviceId: sessionDeviceIdRef.current },
+        (event) => pushEvent(event),
+        base,
+        decision,
+        policy,
+        providerConfig,
+        attachmentState.allAttachments,
+        health.safeMode,
+        boardSnapshot,
+      );
+
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
-      tools: this.createTools(req, (event) => pushEvent(event), base, decision, policy, providerConfig, attachmentState.allAttachments, health.safeMode, boardSnapshot),
+      tools: buildSessionTools(),
+      toolContextExtras: {
+        onStudioDeviceBound: (id) => {
+          sessionDeviceIdRef.current = id;
+          this.switchDeviceCallback?.(id);
+          agentInstance?.setTools(buildSessionTools());
+        },
+        onStudioDeviceRemoved: (id) => {
+          if (sessionDeviceIdRef.current === id) {
+            sessionDeviceIdRef.current = undefined;
+          }
+          agentInstance?.setTools(buildSessionTools());
+        },
+      },
       streamFn,
       modelDef,
       apiKey,
@@ -1037,6 +1073,7 @@ export class RDKClawApp {
       contextTokens: Math.max(16_000, Number(policy.context.contextTokens) || modelCaps.contextWindow),
       runtimePolicy,
     });
+    agentInstance = agent;
 
     const markdownMemorySync = await syncWorkspaceMarkdownMemory({
       workspaceDir: workspace.workspaceDir,

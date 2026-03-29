@@ -18,6 +18,7 @@ import {
   setActiveRdkclawSession,
   stopRDKClawTask,
   streamAgentChat,
+  fetchDevices,
   fetchDeviceOpenClawHealth,
   type AgentAttachmentPayload,
   type AgentSSEEvent,
@@ -158,7 +159,7 @@ export function useAIChatStore(): AIChatStoreState {
 
 export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const { addToast } = useToastStore();
-  const { currentDevice, setActiveDevice, devices } = useDeviceStore();
+  const { currentDevice, setActiveDevice, setDevices, devices } = useDeviceStore();
   const { activeTab, setShowSettings, language } = useUIStore();
   const isEn = language === 'en';
   const t = (key: string, zh: string) => translate(isEn, key, zh);
@@ -1177,6 +1178,37 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       }),
                       ok: !isError,
                     };
+                  }
+                }
+
+                if (!isError && (toolName === 'device_connect_ssh' || toolName === 'switch_device')) {
+                  let boundId: string | null = null;
+                  if (toolName === 'device_connect_ssh' && /设备连接成功/i.test(result)) {
+                    const m = result.match(/设备ID:\s*([a-f0-9-]{36})/i);
+                    boundId = m?.[1] ?? null;
+                  } else if (toolName === 'switch_device' && /已切换到设备/i.test(result)) {
+                    const m = result.match(/\[id:\s*([a-f0-9-]{36})\]/i);
+                    boundId = m?.[1] ?? null;
+                  }
+                  if (boundId) {
+                    void (async () => {
+                      try {
+                        const res = await fetchDevices();
+                        const next = res.devices.map((device) => ({
+                          id: device.id,
+                          name: `${device.username}@${device.host}:${device.port ?? 22}`,
+                          status: device.status === 'connected' ? 'online' : 'offline',
+                          ip: device.host,
+                          port: device.port ?? 22,
+                          description: `SSH ${device.username}:${device.port ?? 22}`,
+                        }));
+                        setDevices(next);
+                        setActiveDevice(boundId);
+                        await setActiveRdkclawDevice(boundId);
+                      } catch {
+                        /* ignore */
+                      }
+                    })();
                   }
                 }
 

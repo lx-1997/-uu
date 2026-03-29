@@ -257,7 +257,8 @@ export const editTool: Tool<{
  */
 export const execTool: Tool<{ command: string; timeout?: number }> = {
   name: "exec",
-  description: "执行 shell 命令",
+  description:
+    "在 RDK Studio 服务端工作区（workspace）本机执行 shell 命令，不是 RDK 开发板。若要在设备上执行命令，必须使用 device_exec（且当前请求已绑定设备）。禁止把本工具输出说成板端或 SSH 在设备上的结果。",
   inputSchema: {
     type: "object",
     properties: {
@@ -337,7 +338,8 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
         result += `\n[OUTPUT TRUNCATED: exceeded ${MAX_OUTPUT_CHARS} chars, kept tail]`;
       }
 
-      return result.slice(0, 30000);
+      const prefix = "[LOCAL_WORKSPACE 本机工作区，非 RDK 板端]\n";
+      return (prefix + result).slice(0, 30000);
     } catch (err) {
       return `错误: ${(err as Error).message}`;
     }
@@ -357,7 +359,8 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
  */
 export const listTool: Tool<{ path?: string; limit?: number }> = {
   name: "list",
-  description: "列出目录内容（按字母排序，目录以 / 结尾）",
+  description:
+    "列出 RDK Studio 服务端工作区目录（按字母排序，目录以 / 结尾），不是 RDK 开发板上的目录。查看设备文件请用 device_file_list / device_exec（需已绑定设备）。",
   inputSchema: {
     type: "object",
     properties: {
@@ -397,7 +400,8 @@ export const listTool: Tool<{ path?: string; limit?: number }> = {
         lines.push(`\n[已截断，共 ${sorted.length} 项，仅显示前 ${limit} 项]`);
       }
 
-      return lines.join("\n") || "目录为空";
+      const body = lines.join("\n") || "目录为空";
+      return `[LOCAL_WORKSPACE 本机工作区，非 RDK 板端]\n${body}`;
     } catch (err) {
       return `错误: ${(err as Error).message}`;
     }

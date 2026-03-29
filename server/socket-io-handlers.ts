@@ -158,7 +158,13 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
           return;
         }
 
-        const pwd = password || devicePasswordCache.get(credentialCacheKey(device.host, device.username, device.port ?? 22)) || defaultSshPassword;
+        const passKey = credentialCacheKey(device.host, device.username, device.port ?? 22);
+        const persistedPassword = (device as Device & { password?: string }).password ?? '';
+        const pwd =
+          password
+          || devicePasswordCache.get(passKey)
+          || persistedPassword
+          || defaultSshPassword;
 
         sshClient = new Client();
         sshClient.on('ready', () => {
