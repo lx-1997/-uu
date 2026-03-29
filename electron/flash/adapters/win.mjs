@@ -65,13 +65,21 @@ function parsePhysicalDriveNumber(drivePath) {
 }
 
 /**
- * `\\.\PhysicalDriveN` 末尾若多一个 `\`，部分环境下 libuv CreateFile 会 EIO；
- * IPC/手工拼接也可能带入尾部反斜杠。
+ * 规范化为 `\\.\PhysicalDriveN`（无尾部 `\`/`/`）。
+ * - 尾部多一个 `\` 时，部分环境下 libuv CreateFile 会报 EIO；
+ * - `//./PhysicalDriveN`、混用 `/`、IPC 转义等统一为同一形式；
+ * 烧录 UI 与 listDrives 仅传入物理盘路径；若普通文件路径以 PhysicalDriveN 结尾会误伤（极罕见）。
  */
 function normalizeWinPhysicalDrivePath(drivePath) {
   let s = String(drivePath || '').trim();
-  const m = s.match(/^(\\\\\.\\PhysicalDrive\d+)(\\+)?$/i);
-  if (m) return m[1];
+  s = s.replace(/\//g, '\\');
+  while (s.endsWith('\\')) {
+    s = s.slice(0, -1);
+  }
+  const m = s.match(/PhysicalDrive\s*(\d+)$/i);
+  if (m) {
+    return `\\\\.\\PhysicalDrive${m[1]}`;
+  }
   return s;
 }
 
@@ -91,30 +99,37 @@ Get-Partition -DiskNumber $n -ErrorAction SilentlyContinue | ForEach-Object {
     } catch { }
   }
 }
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 800
 try { Update-Disk -Number $n -ErrorAction SilentlyContinue } catch { }
-Start-Sleep -Milliseconds 300
+Start-Sleep -Milliseconds 600
 `;
   await runPowerShell(script);
 }
 
-/** 部分 USB/读卡器在卸载后短暂 EIO，短暂退避重试打开 PhysicalDrive */
+/** USB/读卡器在卸载卷后需再等一会儿，否则 CreateFile(\\.\PhysicalDriveN) 常短暂 EIO */
+const POST_UNMOUNT_SETTLE_MS = 1400;
+
+/** 部分 USB/读卡器在卸载后短暂 EIO，退避重试打开 PhysicalDrive */
 async function openPhysicalDriveWithRetry(drivePath, mode) {
   const m = mode || 'r+';
-  const maxAttempts = 6;
-  let lastErr;
+  const maxAttempts = 12;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 500 * attempt));
+      if (attempt > 0) {
+        const backoff = Math.min(2500, 350 + 450 * attempt);
+        await new Promise((r) => setTimeout(r, backoff));
+      }
       return await fs.promises.open(drivePath, m);
     } catch (e) {
-      lastErr = e;
       const code = e && e.code;
-      const retryable = code === 'EIO' || code === 'EBUSY' || code === 'EPERM';
+      const retryable =
+        code === 'EIO'
+        || code === 'EBUSY'
+        || code === 'EPERM'
+        || code === 'EACCES';
       if (!retryable || attempt === maxAttempts - 1) throw e;
     }
   }
-  throw lastErr;
 }
 
 /**
@@ -243,6 +258,8 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
       );
     }
 
+    emitFlashProgress({ stage: 'prepare', message: '正在等待磁盘就绪（卸载后释放句柄）…', percent: 2 });
+    await new Promise((r) => setTimeout(r, POST_UNMOUNT_SETTLE_MS));
     emitFlashProgress({ stage: 'prepare', message: '正在打开镜像与目标磁盘…', percent: 2 });
     imageFh = await fs.promises.open(imagePath, 'r');
     targetFh = await openPhysicalDriveWithRetry(drivePath);
@@ -295,14 +312,15 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
 
 export async function verifyImage(imagePath, drivePathIn) {
   const drivePath = normalizeWinPhysicalDrivePath(drivePathIn);
-  const imageFd = fs.openSync(imagePath, 'r');
-  const driveFd = fs.openSync(drivePath, 'r');
   const total = fs.statSync(imagePath).size;
+  const imageFh = await fs.promises.open(imagePath, 'r');
+  let driveFh;
   try {
-    return verifyImageSample(imageFd, driveFd, total);
+    driveFh = await openPhysicalDriveWithRetry(drivePath, 'r');
+    return verifyImageSample(imageFh.fd, driveFh.fd, total);
   } finally {
-    fs.closeSync(imageFd);
-    fs.closeSync(driveFd);
+    await imageFh.close().catch(() => {});
+    await driveFh?.close().catch(() => {});
   }
 }
 
@@ -346,6 +364,8 @@ export async function backupDrive(drivePathIn, destPath) {
       );
     }
 
+    emitFlashProgress({ stage: 'backup', message: '正在等待磁盘就绪…', percent: 1 });
+    await new Promise((r) => setTimeout(r, POST_UNMOUNT_SETTLE_MS));
     sourceFh = await openPhysicalDriveWithRetry(drivePath, 'r');
     targetFh = await fs.promises.open(outputPath, 'w');
     emitFlashProgress({ stage: 'backup', message: '开始备份磁盘镜像', percent: 2 });
