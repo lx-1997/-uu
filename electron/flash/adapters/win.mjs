@@ -71,10 +71,11 @@ function resolvePowerShellSpawnArgs(scriptBody) {
 function resolveIoPolicy(options = {}) {
   const turbo = options.performanceProfile === 'turbo';
   if (turbo) {
-    return { chunkBytes: 2 * 1024 * 1024 };
+    /** 极速仍用较大块；若遇不稳定可改回常规模式（小块） */
+    return { chunkBytes: 1024 * 1024 };
   }
-  /** 较小块降低部分读卡器/杀毒在单次大块写入时 UnauthorizedAccess 的概率 */
-  return { chunkBytes: 128 * 1024 };
+  /** 小块降低读卡器/杀毒在单次大块写入时 UnauthorizedAccess 的概率（64KB 较 128KB 更稳） */
+  return { chunkBytes: 64 * 1024 };
 }
 
 function runPowerShell(script) {
@@ -140,21 +141,27 @@ function normalizeWinPhysicalDrivePath(drivePath) {
  */
 async function prepareDiskForRawWrite(diskNumber) {
   const script = `
-$ErrorActionPreference = 'Continue'
-$n = ${Number(diskNumber)}
-Get-Partition -DiskNumber $n -ErrorAction SilentlyContinue | ForEach-Object {
-  $p = $_
-  if ($p.DriveLetter) {
-    try {
-      Dismount-Volume -DriveLetter $p.DriveLetter -Confirm:$false -ErrorAction Stop
-    } catch { }
-  }
-  foreach ($ap in @($p.AccessPaths)) {
-    if ($ap -match '^\\\\\?\\Volume\{') {
-      try { Dismount-Volume -Path $ap -ErrorAction SilentlyContinue } catch { }
+function Dismount-DiskPartitions {
+  param([int]$DiskN)
+  Get-Partition -DiskNumber $DiskN -ErrorAction SilentlyContinue | ForEach-Object {
+    $p = $_
+    if ($p.DriveLetter) {
+      try {
+        Dismount-Volume -DriveLetter $p.DriveLetter -Confirm:$false -ErrorAction Stop
+      } catch { }
+    }
+    foreach ($ap in @($p.AccessPaths)) {
+      if ($ap -match '^\\\\\?\\Volume\{') {
+        try { Dismount-Volume -Path $ap -ErrorAction SilentlyContinue } catch { }
+      }
     }
   }
 }
+$ErrorActionPreference = 'Continue'
+$n = ${Number(diskNumber)}
+Dismount-DiskPartitions -DiskN $n
+Start-Sleep -Milliseconds 500
+Dismount-DiskPartitions -DiskN $n
 Start-Sleep -Milliseconds 800
 try { Update-Disk -Number $n -ErrorAction SilentlyContinue } catch { }
 Start-Sleep -Milliseconds 600
@@ -163,13 +170,55 @@ Start-Sleep -Milliseconds 600
 }
 
 /** USB/读卡器在卸载卷后需再等一会儿，否则 CreateFile(\\.\PhysicalDriveN) 常短暂 EIO */
-const POST_UNMOUNT_SETTLE_MS = 1400;
+const POST_UNMOUNT_SETTLE_MS = 2200;
 
 const FLASH_PROGRESS_PREFIX = 'RDK_FLASH_PROGRESS_JSON=';
+/** 旧版明文（易因控制台代码页在 Node 侧变乱码） */
 const RDK_FLASH_FATAL_PREFIX = 'RDK_FLASH_FATAL:';
+/** UTF-8 经 Base64 输出（备用） */
+const RDK_FLASH_FATAL_B64_PREFIX = 'RDK_FLASH_FATAL_B64=';
+/** 首选：异常写入 %TEMP% 下 UTF-8 文件，stdout 只输出 ASCII 路径行，避免管道编码损坏中文 */
+const RDK_FLASH_FATAL_FILE_PREFIX = 'RDK_FLASH_FATAL_FILE=';
+
+function readFatalUtf8File(filePath) {
+  const fp = String(filePath || '').trim();
+  if (!fp) return null;
+  try {
+    const content = fs.readFileSync(fp, 'utf8');
+    try {
+      fs.unlinkSync(fp);
+    } catch {
+      /* ignore */
+    }
+    const t = content.trim();
+    return t || null;
+  } catch {
+    return null;
+  }
+}
 
 function parseFatalLineFromOutput(text) {
   const s = String(text || '');
+  const fileIdx = s.indexOf(RDK_FLASH_FATAL_FILE_PREFIX);
+  if (fileIdx !== -1) {
+    const rest = s.slice(fileIdx + RDK_FLASH_FATAL_FILE_PREFIX.length);
+    const lineEnd = rest.search(/\r\n|\n|\r/);
+    const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
+    const fromFile = readFatalUtf8File(line);
+    if (fromFile) return fromFile;
+  }
+  const b64Idx = s.indexOf(RDK_FLASH_FATAL_B64_PREFIX);
+  if (b64Idx !== -1) {
+    const rest = s.slice(b64Idx + RDK_FLASH_FATAL_B64_PREFIX.length);
+    const lineEnd = rest.search(/\r\n|\n|\r/);
+    const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
+    if (!line) return null;
+    try {
+      return Buffer.from(line, 'base64').toString('utf8') || null;
+    } catch {
+      return null;
+    }
+  }
   const idx = s.indexOf(RDK_FLASH_FATAL_PREFIX);
   if (idx === -1) return null;
   const rest = s.slice(idx + RDK_FLASH_FATAL_PREFIX.length);
@@ -184,7 +233,9 @@ function formatDotNetFlashWriteError(stderrOrMessage) {
   const fatal = parseFatalLineFromOutput(raw);
   if (fatal) {
     const short = fatal.length > 520 ? `${fatal.slice(0, 520)}…` : fatal;
-    if (/UnauthorizedAccess|访问被拒绝|Access is denied/i.test(fatal)) {
+    if (
+      /UnauthorizedAccess|访问被拒绝|对路径的访问被拒绝|Access is denied|Access to the path/i.test(fatal)
+    ) {
       return `写入被拒绝（UnauthorizedAccess）：${short}。常见原因：杀毒/Windows Defender 实时扫描、资源管理器或其它程序再次占用该卷、USB 省电或读卡器接触不良。请尝试：将目标盘或 RDK Studio 加入杀毒排除、关闭已打开的 U 盘窗口、换 USB 口或重新插拔读卡器后重试。`;
     }
     return `写入物理磁盘失败：${short}`;
@@ -192,7 +243,9 @@ function formatDotNetFlashWriteError(stderrOrMessage) {
   if (/<Objs Version=|#<\s*CLIXML/i.test(raw)) {
     return '写入物理磁盘失败：PowerShell 报错被序列化为 CLIXML（已写入部分数据后中断）。多为杀毒实时扫描或卷被重新挂载。请暂时排除该物理盘/关闭实时防护、关闭资源管理器中该盘窗口后重试。';
   }
-  const short = raw.length > 900 ? `${raw.slice(0, 900)}…` : raw;
+  let short = raw.length > 900 ? `${raw.slice(0, 900)}…` : raw;
+  /** CLIXML / 控制台乱码里常重复同一行，避免「写入物理磁盘失败：… 写入物理磁盘失败：…」 */
+  short = short.replace(/(写入物理磁盘失败[：:]\s*)+/g, '写入物理磁盘失败：').trim();
   return `写入物理磁盘失败：${short}`;
 }
 
@@ -233,33 +286,66 @@ $meta = Get-Content -LiteralPath $metaPath -Encoding UTF8 | ConvertFrom-Json
 $imagePath = $meta.imagePath
 $drivePath = $meta.drivePath
 $chunk = [int]$meta.chunkBytes
-$img = [System.IO.File]::OpenRead($imagePath)
+function Write-RdkFatalUtf8([string]$txt) {
+  $p = Join-Path $env:TEMP ('rdk-fatal-' + [guid]::NewGuid().ToString() + '.txt')
+  [System.IO.File]::WriteAllText($p, $txt, [System.Text.UTF8Encoding]::new($false))
+  [Console]::Out.WriteLine('${RDK_FLASH_FATAL_FILE_PREFIX}' + $p)
+  [Console]::Out.Flush()
+}
+# 顺序读镜像，减轻系统缓存与 I/O 抖动
+$img = New-Object System.IO.FileStream($imagePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, $chunk, [System.IO.FileOptions]::SequentialScan)
 try {
-  # 不用 WriteThrough：部分 USB/读卡器在 WriteThrough 下写几 MB 后即 UnauthorizedAccess
+  # 不用 WriteThrough：部分 USB/读卡器在 WriteThrough 下写数 MB 后即 UnauthorizedAccess
   $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None, $chunk)
   try {
     $buf = New-Object byte[] $chunk
     $total = $img.Length
     $off = 0L
     while (($n = $img.Read($buf, 0, $buf.Length)) -gt 0) {
-      $written = $false
-      for ($ti = 0; $ti -lt 5; $ti++) {
-        try {
-          $dst.Write($buf, 0, $n)
-          $written = $true
-          break
-        } catch {
-          if ($ti -lt 4) { Start-Sleep -Milliseconds 400 } else {
-            $inner = $_.Exception
-            while ($inner.InnerException) { $inner = $inner.InnerException }
-            $em = ($inner.Message -replace "\\s+", " ")
-            [Console]::Out.WriteLine('${RDK_FLASH_FATAL_PREFIX}' + $em)
-            [Console]::Out.Flush()
-            exit 1
+      $blockStart = $off
+      $maxStreamRecover = 2
+      $streamRecover = 0
+      $blockDone = $false
+      while (-not $blockDone) {
+        $writeOk = $false
+        $lastWriteErr = $null
+        for ($ti = 0; $ti -lt 6; $ti++) {
+          try {
+            $dst.Write($buf, 0, $n)
+            $writeOk = $true
+            break
+          } catch {
+            $lastWriteErr = $_
+            Start-Sleep -Milliseconds (250 + $ti * 120)
           }
         }
+        if ($writeOk) {
+          $blockDone = $true
+          break
+        }
+        if ($streamRecover -ge $maxStreamRecover) {
+          $ex = $null
+          if ($lastWriteErr) { $ex = $lastWriteErr.Exception } else { $ex = (New-Object System.Exception('写入失败（无异常详情）')) }
+          $inner = $ex
+          while ($inner.InnerException) { $inner = $inner.InnerException }
+          $em = ($inner.Message -replace "\\s+", " ")
+          Write-RdkFatalUtf8 $em
+          exit 1
+        }
+        $streamRecover++
+        try { $dst.Dispose() } catch { }
+        Start-Sleep -Milliseconds 700
+        try {
+          $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None, $chunk)
+          [void]$dst.Seek($blockStart, 'Begin')
+        } catch {
+          $inner = $_.Exception
+          while ($inner.InnerException) { $inner = $inner.InnerException }
+          $em = ($inner.Message -replace "\\s+", " ")
+          Write-RdkFatalUtf8 $em
+          exit 1
+        }
       }
-      if (-not $written) { exit 1 }
       $off += $n
       $line = '${FLASH_PROGRESS_PREFIX}' + (@{ offset = $off; total = $total } | ConvertTo-Json -Compress)
       [Console]::Out.WriteLine($line)
@@ -279,7 +365,13 @@ try {
   let stdoutLineCarry = '';
   let stderrLineCarry = '';
   const flushFlashLine = (line) => {
-    if (line.startsWith(RDK_FLASH_FATAL_PREFIX)) return;
+    if (
+      line.startsWith(RDK_FLASH_FATAL_FILE_PREFIX) ||
+      line.startsWith(RDK_FLASH_FATAL_B64_PREFIX) ||
+      line.startsWith(RDK_FLASH_FATAL_PREFIX)
+    ) {
+      return;
+    }
     if (!line.startsWith(FLASH_PROGRESS_PREFIX)) return;
     try {
       const { offset, total } = JSON.parse(line.slice(FLASH_PROGRESS_PREFIX.length));
