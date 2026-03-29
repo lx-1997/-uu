@@ -8,7 +8,7 @@
  * flash service — no Electron-specific imports here.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -60,12 +60,14 @@ function writePs1WithBom(ps1Path, body) {
 
 function resolvePowerShellSpawnArgs(scriptBody) {
   const enc = encodePowerShellCommand(scriptBody);
+  /** -NonInteractive：避免宿主在异常时仍尝试交互，与 CLIXML 混排 */
+  const psArgsPrefix = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
   if (enc.length <= ENCODED_COMMAND_B64_MAX) {
-    return { mode: 'encoded', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc] };
+    return { mode: 'encoded', args: [...psArgsPrefix, '-EncodedCommand', enc] };
   }
   const ps1Path = path.join(os.tmpdir(), `rdk-flash-script-${crypto.randomUUID()}.ps1`);
   writePs1WithBom(ps1Path, scriptBody);
-  return { mode: 'file', ps1Path, args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1Path] };
+  return { mode: 'file', ps1Path, args: [...psArgsPrefix, '-File', ps1Path] };
 }
 
 function resolveIoPolicy(options = {}) {
@@ -172,6 +174,21 @@ Start-Sleep -Milliseconds 600
 /** USB/读卡器在卸载卷后需再等一会儿，否则 CreateFile(\\.\PhysicalDriveN) 常短暂 EIO */
 const POST_UNMOUNT_SETTLE_MS = 2200;
 
+/**
+ * 写入前 mountvol /N：暂时关闭「新卷自动挂载」，减轻写入数 MB 后分区表已写入、系统识别分区并自动挂载、与 raw 写入争用导致的 UnauthorizedAccess。
+ * 写入结束务必 mountvol /E 恢复，避免影响用户插拔其它 U 盘。
+ */
+function setWindowsAutoMountNewVolumes(enable) {
+  if (process.platform !== 'win32') {
+    return Promise.resolve({ ok: false });
+  }
+  return new Promise((resolve) => {
+    execFile('mountvol', [enable ? '/E' : '/N'], { windowsHide: true }, (err) => {
+      resolve({ ok: !err });
+    });
+  });
+}
+
 const FLASH_PROGRESS_PREFIX = 'RDK_FLASH_PROGRESS_JSON=';
 /** 旧版明文（易因控制台代码页在 Node 侧变乱码） */
 const RDK_FLASH_FATAL_PREFIX = 'RDK_FLASH_FATAL:';
@@ -232,7 +249,9 @@ function formatDotNetFlashWriteError(stderrOrMessage) {
   const raw = String(stderrOrMessage || '').trim();
   const fatal = parseFatalLineFromOutput(raw);
   if (fatal) {
-    const short = fatal.length > 520 ? `${fatal.slice(0, 520)}…` : fatal;
+    let short = fatal.length > 520 ? `${fatal.slice(0, 520)}…` : fatal;
+    /** .NET 中文提示常以「。」结尾，避免与下文「。常见原因」连成「。。」 */
+    short = short.replace(/[。.]+$/u, '').trim();
     if (
       /UnauthorizedAccess|访问被拒绝|对路径的访问被拒绝|Access is denied|Access to the path/i.test(fatal)
     ) {
@@ -363,7 +382,6 @@ try {
   let stdoutBuf = '';
   let stderrBuf = '';
   let stdoutLineCarry = '';
-  let stderrLineCarry = '';
   const flushFlashLine = (line) => {
     if (
       line.startsWith(RDK_FLASH_FATAL_FILE_PREFIX) ||
@@ -395,15 +413,9 @@ try {
       flushFlashLine(line);
     }
   };
+  /** 仅 stdout 解析进度；PS 5.1 等会把同类输出同时打到 stderr，避免对 stderr 再 emit 一遍进度 */
   const pushStderr = (d) => {
-    const chunk = d.toString();
-    stderrBuf += chunk;
-    const text = stderrLineCarry + chunk;
-    const lines = text.split(/\r?\n/);
-    stderrLineCarry = lines.pop() || '';
-    for (const line of lines) {
-      flushFlashLine(line);
-    }
+    stderrBuf += d.toString();
   };
   child.stdout.on('data', pushStdout);
   child.stderr.on('data', pushStderr);
@@ -411,7 +423,6 @@ try {
     child.on('error', reject);
     child.on('close', (code) => {
       if (stdoutLineCarry.trim()) flushFlashLine(stdoutLineCarry.trim());
-      if (stderrLineCarry.trim()) flushFlashLine(stderrLineCarry.trim());
       try {
         fs.unlinkSync(metaPath);
       } catch {
@@ -653,6 +664,8 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
 
   activeOp = { id: crypto.randomUUID(), cancelled: false, child: null };
   let verify = { ok: true, detail: '跳过校验' };
+  /** 仅在为写盘执行了 mountvol /N 时为 true，finally 中必须 /E */
+  let autoMountDisabledByUs = false;
 
   try {
     emitFlashProgress({ stage: 'prepare', message: '正在卸载目标磁盘卷以释放占用…', percent: 1 });
@@ -670,6 +683,15 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
 
     emitFlashProgress({ stage: 'prepare', message: '正在等待磁盘就绪（卸载后释放句柄）…', percent: 2 });
     await new Promise((r) => setTimeout(r, POST_UNMOUNT_SETTLE_MS));
+    const am = await setWindowsAutoMountNewVolumes(false);
+    autoMountDisabledByUs = am.ok;
+    if (am.ok) {
+      emitFlashProgress({
+        stage: 'prepare',
+        message: '已暂时禁用新卷自动挂载（降低写入中途被系统占用概率），完成后自动恢复…',
+        percent: 2,
+      });
+    }
     emitFlashProgress({
       stage: 'prepare',
       message: '写盘引擎: .NET PowerShell（RDK_FLASH_ENGINE_V2）— 正在打开镜像与目标磁盘…',
@@ -699,6 +721,13 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
     return { output: `镜像已写入 ${drivePath}`, verify };
   } finally {
     activeOp.child = null;
+    if (autoMountDisabledByUs) {
+      try {
+        await setWindowsAutoMountNewVolumes(true);
+      } catch {
+        /* ignore */
+      }
+    }
     const online = await bringDiskOnlineBestEffort(diskNo);
     if (!online.ok) {
       emitFlashProgress({
