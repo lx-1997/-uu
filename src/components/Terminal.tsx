@@ -6,16 +6,14 @@ import { getRememberedDevicePassword } from '../api';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import {
   canUseWebSerial,
+  formatSerialPortLabel,
   getSerialConnectBlockedReason,
-  getSerialDriverHint,
+  openSerialPortWithOptions,
   requestAndOpenSerialPort,
+  requestSerialPortGrant,
   RDK_DEFAULT_SERIAL_BAUD,
-  RDK_DEVELOPER_RESOURCE_URL,
-  RDK_DRIVER_CH34X_WINDOWS_ZIP,
-  RDK_DRIVER_CP210X_USB2UART_ZIP,
   RDK_OPEN_USB_SERIAL_EVENT,
   SERIAL_BAUD_OPTIONS,
-  type SerialPortListMode,
 } from '../utils/web-serial';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -214,10 +212,59 @@ export default function Terminal() {
   const [terminalPassword, setTerminalPassword] = useState('');
   const [terminalContextMenu, setTerminalContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [usbBaudRate, setUsbBaudRate] = useState(RDK_DEFAULT_SERIAL_BAUD);
-  /** 与 ESP Web Flasher 等一致：默认列出全部串口，跨 Windows/macOS 最稳 */
-  const [usbSerialListMode, setUsbSerialListMode] = useState<SerialPortListMode>('all');
+  /** 当前页已授权的本地串口（navigator.serial.getPorts），下拉即选设备 */
+  const [usbPorts, setUsbPorts] = useState<SerialPort[]>([]);
+  const [usbPortIndex, setUsbPortIndex] = useState(-1);
   const [usbSerialConnecting, setUsbSerialConnecting] = useState(false);
   const usbSerialConnectLockRef = useRef(false);
+
+  const refreshUsbPorts = useCallback(async () => {
+    if (!canUseWebSerial()) return;
+    try {
+      const list = await navigator.serial.getPorts();
+      setUsbPorts(list);
+      setUsbPortIndex((prev) => {
+        if (prev >= 0 && prev < list.length) return prev;
+        return list.length === 1 ? 0 : -1;
+      });
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!canUseWebSerial()) return;
+    void refreshUsbPorts();
+    const serial = navigator.serial as unknown as EventTarget;
+    const onChange = () => {
+      void refreshUsbPorts();
+    };
+    serial.addEventListener('connect', onChange);
+    serial.addEventListener('disconnect', onChange);
+    return () => {
+      serial.removeEventListener('connect', onChange);
+      serial.removeEventListener('disconnect', onChange);
+    };
+  }, [refreshUsbPorts]);
+
+  const addUsbPortFromPicker = useCallback(async () => {
+    const blocked = getSerialConnectBlockedReason(isEn);
+    if (blocked) {
+      addToast(blocked, 'warning');
+      return;
+    }
+    try {
+      const granted = await requestSerialPortGrant('all');
+      const list = await navigator.serial.getPorts();
+      setUsbPorts(list);
+      const idx = list.indexOf(granted);
+      setUsbPortIndex(idx >= 0 ? idx : list.length ? list.length - 1 : -1);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'NotFoundError') return;
+      const msg = e instanceof Error ? e.message : String(e);
+      addToast(fillTemplate(t('terminal.serial.openFail', '无法打开串口：{{msg}}'), { msg }), 'error');
+    }
+  }, [addToast, isEn, t]);
 
   const hasSerialTab = terminalSessions.some((s) => s.transport === 'serial');
   const allowTerminalUi = Boolean(currentDevice) || hasSerialTab;
@@ -232,7 +279,14 @@ export default function Terminal() {
     usbSerialConnectLockRef.current = true;
     setUsbSerialConnecting(true);
     try {
-      const port = await requestAndOpenSerialPort(usbBaudRate, usbSerialListMode);
+      let port: SerialPort;
+      if (usbPortIndex >= 0 && usbPorts[usbPortIndex]) {
+        port = usbPorts[usbPortIndex];
+        await openSerialPortWithOptions(port, usbBaudRate);
+      } else {
+        port = await requestAndOpenSerialPort(usbBaudRate, 'all');
+        await refreshUsbPorts();
+      }
       const id = `serial-${Date.now()}`;
       pendingSerialPortsRef.current.set(id, port);
       const name = t('terminal.session.serial', 'USB 串口');
@@ -259,7 +313,19 @@ export default function Terminal() {
       usbSerialConnectLockRef.current = false;
       setUsbSerialConnecting(false);
     }
-  }, [addToast, appendTerminalSession, currentDevice, isEn, replaceTerminalSessions, setActiveTab, t, usbBaudRate, usbSerialListMode]);
+  }, [
+    addToast,
+    appendTerminalSession,
+    currentDevice,
+    isEn,
+    refreshUsbPorts,
+    replaceTerminalSessions,
+    setActiveTab,
+    t,
+    usbBaudRate,
+    usbPortIndex,
+    usbPorts,
+  ]);
 
   const connectUsbSerialRef = useRef(connectUsbSerial);
   connectUsbSerialRef.current = connectUsbSerial;
@@ -460,6 +526,82 @@ export default function Terminal() {
     })();
   };
 
+  /** 下拉 = 本页已授权串口（getPorts）；「添加」= requestPort；未选时「连接」打开系统选择器 */
+  const renderUsbSerialControls = (variant: 'welcome' | 'bar') => (
+    <div
+      className={
+        variant === 'welcome'
+          ? 'immersive-serial-bar immersive-serial-bar--welcome'
+          : 'immersive-serial-bar'
+      }
+    >
+      <div className="immersive-serial-bar-main">
+        <span className="immersive-serial-bar-label">{t('terminal.serial.sectionLabel', 'USB 串口')}</span>
+        <select
+          className="select immersive-serial-port-select"
+          value={usbPortIndex < 0 ? '' : String(usbPortIndex)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setUsbPortIndex(v === '' ? -1 : Number.parseInt(v, 10));
+          }}
+          title={t(
+            'terminal.serial.portSelectTitle',
+            'RDK Studio：已授权的 USB 串口；列表为空时请点「添加」在系统对话框中选择设备。',
+          )}
+          disabled={usbSerialConnecting}
+        >
+          <option value="">{t('terminal.serial.portPlaceholder', '请选择串口…')}</option>
+          {usbPorts.map((p, i) => (
+            <option key={`${i}-${formatSerialPortLabel(p, i)}`} value={String(i)}>
+              {formatSerialPortLabel(p, i)}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select immersive-serial-baud-select"
+          value={usbBaudRate}
+          onChange={(e) => setUsbBaudRate(Number(e.target.value))}
+          title={t('terminal.serial.baudTitle', '波特率（RDK 调试口默认 115200）')}
+          disabled={usbSerialConnecting}
+        >
+          {SERIAL_BAUD_OPTIONS.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => void refreshUsbPorts()}
+          title={t('terminal.serial.refreshPorts', '刷新串口列表')}
+          disabled={usbSerialConnecting}
+        >
+          {t('terminal.serial.refreshPorts', '刷新')}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => void addUsbPortFromPicker()}
+          title={t('terminal.serial.addPortTitle', '在系统对话框中选择并授权串口')}
+          disabled={usbSerialConnecting}
+        >
+          {t('terminal.serial.addPort', '添加')}
+        </button>
+      </div>
+      <div className="immersive-serial-bar-connect">
+        <button
+          type="button"
+          className="btn btn-primary btn-sm immersive-serial-connect-btn"
+          onClick={() => void connectUsbSerial()}
+          disabled={usbSerialConnecting}
+        >
+          {usbSerialConnecting
+            ? t('terminal.serial.connecting', '正在打开串口…')
+            : t('terminal.serial.connectBtn', '连接')}
+        </button>
+      </div>
+    </div>
+  );
+
   if (!allowTerminalUi) {
     return (
       <div className="immersive">
@@ -473,62 +615,14 @@ export default function Terminal() {
                 <path d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3" /><rect x="2.25" y="4.5" width="19.5" height="15" rx="2.25" />
               </svg>
             </div>
-            <h2 className="immersive-welcome-title">{t('terminal.ui.remoteTitle', '远程终端')}</h2>
-            <p className="immersive-welcome-desc">{t('terminal.ui.remoteDesc', '请先在左下角连接一台 RDK 设备，即可打开 SSH 终端会话。')}</p>
+            <h2 className="immersive-welcome-title">{t('terminal.ui.remoteTitle', 'RDK Studio 终端')}</h2>
+            <p className="immersive-welcome-desc">{t('terminal.ui.remoteDesc', '在左下角连接 RDK 设备后可使用网络 SSH；亦可在下方使用本机 USB 串口调试。')}</p>
             {canUseWebSerial() ? (
-              <div className="terminal-serial-welcome" style={{ marginTop: 20, maxWidth: 420, textAlign: 'left' as const }}>
-                <p className="immersive-welcome-desc" style={{ marginBottom: 12 }}>
-                  {t('terminal.serial.hint', '或使用 USB 调试串口（Chrome / Edge，本地直连，无需设备 IP）：')}
+              <div className="terminal-serial-welcome">
+                <p className="terminal-serial-welcome-lead">
+                  {t('terminal.serial.rdkStudioLead', '选择串口与波特率后点「连接」；列表为空时请先点「添加」。默认 115200 8N1。')}
                 </p>
-                <div className="terminal-serial-welcome-controls">
-                  <label className="terminal-serial-welcome-label">{t('terminal.serial.baudLabel', '波特率')}</label>
-                  <select
-                    className="select terminal-serial-welcome-select"
-                    value={usbBaudRate}
-                    onChange={(e) => setUsbBaudRate(Number(e.target.value))}
-                  >
-                    {SERIAL_BAUD_OPTIONS.map((b) => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                  </select>
-                  <label className="terminal-serial-welcome-label">{t('terminal.serial.listModeLabel', '串口列表')}</label>
-                  <select
-                    className="select terminal-serial-welcome-select"
-                    title={t('terminal.serial.listModeTitle', '「全部」与常见 Web 烧录工具一致，兼容 Windows/macOS 各类 COM/cu 口；若列表过长可改为仅常见 USB 芯片。')}
-                    value={usbSerialListMode}
-                    onChange={(e) => setUsbSerialListMode(e.target.value as SerialPortListMode)}
-                  >
-                    <option value="all">{t('terminal.serial.listModeAll', '全部（推荐）')}</option>
-                    <option value="common">{t('terminal.serial.listModeCommon', '仅常见 USB 转串口')}</option>
-                  </select>
-                  <button
-                    type="button"
-                    className="btn btn-primary terminal-serial-welcome-connect"
-                    disabled={usbSerialConnecting}
-                    onClick={() => void connectUsbSerial()}
-                  >
-                    {usbSerialConnecting
-                      ? t('terminal.serial.connecting', '正在打开串口…')
-                      : t('terminal.serial.connectBtn', '连接 USB 串口')}
-                  </button>
-                </div>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
-                  {t('terminal.serial.rdkNote', 'RDK 官方调试口默认 115200 8N1，无流控。')}
-                </p>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.55 }}>
-                  {getSerialDriverHint(isEn)}{' '}
-                  <a href={RDK_DRIVER_CP210X_USB2UART_ZIP} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
-                    {t('terminal.serial.driverCp210x', 'CP210x')}
-                  </a>
-                  {' · '}
-                  <a href={RDK_DRIVER_CH34X_WINDOWS_ZIP} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
-                    {t('terminal.serial.driverCh340', 'CH340')}
-                  </a>
-                  {' · '}
-                  <a href={RDK_DEVELOPER_RESOURCE_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
-                    {t('terminal.serial.driverMore', '更多')}
-                  </a>
-                </p>
+                {renderUsbSerialControls('welcome')}
               </div>
             ) : (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 16 }}>
@@ -541,7 +635,7 @@ export default function Terminal() {
     );
   }
 
-  const barMeta = currentDevice?.name ?? t('terminal.ui.serialOnlyMeta', 'USB 串口（本地）');
+  const barMeta = currentDevice?.name ?? t('terminal.ui.serialOnlyMeta', 'RDK Studio · USB 串口');
 
   return (
     <div className="immersive">
@@ -572,45 +666,6 @@ export default function Terminal() {
             >
               +
             </button>
-            {canUseWebSerial() && (
-              <div
-                className="terminal-serial-bar-tools"
-                title={t('terminal.serial.barToolsTitle', 'USB 串口：波特率、端口筛选、新建会话')}
-              >
-                <select
-                  className="select terminal-serial-bar-select"
-                  value={usbBaudRate}
-                  onChange={(e) => setUsbBaudRate(Number(e.target.value))}
-                  title={t('terminal.serial.baudTitle', '新 USB 串口会话的波特率（RDK 默认 115200）')}
-                >
-                  {SERIAL_BAUD_OPTIONS.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-                <select
-                  className="select terminal-serial-bar-select"
-                  value={usbSerialListMode}
-                  onChange={(e) => setUsbSerialListMode(e.target.value as SerialPortListMode)}
-                  title={t('terminal.serial.listModeTitle', '「全部」与常见 Web 烧录工具一致，兼容 Windows/macOS 各类 COM/cu 口；若列表过长可改为仅常见 USB 芯片。')}
-                >
-                  <option value="all">{t('terminal.serial.listShortAll', '全部')}</option>
-                  <option value="common">{t('terminal.serial.listShortCommon', '常见 USB')}</option>
-                </select>
-                <button
-                  type="button"
-                  className="immersive-tab immersive-tab-add terminal-serial-bar-usb-btn"
-                  disabled={usbSerialConnecting}
-                  onClick={() => void connectUsbSerial()}
-                  title={
-                    usbSerialConnecting
-                      ? t('terminal.serial.connecting', '正在打开串口…')
-                      : t('terminal.serial.connectTitle', '新建 USB 串口会话')
-                  }
-                >
-                  {usbSerialConnecting ? '…' : 'USB'}
-                </button>
-              </div>
-            )}
           </div>
         </div>
         <div className="immersive-bar-center">
@@ -625,6 +680,8 @@ export default function Terminal() {
           </button>
         </div>
       </div>
+
+      {canUseWebSerial() && renderUsbSerialControls('bar')}
 
       <div
         className="immersive-viewport"

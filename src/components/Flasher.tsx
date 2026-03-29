@@ -66,26 +66,7 @@ const DEVICE_LIST: DeviceItem[] = [
     toolWinUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_x64-setup.exe',
   },
   { key: 'x3-module', name: 'RDK X3 Module (TF Card)', infoUrl: 'https://developer.d-robotics.cc/rdkx3' },
-  {
-    key: 'x3-module-emmc',
-    name: 'RDK X3 Module (eMMC)',
-    infoUrl: 'https://developer.d-robotics.cc/rdkx3',
-    imageDownloadUrl: 'https://archive.d-robotics.cc/downloads/os_images/rdk_x3/',
-    disabled: true,
-    disabledNotice: '该设备需要使用第三方工具 (xburn) 烧写系统',
-  },
   { key: 'x5-module', name: 'RDK X5 Module (TF Card)', infoUrl: 'https://developer.d-robotics.cc/rdkx5' },
-  {
-    key: 'x5-module-emmc',
-    name: 'RDK X5 Module (eMMC)',
-    infoUrl: 'https://developer.d-robotics.cc/rdkx5',
-    imageDownloadUrl: 'https://archive.d-robotics.cc/downloads/os_images/rdk_x5/',
-    toolDownloadUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_amd64.deb',
-    toolDmgUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_universal.dmg',
-    toolWinUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_x64-setup.exe',
-    disabled: true,
-    disabledNotice: '该设备需要使用第三方工具 (xburn) 烧写系统',
-  },
 ];
 
 const IMAGE_LIST: Record<string, ImageItem[]> = {
@@ -1023,7 +1004,7 @@ export default function Flasher() {
         {step === 0 && (
           <section className="card card-compact flasher-step-card">
             <div className="section-label">{t('flasher.section.pickDevice', '选择设备型号')}</div>
-            <div className="config-grid flasher-device-grid">
+            <div className="config-grid flasher-device-grid flasher-device-grid-wrap">
               {DEVICE_LIST.map((dev) => (
                 <div
                   key={dev.key}

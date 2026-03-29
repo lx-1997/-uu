@@ -1,5 +1,5 @@
 /**
- * Web Serial API（Chrome/Edge）。官方 TS lib 未包含时在此补充。
+ * Web Serial API。官方 TS lib 未包含时在此补充。
  * @see https://wicg.github.io/serial/
  */
 

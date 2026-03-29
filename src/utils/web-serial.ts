@@ -16,7 +16,7 @@ export const RDK_DRIVER_CH34X_WINDOWS_ZIP =
   'https://archive.d-robotics.cc/downloads/software_tools/serial_to_usb_drivers/CH34x_Install_Windows_v3_4.zip';
 
 /**
- * Web Serial API（Chromium：Chrome / Edge；桌面端 Windows、macOS 均可用同一套 API）。
+ * Web Serial API（Chromium 系桌面浏览器；Windows / macOS）。
  *
  * 与市面常见实现一致（如 ESP Web Flasher、Arduino 云端工具、Chrome Samples）：
  * - `requestPort({ filters: [] })` 列出**全部**串口，避免按 VID/PID 过滤后在某些系统上「看不到设备」
@@ -64,8 +64,8 @@ export function canUseWebSerial(): boolean {
 
 export function getWebSerialUnsupportedHint(isEn: boolean): string {
   return isEn
-    ? 'Use Chrome or Edge on Windows/macOS. Safari and Firefox do not support Web Serial.'
-    : '请使用 Chrome 或 Edge（Windows / macOS）。Safari、Firefox 不支持 Web Serial。';
+    ? 'Use a desktop browser that supports Web Serial (Windows / macOS).'
+    : '请使用支持 Web Serial 的桌面浏览器（Windows / macOS）。';
 }
 
 export function getSerialSecureContextHint(isEn: boolean): string {
@@ -89,8 +89,46 @@ export function getSerialConnectBlockedReason(isEn: boolean): string | null {
   return isEn ? 'Web Serial is unavailable in this environment.' : '当前环境无法使用 Web Serial。';
 }
 
+/** 供已授权（getPorts）设备连接：必要时先关闭再按波特率打开 */
+export async function openSerialPortWithOptions(port: SerialPort, baudRate: number): Promise<void> {
+  if (port.readable || port.writable) {
+    try {
+      await port.close();
+    } catch {
+      /* noop */
+    }
+  }
+  await port.open({
+    baudRate,
+    dataBits: 8,
+    stopBits: 1,
+    parity: 'none',
+    flowControl: 'none',
+  });
+}
+
 /**
- * 用户手势内调用：弹出系统串口选择器并打开端口。
+ * 展示用标签（浏览器不暴露 COM 名，仅能显示 USB VID:PID 或序号）。
+ * @see https://developer.chrome.com/docs/capabilities/serial
+ */
+export function formatSerialPortLabel(port: SerialPort, index: number): string {
+  try {
+    const info = port.getInfo();
+    const vid = info.usbVendorId;
+    const pid = info.usbProductId;
+    if (vid != null && pid != null) {
+      const v = (vid & 0xffff).toString(16).padStart(4, '0');
+      const p = (pid & 0xffff).toString(16).padStart(4, '0');
+      return `${v}:${p} · #${index + 1}`;
+    }
+  } catch {
+    /* noop */
+  }
+  return `#${index + 1}`;
+}
+
+/**
+ * 用户手势内：弹出系统串口选择器，授权后打开端口（首次连接或下拉未选时用）。
  * @param listMode `all`（推荐，跨平台最稳） | `common`（仅常见 USB 转串口）
  */
 export async function requestAndOpenSerialPort(
@@ -100,14 +138,17 @@ export async function requestAndOpenSerialPort(
   const serial = navigator.serial;
   const filters = listMode === 'common' ? USB_SERIAL_COMMON_FILTERS : [];
   const port = await serial.requestPort({ filters });
-  await port.open({
-    baudRate,
-    dataBits: 8,
-    stopBits: 1,
-    parity: 'none',
-    flowControl: 'none',
-  });
+  await openSerialPortWithOptions(port, baudRate);
   return port;
+}
+
+/**
+ * 仅弹出选择器并返回端口（不打开），用于「添加串口」后刷新下拉列表。
+ */
+export async function requestSerialPortGrant(listMode: SerialPortListMode = 'all'): Promise<SerialPort> {
+  const serial = navigator.serial;
+  const filters = listMode === 'common' ? USB_SERIAL_COMMON_FILTERS : [];
+  return serial.requestPort({ filters });
 }
 
 export const SERIAL_BAUD_OPTIONS = [115200, 921600, 57600, 460800] as const;

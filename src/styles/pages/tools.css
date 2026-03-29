@@ -489,6 +489,27 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* 设备型号：自适应列宽，宽屏 3 列、中屏 2 列、窄屏单列（与步骤条留白一致） */
+.flasher-page .flasher-device-grid.flasher-device-grid-wrap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.flasher-page .flasher-device-grid.flasher-device-grid-wrap .config-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.flasher-page .flasher-device-grid.flasher-device-grid-wrap .config-card-meta {
+  margin-top: auto;
+  padding-top: 14px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .flasher-page .flasher-device-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -653,6 +674,10 @@
   .flasher-page .config-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* 设备型号区保持自适应多列，不被上一行 .config-grid 固定为 2 列 */
+  .flasher-page .flasher-device-grid.flasher-device-grid-wrap {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
   /* 避免上一行覆盖 xburn 烧录页专用列宽 */
   .flasher-page .flasher-step2-grid.flasher-step2-xburn {
     grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.28fr);
@@ -660,6 +685,10 @@
 }
 
 @media (max-width: 1100px) {
+  .flasher-page .flasher-device-grid.flasher-device-grid-wrap {
+    grid-template-columns: 1fr;
+  }
+
   .flasher-page .flasher-device-grid,
   .flasher-page .flasher-step1-grid,
   .flasher-page .flasher-step2-grid,

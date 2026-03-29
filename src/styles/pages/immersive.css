@@ -339,61 +339,88 @@
   color: var(--text-primary);
 }
 
-/* USB 串口工具条：与标签页同排，单独分组避免 immersive-tabs 的 2px gap 挤在一起 */
-.terminal-serial-bar-tools {
+/* USB 串口：主行 + 「连接」单独一行右对齐（欢迎区灰框内右下角） */
+.immersive-serial-bar {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
+  padding: 8px 16px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  margin-left: 8px;
-  padding-left: 10px;
-  border-left: 1px solid var(--border);
 }
 
-/* 与全局 .select 的 padding:10px 14px 冲突：再设 height:28px 时 border-box 下文字区≈8px，会压扁不可读 */
-select.terminal-serial-bar-select.select {
-  max-width: 130px;
-  min-width: 72px;
-  font-size: 12px;
-  line-height: 1.35;
-  padding: 4px 26px 4px 8px;
-  min-height: 30px;
-  height: auto;
+.immersive-serial-bar-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.immersive-serial-bar-connect {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.immersive-serial-bar--welcome {
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border);
+}
+
+.immersive-serial-bar-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
   flex-shrink: 0;
+  white-space: nowrap;
+}
+
+select.immersive-serial-port-select.select {
+  min-width: 200px;
+  flex: 1 1 200px;
+  max-width: 100%;
+  height: auto;
+  min-height: 34px;
+  padding: 6px 28px 6px 10px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--text-primary);
   background-color: var(--input-bg);
 }
 
-.terminal-serial-bar-usb-btn {
-  min-width: auto;
-  padding: 0 10px;
-}
-
-/* 欢迎页：波特率 / 列表 / 连接按钮一行（可换行） */
-.terminal-serial-welcome-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 14px;
-}
-
-.terminal-serial-welcome-label {
-  font-size: 13px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.terminal-serial-welcome-select {
-  min-width: 120px;
-  max-width: min(100%, 220px);
-  flex-shrink: 0;
+select.immersive-serial-baud-select.select {
+  width: auto;
+  min-width: 92px;
+  min-height: 34px;
+  padding: 6px 24px 6px 10px;
+  font-size: 12px;
   line-height: 1.4;
-  padding: 8px 12px;
-  min-height: 38px;
+  color: var(--text-primary);
+  background-color: var(--input-bg);
 }
 
-.terminal-serial-welcome-connect {
+.terminal-serial-welcome {
+  margin-top: 20px;
+  max-width: 560px;
+  text-align: left;
+}
+
+.terminal-serial-welcome-lead {
+  margin: 0 0 12px;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.immersive-serial-connect-btn {
   flex-shrink: 0;
+  min-width: 80px;
 }
 
 /* ── Desktop placeholder ── */

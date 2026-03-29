@@ -4,6 +4,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.16.0"
+  },
   "scripts": {
     "dev": "concurrently --kill-others-on-fail \"npm:dev:server\" \"npm:dev:client\"",
     "desktop": "concurrently \"npm:dev:server\" \"npm:dev:client\" \"npm:electron\"",
@@ -174,8 +177,13 @@
     "ssh2": "^1.16.0",
     "unpdf": "^1.4.0",
     "uuid": "^11.1.0",
-    "ws": "^8.19.0",
-    "xterm": "^5.3.0"
+    "ws": "^8.19.0"
+  },
+  "overrides": {
+    "uuid": "$uuid",
+    "cacache": {
+      "glob": "^13.0.0"
+    }
   },
   "devDependencies": {
     "@tencent-weixin/openclaw-weixin": "^2.0.1",
