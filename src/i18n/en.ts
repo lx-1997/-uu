@@ -307,6 +307,8 @@ export const EN: Record<string, string> = {
   'dashboard.chatFirst': 'Chat first',
   'dashboard.restartOnboarding': 'Restart onboarding',
   'dashboard.deviceOnline': 'Device online',
+  'dashboard.devicePillHint':
+    '“Online” means the backend successfully authenticated over SSH with the saved credentials for this device. Without a stored password or if auth fails, it shows offline—reconnect the device to save credentials.',
   'dashboard.oneShotDev': 'Prompt-to-dev',
   'dashboard.healthCheck': 'Health check',
   'dashboard.metric.mem': 'MEM',

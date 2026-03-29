@@ -379,7 +379,7 @@ export default function Dashboard() {
             className={`lp-pill ${deviceChannelOk ? 'online' : ''}`}
             title={t(
               'dashboard.devicePillHint',
-              '设备 SSH：与侧栏一致，由后台 ping 与诊断拉取共同更新在线状态',
+              '「在线」表示后台已用当前保存的 SSH 凭据成功登录该设备。无凭据或密码错误时会显示离线；请重新连接设备以保存密码。',
             )}
           >
             <span className={`status-dot ${deviceChannelOk ? 'online' : 'offline'}`} />

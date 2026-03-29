@@ -360,6 +360,11 @@ function createFloatingBallWindow() {
       }
     }
     floatingBallWin.show();
+    try {
+      floatingBallWin.setIgnoreMouseEvents(false);
+    } catch {
+      /* ignore */
+    }
   });
 
   floatingBallWin.on('closed', () => {

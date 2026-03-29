@@ -2156,8 +2156,13 @@ app.post('/api/devices/verify', async (request, response) => {
 });
 
 const devicePingCache = new Map<string, { status: string; expiresAt: number }>();
-const PING_CACHE_TTL_MS = 3000;
+/** SSH 握手比 TCP 重，略延长缓存减轻轮询压力 */
+const PING_CACHE_TTL_MS = 5000;
 
+/**
+ * 与 UI「设备在线」一致：须能使用当前可用凭据完成 SSH 认证（verifySshConnection）。
+ * 凭据来自 x-device-password 头、内存缓存、持久化设备记录或 RDK_SSH_PASSWORD；皆无时无法探测，视为 offline。
+ */
 app.get('/api/devices/:id/ping', async (request, response) => {
   const { id } = request.params;
   const device = await resolveDevice(request, response, id);
@@ -2169,17 +2174,20 @@ app.get('/api/devices/:id/ping', async (request, response) => {
     return;
   }
 
-  const port = device.port ?? 22;
-  /* 与 SSH/诊断握手相比，过短的 TCP 超时易误判「离线」，导致顶栏红点与工作台指标不一致 */
-  const tcpProbeMs = 5000;
+  const { password } = resolvePassword(request, device);
+  const pwd = String(password ?? '').trim();
+  if (!pwd) {
+    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_CACHE_TTL_MS });
+    response.json({ ok: false, status: 'offline' });
+    return;
+  }
+
   try {
-    await new Promise<void>((resolve, reject) => {
-      const socket = net.connect({ host: device.host, port, timeout: tcpProbeMs }, () => {
-        socket.destroy();
-        resolve();
-      });
-      socket.on('error', reject);
-      socket.on('timeout', () => { socket.destroy(); reject(new Error('timeout')); });
+    await verifySshConnection({
+      host: device.host,
+      port: device.port ?? 22,
+      username: device.username,
+      password: pwd,
     });
     devicePingCache.set(id, { status: 'connected', expiresAt: Date.now() + PING_CACHE_TTL_MS });
     response.json({ ok: true, status: 'connected' });

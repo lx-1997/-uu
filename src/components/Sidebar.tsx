@@ -131,7 +131,17 @@ export default function Sidebar() {
           {currentDevice ? currentDevice.name : t('sidebar.summary.noDevice', '未选择设备')}
         </div>
         <div className="sidebar-summary-meta">
-          <span className={`sidebar-summary-pill ${currentDevice && isDeviceSshConnected(currentDevice.status) ? 'online' : ''}`}>
+          <span
+            className={`sidebar-summary-pill ${currentDevice && isDeviceSshConnected(currentDevice.status) ? 'online' : ''}`}
+            title={
+              currentDevice
+                ? t(
+                    'dashboard.devicePillHint',
+                    '「在线」表示后台已用当前保存的 SSH 凭据成功登录该设备。无凭据或密码错误时会显示离线；请重新连接设备以保存密码。',
+                  )
+                : undefined
+            }
+          >
             <span
               className={`status-dot ${
                 !currentDevice ? '' : isDeviceSshConnected(currentDevice.status) ? 'online' : 'offline'

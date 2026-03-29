@@ -12,6 +12,8 @@
       background: transparent;
       width: 100%;
       height: 100%;
+      -webkit-user-select: none;
+      user-select: none;
     }
     .stage {
       box-sizing: border-box;
@@ -23,6 +25,8 @@
       justify-content: flex-end;
       cursor: grab;
       touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
     .stage:active {
       cursor: grabbing;
@@ -43,7 +47,7 @@
     .welcome-cluster.is-hidden {
       opacity: 0;
       transform: translateY(6px);
-      pointer-events: none;
+      /* 勿设 pointer-events: none：否则点击会穿透到透明 stage，在 Windows 上易丢命中 */
     }
     body.is-compact .welcome-cluster {
       display: none;
@@ -165,7 +169,7 @@
     <div class="welcome-cluster" id="welcomeCluster">
       <div class="bubble">
         <div class="bubble-row">
-          <p class="bubble-text">欢迎和我对话</p>
+          <p class="bubble-text">快来和我对话吧</p>
           <div class="wave" aria-hidden="true">
             <span></span><span></span><span></span><span></span>
           </div>
@@ -201,76 +205,66 @@
 
     let abortActiveDrag = null;
 
-    stage.addEventListener('pointerdown', (e) => {
+    /**
+     * 拖动策略（避免透明小窗 + pointer capture 在 Windows 上不稳定）：
+     * 左键按下即通知主进程 dragStart，用全局光标轮询移动窗口；不依赖 renderer 在指针移出窗体后仍能收到 pointermove。
+     * mouseup 时 dragEnd，若全程位移小于阈值则视为单击打开主窗口。
+     */
+    stage.addEventListener('mousedown', (e) => {
       if (e.button === 2) return;
       if (e.button !== 0 || !window.rdkFloatingBall) return;
+      e.preventDefault();
 
       if (typeof abortActiveDrag === 'function') {
         abortActiveDrag();
         abortActiveDrag = null;
       }
 
-      try {
-        stage.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-
-      const pointerId = e.pointerId;
       const startX = e.screenX;
       const startY = e.screenY;
-      let moved = false;
-      /** 超过阈值后由主进程用全局光标轮询移动窗口，避免指针移出小窗后 pointermove 中断 */
       let mainDragStarted = false;
 
-      const onMove = (ev) => {
-        if (ev.pointerId !== pointerId) return;
-        const dist = Math.hypot(ev.screenX - startX, ev.screenY - startY);
-        if (dist <= MOVE_THRESH_PX) return;
-        if (!moved) moved = true;
-        if (!mainDragStarted && window.rdkFloatingBall.dragStart) {
-          mainDragStarted = true;
-          window.rdkFloatingBall.dragStart();
-        }
+      const startMainDrag = () => {
+        if (mainDragStarted) return;
+        if (!window.rdkFloatingBall.dragStart) return;
+        mainDragStarted = true;
+        window.rdkFloatingBall.dragStart();
       };
 
-      const teardown = (withClickIfTap) => {
-        window.removeEventListener('pointermove', onMove, true);
-        window.removeEventListener('pointerup', onUp, true);
-        window.removeEventListener('pointercancel', onUp, true);
-        window.removeEventListener('lostpointercapture', onLostCapture, true);
+      startMainDrag();
+
+      const cleanup = (withClickIfTap, mouseUpEv) => {
+        document.removeEventListener('mouseup', onMouseUp, true);
+        window.removeEventListener('blur', onBlur, true);
         if (mainDragStarted && window.rdkFloatingBall.dragEnd) {
           window.rdkFloatingBall.dragEnd();
         }
         mainDragStarted = false;
-        try {
-          stage.releasePointerCapture(pointerId);
-        } catch {
-          /* ignore */
+        if (withClickIfTap && mouseUpEv) {
+          const dist = Math.hypot(mouseUpEv.screenX - startX, mouseUpEv.screenY - startY);
+          if (dist <= MOVE_THRESH_PX) {
+            window.rdkFloatingBall.notifyClick();
+          }
         }
-        if (withClickIfTap && !moved) window.rdkFloatingBall.notifyClick();
       };
 
-      const onUp = (ev) => {
-        if (ev.pointerId !== pointerId) return;
+      const onMouseUp = (ev) => {
+        if (ev.button !== 0) return;
         abortActiveDrag = null;
-        teardown(true);
+        cleanup(true, ev);
       };
 
-      const onLostCapture = (ev) => {
-        if (ev.pointerId !== pointerId) return;
+      const onBlur = () => {
         abortActiveDrag = null;
-        teardown(false);
+        cleanup(false, null);
       };
 
       abortActiveDrag = () => {
-        teardown(false);
+        cleanup(false, null);
       };
 
-      window.addEventListener('pointermove', onMove, true);
-      window.addEventListener('pointerup', onUp, true);
-      window.addEventListener('pointercancel', onUp, true);
-      window.addEventListener('lostpointercapture', onLostCapture, true);
+      document.addEventListener('mouseup', onMouseUp, true);
+      window.addEventListener('blur', onBlur, true);
     });
 
     stage.addEventListener('contextmenu', (e) => {
