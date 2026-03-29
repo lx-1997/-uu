@@ -663,7 +663,7 @@ export default function OnboardingWizard() {
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M12 18v-6"/><path d="M8 18v-2"/><path d="M16 18v-4"/><rect x="6" y="18" width="4" height="4" rx="1"/><rect x="14" y="18" width="4" height="4" rx="1"/><circle cx="12" cy="8" r="2"/><path d="M12 2v4"/></svg>
               <div>
                 <strong>{t('onboard.connect.serialTitle', 'USB 串口')}</strong>
-                <span>{t('onboard.connect.serialSub', '调试口直连，适合首次配网')}</span>
+                <span>{t('onboard.connect.serialSub', '本机 Web Serial 调试，与 SSH 无关')}</span>
               </div>
             </button>
           </div>

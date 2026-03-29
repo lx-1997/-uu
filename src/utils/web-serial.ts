@@ -1,3 +1,9 @@
+/** 与 AddDeviceModal / Terminal 约定：请求打开本机 Web Serial（与 SSH 无关） */
+export const RDK_OPEN_USB_SERIAL_EVENT = 'rdk-open-usb-serial';
+
+/** 地瓜机器人开发者资源中心（驱动与工具下载等） */
+export const RDK_DEVELOPER_RESOURCE_URL = 'https://developer.d-robotics.cc/resource';
+
 /**
  * Web Serial API（Chromium：Chrome / Edge；桌面端 Windows、macOS 均可用同一套 API）。
  *

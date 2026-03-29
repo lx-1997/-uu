@@ -10,6 +10,8 @@ import {
   getSerialDriverHint,
   requestAndOpenSerialPort,
   RDK_DEFAULT_SERIAL_BAUD,
+  RDK_DEVELOPER_RESOURCE_URL,
+  RDK_OPEN_USB_SERIAL_EVENT,
   SERIAL_BAUD_OPTIONS,
   type SerialPortListMode,
 } from '../utils/web-serial';
@@ -256,6 +258,14 @@ export default function Terminal() {
       setUsbSerialConnecting(false);
     }
   }, [addToast, appendTerminalSession, currentDevice, isEn, replaceTerminalSessions, setActiveTab, t, usbBaudRate, usbSerialListMode]);
+
+  const connectUsbSerialRef = useRef(connectUsbSerial);
+  connectUsbSerialRef.current = connectUsbSerial;
+  useEffect(() => {
+    const onOpenFromNav = () => void connectUsbSerialRef.current();
+    window.addEventListener(RDK_OPEN_USB_SERIAL_EVENT, onOpenFromNav);
+    return () => window.removeEventListener(RDK_OPEN_USB_SERIAL_EVENT, onOpenFromNav);
+  }, []);
 
   // ── resolve device password ──
   useEffect(() => {
@@ -504,7 +514,15 @@ export default function Terminal() {
                   {t('terminal.serial.rdkNote', 'RDK 官方调试口默认 115200 8N1，无流控。')}
                 </p>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-                  {getSerialDriverHint(isEn)}
+                  {getSerialDriverHint(isEn)}{' '}
+                  <a
+                    href={RDK_DEVELOPER_RESOURCE_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'var(--accent)' }}
+                  >
+                    {t('terminal.serial.driverResourceLink', '驱动下载：地瓜资源中心')}
+                  </a>
                 </p>
               </div>
             ) : (
