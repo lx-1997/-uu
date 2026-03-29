@@ -1,8 +1,12 @@
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Device } from '../app-types';
 import { connectDevice, checkDevicePing, fetchDevices, forgetDevicePassword, rememberDevicePassword, removeDevice as removeDeviceApi } from '../api';
+import { isDeviceSshConnected } from '../utils/device-connection';
 import { useToastStore } from './useToastStore';
 import { useAuth } from './useAuth';
+
+/** 后台 ping 连续失败多少次后才将设备标为离线，减轻偶发网络抖动导致的「在线/离线」闪烁 */
+const PING_FAILS_BEFORE_OFFLINE = 3;
 
 const DEVICES_CACHE_KEY = 'rdk-studio-devices-cache-v1';
 
@@ -86,6 +90,8 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     devicesRef.current = devices;
   }, [devices]);
 
+  const pingFailStreakRef = React.useRef<Record<string, number>>({});
+
   // 与 UIStore 的 ConfirmDialog 解耦（DeviceProvider 在 UI 外层），删除设备用浏览器确认框即可。
   const showConfirm = useCallback((title: string, message: string, onConfirm: () => void) => {
     const text = [title, message].filter(Boolean).join('\n\n');
@@ -152,6 +158,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       removeDeviceApi(id)
         .then(() => {
           forgetDevicePassword(id);
+          delete pingFailStreakRef.current[id];
           setDevices(prev => {
             const remaining = prev.filter(d => d.id !== id);
             if (activeDevice === id) {
@@ -167,6 +174,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           const notOnServer = /\b404\b/.test(msg) || /设备不存在/i.test(msg) || /not\s*found/i.test(msg);
           if (notOnServer) {
             forgetDevicePassword(id);
+            delete pingFailStreakRef.current[id];
             setDevices((prev) => {
               const remaining = prev.filter((d) => d.id !== id);
               if (activeDevice === id) {
@@ -240,14 +248,33 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       if (cancelled || pinging) return;
       const snapshot = devicesRef.current;
       if (snapshot.length === 0) return;
+      const knownIds = new Set(snapshot.map((d) => d.id));
+      for (const k of Object.keys(pingFailStreakRef.current)) {
+        if (!knownIds.has(k)) delete pingFailStreakRef.current[k];
+      }
       pinging = true;
       try {
         const newDevices = await Promise.all(snapshot.map(async (dev) => {
           try {
             const res = await checkDevicePing(dev.id);
-            return { ...dev, status: res.status === 'connected' ? 'online' : 'offline' };
+            const pingOk = res.status === 'connected';
+            if (pingOk) {
+              pingFailStreakRef.current[dev.id] = 0;
+              return dev.status === 'online' ? dev : { ...dev, status: 'online' as const };
+            }
+            const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
+            pingFailStreakRef.current[dev.id] = streak;
+            if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
+              return dev;
+            }
+            return { ...dev, status: 'offline' as const };
           } catch {
-            return { ...dev, status: 'offline' };
+            const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
+            pingFailStreakRef.current[dev.id] = streak;
+            if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
+              return dev;
+            }
+            return { ...dev, status: 'offline' as const };
           }
         }));
         if (!cancelled) {
