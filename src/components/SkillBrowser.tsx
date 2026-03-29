@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
@@ -82,8 +83,14 @@ function buildQualityPromptBySource(
   tf: (key: string, zh: string, vars: Record<string, string | number>) => string,
 ): string {
   const common = [
-    t('skillBrowser.prompt.mustWrite', '【重要】你必须使用 board_openclaw_write_skill 工具将生成的 SKILL.md 直接写入板端。不要只输出文本。'),
-    t('skillBrowser.prompt.noTool', '如果没有该工具可用，请生成完整的 SKILL.md 内容并明确告知用户需要手动部署。'),
+    t(
+      'skillBrowser.prompt.mustWrite',
+      '【部署约束】先完整输出 A/B 结构（含 SKILL.md 全文）。未经用户在对话中明确确认写入板端（例如回复「确认写入板端」），不得调用 board_openclaw_write_skill 或向该路径执行 device_file_write。用户确认后，优先使用 board_openclaw_write_skill；若工具不可用，可用 device_file_write 写入 /root/.openclaw/workspace/skills/<skillId>/SKILL.md。禁止未实际调用工具却声称已部署。',
+    ),
+    t(
+      'skillBrowser.prompt.noTool',
+      '若 board_openclaw_write_skill 与 device_file_write 均不可用，输出完整 SKILL.md，并说明需在「技能工坊 → 创建技能」中手动部署或粘贴。',
+    ),
     '',
     t('skillBrowser.prompt.qualityTitle', '质量要求：'),
     t('skillBrowser.prompt.q1', '1) 必须给出可执行命令，不允许只给概念描述。'),
@@ -96,7 +103,7 @@ function buildQualityPromptBySource(
 
   if (kind === 'github') {
     return [
-      t('skillBrowser.prompt.githubIntro', '请将以下 GitHub 仓库转化为 OpenClaw 技能并部署到板端。'),
+      t('skillBrowser.prompt.githubIntro', '请将以下 GitHub 仓库转化为 OpenClaw 技能（可部署到板端；写入前须用户确认）。'),
       tf('skillBrowser.prompt.linkLine', '链接: {{url}}', { url }),
       tf('skillBrowser.prompt.goalLine', '目标: {{goal}}', { goal }),
       t('skillBrowser.prompt.githubExtra', 'GitHub 专项：分析 README、依赖文件，提取构建与运行命令，锁定版本。'),
@@ -105,15 +112,19 @@ function buildQualityPromptBySource(
   }
   if (kind === 'nodehub') {
     return [
-      t('skillBrowser.prompt.nodehubIntro', '请将以下 NodeHub 应用转化为 OpenClaw 技能并部署到板端。'),
+      t('skillBrowser.prompt.nodehubIntro', '请将以下 NodeHub 应用转化为 OpenClaw 技能（可部署到板端；写入前须用户确认）。'),
       tf('skillBrowser.prompt.linkLine', '链接: {{url}}', { url }),
       tf('skillBrowser.prompt.goalLine', '目标: {{goal}}', { goal }),
       t('skillBrowser.prompt.nodehubExtra', 'NodeHub 专项：提取应用 ID、安装/运行/停止命令、配置项、资源占用。'),
+      t(
+        'skillBrowser.prompt.nodehubUrlHint',
+        'URL 说明：官方站点可能使用 `.../nodehub/detail/{id}` 或 `.../nodehubdetail/{id}` 两种路径，末尾数字串均为 NodeHub 应用 ID；若页面为前端动态加载导致无法抓取详情，须如实说明并列出缺失项。',
+      ),
       ...common,
     ].join('\n');
   }
   return [
-    t('skillBrowser.prompt.webIntro', '请将以下网页内容转化为 OpenClaw 技能并部署到板端。'),
+    t('skillBrowser.prompt.webIntro', '请将以下网页内容转化为 OpenClaw 技能（可部署到板端；写入前须用户确认）。'),
     tf('skillBrowser.prompt.linkLine', '链接: {{url}}', { url }),
     tf('skillBrowser.prompt.goalLine', '目标: {{goal}}', { goal }),
     t('skillBrowser.prompt.webExtra', '网页专项：抓取正文要点，提取可执行的操作步骤。'),
@@ -128,8 +139,19 @@ async function writeSkillToBoard(deviceId: string, skillId: string, content: str
     body: JSON.stringify({ skillId, content }),
   });
   const data = await res.json();
-  if (!res.ok) return { ok: false, message: data?.error || `HTTP ${res.status}` };
+  if (!res.ok) return { ok: false, message: data?.message || data?.error || `HTTP ${res.status}` };
   return { ok: !!data.ok, message: data.message || 'Write complete', path: data.path };
+}
+
+async function deleteSkillFromBoard(deviceId: string, skillId: string): Promise<{ ok: boolean; message: string }> {
+  const res = await fetchApi(`/api/devices/${deviceId}/openclaw/skill-delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skillId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, message: data?.message || data?.error || `HTTP ${res.status}` };
+  return { ok: !!data.ok, message: data.message || 'Deleted' };
 }
 
 function extractSkillName(content: string): string {
@@ -169,6 +191,7 @@ export default function SkillBrowser() {
   const [editContent, setEditContent] = useState('');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null);
 
   // Confirm dialog
   const [confirmAction, setConfirmAction] = useState<{
@@ -267,6 +290,15 @@ export default function SkillBrowser() {
     }
   }, [selectedBoardSkill, loadSkillContent]);
 
+  useEffect(() => {
+    if (!confirmAction) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmAction(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [confirmAction]);
+
   const filteredBoardSkills = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return boardSkills;
@@ -364,6 +396,57 @@ export default function SkillBrowser() {
     setEditing(true);
   };
 
+  const executeDeleteSkill = useCallback(
+    async (skillId: string) => {
+      if (!currentDevice) return;
+      setDeletingSkillId(skillId);
+      try {
+        const result = await deleteSkillFromBoard(currentDevice.id, skillId);
+        if (result.ok) {
+          addToast?.(tf('skillBrowser.toast.deleted', '已删除板端技能「{{id}}」', { id: skillId }), 'success');
+          if (selectedBoardSkill?.split('|')[0] === skillId) {
+            setSelectedBoardSkill(null);
+            setSkillContent('');
+            setSkillContentPath('');
+            setEditing(false);
+          }
+          await loadBoardSkills();
+        } else {
+          addToast?.(tf('skillBrowser.toast.deleteFail', '删除失败: {{msg}}', { msg: result.message }), 'error');
+        }
+      } catch (e: unknown) {
+        addToast?.(
+          tf('skillBrowser.toast.deleteFail', '删除失败: {{msg}}', { msg: e instanceof Error ? e.message : t('api.err.default', '网络错误') }),
+          'error',
+        );
+      } finally {
+        setDeletingSkillId(null);
+      }
+    },
+    [currentDevice, addToast, tf, loadBoardSkills, selectedBoardSkill, t],
+  );
+
+  const requestDeleteSkill = (skillId: string) => {
+    if (!currentDevice) return addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
+    setConfirmAction({
+      title: tf('skillBrowser.confirm.deleteTitle', '删除板端技能「{{id}}」？', { id: skillId }),
+      detail: t(
+        'skillBrowser.confirm.deleteDetail',
+        '将尝试删除 ~/.openclaw/workspace/skills 与 /opt/openclaw/skills 下同名片段（若存在）。若两处均不存在或权限不足，请刷新列表或在设备上手动处理。',
+      ),
+      confirmLabel: t('skillBrowser.confirm.delete', '删除'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void executeDeleteSkill(skillId);
+      },
+    });
+  };
+
+  const selectSkillAndView = (s: string) => {
+    setSelectedBoardSkill(s);
+    setRightTab('view');
+  };
+
   return (
     <div className="config-page" style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: 0, overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
@@ -384,6 +467,12 @@ export default function SkillBrowser() {
         <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
             <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('skillBrowser.searchPh', '搜索技能...')} style={{ fontSize: '0.8125rem' }} />
+            <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
+              {t(
+                'skillBrowser.sidebarHint',
+                '点击名称在右侧查看；点「编辑」修改。垃圾桶会尝试删除工作区与 /opt/openclaw/skills 下同名片段。',
+              )}
+            </p>
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {filteredBoardSkills.length === 0 && (
@@ -395,15 +484,40 @@ export default function SkillBrowser() {
               const name = s.split('|')[0] || s;
               const desc = (s.split('|')[2] || '').replace(/^"|"$/g, '').trim();
               return (
-                <button
+                <div
                   key={s}
                   className={`config-sidebar-item ${selectedBoardSkill === s ? 'active' : ''}`}
-                  onClick={() => setSelectedBoardSkill(s)}
-                  title={desc || name}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px' }}
                 >
-                  <strong style={{ fontSize: '0.75rem', flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</strong>
-                </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => selectSkillAndView(s)}
+                    title={desc || name}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      justifyContent: 'flex-start',
+                      padding: '4px 6px',
+                      fontWeight: selectedBoardSkill === s ? 600 : 400,
+                    }}
+                  >
+                    <strong style={{ fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textAlign: 'left' }}>{name}</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: 4, flexShrink: 0, color: 'var(--danger, #c44)' }}
+                    title={t('skillBrowser.deleteSkill', '删除板端技能')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      requestDeleteSkill(name);
+                    }}
+                    disabled={!currentDevice || deletingSkillId === name}
+                  >
+                    <Trash2 size={14} aria-hidden />
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -528,11 +642,14 @@ export default function SkillBrowser() {
                   <textarea className="input" value={skillGoal} onChange={(e) => setSkillGoal(e.target.value)} rows={2} placeholder={t('skillBrowser.goalPh', '可选：补充目标说明（如：提取 YOLO 推理相关命令）')} style={{ resize: 'vertical', minHeight: 56 }} />
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button type="button" className="btn btn-primary btn-sm" onClick={startUrlBasedSkillCreate} disabled={!sourceUrl.trim()}>
-                      {t('skillBrowser.aiRun', 'AI 生成并部署')}
+                      {t('skillBrowser.aiRun', '发送到 AI 生成')}
                     </button>
                   </div>
                   <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
-                    {t('skillBrowser.linkHint', '流程说明：点击后将跳转到 AI 对话，AI 会分析链接内容、生成 SKILL.md 并通过工具直接写入板端。如果 AI 仅输出了文本模板，你可以复制内容到「创建技能」标签页手动部署。')}
+                    {t(
+                      'skillBrowser.linkHint',
+                      '流程说明：点击后将把指令发送到 AI 对话；AI 应先给出完整 SKILL.md 并说明来源与缺失项，仅在你在对话中明确确认写入后，才应调用写入工具。你也可以复制 SKILL 到「创建技能」标签页，用界面上的「部署到板端」自行确认部署。',
+                    )}
                   </div>
                 </div>
               </div>
@@ -542,13 +659,51 @@ export default function SkillBrowser() {
       </div>
 
       {confirmAction && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: 'var(--bg)', borderRadius: 'var(--radius-md)', padding: '24px', maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
-            <strong style={{ fontSize: '0.9375rem', display: 'block', marginBottom: 8 }}>{confirmAction.title}</strong>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0 0 16px' }}>{confirmAction.detail}</p>
+        <div
+          role="presentation"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 12100,
+            background: 'rgba(15, 23, 42, 0.72)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+          onClick={() => setConfirmAction(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="skill-browser-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-elevated)',
+              color: 'var(--text-primary)',
+              borderRadius: 'var(--radius-md)',
+              padding: '24px',
+              maxWidth: 420,
+              width: 'min(420px, 100%)',
+              border: '1px solid var(--border-strong)',
+              boxShadow: 'var(--shadow-xl)',
+            }}
+          >
+            <strong id="skill-browser-confirm-title" style={{ fontSize: '0.9375rem', display: 'block', marginBottom: 8 }}>
+              {confirmAction.title}
+            </strong>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0 0 16px', lineHeight: 1.55 }}>
+              {confirmAction.detail}
+            </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmAction(null)}>{t('skillBrowser.confirm.cancel', '取消')}</button>
-              <button type="button" className="btn btn-primary btn-sm" onClick={confirmAction.onConfirm}>{confirmAction.confirmLabel}</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmAction(null)}>
+                {t('skillBrowser.confirm.cancel', '取消')}
+              </button>
+              <button type="button" className="btn btn-primary btn-sm" onClick={confirmAction.onConfirm}>
+                {confirmAction.confirmLabel}
+              </button>
             </div>
           </div>
         </div>

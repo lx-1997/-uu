@@ -30,6 +30,8 @@ registerSsoLoginIpc({ getMainWindow: () => mainWin });
 let serverProcess = null;
 // url -> WebContentsView 映射
 const viewsMap = {};
+/** studio_embedded_browser_capture：独立小悬浮窗 captureId -> BrowserWindow */
+const captureFloatingWins = new Map();
 let latestRendererBounds = null;
 function normalizeRendererBounds(win, raw) {
   const [cw, ch] = win.getContentSize();
@@ -469,6 +471,150 @@ ipcMain.on('rdk:close-url', (_event, { url }) => {
   delete viewsMap[url];
 });
 
+/** 在 app.ready 后注册，避免个别环境下 IPC 未绑定；与悬浮窗抓取共用 */
+function registerBrowserCaptureHandlers() {
+  const CAPTURE_PAGE_TEXT_SCRIPT = [
+    '(() => {',
+    '  try {',
+    '    function normalize(t) {',
+    '      if (!t) return "";',
+    '      return String(t)',
+    '        .replace(/\\r\\n/g, "\\n")',
+    '        .replace(/[^\\S\\n]+/g, " ")',
+    '        .replace(/\\n{3,}/g, "\\n\\n")',
+    '        .trim();',
+    '    }',
+    '    function blockText(el) {',
+    '      if (!el || !el.innerText) return "";',
+    '      return normalize(el.innerText);',
+    '    }',
+    '    var selectors = ["main","[role=\\"main\\"]","article",".markdown-body","#__next","[class*=\\"detail\\"]","[class*=\\"content\\"]","body"];',
+    '    var best = "";',
+    '    for (var i = 0; i < selectors.length; i++) {',
+    '      var el = document.querySelector(selectors[i]);',
+    '      var t = blockText(el);',
+    '      if (t.length > best.length) best = t;',
+    '    }',
+    '    var rootT = normalize(document.documentElement ? document.documentElement.innerText : "");',
+    '    if (rootT.length > best.length) best = rootT;',
+    '    return best || blockText(document.body);',
+    '  } catch (e) { return ""; }',
+    '})()',
+  ].join('\n');
+
+  for (const name of ['rdk:capture-embedded-url', 'rdk:open-floating-capture', 'rdk:capture-floating-url', 'rdk:close-floating-capture']) {
+    try {
+      ipcMain.removeHandler(name);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  ipcMain.handle('rdk:capture-embedded-url', async (_event, { url }) => {
+    const u = String(url || '').trim();
+    if (!u) return { ok: false, error: '缺少 url' };
+    const view = viewsMap[u];
+    if (!view || view.webContents.isDestroyed()) {
+      return { ok: false, error: '未找到该 URL 的内嵌视图：请先在本窗口打开该页面（嵌入区）' };
+    }
+    try {
+      const text = await view.webContents.executeJavaScript(CAPTURE_PAGE_TEXT_SCRIPT, true);
+      return { ok: true, text: String(text || '') };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('rdk:open-floating-capture', async (_event, { captureId, url }) => {
+    const id = String(captureId || '').trim();
+    const u = String(url || '').trim();
+    if (!id || !u) return { ok: false, error: '缺少 captureId 或 url' };
+    if (!mainWin) return { ok: false, error: '主窗口未就绪' };
+    const prev = captureFloatingWins.get(id);
+    if (prev && !prev.win.isDestroyed()) {
+      try {
+        prev.win.close();
+      } catch {
+        /* ignore */
+      }
+      captureFloatingWins.delete(id);
+    }
+    const FW = 540;
+    const FH = 700;
+    const win = new BrowserWindow({
+      parent: mainWin,
+      modal: false,
+      width: FW,
+      height: FH,
+      minWidth: 360,
+      minHeight: 420,
+      show: true,
+      title: 'RDK Studio · 页面抓取',
+      autoHideMenuBar: true,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    win.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
+    const pb = mainWin.getBounds();
+    const margin = 20;
+    const x = Math.max(0, Math.round(pb.x + pb.width - FW - margin));
+    const y = Math.max(0, Math.round(pb.y + pb.height - FH - margin));
+    win.setPosition(x, y);
+    captureFloatingWins.set(id, { win, url: u });
+    win.on('closed', () => {
+      captureFloatingWins.delete(id);
+    });
+    win.webContents.setWindowOpenHandler((details) => {
+      shell.openExternal(details.url);
+      return { action: 'deny' };
+    });
+    try {
+      await win.loadURL(u);
+      return { ok: true };
+    } catch (err) {
+      captureFloatingWins.delete(id);
+      if (!win.isDestroyed()) win.close();
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('rdk:capture-floating-url', async (_event, { captureId }) => {
+    const id = String(captureId || '').trim();
+    if (!id) return { ok: false, error: '缺少 captureId' };
+    const rec = captureFloatingWins.get(id);
+    if (!rec || rec.win.isDestroyed()) {
+      return { ok: false, error: '未找到抓取悬浮窗（可能已关闭）' };
+    }
+    try {
+      const text = await rec.win.webContents.executeJavaScript(CAPTURE_PAGE_TEXT_SCRIPT, true);
+      return { ok: true, text: String(text || '') };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('rdk:close-floating-capture', async (_event, { captureId }) => {
+    const id = String(captureId || '').trim();
+    if (!id) return { ok: false, error: '缺少 captureId' };
+    const rec = captureFloatingWins.get(id);
+    if (!rec || rec.win.isDestroyed()) {
+      captureFloatingWins.delete(id);
+      return { ok: true };
+    }
+    try {
+      rec.win.close();
+    } catch {
+      /* ignore */
+    }
+    captureFloatingWins.delete(id);
+    return { ok: true };
+  });
+
+  console.log('[main] browser capture IPC registered');
+}
+
 ipcMain.handle('rdk:flash:get-capabilities', async () => {
   return flashService.getCapabilities();
 });
@@ -560,6 +706,8 @@ ipcMain.handle('rdk:flash:launch-xburn', async (_event, payload) => {
 });
 
 app.whenReady().then(async () => {
+  registerBrowserCaptureHandlers();
+
   // 初始化跨平台 flash service
   flashService.initFlashService({
     platform: process.platform,

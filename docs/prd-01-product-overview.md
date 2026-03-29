@@ -444,6 +444,7 @@ OpenClaw 管理
 | `/api/devices/:id/openclaw/skills` | GET | 获取板端已安装技能列表 |
 | `/api/devices/:id/openclaw/skill-content` | GET | 读取指定技能的 SKILL.md 内容 |
 | `/api/devices/:id/openclaw/skill-write` | POST | 将 SKILL.md 内容写入板端（参数: skillId, content） |
+| `/api/devices/:id/openclaw/skill-delete` | POST | 仅删除工作区 `~/.openclaw/workspace/skills/<skillId>`（参数: skillId） |
 
 ---
 

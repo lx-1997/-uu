@@ -105,6 +105,8 @@ describe('getExternalChannelPolicy', () => {
     expect(getExternalChannelPolicy('ros_topics')).toBe('allow');
     expect(getExternalChannelPolicy('web_search')).toBe('allow');
     expect(getExternalChannelPolicy('web_fetch')).toBe('allow');
+    expect(getExternalChannelPolicy('web_browser_fetch')).toBe('allow');
+    expect(getExternalChannelPolicy('studio_embedded_browser_capture')).toBe('allow');
   });
 });
 

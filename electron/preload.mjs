@@ -62,4 +62,16 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
     ipcRenderer.on(RDK_SSO_TOKEN, wrapped);
     return () => ipcRenderer.removeListener(RDK_SSO_TOKEN, wrapped);
   },
+
+  /** 从内嵌 WebContentsView 抓取 document.body.innerText（需已 rdk:open-url 同 URL） */
+  captureEmbeddedPageText: (url) => ipcRenderer.invoke('rdk:capture-embedded-url', { url }),
+
+  /** Agent 抓取：打开独立小悬浮窗（不挡主界面） */
+  openFloatingCaptureBrowser: (payload) => ipcRenderer.invoke('rdk:open-floating-capture', payload),
+
+  /** 从抓取悬浮窗取正文（按 captureId） */
+  captureFloatingPageText: (captureId) => ipcRenderer.invoke('rdk:capture-floating-url', { captureId }),
+
+  /** 关闭抓取悬浮窗 */
+  closeFloatingCapture: (captureId) => ipcRenderer.invoke('rdk:close-floating-capture', { captureId }),
 });

@@ -1,9 +1,9 @@
 import type { Tool } from "./types.js";
+import { decodeEntities, normalizeUrl, stripHtml, truncate } from "./web-text-utils.js";
+import type { WebToolOptions } from "./web-tool-options.js";
+import { createBrowserFetchTools } from "./browser-tools.js";
 
-export interface WebToolOptions {
-  maxFetchChars?: number;
-  timeoutMs?: number;
-}
+export type { WebToolOptions };
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_FETCH_CHARS = 16_000;
@@ -17,35 +17,60 @@ function withTimeout(timeoutMs: number) {
   };
 }
 
-function decodeEntities(input: string) {
-  return input
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'");
+/** 从原始 HTML 取 title / meta description，用于正文过短时的补充（常见于 SEO / 部分静态壳） */
+function extractHtmlAuxiliaryText(html: string): { title?: string; description?: string } {
+  const titleM = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleM ? stripHtml(titleM[1] || "").slice(0, 300) : undefined;
+  const metaM = html.match(
+    /<meta[^>]+name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i,
+  ) || html.match(
+    /<meta[^>]+content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i,
+  );
+  const description = metaM ? stripHtml(metaM[1] || "").slice(0, 500) : undefined;
+  return {
+    title: title?.trim() || undefined,
+    description: description?.trim() || undefined,
+  };
 }
 
-function stripHtml(html: string) {
-  const withoutScript = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ");
-  const text = withoutScript.replace(/<[^>]+>/g, " ");
-  return decodeEntities(text).replace(/\s+/g, " ").trim();
+/** 服务端 fetch 常见「壳 HTML」：正文需浏览器执行 JS 才出现 */
+function looksLikeClientRenderedShell(html: string, strippedLen: number): boolean {
+  if (strippedLen > 600) return false;
+  const h = html.slice(0, 120_000).toLowerCase();
+  const markers =
+    /id=["']root["']|id=["']__next["']|id=["']app["']|__next_data__|data-reactroot|ng-app|vite\/client|createRoot\(|vue\.createApp|nuxt|sveltekit|data-v-/.test(
+      h,
+    );
+  return markers && strippedLen < 500;
 }
 
-function normalizeUrl(raw: string) {
-  const value = raw.trim();
-  if (!/^https?:\/\//i.test(value)) {
-    throw new Error("URL 仅支持 http/https 协议");
+/**
+ * Next.js 页面常带 __NEXT_DATA__；若 pageProps 为空则 SSR 未注入详情（与地瓜 NodeHub 详情页行为一致）。
+ */
+function analyzeNextJsEmbeddedData(html: string): string | null {
+  const m = html.match(/<script id="__NEXT_DATA__"[^>]*type="application\/json">([\s\S]*?)<\/script>/i);
+  if (!m?.[1]) return null;
+  try {
+    const d = JSON.parse(m[1]) as {
+      props?: { pageProps?: Record<string, unknown> };
+      query?: Record<string, string>;
+      page?: string;
+    };
+    const pp = d.props?.pageProps;
+    const pagePath = String(d.page || "");
+    const q = d.query || {};
+    const keys = pp && typeof pp === "object" ? Object.keys(pp) : [];
+    if (keys.length === 0) {
+      const idHint = q.id ? `路由 id=${q.id}` : "";
+      if (pagePath.includes("nodehub") || pagePath.includes("Nodehub")) {
+        return `Next.js __NEXT_DATA__: pageProps 为空，NodeHub 详情由浏览器异步加载；${idHint}。若已配置 TAVILY_API_KEY，web_fetch 会自动尝试 Tavily Extract（advanced）兜底；若仍不足需人工在网页复制或向官方要详情 API。`;
+      }
+      return `Next.js __NEXT_DATA__: pageProps 为空，正文多为客户端请求后渲染。${idHint}`;
+    }
+    return `Next.js __NEXT_DATA__: SSR 含 pageProps（键: ${keys.slice(0, 12).join(", ")}）`;
+  } catch {
+    return null;
   }
-  const url = new URL(value);
-  return url.toString();
-}
-
-function truncate(text: string, max: number) {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n\n[...内容已截断，总长度 ${text.length} 字符]`;
 }
 
 function parseDdgResultLink(link: string) {
@@ -58,11 +83,350 @@ function parseDdgResultLink(link: string) {
   }
 }
 
+/** DuckDuckGo 经典 HTML 与 lite 页会换 class/结构，多模式提取并去重 */
+function extractDdgHtmlResults(html: string, limit: number): Array<{ title: string; url: string }> {
+  const out: Array<{ title: string; url: string }> = [];
+  const seen = new Set<string>();
+
+  const push = (href: string, inner: string) => {
+    const raw = href.trim();
+    if (!raw || raw === "#" || raw.startsWith("javascript:")) return;
+    let url = parseDdgResultLink(raw);
+    try {
+      const u = new URL(url);
+      if (u.hostname.includes("duckduckgo.com") && !u.searchParams.get("uddg")) return;
+    } catch {
+      return;
+    }
+    const title = stripHtml(inner).slice(0, 200).trim();
+    if (!title || title.length < 2) return;
+    const key = url.split("#")[0] || url;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ title, url });
+  };
+
+  const patterns: RegExp[] = [
+    /<a[^>]*class="[^"]*\bresult__a\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+    /<a[^>]*href="([^"]+)"[^>]*class="[^"]*\bresult__a\b[^"]*"[^>]*>([\s\S]*?)<\/a>/gi,
+    /<a[^>]*class="[^"]*\bresult-link\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+    /<a[^>]+href="([^"]*duckduckgo\.com\/l\/\?[^"]*uddg=[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+  ];
+
+  for (const regex of patterns) {
+    regex.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(html)) && out.length < limit) {
+      push(m[1] || "", m[2] || "");
+    }
+    if (out.length >= limit) break;
+  }
+
+  return out.slice(0, limit);
+}
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/** web_fetch 与浏览器行为略对齐，减少被站点直接挡掉 */
+const PAGE_FETCH_HEADERS: Record<string, string> = {
+  "User-Agent": BROWSER_UA,
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,application/json;q=0.5,*/*;q=0.3",
+  "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+  "Cache-Control": "no-cache",
+  "Sec-Fetch-Dest": "document",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "none",
+  "Upgrade-Insecure-Requests": "1",
+};
+
+/**
+ * GET 拉取正文；对网络错误与 502/503/504 各重试一次（与常见「类浏览器」容错一致）
+ */
+async function httpGetPageText(
+  url: string,
+  signal: AbortSignal,
+): Promise<{ res: Response; text: string; retried: boolean }> {
+  const doFetch = async () => {
+    const res = await fetch(url, {
+      method: "GET",
+      signal,
+      headers: PAGE_FETCH_HEADERS,
+      redirect: "follow",
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  try {
+    let { res, text } = await doFetch();
+    if ([502, 503, 504].includes(res.status)) {
+      await new Promise((r) => setTimeout(r, 450));
+      const second = await doFetch();
+      return { res: second.res, text: second.text, retried: true };
+    }
+    return { res, text, retried: false };
+  } catch (firstErr) {
+    await new Promise((r) => setTimeout(r, 450));
+    const { res, text } = await doFetch();
+    return { res, text, retried: true };
+  }
+}
+
+const DDG_FETCH_HEADERS = {
+  "User-Agent": BROWSER_UA,
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+};
+
+async function fetchDuckDuckGoHtml(
+  query: string,
+  signal: AbortSignal,
+): Promise<Array<{ html: string; status: number; via: string }>> {
+  const q = encodeURIComponent(query);
+  const out: Array<{ html: string; status: number; via: string }> = [];
+
+  const push = async (
+    label: string,
+    fn: () => Promise<Response>,
+  ) => {
+    try {
+      const res = await fn();
+      const text = await res.text();
+      if (text.length > 80) {
+        out.push({ html: text, status: res.status, via: label });
+      }
+    } catch {
+      /* 下一来源 */
+    }
+  };
+
+  await push("html.duckduckgo.com POST", () =>
+    fetch("https://html.duckduckgo.com/html/", {
+      method: "POST",
+      signal,
+      headers: {
+        ...DDG_FETCH_HEADERS,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Referer: "https://duckduckgo.com/",
+      },
+      body: `q=${q}`,
+    }),
+  );
+  await push("duckduckgo.com/html GET", () =>
+    fetch(`https://duckduckgo.com/html/?q=${q}`, {
+      method: "GET",
+      signal,
+      headers: { ...DDG_FETCH_HEADERS, Referer: "https://duckduckgo.com/" },
+    }),
+  );
+  await push("lite.duckduckgo.com", () =>
+    fetch(`https://lite.duckduckgo.com/lite/?q=${q}`, {
+      method: "GET",
+      signal,
+      headers: { ...DDG_FETCH_HEADERS, Referer: "https://duckduckgo.com/" },
+    }),
+  );
+
+  return out;
+}
+
+const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
+const TAVILY_EXTRACT_URL = "https://api.tavily.com/extract";
+
+/** 地瓜 NodeHub 详情页：首屏无 pageProps 或正文极短时，用 Tavily Extract 再拉一层（见 docs.tavily.com /extract） */
+function shouldTavilyExtractDroboticsNodeHub(rawHtml: string, strippedText: string, pageUrl: string): boolean {
+  if (!(process.env.TAVILY_API_KEY || "").trim()) return false;
+  try {
+    const u = new URL(pageUrl);
+    if (u.hostname !== "developer.d-robotics.cc") return false;
+    if (!/nodehubdetail|\/nodehub\/detail\//i.test(u.pathname)) return false;
+    const nextHint = analyzeNextJsEmbeddedData(rawHtml);
+    if (nextHint && nextHint.includes("pageProps 为空")) return true;
+    if (strippedText.length < 500) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** 消耗 Tavily Extract 额度（advanced 约 2 credits/5 URLs，以官方计费为准） */
+async function tavilyExtractPageMarkdown(pageUrl: string): Promise<{ ok: true; markdown: string } | { ok: false; error: string }> {
+  const apiKey = (process.env.TAVILY_API_KEY || "").trim();
+  if (!apiKey) return { ok: false, error: "TAVILY_API_KEY 未配置" };
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 32_000);
+  try {
+    const res = await fetch(TAVILY_EXTRACT_URL, {
+      method: "POST",
+      signal: ac.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        urls: [pageUrl],
+        extract_depth: "advanced",
+        format: "markdown",
+        timeout: 25,
+      }),
+    });
+    const rawText = await res.text();
+    if (!res.ok) {
+      let detail = rawText.slice(0, 400);
+      try {
+        const j = JSON.parse(rawText) as { detail?: { error?: string } };
+        if (j?.detail?.error) detail = j.detail.error;
+      } catch {
+        /* 保持截断 */
+      }
+      return { ok: false, error: detail || `HTTP ${res.status}` };
+    }
+    const data = JSON.parse(rawText) as {
+      results?: Array<{ raw_content?: string }>;
+      failed_results?: Array<{ error?: string }>;
+    };
+    const r = data.results?.[0];
+    if (r?.raw_content && String(r.raw_content).trim().length > 30) {
+      return { ok: true, markdown: String(r.raw_content).trim() };
+    }
+    const fail = data.failed_results?.[0];
+    return { ok: false, error: fail?.error || "extract 无 raw_content（页面可能仍依赖登录或强反爬）" };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg.includes("abort") ? "Tavily Extract 超时" : msg };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function snippetLine(text: string | undefined, max = 220) {
+  if (!text) return "";
+  const one = text.replace(/\s+/g, " ").trim();
+  if (one.length <= max) return one;
+  return `${one.slice(0, max)}…`;
+}
+
+/** 见 https://docs.tavily.com/api-reference/endpoint/search — 需环境变量 TAVILY_API_KEY */
+async function searchTavily(
+  query: string,
+  limit: number,
+  signal: AbortSignal,
+): Promise<
+  | {
+      ok: true;
+      results: Array<{ title: string; url: string; snippet?: string }>;
+      answer?: string;
+      responseTime?: number;
+    }
+  | { ok: false; reason: string; httpStatus?: number }
+> {
+  const apiKey = (process.env.TAVILY_API_KEY || "").trim();
+  if (!apiKey) {
+    return { ok: false, reason: "TAVILY_API_KEY 未配置" };
+  }
+
+  const res = await fetch(TAVILY_SEARCH_URL, {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      query,
+      search_depth: "basic",
+      max_results: Math.min(20, limit),
+      topic: "general",
+      include_answer: false,
+    }),
+  });
+
+  const rawText = await res.text();
+  if (!res.ok) {
+    let detail = rawText.slice(0, 400);
+    try {
+      const j = JSON.parse(rawText) as { detail?: { error?: string } };
+      if (j?.detail?.error) detail = j.detail.error;
+    } catch {
+      /* 保持原文截断 */
+    }
+    return { ok: false, reason: detail || `HTTP ${res.status}`, httpStatus: res.status };
+  }
+
+  let data: {
+    query?: string;
+    answer?: string;
+    results?: Array<{ title?: string; url?: string; content?: string }>;
+    response_time?: number;
+  };
+  try {
+    data = JSON.parse(rawText) as typeof data;
+  } catch {
+    return { ok: false, reason: "Tavily 响应非 JSON" };
+  }
+
+  const results = (data.results || [])
+    .map((r) => {
+      const title = String(r.title || "").trim();
+      const url = String(r.url || "").trim();
+      if (!title || !url) return null;
+      const snippet = r.content ? snippetLine(r.content) : undefined;
+      return { title, url, snippet };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .slice(0, limit);
+
+  return {
+    ok: true,
+    results,
+    answer: data.answer,
+    responseTime: data.response_time,
+  };
+}
+
+/** 产品策略：先 DDG（无 API 成本），解析不到再 Tavily（TAVILY_API_KEY） */
+function extractDdgResultsFromPages(
+  pages: Array<{ html: string; status: number; via: string }>,
+  limit: number,
+): { results: Array<{ title: string; url: string }>; via: string; status: number } | null {
+  for (const page of pages) {
+    const parsed = extractDdgHtmlResults(page.html, limit);
+    if (parsed.length > 0) {
+      return { results: parsed, via: page.via, status: page.status };
+    }
+  }
+  return null;
+}
+
+function formatDdgSearchOutput(
+  query: string,
+  pages: Array<{ html: string; status: number; via: string }>,
+  limit: number,
+): string {
+  const got = extractDdgResultsFromPages(pages, limit);
+  if (!got) {
+    const last = pages[pages.length - 1];
+    const hint = last
+      ? last.status >= 400
+        ? `最后一跳 HTTP ${last.status}（${last.via}）。`
+        : `已尝试 ${pages.length} 种入口，解析到 0 条（末页约 ${last.html.length} 字符，${last.via}）。可能被反爬拦截、页面结构变更或网络不稳定；可换更短/英文关键词，或直接对已知文档 URL 使用 web_fetch。`
+      : "未能从 DuckDuckGo 拉取到页面（网络或 TLS 问题）。";
+    return `query: ${query}\n未检索到可用结果。\n${hint}`;
+  }
+  const lines = got.results.map((item, i) => `${i + 1}. ${item.title}\n   ${item.url}`);
+  return `query: ${query}\nengine: DuckDuckGo (${got.via}${got.status ? `, http ${got.status}` : ""})\nresults:\n${lines.join("\n")}`;
+}
+
 function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: number }> {
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const hasTavily = !!(process.env.TAVILY_API_KEY || "").trim();
   return {
     name: "web_search",
-    description: "在互联网上搜索关键词，返回结果标题和链接。适用于最新资讯、文档入口、资料定位。",
+    description: hasTavily
+      ? "在互联网上搜索关键词，返回标题、链接与（若有）摘要。优先 DuckDuckGo 网页解析；无可用结果时再调用 Tavily API。需要全文可对结果 URL 再使用 web_fetch。"
+      : "在互联网上搜索关键词，返回结果标题和链接（DuckDuckGo 网页解析；可在服务端配置 TAVILY_API_KEY，在无结果时启用 Tavily 兜底）。需要正文请对链接再使用 web_fetch。",
     inputSchema: {
       type: "object",
       properties: {
@@ -77,28 +441,37 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
       const limit = Math.min(10, Math.max(1, Number(input.limit || 5)));
       const timeout = withTimeout(timeoutMs);
       try {
-        const res = await fetch(`https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-          method: "GET",
-          signal: timeout.signal,
-          headers: {
-            "User-Agent": "RDKClaw/1.0 (+network-tool)",
-          },
-        });
-        const html = await res.text();
-        const results: Array<{ title: string; url: string }> = [];
-        const regex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-        let match: RegExpExecArray | null = null;
-        while ((match = regex.exec(html)) && results.length < limit) {
-          const url = parseDdgResultLink(match[1] || "");
-          const title = stripHtml(match[2] || "").slice(0, 120);
-          if (!url || !title) continue;
-          results.push({ title, url });
+        const pages = await fetchDuckDuckGoHtml(query, timeout.signal);
+        const ddg = extractDdgResultsFromPages(pages, limit);
+        if (ddg && ddg.results.length > 0) {
+          const lines = ddg.results.map((item, i) => `${i + 1}. ${item.title}\n   ${item.url}`);
+          return `query: ${query}\nengine: DuckDuckGo (${ddg.via}${ddg.status ? `, http ${ddg.status}` : ""})\nresults:\n${lines.join("\n")}`;
         }
-        if (results.length === 0) {
-          return `query: ${query}\n未检索到结果（可能被目标站点限制或网络波动）。`;
+
+        if ((process.env.TAVILY_API_KEY || "").trim()) {
+          try {
+            const tv = await searchTavily(query, limit, timeout.signal);
+            if (tv.ok && tv.results.length > 0) {
+              const lines = tv.results.map((item, i) => {
+                const sn = item.snippet ? `\n   snippet: ${item.snippet}` : "";
+                return `${i + 1}. ${item.title}\n   ${item.url}${sn}`;
+              });
+              const rt =
+                tv.responseTime !== undefined ? `, ${tv.responseTime.toFixed(2)}s` : "";
+              return `query: ${query}\nengine: Tavily (basic${rt}, fallback after DDG empty)\nresults:\n${lines.join("\n")}`;
+            }
+            const ddgFail = formatDdgSearchOutput(query, pages, limit);
+            const tvNote = !tv.ok
+              ? `Tavily 不可用（${tv.httpStatus ?? "?"}）：${tv.reason}`
+              : "Tavily 返回 0 条";
+            return `${ddgFail}\n\n[注] ${tvNote}`;
+          } catch (e) {
+            const ddgFail = formatDdgSearchOutput(query, pages, limit);
+            return `${ddgFail}\n\n[注] Tavily 请求异常：${e instanceof Error ? e.message : String(e)}`;
+          }
         }
-        const lines = results.map((item, i) => `${i + 1}. ${item.title}\n   ${item.url}`);
-        return `query: ${query}\nresults:\n${lines.join("\n")}`;
+
+        return formatDdgSearchOutput(query, pages, limit);
       } finally {
         timeout.clear();
       }
@@ -111,7 +484,8 @@ function webFetchTool(options: WebToolOptions): Tool<{ url: string; maxChars?: n
   const maxFetchChars = Math.max(2000, options.maxFetchChars ?? DEFAULT_MAX_FETCH_CHARS);
   return {
     name: "web_fetch",
-    description: "抓取指定网页内容并转为可读文本。适用于文档、公告、博客正文提取。",
+    description:
+      "抓取指定 URL 的响应体并转为可读文本（GET，跟随重定向）。HTML 会剥标签。对 developer.d-robotics.cc 的 NodeHub 详情页，若首屏无正文且已配置 TAVILY_API_KEY，会自动追加 Tavily Extract（advanced）结果。非 2xx 仍会返回状态码与部分正文。",
     inputSchema: {
       type: "object",
       properties: {
@@ -125,18 +499,60 @@ function webFetchTool(options: WebToolOptions): Tool<{ url: string; maxChars?: n
       const maxChars = Math.max(2000, Math.min(120_000, Number(input.maxChars || maxFetchChars)));
       const timeout = withTimeout(timeoutMs);
       try {
-        const res = await fetch(url, {
-          method: "GET",
-          signal: timeout.signal,
-          headers: {
-            "User-Agent": "RDKClaw/1.0 (+network-tool)",
-            Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8",
-          },
-        });
+        const { res, text: raw, retried } = await httpGetPageText(url, timeout.signal);
         const contentType = (res.headers.get("content-type") || "").toLowerCase();
-        const raw = await res.text();
-        const text = contentType.includes("html") ? stripHtml(raw) : raw.trim();
-        return `source: ${url}\ncontent_type: ${contentType || "unknown"}\nfetched_at: ${new Date().toISOString()}\n\n${truncate(text, maxChars)}`;
+        const isHtml = contentType.includes("html") || /^<!DOCTYPE html|<html[\s>]/i.test(raw.slice(0, 400));
+
+        let text = isHtml ? stripHtml(raw) : raw.trim();
+        let auxNote = "";
+        if (isHtml) {
+          const aux = extractHtmlAuxiliaryText(raw);
+          if (text.length < 120 && (aux.description || aux.title)) {
+            const parts = [aux.title && `title: ${aux.title}`, aux.description && `meta_description: ${aux.description}`].filter(
+              Boolean,
+            );
+            text = `${text}\n\n${parts.join("\n")}`.trim();
+            auxNote = "（已附加 title/meta 摘要：正文过短）";
+          }
+        }
+
+        const spaHint = isHtml && looksLikeClientRenderedShell(raw, text.length)
+          ? "\nfetch_hint: 该页疑似前端渲染（服务端仅收到壳 HTML）。可改用 web_search 找文档镜像、或向用户要静态文档链接/API。"
+          : "";
+
+        const nextHint = isHtml ? analyzeNextJsEmbeddedData(raw) : null;
+        const nextBlock = nextHint ? `\nframework_hint: ${nextHint}` : "";
+
+        const statusLine = `http_status: ${res.status}${res.statusText ? ` ${res.statusText}` : ""}`;
+        const okLine = res.ok ? "http_ok: true" : "http_ok: false";
+        const retryLine = retried ? "retried: true（曾自动重试 1 次）" : "";
+
+        const head = [
+          `source: ${url}`,
+          statusLine,
+          okLine,
+          `content_type: ${contentType || "unknown"}`,
+          `fetched_at: ${new Date().toISOString()}`,
+          retryLine,
+          auxNote && `note: ${auxNote}`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const body = truncate(text, maxChars);
+        const errBanner = !res.ok ? `\nfetch_warning: HTTP ${res.status}，以下为响应体提取，请谨慎采信。\n` : "\n";
+
+        let tavilyExtractBlock = "";
+        if (isHtml && shouldTavilyExtractDroboticsNodeHub(raw, text, url)) {
+          const tv = await tavilyExtractPageMarkdown(url);
+          if (tv.ok) {
+            tavilyExtractBlock = `\n---\ntavily_extract_ok: true\ntavily_extract (advanced, markdown):\n${truncate(tv.markdown, maxChars)}\n`;
+          } else {
+            tavilyExtractBlock = `\n---\ntavily_extract_ok: false\ntavily_extract_error: ${tv.error}\n`;
+          }
+        }
+
+        return `${head}${errBanner}${body}${spaHint}${nextBlock}${tavilyExtractBlock}`;
       } finally {
         timeout.clear();
       }
@@ -198,6 +614,7 @@ export function createWebTools(options: WebToolOptions = {}): Tool[] {
     webSearchTool(options),
     webFetchTool(options),
     webExtractTool(options),
+    ...createBrowserFetchTools(options),
   ];
 }
 

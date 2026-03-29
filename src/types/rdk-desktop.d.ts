@@ -72,6 +72,17 @@ declare global {
       stopSsoEmbedded?: () => Promise<{ ok: boolean }>;
       openSsoLoginWindow?: () => Promise<void>;
       onSsoToken?: (cb: (payload: { token?: string }) => void) => (() => void) | void;
+
+      /** 抓取内嵌页正文（与 openUrl 的 url 字符串需一致） */
+      captureEmbeddedPageText?: (url: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
+
+      /** Agent 抓取：独立悬浮 BrowserWindow */
+      openFloatingCaptureBrowser?: (payload: {
+        captureId: string;
+        url: string;
+      }) => Promise<{ ok: boolean; error?: string }>;
+      captureFloatingPageText?: (captureId: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
+      closeFloatingCapture?: (captureId: string) => Promise<{ ok: boolean; error?: string }>;
     };
   }
 }

@@ -50,6 +50,7 @@ export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks):
     boardOpenClawHealthTool(deviceId),
     boardOpenClawSkillsListTool(deviceId),
     boardOpenClawSkillInstallTool(deviceId),
+    boardOpenClawWriteSkillTool(deviceId),
     deviceDiagnoseTool(deviceId),
     rosTopicsTool(deviceId),
     rosNodesTool(deviceId),
@@ -694,6 +695,40 @@ function boardOpenClawSkillInstallTool(deviceId: string): Tool<{ skillId: string
         'echo "[OpenClaw] 技能安装完成"',
       ].join('; ');
       return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
+    },
+  };
+}
+
+/** 与 Studio POST /api/devices/:id/openclaw/skill-write 等价；需用户已明确同意后再写入 */
+function boardOpenClawWriteSkillTool(deviceId: string): Tool<{ skillId: string; content: string }> {
+  return {
+    name: 'board_openclaw_write_skill',
+    description:
+      '将自定义 SKILL.md 写入板端 OpenClaw 工作区（/root/.openclaw/workspace/skills/<skillId>/SKILL.md），与 RDK Studio「技能工坊」写入 API 一致。' +
+      '仅在用户已明确确认要部署到板端后调用；skillId 为目录名（kebab-case），只能包含字母、数字、下划线、横线。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        skillId: {
+          type: 'string',
+          description: '技能目录名，如 my-nodehub-app（与 SKILL frontmatter 的 name 一致为佳）',
+        },
+        content: { type: 'string', description: '完整 SKILL.md 文本' },
+      },
+      required: ['skillId', 'content'],
+    },
+    async execute(input) {
+      const id = String(input.skillId || '').trim();
+      if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        throw new Error('skillId 只能包含字母、数字、下划线和横线');
+      }
+      const remotePath = `/root/.openclaw/workspace/skills/${id}/SKILL.md`;
+      await writeDeviceFile(deviceId, remotePath, input.content);
+      return JSON.stringify({
+        ok: true,
+        path: remotePath,
+        message: `已写入 ${remotePath}（${input.content.length} 字符）`,
+      });
     },
   };
 }

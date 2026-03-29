@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "comment": "团队可提交到 Git：限制 Agent 工具 studio_embedded_browser_capture 允许打开的主机后缀（SSRF 仍由服务端校验）。空数组表示仅走服务端内网拦截，不额外限制域名。",
+  "allowedHostSuffixes": [
+  ]
+}

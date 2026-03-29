@@ -9,6 +9,7 @@ import {
 import type { RDKClawExecutionMode } from '../../rdkclaw/types.js';
 import type { AutonomyTask } from '../../rdkclaw/autonomy-scheduler.js';
 import { getTokenUsageReport } from '../../monitoring/token-usage.js';
+import { createStudioEmbeddedBrowserCaptureTool } from '../../studio-browser-capture.js';
 
 const ALLOWED_PROVIDERS = new Set<ProviderConfig['provider']>([
   'qwen',
@@ -425,6 +426,7 @@ export function createStudioTools(runtime?: StudioAutonomyRuntime): Tool[] {
     appendDailyMemoryTool(),
     promoteLongTermMemoryTool(),
     tokenUsageReportTool(),
+    ...createStudioEmbeddedBrowserCaptureTool(),
   ];
   if (runtime) {
     tools.push(

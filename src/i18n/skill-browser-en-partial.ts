@@ -3,9 +3,9 @@ export const SKILL_BROWSER_EN: Record<string, string> = {
   'skillBrowser.source.web': 'Web page',
 
   'skillBrowser.prompt.mustWrite':
-    '[Important] You must use the board_openclaw_write_skill tool to write the generated SKILL.md to the board. Do not output text only.',
+    '[Deploy rules] First output sections A/B including the full SKILL.md. Do NOT call board_openclaw_write_skill or device_file_write to the skills path until the user clearly confirms in chat (e.g. “confirm write to board”). After confirmation, prefer board_openclaw_write_skill; if unavailable, use device_file_write to /root/.openclaw/workspace/skills/<skillId>/SKILL.md. Do not claim deployed without actually calling a write tool.',
   'skillBrowser.prompt.noTool':
-    'If that tool is unavailable, output the full SKILL.md and tell the user to deploy manually.',
+    'If neither board_openclaw_write_skill nor device_file_write is available, output the full SKILL.md and explain manual deploy via Skill Studio → Create, or paste.',
   'skillBrowser.prompt.qualityTitle': 'Quality requirements:',
   'skillBrowser.prompt.q1': '1) Provide executable commands — no hand-wavy descriptions only.',
   'skillBrowser.prompt.q2':
@@ -18,15 +18,17 @@ export const SKILL_BROWSER_EN: Record<string, string> = {
     '6) Final structure: A. Source summary B. Generated SKILL.md C. Deploy result D. Risks and rollback.',
 
   'skillBrowser.prompt.githubIntro':
-    'Turn the following GitHub repo into an OpenClaw skill and deploy it to the board.',
+    'Turn the following GitHub repo into an OpenClaw skill (deployable to the board; require user confirmation before writing).',
   'skillBrowser.prompt.githubExtra':
     'GitHub focus: read README and dependency files, extract build/run commands, pin versions.',
   'skillBrowser.prompt.nodehubIntro':
-    'Turn the following NodeHub app into an OpenClaw skill and deploy it to the board.',
+    'Turn the following NodeHub app into an OpenClaw skill (deployable to the board; require user confirmation before writing).',
   'skillBrowser.prompt.nodehubExtra':
     'NodeHub focus: app ID, install/run/stop commands, config, resource usage.',
+  'skillBrowser.prompt.nodehubUrlHint':
+    'URL note: the site may use `.../nodehub/detail/{id}` or `.../nodehubdetail/{id}`; the trailing numeric segment is the NodeHub app ID. If the page is client-rendered and details cannot be fetched, state that and list missing fields.',
   'skillBrowser.prompt.webIntro':
-    'Turn the following web content into an OpenClaw skill and deploy it to the board.',
+    'Turn the following web content into an OpenClaw skill (deployable to the board; require user confirmation before writing).',
   'skillBrowser.prompt.webExtra': 'Web focus: extract main points and actionable steps.',
   'skillBrowser.prompt.linkLine': 'Link: {{url}}',
   'skillBrowser.prompt.goalLine': 'Goal: {{goal}}',
@@ -69,6 +71,9 @@ category: Custom
   'skillBrowser.gwOff': 'Gateway stopped',
   'skillBrowser.refresh': 'Refresh',
   'skillBrowser.searchPh': 'Search skills…',
+  'skillBrowser.sidebarHint':
+    'Click a name to view on the right; use Edit to change. Trash removes the skill folder under workspace and/or /opt/openclaw/skills when present.',
+  'skillBrowser.deleteSkill': 'Remove skill on board',
   'skillBrowser.empty.noSkills': 'No skills on this device',
   'skillBrowser.empty.noDevice': 'Connect a device first',
   'skillBrowser.newSkill': '+ New skill',
@@ -101,9 +106,9 @@ category: Custom
   'skillBrowser.urlPh': 'Paste URL (GitHub / NodeHub / docs)',
   'skillBrowser.kindLabel': 'Detected type:',
   'skillBrowser.goalPh': 'Optional: extra goal (e.g. extract YOLO inference commands)',
-  'skillBrowser.aiRun': 'Generate & deploy with AI',
+  'skillBrowser.aiRun': 'Send to AI to generate',
   'skillBrowser.linkHint':
-    'Opens AI chat: it will analyze the link, generate SKILL.md, and write to the board via tools. If you only get text, copy it to the Create tab and deploy manually.',
+    'Sends instructions to AI chat: it should output a full SKILL.md and note sources/gaps first, and only call write tools after you clearly confirm in chat. You can also copy SKILL to the Create tab and deploy with the UI confirmation.',
 
   'skillBrowser.confirm.cancel': 'Cancel',
   'skillBrowser.confirm.deploy': 'Deploy',
@@ -126,10 +131,16 @@ category: Custom
   'skillBrowser.toast.saveFail': 'Save failed: {{msg}}',
   'skillBrowser.confirm.saveTitle': 'Overwrite skill “{{id}}” on board?',
   'skillBrowser.confirm.saveDetail': 'This overwrites the existing SKILL.md on the board.',
+  'skillBrowser.confirm.deleteTitle': 'Delete skill “{{id}}” on board?',
+  'skillBrowser.confirm.deleteDetail':
+    'Removes the skill folder under ~/.openclaw/workspace/skills and/or /opt/openclaw/skills if present. If neither exists or permission is denied, refresh the list or fix on the device.',
+  'skillBrowser.confirm.delete': 'Delete',
   'skillBrowser.toast.needUrl': 'Enter a URL first',
   'skillBrowser.toast.badUrl': 'Enter a valid http/https URL',
   'skillBrowser.err.readHttp': 'Could not read skill (HTTP {{status}})',
   'skillBrowser.err.emptyBody': '(empty)',
   'skillBrowser.err.readFail': 'Read failed: {{msg}}',
   'skillBrowser.writeDone': 'Write complete',
+  'skillBrowser.toast.deleted': 'Skill “{{id}}” removed on board',
+  'skillBrowser.toast.deleteFail': 'Delete failed: {{msg}}',
 };

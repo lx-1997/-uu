@@ -74,6 +74,12 @@ import { registerAnalyticsRoutes } from './analytics-routes.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
 import { handleEnsurePartnerAdvisorySkill } from './rdkclaw/partner-advisory-skill-deploy.js';
+import {
+  registerStudioBrowserCaptureSocket,
+  submitStudioBrowserCapture,
+  cancelStudioBrowserCapture,
+  cancelAllPendingStudioBrowserCaptures,
+} from './studio-browser-capture.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -81,6 +87,7 @@ const io = new SocketIOServer(httpServer, {
   // 与 Express cors({ credentials: true, origin: true }) 对齐，便于浏览器携带 SSO Cookie
   cors: { origin: true, credentials: true },
 });
+registerStudioBrowserCaptureSocket(io);
 
 const wss = new WebSocketServer({ noServer: true });
 const rosbridgeWss = new WebSocketServer({ noServer: true });
@@ -1425,6 +1432,28 @@ app.use(express.json({ limit: '50mb' }));
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)
 registerSSORoutes(app);
 registerAnalyticsRoutes(app);
+
+/** Studio 桌面端：用户在内嵌浏览器提交页面正文，完成 Agent 工具 studio_embedded_browser_capture */
+app.post('/api/studio/browser-capture/submit', (req, res) => {
+  const captureId = String(req.body?.captureId ?? '').trim();
+  const text = String(req.body?.text ?? '');
+  const r = submitStudioBrowserCapture(captureId, text);
+  if (r.ok) {
+    res.json({ ok: true });
+    return;
+  }
+  res.status(400).json({ ok: false, error: r.error });
+});
+
+app.post('/api/studio/browser-capture/cancel', (req, res) => {
+  const captureId = String(req.body?.captureId ?? '').trim();
+  const r = cancelStudioBrowserCapture(captureId, '用户取消');
+  if (r.ok) {
+    res.json({ ok: true });
+    return;
+  }
+  res.status(400).json({ ok: false, error: r.error });
+});
 
 /** 微信扫码：短时图片预览（免检，凭不可猜测 id + TTL；避免 SSE 内嵌超长 data URL 导致裂图） */
 app.get('/api/rdkclaw/weixin/qr-preview', (req, res) => {
@@ -2813,6 +2842,51 @@ app.post('/api/devices/:id/openclaw/skill-write', async (request, response) => {
   } else {
     sendApiError(response, 500, 'SKILL_WRITE_FAILED', '写入失败', { retryable: true, details: { output: run.output } });
   }
+});
+
+/**
+ * 删除板端技能目录：同时尝试
+ * - /root/.openclaw/workspace/skills/<id>（用户/Studio 部署）
+ * - /opt/openclaw/skills/<id>（系统或预装）
+ * 与列表 API 扫描范围一致，避免「能读到、删不掉」。
+ */
+app.post('/api/devices/:id/openclaw/skill-delete', async (request, response) => {
+  const { id } = request.params;
+  const { skillId } = request.body as { skillId?: string };
+  const name = String(skillId || '').trim();
+  if (!name) {
+    sendApiError(response, 400, 'INVALID_SKILL_DELETE', 'skillId 不能为空', { retryable: false });
+    return;
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    sendApiError(response, 400, 'INVALID_SKILL_ID', 'skillId 只能包含字母、数字、下划线和横线', { retryable: false });
+    return;
+  }
+  const wsDir = `/root/.openclaw/workspace/skills/${name}`;
+  const optDir = `/opt/openclaw/skills/${name}`;
+  const run = await runOnDevice(request, response, id, [
+    `bash -lc "out=NOT_FOUND; [ -d '${wsDir}' ] && rm -rf '${wsDir}' && out=OK; [ -d '${optDir}' ] && rm -rf '${optDir}' && out=OK; echo \\$out"`,
+  ]);
+  if (!run) return;
+  const out = String(run.output || '').trim();
+  if (out.endsWith('OK')) {
+    response.json({
+      ok: true,
+      message: `已删除板端技能 ${name}（若存在于工作区与 /opt/openclaw/skills 均已移除）`,
+    });
+    return;
+  }
+  if (out.includes('NOT_FOUND')) {
+    sendApiError(
+      response,
+      404,
+      'SKILL_NOT_FOUND_ON_DEVICE',
+      '板端未找到该技能目录（已检查 ~/.openclaw/workspace/skills 与 /opt/openclaw/skills）。请刷新列表后重试，或在设备上确认路径。',
+      { retryable: false },
+    );
+    return;
+  }
+  sendApiError(response, 500, 'SKILL_DELETE_FAILED', '删除失败', { retryable: true, details: { output: run.output } });
 });
 
 /** 若板端尚无或版本/内容与 Studio 内置不一致，则部署 rdk-rdkclaw-partner-advisory 并校验 sha256 */
@@ -4270,6 +4344,7 @@ app.post('/api/rdkclaw/soul-updates/:proposalId/decision', async (request, respo
 });
 
 app.post('/api/rdkclaw/runs/cancel-all', (_request, response) => {
+  cancelAllPendingStudioBrowserCaptures('任务已停止');
   const count = rdkclaw.cancelAllRuns();
   const auto = autonomyScheduler.stopAll();
   response.json({

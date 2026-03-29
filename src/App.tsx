@@ -15,6 +15,7 @@ import SettingsPanel from './components/SettingsPanel';
 import ConfirmDialog from './components/ConfirmDialog';
 import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
+import StudioBrowserCaptureBridge from './components/StudioBrowserCaptureBridge';
 import { isDeviceSshConnected } from './utils/device-connection';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -236,6 +237,7 @@ function AppShell() {
       <AddDeviceModal />
       <SettingsPanel />
       <ConfirmDialog />
+      <StudioBrowserCaptureBridge />
     </div>
   );
 }
