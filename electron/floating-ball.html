@@ -219,58 +219,30 @@
       const pointerId = e.pointerId;
       const startX = e.screenX;
       const startY = e.screenY;
-      let lastX = e.screenX;
-      let lastY = e.screenY;
       let moved = false;
-
-      let pendingDx = 0;
-      let pendingDy = 0;
-      let rafId = null;
-
-      function flushPending() {
-        rafId = null;
-        if (pendingDx === 0 && pendingDy === 0) return;
-        const dx = pendingDx;
-        const dy = pendingDy;
-        pendingDx = 0;
-        pendingDy = 0;
-        window.rdkFloatingBall.moveBy(dx, dy);
-      }
-
-      function queueMove(dx, dy) {
-        pendingDx += dx;
-        pendingDy += dy;
-        if (rafId == null) {
-          rafId = requestAnimationFrame(flushPending);
-        }
-      }
+      /** 超过阈值后由主进程用全局光标轮询移动窗口，避免指针移出小窗后 pointermove 中断 */
+      let mainDragStarted = false;
 
       const onMove = (ev) => {
         if (ev.pointerId !== pointerId) return;
         const dist = Math.hypot(ev.screenX - startX, ev.screenY - startY);
-        if (!moved) {
-          if (dist <= MOVE_THRESH_PX) return;
-          moved = true;
+        if (dist <= MOVE_THRESH_PX) return;
+        if (!moved) moved = true;
+        if (!mainDragStarted && window.rdkFloatingBall.dragStart) {
+          mainDragStarted = true;
+          window.rdkFloatingBall.dragStart();
         }
-        const dx = ev.screenX - lastX;
-        const dy = ev.screenY - lastY;
-        lastX = ev.screenX;
-        lastY = ev.screenY;
-        if (dx !== 0 || dy !== 0) queueMove(dx, dy);
       };
 
       const teardown = (withClickIfTap) => {
         window.removeEventListener('pointermove', onMove, true);
         window.removeEventListener('pointerup', onUp, true);
         window.removeEventListener('pointercancel', onUp, true);
-        if (rafId != null) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
+        window.removeEventListener('lostpointercapture', onLostCapture, true);
+        if (mainDragStarted && window.rdkFloatingBall.dragEnd) {
+          window.rdkFloatingBall.dragEnd();
         }
-        if (pendingDx !== 0 || pendingDy !== 0) {
-          window.rdkFloatingBall.moveBy(pendingDx, pendingDy);
-          pendingDx = pendingDy = 0;
-        }
+        mainDragStarted = false;
         try {
           stage.releasePointerCapture(pointerId);
         } catch {
@@ -285,6 +257,12 @@
         teardown(true);
       };
 
+      const onLostCapture = (ev) => {
+        if (ev.pointerId !== pointerId) return;
+        abortActiveDrag = null;
+        teardown(false);
+      };
+
       abortActiveDrag = () => {
         teardown(false);
       };
@@ -292,6 +270,7 @@
       window.addEventListener('pointermove', onMove, true);
       window.addEventListener('pointerup', onUp, true);
       window.addEventListener('pointercancel', onUp, true);
+      window.addEventListener('lostpointercapture', onLostCapture, true);
     });
 
     stage.addEventListener('contextmenu', (e) => {

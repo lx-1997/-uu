@@ -79,8 +79,19 @@ function buildS100XburnGuiOpenDialogOptions() {
 let mainWin = null;
 /** 桌面悬浮球（仅桌面包；与主窗口独立） */
 let floatingBallWin = null;
+/** 主进程定时按全局光标移动悬浮窗（避免透明小窗在 setBounds 后指针落在窗外，renderer 收不到 pointermove） */
+let floatingBallDragTimer = null;
+let floatingBallLastCursor = null;
 /** 用户选择「隐藏直到下次启动」后，本会话内不再创建悬浮球，直至设置重新启用或进程重启 */
 let floatingBallSkipForSession = false;
+
+function stopFloatingBallDragTracking() {
+  if (floatingBallDragTimer != null) {
+    clearInterval(floatingBallDragTimer);
+    floatingBallDragTimer = null;
+  }
+  floatingBallLastCursor = null;
+}
 
 function getFloatingBallPrefsPath() {
   return path.join(app.getPath('userData'), 'floating-ball-prefs.json');
@@ -352,6 +363,7 @@ function createFloatingBallWindow() {
   });
 
   floatingBallWin.on('closed', () => {
+    stopFloatingBallDragTracking();
     floatingBallWin = null;
   });
 }
@@ -372,6 +384,34 @@ ipcMain.on('rdk:floating-ball:move-by', (_e, payload) => {
     width: b.width,
     height: b.height,
   });
+});
+
+ipcMain.on('rdk:floating-ball:drag-start', () => {
+  if (!floatingBallWin || floatingBallWin.isDestroyed()) return;
+  stopFloatingBallDragTracking();
+  floatingBallLastCursor = screen.getCursorScreenPoint();
+  floatingBallDragTimer = setInterval(() => {
+    if (!floatingBallWin || floatingBallWin.isDestroyed()) {
+      stopFloatingBallDragTracking();
+      return;
+    }
+    const cur = screen.getCursorScreenPoint();
+    const dx = cur.x - floatingBallLastCursor.x;
+    const dy = cur.y - floatingBallLastCursor.y;
+    floatingBallLastCursor = cur;
+    if (dx === 0 && dy === 0) return;
+    const b = floatingBallWin.getBounds();
+    floatingBallWin.setBounds({
+      x: Math.round(b.x + dx),
+      y: Math.round(b.y + dy),
+      width: b.width,
+      height: b.height,
+    });
+  }, 16);
+});
+
+ipcMain.on('rdk:floating-ball:drag-end', () => {
+  stopFloatingBallDragTracking();
 });
 
 ipcMain.on('rdk:floating-ball:click', async () => {

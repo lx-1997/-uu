@@ -153,6 +153,35 @@ Start-Sleep -Milliseconds 600
 const POST_UNMOUNT_SETTLE_MS = 1400;
 
 const FLASH_PROGRESS_PREFIX = 'RDK_FLASH_PROGRESS_JSON=';
+const RDK_FLASH_FATAL_PREFIX = 'RDK_FLASH_FATAL:';
+
+function parseFatalLineFromStderr(stderr) {
+  const s = String(stderr || '');
+  const idx = s.indexOf(RDK_FLASH_FATAL_PREFIX);
+  if (idx === -1) return null;
+  const rest = s.slice(idx + RDK_FLASH_FATAL_PREFIX.length);
+  const lineEnd = rest.search(/\r\n|\n|\r/);
+  const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
+  return line || null;
+}
+
+/** 解析 .NET/PowerShell 失败信息，避免把整段 CLIXML 塞进 UI */
+function formatDotNetFlashWriteError(stderrOrMessage) {
+  const raw = String(stderrOrMessage || '').trim();
+  const fatal = parseFatalLineFromStderr(raw);
+  if (fatal) {
+    const short = fatal.length > 520 ? `${fatal.slice(0, 520)}…` : fatal;
+    if (/UnauthorizedAccess|访问被拒绝|Access is denied/i.test(fatal)) {
+      return `写入被拒绝（UnauthorizedAccess）：${short}。常见原因：杀毒/Windows Defender 实时扫描、资源管理器或其它程序再次占用该卷、USB 省电或读卡器接触不良。请尝试：将目标盘或 RDK Studio 加入杀毒排除、关闭已打开的 U 盘窗口、换 USB 口或重新插拔读卡器后重试。`;
+    }
+    return `写入物理磁盘失败：${short}`;
+  }
+  if (/<Objs Version=|#<\s*CLIXML/i.test(raw)) {
+    return '写入物理磁盘失败：PowerShell 报错被序列化为 CLIXML（已写入部分数据后中断）。多为杀毒实时扫描或卷被重新挂载。请暂时排除该物理盘/关闭实时防护、关闭资源管理器中该盘窗口后重试。';
+  }
+  const short = raw.length > 900 ? `${raw.slice(0, 900)}…` : raw;
+  return `写入物理磁盘失败：${short}`;
+}
 
 /**
  * Node 在 Windows 上对 \\.\PhysicalDriveN 会经 path.win32.toNamespacedPath 错误地追加尾部 \，
@@ -185,6 +214,7 @@ function runPowerShellFileCaptureStdout(ps1Path) {
 function startDotNetRawWrite(imagePath, drivePath, chunkBytes) {
   const metaPath = writeMetaFile({ imagePath, drivePath, chunkBytes });
   const ps1Body = `$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $metaPath = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(metaPath, 'utf8').toString('base64')}'))
 $meta = Get-Content -LiteralPath $metaPath -Encoding UTF8 | ConvertFrom-Json
 $imagePath = $meta.imagePath
@@ -192,13 +222,27 @@ $drivePath = $meta.drivePath
 $chunk = [int]$meta.chunkBytes
 $img = [System.IO.File]::OpenRead($imagePath)
 try {
-  $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+  $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None, $chunk, [System.IO.FileOptions]::WriteThrough)
   try {
     $buf = New-Object byte[] $chunk
     $total = $img.Length
     $off = 0L
     while (($n = $img.Read($buf, 0, $buf.Length)) -gt 0) {
-      $dst.Write($buf, 0, $n)
+      $written = $false
+      for ($ti = 0; $ti -lt 3; $ti++) {
+        try {
+          $dst.Write($buf, 0, $n)
+          $written = $true
+          break
+        } catch {
+          if ($ti -lt 2) { Start-Sleep -Milliseconds 280 } else {
+            $em = ($_.Exception.Message -replace "\\s+", " ")
+            [Console]::Error.WriteLine('${RDK_FLASH_FATAL_PREFIX}' + $em)
+            exit 1
+          }
+        }
+      }
+      if (-not $written) { exit 1 }
       $off += $n
       $line = '${FLASH_PROGRESS_PREFIX}' + (@{ offset = $off; total = $total } | ConvertTo-Json -Compress)
       [Console]::Error.WriteLine($line)
@@ -514,7 +558,7 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
       }
       const msg = e instanceof Error ? e.message : String(e);
       throw Object.assign(
-        new Error(`写入物理磁盘失败：${msg}`),
+        new Error(formatDotNetFlashWriteError(msg)),
         { code: FlashErrorCode.WRITE_FAILED },
       );
     }

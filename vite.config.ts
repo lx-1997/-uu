@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,7 +9,12 @@ const pkg = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf-8
 const appVersion = typeof pkg.version === 'string' ? pkg.version : '0.0.0';
 const buildDate = new Date().toISOString().slice(0, 10);
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const apiPort = env.PORT?.trim() || '8787';
+  const apiTarget = `http://localhost:${apiPort}`;
+
+  return {
   // Electron 生产环境用 file:// 加载 dist/index.html，必须用相对路径，否则 /assets/* 会指向盘符根目录导致白屏
   base: './',
   /** 避免多份 react 导致 Context（AppProvider）在懒加载子树中失效 */
@@ -26,7 +31,7 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://localhost:8787',
+        target: apiTarget,
         changeOrigin: true,
         ws: true,
       },
@@ -42,4 +47,5 @@ export default defineConfig({
       },
     },
   },
+};
 });
