@@ -22,10 +22,22 @@ let activeOp = null;
 const ENCODED_COMMAND_B64_MAX = 7000;
 
 /**
- * 32 位进程在 64 位 Windows 上应调用 Sysnative 下的 PowerShell，否则可能拿到 WOW64 环境导致打开物理盘异常。
+ * 烧录用：优先 PowerShell 7（pwsh），错误为纯文本，不会像 5.1 那样把 stderr 打成 CLIXML。
+ * 否则 32 位进程在 64 位 Windows 上用 Sysnative 下的 Windows PowerShell 5.1。
  */
 function getPowerShellExe() {
   if (process.platform !== 'win32') return 'powershell.exe';
+  const pwshCandidates = [
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
+    path.join(process.env['ProgramFiles(x86)'] || '', 'PowerShell', '7', 'pwsh.exe'),
+  ].filter(Boolean);
+  for (const p of pwshCandidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      /* ignore */
+    }
+  }
   try {
     const sysnative = path.join(process.env.SystemRoot || 'C:\\Windows', 'Sysnative', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     if (fs.existsSync(sysnative)) return sysnative;
@@ -61,7 +73,8 @@ function resolveIoPolicy(options = {}) {
   if (turbo) {
     return { chunkBytes: 2 * 1024 * 1024 };
   }
-  return { chunkBytes: 512 * 1024 };
+  /** 较小块降低部分读卡器/杀毒在单次大块写入时 UnauthorizedAccess 的概率 */
+  return { chunkBytes: 128 * 1024 };
 }
 
 function runPowerShell(script) {
@@ -155,8 +168,8 @@ const POST_UNMOUNT_SETTLE_MS = 1400;
 const FLASH_PROGRESS_PREFIX = 'RDK_FLASH_PROGRESS_JSON=';
 const RDK_FLASH_FATAL_PREFIX = 'RDK_FLASH_FATAL:';
 
-function parseFatalLineFromStderr(stderr) {
-  const s = String(stderr || '');
+function parseFatalLineFromOutput(text) {
+  const s = String(text || '');
   const idx = s.indexOf(RDK_FLASH_FATAL_PREFIX);
   if (idx === -1) return null;
   const rest = s.slice(idx + RDK_FLASH_FATAL_PREFIX.length);
@@ -168,7 +181,7 @@ function parseFatalLineFromStderr(stderr) {
 /** 解析 .NET/PowerShell 失败信息，避免把整段 CLIXML 塞进 UI */
 function formatDotNetFlashWriteError(stderrOrMessage) {
   const raw = String(stderrOrMessage || '').trim();
-  const fatal = parseFatalLineFromStderr(raw);
+  const fatal = parseFatalLineFromOutput(raw);
   if (fatal) {
     const short = fatal.length > 520 ? `${fatal.slice(0, 520)}…` : fatal;
     if (/UnauthorizedAccess|访问被拒绝|Access is denied/i.test(fatal)) {
@@ -222,22 +235,26 @@ $drivePath = $meta.drivePath
 $chunk = [int]$meta.chunkBytes
 $img = [System.IO.File]::OpenRead($imagePath)
 try {
-  $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None, $chunk, [System.IO.FileOptions]::WriteThrough)
+  # 不用 WriteThrough：部分 USB/读卡器在 WriteThrough 下写几 MB 后即 UnauthorizedAccess
+  $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None, $chunk)
   try {
     $buf = New-Object byte[] $chunk
     $total = $img.Length
     $off = 0L
     while (($n = $img.Read($buf, 0, $buf.Length)) -gt 0) {
       $written = $false
-      for ($ti = 0; $ti -lt 3; $ti++) {
+      for ($ti = 0; $ti -lt 5; $ti++) {
         try {
           $dst.Write($buf, 0, $n)
           $written = $true
           break
         } catch {
-          if ($ti -lt 2) { Start-Sleep -Milliseconds 280 } else {
-            $em = ($_.Exception.Message -replace "\\s+", " ")
-            [Console]::Error.WriteLine('${RDK_FLASH_FATAL_PREFIX}' + $em)
+          if ($ti -lt 4) { Start-Sleep -Milliseconds 400 } else {
+            $inner = $_.Exception
+            while ($inner.InnerException) { $inner = $inner.InnerException }
+            $em = ($inner.Message -replace "\\s+", " ")
+            [Console]::Out.WriteLine('${RDK_FLASH_FATAL_PREFIX}' + $em)
+            [Console]::Out.Flush()
             exit 1
           }
         }
@@ -245,7 +262,8 @@ try {
       if (-not $written) { exit 1 }
       $off += $n
       $line = '${FLASH_PROGRESS_PREFIX}' + (@{ offset = $off; total = $total } | ConvertTo-Json -Compress)
-      [Console]::Error.WriteLine($line)
+      [Console]::Out.WriteLine($line)
+      [Console]::Out.Flush()
     }
     $dst.Flush()
   } finally { $dst.Dispose() }
@@ -256,9 +274,12 @@ try {
   const child = spawn(getPowerShellExe(), spawnOpts.args, {
     windowsHide: true,
   });
+  let stdoutBuf = '';
   let stderrBuf = '';
+  let stdoutLineCarry = '';
   let stderrLineCarry = '';
-  const flushFlashProgressLine = (line) => {
+  const flushFlashLine = (line) => {
+    if (line.startsWith(RDK_FLASH_FATAL_PREFIX)) return;
     if (!line.startsWith(FLASH_PROGRESS_PREFIX)) return;
     try {
       const { offset, total } = JSON.parse(line.slice(FLASH_PROGRESS_PREFIX.length));
@@ -272,21 +293,33 @@ try {
       /* ignore malformed line */
     }
   };
-  child.stderr.on('data', (d) => {
+  const pushStdout = (d) => {
+    const chunk = d.toString();
+    stdoutBuf += chunk;
+    const text = stdoutLineCarry + chunk;
+    const lines = text.split(/\r?\n/);
+    stdoutLineCarry = lines.pop() || '';
+    for (const line of lines) {
+      flushFlashLine(line);
+    }
+  };
+  const pushStderr = (d) => {
     const chunk = d.toString();
     stderrBuf += chunk;
     const text = stderrLineCarry + chunk;
     const lines = text.split(/\r?\n/);
     stderrLineCarry = lines.pop() || '';
     for (const line of lines) {
-      flushFlashProgressLine(line);
+      flushFlashLine(line);
     }
-  });
-  child.stdout.on('data', (d) => { stderrBuf += d.toString(); });
+  };
+  child.stdout.on('data', pushStdout);
+  child.stderr.on('data', pushStderr);
   const done = new Promise((resolve, reject) => {
     child.on('error', reject);
     child.on('close', (code) => {
-      if (stderrLineCarry.trim()) flushFlashProgressLine(stderrLineCarry.trim());
+      if (stdoutLineCarry.trim()) flushFlashLine(stdoutLineCarry.trim());
+      if (stderrLineCarry.trim()) flushFlashLine(stderrLineCarry.trim());
       try {
         fs.unlinkSync(metaPath);
       } catch {
@@ -298,7 +331,10 @@ try {
         /* ignore */
       }
       if (code === 0) resolve();
-      else reject(new Error((stderrBuf || `powershell exit ${code}`).trim()));
+      else {
+        const combined = `${stdoutBuf}\n${stderrBuf}`.trim();
+        reject(new Error(combined || `powershell exit ${code}`));
+      }
     });
   });
   return { child, done };
