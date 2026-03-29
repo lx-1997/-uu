@@ -1,3 +1,5 @@
+import { isDesktopMac } from './env';
+
 /** 与 AddDeviceModal / Terminal 约定：请求打开本机 Web Serial（与 SSH 无关） */
 export const RDK_OPEN_USB_SERIAL_EVENT = 'rdk-open-usb-serial';
 
@@ -56,10 +58,17 @@ export function isSerialSecureContext(): boolean {
 
 /**
  * 综合判断是否具备连接串口的浏览器环境。
- * 注：Electron 内嵌 Chromium 需在 session 中允许串口权限，并建议使用 HTTPS 或自定义协议的安全上下文。
+ * macOS 桌面版暂不提供 USB 串口；网页端在 Chrome 等仍可使用 Web Serial。
  */
 export function canUseWebSerial(): boolean {
+  if (isDesktopMac()) return false;
   return isSerialSecureContext() && isWebSerialSupported();
+}
+
+export function getMacDesktopSerialUnavailableHint(isEn: boolean): string {
+  return isEn
+    ? 'The macOS desktop app does not support USB serial yet. Connect over SSH after the device is on the LAN, or use the web app for local USB serial.'
+    : 'macOS 桌面版暂不支持 USB 串口调试。请接入局域网后使用 SSH；若需本机 USB 串口请使用网页版。';
 }
 
 export function getWebSerialUnsupportedHint(isEn: boolean): string {
@@ -81,8 +90,9 @@ export function getSerialDriverHint(isEn: boolean): string {
     : '若列表中无设备，请先在系统中安装 USB 转串口驱动（如 CH340、CP210x）。Windows 多为 COM 口，macOS 多为 /dev/cu.usb*，Web Serial 会统一列出。';
 }
 
-/** 无法连接时返回一条主因说明（安全上下文优先于浏览器不支持） */
+/** 无法连接时返回一条主因说明（mac 桌面版优先，其次安全上下文 / 浏览器能力） */
 export function getSerialConnectBlockedReason(isEn: boolean): string | null {
+  if (isDesktopMac()) return getMacDesktopSerialUnavailableHint(isEn);
   if (canUseWebSerial()) return null;
   if (!isSerialSecureContext()) return getSerialSecureContextHint(isEn);
   if (!isWebSerialSupported()) return getWebSerialUnsupportedHint(isEn);

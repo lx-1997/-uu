@@ -874,6 +874,26 @@
   overflow-wrap: anywhere;
 }
 
+.add-device-method-usb-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.add-device-mac-badge {
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+button.add-device-method-card--disabled,
+button.add-device-method-card--disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.72;
+  border-color: var(--border);
+  box-shadow: none;
+}
+
 .add-device-method-card > svg:last-child {
   flex-shrink: 0;
   margin-top: 4px;

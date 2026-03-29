@@ -698,6 +698,21 @@ button.ob-connect-card:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.ob-connect-serial-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button.ob-connect-card--disabled,
+button.ob-connect-card--disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.72;
+  border-color: var(--border);
+  box-shadow: none;
+}
+
 /* OpenClaw status */
 .ob-oc-status {
   padding: 20px;

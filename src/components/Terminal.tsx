@@ -4,6 +4,7 @@ import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
 import { getRememberedDevicePassword } from '../api';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
+import { isDesktopMac } from '../utils/env';
 import {
   canUseWebSerial,
   formatSerialPortLabel,
@@ -616,7 +617,11 @@ export default function Terminal() {
               </svg>
             </div>
             <h2 className="immersive-welcome-title">{t('terminal.ui.remoteTitle', 'RDK Studio 终端')}</h2>
-            <p className="immersive-welcome-desc">{t('terminal.ui.remoteDesc', '在左下角连接 RDK 设备后可使用网络 SSH；亦可在下方使用本机 USB 串口调试。')}</p>
+            <p className="immersive-welcome-desc">
+              {isDesktopMac()
+                ? t('terminal.ui.remoteDescMac', '在左下角连接 RDK 设备后可使用网络 SSH。')
+                : t('terminal.ui.remoteDesc', '在左下角连接 RDK 设备后可使用网络 SSH；亦可在下方使用本机 USB 串口调试。')}
+            </p>
             {canUseWebSerial() ? (
               <div className="terminal-serial-welcome">
                 <p className="terminal-serial-welcome-lead">

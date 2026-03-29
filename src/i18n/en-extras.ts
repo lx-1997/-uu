@@ -253,6 +253,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'terminal.ui.remoteTitle': 'RDK Studio Terminal',
   'terminal.ui.remoteDesc':
     'Connect an RDK device in the dock for SSH, or use local USB serial below.',
+  'terminal.ui.remoteDescMac':
+    'Connect an RDK device in the dock to use SSH.',
   'terminal.ui.serialOnlyMeta': 'RDK Studio · USB serial',
   'terminal.serial.rdkStudioLead':
     'Pick a port and baud, then Connect. If the list is empty, click Add first. Default 115200 8N1.',
@@ -1142,6 +1144,10 @@ export const EN_EXTRAS: Record<string, string> = {
   'addDevice.method.ssh.desc': 'Ethernet/Wi‑Fi — enter the device IP',
   'addDevice.method.usb.title': 'USB serial debug',
   'addDevice.method.usb.desc': 'Local serial console (Web Serial); does not add a network device',
+  'addDevice.usb.macBadge': 'Not on Mac app',
+  'addDevice.usb.macUnavailableTitle': 'USB serial is not available in the macOS desktop app',
+  'addDevice.usb.macUnavailable':
+    'USB serial is not available in the macOS desktop app yet. Use SSH or open the web app for local USB serial.',
   'addDevice.sub.usbSerial': 'USB serial debug',
   'addDevice.usb.lead': 'Like common serial monitors or Arduino Serial Monitor: data stays between your browser and the local USB–UART bridge — RDK Studio’s server SSH is not involved.',
   'addDevice.usb.bullet1': 'Use it for boot logs, first-time setup, etc. Pick the port and baud in the Terminal tab (system picker + toolbar).',

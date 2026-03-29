@@ -3,6 +3,7 @@ import { useAppState } from '../hooks/useAppState';
 import { verifyDeviceConnection } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
+import { isDesktopMac } from '../utils/env';
 import {
   RDK_DEVELOPER_RESOURCE_URL,
   RDK_DRIVER_CH34X_WINDOWS_ZIP,
@@ -40,6 +41,13 @@ export default function AddDeviceModal() {
     const justOpened = showAddDevice && !prevShowAddDeviceRef.current;
     prevShowAddDeviceRef.current = showAddDevice;
     if (!justOpened) return;
+    if (addDeviceInitialMethod === 'usb' && isDesktopMac()) {
+      setAddDeviceInitialMethod(null);
+      setMethod('manual');
+      setStep('method');
+      addToast(t('addDevice.usb.macUnavailable', 'macOS 桌面版暂不支持 USB 串口，请使用 SSH 连接或改用网页版。'), 'info');
+      return;
+    }
     if (addDeviceInitialMethod) {
       setMethod(addDeviceInitialMethod);
       setStep('configure');
@@ -48,7 +56,7 @@ export default function AddDeviceModal() {
       setStep('method');
       setMethod('manual');
     }
-  }, [showAddDevice, addDeviceInitialMethod, setAddDeviceInitialMethod]);
+  }, [addDeviceInitialMethod, addToast, setAddDeviceInitialMethod, showAddDevice, t]);
 
   const close = () => {
     setShowAddDevice(false);
@@ -158,7 +166,7 @@ export default function AddDeviceModal() {
         {step === 'method' && (
           <div className="modal-body">
             <div className="add-device-methods">
-              <button className="add-device-method-card" onClick={() => goToConfigure('manual')}>
+              <button type="button" className="add-device-method-card" onClick={() => goToConfigure('manual')}>
                 <div className="add-device-method-icon">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M5 12.55a11 11 0 0114 0"/><path d="M1.42 9a16 16 0 0121.16 0"/>
@@ -171,7 +179,15 @@ export default function AddDeviceModal() {
                 </div>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
               </button>
-              <button className="add-device-method-card" onClick={() => goToConfigure('usb')}>
+              <button
+                type="button"
+                className={`add-device-method-card${isDesktopMac() ? ' add-device-method-card--disabled' : ''}`}
+                disabled={isDesktopMac()}
+                onClick={() => {
+                  if (!isDesktopMac()) goToConfigure('usb');
+                }}
+                title={isDesktopMac() ? t('addDevice.usb.macUnavailableTitle', 'macOS 桌面版暂不支持 USB 串口') : undefined}
+              >
                 <div className="add-device-method-icon">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 18v-6"/><path d="M8 18v-2"/><path d="M16 18v-4"/>
@@ -180,10 +196,17 @@ export default function AddDeviceModal() {
                   </svg>
                 </div>
                 <div className="add-device-method-body">
-                  <strong>{t('addDevice.method.usb.title', 'USB 串口调试')}</strong>
+                  <div className="add-device-method-usb-title-row">
+                    <strong>{t('addDevice.method.usb.title', 'USB 串口调试')}</strong>
+                    {isDesktopMac() && (
+                      <span className="badge badge-muted add-device-mac-badge">{t('addDevice.usb.macBadge', 'Mac 暂不支持')}</span>
+                    )}
+                  </div>
                   <span>{t('addDevice.method.usb.desc', '本机串口控制台（Web Serial），不添加网络设备')}</span>
                 </div>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                {!isDesktopMac() && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                )}
               </button>
             </div>
             <div className="add-device-support-hint">

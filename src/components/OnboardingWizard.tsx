@@ -9,6 +9,7 @@ import {
   saveAgentConfig,
 } from '../api';
 import { fetchApi } from '../utils/apiBase';
+import { isDesktopMac } from '../utils/env';
 import {
   deployJobStorageKey as ocDeployJobLsKey,
   startOpenClawDeployPoll,
@@ -654,15 +655,23 @@ export default function OnboardingWizard() {
             </button>
             <button
               type="button"
-              className="ob-connect-card"
+              className={`ob-connect-card${isDesktopMac() ? ' ob-connect-card--disabled' : ''}`}
+              disabled={isDesktopMac()}
+              title={isDesktopMac() ? t('onboard.connect.serialMacTitle', 'macOS 桌面版暂不支持 USB 串口') : undefined}
               onClick={() => {
+                if (isDesktopMac()) return;
                 setAddDeviceInitialMethod('usb');
                 setShowAddDevice(true);
               }}
             >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M12 18v-6"/><path d="M8 18v-2"/><path d="M16 18v-4"/><rect x="6" y="18" width="4" height="4" rx="1"/><rect x="14" y="18" width="4" height="4" rx="1"/><circle cx="12" cy="8" r="2"/><path d="M12 2v4"/></svg>
               <div>
-                <strong>{t('onboard.connect.serialTitle', 'USB 串口')}</strong>
+                <div className="ob-connect-serial-title-row">
+                  <strong>{t('onboard.connect.serialTitle', 'USB 串口')}</strong>
+                  {isDesktopMac() && (
+                    <span className="badge badge-muted">{t('onboard.connect.serialMacBadge', 'Mac 暂不支持')}</span>
+                  )}
+                </div>
                 <span>{t('onboard.connect.serialSub', '本机 Web Serial 调试，与 SSH 无关')}</span>
               </div>
             </button>

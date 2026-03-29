@@ -46,6 +46,8 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.connect.sshSub': 'Enter IP for remote shell',
   'onboard.connect.serialTitle': 'USB serial',
   'onboard.connect.serialSub': 'Debug port — good for first-time setup',
+  'onboard.connect.serialMacBadge': 'Not on Mac app',
+  'onboard.connect.serialMacTitle': 'USB serial is not available in the macOS desktop app',
   'onboard.connect.addDevice': 'Add device',
   'onboard.connect.skipLater': 'Connect later — skip',
   'onboard.toast.skipConnect': 'Skipped device connection — try AI now and connect later',
