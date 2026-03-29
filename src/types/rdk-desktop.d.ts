@@ -83,6 +83,15 @@ declare global {
       }) => Promise<{ ok: boolean; error?: string }>;
       captureFloatingPageText?: (captureId: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
       closeFloatingCapture?: (captureId: string) => Promise<{ ok: boolean; error?: string }>;
+
+      /** 悬浮球点击后主进程通知：应聚焦主窗口并展开 AI Dock */
+      onFloatingBallActivate?: (cb: () => void) => (() => void) | void;
+
+      getFloatingBallPrefs?: () => Promise<{ enabled: boolean }>;
+      setFloatingBallEnabled?: (enabled: boolean) => Promise<{ ok: boolean }>;
+      onFloatingBallMenu?: (
+        cb: (payload: { action: string; tab?: string }) => void,
+      ) => (() => void) | void;
     };
   }
 }

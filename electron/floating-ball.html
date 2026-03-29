@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data: blob:; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline';" />
+  <title>RDK Studio</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: transparent;
+      width: 100%;
+      height: 100%;
+    }
+    .shell {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      padding: 6px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+      touch-action: none;
+    }
+    .shell:active {
+      cursor: grabbing;
+    }
+    .shell img {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      display: block;
+      pointer-events: none;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell" id="shell">
+    <img id="ball-img" alt="" draggable="false" />
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const icon = params.get('icon');
+    const img = document.getElementById('ball-img');
+    const shell = document.getElementById('shell');
+    if (icon) img.src = icon;
+
+    const MOVE_THRESH_PX = 5;
+
+    /** 上一段拖拽未收到 pointerup 时强制收尾，避免监听器堆积导致第二次拖拽发双倍位移 */
+    let abortActiveDrag = null;
+
+    shell.addEventListener('pointerdown', (e) => {
+      if (e.button === 2) return;
+      if (e.button !== 0 || !window.rdkFloatingBall) return;
+
+      if (typeof abortActiveDrag === 'function') {
+        abortActiveDrag();
+        abortActiveDrag = null;
+      }
+
+      try {
+        shell.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+
+      const pointerId = e.pointerId;
+      const startX = e.screenX;
+      const startY = e.screenY;
+      let lastX = e.screenX;
+      let lastY = e.screenY;
+      let moved = false;
+
+      let pendingDx = 0;
+      let pendingDy = 0;
+      let rafId = null;
+
+      function flushPending() {
+        rafId = null;
+        if (pendingDx === 0 && pendingDy === 0) return;
+        const dx = pendingDx;
+        const dy = pendingDy;
+        pendingDx = 0;
+        pendingDy = 0;
+        window.rdkFloatingBall.moveBy(dx, dy);
+      }
+
+      function queueMove(dx, dy) {
+        pendingDx += dx;
+        pendingDy += dy;
+        if (rafId == null) {
+          rafId = requestAnimationFrame(flushPending);
+        }
+      }
+
+      const onMove = (ev) => {
+        if (ev.pointerId !== pointerId) return;
+        const dist = Math.hypot(ev.screenX - startX, ev.screenY - startY);
+        if (!moved) {
+          if (dist <= MOVE_THRESH_PX) return;
+          moved = true;
+        }
+        const dx = ev.screenX - lastX;
+        const dy = ev.screenY - lastY;
+        lastX = ev.screenX;
+        lastY = ev.screenY;
+        if (dx !== 0 || dy !== 0) queueMove(dx, dy);
+      };
+
+      const teardown = (withClickIfTap) => {
+        window.removeEventListener('pointermove', onMove, true);
+        window.removeEventListener('pointerup', onUp, true);
+        window.removeEventListener('pointercancel', onUp, true);
+        if (rafId != null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        if (pendingDx !== 0 || pendingDy !== 0) {
+          window.rdkFloatingBall.moveBy(pendingDx, pendingDy);
+          pendingDx = pendingDy = 0;
+        }
+        try {
+          shell.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
+        if (withClickIfTap && !moved) window.rdkFloatingBall.notifyClick();
+      };
+
+      const onUp = (ev) => {
+        if (ev.pointerId !== pointerId) return;
+        abortActiveDrag = null;
+        teardown(true);
+      };
+
+      abortActiveDrag = () => {
+        teardown(false);
+      };
+
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onUp, true);
+    });
+
+    shell.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (window.rdkFloatingBall?.showContextMenu) {
+        window.rdkFloatingBall.showContextMenu(e.clientX, e.clientY);
+      }
+    });
+  </script>
+</body>
+</html>

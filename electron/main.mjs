@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, screen, Menu } from 'electron';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,6 +25,34 @@ const RAIL_W = 56;
 const TOPBAR_H = 48;
 
 let mainWin = null;
+/** 桌面悬浮球（仅桌面包；与主窗口独立） */
+let floatingBallWin = null;
+/** 用户选择「隐藏直到下次启动」后，本会话内不再创建悬浮球，直至设置重新启用或进程重启 */
+let floatingBallSkipForSession = false;
+
+function getFloatingBallPrefsPath() {
+  return path.join(app.getPath('userData'), 'floating-ball-prefs.json');
+}
+
+function readFloatingBallPrefs() {
+  try {
+    const p = getFloatingBallPrefsPath();
+    if (!fs.existsSync(p)) return { enabled: true };
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return { enabled: raw.enabled !== false };
+  } catch {
+    return { enabled: true };
+  }
+}
+
+function writeFloatingBallPrefs(prefs) {
+  try {
+    fs.mkdirSync(path.dirname(getFloatingBallPrefsPath()), { recursive: true });
+    fs.writeFileSync(getFloatingBallPrefsPath(), JSON.stringify(prefs, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[floating-ball] write prefs failed:', err);
+  }
+}
 
 registerSsoLoginIpc({ getMainWindow: () => mainWin });
 let serverProcess = null;
@@ -139,6 +167,215 @@ function resolveWindowIcon() {
   if (fs.existsSync(branding)) return branding;
   return undefined;
 }
+
+/** 悬浮球图标：优先 public/branding/floating-ball.png；mac 上 resolveWindowIcon 常为 undefined，再试 public/branding/icon.png */
+function resolveFloatingBallIcon() {
+  const root = path.join(__dirname, '..');
+  const ball = path.join(root, 'public', 'branding', 'floating-ball.png');
+  if (fs.existsSync(ball)) return ball;
+  const fromMain = resolveWindowIcon();
+  if (fromMain) return fromMain;
+  const brandingIcon = path.join(root, 'public', 'branding', 'icon.png');
+  if (fs.existsSync(brandingIcon)) return brandingIcon;
+  return undefined;
+}
+
+function positionFloatingBallWindow(win) {
+  try {
+    const { width, height, x, y } = screen.getPrimaryDisplay().workArea;
+    const [w, h] = win.getSize();
+    const margin = 20;
+    win.setPosition(Math.round(x + width - w - margin), Math.round(y + height - h - margin));
+  } catch {
+    /* ignore */
+  }
+}
+
+function createFloatingBallWindow() {
+  const prefs = readFloatingBallPrefs();
+  if (!prefs.enabled) return;
+  if (floatingBallSkipForSession) return;
+
+  if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+    floatingBallWin.show();
+    return;
+  }
+
+  const iconPath = resolveFloatingBallIcon();
+  if (!iconPath || !fs.existsSync(iconPath)) {
+    console.warn('[floating-ball] 未找到图标（请将 PNG 置于 public/branding/floating-ball.png），已跳过悬浮球');
+    return;
+  }
+
+  floatingBallWin = new BrowserWindow({
+    width: 72,
+    height: 72,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    hasShadow: false,
+    show: false,
+    focusable: true,
+    ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
+    webPreferences: {
+      preload: path.join(__dirname, 'floating-ball-preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  const fileUrl = pathToFileURL(iconPath).href;
+  floatingBallWin.loadFile(path.join(__dirname, 'floating-ball.html'), {
+    query: { icon: fileUrl },
+  }).catch((err) => {
+    console.error('[floating-ball] load failed:', err);
+  });
+
+  floatingBallWin.once('ready-to-show', () => {
+    positionFloatingBallWindow(floatingBallWin);
+    try {
+      floatingBallWin.setAlwaysOnTop(true, 'screen-saver');
+    } catch {
+      floatingBallWin.setAlwaysOnTop(true);
+    }
+    if (process.platform === 'darwin') {
+      try {
+        floatingBallWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    floatingBallWin.show();
+  });
+
+  floatingBallWin.on('closed', () => {
+    floatingBallWin = null;
+  });
+}
+
+ipcMain.on('rdk:floating-ball:move-by', (_e, payload) => {
+  const dx = Number(payload?.dx ?? 0);
+  const dy = Number(payload?.dy ?? 0);
+  if (!floatingBallWin || floatingBallWin.isDestroyed()) return;
+  if (!dx && !dy) return;
+  const b = floatingBallWin.getBounds();
+  floatingBallWin.setBounds({
+    x: Math.round(b.x + dx),
+    y: Math.round(b.y + dy),
+    width: b.width,
+    height: b.height,
+  });
+});
+
+ipcMain.on('rdk:floating-ball:click', async () => {
+  await focusMainWindow();
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send('rdk:floating-ball:activate');
+  }
+});
+
+ipcMain.on('rdk:floating-ball:context-menu', (_event, payload) => {
+  if (!floatingBallWin || floatingBallWin.isDestroyed()) return;
+  const x = Math.round(Number(payload?.clientX ?? 0));
+  const y = Math.round(Number(payload?.clientY ?? 0));
+  const template = [
+    {
+      label: '打开主窗口',
+      click: () => {
+        void focusMainWindow();
+      },
+    },
+    {
+      label: '展开 AI 对话',
+      click: () => {
+        void focusMainWindow();
+        if (mainWin && !mainWin.isDestroyed()) {
+          mainWin.webContents.send('rdk:floating-ball:activate');
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '打开工作台',
+      click: () => {
+        void focusMainWindow();
+        sendFloatingBallMenu({ action: 'navigate-tab', tab: 'dashboard' });
+      },
+    },
+    {
+      label: '打开终端',
+      click: () => {
+        void focusMainWindow();
+        sendFloatingBallMenu({ action: 'navigate-tab', tab: 'terminal' });
+      },
+    },
+    {
+      label: '打开 OpenClaw',
+      click: () => {
+        void focusMainWindow();
+        sendFloatingBallMenu({ action: 'navigate-tab', tab: 'openclaw' });
+      },
+    },
+    {
+      label: '打开远程桌面',
+      click: () => {
+        void focusMainWindow();
+        sendFloatingBallMenu({ action: 'navigate-tab', tab: 'vnc' });
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '截图提问（展开 AI Dock）',
+      click: () => {
+        void focusMainWindow();
+        sendFloatingBallMenu({ action: 'screenshot-ask' });
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '隐藏直到下次启动',
+      click: () => {
+        floatingBallSkipForSession = true;
+        if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+          floatingBallWin.close();
+        }
+      },
+    },
+    {
+      label: '停用桌面悬浮球',
+      click: () => {
+        writeFloatingBallPrefs({ enabled: false });
+        floatingBallSkipForSession = false;
+        if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+          floatingBallWin.close();
+        }
+      },
+    },
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  menu.popup({ window: floatingBallWin, x, y });
+});
+
+ipcMain.handle('rdk:floating-ball:get-prefs', () => readFloatingBallPrefs());
+
+ipcMain.handle('rdk:floating-ball:set-enabled', async (_e, payload) => {
+  const enabled = Boolean(payload?.enabled);
+  writeFloatingBallPrefs({ enabled });
+  floatingBallSkipForSession = false;
+  if (enabled) {
+    createFloatingBallWindow();
+  } else if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+    floatingBallWin.close();
+  }
+  return { ok: true };
+});
 
 /* ── 启动内嵌 Express 服务器（仅生产模式） ── */
 function stopEmbeddedServer() {
@@ -354,6 +591,10 @@ async function createMainWindow() {
 
   await mainWin.loadURL(target);
 
+  mainWin.on('closed', () => {
+    mainWin = null;
+  });
+
   // 窗口 resize 时同步所有 WebContentsView 的尺寸
   let resizeTimer = null;
   mainWin.on('resize', () => {
@@ -371,6 +612,23 @@ async function createMainWindow() {
   });
 
   return mainWin;
+}
+
+async function focusMainWindow() {
+  if (!mainWin || mainWin.isDestroyed()) {
+    await createMainWindow();
+  }
+  if (mainWin && !mainWin.isDestroyed()) {
+    if (mainWin.isMinimized()) mainWin.restore();
+    mainWin.show();
+    mainWin.focus();
+  }
+}
+
+function sendFloatingBallMenu(payload) {
+  if (mainWin && !mainWin.isDestroyed()) {
+    mainWin.webContents.send('rdk:floating-ball:menu', payload);
+  }
 }
 
 // ── IPC: 打开嵌入页面 ──
@@ -735,10 +993,13 @@ app.whenReady().then(async () => {
   }
 
   await createMainWindow();
+  createFloatingBallWindow();
 
   app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (!mainWin || mainWin.isDestroyed()) {
       await createMainWindow();
+    } else {
+      mainWin.show();
     }
   });
 });
@@ -751,5 +1012,9 @@ app.on('window-all-closed', async () => {
 });
 
 app.on('before-quit', async () => {
+  if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+    floatingBallWin.close();
+    floatingBallWin = null;
+  }
   await stopEmbeddedServer();
 });

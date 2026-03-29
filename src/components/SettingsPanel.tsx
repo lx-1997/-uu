@@ -37,6 +37,7 @@ import {
   restartWeixinChannel,
 } from '../api';
 import { RDK_SSO_SESSION_MIRROR_KEY, fetchApi, resolveApiUrl } from '../utils/apiBase';
+import { isDesktop } from '../utils/env';
 import { fillTemplate } from '../i18n/en-extras';
 import { useAuth } from '../hooks/useAuth';
 import { trackUiAction } from '../analytics/client';
@@ -265,6 +266,14 @@ export default function SettingsPanel() {
   const [forumPasswordInput, setForumPasswordInput] = useState('');
   const [forumSaving, setForumSaving] = useState(false);
   const [forumVerifyMsg, setForumVerifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [floatingBallEnabled, setFloatingBallEnabled] = useState(true);
+
+  useEffect(() => {
+    if (!showSettings || !isDesktop()) return;
+    void window.rdkDesktop?.getFloatingBallPrefs?.().then((p) => {
+      setFloatingBallEnabled(p.enabled !== false);
+    }).catch(() => {});
+  }, [showSettings]);
 
   /* ── WeChat State ── */
   const [weixinAccounts, setWeixinAccounts] = useState<Array<{ accountId: string; nickname: string; boundAt: number }>>([]);
@@ -1315,6 +1324,30 @@ export default function SettingsPanel() {
                     <span className="settings-row-label">{t('settings.conn.auto', '启动时自动连接')}</span>
                     <input type="checkbox" title={t('settings.conn.auto', '启动时自动连接')} aria-label={t('settings.conn.auto', '启动时自动连接')} checked={autoReconnect} onChange={e => { setAutoReconnect(e.target.checked); addToast(t('settings.conn.updated', '已更新'), 'success'); }} />
                   </div>
+                  {isDesktop() && (
+                    <div className="settings-row">
+                      <span className="settings-row-label">{t('settings.conn.floatingBall', '桌面悬浮球')}</span>
+                      <input
+                        type="checkbox"
+                        title={t('settings.conn.floatingBall', '桌面悬浮球')}
+                        aria-label={t('settings.conn.floatingBall', '桌面悬浮球')}
+                        checked={floatingBallEnabled}
+                        onChange={async (e) => {
+                          const v = e.target.checked;
+                          setFloatingBallEnabled(v);
+                          try {
+                            await window.rdkDesktop?.setFloatingBallEnabled?.(v);
+                            addToast(
+                              v ? t('settings.conn.floatingBall.on', '已启用桌面悬浮球') : t('settings.conn.floatingBall.off', '已停用桌面悬浮球'),
+                              'success',
+                            );
+                          } catch {
+                            addToast(t('settings.conn.floatingBall.fail', '悬浮球设置保存失败'), 'error');
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </section>
 

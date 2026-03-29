@@ -74,4 +74,20 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
 
   /** 关闭抓取悬浮窗 */
   closeFloatingCapture: (captureId) => ipcRenderer.invoke('rdk:close-floating-capture', { captureId }),
+
+  /** 桌面悬浮球点击：聚焦主窗口并展开 Dock */
+  onFloatingBallActivate: (cb) => {
+    const wrapped = () => cb();
+    ipcRenderer.on('rdk:floating-ball:activate', wrapped);
+    return () => ipcRenderer.removeListener('rdk:floating-ball:activate', wrapped);
+  },
+
+  getFloatingBallPrefs: () => ipcRenderer.invoke('rdk:floating-ball:get-prefs'),
+  setFloatingBallEnabled: (enabled) => ipcRenderer.invoke('rdk:floating-ball:set-enabled', { enabled }),
+
+  onFloatingBallMenu: (cb) => {
+    const wrapped = (_e, payload) => cb(payload);
+    ipcRenderer.on('rdk:floating-ball:menu', wrapped);
+    return () => ipcRenderer.removeListener('rdk:floating-ball:menu', wrapped);
+  },
 });

@@ -17,6 +17,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 import StudioBrowserCaptureBridge from './components/StudioBrowserCaptureBridge';
 import { isDeviceSshConnected } from './utils/device-connection';
+import type { Tab } from './app-types';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Flasher = lazy(() => import('./components/Flasher'));
@@ -171,12 +172,37 @@ function useThemeSync() {
 }
 
 function AppShell() {
-  const { activeTab, currentDevice, theme, railExpanded } = useAppState();
+  const {
+    activeTab, currentDevice, theme, railExpanded,
+    setChatExpanded, setActiveTab, addToast,
+  } = useAppState();
   const { t } = useI18n();
   useStudioPresence(activeTab);
   useDesktopTabSync(activeTab);
   useDesktopViewBounds(activeTab, railExpanded);
   useThemeSync();
+
+  useEffect(() => {
+    const rdk = window.rdkDesktop;
+    if (!rdk?.onFloatingBallActivate) return;
+    return rdk.onFloatingBallActivate(() => {
+      setChatExpanded(true);
+    });
+  }, [setChatExpanded]);
+
+  useEffect(() => {
+    const rdk = window.rdkDesktop;
+    if (!rdk?.onFloatingBallMenu) return;
+    return rdk.onFloatingBallMenu((payload: { action: string; tab?: string }) => {
+      if (payload.action === 'navigate-tab' && payload.tab) {
+        setActiveTab(payload.tab as Tab);
+      }
+      if (payload.action === 'screenshot-ask') {
+        setChatExpanded(true);
+        addToast(t('dock.floatingBall.screenshotHint', '已展开 AI 对话：可粘贴截图或使用附件发送图片'), 'info');
+      }
+    });
+  }, [setActiveTab, setChatExpanded, addToast, t]);
 
   const tabTitle = useMemo(() => {
     const names: Record<string, string> = {
