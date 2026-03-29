@@ -1,18 +1,19 @@
 /**
  * Windows flash adapter.
  *
- * Provides drive enumeration, image writing, backup, decompression and
- * xburn launching on Windows via PowerShell and direct file I/O.
+ * 烧录（非 S100）：与 rdkstudio_frontend-master `FlashBehavior` / Imager 一致，使用 GNU dd
+ *（`dd.exe if=… of=… bs=4M status=progress`）。备份/校验抽样仍用 .NET 流式读写。
  *
  * Every public method mirrors the adapter interface consumed by the
  * flash service — no Electron-specific imports here.
  */
 
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { emitFlashProgress } from '../progress.mjs';
 import { FlashErrorCode } from '../types.mjs';
 
@@ -78,6 +79,34 @@ function resolveIoPolicy(options = {}) {
   }
   /** 小块降低读卡器/杀毒在单次大块写入时 UnauthorizedAccess 的概率（64KB 较 128KB 更稳） */
   return { chunkBytes: 64 * 1024 };
+}
+
+/** 与 Imager FlashWindows 一致：优先打包内 `flash/win32/x64/dd.exe`，否则 Git/usr、PATH */
+function resolveWindowsDdExe() {
+  const env = String(process.env.RDK_DD_EXE || '').trim();
+  if (env && fs.existsSync(env)) return env;
+
+  const packaged = process.resourcesPath
+    ? path.join(process.resourcesPath, 'flash', 'win32', 'x64', 'dd.exe')
+    : '';
+  if (packaged && fs.existsSync(packaged)) return packaged;
+
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const dev = path.join(here, '..', '..', 'resources', 'flash', 'win32', 'x64', 'dd.exe');
+  if (fs.existsSync(dev)) return path.resolve(dev);
+
+  const gitDd = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'usr', 'bin', 'dd.exe');
+  if (fs.existsSync(gitDd)) return gitDd;
+
+  try {
+    const w = execFileSync('where', ['dd'], { encoding: 'utf8', windowsHide: true });
+    const first = String(w || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0];
+    if (first && fs.existsSync(first)) return first;
+  } catch {
+    /* ignore */
+  }
+
+  return '';
 }
 
 function runPowerShell(script) {
@@ -190,83 +219,6 @@ function setWindowsAutoMountNewVolumes(enable) {
 }
 
 const FLASH_PROGRESS_PREFIX = 'RDK_FLASH_PROGRESS_JSON=';
-/** 旧版明文（易因控制台代码页在 Node 侧变乱码） */
-const RDK_FLASH_FATAL_PREFIX = 'RDK_FLASH_FATAL:';
-/** UTF-8 经 Base64 输出（备用） */
-const RDK_FLASH_FATAL_B64_PREFIX = 'RDK_FLASH_FATAL_B64=';
-/** 首选：异常写入 %TEMP% 下 UTF-8 文件，stdout 只输出 ASCII 路径行，避免管道编码损坏中文 */
-const RDK_FLASH_FATAL_FILE_PREFIX = 'RDK_FLASH_FATAL_FILE=';
-
-function readFatalUtf8File(filePath) {
-  const fp = String(filePath || '').trim();
-  if (!fp) return null;
-  try {
-    const content = fs.readFileSync(fp, 'utf8');
-    try {
-      fs.unlinkSync(fp);
-    } catch {
-      /* ignore */
-    }
-    const t = content.trim();
-    return t || null;
-  } catch {
-    return null;
-  }
-}
-
-function parseFatalLineFromOutput(text) {
-  const s = String(text || '');
-  const fileIdx = s.indexOf(RDK_FLASH_FATAL_FILE_PREFIX);
-  if (fileIdx !== -1) {
-    const rest = s.slice(fileIdx + RDK_FLASH_FATAL_FILE_PREFIX.length);
-    const lineEnd = rest.search(/\r\n|\n|\r/);
-    const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
-    const fromFile = readFatalUtf8File(line);
-    if (fromFile) return fromFile;
-  }
-  const b64Idx = s.indexOf(RDK_FLASH_FATAL_B64_PREFIX);
-  if (b64Idx !== -1) {
-    const rest = s.slice(b64Idx + RDK_FLASH_FATAL_B64_PREFIX.length);
-    const lineEnd = rest.search(/\r\n|\n|\r/);
-    const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
-    if (!line) return null;
-    try {
-      return Buffer.from(line, 'base64').toString('utf8') || null;
-    } catch {
-      return null;
-    }
-  }
-  const idx = s.indexOf(RDK_FLASH_FATAL_PREFIX);
-  if (idx === -1) return null;
-  const rest = s.slice(idx + RDK_FLASH_FATAL_PREFIX.length);
-  const lineEnd = rest.search(/\r\n|\n|\r/);
-  const line = (lineEnd === -1 ? rest : rest.slice(0, lineEnd)).trim();
-  return line || null;
-}
-
-/** 解析 .NET/PowerShell 失败信息，避免把整段 CLIXML 塞进 UI */
-function formatDotNetFlashWriteError(stderrOrMessage) {
-  const raw = String(stderrOrMessage || '').trim();
-  const fatal = parseFatalLineFromOutput(raw);
-  if (fatal) {
-    let short = fatal.length > 520 ? `${fatal.slice(0, 520)}…` : fatal;
-    /** .NET 中文提示常以「。」结尾，避免与下文「。常见原因」连成「。。」 */
-    short = short.replace(/[。.]+$/u, '').trim();
-    if (
-      /UnauthorizedAccess|访问被拒绝|对路径的访问被拒绝|Access is denied|Access to the path/i.test(fatal)
-    ) {
-      return `写入被拒绝（UnauthorizedAccess）：${short}。常见原因：杀毒/Windows Defender 实时扫描、资源管理器或其它程序再次占用该卷、USB 省电或读卡器接触不良。请尝试：将目标盘或 RDK Studio 加入杀毒排除、关闭已打开的 U 盘窗口、换 USB 口或重新插拔读卡器后重试。`;
-    }
-    return `写入物理磁盘失败：${short}`;
-  }
-  if (/<Objs Version=|#<\s*CLIXML/i.test(raw)) {
-    return '写入物理磁盘失败：PowerShell 报错被序列化为 CLIXML（已写入部分数据后中断）。多为杀毒实时扫描或卷被重新挂载。请暂时排除该物理盘/关闭实时防护、关闭资源管理器中该盘窗口后重试。';
-  }
-  let short = raw.length > 900 ? `${raw.slice(0, 900)}…` : raw;
-  /** CLIXML / 控制台乱码里常重复同一行，避免「写入物理磁盘失败：… 写入物理磁盘失败：…」 */
-  short = short.replace(/(写入物理磁盘失败[：:]\s*)+/g, '写入物理磁盘失败：').trim();
-  return `写入物理磁盘失败：${short}`;
-}
 
 /**
  * Node 在 Windows 上对 \\.\PhysicalDriveN 会经 path.win32.toNamespacedPath 错误地追加尾部 \，
@@ -295,152 +247,90 @@ function runPowerShellFileCaptureStdout(ps1Path) {
   });
 }
 
-/** 使用 .NET FileStream 整盘写入；返回 { child, done } 以便取消时 kill */
-function startDotNetRawWrite(imagePath, drivePath, chunkBytes) {
-  const metaPath = writeMetaFile({ imagePath, drivePath, chunkBytes });
-  const ps1Body = `$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-$metaPath = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${Buffer.from(metaPath, 'utf8').toString('base64')}'))
-$meta = Get-Content -LiteralPath $metaPath -Encoding UTF8 | ConvertFrom-Json
-$imagePath = $meta.imagePath
-$drivePath = $meta.drivePath
-$chunk = [int]$meta.chunkBytes
-function Write-RdkFatalUtf8([string]$txt) {
-  $p = Join-Path $env:TEMP ('rdk-fatal-' + [guid]::NewGuid().ToString() + '.txt')
-  [System.IO.File]::WriteAllText($p, $txt, [System.Text.UTF8Encoding]::new($false))
-  [Console]::Out.WriteLine('${RDK_FLASH_FATAL_FILE_PREFIX}' + $p)
-  [Console]::Out.Flush()
+/** GNU dd `status=progress` 行解析（与旧版 Imager 逻辑一致） */
+function parseDdCopiedBytes(line) {
+  const s = String(line || '').trim();
+  const m = s.match(/^(\d+)\s+bytes\b/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
 }
-# 顺序读镜像，减轻系统缓存与 I/O 抖动
-$img = New-Object System.IO.FileStream($imagePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read, $chunk, [System.IO.FileOptions]::SequentialScan)
-try {
-  # 不用 WriteThrough：部分 USB/读卡器在 WriteThrough 下写数 MB 后即 UnauthorizedAccess
-  $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None, $chunk)
-  try {
-    $buf = New-Object byte[] $chunk
-    $total = $img.Length
-    $off = 0L
-    while (($n = $img.Read($buf, 0, $buf.Length)) -gt 0) {
-      $blockStart = $off
-      $maxStreamRecover = 2
-      $streamRecover = 0
-      $blockDone = $false
-      while (-not $blockDone) {
-        $writeOk = $false
-        $lastWriteErr = $null
-        for ($ti = 0; $ti -lt 6; $ti++) {
-          try {
-            $dst.Write($buf, 0, $n)
-            $writeOk = $true
-            break
-          } catch {
-            $lastWriteErr = $_
-            Start-Sleep -Milliseconds (250 + $ti * 120)
-          }
-        }
-        if ($writeOk) {
-          $blockDone = $true
-          break
-        }
-        if ($streamRecover -ge $maxStreamRecover) {
-          $ex = $null
-          if ($lastWriteErr) { $ex = $lastWriteErr.Exception } else { $ex = (New-Object System.Exception('写入失败（无异常详情）')) }
-          $inner = $ex
-          while ($inner.InnerException) { $inner = $inner.InnerException }
-          $em = ($inner.Message -replace "\\s+", " ")
-          Write-RdkFatalUtf8 $em
-          exit 1
-        }
-        $streamRecover++
-        try { $dst.Dispose() } catch { }
-        Start-Sleep -Milliseconds 700
-        try {
-          $dst = New-Object System.IO.FileStream($drivePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None, $chunk)
-          [void]$dst.Seek($blockStart, 'Begin')
-        } catch {
-          $inner = $_.Exception
-          while ($inner.InnerException) { $inner = $inner.InnerException }
-          $em = ($inner.Message -replace "\\s+", " ")
-          Write-RdkFatalUtf8 $em
-          exit 1
-        }
-      }
-      $off += $n
-      $line = '${FLASH_PROGRESS_PREFIX}' + (@{ offset = $off; total = $total } | ConvertTo-Json -Compress)
-      [Console]::Out.WriteLine($line)
-      [Console]::Out.Flush()
-    }
-    $dst.Flush()
-  } finally { $dst.Dispose() }
-} finally { $img.Dispose() }
-`;
-  const spawnOpts = resolvePowerShellSpawnArgs(ps1Body);
-  const extraPs1 = spawnOpts.mode === 'file' ? spawnOpts.ps1Path : null;
-  const child = spawn(getPowerShellExe(), spawnOpts.args, {
-    windowsHide: true,
-  });
-  let stdoutBuf = '';
+
+/**
+ * 与 rdkstudio_frontend-master FlashWindows 一致：`dd.exe if=… of=… bs=… status=progress`
+ * GNU dd：`conv=fsync` 在退出前刷出输出文件，降低 U 盘/读卡器拔盘过早导致末尾未落盘的风险。
+ * 返回 { child, done } 供取消时 kill。
+ */
+function startDdFlashWindows(imagePath, drivePath, totalBytes, performanceProfile) {
+  const ddExe = resolveWindowsDdExe();
+  if (!ddExe) {
+    throw Object.assign(
+      new Error(
+        '未找到 dd.exe。请将官方 Imager 自带的 flash/win32/x64/dd.exe 放到 electron/resources/flash/win32/x64/，'
+        + '或安装 Git for Windows，或设置环境变量 RDK_DD_EXE 指向 dd.exe。',
+      ),
+      { code: FlashErrorCode.TOOL_MISSING },
+    );
+  }
+
+  const bs = performanceProfile === 'turbo' ? '8M' : '4M';
+  const args = [
+    `if=${imagePath}`,
+    `of=${drivePath}`,
+    `bs=${bs}`,
+    'status=progress',
+    'conv=fsync',
+  ];
+
+  const child = spawn(ddExe, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderrBuf = '';
-  let stdoutLineCarry = '';
-  const flushFlashLine = (line) => {
-    if (
-      line.startsWith(RDK_FLASH_FATAL_FILE_PREFIX) ||
-      line.startsWith(RDK_FLASH_FATAL_B64_PREFIX) ||
-      line.startsWith(RDK_FLASH_FATAL_PREFIX)
-    ) {
-      return;
-    }
-    if (!line.startsWith(FLASH_PROGRESS_PREFIX)) return;
-    try {
-      const { offset, total } = JSON.parse(line.slice(FLASH_PROGRESS_PREFIX.length));
-      const percent = Math.min(98, Math.max(3, Math.round((offset / total) * 96) + 2));
-      emitFlashProgress({
-        stage: 'flashing',
-        message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(total / 1024 / 1024).toFixed(1)} MB`,
-        percent,
-      });
-    } catch {
-      /* ignore malformed line */
-    }
+  let stderrCarry = '';
+
+  const flushLine = (line) => {
+    const offset = parseDdCopiedBytes(line);
+    if (offset === null || !totalBytes) return;
+    const percent = Math.min(98, Math.max(3, Math.round((offset / totalBytes) * 96) + 2));
+    emitFlashProgress({
+      stage: 'flashing',
+      message: `已写入 ${(offset / 1024 / 1024).toFixed(1)} MB / ${(totalBytes / 1024 / 1024).toFixed(1)} MB`,
+      percent,
+    });
   };
-  const pushStdout = (d) => {
+
+  const onChunk = (d) => {
     const chunk = d.toString();
-    stdoutBuf += chunk;
-    const text = stdoutLineCarry + chunk;
+    stderrBuf += chunk;
+    const text = stderrCarry + chunk;
     const lines = text.split(/\r?\n/);
-    stdoutLineCarry = lines.pop() || '';
-    for (const line of lines) {
-      flushFlashLine(line);
-    }
+    stderrCarry = lines.pop() || '';
+    for (const ln of lines) flushLine(ln);
   };
-  /** 仅 stdout 解析进度；PS 5.1 等会把同类输出同时打到 stderr，避免对 stderr 再 emit 一遍进度 */
-  const pushStderr = (d) => {
-    stderrBuf += d.toString();
-  };
-  child.stdout.on('data', pushStdout);
-  child.stderr.on('data', pushStderr);
+
+  child.stderr.on('data', onChunk);
+  child.stdout.on('data', onChunk);
+
   const done = new Promise((resolve, reject) => {
     child.on('error', reject);
     child.on('close', (code) => {
-      if (stdoutLineCarry.trim()) flushFlashLine(stdoutLineCarry.trim());
-      try {
-        fs.unlinkSync(metaPath);
-      } catch {
-        /* ignore */
-      }
-      try {
-        if (extraPs1) fs.unlinkSync(extraPs1);
-      } catch {
-        /* ignore */
+      if (stderrCarry.trim()) flushLine(stderrCarry.trim());
+      /** 须在 code===0 之前判断：取消后 kill 极少数情况下子进程仍可能 0 退出 */
+      if (activeOp?.cancelled) {
+        reject(Object.assign(new Error('用户取消写盘'), { code: FlashErrorCode.USER_CANCELLED }));
+        return;
       }
       if (code === 0) resolve();
-      else {
-        const combined = `${stdoutBuf}\n${stderrBuf}`.trim();
-        reject(new Error(combined || `powershell exit ${code}`));
-      }
+      else reject(new Error((stderrBuf || `dd 退出码 ${code}`).trim()));
     });
   });
+
   return { child, done };
+}
+
+function formatDdFlashWriteError(stderrOrMessage) {
+  const raw = String(stderrOrMessage || '').trim();
+  if (!raw) return 'dd 烧录失败（无详细输出）';
+  const short = raw.length > 900 ? `${raw.slice(0, 900)}…` : raw;
+  return `dd 烧录失败：${short}`;
 }
 
 /** 物理盘备份：.NET 读 PhysicalDrive，避免 Node fs.open 对 raw 设备 EIO */
@@ -642,7 +532,6 @@ export async function listDrives() {
 export async function writeImage(imagePath, drivePathIn, options = {}) {
   const drivePath = normalizeWinPhysicalDrivePath(drivePathIn);
   const verifyMode = options.verifyMode || 'sample';
-  const ioPolicy = resolveIoPolicy(options);
   const drives = await listDrives();
   const driveMeta = drives.find((d) => d.path === drivePath) || null;
   if (!driveMeta) throw Object.assign(new Error('未找到目标磁盘，请刷新后重试'), { code: FlashErrorCode.DEVICE_NOT_FOUND });
@@ -694,10 +583,10 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
     }
     emitFlashProgress({
       stage: 'prepare',
-      message: '写盘引擎: .NET PowerShell（RDK_FLASH_ENGINE_V2）— 正在打开镜像与目标磁盘…',
+      message: '写盘引擎: GNU dd（与 RDK Studio Imager / rdkstudio_frontend-master 一致）…',
       percent: 2,
     });
-    const { child, done } = startDotNetRawWrite(imagePath, drivePath, ioPolicy.chunkBytes);
+    const { child, done } = startDdFlashWindows(imagePath, drivePath, total, options.performanceProfile);
     activeOp.child = child;
     emitFlashProgress({ stage: 'flashing', message: '正在写入物理磁盘，请勿拔出介质', percent: 3 });
     try {
@@ -708,7 +597,7 @@ export async function writeImage(imagePath, drivePathIn, options = {}) {
       }
       const msg = e instanceof Error ? e.message : String(e);
       throw Object.assign(
-        new Error(formatDotNetFlashWriteError(msg)),
+        new Error(formatDdFlashWriteError(msg)),
         { code: FlashErrorCode.WRITE_FAILED },
       );
     }
