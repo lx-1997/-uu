@@ -44,9 +44,9 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
   'NPM_FAST_REG="${NPM_FAST_REG:-https://registry.npmjs.org}";',
   'ALT_REG="${ALT_REG:-https://registry.npmmirror.com}";',
   'for i in 1 2 3; do',
-  'if CI=1 npm install -g openclaw@latest --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+  'if CI=1 npm install -g openclaw@latest --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
   'echo [OpenClaw] fallback registry: "${ALT_REG}";',
-  'if CI=1 npm install -g openclaw@latest --loglevel info --registry="${ALT_REG}" --prefer-offline=false --fetch-timeout=120000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+  'if CI=1 npm install -g openclaw@latest --no-audit --no-fund --loglevel info --registry="${ALT_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
   '[ "${i}" = 3 ] && exit 1;',
   'echo [OpenClaw] retry "${i}"/3...;',
   'sleep 3;',
@@ -62,3 +62,24 @@ export const OPENCLAW_PREPARE_NPM_SPEED =
   'if command -v npm >/dev/null 2>&1; then ' +
   OPENCLAW_FAST_REGISTRY_SNIPPET +
   '; npm config set registry "$NPM_FAST_REG" 2>/dev/null; npm config set maxsockets 20 2>/dev/null; npm config set fetch-retries 5 2>/dev/null; echo [OpenClaw] npm registry applied; else echo [OpenClaw] npm skip registry hint; fi';
+
+/** 官方 install.sh 管道 + npm 回退（与历史行为一致）。 */
+export const OPENCLAW_OFFICIAL_INSTALL_FALLBACK =
+  '(curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || ' +
+  '(echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && ' +
+  OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
+  '))';
+
+/**
+ * 安装 OpenClaw 本体：默认若板端已有 node+npm 则跳过官方 install.sh，直接 npm -g（与脚本内 [2/3] 实质相同，但省去脚本前置步骤，通常更快）。
+ * 设置环境变量 OPENCLAW_FORCE_OFFICIAL_INSTALL_SH=1 可强制始终走官方 install.sh。
+ */
+export const OPENCLAW_INSTALL_OPENCLAW_STEP =
+  process.env.OPENCLAW_FORCE_OFFICIAL_INSTALL_SH === '1'
+    ? OPENCLAW_OFFICIAL_INSTALL_FALLBACK
+    : '(if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then ' +
+      'echo "[OpenClaw] 已检测到 Node.js/npm，跳过官方 install.sh，直接 npm 全局安装（通常更快）..." && ' +
+      OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
+      '; else ' +
+      OPENCLAW_OFFICIAL_INSTALL_FALLBACK +
+      '; fi)';

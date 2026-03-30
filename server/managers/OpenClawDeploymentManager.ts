@@ -10,9 +10,18 @@ import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transpo
 import {
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
   OPENCLAW_FAST_REGISTRY_SNIPPET,
+  OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
   OPENCLAW_PREPARE_NPM_SPEED,
 } from './openclaw-board-install-sh.js';
+
+/** 板端一键安装/升级 SSH 超时（毫秒）。默认 30 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式 npm 全局装包常超过 10 分钟。 */
+export const OPENCLAW_INSTALL_TIMEOUT_MS = (() => {
+  const raw = process.env.OPENCLAW_INSTALL_TIMEOUT_MS;
+  const n = raw ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 120000) return Math.floor(n);
+  return 1_800_000;
+})();
 
 export interface Device {
   ip: string;
@@ -314,10 +323,7 @@ const NPM_INSTALL_CMD = [
   BOARD_ENV_EXPORT,
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
   'echo "[OpenClaw] 开始安装（官方推荐流程）..."',
-  // 优先官方安装脚本（已注入 NPM_CONFIG_REGISTRY / Node 镜像）；失败回退 npm 双源重试（勿用反引号拼接片段，避免 $NPM_FAST_REG 被误解析）
-  '(curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && ' +
-    OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
-    '))',
+  OPENCLAW_INSTALL_OPENCLAW_STEP,
   RESOLVE_OPENCLAW_CMD,
   CLAWHUB_AUTO_LOGIN_CMD,
   ENSURE_GATEWAY_LOCAL_MODE,
@@ -679,11 +685,11 @@ export class OpenClawDeploymentManager {
   }
 
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: 600000 });
+    this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }
 
   runUpgrade(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    this.execCommand(device, NPM_UPGRADE_CMD, onOutput, onComplete, { pty: true, timeout: 600000 });
+    this.execCommand(device, NPM_UPGRADE_CMD, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }
 
   runUninstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -1159,10 +1165,10 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       BOARD_ENV_EXPORT,
       OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
       'echo "[OpenClaw] 使用官方安装脚本..."',
-      'curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH" && ' + OPENCLAW_NPM_FAST_INSTALL_SNIPPET + ')',
+      OPENCLAW_INSTALL_OPENCLAW_STEP,
       'echo "[OpenClaw] 安装完成"',
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 600000 });
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }
 
   runLogs(

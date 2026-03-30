@@ -1273,7 +1273,7 @@ export default function OpenClaw() {
                   >
                     {t(
                       'oc.deploy.installPhaseHint',
-                      '当前为「安装」步骤：官方脚本会安装 Node.js 与 openclaw CLI；下载或编译时可能数分钟无新日志，属正常现象。',
+                      '当前为「安装」步骤：以 npm 全局安装 openclaw 为主（若板端已有 Node 则跳过官方 install.sh）；拉包或编译时可能数分钟无新日志，属正常现象。',
                     )}
                   </div>
                 )}
@@ -1634,7 +1634,7 @@ export default function OpenClaw() {
               >
                 {t(
                   'oc.deploy.installPhaseHint',
-                  '当前为「安装」步骤：官方脚本会安装 Node.js 与 openclaw CLI；下载或编译时可能数分钟无新日志，属正常现象。',
+                  '当前为「安装」步骤：以 npm 全局安装 openclaw 为主（若板端已有 Node 则跳过官方 install.sh）；拉包或编译时可能数分钟无新日志，属正常现象。',
                 )}
               </div>
             )}

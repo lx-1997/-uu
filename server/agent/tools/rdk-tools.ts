@@ -19,6 +19,7 @@ import {
 } from './rdk-ssh-helper.js';
 import {
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
+  OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
 } from '../../managers/openclaw-board-install-sh.js';
 import * as path from 'node:path';
@@ -300,9 +301,7 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
         'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
         OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
         '; OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
-        '(curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || ' +
-          OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
-          ');',
+        OPENCLAW_INSTALL_OPENCLAW_STEP + ';',
         'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',

@@ -2492,12 +2492,12 @@ async function executeOpenClawDeployJob(
       openClawManager.runPrepare(deviceObj, onOutput, onComplete);
     }), true);
     await runStep('install', async () => {
-      /** 官方安装脚本在 NodeSource/npm 阶段可能长时间无 SSH 输出，定时写入提示避免误以为卡住 */
-      const heartbeatMs = 70_000;
+      /** npm 全局安装可能长时间无 SSH 新行；间隔不宜过短以免刷屏 */
+      const heartbeatMs = 120_000;
       const heartbeat = setInterval(() => {
         appendDeployOutput(
           job,
-          '\n[Studio] 板端仍在安装（下载 Node.js / 运行 npm 等可能数分钟无新行），请耐心等待，勿关闭窗口。\n',
+          '\n[Studio] 板端仍在安装（npm 拉包/编译时可能数分钟无新日志），请耐心等待；若需更长时间可在服务端设置 OPENCLAW_INSTALL_TIMEOUT_MS（默认 30 分钟）。\n',
         );
       }, heartbeatMs);
       try {
