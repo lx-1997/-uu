@@ -271,12 +271,13 @@ export default function SettingsPanel() {
   const [forumVerifyMsg, setForumVerifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [floatingBallEnabled, setFloatingBallEnabled] = useState(true);
 
+  /** 桌面端启动即同步主进程 prefs（默认开启），不依赖是否打开设置面板 */
   useEffect(() => {
-    if (!showSettings || !isDesktop()) return;
+    if (!isDesktop()) return;
     void window.rdkDesktop?.getFloatingBallPrefs?.().then((p) => {
       setFloatingBallEnabled(p.enabled !== false);
     }).catch(() => {});
-  }, [showSettings]);
+  }, []);
 
   /* ── WeChat State ── */
   const [weixinAccounts, setWeixinAccounts] = useState<Array<{ accountId: string; nickname: string; boundAt: number }>>([]);

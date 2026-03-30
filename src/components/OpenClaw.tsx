@@ -5,6 +5,7 @@ import { useI18n } from '../i18n/use-i18n';
 import { renderMarkdown } from './MarkdownRenderer';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { fetchApi } from '../utils/apiBase';
+import { stripAnsi } from '../utils/strip-ansi';
 import { persistGatewayStatusSnapshot } from '../studio-ui-hints';
 import {
   subscribeOpenClawDeployJob,
@@ -242,6 +243,11 @@ export default function OpenClaw() {
   const [deployJobId, setDeployJobId] = useState('');
   const [deployOutput, setDeployOutput] = useState('');
   const [showDeployGuideModal, setShowDeployGuideModal] = useState(false);
+  /** 用户点「后台运行」后收起顶部横幅，避免主区域只剩一条「部署进行中」 */
+  const [deployBannerDismissed, setDeployBannerDismissed] = useState(false);
+  /** 安装阶段长时间无新日志时提示（非错误） */
+  const [deployInstallStallHint, setDeployInstallStallHint] = useState(false);
+  const deployInstallStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ─── Post-install Guide State ───
   const [showSetupGuide, setShowSetupGuide] = useState(false);
@@ -274,12 +280,13 @@ export default function OpenClaw() {
   const applyDeployJob = (job: DeployJob) => {
     const stepOrder: DeployStepName[] = ['check', 'prepare', 'install', 'config'];
     setDeploySteps(stepOrder.map((name) => job.steps?.[name] || 'pending'));
-    setDeployOutput(job.output || '');
+    setDeployOutput(stripAnsi(job.output || ''));
     if (job.status === 'running') {
       setDeployRunning(true);
       return;
     }
     setDeployRunning(false);
+    setDeployBannerDismissed(false);
     stopOpenClawDeployPoll();
     if (ocDeployLsKey) localStorage.removeItem(ocDeployLsKey);
     if (job.status === 'done') {
@@ -360,25 +367,29 @@ export default function OpenClaw() {
     if (status?.running) {
       setShowDeployGuideModal(false);
       if (ocDeployGuideModalKey) {
-        try { localStorage.removeItem(ocDeployGuideModalKey); } catch { /* ignore */ }
+        try {
+          localStorage.removeItem(ocDeployGuideModalKey);
+          sessionStorage.removeItem(ocDeployGuideModalKey);
+        } catch { /* ignore */ }
       }
       return;
     }
+    // 旧版用 localStorage 永久记录「稍后配置」，弹框不再自动出现；清除遗留项
+    if (ocDeployGuideModalKey) {
+      try {
+        if (localStorage.getItem(ocDeployGuideModalKey) === 'dismissed') {
+          localStorage.removeItem(ocDeployGuideModalKey);
+        }
+      } catch { /* ignore */ }
+    }
     let saved = '';
     if (ocDeployGuideModalKey) {
-      try { saved = localStorage.getItem(ocDeployGuideModalKey) || ''; } catch { saved = ''; }
+      try { saved = sessionStorage.getItem(ocDeployGuideModalKey) || ''; } catch { saved = ''; }
     }
     if (saved !== 'dismissed') {
       setShowDeployGuideModal(true);
     }
   }, [activeTab, currentDevice, ocDeployGuideModalKey, status?.running]);
-
-  useEffect(() => {
-    if (!ocDeployGuideModalKey) return;
-    if (showDeployGuideModal) {
-      try { localStorage.setItem(ocDeployGuideModalKey, 'open'); } catch { /* ignore */ }
-    }
-  }, [ocDeployGuideModalKey, showDeployGuideModal]);
 
   useEffect(() => {
     if (status !== null && config !== null && needsSetup()) {
@@ -834,6 +845,7 @@ export default function OpenClaw() {
       const baseUrl = deployBaseUrl || preset?.baseUrl || '';
       const api = deployApi || preset?.api || 'openai-completions';
       setDeployRunning(true);
+      setDeployBannerDismissed(false);
       setDeploySteps(['running', 'pending', 'pending', 'pending']);
       setDeployOutput('');
       setShowDeployGuideModal(true);
@@ -857,9 +869,41 @@ export default function OpenClaw() {
     } catch (err: any) {
       addToast?.(tf('oc.deploy.configFail', '配置失败: {{msg}}', { msg: err.message }), 'error');
       setDeployRunning(false);
+      setDeployBannerDismissed(false);
       stopDeployPolling();
     }
   };
+
+  /** 关闭部署引导：部署中 = 真正「后台运行」（收起顶栏横幅）；未部署 = 本会话内不再自动弹出（用 sessionStorage） */
+  const dismissDeployGuideModal = () => {
+    setShowDeployGuideModal(false);
+    if (deployRunning) {
+      setDeployBannerDismissed(true);
+    }
+    if (ocDeployGuideModalKey && !deployRunning) {
+      try { sessionStorage.setItem(ocDeployGuideModalKey, 'dismissed'); } catch { /* ignore */ }
+    }
+  };
+
+  /** 安装步骤中：每次有新日志则重置；连续约 48s 无新输出则提示「可能仍在下载」 */
+  useEffect(() => {
+    if (deployInstallStallTimerRef.current) {
+      clearTimeout(deployInstallStallTimerRef.current);
+      deployInstallStallTimerRef.current = null;
+    }
+    setDeployInstallStallHint(false);
+    const installRunning = deployRunning && deploySteps.length >= 3 && deploySteps[2] === 'running';
+    if (!installRunning) return;
+    deployInstallStallTimerRef.current = setTimeout(() => {
+      setDeployInstallStallHint(true);
+    }, 48_000);
+    return () => {
+      if (deployInstallStallTimerRef.current) {
+        clearTimeout(deployInstallStallTimerRef.current);
+        deployInstallStallTimerRef.current = null;
+      }
+    };
+  }, [deployRunning, deployOutput, deploySteps]);
 
   /* ─── Skill Functions ─── */
 
@@ -1214,6 +1258,43 @@ export default function OpenClaw() {
                     ))}
                   </div>
                 )}
+                {deployRunning && deploySteps.length >= 3 && deploySteps[2] === 'running' && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: '8px 10px',
+                      fontSize: '0.6875rem',
+                      lineHeight: 1.45,
+                      color: 'var(--text-secondary)',
+                      background: 'var(--accent-subtle)',
+                      borderRadius: 6,
+                      border: '1px solid color-mix(in srgb, var(--accent) 25%, var(--border))',
+                    }}
+                  >
+                    {t(
+                      'oc.deploy.installPhaseHint',
+                      '当前为「安装」步骤：官方脚本会安装 Node.js 与 openclaw CLI；下载或编译时可能数分钟无新日志，属正常现象。',
+                    )}
+                  </div>
+                )}
+                {deployInstallStallHint && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      padding: '8px 10px',
+                      fontSize: '0.6875rem',
+                      lineHeight: 1.45,
+                      background: 'var(--warn-subtle)',
+                      borderRadius: 6,
+                      border: '1px solid var(--warn)',
+                    }}
+                  >
+                    {t(
+                      'oc.deploy.installStallHint',
+                      '已有一段时间没有新日志。板端可能仍在下载或执行 npm；可继续等待，或点右上角「后台运行」先做其他操作。',
+                    )}
+                  </div>
+                )}
                 {(deployRunning || deployOutput) && (
                   <pre className="oc-log" style={{ marginTop: 8, maxHeight: 220, overflow: 'auto' }}>
                     {deployOutput.trim()
@@ -1421,7 +1502,7 @@ export default function OpenClaw() {
 
   return (
     <div className={`oc-layout ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''}`}>
-      {deployRunning && !showDeployGuideModal && (
+      {deployRunning && !showDeployGuideModal && !deployBannerDismissed && (
         <div
           className="oc-deploy-float-banner"
           style={{
@@ -1448,6 +1529,23 @@ export default function OpenClaw() {
           </button>
         </div>
       )}
+      {deployRunning && deployBannerDismissed && !showDeployGuideModal && (
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          style={{
+            position: 'fixed',
+            right: 16,
+            bottom: 72,
+            zIndex: 1100,
+            boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+            maxWidth: 'min(300px, calc(100vw - 32px))',
+          }}
+          onClick={() => setShowDeployGuideModal(true)}
+        >
+          {t('oc.deploy.backgroundChip', '部署进行中 · 查看日志')}
+        </button>
+      )}
       {showDeployGuideModal && (
         <div
           role="presentation"
@@ -1464,9 +1562,9 @@ export default function OpenClaw() {
             alignItems: 'center',
             padding: 16,
           }}
-          onClick={() => setShowDeployGuideModal(false)}
+          onClick={dismissDeployGuideModal}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') setShowDeployGuideModal(false);
+            if (e.key === 'Escape') dismissDeployGuideModal();
           }}
         >
           <div
@@ -1481,12 +1579,7 @@ export default function OpenClaw() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  setShowDeployGuideModal(false);
-                  if (ocDeployGuideModalKey && !deployRunning) {
-                    try { localStorage.setItem(ocDeployGuideModalKey, 'dismissed'); } catch { /* ignore */ }
-                  }
-                }}
+                onClick={dismissDeployGuideModal}
               >
                 {deployRunning ? t('oc.modal.backgroundRun', '后台运行') : t('oc.modal.later', '稍后配置')}
               </button>
@@ -1524,6 +1617,43 @@ export default function OpenClaw() {
                     <span className={`badge ${deploySteps[idx] === 'done' ? 'badge-ok' : deploySteps[idx] === 'running' ? 'badge-accent' : deploySteps[idx] === 'error' ? 'badge-danger' : 'badge-muted'}`}>{label}</span>
                   </span>
                 ))}
+              </div>
+            )}
+            {deployRunning && deploySteps.length >= 3 && deploySteps[2] === 'running' && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 10px',
+                  fontSize: '0.6875rem',
+                  lineHeight: 1.45,
+                  color: 'var(--text-secondary)',
+                  background: 'var(--accent-subtle)',
+                  borderRadius: 6,
+                  border: '1px solid color-mix(in srgb, var(--accent) 25%, var(--border))',
+                }}
+              >
+                {t(
+                  'oc.deploy.installPhaseHint',
+                  '当前为「安装」步骤：官方脚本会安装 Node.js 与 openclaw CLI；下载或编译时可能数分钟无新日志，属正常现象。',
+                )}
+              </div>
+            )}
+            {deployInstallStallHint && (
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: '8px 10px',
+                  fontSize: '0.6875rem',
+                  lineHeight: 1.45,
+                  background: 'var(--warn-subtle)',
+                  borderRadius: 6,
+                  border: '1px solid var(--warn)',
+                }}
+              >
+                {t(
+                  'oc.deploy.installStallHint',
+                  '已有一段时间没有新日志。板端可能仍在下载或执行 npm；可继续等待，或点右上角「后台运行」先做其他操作。',
+                )}
               </div>
             )}
             {(deployRunning || deployOutput) && (
@@ -1626,7 +1756,19 @@ export default function OpenClaw() {
                     {!status?.running && (
                       <button type="button" className="btn btn-primary btn-sm" onClick={() => { runAction('restart-gateway'); setShowSetupGuide(true); }} disabled={loading}>{t('oc.startGateway', '启动网关')}</button>
                     )}
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setPanelOpen(true); toggleAccordion(status?.running ? 'model' : 'deploy'); }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setPanelOpen(true);
+                        if (status?.running) {
+                          toggleAccordion('model');
+                        } else {
+                          setShowDeployGuideModal(true);
+                          toggleAccordion('deploy');
+                        }
+                      }}
+                    >
                       {status?.running ? t('oc.models.configure', '配置模型') : t('oc.deploy.title', '一键部署')}
                     </button>
                   </div>

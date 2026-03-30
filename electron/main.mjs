@@ -138,6 +138,17 @@ function writeFloatingBallPrefs(prefs) {
   }
 }
 
+/** 无配置文件时写入默认「开启」，与 readFloatingBallPrefs 语义一致，避免磁盘上长期无文件导致设置页与行为不一致 */
+function ensureFloatingBallPrefsDefault() {
+  try {
+    const p = getFloatingBallPrefsPath();
+    if (fs.existsSync(p)) return;
+    writeFloatingBallPrefs({ enabled: true });
+  } catch {
+    /* ignore */
+  }
+}
+
 registerSsoLoginIpc({ getMainWindow: () => mainWin });
 let serverProcess = null;
 // url -> WebContentsView 映射
@@ -1314,6 +1325,7 @@ app.whenReady().then(async () => {
   }
 
   await createMainWindow();
+  ensureFloatingBallPrefsDefault();
   createFloatingBallWindow();
 
   flashService.initFlashService({

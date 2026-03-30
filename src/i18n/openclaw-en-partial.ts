@@ -171,6 +171,11 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.deploy.bannerHint': 'OpenClaw deploy in progress…',
   'oc.deploy.bannerWithId': 'OpenClaw deploy in progress (#{{id}})…',
   'oc.deploy.bannerOpenLog': 'View log',
+  'oc.deploy.backgroundChip': 'Deploy in progress · tap to view log',
+  'oc.deploy.installPhaseHint':
+    'Install step runs the official script (Node.js + npm). It may show no new lines for several minutes — that is normal.',
+  'oc.deploy.installStallHint':
+    'No new log lines for a while. The device may still be downloading or compiling. You can keep this open or use “Run in background”.',
   'oc.deploy.logWorking':
     'Running diagnosis over SSH; first log lines may be delayed. If the log stays empty, check the device is online and the network is OK.',
   'oc.deploy.wifiPrereq':

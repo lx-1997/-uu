@@ -2,6 +2,7 @@
  * OpenClaw 一键部署状态：SSE 实时日志 + 轮询兜底（离开 OpenClaw 页后仍由全局 Host 续跑）。
  */
 import { resolveApiUrl, resolveOpenClawDeployStreamUrl } from './apiBase';
+import { stripAnsi } from './strip-ansi';
 
 export type DeployStepName = 'check' | 'prepare' | 'install' | 'config';
 export type DeployStepState = 'pending' | 'running' | 'done' | 'error';
@@ -192,7 +193,10 @@ export function startOpenClawDeployPoll(deviceId: string, jobId: string) {
             output: '',
           };
         }
-        sseJobMergeRef = { ...sseJobMergeRef, output: (sseJobMergeRef.output || '') + d.text };
+        sseJobMergeRef = {
+          ...sseJobMergeRef,
+          output: (sseJobMergeRef.output || '') + stripAnsi(d.text),
+        };
         emit(sseJobMergeRef);
       }
     } catch {

@@ -33,6 +33,7 @@ import {
 } from './board/device-profiles.js';
 import type { RdkPlatform } from '../shared/board-types.js';
 import { shellEscape, isSafeName } from './utils/shell-escape.js';
+import { stripAnsi } from './utils/strip-ansi.js';
 import {
   DEFAULT_VNC_PORT, OPENCLAW_GATEWAY_PORT,
   AI_REQUEST_TIMEOUT_MS,
@@ -728,12 +729,13 @@ function deploySseSendFinalAndClose(job: OpenClawDeployJob) {
 }
 
 function appendDeployOutput(job: OpenClawDeployJob, chunk: string) {
-  job.output += chunk;
+  const text = stripAnsi(chunk);
+  job.output += text;
   if (job.output.length > 250_000) {
     job.output = job.output.slice(job.output.length - 250_000);
   }
   schedulePersistRuntimeJobs();
-  deploySseBroadcast(job.id, { type: 'log', text: chunk });
+  deploySseBroadcast(job.id, { type: 'log', text });
 }
 
 function gcFeishuSeen() {
@@ -2489,9 +2491,23 @@ async function executeOpenClawDeployJob(
     await runStep('prepare', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
       openClawManager.runPrepare(deviceObj, onOutput, onComplete);
     }), true);
-    await runStep('install', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
-      openClawManager.runInstall(deviceObj, onOutput, onComplete);
-    }), true);
+    await runStep('install', async () => {
+      /** 官方安装脚本在 NodeSource/npm 阶段可能长时间无 SSH 输出，定时写入提示避免误以为卡住 */
+      const heartbeatMs = 70_000;
+      const heartbeat = setInterval(() => {
+        appendDeployOutput(
+          job,
+          '\n[Studio] 板端仍在安装（下载 Node.js / 运行 npm 等可能数分钟无新行），请耐心等待，勿关闭窗口。\n',
+        );
+      }, heartbeatMs);
+      try {
+        return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
+          openClawManager.runInstall(deviceObj, onOutput, onComplete);
+        });
+      } finally {
+        clearInterval(heartbeat);
+      }
+    }, true);
     await runStep('config', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
       openClawManager.updateConfig(
         deviceObj,
@@ -2568,7 +2584,7 @@ app.post('/api/devices/:id/openclaw/install', async (request, response) => {
   const { password } = resolvePassword(request, device);
   const deviceObj = toOpenClawDevice(device, password);
   let output = '';
-  openClawManager.runInstall(deviceObj, (chunk) => { output += chunk; }, (success) => {
+  openClawManager.runInstall(deviceObj, (chunk) => { output += stripAnsi(chunk); }, (success) => {
     response.json({ ok: success, output });
   });
 });
@@ -2590,7 +2606,7 @@ app.post('/api/devices/:id/openclaw/install-stream', async (request, response) =
 
   openClawManager.runInstall(deviceObj, (chunk) => {
     if (!response.writableEnded) {
-      response.write(`data: ${JSON.stringify({ type: 'log', text: chunk })}\n\n`);
+      response.write(`data: ${JSON.stringify({ type: 'log', text: stripAnsi(chunk) })}\n\n`);
     }
   }, (success) => {
     if (!response.writableEnded) {
