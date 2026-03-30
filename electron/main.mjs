@@ -1,7 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { app, BrowserWindow, WebContentsView, ipcMain, shell, dialog, screen, Menu, session } from 'electron';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 import fs from 'node:fs';
 import os from 'node:os';
 import http from 'node:http';
@@ -580,6 +583,39 @@ ipcMain.handle('rdk:floating-ball:set-enabled', async (_e, payload) => {
 });
 
 /* ── 启动内嵌 Express 服务器（仅生产模式） ── */
+/**
+ * 辅助排查：谁在监听端口（常见于安装版 + npm run dev 同时开、或上一份 RDK Studio 未退出）。
+ */
+async function formatPortListenHint(port) {
+  try {
+    if (process.platform === 'win32') {
+      const { stdout } = await execFileAsync('cmd', ['/c', `netstat -ano | findstr ":${port}"`], {
+        windowsHide: true,
+      });
+      const t = String(stdout || '').trim();
+      return t || '';
+    }
+    const { stdout } = await execFileAsync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], {
+      windowsHide: true,
+    });
+    return String(stdout || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** 桌面包专用：仅当 :port 上已是「带 RDK_PACKAGED_DESKTOP 的内置 API」时才返回 true，避免误用开发态 npm run dev。 */
+async function probeReusablePackagedDesktopApi(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return false;
+    const body = await res.json().catch(() => null);
+    return !!(body && body.ok === true && body.rdkStudioApi === true && body.packagedDesktop === true);
+  } catch {
+    return false;
+  }
+}
+
 function stopEmbeddedServer() {
   const proc = serverProcess;
   if (!proc) return Promise.resolve();
@@ -624,6 +660,13 @@ function startEmbeddedServer() {
   if (!isPacked) return Promise.resolve(SERVER_PORT);
 
   return new Promise((resolve, reject) => {
+    (async () => {
+      if (await probeReusablePackagedDesktopApi(SERVER_PORT)) {
+        console.log('[server] 端口', SERVER_PORT, '上已有可复用的内置 API，跳过再拉起子进程');
+        resolve(SERVER_PORT);
+        return;
+      }
+
     // asar: false 时 app.getAppPath() 指向 resources/app/ (真实目录)
     // tsconfig.server.json 的 rootDir 是项目根，所以 server/index.ts 编译到 dist-server/server/index.js
     const serverPath = path.join(getAppRoot(), 'dist-server', 'server', 'index.js');
@@ -639,6 +682,7 @@ function startEmbeddedServer() {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
+        RDK_PACKAGED_DESKTOP: '1',
         PORT: String(SERVER_PORT),
         NODE_ENV: 'production',
         RDK_DATA_DIR: dataPath,
@@ -707,6 +751,7 @@ function startEmbeddedServer() {
         );
       }
     });
+    })().catch(reject);
   });
 }
 
@@ -1314,9 +1359,11 @@ app.whenReady().then(async () => {
       }
     } catch (err) {
       console.error('[main] server startup failed:', err);
+      const listenHint = await formatPortListenHint(SERVER_PORT);
+      const hintBlock = listenHint ? `\n\n当前端口占用情况（仅供参考）：\n${listenHint}` : '';
       dialog.showErrorBox(
         'RDK Studio 启动失败',
-        `内置服务未能正常启动，请检查端口 ${SERVER_PORT} 是否被占用，或查看日志后重试。\n\n${err instanceof Error ? err.message : String(err)}`,
+        `内置服务未能正常启动。常见原因：已打开另一份 RDK Studio、或本机正在跑「npm run dev」占用了 ${SERVER_PORT}。\n请先退出多余实例或关闭开发服务，也可设置环境变量 PORT 换端口（需与前端约定一致）。${hintBlock}\n\n${err instanceof Error ? err.message : String(err)}`,
       );
       await stopEmbeddedServer();
       app.quit();

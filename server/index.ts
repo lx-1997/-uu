@@ -1700,7 +1700,12 @@ app.post('/api/skills/reload', (_request, response) => {
 });
 
 app.get('/api/health', (_request, response) => {
-  response.json({ ok: true });
+  response.json({
+    ok: true,
+    rdkStudioApi: true,
+    /** 仅桌面包嵌入子进程设置，用于 Electron 检测「可安全复用的内置服务」，避免误连 npm run dev */
+    packagedDesktop: process.env.RDK_PACKAGED_DESKTOP === '1',
+  });
 });
 
 app.get('/api/devices/scheduler/stats', (_request, response) => {
