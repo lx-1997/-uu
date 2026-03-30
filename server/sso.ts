@@ -413,6 +413,18 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
   }
 
   /**
+   * noVNC 静态资源（/vnc/*）：与 Studio 账号无关；RFB 由板端 VNC 口令与 websockify 私网目标校验约束。
+   * 若要求 SSO，内嵌 WebView 常不携带 Cookie，会误跳统一认证页。
+   */
+  if (
+    (req.method === 'GET' || req.method === 'HEAD')
+    && (req.path === '/vnc' || req.path.startsWith('/vnc/'))
+  ) {
+    next();
+    return;
+  }
+
+  /**
    * 仅同步「当前 UI 会话 / 设备」到飞书适配器内存，无敏感数据。
    * 开发态常见 localhost 跨端口，Cookie 偶发未带上会导致 401，干扰对话侧体验（与论坛凭据无关）。
    */
