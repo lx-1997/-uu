@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { useSessionDailyActivePing, useGuestDailyActivePing } from '../analytics/useDailyActivePing';
 import { ssoTranslate as st } from '../i18n/sso-translate';
 import { fetchApi, setSsoSessionMirror } from '../utils/apiBase';
@@ -57,6 +58,23 @@ function afterNextPaint(cb: () => void): void {
   requestAnimationFrame(() => {
     requestAnimationFrame(cb);
   });
+}
+
+/** 服务端在未启用 SSO 时返回 logoutUrl: '/'；整页 replace 会造成文档切换期浏览器白屏，改为软登出 */
+function isSameAppSoftLogoutTarget(url: string): boolean {
+  const t = url.trim();
+  if (!t || t === '/') return true;
+  try {
+    const u = new URL(t, window.location.href);
+    return (
+      u.origin === window.location.origin
+      && (u.pathname === '/' || u.pathname === '')
+      && u.search === ''
+      && u.hash === ''
+    );
+  } catch {
+    return false;
+  }
 }
 
 export interface SSOUser {
@@ -162,28 +180,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const res = await fetchApi('/api/sso/logout', {
         method: 'POST',
       });
-      const data = (await res.json()) as { logoutUrl?: string };
-      setUser(null);
+      const data = (await res.json().catch(() => ({}))) as { logoutUrl?: string };
+      const logoutUrl = data.logoutUrl?.trim() ?? '';
       setSsoSessionMirror(null);
-      const logoutUrl = data.logoutUrl?.trim();
+
+      if (logoutUrl && isSameAppSoftLogoutTarget(logoutUrl)) {
+        flushSync(() => {
+          setLogoutUiPhase('reload');
+        });
+        try {
+          await refresh();
+        } finally {
+          setLogoutUiPhase(null);
+        }
+        return;
+      }
+
+      flushSync(() => {
+        setUser(null);
+        setLogoutUiPhase(logoutUrl ? 'redirect' : 'reload');
+      });
       if (logoutUrl) {
-        setLogoutUiPhase('redirect');
         afterNextPaint(() => {
           window.location.replace(logoutUrl);
         });
       } else {
-        setLogoutUiPhase('reload');
         afterNextPaint(() => {
           window.location.reload();
         });
       }
     } catch {
-      setLogoutUiPhase('reload');
+      flushSync(() => {
+        setLogoutUiPhase('reload');
+      });
       afterNextPaint(() => {
         window.location.reload();
       });
     }
-  }, []);
+  }, [refresh]);
 
   const value = useMemo(
     () => ({
