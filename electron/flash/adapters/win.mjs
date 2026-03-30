@@ -459,34 +459,49 @@ async function listDrivesPowerShell() {
 }
 
 /**
- * 与 rdkstudio_frontend 一致：有 ls.exe 时优先用其枚举 /dev/sd*，并与 Get-Disk 合并容量信息。
+ * 有烧录捆绑时：以 Get-Disk 为权威列表（容量、总线、可移动），保证每次都能列出盘。
+ * `/dev/sd*` 由 PhysicalDrive 序号推导（与 MSYS/dd 一致）；ls 仅用于丰富名称（与 rdkstudio_frontend 同源），
+ * 避免因 ls/by-id 里「usb」配对失败而出现「刷不出 /dev/sdb」。
  */
 export async function listDrives() {
-  if (hasFrontendFlashBundle()) {
-    try {
-      const pairs = listUsbDevicesViaLs();
-      const ps = await listDrivesPowerShell();
-      if (pairs.length > 0) {
-        return pairs.map((p, i) => {
-          const phys = msysDeviceToPhysicalDrive(p.device);
-          const meta = phys ? ps.find((d) => d.path === phys) : null;
-          return {
-            id: meta ? String(meta.id) : `ls-${i}`,
-            path: p.device,
-            label: p.name,
-            size: meta?.size ?? '',
-            sizeBytes: Number(meta?.sizeBytes || 0),
-            bus: meta?.bus ?? '',
-            mediaType: meta?.mediaType ?? '',
-            removable: meta?.removable ?? true,
-          };
-        });
-      }
-    } catch (e) {
-      console.warn('[win flash] listUsbDevicesViaLs failed, fallback Get-Disk:', e);
-    }
+  const ps = await listDrivesPowerShell();
+  if (!hasFrontendFlashBundle()) {
+    return ps;
   }
-  return listDrivesPowerShell();
+
+  /** @type {Map<string, { device: string, name: string }>} */
+  const byPhys = new Map();
+  try {
+    const pairs = listUsbDevicesViaLs();
+    for (const p of pairs) {
+      const phys = msysDeviceToPhysicalDrive(p.device);
+      if (!phys) {
+        continue;
+      }
+      const key = normalizeWinPhysicalDrivePath(phys);
+      if (!byPhys.has(key)) {
+        byPhys.set(key, { device: p.device, name: p.name });
+      }
+    }
+  } catch (e) {
+    console.warn('[win flash] listUsbDevicesViaLs failed (ignored, using Get-Disk + msys path):', e);
+  }
+
+  return ps.map((d) => {
+    const phys = normalizeWinPhysicalDrivePath(d.path);
+    const fromLs = byPhys.get(phys);
+    const msysFallback = physicalDriveToMsysOf(phys);
+    return {
+      id: String(d.id),
+      path: fromLs?.device ?? msysFallback ?? phys,
+      label: fromLs?.name ?? d.label,
+      size: d.size,
+      sizeBytes: d.sizeBytes,
+      bus: d.bus,
+      mediaType: d.mediaType,
+      removable: d.removable,
+    };
+  });
 }
 
 /**
