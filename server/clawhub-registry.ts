@@ -20,10 +20,16 @@ const MAX_HTTP_ATTEMPTS = 6;
 const SKILL_MD_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 
+/** 单次出站 fetch 超时，避免首包 DNS/TLS 慢时无限挂起；重试每轮独立计时 */
+const SEARCH_FETCH_TIMEOUT_MS = 55_000;
+const JSON_FETCH_TIMEOUT_MS = 55_000;
+const ZIP_FETCH_TIMEOUT_MS = 120_000;
+
 type CachedSkillMd = { markdown: string; version: string; slug: string; cachedAt: number };
 
 const skillMdCache = new Map<string, CachedSkillMd>();
 const searchCache = new Map<string, { at: number; results: ClawhubSearchHit[] }>();
+const inflightSearch = new Map<string, Promise<{ results: ClawhubSearchHit[] }>>();
 const inflightSkillMd = new Map<string, Promise<CachedSkillMd>>();
 
 export function getClawhubRegistryBase(): string {
@@ -33,6 +39,19 @@ export function getClawhubRegistryBase(): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const signal =
+    typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined;
+  if (signal) {
+    return fetch(url, { ...init, signal });
+  }
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(t));
 }
 
 function parseRetryAfterSeconds(headers: Headers): number | undefined {
@@ -48,10 +67,26 @@ function isRateLimited(status: number, bodyText: string): boolean {
   return /rate\s*limit/i.test(bodyText);
 }
 
-async function fetchTextWithRetry(url: string, extraHeaders: Record<string, string>): Promise<string> {
+type FetchTextOptions = { timeoutMs?: number };
+
+async function fetchTextWithRetry(
+  url: string,
+  extraHeaders: Record<string, string>,
+  options?: FetchTextOptions,
+): Promise<string> {
+  const timeoutMs = options?.timeoutMs ?? JSON_FETCH_TIMEOUT_MS;
   const headers = { ...CLAWHUB_HEADERS, ...extraHeaders };
   for (let attempt = 0; attempt < MAX_HTTP_ATTEMPTS; attempt++) {
-    const res = await fetch(url, { method: 'GET', headers });
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/abort|timeout/i.test(msg) || (e instanceof Error && e.name === 'AbortError')) {
+        throw new Error('clawhub_fetch_timeout');
+      }
+      throw e instanceof Error ? e : new Error(String(e));
+    }
     const text = await res.text();
     if (isRateLimited(res.status, text)) {
       if (attempt >= MAX_HTTP_ATTEMPTS - 1) {
@@ -76,7 +111,16 @@ async function fetchBufferWithRetry(url: string): Promise<Uint8Array> {
     'User-Agent': CLAWHUB_HEADERS['User-Agent'],
   };
   for (let attempt = 0; attempt < MAX_HTTP_ATTEMPTS; attempt++) {
-    const res = await fetch(url, { method: 'GET', headers });
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(url, { method: 'GET', headers }, ZIP_FETCH_TIMEOUT_MS);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/abort|timeout/i.test(msg) || (e instanceof Error && e.name === 'AbortError')) {
+        throw new Error('clawhub_fetch_timeout');
+      }
+      throw e instanceof Error ? e : new Error(String(e));
+    }
     if (res.status === 429) {
       if (attempt >= MAX_HTTP_ATTEMPTS - 1) {
         throw new Error('clawhub_rate_limited');
@@ -131,15 +175,36 @@ export async function clawhubSearch(query: string, limit = 20): Promise<{ result
     return { results: hit.results };
   }
 
-  const base = getClawhubRegistryBase();
-  const url = new URL('/api/v1/search', `${base}/`);
-  url.searchParams.set('q', q);
-  url.searchParams.set('limit', String(lim));
-  const text = await fetchTextWithRetry(url.toString(), {});
-  const data = JSON.parse(text) as { results?: ClawhubSearchHit[] };
-  const results = Array.isArray(data.results) ? data.results : [];
-  searchCache.set(cacheKey, { at: now, results });
-  return { results };
+  const pending = inflightSearch.get(cacheKey);
+  if (pending) return pending;
+
+  const p = (async () => {
+    const base = getClawhubRegistryBase();
+    const url = new URL('/api/v1/search', `${base}/`);
+    url.searchParams.set('q', q);
+    url.searchParams.set('limit', String(lim));
+    const text = await fetchTextWithRetry(url.toString(), {}, { timeoutMs: SEARCH_FETCH_TIMEOUT_MS });
+    const data = JSON.parse(text) as { results?: ClawhubSearchHit[] };
+    const results = Array.isArray(data.results) ? data.results : [];
+    searchCache.set(cacheKey, { at: Date.now(), results });
+    return { results };
+  })();
+
+  inflightSearch.set(cacheKey, p);
+  p.finally(() => inflightSearch.delete(cacheKey));
+  return p;
+}
+
+/**
+ * 进程启动后预热一次到注册表的连接（DNS/TLS/keep-alive），减轻用户首次点击搜索的冷启动延迟。
+ */
+let warmupStarted = false;
+export function warmupClawhubRegistry(): void {
+  if (warmupStarted) return;
+  warmupStarted = true;
+  setImmediate(() => {
+    clawhubSearch('warmup', 1).catch(() => undefined);
+  });
 }
 
 type SkillMetaJson = {
@@ -153,7 +218,7 @@ export async function clawhubResolveInstallRef(slug: string): Promise<{ installR
   const safe = assertSafeSlug(slug);
   const base = getClawhubRegistryBase();
   const url = `${base}/api/v1/skills/${encodeURIComponent(safe)}`;
-  const text = await fetchTextWithRetry(url, {});
+  const text = await fetchTextWithRetry(url, {}, { timeoutMs: JSON_FETCH_TIMEOUT_MS });
   const data = JSON.parse(text) as SkillMetaJson;
   const v = data.latestVersion?.version?.trim();
   if (!v) {

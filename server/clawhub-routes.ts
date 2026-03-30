@@ -2,7 +2,7 @@
  * 技能注册表搜索与拉取 SKILL.md（默认 SkillHub 镜像，供 Skill 中心使用）。
  */
 import type { Express, Request, Response } from 'express';
-import { clawhubFetchSkillMarkdown, clawhubSearch } from './clawhub-registry.js';
+import { clawhubFetchSkillMarkdown, clawhubSearch, warmupClawhubRegistry } from './clawhub-registry.js';
 
 const RATE_LIMIT_USER_MSG =
   '技能源访问频率受限（Rate limit），请等待约 1～2 分钟后重试，或减少连续切换技能。';
@@ -10,6 +10,13 @@ const RATE_LIMIT_USER_MSG =
 function mapClawhubError(msg: string): { http: number; error: string; message?: string } {
   if (msg === 'clawhub_rate_limited' || /rate\s*limit/i.test(msg)) {
     return { http: 429, error: 'clawhub_rate_limited', message: RATE_LIMIT_USER_MSG };
+  }
+  if (msg === 'clawhub_fetch_timeout' || /timeout|aborted/i.test(msg)) {
+    return {
+      http: 504,
+      error: 'clawhub_fetch_timeout',
+      message: '连接技能源超时，请稍后重试；首次搜索可能较慢，第二次通常会更快。',
+    };
   }
   if (msg === 'invalid_skill_slug') {
     return { http: 400, error: msg };
@@ -57,4 +64,6 @@ export function registerClawhubRoutes(app: Express): void {
       });
     }
   });
+
+  warmupClawhubRegistry();
 }

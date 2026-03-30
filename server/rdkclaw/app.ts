@@ -29,6 +29,7 @@ import { createStudioTools, type StudioAutonomyRuntime } from "../agent/tools/st
 import { createForumTools } from "../agent/tools/forum-tools.js";
 import { ForumAuthStore } from "./forum-auth-store.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
+import { createSkillhubTools } from "../agent/tools/skillhub-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { readDevices } from "../storage.js";
 import { CONVERSATION_SCHEMA, recordConversationTurn } from "../conversation-log.js";
@@ -645,6 +646,7 @@ export class RDKClawApp {
           maxFetchChars: policy.network.maxFetchChars,
           timeoutMs: 15000,
         }),
+        ...createSkillhubTools(),
       );
     }
     if (req.deviceId) {

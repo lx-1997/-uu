@@ -451,8 +451,12 @@ export default function SkillBrowser() {
     }
     setClawhubSearchLoading(true);
     setClawhubSearchErr(null);
+    const ac = new AbortController();
+    const tid = window.setTimeout(() => ac.abort(), 75_000);
     try {
-      const res = await fetchApi(`/api/clawhub/search?q=${encodeURIComponent(q)}&limit=30`);
+      const res = await fetchApi(`/api/clawhub/search?q=${encodeURIComponent(q)}&limit=30`, {
+        signal: ac.signal,
+      });
       const data = await res.json() as {
         ok?: boolean;
         results?: { slug: string; displayName?: string; summary?: string; score?: number }[];
@@ -472,9 +476,16 @@ export default function SkillBrowser() {
         setClawhubSearchErr(null);
       }
     } catch (e) {
-      setClawhubSearchErr(e instanceof Error ? e.message : t('api.err.default', '网络错误'));
+      if (e instanceof Error && e.name === 'AbortError') {
+        setClawhubSearchErr(
+          t('skillBrowser.clawhub.searchTimeout', '搜索超时，请再试一次（首次连接技能源可能较慢）'),
+        );
+      } else {
+        setClawhubSearchErr(e instanceof Error ? e.message : t('api.err.default', '网络错误'));
+      }
       setClawhubResults([]);
     } finally {
+      window.clearTimeout(tid);
       setClawhubSearchLoading(false);
     }
   }, [clawhubQuery, addToast, t]);
@@ -939,8 +950,18 @@ export default function SkillBrowser() {
                       onClick={() => void runClawhubSearch()}
                       disabled={clawhubSearchLoading}
                     >
-                      {clawhubSearchLoading ? '...' : t('skillBrowser.clawhub.search', '搜索')}
+                      {clawhubSearchLoading
+                        ? t('skillBrowser.clawhub.searching', '搜索中…')
+                        : t('skillBrowser.clawhub.search', '搜索')}
                     </button>
+                    {clawhubSearchLoading && (
+                      <p style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
+                        {t(
+                          'skillBrowser.clawhub.searchColdHint',
+                          '首次连接技能源可能需几秒，请稍候；完成后再次搜索会更快。',
+                        )}
+                      </p>
+                    )}
                     {clawhubSearchErr && (
                       <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0 }}>{clawhubSearchErr}</p>
                     )}
