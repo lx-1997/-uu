@@ -550,6 +550,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'topbar.ip.copied': 'Copied {{ip}}',
   'topbar.ip.copyFail': 'Copy failed; select text manually',
   'topbar.wifi.title': 'Configure Wi‑Fi',
+  'topbar.wifi.titleConnected': 'Wi‑Fi connected (click to configure)',
+  'topbar.wifi.titleDisconnected': 'Wi‑Fi not connected (click to configure)',
   'topbar.user.logout': 'Log out',
 
   'api.deviceAuth': 'Device auth expired; re-enter credentials',

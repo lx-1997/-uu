@@ -218,11 +218,11 @@ export const EN: Record<string, string> = {
 
   'settings.weixin.title': 'Messaging · WeChat',
   'settings.weixin.desc': 'Scan to bind WeChat and talk to RDKClaw anywhere.',
-  'settings.weixin.scan': 'Scan to connect',
+  'settings.weixin.scan': 'Scan to connect RDKClaw',
   'settings.weixin.restartCh': 'Restart channel',
   'settings.weixin.remove': 'Remove',
   'settings.weixin.none': 'No WeChat account bound',
-  'settings.weixin.modalTitle': 'WeChat scan',
+  'settings.weixin.modalTitle': 'Connect RDKClaw (WeChat)',
   'settings.weixin.close': 'Close',
   'settings.weixin.qrAlt': 'WeChat QR code',
   'settings.weixin.scanHint': 'Scan with WeChat',

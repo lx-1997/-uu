@@ -808,11 +808,11 @@ export default function SettingsPanel() {
       } catch { /* ignore */ }
       closeWeixinLogin();
     });
-    es.addEventListener('error', (e) => {
+    es.addEventListener('weixin_login_fail', (e) => {
       if (settled) return;
       settled = true;
       try {
-        const data = JSON.parse((e as any).data || '{}');
+        const data = JSON.parse((e as MessageEvent).data || '{}');
         addToast(
           tf('toast.weixinLoginFailMsg', '登录失败: {{msg}}', {
             msg: data.message || t('toast.unknownErr', '未知错误'),
@@ -865,7 +865,7 @@ export default function SettingsPanel() {
             >
               <div className="modal-header settings-weixin-qr-header">
                 <span id="settings-weixin-qr-title" className="modal-title">
-                  {t('settings.weixin.modalTitle', '微信扫码连接')}
+                  {t('settings.weixin.modalTitle', '扫码连接 RDKClaw')}
                 </span>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={closeWeixinLogin} aria-label={t('settings.modal.close', '关闭')}>
                   &times;
@@ -890,7 +890,7 @@ export default function SettingsPanel() {
                         />
                       ) : (
                         <p className="settings-hint settings-weixin-qr-fallback" style={{ margin: 0 }}>
-                          {t('settings.weixin.qrLoadFailHint', '图片解码失败，请关闭弹窗后重试「扫码连接」。')}
+                          {t('settings.weixin.qrLoadFailHint', '图片解码失败，请关闭弹窗后重试「扫码连接 RDKClaw」。')}
                         </p>
                       )}
                     </div>
@@ -1328,7 +1328,7 @@ export default function SettingsPanel() {
 
                   <div className="settings-actions">
                     <button type="button" className="btn btn-primary btn-sm" onClick={startWeixinLogin} disabled={weixinLoginLoading}>
-                      {t('settings.weixin.scan', '扫码连接')}
+                      {t('settings.weixin.scan', '扫码连接 RDKClaw')}
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={async () => { await restartWeixinChannel(); addToast(t('toast.weixinRestarted', '已重启'), 'info'); }}>{t('settings.weixin.restartCh', '重启渠道')}</button>
                   </div>

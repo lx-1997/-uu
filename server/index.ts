@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import { prepareWeChatQrPreviewBuffer } from './rdkclaw/ilink-qrcode.js';
+import { getWeixinIlinkCommonHeaders } from './rdkclaw/weixin-ilink-headers.js';
 import { putWeixinQrPreview, getWeixinQrPreview } from './rdkclaw/weixin-qr-preview.js';
 import { v4 as uuid } from 'uuid';
 import crypto from 'node:crypto';
@@ -407,7 +408,8 @@ const weixinChannel = new WeixinPollingChannel({
   notificationHub,
   feishuAuthStore: feishuAuth,
 });
-if (weixinConfigStore.getConfig().enabled && weixinAccountStore.listAccounts().length > 0) {
+/** 渠道需在「尚无账号」时也 start，否则 started=false 时首次扫码绑定不会启动轮询，RDKClaw 无法通过微信连通 */
+if (weixinConfigStore.getConfig().enabled) {
   weixinChannel.start();
   console.log('[Weixin] 微信 ClawBot 渠道已启动');
 }
@@ -4683,22 +4685,24 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
 
   try {
     sendSSE('log', { message: '正在获取二维码...' });
-    const qrRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`);
+    const qrRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`, {
+      headers: getWeixinIlinkCommonHeaders(),
+    });
     if (!qrRes.ok) {
-      sendSSE('error', { message: `获取二维码失败: HTTP ${qrRes.status}` });
+      sendSSE('weixin_login_fail', { message: `获取二维码失败: HTTP ${qrRes.status}` });
       response.end();
       return;
     }
     const qrData = await qrRes.json() as { qrcode?: string; qrcode_img_content?: string };
-    if (!qrData.qrcode || !qrData.qrcode_img_content) {
-      sendSSE('error', { message: '获取二维码失败: 响应中缺少 qrcode' });
+    if (!qrData.qrcode?.trim()) {
+      sendSSE('weixin_login_fail', { message: '获取二维码失败: 响应中缺少 qrcode' });
       response.end();
       return;
     }
 
     const { buf, mime } = await prepareWeChatQrPreviewBuffer({
       qrcode: qrData.qrcode,
-      qrcodeImgContent: qrData.qrcode_img_content,
+      qrcodeImgContent: qrData.qrcode_img_content || '',
     });
     const previewId = putWeixinQrPreview(buf, mime);
     /** 相对路径：由前端 resolveApiUrl 拼到当前页 / Electron apiBase，避免 Host/HTTPS 与 publicApiBaseUrl 不一致导致 img 404 或非图片响应 */
@@ -4708,14 +4712,16 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
 
     const deadline = Date.now() + MAX_WAIT_MS;
     let qrcode = qrData.qrcode;
+    /** 与 @tencent-weixin/openclaw-weixin login-qr.ts 一致：扫码后可能要求切到就近 IDC 节点再轮询 */
+    let pollBaseUrl = ILINK_BASE;
 
     while (!aborted && Date.now() < deadline) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), QR_POLL_TIMEOUT + 5_000);
       try {
         const statusRes = await fetch(
-          `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
-          { headers: { 'iLink-App-ClientVersion': '1' }, signal: controller.signal },
+          `${pollBaseUrl}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
+          { headers: getWeixinIlinkCommonHeaders(), signal: controller.signal },
         );
         clearTimeout(timer);
         if (!statusRes.ok) {
@@ -4729,7 +4735,18 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
           ilink_bot_id?: string;
           baseurl?: string;
           ilink_user_id?: string;
+          redirect_host?: string;
         };
+
+        if (status.status === 'scaned_but_redirect') {
+          const host = String(status.redirect_host || '').trim();
+          if (host) {
+            const hostClean = host.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+            pollBaseUrl = `https://${hostClean}`;
+            sendSSE('log', { message: '正在切换至就近节点…' });
+          }
+          continue;
+        }
 
         if (status.status === 'scaned') {
           sendSSE('scanned', { message: '已扫码，请在微信中确认' });
@@ -4750,25 +4767,27 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
         } else if (status.status === 'expired') {
           sendSSE('log', { message: '二维码已过期，正在刷新...' });
           try {
-            const refreshRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`);
+            const refreshRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`, {
+              headers: getWeixinIlinkCommonHeaders(),
+            });
             const refreshData = await refreshRes.json() as { qrcode?: string; qrcode_img_content?: string };
-            if (refreshData.qrcode && refreshData.qrcode_img_content) {
+            if (refreshData.qrcode) {
               qrcode = refreshData.qrcode;
               const rBuf = await prepareWeChatQrPreviewBuffer({
                 qrcode: refreshData.qrcode,
-                qrcodeImgContent: refreshData.qrcode_img_content,
+                qrcodeImgContent: refreshData.qrcode_img_content || '',
               });
               const rId = putWeixinQrPreview(rBuf.buf, rBuf.mime);
               const refreshPreviewUrl = `/api/rdkclaw/weixin/qr-preview?id=${encodeURIComponent(rId)}`;
               sendSSE('qrcode', { qrcode: refreshPreviewUrl });
               sendSSE('log', { message: '新二维码已生成，请重新扫描' });
             } else {
-              sendSSE('error', { message: '刷新二维码失败' });
+              sendSSE('weixin_login_fail', { message: '刷新二维码失败' });
               response.end();
               return;
             }
           } catch (refreshErr: any) {
-            sendSSE('error', { message: `刷新二维码失败: ${refreshErr.message || ''}` });
+            sendSSE('weixin_login_fail', { message: `刷新二维码失败: ${refreshErr.message || ''}` });
             response.end();
             return;
           }
@@ -4782,11 +4801,11 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
     }
 
     if (!aborted) {
-      sendSSE('error', { message: '登录超时，请重试' });
+      sendSSE('weixin_login_fail', { message: '登录超时，请重试' });
       response.end();
     }
   } catch (err: any) {
-    sendSSE('error', { message: err.message || '启动登录流程失败' });
+    sendSSE('weixin_login_fail', { message: err.message || '启动登录流程失败' });
     response.end();
   }
 });
@@ -4795,19 +4814,21 @@ app.post('/api/rdkclaw/weixin/bind-start', async (request, response) => {
   const ILINK_BASE = 'https://ilinkai.weixin.qq.com';
   const BOT_TYPE = '3';
   try {
-    const qrRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`);
+    const qrRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`, {
+      headers: getWeixinIlinkCommonHeaders(),
+    });
     if (!qrRes.ok) {
       response.status(502).json({ ok: false, error: `获取二维码失败: HTTP ${qrRes.status}` });
       return;
     }
     const qrData = await qrRes.json() as { qrcode?: string; qrcode_img_content?: string };
-    if (!qrData.qrcode || !qrData.qrcode_img_content) {
+    if (!qrData.qrcode?.trim()) {
       response.status(502).json({ ok: false, error: '获取二维码失败: 响应缺少 qrcode' });
       return;
     }
     const b = await prepareWeChatQrPreviewBuffer({
       qrcode: qrData.qrcode,
-      qrcodeImgContent: qrData.qrcode_img_content,
+      qrcodeImgContent: qrData.qrcode_img_content || '',
     });
     const bindPreviewId = putWeixinQrPreview(b.buf, b.mime);
     const qrDataUrl = `/api/rdkclaw/weixin/qr-preview?id=${encodeURIComponent(bindPreviewId)}`;
@@ -4816,16 +4837,25 @@ app.post('/api/rdkclaw/weixin/bind-start', async (request, response) => {
     const pollForBind = async () => {
       const deadline = Date.now() + 5 * 60_000;
       let currentQr = qrData.qrcode!;
+      let pollBaseUrl = ILINK_BASE;
       while (Date.now() < deadline) {
         try {
           const statusRes = await fetch(
-            `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(currentQr)}`,
-            { headers: { 'iLink-App-ClientVersion': '1' }, signal: AbortSignal.timeout(40_000) },
+            `${pollBaseUrl}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(currentQr)}`,
+            { headers: getWeixinIlinkCommonHeaders(), signal: AbortSignal.timeout(40_000) },
           );
           if (!statusRes.ok) { await new Promise(r => setTimeout(r, 2000)); continue; }
           const status = await statusRes.json() as {
-            status?: string; bot_token?: string; ilink_bot_id?: string; baseurl?: string;
+            status?: string; bot_token?: string; ilink_bot_id?: string; baseurl?: string; redirect_host?: string;
           };
+          if (status.status === 'scaned_but_redirect') {
+            const host = String(status.redirect_host || '').trim();
+            if (host) {
+              const hostClean = host.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+              pollBaseUrl = `https://${hostClean}`;
+            }
+            continue;
+          }
           if (status.status === 'confirmed' && status.ilink_bot_id) {
             const account = {
               accountId: status.ilink_bot_id,

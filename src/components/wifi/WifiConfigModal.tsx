@@ -5,7 +5,14 @@ import { useAppState } from '../../hooks/useAppState';
 import { useI18n } from '../../i18n/use-i18n';
 import { fillTemplate } from '../../i18n/en-extras';
 
-export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
+export default function WifiConfigModal({
+  onClose,
+  onConnected,
+}: {
+  onClose: () => void;
+  /** 连接成功即将关闭时调用（便于顶栏刷新 WiFi 状态色） */
+  onConnected?: () => void;
+}) {
   const { currentDevice, addToast } = useAppState();
   const { t } = useI18n();
   const tf = useCallback(
@@ -51,6 +58,7 @@ export default function WifiConfigModal({ onClose }: { onClose: () => void }) {
       if (data.output) setConnectLog(data.output);
       if (data.ok) {
         addToast(tf('wifiModal.toast.connected', '已连接到 {{ssid}}', { ssid }), 'success');
+        onConnected?.();
         onClose();
       } else {
         addToast(data.error || data.output || t('wifiModal.toast.connectFail', 'WiFi 连接失败，请检查密码是否正确'), 'error');

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { useDeviceStore } from '../hooks/useDeviceStore';
+import { isDeviceShownOnline } from '../utils/device-connection';
 import { useToastStore } from '../hooks/useToastStore';
 import { useAuth } from '../hooks/useAuth';
 import { executeDeviceCommand } from '../api';
@@ -155,6 +156,29 @@ function getSsoDisplayLabel(user: { name?: string; email?: string; id?: string }
   return '';
 }
 
+/**
+ * 板端：nmcli WiFi 已连接优先；否则 wlan* 有全局 IPv4 视为已连无线（有线-only 时多为 DOWN）。
+ */
+const WIFI_LINK_PROBE_CMD =
+  'bash -lc "command -v nmcli >/dev/null 2>&1 && nmcli -t -f STATE dev wifi 2>/dev/null | grep -q connected && echo UP || (ip -br -4 addr show scope global 2>/dev/null | grep -qE \'^wlan[0-9]+.*[0-9]+\\.[0-9]+\' && echo UP || echo DOWN)"';
+
+function parseWifiProbeOutput(output: string): 'up' | 'down' | null {
+  const line = output.trim().split(/\r?\n/).find(Boolean) ?? '';
+  const u = line.toUpperCase();
+  if (u.startsWith('UP') || u === 'UP') return 'up';
+  if (u.startsWith('DOWN') || u === 'DOWN') return 'down';
+  return null;
+}
+
+async function fetchWifiLinkState(deviceId: string): Promise<'up' | 'down' | null> {
+  try {
+    const res = await executeDeviceCommand(deviceId, WIFI_LINK_PROBE_CMD);
+    return parseWifiProbeOutput(res.output || '');
+  } catch {
+    return null;
+  }
+}
+
 async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -176,6 +200,8 @@ async function copyToClipboard(text: string) {
   }
 }
 
+const WIFI_LINK_POLL_MS = 30_000;
+
 export default function TopToolbar() {
   const { currentDevice } = useDeviceStore();
   const { addToast } = useToastStore();
@@ -184,6 +210,8 @@ export default function TopToolbar() {
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const [copied, setCopied] = useState(false);
   const [showWifiModal, setShowWifiModal] = useState(false);
+  /** WiFi 链路状态：仅作顶栏颜色提示；未知时不染色 */
+  const [wifiLink, setWifiLink] = useState<'up' | 'down' | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showIpMenu, setShowIpMenu] = useState(false);
   const [ipRows, setIpRows] = useState<{ iface: string; ip: string }[]>([]);
@@ -218,6 +246,25 @@ export default function TopToolbar() {
       setIpLoading(false);
     });
   };
+
+  useEffect(() => {
+    if (!currentDevice || !isDeviceShownOnline(currentDevice)) {
+      setWifiLink(null);
+      return;
+    }
+    let cancelled = false;
+    const run = () => {
+      void fetchWifiLinkState(currentDevice.id).then((s) => {
+        if (!cancelled) setWifiLink(s);
+      });
+    };
+    run();
+    const id = window.setInterval(run, WIFI_LINK_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
 
   useEffect(() => {
     if (!showIpMenu) return;
@@ -309,12 +356,19 @@ export default function TopToolbar() {
       </div>
 
       <button
-        className="btn-icon"
-        title={t('topbar.wifi.title', '配置 WiFi')}
+        type="button"
+        className={`btn-icon topbar-wifi-btn${wifiLink === 'up' ? ' topbar-wifi-btn--up' : ''}${wifiLink === 'down' ? ' topbar-wifi-btn--down' : ''}`}
+        title={
+          wifiLink === 'up'
+            ? t('topbar.wifi.titleConnected', 'WiFi 已连接（点击配置）')
+            : wifiLink === 'down'
+              ? t('topbar.wifi.titleDisconnected', 'WiFi 未连接（点击配置）')
+              : t('topbar.wifi.title', '配置 WiFi')
+        }
         onClick={() => setShowWifiModal(true)}
         disabled={!currentDevice}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M5 12.55a11 11 0 0114.08 0" /><path d="M1.42 9a16 16 0 0121.16 0" /><path d="M8.53 16.11a6 6 0 016.95 0" /><circle cx="12" cy="20" r="1" />
         </svg>
       </button>
@@ -369,7 +423,12 @@ export default function TopToolbar() {
       )}
 
       {showWifiModal && createPortal(
-        <WifiConfigModal onClose={() => setShowWifiModal(false)} />,
+        <WifiConfigModal
+          onClose={() => setShowWifiModal(false)}
+          onConnected={() => {
+            if (currentDevice) void fetchWifiLinkState(currentDevice.id).then(setWifiLink);
+          }}
+        />,
         document.body,
       )}
     </>

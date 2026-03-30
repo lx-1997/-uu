@@ -2,14 +2,25 @@ import QRCode from "qrcode";
 import { Buffer } from "node:buffer";
 
 /**
- * 微信 iLink `get_bot_qrcode` 的 `qrcode_img_content` 多为 PNG/JPEG 等图片的 base64。
- * 必须用正确 MIME 的 data URL，否则浏览器会显示裂图；部分接口为 URL-safe base64。
+ * 微信 iLink `get_bot_qrcode` 的 `qrcode_img_content` 可能是：
+ * - 栅格图 base64（PNG/JPEG 等）；
+ * - 或 **要写进二维码的字符串**（常为 https:// / weixin:// 链接）——与 @tencent-weixin/openclaw-weixin 的
+ *   `qrcode-terminal.generate(qrResponse.qrcode_img_content)` 一致，不能当「图片 URL」去 fetch。
+ * 若把 `qrcode` 的 hex token 误当成唯一载荷生成二维码，微信扫一扫会只显示一串十六进制文本。
  */
 
 function normalizeUnknownInput(v: unknown): string {
   if (v == null) return "";
   if (typeof v === "string") return v.trim();
   return String(v).trim();
+}
+
+/** 非微信 iLink 登录 token（误把 WiFi 配置串等当 qrcode 时不能用来生成二维码） */
+function isSpuriousWeixinLoginToken(token: string): boolean {
+  const t = String(token || "").trim();
+  if (!t) return true;
+  if (/^WIFI:/i.test(t)) return true;
+  return false;
 }
 
 /** URL-safe base64 → 标准 base64，便于 Buffer 解码 */
@@ -81,6 +92,7 @@ async function bufferFromQrToken(token: string): Promise<{ buf: Buffer; mime: st
   return { buf, mime: m[1] };
 }
 
+
 export async function resolveIlinkQrDisplayDataUrl(input: {
   qrcode: string;
   qrcodeImgContent: string;
@@ -90,13 +102,20 @@ export async function resolveIlinkQrDisplayDataUrl(input: {
 
   if (imgRaw) {
     if (/^data:image\//i.test(imgRaw)) return imgRaw;
-    if (/^https?:\/\//i.test(imgRaw)) return imgRaw;
+    /** 链接/自定义 scheme：编码进二维码本体，勿 fetch（页面常为 HTML，会导致误回退到 qrcode hex） */
+    if (/^https?:\/\//i.test(imgRaw) || /^weixin:/i.test(imgRaw)) {
+      return QRCode.toDataURL(imgRaw, { width: 280, margin: 2 });
+    }
     const asData = dataUrlFromRawBase64(imgRaw);
     if (asData) return asData;
   }
 
-  if (token) {
+  if (token && !isSpuriousWeixinLoginToken(token)) {
     return QRCode.toDataURL(token, { width: 280, margin: 2 });
+  }
+
+  if (token && isSpuriousWeixinLoginToken(token)) {
+    throw new Error("ilink: qrcode 字段无效（疑似 WiFi 等非微信登录串），且无可用的 qrcode_img_content");
   }
 
   throw new Error("ilink: 缺少可用的二维码图片或 qrcode 字段");
@@ -111,28 +130,17 @@ export async function prepareWeChatQrPreviewBuffer(input: {
 }): Promise<{ buf: Buffer; mime: string }> {
   const token = String(input.qrcode || "").trim();
   const resolved = await resolveIlinkQrDisplayDataUrl(input);
-  let out: { buf: Buffer; mime: string };
-  if (/^https?:\/\//i.test(resolved)) {
-    const r = await fetch(resolved);
-    if (!r.ok) {
-      throw new Error(`ilink: 拉取二维码图片失败: HTTP ${r.status}`);
-    }
-    const ab = await r.arrayBuffer();
-    const mime = r.headers.get("content-type")?.split(";")[0]?.trim() || "image/png";
-    out = { buf: Buffer.from(ab), mime };
-  } else {
-    const m = resolved.match(/^data:(image\/[a-z0-9+.-]+);base64,(.+)$/is);
-    if (!m) {
-      throw new Error("ilink: 无法将二维码解析为 data URL");
-    }
-    const b64 = normalizeBase64Chunk(m[2]);
-    const buf = Buffer.from(b64, "base64");
-    if (!buf.length) {
-      throw new Error("ilink: 二维码图片 base64 解码为空");
-    }
-    out = { buf, mime: m[1] };
+  const m = resolved.match(/^data:(image\/[a-z0-9+.-]+);base64,(.+)$/is);
+  if (!m) {
+    throw new Error("ilink: 无法将二维码解析为 data URL");
   }
-  if (!isRasterImageMagic(out.buf) && token) {
+  const b64 = normalizeBase64Chunk(m[2]);
+  const buf = Buffer.from(b64, "base64");
+  if (!buf.length) {
+    throw new Error("ilink: 二维码图片 base64 解码为空");
+  }
+  const out = { buf, mime: m[1] };
+  if (!isRasterImageMagic(out.buf) && token && !isSpuriousWeixinLoginToken(token)) {
     return bufferFromQrToken(token);
   }
   if (!isRasterImageMagic(out.buf)) {
