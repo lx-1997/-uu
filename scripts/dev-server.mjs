@@ -25,12 +25,15 @@ function getWindowsPidsOnPort(port) {
 }
 
 function killPort(port) {
+  const p = Number(port);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return;
+
   if (process.platform === 'win32') {
-    const beforePids = getWindowsPidsOnPort(port);
+    const beforePids = getWindowsPidsOnPort(p);
     if (beforePids.length === 0) {
       return;
     }
-    console.log(`[dev:server] 端口 ${port} 被占用，尝试结束 PID: ${beforePids.join(', ')}`);
+    console.log(`[dev:server] 端口 ${p} 被占用，尝试结束 PID: ${beforePids.join(', ')}`);
     for (const pid of beforePids) {
       try {
         execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
@@ -38,19 +41,42 @@ function killPort(port) {
         /* 进程可能已退出 */
       }
     }
-    const after = getWindowsPidsOnPort(port);
+    const after = getWindowsPidsOnPort(p);
     if (after.length > 0) {
       console.error(
-        `[dev:server] 端口 ${port} 仍被占用（PID: ${after.join(', ')}）。请用管理员 PowerShell 执行: Stop-Process -Id <PID> -Force`,
+        `[dev:server] 端口 ${p} 仍被占用（PID: ${after.join(', ')}）。请用管理员 PowerShell 执行: Stop-Process -Id <PID> -Force`,
       );
     }
     return;
   }
 
+  // macOS 自带 BSD `fuser`，不支持 `fuser -k <port>/tcp`；Linux 上也可用 `lsof` 精准确认 LISTEN
   try {
-    execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' });
-  } catch {
-    // no process using this port
+    const out = execSync(`lsof -tiTCP:${p} -sTCP:LISTEN`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const pids = [...new Set(out.trim().split(/\n/).filter(Boolean))];
+    for (const pidStr of pids) {
+      const pid = Number(pidStr);
+      if (!Number.isInteger(pid)) continue;
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // ESRCH: already gone
+      }
+    }
+  } catch (err) {
+    const status = err && typeof err === 'object' && 'status' in err ? err.status : null;
+    if (status === 1) {
+      // lsof：无监听该端口的进程
+    } else if (process.platform === 'linux') {
+      try {
+        execSync(`fuser -k ${p}/tcp`, { stdio: 'ignore' });
+      } catch {
+        // no process using this port
+      }
+    }
   }
 }
 

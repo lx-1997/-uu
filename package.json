@@ -25,6 +25,7 @@
     "build:desktop:win:dir": "node scripts/build-desktop.mjs win dir",
     "build:windows:dir": "node scripts/build-desktop.mjs win dir",
     "build:desktop:mac": "node scripts/build-desktop.mjs mac",
+    "build:desktop:mac:local": "node scripts/build-desktop.mjs mac local",
     "build:desktop:linux": "node scripts/build-desktop.mjs linux",
     "verify:desktop:smoke:win": "node scripts/desktop-smoke-check.mjs win",
     "verify:desktop:smoke:mac": "node scripts/desktop-smoke-check.mjs mac",
@@ -122,7 +123,10 @@
           ]
         }
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "entitlements": "build-resources/entitlements.mac.plist",
+      "entitlementsInherit": "build-resources/entitlements.mac.plist"
     },
     "linux": {
       "target": [

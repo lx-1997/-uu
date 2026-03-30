@@ -15,37 +15,39 @@ export default defineConfig(({ mode }) => {
   const apiTarget = `http://localhost:${apiPort}`;
 
   return {
-  // Electron 生产环境用 file:// 加载 dist/index.html，必须用相对路径，否则 /assets/* 会指向盘符根目录导致白屏
-  base: './',
-  /** 避免多份 react 导致 Context（AppProvider）在懒加载子树中失效 */
-  resolve: {
-    dedupe: ['react', 'react-dom'],
-  },
-  define: {
-    'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
-    'import.meta.env.VITE_APP_BUILD_DATE': JSON.stringify(buildDate),
-  },
-  plugins: [react()],
-  server: {
-    port: 5173,
-    host: '0.0.0.0',
-    proxy: {
-      '/api': {
-        target: apiTarget,
-        changeOrigin: true,
-        ws: true,
-      },
+    // 默认 cache 在 node_modules/.vite；若该目录曾因 sudo/npm 以 root 写入导致属主为 root，会出现 EACCES unlink。改到仓库根目录下用户可写目录。
+    cacheDir: path.join(__dirname, '.vite-cache'),
+    // Electron 生产环境用 file:// 加载 dist/index.html，必须用相对路径，否则 /assets/* 会指向盘符根目录导致白屏
+    base: './',
+    /** 避免多份 react 导致 Context（AppProvider）在懒加载子树中失效 */
+    resolve: {
+      dedupe: ['react', 'react-dom'],
     },
-  },
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules/react-dom')) return 'react-dom';
-          if (id.includes('node_modules/react/')) return 'react';
+    define: {
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+      'import.meta.env.VITE_APP_BUILD_DATE': JSON.stringify(buildDate),
+    },
+    plugins: [react()],
+    server: {
+      port: 5173,
+      host: '0.0.0.0',
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
         },
       },
     },
-  },
-};
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/react-dom')) return 'react-dom';
+            if (id.includes('node_modules/react/')) return 'react';
+          },
+        },
+      },
+    },
+  };
 });

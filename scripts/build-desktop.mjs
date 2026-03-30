@@ -19,10 +19,17 @@ const buildStartedAt = Date.now();
 const supportedTargets = new Set(['win', 'mac', 'linux']);
 if (!supportedTargets.has(target)) {
   console.error(`[build:desktop] Invalid target: ${target || '<empty>'}`);
-  console.error('[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir|zip]');
+  console.error(
+    '[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir|zip|local]',
+  );
   process.exit(1);
 }
-if (mode && !(target === 'win' && (mode === 'dir' || mode === 'zip'))) {
+const macLocalSign = target === 'mac' && mode === 'local';
+if (
+  mode &&
+  !(target === 'win' && (mode === 'dir' || mode === 'zip')) &&
+  !macLocalSign
+) {
   console.error(`[build:desktop] Unsupported mode "${mode}" for target "${target}"`);
   process.exit(1);
 }
@@ -240,7 +247,20 @@ try {
         ? ['--win', 'zip']
         : [`--${target}`];
   /** 与 package.json build.win 一致为 x64；在 arm64 Mac 上若省略则会误打 win-arm64。 */
-  const builderArgs = target === 'win' ? [...builderBaseArgs, '--x64'] : builderBaseArgs;
+  let builderArgs = target === 'win' ? [...builderBaseArgs, '--x64'] : builderBaseArgs;
+  if (macLocalSign) {
+    console.warn(
+      '[build:desktop] mac local：使用 ad-hoc 签名（identity=-），仅适合本机/信任环境；勿对外正式发布。',
+    );
+    console.warn(
+      '[build:desktop] 若 .app/.dmg 经浏览器或 AirDrop 传递，可能带隔离属性；可右键「打开」或 xattr -dr com.apple.quarantine <路径>。',
+    );
+    builderArgs = [
+      ...builderArgs,
+      '-c.mac.identity=-',
+      '-c.mac.notarize=false',
+    ];
+  }
   await run(builderBin, builderArgs);
   await runWithEnv(
     process.execPath,
