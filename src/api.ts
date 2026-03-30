@@ -1059,13 +1059,21 @@ export function installDeviceOpenClaw(deviceId: string, password?: string) {
 /**
  * 设备可达性探测（后台轮询用）。不得走 request()：服务端在 ID 不存在时返回 404，
  * 否则会触发全局 rdk-api-error，每十几秒弹一次「设备不存在」。
+ * 须与 request() 一致附带 x-device-password（sessionStorage）及 SSO 镜像头，否则服务端无凭据会恒为 offline，
+ * 而 diagnostics 等走 request() 仍能成功，造成「有指标却显示设备离线」。
  */
 export async function checkDevicePing(deviceId: string): Promise<{ ok: boolean; status: string }> {
   const id = String(deviceId || '').trim();
   if (!id) return { ok: false, status: 'offline' };
   try {
     const url = resolveUrl(`/api/devices/${encodeURIComponent(id)}/ping`);
-    const response = await fetch(url, { method: 'GET' });
+    const headers = new Headers();
+    const remembered = getRememberedDevicePassword(id);
+    if (remembered) {
+      headers.set('x-device-password', remembered);
+    }
+    applySsoMirrorToHeaders(headers);
+    const response = await fetch(url, { method: 'GET', headers, credentials: 'include' });
     const data = (await response.json().catch(() => ({}))) as { ok?: boolean; status?: string };
     if (!response.ok) {
       return { ok: false, status: 'offline' };

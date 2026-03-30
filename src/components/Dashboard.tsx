@@ -189,11 +189,23 @@ export default function Dashboard() {
     };
   }, []);
 
+  /** 设备已判定离线时立即清空指标，避免关机后仍显示上一次的 MEM/TEMP/uptime */
+  useEffect(() => {
+    if (!currentDevice || isDeviceShownOnline(currentDevice)) return;
+    setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+  }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
+
   useEffect(() => {
     if (!currentDevice) return;
     const deviceId = currentDevice.id;
     let cancelled = false;
     const load = () => {
+      if (!isDeviceShownOnline(currentDevice)) {
+        if (!cancelled) {
+          setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+        }
+        return;
+      }
       fetchDeviceDiagnostics(deviceId)
         .then((r) => {
           if (cancelled) return;
@@ -221,7 +233,7 @@ export default function Dashboard() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [currentDevice?.id]);
+  }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
 
   const partnerSkillSyncedRef = useRef<Set<string>>(new Set());
 

@@ -2168,8 +2168,11 @@ app.post('/api/devices/verify', async (request, response) => {
 });
 
 const devicePingCache = new Map<string, { status: string; expiresAt: number }>();
-/** SSH 握手比 TCP 重，略延长缓存减轻轮询压力 */
-const PING_CACHE_TTL_MS = 5000;
+/** 仅缓存「不可达」结果，减轻对关机设备的重复 TCP/SSH；成功不缓存，避免关机后仍返回已连接 */
+const PING_FAIL_CACHE_TTL_MS = 4000;
+
+/** UI 轮询用：较短握手超时，关机后尽快失败（verifySshConnection 默认 30s 会导致长时间误判在线） */
+const PING_SSH_READY_TIMEOUT_MS = 8000;
 
 /**
  * 与 UI「设备在线」一致：须能使用当前可用凭据完成 SSH 认证（verifySshConnection）。
@@ -2181,30 +2184,32 @@ app.get('/api/devices/:id/ping', async (request, response) => {
   if (!device) return;
 
   const cached = devicePingCache.get(id);
-  if (cached && cached.expiresAt > Date.now()) {
-    response.json({ ok: cached.status === 'connected', status: cached.status });
+  if (cached && cached.expiresAt > Date.now() && cached.status === 'offline') {
+    response.json({ ok: false, status: 'offline' });
     return;
   }
 
   const { password } = resolvePassword(request, device);
   const pwd = String(password ?? '').trim();
   if (!pwd) {
-    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_CACHE_TTL_MS });
+    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_FAIL_CACHE_TTL_MS });
     response.json({ ok: false, status: 'offline' });
     return;
   }
 
   try {
-    await verifySshConnection({
-      host: device.host,
-      port: device.port ?? 22,
-      username: device.username,
-      password: pwd,
-    });
-    devicePingCache.set(id, { status: 'connected', expiresAt: Date.now() + PING_CACHE_TTL_MS });
+    await verifySshConnection(
+      {
+        host: device.host,
+        port: device.port ?? 22,
+        username: device.username,
+        password: pwd,
+      },
+      { readyTimeoutMs: PING_SSH_READY_TIMEOUT_MS },
+    );
     response.json({ ok: true, status: 'connected' });
   } catch {
-    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_CACHE_TTL_MS });
+    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_FAIL_CACHE_TTL_MS });
     response.json({ ok: false, status: 'offline' });
   }
 });

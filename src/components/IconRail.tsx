@@ -4,7 +4,9 @@ import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import StudioVersionFooter from './StudioVersionFooter';
 import { isDeviceShownOnline } from '../utils/device-connection';
+import { isDesktop } from '../utils/env';
 import { useConfirmRemoveDevice } from '../hooks/useConfirmRemoveDevice';
+import DesktopChatSessionsPanel from './DesktopChatSessionsPanel';
 
 interface NavItemDef {
   tab: Tab;
@@ -49,6 +51,10 @@ const CAPABILITY_ITEMS: NavItemDef[] = [
     paths: ['M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3'] },
 ];
 
+/** 工作台置顶；桌面端「AI 对话」插在 dashboard 与后续项之间 */
+const DASHBOARD_NAV: NavItemDef[] = [NAV_ITEMS[0]];
+const NAV_ITEMS_AFTER_DASHBOARD: NavItemDef[] = NAV_ITEMS.slice(1);
+
 /** 与 prepare:build-resources 写入的 `public/branding/icon.png` 一致；`base: './'` 下需相对根 */
 const RAIL_BRAND_SRC = `${import.meta.env.BASE_URL}branding/icon.png`;
 
@@ -74,6 +80,7 @@ export default function IconRail() {
   const { t } = useI18n();
 
   const [showDevicePanel, setShowDevicePanel] = useState(false);
+  const [showChatSessionsPanel, setShowChatSessionsPanel] = useState(false);
   const [railLogoFailed, setRailLogoFailed] = useState(false);
   const onRailLogoError = useCallback(() => setRailLogoFailed(true), []);
   const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
@@ -112,7 +119,26 @@ export default function IconRail() {
         </button>
 
         <div className="rail-nav">
-          {renderGroup(NAV_ITEMS)}
+          {renderGroup(DASHBOARD_NAV)}
+          {isDesktop() && (
+            <button
+              type="button"
+              className={`rail-btn rail-chat-sessions-btn ${showChatSessionsPanel ? 'active' : ''}`}
+              aria-label={t('rail.chatSessions.short', 'AI 对话')}
+              data-tooltip={!railExpanded ? t('rail.chatSessions.tooltip', 'AI 对话（按设备切换）') : undefined}
+              aria-pressed={showChatSessionsPanel}
+              onClick={() => {
+                setShowDevicePanel(false);
+                setShowChatSessionsPanel((p) => !p);
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+              </svg>
+              {railExpanded && <span className="rail-label">{t('rail.chatSessions.short', 'AI 对话')}</span>}
+            </button>
+          )}
+          {renderGroup(NAV_ITEMS_AFTER_DASHBOARD)}
           <div className="rail-separator" />
           {renderGroup(CONNECT_ITEMS)}
           <div className="rail-separator" />
@@ -136,7 +162,10 @@ export default function IconRail() {
           <button
             className="rail-btn"
             data-tooltip={!railExpanded ? (currentDevice ? currentDevice.name : t('rail.pickDevice', '选择设备')) : undefined}
-            onClick={() => setShowDevicePanel(!showDevicePanel)}
+            onClick={() => {
+              setShowChatSessionsPanel(false);
+              setShowDevicePanel(!showDevicePanel);
+            }}
           >
             <span className={`rail-device-dot ${deviceOnline ? 'online' : 'offline'}`} />
             {railExpanded && <span className="rail-label">{currentDevice ? currentDevice.name : t('rail.device', '设备')}</span>}
@@ -195,6 +224,11 @@ export default function IconRail() {
           </button>
         </div>
       </nav>
+
+      <DesktopChatSessionsPanel
+        open={showChatSessionsPanel}
+        onClose={() => setShowChatSessionsPanel(false)}
+      />
 
       {showDevicePanel && (
         <>

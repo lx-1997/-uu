@@ -38,8 +38,8 @@ function removeVerifiedId(id: string) {
 import { useToastStore } from './useToastStore';
 import { useAuth } from './useAuth';
 
-/** 后台 ping 连续失败多少次后才将设备标为离线，减轻偶发网络抖动导致的「在线/离线」闪烁 */
-const PING_FAILS_BEFORE_OFFLINE = 3;
+/** 后台 ping 连续失败多少次后才标离线；过大会导致关机后长时间仍显示「已连接」 */
+const PING_FAILS_BEFORE_OFFLINE = 2;
 
 const DEVICES_CACHE_KEY = 'rdk-studio-devices-cache-v1';
 
@@ -348,7 +348,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
     const timer = setInterval(() => {
       void pingAll();
-    }, 15000);
+    }, 10000);
     void pingAll();
 
     return () => { cancelled = true; clearInterval(timer); };

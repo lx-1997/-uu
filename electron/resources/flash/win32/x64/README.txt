@@ -22,3 +22,6 @@ Windows 烧录工具（与 rdkstudio_frontend flash/win32/x64 用法一致）
   - 你在打 Windows 包前须保证本目录已有 dd.exe、ls.exe、msys-2.0.dll；npm run build:desktop:win 会自动尝试 copy:win-flash。
   - 在 Mac/Linux 上交叉打 win 包时无法自动复制，请先在 Windows 上生成并提交本目录，或从仓库拉取已提交的完整目录。
   - 缺文件仍允许打包时会有警告；若要在 CI 里缺文件直接失败：RDK_DESKTOP_STRICT_WIN_FLASH=1
+
+烧录页枚举设备（开发调试用）：
+  - 默认仅用 Get-Disk + /dev/sd* 推导，已关闭慢速 ls 扫描；需与旧版完全一致盘符前缀名称时可设 RDK_FLASH_LS_ENRICH=1（会变慢）。

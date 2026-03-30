@@ -56,6 +56,15 @@ export const EN: Record<string, string> = {
   'rail.version.label': 'About',
   'rail.version.open': 'Open version and release notes',
 
+  'rail.chatSessions.short': 'AI Chat',
+  'rail.chatSessions.tooltip': 'AI chat (switch by device)',
+  'rail.chatSessions.title': 'AI Chat',
+  'rail.chatSessions.hint': 'One chat window per device; adding a device adds another chat.',
+  'rail.chatSessions.global': 'Unbound / Global',
+  'rail.chatSessions.globalDesc': 'Conversation when no device is selected',
+  'rail.chatSessions.emptyDevices': 'No devices yet. Add a board to start a device-scoped chat.',
+  'rail.chatSessions.addDevice': '+ Add device (new chat window)',
+
   'version.modal.title': 'About RDK Studio',
   'version.modal.subtitle': 'Version & product',
   'version.modal.features': 'Features',

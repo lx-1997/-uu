@@ -19,7 +19,16 @@ export interface RunRemoteCommandOptions {
   timeoutMs?: number;
 }
 
-export function verifySshConnection(credentials: SshCredentials) {
+export interface VerifySshConnectionOptions {
+  /** 默认 30s；轮询 ping 等场景用较短值，避免关机后长时间卡在握手 */
+  readyTimeoutMs?: number;
+}
+
+export function verifySshConnection(credentials: SshCredentials, options?: VerifySshConnectionOptions) {
+  const readyTimeout = Number.isFinite(options?.readyTimeoutMs)
+    ? Math.max(2000, Number(options?.readyTimeoutMs))
+    : SSH_READY_TIMEOUT_MS;
+
   return new Promise<void>((resolve, reject) => {
     const client = new Client();
 
@@ -36,7 +45,7 @@ export function verifySshConnection(credentials: SshCredentials) {
         port: credentials.port ?? 22,
         username: credentials.username,
         password: credentials.password,
-        readyTimeout: SSH_READY_TIMEOUT_MS,
+        readyTimeout,
       });
   });
 }

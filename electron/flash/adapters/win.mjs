@@ -438,30 +438,53 @@ export function getCapabilities() {
   };
 }
 
+/**
+ * 纯文本行输出，避免 Get-Disk | ConvertTo-Json 在部分机器上明显变慢。
+ * 每行：Number ### FriendlyName ### BusType ### Size ### OperationalStatus（### 分隔，避免 FriendlyName 含制表符）
+ */
 async function listDrivesPowerShell() {
-  const script = `$drives = Get-Disk | Select-Object Number,FriendlyName,BusType,Size,IsBoot,IsSystem,OperationalStatus,Path; $drives | ConvertTo-Json -Depth 3`;
+  const script = String.raw`Get-Disk | Where-Object { -not $_.IsSystem -and -not $_.IsBoot } | ForEach-Object {
+  $fn = if ($null -eq $_.FriendlyName) { '' } else { [string]$_.FriendlyName -replace '\r?\n', ' ' }
+  "$($_.Number)###$fn###$($_.BusType)###$($_.Size)###$($_.OperationalStatus)"
+}`;
   const output = await runPowerShell(script);
   if (!output) return [];
-  const parsed = JSON.parse(output);
-  const arr = Array.isArray(parsed) ? parsed : [parsed];
-  return arr
-    .filter((item) => !item.IsSystem && !item.IsBoot)
-    .map((item) => ({
-      id: String(item.Number),
-      path: `\\\\.\\PhysicalDrive${item.Number}`,
-      label: item.FriendlyName || `PhysicalDrive${item.Number}`,
-      size: item.Size || '',
-      sizeBytes: Number(item.Size || 0),
-      bus: item.BusType || '',
-      mediaType: item.OperationalStatus || '',
-      removable: ['USB', 'SD', 'MMC'].includes(String(item.BusType || '').toUpperCase()),
-    }));
+  const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows = [];
+  for (const line of lines) {
+    const parts = line.split('###');
+    if (parts.length < 5) {
+      continue;
+    }
+    const num = Number(parts[0]);
+    if (!Number.isFinite(num)) {
+      continue;
+    }
+    const friendlyName = parts[1] || '';
+    const busType = parts[2] || '';
+    const sizeBytes = Number(parts[3]) || 0;
+    const opStatus = parts[4] || '';
+    rows.push({
+      id: String(num),
+      path: `\\\\.\\PhysicalDrive${num}`,
+      label: friendlyName || `PhysicalDrive${num}`,
+      size: sizeBytes ? String(sizeBytes) : '',
+      sizeBytes,
+      bus: busType,
+      mediaType: opStatus,
+      removable: ['USB', 'SD', 'MMC'].includes(String(busType || '').toUpperCase()),
+    });
+  }
+  return rows;
 }
 
 /**
  * 有烧录捆绑时：以 Get-Disk 为权威列表（容量、总线、可移动），保证每次都能列出盘。
- * `/dev/sd*` 由 PhysicalDrive 序号推导（与 MSYS/dd 一致）；ls 仅用于丰富名称（与 rdkstudio_frontend 同源），
- * 避免因 ls/by-id 里「usb」配对失败而出现「刷不出 /dev/sdb」。
+ * `/dev/sd*` 由 PhysicalDrive 序号推导（与 MSYS/dd 一致）。
+ *
+ * 默认不再调用 listUsbDevicesViaLs（多次 execFileSync(ls)，在部分机器上极慢）；
+ * 路径与 FriendlyName 已足够烧录与展示。若需与旧版前端完全一致的盘符前缀名称，可设环境变量
+ * RDK_FLASH_LS_ENRICH=1（会变慢）。
  */
 export async function listDrives() {
   const ps = await listDrivesPowerShell();
@@ -471,20 +494,23 @@ export async function listDrives() {
 
   /** @type {Map<string, { device: string, name: string }>} */
   const byPhys = new Map();
-  try {
-    const pairs = listUsbDevicesViaLs();
-    for (const p of pairs) {
-      const phys = msysDeviceToPhysicalDrive(p.device);
-      if (!phys) {
-        continue;
+  const enrichLs = String(process.env.RDK_FLASH_LS_ENRICH || '').trim() === '1';
+  if (enrichLs) {
+    try {
+      const pairs = listUsbDevicesViaLs();
+      for (const p of pairs) {
+        const phys = msysDeviceToPhysicalDrive(p.device);
+        if (!phys) {
+          continue;
+        }
+        const key = normalizeWinPhysicalDrivePath(phys);
+        if (!byPhys.has(key)) {
+          byPhys.set(key, { device: p.device, name: p.name });
+        }
       }
-      const key = normalizeWinPhysicalDrivePath(phys);
-      if (!byPhys.has(key)) {
-        byPhys.set(key, { device: p.device, name: p.name });
-      }
+    } catch (e) {
+      console.warn('[win flash] listUsbDevicesViaLs failed (ignored, using Get-Disk + msys path):', e);
     }
-  } catch (e) {
-    console.warn('[win flash] listUsbDevicesViaLs failed (ignored, using Get-Disk + msys path):', e);
   }
 
   return ps.map((d) => {
