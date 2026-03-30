@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { isDesktop as checkIsDesktop } from '../utils/env';
 import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
+import { FLASHER_MENTION_SESSION_KEY, type FlasherMentionContext } from '../constants/dock-mention-capabilities';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 
@@ -199,7 +200,7 @@ function normalizeStageToPhase(stage: string | undefined): FlashPhase {
    Component
    ═══════════════════════════════════════════════════════════ */
 export default function Flasher() {
-  const { setActiveTab, addToast } = useAppState();
+  const { setActiveTab, addToast, activeTab } = useAppState();
   const { t, language } = useI18n();
   const tf = useCallback(
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
@@ -410,6 +411,40 @@ export default function Flasher() {
     }
   }, []);
 
+  /** AI Dock @烧写：带上下文切换到本页时应用一次 */
+  useEffect(() => {
+    if (activeTab !== 'flasher') return;
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(FLASHER_MENTION_SESSION_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(FLASHER_MENTION_SESSION_KEY);
+    } catch {
+      return;
+    }
+    let ctx: FlasherMentionContext;
+    try {
+      ctx = JSON.parse(raw) as FlasherMentionContext;
+    } catch {
+      return;
+    }
+    if (!ctx.deviceKey || !DEVICE_LIST.some((d) => d.key === ctx.deviceKey)) return;
+    const dev = DEVICE_LIST.find((d) => d.key === ctx.deviceKey);
+    if (dev?.disabled) return;
+
+    setSelectedDeviceKey(ctx.deviceKey);
+    const list = IMAGE_LIST[resolveImageKey(ctx.deviceKey)] ?? [];
+    if (ctx.deviceKey === 's100') {
+      setSelectedImageKey('');
+    } else if (list[0]) {
+      setSelectedImageKey(list[0].key);
+    }
+    setUseLocalImage(Boolean(ctx.preferLocalImage));
+    setLocalImagePath('');
+    setStep(1);
+    addToast(t('dock.mention.flash.applied', '已应用来自输入框 @烧写 的选择'), 'info');
+  }, [activeTab, addToast, t]);
+
   /* ── device selection ── */
   const chooseDevice = (key: string) => {
     const dev = DEVICE_LIST.find((d) => d.key === key);
@@ -464,8 +499,9 @@ export default function Flasher() {
       } else {
         addToast(t('flasher.toast.noDrives', '未检测到可用 SD/eMMC 目标盘'), 'warning');
       }
-    } catch (e: any) {
-      setError(e?.message || t('flasher.err.scanException', '磁盘扫描异常'));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || t('flasher.err.scanException', '磁盘扫描异常'));
     }
   };
 
@@ -588,14 +624,21 @@ export default function Flasher() {
     setPhase('decompressing');
     setProgress(0);
     appendLog(t('flasher.log.decompressStart', '开始解压镜像...'));
-    const result = await window.rdkDesktop.flashDecompressImage({ filePath });
-    if (!result.ok) {
-      setError(result.error || t('flasher.err.decompressFail', '解压失败'));
+    try {
+      const result = await window.rdkDesktop.flashDecompressImage({ filePath });
+      if (!result.ok) {
+        setError(result.error || t('flasher.err.decompressFail', '解压失败'));
+        setPhase('error');
+        return null;
+      }
+      appendLog(t('flasher.log.decompressDone', '解压完成'));
+      return result.outputPath ?? null;
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || t('flasher.err.decompressFail', '解压失败'));
       setPhase('error');
       return null;
     }
-    appendLog(t('flasher.log.decompressDone', '解压完成'));
-    return result.outputPath ?? null;
   };
 
   /* ── execute flash (TF card via dd) ── */
@@ -664,8 +707,8 @@ export default function Flasher() {
       setPhase('done');
       addToast(t('flasher.toast.writeDone', '镜像写盘完成'), 'success');
       /* 保留在步骤 3，由用户点「完成 →」再进入写盘完成页，避免成功瞬间自动跳转 */
-    } catch (e: any) {
-      const rawMsg = e?.message || t('flasher.err.writeFail', '写盘失败');
+    } catch (e: unknown) {
+      const rawMsg = (e instanceof Error ? e.message : String(e)) || t('flasher.err.writeFail', '写盘失败');
       const msg = dedupeFlashErrorDisplayText(rawMsg);
       const userCancelled = isFlashUserCancelled(msg);
       setError(userCancelled ? '' : msg);

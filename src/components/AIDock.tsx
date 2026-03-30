@@ -13,6 +13,13 @@ import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText } from '../utils/chat-message-plain';
 import { ChatHistoryModal } from './ChatHistoryModal';
+import { DockFlashMentionWizard } from './DockFlashMentionWizard';
+import {
+  DOCK_MENTION_CAPABILITIES,
+  filterMentionCapabilities,
+  parseTrailingAtMention,
+  type DockMentionCapabilityId,
+} from '../constants/dock-mention-capabilities';
 import io from 'socket.io-client';
 
 /* ─── Inline SVG icons (avoid emoji, keep crisp) ─── */
@@ -43,6 +50,12 @@ const Icon = {
   close: (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
+  flash: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2h8l4 4v16a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2z"/>
+      <path d="M10 10h4M10 14h4"/>
     </svg>
   ),
   robot: (
@@ -370,7 +383,7 @@ function BlockRenderer({
             className="chat-panel-action"
             title={t('dock.terminal.copyAllTitle', '复制全部输出')}
             onClick={() => {
-              void copyDockPlainText(block.lines.join('\n')).then(() => {});
+              void copyDockPlainText(block.lines.join('\n'));
             }}
           >
             {t('dock.terminal.copyOut', '复制输出')}
@@ -437,7 +450,7 @@ function BlockRenderer({
             className="chat-panel-action"
             title={t('dock.terminal.copyAllTitle', '复制全部输出')}
             onClick={() => {
-              void copyDockPlainText(block.lines.join('\n')).then(() => {});
+              void copyDockPlainText(block.lines.join('\n'));
             }}
           >
             {t('dock.terminal.copyOut', '复制输出')}
@@ -513,7 +526,7 @@ function BlockRenderer({
             src={imgUrl}
             alt={block.caption || t('dock.image.alt', '设备图片')}
             loading="lazy"
-            onClick={() => window.open(imgUrl, '_blank')}
+            onClick={() => window.open(imgUrl, '_blank', 'noopener,noreferrer')}
           />
           {block.caption && <div className="image-block-caption">{block.caption}</div>}
         </div>
@@ -741,7 +754,7 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
     return (
       <div className="chat-attachment chat-attachment-image">
         {attachment.url ? (
-          <img src={attachment.url} alt={attachment.name} loading="lazy" onClick={() => window.open(attachment.url, '_blank')} />
+          <img src={attachment.url} alt={attachment.name} loading="lazy" onClick={() => window.open(attachment.url, '_blank', 'noopener,noreferrer')} />
         ) : (
           <div className="file-attachment-info">
             <span className="file-attachment-name">{attachment.name}</span>
@@ -831,6 +844,38 @@ export default function AIDock() {
     currentDevice, addToast, language, setLanguage,
   } = useAppState();
   const { t, isEn } = useI18n();
+  const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
+  const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
+
+  const mentionParse = useMemo(() => parseTrailingAtMention(cmd), [cmd]);
+  const filteredMentionCaps = useMemo(() => {
+    if (!mentionParse) return [];
+    return filterMentionCapabilities(DOCK_MENTION_CAPABILITIES, mentionParse.query, isEn);
+  }, [mentionParse, isEn]);
+  const mentionMenuActive = Boolean(mentionParse);
+
+  useLayoutEffect(() => {
+    if (!mentionMenuActive) return;
+    setMentionHighlightIdx((i) => {
+      const n = filteredMentionCaps.length;
+      if (n <= 0) return 0;
+      return Math.min(i, n - 1);
+    });
+  }, [mentionMenuActive, filteredMentionCaps.length]);
+
+  const pickMentionCapability = useCallback(
+    (id: DockMentionCapabilityId) => {
+      if (!mentionParse) return;
+      const prefix = cmd.slice(0, mentionParse.atIndex).trimEnd();
+      setCmd(prefix);
+      setShowSuggestions(false);
+      if (id === 'flash') {
+        setDockFlashWizardOpen(true);
+      }
+    },
+    [cmd, mentionParse, setCmd, setShowSuggestions],
+  );
+
   const tfDock = useCallback(
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
     [t],
@@ -898,6 +943,7 @@ export default function AIDock() {
   const audioChunksRef = useRef<Blob[]>([]);
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const voiceTranscriptRef = useRef('');
+  const isRecordingRef = useRef(false);
 
   useEffect(() => {
     if (!inputContextMenu) return;
@@ -1033,6 +1079,15 @@ export default function AIDock() {
     });
   }, []);
 
+  /* 组件卸载时 revoke 所有未清理的 ObjectURL，防止内存泄漏 */
+  const pendingAttachmentsRef = useRef(pendingAttachments);
+  pendingAttachmentsRef.current = pendingAttachments;
+  useEffect(() => {
+    return () => {
+      pendingAttachmentsRef.current.forEach(a => URL.revokeObjectURL(a.url));
+    };
+  }, []);
+
   const handleFilePick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -1098,6 +1153,7 @@ export default function AIDock() {
       speechRecognitionRef.current?.stop();
       mediaRecorderRef.current?.stop();
       setIsRecording(false);
+      isRecordingRef.current = false;
       return;
     }
     try {
@@ -1132,8 +1188,9 @@ export default function AIDock() {
           };
           recognition.onerror = () => null;
           recognition.onend = () => {
-            if (isRecording) {
+            if (isRecordingRef.current) {
               setIsRecording(false);
+              isRecordingRef.current = false;
             }
           };
           recognition.start();
@@ -1163,6 +1220,7 @@ export default function AIDock() {
       recorder.start();
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
+      isRecordingRef.current = true;
     } catch {
       addToast(t('dock.mic.denied', '无法访问麦克风，请检查浏览器或桌面端权限'), 'warning');
     }
@@ -1467,6 +1525,7 @@ export default function AIDock() {
         attachments: attachmentPayloads,
         displayAttachments,
       });
+      pendingAttachments.forEach(a => URL.revokeObjectURL(a.url));
       setPendingAttachments([]);
       setRecordingTranscript('');
     } catch (error) {
@@ -1745,7 +1804,7 @@ export default function AIDock() {
       )}
 
       {/* Suggestions (idle) */}
-      {showSuggestions && !chatExpanded && filteredSuggestions.length > 0 && (
+      {showSuggestions && !chatExpanded && !mentionMenuActive && filteredSuggestions.length > 0 && (
         <div className="dock-suggestions" style={{ position: 'relative' }}>
           {filteredSuggestions.slice(0, 6).map((s, i) => (
             <div key={i} className="dock-suggestion-item" onMouseDown={() => { setCmd(s.text); setShowSuggestions(false); }}>
@@ -1763,6 +1822,31 @@ export default function AIDock() {
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
       >
+        {mentionMenuActive && (
+          <div className="dock-mention-menu" role="listbox" aria-label={t('dock.mention.aria', '调用能力')}>
+            {filteredMentionCaps.length === 0 ? (
+              <div className="dock-mention-empty">{t('dock.mention.empty', '无匹配能力')}</div>
+            ) : (
+              filteredMentionCaps.map((cap, i) => (
+                <div
+                  key={cap.id}
+                  role="option"
+                  aria-selected={i === mentionHighlightIdx}
+                  className={`dock-mention-item ${i === mentionHighlightIdx ? 'active' : ''}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pickMentionCapability(cap.id);
+                  }}
+                  onMouseEnter={() => setMentionHighlightIdx(i)}
+                >
+                  <span className="dock-mention-icon">{cap.id === 'flash' ? Icon.flash : Icon.spark}</span>
+                  <span className="dock-mention-label">{isEn ? cap.labelEn : cap.labelZh}</span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
         {pendingAttachments.length > 0 && (
           <div className="dock-attachments">
             {pendingAttachments.map(att => (
@@ -1815,9 +1899,40 @@ export default function AIDock() {
               e.preventDefault();
               setInputContextMenu({ x: e.clientX, y: e.clientY });
             }}
-            onFocus={() => { setInputFocused(true); if (!chatExpanded) setShowSuggestions(true); }}
+            onFocus={() => {
+              setInputFocused(true);
+              if (!chatExpanded && !parseTrailingAtMention(cmd)) setShowSuggestions(true);
+            }}
             onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
-            onKeyDown={(e) => { if (e.key === 'Escape' && chatExpanded) { closeDock(); e.preventDefault(); } }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && chatExpanded) {
+                closeDock();
+                e.preventDefault();
+                return;
+              }
+              if (mentionMenuActive && filteredMentionCaps.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setMentionHighlightIdx((h) => (h + 1) % filteredMentionCaps.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setMentionHighlightIdx((h) => (h - 1 + filteredMentionCaps.length) % filteredMentionCaps.length);
+                  return;
+                }
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const cap = filteredMentionCaps[mentionHighlightIdx];
+                  if (cap) pickMentionCapability(cap.id);
+                  return;
+                }
+              }
+              if (mentionMenuActive && e.key === 'Escape') {
+                e.preventDefault();
+                if (mentionParse) setCmd(cmd.slice(0, mentionParse.atIndex));
+              }
+            }}
           />
 
           {cmd.trim() && (
@@ -1944,6 +2059,14 @@ export default function AIDock() {
       devices={devices}
       preferredDeviceId={currentDevice?.id}
       t={t}
+    />
+    <DockFlashMentionWizard
+      open={dockFlashWizardOpen}
+      onClose={() => setDockFlashWizardOpen(false)}
+      setActiveTab={setActiveTab}
+      addToast={addToast}
+      t={t}
+      isEn={isEn}
     />
     </>
   );
