@@ -52,12 +52,16 @@ export function persistOpenClawHealthSnapshot(
 /** OpenClaw 页顶栏 /status 回调用 */
 export function persistGatewayStatusSnapshot(
   deviceId: string | undefined,
-  data: { running: boolean; version: string; feishuConnected: boolean },
+  data: { running: boolean; version: string; installed?: boolean; feishuConnected: boolean },
 ) {
   if (!deviceId?.trim()) return;
   writeMerged(deviceId.trim(), {
     source: 'openclaw-status',
-    gateway: { running: data.running, version: data.version },
+    gateway: {
+      running: data.running,
+      version: data.version,
+      ...(typeof data.installed === 'boolean' ? { installed: data.installed } : {}),
+    },
     feishuConnected: data.feishuConnected,
   });
 }

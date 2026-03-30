@@ -35,6 +35,8 @@ export interface Device {
 export interface GatewayStatus {
   running: boolean;
   version: string;
+  /** true when `openclaw --version` succeeds（与网关进程是否监听 18789 无关） */
+  installed: boolean;
   feishuConnected: boolean;
   weixinConnected: boolean;
 }
@@ -731,7 +733,7 @@ export class OpenClawDeploymentManager {
 
   getGatewayStatus(device: Device, onResult: (status: GatewayStatus) => void, onOutput?: (chunk: string) => void): void {
     const pyScript = `import json, os, subprocess
-result = {"running": False, "version": "", "feishuConnected": False, "weixinConnected": False}
+result = {"running": False, "version": "", "installed": False, "feishuConnected": False, "weixinConnected": False}
 try:
     import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -746,6 +748,7 @@ try:
     env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + env.get("PATH", "")
     out = subprocess.check_output(["openclaw", "--version"], env=env, stderr=subprocess.DEVNULL, timeout=5).decode().strip()
     result["version"] = out
+    result["installed"] = bool(out)
 except:
     pass
 try:
@@ -774,7 +777,7 @@ print(json.dumps(result))`;
           return;
         } catch (_) {}
       }
-      onResult({ running: false, version: '', feishuConnected: false, weixinConnected: false });
+      onResult({ running: false, version: '', installed: false, feishuConnected: false, weixinConnected: false });
     });
   }
 

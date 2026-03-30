@@ -54,6 +54,7 @@ export interface StudioUiHints {
   gateway?: {
     running?: boolean;
     version?: string;
+    installed?: boolean;
   };
   /** 板端网关侧飞书插件是否连上（与 Studio→飞书机器人通道不是同一概念，勿混为一谈） */
   feishuConnected?: boolean;

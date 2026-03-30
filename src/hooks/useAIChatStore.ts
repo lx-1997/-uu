@@ -1948,10 +1948,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       try {
         const res = await fetchApi(`/api/devices/${encodeURIComponent(id)}/openclaw/status`);
         if (cancelled || !res.ok) return;
-        const data = (await res.json()) as { running?: boolean; version?: string; feishuConnected?: boolean };
+        const data = (await res.json()) as { running?: boolean; version?: string; installed?: boolean; feishuConnected?: boolean };
         persistGatewayStatusSnapshot(id, {
           running: !!data.running,
           version: typeof data.version === 'string' ? data.version : '',
+          installed: !!(data.installed ?? (typeof data.version === 'string' && !!data.version.trim())),
           feishuConnected: !!data.feishuConnected,
         });
       } catch {

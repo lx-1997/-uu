@@ -286,10 +286,15 @@ export default function OnboardingWizard() {
             gw: status?.gatewayRunning ? tRef.current('onboard.log.running', '运行中') : tRef.current('onboard.log.stopped', '未运行'),
             summary: status?.summary || '',
           })}\n`);
-          if (status?.gatewayRunning) {
-            addToast(tRef.current('onboard.deploy.done', 'OpenClaw 部署完成'), 'success');
+          if (status?.installed) {
+            addToast(
+              status.gatewayRunning
+                ? tRef.current('onboard.deploy.done', 'OpenClaw 部署完成')
+                : tRef.current('onboard.deploy.doneNoGw', 'OpenClaw 已安装完成；对话前请启动网关'),
+              'success',
+            );
           } else {
-            addToast(tRef.current('onboard.deploy.gwNotReady', '部署完成，但网关未就绪，请点击“启动网关”'), 'warning');
+            addToast(tRef.current('onboard.deploy.verifyNotInstalled', '部署流程结束，但未检测到 OpenClaw CLI，请查看日志'), 'warning');
           }
         })
         .catch(() => {

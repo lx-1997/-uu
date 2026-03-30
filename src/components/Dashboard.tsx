@@ -370,17 +370,17 @@ export default function Dashboard() {
             RDKClaw
           </span>
           <span
-            className={`lp-pill ${openclawHealth?.gatewayRunning ? 'ok' : ''}`}
+            className={`lp-pill ${openclawHealth?.installed || openclawHealth?.gatewayRunning ? 'ok' : ''}`}
             title={t(
               'dashboard.openclawPillHint',
-              '板端 OpenClaw：网关进程是否在运行（SSH 拉取板端健康检查）',
+              '板端 OpenClaw：CLI 已安装或网关运行中（SSH 健康检查）；网关未起时仍可显示已安装',
             )}
           >
             <span
               className={`status-dot ${
                 openclawHealth == null
                   ? 'warn'
-                  : openclawHealth.gatewayRunning
+                  : openclawHealth.installed || openclawHealth.gatewayRunning
                     ? 'online'
                     : 'offline'
               }`}

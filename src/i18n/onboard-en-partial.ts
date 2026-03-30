@@ -130,6 +130,8 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.log.running': 'running',
   'onboard.log.stopped': 'stopped',
   'onboard.deploy.done': 'OpenClaw deploy complete',
+  'onboard.deploy.doneNoGw': 'OpenClaw install complete — start gateway before chat',
+  'onboard.deploy.verifyNotInstalled': 'Deploy finished but OpenClaw CLI not detected — check logs',
   'onboard.deploy.gwNotReady': 'Deploy finished but gateway not up — tap “Start gateway”',
   'onboard.deploy.verifyFail': 'Deploy finished but verify failed — retry shortly',
   'onboard.toast.needModelFirst': 'Finish model config before one-click deploy',

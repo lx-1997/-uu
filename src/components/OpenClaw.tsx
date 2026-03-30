@@ -23,6 +23,8 @@ import io from 'socket.io-client';
 interface GatewayStatus {
   running: boolean;
   version: string;
+  /** 与后端 GatewayStatus.installed 一致；旧响应可能缺省，用 version 兜底 */
+  installed?: boolean;
   feishuConnected: boolean;
   weixinConnected?: boolean;
 }
@@ -172,6 +174,11 @@ export default function OpenClaw() {
   const [loading, setLoading] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
 
+  const ocInstalled = useMemo(
+    () => !!(status?.installed ?? status?.version?.trim()),
+    [status],
+  );
+
   // ─── Chat State (persisted per device) ───
   const chatStorageKey = currentDevice ? `oc-chat-${currentDevice.id}` : '';
   const [chatMessages, setChatMessagesRaw] = useState<ChatMessage[]>(() => {
@@ -320,7 +327,7 @@ export default function OpenClaw() {
           }
         }
         setShowSetupGuide(true);
-        setSetupStep('gateway');
+        setSetupStep('model');
         setPanelOpen(true);
       }, 1200);
       return;
@@ -364,7 +371,9 @@ export default function OpenClaw() {
 
   useEffect(() => {
     if (!currentDevice || activeTab !== 'openclaw') return;
-    if (status?.running) {
+    if (statusLoading) return;
+    const installed = !!(status?.installed ?? status?.version?.trim());
+    if (installed) {
       setShowDeployGuideModal(false);
       if (ocDeployGuideModalKey) {
         try {
@@ -389,12 +398,13 @@ export default function OpenClaw() {
     if (saved !== 'dismissed') {
       setShowDeployGuideModal(true);
     }
-  }, [activeTab, currentDevice, ocDeployGuideModalKey, status?.running]);
+  }, [activeTab, currentDevice, ocDeployGuideModalKey, status?.installed, status?.version, statusLoading]);
 
   useEffect(() => {
     if (status !== null && config !== null && needsSetup()) {
       setShowSetupGuide(true);
-      if (!status.running) {
+      const installed = !!(status?.installed ?? status?.version?.trim());
+      if (!installed) {
         setSetupStep('gateway');
       } else if (!config.modelGateway?.baseUrl || !config.modelGateway?.apiKey) {
         setSetupStep('model');
@@ -516,10 +526,12 @@ export default function OpenClaw() {
       }
       const data = await res.json();
       setStatus(data);
+      const st = data as GatewayStatus;
       persistGatewayStatusSnapshot(currentDevice.id, {
-        running: !!data.running,
-        version: typeof data.version === 'string' ? data.version : '',
-        feishuConnected: !!data.feishuConnected,
+        running: !!st.running,
+        version: typeof st.version === 'string' ? st.version : '',
+        installed: !!(st.installed ?? st.version?.trim()),
+        feishuConnected: !!st.feishuConnected,
       });
       return data;
     } catch (e: any) {
@@ -996,11 +1008,11 @@ export default function OpenClaw() {
   };
 
   const getSetupStatus = (): SetupStatus => {
-    const gwOk = !!status?.running;
+    const installed = !!(status?.installed ?? status?.version?.trim());
     const modelOk = !!(config?.modelGateway?.baseUrl && config?.modelGateway?.apiKey);
     const feishuOk = !!(config?.feishu?.appId && config?.feishu?.appSecret);
     return {
-      gateway: gwOk ? 'ok' : (status === null ? 'warn' : 'error'),
+      gateway: installed ? 'ok' : (status === null ? 'warn' : 'error'),
       model: modelOk ? 'ok' : 'unconfigured',
       feishu: feishuOk ? 'ok' : 'unconfigured',
     };
@@ -1016,8 +1028,9 @@ export default function OpenClaw() {
   };
 
   const needsSetup = () => {
-    const s = getSetupStatus();
-    return s.gateway !== 'ok' || s.model !== 'ok';
+    const installed = !!(status?.installed ?? status?.version?.trim());
+    const modelOk = !!(config?.modelGateway?.baseUrl && config?.modelGateway?.apiKey);
+    return !installed || !modelOk;
   };
 
   const MI = (name: string, cls?: string) => (
@@ -1104,11 +1117,19 @@ export default function OpenClaw() {
       {
         key: 'gateway',
         icon: 'dns',
-        label: t('oc.setup.gateway', '网关'),
-        status: setupStatus.gateway === 'ok' ? t('oc.status.running', '运行中') : setupStatus.gateway === 'warn' ? t('oc.status.checking', '检测中...') : t('oc.status.stopped', '未运行'),
+        label: t('oc.setup.openclaw', 'OpenClaw'),
+        status:
+          setupStatus.gateway === 'ok'
+            ? (status?.running ? t('oc.setup.ocWithGw', '已安装 · 网关运行中') : t('oc.setup.ocInstalledOnly', '已安装'))
+            : setupStatus.gateway === 'warn'
+              ? t('oc.status.checking', '检测中...')
+              : t('oc.status.notInstalled', '未安装'),
         statusClass: setupStatus.gateway === 'ok' ? 'badge-ok' : setupStatus.gateway === 'warn' ? 'badge-accent' : 'badge-danger',
-        action: () => { toggleAccordion('ops'); },
-        actionLabel: setupStatus.gateway === 'ok' ? t('oc.action.view', '查看') : t('oc.action.start', '启动'),
+        action: () => { toggleAccordion(setupStatus.gateway === 'ok' ? 'ops' : 'deploy'); },
+        actionLabel:
+          setupStatus.gateway === 'ok'
+            ? t('oc.action.view', '查看')
+            : t('oc.action.deploy', '一键部署'),
       },
       {
         key: 'model',
@@ -1156,9 +1177,9 @@ export default function OpenClaw() {
         {showSetupGuide && needsSetup() && (
           <div className="oc-setup-guide-hint">
             {setupStatus.gateway !== 'ok'
-              ? t('oc.setup.hint.gateway', '请先启动网关，点击上方「启动」或展开 Gateway 网关面板')
+              ? t('oc.setup.hint.needInstall', '请先安装 OpenClaw：使用「一键部署」或展开下方面板按步骤安装')
               : setupStatus.model !== 'ok'
-              ? t('oc.setup.hint.model', '网关已运行，请配置模型以启用 AI 能力')
+              ? t('oc.setup.hint.model', 'OpenClaw 已安装，请配置模型以启用 AI 能力')
               : t('oc.setup.hint.feishu', '基础配置已完成！可选配置飞书以接入消息渠道')}
             <button className="btn btn-ghost btn-sm" onClick={() => setShowSetupGuide(false)} style={{ fontSize: '0.5625rem', marginLeft: 'auto' }}>{t('oc.setup.dismiss', '关闭引导')}</button>
           </div>
@@ -1585,7 +1606,10 @@ export default function OpenClaw() {
               </button>
             </div>
             <p className="config-card-desc" style={{ marginTop: 4, marginBottom: 8 }}>
-              {t('oc.modal.deployDesc', '完成部署后，OpenClaw 会更稳定更智能。安装完成以网关可用为准；若模型测试失败可稍后再修复。')}
+              {t(
+                'oc.modal.deployDesc',
+                '完成部署后，OpenClaw 会更稳定更智能。以 CLI 安装成功为准；网关在首次对话前启动即可；若模型测试失败可稍后再修复。',
+              )}
             </p>
             {deployWifiPrereqNotice}
             <div className="oc-form-row">
@@ -1668,8 +1692,13 @@ export default function OpenClaw() {
                     : t('oc.deploy.logWait', '部署任务已启动，等待日志输出...')}
               </pre>
             )}
-            {!deployRunning && status?.running && (
+            {!deployRunning && ocInstalled && status?.running && (
               <div className="badge badge-ok" style={{ marginTop: 8 }}>{t('oc.gw.readyBadge', '网关已可用，安装完成')}</div>
+            )}
+            {!deployRunning && ocInstalled && !status?.running && (
+              <div className="badge badge-accent" style={{ marginTop: 8 }}>
+                {t('oc.gw.installedNoGwBadge', 'OpenClaw 已安装；对话前请启动网关')}
+              </div>
             )}
           </div>
         </div>
@@ -1716,7 +1745,7 @@ export default function OpenClaw() {
           </div>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
-            {!status?.running && (
+            {ocInstalled && !status?.running && (
               <button type="button" className="btn btn-primary btn-sm" onClick={() => { runAction('restart-gateway'); setShowSetupGuide(true); }} disabled={loading} style={{ fontSize: '0.6875rem' }}>{t('oc.startGateway', '启动网关')}</button>
             )}
             <button type="button" className="btn-icon" onClick={loadStatus} title={t('oc.title.refreshStatus', '刷新状态')}>{MI('refresh')}</button>
@@ -1748,28 +1777,58 @@ export default function OpenClaw() {
                 <>
                   <strong>{t('oc.chat.needSetupTitle', 'OpenClaw 需要配置')}</strong>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '4px 0 8px', textAlign: 'center', maxWidth: 320 }}>
-                    {!status?.running
-                      ? t('oc.chat.needGw', '网关未运行。请在右侧面板中启动网关，或使用「一键部署」完成安装和配置。')
-                      : t('oc.chat.needModel', '网关已运行，但模型尚未配置。请在右侧面板中配置模型以启用 AI 对话能力。')}
+                    {!ocInstalled
+                      ? t('oc.chat.needInstall', '尚未检测到 OpenClaw CLI。请使用「一键部署」或在板端安装后再试。')
+                      : t('oc.chat.needModel', 'OpenClaw 已安装，但模型尚未配置。请在右侧面板中配置模型以启用 AI 对话能力。')}
                   </p>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {!status?.running && (
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => { runAction('restart-gateway'); setShowSetupGuide(true); }} disabled={loading}>{t('oc.startGateway', '启动网关')}</button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        setPanelOpen(true);
-                        if (status?.running) {
-                          toggleAccordion('model');
-                        } else {
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    {!ocInstalled && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => {
                           setShowDeployGuideModal(true);
                           toggleAccordion('deploy');
-                        }
+                          setPanelOpen(true);
+                        }}
+                      >
+                        {t('oc.deploy.title', '一键部署')}
+                      </button>
+                    )}
+                    {ocInstalled && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => {
+                          setPanelOpen(true);
+                          toggleAccordion('model');
+                        }}
+                      >
+                        {t('oc.models.configure', '配置模型')}
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : !status?.running ? (
+                <>
+                  <strong>{t('oc.chat.needStartGwTitle', '网关未运行')}</strong>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '4px 0 8px', textAlign: 'center', maxWidth: 320 }}>
+                    {t('oc.chat.needStartGwBody', '对话前需要启动板端 Gateway。可在下方启动，或展开右侧「Gateway 网关」面板操作。')}
+                  </p>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        runAction('restart-gateway');
+                        setShowSetupGuide(true);
                       }}
+                      disabled={loading}
                     >
-                      {status?.running ? t('oc.models.configure', '配置模型') : t('oc.deploy.title', '一键部署')}
+                      {t('oc.startGateway', '启动网关')}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setPanelOpen(true); toggleAccordion('ops'); }}>
+                      {t('oc.chat.openGwPanel', '打开网关面板')}
                     </button>
                   </div>
                 </>
