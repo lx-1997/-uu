@@ -79,6 +79,7 @@ import {
   type SSOUser,
 } from './sso.js';
 import { registerAnalyticsRoutes } from './analytics-routes.js';
+import { registerClawhubRoutes } from './clawhub-routes.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
 import { handleEnsurePartnerAdvisorySkill } from './rdkclaw/partner-advisory-skill-deploy.js';
@@ -1483,6 +1484,7 @@ app.use(express.json({ limit: '50mb' }));
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)
 registerSSORoutes(app);
 registerAnalyticsRoutes(app);
+registerClawhubRoutes(app);
 
 /** Studio 桌面端：用户在内嵌浏览器提交页面正文，完成 Agent 工具 studio_embedded_browser_capture */
 app.post('/api/studio/browser-capture/submit', (req, res) => {
@@ -4404,6 +4406,25 @@ app.get('/api/rdkclaw/policy', (_request, response) => {
 app.post('/api/rdkclaw/policy', (request, response) => {
   const patch = request.body ?? {};
   response.json({ ok: true, policy: rdkclaw.savePolicy(patch) });
+});
+
+/** Skill 工坊：将 SkillHub 等来源的 SKILL.md 写入本机 RDKClaw 用户工作区 skills/（与对话侧 userId 一致） */
+app.post('/api/rdkclaw/local-skill-write', async (request, response) => {
+  const { userId, skillId, content } = request.body as { userId?: string; skillId?: string; content?: string };
+  try {
+    const uid = String(userId || '').trim() || undefined;
+    const result = await rdkclaw.writeLocalSkill(uid, String(skillId || '').trim(), String(content || ''));
+    rdkclaw.reloadSkills();
+    response.json({ ok: true, path: result.path, message: `已写入 ${result.path}` });
+  } catch (e) {
+    sendApiError(
+      response,
+      400,
+      'LOCAL_SKILL_WRITE_FAILED',
+      e instanceof Error ? e.message : '写入失败',
+      { retryable: false },
+    );
+  }
 });
 
 app.get('/api/rdkclaw/security-audit', (request, response) => {

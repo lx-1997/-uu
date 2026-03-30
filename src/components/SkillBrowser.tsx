@@ -6,6 +6,10 @@ import { fillTemplate } from '../i18n/en-extras';
 import { fetchDeviceOpenClawHealth } from '../api';
 import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
 import { fetchApi } from '../utils/apiBase';
+import skillCenterManifestJson from '../skill-center/manifest.json';
+import type { SkillCenterManifest } from '../skill-center/types';
+
+const skillCenterManifest = skillCenterManifestJson as SkillCenterManifest;
 
 interface OpenClawSkillsPayload {
   ok?: boolean;
@@ -14,6 +18,8 @@ interface OpenClawSkillsPayload {
 
 type SourceKind = 'github' | 'nodehub' | 'web';
 type RightTab = 'view' | 'create' | 'link';
+type HubMode = 'board' | 'center';
+type CenterSub = 'catalog' | 'clawhub';
 
 function looksLikeHttpUrl(v: string): boolean {
   try {
@@ -143,6 +149,21 @@ async function writeSkillToBoard(deviceId: string, skillId: string, content: str
   return { ok: !!data.ok, message: data.message || 'Write complete', path: data.path };
 }
 
+/** 与 AI 对话侧一致，用于定位 ~/.rdkstudio/rdkclaw-workspaces/&lt;id&gt;/skills/ */
+const STUDIO_USER_ID_KEY = 'rdk:chat:user-id';
+
+function readStudioUserId(): string {
+  try {
+    const existing = localStorage.getItem(STUDIO_USER_ID_KEY);
+    if (existing?.trim()) return existing.trim();
+    const created = `studio-user-${Date.now()}`;
+    localStorage.setItem(STUDIO_USER_ID_KEY, created);
+    return created;
+  } catch {
+    return `studio-user-${Date.now()}`;
+  }
+}
+
 async function deleteSkillFromBoard(deviceId: string, skillId: string): Promise<{ ok: boolean; message: string }> {
   const res = await fetchApi(`/api/devices/${deviceId}/openclaw/skill-delete`, {
     method: 'POST',
@@ -177,6 +198,26 @@ export default function SkillBrowser() {
   const [skillContentLoading, setSkillContentLoading] = useState(false);
 
   const [rightTab, setRightTab] = useState<RightTab>('view');
+
+  const [hubMode, setHubMode] = useState<HubMode>('board');
+  const [selectedCenterFolder, setSelectedCenterFolder] = useState<string | null>(null);
+  const [centerMd, setCenterMd] = useState('');
+  const [centerMdLoading, setCenterMdLoading] = useState(false);
+  const [centerSearch, setCenterSearch] = useState('');
+  const [centerCategory, setCenterCategory] = useState<string>('all');
+  const [centerSub, setCenterSub] = useState<CenterSub>('clawhub');
+
+  const [clawhubQuery, setClawhubQuery] = useState('RDK X5');
+  const [clawhubResults, setClawhubResults] = useState<
+    { slug: string; displayName?: string; summary?: string; score?: number }[]
+  >([]);
+  const [clawhubSearchLoading, setClawhubSearchLoading] = useState(false);
+  const [clawhubSearchErr, setClawhubSearchErr] = useState<string | null>(null);
+  const [selectedClawhubSlug, setSelectedClawhubSlug] = useState<string | null>(null);
+  const [clawhubMd, setClawhubMd] = useState('');
+  const [clawhubMdLoading, setClawhubMdLoading] = useState(false);
+  const [clawhubResolvedVersion, setClawhubResolvedVersion] = useState<string | null>(null);
+  const [localRdkclawWriteLoading, setLocalRdkclawWriteLoading] = useState(false);
 
   // Create skill state
   const [newSkillId, setNewSkillId] = useState('');
@@ -305,6 +346,139 @@ export default function SkillBrowser() {
     return boardSkills.filter((s) => s.toLowerCase().includes(q));
   }, [boardSkills, search]);
 
+  const filteredCenterItems = useMemo(() => {
+    const q = centerSearch.trim().toLowerCase();
+    return skillCenterManifest.items.filter((it) => {
+      if (centerCategory !== 'all' && it.category !== centerCategory) return false;
+      if (!q) return true;
+      return it.folder.toLowerCase().includes(q) || it.title.toLowerCase().includes(q);
+    });
+  }, [centerSearch, centerCategory]);
+
+  const fetchCenterMd = useCallback(
+    async (folder: string) => {
+      setCenterMdLoading(true);
+      setCenterMd('');
+      try {
+        const res = await fetchApi(`/api/skills/${encodeURIComponent(folder)}/md`);
+        const text = await res.text();
+        if (!res.ok) {
+          setCenterMd(
+            tf('skillBrowser.center.loadErr', '加载失败: HTTP {{status}}', { status: res.status }),
+          );
+          return;
+        }
+        setCenterMd(text);
+      } catch (e) {
+        setCenterMd(
+          tf('skillBrowser.center.loadErr2', '{{msg}}', {
+            msg: e instanceof Error ? e.message : t('api.err.default', '网络错误'),
+          }),
+        );
+      } finally {
+        setCenterMdLoading(false);
+      }
+    },
+    [t, tf],
+  );
+
+  useEffect(() => {
+    if (hubMode !== 'center' || centerSub !== 'catalog') return;
+    const list = filteredCenterItems;
+    if (list.length === 0) {
+      setSelectedCenterFolder(null);
+      return;
+    }
+    if (!selectedCenterFolder || !list.some((x) => x.folder === selectedCenterFolder)) {
+      setSelectedCenterFolder(list[0].folder);
+    }
+  }, [hubMode, centerSub, filteredCenterItems, selectedCenterFolder]);
+
+  useEffect(() => {
+    if (hubMode !== 'center' || centerSub !== 'catalog' || !selectedCenterFolder) {
+      if (hubMode !== 'center' || centerSub !== 'catalog') setCenterMd('');
+      return;
+    }
+    void fetchCenterMd(selectedCenterFolder);
+  }, [hubMode, centerSub, selectedCenterFolder, fetchCenterMd]);
+
+  const fetchClawhubSkillMd = useCallback(async (slug: string) => {
+    setClawhubMdLoading(true);
+    setClawhubMd('');
+    setClawhubResolvedVersion(null);
+    try {
+      const res = await fetchApi(`/api/clawhub/skills/${encodeURIComponent(slug)}/skill-md`);
+      const data = await res.json() as {
+        ok?: boolean;
+        markdown?: string;
+        version?: string;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setClawhubMd(
+          data.message
+            || data.error
+            || tf('skillBrowser.center.loadErr', '加载失败: HTTP {{status}}', { status: res.status }),
+        );
+        return;
+      }
+      setClawhubMd(data.markdown || '');
+      setClawhubResolvedVersion(data.version ?? null);
+    } catch (e) {
+      setClawhubMd(
+        e instanceof Error ? e.message : t('api.err.default', '网络错误'),
+      );
+    } finally {
+      setClawhubMdLoading(false);
+    }
+  }, [t, tf]);
+
+  useEffect(() => {
+    if (hubMode !== 'center' || centerSub !== 'clawhub' || !selectedClawhubSlug) {
+      setClawhubMd('');
+      setClawhubResolvedVersion(null);
+      return;
+    }
+    void fetchClawhubSkillMd(selectedClawhubSlug);
+  }, [hubMode, centerSub, selectedClawhubSlug, fetchClawhubSkillMd]);
+
+  const runClawhubSearch = useCallback(async () => {
+    const q = clawhubQuery.trim();
+    if (!q) {
+      addToast?.(t('skillBrowser.clawhub.needQuery', '请输入搜索关键词'), 'warning');
+      return;
+    }
+    setClawhubSearchLoading(true);
+    setClawhubSearchErr(null);
+    try {
+      const res = await fetchApi(`/api/clawhub/search?q=${encodeURIComponent(q)}&limit=30`);
+      const data = await res.json() as {
+        ok?: boolean;
+        results?: { slug: string; displayName?: string; summary?: string; score?: number }[];
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || data.ok === false) {
+        setClawhubSearchErr(data.message || data.error || t('skillBrowser.clawhub.searchFail', '搜索失败'));
+        setClawhubResults([]);
+        return;
+      }
+      const list = data.results ?? [];
+      setClawhubResults(list);
+      if (list.length === 0) {
+        setClawhubSearchErr(t('skillBrowser.clawhub.noResults', '无匹配技能'));
+      } else {
+        setClawhubSearchErr(null);
+      }
+    } catch (e) {
+      setClawhubSearchErr(e instanceof Error ? e.message : t('api.err.default', '网络错误'));
+      setClawhubResults([]);
+    } finally {
+      setClawhubSearchLoading(false);
+    }
+  }, [clawhubQuery, addToast, t]);
+
   const sourceKind = useMemo(() => (looksLikeHttpUrl(sourceUrl) ? detectSourceKind(sourceUrl) : null), [sourceUrl]);
 
   const executeDeploy = useCallback(async (id: string, content: string) => {
@@ -325,6 +499,109 @@ export default function SkillBrowser() {
       setDeploying(false);
     }
   }, [currentDevice, addToast, loadBoardSkills, t, tf]);
+
+  const handleDeployBuiltin = () => {
+    if (!currentDevice) {
+      addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
+      return;
+    }
+    if (!selectedCenterFolder || !centerMd.trim()) {
+      addToast?.(t('skillBrowser.center.emptyBody', '技能内容为空，无法部署'), 'warning');
+      return;
+    }
+    const id = selectedCenterFolder;
+    setConfirmAction({
+      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到板端？', { id }),
+      detail: tf('skillBrowser.center.deployDetail', '将写入 ~/.openclaw/workspace/skills/{{id}}/SKILL.md（内置 SKILL.md 原文）', { id }),
+      confirmLabel: t('skillBrowser.confirm.deploy', '确认部署'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void executeDeploy(id, centerMd);
+      },
+    });
+  };
+
+  const clawhubDeployId = (slug: string) =>
+    slug
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'skillhub-skill';
+
+  const handleDeployClawhub = () => {
+    if (!currentDevice) {
+      addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
+      return;
+    }
+    if (!selectedClawhubSlug || !clawhubMd.trim()) {
+      addToast?.(t('skillBrowser.center.emptyBody', '技能内容为空，无法部署'), 'warning');
+      return;
+    }
+    const id = clawhubDeployId(selectedClawhubSlug);
+    setConfirmAction({
+      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到板端？', { id }),
+      detail: tf('skillBrowser.clawhub.deployDetail', '将 SkillHub 技能「{{slug}}」写入 ~/.openclaw/workspace/skills/{{id}}/SKILL.md', {
+        slug: selectedClawhubSlug,
+        id,
+      }),
+      confirmLabel: t('skillBrowser.confirm.deploy', '确认部署'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void executeDeploy(id, clawhubMd);
+      },
+    });
+  };
+
+  const executeWriteLocalRdkclaw = useCallback(
+    async (skillId: string, content: string) => {
+      setLocalRdkclawWriteLoading(true);
+      try {
+        const res = await fetchApi('/api/rdkclaw/local-skill-write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: readStudioUserId(),
+            skillId,
+            content: content.trim(),
+          }),
+        });
+        const data = (await res.json()) as { ok?: boolean; path?: string; message?: string; error?: string };
+        if (!res.ok) {
+          addToast?.(data.message || data.error || t('skillBrowser.clawhub.localWriteFail', '写入本地 RDKClaw 失败'), 'error');
+          return;
+        }
+        addToast?.(
+          tf('skillBrowser.clawhub.localWriteOk', '已写入本地 RDKClaw：{{path}}', { path: data.path || '' }),
+          'success',
+        );
+      } catch (e) {
+        addToast?.(e instanceof Error ? e.message : t('api.err.default', '网络错误'), 'error');
+      } finally {
+        setLocalRdkclawWriteLoading(false);
+      }
+    },
+    [addToast, t, tf],
+  );
+
+  const handleWriteLocalRdkclaw = () => {
+    if (!selectedClawhubSlug || !clawhubMd.trim()) {
+      addToast?.(t('skillBrowser.center.emptyBody', '技能内容为空，无法写入'), 'warning');
+      return;
+    }
+    const id = clawhubDeployId(selectedClawhubSlug);
+    setConfirmAction({
+      title: tf('skillBrowser.clawhub.localWriteTitle', '写入本地 RDKClaw 技能「{{id}}」？', { id }),
+      detail: t(
+        'skillBrowser.clawhub.localWriteDetail',
+        '将写入本机用户工作区 skills 目录（与对话侧 RDKClaw 同一用户 ID），约数秒内可在对话中匹配；不经过 SSH 设备。',
+      ),
+      confirmLabel: t('skillBrowser.clawhub.localWriteConfirm', '确认写入'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void executeWriteLocalRdkclaw(id, clawhubMd);
+      },
+    });
+  };
 
   const handleDeploy = () => {
     if (!currentDevice) return addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
@@ -449,98 +726,384 @@ export default function SkillBrowser() {
 
   return (
     <div className="config-page" style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0, flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <strong style={{ fontSize: '1rem' }}>{t('skillBrowser.title', 'OpenClaw 技能工坊')}</strong>
-          <span className="badge badge-muted">{tf('skillBrowser.count', '{{n}} 个板端技能', { n: boardSkills.length })}</span>
-          {openclawHealth && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button
+              type="button"
+              className={`btn btn-sm ${hubMode === 'board' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setHubMode('board')}
+              style={{ fontSize: '0.6875rem' }}
+            >
+              {t('skillBrowser.hub.board', '板端')}
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${hubMode === 'center' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setHubMode('center')}
+              style={{ fontSize: '0.6875rem' }}
+            >
+              {t('skillBrowser.hub.center', 'Skill 中心')}
+            </button>
+          </div>
+          {hubMode === 'board' && (
+            <span className="badge badge-muted">{tf('skillBrowser.count', '{{n}} 个板端技能', { n: boardSkills.length })}</span>
+          )}
+          {hubMode === 'center' && (
+            <span className="badge badge-muted">
+              {tf('skillBrowser.center.badge', '内置 {{n}} 条', { n: skillCenterManifest.items.length })}
+            </span>
+          )}
+          {openclawHealth && hubMode === 'board' && (
             <span className={`badge ${openclawHealth.gatewayRunning ? 'badge-ok' : 'badge-muted'}`}>
               {openclawHealth.gatewayRunning ? t('skillBrowser.gwOn', '网关运行中') : t('skillBrowser.gwOff', '网关未运行')}
             </span>
           )}
         </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={loadBoardSkills} disabled={loading}>{loading ? '...' : t('skillBrowser.refresh', '刷新')}</button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => {
+            if (hubMode === 'center' && centerSub === 'catalog' && selectedCenterFolder) void fetchCenterMd(selectedCenterFolder);
+            else if (hubMode === 'center' && centerSub === 'clawhub' && selectedClawhubSlug) void fetchClawhubSkillMd(selectedClawhubSlug);
+            else void loadBoardSkills();
+          }}
+          disabled={
+            loading
+            || (hubMode === 'center' && centerSub === 'catalog' && centerMdLoading)
+            || (hubMode === 'center' && centerSub === 'clawhub' && clawhubMdLoading)
+          }
+        >
+          {loading || (hubMode === 'center' && centerSub === 'catalog' && centerMdLoading) || (hubMode === 'center' && centerSub === 'clawhub' && clawhubMdLoading)
+            ? '...'
+            : t('skillBrowser.refresh', '刷新')}
+        </button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* Sidebar */}
         <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('skillBrowser.searchPh', '搜索技能...')} style={{ fontSize: '0.8125rem' }} />
-            <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
-              {t(
-                'skillBrowser.sidebarHint',
-                '点击名称在右侧查看；点「编辑」修改。垃圾桶会尝试删除工作区与 /opt/openclaw/skills 下同名片段。',
-              )}
-            </p>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {filteredBoardSkills.length === 0 && (
-              <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-                {currentDevice ? t('skillBrowser.empty.noSkills', '当前设备无已安装技能') : t('skillBrowser.empty.noDevice', '请先连接设备')}
+          {hubMode === 'board' ? (
+            <>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('skillBrowser.searchPh', '搜索技能...')} style={{ fontSize: '0.8125rem' }} />
+                <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
+                  {t(
+                    'skillBrowser.sidebarHint',
+                    '点击名称在右侧查看；点「编辑」修改。垃圾桶会尝试删除工作区与 /opt/openclaw/skills 下同名片段。',
+                  )}
+                </p>
               </div>
-            )}
-            {filteredBoardSkills.map((s) => {
-              const name = s.split('|')[0] || s;
-              const desc = (s.split('|')[2] || '').replace(/^"|"$/g, '').trim();
-              return (
-                <div
-                  key={s}
-                  className={`config-sidebar-item ${selectedBoardSkill === s ? 'active' : ''}`}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px' }}
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {filteredBoardSkills.length === 0 && (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+                    {currentDevice ? t('skillBrowser.empty.noSkills', '当前设备无已安装技能') : t('skillBrowser.empty.noDevice', '请先连接设备')}
+                  </div>
+                )}
+                {filteredBoardSkills.map((s) => {
+                  const name = s.split('|')[0] || s;
+                  const desc = (s.split('|')[2] || '').replace(/^"|"$/g, '').trim();
+                  return (
+                    <div
+                      key={s}
+                      className={`config-sidebar-item ${selectedBoardSkill === s ? 'active' : ''}`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px' }}
+                    >
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => selectSkillAndView(s)}
+                        title={desc || name}
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          justifyContent: 'flex-start',
+                          padding: '4px 6px',
+                          fontWeight: selectedBoardSkill === s ? 600 : 400,
+                        }}
+                      >
+                        <strong style={{ fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textAlign: 'left' }}>{name}</strong>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ padding: 4, flexShrink: 0, color: 'var(--danger, #c44)' }}
+                        title={t('skillBrowser.deleteSkill', '删除板端技能')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          requestDeleteSkill(name);
+                        }}
+                        disabled={!currentDevice || deletingSkillId === name}
+                      >
+                        <Trash2 size={14} aria-hidden />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)' }}>
+                <button type="button" className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: '0.75rem' }} onClick={() => setRightTab('create')}>{t('skillBrowser.newSkill', '+ 创建新技能')}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 4 }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${centerSub === 'clawhub' ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: '0.625rem' }}
+                  onClick={() => setCenterSub('clawhub')}
                 >
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => selectSkillAndView(s)}
-                    title={desc || name}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      justifyContent: 'flex-start',
-                      padding: '4px 6px',
-                      fontWeight: selectedBoardSkill === s ? 600 : 400,
-                    }}
-                  >
-                    <strong style={{ fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textAlign: 'left' }}>{name}</strong>
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    style={{ padding: 4, flexShrink: 0, color: 'var(--danger, #c44)' }}
-                    title={t('skillBrowser.deleteSkill', '删除板端技能')}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      requestDeleteSkill(name);
-                    }}
-                    disabled={!currentDevice || deletingSkillId === name}
-                  >
-                    <Trash2 size={14} aria-hidden />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)' }}>
-            <button type="button" className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: '0.75rem' }} onClick={() => setRightTab('create')}>{t('skillBrowser.newSkill', '+ 创建新技能')}</button>
-          </div>
+                  {t('skillBrowser.clawhub.tab', 'SkillHub')}
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${centerSub === 'catalog' ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, fontSize: '0.625rem' }}
+                  onClick={() => setCenterSub('catalog')}
+                >
+                  {t('skillBrowser.center.catalogTab', '本地清单')}
+                </button>
+              </div>
+              {centerSub === 'catalog' ? (
+                <>
+                  <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <select
+                      className="input"
+                      value={centerCategory}
+                      onChange={(e) => setCenterCategory(e.target.value)}
+                      style={{ fontSize: '0.75rem', padding: '4px 6px' }}
+                    >
+                      <option value="all">{t('skillBrowser.center.catAll', '全部分类')}</option>
+                      {skillCenterManifest.categories.map((c) => (
+                        <option key={c.id} value={c.id}>{c.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      className="input"
+                      value={centerSearch}
+                      onChange={(e) => setCenterSearch(e.target.value)}
+                      placeholder={t('skillBrowser.center.searchPh', '搜索内置技能...')}
+                      style={{ fontSize: '0.8125rem' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    {filteredCenterItems.length === 0 && (
+                      <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+                        {skillCenterManifest.items.length === 0
+                          ? t(
+                              'skillBrowser.center.emptyCatalog',
+                              '暂无 Skill 中心条目，接入清单后将在此展示。',
+                            )
+                          : t('skillBrowser.center.emptyFilter', '无匹配项，请调整分类或搜索')}
+                      </div>
+                    )}
+                    {filteredCenterItems.map((it) => (
+                      <button
+                        key={it.folder}
+                        type="button"
+                        className={`config-sidebar-item ${selectedCenterFolder === it.folder ? 'active' : ''}`}
+                        onClick={() => setSelectedCenterFolder(it.folder)}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 10px',
+                          border: 'none',
+                          background: selectedCenterFolder === it.folder ? 'var(--bg-muted)' : 'transparent',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</strong>
+                        <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{it.folder}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <input
+                      className="input"
+                      value={clawhubQuery}
+                      onChange={(e) => setClawhubQuery(e.target.value)}
+                      placeholder={t('skillBrowser.clawhub.queryPh', '搜索关键词，如 RDK X5')}
+                      style={{ fontSize: '0.8125rem' }}
+                      onKeyDown={(e) => e.key === 'Enter' && void runClawhubSearch()}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      style={{ width: '100%', fontSize: '0.75rem' }}
+                      onClick={() => void runClawhubSearch()}
+                      disabled={clawhubSearchLoading}
+                    >
+                      {clawhubSearchLoading ? '...' : t('skillBrowser.clawhub.search', '搜索')}
+                    </button>
+                    {clawhubSearchErr && (
+                      <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0 }}>{clawhubSearchErr}</p>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    {clawhubResults.length === 0 && !clawhubSearchLoading && !clawhubSearchErr && (
+                      <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                        {t('skillBrowser.clawhub.hintRun', '输入关键词后点击搜索')}
+                      </div>
+                    )}
+                    {clawhubResults.map((r) => (
+                      <button
+                        key={r.slug}
+                        type="button"
+                        className={`config-sidebar-item ${selectedClawhubSlug === r.slug ? 'active' : ''}`}
+                        onClick={() => setSelectedClawhubSlug(r.slug)}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 10px',
+                          border: 'none',
+                          background: selectedClawhubSlug === r.slug ? 'var(--bg-muted)' : 'transparent',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.displayName || r.slug}</strong>
+                        <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{r.slug}</span>
+                        {r.summary && (
+                          <span style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', display: 'block', marginTop: 4, lineHeight: 1.35, maxHeight: '4.2em', overflow: 'hidden' }}>
+                            {r.summary}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
 
         {/* Right panel */}
         <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-            {(['view', 'create', 'link'] as RightTab[]).map((tab) => (
-              <button key={tab} type="button" className={`btn btn-ghost btn-sm ${rightTab === tab ? 'active' : ''}`}
-                onClick={() => setRightTab(tab)}
-                style={{ borderRadius: 0, borderBottom: rightTab === tab ? '2px solid var(--accent)' : '2px solid transparent', fontSize: '0.75rem', padding: '8px 16px' }}>
-                {tab === 'view' ? t('skillBrowser.tab.view', '查看 / 编辑') : tab === 'create' ? t('skillBrowser.tab.create', '创建技能') : t('skillBrowser.tab.link', '链接转技能')}
-              </button>
-            ))}
-          </div>
+          {hubMode === 'center' ? (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {centerSub === 'catalog' ? (
+                <>
+                  <div>
+                    <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.center.title', '内置技能预览')}</strong>
+                  </div>
+                  {!selectedCenterFolder ? (
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{t('skillBrowser.center.pick', '请在左侧选择一条内置技能。')}</p>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                        <div>
+                          <strong style={{ fontSize: '0.875rem' }}>{filteredCenterItems.find((x) => x.folder === selectedCenterFolder)?.title ?? selectedCenterFolder}</strong>
+                          <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.625rem', fontFamily: 'monospace' }}>{selectedCenterFolder}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={handleDeployBuiltin}
+                          disabled={deploying || !currentDevice || centerMdLoading || !centerMd.trim()}
+                        >
+                          {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到板端')}
+                        </button>
+                      </div>
+                      {!currentDevice && (
+                        <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
+                      )}
+                      <div className="config-terminal" style={{ maxHeight: 'none', flex: 1, minHeight: 280 }}>
+                        <pre style={{ margin: 0, fontSize: '0.75rem' }}>
+                          {centerMdLoading ? t('skillBrowser.center.loading', '正在加载 SKILL.md ...') : (centerMd || t('skillBrowser.noContent', '未读取到内容'))}
+                        </pre>
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.clawhub.previewTitle', 'SkillHub 技能预览')}</strong>
+                    <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                      <a href="https://skillhub.tencent.com/" target="_blank" rel="noreferrer">
+                        skillhub.tencent.com
+                      </a>
+                    </p>
+                  </div>
+                  {!selectedClawhubSlug ? (
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{t('skillBrowser.clawhub.pick', '请先在左侧搜索并选择一条技能。')}</p>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                        <div>
+                          <strong style={{ fontSize: '0.875rem' }}>{clawhubResults.find((x) => x.slug === selectedClawhubSlug)?.displayName || selectedClawhubSlug}</strong>
+                          <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.625rem', fontFamily: 'monospace' }}>{selectedClawhubSlug}</span>
+                          {clawhubResolvedVersion && (
+                            <span className="badge badge-muted" style={{ marginLeft: 6, fontSize: '0.625rem' }}>v{clawhubResolvedVersion}</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={handleWriteLocalRdkclaw}
+                              disabled={localRdkclawWriteLoading || clawhubMdLoading || !clawhubMd.trim()}
+                              title={t(
+                                'skillBrowser.clawhub.localWriteHint',
+                                '写入本机 ~/.rdkstudio/rdkclaw-workspaces/.../skills/（与 RDKClaw 对话同源）',
+                              )}
+                            >
+                              {localRdkclawWriteLoading
+                                ? t('skillBrowser.clawhub.localWriting', '写入中...')
+                                : t('skillBrowser.clawhub.writeLocal', '写入本地 RDKClaw')}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={handleDeployClawhub}
+                              disabled={deploying || !currentDevice || clawhubMdLoading || !clawhubMd.trim()}
+                            >
+                              {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到板端')}
+                            </button>
+                          </div>
+                          <span style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', maxWidth: 300, textAlign: 'right', lineHeight: 1.35 }}>
+                            {t(
+                              'skillBrowser.clawhub.deployVsLocal',
+                              '「写入本地 RDKClaw」：本机对话侧技能目录；「部署到板端」：SSH 到设备写入 OpenClaw 技能目录。',
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                      {!currentDevice && (
+                        <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
+                      )}
+                      <div className="config-terminal" style={{ maxHeight: 'none', flex: 1, minHeight: 280 }}>
+                        <pre style={{ margin: 0, fontSize: '0.75rem' }}>
+                          {clawhubMdLoading ? t('skillBrowser.center.loading', '正在加载 SKILL.md ...') : (clawhubMd || t('skillBrowser.noContent', '未读取到内容'))}
+                        </pre>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+                {(['view', 'create', 'link'] as RightTab[]).map((tab) => (
+                  <button key={tab} type="button" className={`btn btn-ghost btn-sm ${rightTab === tab ? 'active' : ''}`}
+                    onClick={() => setRightTab(tab)}
+                    style={{ borderRadius: 0, borderBottom: rightTab === tab ? '2px solid var(--accent)' : '2px solid transparent', fontSize: '0.75rem', padding: '8px 16px' }}>
+                    {tab === 'view' ? t('skillBrowser.tab.view', '查看 / 编辑') : tab === 'create' ? t('skillBrowser.tab.create', '创建技能') : t('skillBrowser.tab.link', '链接转技能')}
+                  </button>
+                ))}
+              </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-            {/* Tab: View / Edit */}
-            {rightTab === 'view' && (
+              <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+                {/* Tab: View / Edit */}
+                {rightTab === 'view' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {!selectedBoardSkill ? (
                   <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{t('skillBrowser.view.pick', '请在左侧选择一个板端技能查看内容。')}</p>
@@ -654,7 +1217,9 @@ export default function SkillBrowser() {
                 </div>
               </div>
             )}
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

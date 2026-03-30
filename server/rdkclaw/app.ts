@@ -365,6 +365,31 @@ export class RDKClawApp {
     return this.skills.reload();
   }
 
+  /**
+   * 将 SKILL.md 写入当前 Studio 用户对应的 RDKClaw 工作区 `skills/<skillId>/`（与对话侧技能热加载一致）。
+   * 路径见 rdk-skill-authoring-guide：~/.rdkstudio/rdkclaw-workspaces/&lt;profile&gt;/skills/ 或自定义 workspaceRoot。
+   */
+  async writeLocalSkill(userId: string | undefined, skillId: string, content: string): Promise<{ path: string }> {
+    const name = String(skillId || '').trim();
+    const md = String(content || '').trim();
+    if (!name || !md) {
+      throw new Error('skillId 和 content 不能为空');
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+      throw new Error('skillId 只能包含字母、数字、下划线和横线');
+    }
+    const userProfile = userId ? this.personaStore.getUser(userId) : null;
+    const ws = await this.workspaceStore.getOrInit(userId, userProfile);
+    const skillDir = path.join(ws.workspaceDir, 'skills', name);
+    await fs.promises.mkdir(skillDir, { recursive: true });
+    const skillPath = path.join(skillDir, 'SKILL.md');
+    await fs.promises.writeFile(skillPath, md, 'utf-8');
+    if (ws.workspaceDir !== this.workspaceDir) {
+      this.skills.addExtraDir(path.join(ws.workspaceDir, 'skills'));
+    }
+    return { path: skillPath };
+  }
+
   getPolicy(): RDKClawPolicy {
     return this.policyStore.getPolicy();
   }
