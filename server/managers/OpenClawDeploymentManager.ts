@@ -8,9 +8,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transport.js';
 import {
-  OPENCLAW_EXPORT_NPM_REGISTRY,
+  OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
   OPENCLAW_FAST_REGISTRY_SNIPPET,
-  OPENCLAW_NODE_MIRROR_EXPORT,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
   OPENCLAW_PREPARE_NPM_SPEED,
 } from './openclaw-board-install-sh.js';
@@ -313,12 +312,12 @@ ws = connectWs();
 
 const NPM_INSTALL_CMD = [
   BOARD_ENV_EXPORT,
-  OPENCLAW_FAST_REGISTRY_SNIPPET,
-  OPENCLAW_EXPORT_NPM_REGISTRY,
-  OPENCLAW_NODE_MIRROR_EXPORT,
+  OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
   'echo "[OpenClaw] 开始安装（官方推荐流程）..."',
-  // 优先官方安装脚本（已注入 NPM_CONFIG_REGISTRY / Node 镜像）；失败回退 npm 双源重试
-  `(curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && ${OPENCLAW_NPM_FAST_INSTALL_SNIPPET}))`,
+  // 优先官方安装脚本（已注入 NPM_CONFIG_REGISTRY / Node 镜像）；失败回退 npm 双源重试（勿用反引号拼接片段，避免 $NPM_FAST_REG 被误解析）
+  '(curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && ' +
+    OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
+    '))',
   RESOLVE_OPENCLAW_CMD,
   CLAWHUB_AUTO_LOGIN_CMD,
   ENSURE_GATEWAY_LOCAL_MODE,
@@ -343,13 +342,13 @@ const GATEWAY_DIAG_LOGS = [
 
 const NPM_UPGRADE_CMD = [
   BOARD_ENV_EXPORT,
-  OPENCLAW_FAST_REGISTRY_SNIPPET,
-  OPENCLAW_EXPORT_NPM_REGISTRY,
-  OPENCLAW_NODE_MIRROR_EXPORT,
+  OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
   RESOLVE_OPENCLAW_CMD,
   'echo "[OpenClaw] 开始升级（官方推荐流程）..."',
   // 优先 CLI update，失败回退 npm 双源重试
-  `(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && ${OPENCLAW_NPM_FAST_INSTALL_SNIPPET})`,
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && ' +
+    OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
+    ')',
   ENSURE_GATEWAY_LOCAL_MODE,
   ENSURE_GATEWAY_AUTH_TOKEN,
   NPM_NVM_CLEANUP,
@@ -1158,9 +1157,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
   runScriptInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
       BOARD_ENV_EXPORT,
-      OPENCLAW_FAST_REGISTRY_SNIPPET,
-      OPENCLAW_EXPORT_NPM_REGISTRY,
-      OPENCLAW_NODE_MIRROR_EXPORT,
+      OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
       'echo "[OpenClaw] 使用官方安装脚本..."',
       'curl -fsSL --connect-timeout 8 --max-time 45 --retry 2 --retry-delay 2 https://openclaw.ai/install.sh | bash -s -- --no-onboard 2>&1 || (echo "[OpenClaw] 官方脚本失败，尝试 npm 安装..." && export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH" && ' + OPENCLAW_NPM_FAST_INSTALL_SNIPPET + ')',
       'echo "[OpenClaw] 安装完成"',
