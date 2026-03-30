@@ -342,6 +342,8 @@ export const EN: Record<string, string> = {
 
   // SSO full-screen login (aligned with rdkstudio_frontend-master Login.vue)
   'sso.verifying': 'Verifying identity…',
+  'sso.logoutRedirecting': 'Signing out… Redirecting to the identity provider.',
+  'sso.logoutReloading': 'Refreshing the page…',
   'sso.embedPreparing': 'Loading unified login…',
   'sso.embedFailed': 'Could not start the login callback. Please retry.',
   'sso.embedLoadFailed':

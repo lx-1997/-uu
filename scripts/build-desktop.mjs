@@ -139,12 +139,19 @@ function validateBuildConfig() {
   }
 }
 
+/** Windows 上直接 spawn .cmd 且 shell:false 会 EINVAL；仅对 *.cmd 启用 shell。 */
+function useShellForCmd(cmd) {
+  return platform === 'win32' && typeof cmd === 'string' && /\.cmd$/i.test(cmd);
+}
+
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
+    const shell = useShellForCmd(cmd);
     const child = spawn(cmd, args, {
       cwd: rootDir,
       stdio: 'inherit',
-      shell: platform === 'win32',
+      // node.exe 路径含空格时勿对 node 开 shell；*.cmd 必须 shell 或会 EINVAL
+      shell,
       env: process.env,
     });
     child.on('error', reject);
@@ -156,10 +163,11 @@ function run(cmd, args) {
 }
 function runWithEnv(cmd, args, extraEnv) {
   return new Promise((resolve, reject) => {
+    const shell = useShellForCmd(cmd);
     const child = spawn(cmd, args, {
       cwd: rootDir,
       stdio: 'inherit',
-      shell: platform === 'win32',
+      shell,
       env: { ...process.env, ...(extraEnv || {}) },
     });
     child.on('error', reject);

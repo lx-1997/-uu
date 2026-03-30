@@ -7,7 +7,57 @@ import React, {
   useState,
 } from 'react';
 import { useSessionDailyActivePing, useGuestDailyActivePing } from '../analytics/useDailyActivePing';
+import { ssoTranslate as st } from '../i18n/sso-translate';
 import { fetchApi, setSsoSessionMirror } from '../utils/apiBase';
+
+type LogoutUiPhase = null | 'redirect' | 'reload';
+
+function LogoutTransitionOverlay({ phase }: { phase: Exclude<LogoutUiPhase, null> }) {
+  const msg =
+    phase === 'redirect'
+      ? st('sso.logoutRedirecting', '正在退出登录，即将跳转统一认证…')
+      : st('sso.logoutReloading', '正在刷新页面…');
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 2147483647,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+        background: 'linear-gradient(135deg, #0f0f14 0%, #1a1a24 50%, #0f0f14 100%)',
+        color: 'rgba(255,255,255,0.9)',
+      }}
+    >
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          border: '3px solid rgba(255,255,255,0.2)',
+          borderTopColor: '#ff6b00',
+          borderRadius: '50%',
+          animation: 'rdk-boot-spin 0.75s linear infinite',
+        }}
+        aria-hidden
+      />
+      <p style={{ margin: 0, fontSize: 14, textAlign: 'center', padding: '0 24px', maxWidth: 400 }}>
+        {msg}
+      </p>
+    </div>
+  );
+}
+
+/** 双 rAF：避免 setState 后立刻改 location，首帧仍是白屏 */
+function afterNextPaint(cb: () => void): void {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(cb);
+  });
+}
 
 export interface SSOUser {
   id: string;
@@ -40,6 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [ssoConfigured, setSsoConfigured] = useState(false);
   const [user, setUser] = useState<SSOUser | null>(null);
   const [loginUrl, setLoginUrl] = useState<string | null>(null);
+  const [logoutUiPhase, setLogoutUiPhase] = useState<LogoutUiPhase>(null);
 
   const refresh = useCallback(async () => {
     const SSO_FETCH_MS = 12_000;
@@ -114,13 +165,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = (await res.json()) as { logoutUrl?: string };
       setUser(null);
       setSsoSessionMirror(null);
-      if (data.logoutUrl) {
-        window.location.href = data.logoutUrl;
+      const logoutUrl = data.logoutUrl?.trim();
+      if (logoutUrl) {
+        setLogoutUiPhase('redirect');
+        afterNextPaint(() => {
+          window.location.replace(logoutUrl);
+        });
       } else {
-        window.location.reload();
+        setLogoutUiPhase('reload');
+        afterNextPaint(() => {
+          window.location.reload();
+        });
       }
     } catch {
-      window.location.reload();
+      setLogoutUiPhase('reload');
+      afterNextPaint(() => {
+        window.location.reload();
+      });
     }
   }, []);
 
@@ -142,6 +203,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={value}>
       <AuthDailyActiveHost />
       {children}
+      {logoutUiPhase ? <LogoutTransitionOverlay phase={logoutUiPhase} /> : null}
     </AuthContext.Provider>
   );
 }
