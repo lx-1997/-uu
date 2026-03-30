@@ -85,6 +85,27 @@ let floatingBallLastCursor = null;
 /** 用户选择「隐藏直到下次启动」后，本会话内不再创建悬浮球，直至设置重新启用或进程重启 */
 let floatingBallSkipForSession = false;
 
+/**
+ * 再次双击图标/快捷方式时不启动第二进程，而是聚焦已有主窗口（与悬浮球并存；仅首实例继续执行后续逻辑）。
+ * macOS 亦注册，避免从部分启动器重复拉起。
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+app.on('second-instance', () => {
+  if (mainWin && !mainWin.isDestroyed()) {
+    if (mainWin.isMinimized()) mainWin.restore();
+    mainWin.show();
+    mainWin.focus();
+    try {
+      mainWin.moveTop();
+    } catch {
+      /* ignore */
+    }
+  }
+});
+
 function stopFloatingBallDragTracking() {
   if (floatingBallDragTimer != null) {
     clearInterval(floatingBallDragTimer);
