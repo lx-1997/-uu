@@ -36,6 +36,47 @@ export function getResolvedDailyUsageTable(): string {
   return env || 'studio_daily_usage';
 }
 
+/** 与 studio_daily_usage.sql 注释一致：业务日历日按此时区切分（默认 Asia/Shanghai） */
+export function getResolvedDailyUsageTimezone(): string {
+  const raw = String(process.env.SUPABASE_DAILY_USAGE_TIMEZONE ?? '').trim();
+  return raw || 'Asia/Shanghai';
+}
+
+/** 将 instant 格式化为指定 IANA 时区下的日历日 YYYY-MM-DD（非 UTC 日） */
+export function formatCalendarDateYmdInTimeZone(date: Date, timeZone: string): string {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = dtf.formatToParts(date);
+  const y = parts.find((p) => p.type === 'year')?.value;
+  const m = parts.find((p) => p.type === 'month')?.value;
+  const d = parts.find((p) => p.type === 'day')?.value;
+  if (!y || !m || !d) {
+    throw new Error(`Intl formatToParts failed for timeZone=${timeZone}`);
+  }
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+function resolveUsageDateString(now: Date): string {
+  const tz = getResolvedDailyUsageTimezone();
+  try {
+    return formatCalendarDateYmdInTimeZone(now, tz);
+  } catch {
+    console.warn(
+      '[daily-usage] invalid SUPABASE_DAILY_USAGE_TIMEZONE, falling back to Asia/Shanghai:',
+      tz,
+    );
+    try {
+      return formatCalendarDateYmdInTimeZone(now, 'Asia/Shanghai');
+    } catch {
+      return now.toISOString().slice(0, 10);
+    }
+  }
+}
+
 /**
  * 记录一次打开 PV（每验证/打开一行）。usage_key：SSO 为展示名；无 SSO 为匿名 id。
  */
@@ -52,7 +93,7 @@ export async function performDailyActiveInsert(
     return { ok: true, persisted: false, reason: 'no_credentials' };
   }
 
-  const usageDate = new Date().toISOString().slice(0, 10);
+  const usageDate = resolveUsageDateString(new Date());
   const aid = usageKey.trim().slice(0, 256);
   const ver = appVersion.trim().slice(0, 48);
   if (!aid) {
