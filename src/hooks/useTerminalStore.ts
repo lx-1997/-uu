@@ -7,13 +7,7 @@ import { executeDeviceCommand, rememberDevicePassword } from '../api';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { useUIStore } from './useUIStore';
-
-const TERM_UI_LOCALE_KEY = 'rdk-ui-locale';
-
-function readStoredLocaleForTerminal(): 'zh-CN' | 'en' {
-  if (typeof window === 'undefined') return 'zh-CN';
-  return localStorage.getItem(TERM_UI_LOCALE_KEY) === 'en' ? 'en' : 'zh-CN';
-}
+import { readStoredLocale } from '../utils/locale';
 
 export interface TerminalStoreState {
   terminalProfile: string;
@@ -55,7 +49,7 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
   const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>(() => [
     {
       id: 'session-1',
-      name: translate(readStoredLocaleForTerminal() === 'en', 'terminal.session.main', '主会话'),
+      name: translate(readStoredLocale() === 'en', 'terminal.session.main', '主会话'),
       profile: 'shell',
       status: 'attached',
       lines: ['Welcome to RDK OS.', 'root@rdk:~#'],
@@ -165,7 +159,7 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
         const rawMessage = error instanceof Error ? error.message : t('terminal.cmd.fail', '命令执行失败');
         const authFailed = /设备密码缺失|缺少 SSH 密码|Authentication failure|authentication failed|password|auth fail/i.test(rawMessage);
         const message = authFailed
-          ? t('terminal.auth.fail', '设备认证失败，请在设备管理中重新连接并更新账号密码')
+          ? t('terminal.auth.fail', '设备认证失败。请在左侧设备列表中点击该设备，确认用户名和密码是否正确')
           : rawMessage;
         setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
           ? { ...s, status: 'attached', lines: [...s.lines, `ERROR: ${message}`, 'root@rdk:~#'] }

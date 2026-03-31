@@ -535,13 +535,24 @@ function toOpenClawDevice(device: Device, password?: string) {
   };
 }
 
+/**
+ * RDK 开发板常见默认密码候选列表。
+ *
+ * RDK X3/X5 出厂默认用户名和密码相同（root/root、sunrise/sunrise），
+ * 用户首次添加设备时如果没有手动输入密码，系统会按此列表依次尝试。
+ *
+ * 可通过环境变量 RDK_DEFAULT_PASSWORDS 追加自定义候选（逗号分隔），
+ * 例如：RDK_DEFAULT_PASSWORDS=mypass1,mypass2
+ */
+const BUILTIN_DEFAULT_PASSWORDS = ['root', 'sunrise'];
+
 function passwordCandidates(username: string) {
+  const envExtra = String(process.env.RDK_DEFAULT_PASSWORDS ?? '').trim();
+  const extraPasswords = envExtra ? envExtra.split(',').map((s) => s.trim()).filter(Boolean) : [];
   const candidates = [
-    username,
-    username === 'root' ? 'root' : '',
-    username === 'sunrise' ? 'sunrise' : '',
-    'root',
-    'sunrise',
+    username,                                       // 用户名即密码（RDK 出厂默认）
+    ...BUILTIN_DEFAULT_PASSWORDS,                   // 内置默认密码
+    ...extraPasswords,                              // 用户自定义候选
   ].filter(Boolean);
   return Array.from(new Set(candidates));
 }
@@ -1443,7 +1454,7 @@ async function runOnDevice(
         }
       }
     }
-    throw lastError instanceof Error ? lastError : new Error('板端命令执行失败');
+    throw lastError instanceof Error ? lastError : new Error('设备命令执行失败');
   }).catch((error) => {
     lastError = error;
     return null;
@@ -1457,7 +1468,7 @@ async function runOnDevice(
       response,
       400,
       'DEVICE_AUTH_REQUIRED',
-      '设备密码缺失或不正确，请在设备管理中重新连接并填写密码',
+      '设备密码缺失或不正确。请在左侧设备列表中点击该设备，重新输入正确的 SSH 密码后再试',
       { retryable: false },
     );
     return null;
@@ -1468,7 +1479,9 @@ async function runOnDevice(
       response,
       504,
       'DEVICE_COMMAND_TIMEOUT',
-      lastError instanceof Error ? `板端命令执行超时: ${lastError.message}` : '板端命令执行超时',
+      lastError instanceof Error
+        ? `设备命令执行超时（${lastError.message}）。请检查设备是否在线、网络是否通畅后重试`
+        : '设备命令执行超时。请检查设备是否在线、网络是否通畅后重试',
       { retryable: true },
     );
     return null;
@@ -1478,7 +1491,9 @@ async function runOnDevice(
     response,
     500,
     'DEVICE_COMMAND_FAILED',
-    lastError instanceof Error ? `板端命令执行失败: ${lastError.message}` : '板端命令执行失败',
+    lastError instanceof Error
+      ? `设备命令执行失败（${lastError.message}）。如果反复出现，请尝试重启设备或检查 SSH 服务`
+      : '设备命令执行失败。如果反复出现，请尝试重启设备或检查 SSH 服务',
     { retryable: false },
   );
   return null;
@@ -2073,7 +2088,7 @@ app.post('/api/apps/one-shot-deploy', async (request, response) => {
   }
 
   if (isSshAuthError(lastError)) {
-    sendApiError(response, 401, 'SSH_AUTH_FAILED', '部署认证失败，请检查设备账号密码', { retryable: false });
+    sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，用户名或密码不正确。请在设备管理中确认账号信息后重试', { retryable: false });
     return;
   }
   if (isSshTimeoutError(lastError)) {
@@ -2148,10 +2163,10 @@ app.post('/api/devices/connect', async (request, response) => {
       return;
     }
     if (isSshAuthError(error)) {
-      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，请检查用户名或密码', { retryable: false });
+      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，用户名或密码不正确。请在设备管理中确认账号信息后重试', { retryable: false });
       return;
     }
-    sendApiError(response, 500, 'SSH_CONNECT_FAILED', error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败', { retryable: true });
+    sendApiError(response, 500, 'SSH_CONNECT_FAILED', error instanceof Error ? `SSH 连接失败（${error.message}）。请检查设备 IP 和端口是否正确` : 'SSH 连接失败。请检查设备 IP 和端口是否正确', { retryable: true });
   }
 });
 
@@ -2462,10 +2477,10 @@ app.post('/api/devices/verify', async (request, response) => {
       return;
     }
     if (isSshAuthError(error)) {
-      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，请检查用户名或密码', { retryable: false });
+      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，用户名或密码不正确。请在设备管理中确认账号信息后重试', { retryable: false });
       return;
     }
-    sendApiError(response, 500, 'SSH_CONNECT_FAILED', error instanceof Error ? `SSH 连接失败: ${error.message}` : 'SSH 连接失败', { retryable: true });
+    sendApiError(response, 500, 'SSH_CONNECT_FAILED', error instanceof Error ? `SSH 连接失败（${error.message}）。请检查设备 IP 和端口是否正确` : 'SSH 连接失败。请检查设备 IP 和端口是否正确', { retryable: true });
   }
 });
 
@@ -2597,23 +2612,23 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   }
 
   if (!password) {
-    sendApiError(response, 400, 'DEVICE_PASSWORD_MISSING', '设备密码缺失或不正确，请在设备管理中重新连接并填写密码', { retryable: false });
+    sendApiError(response, 400, 'DEVICE_PASSWORD_MISSING', '设备密码缺失。请在左侧设备列表中点击该设备，重新输入 SSH 密码后再试', { retryable: false });
     return;
   }
 
   if (isSshAuthError(lastError)) {
-    sendApiError(response, 401, 'SSH_AUTH_FAILED', 'OpenClaw 板端认证失败，请检查设备账号密码', { retryable: false });
+    sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，用户名或密码不正确。请在设备管理中确认账号信息后重试', { retryable: false });
     return;
   }
   if (isSshTimeoutError(lastError)) {
-    sendApiError(response, 504, 'DEVICE_COMMAND_TIMEOUT', 'OpenClaw 板端执行超时，请稍后重试', { retryable: true });
+    sendApiError(response, 504, 'DEVICE_COMMAND_TIMEOUT', 'OpenClaw 执行超时，设备可能负载较高或网络不稳定，请稍后重试', { retryable: true });
     return;
   }
   sendApiError(
     response,
     500,
     'OPENCLAW_ACTION_FAILED',
-    lastError instanceof Error ? `OpenClaw 板端执行失败: ${lastError.message}` : 'OpenClaw 板端执行失败',
+    lastError instanceof Error ? `OpenClaw 执行失败（${lastError.message}）` : 'OpenClaw 执行失败',
     { retryable: true },
   );
 });
@@ -2645,14 +2660,14 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
   const device = devices.find((item) => item.id === id);
 
   if (!device) {
-    sendApiError(response, 404, 'DEVICE_NOT_FOUND', '设备不存在', { retryable: false });
+    sendApiError(response, 404, 'DEVICE_NOT_FOUND', '设备不存在或已被移除。请在左侧设备列表中重新添加设备', { retryable: false });
     return;
   }
 
   const sshPassword = providedPassword || resolveStoredDevicePassword(device);
 
   if (!sshPassword) {
-    sendApiError(response, 400, 'DEVICE_PASSWORD_MISSING', '缺少设备密码，请补充当前设备密码后重试', { retryable: false });
+    sendApiError(response, 400, 'DEVICE_PASSWORD_MISSING', '设备密码缺失。请在左侧设备列表中点击该设备，重新输入 SSH 密码后再试', { retryable: false });
     return;
   }
 
@@ -2682,7 +2697,7 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
     response.json({ output, device: sanitizeDevice(nextDevice as Device & { password?: string }) });
   } catch (error) {
     if (isSshAuthError(error)) {
-      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'OpenClaw 认证失败，请检查设备账号密码', { retryable: false });
+      sendApiError(response, 401, 'SSH_AUTH_FAILED', 'SSH 认证失败，用户名或密码不正确。请在设备管理中确认账号信息后重试', { retryable: false });
       return;
     }
     if (isSshTimeoutError(error)) {
@@ -3811,7 +3826,7 @@ ls -lh ${shEscape(outPath)} 2>/dev/null || true
     const job = flashBackupJobs.get(jobId);
     if (job) {
       job.status = 'error';
-      job.error = '板端命令执行失败';
+      job.error = '设备命令执行失败，请检查设备连接状态';
       job.finishedAt = Date.now();
       schedulePersistRuntimeJobs();
     }
@@ -3823,7 +3838,7 @@ ls -lh ${shEscape(outPath)} 2>/dev/null || true
   if (job) {
     job.status = failed ? 'error' : 'done';
     job.output = executed.output;
-    job.error = failed ? '板端缺少 rdk-backup 命令' : undefined;
+    job.error = failed ? '设备上未安装 rdk-backup 工具，请先安装后重试' : undefined;
     job.finishedAt = Date.now();
     schedulePersistRuntimeJobs();
   }
@@ -3833,7 +3848,7 @@ ls -lh ${shEscape(outPath)} 2>/dev/null || true
     jobId,
     outputPath: outPath,
     output: executed.output,
-    error: failed ? '板端缺少 rdk-backup 命令' : undefined,
+    error: failed ? '设备上未安装 rdk-backup 工具，请先安装后重试' : undefined,
   });
 });
 

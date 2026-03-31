@@ -6,6 +6,11 @@
  * events or API routes call readDevices() within the same request burst.
  * The cache is invalidated on every write to ensure consistency.
  *
+ * 写入安全：
+ * - 原子写入：先写临时文件再 rename，避免写入中途崩溃导致 JSON 损坏。
+ * - 串行写入：通过 Promise 链保证并发 writeDevices 调用按序执行，
+ *   避免两个请求同时读-改-写导致后者覆盖前者的修改。
+ *
  * In Electron production builds, RDK_DATA_DIR points to the app's
  * user-data directory instead of the project root.
  */
@@ -102,5 +107,29 @@ export async function writeDevices(devices: Device[]) {
   const dataFilePath = getDataFilePath();
   await migrateLegacyDataIfNeeded(dataFilePath);
   await fs.mkdir(path.dirname(dataFilePath), { recursive: true });
-  await fs.writeFile(dataFilePath, JSON.stringify(devices, null, 2), 'utf-8');
+  // 原子写入：先写临时文件再 rename，防止写入中途崩溃导致 JSON 损坏
+  const tmpPath = dataFilePath + '.tmp.' + process.pid;
+  await fs.writeFile(tmpPath, JSON.stringify(devices, null, 2), 'utf-8');
+  await fs.rename(tmpPath, dataFilePath);
+}
+
+/**
+ * 串行化写入：保证并发 writeDevices 调用按序执行。
+ *
+ * 使用场景：多个 Socket.IO 事件或 API 路由同时触发设备状态更新时，
+ * 如果不串行化，后一个 writeDevices 可能基于过期数据覆盖前一个的修改。
+ *
+ * 用法：在需要读-改-写的场景中，用 serializedWriteDevices 替代直接调用 writeDevices。
+ * 例如：await serializedWriteDevices(async () => {
+ *   const devices = await readDevices();
+ *   devices.push(newDevice);
+ *   await writeDevices(devices);
+ * });
+ */
+let _writeChain: Promise<void> = Promise.resolve();
+
+export function serializedWriteDevices(fn: () => Promise<void>): Promise<void> {
+  const next = _writeChain.then(fn, fn);
+  _writeChain = next.catch(() => {});
+  return next;
 }

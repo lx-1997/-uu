@@ -6,13 +6,7 @@ import { translate } from '../i18n/translate';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { fetchNodeRedStatus, fetchRosTopics, fetchVncStatus, executeDeviceCommand } from '../api';
-
-const UI_LOCALE_KEY = 'rdk-ui-locale';
-
-function readStoredLocale(): 'zh-CN' | 'en' {
-  if (typeof window === 'undefined') return 'zh-CN';
-  return localStorage.getItem(UI_LOCALE_KEY) === 'en' ? 'en' : 'zh-CN';
-}
+import { readStoredLocale, writeStoredLocale, UI_LOCALE_KEY, type AppLocale } from '../utils/locale';
 
 /** 固定为橙色极光浅色主题（原 aurora），不再提供赛博/奶咖切换 */
 export type ThemeMode = 'aurora';
@@ -167,9 +161,9 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   // ── Language（提前声明，供 Flash/VNC 等文案使用）──
   const [language, setLanguageState] = useState<'zh-CN' | 'en'>(readStoredLocale);
   const setLanguage = (v: string) => {
-    const next: 'zh-CN' | 'en' = v === 'en' ? 'en' : 'zh-CN';
+    const next: AppLocale = v === 'en' ? 'en' : 'zh-CN';
     setLanguageState(next);
-    if (typeof window !== 'undefined') localStorage.setItem(UI_LOCALE_KEY, next);
+    writeStoredLocale(next);
   };
   const isEn = language === 'en';
   const t = (key: string, zh: string) => translate(isEn, key, zh);
@@ -279,7 +273,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
         } else {
           setVncConnected(false);
           setVncProgress(0);
-          setVncPhase(t('ui.vnc.phase.missing', '设备未检测到 VNC 服务，请先在板端启动'));
+          setVncPhase(t('ui.vnc.phase.missing', '设备未检测到 VNC 服务，请先在设备上启动 x11vnc 或 vncserver'));
           addToast(t('ui.vnc.toast.missing', '未检测到 VNC 服务，请先在设备上启动 x11vnc/vncserver'), 'warning');
         }
       })
