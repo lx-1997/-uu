@@ -271,7 +271,11 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
     const timeout = input.timeout ?? 30000;
 
     try {
-      const child = spawn("sh", ["-c", input.command], {
+      // 跨平台 shell 选择：Windows 用 cmd /c，macOS/Linux 用 sh -c
+      const isWin = process.platform === "win32";
+      const shell = isWin ? "cmd" : "sh";
+      const shellArgs = isWin ? ["/c", input.command] : ["-c", input.command];
+      const child = spawn(shell, shellArgs, {
         cwd: ctx.workspaceDir,
         stdio: ["ignore", "pipe", "pipe"],
       });

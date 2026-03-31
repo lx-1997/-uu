@@ -2420,24 +2420,62 @@ app.post('/api/typec/configure', async (request, response) => {
     let result: string;
     if (platform === 'win32') {
       // Windows: 使用 netsh 配置静态 IP（需要管理员权限）
-      // 注意：interfaceName 可能包含空格（如 "Loopback Pseudo-Interface 1"），
-      // 使用 spawn 参数数组传递避免 shell 注入和引号问题
-      result = await new Promise<string>((resolve, reject) => {
-        const child = spawn('netsh', [
-          'interface', 'ipv4', 'set', 'address',
-          `name=${interfaceName}`,
-          'static', pcIp, mask,
-        ], { timeout: 15000, windowsHide: true });
-        let stdout = '';
-        let stderr = '';
-        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-        child.on('close', (code) => {
-          if (code === 0) resolve(stdout);
-          else reject(new Error(stderr || stdout || `netsh exit code ${code}`));
+      //
+      // netsh 行为：
+      //   - 网卡当前是 DHCP → set address 成功
+      //   - 网卡已有静态 IP  → set address 报"对象已存在"
+      //   - 网卡已有相同 IP  → 无需操作
+      //
+      // 策略：先检查当前 IP，如果已经是目标 IP 直接跳过；
+      // 否则先 delete 旧静态 IP（忽略错误），再 set 新 IP。
+      const spawnNetsh = (args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> =>
+        new Promise((resolve, reject) => {
+          const child = spawn('netsh', args, { timeout: 15000, windowsHide: true });
+          let stdout = '';
+          let stderr = '';
+          child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+          child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+          child.on('close', (code) => resolve({ code, stdout, stderr }));
+          child.on('error', reject);
         });
-        child.on('error', reject);
-      });
+
+      // 检查当前 IP 是否已经是目标值
+      const currentAddrs = os.networkInterfaces()[interfaceName];
+      const alreadyConfigured = currentAddrs?.some(a => a.family === 'IPv4' && a.address === pcIp);
+      if (alreadyConfigured) {
+        result = `IP ${pcIp} 已配置在 ${interfaceName} 上，无需重复设置`;
+      } else {
+        // 先尝试直接 set
+        const first = await spawnNetsh([
+          'interface', 'ipv4', 'set', 'address',
+          `name=${interfaceName}`, 'static', pcIp, mask,
+        ]);
+        if (first.code === 0) {
+          result = first.stdout;
+        } else {
+          // "对象已存在" → 先删除旧静态 IP 再重新设置
+          await spawnNetsh([
+            'interface', 'ipv4', 'delete', 'address',
+            `name=${interfaceName}`, 'addr=0.0.0.0', 'gateway=all',
+          ]).catch(() => {});
+          // 也尝试删除当前已有的具体 IP
+          for (const addr of (currentAddrs ?? []).filter(a => a.family === 'IPv4')) {
+            await spawnNetsh([
+              'interface', 'ipv4', 'delete', 'address',
+              `name=${interfaceName}`, `addr=${addr.address}`,
+            ]).catch(() => {});
+          }
+          const second = await spawnNetsh([
+            'interface', 'ipv4', 'set', 'address',
+            `name=${interfaceName}`, 'static', pcIp, mask,
+          ]);
+          if (second.code === 0) {
+            result = second.stdout;
+          } else {
+            throw new Error(second.stderr || second.stdout || `netsh exit code ${second.code}`);
+          }
+        }
+      }
     } else if (platform === 'darwin') {
       result = await configureDarwinTypecNic(interfaceName, pcIp, mask);
     } else {
