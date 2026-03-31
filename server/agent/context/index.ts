@@ -45,3 +45,9 @@ export {
   estimateMessagesChars,
   estimateMessagesTokens,
 } from "./tokens.js";
+export {
+  microcompact,
+  DEFAULT_MICRO_COMPACT_CONFIG,
+  type MicroCompactConfig,
+  type MicroCompactResult,
+} from "./microcompact.js";

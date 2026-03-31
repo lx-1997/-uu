@@ -62,10 +62,30 @@ export type MiniAgentEvent =
   // mini 特有事件
   | { type: "steering"; pendingCount: number }
   | { type: "compaction"; summaryChars: number; droppedMessages: number }
-  | { type: "context_overflow_compact"; error: string }
+  | { type: "context_overflow_compact"; error: string; recoveryLevel?: number }
   | { type: "retry"; attempt: number; delay: number; error: string }
   | { type: "subagent_summary"; childSessionKey: string; label?: string; task: string; summary: string }
-  | { type: "subagent_error"; childSessionKey: string; label?: string; task: string; error: string };
+  | { type: "subagent_error"; childSessionKey: string; label?: string; task: string; error: string }
+
+  // 可观测性事件（借鉴 claude-code run metrics）
+  | { type: "microcompact"; compressedCount: number; savedChars: number }
+  | { type: "emergency_truncation"; droppedMessages: number; keptMessages: number }
+  | { type: "run_metrics"; metrics: RunMetrics };
+
+/** Agent run 的完整执行统计（借鉴 claude-code） */
+export interface RunMetrics {
+  runId: string;
+  sessionKey: string;
+  totalTurns: number;
+  totalToolCalls: number;
+  toolCallsByName: Record<string, number>;
+  toolErrors: number;
+  microcompactSavedChars: number;
+  overflowRecoveries: number;
+  totalDurationMs: number;
+  firstTokenMs: number | null;
+  contextCompactions: number;
+}
 
 // ============== 结果类型 ==============
 

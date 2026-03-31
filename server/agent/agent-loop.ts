@@ -40,9 +40,11 @@ import {
   describeError,
 } from "./provider/errors.js";
 import { pruneContextMessages } from "./context/index.js";
+import { microcompact } from "./context/microcompact.js";
 import { createMiniAgentStream, type MiniAgentEvent, type MiniAgentResult } from "./agent-events.js";
 import { abortable } from "./tools/abort.js";
 import { convertMessagesToPi } from "./message-convert.js";
+import type { ToolHookRegistry } from "./tool-hooks.js";
 
 // ============== 类型定义 ==============
 
@@ -107,6 +109,8 @@ export interface AgentLoopParams {
     name: string;
     input: unknown;
   }) => Promise<{ approved: boolean; decision: string } | null>;
+  /** Tool Hooks 注册表（借鉴 claude-code PreToolUse/PostToolUse） */
+  toolHooks?: ToolHookRegistry;
   /** 外部 abort 信号 */
   abortSignal: AbortSignal;
 }
@@ -217,7 +221,16 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
     let turns = 0;
     let totalToolCalls = 0;
     let finalText = "";
-    let overflowCompactionAttempted = false;
+    let overflowRecoveryLevel = 0; // 0=none, 1=microcompact, 2=llm-compact, 3=emergency-truncation
+
+    // ── Run Metrics 追踪器（借鉴 claude-code） ──
+    const runStartMs = Date.now();
+    let firstTokenMs: number | null = null;
+    let microcompactTotalSavedChars = 0;
+    let overflowRecoveries = 0;
+    let contextCompactions = 0;
+    let toolErrors = 0;
+    const toolCallsByName: Record<string, number> = {};
 
     try {
       // 对应 OpenClaw: 循环开始前检查 steering（用户可能在等待期间输入）
@@ -246,6 +259,22 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               currentMessages.push(msg);
             }
             pendingMessages = [];
+          }
+
+          // ===== MicroCompact: 压缩旧 tool_result（零 LLM 调用） =====
+          // 借鉴 claude-code: 每轮 LLM 调用前，自动把已处理过的 tool_result
+          // 替换为占位符，大幅减少 token 消耗而不丢失关键信息。
+          if (turns > 1) {
+            const mcResult = microcompact(currentMessages);
+            if (mcResult.compressedCount > 0) {
+              currentMessages.splice(0, currentMessages.length, ...mcResult.messages);
+              microcompactTotalSavedChars += mcResult.savedChars;
+              stream.push({
+                type: "microcompact" as any,
+                compressedCount: mcResult.compressedCount,
+                savedChars: mcResult.savedChars,
+              });
+            }
           }
 
           // ===== Prune: 每轮都执行 =====
@@ -306,6 +335,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       break;
 
                     case "text_delta":
+                      if (!firstTokenMs) firstTokenMs = Date.now() - runStartMs;
                       stream.push({ type: "message_delta", delta: event.delta });
                       break;
 
@@ -367,20 +397,69 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               },
             );
           } catch (llmError) {
-            // Context overflow → auto-compact → 重试一次
+            // Context overflow → 渐进式恢复（借鉴 claude-code reactive compact）
+            //
+            // 策略链（每次 overflow 尝试下一级）：
+            //   Level 1: microcompact（压缩旧 tool_result，零 LLM 调用）
+            //   Level 2: auto-compact（LLM 生成摘要）
+            //   Level 3: emergency truncation（直接丢弃旧消息，保留最近 N 条）
             const errorText = describeError(llmError);
-            if (isContextOverflowError(errorText) && !overflowCompactionAttempted) {
-              overflowCompactionAttempted = true;
-              stream.push({ type: "context_overflow_compact", error: errorText });
-              const overflowPrep = await prepareCompaction({
-                messages: currentMessages,
-                sessionKey,
-                runId,
+            if (isContextOverflowError(errorText) && overflowRecoveryLevel < 3) {
+              overflowRecoveryLevel++;
+              overflowRecoveries++;
+              stream.push({
+                type: "context_overflow_compact" as any,
+                error: errorText,
+                recoveryLevel: overflowRecoveryLevel,
               });
-              if (overflowPrep.summary && overflowPrep.summaryMessage) {
-                compactionSummary = overflowPrep.summaryMessage;
-                turns--;
-                continue;
+
+              if (overflowRecoveryLevel === 1) {
+                // Level 1: 激进 microcompact（保留更少的 tool_result）
+                const mcResult = microcompact(currentMessages, { keepRecentResults: 2, minContentLength: 50 });
+                if (mcResult.compressedCount > 0) {
+                  currentMessages.splice(0, currentMessages.length, ...mcResult.messages);
+                  turns--;
+                  continue;
+                }
+                // microcompact 没效果，升级到 Level 2
+                overflowRecoveryLevel = 2;
+              }
+
+              if (overflowRecoveryLevel === 2) {
+                // Level 2: LLM 摘要压缩
+                try {
+                  const overflowPrep = await prepareCompaction({
+                    messages: currentMessages,
+                    sessionKey,
+                    runId,
+                  });
+                  if (overflowPrep.summary && overflowPrep.summaryMessage) {
+                    compactionSummary = overflowPrep.summaryMessage;
+                    turns--;
+                    continue;
+                  }
+                } catch {
+                  // LLM compact 也失败了，升级到 Level 3
+                  overflowRecoveryLevel = 3;
+                }
+              }
+
+              if (overflowRecoveryLevel === 3) {
+                // Level 3: Emergency truncation — 直接丢弃旧消息，保留最近 6 条
+                // 这是最后的兜底，确保 Agent 不会因为上下文溢出而完全崩溃
+                const keepCount = Math.min(6, currentMessages.length);
+                const dropped = currentMessages.length - keepCount;
+                if (dropped > 0) {
+                  const kept = currentMessages.slice(-keepCount);
+                  currentMessages.splice(0, currentMessages.length, ...kept);
+                  stream.push({
+                    type: "emergency_truncation" as any,
+                    droppedMessages: dropped,
+                    keptMessages: keepCount,
+                  });
+                  turns--;
+                  continue;
+                }
               }
             }
             throw llmError;
@@ -435,11 +514,38 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 group.calls.map(async (call) => {
                   const tool = toolsForRun.find((t) => t.name === call.name);
                   if (!tool) return { text: `未知工具: ${call.name}`, errFlag: true };
-                  try {
-                    return { text: await tool.execute(call.input, { ...toolCtx, toolCallId: call.id }), errFlag: false };
-                  } catch (err) {
-                    return { text: `执行错误: ${(err as Error).message}`, errFlag: false };
+
+                  // PreToolUse hooks
+                  if (params.toolHooks) {
+                    const { decision, hookName } = await params.toolHooks.runPreHooks({
+                      tool, input: call.input, ctx: toolCtx, sessionId: params.sessionKey,
+                    });
+                    if (decision.action === "block") {
+                      return { text: `[${hookName}] ${decision.reason}`, errFlag: true };
+                    }
+                    if (decision.action === "modify") {
+                      call.input = decision.input;
+                    }
                   }
+
+                  const startMs = Date.now();
+                  let text: string;
+                  let errFlag = false;
+                  try {
+                    text = await tool.execute(call.input, { ...toolCtx, toolCallId: call.id });
+                  } catch (err) {
+                    text = `执行错误: ${(err as Error).message}`;
+                    errFlag = true;
+                  }
+
+                  // PostToolUse hooks
+                  if (params.toolHooks) {
+                    text = await params.toolHooks.runPostHooks({
+                      tool, input: call.input, result: text, isError: errFlag,
+                      durationMs: Date.now() - startMs, ctx: toolCtx, sessionId: params.sessionKey,
+                    });
+                  }
+                  return { text, errFlag };
                 }),
               );
               for (let j = 0; j < group.calls.length; j++) {
@@ -449,6 +555,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   ? s.value
                   : { text: `执行错误: ${String((s as PromiseRejectedResult).reason)}`, errFlag: true };
                 totalToolCalls++;
+                toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
+                if (isError) toolErrors++;
                 stream.push({
                   type: "tool_execution_end",
                   toolCallId: call.id,
@@ -499,7 +607,37 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                     }
                   }
                   try {
+                    // PreToolUse hooks
+                    if (params.toolHooks) {
+                      const { decision, hookName } = await params.toolHooks.runPreHooks({
+                        tool, input: call.input, ctx: toolCtx, sessionId: params.sessionKey,
+                      });
+                      if (decision.action === "block") {
+                        result = `[${hookName}] ${decision.reason}`;
+                        isError = true;
+                        totalToolCalls++;
+                        stream.push({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError });
+                        toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
+                        const steering = await getSteeringMessages();
+                        if (steering.length > 0) { steeringMessages = steering; pendingMessages = steering; }
+                        if (steeringMessages) break;
+                        continue;
+                      }
+                      if (decision.action === "modify") {
+                        call.input = decision.input;
+                      }
+                    }
+
+                    const toolStartMs = Date.now();
                     result = await tool.execute(call.input, { ...toolCtx, toolCallId: call.id });
+
+                    // PostToolUse hooks
+                    if (params.toolHooks) {
+                      result = await params.toolHooks.runPostHooks({
+                        tool, input: call.input, result, isError: false,
+                        durationMs: Date.now() - toolStartMs, ctx: toolCtx, sessionId: params.sessionKey,
+                      });
+                    }
                   } catch (err) {
                     result = `执行错误: ${(err as Error).message}`;
                   }
@@ -508,7 +646,9 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 }
 
                 totalToolCalls++;
-                const isError = !tool;
+                toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
+                const isError = !tool || result.startsWith("执行错误:") || result.startsWith("[");
+                if (isError) toolErrors++;
                 stream.push({
                   type: "tool_execution_end",
                   toolCallId: call.id,
@@ -563,6 +703,24 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
         break;
       }
       // ========== 外层循环结束 ==========
+
+      // 发射 run_metrics 事件（借鉴 claude-code run_complete）
+      stream.push({
+        type: "run_metrics",
+        metrics: {
+          runId,
+          sessionKey,
+          totalTurns: turns,
+          totalToolCalls,
+          toolCallsByName,
+          toolErrors,
+          microcompactSavedChars: microcompactTotalSavedChars,
+          overflowRecoveries,
+          totalDurationMs: Date.now() - runStartMs,
+          firstTokenMs,
+          contextCompactions,
+        },
+      });
 
       stream.push({ type: "agent_end", runId, messages: currentMessages });
       stream.end({ finalText, turns, totalToolCalls, messages: currentMessages });
