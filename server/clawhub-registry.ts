@@ -34,6 +34,8 @@ const CLAWHUB_HEADERS = {
 } as const;
 
 const MAX_HTTP_ATTEMPTS = 6;
+/** 超时重试次数（DNS/TLS 首次慢，第二次通常有缓存） */
+const MAX_TIMEOUT_RETRIES = 2;
 const SKILL_MD_CACHE_TTL_MS = 30 * 60 * 1000;
 const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -93,15 +95,23 @@ async function fetchTextWithRetry(
 ): Promise<string> {
   const timeoutMs = options?.timeoutMs ?? JSON_FETCH_TIMEOUT_MS;
   const headers = { ...CLAWHUB_HEADERS, ...extraHeaders };
+  let timeoutRetries = 0;
   for (let attempt = 0; attempt < MAX_HTTP_ATTEMPTS; attempt++) {
     let res: Response;
     try {
       res = await fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (/abort|timeout/i.test(msg) || (e instanceof Error && e.name === 'AbortError')) {
-        throw new Error('clawhub_fetch_timeout');
+      const isTimeout = /abort|timeout/i.test(msg) || (e instanceof Error && e.name === 'AbortError');
+      // 超时和网络错误都重试（DNS/TLS 首次慢，第二次通常有缓存）
+      if (timeoutRetries < MAX_TIMEOUT_RETRIES) {
+        timeoutRetries++;
+        const reason = isTimeout ? 'timeout' : `network error (${msg})`;
+        console.warn(`[clawhub] ${reason}, retry ${timeoutRetries}/${MAX_TIMEOUT_RETRIES}: ${url}`);
+        if (!isTimeout) await sleep(1000);
+        continue;
       }
+      if (isTimeout) throw new Error('clawhub_fetch_timeout');
       throw e instanceof Error ? e : new Error(String(e));
     }
     const text = await res.text();

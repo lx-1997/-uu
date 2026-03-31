@@ -5,8 +5,10 @@ import { createBrowserFetchTools } from "./browser-tools.js";
 
 export type { WebToolOptions };
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_FETCH_CHARS = 16_000;
+/** 网络请求最大重试次数 */
+const MAX_NETWORK_RETRIES = 2;
 
 function withTimeout(timeoutMs: number) {
   const controller = new AbortController();
@@ -439,42 +441,54 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
       const query = input.query.trim();
       if (!query) throw new Error("query 不能为空");
       const limit = Math.min(10, Math.max(1, Number(input.limit || 5)));
-      const timeout = withTimeout(timeoutMs);
-      try {
-        const pages = await fetchDuckDuckGoHtml(query, timeout.signal);
-        const ddg = extractDdgResultsFromPages(pages, limit);
-        if (ddg && ddg.results.length > 0) {
-          const lines = ddg.results.map((item, i) => `${i + 1}. ${item.title}\n   ${item.url}`);
-          return `query: ${query}\nengine: DuckDuckGo (${ddg.via}${ddg.status ? `, http ${ddg.status}` : ""})\nresults:\n${lines.join("\n")}`;
-        }
 
-        if ((process.env.TAVILY_API_KEY || "").trim()) {
-          try {
-            const tv = await searchTavily(query, limit, timeout.signal);
-            if (tv.ok && tv.results.length > 0) {
-              const lines = tv.results.map((item, i) => {
-                const sn = item.snippet ? `\n   snippet: ${item.snippet}` : "";
-                return `${i + 1}. ${item.title}\n   ${item.url}${sn}`;
-              });
-              const rt =
-                tv.responseTime !== undefined ? `, ${tv.responseTime.toFixed(2)}s` : "";
-              return `query: ${query}\nengine: Tavily (basic${rt}, fallback after DDG empty)\nresults:\n${lines.join("\n")}`;
-            }
-            const ddgFail = formatDdgSearchOutput(query, pages, limit);
-            const tvNote = !tv.ok
-              ? `Tavily 不可用（${tv.httpStatus ?? "?"}）：${tv.reason}`
-              : "Tavily 返回 0 条";
-            return `${ddgFail}\n\n[注] ${tvNote}`;
-          } catch (e) {
-            const ddgFail = formatDdgSearchOutput(query, pages, limit);
-            return `${ddgFail}\n\n[注] Tavily 请求异常：${e instanceof Error ? e.message : String(e)}`;
+      // 网络请求重试：DNS/TLS 首次慢或临时网络波动
+      let lastError: Error | null = null;
+      for (let retry = 0; retry <= MAX_NETWORK_RETRIES; retry++) {
+        const timeout = withTimeout(timeoutMs);
+        try {
+          const pages = await fetchDuckDuckGoHtml(query, timeout.signal);
+          const ddg = extractDdgResultsFromPages(pages, limit);
+          if (ddg && ddg.results.length > 0) {
+            const lines = ddg.results.map((item, i) => `${i + 1}. ${item.title}\n   ${item.url}`);
+            return `query: ${query}\nengine: DuckDuckGo (${ddg.via}${ddg.status ? `, http ${ddg.status}` : ""})\nresults:\n${lines.join("\n")}`;
           }
-        }
 
-        return formatDdgSearchOutput(query, pages, limit);
-      } finally {
-        timeout.clear();
+          if ((process.env.TAVILY_API_KEY || "").trim()) {
+            try {
+              const tv = await searchTavily(query, limit, timeout.signal);
+              if (tv.ok && tv.results.length > 0) {
+                const lines = tv.results.map((item, i) => {
+                  const sn = item.snippet ? `\n   snippet: ${item.snippet}` : "";
+                  return `${i + 1}. ${item.title}\n   ${item.url}${sn}`;
+                });
+                const rt =
+                  tv.responseTime !== undefined ? `, ${tv.responseTime.toFixed(2)}s` : "";
+                return `query: ${query}\nengine: Tavily (basic${rt}, fallback after DDG empty)\nresults:\n${lines.join("\n")}`;
+              }
+              const ddgFail = formatDdgSearchOutput(query, pages, limit);
+              const tvNote = !tv.ok
+                ? `Tavily 不可用（${tv.httpStatus ?? "?"}）：${tv.reason}`
+                : "Tavily 返回 0 条";
+              return `${ddgFail}\n\n[注] ${tvNote}`;
+            } catch (e) {
+              const ddgFail = formatDdgSearchOutput(query, pages, limit);
+              return `${ddgFail}\n\n[注] Tavily 请求异常：${e instanceof Error ? e.message : String(e)}`;
+            }
+          }
+
+          return formatDdgSearchOutput(query, pages, limit);
+        } catch (e) {
+          lastError = e instanceof Error ? e : new Error(String(e));
+          if (retry < MAX_NETWORK_RETRIES) {
+            console.warn(`[web_search] retry ${retry + 1}/${MAX_NETWORK_RETRIES}: ${lastError.message}`);
+            continue;
+          }
+        } finally {
+          timeout.clear();
+        }
       }
+      throw lastError ?? new Error("web_search failed");
     },
   };
 }
