@@ -52,12 +52,14 @@ export function boardOpenClawChatTool(
   return {
     name: "board_openclaw_chat",
     description:
-      "与板端 OpenClaw 自由交流——交换信息、讨论方案、了解板端能力和状态。" +
-      "不同于 assess（评估可行性）和 delegate（委派执行），这是轻量级的伙伴对话。" +
-      "典型用途：了解 OpenClaw 配置的模型和能力（如是否支持视觉）、分享你的分析发现、" +
-      "讨论执行方案和注意事项、获取板端实时状态、协商分工。" +
-      "与 delegate 共享会话上下文，交流过的内容在后续委派时 OpenClaw 仍记得。" +
-      "板端回复可能需数十秒；若你在同一条回复里先对用户说一两句轻松话/笑话再调用本工具，可减少干等感（服务端也会推送一句等待提示）。",
+      "与板端 OpenClaw 自由交流——交换信息、讨论方案、了解板端能力和状态。\n\n" +
+      "IMPORTANT 使用规则：\n" +
+      "- 不同于 board_openclaw_assess（评估可行性）和 board_openclaw_delegate（委派执行），这是轻量级的伙伴对话\n" +
+      "- 典型用途：了解 OpenClaw 配置的模型和能力、分享你的分析发现、讨论执行方案、获取板端实时状态\n" +
+      "- 与 delegate 共享会话上下文，交流过的内容在后续委派时 OpenClaw 仍记得\n" +
+      "- 板端回复可能需数十秒（本地模型推理慢），先对用户说一两句轻松话再调用\n" +
+      "- 当 delegate 返回 [NEED_RDKCLAW] 块时，用你的工具获取信息后通过此工具发回给 OpenClaw\n" +
+      "- NEVER 用此工具替代 delegate 来执行任务——chat 只交流不执行",
     inputSchema: {
       type: "object",
       properties: {

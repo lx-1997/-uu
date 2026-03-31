@@ -168,10 +168,16 @@ export function boardOpenClawDelegateTool(
   return {
     name: "board_openclaw_delegate",
     description:
-      "将任务委派给板端 OpenClaw 执行。通常在 board_openclaw_assess 确认可行后调用。" +
-      "在 guidance 中融入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索）对它很重要。" +
-      "若任务可能超出其当前技能，在 guidance 中写明：板端可先通过 **find-skills**（SkillHub）检索/安装再执行；委派前会自动检查并尝试 `clawhub install find-skills`，也可调用 **board_openclaw_ensure_find_skills**。" +
-      "同一对话内自动复用会话，板端保留上下文。",
+      "将任务委派给板端 OpenClaw 执行。这是 RDKClaw 与板端协作的核心工具。\n\n" +
+      "IMPORTANT 使用规则：\n" +
+      "- ALWAYS 在委派前先用 board_openclaw_assess 评估板端能力，确认可行后再委派\n" +
+      "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
+      "- ALWAYS 在 guidance 中写明验收标准（怎样算成功）\n" +
+      "- 若任务可能超出板端当前技能，在 guidance 中提示：可先用 find-skills（SkillHub）检索/安装再执行\n" +
+      "- 委派后 ALWAYS 评估返回结果的质量，失败时用本地工具兜底\n" +
+      "- 若 OpenClaw 回复含 [NEED_RDKCLAW] 块，提取 type/query/reason 后用你的工具获取信息，再通过 board_openclaw_chat 发回\n" +
+      "- 同一对话内自动复用会话，板端保留上下文\n" +
+      "- NEVER 在未连接设备时调用此工具",
     inputSchema: {
       type: "object",
       properties: {

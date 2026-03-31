@@ -161,7 +161,13 @@ function deviceFileDownloadToLocalTool(
 ): Tool<{ remotePath: string; localPath?: string }> {
   return {
     name: 'device_file_download_to_local',
-    description: '把设备上的文件下载到本机（RDK Studio 所在电脑）。可选 localPath，不填则下载到 workspace/downloads/。下载图片、视频或文档后会返回可预览/可下载的 URL。',
+    description:
+      '把设备上的文件下载到本机（RDK Studio 所在电脑）。\n' +
+      '用途：下载图片、视频、模型文件、日志等到本地查看或处理。\n\n' +
+      '使用规则：\n' +
+      '- 可选 localPath，不填则下载到 workspace/downloads/\n' +
+      '- 下载图片/视频后会返回可预览的 URL\n' +
+      '- 大文件下载可能较慢，先告知用户',
     inputSchema: {
       type: 'object',
       properties: {
@@ -217,7 +223,13 @@ function deviceFileDownloadToLocalTool(
 function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: string; remotePath: string }> {
   return {
     name: 'device_file_upload_from_local',
-    description: '把本机文件上传到设备。localPath 基于 RDK Studio workspace。',
+    description:
+      '把本机文件上传到设备。\n' +
+      '用途：上传模型文件、脚本、配置到 RDK 设备。\n\n' +
+      '使用规则：\n' +
+      '- localPath 基于 RDK Studio workspace\n' +
+      '- remotePath 必须是设备上的绝对路径\n' +
+      '- 上传后建议用 device_file_read 或 device_exec 验证',
     inputSchema: {
       type: 'object',
       properties: {
@@ -237,7 +249,18 @@ function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: stri
 function deviceExecTool(deviceId: string): Tool<{ command: string }> {
   return {
     name: 'device_exec',
-    description: '在 RDK 设备上执行 shell 命令。用于运行任意命令、安装软件、查看系统状态、编译代码等。长时间命令加 timeout 30；避免交互式命令（vim/top）；复杂任务用 && 串联。执行后检查输出确认是否成功。',
+    description:
+      '在 RDK 设备上通过 SSH 执行 shell 命令。\n' +
+      '用途：运行任意命令、安装软件、查看系统状态、编译代码、管理进程等。\n\n' +
+      'IMPORTANT 使用规则：\n' +
+      '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
+      '- 长时间命令（编译、下载）加 timeout 参数或用 nohup 后台执行\n' +
+      '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
+      '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功\n' +
+      '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步\n' +
+      '- 读取设备文件用 device_file_read 而不是 cat\n' +
+      '- 写入设备文件用 device_file_write 而不是 echo/tee\n' +
+      '- 查看目录用 device_file_list 而不是 ls',
     inputSchema: {
       type: 'object',
       properties: {
@@ -255,7 +278,14 @@ function deviceExecTool(deviceId: string): Tool<{ command: string }> {
 function deviceFileReadTool(deviceId: string): Tool<{ path: string }> {
   return {
     name: 'device_file_read',
-    description: '读取 RDK 设备上的文件内容。用于查看配置文件、日志、代码等。',
+    description:
+      '读取 RDK 设备上的文件内容。\n' +
+      '用途：查看配置文件、日志、代码、脚本等文本文件。\n\n' +
+      '使用规则：\n' +
+      '- ALWAYS 使用绝对路径（如 /root/.openclaw/openclaw.json）\n' +
+      '- 大文件（>100KB）建议先用 device_exec 查看行数再决定是否全量读取\n' +
+      '- 二进制文件（图片、模型）不要用此工具，用 device_file_download_to_local 下载后处理\n' +
+      '- NEVER 用 device_exec + cat 替代此工具',
     inputSchema: {
       type: 'object',
       properties: {
@@ -272,7 +302,15 @@ function deviceFileReadTool(deviceId: string): Tool<{ path: string }> {
 function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: string }> {
   return {
     name: 'device_file_write',
-    description: '写入文件到 RDK 设备。用于创建脚本、配置文件、代码文件等。',
+    description:
+      '写入文件到 RDK 设备。\n' +
+      '用途：创建脚本、配置文件、代码文件、systemd unit 等。\n\n' +
+      '使用规则：\n' +
+      '- IMPORTANT: 写入已存在的文件前，ALWAYS 先用 device_file_read 读取当前内容\n' +
+      '- 此工具会完全覆盖目标文件，不是追加\n' +
+      '- 目录不存在时不会自动创建，需先用 device_exec 创建目录\n' +
+      '- NEVER 用 device_exec + echo/tee/heredoc 替代此工具\n' +
+      '- 写入后建议用 device_file_read 验证内容正确',
     inputSchema: {
       type: 'object',
       properties: {
@@ -291,7 +329,12 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
 function deviceFileListTool(deviceId: string): Tool<{ path?: string }> {
   return {
     name: 'device_file_list',
-    description: '列出 RDK 设备上的目录内容。',
+    description:
+      '列出 RDK 设备上的目录内容。\n\n' +
+      '使用规则：\n' +
+      '- 默认列出 /root 目录\n' +
+      '- ALWAYS 使用绝对路径\n' +
+      '- NEVER 用 device_exec + ls 替代此工具',
     inputSchema: {
       type: 'object',
       properties: {
@@ -307,7 +350,13 @@ function deviceFileListTool(deviceId: string): Tool<{ path?: string }> {
 function deviceDiagnoseTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'device_diagnose',
-    description: '获取 RDK 设备硬件诊断信息：CPU 温度、BPU 负载、内存使用、磁盘空间。',
+    description:
+      '获取 RDK 设备硬件诊断信息：CPU 温度、BPU 负载、内存使用、磁盘空间、运行时间。\n\n' +
+      '使用规则：\n' +
+      '- 用户问"板子状态/温度/内存/磁盘"时 ALWAYS 使用此工具\n' +
+      '- 温度值需除以 1000 转为摄氏度（如 65000 → 65°C）\n' +
+      '- BPU ratio 值 0-100 表示负载百分比\n' +
+      '- 可与 board_openclaw_assess 并行调用',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -732,8 +781,14 @@ print(json.dumps(mask(d),indent=2))`.replace(/\n/g, ';');
 function boardOpenClawHealthTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_health',
-    description: '获取板端 OpenClaw 结构化健康状态（JSON：installed、gatewayRunning、version、hasToken、aiReady 等）。较慢（SSH + 板端 CLI）。' +
-      '不要在每轮对话中例行调用；若 Studio 已显示 OpenClaw 在线则默认跳过。仅在用户报障、安装/升级/重启后需验收、delegate/chat 失败、或 UI 异常时再调用。',
+    description:
+      '获取板端 OpenClaw 结构化健康状态（JSON：installed、gatewayRunning、version、hasToken、aiReady 等）。\n\n' +
+      'IMPORTANT 使用约束：\n' +
+      '- 此工具较慢（SSH + 板端 CLI），NEVER 在每轮对话中例行调用\n' +
+      '- 若 Studio UI 快照已显示 OpenClaw 在线，ALWAYS 优先采信快照，不要重复调用\n' +
+      '- 仅在以下场景调用：用户报障、安装/升级/重启后需验收、delegate/chat 失败、UI 显示异常\n' +
+      '- 轻量状态查询用 board_openclaw_status 替代\n' +
+      '- 全面体检用 board_openclaw_check 替代',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [

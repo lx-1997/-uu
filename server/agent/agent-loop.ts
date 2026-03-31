@@ -614,9 +614,10 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       });
                       if (decision.action === "block") {
                         result = `[${hookName}] ${decision.reason}`;
-                        isError = true;
                         totalToolCalls++;
-                        stream.push({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError });
+                        toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
+                        toolErrors++;
+                        stream.push({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError: true });
                         toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
                         const steering = await getSteeringMessages();
                         if (steering.length > 0) { steeringMessages = steering; pendingMessages = steering; }

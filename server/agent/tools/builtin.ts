@@ -74,7 +74,12 @@ async function resolveMemoryRoot(ctx: ToolContext): Promise<string> {
  */
 export const readTool: Tool<{ file_path: string; limit?: number }> = {
   name: "read",
-  description: "读取文件内容，返回带行号的文本",
+  description:
+    "读取本机工作区文件内容，返回带行号的文本。\n\n" +
+    "使用规则：\n" +
+    "- 这是本机文件，不是 RDK 设备上的文件。读取设备文件用 device_file_read\n" +
+    "- 默认最多 500 行，大文件可指定 limit\n" +
+    "- NEVER 对同一文件重复读取——已读过的内容在上下文中",
   inputSchema: {
     type: "object",
     properties: {
@@ -125,7 +130,12 @@ export const readTool: Tool<{ file_path: string; limit?: number }> = {
  */
 export const writeTool: Tool<{ file_path: string; content: string }> = {
   name: "write",
-  description: "写入文件，会覆盖已存在的文件",
+  description:
+    "创建或覆盖本机工作区文件。\n\n" +
+    "IMPORTANT 使用规则：\n" +
+    "- 此工具会完全覆盖目标文件。修改已有文件用 edit 工具\n" +
+    "- 这是本机文件操作。写入设备文件用 device_file_write\n" +
+    "- 目录不存在时会自动创建",
   inputSchema: {
     type: "object",
     properties: {
@@ -182,7 +192,13 @@ export const editTool: Tool<{
   new_string: string;
 }> = {
   name: "edit",
-  description: "编辑文件，替换指定文本（只替换第一个匹配）",
+  description:
+    "编辑本机工作区文件，替换指定文本（只替换第一个匹配）。\n\n" +
+    "IMPORTANT 使用规则：\n" +
+    "- old_text 必须与文件中的内容完全匹配（包括空格和缩进）\n" +
+    "- 编辑前 ALWAYS 先用 read 确认文件当前内容\n" +
+    "- 这是本机文件操作。编辑设备文件用 device_file_read + device_file_write\n" +
+    "- 创建新文件用 write 工具",
   inputSchema: {
     type: "object",
     properties: {
@@ -258,7 +274,13 @@ export const editTool: Tool<{
 export const execTool: Tool<{ command: string; timeout?: number }> = {
   name: "exec",
   description:
-    "在 RDK Studio 服务端工作区（workspace）本机执行 shell 命令，不是 RDK 开发板。若要在设备上执行命令，必须使用 device_exec（且当前请求已绑定设备）。禁止把本工具输出说成板端或 SSH 在设备上的结果。",
+    "在 RDK Studio 服务端本机执行 shell 命令。\n\n" +
+    "IMPORTANT 使用规则：\n" +
+    "- 这是本机命令，不是 RDK 设备。在设备上执行命令 ALWAYS 用 device_exec\n" +
+    "- NEVER 把本工具输出说成板端或 SSH 在设备上的结果\n" +
+    "- 默认超时 30 秒，可通过 timeout 参数调整\n" +
+    "- NEVER 使用交互式命令（vim、top、less）\n" +
+    "- 用途：运行本地脚本、安装 npm 包、git 操作、文件处理等",
   inputSchema: {
     type: "object",
     properties: {
@@ -364,7 +386,10 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
 export const listTool: Tool<{ path?: string; limit?: number }> = {
   name: "list",
   description:
-    "列出 RDK Studio 服务端工作区目录（按字母排序，目录以 / 结尾），不是 RDK 开发板上的目录。查看设备文件请用 device_file_list / device_exec（需已绑定设备）。",
+    "列出本机工作区目录内容（按字母排序，目录以 / 结尾）。\n\n" +
+    "使用规则：\n" +
+    "- 这是本机目录，不是 RDK 设备。查看设备目录用 device_file_list\n" +
+    "- 用于探索项目结构、查找文件",
   inputSchema: {
     type: "object",
     properties: {
@@ -439,7 +464,12 @@ export const listTool: Tool<{ path?: string; limit?: number }> = {
  */
 export const grepTool: Tool<{ pattern: string; path?: string }> = {
   name: "grep",
-  description: "在文件中搜索文本（支持正则表达式）",
+  description:
+    "在本机工作区文件中搜索文本（支持正则表达式）。\n\n" +
+    "使用规则：\n" +
+    "- 这是本机搜索。在设备上搜索用 device_exec + grep\n" +
+    "- 返回匹配行及上下文\n" +
+    "- 可指定 path 限定搜索范围",
   inputSchema: {
     type: "object",
     properties: {
@@ -567,7 +597,12 @@ async function runRipgrep(params: {
  */
 export const memorySearchTool: Tool<{ query: string; limit?: number }> = {
   name: "memory_search",
-  description: "检索长期记忆索引，返回相关记忆摘要列表",
+  description:
+    "检索长期记忆索引，返回相关记忆摘要列表。\n\n" +
+    "使用规则：\n" +
+    "- 用户提到「之前」「上次」「记得」时 ALWAYS 先搜索记忆\n" +
+    "- 搜索到相关记忆后用 memory_get 获取完整内容\n" +
+    "- 默认返回 5 条，可通过 limit 调整",
   inputSchema: {
     type: "object",
     properties: {
@@ -601,7 +636,11 @@ export const memorySearchTool: Tool<{ query: string; limit?: number }> = {
  */
 export const memoryGetTool: Tool<{ id: string }> = {
   name: "memory_get",
-  description: "按 ID 读取一条记忆的完整内容",
+  description:
+    "按 ID 读取一条记忆的完整内容。\n\n" +
+    "使用规则：\n" +
+    "- ALWAYS 先用 memory_search 获取 ID，再用此工具读取\n" +
+    "- 返回记忆的完整文本",
   inputSchema: {
     type: "object",
     properties: {
@@ -641,7 +680,12 @@ export const memorySaveTool: Tool<{
   content: string;
 }> = {
   name: "memory_save",
-  description: "将重要信息写入长期记忆，并同步记录到 daily memory（memory/YYYY-MM-DD.md）",
+  description:
+    "将重要信息写入长期记忆，并同步记录到 daily memory（memory/YYYY-MM-DD.md）。\n\n" +
+    "使用规则：\n" +
+    "- 保存用户的偏好、设备配置、关键决策、常用命令等\n" +
+    "- NEVER 保存临时信息或一次性数据\n" +
+    "- 内容应简洁、结构化，方便后续检索",
   inputSchema: {
     type: "object",
     properties: {
@@ -694,7 +738,12 @@ export const sessionsSpawnTool: Tool<{
 }> = {
   name: "sessions_spawn",
   description:
-    "启动子代理执行后台任务，并回传摘要。可通过 toolScope 限制子代理的工具范围：read-only（仅文件读取与搜索）、device-read（加板端只读）、full（全量工具，默认）。",
+    "启动子代理执行后台任务，主线程不阻塞。\n\n" +
+    "使用规则：\n" +
+    "- 适用场景：委派 OpenClaw 后做验证/监控、长时间 web 研究、并行信息收集\n" +
+    "- 子代理完成后自动将摘要写入当前会话\n" +
+    "- toolScope 控制子代理权限：read-only（仅读取）、device-read（加板端只读）、full（全量，默认）\n" +
+    "- NEVER 用子代理替代你能直接完成的简单任务",
   inputSchema: {
     type: "object",
     properties: {
