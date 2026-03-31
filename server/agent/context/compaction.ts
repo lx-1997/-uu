@@ -417,8 +417,8 @@ async function summarizeWithFallback(params: {
 
   try {
     return await summarizeChunks(params);
-  } catch {
-    // fallback
+  } catch (e) {
+    console.warn('[compaction] summarizeChunks failed, falling back to smaller chunks:', e instanceof Error ? e.message : String(e));
   }
 
   const smallMessages: Message[] = [];
@@ -440,8 +440,8 @@ async function summarizeWithFallback(params: {
       });
       const notes = oversizedNotes.length > 0 ? `\n\n${oversizedNotes.join("\n")}` : "";
       return partial + notes;
-    } catch {
-      // fall through
+    } catch (e) {
+      console.warn('[compaction] smaller-chunks fallback also failed:', e instanceof Error ? e.message : String(e));
     }
   }
 

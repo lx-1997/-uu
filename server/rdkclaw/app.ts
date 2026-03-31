@@ -300,6 +300,18 @@ export class RDKClawApp {
     this.pendingMapsCleanupInterval = setInterval(() => this.cleanupStalePendingMaps(), 60_000);
   }
 
+  /** 释放定时器等资源，用于热重载和测试场景 */
+  destroy() {
+    if (this.pendingMapsCleanupInterval) {
+      clearInterval(this.pendingMapsCleanupInterval);
+      this.pendingMapsCleanupInterval = null;
+    }
+    this.sessionAutoApprove.clear();
+    this.boardSkillSnapshotCache.clear();
+    this.pendingApprovals.clear();
+    this.pendingRecommendations.clear();
+  }
+
   /**
    * 防止客户端断连后 pending 条目永久占用 Map（审批另有 5min 定时器，此为兜底）。
    */
@@ -307,6 +319,7 @@ export class RDKClawApp {
     const now = Date.now();
     const approvalStaleMs = 10 * 60 * 1000;
     const recommendationStaleMs = 30 * 60 * 1000;
+    const sessionAutoApproveStaleMs = 60 * 60 * 1000; // 1h TTL for session auto-approve
     const staleApprovalIds: string[] = [];
     for (const [id, p] of this.pendingApprovals) {
       if (now - p.createdAt > approvalStaleMs) staleApprovalIds.push(id);
@@ -333,6 +346,25 @@ export class RDKClawApp {
         p.resolve({ choiceId: "__expired__", autoExecute: false });
       } catch {
         /* ignore */
+      }
+    }
+
+    // 清理过期的 sessionAutoApprove 条目（防止内存泄漏）
+    // 没有时间戳，用 size 上限兜底：超过 200 个时淘汰最早的
+    if (this.sessionAutoApprove.size > 200) {
+      const toDelete = this.sessionAutoApprove.size - 100;
+      let deleted = 0;
+      for (const key of this.sessionAutoApprove.keys()) {
+        if (deleted >= toDelete) break;
+        this.sessionAutoApprove.delete(key);
+        deleted++;
+      }
+    }
+
+    // 清理过期的 boardSkillSnapshotCache 条目
+    for (const [id, entry] of this.boardSkillSnapshotCache) {
+      if (now > entry.expiresAt) {
+        this.boardSkillSnapshotCache.delete(id);
       }
     }
   }
