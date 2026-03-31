@@ -85,6 +85,14 @@ const TIMEOUT_PATTERNS = [
   "timed out",
   "deadline exceeded",
   "context deadline exceeded",
+  "etimedout",
+  "econnreset",
+  "econnrefused",
+  "socket hang up",
+  "network error",
+  "fetch failed",
+  "enotfound",
+  "epipe",
 ];
 
 const AUTH_PATTERNS = [
@@ -151,6 +159,22 @@ export function isTimeoutError(message?: string): boolean {
   return !!message && matchesAny(message, TIMEOUT_PATTERNS);
 }
 
+/** 5xx 服务端错误（overloaded、internal server error 等） */
+export function isServerError(message?: string): boolean {
+  if (!message) return false;
+  return /\b(5\d{2})\b/.test(message) ||
+    /overloaded|internal.server.error|bad gateway|service unavailable|gateway timeout/i.test(message);
+}
+
+/**
+ * 判断错误是否为瞬时错误（值得重试）
+ * 借鉴 claude-code: rate_limit + timeout + 网络错误 + 5xx 都重试
+ */
+export function isTransientError(message?: string): boolean {
+  if (!message) return false;
+  return isRateLimitError(message) || isTimeoutError(message) || isServerError(message);
+}
+
 export function isAuthError(message?: string): boolean {
   return !!message && matchesAny(message, AUTH_PATTERNS);
 }
@@ -196,7 +220,7 @@ export interface RetryOptions {
   minDelayMs?: number;
   /** 最大延迟（默认 30000ms） */
   maxDelayMs?: number;
-  /** 抖动系数 0-1（默认 0.1） */
+  /** 抖动系数 0-1（默认 0.25，借鉴 claude-code） */
   jitter?: number;
   /** 日志标签 */
   label?: string;
@@ -222,7 +246,7 @@ export async function retryAsync<T>(
   const attempts = options?.attempts ?? 3;
   const minDelayMs = options?.minDelayMs ?? 300;
   const maxDelayMs = options?.maxDelayMs ?? 30_000;
-  const jitter = options?.jitter ?? 0.1;
+  const jitter = options?.jitter ?? 0.25; // 借鉴 claude-code: 25% 随机抖动
 
   let lastError: unknown;
 
@@ -237,6 +261,16 @@ export async function retryAsync<T>(
 
       // 指数退避
       let delay = minDelayMs * 2 ** (attempt - 1);
+
+      // 借鉴 claude-code: 尊重 Retry-After 头
+      const errMsg = describeError(err);
+      const retryAfterMatch = errMsg.match(/retry.after[:\s]*(\d+)/i);
+      if (retryAfterMatch) {
+        const retryAfterMs = parseInt(retryAfterMatch[1], 10) * 1000;
+        if (retryAfterMs > 0 && retryAfterMs < maxDelayMs * 2) {
+          delay = retryAfterMs;
+        }
+      }
 
       // 抖动
       if (jitter > 0) {

@@ -37,6 +37,7 @@ import {
   retryAsync,
   isContextOverflowError,
   isRateLimitError,
+  isTransientError,
   describeError,
 } from "./provider/errors.js";
 import { pruneContextMessages } from "./context/index.js";
@@ -310,6 +311,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           const assistantContent: ContentBlock[] = [];
           const toolCalls: { id: string; name: string; input: Record<string, unknown> }[] = [];
           const turnTextParts: string[] = [];
+          let currentThinkingParts: string[] | null = null;
 
           try {
             await retryAsync(
@@ -333,11 +335,21 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   switch (event.type) {
                     case "thinking_delta":
                       stream.push({ type: "thinking_delta", delta: (event as any).delta });
+                      // 累积 thinking 内容用于持久化
+                      if (!currentThinkingParts) currentThinkingParts = [];
+                      currentThinkingParts.push((event as any).delta);
                       break;
 
                     case "thinking_end":
-                      // thinking 内容保存到 assistant message（对齐 pi-agent-core）
-                      // 但不计入 turnTextParts（思考不是最终输出）
+                      // 将 thinking 内容持久化到 assistant message
+                      // 这样多轮对话中 LLM 可以回顾自己之前的推理过程
+                      if (currentThinkingParts && currentThinkingParts.length > 0) {
+                        const thinkingText = currentThinkingParts.join("");
+                        if (thinkingText.trim()) {
+                          assistantContent.push({ type: "text", text: `<thinking>\n${thinkingText}\n</thinking>` });
+                        }
+                        currentThinkingParts = null;
+                      }
                       break;
 
                     case "text_delta":
@@ -395,7 +407,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 label: "llm-call",
                 shouldRetry: (err) => {
                   if (abortSignal.aborted) return false;
-                  return isRateLimitError(describeError(err));
+                  // 借鉴 claude-code: rate_limit + timeout + 网络错误 + 5xx 都重试
+                  return isTransientError(describeError(err));
                 },
                 onRetry: ({ attempt, delay, error }) => {
                   stream.push({ type: "retry", attempt, delay, error: describeError(error) });
@@ -492,7 +505,21 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
           // 没有工具调用 → 内层循环结束条件之一
           if (!hasMoreToolCalls) {
-            finalText = turnText;
+            finalText = turnText || "";
+            // 空回复检测：LLM 没有输出任何文本也没有调用工具
+            // 借鉴 claude-code: 空回复时注入提示让 LLM 重新生成
+            if (!finalText.trim() && turns < maxTurns - 1) {
+              pendingMessages = await getSteeringMessages();
+              if (pendingMessages.length === 0) {
+                // 注入一条系统提示，让 LLM 重新回答
+                pendingMessages = [{
+                  role: "user",
+                  content: [{ type: "text", text: "[系统提示] 你的上一次回复为空。请重新回答用户的问题。" }],
+                  timestamp: Date.now(),
+                }];
+              }
+              continue;
+            }
             stream.push({ type: "turn_end", turn: turns });
             // 检查是否有 steering 消息待处理
             pendingMessages = await getSteeringMessages();
