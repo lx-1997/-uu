@@ -16,6 +16,53 @@
   position: relative;
 }
 
+/* 副屏：无侧栏，顶栏与内容占满宽 */
+.app-shell.rdk-embed {
+  --rail-current-width: 0px;
+  grid-template-columns: 1fr;
+}
+
+.app-shell.rdk-embed .top-bar,
+.app-shell.rdk-embed .content-area {
+  grid-column: 1;
+}
+
+.rdk-embed-hint {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(280px, 28vw);
+}
+
+.rdk-embed-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.rdk-embed-ai-dock-placeholder {
+  flex: 1;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.rdk-embed-openclaw-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ══════════════════════════
    Icon Rail (56px sidebar)
    ══════════════════════════ */
@@ -33,10 +80,13 @@
   backdrop-filter: var(--glass);
   z-index: var(--z-rail);
   overflow-y: auto;
-  overflow-x: visible;
+  overflow-x: hidden;
 }
 
-.icon-rail::-webkit-scrollbar { width: 0; }
+.icon-rail::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
 
 /* Logo（产品图：public/branding/icon.png；缺失时回退为字母 R） */
 .rail-logo {
@@ -179,7 +229,13 @@
   left: calc(100% + 10px);
   top: 50%;
   transform: translateY(-50%) scale(0.95);
-  padding: 6px 14px;
+  /* 未悬停时不占布局宽度，避免侧栏纵向滚动容器底部出现无意义的水平滚动条 */
+  width: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  border: none;
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--text-primary);
@@ -187,7 +243,6 @@
   font-weight: 500;
   white-space: nowrap;
   box-shadow: var(--shadow-lg);
-  border: 1px solid var(--border);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -195,6 +250,12 @@
 }
 
 [data-tooltip]:hover::after {
+  width: max-content;
+  height: auto;
+  max-width: min(280px, 70vw);
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  overflow: visible;
   opacity: 1;
   transform: translateY(-50%) scale(1);
 }

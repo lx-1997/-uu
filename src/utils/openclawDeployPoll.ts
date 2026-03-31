@@ -120,11 +120,32 @@ async function tick() {
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       clearTimer();
       closeDeployEventSource();
+      const failJob: OpenClawDeployJobPayload = {
+        id: activeJobId,
+        deviceId: activeDeviceId,
+        status: 'error',
+        error: 'oc.deployPoll.interrupted',
+        steps: sseJobMergeRef?.steps ?? {
+          check: 'error',
+          prepare: 'pending',
+          install: 'pending',
+          config: 'pending',
+        },
+        output: sseJobMergeRef?.output ?? '',
+        finishedAt: Date.now(),
+      };
+      emit(failJob);
+      try {
+        localStorage.removeItem(deployJobStorageKey(activeDeviceId));
+      } catch {
+        /* ignore */
+      }
       window.dispatchEvent(
         new CustomEvent('rdk-oc-deploy-finished', {
           detail: {
             status: 'error',
             error: 'oc.deployPoll.interrupted',
+            deviceId: activeDeviceId,
           },
         }),
       );
@@ -149,7 +170,7 @@ async function tick() {
     lastEmittedTerminal = sig;
     window.dispatchEvent(
       new CustomEvent('rdk-oc-deploy-finished', {
-        detail: { status: job.status, error: job.error, job },
+        detail: { status: job.status, error: job.error, job, deviceId: job.deviceId },
       }),
     );
   }

@@ -3,17 +3,32 @@
  * 渲染进程再 POST /api/sso/bootstrap 建立 HttpOnly 会话。
  */
 import http from 'node:http';
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain, shell } from 'electron';
 
 export const RDK_SSO_TOKEN_CHANNEL = 'rdk:sso:token';
 const RDK_PREPARE_SSO_EMBEDDED = 'rdk:sso:prepare-embedded';
 const RDK_STOP_SSO_EMBEDDED = 'rdk:sso:stop-embedded';
 const RDK_OPEN_SSO_LOGIN = 'rdk:sso:open-login-window';
+const RDK_OPEN_SSO_EXTERNAL = 'rdk:sso:open-external';
 
 const SSO_CALLBACK_PORT_BASE = 38473;
 
 function getSsoBaseUrl() {
   return (process.env.SSO_BASE_URL || 'https://sso.d-robotics.cc').replace(/\/$/, '');
+}
+
+/** 仅允许打开 SSO 门户 URL（与 prepare-embedded 返回的 ssoUrl 同域），防止任意 openExternal */
+function isAllowedSsoOpenUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return false;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'https:') return false;
+    const base = new URL(`${getSsoBaseUrl()}/`);
+    return u.origin === base.origin;
+  } catch {
+    return false;
+  }
 }
 
 function sendTokenToRenderer(getMainWindow, token) {
@@ -117,6 +132,16 @@ export function registerSsoLoginIpc(opts) {
   ipcMain.handle(RDK_STOP_SSO_EMBEDDED, () => {
     stopEmbedded();
     return { ok: true };
+  });
+
+  ipcMain.handle(RDK_OPEN_SSO_EXTERNAL, (_event, url) => {
+    if (!isAllowedSsoOpenUrl(url)) {
+      return { ok: false, error: 'invalid sso url' };
+    }
+    return shell.openExternal(String(url).trim()).then(
+      () => ({ ok: true }),
+      (e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }),
+    );
   });
 
   ipcMain.handle(RDK_OPEN_SSO_LOGIN, () => {

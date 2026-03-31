@@ -6,6 +6,7 @@ export {
   verifyImage,
   backupDrive,
   decompressXz,
+  decompressGz,
   cancelActiveOp,
   launchThirdPartyTool,
   runS100XburnFlash,

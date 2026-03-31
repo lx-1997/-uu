@@ -14,9 +14,9 @@ export function createSkillhubTools(): Tool[] {
 const skillhubSearchTool: Tool<{ query: string; limit?: number }> = {
   name: 'skillhub_search',
   description:
-    '在 SkillHub（与 ClawHub 兼容的公共注册表）中按关键词搜索**可安装的 OpenClaw 技能**。' +
-    '当用户需要某类自动化能力、集成、CLI、或你想确认「是否已有现成社区技能」时使用；用用户目标概括成简短英文或中文关键词（如 weather、百度、obsidian、pdf）。' +
-    '返回 slug、名称、摘要与版本，供推荐或后续 `board_openclaw_skill_install` / Studio 技能工坊安装。',
+    '在 SkillHub（与 ClawHub 兼容的公共注册表）中按关键词搜索**可安装的 OpenClaw 技能**；基址受 `CLAWHUB_REGISTRY` 影响（默认国内同源）。' +
+    '**一般能力缺口请先调用内置 `find_skills`**（腾讯 SkillHub + 本地技能）；本工具用于仅需注册表搜索、或需与 `CLAWHUB_REGISTRY` 换源一致时。' +
+    '关键词示例：weather、百度、obsidian、pdf。返回 slug、摘要与版本，供 `board_openclaw_skill_install` / Studio 技能工坊。',
   inputSchema: {
     type: 'object',
     properties: {

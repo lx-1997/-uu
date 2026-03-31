@@ -1,8 +1,8 @@
 /**
  * macOS flash adapter.
  *
- * Provides drive enumeration, image writing, backup, decompression and
- * xburn launching on macOS via diskutil, dd, and native xz.
+ * Provides drive enumeration, image write/backup/decompression and xburn on macOS (diskutil, dd)。
+ * `.img.xz` 与旧版 rdkstudio_frontend 一致：系统 `/usr/bin/gunzip -dk`（同目录写出 .img，保留 .xz）。
  *
  * Requires elevated privileges (sudo / osascript) for disk write operations.
  */
@@ -33,6 +33,9 @@ function resolveIoPolicy(options = {}) {
   }
   return { chunkBytes: 512 * 1024 };
 }
+
+/** 与旧版 rdkstudio_frontend DecompressBehavior（Mac）一致 */
+const MAC_SYSTEM_GUNZIP = '/usr/bin/gunzip';
 
 function exec(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -628,39 +631,60 @@ export async function backupDrive(drivePath, destPath) {
 export async function decompressXz(inputPath, outputPath) {
   if (!inputPath.toLowerCase().endsWith('.xz')) return inputPath;
 
-  const hasXz = await exec('which', ['xz']).then(() => true).catch(() => false);
-  if (!hasXz) {
+  if (!fs.existsSync(MAC_SYSTEM_GUNZIP)) {
     throw Object.assign(
-      new Error('系统缺少 xz 工具，请先安装（brew install xz），或手动解压为 .img'),
+      new Error('系统缺少 /usr/bin/gunzip，无法解压 .xz 镜像'),
       { code: FlashErrorCode.TOOL_MISSING },
     );
   }
 
-  return new Promise((resolve, reject) => {
-    emitFlashProgress({ stage: 'decompressing', message: '正在解压 xz 镜像', percent: 3 });
-    const child = spawn('xz', ['-dc', inputPath], { stdio: ['ignore', 'pipe', 'pipe'] });
-    const writer = fs.createWriteStream(outputPath);
-    child.stdout.pipe(writer);
+  emitFlashProgress({ stage: 'decompressing', message: '正在解压 xz 镜像（gunzip -dk）…', percent: 3 });
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (fn) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+
+    const child = spawn(MAC_SYSTEM_GUNZIP, ['-dk', inputPath], { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('close', (code) => {
-      if (code === 0) {
-        emitFlashProgress({ stage: 'decompressing', message: '解压完成', percent: 100 });
-        resolve(outputPath);
-      } else {
-        reject(Object.assign(
-          new Error(`xz 解压失败: ${stderr || `exit code ${code}`}`),
-          { code: FlashErrorCode.DECOMPRESS_FAILED },
-        ));
-      }
-    });
     child.on('error', (err) => {
-      reject(Object.assign(
-        new Error(`xz 执行失败: ${err.message}`),
-        { code: FlashErrorCode.DECOMPRESS_FAILED },
-      ));
+      done(() =>
+        reject(
+          Object.assign(new Error(`gunzip 执行失败: ${err.message}`), {
+            code: FlashErrorCode.DECOMPRESS_FAILED,
+          }),
+        ));
+    });
+    child.on('close', (code) => {
+      if (code !== 0) {
+        done(() =>
+          reject(
+            Object.assign(
+              new Error(`gunzip 解压失败: ${stderr.trim() || `exit code ${code}`}`),
+              { code: FlashErrorCode.DECOMPRESS_FAILED },
+            ),
+          ));
+        return;
+      }
+      if (!fs.existsSync(outputPath)) {
+        done(() =>
+          reject(
+            Object.assign(new Error('解压完成但未找到输出的 .img 文件'), {
+              code: FlashErrorCode.DECOMPRESS_FAILED,
+            }),
+          ));
+        return;
+      }
+      done(() => resolve());
     });
   });
+
+  emitFlashProgress({ stage: 'decompressing', message: '解压完成', percent: 100 });
+  return outputPath;
 }
 
 export function cancelActiveOp() {

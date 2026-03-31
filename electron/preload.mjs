@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   prepareSsoEmbedded: () => ipcRenderer.invoke('rdk:sso:prepare-embedded'),
   stopSsoEmbedded: () => ipcRenderer.invoke('rdk:sso:stop-embedded'),
   openSsoLoginWindow: () => ipcRenderer.invoke('rdk:sso:open-login-window'),
+  /** 系统默认浏览器打开 SSO（环回回调仍由当前 prepare-embedded 监听，勿先 stop） */
+  openSsoExternal: (url) => ipcRenderer.invoke('rdk:sso:open-external', url),
   onSsoToken: (cb) => {
     const wrapped = (_event, payload) => cb(payload);
     ipcRenderer.on(RDK_SSO_TOKEN, wrapped);

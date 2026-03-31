@@ -13,10 +13,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { finished } from 'node:stream/promises';
 
 const execFileAsync = promisify(execFile);
 import { emitFlashProgress } from '../progress.mjs';
 import { FlashErrorCode } from '../types.mjs';
+import { getXzUncompressedSizeBytes, startXzOutputSizeProgress } from '../xz-decompress-help.mjs';
 import {
   hasFrontendFlashBundle,
   listUsbDevicesViaLs,
@@ -77,6 +79,41 @@ function resolvePowerShellSpawnArgs(scriptBody) {
   const ps1Path = path.join(os.tmpdir(), `rdk-flash-script-${crypto.randomUUID()}.ps1`);
   writePs1WithBom(ps1Path, scriptBody);
   return { mode: 'file', ps1Path, args: [...psArgsPrefix, '-File', ps1Path] };
+}
+
+/** GUI/PATH 瘦身时仍能命中 Git usr\\bin、Scoop、Chocolatey 等处的 xz.exe */
+function buildWinFlashPathEnv() {
+  const raw = process.env.PATH || '';
+  const pf = process.env.ProgramFiles || 'C:\\Program Files';
+  const pfx86 = process.env['ProgramFiles(x86)'] || '';
+  const extra = [
+    path.join(pf, 'Git', 'usr', 'bin'),
+    pfx86 ? path.join(pfx86, 'Git', 'usr', 'bin') : '',
+    path.join(pf, 'XZ Utils', 'bin'),
+    path.join(process.env.USERPROFILE || '', 'scoop', 'shims'),
+    path.join(process.env.ProgramData || 'C:\\ProgramData', 'chocolatey', 'bin'),
+  ].filter(Boolean);
+  const parts = [...extra, ...raw.split(path.delimiter).filter(Boolean)];
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    out.push(p);
+  }
+  return { ...process.env, PATH: out.join(path.delimiter) };
+}
+
+function winWhichXz(env) {
+  return new Promise((resolve) => {
+    const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+    const whereExe = path.join(sysRoot, 'System32', 'where.exe');
+    execFile(whereExe, ['xz'], { env, windowsHide: true }, (err, stdout) => {
+      if (err) return resolve(null);
+      const line = String(stdout).split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      resolve(line || null);
+    });
+  });
 }
 
 function resolveIoPolicy(options = {}) {
@@ -740,25 +777,93 @@ export async function backupDrive(drivePathIn, destPath) {
 
 export async function decompressXz(inputPath, outputPath) {
   if (!inputPath.toLowerCase().endsWith('.xz')) return inputPath;
-  return new Promise((resolve, reject) => {
-    emitFlashProgress({ stage: 'decompressing', message: '正在解压 xz 镜像', percent: 3 });
-    const child = spawn(getPowerShellExe(), [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-      `if (Get-Command xz -ErrorAction SilentlyContinue) { xz -dc "${inputPath.replace(/"/g, '""')}" > "${outputPath.replace(/"/g, '""')}" } else { exit 127 }`,
-    ], { windowsHide: true });
-    child.on('close', (code) => {
-      if (code === 0) {
-        emitFlashProgress({ stage: 'decompressing', message: '解压完成', percent: 100 });
-        resolve(outputPath);
-      } else {
-        reject(Object.assign(
-          new Error('系统缺少 xz，无法自动解压 .xz 文件，请先手动解压为 .img'),
-          { code: FlashErrorCode.TOOL_MISSING },
-        ));
-      }
-    });
-    child.on('error', reject);
+
+  const env = buildWinFlashPathEnv();
+  const xzExe = await winWhichXz(env);
+  if (!xzExe) {
+    throw Object.assign(
+      new Error(
+        '未找到 xz，无法解压 .img.xz。请安装 XZ Utils（https://tukaani.org/xz/）并加入 PATH，或安装 Git for Windows（含 usr\\bin\\xz.exe），也可手动解压为 .img。',
+      ),
+      { code: FlashErrorCode.TOOL_MISSING },
+    );
+  }
+
+  const totalBytes = await getXzUncompressedSizeBytes(inputPath, env, xzExe);
+  let stopProgress = () => {};
+  emitFlashProgress({
+    stage: 'decompressing',
+    message: totalBytes ? '正在解压 xz 镜像（已估算进度）…' : '正在解压 xz 镜像…',
+    percent: 3,
   });
+  stopProgress = startXzOutputSizeProgress({
+    outputPath,
+    totalBytes: totalBytes || 0,
+    onProgress: (pct) =>
+      emitFlashProgress({
+        stage: 'decompressing',
+        message: `正在解压 xz 镜像… ${pct}%`,
+        percent: pct,
+      }),
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const done = (fn) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+
+      const child = spawn(xzExe, ['-dc', inputPath], { stdio: ['ignore', 'pipe', 'pipe'], env, windowsHide: true });
+      const writer = fs.createWriteStream(outputPath);
+      let stderr = '';
+      child.stderr.on('data', (d) => { stderr += d.toString(); });
+      writer.on('error', (err) => {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          /* ignore */
+        }
+        done(() => reject(Object.assign(err, { code: FlashErrorCode.DECOMPRESS_FAILED })));
+      });
+      child.stdout.pipe(writer);
+      child.on('error', (err) => {
+        const code =
+          err && err.code === 'ENOENT' ? FlashErrorCode.TOOL_MISSING : FlashErrorCode.DECOMPRESS_FAILED;
+        done(() =>
+          reject(
+            Object.assign(new Error(`xz 执行失败: ${err.message}`), { code }),
+          ));
+      });
+      child.on('close', (code) => {
+        if (code !== 0) {
+          const tail = stderr.trim();
+          const errMsg = tail || `exit code ${code}`;
+          done(() =>
+            reject(
+              Object.assign(new Error(`xz 解压失败: ${errMsg}`), {
+                code: FlashErrorCode.DECOMPRESS_FAILED,
+              }),
+            ));
+          return;
+        }
+        finished(writer)
+          .then(() => {
+            done(() => resolve());
+          })
+          .catch((err) => {
+            done(() => reject(Object.assign(err, { code: FlashErrorCode.DECOMPRESS_FAILED })));
+          });
+      });
+    });
+  } finally {
+    stopProgress();
+  }
+
+  emitFlashProgress({ stage: 'decompressing', message: '解压完成', percent: 100 });
+  return outputPath;
 }
 
 export function cancelActiveOp() {

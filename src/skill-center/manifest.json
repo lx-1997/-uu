@@ -1,5 +1,13 @@
 {
   "version": 1,
-  "categories": [],
-  "items": []
+  "categories": [
+    { "id": "meta", "label": "技能发现 / Meta" }
+  ],
+  "items": [
+    {
+      "folder": "rdk-skillhub-discovery",
+      "category": "meta",
+      "title": "SkillHub 技能发现（find_skills）"
+    }
+  ]
 }

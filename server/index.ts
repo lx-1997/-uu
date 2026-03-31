@@ -24,6 +24,7 @@ import { Client } from 'ssh2';
 import WebSocket, { WebSocketServer } from 'ws';
 import * as net from 'net';
 import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
+import { pingVendorModel } from './openclaw-vendor-model-ping.js';
 import * as path from 'path';
 import {
   buildBoardDetectionCommand,
@@ -260,6 +261,14 @@ type FlashBackupJob = {
 const flashBackupJobs = new Map<string, FlashBackupJob>();
 type OpenClawDeployStepName = 'check' | 'prepare' | 'install' | 'config';
 type OpenClawDeployStepState = 'pending' | 'running' | 'done' | 'error';
+/** 与前端步骤条一致，用于部署日志分段 */
+const OPENCLAW_DEPLOY_LOG_DIVIDER = '────────────────────────────────────────────────────────';
+const OPENCLAW_DEPLOY_STEP_TITLE: Record<OpenClawDeployStepName, string> = {
+  check: '诊断',
+  prepare: '依赖',
+  install: '安装',
+  config: '配置',
+};
 type OpenClawDeployJob = {
   id: string;
   deviceId: string;
@@ -336,8 +345,8 @@ const WORKSPACE_HEALTH_SCRIPT = [
   '_dpkg=$(dpkg -l 2>/dev/null | awk "/^ii/{print \\$2}")',
   '_ss=$(ss -lntp 2>/dev/null)',
   '_ps=$(ps -eo args --no-headers 2>/dev/null)',
-  // Source TROS so ros2 CLI is discoverable even when not in default PATH
-  'test -f /opt/tros/humble/setup.bash && . /opt/tros/humble/setup.bash 2>/dev/null || true',
+  // Source first available TROS overlay so ros2 CLI is discoverable (not only humble)
+  'for _tros_setup in /opt/tros/*/setup.bash; do [ -f "$_tros_setup" ] && . "$_tros_setup" 2>/dev/null && break; done; true',
   'python_ready=$(command -v python3 >/dev/null 2>&1 && echo 1 || echo 0)',
   'git_ready=$(command -v git >/dev/null 2>&1 && echo 1 || echo 0)',
   'node_ready=$(command -v node >/dev/null 2>&1 && echo 1 || echo 0)',
@@ -688,6 +697,9 @@ async function restoreRuntimeJobsState() {
 }
 
 const deploySSEClients = new Map<string, Set<Response>>();
+/** 一键部署当前 SSH 步骤的 abort（用于用户取消） */
+const deployJobActiveAbort = new Map<string, () => void>();
+const openClawDeployUserCancelled = new Set<string>();
 
 function deploySseBroadcast(jobId: string, payload: unknown) {
   const set = deploySSEClients.get(jobId);
@@ -2143,6 +2155,285 @@ app.post('/api/devices/connect', async (request, response) => {
   }
 });
 
+// ─── TypeC 闪连 API ───
+
+/**
+ * 跨平台枚举闪连候选网卡（与 old-studio ConnectionBehaviorEtherList 一致的前缀过滤，
+ * 并在 macOS 上进一步排除 Wi-Fi / Thunderbolt 等无关接口）。
+ *
+ * 必须用系统命令而非 os.networkInterfaces()，因为后者只返回已分配地址的接口，
+ * 而 TypeC 虚拟网卡在配置 IP 之前可能还没有地址。
+ */
+
+/** macOS: 解析 networksetup -listallhardwareports，返回 { device, port } 映射 */
+async function parseMacHardwarePorts(): Promise<Map<string, string>> {
+  const raw = await new Promise<string>((resolve, reject) => {
+    const child = spawn('sh', ['-c', 'networksetup -listallhardwareports'], { timeout: 5000 });
+    let out = '';
+    child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+    child.on('close', (code) => code === 0 ? resolve(out) : reject(new Error(`networksetup exit ${code}`)));
+    child.on('error', reject);
+  });
+  const map = new Map<string, string>();
+  let currentPort = '';
+  for (const line of raw.split('\n')) {
+    const portMatch = line.match(/^Hardware Port:\s*(.+)/);
+    if (portMatch) { currentPort = portMatch[1].trim(); continue; }
+    const devMatch = line.match(/^Device:\s*(\S+)/);
+    if (devMatch && currentPort) { map.set(devMatch[1], currentPort); }
+  }
+  return map;
+}
+
+/** macOS 上需要排除的硬件端口类型关键词 */
+const MAC_EXCLUDED_PORT_KEYWORDS = ['wi-fi', 'thunderbolt', 'ethernet adapter'];
+
+async function listTypecCandidateNics(): Promise<Array<{ name: string; portType?: string }>> {
+  const platform = os.platform();
+
+  if (platform === 'darwin') {
+    // macOS: 用 networksetup 获取硬件端口类型，排除 Wi-Fi / Thunderbolt
+    const portMap = await parseMacHardwarePorts();
+    const allNics = await new Promise<string>((resolve, reject) => {
+      const child = spawn('sh', ['-c', 'ifconfig -l'], { timeout: 5000 });
+      let out = '';
+      child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+      child.on('close', (code) => code === 0 ? resolve(out) : reject(new Error(`ifconfig -l exit ${code}`)));
+      child.on('error', reject);
+    });
+    return allNics.trim().split(/\s+/)
+      .filter(n => {
+        if (!n.startsWith('e')) return false;
+        const port = portMap.get(n)?.toLowerCase() ?? '';
+        // 排除 Wi-Fi 和 Thunderbolt 相关接口
+        return !MAC_EXCLUDED_PORT_KEYWORDS.some(kw => port.includes(kw));
+      })
+      .sort()
+      .reverse()
+      .map(name => ({ name, portType: portMap.get(name) }));
+  }
+
+  if (platform === 'linux') {
+    // Linux: ls /sys/class/net，只保留 'e' 或 'u' 开头
+    const raw = await new Promise<string>((resolve, reject) => {
+      const child = spawn('sh', ['-c', 'ls /sys/class/net'], { timeout: 5000 });
+      let out = '';
+      child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+      child.on('close', (code) => code === 0 ? resolve(out) : reject(new Error(`ls exit ${code}`)));
+      child.on('error', reject);
+    });
+    return raw.trim().split(/\s+/)
+      .filter(n => n.startsWith('e') || n.startsWith('u'))
+      .sort()
+      .reverse()
+      .map(name => ({ name }));
+  }
+
+  // Windows: netsh interface ipv4 show interfaces，保留 connected 且非 WLAN
+  const raw = await new Promise<string>((resolve, reject) => {
+    const child = spawn('cmd', ['/c', 'netsh interface ipv4 show interfaces'], { timeout: 5000 });
+    let out = '';
+    child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
+    child.on('close', (code) => code === 0 ? resolve(out) : reject(new Error(`netsh exit ${code}`)));
+    child.on('error', reject);
+  });
+  return raw.split('\n')
+    .filter(line => line.includes('connected') && !line.includes('WLAN') && !line.includes('disconnected'))
+    .map(line => {
+      const idx = line.indexOf('connected');
+      return { name: line.substring(idx + 9).trim() };
+    })
+    .filter(item => item.name.length > 0);
+}
+
+function isValidTypecInterfaceName(name: string): boolean {
+  return name.length > 0 && name.length <= 32 && /^[a-zA-Z][a-zA-Z0-9._@-]*$/.test(name);
+}
+
+function isIpv4DottedQuad(s: string): boolean {
+  const parts = s.split('.');
+  if (parts.length !== 4) return false;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return false;
+    const n = Number(p);
+    if (n < 0 || n > 255) return false;
+  }
+  return true;
+}
+
+function isIfconfigPermissionDenied(msg: string): boolean {
+  return /permission denied|Operation not permitted/i.test(msg);
+}
+
+async function execFileWithTimeout(
+  file: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { timeout: timeoutMs });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const done = (result: { code: number | null; stdout: string; stderr: string }) => {
+      if (!settled) {
+        settled = true;
+        resolve(result);
+      }
+    };
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        done({ code: 127, stdout: '', stderr: err.message });
+      } else if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
+    child.on('close', (code) => done({ code, stdout, stderr }));
+  });
+}
+
+/**
+ * macOS：`ifconfig up` 需 root。先直接调用 /sbin/ifconfig，若遇 permission denied，
+ * 再用 osascript 弹出系统密码框提权（与桌面端常见做法一致）。
+ */
+async function configureDarwinTypecNic(
+  interfaceName: string,
+  pcIp: string,
+  mask: string,
+): Promise<string> {
+  const args = [interfaceName, pcIp, 'netmask', mask, 'up'];
+  const first = await execFileWithTimeout('/sbin/ifconfig', args, 15000);
+  if (first.code === 0) return first.stdout;
+  const errLine = (first.stderr || `exit code ${first.code}`).trim();
+  if (!isIfconfigPermissionDenied(first.stderr)) {
+    throw new Error(errLine);
+  }
+  const shellCmd = `/sbin/ifconfig ${interfaceName} ${pcIp} netmask ${mask} up`;
+  const escaped = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const appleScript = `do shell script "${escaped}" with administrator privileges`;
+  const second = await execFileWithTimeout('osascript', ['-e', appleScript], 120000);
+  if (second.code === 0) return second.stdout;
+  const combined = `${second.stderr}\n${second.stdout}`.trim();
+  if (/user canceled|用户已取消|-128|错误代码：-128/i.test(combined)) {
+    throw new Error('已取消管理员授权，无法为本机网卡设置 IP');
+  }
+  throw new Error(combined || `osascript exit ${second.code}`);
+}
+
+async function configureLinuxTypecNic(
+  interfaceName: string,
+  pcIp: string,
+  mask: string,
+): Promise<string> {
+  const bins = ['/sbin/ifconfig', '/usr/sbin/ifconfig'];
+  let lastErr = '';
+  for (const bin of bins) {
+    const r = await execFileWithTimeout(bin, [interfaceName, pcIp, 'netmask', mask, 'up'], 15000);
+    if (r.code === 0) return r.stdout;
+    lastErr = r.stderr || `exit code ${r.code}`;
+    if (r.code === 127) continue;
+    if (isIfconfigPermissionDenied(r.stderr)) {
+      throw new Error(
+        `${lastErr.trim()} · Linux 下需 root 权限，请用 sudo 启动本服务或手动执行：sudo ${bin} ${interfaceName} ${pcIp} netmask ${mask} up`,
+      );
+    }
+    throw new Error(lastErr);
+  }
+  throw new Error(lastErr || '未找到 ifconfig（/sbin 与 /usr/sbin）');
+}
+
+/** 列举本机闪连候选网卡（系统命令枚举 + 平台过滤） */
+app.get('/api/typec/interfaces', async (_request, response) => {
+  try {
+    const nics = await listTypecCandidateNics();
+    // 补充 IP 和 MAC 信息（从 os.networkInterfaces 获取，可能为空）
+    const osIfaces = os.networkInterfaces();
+    const result = nics.map(nic => {
+      const addrs = osIfaces[nic.name];
+      const ipv4 = addrs?.filter(a => a.family === 'IPv4').map(a => a.address) ?? [];
+      const mac = addrs?.find(a => a.mac && a.mac !== '00:00:00:00:00:00')?.mac ?? '';
+      return { name: nic.name, mac, addresses: ipv4, portType: nic.portType ?? '' };
+    });
+    response.json({ ok: true, interfaces: result });
+  } catch (error) {
+    sendApiError(response, 500, 'INTERFACE_LIST_FAILED', error instanceof Error ? error.message : '获取网卡列表失败');
+  }
+});
+
+/** 配置 TypeC 虚拟网卡 IP（需要管理员权限） */
+app.post('/api/typec/configure', async (request, response) => {
+  const { interfaceName, pcIp, netmask } = request.body as {
+    interfaceName?: string;
+    pcIp?: string;
+    netmask?: string;
+  };
+
+  if (!interfaceName || !pcIp) {
+    sendApiError(response, 400, 'INVALID_PARAMS', '请提供 interfaceName 和 pcIp');
+    return;
+  }
+
+  const mask = netmask || '255.255.255.0';
+  if (!isIpv4DottedQuad(pcIp) || !isIpv4DottedQuad(mask)) {
+    sendApiError(response, 400, 'INVALID_PARAMS', 'pcIp / netmask 须为点分 IPv4');
+    return;
+  }
+
+  const platform = os.platform();
+  if (platform !== 'win32' && !isValidTypecInterfaceName(interfaceName)) {
+    sendApiError(response, 400, 'INVALID_PARAMS', 'interfaceName 格式非法');
+    return;
+  }
+
+  try {
+    let result: string;
+    if (platform === 'win32') {
+      const cmd = `netsh interface ipv4 set address name="${interfaceName}" static ${pcIp} ${mask}`;
+      result = await new Promise<string>((resolve, reject) => {
+        const child = spawn('sh', ['-c', cmd], { timeout: 15000 });
+        let stdout = '';
+        let stderr = '';
+        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+        child.on('close', (code) => {
+          if (code === 0) resolve(stdout);
+          else reject(new Error(stderr || `exit code ${code}`));
+        });
+        child.on('error', reject);
+      });
+    } else if (platform === 'darwin') {
+      result = await configureDarwinTypecNic(interfaceName, pcIp, mask);
+    } else {
+      result = await configureLinuxTypecNic(interfaceName, pcIp, mask);
+    }
+
+    // 轮询验证 IP 是否生效（最多 5 次，每次 500ms）
+    let verified = false;
+    for (let i = 0; i < 5; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const ifaces = os.networkInterfaces();
+      const target = ifaces[interfaceName];
+      if (target?.some(a => a.family === 'IPv4' && a.address === pcIp)) {
+        verified = true;
+        break;
+      }
+    }
+
+    response.json({ ok: true, verified, output: result });
+  } catch (error) {
+    sendApiError(
+      response,
+      500,
+      'TYPEC_CONFIGURE_FAILED',
+      error instanceof Error ? `网卡配置失败: ${error.message}` : '网卡配置失败',
+      { retryable: true },
+    );
+  }
+});
+
 app.post('/api/devices/verify', async (request, response) => {
   const { host, port, username, password } = request.body as {
     host?: string;
@@ -2427,19 +2718,24 @@ function runOpenClawManagerStep(
 /** 一键部署：将 SSH 流式输出同步写入 job，避免前端轮询到空日志误以为卡住 */
 function runOpenClawManagerStepForDeploy(
   job: OpenClawDeployJob,
-  invoke: (onOutput: (chunk: string) => void, onComplete: (success: boolean) => void) => void,
+  invoke: (
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void,
+  ) => { abort: () => void },
 ): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     let output = '';
-    invoke(
+    const handle = invoke(
       (chunk) => {
         output += chunk;
         appendDeployOutput(job, chunk);
       },
       (success) => {
+        deployJobActiveAbort.delete(job.id);
         resolve({ ok: success, output });
       },
     );
+    deployJobActiveAbort.set(job.id, handle.abort);
   });
 }
 
@@ -2466,7 +2762,10 @@ async function executeOpenClawDeployJob(
     job.steps[step] = 'running';
     schedulePersistRuntimeJobs();
     broadcastDeployJobToSse(job);
-    appendDeployOutput(job, `\n>>> ${step}\n`);
+    appendDeployOutput(
+      job,
+      `\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n ${OPENCLAW_DEPLOY_STEP_TITLE[step]}\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n`,
+    );
     const result = await runner();
     if (!result.ok) {
       job.steps[step] = 'error';
@@ -2484,38 +2783,53 @@ async function executeOpenClawDeployJob(
 
   try {
     await runStep('check', async () => {
-      const diagnostic = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
-        openClawManager.runCheck(deviceObj, onOutput, onComplete);
-      });
-      const network = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
-        openClawManager.runNetworkCheck(deviceObj, onOutput, onComplete);
-      });
+      const diagnostic = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
+        openClawManager.runCheck(deviceObj, onOutput, onComplete),
+      );
+      const network = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
+        openClawManager.runNetworkCheck(deviceObj, onOutput, onComplete),
+      );
       return {
         ok: network.ok,
-        output: `${diagnostic.output || ''}\n${network.output || ''}`,
+        output: `${diagnostic.output || ''}\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n · 网络连通性\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n${network.output || ''}`,
       };
     }, true);
-    await runStep('prepare', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
-      openClawManager.runPrepare(deviceObj, onOutput, onComplete);
-    }), true);
-    await runStep('install', async () => {
-      /** npm 全局安装可能长时间无 SSH 新行；间隔不宜过短以免刷屏 */
+    const deployLongRunHeartbeat = () => {
       const heartbeatMs = 120_000;
-      const heartbeat = setInterval(() => {
-        appendDeployOutput(
-          job,
-          '\n[Studio] 板端仍在安装（npm 拉包/编译时可能数分钟无新日志），请耐心等待；若需更长时间可在服务端设置 OPENCLAW_INSTALL_TIMEOUT_MS（默认 30 分钟）。\n',
-        );
-      }, heartbeatMs);
+      return {
+        start: () =>
+          setInterval(() => {
+            appendDeployOutput(
+              job,
+              '\n[Studio] 板端仍在执行（依赖准备或安装可能数分钟无新日志），请耐心等待；可调整 OPENCLAW_INSTALL_TIMEOUT_MS（默认 30 分钟）。\n',
+            );
+          }, heartbeatMs),
+        stop: (h: ReturnType<typeof setInterval>) => clearInterval(h),
+      };
+    };
+    await runStep('prepare', async () => {
+      const hb = deployLongRunHeartbeat();
+      const t = hb.start();
       try {
-        return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
-          openClawManager.runInstall(deviceObj, onOutput, onComplete);
-        });
+        return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
+          openClawManager.runPrepare(deviceObj, onOutput, onComplete),
+        );
       } finally {
-        clearInterval(heartbeat);
+        hb.stop(t);
       }
     }, true);
-    await runStep('config', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) => {
+    await runStep('install', async () => {
+      const hb = deployLongRunHeartbeat();
+      const t = hb.start();
+      try {
+        return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
+          openClawManager.runInstall(deviceObj, onOutput, onComplete),
+        );
+      } finally {
+        hb.stop(t);
+      }
+    }, true);
+    await runStep('config', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
       openClawManager.updateConfig(
         deviceObj,
         {
@@ -2529,8 +2843,8 @@ async function executeOpenClawDeployJob(
         },
         onOutput,
         onComplete,
-      );
-    }), true);
+      ),
+    ), true);
 
     const healthStatus = await readHealthStatus();
     if (!healthStatus.installed) {
@@ -2550,10 +2864,15 @@ async function executeOpenClawDeployJob(
     deploySseSendFinalAndClose(job);
   } catch (error) {
     job.status = 'error';
-    job.error = error instanceof Error ? error.message : '部署失败';
+    job.error = openClawDeployUserCancelled.has(job.id)
+      ? '用户已取消部署'
+      : (error instanceof Error ? error.message : '部署失败');
+    openClawDeployUserCancelled.delete(job.id);
     job.finishedAt = Date.now();
     schedulePersistRuntimeJobs();
     deploySseSendFinalAndClose(job);
+  } finally {
+    deployJobActiveAbort.delete(job.id);
   }
 }
 
@@ -2734,6 +3053,43 @@ app.get('/api/devices/:id/openclaw/deploy/stream', (request, response) => {
   });
 });
 
+app.post('/api/devices/:id/openclaw/deploy/cancel', async (request, response) => {
+  const { id } = request.params;
+  const jobId = String((request.body as { jobId?: string })?.jobId ?? '').trim();
+  if (!jobId) {
+    sendApiError(response, 400, 'INVALID_JOB_ID', '缺少 jobId', { retryable: false });
+    return;
+  }
+  cleanupOpenClawDeployJobs();
+  const job = openClawDeployJobs.get(jobId);
+  if (!job || job.deviceId !== id) {
+    sendApiError(response, 404, 'OPENCLAW_DEPLOY_JOB_NOT_FOUND', '部署任务不存在', { retryable: false });
+    return;
+  }
+  if (job.status !== 'running') {
+    sendApiError(response, 400, 'OPENCLAW_DEPLOY_NOT_RUNNING', '任务未在运行中', { retryable: false });
+    return;
+  }
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  openClawDeployUserCancelled.add(jobId);
+  appendDeployOutput(job, '\n[Studio] 用户取消部署：正在中断板端 SSH 会话…\n');
+  broadcastDeployJobToSse(job);
+  schedulePersistRuntimeJobs();
+
+  const aborter = deployJobActiveAbort.get(jobId);
+  if (aborter) {
+    try {
+      aborter();
+    } catch {
+      /* ignore */
+    }
+  }
+  openClawManager.destroyConnection(device.host);
+  response.json({ ok: true });
+});
+
 app.post('/api/devices/:id/openclaw/upgrade', async (request, response) => {
   const { id } = request.params;
   const device = await resolveDevice(request, response, id);
@@ -2894,6 +3250,27 @@ app.post('/api/devices/:id/openclaw/model-test', async (request, response) => {
     const ok = success && /MODEL_TEST_OK/.test(text);
     const pairingRequired = /pairing required/i.test(text);
     response.json({ ok, output: text, pairingRequired });
+  });
+});
+
+/** 从 Studio 服务端直连厂商 HTTP API（不经板端 Gateway） */
+app.post('/api/openclaw/vendor-model-ping', async (request, response) => {
+  const body = request.body as {
+    baseUrl?: string;
+    apiKey?: string;
+    modelId?: string;
+    api?: string;
+  };
+  const result = await pingVendorModel(body);
+  if (result.ok) {
+    response.json({ ok: true, latencyMs: result.latencyMs });
+    return;
+  }
+  response.json({
+    ok: false,
+    error: result.error,
+    detail: result.detail,
+    status: result.status,
   });
 });
 
@@ -4148,6 +4525,8 @@ app.get('/api/agent/config', (_request, response) => {
     hasApiKey: !!entry.apiKey,
     baseUrl: entry.baseUrl,
     isActive: entry.id === registry.activeId,
+    thinkingDefault: entry.thinkingDefault ?? '',
+    reasoningVisibility: entry.reasoningVisibility ?? '',
   }));
   if (!config) {
     response.json({
@@ -4165,6 +4544,8 @@ app.get('/api/agent/config', (_request, response) => {
     model: config.model,
     hasApiKey: !!config.apiKey,
     baseUrl: config.baseUrl,
+    thinkingDefault: config.thinkingDefault ?? '',
+    reasoningVisibility: config.reasoningVisibility ?? '',
     models,
     activeModelId: registry.activeId || null,
     envApiKeyAvailable,
@@ -4182,6 +4563,8 @@ app.post('/api/agent/config', (request, response) => {
     apiKey?: string;
     baseUrl?: string;
     setActive?: boolean;
+    thinkingDefault?: string;
+    reasoningVisibility?: string;
   };
 
   const action = body.action || 'upsert';
@@ -4290,6 +4673,8 @@ app.post('/api/agent/config', (request, response) => {
     apiKey: key,
     baseUrl: body.baseUrl,
     setActive: body.setActive ?? true,
+    ...(body.thinkingDefault !== undefined ? { thinkingDefault: body.thinkingDefault } : {}),
+    ...(body.reasoningVisibility !== undefined ? { reasoningVisibility: body.reasoningVisibility } : {}),
   });
   response.json({ ok: true });
 });
@@ -4309,6 +4694,8 @@ app.get('/api/agent/config/export', (request, response) => {
       apiKey: includeSecrets ? entry.apiKey : '',
       hasApiKey: !!entry.apiKey,
       baseUrl: entry.baseUrl,
+      thinkingDefault: entry.thinkingDefault,
+      reasoningVisibility: entry.reasoningVisibility,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     })),
@@ -4328,6 +4715,8 @@ app.post('/api/agent/config/import', (request, response) => {
         model?: string;
         apiKey?: string;
         baseUrl?: string;
+        thinkingDefault?: string;
+        reasoningVisibility?: string;
         createdAt?: number;
         updatedAt?: number;
       }>;
@@ -4352,9 +4741,22 @@ app.post('/api/agent/config/import', (request, response) => {
       const label = String(entry.label || '').trim() || `${provider}/${model}`;
       const apiKey = String(entry.apiKey || '').trim();
       const baseUrl = String(entry.baseUrl || '').trim() || undefined;
+      const thinkingDefault = String(entry.thinkingDefault || '').trim() || undefined;
+      const reasoningVisibility = String(entry.reasoningVisibility || '').trim() || undefined;
       const createdAt = Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : now;
       const updatedAt = Number.isFinite(entry.updatedAt) ? Number(entry.updatedAt) : now;
-      return { id, label, provider, model, apiKey, baseUrl, createdAt, updatedAt };
+      return {
+        id,
+        label,
+        provider,
+        model,
+        apiKey,
+        baseUrl,
+        ...(thinkingDefault ? { thinkingDefault } : {}),
+        ...(reasoningVisibility ? { reasoningVisibility } : {}),
+        createdAt,
+        updatedAt,
+      };
     })
     .filter((entry): entry is NonNullable<typeof entry> => !!entry);
   if (normalizedEntries.length === 0) {

@@ -201,10 +201,12 @@ function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
     const req = client.get(url, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
         resolve(downloadFile(res.headers.location, destPath));
         return;
       }
       if (res.statusCode !== 200) {
+        res.resume();
         reject(new Error(`下载失败: HTTP ${res.statusCode || 'unknown'}`));
         return;
       }
@@ -228,7 +230,25 @@ function downloadFile(url, destPath) {
       });
       res.pipe(writer);
       writer.on('finish', () => {
-        writer.close(() => resolve(destPath));
+        writer.close(async () => {
+          try {
+            if (Number.isFinite(total) && total > 0) {
+              const st = await fs.promises.stat(destPath);
+              if (st.size !== total) {
+                await fs.promises.unlink(destPath).catch(() => {});
+                reject(
+                  new Error(
+                    `下载不完整（预期 ${total} 字节，实际 ${st.size} 字节），已删除残留文件。请检查网络与磁盘空间后重试。`,
+                  ),
+                );
+                return;
+              }
+            }
+            resolve(destPath);
+          } catch (e) {
+            reject(e instanceof Error ? e : new Error(String(e)));
+          }
+        });
       });
       writer.on('error', reject);
     });
@@ -255,8 +275,10 @@ ipcMain.handle('rdk:flash:download-image', async (_event, payload) => {
 ipcMain.handle('rdk:flash:decompress-image', async (_event, payload) => {
   const filePath = String(payload?.filePath || '').trim();
   if (!filePath) return { ok: false, error: '缺少 filePath' };
-  if (!filePath.toLowerCase().endsWith('.xz')) return { ok: true, outputPath: filePath };
-  return flashService.decompressXz(filePath);
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith('.xz')) return flashService.decompressXz(filePath);
+  if (lower.endsWith('.gz') && !lower.endsWith('.tar.gz')) return flashService.decompressGz(filePath);
+  return { ok: true, outputPath: filePath };
 });
 
 ipcMain.handle('rdk:serial:list-windows', async () => listWindowsSerialPorts());

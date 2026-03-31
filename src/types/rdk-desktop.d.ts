@@ -149,6 +149,8 @@ declare global {
       prepareSsoEmbedded?: () => Promise<{ ok: boolean; ssoUrl?: string; error?: string }>;
       stopSsoEmbedded?: () => Promise<{ ok: boolean }>;
       openSsoLoginWindow?: () => Promise<void>;
+      /** 使用系统浏览器打开 SSO 门户（URL 须与当前嵌入式回调同源） */
+      openSsoExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
       onSsoToken?: (cb: (payload: { token?: string }) => void) => (() => void) | void;
 
       /** 抓取内嵌页正文（与 openUrl 的 url 字符串需一致） */

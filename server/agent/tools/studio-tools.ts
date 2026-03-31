@@ -25,6 +25,8 @@ function prettyConfig(config: ProviderConfig | null): string {
     model: config.model,
     baseUrl: config.baseUrl,
     hasApiKey: !!config.apiKey,
+    thinkingDefault: config.thinkingDefault || null,
+    reasoningVisibility: config.reasoningVisibility || null,
   }, null, 2);
 }
 
@@ -71,6 +73,8 @@ function setStudioAgentConfigTool(): Tool<{
         model: input.model,
         apiKey: input.apiKey?.trim() || existing?.apiKey || '',
         baseUrl: input.baseUrl?.trim() || undefined,
+        thinkingDefault: existing?.thinkingDefault,
+        reasoningVisibility: existing?.reasoningVisibility,
       };
       if (!next.apiKey) {
         throw new Error('缺少 apiKey：首次配置必须提供 API key');

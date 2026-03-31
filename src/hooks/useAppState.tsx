@@ -10,7 +10,8 @@ import { ToastProvider, useToastStore } from './useToastStore';
 import { DeviceProvider, useDeviceStore } from './useDeviceStore';
 import { UIProvider, useUIStore, type ThemeMode } from './useUIStore';
 import { TerminalProvider, useTerminalStore } from './useTerminalStore';
-import { AIChatProvider, useAIChatStore } from './useAIChatStore';
+import { AIChatProvider, useAIChatStore, type RdkClawTimelineEntry } from './useAIChatStore';
+import { getRdkEmbedPanel } from '../utils/embed-mode';
 
 // ---- State shape (unchanged — backward compatible) ----
 export type { ThemeMode };
@@ -137,8 +138,8 @@ export interface AppState {
   // Modals
   showAddDevice: boolean;
   setShowAddDevice: (v: boolean) => void;
-  addDeviceInitialMethod: 'manual' | 'usb' | null;
-  setAddDeviceInitialMethod: (v: 'manual' | 'usb' | null) => void;
+  addDeviceInitialMethod: 'manual' | 'usb' | 'typec' | null;
+  setAddDeviceInitialMethod: (v: 'manual' | 'usb' | 'typec' | null) => void;
   newDeviceName: string;
   setNewDeviceName: (v: string) => void;
   newDeviceIp: string;
@@ -224,6 +225,10 @@ export interface AppState {
     detachedAt: number;
   }>;
   stopBackgroundRun: (runId: string) => void;
+
+  rdkClawRunTimeline: RdkClawTimelineEntry[];
+  runTimelinePanelOpen: boolean;
+  setRunTimelinePanelOpen: (v: boolean) => void;
 }
 
 /** 供 useI18n 等在 Provider 暂不可用时降级（避免 HMR 偶发崩溃） */
@@ -262,7 +267,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         input?.focus();
       }
       if (e.key === 'Escape') {
-        if (chat.chatExpanded) chat.setChatExpanded(false);
+        if (chat.chatExpanded && !getRdkEmbedPanel()) chat.setChatExpanded(false);
         if (ui.showSettings) ui.setShowSettings(false);
         if (device.showAddDevice) device.setShowAddDevice(false);
         if (ui.diagnosticOpen) ui.setDiagnosticOpen(false);

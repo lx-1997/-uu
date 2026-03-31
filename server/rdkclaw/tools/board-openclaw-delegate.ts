@@ -157,6 +157,7 @@ export function boardOpenClawDelegateTool(
     description:
       "将任务委派给板端 OpenClaw 执行。通常在 board_openclaw_assess 确认可行后调用。" +
       "在 guidance 中融入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索）对它很重要。" +
+      "若任务可能超出其当前技能，在 guidance 中写明：板端可先通过 **find-skills**（SkillHub）检索/安装再执行；Studio 安装 OpenClaw 时默认会装 find-skills。" +
       "同一对话内自动复用会话，板端保留上下文。",
     inputSchema: {
       type: "object",
@@ -195,9 +196,10 @@ export function boardOpenClawDelegateTool(
       }
       if (useSkills) {
         msgParts.push(
-          "\nhint: 优先使用你已安装的技能来完成任务。" +
-          "如果没有匹配的技能，可以用 clawhub 搜索和安装新技能。" +
-          "完成后简要说明你用了哪些技能或工具链，帮助我了解你的能力成长。",
+          "\nhint: 优先使用你已安装的技能完成任务。" +
+          "若判断**现有技能/工具无法完成**或缺少能力：请优先使用 **find-skills**（腾讯 SkillHub 元技能；Studio 一键安装板端 OpenClaw 后默认应已 `clawhub install find-skills`）在板端检索并安装合适技能后再执行。" +
+          "亦可 `clawhub install <owner/slug>` 安装其他技能。" +
+          "完成后简要说明你用了哪些技能或工具链。",
         );
       }
       msgParts.push(

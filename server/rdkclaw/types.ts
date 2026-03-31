@@ -42,6 +42,8 @@ export interface RDKClawChatRequest {
 
 export type RDKClawEventType =
   | "text"
+  /** pi-ai extended thinking → Agent thinking_delta，流式推送到客户端 */
+  | "thinking_delta"
   | "tool_start"
   | "tool_progress"
   | "tool_result"

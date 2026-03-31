@@ -9,10 +9,13 @@ import * as path from 'path';
 import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transport.js';
 import {
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
+  OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+  OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_FAST_REGISTRY_SNIPPET,
   OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
   OPENCLAW_PREPARE_NPM_SPEED,
+  OPENCLAW_RESOLVE_CLI_SNIPPET,
 } from './openclaw-board-install-sh.js';
 
 /** 板端一键安装/升级 SSH 超时（毫秒）。默认 30 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式 npm 全局装包常超过 10 分钟。 */
@@ -90,20 +93,44 @@ export interface ConfigData {
   }>;
   pluginsAllow?: string[];
   allProviders?: Record<string, any>;
+  /** 对齐 OpenClaw `agents.defaults`：思考档位与推理可见性（写入 `reasoningDefault`，非旧版误用的 `reasoning`） */
+  agentDefaults?: {
+    thinkingDefault?: string;
+    /** 推理可见性；持久化到板端为 `reasoningDefault` */
+    reasoning?: string;
+  };
 }
 
+/** OpenClaw 文档常见取值；非常规值仍允许写入以兼容新版本 */
+const OPENCLAW_THINKING_DEFAULTS_KNOWN = new Set([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'adaptive',
+]);
+/** 与 OpenClaw runtime-schema `agents.defaults.reasoningDefault` 一致 */
+const OPENCLAW_REASONING_DEFAULT_KNOWN = new Set(['off', 'on', 'stream']);
+
 // 常量定义
-const NPM_NVM_CLEANUP = 'echo "[OpenClaw] 清理 .npmrc 中与 nvm 冲突的配置" && (npm config delete prefix 2>/dev/null || true) && (npm config delete globalconfig 2>/dev/null || true)';
+const NPM_NVM_CLEANUP =
+  '(npm config delete prefix 2>/dev/null || true) && (npm config delete globalconfig 2>/dev/null || true)';
 const CLAWHUB_TOKEN = process.env.CLAWHUB_TOKEN ?? '';
+/** 禁止在「then …;」与「else」之间插 &&——会生成 `; && else` 导致 bash 语法错误，后续安装步骤可能被跳过或整段异常 */
 const CLAWHUB_AUTO_LOGIN_CMD = [
-  'echo "[OpenClaw] 正在自动登录 ClawHub..."',
-  `clawhub login --token ${CLAWHUB_TOKEN} 2>&1 || echo "[OpenClaw] ClawHub 自动登录失败"`
+  'CLAWHUB_CMD="$(command -v clawhub 2>/dev/null || true)"',
+  'if [ -z "$CLAWHUB_CMD" ] && [ -x "$HOME/.npm-global/bin/clawhub" ]; then CLAWHUB_CMD="$HOME/.npm-global/bin/clawhub"; fi',
+  `if [ -n "$CLAWHUB_CMD" ]; then "$CLAWHUB_CMD" login --token ${CLAWHUB_TOKEN} 2>&1 || echo "[OpenClaw] ClawHub 登录失败" >&2; else true; fi`,
 ].join(' && ');
 /** NO_COLOR/FORCE_COLOR：减少安装脚本与 npm 的 ANSI，Web 端日志仍经 strip-ansi 兜底 */
 const BOARD_ENV_EXPORT = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH" && export NO_COLOR=1 FORCE_COLOR=0';
-const RESTART_GATEWAY_FALLBACK = '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart 2>/dev/null || "$OPENCLAW_CMD" restart 2>/dev/null; else false; fi) || clawctl gateway restart || true)';
+const RESTART_GATEWAY_FALLBACK =
+  '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart 2>/dev/null || "$OPENCLAW_CMD" restart 2>/dev/null; else false; fi) || (command -v clawctl >/dev/null 2>&1 && clawctl gateway restart) || true)';
 /** 与 RESTART_GATEWAY_FALLBACK 一致：单重 ( ) 子 shell，禁止 (( ))——否则 bash 按算术解析会失败 */
-const START_GATEWAY_FALLBACK = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway start 2>&1 || "$OPENCLAW_CMD" start 2>&1; else false; fi) || clawctl start 2>&1 || true';
+const START_GATEWAY_FALLBACK =
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway start 2>&1 || "$OPENCLAW_CMD" start 2>&1; else false; fi) || (command -v clawctl >/dev/null 2>&1 && clawctl start) || true';
 const ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64 = Buffer.from(`
 import json
 import os
@@ -124,8 +151,6 @@ d["gateway"] = g
 
 with open(p, "w", encoding="utf-8") as f:
     json.dump(d, f, indent=2, ensure_ascii=False)
-
-print("[OpenClaw] gateway.mode=local, gateway.bind=loopback")
 `.trim(), 'utf8').toString('base64');
 
 const ENSURE_GATEWAY_AUTH_TOKEN_SCRIPT_B64 = Buffer.from(`
@@ -153,30 +178,22 @@ if not token:
   d["gateway"] = g
   with open(p, "w", encoding="utf-8") as f:
     json.dump(d, f, indent=2, ensure_ascii=False)
-  print("[OpenClaw] 已生成 gateway.auth.token")
-else:
-  print("[OpenClaw] gateway.auth.token 已存在")
 `.trim(), 'utf8').toString('base64');
 
 const ENSURE_GATEWAY_LOCAL_MODE = [
-  'echo "[OpenClaw] 确保 gateway.mode=local 与 bind=loopback"',
   `echo '${ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_mode.py`,
-  'python3 /tmp/oc_fix_gateway_mode.py 2>&1 || echo "[OpenClaw] gateway mode 修复失败"',
+  'python3 /tmp/oc_fix_gateway_mode.py 2>&1 || echo "[OpenClaw] gateway mode 修复失败" >&2',
 ].join(' && ');
 const ENSURE_GATEWAY_AUTH_TOKEN = [
-  'echo "[OpenClaw] 确保 gateway.auth.token 存在"',
   `echo '${ENSURE_GATEWAY_AUTH_TOKEN_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_token.py`,
-  'python3 /tmp/oc_fix_gateway_token.py 2>&1 || echo "[OpenClaw] gateway token 修复失败"',
+  'python3 /tmp/oc_fix_gateway_token.py 2>&1 || echo "[OpenClaw] gateway token 修复失败" >&2',
 ].join(' && ');
-const RUN_DOCTOR = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 执行失败，请手动检查"; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 doctor"; fi)';
-const RUN_HEALTH = '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health --json 2>&1 || "$OPENCLAW_CMD" status --all 2>&1 || "$OPENCLAW_CMD" status 2>&1 || echo "[OpenClaw] health 检查失败"; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 health"; fi)';
-const RESOLVE_OPENCLAW_CMD = [
-  'OPENCLAW_CMD="$(command -v openclaw 2>/dev/null || true)"',
-  'if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.npm-global/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.npm-global/bin/openclaw"; fi',
-  'if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.local/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.local/bin/openclaw"; fi',
-  'if [ -z "$OPENCLAW_CMD" ]; then OPENCLAW_CMD="$(npm prefix -g 2>/dev/null)/bin/openclaw"; fi',
-  'if [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi',
-].join(' && ');
+const RUN_DOCTOR =
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 失败" >&2; else true; fi)';
+const RUN_HEALTH =
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health --json 2>&1 || "$OPENCLAW_CMD" status --all 2>&1 || "$OPENCLAW_CMD" status 2>&1 || echo "[OpenClaw] health 失败" >&2; else true; fi)';
+/** 与 board 安装脚本共用，避免 npm prefix 空 → /bin/openclaw */
+const RESOLVE_OPENCLAW_CMD = OPENCLAW_RESOLVE_CLI_SNIPPET;
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
   'anthropic-messages',
@@ -321,21 +338,66 @@ function connectWs() {
 ws = connectWs();
 `;
 
+/** 一键部署日志：分段横线（与前端步骤条「依赖 / 安装」对应） */
+const STUDIO_DEPLOY_LOG_DIV = 'echo "────────────────────────────────────────────────────────"';
+
+/**
+ * Studio 一键安装后默认安装元技能 find-skills。
+ * ClawHub CLI：`clawhub install <技能短名>`（文档示例：`clawhub install summarize`）；与 `clawhub clone owner/skill` 不同。
+ * `RDK_SKIP_BOARD_FIND_SKILLS=1` 可跳过。
+ */
+const BOARD_FIND_SKILLS_INSTALL =
+  process.env.RDK_SKIP_BOARD_FIND_SKILLS === '1' || process.env.RDK_SKIP_BOARD_FIND_SKILLS === 'true'
+    ? 'echo "[OpenClaw] RDK_SKIP_BOARD_FIND_SKILLS 已设置，跳过 find-skills"'
+    : [
+        STUDIO_DEPLOY_LOG_DIV,
+        'echo "[Studio] 默认安装 SkillHub 元技能 find-skills（失败不阻断安装流程）"',
+        STUDIO_DEPLOY_LOG_DIV,
+        'CLAWHUB_CMD="$(command -v clawhub 2>/dev/null || true)"',
+        'if [ -z "$CLAWHUB_CMD" ] && [ -x "$HOME/.npm-global/bin/clawhub" ]; then CLAWHUB_CMD="$HOME/.npm-global/bin/clawhub"; fi',
+        'if [ -n "$CLAWHUB_CMD" ]; then "$CLAWHUB_CMD" install find-skills 2>&1 || echo "[OpenClaw] find-skills 跳过（已存在或安装失败）" >&2; else echo "[OpenClaw] 无 clawhub，跳过 find-skills" >&2; fi',
+      ].join(' && ');
+
 const NPM_INSTALL_CMD = [
+  STUDIO_DEPLOY_LOG_DIV,
+  'echo "[Studio] 安装 OpenClaw（npm / ClawHub / 网关）"',
+  STUDIO_DEPLOY_LOG_DIV,
   BOARD_ENV_EXPORT,
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
-  'echo "[OpenClaw] 开始安装（官方推荐流程）..."',
+  OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+  OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_INSTALL_OPENCLAW_STEP,
   RESOLVE_OPENCLAW_CMD,
   CLAWHUB_AUTO_LOGIN_CMD,
+  BOARD_FIND_SKILLS_INSTALL,
   ENSURE_GATEWAY_LOCAL_MODE,
   ENSURE_GATEWAY_AUTH_TOKEN,
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
   RUN_HEALTH,
-  'echo "[OpenClaw] 安装流程完成"'
+  'echo "[OpenClaw] 安装完成"',
 ].join(' && ');
+
+/** 与 runPrepare() 相同；单独 API 与一键部署合并路径共用 */
+const OPENCLAW_PREPARE_CMD = [
+  [BOARD_ENV_EXPORT, OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET, OPENCLAW_ENSURE_NPM_SNIPPET, RESOLVE_OPENCLAW_CMD].join(' && '),
+  STUDIO_DEPLOY_LOG_DIV,
+  'echo "[Studio] 环境准备（Node / npm / 目录）"',
+  STUDIO_DEPLOY_LOG_DIV,
+  'node --version 2>&1 || true',
+  'npm --version 2>&1 || true',
+  'mkdir -p "$HOME/.openclaw" "$HOME/.npm-global"',
+  'npm config set prefix "$HOME/.npm-global" 2>/dev/null ; npm config set fund false 2>/dev/null ; npm config set update-notifier false 2>/dev/null',
+  OPENCLAW_PREPARE_NPM_SPEED,
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo "openclaw: 未安装"; fi)',
+  ENSURE_GATEWAY_LOCAL_MODE,
+  ENSURE_GATEWAY_AUTH_TOKEN,
+  'command -v npm >/dev/null 2>&1',
+].join(' ; ');
+
+/** 仍需单次 SSH 合并时：准备子 shell 成功后衔接 NPM_INSTALL_CMD（安装段首已有分割线） */
+const OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD = `( ${OPENCLAW_PREPARE_CMD} ) && ${NPM_INSTALL_CMD}`;
 
 const GATEWAY_RESTART_CMD = `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && ${RESTART_GATEWAY_FALLBACK} && echo "[OpenClaw] Gateway 已重启"`;
 const GATEWAY_PORT_CHECK = `python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_STREAM); s.settimeout(1.0); ok=(s.connect_ex(("127.0.0.1",18789))==0); s.close(); print("OPEN" if ok else "CLOSED")'`;
@@ -351,19 +413,21 @@ const GATEWAY_DIAG_LOGS = [
 const NPM_UPGRADE_CMD = [
   BOARD_ENV_EXPORT,
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
+  OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+  OPENCLAW_ENSURE_NPM_SNIPPET,
   RESOLVE_OPENCLAW_CMD,
-  'echo "[OpenClaw] 开始升级（官方推荐流程）..."',
   // 优先 CLI update，失败回退 npm 双源重试
-  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 命令失败，回退 npm 升级..." && ' +
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 失败，改 npm" >&2 && ' +
     OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
     ')',
+  BOARD_FIND_SKILLS_INSTALL,
   ENSURE_GATEWAY_LOCAL_MODE,
   ENSURE_GATEWAY_AUTH_TOKEN,
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
   RUN_HEALTH,
-  'echo "[OpenClaw] 升级流程完成"'
+  'echo "[OpenClaw] 升级完成"',
 ].join(' && ');
 
 export class OpenClawDeploymentManager {
@@ -620,7 +684,7 @@ export class OpenClawDeploymentManager {
     return handle;
   }
 
-  runCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
+  runCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
     const cmd = [
       BOARD_ENV_EXPORT,
       RESOLVE_OPENCLAW_CMD,
@@ -643,36 +707,30 @@ export class OpenClawDeploymentManager {
       'npm --version 2>&1 || echo "npm 未安装"',
       'echo "=== 诊断完成 ==="',
     ].join(' ; ');
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000 });
+    return this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000 });
   }
 
-  runPrepare(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const cmd = [
-      BOARD_ENV_EXPORT,
-      RESOLVE_OPENCLAW_CMD,
-      'echo "=== 环境准备 ==="',
-      'echo "--- 检查 Node.js ---"',
-      'node --version 2>&1 || echo "node 未安装，请先安装 Node.js 18+"',
-      'echo "--- 检查 npm ---"',
-      'npm --version 2>&1 || echo "npm 未安装"',
-      'echo "--- 创建目录 ---"',
-      'mkdir -p "$HOME/.openclaw" "$HOME/.npm-global" 2>&1 && echo "目录已就绪"',
-      'echo "--- 配置 npm ---"',
-      'npm config set prefix "$HOME/.npm-global" 2>/dev/null ; npm config set fund false 2>/dev/null ; npm config set update-notifier false 2>/dev/null',
-      OPENCLAW_PREPARE_NPM_SPEED,
-      'echo "npm 配置完成"',
-      'echo "--- 检查 openclaw ---"',
-      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo "openclaw 尚未安装（可点击安装按钮）"; fi)',
-      'echo "--- 修复网关模式 ---"',
-      ENSURE_GATEWAY_LOCAL_MODE,
-      'echo "--- 修复网关 token ---"',
-      ENSURE_GATEWAY_AUTH_TOKEN,
-      'echo "=== 准备完成 ==="',
-    ].join(' ; ');
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
+  runPrepare(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
+    // 与 runInstall 一致：准备阶段可能 apt / NodeSource，嵌入式上常 >2 分钟；pty 便于实时刷日志
+    return this.execCommand(device, OPENCLAW_PREPARE_CMD, onOutput, onComplete, {
+      pty: true,
+      timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
+    });
   }
 
-  runNetworkCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
+  /** 单次 SSH：环境准备 + 安装（等同 runPrepare 后接 runInstall；一键部署默认已拆成两步） */
+  runDeployPrepareAndInstall(
+    device: Device,
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void,
+  ): { abort: () => void } {
+    return this.execCommand(device, OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD, onOutput, onComplete, {
+      pty: true,
+      timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
+    });
+  }
+
+  runNetworkCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
     // 注意：必须用 if/( ) 子shell，不能用 (( ))——后者在 bash 中是算术扩展，无法执行 ping/curl，会导致误判 NETWORK_OFFLINE
     const cmd = [
       BOARD_ENV_EXPORT,
@@ -683,11 +741,11 @@ export class OpenClawDeploymentManager {
       'if [ "$net_ok" != "1" ]; then if curl -sI --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1 || wget -q --spider --timeout=6 https://registry.npmjs.org >/dev/null 2>&1; then net_ok=1; fi; fi',
       'if [ "$net_ok" = "1" ]; then echo "NETWORK_READY"; else echo "NETWORK_OFFLINE"; exit 1; fi',
     ].join(' ; ');
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 25000 });
+    return this.execCommand(device, cmd, onOutput, onComplete, { timeout: 25000 });
   }
 
-  runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
+  runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
+    return this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }
 
   runUpgrade(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -896,7 +954,7 @@ print(json.dumps(result, ensure_ascii=False))`;
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {
     const pyScript = `import json,os
 p=os.path.expanduser('~/.openclaw/openclaw.json')
-result={"modelGateway":{"baseUrl":"","apiKey":"","api":"openai-completions","modelId":"qwen-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{}}
+result={"modelGateway":{"baseUrl":"","apiKey":"","api":"openai-completions","modelId":"qwen-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{},"agentDefaults":{"thinkingDefault":"","reasoning":""}}
 if os.path.exists(p):
   d=json.load(open(p))
   provider=((d.get('models') or {}).get('providers') or {}).get('custom-gateway') or {}
@@ -932,6 +990,15 @@ if os.path.exists(p):
   plugins=((d.get('plugins') or {}).get('allow') or [])
   if isinstance(plugins,list):
     result["pluginsAllow"]=[str(x) for x in plugins if isinstance(x,(str,int,float)) and str(x).strip()]
+  agdef=((d.get('agents') or {}).get('defaults')) or {}
+  _td=agdef.get('thinkingDefault')
+  _rv=agdef.get('reasoningDefault')
+  if _rv is None or (isinstance(_rv,str) and str(_rv).strip()==''):
+    _rv=agdef.get('reasoning')
+  result['agentDefaults']={
+    'thinkingDefault': str(_td).strip() if isinstance(_td,(str,int,float)) else '',
+    'reasoning': str(_rv).strip() if isinstance(_rv,(str,int,float)) else '',
+  }
 print(json.dumps(result,ensure_ascii=False))`;
     const b64 = Buffer.from(pyScript, 'utf8').toString('base64');
     const cmd = `echo '${b64}' | base64 -d > /tmp/oc_read_config.py && python3 /tmp/oc_read_config.py`;
@@ -973,10 +1040,15 @@ print(json.dumps(result,ensure_ascii=False))`;
 
   updateConfig(
     device: Device,
-    config: { modelGateway?: any; feishu?: any; pluginsAllow?: string[] },
+    config: {
+      modelGateway?: any;
+      feishu?: any;
+      pluginsAllow?: string[];
+      agentDefaults?: { thinkingDefault?: string; reasoning?: string };
+    },
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void
-  ): void {
+  ): { abort: () => void } {
     const patch: any = {};
     if (config.modelGateway?.baseUrl && config.modelGateway?.apiKey) {
       const modelId = config.modelGateway.modelId || 'default-model';
@@ -1022,10 +1094,33 @@ print(json.dumps(result,ensure_ascii=False))`;
         allow: Array.from(new Set(allow)),
       };
     }
+    if (config.agentDefaults) {
+      const ad: Record<string, string> = {};
+      const td = String(config.agentDefaults.thinkingDefault ?? '').trim();
+      const rv = String(config.agentDefaults.reasoning ?? '').trim();
+      if (td) {
+        if (!OPENCLAW_THINKING_DEFAULTS_KNOWN.has(td)) {
+          onOutput(
+            `[OpenClaw] 提示: thinkingDefault="${td}" 不在常见列表内，仍将写入（请确认当前 openclaw 版本支持）\n`,
+          );
+        }
+        ad.thinkingDefault = td;
+      }
+      if (rv) {
+        if (!OPENCLAW_REASONING_DEFAULT_KNOWN.has(rv)) {
+          onOutput(`[OpenClaw] 提示: reasoningDefault="${rv}" 不在常见列表内，仍将写入\n`);
+        }
+        ad.reasoningDefault = rv;
+      }
+      if (Object.keys(ad).length > 0) {
+        patch.agents = patch.agents || { defaults: {} };
+        patch.agents.defaults = { ...(patch.agents.defaults || {}), ...ad };
+      }
+    }
     if (Object.keys(patch).length === 0) {
       onOutput('[OpenClaw] 无有效配置项，跳过更新\n');
       onComplete(true);
-      return;
+      return { abort: () => {} };
     }
     const patchB64 = Buffer.from(JSON.stringify(patch), 'utf8').toString('base64');
     const pyScript = `import json,os,sys,base64,traceback
@@ -1041,11 +1136,19 @@ try:
  merge(d,pat)
  if 'channels' in pat and 'feishu' in pat['channels']:
   d.setdefault('channels',{})['feishu']=pat['channels']['feishu']
+ _ag=d.get('agents')
+ if isinstance(_ag,dict):
+  _defs=_ag.get('defaults')
+  if isinstance(_defs,dict) and 'reasoning' in _defs:
+   del _defs['reasoning']
  json.dump(d,open(p,'w'),indent=2,ensure_ascii=False)
  v=json.load(open(p))
  mp=((v.get('models') or {}).get('providers') or {}).get('custom-gateway')
  ap=((v.get('agents') or {}).get('defaults') or {}).get('model',{}).get('primary','')
- print('[OpenClaw] 配置已更新 | model-provider:',('ok' if mp else 'missing'),'| primary:',ap or 'none')
+ ag=((v.get('agents') or {}).get('defaults') or {})
+ td=ag.get('thinkingDefault') or ''
+ rv=ag.get('reasoningDefault') or ag.get('reasoning') or ''
+ print('[OpenClaw] 配置已更新 | model-provider:',('ok' if mp else 'missing'),'| primary:',ap or 'none','| thinkingDefault:',td or '—','| reasoningDefault:',rv or '—')
 except Exception as e:
  traceback.print_exc()
  print('[OpenClaw] 配置写入失败:',str(e))
@@ -1059,7 +1162,7 @@ except Exception as e:
       RESTART_GATEWAY_FALLBACK,
       'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
+    return this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
   }
 
   runRestartGateway(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -1167,9 +1270,10 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     const cmd = [
       BOARD_ENV_EXPORT,
       OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
-      'echo "[OpenClaw] 使用官方安装脚本..."',
+      OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+      OPENCLAW_ENSURE_NPM_SNIPPET,
       OPENCLAW_INSTALL_OPENCLAW_STEP,
-      'echo "[OpenClaw] 安装完成"',
+      BOARD_FIND_SKILLS_INSTALL,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }

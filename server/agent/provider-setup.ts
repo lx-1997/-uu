@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { streamSimple, streamSimpleAnthropic, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
-import type { Model, StreamFunction } from '@mariozechner/pi-ai';
+import type { Model, StreamFunction, ThinkingLevel } from '@mariozechner/pi-ai';
 import { lookupModelCapabilities, fetchModelCapabilitiesFromProvider, registerModelCapabilities } from './model-registry.js';
 
 registerBuiltInApiProviders();
@@ -19,6 +19,10 @@ export interface ProviderConfig {
   model: string;
   apiKey: string;
   baseUrl?: string;
+  /** 扩展思考档位：off / minimal / low / medium / high / xhigh / adaptive；空则 RDKClaw 默认 high */
+  thinkingDefault?: string;
+  /** 是否在 Studio 流式展示 thinking_delta：off / on / stream；空视为 stream */
+  reasoningVisibility?: string;
 }
 
 export interface ProviderConfigEntry extends ProviderConfig {
@@ -26,6 +30,22 @@ export interface ProviderConfigEntry extends ProviderConfig {
   label: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/** RDKClaw：null 表示关闭扩展思考；缺省配置视为 high */
+export function resolveRdkclawAgentReasoning(cfg: ProviderConfig): ThinkingLevel | null {
+  const raw = normalizeText(cfg.thinkingDefault).toLowerCase();
+  if (!raw) return 'high';
+  if (raw === 'off') return null;
+  const allowed = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive']);
+  if (allowed.has(raw)) return raw as ThinkingLevel;
+  return 'high';
+}
+
+export function rdkclawShouldStreamThinking(cfg: ProviderConfig): boolean {
+  const v = normalizeText(cfg.reasoningVisibility).toLowerCase();
+  if (!v) return true;
+  return v !== 'off';
 }
 
 export interface ProviderConfigRegistry {
@@ -153,6 +173,8 @@ export function loadProviderConfig(): ProviderConfig | null {
     model: active.model,
     apiKey: active.apiKey,
     baseUrl: active.baseUrl,
+    thinkingDefault: active.thinkingDefault,
+    reasoningVisibility: active.reasoningVisibility,
   };
 }
 
@@ -189,6 +211,8 @@ function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
     const storedLabel = normalizeText(item.label);
     const canonical = `${provider}/${model}`;
     const labelMatchesContent = storedLabel && (storedLabel.includes(model) || storedLabel === canonical);
+    const thinkingDefault = normalizeText(item.thinkingDefault) || undefined;
+    const reasoningVisibility = normalizeText(item.reasoningVisibility) || undefined;
     entries.push({
       id: normalizeText(item.id) || `cfg-${Math.random().toString(36).slice(2, 10)}`,
       label: labelMatchesContent ? storedLabel : canonical,
@@ -196,6 +220,8 @@ function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
       model,
       apiKey: normalizeText(item.apiKey),
       baseUrl: normalizeText(item.baseUrl) || undefined,
+      ...(thinkingDefault ? { thinkingDefault } : {}),
+      ...(reasoningVisibility ? { reasoningVisibility } : {}),
       createdAt: Number.isFinite(item.createdAt) ? Number(item.createdAt) : now,
       updatedAt: Number.isFinite(item.updatedAt) ? Number(item.updatedAt) : now,
     });
@@ -262,6 +288,12 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
           model,
           apiKey,
           baseUrl: normalizeText(legacy.baseUrl) || undefined,
+          ...(normalizeText((legacy as ProviderConfig).thinkingDefault)
+            ? { thinkingDefault: normalizeText((legacy as ProviderConfig).thinkingDefault) }
+            : {}),
+          ...(normalizeText((legacy as ProviderConfig).reasoningVisibility)
+            ? { reasoningVisibility: normalizeText((legacy as ProviderConfig).reasoningVisibility) }
+            : {}),
           createdAt: now,
           updatedAt: now,
         }],
@@ -300,6 +332,8 @@ export function saveProviderConfig(config: ProviderConfig): void {
     model: config.model,
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
+    thinkingDefault: config.thinkingDefault ?? active?.thinkingDefault,
+    reasoningVisibility: config.reasoningVisibility ?? active?.reasoningVisibility,
     createdAt: active?.createdAt || now,
     updatedAt: now,
   };
@@ -318,6 +352,8 @@ export function upsertProviderConfigEntry(input: {
   apiKey?: string;
   baseUrl?: string;
   setActive?: boolean;
+  thinkingDefault?: string;
+  reasoningVisibility?: string;
 }): ProviderConfigEntry {
   const registry = loadProviderRegistry();
   const now = Date.now();
@@ -325,6 +361,14 @@ export function upsertProviderConfigEntry(input: {
   const active = getActiveProviderEntry(registry);
   const id = input.id?.trim() || `cfg-${Math.random().toString(36).slice(2, 10)}`;
   const resolvedApiKey = normalizeText(input.apiKey) || existing?.apiKey || active?.apiKey || '';
+  const nextThinking =
+    input.thinkingDefault !== undefined
+      ? (normalizeText(input.thinkingDefault) || undefined)
+      : existing?.thinkingDefault ?? active?.thinkingDefault;
+  const nextReasoningVis =
+    input.reasoningVisibility !== undefined
+      ? (normalizeText(input.reasoningVisibility) || undefined)
+      : existing?.reasoningVisibility ?? active?.reasoningVisibility;
   const next: ProviderConfigEntry = {
     id,
     label: normalizeText(input.label) || existing?.label || `${input.provider}/${input.model}`,
@@ -332,6 +376,8 @@ export function upsertProviderConfigEntry(input: {
     model: input.model,
     apiKey: resolvedApiKey,
     baseUrl: normalizeText(input.baseUrl) || existing?.baseUrl || undefined,
+    ...(nextThinking ? { thinkingDefault: nextThinking } : {}),
+    ...(nextReasoningVis ? { reasoningVisibility: nextReasoningVis } : {}),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -423,6 +469,16 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
 
   const caps = lookupModelCapabilities(config.provider, modelId);
 
+  /**
+   * pi-ai 在 reasoning 模型上默认可能用 `developer` 角色承载系统提示；多数 OpenAI 兼容网关
+   *（豆包、通义、DeepSeek 等）只接受 system/user/assistant/tool，会 400。
+   * @see https://github.com/badlogic/pi-mono — OpenAICompletionsCompat.supportsDeveloperRole
+   */
+  const openaiCompat = {
+    supportsDeveloperRole: false as const,
+    ...(isQwenCodingEndpoint ? { supportsUsageInStreaming: false as const } : {}),
+  };
+
   if (protocol === 'anthropic') {
     return {
       api: 'anthropic-messages',
@@ -430,7 +486,8 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
       id: modelId,
       name: modelId,
       baseUrl,
-      reasoning: false,
+      /** true：允许 agent-loop 的 reasoning 级别生效；不支持的机型由 pi-ai/上游静默降级 */
+      reasoning: true,
       input: ['text'] as const,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: caps.contextWindow,
@@ -444,9 +501,9 @@ export function buildModelDef(config: ProviderConfig): Model<any> {
     id: modelId,
     name: modelId,
     baseUrl,
-    reasoning: false,
+    reasoning: true,
     input: ['text'] as const,
-    ...(isQwenCodingEndpoint ? { compat: { supportsUsageInStreaming: false } } : {}),
+    compat: openaiCompat,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: caps.contextWindow,
     maxTokens: caps.maxOutputTokens,

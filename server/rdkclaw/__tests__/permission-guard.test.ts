@@ -209,6 +209,9 @@ describe('risk classification', () => {
     expect(guard('device_diagnose', {}).risk).toBe('low');
     expect(guard('ros_topics', {}).risk).toBe('low');
     expect(guard('memory_search', {}).risk).toBe('low');
+    expect(guard('find_skills', {}).risk).toBe('low');
+    expect(guard('skill_mark_validated', {}).risk).toBe('low');
+    expect(guard('skillhub_search', {}).risk).toBe('low');
   });
 
   it('classifies write tools as high risk', () => {

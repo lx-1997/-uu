@@ -103,7 +103,7 @@ export const EN: Record<string, string> = {
   'dock.mention.flash.optOfficial': 'Official catalog',
   'dock.mention.flash.optOfficialDesc': 'Choose a version from the list on the flash page (S100 often uses product.zip / xburn).',
   'dock.mention.flash.optLocal': 'Local image',
-  'dock.mention.flash.optLocalDesc': 'Browse or enter a local .img / .xz path on the flash page.',
+  'dock.mention.flash.optLocalDesc': 'Browse or enter a local .img / .xz / .gz path on the flash page.',
   'dock.mention.flash.next': 'Next',
   'dock.mention.flash.openFlasher': 'Open flash page',
   'dock.mention.flash.summaryDevice': 'Device',
@@ -155,6 +155,13 @@ export const EN: Record<string, string> = {
   'settings.ai.import': 'Import',
   'settings.ai.import.title': 'Import',
   'settings.ai.hint': 'Switch models quickly; config is stored locally.',
+  'settings.ai.brainAdvanced': 'Reasoning',
+  'settings.ai.brainAdvancedHint':
+    'Thinking level = extended reasoning strength; visibility controls whether thinking blocks stream in chat (model must support). Empty = defaults (high + stream).',
+  'settings.ai.thinkingDefault': 'Thinking level',
+  'settings.ai.reasoningVisibility': 'Reasoning visibility',
+  'settings.ai.brainInherit': 'Default (high)',
+  'settings.ai.brainStreamDefault': 'Default (stream)',
 
   'settings.persona.title': 'Persona & behavior',
   'settings.persona.desc': 'Core persona is system-managed; here you tune preferences and autonomy.',

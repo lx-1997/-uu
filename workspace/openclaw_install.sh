@@ -26,7 +26,7 @@ else
         opkg update
         opkg install nodejs npm
     elif command -v apt &> /dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
         apt-get install -y nodejs
     else
         echo "无法自动安装 Node.js，请手动安装"

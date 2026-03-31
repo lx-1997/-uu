@@ -904,6 +904,44 @@
   padding: 6px 8px;
 }
 
+.oc-input-with-toggle {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.oc-input-with-toggle .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.oc-secret-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.oc-secret-toggle:hover {
+  color: var(--text-secondary);
+  background: var(--surface-hover, color-mix(in srgb, var(--text-primary) 6%, transparent));
+}
+
+.oc-secret-toggle-icon {
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
 .oc-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

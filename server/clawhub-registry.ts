@@ -10,6 +10,23 @@ import JSZip from 'jszip';
 /** SkillHub 与官网前端共用 API；勿改为 skillhub.tencent.com（该域对 `/api/v1/*` 会回退 SPA HTML） */
 const DEFAULT_REGISTRY = 'https://lightmake.site';
 
+/**
+ * 腾讯 SkillHub 开放 API 基址（与 SkillHub 前端同源后端）。
+ * RDKClaw 聚合检索时**固定优先**此端点，便于国内可达并与 `CLAWHUB_REGISTRY` 其它用途解耦。
+ */
+export const TENCENT_SKILLHUB_API_BASE = DEFAULT_REGISTRY;
+
+/**
+ * 官方 ClawHub 注册表 API 基址（与公开文档一致：`clawhub config set registry https://clawhub.ai`）。
+ * `find_skills` 在腾讯 **零命中** 或 **请求失败** 时兜底查询；可用 `CLAWHUB_OFFICIAL_FALLBACK_BASE` 覆盖（需完整 https 基址，无尾斜杠）。
+ */
+export function getOfficialClawhubFallbackBase(): string {
+  const raw = String(process.env.CLAWHUB_OFFICIAL_FALLBACK_BASE ?? 'https://clawhub.ai')
+    .trim()
+    .replace(/\/$/, '');
+  return raw || 'https://clawhub.ai';
+}
+
 /** 部分 CDN 对无 UA 请求更严格限流 */
 const CLAWHUB_HEADERS = {
   Accept: 'application/json',
@@ -164,11 +181,19 @@ export type ClawhubSearchHit = {
   updatedAt?: number;
 };
 
-export async function clawhubSearch(query: string, limit = 20): Promise<{ results: ClawhubSearchHit[] }> {
+/**
+ * 在指定注册表基址上搜索（用于强制走腾讯 SkillHub 等，而不受 `CLAWHUB_REGISTRY` 影响）。
+ */
+export async function clawhubSearchAt(
+  registryBase: string,
+  query: string,
+  limit = 20,
+): Promise<{ results: ClawhubSearchHit[] }> {
+  const base = String(registryBase || '').replace(/\/$/, '') || DEFAULT_REGISTRY;
   const q = query.trim();
   if (!q) return { results: [] };
   const lim = Math.min(50, Math.max(1, limit));
-  const cacheKey = `search:${q.toLowerCase()}\0${lim}`;
+  const cacheKey = `searchAt:${base}\0${q.toLowerCase()}\0${lim}`;
   const now = Date.now();
   const hit = searchCache.get(cacheKey);
   if (hit && now - hit.at < SEARCH_CACHE_TTL_MS) {
@@ -179,7 +204,6 @@ export async function clawhubSearch(query: string, limit = 20): Promise<{ result
   if (pending) return pending;
 
   const p = (async () => {
-    const base = getClawhubRegistryBase();
     const url = new URL('/api/v1/search', `${base}/`);
     url.searchParams.set('q', q);
     url.searchParams.set('limit', String(lim));
@@ -193,6 +217,11 @@ export async function clawhubSearch(query: string, limit = 20): Promise<{ result
   inflightSearch.set(cacheKey, p);
   p.finally(() => inflightSearch.delete(cacheKey));
   return p;
+}
+
+/** 使用环境变量 `CLAWHUB_REGISTRY` 或默认基址搜索（与 CLI/其它调用一致）。 */
+export async function clawhubSearch(query: string, limit = 20): Promise<{ results: ClawhubSearchHit[] }> {
+  return clawhubSearchAt(getClawhubRegistryBase(), query, limit);
 }
 
 /**

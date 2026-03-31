@@ -60,6 +60,10 @@ interface ConfigData {
   }>;
   pluginsAllow?: string[];
   allProviders?: Record<string, any>;
+  agentDefaults?: {
+    thinkingDefault?: string;
+    reasoning?: string;
+  };
 }
 
 interface ChatMessage {
@@ -208,8 +212,14 @@ export default function OpenClaw() {
     modelId: '',
     modelName: '',
   });
+  /** 写入板端 `agents.defaults`（OpenClaw）；空字符串表示不覆盖该项 */
+  const [agentDefaults, setAgentDefaults] = useState({
+    thinkingDefault: '',
+    reasoning: '',
+  });
   const [selectedPreset, setSelectedPreset] = useState('');
-  const [testResult, setTestResult] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [vendorApiTest, setVendorApiTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [gatewayTest, setGatewayTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
 
   // ─── Feishu Config State ───
   const [feishuConfig, setFeishuConfig] = useState({
@@ -255,6 +265,7 @@ export default function OpenClaw() {
   /** 安装阶段长时间无新日志时提示（非错误） */
   const [deployInstallStallHint, setDeployInstallStallHint] = useState(false);
   const deployInstallStallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [deployCancelLoading, setDeployCancelLoading] = useState(false);
 
   // ─── Post-install Guide State ───
   const [showSetupGuide, setShowSetupGuide] = useState(false);
@@ -266,6 +277,8 @@ export default function OpenClaw() {
   const [mobilePanel, setMobilePanel] = useState(false);
   const [accordion, setAccordion] = useState<ConfigTab | 'deploy' | 'ops' | 'pairing' | null>(null);
   const [configTab, setConfigTab] = useState<ConfigTab>('model');
+  const [deployApiKeyVisible, setDeployApiKeyVisible] = useState(false);
+  const [modelGatewayApiKeyVisible, setModelGatewayApiKeyVisible] = useState(false);
 
   // ─── Refs ───
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
@@ -332,7 +345,13 @@ export default function OpenClaw() {
       }, 1200);
       return;
     }
-    const err = job.error || tRef.current('oc.deploy.fail', '部署失败，请查看日志输出');
+    const err =
+      job.error === 'oc.deployPoll.interrupted'
+        ? tRef.current(
+            'oc.deployPoll.interrupted',
+            '多次无法获取部署进度（网络或服务端可能异常）。请查看下方日志并检查网络后重试。',
+          )
+        : job.error || tRef.current('oc.deploy.fail', '部署失败，请查看日志输出');
     appendSystemMessage(fillTemplate(tRef.current('oc.deploy.failMsg', '**部署失败：** {{detail}}'), { detail: err }));
     if (job.output?.trim()) {
       appendSystemMessage(`\`>>> deploy\`\n\n\`\`\`\n${job.output.slice(-4000)}\n\`\`\``);
@@ -564,6 +583,14 @@ export default function OpenClaw() {
       const data = await res.json();
       setConfig(data);
       if (data.modelGateway) setModelConfig(data.modelGateway);
+      if (data.agentDefaults) {
+        setAgentDefaults({
+          thinkingDefault: (data.agentDefaults.thinkingDefault || '').trim(),
+          reasoning: (data.agentDefaults.reasoning || '').trim(),
+        });
+      } else {
+        setAgentDefaults({ thinkingDefault: '', reasoning: '' });
+      }
       if (data.feishu) {
         setFeishuConfig((prev) => ({
           ...prev,
@@ -612,7 +639,7 @@ export default function OpenClaw() {
     if (isSlow) {
       progressTimer = setInterval(() => {
         const elapsed = Math.round((Date.now() - startTime) / 1000);
-        updateLastAssistant(`\`>>> ${action}\`\n\n${t('oc.run.running', '执行中...')} (${elapsed}s)\n\n_${action === 'install' || action === 'upgrade' ? t('oc.run.progressSlow', '安装/升级可能需要几分钟，请耐心等待') : t('oc.run.progressSsh', '正在通过 SSH 执行命令')}_`);
+        updateLastAssistant(`\`>>> ${action}\`\n\n${t('oc.run.running', '执行中...')} (${elapsed}s)\n\n_${action === 'install' || action === 'upgrade' ? t('oc.run.progressSlow', '安装/升级可能需要几分钟；若日志长时间无新行，请展开下方日志是否已出现 apt/dpkg 报错（例如 libnode-dev 与 NodeSource 文件冲突），勿仅凭此提示推断仍在下载。') : t('oc.run.progressSsh', '正在通过 SSH 执行命令')}_`);
       }, 5000);
     }
 
@@ -720,8 +747,16 @@ export default function OpenClaw() {
       .filter(Boolean);
 
     if (activeTab === 'model') {
-      if (!modelConfig.baseUrl.trim() || !modelConfig.apiKey.trim()) {
-        addToast?.(t('oc.save.needUrlKey', '需要填写 Base URL 和 API Key'), 'warning');
+      const adPartial: Record<string, string> = {};
+      if (agentDefaults.thinkingDefault.trim()) adPartial.thinkingDefault = agentDefaults.thinkingDefault.trim();
+      if (agentDefaults.reasoning.trim()) adPartial.reasoning = agentDefaults.reasoning.trim();
+      const hasAgentPatch = Object.keys(adPartial).length > 0;
+      const hasModelGateway = !!(modelConfig.baseUrl.trim() && modelConfig.apiKey.trim());
+      if (!hasModelGateway && !hasAgentPatch) {
+        addToast?.(
+          t('oc.save.needUrlKeyOrAgent', '请填写 Base URL 与 API Key，或至少选择一项思考档位 / 推理可见性'),
+          'warning',
+        );
         return;
       }
     }
@@ -752,8 +787,15 @@ export default function OpenClaw() {
     }
 
     const payload: any = {};
-    if (activeTab === 'model') payload.modelGateway = modelConfig;
-    else if (activeTab === 'feishu') payload.feishu = feishuConfig;
+    if (activeTab === 'model') {
+      if (modelConfig.baseUrl.trim() && modelConfig.apiKey.trim()) {
+        payload.modelGateway = modelConfig;
+      }
+      const ad: Record<string, string> = {};
+      if (agentDefaults.thinkingDefault.trim()) ad.thinkingDefault = agentDefaults.thinkingDefault.trim();
+      if (agentDefaults.reasoning.trim()) ad.reasoning = agentDefaults.reasoning.trim();
+      if (Object.keys(ad).length > 0) payload.agentDefaults = ad;
+    } else if (activeTab === 'feishu') payload.feishu = feishuConfig;
     else if (activeTab === 'skills') payload.pluginsAllow = pluginAllowList;
 
     setLoading(true);
@@ -791,9 +833,50 @@ export default function OpenClaw() {
     }
   };
 
-  const testConnection = async () => {
+  /** 本机直连厂商 HTTP（与板端 Gateway 无关），使用当前表单中的 Base URL / Key / 模型 / 协议 */
+  const testVendorApiConnection = async () => {
+    if (!modelConfig.baseUrl.trim() || !modelConfig.apiKey.trim() || !modelConfig.modelId.trim()) {
+      addToast?.(t('oc.test.vendorMissing', '请填写 Base URL、模型 ID 与 API Key'), 'warning');
+      return;
+    }
+    setVendorApiTest('testing');
+    try {
+      const res = await fetchApi('/api/openclaw/vendor-model-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseUrl: modelConfig.baseUrl.trim(),
+          apiKey: modelConfig.apiKey.trim(),
+          modelId: modelConfig.modelId.trim(),
+          api: modelConfig.api,
+        }),
+      });
+      const data = await res.json();
+      const passed = !!data?.ok;
+      setVendorApiTest(passed ? 'ok' : 'fail');
+      if (passed) {
+        const ms = typeof data?.latencyMs === 'number' ? data.latencyMs : null;
+        addToast?.(
+          ms != null
+            ? tf('oc.test.vendorOkMs', '厂商 API 可用（{{ms}} ms）', { ms: String(ms) })
+            : t('oc.test.vendorOk', '厂商 API 可用'),
+          'success',
+        );
+      } else {
+        const detail = [data?.detail, data?.status ? `HTTP ${data.status}` : '', data?.error].filter(Boolean).join(' · ');
+        addToast?.(detail || t('oc.test.vendorFail', '厂商 API 测试失败'), 'warning');
+      }
+    } catch {
+      setVendorApiTest('fail');
+      addToast?.(t('oc.test.vendorFailNet', '厂商 API 测试失败（网络或服务异常）'), 'error');
+    }
+    setTimeout(() => setVendorApiTest('idle'), 5000);
+  };
+
+  /** 经板端 WebSocket Gateway 的 chat.send 端到端测试 */
+  const testGatewayModelConnection = async () => {
     if (!currentDevice) return;
-    setTestResult('testing');
+    setGatewayTest('testing');
     try {
       const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/model-test`, {
         method: 'POST',
@@ -801,7 +884,7 @@ export default function OpenClaw() {
       });
       const data = await res.json();
       const passed = !!data?.ok;
-      setTestResult(passed ? 'ok' : 'fail');
+      setGatewayTest(passed ? 'ok' : 'fail');
       if (passed) {
         addToast?.(t('oc.test.ok', '模型调用测试通过'), 'success');
       } else {
@@ -814,10 +897,10 @@ export default function OpenClaw() {
         }
       }
     } catch {
-      setTestResult('fail');
+      setGatewayTest('fail');
       addToast?.(t('oc.test.failNet', '模型调用测试失败'), 'error');
     }
-    setTimeout(() => setTestResult('idle'), 5000);
+    setTimeout(() => setGatewayTest('idle'), 5000);
   };
 
   const switchModel = async (provider: string, modelId: string) => {
@@ -883,6 +966,38 @@ export default function OpenClaw() {
       setDeployRunning(false);
       setDeployBannerDismissed(false);
       stopDeployPolling();
+    }
+  };
+
+  const handleCancelDeploy = async () => {
+    if (!currentDevice || !deployJobId.trim() || deployCancelLoading) return;
+    setDeployCancelLoading(true);
+    try {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/deploy/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: deployJobId.trim() }),
+      });
+      const data = await res.json().catch(() => ({} as { message?: string; error?: string }));
+      if (!res.ok) {
+        addToast?.(
+          tf('oc.deploy.cancelFail', '取消失败：{{msg}}', {
+            msg: String(data?.message || data?.error || `HTTP ${res.status}`),
+          }),
+          'warning',
+        );
+        return;
+      }
+      addToast?.(t('oc.deploy.cancelSent', '已请求中断部署，状态稍后会更新'), 'info');
+    } catch (err: unknown) {
+      addToast?.(
+        tf('oc.deploy.cancelFail', '取消失败：{{msg}}', {
+          msg: err instanceof Error ? err.message : String(err),
+        }),
+        'error',
+      );
+    } finally {
+      setDeployCancelLoading(false);
     }
   };
 
@@ -1037,6 +1152,46 @@ export default function OpenClaw() {
     <span className={`material-symbols-outlined ${cls || ''}`}>{name}</span>
   );
 
+  const OcApiKeyRow = ({
+    value,
+    onChange,
+    placeholder,
+    visible,
+    onToggleVisible,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    placeholder: string;
+    visible: boolean;
+    onToggleVisible: () => void;
+  }) => (
+    <div className="oc-form-row">
+      <span className="oc-form-label">{t('oc.form.apiKey', 'API Key')}</span>
+      <div className="oc-input-with-toggle">
+        <input
+          className="input"
+          type={visible ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={t('oc.form.apiKey', 'API Key')}
+        />
+        <button
+          type="button"
+          className="oc-secret-toggle"
+          onClick={onToggleVisible}
+          aria-label={visible ? t('oc.aria.hideApiKey', '隐藏 API Key') : t('oc.aria.showApiKey', '显示 API Key')}
+          aria-pressed={visible}
+          title={visible ? t('oc.aria.hideApiKey', '隐藏 API Key') : t('oc.aria.showApiKey', '显示 API Key')}
+        >
+          {MI(visible ? 'visibility_off' : 'visibility', 'oc-secret-toggle-icon')}
+        </button>
+      </div>
+    </div>
+  );
+
   /** 一键部署前：板端需能访问外网；与新手引导「先联网」一致 */
   const deployWifiPrereqNotice = (
     <div
@@ -1129,7 +1284,7 @@ export default function OpenClaw() {
         actionLabel:
           setupStatus.gateway === 'ok'
             ? t('oc.action.view', '查看')
-            : t('oc.action.deploy', '一键部署'),
+            : t('oc.action.deploy', '一键部署 OpenClaw'),
       },
       {
         key: 'model',
@@ -1225,7 +1380,7 @@ export default function OpenClaw() {
 
           {/* ── Deploy ── */}
           <div className="oc-accordion-item">
-            <AccTrigger id="deploy" icon="rocket_launch" label={t('oc.deploy.title', '一键部署')} hint={deployRunning ? (deployJobId ? tf('oc.deploy.runningId', '部署中 #{{id}}', { id: deployJobId.slice(0, 8) }) : t('oc.deploy.runningShort', '部署中...')) : undefined} />
+            <AccTrigger id="deploy" icon="rocket_launch" label={t('oc.deploy.title', '一键部署 OpenClaw')} hint={deployRunning ? (deployJobId ? tf('oc.deploy.runningId', '部署中 #{{id}}', { id: deployJobId.slice(0, 8) }) : t('oc.deploy.runningShort', '部署中...')) : undefined} />
             {accordion === 'deploy' && (
               <div className="oc-accordion-content">
                 {deployWifiPrereqNotice}
@@ -1246,10 +1401,13 @@ export default function OpenClaw() {
                   <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
                   <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
                 </div>
-                <div className="oc-form-row">
-                  <span className="oc-form-label">{t('oc.form.apiKey', 'API Key')}</span>
-                  <input className="input" type="password" value={deployApiKey} onChange={(e) => setDeployApiKey(e.target.value)} placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'} />
-                </div>
+                <OcApiKeyRow
+                  value={deployApiKey}
+                  onChange={setDeployApiKey}
+                  placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'}
+                  visible={deployApiKeyVisible}
+                  onToggleVisible={() => setDeployApiKeyVisible((v) => !v)}
+                />
                 <div className="oc-form-row">
                   <span className="oc-form-label">{t('oc.form.protocol', '协议')}</span>
                   <select className="select" value={deployApi} onChange={(e) => setDeployApi(e.target.value)} aria-label={t('oc.aria.apiProtocol', 'API 协议')}>
@@ -1266,9 +1424,21 @@ export default function OpenClaw() {
                   <span className="oc-form-label">{t('oc.form.secret', 'Secret')}</span>
                   <input className="input" type="password" value={deployFeishuAppSecret} onChange={(e) => setDeployFeishuAppSecret(e.target.value)} placeholder={t('oc.ph.feishuSecret', '飞书 App Secret (可跳过)')} />
                 </div>
-                <button type="button" className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ width: '100%', marginTop: 8 }}>
-                  {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
-                </button>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'stretch' }}>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ flex: 1 }}>
+                    {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
+                  </button>
+                  {deployRunning && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleCancelDeploy}
+                      disabled={!deployJobId.trim() || deployCancelLoading}
+                    >
+                      {deployCancelLoading ? t('oc.test.testing', '...') : t('oc.deploy.cancelBtn', '取消部署')}
+                    </button>
+                  )}
+                </div>
                 {deploySteps.length > 0 && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: '0.625rem' }}>
                     {deployStepLabels.map((label, idx) => (
@@ -1294,7 +1464,7 @@ export default function OpenClaw() {
                   >
                     {t(
                       'oc.deploy.installPhaseHint',
-                      '当前为「安装」步骤：以 npm 全局安装 openclaw 为主（若板端已有 Node 则跳过官方 install.sh）；拉包或编译时可能数分钟无新日志，属正常现象。',
+                      '当前为「安装」步骤：以 npm 全局安装 openclaw 为主；若 Node 低于 24 LTS 会自动走 NodeSource 升级（会先尝试移除 libnode-dev / 发行版 nodejs，避免 common.gypi 等 dpkg 覆盖冲突）。拉包或编译时可能数分钟无新日志；若日志已出现 dpkg error 而非单纯等待下载，请根据报错处理或取消后重试。apt/dpkg 锁占用时请等待其它 apt 结束后再试。',
                     )}
                   </div>
                 )}
@@ -1354,21 +1524,79 @@ export default function OpenClaw() {
                   <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
                   <input className="input" type="text" value={modelConfig.modelId} onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
                 </div>
-                <div className="oc-form-row">
-                  <span className="oc-form-label">{t('oc.form.apiKey', 'API Key')}</span>
-                  <input className="input" type="password" value={modelConfig.apiKey} onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })} placeholder={selectedPreset && PROVIDER_PRESETS[selectedPreset]?.keyHint || 'sk-...'} />
-                </div>
+                <OcApiKeyRow
+                  value={modelConfig.apiKey}
+                  onChange={(apiKey) => setModelConfig({ ...modelConfig, apiKey })}
+                  placeholder={selectedPreset && PROVIDER_PRESETS[selectedPreset]?.keyHint || 'sk-...'}
+                  visible={modelGatewayApiKeyVisible}
+                  onToggleVisible={() => setModelGatewayApiKeyVisible((v) => !v)}
+                />
                 <div className="oc-form-row">
                   <span className="oc-form-label">{t('oc.form.protocol', '协议')}</span>
                   <select className="select" value={modelConfig.api} onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })} aria-label={t('oc.aria.apiProtocol', 'API 协议')}>
                     {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
-                <div className="oc-form-actions">
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: '8px 0 4px' }}>
+                  {t(
+                    'oc.model.agentDefaultsHint',
+                    '板端对应 openclaw.json 的 agents.defaults：思考档位为 thinkingDefault，推理可见性为 reasoningDefault（勿使用已废弃的 reasoning 键）。留空表示本次保存不修改该项。',
+                  )}
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">{t('oc.form.thinkingDefault', '思考档位')}</span>
+                  <select
+                    className="select"
+                    value={agentDefaults.thinkingDefault}
+                    onChange={(e) => setAgentDefaults({ ...agentDefaults, thinkingDefault: e.target.value })}
+                    aria-label={t('oc.aria.thinkingDefault', '思考档位 thinkingDefault')}
+                  >
+                    <option value="">{t('oc.form.agentDefaultInherit', '不修改')}</option>
+                    <option value="off">off</option>
+                    <option value="minimal">minimal</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                    <option value="xhigh">xhigh</option>
+                    <option value="adaptive">adaptive</option>
+                  </select>
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">{t('oc.form.reasoningVisibility', '推理可见性')}</span>
+                  <select
+                    className="select"
+                    value={agentDefaults.reasoning}
+                    onChange={(e) => setAgentDefaults({ ...agentDefaults, reasoning: e.target.value })}
+                    aria-label={t('oc.aria.reasoningVisibility', '推理可见性 reasoning')}
+                  >
+                    <option value="">{t('oc.form.agentDefaultInherit', '不修改')}</option>
+                    <option value="off">off</option>
+                    <option value="on">on</option>
+                    <option value="stream">stream</option>
+                  </select>
+                </div>
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+                  {t(
+                    'oc.test.vendorVsGatewayHint',
+                    '「测试 API」从本机直连厂商接口（不经板端 Gateway）；「测试网关」经 WebSocket 走板端完整链路（依赖网关与配对等）。',
+                  )}
+                </div>
+                <div className="oc-form-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => saveConfig('model')} disabled={loading}>{loading ? t('oc.test.testing', '...') : t('oc.save', '保存')}</button>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => { loadConfig(); addToast?.(t('oc.toast.reloaded', '已加载'), 'info'); }}>{t('oc.reload', '重载')}</button>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={testConnection} disabled={testResult === 'testing'}>
-                    {testResult === 'testing' ? t('oc.test.testing', '...') : testResult === 'ok' ? t('oc.test.okLabel', '正常') : t('oc.test.run', '测试')}
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={testVendorApiConnection} disabled={vendorApiTest === 'testing'}>
+                    {vendorApiTest === 'testing'
+                      ? t('oc.test.testing', '...')
+                      : vendorApiTest === 'ok'
+                        ? t('oc.test.vendorOkLabel', 'API 正常')
+                        : t('oc.test.vendorRun', '测试 API')}
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={testGatewayModelConnection} disabled={!currentDevice || gatewayTest === 'testing'} title={!currentDevice ? t('oc.test.gatewayNeedDevice', '需先选择设备') : undefined}>
+                    {gatewayTest === 'testing'
+                      ? t('oc.test.testing', '...')
+                      : gatewayTest === 'ok'
+                        ? t('oc.test.gatewayOkLabel', '网关正常')
+                        : t('oc.test.gatewayRun', '测试网关')}
                   </button>
                 </div>
               </div>
@@ -1545,9 +1773,21 @@ export default function OpenClaw() {
               ? tf('oc.deploy.bannerWithId', 'OpenClaw 部署进行中（#{{id}}）…', { id: deployJobId.slice(0, 8) })
               : t('oc.deploy.bannerHint', 'OpenClaw 部署进行中…')}
           </span>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowDeployGuideModal(true)}>
-            {t('oc.deploy.bannerOpenLog', '查看日志')}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {deployJobId.trim() && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleCancelDeploy}
+                disabled={deployCancelLoading}
+              >
+                {deployCancelLoading ? t('oc.test.testing', '...') : t('oc.deploy.cancelBtn', '取消部署')}
+              </button>
+            )}
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowDeployGuideModal(true)}>
+              {t('oc.deploy.bannerOpenLog', '查看日志')}
+            </button>
+          </div>
         </div>
       )}
       {deployRunning && deployBannerDismissed && !showDeployGuideModal && (
@@ -1620,19 +1860,34 @@ export default function OpenClaw() {
               <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
               <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
             </div>
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.apiKey', 'API Key')}</span>
-              <input className="input" type="password" value={deployApiKey} onChange={(e) => setDeployApiKey(e.target.value)} placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'} />
-            </div>
+            <OcApiKeyRow
+              value={deployApiKey}
+              onChange={setDeployApiKey}
+              placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'}
+              visible={deployApiKeyVisible}
+              onToggleVisible={() => setDeployApiKeyVisible((v) => !v)}
+            />
             <div className="oc-form-row">
               <span className="oc-form-label">{t('oc.form.protocol', '协议')}</span>
               <select className="select" value={deployApi} onChange={(e) => setDeployApi(e.target.value)} aria-label={t('oc.aria.apiProtocol', 'API 协议')}>
                 {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-            <button type="button" className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ width: '100%', marginTop: 8 }}>
-              {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
-            </button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'stretch' }}>
+              <button type="button" className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ flex: 1 }}>
+                {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
+              </button>
+              {deployRunning && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={handleCancelDeploy}
+                  disabled={!deployJobId.trim() || deployCancelLoading}
+                >
+                  {deployCancelLoading ? t('oc.test.testing', '...') : t('oc.deploy.cancelBtn', '取消部署')}
+                </button>
+              )}
+            </div>
             {deploySteps.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: '0.625rem' }}>
                 {deployStepLabels.map((label, idx) => (
@@ -1658,7 +1913,7 @@ export default function OpenClaw() {
               >
                 {t(
                   'oc.deploy.installPhaseHint',
-                  '当前为「安装」步骤：以 npm 全局安装 openclaw 为主（若板端已有 Node 则跳过官方 install.sh）；拉包或编译时可能数分钟无新日志，属正常现象。',
+                  '当前为「安装」步骤：以 npm 全局安装 openclaw 为主；若 Node 低于 24 LTS 会自动走 NodeSource 升级（会先尝试移除 libnode-dev / 发行版 nodejs，避免 common.gypi 等 dpkg 覆盖冲突）。拉包或编译时可能数分钟无新日志；若日志已出现 dpkg error 而非单纯等待下载，请根据报错处理或取消后重试。apt/dpkg 锁占用时请等待其它 apt 结束后再试。',
                 )}
               </div>
             )}
@@ -1792,7 +2047,7 @@ export default function OpenClaw() {
                           setPanelOpen(true);
                         }}
                       >
-                        {t('oc.deploy.title', '一键部署')}
+                        {t('oc.deploy.title', '一键部署 OpenClaw')}
                       </button>
                     )}
                     {ocInstalled && (
@@ -1897,7 +2152,18 @@ export default function OpenClaw() {
             <div className="modal-body">{t('oc.confirm.body', '此操作不可撤销。确定继续？')}</div>
             <div className="modal-footer">
               <button type="button" className="btn btn-ghost" onClick={() => setConfirmAction(null)}>{t('oc.confirm.cancel', '取消')}</button>
-              <button type="button" className="btn btn-danger" onClick={() => runAction(confirmAction.action)} disabled={loading}>{loading ? t('oc.confirm.running', '执行中...') : t('oc.confirm.run', '确认')}</button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  const a = confirmAction.action;
+                  setConfirmAction(null);
+                  void runAction(a);
+                }}
+                disabled={loading}
+              >
+                {t('oc.confirm.run', '确认')}
+              </button>
             </div>
           </div>
         </div>

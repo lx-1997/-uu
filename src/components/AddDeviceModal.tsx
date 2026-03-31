@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../hooks/useAppState';
-import { verifyDeviceConnection } from '../api';
+import { verifyDeviceConnection, fetchTypecInterfaces, configureTypecInterface, type NetworkInterface } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { isDesktopMac } from '../utils/env';
@@ -11,8 +11,13 @@ import {
   RDK_OPEN_USB_SERIAL_EVENT,
 } from '../utils/web-serial';
 
-type ConnMethod = 'manual' | 'usb';
+type ConnMethod = 'manual' | 'usb' | 'typec';
 type Step = 'method' | 'configure' | 'verify';
+
+/** TypeC 闪连固定 IP 方案 */
+const TYPEC_DEVICE_IP = '192.168.128.10';
+const TYPEC_PC_IP = '192.168.128.100';
+const TYPEC_NETMASK = '255.255.255.0';
 
 export default function AddDeviceModal() {
   const {
@@ -31,11 +36,19 @@ export default function AddDeviceModal() {
   const [sshPort, setSshPort] = useState('22');
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPass, setWifiPass] = useState('');
-  const [showWifiConfig, setShowWifiConfig] = useState(false);
+  const [showWifiConfig, setShowWifiConfig] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [verifyOk, setVerifyOk] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const prevShowAddDeviceRef = useRef(false);
+
+  // ── TypeC 闪连状态 ──
+  const [typecInterfaces, setTypecInterfaces] = useState<NetworkInterface[]>([]);
+  const [selectedInterface, setSelectedInterface] = useState('');
+  const [typecConfiguring, setTypecConfiguring] = useState(false);
+  const [typecConfigured, setTypecConfigured] = useState(false);
+  const [typecStep, setTypecStep] = useState<'select-nic' | 'configuring' | 'connecting'>('select-nic');
+  const [loadingInterfaces, setLoadingInterfaces] = useState(false);
 
   useEffect(() => {
     const justOpened = showAddDevice && !prevShowAddDeviceRef.current;
@@ -51,6 +64,9 @@ export default function AddDeviceModal() {
     if (addDeviceInitialMethod) {
       setMethod(addDeviceInitialMethod);
       setStep('configure');
+      if (addDeviceInitialMethod === 'typec') {
+        loadTypecInterfaces();
+      }
       setAddDeviceInitialMethod(null);
     } else {
       setStep('method');
@@ -71,10 +87,96 @@ export default function AddDeviceModal() {
     setSshPort('22');
     setWifiSsid('');
     setWifiPass('');
-    setShowWifiConfig(false);
+    setShowWifiConfig(true);
+    // 重置闪连状态
+    setTypecInterfaces([]);
+    setSelectedInterface('');
+    setTypecConfiguring(false);
+    setTypecConfigured(false);
+    setTypecStep('select-nic');
+    setLoadingInterfaces(false);
   };
 
-  const goToConfigure = (m: ConnMethod) => { setMethod(m); setStep('configure'); };
+  const goToConfigure = (m: ConnMethod) => {
+    setMethod(m);
+    setStep('configure');
+    if (m === 'typec') {
+      loadTypecInterfaces();
+    }
+  };
+
+  /** 加载网卡列表 */
+  const loadTypecInterfaces = () => {
+    setLoadingInterfaces(true);
+    fetchTypecInterfaces()
+      .then((res) => {
+        setTypecInterfaces(res.interfaces);
+        setLoadingInterfaces(false);
+      })
+      .catch(() => {
+        addToast(t('addDevice.typec.loadFail', '获取网卡列表失败'), 'error');
+        setLoadingInterfaces(false);
+      });
+  };
+
+  /** 配置 TypeC 网卡 IP 并自动连接 */
+  const configureAndConnectTypec = () => {
+    if (!selectedInterface) {
+      addToast(t('addDevice.typec.selectNic', '请选择 TypeC 虚拟网卡'), 'warning');
+      return;
+    }
+    setTypecStep('configuring');
+    setTypecConfiguring(true);
+
+    configureTypecInterface(selectedInterface, TYPEC_PC_IP, TYPEC_NETMASK)
+      .then((res) => {
+        if (!res.verified) {
+          addToast(t('addDevice.typec.ipNotVerified', 'IP 配置未生效，请检查网卡选择是否正确'), 'warning');
+          setTypecConfiguring(false);
+          setTypecStep('select-nic');
+          return;
+        }
+        setTypecConfigured(true);
+        setTypecConfiguring(false);
+        // 自动填充闪连 IP 并进入验证
+        setNewDeviceIp(TYPEC_DEVICE_IP);
+        setSshUser('root');
+        setSshPass('root');
+        setSshPort('22');
+        setTypecStep('connecting');
+        // 自动开始 SSH 验证
+        setStep('verify');
+        setVerifying(true);
+        setVerifyOk(false);
+        verifyDeviceConnection({ host: TYPEC_DEVICE_IP, port: 22, username: 'root', password: 'root' })
+          .then(() => { setVerifying(false); setVerifyOk(true); })
+          .catch((error) => {
+            setVerifying(false);
+            setVerifyOk(false);
+            const raw = error instanceof Error ? error.message : t('addDevice.err.verify', '连接验证失败');
+            if (raw.includes('[SSH_CONNECT_TIMEOUT]')) {
+              addToast(t('addDevice.typec.timeout', '闪连超时：请确认 TypeC 线缆已连接到 RDK X5'), 'warning');
+            } else if (raw.includes('[SSH_AUTH_FAILED]')) {
+              addToast(t('addDevice.toast.authFail', '认证失败：请检查用户名和密码'), 'error');
+            } else {
+              addToast(t('addDevice.typec.connectFail', '闪连失败，请检查 TypeC 线缆连接'), 'error');
+            }
+          });
+      })
+      .catch((error) => {
+        setTypecConfiguring(false);
+        setTypecStep('select-nic');
+        const msg = error instanceof Error ? error.message : '网卡配置失败';
+        addToast(msg, 'error');
+      });
+  };
+
+  /** 闪连确认添加设备 */
+  const confirmAddTypec = () => {
+    const alias = newDeviceName.trim() || 'RDK X5 (闪连)';
+    addNewDevice({ host: TYPEC_DEVICE_IP, port: 22, username: sshUser.trim() || 'root', password: sshPass.trim() || 'root', name: alias });
+    close();
+  };
 
   /** USB 串口仅为本机调试（Web Serial），不经过服务器 SSH，也不「添加设备」 */
   const openUsbSerialDebug = () => {
@@ -90,6 +192,10 @@ export default function AddDeviceModal() {
   };
 
   const goToVerify = () => {
+    if (method === 'typec') {
+      configureAndConnectTypec();
+      return;
+    }
     if (method !== 'manual') return;
     setStep('verify');
     setVerifying(true);
@@ -136,7 +242,7 @@ export default function AddDeviceModal() {
             <div className="modal-title">{t('addDevice.title', '添加设备')}</div>
             <div className="modal-subtitle">
               {step === 'method' && t('addDevice.sub.method', '选择连接方式')}
-              {step === 'configure' && (method === 'manual' ? t('addDevice.sub.configureSsh', '配置 SSH 连接') : t('addDevice.sub.usbSerial', 'USB 串口调试'))}
+              {step === 'configure' && (method === 'manual' ? t('addDevice.sub.configureSsh', '配置 SSH 连接') : method === 'typec' ? t('addDevice.sub.typec', 'TypeC 闪连配置') : t('addDevice.sub.usbSerial', 'USB 串口调试'))}
               {step === 'verify' && t('addDevice.sub.verify', '验证连接')}
             </div>
           </div>
@@ -147,7 +253,7 @@ export default function AddDeviceModal() {
           </button>
         </div>
 
-        {/* Step indicator（USB 串口仅一页说明，不展示 SSH 的三步） */}
+        {/* Step indicator（USB 串口仅一页说明，不展示三步） */}
         {!(method === 'usb' && step === 'configure') && (
           <div className="add-device-steps">
             {[t('addDevice.step.method', '连接方式'), t('addDevice.step.configure', '配置'), t('addDevice.step.verify', '验证')].map((label, i) => (
@@ -179,6 +285,23 @@ export default function AddDeviceModal() {
                 </div>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
               </button>
+
+              {/* TypeC 闪连 */}
+              <button type="button" className="add-device-method-card" onClick={() => goToConfigure('typec')}>
+                <div className="add-device-method-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2v6"/><path d="M9 8h6"/><rect x="7" y="8" width="10" height="4" rx="2"/>
+                    <path d="M12 12v2"/><path d="M8 14h8v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4z"/>
+                    <circle cx="10" cy="17" r="0.5" fill="var(--accent)"/><circle cx="14" cy="17" r="0.5" fill="var(--accent)"/>
+                  </svg>
+                </div>
+                <div className="add-device-method-body">
+                  <strong>{t('addDevice.method.typec.title', 'TypeC 闪连')}</strong>
+                  <span>{t('addDevice.method.typec.desc', '通过 USB Type-C 线缆直连 RDK X5，无需网络')}</span>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+
               <button
                 type="button"
                 className={`add-device-method-card${isDesktopMac() ? ' add-device-method-card--disabled' : ''}`}
@@ -275,6 +398,78 @@ export default function AddDeviceModal() {
                   </div>
                 )}
               </div>
+            ) : method === 'typec' ? (
+              /* ── TypeC 闪连配置 ── */
+              <div className="add-device-form add-device-typec-form">
+                <p className="add-device-typec-lead">
+                  {t('addDevice.typec.lead', '通过 USB Type-C 线缆在 PC 和 RDK X5 之间建立虚拟以太网链路，自动配置 IP 并通过 SSH 连接设备。')}
+                </p>
+                <div className="add-device-typec-steps">
+                  <div className="add-device-usb-step"><span className="add-device-usb-num">1</span>{t('addDevice.typec.step1', '用 Type-C 线连接 PC 与 RDK X5 的 Type-C 口')}</div>
+                  <div className="add-device-usb-step"><span className="add-device-usb-num">2</span>{t('addDevice.typec.step2', '选择 TypeC 虚拟网卡，点击「开始闪连」')}</div>
+                </div>
+
+                <div className="add-device-field" style={{ marginTop: 12 }}>
+                  <label>{t('addDevice.typec.selectLabel', '选择 TypeC 虚拟网卡')}</label>
+                  {loadingInterfaces ? (
+                    <div className="add-device-typec-loading">
+                      <div className="spinner spinner-sm" />
+                      <span>{t('addDevice.typec.loading', '正在获取网卡列表...')}</span>
+                    </div>
+                  ) : (
+                    <div className="add-device-typec-nic-list">
+                      {typecInterfaces.length === 0 ? (
+                        <div className="add-device-typec-empty">
+                          {t('addDevice.typec.noNic', '未检测到网络接口，请确认 Type-C 线缆已连接')}
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={loadTypecInterfaces} style={{ marginTop: 8 }}>
+                            {t('addDevice.typec.refresh', '刷新')}
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          {typecInterfaces.map((iface) => (
+                            <button
+                              key={iface.name}
+                              type="button"
+                              className={`add-device-typec-nic-item${selectedInterface === iface.name ? ' selected' : ''}`}
+                              onClick={() => setSelectedInterface(iface.name)}
+                            >
+                              <div className="add-device-typec-nic-name">
+                                {iface.name}
+                                {iface.portType && <span className="add-device-typec-nic-port-type">{iface.portType}</span>}
+                              </div>
+                              <div className="add-device-typec-nic-detail">
+                                {iface.addresses.length > 0 ? iface.addresses.join(', ') : t('addDevice.typec.noIp', '未分配 IP')}
+                                {iface.mac ? ` · ${iface.mac}` : ''}
+                              </div>
+                            </button>
+                          ))}
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={loadTypecInterfaces} style={{ marginTop: 4 }}>
+                            {t('addDevice.typec.refresh', '刷新')}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="add-device-typec-ip-info">
+                  <span className="add-device-typec-ip-label">{t('addDevice.typec.ipScheme', 'IP 方案：')}</span>
+                  <span>PC {TYPEC_PC_IP} ↔ RDK {TYPEC_DEVICE_IP}</span>
+                </div>
+
+                {typecConfiguring && (
+                  <div className="add-device-typec-progress">
+                    <div className="spinner spinner-sm" />
+                    <span>{t('addDevice.typec.configuring', '正在配置网卡 IP...')}</span>
+                  </div>
+                )}
+
+                <div className="add-device-field">
+                  <label>{t('addDevice.label.alias', '设备别名（可选）')}</label>
+                  <input className="input" placeholder="RDK X5 (闪连)" value={newDeviceName} onChange={e => setNewDeviceName(e.target.value)} />
+                </div>
+              </div>
             ) : (
               <div className="add-device-form add-device-usb-serial-only">
                 <p className="add-device-usb-serial-lead">{t('addDevice.usb.lead', '与常见串口助手、Arduino 串口监视器类似：数据仅在浏览器与本机 USB 转串口芯片之间传输，不经过 RDK Studio 服务器的 SSH。')}</p>
@@ -304,7 +499,7 @@ export default function AddDeviceModal() {
             )}
 
             <div className="modal-footer">
-              <button type="button" className="btn btn-ghost" onClick={() => setStep('method')}>{t('addDevice.back', '返回')}</button>
+              <button type="button" className="btn btn-ghost" onClick={() => { setStep('method'); setTypecStep('select-nic'); setTypecConfiguring(false); }}>{t('addDevice.back', '返回')}</button>
               {method === 'manual' ? (
                 <button
                   type="button"
@@ -313,6 +508,15 @@ export default function AddDeviceModal() {
                   disabled={!newDeviceIp.trim() || !sshPass.trim()}
                 >
                   {t('addDevice.next', '下一步')}
+                </button>
+              ) : method === 'typec' ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={configureAndConnectTypec}
+                  disabled={!selectedInterface || typecConfiguring}
+                >
+                  {typecConfiguring ? t('addDevice.typec.busy', '配置中...') : t('addDevice.typec.start', '开始闪连')}
                 </button>
               ) : (
                 <button type="button" className="btn btn-primary" onClick={openUsbSerialDebug}>
@@ -362,7 +566,7 @@ export default function AddDeviceModal() {
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => { setStep('configure'); setVerifyOk(false); }}>{t('addDevice.back', '返回')}</button>
-              <button className="btn btn-primary" onClick={verifyOk ? confirmAdd : goToVerify} disabled={verifying}>
+              <button className="btn btn-primary" onClick={verifyOk ? (method === 'typec' ? confirmAddTypec : confirmAdd) : (method === 'typec' ? configureAndConnectTypec : goToVerify)} disabled={verifying}>
                 {verifying ? t('addDevice.verify.busy', '验证中...') : verifyOk ? t('addDevice.addToWorkspace', '添加到工作区') : t('addDevice.retry', '重试')}
               </button>
             </div>

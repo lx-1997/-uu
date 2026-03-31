@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
 import { CMD_SUGGESTIONS, type CmdSuggestion } from '../constants';
 import { translate } from '../i18n/translate';
@@ -33,6 +33,7 @@ import {
   toChatDeviceId,
 } from '../utils/chat-history-storage';
 import { fetchApi } from '../utils/apiBase';
+import { getRdkEmbedPanel } from '../utils/embed-mode';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
@@ -47,7 +48,27 @@ import {
   splitOpenClawCollaborationResult,
   extractNeedRdkclawBlocks,
   formatBoardOutboundLines,
+  isBoardOpenClawCollabTool,
 } from './sse-helpers';
+
+/** RDKClaw 当前轮次运行时间线（AI Dock 侧栏展示） */
+export type RdkClawTimelineKind =
+  | 'setup'
+  | 'context'
+  | 'reasoning'
+  | 'tool_start'
+  | 'tool_end'
+  | 'board_tool'
+  | 'progress'
+  | 'complete';
+
+export interface RdkClawTimelineEntry {
+  id: string;
+  at: number;
+  kind: RdkClawTimelineKind;
+  title: string;
+  detail?: string;
+}
 
 export interface AIChatStoreState {
   cmd: string;
@@ -96,6 +117,11 @@ export interface AIChatStoreState {
     detachedAt: number;
   }>;
   stopBackgroundRun: (runId: string) => void;
+
+  /** 当前轮次 SSE 时间线（发送新消息时重置） */
+  rdkClawRunTimeline: RdkClawTimelineEntry[];
+  runTimelinePanelOpen: boolean;
+  setRunTimelinePanelOpen: (v: boolean) => void;
 }
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
@@ -209,6 +235,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     detachedAt: number;
   }>>([]);
 
+  const [rdkClawRunTimeline, setRdkClawRunTimeline] = useState<RdkClawTimelineEntry[]>([]);
+  const [runTimelinePanelOpen, setRunTimelinePanelOpen] = useState(false);
+  const timelineSeqRef = useRef(0);
+  const boardToolTimelineSigRef = useRef('');
+
   const allCmdSuggestions: CmdSuggestion[] = useMemo(
     () =>
       CMD_SUGGESTIONS.map((s) => ({
@@ -270,6 +301,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
+    setRdkClawRunTimeline([]);
     addToast(t('chat.store.historyCleared', '对话记录已清空'), 'info');
   };
 
@@ -298,6 +330,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     suggestions: Array<{ title: string; detail: string; command?: string }>;
   } | null>(null);
   const streamGenerationRef = useRef(0);
+  const appendRunTimelineEntry = useCallback((gen: number, entry: Omit<RdkClawTimelineEntry, 'id' | 'at'>) => {
+    if (gen !== streamGenerationRef.current) return;
+    timelineSeqRef.current += 1;
+    const id = `tl-${timelineSeqRef.current}-${Date.now()}`;
+    setRdkClawRunTimeline((prev) =>
+      [...prev, { ...entry, id, at: Date.now(), detail: entry.detail ? entry.detail.slice(0, 600) : undefined }].slice(-200),
+    );
+  }, []);
   const toolTimelineRef = useRef<Record<string, {
     toolName: string;
     executor: string;
@@ -312,6 +352,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     openclawStreamBuf?: string;
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
+  /** 当前轮 assistant 消息里 reasoning 块的 aiBlocks 下标 */
+  const reasoningBlockIndexRef = useRef<number | null>(null);
+  const reasoningTimelineSentRef = useRef(false);
   const approvalBlockRef = useRef<Record<string, number>>({});
   const chatDeviceIdRef = useRef<string>(initialChatDeviceId);
   const sessionStorageKey = chatSessionStorageKey(initialChatDeviceId);
@@ -885,7 +928,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         currentRunIdRef.current = '';
         toolTimelineRef.current = {};
         latestBoardToolRef.current = null;
+        reasoningBlockIndexRef.current = null;
+        reasoningTimelineSentRef.current = false;
         approvalBlockRef.current = {};
+        timelineSeqRef.current = 0;
+        boardToolTimelineSigRef.current = '';
+        setRdkClawRunTimeline([]);
 
         setChatMessages(prev => [...prev, {
           id: aiMsgId, role: 'ai', text: '', blocks: [], source: 'studio',
@@ -942,6 +990,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   aiBlocks.push({
                     type: 'status',
                     items: [{ label: executorLabel(executor), value: message, ok: true }],
+                  });
+                  appendRunTimelineEntry(generation, {
+                    kind: 'setup',
+                    title: t('chat.timeline.setup', '准备上下文'),
+                    detail: message.slice(0, 400),
                   });
                   updateAiMessage(aiText, aiBlocks, true);
                   break;
@@ -1018,6 +1071,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     items: metaItems,
                   });
                 }
+                appendRunTimelineEntry(generation, {
+                  kind: 'context',
+                  title: t('chat.timeline.context', '运行上下文'),
+                  detail: summaryParts.join(' · '),
+                });
                 updateAiMessage(aiText, aiBlocks, true);
                 break;
               }
@@ -1026,11 +1084,46 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
+              case 'thinking_delta': {
+                const delta = String(event.data.delta ?? '');
+                if (!delta) break;
+                const idx = reasoningBlockIndexRef.current;
+                const existing =
+                  idx != null && idx < aiBlocks.length && aiBlocks[idx]?.type === 'reasoning'
+                    ? (aiBlocks[idx] as Extract<ChatBlock, { type: 'reasoning' }>)
+                    : null;
+                if (existing) {
+                  existing.text += delta;
+                } else {
+                  reasoningBlockIndexRef.current = aiBlocks.length;
+                  aiBlocks.push({
+                    type: 'reasoning',
+                    text: delta,
+                    collapsible: true,
+                    defaultCollapsed: true,
+                  });
+                }
+                if (!reasoningTimelineSentRef.current) {
+                  reasoningTimelineSentRef.current = true;
+                  appendRunTimelineEntry(generation, {
+                    kind: 'reasoning',
+                    title: t('chat.timeline.reasoning', '模型推理'),
+                    detail: delta.slice(0, 280),
+                  });
+                }
+                updateAiMessage(aiText, aiBlocks);
+                break;
+              }
               case 'tool_start': {
                 toolStepNo += 1;
                 const toolName = resolveToolName(event.data);
                 const args = event.data.args as Record<string, unknown>;
-                const executor = String(event.data.executor || (toolName === 'board_openclaw_delegate' ? 'board_openclaw' : 'rdkclaw_local'));
+                const executor = String(
+                  event.data.executor || (isBoardOpenClawCollabTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
+                );
+                if (isBoardOpenClawCollabTool(toolName)) {
+                  boardToolTimelineSigRef.current = '';
+                }
                 const phase = resolvePhase(event.data.phase);
                 const argStr = summarizeToolArgs(args);
                 const statusIndex = aiBlocks.length;
@@ -1054,28 +1147,38 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   executor,
                   startedAt: Date.now(),
                   statusIndex,
-                  ...((toolName === 'board_openclaw_delegate' || toolName === 'board_openclaw_chat')
-                    ? { openclawStreamBuf: '' }
-                    : {}),
+                  ...(isBoardOpenClawCollabTool(toolName) ? { openclawStreamBuf: '' } : {}),
                 };
-                if (toolName === 'board_openclaw_delegate' || toolName === 'board_openclaw_chat') {
+                if (isBoardOpenClawCollabTool(toolName)) {
                   latestBoardToolRef.current = toolCallId;
                   const outboundLines = formatBoardOutboundLines(toolName, args);
-                  if (outboundLines.length > 0) {
-                    aiBlocks.push({
-                      type: 'collab',
-                      side: 'rdkclaw',
-                      collabRole: 'outbound',
-                      title: t('dock.collab.outboundTitle', '发给板端 OpenClaw'),
-                      subtitle: toolName === 'board_openclaw_chat'
-                        ? t('dock.collab.outboundChatSubtitle', 'RDKClaw 发出的交流内容')
-                        : t('dock.collab.outboundDelegateSubtitle', '委派任务与执行建议'),
-                      lines: outboundLines,
-                      collapsible: true,
-                      previewLines: 12,
-                    });
-                  }
+                  const linesOut = outboundLines.length > 0 ? outboundLines : [argStr];
+                  const outboundSubtitle =
+                    toolName === 'board_openclaw_chat'
+                      ? t('dock.collab.outboundChatSubtitle', 'RDKClaw 发出的交流内容')
+                      : toolName === 'board_openclaw_assess'
+                        ? t('dock.collab.outboundAssessSubtitle', '向板端咨询任务可行性（仅评估）')
+                        : toolName === 'fleet_board_delegate'
+                          ? t('dock.collab.outboundFleetDelegateSubtitle', '跨板委派至目标设备')
+                          : toolName === 'fleet_board_broadcast'
+                            ? t('dock.collab.outboundFleetBroadcastSubtitle', '向多块板卡广播任务')
+                            : t('dock.collab.outboundDelegateSubtitle', '委派任务与执行建议');
+                  aiBlocks.push({
+                    type: 'collab',
+                    side: 'rdkclaw',
+                    collabRole: 'outbound',
+                    title: t('dock.collab.outboundTitle', '发给板端 OpenClaw'),
+                    subtitle: outboundSubtitle,
+                    lines: linesOut,
+                    collapsible: true,
+                    previewLines: 12,
+                  });
                 }
+                appendRunTimelineEntry(generation, {
+                  kind: 'tool_start',
+                  title: tf('chat.timeline.toolStart', '工具 · {{tool}}', { tool: toolName }),
+                  detail: `${executorLabel(executor)} · ${phase} · ${argStr}`.slice(0, 500),
+                });
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
@@ -1096,9 +1199,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   });
                 }
                 const isBoardOpenClaw =
-                  toolName === 'board_openclaw_delegate'
-                  || toolName === 'board_openclaw_chat'
-                  || state.executor === 'board_openclaw';
+                  isBoardOpenClawCollabTool(toolName) || state.executor === 'board_openclaw';
                 if (isBoardOpenClaw) {
                   if (toolName === 'board_openclaw_chat' && progressSource === 'studio_wait') {
                     const more = rawChunk.split('\n').map((l) => l.trimEnd()).filter((l) => l.length > 0);
@@ -1148,6 +1249,22 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       previewLines: 8,
                     });
                   }
+                  if (/\[TOOL:/.test(rawChunk)) {
+                    const bits =
+                      rawChunk.match(/\[TOOL:[^\]]*\][^\n]*/g)
+                      ?? rawChunk.split('\n').filter((l) => l.includes('[TOOL:'));
+                    for (const bit of bits) {
+                      const sig = String(bit).trim().slice(0, 240);
+                      if (sig && sig !== boardToolTimelineSigRef.current) {
+                        boardToolTimelineSigRef.current = sig;
+                        appendRunTimelineEntry(generation, {
+                          kind: 'board_tool',
+                          title: t('chat.timeline.boardTool', '板端工具'),
+                          detail: sig,
+                        });
+                      }
+                    }
+                  }
                 } else {
                   const progressLines = rawChunk.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20);
                   if (progressLines.length === 0) break;
@@ -1193,6 +1310,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     };
                   }
                 }
+                appendRunTimelineEntry(generation, {
+                  kind: 'tool_end',
+                  title: state?.toolName || toolName,
+                  detail: tf('chat.timeline.toolEndVal', '{{state}} · {{ms}} ms', {
+                    state: isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成'),
+                    ms: Math.max(1, elapsedMs),
+                  }),
+                });
 
                 if (!isError && (toolName === 'device_connect_ssh' || toolName === 'switch_device')) {
                   let boundId: string | null = null;
@@ -1313,7 +1438,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (
                   !mediaHandled
                   && !isError
-                  && (toolName === 'board_openclaw_delegate' || toolName === 'board_openclaw_chat')
+                  && isBoardOpenClawCollabTool(toolName)
                 ) {
                   const st = toolTimelineRef.current[toolCallId || ''];
                   const { body, rdkHint } = splitOpenClawCollaborationResult(result);
@@ -1471,7 +1596,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const toolName = resolveToolName(event.data);
                 const risk = String(event.data.risk || 'medium') as 'low' | 'medium' | 'high';
                 const runId = String(event.data.runId || currentRunId || '');
-                const executor = String(event.data.executor || (toolName === 'board_openclaw_delegate' ? 'board_openclaw' : 'rdkclaw_local'));
+                const executor = String(
+                  event.data.executor || (isBoardOpenClawCollabTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
+                );
                 const summary = `${toolName} · ${executorLabel(executor)} · ${t('chat.approval.risk', '风险')} ${risk.toUpperCase()}`;
                 approvalBlockRef.current[approvalId] = aiBlocks.length;
                 aiBlocks.push({
@@ -1676,6 +1803,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 } else {
                   aiBlocks.push(progressBlock);
                 }
+                appendRunTimelineEntry(generation, {
+                  kind: 'progress',
+                  title: t('chat.timeline.heartbeat', '进度心跳'),
+                  detail: msg,
+                });
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
@@ -1702,6 +1834,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 aiBlocks.push({
                   type: 'status',
                   items: [{ label, value: detail.length > 0 ? detail.join(' · ') : '', ok }],
+                });
+                appendRunTimelineEntry(generation, {
+                  kind: 'complete',
+                  title: label,
+                  detail: detail.length > 0 ? detail.join(' · ') : undefined,
                 });
                 updateAiMessage(aiText, aiBlocks, true);
                 break;
@@ -2000,7 +2137,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           .split('\n')
           .map((line) => line.trim())
           .filter(Boolean)
-          .map((line) => line.replace(/^board_openclaw_delegate:\s*/i, '').trim())
+          .map((line) => line.replace(/^(board_openclaw_\w+|fleet_board_\w+):\s*/i, '').trim())
           .slice(-20);
         const dedupeLines = (prevLines: string[], nextLines: string[]) => {
           if (nextLines.length === 0) return prevLines;
@@ -2259,11 +2396,32 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Close chat panel on tab change
+  // Close chat panel on tab change（副屏常驻展开，不受主导航切换影响）
   useEffect(() => {
+    if (getRdkEmbedPanel()) return;
     if (chatExpanded) setChatExpanded(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  /** 多窗口：另一标签页写入 localStorage 后同步到当前窗口内存态 */
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.storageArea !== localStorage || !e.key) return;
+      if (e.key !== chatHistoryStorageKey(chatDeviceIdRef.current)) return;
+      if (!e.newValue) {
+        setChatMessages([]);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(e.newValue) as ChatMessage[];
+        setChatMessages(parsed.slice(-MAX_CHAT_MESSAGES_IN_MEMORY));
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   const value: AIChatStoreState = {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
@@ -2273,6 +2431,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     agentMode, setAgentMode, agentPlan, agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
+    rdkClawRunTimeline, runTimelinePanelOpen, setRunTimelinePanelOpen,
   };
 
   return React.createElement(AIChatContext.Provider, { value }, children);

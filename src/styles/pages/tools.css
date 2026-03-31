@@ -519,6 +519,13 @@
   align-items: start;
 }
 
+/* 本机镜像：大块区域用 button 承接点击，与「浏览」一致触发系统选文件 */
+.flasher-page button.flasher-local-file-pick {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+}
+
 .flasher-page .flasher-step2-grid {
   grid-template-columns: minmax(0, 1.1fr) minmax(340px, 1fr);
   align-items: start;

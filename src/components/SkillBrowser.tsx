@@ -149,6 +149,58 @@ async function writeSkillToBoard(deviceId: string, skillId: string, content: str
   return { ok: !!data.ok, message: data.message || 'Write complete', path: data.path };
 }
 
+async function fetchCenterMdText(folder: string): Promise<{ ok: true; text: string } | { ok: false; message: string }> {
+  try {
+    const res = await fetchApi(`/api/skills/${encodeURIComponent(folder)}/md`);
+    const text = await res.text();
+    if (!res.ok) return { ok: false, message: text.slice(0, 200) || `HTTP ${res.status}` };
+    return { ok: true, text };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'network' };
+  }
+}
+
+async function fetchClawhubSkillMdText(
+  slug: string,
+): Promise<{ ok: true; markdown: string } | { ok: false; message: string }> {
+  try {
+    const res = await fetchApi(`/api/clawhub/skills/${encodeURIComponent(slug)}/skill-md`);
+    const data = (await res.json()) as { ok?: boolean; markdown?: string; message?: string; error?: string };
+    if (!res.ok || !data.ok) {
+      return { ok: false, message: data.message || data.error || `HTTP ${res.status}` };
+    }
+    return { ok: true, markdown: data.markdown || '' };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'network' };
+  }
+}
+
+async function postLocalRdkclawSkill(
+  userId: string,
+  skillId: string,
+  content: string,
+): Promise<{ ok: boolean; message?: string; path?: string }> {
+  const res = await fetchApi('/api/rdkclaw/local-skill-write', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, skillId, content: content.trim() }),
+  });
+  const data = (await res.json()) as { ok?: boolean; path?: string; message?: string; error?: string };
+  if (!res.ok) return { ok: false, message: data.message || data.error || `HTTP ${res.status}` };
+  return { ok: !!data.ok, path: data.path, message: data.message };
+}
+
+/** SkillHub slug → 板端 / 本地 skills 目录名（与单条部署一致） */
+function clawhubSlugToBoardSkillId(slug: string): string {
+  return (
+    slug
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'skillhub-skill'
+  );
+}
+
 /** 与 AI 对话侧一致，用于定位 ~/.rdkstudio/rdkclaw-workspaces/&lt;id&gt;/skills/ */
 const STUDIO_USER_ID_KEY = 'rdk:chat:user-id';
 
@@ -218,6 +270,8 @@ export default function SkillBrowser() {
   const [clawhubMdLoading, setClawhubMdLoading] = useState(false);
   const [clawhubResolvedVersion, setClawhubResolvedVersion] = useState<string | null>(null);
   const [localRdkclawWriteLoading, setLocalRdkclawWriteLoading] = useState(false);
+  const [centerBatchSelected, setCenterBatchSelected] = useState<Set<string>>(() => new Set());
+  const [clawhubBatchSelected, setClawhubBatchSelected] = useState<Set<string>>(() => new Set());
 
   // Create skill state
   const [newSkillId, setNewSkillId] = useState('');
@@ -354,6 +408,27 @@ export default function SkillBrowser() {
       return it.folder.toLowerCase().includes(q) || it.title.toLowerCase().includes(q);
     });
   }, [centerSearch, centerCategory]);
+
+  useEffect(() => {
+    setCenterBatchSelected(new Set());
+    setClawhubBatchSelected(new Set());
+  }, [hubMode, centerSub]);
+
+  useEffect(() => {
+    const allowed = new Set(filteredCenterItems.map((x) => x.folder));
+    setCenterBatchSelected((prev) => {
+      const next = new Set([...prev].filter((f) => allowed.has(f)));
+      return next.size === prev.size && [...prev].every((x) => next.has(x)) ? prev : next;
+    });
+  }, [filteredCenterItems]);
+
+  useEffect(() => {
+    const allowed = new Set(clawhubResults.map((r) => r.slug));
+    setClawhubBatchSelected((prev) => {
+      const next = new Set([...prev].filter((s) => allowed.has(s)));
+      return next.size === prev.size && [...prev].every((x) => next.has(x)) ? prev : next;
+    });
+  }, [clawhubResults]);
 
   const fetchCenterMd = useCallback(
     async (folder: string) => {
@@ -532,13 +607,6 @@ export default function SkillBrowser() {
     });
   };
 
-  const clawhubDeployId = (slug: string) =>
-    slug
-      .trim()
-      .replace(/[^a-zA-Z0-9_-]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '') || 'skillhub-skill';
-
   const handleDeployClawhub = () => {
     if (!currentDevice) {
       addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
@@ -548,7 +616,7 @@ export default function SkillBrowser() {
       addToast?.(t('skillBrowser.center.emptyBody', '技能内容为空，无法部署'), 'warning');
       return;
     }
-    const id = clawhubDeployId(selectedClawhubSlug);
+    const id = clawhubSlugToBoardSkillId(selectedClawhubSlug);
     setConfirmAction({
       title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到板端？', { id }),
       detail: tf('skillBrowser.clawhub.deployDetail', '将 SkillHub 技能「{{slug}}」写入 ~/.openclaw/workspace/skills/{{id}}/SKILL.md', {
@@ -567,18 +635,9 @@ export default function SkillBrowser() {
     async (skillId: string, content: string) => {
       setLocalRdkclawWriteLoading(true);
       try {
-        const res = await fetchApi('/api/rdkclaw/local-skill-write', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: readStudioUserId(),
-            skillId,
-            content: content.trim(),
-          }),
-        });
-        const data = (await res.json()) as { ok?: boolean; path?: string; message?: string; error?: string };
-        if (!res.ok) {
-          addToast?.(data.message || data.error || t('skillBrowser.clawhub.localWriteFail', '写入本地 RDKClaw 失败'), 'error');
+        const data = await postLocalRdkclawSkill(readStudioUserId(), skillId, content);
+        if (!data.ok) {
+          addToast?.(data.message || t('skillBrowser.clawhub.localWriteFail', '写入本地 RDKClaw 失败'), 'error');
           return;
         }
         addToast?.(
@@ -594,12 +653,196 @@ export default function SkillBrowser() {
     [addToast, t, tf],
   );
 
+  const runBatchDeployCenterFolders = useCallback(
+    async (folders: string[]) => {
+      if (!currentDevice || folders.length === 0) return;
+      setDeploying(true);
+      let ok = 0;
+      const fails: string[] = [];
+      try {
+        for (const folder of folders) {
+          const r = await fetchCenterMdText(folder);
+          if (!r.ok) {
+            fails.push(`${folder}: ${r.message}`);
+            continue;
+          }
+          if (!r.text.trim()) {
+            fails.push(`${folder}: empty`);
+            continue;
+          }
+          const result = await writeSkillToBoard(currentDevice.id, folder, r.text.trim());
+          if (result.ok) ok++;
+          else fails.push(`${folder}: ${result.message}`);
+        }
+        await loadBoardSkills();
+        if (fails.length === 0) {
+          addToast?.(tf('skillBrowser.batch.deployAllOk', '已全部部署到板端（{{n}} 项）', { n: ok }), 'success');
+        } else {
+          addToast?.(
+            tf('skillBrowser.batch.deployPartial', '板端部署：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
+              ok,
+              fail: fails.length,
+              first: fails[0] || '',
+            }),
+            ok > 0 ? 'warning' : 'error',
+          );
+        }
+      } catch (e: unknown) {
+        addToast?.(
+          tf('skillBrowser.toast.deployFail', '部署失败: {{msg}}', {
+            msg: e instanceof Error ? e.message : t('api.err.default', '网络错误'),
+          }),
+          'error',
+        );
+      } finally {
+        setDeploying(false);
+      }
+    },
+    [currentDevice, addToast, loadBoardSkills, t, tf],
+  );
+
+  const runBatchWriteLocalCenterFolders = useCallback(
+    async (folders: string[]) => {
+      if (folders.length === 0) return;
+      const uid = readStudioUserId();
+      setLocalRdkclawWriteLoading(true);
+      let ok = 0;
+      const fails: string[] = [];
+      try {
+        for (const folder of folders) {
+          const r = await fetchCenterMdText(folder);
+          if (!r.ok) {
+            fails.push(`${folder}: ${r.message}`);
+            continue;
+          }
+          if (!r.text.trim()) {
+            fails.push(`${folder}: empty`);
+            continue;
+          }
+          const data = await postLocalRdkclawSkill(uid, folder, r.text);
+          if (data.ok) ok++;
+          else fails.push(`${folder}: ${data.message || 'fail'}`);
+        }
+        if (fails.length === 0) {
+          addToast?.(tf('skillBrowser.batch.localAllOk', '已全部写入本地 RDKClaw（{{n}} 项）', { n: ok }), 'success');
+        } else {
+          addToast?.(
+            tf('skillBrowser.batch.localPartial', '本地写入：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
+              ok,
+              fail: fails.length,
+              first: fails[0] || '',
+            }),
+            ok > 0 ? 'warning' : 'error',
+          );
+        }
+      } catch (e: unknown) {
+        addToast?.(e instanceof Error ? e.message : t('api.err.default', '网络错误'), 'error');
+      } finally {
+        setLocalRdkclawWriteLoading(false);
+      }
+    },
+    [addToast, t, tf],
+  );
+
+  const runBatchDeployClawhubSlugs = useCallback(
+    async (slugs: string[]) => {
+      if (!currentDevice || slugs.length === 0) return;
+      setDeploying(true);
+      let ok = 0;
+      const fails: string[] = [];
+      try {
+        for (const slug of slugs) {
+          const r = await fetchClawhubSkillMdText(slug);
+          if (!r.ok) {
+            fails.push(`${slug}: ${r.message}`);
+            continue;
+          }
+          if (!r.markdown.trim()) {
+            fails.push(`${slug}: empty`);
+            continue;
+          }
+          const id = clawhubSlugToBoardSkillId(slug);
+          const result = await writeSkillToBoard(currentDevice.id, id, r.markdown.trim());
+          if (result.ok) ok++;
+          else fails.push(`${slug}: ${result.message}`);
+        }
+        await loadBoardSkills();
+        if (fails.length === 0) {
+          addToast?.(tf('skillBrowser.batch.deployAllOk', '已全部部署到板端（{{n}} 项）', { n: ok }), 'success');
+        } else {
+          addToast?.(
+            tf('skillBrowser.batch.deployPartial', '板端部署：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
+              ok,
+              fail: fails.length,
+              first: fails[0] || '',
+            }),
+            ok > 0 ? 'warning' : 'error',
+          );
+        }
+      } catch (e: unknown) {
+        addToast?.(
+          tf('skillBrowser.toast.deployFail', '部署失败: {{msg}}', {
+            msg: e instanceof Error ? e.message : t('api.err.default', '网络错误'),
+          }),
+          'error',
+        );
+      } finally {
+        setDeploying(false);
+      }
+    },
+    [currentDevice, addToast, loadBoardSkills, t, tf],
+  );
+
+  const runBatchWriteLocalClawhubSlugs = useCallback(
+    async (slugs: string[]) => {
+      if (slugs.length === 0) return;
+      const uid = readStudioUserId();
+      setLocalRdkclawWriteLoading(true);
+      let ok = 0;
+      const fails: string[] = [];
+      try {
+        for (const slug of slugs) {
+          const r = await fetchClawhubSkillMdText(slug);
+          if (!r.ok) {
+            fails.push(`${slug}: ${r.message}`);
+            continue;
+          }
+          if (!r.markdown.trim()) {
+            fails.push(`${slug}: empty`);
+            continue;
+          }
+          const id = clawhubSlugToBoardSkillId(slug);
+          const data = await postLocalRdkclawSkill(uid, id, r.markdown);
+          if (data.ok) ok++;
+          else fails.push(`${slug}: ${data.message || 'fail'}`);
+        }
+        if (fails.length === 0) {
+          addToast?.(tf('skillBrowser.batch.localAllOk', '已全部写入本地 RDKClaw（{{n}} 项）', { n: ok }), 'success');
+        } else {
+          addToast?.(
+            tf('skillBrowser.batch.localPartial', '本地写入：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
+              ok,
+              fail: fails.length,
+              first: fails[0] || '',
+            }),
+            ok > 0 ? 'warning' : 'error',
+          );
+        }
+      } catch (e: unknown) {
+        addToast?.(e instanceof Error ? e.message : t('api.err.default', '网络错误'), 'error');
+      } finally {
+        setLocalRdkclawWriteLoading(false);
+      }
+    },
+    [addToast, t, tf],
+  );
+
   const handleWriteLocalRdkclaw = () => {
     if (!selectedClawhubSlug || !clawhubMd.trim()) {
       addToast?.(t('skillBrowser.center.emptyBody', '技能内容为空，无法写入'), 'warning');
       return;
     }
-    const id = clawhubDeployId(selectedClawhubSlug);
+    const id = clawhubSlugToBoardSkillId(selectedClawhubSlug);
     setConfirmAction({
       title: tf('skillBrowser.clawhub.localWriteTitle', '写入本地 RDKClaw 技能「{{id}}」？', { id }),
       detail: t(
@@ -610,6 +853,105 @@ export default function SkillBrowser() {
       onConfirm: () => {
         setConfirmAction(null);
         void executeWriteLocalRdkclaw(id, clawhubMd);
+      },
+    });
+  };
+
+  const batchActionBusy = deploying || localRdkclawWriteLoading;
+
+  const previewIdList = (ids: string[], max = 6) => {
+    const head = ids.slice(0, max).join('、');
+    return ids.length > max ? `${head} …（共 ${ids.length} 项）` : head;
+  };
+
+  const handleBatchDeployCenterClick = () => {
+    if (!currentDevice) {
+      addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
+      return;
+    }
+    const folders = [...centerBatchSelected].sort();
+    if (folders.length === 0) {
+      addToast?.(t('skillBrowser.batch.noneSelected', '请先在左侧勾选技能'), 'warning');
+      return;
+    }
+    setConfirmAction({
+      title: tf('skillBrowser.batch.confirmDeployTitle', '批量将 {{n}} 项内置技能部署到板端？', { n: folders.length }),
+      detail: tf(
+        'skillBrowser.batch.confirmDeployCenterDetail',
+        '将逐项从技能中心拉取 SKILL.md 并写入设备。包含：{{preview}}',
+        { preview: previewIdList(folders) },
+      ),
+      confirmLabel: t('skillBrowser.confirm.deploy', '确认部署'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void runBatchDeployCenterFolders(folders);
+      },
+    });
+  };
+
+  const handleBatchWriteLocalCenterClick = () => {
+    const folders = [...centerBatchSelected].sort();
+    if (folders.length === 0) {
+      addToast?.(t('skillBrowser.batch.noneSelected', '请先在左侧勾选技能'), 'warning');
+      return;
+    }
+    setConfirmAction({
+      title: tf('skillBrowser.batch.confirmLocalCenterTitle', '批量将 {{n}} 项写入本地 RDKClaw？', { n: folders.length }),
+      detail: tf(
+        'skillBrowser.batch.confirmLocalCenterDetail',
+        '将逐项拉取 SKILL.md 并写入本机 ~/.rdkstudio/rdkclaw-workspaces/…/skills/。包含：{{preview}}',
+        { preview: previewIdList(folders) },
+      ),
+      confirmLabel: t('skillBrowser.clawhub.localWriteConfirm', '确认写入'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void runBatchWriteLocalCenterFolders(folders);
+      },
+    });
+  };
+
+  const handleBatchDeployClawhubClick = () => {
+    if (!currentDevice) {
+      addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
+      return;
+    }
+    const slugs = [...clawhubBatchSelected].sort();
+    if (slugs.length === 0) {
+      addToast?.(t('skillBrowser.batch.noneSelected', '请先在左侧勾选技能'), 'warning');
+      return;
+    }
+    setConfirmAction({
+      title: tf('skillBrowser.batch.confirmDeployClawhubTitle', '批量将 {{n}} 项 SkillHub 技能部署到板端？', { n: slugs.length }),
+      detail: tf(
+        'skillBrowser.batch.confirmDeployClawhubDetail',
+        '将逐项拉取远端 SKILL.md 并写入设备（目录名规则与单条部署相同）。包含：{{preview}}',
+        { preview: previewIdList(slugs) },
+      ),
+      confirmLabel: t('skillBrowser.confirm.deploy', '确认部署'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void runBatchDeployClawhubSlugs(slugs);
+      },
+    });
+  };
+
+  const handleBatchWriteLocalClawhubClick = () => {
+    const slugs = [...clawhubBatchSelected].sort();
+    if (slugs.length === 0) {
+      addToast?.(t('skillBrowser.batch.noneSelected', '请先在左侧勾选技能'), 'warning');
+      return;
+    }
+    setConfirmAction({
+      title: tf('skillBrowser.batch.confirmLocalClawhubTitle', '批量将 {{n}} 项 SkillHub 技能写入本地 RDKClaw？', { n: slugs.length }),
+      detail: tf(
+        'skillBrowser.batch.confirmLocalClawhubDetail',
+        '将逐项拉取 SKILL.md 并写入本机工作区。包含：{{preview}}',
+        { preview: previewIdList(slugs) },
+      ),
+      confirmLabel: t('skillBrowser.clawhub.localWriteConfirm', '确认写入'),
+      onConfirm: () => {
+        setConfirmAction(null);
+        void runBatchWriteLocalClawhubSlugs(slugs);
       },
     });
   };
@@ -898,6 +1240,37 @@ export default function SkillBrowser() {
                       placeholder={t('skillBrowser.center.searchPh', '搜索内置技能...')}
                       style={{ fontSize: '0.8125rem' }}
                     />
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 6,
+                        fontSize: '0.625rem',
+                      }}
+                    >
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {tf('skillBrowser.batch.selected', '已选 {{n}} 项', { n: centerBatchSelected.size })}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                        onClick={() => setCenterBatchSelected(new Set(filteredCenterItems.map((x) => x.folder)))}
+                        disabled={filteredCenterItems.length === 0 || batchActionBusy}
+                      >
+                        {t('skillBrowser.batch.selectAll', '全选列表')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                        onClick={() => setCenterBatchSelected(new Set())}
+                        disabled={centerBatchSelected.size === 0}
+                      >
+                        {t('skillBrowser.batch.clearSelection', '清空勾选')}
+                      </button>
+                    </div>
                   </div>
                   <div style={{ flex: 1, overflowY: 'auto' }}>
                     {filteredCenterItems.length === 0 && (
@@ -911,24 +1284,51 @@ export default function SkillBrowser() {
                       </div>
                     )}
                     {filteredCenterItems.map((it) => (
-                      <button
+                      <div
                         key={it.folder}
-                        type="button"
-                        className={`config-sidebar-item ${selectedCenterFolder === it.folder ? 'active' : ''}`}
-                        onClick={() => setSelectedCenterFolder(it.folder)}
                         style={{
-                          display: 'block',
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '8px 10px',
-                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 6,
+                          borderBottom: '1px solid var(--border)',
                           background: selectedCenterFolder === it.folder ? 'var(--bg-muted)' : 'transparent',
-                          cursor: 'pointer',
                         }}
                       >
-                        <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</strong>
-                        <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{it.folder}</span>
-                      </button>
+                        <input
+                          type="checkbox"
+                          checked={centerBatchSelected.has(it.folder)}
+                          onChange={() => {
+                            setCenterBatchSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(it.folder)) next.delete(it.folder);
+                              else next.add(it.folder);
+                              return next;
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          disabled={batchActionBusy}
+                          aria-label={t('skillBrowser.batch.toggleItem', '勾选此项以批量操作')}
+                          style={{ margin: '10px 0 0 8px', flexShrink: 0 }}
+                        />
+                        <button
+                          type="button"
+                          className="config-sidebar-item"
+                          onClick={() => setSelectedCenterFolder(it.folder)}
+                          style={{
+                            flex: 1,
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '8px 10px 8px 4px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</strong>
+                          <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{it.folder}</span>
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </>
@@ -965,6 +1365,39 @@ export default function SkillBrowser() {
                     {clawhubSearchErr && (
                       <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0 }}>{clawhubSearchErr}</p>
                     )}
+                    {clawhubResults.length > 0 && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: 6,
+                          fontSize: '0.625rem',
+                        }}
+                      >
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          {tf('skillBrowser.batch.selected', '已选 {{n}} 项', { n: clawhubBatchSelected.size })}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                          onClick={() => setClawhubBatchSelected(new Set(clawhubResults.map((r) => r.slug)))}
+                          disabled={batchActionBusy}
+                        >
+                          {t('skillBrowser.batch.selectAll', '全选列表')}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                          onClick={() => setClawhubBatchSelected(new Set())}
+                          disabled={clawhubBatchSelected.size === 0}
+                        >
+                          {t('skillBrowser.batch.clearSelection', '清空勾选')}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div style={{ flex: 1, overflowY: 'auto' }}>
                     {clawhubResults.length === 0 && !clawhubSearchLoading && !clawhubSearchErr && (
@@ -973,29 +1406,56 @@ export default function SkillBrowser() {
                       </div>
                     )}
                     {clawhubResults.map((r) => (
-                      <button
+                      <div
                         key={r.slug}
-                        type="button"
-                        className={`config-sidebar-item ${selectedClawhubSlug === r.slug ? 'active' : ''}`}
-                        onClick={() => setSelectedClawhubSlug(r.slug)}
                         style={{
-                          display: 'block',
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '8px 10px',
-                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 6,
+                          borderBottom: '1px solid var(--border)',
                           background: selectedClawhubSlug === r.slug ? 'var(--bg-muted)' : 'transparent',
-                          cursor: 'pointer',
                         }}
                       >
-                        <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.displayName || r.slug}</strong>
-                        <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{r.slug}</span>
-                        {r.summary && (
-                          <span style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', display: 'block', marginTop: 4, lineHeight: 1.35, maxHeight: '4.2em', overflow: 'hidden' }}>
-                            {r.summary}
-                          </span>
-                        )}
-                      </button>
+                        <input
+                          type="checkbox"
+                          checked={clawhubBatchSelected.has(r.slug)}
+                          onChange={() => {
+                            setClawhubBatchSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(r.slug)) next.delete(r.slug);
+                              else next.add(r.slug);
+                              return next;
+                            });
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          disabled={batchActionBusy}
+                          aria-label={t('skillBrowser.batch.toggleItem', '勾选此项以批量操作')}
+                          style={{ margin: '10px 0 0 8px', flexShrink: 0 }}
+                        />
+                        <button
+                          type="button"
+                          className="config-sidebar-item"
+                          onClick={() => setSelectedClawhubSlug(r.slug)}
+                          style={{
+                            flex: 1,
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: '8px 10px 8px 4px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.displayName || r.slug}</strong>
+                          <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{r.slug}</span>
+                          {r.summary && (
+                            <span style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', display: 'block', marginTop: 4, lineHeight: 1.35, maxHeight: '4.2em', overflow: 'hidden' }}>
+                              {r.summary}
+                            </span>
+                          )}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </>
@@ -1026,11 +1486,34 @@ export default function SkillBrowser() {
                           type="button"
                           className="btn btn-primary btn-sm"
                           onClick={handleDeployBuiltin}
-                          disabled={deploying || !currentDevice || centerMdLoading || !centerMd.trim()}
+                          disabled={batchActionBusy || !currentDevice || centerMdLoading || !centerMd.trim()}
                         >
                           {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到板端')}
                         </button>
                       </div>
+                      {centerBatchSelected.size > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                            {tf('skillBrowser.batch.barHint', '已勾选 {{n}} 项，可批量操作（与当前预览无关）', { n: centerBatchSelected.size })}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={handleBatchDeployCenterClick}
+                            disabled={batchActionBusy || !currentDevice}
+                          >
+                            {tf('skillBrowser.batch.deployBoardN', '批量部署到板端 ({{n}})', { n: centerBatchSelected.size })}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={handleBatchWriteLocalCenterClick}
+                            disabled={batchActionBusy}
+                          >
+                            {tf('skillBrowser.batch.writeLocalN', '批量写入本地 RDKClaw ({{n}})', { n: centerBatchSelected.size })}
+                          </button>
+                        </div>
+                      )}
                       {!currentDevice && (
                         <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
                       )}
@@ -1070,7 +1553,7 @@ export default function SkillBrowser() {
                               type="button"
                               className="btn btn-primary btn-sm"
                               onClick={handleWriteLocalRdkclaw}
-                              disabled={localRdkclawWriteLoading || clawhubMdLoading || !clawhubMd.trim()}
+                              disabled={batchActionBusy || clawhubMdLoading || !clawhubMd.trim()}
                               title={t(
                                 'skillBrowser.clawhub.localWriteHint',
                                 '写入本机 ~/.rdkstudio/rdkclaw-workspaces/.../skills/（与 RDKClaw 对话同源）',
@@ -1084,7 +1567,7 @@ export default function SkillBrowser() {
                               type="button"
                               className="btn btn-ghost btn-sm"
                               onClick={handleDeployClawhub}
-                              disabled={deploying || !currentDevice || clawhubMdLoading || !clawhubMd.trim()}
+                              disabled={batchActionBusy || !currentDevice || clawhubMdLoading || !clawhubMd.trim()}
                             >
                               {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到板端')}
                             </button>
@@ -1097,6 +1580,29 @@ export default function SkillBrowser() {
                           </span>
                         </div>
                       </div>
+                      {clawhubBatchSelected.size > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                            {tf('skillBrowser.batch.barHint', '已勾选 {{n}} 项，可批量操作（与当前预览无关）', { n: clawhubBatchSelected.size })}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={handleBatchDeployClawhubClick}
+                            disabled={batchActionBusy || !currentDevice}
+                          >
+                            {tf('skillBrowser.batch.deployBoardN', '批量部署到板端 ({{n}})', { n: clawhubBatchSelected.size })}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={handleBatchWriteLocalClawhubClick}
+                            disabled={batchActionBusy}
+                          >
+                            {tf('skillBrowser.batch.writeLocalN', '批量写入本地 RDKClaw ({{n}})', { n: clawhubBatchSelected.size })}
+                          </button>
+                        </div>
+                      )}
                       {!currentDevice && (
                         <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
                       )}

@@ -8,7 +8,13 @@
  * IPC layer stay unchanged.
  */
 
+import { createReadStream, createWriteStream } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import { createGunzip } from 'node:zlib';
+import { pipeline } from 'node:stream/promises';
+
 import {
+  emitFlashProgress,
   getFlashProgressSnapshot,
   resetFlashProgressHistory,
   setProgressSender,
@@ -111,17 +117,76 @@ export async function backupDrive(drivePath, destPath) {
   }
 }
 
+/** 将 xz/gzip 工具或 zlib 的常见错误转述为可操作的说明（末尾保留原始英文/工具输出便于排查） */
+function humanizeDecompressError(raw) {
+  const msg = String(raw || '').trim();
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes('eno space')
+    || lower.includes('no space left')
+    || lower.includes('enospc')
+  ) {
+    return `磁盘空间不足，解压 .xz/.gz 需要额外写出完整 .img（通常数 GB）。请清理目标磁盘后重试，或换到有足够空间的目录。\n（原始信息：${msg}）`;
+  }
+  if (
+    lower.includes('unexpected end of input')
+    || lower.includes('unexpected eof')
+    || lower.includes('premature end')
+    || lower.includes('unexpected end of file')
+    || /corrupt input/i.test(msg)
+    || /corrupted input/i.test(msg)
+    || /truncated/i.test(msg)
+  ) {
+    return (
+      '压缩包不完整或已损坏（多为下载中断、复制未完成或磁盘满）。请删除该 .xz/.gz 后重新完整下载，并与官方页面核对体积或校验和后再解压。\n'
+      + `（原始信息：${msg}）`
+    );
+  }
+  return msg;
+}
+
 export async function decompressXz(inputPath) {
   if (!inputPath.toLowerCase().endsWith('.xz')) return { ok: true, outputPath: inputPath };
   const a = await getAdapter();
   if (!a) return { ok: false, error: '当前平台暂不支持自动解压', code: 'UNSUPPORTED_PLATFORM' };
+  const outputPath = inputPath.replace(/\.xz$/i, '');
   try {
     resetFlashProgressHistory();
-    const outputPath = inputPath.replace(/\.xz$/i, '');
     const resolved = await a.decompressXz(inputPath, outputPath);
     return { ok: true, outputPath: resolved };
   } catch (error) {
-    return { ok: false, error: error.message, code: error.code };
+    await unlink(outputPath).catch(() => {});
+    return {
+      ok: false,
+      error: humanizeDecompressError(error instanceof Error ? error.message : String(error)),
+      code: error?.code,
+    };
+  }
+}
+
+/** TF 卡：gzip 压缩镜像（.img.gz 等），不依赖系统 gzip/xz；排除 .tar.gz */
+export async function decompressGz(inputPath) {
+  const lower = String(inputPath).toLowerCase();
+  if (!lower.endsWith('.gz') || lower.endsWith('.tar.gz')) {
+    return { ok: true, outputPath: inputPath };
+  }
+  const outputPath = inputPath.replace(/\.gz$/i, '');
+  try {
+    resetFlashProgressHistory();
+    emitFlashProgress({ stage: 'decompressing', message: '正在解压 gzip 镜像…', percent: 5 });
+    const source = createReadStream(inputPath);
+    const gunzip = createGunzip();
+    const dest = createWriteStream(outputPath);
+    await pipeline(source, gunzip, dest);
+    emitFlashProgress({ stage: 'decompressing', message: '解压完成', percent: 100 });
+    return { ok: true, outputPath };
+  } catch (error) {
+    await unlink(outputPath).catch(() => {});
+    return {
+      ok: false,
+      error: humanizeDecompressError(error instanceof Error ? error.message : String(error)),
+      code: 'DECOMPRESS_FAILED',
+    };
   }
 }
 

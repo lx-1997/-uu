@@ -18,6 +18,7 @@ import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 import StudioBrowserCaptureBridge from './components/StudioBrowserCaptureBridge';
 import ElectronSerialPortPicker from './components/ElectronSerialPortPicker';
 import { isDeviceShownOnline } from './utils/device-connection';
+import { getRdkEmbedPanel, type RdkEmbedPanel } from './utils/embed-mode';
 import type { Tab } from './app-types';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -263,6 +264,92 @@ function AppShell() {
   );
 }
 
+/** 副屏：无侧栏，避免重复挂载 IDE/VNC 嵌入层；仅 OpenClaw 全页 + Dock 或纯对话工作区 */
+function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
+  const {
+    currentDevice, theme, setChatExpanded, setActiveTab,
+  } = useAppState();
+  const { t } = useI18n();
+  useStudioPresence(panel === 'openclaw' ? 'openclaw' : 'dashboard');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    setChatExpanded(true);
+    setActiveTab(panel === 'openclaw' ? 'openclaw' : 'dashboard');
+  }, [panel, setChatExpanded, setActiveTab]);
+
+  const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
+  const embedTitle = panel === 'ai-dock'
+    ? t('embed.clawChat.title', 'RDKClaw 对话副屏')
+    : t('embed.openclaw.title', 'OpenClaw 副屏');
+
+  const focusMain = () => {
+    try {
+      window.opener?.focus();
+    } catch {
+      /* cross-origin */
+    }
+  };
+
+  return (
+    <div className={`app-shell rdk-embed`} data-rdk-embed={panel}>
+      <OpenClawDeployPollHost />
+
+      <header className="top-bar rdk-embed-topbar">
+        <div className="topbar-left">
+          <span className="topbar-page-name">{embedTitle}</span>
+          <span className="rdk-embed-hint">{t('embed.dragHint', '可拖到另一显示器与主窗口并排')}</span>
+        </div>
+        <div className="topbar-right">
+          {currentDevice && (
+            <div className="topbar-device-chip">
+              <span className={`status-dot ${deviceOnline ? 'online' : 'offline'}`} />
+              <span className="mono truncate" style={{ maxWidth: 180 }}>
+                {currentDevice.name} · {currentDevice.ip}
+              </span>
+            </div>
+          )}
+          {typeof window !== 'undefined' && window.opener && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={focusMain}>
+              {t('embed.focusMain', '切换到主窗口')}
+            </button>
+          )}
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => window.close()}>
+            {t('embed.closePopout', '关闭副屏')}
+          </button>
+        </div>
+      </header>
+
+      <main className="content-area rdk-embed-main">
+        <ErrorBoundary>
+          {panel === 'openclaw' ? (
+            <Suspense fallback={<RouteFallback />}>
+              <div className="page-slot page-enter rdk-embed-openclaw-slot">
+                <OpenClaw />
+              </div>
+            </Suspense>
+          ) : (
+            <div className="rdk-embed-ai-dock-placeholder" aria-hidden>
+              <p>{t('embed.aiDock.placeholder', '下方为 RDKClaw 对话区，可与主窗口的 IDE / OpenClaw 并排使用。')}</p>
+            </div>
+          )}
+        </ErrorBoundary>
+        <AIDock />
+      </main>
+
+      <Toasts />
+      <ElectronSerialPortPicker />
+      <AddDeviceModal />
+      <SettingsPanel />
+      <ConfirmDialog />
+      <StudioBrowserCaptureBridge />
+    </div>
+  );
+}
+
 function SSOGate({ children }: { children: ReactNode }) {
   const { loading, ssoRequired, user } = useAuth();
 
@@ -308,15 +395,18 @@ function SSOGate({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  const embedPanel = typeof window !== 'undefined' ? getRdkEmbedPanel() : null;
+
   useEffect(() => {
     initAnalyticsFlushListeners();
     /* 默认工作台分包预热，缩短首进工作台的等待 */
     void import('./components/Dashboard');
   }, []);
+
   return (
     <ErrorBoundary>
       <SSOGate>
-        <AppShell />
+        {embedPanel ? <EmbedAppShell panel={embedPanel} /> : <AppShell />}
       </SSOGate>
     </ErrorBoundary>
   );

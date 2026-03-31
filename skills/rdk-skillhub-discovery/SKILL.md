@@ -1,6 +1,6 @@
 ---
 name: SkillHub Discovery
-description: 当当前对话需要某类自动化/集成能力时，主动用 SkillHub（ClawHub 生态）检索是否已有可安装技能，并给出 slug 与摘要。触发：找技能、SkillHub、社区技能、有没有现成 skill、能否装一个 xxx 技能、clawhub。
+description: 当对话需要自动化/集成能力或能力缺口时，优先用内置 `find_skills`（腾讯 SkillHub + 本地 SKILL）检索可安装或可读本机技能。触发：找技能、SkillHub、社区技能、现成 skill、安装技能、解决不了、缺工具、clawhub。
 version: 1.0.0
 trigger: SkillHub,技能检索,社区技能,clawhub,现成技能,安装技能,找技能,有没有技能,skill 推荐,技能推荐,OpenClaw 技能
 risk: low
@@ -17,20 +17,22 @@ category: Meta
 
 ## 何时主动使用
 
-在**不重复打扰用户**的前提下，当满足以下任一情况时，**优先调用 `skillhub_search`** 再回答：
+在**不重复打扰用户**的前提下，当满足以下任一情况时，**优先调用内置 `find_skills`**（默认腾讯 SkillHub API + 工作区 SKILL.md）再回答：
 
-1. 用户明确想「找技能 / 装技能 / SkillHub / clawhub」。
+1. 用户明确想「找技能 / 装技能 / SkillHub / clawhub / find-skills」。
 2. 用户描述的目标明显可通过**现成 OpenClaw 技能包**完成（例如：天气、搜索、PDF、Obsidian、浏览器自动化、IM 等），而你尚未确认是否存在社区方案。
-3. 对话陷入「缺工具 / 要自己写脚本」时，**先检索一次**是否有现成技能可缩短路径。
+3. 对话陷入「缺工具 / 解决不了 / 要自己写脚本」时，**先检索一次**本地 + SkillHub 是否有现成技能。
 
 若用户仅做闲聊、或问题明显与技能生态无关，**不必**例行调用。
 
 ## 检索策略
 
-1. **提炼查询词**：用 1～3 个英文或中文关键词概括用户目标（例：`weather`、`百度`、`pdf edit`、`obsidian`）。避免整段对话复制进 `query`。
-2. **调用工具**：`skillhub_search`，`limit` 建议 8～15。
-3. **解读结果**：按 `score` 或相关性向用户展示 **前若干条**，每条包含：**slug**、**displayName**、**summary**、**version**（若有）。
-4. **无结果时**：缩小或改写关键词再搜一次；仍无则如实说明，并回到 `web_search` / 设备能力等其它路径。
+1. **提炼查询词**：用 1～5 个英文或中文关键词概括用户目标（例：`weather`、`百度`、`pdf`、`obsidian`）。避免整段对话复制进 `query`。
+2. **调用工具**：`find_skills`（一次拿到 SkillHub 条目 + 本地匹配路径）；若需与 `CLAWHUB_REGISTRY` 换源行为完全一致，可再补充 `skillhub_search`。
+3. **解读结果**：先看 SkillHub `slug` / 摘要；再看 `local_workspace_skills` 路径，必要时 `read` 完整 SKILL.md。
+4. **无结果时**：改写关键词再 `find_skills`；仍无则如实说明，并回到 `web_search` / 设备能力等路径。
+
+5. **内化**：仅当用户任务**已成功**且确实采用了某检索到的技能后，再调用 `skill_mark_validated`；检索本身只记审计日志，不等于「已学会」。
 
 ## 安装与后续（说明即可，勿虚构已安装）
 

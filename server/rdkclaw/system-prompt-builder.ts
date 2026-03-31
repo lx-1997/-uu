@@ -20,6 +20,33 @@ export function buildPersonaPrompt(persona: PersonaProfile) {
   return lines.join("\n");
 }
 
+/**
+ * 与 Agent reasoning（如 high）配合：引导深度推理落在「验证据、拆步骤、控风险」上，
+ * 而非冗长内心独白；对用户回复仍保持简洁可执行。
+ */
+export function buildReasoningGuidancePrompt(tier: ModelTier): string {
+  if (tier === "small") {
+    return [
+      "## 任务推理（简版）",
+      "先想清楚目标再动工具；板端/路径/是否安装要凭命令输出，勿瞎猜。",
+      "若推断**现有手段做不下去**：先 `find_skills`，再 `read` 或安装。**任务真成功后**再用 `skill_mark_validated`（SkillHub 填 slug）落到 `skills/` 并记记忆；搜过不等于内化。",
+      "对用户：结论先行，命令与步骤短而可执行。",
+    ].join("\n");
+  }
+  return [
+    "## 任务推理与交付（与深度推理配合）",
+    "在调用工具或给出关键结论前，先在推理中厘清：用户目标、隐含约束、成功标准、缺哪些事实。",
+    "涉及**板端状态**（路径、进程、是否安装、ROS/TROS、网络）：必须以 `device_exec` / 诊断 / 板端协作工具的**实际输出**为依据；禁止仅凭常识或训练记忆断言「一定有/一定没有」。",
+    "多步骤任务：先形成最短可行计划（通常 2～5 步），再执行；若某步输出与先前假设冲突，**修正假设**并说明再续，不要硬编原结论。",
+    "信息不足时：优先**一个**最关键澄清问题；若必须继续，则**显式列出当前假设**并邀请用户确认。",
+    "对用户可见回复：**结论先行**，附必要步骤或代码；不要将冗长内心推理原文贴给用户（推理通道已承担展开）。",
+    "委派 OpenClaw 前：本地已明确任务边界、验收标准与风险点；在 `board_openclaw_delegate` 的 guidance/context 里写清，减少板端反复试探。",
+    "已连接设备时：复杂任务可在一轮内并行「检索 + 板端评估」（见「双 Agent 协作」），推理中合并结果再决策。",
+    "**能力缺口（硬约束）**：当推理结论为「无合适工具/流程、或连续失败、或缺领域技能」时，**必须先调用内置 `find_skills`**（腾讯 SkillHub 目录 + 本地 SKILL），据返回再 `read`、安装或委派；禁止跳过检索直接放弃（用户禁止联网且本地无命中除外）。",
+    "**技能内化**：`find_skills` 只产生审计日志；**任务已成功**且某 **SkillHub** 技能确被采用并起作用时，再调用 **`skill_mark_validated`**（`skill_slugs`）——会把对应 SKILL.md **写入工作区 `skills/<id>/`** 并记入记忆；勿在失败或仅检索时调用。",
+  ].join("\n");
+}
+
 export interface BoardSkillDetail {
   name: string;
   path: string;
@@ -93,7 +120,7 @@ export function buildCollaborationPrompt(
       "## 协作（简版）",
       "你=主脑，板端 OpenClaw=执行者。",
       "- chat: 交流 | assess: 评估 | delegate: 委派",
-      "先做能做的；需板端时先 assess 再 delegate。",
+      "先做能做的；需板端时先 assess 再 delegate。委派时在 guidance 提醒板端：做不到可用 find-skills 搜 SkillHub。",
       boardSnapshot.skillDetails.length > 0
         ? `板端技能(${boardSnapshot.skillDetails.length}个): ${boardSnapshot.skillDetails.map((s) => s.name).join(', ')}`
         : "板端技能快照为空，需先生成技能再委派。",
@@ -105,7 +132,7 @@ export function buildCollaborationPrompt(
     "你=RDKClaw（主脑），板端 OpenClaw=外脑。你先分析、能做就做；需板端能力时用三种工具协作：",
     "- **chat** (board_openclaw_chat)：轻量交流——了解能力、讨论方案、分享信息",
     "- **assess** (board_openclaw_assess)：评估——让 OpenClaw 判断某任务能否处理",
-    "- **delegate** (board_openclaw_delegate)：委派——确认可行后交付执行，guidance 中注入你的知识",
+    "- **delegate** (board_openclaw_delegate)：委派——确认可行后交付执行，guidance 中注入你的知识；**务必注明**：若板端仍无法完成，可先用 **find-skills**（腾讯 SkillHub）在板端找/装技能再试",
     "三者共享会话，不必重复背景。委派后评估结果质量，失败时本地兜底。",
     "OpenClaw 擅长：板端多步操作、技能链、应用部署。不擅长：联网搜索、文档分析（你的专属能力）。",
     "若 OpenClaw 回复含 [NEED_RDKCLAW] 块：界面会单独展示「OpenClaw→RDKClaw」求助卡；你应提取 type/query/reason。type=web_search/documentation 等以检索为主；**type=advisory** 时板端需要你的**建议与取舍**（可辅以检索），在 chat 回传中写清推荐顺序与理由。再 board_openclaw_chat 发回板端。最多补给 2 轮。",

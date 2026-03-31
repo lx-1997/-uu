@@ -4,7 +4,10 @@ import { sanitizeSecrets } from "./secret-sanitizer.js";
 
 export function resolveExecutor(toolName?: string) {
   if (!toolName) return "rdkclaw_local";
-  return toolName.startsWith("board_openclaw_") ? "board_openclaw" : "rdkclaw_local";
+  if (toolName.startsWith("board_openclaw_")) return "board_openclaw";
+  // 跨板调度同样走板端 OpenClaw 网关，与 Studio 侧协作展示一致
+  if (toolName === "fleet_board_delegate" || toolName === "fleet_board_broadcast") return "board_openclaw";
+  return "rdkclaw_local";
 }
 
 export function mapMiniEvent(
@@ -14,6 +17,8 @@ export function mapMiniEvent(
   switch (event.type) {
     case "message_delta":
       return { type: "text", data: { delta: sanitizeSecrets(event.delta), ...base } };
+    case "thinking_delta":
+      return { type: "thinking_delta", data: { delta: sanitizeSecrets(event.delta), ...base } };
     case "turn_start":
       return { type: "turn_start", data: { turn: event.turn, ...base } };
     case "turn_end":

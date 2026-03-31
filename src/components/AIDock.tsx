@@ -9,6 +9,7 @@ import type { AgentAttachmentPayload } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, fetchApi } from '../utils/apiBase';
+import { getRdkEmbedPanel, getRdkEmbedDockCtx, openRdkClawChatPopout, openOpenClawPopout } from '../utils/embed-mode';
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText } from '../utils/chat-message-plain';
@@ -221,6 +222,45 @@ async function fileToBase64(file: File) {
   return btoa(binary);
 }
 
+function ReasoningCollapsible({ block }: { block: Extract<ChatBlock, { type: 'reasoning' }> }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(!block.defaultCollapsed);
+  const summary =
+    block.summary
+    || (block.text.trim().length > 0
+      ? t('dock.reasoning.summaryHasContent', '推理过程 · 点击展开')
+      : t('dock.reasoning.summaryEmpty', '推理过程'));
+  return (
+    <div className={`msg-block reasoning-collapsible ${open ? 'open' : ''}`}>
+      <div className="reasoning-collapsible-toolbar">
+        <button
+          type="button"
+          className="reasoning-collapsible-trigger"
+          onClick={() => setOpen((p) => !p)}
+        >
+          <svg className="reasoning-collapsible-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          <span className="reasoning-collapsible-summary">{summary}</span>
+        </button>
+        {block.text.trim().length > 0 && (
+          <button
+            type="button"
+            className="chat-panel-action"
+            title={t('dock.reasoning.copyTitle', '复制推理全文')}
+            onClick={() => { void copyDockPlainText(block.text); }}
+          >
+            {t('dock.reasoning.copy', '复制')}
+          </button>
+        )}
+      </div>
+      {open && (
+        <pre className="reasoning-collapsible-body">{block.text}</pre>
+      )}
+    </div>
+  );
+}
+
 function StatusCollapsible({ block }: { block: Extract<ChatBlock, { type: 'status' }> }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(!block.defaultCollapsed);
@@ -349,11 +389,12 @@ function BlockRenderer({
   const [expandedTerminal, setExpandedTerminal] = useState(false);
   const [expandedCollab, setExpandedCollab] = useState(false);
 
+  const needsRosAnimation = block.type === 'image' && !block.src;
   useEffect(() => {
-    if (block.type !== 'image') return;
+    if (!needsRosAnimation) return;
     const timer = window.setInterval(() => setRosFrame((p) => (p + 1) % 3), 1200);
     return () => window.clearInterval(timer);
-  }, [block.type]);
+  }, [needsRosAnimation]);
 
   if (block.type === 'terminal') {
     const previewLines = Math.max(3, block.previewLines ?? 10);
@@ -735,6 +776,32 @@ function BlockRenderer({
     );
   }
 
+  if (block.type === 'reasoning') {
+    if (block.collapsible !== false) {
+      return <ReasoningCollapsible block={block} />;
+    }
+    return (
+      <div className="msg-block reasoning-collapsible open">
+        <div className="reasoning-collapsible-toolbar">
+          <span className="reasoning-collapsible-summary reasoning-collapsible-summary--static">
+            {t('dock.reasoning.title', '推理过程')}
+          </span>
+          {block.text.trim().length > 0 && (
+            <button
+              type="button"
+              className="chat-panel-action"
+              title={t('dock.reasoning.copyTitle', '复制推理全文')}
+              onClick={() => { void copyDockPlainText(block.text); }}
+            >
+              {t('dock.reasoning.copy', '复制')}
+            </button>
+          )}
+        </div>
+        <pre className="reasoning-collapsible-body">{block.text}</pre>
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -828,6 +895,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
+    rdkClawRunTimeline, runTimelinePanelOpen, setRunTimelinePanelOpen,
     handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
@@ -870,6 +938,9 @@ export default function AIDock() {
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
     [t],
   );
+
+  const rdkEmbedPanel = useMemo(() => (typeof window !== 'undefined' ? getRdkEmbedPanel() : null), []);
+  const embedDockCtxTab = useMemo(() => getRdkEmbedDockCtx(), []);
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
   const [dockOcMode, setDockOcMode] = useState(true);
@@ -934,6 +1005,12 @@ export default function AIDock() {
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const voiceTranscriptRef = useRef('');
   const isRecordingRef = useRef(false);
+
+  useEffect(() => {
+    if (rdkEmbedPanel !== 'ai-dock') return;
+    setChatExpanded(true);
+    setWorkspaceMode(true);
+  }, [rdkEmbedPanel, setChatExpanded]);
 
   useEffect(() => {
     if (!inputContextMenu) return;
@@ -1220,6 +1297,8 @@ export default function AIDock() {
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
   const hiddenCount = Math.max(0, chatMessages.length - visibleMessages.length);
   const shouldKeepStatusInCompact = useCallback((block: Extract<ChatBlock, { type: 'status' }>) => {
+    /** RDKClaw run_progress（⏳ 进度）；极简模式也保留，避免长任务像「死机」 */
+    if ((block as { _runProgress?: boolean })._runProgress) return true;
     const summary = block.summary || '';
     if (/Time|耗时|Token|token|tool|Tool|compact|压缩/i.test(summary)) return true;
     return block.items.some((item) => /失败|错误|异常|提示|拒绝|超时|fail|error|denied|timeout|hint|warning/i.test(`${item.label} ${item.value}`));
@@ -1228,6 +1307,7 @@ export default function AIDock() {
     if (!compactFlowMode) return blocks;
     return blocks.filter((block) => {
       if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result' || block.type === 'recommendation' || block.type === 'soul-update') return true;
+      if (block.type === 'reasoning') return true;
       if (block.type === 'collab') return true;
       if (block.type === 'image' || block.type === 'video' || block.type === 'file' || block.type === 'code') return true;
       if (block.type === 'status') return shouldKeepStatusInCompact(block);
@@ -1443,7 +1523,9 @@ export default function AIDock() {
     { id: 'hw', icon: '🌡️', label: t('dock.quick.def.hw.label', '硬件状态'), text: t('dock.quick.def.hw.text', '检查当前设备的 BPU 负载和芯片温度') },
     { id: 'plan', icon: '📋', label: t('dock.quick.def.plan.label', '执行计划'), text: t('dock.quick.def.plan.text', '把当前需求拆成 3 步并立即开始执行第一步') },
   ], [t]);
-  const effectiveTab = (activeTab === 'openclaw' && !dockOcMode) ? '_rdkclaw_fallback' : activeTab;
+  const effectiveTab = embedDockCtxTab
+    ? (embedDockCtxTab === 'openclaw' && !dockOcMode ? '_rdkclaw_fallback' : embedDockCtxTab)
+    : ((activeTab === 'openclaw' && !dockOcMode) ? '_rdkclaw_fallback' : activeTab);
   const quickPrompts = promptsByTab[effectiveTab] ?? defaultPrompts;
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
@@ -1524,6 +1606,10 @@ export default function AIDock() {
   };
 
   const closeDock = () => {
+    if (rdkEmbedPanel) {
+      window.close();
+      return;
+    }
     setChatExpanded(false);
     setWorkspaceMode(false);
     setShowAllMessages(false);
@@ -1579,6 +1665,35 @@ export default function AIDock() {
               </div>
             </div>
             <div className="dock-header-right">
+              {!rdkEmbedPanel && (
+                <>
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    onClick={() => openRdkClawChatPopout({ dockCtx: activeTab })}
+                    title={t('dock.popout.clawTitle', '新窗口打开 RDKClaw 对话（可与 IDE / OpenClaw 并排）')}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                  </button>
+                  {activeTab === 'openclaw' && (
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      onClick={() => openOpenClawPopout()}
+                      title={t('dock.popout.openclawTitle', '新窗口仅打开 OpenClaw 页面')}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M9 9h6v6H9z" />
+                      </svg>
+                    </button>
+                  )}
+                </>
+              )}
               {isSubpageTab && (
                 <button
                   className="btn-icon"
@@ -1598,6 +1713,25 @@ export default function AIDock() {
                 title={compactFlowMode ? t('dock.compact.titleOn', '已开启极简流程视图（点击查看完整过程）') : t('dock.compact.titleOff', '已关闭极简流程视图（点击只看结论）')}
               >
                 {compactFlowMode ? t('dock.compact.btnCompact', '极简') : t('dock.compact.btnFull', '完整')}
+              </button>
+              <button
+                type="button"
+                className={`btn-icon dock-timeline-toggle ${runTimelinePanelOpen ? 'active' : ''}`}
+                onClick={() => setRunTimelinePanelOpen(!runTimelinePanelOpen)}
+                title={t('dock.timeline.toggleTitle', '运行时间线（当前轮次步骤与心跳）')}
+                aria-expanded={runTimelinePanelOpen}
+              >
+                <span className="dock-timeline-btn-inner">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <line x1="6" y1="4" x2="6" y2="20" />
+                    <circle cx="6" cy="8" r="1.5" fill="currentColor" stroke="none" />
+                    <circle cx="6" cy="14" r="1.5" fill="currentColor" stroke="none" />
+                    <path d="M9 8h10M9 14h7" />
+                  </svg>
+                  {aiTyping && rdkClawRunTimeline.length > 0 && !runTimelinePanelOpen ? (
+                    <span className="dock-timeline-live-dot" aria-hidden />
+                  ) : null}
+                </span>
               </button>
               {taskHistory.length > 0 && (
                 <button className="btn-icon" onClick={() => setShowTaskPanel(!showTaskPanel)} title={t('dock.task.panelTitle', '任务')}>
@@ -1621,6 +1755,49 @@ export default function AIDock() {
               <button className="btn-icon" onClick={closeDock} title={t('dock.task.closeTitle', '关闭')}>{Icon.close}</button>
             </div>
           </div>
+
+          {/* RDKClaw 运行时间线（当前 SSE 轮次） */}
+          {runTimelinePanelOpen && (
+            <div className="dock-timeline" role="region" aria-label={t('dock.timeline.regionLabel', 'RDKClaw 运行时间线')}>
+              <div className="dock-timeline-head">
+                <span className="dock-timeline-title">{t('dock.timeline.title', '运行时间线')}</span>
+                <span className="dock-timeline-sub">
+                  {rdkClawRunTimeline.length === 0
+                    ? t('dock.timeline.emptyHint', '发送消息后，步骤与板端工具会出现在此')
+                    : tfDock('dock.timeline.count', '共 {{n}} 条事件', { n: rdkClawRunTimeline.length })}
+                </span>
+              </div>
+              {rdkClawRunTimeline.length === 0 ? (
+                <div className="dock-timeline-empty">{t('dock.timeline.waitStart', '等待本轮对话开始…')}</div>
+              ) : (
+                <ul className="dock-timeline-list">
+                  {(() => {
+                    const t0 = rdkClawRunTimeline[0]?.at ?? Date.now();
+                    return rdkClawRunTimeline.map((e) => {
+                      const relS = Math.max(0, (e.at - t0) / 1000);
+                      const clock =
+                        relS < 60
+                          ? `+${relS.toFixed(1)}s`
+                          : `+${Math.floor(relS / 60)}m ${Math.floor(relS % 60)}s`;
+                      return (
+                        <li key={e.id} className={`dock-timeline-item kind-${e.kind}`}>
+                          <span className="dock-timeline-clock" title={new Date(e.at).toLocaleTimeString()}>
+                            {clock}
+                          </span>
+                          <div className="dock-timeline-body">
+                            <span className="dock-timeline-item-title">{e.title}</span>
+                            {e.detail ? (
+                              <pre className="dock-timeline-detail">{e.detail}</pre>
+                            ) : null}
+                          </div>
+                        </li>
+                      );
+                    });
+                  })()}
+                </ul>
+              )}
+            </div>
+          )}
 
           {/* Task panel */}
           {showTaskPanel && (

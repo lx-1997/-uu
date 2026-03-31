@@ -27,7 +27,7 @@ const WORKSPACE_HEALTH_SCRIPT = [
   '_dpkg=$(dpkg -l 2>/dev/null | awk "/^ii/{print \\$2}")',
   '_ss=$(ss -lntp 2>/dev/null)',
   '_ps=$(ps -eo args --no-headers 2>/dev/null)',
-  'test -f /opt/tros/humble/setup.bash && . /opt/tros/humble/setup.bash 2>/dev/null || true',
+  'for _tros_setup in /opt/tros/*/setup.bash; do [ -f "$_tros_setup" ] && . "$_tros_setup" 2>/dev/null && break; done; true',
   'python_ready=$(command -v python3 >/dev/null 2>&1 && echo 1 || echo 0)',
   'git_ready=$(command -v git >/dev/null 2>&1 && echo 1 || echo 0)',
   'node_ready=$(command -v node >/dev/null 2>&1 && echo 1 || echo 0)',

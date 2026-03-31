@@ -144,9 +144,21 @@ function requiresXburn(deviceKey: string): boolean {
   return deviceKey === 's100' || deviceKey.endsWith('-emmc');
 }
 
-function isCompressedFile(filePath: string): boolean {
+/** TF 卡写盘：需自动解压的镜像（与参考 Studio 非 S100 一致为 .xz；另支持 gzip 的 .gz/.img.gz，不含 .tar.gz）。S100 的 product.zip 走 xburn，不在此列。 */
+function needsTfImageDecompress(filePath: string): boolean {
   const lower = filePath.toLowerCase();
-  return lower.endsWith('.xz') || lower.endsWith('.zip');
+  if (lower.endsWith('.xz')) return true;
+  if (lower.endsWith('.tar.gz')) return false;
+  if (lower.endsWith('.gz')) return true;
+  return false;
+}
+
+function isValidTfLocalImagePath(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith('.img') || lower.endsWith('.xz')) return true;
+  if (lower.endsWith('.tar.gz')) return false;
+  if (lower.endsWith('.gz')) return true;
+  return false;
 }
 
 function isSafeFlashTargetDrive(drive: FlashDrive): boolean {
@@ -518,17 +530,27 @@ export default function Flasher() {
       setError(t('flasher.err.pickUnsupported', '当前环境不支持文件选择'));
       return;
     }
-    const ext = ['img', 'xz'];
+    const ext = ['img', 'xz', 'gz'];
     const result = await window.rdkDesktop.flashPickImage({
       extensions: ext,
       appendAllFilesFilter: true,
     });
     if (result.ok && result.path) {
       const p = result.path;
-      const lower = p.toLowerCase();
-      if (!lower.endsWith('.img') && !lower.endsWith('.xz')) {
-        setError(t('flasher.err.unsupportedFileType', '不支持该文件类型，请选择 .img 或 .xz 镜像。'));
-        addToast(t('flasher.err.unsupportedFileType', '不支持该文件类型，请选择 .img 或 .xz 镜像。'), 'error');
+      if (!isValidTfLocalImagePath(p)) {
+        setError(
+          t(
+            'flasher.err.unsupportedFileType',
+            '不支持该文件类型，请选择 .img、.xz 或 .gz（如 .img.gz）镜像。',
+          ),
+        );
+        addToast(
+          t(
+            'flasher.err.unsupportedFileType',
+            '不支持该文件类型，请选择 .img、.xz 或 .gz（如 .img.gz）镜像。',
+          ),
+          'error',
+        );
         return;
       }
       setLocalImagePath(p);
@@ -615,7 +637,7 @@ export default function Flasher() {
 
   /* ── decompress image ── */
   const decompressImage = async (filePath: string): Promise<string | null> => {
-    if (!isCompressedFile(filePath)) return filePath;
+    if (!needsTfImageDecompress(filePath)) return filePath;
     if (!window.rdkDesktop?.flashDecompressImage) {
       appendLog(t('flasher.log.decompressUnsupported', '当前环境暂不支持自动解压，请手动解压后选择 .img 文件'));
       setError(t('flasher.err.decompressManual', '请手动解压镜像文件为 .img 后重新选择'));
@@ -655,6 +677,16 @@ export default function Flasher() {
 
     let imgPath = localImagePath;
 
+    if (useLocalImage && imgPath.trim() && !isValidTfLocalImagePath(imgPath.trim())) {
+      const msg = t(
+        'flasher.err.unsupportedFileType',
+        '不支持该文件类型，请选择 .img、.xz 或 .gz（如 .img.gz）镜像。',
+      );
+      setError(msg);
+      addToast(msg, 'error');
+      return;
+    }
+
     if (!useLocalImage && selectedImage) {
       const downloaded = await downloadImage(selectedImage.downloadUrl);
       if (!downloaded) return;
@@ -666,7 +698,7 @@ export default function Flasher() {
       return;
     }
 
-    if (isCompressedFile(imgPath)) {
+    if (needsTfImageDecompress(imgPath)) {
       const decompressed = await decompressImage(imgPath);
       if (!decompressed) return;
       imgPath = decompressed;
@@ -1198,17 +1230,15 @@ export default function Flasher() {
               <div>
                 <div className="section-label">{t('flasher.section.localFile', '本机镜像文件')}</div>
                 <div className="config-section">
-                  <div
-                    className={`config-card ${useLocalImage ? 'selected' : ''}`}
+                  <button
+                    type="button"
+                    className={`config-card flasher-local-file-pick ${useLocalImage ? 'selected' : ''}`}
                     onClick={() => void (isS100Device ? pickS100UnifiedImage() : pickLocalImage())}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        void (isS100Device ? pickS100UnifiedImage() : pickLocalImage());
-                      }
-                    }}
+                    aria-label={
+                      isS100Device
+                        ? t('flasher.s100.pickFirmware', '选择 product.zip 或已解压文件夹…')
+                        : t('flasher.localFile.pick', '选择本机镜像文件...')
+                    }
                   >
                     <div className="config-card-head">
                       <div className="config-card-name">
@@ -1222,7 +1252,7 @@ export default function Flasher() {
                       </div>
                     </div>
                     {localImagePath && <div className="config-card-desc" style={{ wordBreak: 'break-all' }}>{localImagePath}</div>}
-                  </div>
+                  </button>
                   <div className="config-actions" style={{ width: '100%', alignItems: 'stretch' }}>
                     <input
                       className="input"
@@ -1233,7 +1263,7 @@ export default function Flasher() {
                             'flasher.s100.pathPlaceholder',
                             '请填写或浏览：product.zip 或已解压固件文件夹路径',
                           )
-                          : t('flasher.localFile.placeholder', '或手动输入路径 (.img / .xz)')
+                          : t('flasher.localFile.placeholder', '或手动输入路径 (.img / .xz / .gz)')
                       }
                       value={localImagePath}
                       onChange={(e) => { setLocalImagePath(e.target.value); if (e.target.value) setUseLocalImage(true); }}
@@ -1561,7 +1591,7 @@ export default function Flasher() {
                 else if (phase === 'error' && ci >= 0 && pi === ci) state = 'error';
 
                 if (p === 'downloading' && useLocalImage && !isWinS100OneClick) state = 'skip';
-                if (p === 'decompressing' && localImagePath && !isCompressedFile(localImagePath) && !isWinS100OneClick) {
+                if (p === 'decompressing' && localImagePath && !needsTfImageDecompress(localImagePath) && !isWinS100OneClick) {
                   state = 'skip';
                 }
                 if (p === 'verifying' && needsXburn) state = 'skip';

@@ -94,6 +94,8 @@ export type ChatBlock =
   /** RDKClaw ↔ 板端 OpenClaw 协作：区分双方输出；outbound=发给板端，hint=结果中的 RDKClaw 说明 */
   | { type: 'collab'; side: 'openclaw' | 'rdkclaw'; collabRole?: 'outbound' | 'hint' | 'reverse' | 'wait_hint'; title?: string; subtitle?: string; lines: string[]; collapsible?: boolean; previewLines?: number }
   | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }>; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }
+  /** 模型扩展思考（reasoning / thinking_delta 流式合并） */
+  | { type: 'reasoning'; text: string; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }
   | { type: 'confirm'; text: string; confirmId: string }
   | { type: 'approval'; text: string; approvalId: string; runId?: string; risk?: 'low' | 'medium' | 'high'; executor?: string }
   | { type: 'progress'; steps: Array<{ label: string; status: 'done' | 'running' | 'pending' }>; taskId?: string }

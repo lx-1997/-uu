@@ -203,7 +203,10 @@ export default function OnboardingWizard() {
     setOcChecking(true);
     setDeviceOnline(null);
     checkDevicePing(currentDevice.id)
-      .then((r) => setDeviceOnline(!!r.ok))
+      .then((r) => {
+        if (r.status === 'transient') return;
+        setDeviceOnline(!!r.ok);
+      })
       .catch(() => setDeviceOnline(false));
     fetchDeviceOpenClawHealth(currentDevice.id)
       .then(r => {
@@ -268,7 +271,13 @@ export default function OnboardingWizard() {
       }
 
       if (job.status === 'error') {
-        const msg = job.error || tRef.current('onboard.deploy.failShort', '部署失败，请查看日志');
+        const msg =
+          job.error === 'oc.deployPoll.interrupted'
+            ? tRef.current(
+                'oc.deployPoll.interrupted',
+                '多次无法获取部署进度（网络或服务端可能异常）。请打开「OpenClaw」页面查看日志，或检查网络后重新发起一键部署。',
+              )
+            : job.error || tRef.current('onboard.deploy.failShort', '部署失败，请查看日志');
         setOcInstallLog((prev) => `${prev}\n[错误] ${msg}\n`);
         addToast(tRef.current('onboard.deploy.failToast', 'OpenClaw 一键部署失败，请查看日志'), 'warning');
         return;
@@ -327,6 +336,10 @@ export default function OnboardingWizard() {
 
     try {
       const ping = await checkDevicePing(currentDevice.id);
+      if (ping.status === 'transient') {
+        addToast(t('onboard.toast.pingTransient', '安装前检测：与服务端通信不稳定，请稍后再试'), 'warning');
+        return;
+      }
       if (!ping.ok) {
         addToast(t('onboard.toast.pingFail', '安装前检测：设备未响应，请检查网络后重试'), 'warning');
         return;

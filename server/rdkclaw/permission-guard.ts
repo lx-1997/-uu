@@ -268,7 +268,7 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
   if (/write|upload|install|upgrade|restart|switch|remove|delete|flash|doctor|pairing_approve|pairing_reject|uninstall/i.test(toolName)) {
     return { blocked: false, risk: 'high' };
   }
-  if (/read|list|status|health|check|topics|nodes|diagnose|search|memory_/.test(toolName)) {
+  if (/read|list|status|health|check|topics|nodes|diagnose|search|find_skills|skill_mark_validated|memory_/.test(toolName)) {
     return { blocked: false, risk: 'low' };
   }
   return { blocked: false, risk: 'medium' };

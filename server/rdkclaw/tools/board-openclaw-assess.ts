@@ -1,4 +1,4 @@
-import type { Tool } from "../../agent/tools/types.js";
+import type { Tool, ToolContext } from "../../agent/tools/types.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager } from "../../managers/OpenClawDeploymentManager.js";
 import type { Device } from "../../../shared/types.js";
@@ -122,6 +122,7 @@ export function boardOpenClawAssessTool(
   manager: OpenClawDeploymentManager,
   conversationId?: string,
   boardSkills?: BoardSkillInfo[],
+  onProgress?: (chunk: string, toolCallId?: string) => void,
 ): Tool<{
   task: string;
   context?: string;
@@ -143,7 +144,7 @@ export function boardOpenClawAssessTool(
       },
       required: ["task"],
     },
-    async execute(input) {
+    async execute(input, ctx: ToolContext) {
       const devices = await readDevices();
       const device = devices.find((d) => d.id === deviceId);
       if (!device) {
@@ -176,6 +177,7 @@ export function boardOpenClawAssessTool(
           prompt,
           (chunk) => {
             output += chunk;
+            onProgress?.(chunk, ctx.toolCallId);
           },
           (success) => {
             if (!success) {

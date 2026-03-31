@@ -1,6 +1,6 @@
 ---
 name: RDK ROS
-description: TROS（板端 ROS2 兼容栈）话题与 rosbag：扫描话题、列出节点、录制/停止。RDK 默认是 TROS 而非独立「ROS 发行版」；勿因 which ros2 为空就断言无环境。触发词：ROS、ROS2、TROS、tros、话题、节点、rosbag、录制、rosbridge。
+description: TROS（TogetheROS.Bot，板端 ROS2 兼容栈；不是涂鸦/Tuya IoT 的「TuyaROS2」）话题与节点、rosbag。RDK 默认是 /opt/tros 下的 TROS；未 source 时 which ros2 可能为空——应先 ls /opt/tros 或 source …/setup.bash 再判断。触发：ROS、ROS2、节点、话题、rosbag、rosbridge。
 version: 1.1.0
 trigger: ros,topic,话题,节点,rosbag,录制,rosbridge,ROS2,扫描话题,TROS,tros,setup.bash,bashrc
 risk: low
@@ -11,7 +11,7 @@ approval_level: none
 cooldown_seconds: 0
 scheduler_template: none
 category: Procedure
-disableModelInvocation: true
+disableModelInvocation: false
 ---
 
 # RDK ROS（TROS / ROS2）

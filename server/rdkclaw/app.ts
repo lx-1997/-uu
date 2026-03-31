@@ -13,6 +13,8 @@ import {
   getBaseUrl,
   loadProviderConfig,
   warmupModelCapabilities,
+  rdkclawShouldStreamThinking,
+  resolveRdkclawAgentReasoning,
   type ProviderConfig,
 } from "../agent/provider-setup.js";
 import { lookupModelCapabilities } from "../agent/model-registry.js";
@@ -30,6 +32,7 @@ import { createForumTools } from "../agent/tools/forum-tools.js";
 import { ForumAuthStore } from "./forum-auth-store.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
 import { createSkillhubTools } from "../agent/tools/skillhub-tools.js";
+import { createSkillDiscoveryTools } from "../agent/tools/skill-discovery-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { readDevices } from "../storage.js";
 import { CONVERSATION_SCHEMA, recordConversationTurn } from "../conversation-log.js";
@@ -73,6 +76,7 @@ import { TextDeltaSmoother } from "./text-delta-smoother.js";
 import {
   classifyModelTier,
   buildPersonaPrompt,
+  buildReasoningGuidancePrompt,
   buildCollaborationPrompt,
   buildStudioUiHintsPrompt,
   type BoardSnapshot,
@@ -164,7 +168,6 @@ function resolveProviderConfig(): ProviderConfig {
     baseUrl: process.env.OPENAI_BASE_URL || DEFAULT_CONFIG.baseUrl,
   };
 }
-
 
 function resolveBoardDevicePassword(device: { username: string; password?: string }) {
   const persisted = device.password ?? "";
@@ -635,6 +638,13 @@ export class RDKClawApp {
       ...createStudioTools(this.autonomyRuntime),
       ...createAttachmentTools(sessionAttachments, providerConfig, base.sessionId),
       ...createDeviceManagerTools(this.switchDeviceCallback),
+      ...createSkillDiscoveryTools({
+        matchLocal: (query) => this.skills.matchByText(query).slice(0, 12),
+        remoteEnabled: policy.network.enabled,
+        afterSkillFilesMaterialized: () => {
+          this.reloadSkills();
+        },
+      }),
     ];
     if (policy.network.enabled) {
       tools.push(
@@ -665,7 +675,22 @@ export class RDKClawApp {
         path: s.path,
         description: s.description,
       }));
-      tools.push(boardOpenClawAssessTool(req.deviceId, this.openClawManager, base.sessionId, skillsForBoard));
+      tools.push(
+        boardOpenClawAssessTool(req.deviceId, this.openClawManager, base.sessionId, skillsForBoard, (chunk, toolCallId) => {
+          emitEvent({
+            type: "tool_progress",
+            data: {
+              ...base,
+              toolName: "board_openclaw_assess",
+              name: "board_openclaw_assess",
+              toolCallId: toolCallId ?? "",
+              phase: "running",
+              executor: "board_openclaw",
+              chunk,
+            },
+          });
+        }),
+      );
       tools.push(
         boardOpenClawChatTool(req.deviceId, this.openClawManager, base.sessionId, (chunk, toolCallId, meta) => {
           emitEvent({
@@ -709,7 +734,7 @@ export class RDKClawApp {
             name: 'fleet_board_delegate',
             toolCallId: toolCallId ?? '',
             phase: 'running',
-            executor: 'fleet',
+            executor: 'board_openclaw',
             chunk,
           },
         });
@@ -723,7 +748,7 @@ export class RDKClawApp {
             name: 'fleet_board_broadcast',
             toolCallId: toolCallId ?? '',
             phase: 'running',
-            executor: 'fleet',
+            executor: 'board_openclaw',
             chunk,
           },
         });
@@ -891,6 +916,7 @@ export class RDKClawApp {
     const modelTier = classifyModelTier(modelCaps.contextWindow, modelCaps.maxOutputTokens);
     const systemPrompt = [
       buildPersonaPrompt(persona),
+      buildReasoningGuidancePrompt(modelTier),
       deviceProfile
         ? `当前平台: ${deviceProfile.displayName} (${deviceProfile.bpuTops}TOPS, ${deviceProfile.cpu}, ${deviceProfile.ramGb}GB RAM)。${deviceProfile.capabilityNotes?.length ? '能力: ' + deviceProfile.capabilityNotes.join('；') : ''}${deviceProfile.limitations.length ? '。限制: ' + deviceProfile.limitations.join('；') : ''}`
         : "",
@@ -904,6 +930,10 @@ export class RDKClawApp {
                 ? "当前板型已识别，建议 web_fetch 入口：" + getResearchSeeds(plat).join(" | ")
                 : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。";
             })(),
+            "## RDK 板端 ROS 环境（易误判）",
+            "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
+            "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
+            "ROS/节点/话题类任务可 `read` 工作区 skills 中的 RDK ROS（rdk-ros）与 RDK Board Knowledge（rdk-board-knowledge）的 SKILL.md。",
             "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。",
           ].join("\n")
         : "",
@@ -928,6 +958,18 @@ export class RDKClawApp {
       modelTier === 'small'
         ? "记住：发现用户偏好→memory_save；重复场景→创建技能。"
         : "## 用户理解\n对话中注意捕捉用户偏好和习惯，用 memory_save 保存重要信息，用 memory_search 回顾历史。发现反复出现的操作模式时主动创建技能。",
+      policy.network.enabled
+        ? [
+            "## 内置 find-skills（腾讯 SkillHub）",
+            "RDK Studio **默认内置** `find_skills`：优先腾讯 SkillHub，零命中或失败再兜底 **官方 ClawHub**（默认 https://clawhub.ai）。`find_skills` **仅写审计** `.rdkstudio/find-skills-log.jsonl`，**不**因「搜过」就写入长期记忆。" +
+            "若本轮**实际采用**了某 SkillHub 技能且任务**验收成功**，再调用 **`skill_mark_validated`**（填 `skill_slugs` + `task_summary`）：会**下载** SKILL.md 到工作区 `skills/<id>/` 并写入记忆与 `.rdkstudio/validated-skills.jsonl`；纯本地采用的填 `local_skill_refs`（不落盘拉取）。失败、仅浏览、未采用则**禁止**调用。",
+            "**强制**：能力缺口时**必须先 `find_skills`**，再 `read` / 安装 / 执行；不得未检索可复用技能就宣称无法完成（用户明确禁止联网且本地无命中除外）。",
+            "仅需与 `CLAWHUB_REGISTRY` 换源一致时，再用 `skillhub_search`。",
+          ].join("\n")
+        : [
+            "## 内置 find-skills（仅本地）",
+            "联网关闭时无远程 SkillHub；缺流程时用 `find_skills` 匹配本地并 `read` SKILL.md。仅**任务成功**且采用了本地/板端技能后，可用 `skill_mark_validated`（local_skill_refs）内化，勿仅因检索而调用。",
+          ].join("\n"),
       buildForumAuthContextPrompt(),
     ].filter(Boolean).join("\n");
     const warmupKey = `${providerConfig.provider}:${providerConfig.model}`;
@@ -1063,6 +1105,9 @@ export class RDKClawApp {
         boardSnapshot,
       );
 
+    const rdkReasoning = resolveRdkclawAgentReasoning(providerConfig);
+    const streamThinkingToClient = rdkclawShouldStreamThinking(providerConfig);
+
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
@@ -1096,7 +1141,7 @@ export class RDKClawApp {
       enableHeartbeat: true,
       maxTurns: 12,
       temperature: 0.5,
-      reasoning: "medium",
+      reasoning: rdkReasoning === null ? null : rdkReasoning,
       contextTokens: Math.max(16_000, Number(policy.context.contextTokens) || modelCaps.contextWindow),
       runtimePolicy,
     });
@@ -1160,6 +1205,13 @@ export class RDKClawApp {
         textSmoother.push(sanitizeSecrets(event.delta));
         return;
       }
+      // 扩展思考流式块：独立于正文 smoother，避免每个 token 都 flush 正文
+      if (event.type === "thinking_delta") {
+        if (!streamThinkingToClient) return;
+        const mapped = mapMiniEvent(event, base);
+        if (mapped) pushEvent(mapped);
+        return;
+      }
       textSmoother.flushSync();
       const mapped = mapMiniEvent(event, base);
       if (mapped) pushEvent(mapped);
@@ -1169,7 +1221,8 @@ export class RDKClawApp {
       pushEvent({ type: "meta", data: { ...base, executor: "rdkclaw_local", phase: "heartbeat", message: content, reason } });
     });
 
-    const PROGRESS_INTERVAL_MS = 120_000;
+    /** 长任务心跳：过久无推送会像卡住；60s 与板端首包/工具间隔更匹配 */
+    const PROGRESS_INTERVAL_MS = 60_000;
     let progressTick = 0;
     const progressTimer = setInterval(() => {
       if (finished) return;

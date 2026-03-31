@@ -249,6 +249,26 @@ export function verifyDeviceConnection(payload: DevicePayload) {
   });
 }
 
+// ─── TypeC 闪连 API ───
+
+export interface NetworkInterface {
+  name: string;
+  mac: string;
+  addresses: string[];
+  portType?: string;
+}
+
+export function fetchTypecInterfaces() {
+  return request<{ ok: boolean; interfaces: NetworkInterface[] }>('/api/typec/interfaces');
+}
+
+export function configureTypecInterface(interfaceName: string, pcIp: string, netmask?: string) {
+  return request<{ ok: boolean; verified: boolean; output: string }>('/api/typec/configure', {
+    method: 'POST',
+    body: JSON.stringify({ interfaceName, pcIp, netmask }),
+  });
+}
+
 export function removeDevice(deviceId: string) {
   return request<{ removedId: string }>(`/api/devices/${deviceId}`, {
     method: 'DELETE',
@@ -288,6 +308,7 @@ export function fetchAIReply(
 export interface AgentSSEEvent {
   type:
     | 'text'
+    | 'thinking_delta'
     | 'tool_start'
     | 'tool_progress'
     | 'tool_result'
@@ -551,6 +572,8 @@ export function fetchAgentConfig() {
     model?: string;
     hasApiKey?: boolean;
     baseUrl?: string;
+    thinkingDefault?: string;
+    reasoningVisibility?: string;
     activeModelId?: string | null;
     envApiKeyAvailable?: boolean;
     /** 安装包内置默认模型（bootstrap），用于「恢复默认」 */
@@ -568,6 +591,8 @@ export function fetchAgentConfig() {
       hasApiKey: boolean;
       baseUrl?: string;
       isActive: boolean;
+      thinkingDefault?: string;
+      reasoningVisibility?: string;
     }>;
   }>('/api/agent/config');
 }
@@ -868,6 +893,8 @@ export function saveAgentConfig(config: {
   apiKey?: string;
   baseUrl?: string;
   setActive?: boolean;
+  thinkingDefault?: string;
+  reasoningVisibility?: string;
 }) {
   return request<{
     ok: boolean;
@@ -896,6 +923,8 @@ export interface AgentConfigExportPayload {
     apiKey: string;
     hasApiKey: boolean;
     baseUrl?: string;
+    thinkingDefault?: string;
+    reasoningVisibility?: string;
     createdAt: number;
     updatedAt: number;
   }>;
@@ -1062,6 +1091,9 @@ export function installDeviceOpenClaw(deviceId: string, password?: string) {
  * 须与 request() 一致附带 x-device-password（sessionStorage）及 SSO 镜像头，否则服务端无凭据会恒为 offline，
  * 而 diagnostics 等走 request() 仍能成功，造成「有指标却显示设备离线」。
  */
+/** ping 不可判定：网关/网络波动，勿当作设备 SSH 离线 */
+const PING_TRANSIENT_HTTP = new Set([408, 429, 502, 503, 504]);
+
 export async function checkDevicePing(deviceId: string): Promise<{ ok: boolean; status: string }> {
   const id = String(deviceId || '').trim();
   if (!id) return { ok: false, status: 'offline' };
@@ -1076,6 +1108,9 @@ export async function checkDevicePing(deviceId: string): Promise<{ ok: boolean; 
     const response = await fetch(url, { method: 'GET', headers, credentials: 'include' });
     const data = (await response.json().catch(() => ({}))) as { ok?: boolean; status?: string };
     if (!response.ok) {
+      if (PING_TRANSIENT_HTTP.has(response.status)) {
+        return { ok: false, status: 'transient' };
+      }
       return { ok: false, status: 'offline' };
     }
     return {
@@ -1083,7 +1118,7 @@ export async function checkDevicePing(deviceId: string): Promise<{ ok: boolean; 
       status: typeof data.status === 'string' ? data.status : (data.ok ? 'connected' : 'offline'),
     };
   } catch {
-    return { ok: false, status: 'offline' };
+    return { ok: false, status: 'transient' };
   }
 }
 

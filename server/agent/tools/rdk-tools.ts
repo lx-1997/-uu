@@ -19,8 +19,11 @@ import {
 } from './rdk-ssh-helper.js';
 import {
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
+  OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+  OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
+  OPENCLAW_RESOLVE_CLI_SNIPPET,
 } from '../../managers/openclaw-board-install-sh.js';
 import * as path from 'node:path';
 
@@ -300,9 +303,14 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
         '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
         'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
         OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
-        '; OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
-        OPENCLAW_INSTALL_OPENCLAW_STEP + ';',
-        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
+        ' && ',
+        OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+        ' && ',
+        OPENCLAW_ENSURE_NPM_SNIPPET,
+        ' && ',
+        OPENCLAW_INSTALL_OPENCLAW_STEP + ' && ',
+        OPENCLAW_RESOLVE_CLI_SNIPPET,
+        ';',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
@@ -323,9 +331,17 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
         '"export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\";',
         'export PATH=\\"$HOME/.npm-global/bin:$PATH\\";',
         OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
-        '; OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi;',
+        ' && ',
+        OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+        ' && ',
+        OPENCLAW_ENSURE_NPM_SNIPPET,
+        ' && ',
+        OPENCLAW_RESOLVE_CLI_SNIPPET,
+        ';',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" update --no-restart 2>&1 || \\\"$OPENCLAW_CMD\\\" update 2>&1; else false; fi) || ' +
           OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
+          ' && ' +
+          OPENCLAW_RESOLVE_CLI_SNIPPET +
           ';',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
@@ -344,7 +360,7 @@ function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never
     async execute() {
       const steps = [
         'export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\"; export PATH=\\"$HOME/.npm-global/bin:$PATH\\"',
-        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$(npm prefix -g 2>/dev/null)/bin/openclaw\\"; fi',
+        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -n \\\"$OPENCLAW_CMD\\\" ] && [ ! -x \\\"$OPENCLAW_CMD\\\" ]; then OPENCLAW_CMD=\\\"\\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.npm-global/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.npm-global/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && command -v npm >/dev/null 2>&1; then _UU=\\\"$(npm prefix -g 2>/dev/null)\\\"; if [ -n \\\"$_UU\\\" ] && [ -x \\\"$_UU/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\\"$_UU/bin/openclaw\\\"; fi; fi; if [ -n \\\"$OPENCLAW_CMD\\\" ] && [ ! -x \\\"$OPENCLAW_CMD\\\" ]; then OPENCLAW_CMD=\\\"\\\"; fi',
         'echo \\"[1/6] 停止 gateway...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway stop 2>/dev/null || true; fi); (systemctl --user stop openclaw-gateway 2>/dev/null || true)',
         'echo \\"[2/6] 官方卸载...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" uninstall --all --yes --non-interactive 2>&1 || true; else echo \\\"[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续兜底清理）\\\"; fi)',
         'echo \\"[3/6] 清理 systemd...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway uninstall 2>/dev/null || true; fi); (systemctl --user disable openclaw-gateway 2>/dev/null || true); (rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true); (systemctl --user daemon-reload 2>/dev/null || true)',
@@ -683,7 +699,11 @@ function boardOpenClawSkillInstallTool(deviceId: string): Tool<{ skillId: string
     inputSchema: {
       type: 'object',
       properties: {
-        skillId: { type: 'string', description: '要安装的技能 ID，如 @anthropic/memory 或 github-user/skill-name' },
+        skillId: {
+          type: 'string',
+          description:
+            '技能 ID：`clawhub install` 与官方文档一致——多为**短名**（如 find-skills、summarize）或注册表 **slug**（常为 owner/skill）；勿与 `clawhub clone owner/skill` 混淆',
+        },
       },
       required: ['skillId'],
     },

@@ -32,6 +32,17 @@ export function extractNeedRdkclawBlocks(text: string): { cleaned: string; extra
   return { cleaned, extracts };
 }
 
+/** 需要在对话区展示 Studio ↔ 板端 OpenClaw 协作气泡的工具 */
+export function isBoardOpenClawCollabTool(toolName: string): boolean {
+  return (
+    toolName === 'board_openclaw_delegate'
+    || toolName === 'board_openclaw_chat'
+    || toolName === 'board_openclaw_assess'
+    || toolName === 'fleet_board_delegate'
+    || toolName === 'fleet_board_broadcast'
+  );
+}
+
 /** 从 tool_start 参数生成「发给板端 OpenClaw」的展示行（LLM 填写的委派/对话内容） */
 export function formatBoardOutboundLines(toolName: string, args: Record<string, unknown> | undefined): string[] {
   if (!args) return [];
@@ -55,6 +66,35 @@ export function formatBoardOutboundLines(toolName: string, args: Record<string, 
     if (message) lines.push(`message:\n${message}`);
     const context = String(args.context ?? '').trim();
     if (context) lines.push(`context:\n${context}`);
+  } else if (toolName === 'board_openclaw_assess') {
+    const task = String(args.task ?? '').trim();
+    if (task) lines.push(`task:\n${task}`);
+    const context = String(args.context ?? '').trim();
+    if (context) lines.push(`context:\n${context}`);
+    const sid = String(args.sessionId ?? '').trim();
+    if (sid) lines.push(`session_id: ${sid}`);
+  } else if (toolName === 'fleet_board_delegate') {
+    const target = String(args.targetDeviceId ?? '').trim();
+    if (target) lines.push(`target_device_id: ${target}`);
+    const task = String(args.task ?? '').trim();
+    if (task) lines.push(`task:\n${task}`);
+    const guidance = String(args.guidance ?? '').trim();
+    if (guidance) lines.push(`guidance:\n${guidance}`);
+    const role = String(args.role ?? '').trim();
+    if (role) lines.push(`role: ${role}`);
+    const sid = String(args.sessionId ?? '').trim();
+    if (sid) lines.push(`session_id: ${sid}`);
+  } else if (toolName === 'fleet_board_broadcast') {
+    const task = String(args.task ?? '').trim();
+    if (task) lines.push(`task:\n${task}`);
+    const guidance = String(args.guidance ?? '').trim();
+    if (guidance) lines.push(`guidance:\n${guidance}`);
+    const mode = String(args.collectMode ?? '').trim();
+    if (mode) lines.push(`collect_mode: ${mode}`);
+    const ids = args.targetDeviceIds;
+    if (Array.isArray(ids) && ids.length > 0) {
+      lines.push(`target_device_ids: ${ids.map((x) => String(x)).join(', ')}`);
+    }
   }
   return lines;
 }

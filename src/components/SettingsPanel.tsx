@@ -164,7 +164,11 @@ export default function SettingsPanel() {
   const [aiSavedModels, setAiSavedModels] = useState<Array<{
     id: string; label: string; provider: string; model: string;
     hasApiKey: boolean; baseUrl?: string; isActive: boolean;
+    thinkingDefault?: string;
+    reasoningVisibility?: string;
   }>>([]);
+  const [aiThinkingDefault, setAiThinkingDefault] = useState('');
+  const [aiReasoningVisibility, setAiReasoningVisibility] = useState('');
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
   const [aiEnvApiKeyAvailable, setAiEnvApiKeyAvailable] = useState(false);
@@ -183,6 +187,8 @@ export default function SettingsPanel() {
     setAiProvider(entry.provider || 'qwen');
     setAiModel(entry.model || '');
     setAiBaseUrl(entry.baseUrl || '');
+    setAiThinkingDefault((entry.thinkingDefault || '').trim());
+    setAiReasoningVisibility((entry.reasoningVisibility || '').trim());
     setAiApiKey('');
     loadedAiProviderRef.current = entry.provider || 'qwen';
   };
@@ -209,6 +215,8 @@ export default function SettingsPanel() {
     setAiProvider(cfg.provider || 'qwen');
     setAiModel(cfg.model || '');
     setAiBaseUrl(cfg.baseUrl || '');
+    setAiThinkingDefault((cfg.thinkingDefault || '').trim());
+    setAiReasoningVisibility((cfg.reasoningVisibility || '').trim());
     setAiApiKey('');
   };
 
@@ -532,6 +540,8 @@ export default function SettingsPanel() {
         apiKey: aiApiKey || undefined,
         baseUrl: aiBaseUrl || providerDefaults.baseUrl || undefined,
         setActive: true,
+        thinkingDefault: aiThinkingDefault,
+        reasoningVisibility: aiReasoningVisibility,
       });
     } catch (err) {
       addToast(
@@ -593,6 +603,8 @@ export default function SettingsPanel() {
     setAiProvider('qwen');
     setAiModel('');
     setAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
+    setAiThinkingDefault('');
+    setAiReasoningVisibility('');
     setAiApiKey('');
   };
 
@@ -1005,8 +1017,8 @@ export default function SettingsPanel() {
                             setAiSaving(true);
                             let switchResult: Awaited<ReturnType<typeof saveAgentConfig>> | null = null;
                             try {
-                              switchResult = await saveAgentConfig({ action: 'switch', id });
-                              if (switchResult.active?.id === id) {
+                                switchResult = await saveAgentConfig({ action: 'switch', id });
+                                if (switchResult.active?.id === id) {
                                 applyAiModelToForm({
                                   id: switchResult.active.id,
                                   label: entry.label,
@@ -1014,6 +1026,8 @@ export default function SettingsPanel() {
                                   model: switchResult.active.model,
                                   hasApiKey: switchResult.active.hasApiKey,
                                   baseUrl: switchResult.active.baseUrl,
+                                  thinkingDefault: entry.thinkingDefault,
+                                  reasoningVisibility: entry.reasoningVisibility,
                                   isActive: true,
                                 });
                               }
@@ -1091,6 +1105,53 @@ export default function SettingsPanel() {
                   <div className="settings-row">
                     <span className="settings-row-label">Base URL</span>
                     <div className="settings-row-value"><input type="text" className="input" title="Base URL" aria-label="Base URL" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl || 'https://...'} value={aiBaseUrl} onChange={e => setAiBaseUrl(e.target.value)} /></div>
+                  </div>
+                  <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+                    <span className="settings-row-label">{t('settings.ai.brainAdvanced', '推理')}</span>
+                    <div className="settings-row-value" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                        {t(
+                          'settings.ai.brainAdvancedHint',
+                          '与板端 OpenClaw 选项对齐：思考档位对应扩展思考强度；推理可见性控制是否在聊天里流式展示思考块（模型需支持）。留空表示默认（档位 high、展示 on/stream）。',
+                        )}
+                      </span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.thinkingDefault', '思考档位')}</span>
+                          <select
+                            className="select"
+                            title={t('settings.ai.thinkingDefault', '思考档位')}
+                            aria-label={t('settings.ai.thinkingDefault', '思考档位')}
+                            value={aiThinkingDefault}
+                            onChange={(e) => setAiThinkingDefault(e.target.value)}
+                          >
+                            <option value="">{t('settings.ai.brainInherit', '默认 (high)')}</option>
+                            <option value="off">off</option>
+                            <option value="minimal">minimal</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                            <option value="xhigh">xhigh</option>
+                            <option value="adaptive">adaptive</option>
+                          </select>
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.reasoningVisibility', '推理可见性')}</span>
+                          <select
+                            className="select"
+                            title={t('settings.ai.reasoningVisibility', '推理可见性')}
+                            aria-label={t('settings.ai.reasoningVisibility', '推理可见性')}
+                            value={aiReasoningVisibility}
+                            onChange={(e) => setAiReasoningVisibility(e.target.value)}
+                          >
+                            <option value="">{t('settings.ai.brainStreamDefault', '默认 (stream)')}</option>
+                            <option value="off">off</option>
+                            <option value="on">on</option>
+                            <option value="stream">stream</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
                   </div>
                   {studioDefaultPreset && (
                     <div className="settings-row">

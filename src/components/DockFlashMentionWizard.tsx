@@ -137,7 +137,7 @@ export function DockFlashMentionWizard({
                 onClick={() => setPreferLocalImage(true)}
               >
                 <span className="dock-flash-wizard-option-title">{t('dock.mention.flash.optLocal', '本地镜像')}</span>
-                <span className="dock-flash-wizard-option-desc">{t('dock.mention.flash.optLocalDesc', '在烧写页浏览或填写本机 .img / .xz 等路径。')}</span>
+                <span className="dock-flash-wizard-option-desc">{t('dock.mention.flash.optLocalDesc', '在烧写页浏览或填写本机 .img / .xz / .gz 等路径。')}</span>
               </button>
             </div>
           </div>

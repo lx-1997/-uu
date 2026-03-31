@@ -4,6 +4,7 @@ import { executeDeviceCommand } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { isDesktop } from '../utils/env';
+import { openOpenClawPopout, openRdkClawChatPopout } from '../utils/embed-mode';
 import DeviceGuard from './DeviceGuard';
 
 /* ── code-server 默认端口（设备侧） ── */
@@ -235,6 +236,28 @@ export default function IDE() {
         </div>
 
         <div className="immersive-bar-right">
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => openRdkClawChatPopout({ dockCtx: 'ide' })}
+            title={t('ide.popout.claw', '新窗口打开 RDKClaw 对话（可拖到侧屏与编辑器并排）')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => openOpenClawPopout()}
+            title={t('ide.popout.openclaw', '新窗口打开 OpenClaw（查看板端 Agent 效果）')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <path d="M7 9h10M7 13h6" />
+            </svg>
+          </button>
+          <div className="immersive-bar-sep" />
           {showIframe && (
             <>
               {/* 非桌面端才显示刷新按钮 */}

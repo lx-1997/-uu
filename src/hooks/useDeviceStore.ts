@@ -80,9 +80,9 @@ export interface DeviceStoreState {
 
   showAddDevice: boolean;
   setShowAddDevice: (v: boolean) => void;
-  /** 下次打开「添加设备」时直接进入对应配置页（与弹窗内 manual / usb 一致），用后清空 */
-  addDeviceInitialMethod: 'manual' | 'usb' | null;
-  setAddDeviceInitialMethod: (v: 'manual' | 'usb' | null) => void;
+  /** 下次打开「添加设备」时直接进入对应配置页（与弹窗内 manual / usb / typec 一致），用后清空 */
+  addDeviceInitialMethod: 'manual' | 'usb' | 'typec' | null;
+  setAddDeviceInitialMethod: (v: 'manual' | 'usb' | 'typec' | null) => void;
   newDeviceName: string;
   setNewDeviceName: (v: string) => void;
   newDeviceIp: string;
@@ -112,10 +112,12 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
   const [activeDevice, setActiveDevice] = useState('');
   const [devices, setDevices] = useState<Device[]>([]);
+  /** 列表从服务端/缓存同步后递增，促使后台 ping 立即跑一轮（避免 length 不变时最长 ~10s 误显示未连接） */
+  const [deviceListRevision, setDeviceListRevision] = useState(0);
   const currentDevice = devices.find((d) => d.id === activeDevice);
 
   const [showAddDevice, setShowAddDevice] = useState(false);
-  const [addDeviceInitialMethod, setAddDeviceInitialMethod] = useState<'manual' | 'usb' | null>(null);
+  const [addDeviceInitialMethod, setAddDeviceInitialMethod] = useState<'manual' | 'usb' | 'typec' | null>(null);
   const [newDeviceName, setNewDeviceName] = useState('');
   const [newDeviceIp, setNewDeviceIp] = useState('');
   const devicesRef = React.useRef<Device[]>([]);
@@ -240,6 +242,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         }));
         setDevices(next);
         setActiveDevice((prev) => (prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? '')));
+        setDeviceListRevision((n) => n + 1);
       } catch {
         if (cancelled) return;
         const cached = loadDevicesFromCache();
@@ -260,6 +263,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
             return cached.devices[0]?.id ?? '';
           });
           addToast('已从本机恢复设备列表（服务端暂不可用或未携带登录态）', 'info');
+          setDeviceListRevision((n) => n + 1);
         } else {
           addToast('设备列表读取失败，请检查后端服务', 'warning');
         }
@@ -293,6 +297,9 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           const verified = dev.sshSessionVerified === true;
           try {
             const res = await checkDevicePing(dev.id);
+            if (res.status === 'transient') {
+              return dev;
+            }
             const pingOk = res.status === 'connected';
             if (pingOk) {
               pingFailStreakRef.current[dev.id] = 0;
@@ -352,7 +359,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     void pingAll();
 
     return () => { cancelled = true; clearInterval(timer); };
-  }, [authReady, devices.length]);
+  }, [authReady, devices.length, deviceListRevision]);
 
   const value = useMemo<DeviceStoreState>(
     () => ({
