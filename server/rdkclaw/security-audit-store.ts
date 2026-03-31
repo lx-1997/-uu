@@ -60,7 +60,7 @@ function loadCacheSync(): SecurityAuditLogEntry[] {
 let _writeChain: Promise<void> = Promise.resolve();
 
 function scheduleFlush(): void {
-  const snapshot = JSON.stringify(_cache, null, 2);
+  const snapshot = JSON.stringify(_cache ?? [], null, 2);
   const task = async () => {
     try {
       await fsp.mkdir(CONFIG_DIR, { recursive: true });

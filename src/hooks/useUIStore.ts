@@ -6,7 +6,7 @@ import { translate } from '../i18n/translate';
 import { useToastStore } from './useToastStore';
 import { useDeviceStore } from './useDeviceStore';
 import { fetchNodeRedStatus, fetchRosTopics, fetchVncStatus, executeDeviceCommand } from '../api';
-import { readStoredLocale, writeStoredLocale, UI_LOCALE_KEY, type AppLocale } from '../utils/locale';
+import { readStoredLocale, writeStoredLocale, type AppLocale } from '../utils/locale';
 
 /** 固定为橙色极光浅色主题（原 aurora），不再提供赛博/奶咖切换 */
 export type ThemeMode = 'aurora';
