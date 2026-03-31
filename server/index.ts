@@ -2244,7 +2244,7 @@ async function listTypecCandidateNics(): Promise<Array<{ name: string; portType?
       .map(name => ({ name }));
   }
 
-  // Windows: netsh interface ipv4 show interfaces，保留 connected 且非 WLAN
+  // Windows: netsh interface ipv4 show interfaces，保留 connected 且排除 WLAN/Loopback/Bluetooth
   const raw = await new Promise<string>((resolve, reject) => {
     const child = spawn('cmd', ['/c', 'netsh interface ipv4 show interfaces'], { timeout: 5000 });
     let out = '';
@@ -2252,8 +2252,15 @@ async function listTypecCandidateNics(): Promise<Array<{ name: string; portType?
     child.on('close', (code) => code === 0 ? resolve(out) : reject(new Error(`netsh exit ${code}`)));
     child.on('error', reject);
   });
+  // 排除无线网卡、回环接口、蓝牙、VPN 等不适合 TypeC 闪联的接口
+  const EXCLUDED_WIN_NIC_KEYWORDS = ['wlan', 'loopback', 'bluetooth', 'vpn', 'teredo', 'isatap', '6to4'];
   return raw.split('\n')
-    .filter(line => line.includes('connected') && !line.includes('WLAN') && !line.includes('disconnected'))
+    .filter(line => {
+      const lc = line.toLowerCase();
+      return lc.includes('connected')
+        && !lc.includes('disconnected')
+        && !EXCLUDED_WIN_NIC_KEYWORDS.some(kw => lc.includes(kw));
+    })
     .map(line => {
       const idx = line.indexOf('connected');
       return { name: line.substring(idx + 9).trim() };
@@ -2398,7 +2405,13 @@ app.post('/api/typec/configure', async (request, response) => {
   }
 
   const platform = os.platform();
-  if (platform !== 'win32' && !isValidTypecInterfaceName(interfaceName)) {
+  if (platform === 'win32') {
+    // Windows 网卡名可含空格和中文，但不应包含引号、分号等注入字符
+    if (!interfaceName || interfaceName.length > 128 || /[";|&<>]/.test(interfaceName)) {
+      sendApiError(response, 400, 'INVALID_PARAMS', 'interfaceName 格式非法');
+      return;
+    }
+  } else if (!isValidTypecInterfaceName(interfaceName)) {
     sendApiError(response, 400, 'INVALID_PARAMS', 'interfaceName 格式非法');
     return;
   }
@@ -2406,16 +2419,22 @@ app.post('/api/typec/configure', async (request, response) => {
   try {
     let result: string;
     if (platform === 'win32') {
-      const cmd = `netsh interface ipv4 set address name="${interfaceName}" static ${pcIp} ${mask}`;
+      // Windows: 使用 netsh 配置静态 IP（需要管理员权限）
+      // 注意：interfaceName 可能包含空格（如 "Loopback Pseudo-Interface 1"），
+      // 使用 spawn 参数数组传递避免 shell 注入和引号问题
       result = await new Promise<string>((resolve, reject) => {
-        const child = spawn('sh', ['-c', cmd], { timeout: 15000 });
+        const child = spawn('netsh', [
+          'interface', 'ipv4', 'set', 'address',
+          `name=${interfaceName}`,
+          'static', pcIp, mask,
+        ], { timeout: 15000, windowsHide: true });
         let stdout = '';
         let stderr = '';
         child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
         child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
         child.on('close', (code) => {
           if (code === 0) resolve(stdout);
-          else reject(new Error(stderr || `exit code ${code}`));
+          else reject(new Error(stderr || stdout || `netsh exit code ${code}`));
         });
         child.on('error', reject);
       });
