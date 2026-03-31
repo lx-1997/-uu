@@ -270,7 +270,18 @@ function deviceExecTool(deviceId: string): Tool<{ command: string }> {
     },
     async execute(input) {
       const output = await execOnDevice(deviceId, [input.command]);
-      return output || '(命令执行成功，无输出)';
+      if (!output) return '(命令执行成功，无输出)';
+
+      // 命令语义化：从输出中提取结构化信息（如温度、内存使用率）
+      const { extractCommandInfo } = await import('../../rdkclaw/command-semantics.js');
+      const info = extractCommandInfo(input.command, output);
+      if (info) {
+        const infoStr = Object.entries(info)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(', ');
+        return `${output}\n\n[解析] ${infoStr}`;
+      }
+      return output;
     },
   };
 }

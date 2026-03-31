@@ -4,8 +4,7 @@ description: 将语音音频转换为文字。支持离线（板端 Whisper/hobo
 version: 1.1.0
 trigger: stt,语音识别,语音转文字,转录,听写,speech to text,whisper,语音输入,录音转文字,识别语音
 risk: low
-permissions:
-  deviceExec: true
+permissions: device_exec
 delegate_preference: collaborative
 requires_board: true
 approval_level: none

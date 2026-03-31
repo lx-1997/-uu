@@ -4,8 +4,7 @@ description: 将文字转换为语音音频。支持离线（板端 hobot_tts）
 version: 1.1.0
 trigger: tts,语音合成,文字转语音,朗读,播报,text to speech,语音播放,语音输出,说话,读出来,hobot_tts
 risk: low
-permissions:
-  deviceExec: true
+permissions: device_exec
 delegate_preference: collaborative
 requires_board: true
 approval_level: none

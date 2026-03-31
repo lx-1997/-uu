@@ -244,8 +244,14 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
         // ========== 内层循环 (tools + steering) ==========
         // 对应 OpenClaw: inner while (hasMoreToolCalls || pendingMessages.length > 0)
         while (hasMoreToolCalls || pendingMessages.length > 0) {
-          if (turns >= maxTurns) break outerLoop;
-          if (abortSignal.aborted) break outerLoop;
+          if (turns >= maxTurns) {
+            stream.push({ type: "turn_transition", turn: turns, reason: "max_turns_reached" });
+            break outerLoop;
+          }
+          if (abortSignal.aborted) {
+            stream.push({ type: "turn_transition", turn: turns, reason: "aborted_by_user" });
+            break outerLoop;
+          }
 
           turns++;
           stream.push({ type: "turn_start", turn: turns });
@@ -270,7 +276,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               currentMessages.splice(0, currentMessages.length, ...mcResult.messages);
               microcompactTotalSavedChars += mcResult.savedChars;
               stream.push({
-                type: "microcompact" as any,
+                type: "microcompact",
                 compressedCount: mcResult.compressedCount,
                 savedChars: mcResult.savedChars,
               });
@@ -408,7 +414,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               overflowRecoveryLevel++;
               overflowRecoveries++;
               stream.push({
-                type: "context_overflow_compact" as any,
+                type: "context_overflow_compact",
                 error: errorText,
                 recoveryLevel: overflowRecoveryLevel,
               });
@@ -435,6 +441,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   });
                   if (overflowPrep.summary && overflowPrep.summaryMessage) {
                     compactionSummary = overflowPrep.summaryMessage;
+                    contextCompactions++;
                     turns--;
                     continue;
                   }
@@ -453,7 +460,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   const kept = currentMessages.slice(-keepCount);
                   currentMessages.splice(0, currentMessages.length, ...kept);
                   stream.push({
-                    type: "emergency_truncation" as any,
+                    type: "emergency_truncation",
                     droppedMessages: dropped,
                     keptMessages: keepCount,
                   });
@@ -648,7 +655,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
                 totalToolCalls++;
                 toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
-                const isError = !tool || result.startsWith("执行错误:") || result.startsWith("[");
+                const isError = !tool || result.startsWith("执行错误:") || result.startsWith("未知工具:");
                 if (isError) toolErrors++;
                 stream.push({
                   type: "tool_execution_end",

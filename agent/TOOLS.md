@@ -51,6 +51,19 @@
 - 用户上传附件时用 `attachment_*` 工具处理
 - delegate 返回含 `[NEED_RDKCLAW]` 时，提取请求 → 本地工具获取 → chat 回传 → 让 OpenClaw 继续
 
+## 常见错误（不要犯）
+
+| 错误行为 | 正确做法 |
+|----------|----------|
+| 用 `device_exec` + `cat` 读文件 | 用 `device_file_read` |
+| 用 `device_exec` + `echo >` 写文件 | 用 `device_file_write` |
+| 用 `exec`（本机）以为在操作设备 | 用 `device_exec`（设备） |
+| 每轮对话都调 `board_openclaw_health` | UI 快照显示正常就不调 |
+| 不 assess 直接 delegate | ALWAYS 先 assess |
+| delegate 失败后反复重试同一任务 | 换方案或用本地工具兜底 |
+| 用 `vim`/`top`/`htop` 等交互式命令 | 用非交互替代（`cat`/`ps`/`free`） |
+| 假设命令执行成功不检查输出 | ALWAYS 检查输出确认结果 |
+
 ## 安全
 
 - rm -rf / dd / mkfs / 烧录 → 先确认
