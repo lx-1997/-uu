@@ -331,7 +331,12 @@ export const switchDeviceTool = (
 ): Tool<{ device: string }> => ({
   name: "switch_device",
   description:
-    "切换当前会话绑定的 RDK 设备。接受设备 IP 或设备 ID。在 Studio 主会话中会立即刷新可用工具（含板端工具）；飞书/微信等渠道仍会同步「当前设备」上下文。",
+    "切换当前会话绑定的 RDK 设备。接受设备 IP 或设备 ID。\n\n" +
+    "IMPORTANT 使用规则：\n" +
+    "- 仅在用户明确要求切换设备时使用\n" +
+    "- NEVER 因为 device_exec 命令失败就自动切换设备——命令失败不代表设备离线\n" +
+    "- NEVER 在未经用户确认的情况下切换设备\n" +
+    "- SSH 超时、命令报错、连接抖动都是正常现象，应该重试而不是切换设备",
   inputSchema: {
     type: "object",
     properties: {

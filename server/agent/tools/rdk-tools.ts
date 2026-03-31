@@ -269,19 +269,25 @@ function deviceExecTool(deviceId: string): Tool<{ command: string }> {
       required: ['command'],
     },
     async execute(input) {
-      const output = await execOnDevice(deviceId, [input.command]);
-      if (!output) return '(命令执行成功，无输出)';
+      try {
+        const output = await execOnDevice(deviceId, [input.command]);
+        if (!output) return '(命令执行成功，无输出)';
 
-      // 命令语义化：从输出中提取结构化信息（如温度、内存使用率）
-      const { extractCommandInfo } = await import('../../rdkclaw/command-semantics.js');
-      const info = extractCommandInfo(input.command, output);
-      if (info) {
-        const infoStr = Object.entries(info)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join(', ');
-        return `${output}\n\n[解析] ${infoStr}`;
+        // 命令语义化：从输出中提取结构化信息（如温度、内存使用率）
+        const { extractCommandInfo } = await import('../../rdkclaw/command-semantics.js');
+        const info = extractCommandInfo(input.command, output);
+        if (info) {
+          const infoStr = Object.entries(info)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ');
+          return `${output}\n\n[解析] ${infoStr}`;
+        }
+        return output;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // 关键：明确告诉 LLM 命令失败≠设备离线，防止误判后切换设备
+        return `[命令执行失败] ${msg}\n\n注意：命令失败不代表设备离线。可能原因：命令本身报错、超时、SSH 瞬时抖动。请重试或换一条命令，不要切换设备。`;
       }
-      return output;
     },
   };
 }

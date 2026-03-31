@@ -5,6 +5,7 @@ import type { Tool } from "../../agent/tools/types.js";
 import type { RDKClawEvent, SoulUpdateProposal } from "../types.js";
 
 const pendingProposals = new Map<string, SoulUpdateProposal & { soulPath: string }>();
+const proposalTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function getPendingProposal(proposalId: string) {
   return pendingProposals.get(proposalId);
@@ -12,6 +13,11 @@ export function getPendingProposal(proposalId: string) {
 
 export function removePendingProposal(proposalId: string) {
   pendingProposals.delete(proposalId);
+  const timer = proposalTimers.get(proposalId);
+  if (timer) {
+    clearTimeout(timer);
+    proposalTimers.delete(proposalId);
+  }
 }
 
 export async function applySoulUpdate(proposalId: string): Promise<{ ok: boolean; error?: string }> {
@@ -138,7 +144,11 @@ export function createSoulUpdateTool(
 
       pendingProposals.set(proposalId, proposal);
 
-      setTimeout(() => pendingProposals.delete(proposalId), 10 * 60 * 1000);
+      const timer = setTimeout(() => {
+        pendingProposals.delete(proposalId);
+        proposalTimers.delete(proposalId);
+      }, 10 * 60 * 1000);
+      proposalTimers.set(proposalId, timer);
 
       emitEvent({
         type: "soul_update_proposal",

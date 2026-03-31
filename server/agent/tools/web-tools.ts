@@ -169,6 +169,8 @@ async function httpGetPageText(
     }
     return { res, text, retried: false };
   } catch (firstErr) {
+    // 如果已经被 abort，不要重试
+    if (signal.aborted) throw firstErr;
     await new Promise((r) => setTimeout(r, 450));
     const { res, text } = await doFetch();
     return { res, text, retried: true };
@@ -181,54 +183,92 @@ const DDG_FETCH_HEADERS = {
   "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 };
 
+/**
+ * DDG 连通性缓存：首次失败后标记不可用，避免后续请求重复等待。
+ * 每 5 分钟重置一次，给 DDG 恢复的机会。
+ */
+let ddgAvailable = true;
+let ddgLastCheckMs = 0;
+const DDG_RECHECK_INTERVAL_MS = 5 * 60 * 1000;
+
 async function fetchDuckDuckGoHtml(
   query: string,
   signal: AbortSignal,
 ): Promise<Array<{ html: string; status: number; via: string }>> {
+  // 连通性缓存：DDG 不可用时直接跳过
+  const now = Date.now();
+  if (!ddgAvailable && now - ddgLastCheckMs < DDG_RECHECK_INTERVAL_MS) {
+    return [];
+  }
+
   const q = encodeURIComponent(query);
   const out: Array<{ html: string; status: number; via: string }> = [];
 
-  const push = async (
+  // DDG 快速超时：国内环境 8 秒没响应基本就是不通
+  const DDG_FAST_TIMEOUT_MS = 8000;
+  const ddgSignal = AbortSignal.any
+    ? AbortSignal.any([signal, AbortSignal.timeout(DDG_FAST_TIMEOUT_MS)])
+    : signal;
+
+  const tryFetch = async (
     label: string,
     fn: () => Promise<Response>,
-  ) => {
+  ): Promise<{ html: string; status: number; via: string } | null> => {
     try {
       const res = await fn();
       const text = await res.text();
       if (text.length > 80) {
-        out.push({ html: text, status: res.status, via: label });
+        return { html: text, status: res.status, via: label };
       }
     } catch {
       /* 下一来源 */
     }
+    return null;
   };
 
-  await push("html.duckduckgo.com POST", () =>
-    fetch("https://html.duckduckgo.com/html/", {
-      method: "POST",
-      signal,
-      headers: {
-        ...DDG_FETCH_HEADERS,
-        "Content-Type": "application/x-www-form-urlencoded",
-        Referer: "https://duckduckgo.com/",
-      },
-      body: `q=${q}`,
-    }),
-  );
-  await push("duckduckgo.com/html GET", () =>
-    fetch(`https://duckduckgo.com/html/?q=${q}`, {
-      method: "GET",
-      signal,
-      headers: { ...DDG_FETCH_HEADERS, Referer: "https://duckduckgo.com/" },
-    }),
-  );
-  await push("lite.duckduckgo.com", () =>
-    fetch(`https://lite.duckduckgo.com/lite/?q=${q}`, {
-      method: "GET",
-      signal,
-      headers: { ...DDG_FETCH_HEADERS, Referer: "https://duckduckgo.com/" },
-    }),
-  );
+  // 并行请求所有 DDG 端点（而非串行），取第一个成功的
+  const results = await Promise.allSettled([
+    tryFetch("html.duckduckgo.com POST", () =>
+      fetch("https://html.duckduckgo.com/html/", {
+        method: "POST",
+        signal: ddgSignal,
+        headers: {
+          ...DDG_FETCH_HEADERS,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Referer: "https://duckduckgo.com/",
+        },
+        body: `q=${q}`,
+      }),
+    ),
+    tryFetch("duckduckgo.com/html GET", () =>
+      fetch(`https://duckduckgo.com/html/?q=${q}`, {
+        method: "GET",
+        signal: ddgSignal,
+        headers: { ...DDG_FETCH_HEADERS, Referer: "https://duckduckgo.com/" },
+      }),
+    ),
+    tryFetch("lite.duckduckgo.com", () =>
+      fetch(`https://lite.duckduckgo.com/lite/?q=${q}`, {
+        method: "GET",
+        signal: ddgSignal,
+        headers: { ...DDG_FETCH_HEADERS, Referer: "https://duckduckgo.com/" },
+      }),
+    ),
+  ]);
+
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value) {
+      out.push(r.value);
+    }
+  }
+
+  // 更新连通性缓存
+  if (out.length === 0) {
+    ddgAvailable = false;
+    ddgLastCheckMs = now;
+  } else {
+    ddgAvailable = true;
+  }
 
   return out;
 }

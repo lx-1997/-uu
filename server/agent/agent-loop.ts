@@ -442,6 +442,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   if (overflowPrep.summary && overflowPrep.summaryMessage) {
                     compactionSummary = overflowPrep.summaryMessage;
                     contextCompactions++;
+                    // 成功恢复后重置 level，让下次 overflow 从 Level 1 重新开始
+                    overflowRecoveryLevel = 0;
                     turns--;
                     continue;
                   }
