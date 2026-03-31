@@ -265,10 +265,14 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
   if (toolName === 'exec' || toolName === 'device_exec') {
     return { blocked: false, risk: command ? getCommandRisk(command) : 'medium' };
   }
-  if (/write|upload|install|upgrade|restart|switch|remove|delete|flash|doctor|pairing_approve|pairing_reject|uninstall/i.test(toolName)) {
+  if (/write|upload|install|upgrade|restart|switch|remove|delete|flash|doctor|pairing_approve|pairing_reject|uninstall|ensure_find/i.test(toolName)) {
     return { blocked: false, risk: 'high' };
   }
-  if (/read|list|status|health|check|topics|nodes|diagnose|search|find_skills|skill_mark_validated|memory_/.test(toolName)) {
+  if (
+    toolName === 'find_skills' ||
+    toolName === 'skill_mark_validated' ||
+    /read|list|status|health|check|topics|nodes|diagnose|search|memory_/.test(toolName)
+  ) {
     return { blocked: false, risk: 'low' };
   }
   return { blocked: false, risk: 'medium' };

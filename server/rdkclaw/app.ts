@@ -962,7 +962,7 @@ export class RDKClawApp {
         ? [
             "## 内置 find-skills（腾讯 SkillHub）",
             "RDK Studio **默认内置** `find_skills`：优先腾讯 SkillHub，零命中或失败再兜底 **官方 ClawHub**（默认 https://clawhub.ai）。`find_skills` **仅写审计** `.rdkstudio/find-skills-log.jsonl`，**不**因「搜过」就写入长期记忆。" +
-            "若本轮**实际采用**了某 SkillHub 技能且任务**验收成功**，再调用 **`skill_mark_validated`**（填 `skill_slugs` + `task_summary`）：会**下载** SKILL.md 到工作区 `skills/<id>/` 并写入记忆与 `.rdkstudio/validated-skills.jsonl`；纯本地采用的填 `local_skill_refs`（不落盘拉取）。失败、仅浏览、未采用则**禁止**调用。",
+            "若本轮**实际采用**了某 SkillHub 技能且任务**验收成功**，再调用 **`skill_mark_validated`**（填 `skill_slugs` + `task_summary`）：**下载** SKILL.md 到本机 `skills/<id>/`，已连接设备时**同步**到板端 `~/.openclaw/workspace/skills/<id>/`，并写记忆与 `.rdkstudio/validated-skills.jsonl`；纯本地采用填 `local_skill_refs`（不拉远端、不推板端）。失败、仅浏览、未采用则**禁止**调用。",
             "**强制**：能力缺口时**必须先 `find_skills`**，再 `read` / 安装 / 执行；不得未检索可复用技能就宣称无法完成（用户明确禁止联网且本地无命中除外）。",
             "仅需与 `CLAWHUB_REGISTRY` 换源一致时，再用 `skillhub_search`。",
           ].join("\n")

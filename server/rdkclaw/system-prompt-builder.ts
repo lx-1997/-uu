@@ -43,7 +43,7 @@ export function buildReasoningGuidancePrompt(tier: ModelTier): string {
     "委派 OpenClaw 前：本地已明确任务边界、验收标准与风险点；在 `board_openclaw_delegate` 的 guidance/context 里写清，减少板端反复试探。",
     "已连接设备时：复杂任务可在一轮内并行「检索 + 板端评估」（见「双 Agent 协作」），推理中合并结果再决策。",
     "**能力缺口（硬约束）**：当推理结论为「无合适工具/流程、或连续失败、或缺领域技能」时，**必须先调用内置 `find_skills`**（腾讯 SkillHub 目录 + 本地 SKILL），据返回再 `read`、安装或委派；禁止跳过检索直接放弃（用户禁止联网且本地无命中除外）。",
-    "**技能内化**：`find_skills` 只产生审计日志；**任务已成功**且某 **SkillHub** 技能确被采用并起作用时，再调用 **`skill_mark_validated`**（`skill_slugs`）——会把对应 SKILL.md **写入工作区 `skills/<id>/`** 并记入记忆；勿在失败或仅检索时调用。",
+    "**技能内化**：`find_skills` 只产生审计日志；**任务已成功**且某 **SkillHub** 技能确被采用并起作用时，再调用 **`skill_mark_validated`**（`skill_slugs`）——写入本机 `skills/<id>/`，**已连接设备时同步到板端 OpenClaw 工作区**；并记入记忆；勿在失败或仅检索时调用。",
   ].join("\n");
 }
 

@@ -1,4 +1,5 @@
 import type { Tool } from "../../agent/tools/types.js";
+import { ensureFindSkillsOnBoard } from "../../agent/tools/rdk-tools.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager, type OpenClawHealthStatus } from "../../managers/OpenClawDeploymentManager.js";
 import type { Device } from "../../../shared/types.js";
@@ -88,6 +89,15 @@ function restartGateway(
   });
 }
 
+async function maybeEnsureBoardFindSkills(deviceId: string, onProgress?: (chunk: string) => void): Promise<void> {
+  if (!deviceId.trim()) return;
+  try {
+    await ensureFindSkillsOnBoard(deviceId, onProgress);
+  } catch (e) {
+    onProgress?.(`\n[板端] find-skills 预装跳过: ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+}
+
 async function ensureBoardGatewayReady(
   manager: OpenClawDeploymentManager,
   boardDevice: { ip: string; userName: string; id?: string; password?: string },
@@ -98,12 +108,14 @@ async function ensureBoardGatewayReady(
   const deviceId = String(boardDevice.id || "").trim();
   if (deviceId && getCachedOpenClawAiReady(deviceId) === true) {
     onProgress?.("\n[预检] 近期已确认板端 OpenClaw 就绪，跳过重复健康检测。\n");
+    await maybeEnsureBoardFindSkills(deviceId, onProgress);
     return;
   }
 
   let health = await getBoardHealth(manager, boardDevice);
   if (health.aiReady) {
     if (deviceId) setCachedOpenClawAiReady(deviceId, true);
+    await maybeEnsureBoardFindSkills(deviceId, onProgress);
     return;
   }
 
@@ -114,6 +126,7 @@ async function ensureBoardGatewayReady(
     health = await getBoardHealth(manager, boardDevice);
     if (health.aiReady) {
       if (deviceId) setCachedOpenClawAiReady(deviceId, true);
+      await maybeEnsureBoardFindSkills(deviceId, onProgress);
       return;
     }
   }
@@ -157,7 +170,7 @@ export function boardOpenClawDelegateTool(
     description:
       "将任务委派给板端 OpenClaw 执行。通常在 board_openclaw_assess 确认可行后调用。" +
       "在 guidance 中融入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索）对它很重要。" +
-      "若任务可能超出其当前技能，在 guidance 中写明：板端可先通过 **find-skills**（SkillHub）检索/安装再执行；Studio 安装 OpenClaw 时默认会装 find-skills。" +
+      "若任务可能超出其当前技能，在 guidance 中写明：板端可先通过 **find-skills**（SkillHub）检索/安装再执行；委派前会自动检查并尝试 `clawhub install find-skills`，也可调用 **board_openclaw_ensure_find_skills**。" +
       "同一对话内自动复用会话，板端保留上下文。",
     inputSchema: {
       type: "object",

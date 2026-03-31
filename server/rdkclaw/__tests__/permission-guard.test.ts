@@ -218,6 +218,7 @@ describe('risk classification', () => {
     expect(guard('device_file_write', { path: '/tmp/x' }).risk).toBe('high');
     expect(guard('flash_check', {}).risk).toBe('high');
     expect(guard('board_openclaw_install', {}).risk).toBe('high');
+    expect(guard('board_openclaw_ensure_find_skills', {}).risk).toBe('high');
   });
 
   it('classifies exec commands by content', () => {
