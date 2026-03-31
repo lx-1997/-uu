@@ -196,9 +196,9 @@ function buildSkillMarkValidatedTool(opts: SkillDiscoveryToolOptions): Tool<{
   return {
     name: 'skill_mark_validated',
     description:
-      '**仅在任务已验收成功且你确实采用了某次检索/安装的技能后调用**：从 SkillHub/ClawHub **下载**对应 `skill_slugs` 的 SKILL.md，写入当前 RDKClaw 工作区 `skills/<目录名>/SKILL.md`（内化成本地技能，下次 `find_skills`/匹配可见）；并写入长期记忆与 `.rdkstudio/validated-skills.jsonl`。' +
-      '**禁止**在：仅 `find_skills` 未实际采用、任务失败、中途放弃、尚未确认成功时调用。' +
-      '若目录下已有非空 SKILL.md 则**不覆盖**（返回提示）。纯本地采用的技能填 `local_skill_refs` 即可（**不**从远端拉取）。' +
+      '**仅在任务已验收成功且你确实采用了某次检索/安装的技能后调用**：从 SkillHub/ClawHub **下载**对应 `skill_slugs` 的 SKILL.md，写入 RDKClaw 工作区 `skills/<目录名>/SKILL.md`；**若当前会话已连接设备**，同时写入板端 `/root/.openclaw/workspace/skills/<目录名>/SKILL.md`；并写记忆与 `.rdkstudio/validated-skills.jsonl`。' +
+      '**禁止**在：仅 `find_skills` 未实际采用、任务失败、半途放弃、尚未确认成功时调用。' +
+      '本机目录下已有非空 SKILL.md 时**不覆盖**本机文件（仍会尝试同步到板端）。纯本地技能填 `local_skill_refs`（**不**从远端拉取、也**不**自动推板端）。' +
       '`skill_slugs` 为 SkillHub/registry slug（如 owner/skill 或短名）。',
     inputSchema: {
       type: 'object',
@@ -257,21 +257,23 @@ function buildSkillMarkValidatedTool(opts: SkillDiscoveryToolOptions): Tool<{
         howUsed: input.how_used?.trim() || undefined,
         sessionKey: ctx.sessionKey,
       });
+      const boardOk = persist.boardPushed.filter((b) => b.ok).length;
       const anyArtifact =
         persist.wroteJsonl ||
         persist.wroteDailyMd ||
         persist.wroteLongTermMemory ||
-        persist.materialized.length > 0;
+        persist.materialized.length > 0 ||
+        boardOk > 0;
       if (!persist.root || !anyArtifact) {
         return JSON.stringify({
           ok: false,
           error:
             persist.root
-              ? '内化写入失败（磁盘、注册表拉取或路径异常），请检查工作区是否可写及网络'
+              ? '内化写入失败（磁盘、注册表拉取、板端 SSH 或路径异常），请检查工作区与设备'
               : '无法解析工作区路径（bootstrapDir/workspaceDir），内化未写入',
         });
       }
-      if (persist.materialized.length > 0) {
+      if (persist.materialized.length > 0 || boardOk > 0) {
         try {
           opts.afterSkillFilesMaterialized?.();
         } catch {
@@ -287,10 +289,12 @@ function buildSkillMarkValidatedTool(opts: SkillDiscoveryToolOptions): Tool<{
         },
         materialized_skills: persist.materialized,
         materialize_errors: persist.materializeErrors.length ? persist.materializeErrors : undefined,
+        board_pushed: persist.boardPushed.length ? persist.boardPushed : undefined,
         message:
           (persist.materialized.length
-            ? `已内化 ${persist.materialized.length} 个 SkillHub 技能到工作区 skills/；`
+            ? `已内化 ${persist.materialized.length} 个 SkillHub 技能到本机 skills/；`
             : '') +
+          (boardOk ? `已同步 ${boardOk} 个到板端 ~/.openclaw/workspace/skills/；` : '') +
           (persist.wroteLongTermMemory
             ? '已写入 validated-skills.jsonl、当日 memory/*.md 与长期记忆索引'
             : '已写入 validated-skills.jsonl 与当日 memory（当前会话未注入 MemoryManager 时无长期记忆索引）'),

@@ -162,6 +162,8 @@ export interface AgentConfig {
   extraAllowedRoots?: string[];
   /** 合并进每次工具执行的 ToolContext（如 RDK Studio 的设备绑定回调） */
   toolContextExtras?: Partial<ToolContext>;
+  /** RDK Studio：每轮解析当前绑定设备 ID，写入 ToolContext.studioDeviceId（供板端技能内化等） */
+  studioDeviceIdResolver?: () => string | undefined;
   /**
    * 运行级策略参数（替代 process.env.RDKCLAW_* 写入）
    *
@@ -235,6 +237,7 @@ export class Agent {
   private baseSystemPrompt: string;
   private tools: Tool[];
   private toolContextExtras?: Partial<ToolContext>;
+  private studioDeviceIdResolver?: () => string | undefined;
   private maxTurns: number;
   private workspaceDir: string;
   private bootstrapDir?: string;
@@ -364,6 +367,7 @@ export class Agent {
     this.baseSystemPrompt = config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     this.tools = config.tools ?? builtinTools;
     this.toolContextExtras = config.toolContextExtras;
+    this.studioDeviceIdResolver = config.studioDeviceIdResolver;
     this.maxTurns = config.maxTurns ?? 20;
     this.workspaceDir = config.workspaceDir ?? process.cwd();
     this.bootstrapDir = config.bootstrapDir;
@@ -763,6 +767,8 @@ export class Agent {
                 toolScope,
               }),
             ...this.toolContextExtras,
+            studioDeviceId:
+              this.studioDeviceIdResolver?.() ?? this.toolContextExtras?.studioDeviceId,
           };
 
           let processedMessage = userMessage;

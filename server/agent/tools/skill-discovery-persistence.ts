@@ -5,6 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { clawhubFetchSkillMarkdown } from '../../clawhub-registry.js';
+import { writeDeviceFile } from './rdk-ssh-helper.js';
 import type { MemoryManager } from '../memory.js';
 import type { ToolContext } from './types.js';
 
@@ -19,8 +20,20 @@ export function hubSlugToLocalSkillId(slug: string): string {
   return base.length > 120 ? base.slice(0, 120) : base;
 }
 
-export type MaterializedSkillFile = { slug: string; localSkillId: string; path: string; version?: string };
+export type MaterializedSkillFile = {
+  slug: string;
+  localSkillId: string;
+  path: string;
+  version?: string;
+  reusedLocal?: boolean;
+};
 export type MaterializeSkillError = { slug: string; error: string };
+export type BoardSkillPushResult = {
+  localSkillId: string;
+  boardPath: string;
+  ok: boolean;
+  error?: string;
+};
 
 function appendInternalizeFooter(markdown: string, hubSlug: string, taskSummary: string): string {
   const safeTask = taskSummary.replace(/`/g, "'").replace(/\s+/g, ' ').trim().slice(0, 400);
@@ -41,17 +54,25 @@ function appendInternalizeFooter(markdown: string, hubSlug: string, taskSummary:
 }
 
 /**
- * 从 SkillHub/ClawHub 拉取 SKILL.md，写入 `bootstrapDir/skills/<localId>/SKILL.md`（与 RDKClaw 工作区约定一致）。
+ * 从 SkillHub/ClawHub 拉取 SKILL.md，写入 `bootstrapDir/skills/<localId>/SKILL.md`；
+ * 若已绑定板端（studioDeviceId），同步写入 `/root/.openclaw/workspace/skills/<localId>/SKILL.md`。
  */
 export async function materializeHubSlugsToWorkspaceSkills(
   bootstrapDir: string,
   slugs: string[],
   meta: { taskSummary: string; sessionKey?: string },
-): Promise<{ materialized: MaterializedSkillFile[]; errors: MaterializeSkillError[] }> {
+  opts?: { studioDeviceId?: string },
+): Promise<{
+  materialized: MaterializedSkillFile[];
+  errors: MaterializeSkillError[];
+  boardPushed: BoardSkillPushResult[];
+}> {
   const materialized: MaterializedSkillFile[] = [];
   const errors: MaterializeSkillError[] = [];
+  const boardPushed: BoardSkillPushResult[] = [];
   const root = bootstrapDir.trim();
-  if (!root || slugs.length === 0) return { materialized, errors };
+  const deviceId = opts?.studioDeviceId?.trim() || '';
+  if (!root || slugs.length === 0) return { materialized, errors, boardPushed };
 
   const seenLocal = new Set<string>();
   const skillsRoot = path.join(root, 'skills');
@@ -70,20 +91,51 @@ export async function materializeHubSlugsToWorkspaceSkills(
     const skillDir = path.join(skillsRoot, localId);
     const skillPath = path.join(skillDir, 'SKILL.md');
 
+    let body: string | null = null;
+    let version: string | undefined;
+    let reusedLocal = false;
+
     try {
       if (fs.existsSync(skillPath)) {
         const st = fs.statSync(skillPath);
         if (st.size > 0) {
-          errors.push({ slug, error: `工作区已存在 ${localId}/SKILL.md，未覆盖` });
-          continue;
+          body = fs.readFileSync(skillPath, 'utf-8');
+          reusedLocal = true;
+          materialized.push({
+            slug,
+            localSkillId: localId,
+            path: skillPath,
+            reusedLocal: true,
+          });
         }
       }
 
-      const { markdown, version } = await clawhubFetchSkillMarkdown(slug);
-      const body = appendInternalizeFooter(markdown, slug, meta.taskSummary);
-      fs.mkdirSync(skillDir, { recursive: true });
-      fs.writeFileSync(skillPath, body, 'utf-8');
-      materialized.push({ slug, localSkillId: localId, path: skillPath, version });
+      if (!body) {
+        const { markdown, version: ver } = await clawhubFetchSkillMarkdown(slug);
+        version = ver;
+        body = appendInternalizeFooter(markdown, slug, meta.taskSummary);
+        fs.mkdirSync(skillDir, { recursive: true });
+        fs.writeFileSync(skillPath, body, 'utf-8');
+        materialized.push({
+          slug,
+          localSkillId: localId,
+          path: skillPath,
+          version,
+          reusedLocal: false,
+        });
+      }
+
+      if (deviceId && body) {
+        const boardPath = `/root/.openclaw/workspace/skills/${localId}/SKILL.md`;
+        try {
+          await writeDeviceFile(deviceId, boardPath, body);
+          boardPushed.push({ localSkillId: localId, boardPath, ok: true });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          boardPushed.push({ localSkillId: localId, boardPath, ok: false, error: msg });
+          console.warn(`[skill_validated] board push failed ${localId}:`, msg);
+        }
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push({ slug, error: msg });
@@ -91,7 +143,7 @@ export async function materializeHubSlugsToWorkspaceSkills(
     }
   }
 
-  return { materialized, errors };
+  return { materialized, errors, boardPushed };
 }
 
 export type FindSkillsPersistPayload = {
@@ -166,6 +218,7 @@ export type PersistValidatedSkillResult = {
   wroteLongTermMemory: boolean;
   materialized: MaterializedSkillFile[];
   materializeErrors: MaterializeSkillError[];
+  boardPushed: BoardSkillPushResult[];
 };
 
 /**
@@ -183,6 +236,7 @@ export async function persistValidatedSkillUsage(
     wroteLongTermMemory: false,
     materialized: [],
     materializeErrors: [],
+    boardPushed: [],
   };
   const root = (ctx.bootstrapDir || ctx.workspaceDir || '').trim();
   if (!root) return empty;
@@ -227,14 +281,29 @@ export async function persistValidatedSkillUsage(
 
   let materialized: MaterializedSkillFile[] = [];
   let materializeErrors: MaterializeSkillError[] = [];
+  let boardPushed: BoardSkillPushResult[] = [];
   if (payload.skillSlugs.length > 0) {
-    const m = await materializeHubSlugsToWorkspaceSkills(root, payload.skillSlugs, {
-      taskSummary: payload.taskSummary,
-      sessionKey: payload.sessionKey,
-    });
+    const m = await materializeHubSlugsToWorkspaceSkills(
+      root,
+      payload.skillSlugs,
+      {
+        taskSummary: payload.taskSummary,
+        sessionKey: payload.sessionKey,
+      },
+      { studioDeviceId: ctx.studioDeviceId },
+    );
     materialized = m.materialized;
     materializeErrors = m.errors;
+    boardPushed = m.boardPushed;
   }
 
-  return { root, wroteJsonl, wroteDailyMd, wroteLongTermMemory, materialized, materializeErrors };
+  return {
+    root,
+    wroteJsonl,
+    wroteDailyMd,
+    wroteLongTermMemory,
+    materialized,
+    materializeErrors,
+    boardPushed,
+  };
 }

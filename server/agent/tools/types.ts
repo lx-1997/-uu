@@ -72,6 +72,10 @@ export interface ToolContext {
   onStudioDeviceBound?: (deviceId: string) => void;
   /** RDK Studio：device_remove 成功后若移除的是当前绑定设备，宿主清空绑定并刷新工具列表 */
   onStudioDeviceRemoved?: (deviceId: string) => void;
+  /**
+   * RDK Studio：当前会话选中的设备 ID（已连接设备时）。`skill_mark_validated` 可将 SkillHub 技能同步写入板端 `skills/`。
+   */
+  studioDeviceId?: string;
 }
 
 // ============== 工具定义 ==============

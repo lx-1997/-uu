@@ -58,6 +58,7 @@ export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks):
     boardOpenClawHealthTool(deviceId),
     boardOpenClawSkillsListTool(deviceId),
     boardOpenClawSkillInstallTool(deviceId),
+    boardOpenClawEnsureFindSkillsTool(deviceId),
     boardOpenClawWriteSkillTool(deviceId),
     deviceDiagnoseTool(deviceId),
     rosTopicsTool(deviceId),
@@ -79,6 +80,72 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bm
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.avi', '.mov', '.mkv']);
 const DOC_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf', '.csv', '.txt', '.md', '.zip', '.rar', '.7z']);
 const OPENCLAW_RESOLVE_SNIPPET = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global"; export PATH="$HOME/.npm-global/bin:$PATH"; OPENCLAW_CMD="$(command -v openclaw 2>/dev/null || true)"; if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.local/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.local/bin/openclaw"; fi; if [ -z "$OPENCLAW_CMD" ] && [ -x "$(npm prefix -g 2>/dev/null)/bin/openclaw" ]; then OPENCLAW_CMD="$(npm prefix -g 2>/dev/null)/bin/openclaw"; fi; if [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi';
+
+/** SkillHub 元技能：`clawhub install` 短名，供板端 find-skills 检索 */
+export const BOARD_FIND_SKILLS_PACKAGE_ID = 'find-skills';
+
+const findSkillsEnsureCooldown = new Map<string, number>();
+const FIND_SKILLS_ENSURE_COOLDOWN_MS = 90_000;
+
+/**
+ * 若板端未安装 find-skills，则 clawhub install + plugins.allow + 重启 gateway。
+ * 短期冷却内不重复跑 SSH（避免同一会话多次委派刷安装）。
+ */
+export async function ensureFindSkillsOnBoard(
+  deviceId: string,
+  onProgress?: (chunk: string) => void,
+): Promise<{ outcome: 'skipped_cooldown' | 'already_present' | 'installed'; output: string }> {
+  const id = String(deviceId || '').trim();
+  if (!id) return { outcome: 'skipped_cooldown', output: '' };
+
+  const now = Date.now();
+  const last = findSkillsEnsureCooldown.get(id) ?? 0;
+  if (now - last < FIND_SKILLS_ENSURE_COOLDOWN_MS) {
+    return { outcome: 'skipped_cooldown', output: '' };
+  }
+  findSkillsEnsureCooldown.set(id, now);
+
+  const pyAllow = `import json,os;x='${BOARD_FIND_SKILLS_PACKAGE_ID}';p=os.path.expanduser('~/.openclaw/openclaw.json');d=json.load(open(p)) if os.path.exists(p) else {};a=d.setdefault('plugins',{}).setdefault('allow',[]);a.append(x) if x not in a else None;json.dump(d,open(p,'w'),indent=2);print('plugins_allow',x)`;
+
+  const cmds = [
+    OPENCLAW_RESOLVE_SNIPPET,
+    'FOUND=0',
+    'for base in /root/.openclaw/workspace/skills /opt/openclaw/skills; do [ -d "$base" ] || continue; for d in "$base"/*; do [ -d "$d" ] || continue; bn=$(basename "$d" | tr "[:upper:]" "[:lower:]"); echo "$bn" | grep -qE "find.*skill|^find-skills$" && FOUND=1 && break; done; [ "$FOUND" = 1 ] && break; done',
+    'if [ "$FOUND" = 0 ]; then L=$(clawhub list 2>/dev/null || true); echo "$L" | grep -qiE "find-skills|find_skills" && FOUND=1; fi',
+    'if [ "$FOUND" = 1 ]; then echo RDK_FIND_SKILLS_ALREADY; exit 0; fi',
+    'echo RDK_FIND_SKILLS_INSTALLING',
+    `(clawhub install ${BOARD_FIND_SKILLS_PACKAGE_ID} 2>&1 || echo clawhub_install_failed)`,
+    `python3 -c "${pyAllow}" 2>&1`,
+    '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true)',
+    'echo RDK_FIND_SKILLS_DONE',
+  ].join('; ');
+
+  onProgress?.('\n[板端] 检查 SkillHub 元技能 find-skills …\n');
+  const output = await execOnDevice(id, [`bash -lc '${cmds}'`]);
+  if (/RDK_FIND_SKILLS_ALREADY/.test(output)) {
+    return { outcome: 'already_present', output };
+  }
+  return { outcome: 'installed', output };
+}
+
+function boardOpenClawEnsureFindSkillsTool(deviceId: string): Tool<Record<string, never>> {
+  return {
+    name: 'board_openclaw_ensure_find_skills',
+    description:
+      '确保板端已安装腾讯 SkillHub 元技能 **find-skills**（板端 `clawhub install find-skills`，用于检索/安装社区技能）。' +
+      '若已安装则跳过。委派前工具链也会自动尝试一次；你可主动调用以排障。',
+    inputSchema: { type: 'object', properties: {} },
+    async execute() {
+      findSkillsEnsureCooldown.delete(deviceId);
+      const r = await ensureFindSkillsOnBoard(deviceId);
+      return JSON.stringify({
+        ok: true,
+        outcome: r.outcome,
+        output: r.output.slice(0, 12_000),
+      });
+    },
+  };
+}
 
 function assertShellSafeToken(name: string, value: string): string {
   const trimmed = value.trim();

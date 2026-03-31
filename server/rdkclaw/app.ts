@@ -1112,6 +1112,7 @@ export class RDKClawApp {
       agentId: "rdkclaw",
       systemPrompt,
       tools: buildSessionTools(),
+      studioDeviceIdResolver: () => sessionDeviceIdRef.current,
       toolContextExtras: {
         onStudioDeviceBound: (id) => {
           sessionDeviceIdRef.current = id;
