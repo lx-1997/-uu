@@ -17,11 +17,14 @@ category: Knowledge
 
 ## 板型识别
 
-检测当前板子是否为 S100：
+本 Skill 仅适用于 RDK S100/S100P。执行前 ALWAYS 确认板型匹配：
+- system prompt 中的设备快照显示 `boardPlatform: rdk-s100`
+- 或执行以下命令确认：
 ```bash
-cat /etc/version  # 含 "s100"
-cat /proc/device-tree/model  # Horizon S100
+cat /proc/device-tree/model 2>/dev/null  # 含 "S100"
+cat /etc/version 2>/dev/null  # 含 "s100"
 ```
+若板型不是 S100，NEVER 使用本 Skill 的命令和模型路径。
 
 ## S100 特有优势
 

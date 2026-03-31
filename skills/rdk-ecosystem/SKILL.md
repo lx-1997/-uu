@@ -47,6 +47,27 @@ category: Procedure
 更细的桥接步骤仍以 **RDK OpenClaw Bridge** 为准；此处不重复 assess 前置规则。
 
 ## 执行流程
+
+### 前置：板型识别与适配（ALWAYS 先执行）
+
+板型决定了可用的包、模型和命令。板型信息通常已在 system prompt 中，若缺失则执行：
+```bash
+cat /proc/device-tree/model 2>/dev/null && cat /etc/version 2>/dev/null
+```
+
+**板型适配速查**：
+
+| 操作 | X3 (Bernoulli2) | X5 (Bayes-e) | S100 (Nash-e) |
+|------|-----------------|--------------|---------------|
+| TROS 安装 | `apt install tros-foxy-*` | `apt install tros-humble-*` | `apt install tros-humble-*` |
+| TROS source | `source /opt/tros/setup.bash` | `source /opt/tros/humble/setup.bash` | `source /opt/tros/humble/setup.bash` |
+| 模型路径 | `/opt/hobot/model/rdkx3/` | `/opt/hobot/model/rdkx5/` | `/opt/hobot/model/rdks100/` |
+| 推理示例 | `/app/ai_inference/` | `/app/ai_inference/` | `/app/ai_inference/` |
+
+**IMPORTANT**: X3 和 X5/S100 的模型 `.bin` 文件不通用，NEVER 混用。安装包前 ALWAYS 确认板型。
+
+### 步骤
+
 1. **板型与系统**：查看设备是否已有 `boardPlatform` / `boardModel`；若没有，调用 `POST /api/devices/{deviceId}/board/detect?persist=1` 经 SSH 探测并可选写回 `devices.json`。
 2. **资料与方案**：用 `web_search` 找官方教程与仓库，用 `web_fetch` 拉取关键页面；优先使用设备记录里的 `researchSeeds`（由 `board/detect?persist=1` 写入）作为检索起点。
 3. **板端能力**：用 `board_openclaw_assess` / `board_openclaw_chat` 确认依赖、已装技能与是否可执行复杂编排。

@@ -22,6 +22,20 @@ disableModelInvocation: true
 - 需要了解设备整体健康状况或定位硬件异常。
 
 ## 执行流程
+
+### 前置：板型识别
+诊断命令因板型而异。板型信息通常已在 system prompt 中，若缺失则先执行：
+```bash
+cat /proc/device-tree/model 2>/dev/null
+```
+
+| 诊断项 | X3 命令 | X5/S100 命令 |
+|--------|---------|-------------|
+| BPU 状态 | `cat /sys/devices/system/bpu/bpu{0,1}/ratio` | `hrut_smi` 或 `bputop` |
+| CPU 频率 | `cat /sys/devices/system/cpu/cpufreq/policy0/cpuinfo_cur_freq` | 同左 |
+| 温度 | `cat /sys/class/thermal/thermal_zone0/temp` | 同左（S100 可能有多个 zone） |
+| 内存 | `free -h`（注意 X3 仅 2GB） | `free -h` |
+
 1. **一键诊断**：调用 `GET /api/devices/{deviceId}/diagnostics` 获取完整诊断输出（温度、BPU、CPU、内存、磁盘、网络、进程等）。
 2. **解读结果**：将诊断输出按类别（温度/CPU/内存/磁盘/BPU/网络）分段解读，标注正常或异常。
 3. **精细排查**（可选）：若需单项深入，调用 `POST /api/devices/{deviceId}/exec` 执行自定义命令。

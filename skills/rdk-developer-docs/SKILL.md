@@ -18,10 +18,16 @@ category: Knowledge
 ## 核心能力
 
 当用户询问 RDK 开发相关问题时，你应该：
-1. 根据问题关键词，从下方文档索引中定位最相关的页面 URL
-2. 使用 `web_fetch` 获取该页面内容
-3. 从获取的内容中提取关键信息回答用户
-4. 如果需要在板端操作，结合 `device_exec` 执行
+1. **识别板型**：从 system prompt 的设备快照中获取板型（X3/X5/S100），若缺失则先问用户或用 `device_exec` 检测
+2. 根据板型和问题关键词，从下方文档索引中定位最相关的页面 URL
+3. 使用 `web_fetch` 获取该页面内容
+4. 从获取的内容中提取关键信息，**根据板型适配后**回答用户
+5. 如果需要在板端操作，结合 `device_exec` 执行
+
+**板型影响文档路由**：
+- X3 相关问题优先查 `/Quick_start/hardware_introduction/rdk_x3/` 和 Foxy 相关文档
+- X5 相关问题优先查 `/Quick_start/hardware_introduction/rdk_x5/` 和 Humble 相关文档
+- S100 相关问题优先查 `/rdk_s/` 路径下的文档（S100 有独立文档区）
 
 ## 文档站点结构
 

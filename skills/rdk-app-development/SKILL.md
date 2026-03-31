@@ -26,6 +26,23 @@ category: Development
 
 ## 执行流程
 
+### 第 0 步：板型识别（所有任务的前置步骤）
+
+**在执行任何操作前，ALWAYS 先确认板型**。板型信息通常已在 system prompt 的设备快照中，若缺失则执行：
+```bash
+cat /proc/device-tree/model 2>/dev/null && cat /etc/version 2>/dev/null
+```
+
+根据板型选择对应的技术栈和模型：
+
+| 板型 | BPU 架构 | 算力 | 系统 | ROS | 模型路径 | 推荐模型 |
+|------|----------|------|------|-----|----------|----------|
+| X3 | Bernoulli2 | 5T | Ubuntu 20.04 | Foxy | /opt/hobot/model/rdkx3/ | YOLOv5s, MobileNet, FCOS |
+| X5 | Bayes-e | 10T | Ubuntu 22.04 | Humble | /opt/hobot/model/rdkx5/ | YOLOv5/v8, 分割, 姿态, ≤2B LLM |
+| S100 | Nash-e | 80-128T | Ubuntu 22.04 | Humble | /opt/hobot/model/rdks100/ | YOLOv8x, DOSOD, LLM/VLM |
+
+**IMPORTANT**: X3 和 X5/S100 的模型文件 `.bin` 不通用（BPU 架构不同），NEVER 混用。
+
 ### 第 1 步：需求理解 + 并行信息收集（关键！）
 
 **目标**：在一个 turn 中同时完成知识准备和板端评估，大幅缩短准备时间。
@@ -63,22 +80,24 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 ```
 ## 技术方案
 - 应用类型: {用户需求概要}
-- 推荐技术栈: {基于平台能力的推荐，如 Python + hobot_dnn + OpenCV}
-- 推荐模型: {从文档检索与 assess 结论中选择的模型}
+- 目标板型: {X3/X5/S100}（基于第 0 步识别结果）
+- 推荐技术栈: {基于板型能力的推荐，如 Python + hobot_dnn}
+- BPU 架构: {Bernoulli2/Bayes-e/Nash-e}（决定模型格式）
+- 推荐模型: {基于板型算力的推荐}
+- TROS 版本: {Foxy(X3) / Humble(X5/S100)}
 
 ## 参考资料
-- 官方文档: {web_search 查到的链接}
-- 参考代码: {关键代码片段或仓库链接}
-- 相关 OpenClaw 技能 / ClawHub: {名称及安装方式}
-
-## 代码结构建议
-- 主文件: main.py (或 main.cpp)
-- 工作目录: ~/apps/{app_name}/
-- 关键依赖: {pip/apt 包列表}
+- 文档链接: {web_search/web_fetch 获取的关键信息}
+- 代码参考: {GitHub 仓库或示例路径}
 
 ## 验收标准
-- {应用应达到的可观测效果，如"进程在运行""可通过浏览器访问 :8080"}
+- {明确的成功判定条件}
 ```
+
+**板型适配要点**：
+- X3：优先轻量模型，注意 2GB 内存限制，TROS 用 Foxy
+- X5：可用中等模型，source `/opt/tros/humble/setup.bash`
+- S100：可用大模型，多路推理，注意 Nash-e 专用模型格式
 
 ### 第 3 步：带建议委派（跨 Agent）
 

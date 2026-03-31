@@ -17,12 +17,15 @@ category: Knowledge
 
 ## 板型识别
 
-检测当前板子是否为 X3：
+本 Skill 仅适用于 RDK X3。执行前 ALWAYS 确认板型匹配：
+- system prompt 中的设备快照显示 `boardPlatform: rdk-x3`
+- 或执行以下命令确认：
 ```bash
-cat /etc/version  # 含 "x3" 或 "sunrise"
-cat /proc/device-tree/model  # Horizon X3
-hrut_somid  # 查看 SoM ID
+cat /proc/device-tree/model 2>/dev/null  # 含 "X3" 或 "Sunrise"
+cat /etc/version 2>/dev/null  # 含 "x3"
+hrut_somid 2>/dev/null  # 查看 SoM ID
 ```
+若板型不是 X3，NEVER 使用本 Skill 的命令和模型路径。
 
 ## X3 特有注意事项
 

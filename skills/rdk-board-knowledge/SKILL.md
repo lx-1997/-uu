@@ -19,12 +19,17 @@ category: Knowledge
 你是协作指导者。当设备已连接，你知道它的能力量级，可以精准引导 OpenClaw 完成任务。
 
 ## 平台判断
-连接设备后，先确认平台型号：
-- **RDK X3**: 入门级，5TOPS BPU，2GB RAM。用轻量模型 (YOLOv5s/MobileNet/FCOS)
-- **RDK X5**: 主力级，10TOPS BPU，4-8GB RAM。跑 YOLO/分割/姿态/DOSOD(12fps)/小LLM(≤2B)
-- **RDK S100**: 旗舰级，80-128TOPS Nash BPU，12-24GB RAM + MCU。跑大模型(LLM/VLM)、DOSOD(45fps)、具身智能
 
-不确定时用 web_search / web_fetch 查文档，并结合 board_openclaw_assess 判断板端是否具备能力。
+连接设备后，ALWAYS 先确认平台型号（通常已在 system prompt 的设备快照中）。若缺失则执行：
+```bash
+cat /proc/device-tree/model 2>/dev/null && cat /etc/version 2>/dev/null
+```
+
+- **RDK X3**: 入门级，5TOPS BPU (Bernoulli2)，2GB RAM，Ubuntu 20.04 + Foxy。用轻量模型 (YOLOv5s/MobileNet/FCOS)
+- **RDK X5**: 主力级，10TOPS BPU (Bayes-e)，4-8GB RAM，Ubuntu 22.04 + Humble。跑 YOLO/分割/姿态/DOSOD(12fps)/小LLM(≤2B)
+- **RDK S100**: 旗舰级，80-128TOPS BPU (Nash-e)，8-16GB RAM，Ubuntu 22.04 + Humble。跑大模型(LLM/VLM)、DOSOD(45fps)、具身智能
+
+**IMPORTANT**: 不同板型的模型 `.bin` 文件不通用（BPU 架构不同），NEVER 混用。在委派 OpenClaw 或执行命令前，ALWAYS 确认板型并选择对应的模型和命令。
 
 ## 协作决策树
 ```
