@@ -2421,13 +2421,15 @@ app.post('/api/typec/configure', async (request, response) => {
     if (platform === 'win32') {
       // Windows: 使用 netsh 配置静态 IP（需要管理员权限）
       //
-      // netsh 行为：
-      //   - 网卡当前是 DHCP → set address 成功
-      //   - 网卡已有静态 IP  → set address 报"对象已存在"
-      //   - 网卡已有相同 IP  → 无需操作
+      // 关键发现（实测）：
+      //   1. Windows 不允许同一个 IP 出现在两个接口上，否则报"对象已存在"
+      //   2. 如果目标网卡已有静态 IP，set address 也会报"对象已存在"
+      //   3. 169.254.x.x (APIPA) 地址是 Windows 自动分配的，delete 后会重新出现
       //
-      // 策略：先检查当前 IP，如果已经是目标 IP 直接跳过；
-      // 否则先 delete 旧静态 IP（忽略错误），再 set 新 IP。
+      // 策略：
+      //   a. 先检查目标 IP 是否已在目标接口上 → 跳过
+      //   b. 检查目标 IP 是否被其他接口占用 → 先从其他接口删除
+      //   c. 从目标接口删除旧 IP → set address static
       const spawnNetsh = (args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> =>
         new Promise((resolve, reject) => {
           const child = spawn('netsh', args, { timeout: 15000, windowsHide: true });
@@ -2439,41 +2441,37 @@ app.post('/api/typec/configure', async (request, response) => {
           child.on('error', reject);
         });
 
-      // 检查当前 IP 是否已经是目标值
-      const currentAddrs = os.networkInterfaces()[interfaceName];
-      const alreadyConfigured = currentAddrs?.some(a => a.family === 'IPv4' && a.address === pcIp);
-      if (alreadyConfigured) {
+      // (a) 检查目标 IP 是否已在目标接口上
+      const allIfaces = os.networkInterfaces();
+      const currentAddrs = allIfaces[interfaceName];
+      if (currentAddrs?.some(a => a.family === 'IPv4' && a.address === pcIp)) {
         result = `IP ${pcIp} 已配置在 ${interfaceName} 上，无需重复设置`;
       } else {
-        // 先尝试直接 set
-        const first = await spawnNetsh([
-          'interface', 'ipv4', 'set', 'address',
-          `name=${interfaceName}`, 'static', pcIp, mask,
-        ]);
-        if (first.code === 0) {
-          result = first.stdout;
-        } else {
-          // "对象已存在" → 先删除旧静态 IP 再重新设置
-          await spawnNetsh([
-            'interface', 'ipv4', 'delete', 'address',
-            `name=${interfaceName}`, 'addr=0.0.0.0', 'gateway=all',
-          ]).catch(() => {});
-          // 也尝试删除当前已有的具体 IP
-          for (const addr of (currentAddrs ?? []).filter(a => a.family === 'IPv4')) {
+        // (b) 检查目标 IP 是否被其他接口占用，如果是则先删除
+        for (const [otherName, otherAddrs] of Object.entries(allIfaces)) {
+          if (otherName === interfaceName) continue;
+          if (otherAddrs?.some(a => a.family === 'IPv4' && a.address === pcIp)) {
             await spawnNetsh([
-              'interface', 'ipv4', 'delete', 'address',
-              `name=${interfaceName}`, `addr=${addr.address}`,
+              'interface', 'ipv4', 'delete', 'address', otherName, pcIp,
             ]).catch(() => {});
           }
-          const second = await spawnNetsh([
-            'interface', 'ipv4', 'set', 'address',
-            `name=${interfaceName}`, 'static', pcIp, mask,
-          ]);
-          if (second.code === 0) {
-            result = second.stdout;
-          } else {
-            throw new Error(second.stderr || second.stdout || `netsh exit code ${second.code}`);
-          }
+        }
+
+        // (c) 从目标接口删除旧 IPv4 地址（忽略错误）
+        for (const addr of (currentAddrs ?? []).filter(a => a.family === 'IPv4')) {
+          await spawnNetsh([
+            'interface', 'ipv4', 'delete', 'address', interfaceName, addr.address,
+          ]).catch(() => {});
+        }
+
+        // 设置新的静态 IP（使用位置参数格式，实测更可靠）
+        const setResult = await spawnNetsh([
+          'interface', 'ipv4', 'set', 'address', interfaceName, 'static', pcIp, mask,
+        ]);
+        if (setResult.code === 0) {
+          result = setResult.stdout;
+        } else {
+          throw new Error(setResult.stderr || setResult.stdout || `netsh exit code ${setResult.code}`);
         }
       }
     } else if (platform === 'darwin') {
