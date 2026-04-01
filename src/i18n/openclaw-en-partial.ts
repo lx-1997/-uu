@@ -196,6 +196,11 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.aria.domain': 'Domain',
   'oc.feishu.dm': 'DM policy',
   'oc.aria.dm': 'DM policy',
+  'oc.pairing.gatewayTrustTitle': 'Gateway trust (CLI ↔ Gateway)',
+  'oc.pairing.gatewayTrustHint':
+    'Not the channel pairing codes below: this runs board-side openclaw pair so the CLI trusts the local :18789 gateway (fixes pairing required).',
+  'oc.pairing.gatewayPairForce': 'Pair (recommended)',
+  'oc.pairing.gatewayPairFull': 'Reset & pair',
   'oc.pairing.title': 'Pairing approval',
   'oc.aria.pairChannel': 'Pairing channel',
   'oc.pairing.codePh': 'Pairing code',

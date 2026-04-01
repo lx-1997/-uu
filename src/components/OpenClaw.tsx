@@ -734,7 +734,7 @@ export default function OpenClaw() {
     setChatMessages((prev) => [...prev, { id: nextChatMessageId(), role: 'assistant', text }]);
   };
 
-  const SLOW_ACTIONS = new Set(['install', 'upgrade', 'uninstall', 'prepare', 'check', 'doctor']);
+  const SLOW_ACTIONS = new Set(['install', 'upgrade', 'uninstall', 'prepare', 'check', 'doctor', 'gateway-pair']);
 
   const updateLastAssistant = (text: string) => {
     setChatMessages((prev) => {
@@ -880,8 +880,8 @@ export default function OpenClaw() {
       } else {
         const output = data.output?.trim() || JSON.stringify(data, null, 2);
         updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n\`\`\`\n${output}\n\`\`\``);
-        if (action === 'install' || action === 'uninstall' || action === 'restart-gateway' || action === 'upgrade') {
-          setTimeout(() => { void loadStatusWithRetry(action === 'restart-gateway' ? 7 : 4, 2000); }, 1000);
+        if (action === 'install' || action === 'uninstall' || action === 'restart-gateway' || action === 'upgrade' || action === 'gateway-pair') {
+          setTimeout(() => { void loadStatusWithRetry(action === 'restart-gateway' || action === 'gateway-pair' ? 7 : 4, 2000); }, 1000);
         }
         if (data.ok) addToast?.(t('oc.toast.opOk', '操作成功'), 'success');
       }
@@ -1906,6 +1906,29 @@ export default function OpenClaw() {
                 <div className="oc-form-actions">
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => saveConfig('feishu')} disabled={loading}>{loading ? t('oc.test.testing', '...') : t('oc.save', '保存')}</button>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => { loadConfig(); addToast?.(t('oc.toast.reloaded', '已加载'), 'info'); }}>{t('oc.reload', '重载')}</button>
+                </div>
+                <div className="divider" style={{ margin: '10px 0' }} />
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 4 }}>{t('oc.pairing.gatewayTrustTitle', '网关信任（CLI ↔ Gateway）')}</div>
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.35 }}>
+                  {t('oc.pairing.gatewayTrustHint', '与下方「渠道配对码」不同：用于板端 openclaw 与本机 18789 网关建立信任，可消除 pairing required。')}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => runAction('gateway-pair', { mode: 'force' })}
+                    disabled={loading}
+                  >
+                    {t('oc.pairing.gatewayPairForce', '一键配对（推荐）')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => runAction('gateway-pair', { mode: 'full' })}
+                    disabled={loading}
+                  >
+                    {t('oc.pairing.gatewayPairFull', '重置并配对')}
+                  </button>
                 </div>
                 <div className="divider" style={{ margin: '10px 0' }} />
                 <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 6 }}>{t('oc.pairing.title', '配对审批')}</div>

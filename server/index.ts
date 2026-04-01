@@ -3774,6 +3774,21 @@ app.post('/api/devices/:id/openclaw/pairing/reject', async (request, response) =
   });
 });
 
+/** 板端 `openclaw pair`：CLI ↔ 本地 Gateway 信任（非飞书渠道 pairing） */
+app.post('/api/devices/:id/openclaw/gateway-pair', async (request, response) => {
+  const { id } = request.params;
+  const { mode } = request.body as { mode?: string };
+  const m = mode === 'full' ? 'full' : 'force';
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+  const { password } = resolvePassword(request, device);
+  const deviceObj = toOpenClawDevice(device, password);
+  let output = '';
+  openClawManager.runGatewayPair(deviceObj, m, (chunk) => { output += chunk; }, (success) => {
+    response.json({ ok: success, output });
+  });
+});
+
 app.get('/api/devices/:id/openclaw/wifi-list', async (request, response) => {
   const { id } = request.params;
   const device = await resolveDevice(request, response, id);

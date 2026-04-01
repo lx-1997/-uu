@@ -31,6 +31,7 @@ import {
   OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
+  OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   OPENCLAW_RESOLVE_CLI_SNIPPET,
 } from '../../managers/openclaw-board-install-sh.js';
 import * as path from 'node:path';
@@ -483,6 +484,7 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
         OPENCLAW_ENSURE_NPM_SNIPPET,
         ' && ',
         OPENCLAW_INSTALL_OPENCLAW_STEP + ' && ',
+        OPENCLAW_ENSURE_SHELL_PATH_SNIPPET + ' && ',
         OPENCLAW_RESOLVE_CLI_SNIPPET,
         ';',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
@@ -516,7 +518,9 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
           OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
           ' && ' +
           OPENCLAW_RESOLVE_CLI_SNIPPET +
-          ';',
+          ' && ' +
+          OPENCLAW_ENSURE_SHELL_PATH_SNIPPET +
+        ';',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',

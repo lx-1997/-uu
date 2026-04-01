@@ -89,6 +89,25 @@ export const OPENCLAW_RESOLVE_CLI_SNIPPET = [
   'if [ -n "$OPENCLAW_CMD" ] && [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi',
 ].join(' && ');
 
+/**
+ * 安装/升级后写入 ~/.bashrc：把 npm 全局 bin、~/.npm-global/bin、~/.local/bin prepend 到 PATH，
+ * 避免交互式 SSH 里 `openclaw` / `clawctl` command not found（与 OPENCLAW_RESOLVE_CLI_SNIPPET 探测路径一致）。
+ * 重复执行会先 sed 删除旧标记块再追加，避免重复堆积。
+ */
+export const OPENCLAW_ENSURE_SHELL_PATH_SNIPPET = [
+  '(',
+  'echo "[OpenClaw] 更新 ~/.bashrc：登录后可执行 openclaw / clawctl（新开终端或 source ~/.bashrc）" 1>&2',
+  '_OC_RC="${HOME}/.bashrc"',
+  'touch "$_OC_RC"',
+  'if command -v sed >/dev/null 2>&1; then sed -i "/# >>> rdk-studio-openclaw-path >>>/,/# <<< rdk-studio-openclaw-path <<</d" "$_OC_RC" 2>/dev/null || true; fi',
+  'printf \'%s\\n\' \'\' >> "$_OC_RC"',
+  'printf \'%s\\n\' \'# >>> rdk-studio-openclaw-path >>>\' >> "$_OC_RC"',
+  'printf \'%s\\n\' \'export PATH="$(npm prefix -g 2>/dev/null)/bin:${HOME}/.npm-global/bin:${HOME}/.local/bin:${PATH}"\' >> "$_OC_RC"',
+  'printf \'%s\\n\' \'# <<< rdk-studio-openclaw-path <<<\' >> "$_OC_RC"',
+  'hash -r 2>/dev/null || true',
+  ')',
+].join('; ');
+
 export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = [
   '(',
   `OPENCLAW_MIN_NODE_MAJOR="\${OPENCLAW_MIN_NODE_MAJOR:-${OPENCLAW_BOARD_NODE_MIN_MAJOR}}";`,

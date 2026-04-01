@@ -15,6 +15,7 @@ import {
   OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
   OPENCLAW_PREPARE_NPM_SPEED,
+  OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   OPENCLAW_RESOLVE_CLI_SNIPPET,
 } from './openclaw-board-install-sh.js';
 
@@ -520,6 +521,7 @@ const NPM_INSTALL_CMD = [
   OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
   OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_INSTALL_OPENCLAW_STEP,
+  OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   RESOLVE_OPENCLAW_CMD,
   CLAWHUB_AUTO_LOGIN_CMD,
   BOARD_FIND_SKILLS_INSTALL,
@@ -573,6 +575,7 @@ const NPM_UPGRADE_CMD = [
   '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 失败，改 npm" >&2 && ' +
     OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
     ')',
+  OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   BOARD_FIND_SKILLS_INSTALL,
   ENSURE_GATEWAY_LOCAL_MODE,
   ENSURE_GATEWAY_AUTH_TOKEN,
@@ -1447,6 +1450,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
       OPENCLAW_ENSURE_NPM_SNIPPET,
       OPENCLAW_INSTALL_OPENCLAW_STEP,
+      OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
       BOARD_FIND_SKILLS_INSTALL,
       'echo "[RDK Studio] 板端默认关闭 memorySearch（避免未配置 embedding 时失败）"',
       `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1'`,
@@ -1531,6 +1535,42 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
   ): void {
     const cmd = `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing reject ${channel} ${code} 2>&1 || echo "[OpenClaw] 当前版本可能不支持 pairing reject"; else echo "[OpenClaw] pairing reject 失败：未找到 openclaw CLI"; fi)`;
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 20000, pty: false });
+  }
+
+  /**
+   * 板端执行 `openclaw pair`（与 `pairing approve` 不同：建立本机 CLI ↔ Gateway 信任，缓解 pairing required / scope-upgrade）。
+   * force：`pair --force`；full：停网关 → `pair --reset` → 按既有逻辑再启动并等待 18789。
+   */
+  runGatewayPair(
+    device: Device,
+    mode: 'force' | 'full',
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void,
+  ): void {
+    const pairForce = [
+      BOARD_ENV_EXPORT,
+      RESOLVE_OPENCLAW_CMD,
+      'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] pair 失败：未找到 openclaw CLI"; exit 1; fi',
+      '"$OPENCLAW_CMD" pair --force 2>&1',
+    ].join(' && ');
+    const pairFull = [
+      BOARD_ENV_EXPORT,
+      RESOLVE_OPENCLAW_CMD,
+      'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] pair 失败：未找到 openclaw CLI"; exit 1; fi',
+      'echo "[OpenClaw] 停止 Gateway..."',
+      '"$OPENCLAW_CMD" gateway stop 2>/dev/null || true',
+      '(systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+      'echo "[OpenClaw] pair --reset..."',
+      '"$OPENCLAW_CMD" pair --reset 2>&1',
+      'echo "[OpenClaw] 启动 Gateway..."',
+      ENSURE_GATEWAY_LOCAL_MODE,
+      START_GATEWAY_FALLBACK,
+      'echo "[OpenClaw] 等待 127.0.0.1:18789..."',
+      `ok=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
+      `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪 127.0.0.1:18789"; else echo "[OpenClaw] Gateway 端口未就绪"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
+    ].join(' && ');
+    const cmd = mode === 'full' ? pairFull : pairForce;
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000, pty: true });
   }
 
   getWifiList(device: Device, onResult: (wifiNames: string[], success: boolean) => void): void {
