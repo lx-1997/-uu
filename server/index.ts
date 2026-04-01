@@ -17,7 +17,14 @@ import {
   setDevicePasswordCache,
   deleteDevicePasswordCache,
 } from './device-password-cache.js';
-import { runRemoteCommands, verifySshConnection, uploadFileSftp, SSH_READY_TIMEOUT_MS } from './ssh.js';
+import {
+  runRemoteCommands,
+  verifySshConnection,
+  uploadFileSftp,
+  SSH_READY_TIMEOUT_MS,
+  SSH_KEEPALIVE_INTERVAL_MS,
+  SSH_KEEPALIVE_COUNT_MAX,
+} from './ssh.js';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { Client } from 'ssh2';
@@ -569,27 +576,7 @@ function toOpenClawDevice(device: Device, password?: string) {
   };
 }
 
-/**
- * RDK 开发板常见默认密码候选列表。
- *
- * RDK X3/X5 出厂默认用户名和密码相同（root/root、sunrise/sunrise），
- * 用户首次添加设备时如果没有手动输入密码，系统会按此列表依次尝试。
- *
- * 可通过环境变量 RDK_DEFAULT_PASSWORDS 追加自定义候选（逗号分隔），
- * 例如：RDK_DEFAULT_PASSWORDS=mypass1,mypass2
- */
-const BUILTIN_DEFAULT_PASSWORDS = ['root', 'sunrise'];
-
-function passwordCandidates(username: string) {
-  const envExtra = String(process.env.RDK_DEFAULT_PASSWORDS ?? '').trim();
-  const extraPasswords = envExtra ? envExtra.split(',').map((s) => s.trim()).filter(Boolean) : [];
-  const candidates = [
-    username,                                       // 用户名即密码（RDK 出厂默认）
-    ...BUILTIN_DEFAULT_PASSWORDS,                   // 内置默认密码
-    ...extraPasswords,                              // 用户自定义候选
-  ].filter(Boolean);
-  return Array.from(new Set(candidates));
-}
+/** 默认口令候选见 `./ssh.js` 的 sshPasswordCandidates */
 
 function isTransientSshError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -6294,6 +6281,8 @@ io.on('connection', (socket) => {
         username: device.username,
         password: pwd,
         readyTimeout: SSH_READY_TIMEOUT_MS,
+        keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
+        keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
       });
 
     } catch (e: any) {

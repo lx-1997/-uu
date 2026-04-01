@@ -8,6 +8,39 @@ import {
 /** ssh2 在 TCP 连通后等待 SSH 握手完成的最长时间。写盘等高 I/O 场景下 8s 易触发「Timed out while waiting for handshake」。 */
 export const SSH_READY_TIMEOUT_MS = 30_000;
 
+/** 与 OpenClawDeploymentManager 对齐，减少 NAT/中间设备 idle 断连 */
+export const SSH_KEEPALIVE_INTERVAL_MS = 30_000;
+export const SSH_KEEPALIVE_COUNT_MAX = 3;
+
+const BUILTIN_DEFAULT_PASSWORDS = ['root', 'sunrise'];
+
+/**
+ * 板端常见默认口令候选（与 index 中设备发现逻辑一致）。
+ * 用于 Agent 侧在已保存密码失效时尝试，避免 RDKClaw 与 HTTP 链路表现不一致。
+ */
+export function sshPasswordCandidates(username: string): string[] {
+  const envExtra = String(process.env.RDK_DEFAULT_PASSWORDS ?? '').trim();
+  const extraPasswords = envExtra ? envExtra.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const candidates = [
+    username,
+    ...BUILTIN_DEFAULT_PASSWORDS,
+    ...extraPasswords,
+  ].filter(Boolean);
+  return Array.from(new Set(candidates));
+}
+
+function sshConnectBase(credentials: SshCredentials) {
+  return {
+    host: credentials.host,
+    port: credentials.port ?? 22,
+    username: credentials.username,
+    password: credentials.password,
+    readyTimeout: SSH_READY_TIMEOUT_MS,
+    keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
+    keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
+  };
+}
+
 export interface SshCredentials {
   host: string;
   username: string;
@@ -41,10 +74,7 @@ export function verifySshConnection(credentials: SshCredentials, options?: Verif
         reject(error);
       })
       .connect({
-        host: credentials.host,
-        port: credentials.port ?? 22,
-        username: credentials.username,
-        password: credentials.password,
+        ...sshConnectBase(credentials),
         readyTimeout,
       });
   });
@@ -126,24 +156,31 @@ export function runRemoteCommands(
       .on('error', (error) => {
         safeReject(error);
       })
-      .connect({
-        host: credentials.host,
-        port: credentials.port ?? 22,
-        username: credentials.username,
-        password: credentials.password,
-        readyTimeout: SSH_READY_TIMEOUT_MS,
-      });
+      .connect(sshConnectBase(credentials));
   });
 }
-export function uploadFileSftp(credentials: SshCredentials, remotePath: string, buffer: Buffer) {
+
+export interface UploadFileSftpOptions {
+  /** 默认 120s；大文件 base64 解码写盘慢于 25s 时易误判失败 */
+  timeoutMs?: number;
+}
+
+export function uploadFileSftp(
+  credentials: SshCredentials,
+  remotePath: string,
+  buffer: Buffer,
+  options: UploadFileSftpOptions = {},
+) {
   // Stream base64 over SSH stdin to avoid ARG_MAX limits.
   // Keep command non-interactive to avoid sudo password prompts hanging the stream.
+  const uploadTimeoutMs = Math.max(15_000, Number(options.timeoutMs ?? 120_000));
+
   return new Promise<void>((resolve, reject) => {
     const client = new Client();
     let resolved = false;
     const timeout = setTimeout(() => {
-      doReject(new Error('文件上传超时（SSH 通道无响应）'));
-    }, 25000);
+      doReject(new Error(`文件上传超时（${uploadTimeoutMs}ms，SSH 通道无响应或解码过慢）`));
+    }, uploadTimeoutMs);
 
     const doResolve = (output?: string) => {
       if (!resolved) {
@@ -196,12 +233,6 @@ export function uploadFileSftp(credentials: SshCredentials, remotePath: string, 
         });
       })
       .on('error', (err: Error) => doReject(err))
-      .connect({
-        host: credentials.host,
-        port: credentials.port ?? 22,
-        username: credentials.username,
-        password: credentials.password,
-        readyTimeout: SSH_READY_TIMEOUT_MS,
-      });
+      .connect(sshConnectBase(credentials));
   });
 }

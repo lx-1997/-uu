@@ -6,7 +6,7 @@
  */
 
 import { readDevices } from '../../storage.js';
-import { runRemoteCommands, uploadFileSftp } from '../../ssh.js';
+import { runRemoteCommands, uploadFileSftp, sshPasswordCandidates } from '../../ssh.js';
 import type { Device } from '../../../shared/types.js';
 import { runInDeviceLane } from '../../device-exec-scheduler.js';
 import * as fs from 'node:fs/promises';
@@ -17,6 +17,25 @@ const devicePasswordCache = new Map<string, string>();
 
 function credentialCacheKey(host: string, username: string, port = 22) {
   return `${host}:${port}::${username}`;
+}
+
+/**
+ * 与 HTTP 设备 API 对齐：缓存/持久化/环境变量优先，再尝试出厂常见口令（用户名、root、sunrise 等）。
+ */
+function buildPasswordCandidatesForAgent(device: Device): string[] {
+  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
+  const cached = devicePasswordCache.get(key) ?? '';
+  const persisted = (device as Device & { password?: string }).password ?? '';
+  const ordered: string[] = [];
+  const push = (p: string) => {
+    const t = p.trim();
+    if (t && !ordered.includes(t)) ordered.push(t);
+  };
+  push(cached);
+  push(persisted);
+  push(defaultSshPassword);
+  for (const p of sshPasswordCandidates(device.username)) push(p);
+  return ordered;
 }
 
 function isTransientSshError(error: unknown): boolean {
@@ -37,44 +56,47 @@ export async function getDevice(deviceId: string): Promise<Device | null> {
   return devices.find((d) => d.id === deviceId) ?? null;
 }
 
-export async function getDevicePassword(device: Device): Promise<string> {
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const cached = devicePasswordCache.get(key);
-  const persisted = (device as Device & { password?: string }).password ?? '';
-  return cached || persisted || defaultSshPassword;
+/** 当前优先使用的口令（首个候选），供仅需单值场景 */
+export function getDevicePassword(device: Device): string {
+  const list = buildPasswordCandidatesForAgent(device);
+  return list[0] ?? '';
 }
 
 /**
  * 在设备上执行命令，返回输出文本。
- * 仅使用设备已保存/缓存的密码（或 RDK_SSH_PASSWORD），不猜测其它口令。
+ * 口令顺序：缓存 → 持久化 → RDK_SSH_PASSWORD → 出厂常见候选；认证失败时换下一候选。
  */
 export async function execOnDevice(deviceId: string, commands: string[]): Promise<string> {
   const device = await getDevice(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
   return runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-    const pwd = await getDevicePassword(device);
-    if (!pwd) {
+    const pwdList = buildPasswordCandidatesForAgent(device);
+    if (pwdList.length === 0) {
       throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
     }
     let lastError: unknown = null;
-    for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
-      try {
-        const output = await runRemoteCommands(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-          commands,
-        );
-        devicePasswordCache.set(key, pwd);
-        return output;
-      } catch (err) {
-        lastError = err;
-        if (isSshAuthError(err)) break;
-        if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
-          console.warn(`[SSH] transient error on ${device.host}, retry ${attempt + 1}/${MAX_TRANSIENT_RETRIES}: ${err instanceof Error ? err.message : err}`);
-          await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
-          continue;
+    for (const pwd of pwdList) {
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        try {
+          const output = await runRemoteCommands(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+            commands,
+          );
+          devicePasswordCache.set(key, pwd);
+          return output;
+        } catch (err) {
+          lastError = err;
+          if (isSshAuthError(err)) break;
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+            console.warn(
+              `[SSH] transient error on ${device.host}, retry ${attempt + 1}/${MAX_TRANSIENT_RETRIES}: ${err instanceof Error ? err.message : err}`,
+            );
+            await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          break;
         }
-        break;
       }
     }
     throw lastError instanceof Error ? lastError : new Error('SSH 命令执行失败');
@@ -96,28 +118,32 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
   await runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-    const pwd = await getDevicePassword(device);
-    if (!pwd) {
+    const pwdList = buildPasswordCandidatesForAgent(device);
+    if (pwdList.length === 0) {
       throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
     }
+    const buf = Buffer.from(content, 'utf-8');
     let lastError: unknown = null;
-    for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
-      try {
-        await uploadFileSftp(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-          filePath,
-          Buffer.from(content, 'utf-8'),
-        );
-        devicePasswordCache.set(key, pwd);
-        return;
-      } catch (err) {
-        lastError = err;
-        if (isSshAuthError(err)) break;
-        if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
-          await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
-          continue;
+    for (const pwd of pwdList) {
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        try {
+          await uploadFileSftp(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+            filePath,
+            buf,
+            { timeoutMs: Math.max(120_000, Math.min(600_000, buf.length / 10 + 120_000)) },
+          );
+          devicePasswordCache.set(key, pwd);
+          return;
+        } catch (err) {
+          lastError = err;
+          if (isSshAuthError(err)) break;
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+            await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          break;
         }
-        break;
       }
     }
     throw lastError instanceof Error ? lastError : new Error('设备文件写入失败');
@@ -165,28 +191,32 @@ export async function uploadLocalFileToDevice(
   const buffer = await fs.readFile(localPath);
   return runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-    const pwd = await getDevicePassword(device);
-    if (!pwd) {
+    const pwdList = buildPasswordCandidatesForAgent(device);
+    if (pwdList.length === 0) {
       throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
     }
+    const uploadTimeout = Math.max(120_000, Math.min(600_000, buffer.length / 10 + 120_000));
     let lastError: unknown = null;
-    for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
-      try {
-        await uploadFileSftp(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-          remotePath,
-          buffer,
-        );
-        devicePasswordCache.set(key, pwd);
-        return { bytes: buffer.length, remotePath };
-      } catch (err) {
-        lastError = err;
-        if (isSshAuthError(err)) break;
-        if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
-          await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
-          continue;
+    for (const pwd of pwdList) {
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        try {
+          await uploadFileSftp(
+            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+            remotePath,
+            buffer,
+            { timeoutMs: uploadTimeout },
+          );
+          devicePasswordCache.set(key, pwd);
+          return { bytes: buffer.length, remotePath };
+        } catch (err) {
+          lastError = err;
+          if (isSshAuthError(err)) break;
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+            await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          break;
         }
-        break;
       }
     }
     throw lastError instanceof Error ? lastError : new Error('本地文件上传到设备失败');
