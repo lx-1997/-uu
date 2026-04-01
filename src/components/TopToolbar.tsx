@@ -7,6 +7,7 @@ import { isDeviceShownOnline } from '../utils/device-connection';
 import { useToastStore } from '../hooks/useToastStore';
 import { useAuth } from '../hooks/useAuth';
 import { executeDeviceCommand } from '../api';
+import { fetchWifiLinkState } from '../utils/wifi-link-probe';
 import WifiConfigModal from './wifi/WifiConfigModal';
 
 function parseIpBrOutput(output: string): { iface: string; ip: string }[] {
@@ -154,29 +155,6 @@ function getSsoDisplayLabel(user: { name?: string; email?: string; id?: string }
   const id = String(user.id || '').trim();
   if (id) return id.length > 36 ? `${id.slice(0, 14)}…${id.slice(-10)}` : id;
   return '';
-}
-
-/**
- * 板端：nmcli WiFi 已连接优先；否则 wlan* 有全局 IPv4 视为已连无线（有线-only 时多为 DOWN）。
- */
-const WIFI_LINK_PROBE_CMD =
-  'bash -lc "command -v nmcli >/dev/null 2>&1 && nmcli -t -f STATE dev wifi 2>/dev/null | grep -q connected && echo UP || (ip -br -4 addr show scope global 2>/dev/null | grep -qE \'^wlan[0-9]+.*[0-9]+\\.[0-9]+\' && echo UP || echo DOWN)"';
-
-function parseWifiProbeOutput(output: string): 'up' | 'down' | null {
-  const line = output.trim().split(/\r?\n/).find(Boolean) ?? '';
-  const u = line.toUpperCase();
-  if (u.startsWith('UP') || u === 'UP') return 'up';
-  if (u.startsWith('DOWN') || u === 'DOWN') return 'down';
-  return null;
-}
-
-async function fetchWifiLinkState(deviceId: string): Promise<'up' | 'down' | null> {
-  try {
-    const res = await executeDeviceCommand(deviceId, WIFI_LINK_PROBE_CMD);
-    return parseWifiProbeOutput(res.output || '');
-  } catch {
-    return null;
-  }
 }
 
 async function copyToClipboard(text: string) {

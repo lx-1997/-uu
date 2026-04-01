@@ -6,6 +6,7 @@ import { useI18n } from '../i18n/use-i18n';
 import { isDesktop } from '../utils/env';
 import { openOpenClawPopout, openRdkClawChatPopout } from '../utils/embed-mode';
 import DeviceGuard from './DeviceGuard';
+import FloatingEmbedPanel from './FloatingEmbedPanel';
 
 /* ── code-server 默认端口（设备侧） ── */
 const CODE_SERVER_PORT = 9888;
@@ -49,6 +50,8 @@ export default function IDE() {
   const [iframeLoading, setIframeLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  /** 桌面：独立原生窗口；浏览器：FloatingEmbedPanel */
+  const [embedFloating, setEmbedFloating] = useState(false);
   const [installing, setInstalling] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -156,6 +159,7 @@ export default function IDE() {
 
   /* ── 关闭编辑器 ── */
   const handleDisconnect = () => {
+    setEmbedFloating(false);
     if (isDesktop() && activeUrlRef.current) {
       (window as any).rdkDesktop.closeUrl(activeUrlRef.current);
       activeUrlRef.current = '';
@@ -207,6 +211,30 @@ export default function IDE() {
       rdk.hideUrl?.(activeUrlRef.current);
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const rdk = (window as any).rdkDesktop;
+    const off = rdk?.onEmbedFloatDocked?.((payload: { url?: string }) => {
+      if (payload?.url && payload.url === activeUrlRef.current) setEmbedFloating(false);
+    });
+    return () => {
+      off?.();
+    };
+  }, []);
+
+  const toggleEmbedFloat = () => {
+    const d = isDesktop();
+    if (!d) {
+      setEmbedFloating((v) => !v);
+      return;
+    }
+    const url = activeUrlRef.current;
+    if (!url) return;
+    const next = !embedFloating;
+    (window as any).rdkDesktop?.setEmbedFloatMode?.(url, next, t('ide.title', '代码编辑器'));
+    setEmbedFloating(next);
+  };
 
   if (!currentDevice) return <DeviceGuard feature={t('ide.guardFeature', '代码编辑器')} />;
 
@@ -260,6 +288,21 @@ export default function IDE() {
           <div className="immersive-bar-sep" />
           {showIframe && (
             <>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={toggleEmbedFloat}
+                title={
+                  embedFloating
+                    ? t('ide.title.floatDock', '贴回主窗口')
+                    : t('ide.title.floatOut', '悬浮窗（可拖副屏）')
+                }
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <rect x="2" y="4" width="10" height="12" rx="1.5" />
+                  <rect x="14" y="6" width="8" height="14" rx="1.5" opacity="0.9" />
+                </svg>
+              </button>
               {/* 非桌面端才显示刷新按钮 */}
               {!desktop && (
                 <button className="btn-icon" onClick={handleReload} title={t('ide.title.refresh', '刷新')}>
@@ -327,17 +370,28 @@ export default function IDE() {
                     <button className="btn btn-ghost" onClick={() => { handleDisconnect(); }}>{t('ide.backRetry', '返回重试')}</button>
                   </>
                 ) : (
-                  <span>{t('ide.desktop.loaded', 'code-server 已在独立视图中加载')}</span>
+                  <span>
+                    {embedFloating
+                      ? t('ide.desktop.floating', '编辑器已在独立窗口中，可拖到副屏与 Studio 并排')
+                      : t('ide.desktop.loaded', 'code-server 已在独立视图中加载')}
+                  </span>
                 )}
               </div>
             ) : (
-              <iframe
-                ref={iframeRef}
-                src={getCodeServerUrl()}
-                title="code-server"
-                onLoad={handleIframeLoad}
-                allow="clipboard-read; clipboard-write; fullscreen"
-              />
+              <FloatingEmbedPanel
+                title={editorLabel}
+                dockLabel={t('ide.title.floatDock', '贴回')}
+                floating={embedFloating}
+                onFloatingChange={setEmbedFloating}
+              >
+                <iframe
+                  ref={iframeRef}
+                  src={getCodeServerUrl()}
+                  title="code-server"
+                  onLoad={handleIframeLoad}
+                  allow="clipboard-read; clipboard-write; fullscreen"
+                />
+              </FloatingEmbedPanel>
             )}
           </>
         ) : (

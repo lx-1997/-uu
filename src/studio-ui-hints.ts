@@ -25,6 +25,7 @@ function writeMerged(deviceId: string, patch: Partial<StudioUiHints>) {
       capturedAt: Date.now(),
       openclaw: { ...prev.openclaw, ...patch.openclaw },
       gateway: { ...prev.gateway, ...patch.gateway },
+      board: { ...prev.board, ...patch.board },
     };
     sessionStorage.setItem(key(deviceId), JSON.stringify(next));
   } catch {
@@ -72,4 +73,20 @@ export function readStudioUiHintsForDevice(deviceId: string | undefined): Studio
   const h = readRaw(deviceId.trim());
   if (!h) return undefined;
   return h;
+}
+
+/** 板型技能包同步后写入，供 Agent 系统提示强调 RDKClaw↔OpenClaw 与板端技能使用 */
+export function persistBoardSkillBundleHint(
+  deviceId: string | undefined,
+  payload: { platform?: string | null; model?: string | null; synced: boolean },
+) {
+  if (!deviceId?.trim()) return;
+  writeMerged(deviceId.trim(), {
+    source: 'board-skill-bundle',
+    board: {
+      platform: payload.platform,
+      model: payload.model,
+      skillBundleSyncedAt: payload.synced ? Date.now() : undefined,
+    },
+  });
 }

@@ -58,4 +58,10 @@ export interface StudioUiHints {
   };
   /** 板端网关侧飞书插件是否连上（与 Studio→飞书机器人通道不是同一概念，勿混为一谈） */
   feishuConnected?: boolean;
+  /** 设备板型与技能包同步提示（供 Agent 强调 RDKClaw↔OpenClaw 协作） */
+  board?: {
+    platform?: string | null;
+    model?: string | null;
+    skillBundleSyncedAt?: number;
+  };
 }

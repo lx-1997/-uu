@@ -1097,6 +1097,26 @@ export function ensurePartnerAdvisorySkill(deviceId: string, password?: string) 
   });
 }
 
+/** 按板型将内置技能包同步到板端（X5→rdkx5_skills；X3/S100/Ultra→文档与指南类 skills） */
+export interface EnsureBoardSkillBundleResult {
+  ok: boolean;
+  platform?: string;
+  bundleRoot?: string;
+  deployed?: string[];
+  skipped?: { id: string; reason: string }[];
+  errors?: { id: string; message: string }[];
+  message?: string;
+  code?: string;
+}
+
+export function ensureBoardSkillBundle(deviceId: string, password?: string) {
+  return request<EnsureBoardSkillBundleResult>(`/api/devices/${deviceId}/openclaw/ensure-board-skill-bundle`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+    body: JSON.stringify({}),
+  });
+}
+
 /**
  * 探测本机 RDK Studio 服务是否存活（含 RDKClaw 等 API）。
  * 使用 fetchApi 而非 request()，避免失败时触发全局 rdk-api-error 弹窗。

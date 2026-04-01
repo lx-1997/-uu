@@ -9,6 +9,7 @@ import {
   removeDevice as removeDeviceApi,
 } from '../api';
 import { isDeviceSshConnected } from '../utils/device-connection';
+import { confirmDeviceUnreachable } from '../utils/device-reachability';
 
 /** 曾成功 SSH 验证过的设备 id（本机持久化，用于「先离线、验证后再显示在线」） */
 const SSH_VERIFIED_IDS_KEY = 'rdk-device-ssh-verified-ids-v1';
@@ -90,6 +91,10 @@ export interface DeviceStoreState {
   /** 打开添加设备弹窗（原「扫描」入口已移除，由 AI/快捷方式统一引导手动填写 IP） */
   scanForDevices: () => void;
   addNewDevice: (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => void;
+  /**
+   * 验证成功后注册设备并加入列表，但不关闭「添加设备」弹窗，供后续 WiFi 步骤使用。
+   */
+  registerDeviceAfterVerify: (payload: { host: string; port?: number; username: string; password: string; name?: string }) => Promise<Device | null>;
   removeDevice: (id: string) => void;
 }
 
@@ -139,6 +144,50 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     addToast('请填写设备 IP 与 SSH 凭据', 'info');
   }, [addToast, setShowAddDevice]);
 
+  const registerDeviceAfterVerify = useCallback((payload: { host: string; port?: number; username: string; password: string; name?: string }) => {
+    const host = payload.host;
+    const port = payload.port ?? 22;
+    const username = payload.username ?? 'root';
+    const password = payload.password ?? '';
+    const alias = payload.name?.trim() ?? '';
+
+    if (!host.trim() || !username.trim() || !password.trim()) {
+      addToast('请填写设备 IP、用户名和密码', 'warning');
+      return Promise.resolve(null);
+    }
+
+    return connectDevice({ host: host.trim(), port, username: username.trim(), password: password.trim() })
+      .then((res) => {
+        rememberDevicePassword(res.device.id, password.trim());
+        const device: Device = {
+          id: res.device.id,
+          name: alias || `${res.device.username}@${res.device.host}:${res.device.port ?? 22}`,
+          status: res.device.status === 'connected' ? 'online' : 'offline',
+          ip: res.device.host,
+          port: res.device.port ?? 22,
+          description: `SSH ${res.device.username}:${res.device.port ?? 22}`,
+          boardPlatform: res.device.boardPlatform ?? null,
+          boardModel: res.device.boardModel ?? null,
+          sshSessionVerified: true,
+        };
+        persistVerifiedId(device.id);
+        setDevices((prev) => [device, ...prev.filter((item) => item.id !== device.id)]);
+        setActiveDevice(device.id);
+        setDeviceListRevision((n) => n + 1);
+        addToast(`设备 "${device.name}" 已加入工作区`, 'success');
+        addActivity(`连接设备: ${device.name} (${device.ip})`);
+        return device;
+      })
+      .catch((error) => {
+        const raw = error instanceof Error ? error.message : '设备连接失败';
+        const msg = /timed out while waiting for handshake/i.test(raw)
+          ? 'SSH 握手超时：请确认设备已开机且网络可达；若正在本机烧录大镜像，可稍后再试或结束写盘后再连接。'
+          : raw;
+        addToast(msg, 'error');
+        return null;
+      });
+  }, [addToast, addActivity]);
+
   const addNewDevice = useCallback((payload?: { host: string; port?: number; username: string; password: string; name?: string }) => {
     const host = payload?.host ?? newDeviceIp;
     const port = payload?.port ?? 22;
@@ -161,6 +210,8 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           ip: res.device.host,
           port: res.device.port ?? 22,
           description: `SSH ${res.device.username}:${res.device.port ?? 22}`,
+          boardPlatform: res.device.boardPlatform ?? null,
+          boardModel: res.device.boardModel ?? null,
           sshSessionVerified: true,
         };
         persistVerifiedId(device.id);
@@ -250,6 +301,8 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           ip: device.host,
           port: device.port ?? 22,
           description: `SSH ${device.username}:${device.port ?? 22}`,
+          boardPlatform: device.boardPlatform ?? null,
+          boardModel: device.boardModel ?? null,
           sshSessionVerified: verifiedIds.has(device.id),
         }));
         setDevices(next);
@@ -330,6 +383,13 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
             if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
               return dev;
             }
+            if (isDeviceSshConnected(dev.status) && streak >= PING_FAILS_BEFORE_OFFLINE) {
+              const unreachable = await confirmDeviceUnreachable(dev.id);
+              if (!unreachable) {
+                pingFailStreakRef.current[dev.id] = 0;
+                return { ...dev, status: 'online' as const, sshSessionVerified: true };
+              }
+            }
             return { ...dev, status: 'offline' as const };
           } catch {
             if (!verified) {
@@ -340,10 +400,29 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
             if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
               return dev;
             }
+            if (isDeviceSshConnected(dev.status) && streak >= PING_FAILS_BEFORE_OFFLINE) {
+              const unreachable = await confirmDeviceUnreachable(dev.id);
+              if (!unreachable) {
+                pingFailStreakRef.current[dev.id] = 0;
+                return { ...dev, status: 'online' as const, sshSessionVerified: true };
+              }
+            }
             return { ...dev, status: 'offline' as const };
           }
         }));
         if (!cancelled) {
+          for (let i = 0; i < snapshot.length; i++) {
+            const p = snapshot[i];
+            const up = newDevices[i];
+            if (!p || !up || p.id !== up.id) continue;
+            if (isDeviceSshConnected(p.status) && up.status === 'offline' && p.id === activeDeviceRef.current) {
+              window.dispatchEvent(
+                new CustomEvent('rdk-device-offline-confirmed', {
+                  detail: { deviceId: up.id, deviceName: up.name },
+                }),
+              );
+            }
+          }
           setDevices((prev) => {
             let changed = false;
             const next = prev.map((p) => {
@@ -380,12 +459,12 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       addDeviceInitialMethod, setAddDeviceInitialMethod,
       newDeviceName, setNewDeviceName,
       newDeviceIp, setNewDeviceIp,
-      scanForDevices, addNewDevice, removeDevice,
+      scanForDevices, addNewDevice, registerDeviceAfterVerify, removeDevice,
     }),
     [
       activeDevice, devices, currentDevice, showAddDevice, addDeviceInitialMethod, setAddDeviceInitialMethod,
       newDeviceName, newDeviceIp,
-      scanForDevices, addNewDevice,
+      scanForDevices, addNewDevice, registerDeviceAfterVerify,
       removeDevice,
     ],
   );

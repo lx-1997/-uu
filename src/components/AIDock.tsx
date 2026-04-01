@@ -9,7 +9,7 @@ import type { AgentAttachmentPayload } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, fetchApi } from '../utils/apiBase';
-import { getRdkEmbedPanel, getRdkEmbedDockCtx, openRdkClawChatPopout, openOpenClawPopout } from '../utils/embed-mode';
+import { getRdkEmbedPanel, getRdkEmbedDockCtx, openOpenClawPopout } from '../utils/embed-mode';
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText } from '../utils/chat-message-plain';
@@ -1665,34 +1665,18 @@ export default function AIDock() {
               </div>
             </div>
             <div className="dock-header-right">
-              {!rdkEmbedPanel && (
-                <>
-                  <button
-                    type="button"
-                    className="btn-icon"
-                    onClick={() => openRdkClawChatPopout({ dockCtx: activeTab })}
-                    title={t('dock.popout.clawTitle', '新窗口打开 RDKClaw 对话（可与 IDE / OpenClaw 并排）')}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                      <polyline points="15 3 21 3 21 9" />
-                      <line x1="10" y1="14" x2="21" y2="3" />
-                    </svg>
-                  </button>
-                  {activeTab === 'openclaw' && (
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      onClick={() => openOpenClawPopout()}
-                      title={t('dock.popout.openclawTitle', '新窗口仅打开 OpenClaw 页面')}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                        <path d="M9 9h6v6H9z" />
-                      </svg>
-                    </button>
-                  )}
-                </>
+              {!rdkEmbedPanel && activeTab === 'openclaw' && (
+                <button
+                  type="button"
+                  className="btn-icon"
+                  onClick={() => openOpenClawPopout()}
+                  title={t('dock.popout.openclawTitle', '新窗口仅打开 OpenClaw 页面')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M9 9h6v6H9z" />
+                  </svg>
+                </button>
               )}
               {isSubpageTab && (
                 <button

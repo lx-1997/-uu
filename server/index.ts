@@ -93,6 +93,7 @@ import { registerClawhubRoutes } from './clawhub-routes.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
 import { getDeviceLaneStats, runInDeviceLane } from './device-exec-scheduler.js';
 import { handleEnsurePartnerAdvisorySkill } from './rdkclaw/partner-advisory-skill-deploy.js';
+import { handleEnsureBoardSkillBundle } from './rdkclaw/board-skill-bundle-deploy.js';
 import {
   registerStudioBrowserCaptureSocket,
   submitStudioBrowserCapture,
@@ -2213,6 +2214,8 @@ app.post('/api/devices/connect', async (request, response) => {
 });
 
 // ─── TypeC 闪连 API ───
+// 安全要点：configure 入口对 interfaceName / pcIp 做格式校验；Windows 网卡名禁止 shell 元字符；
+// 实际改 IP 使用 netsh / ifconfig / ip 参数化调用，勿拼接未校验的用户输入。
 
 /**
  * 跨平台枚举闪连候选网卡（与 old-studio ConnectionBehaviorEtherList 一致的前缀过滤，
@@ -3628,6 +3631,24 @@ app.post('/api/devices/:id/openclaw/ensure-partner-advisory-skill', async (reque
         500,
         'ENSURE_PARTNER_SKILL_FAILED',
         error instanceof Error ? error.message : '同步内置同伴商量技能失败',
+        { retryable: true },
+      );
+    }
+  }
+});
+
+/** 按板型批量同步内置技能（X5→rdkx5_skills 全量；X3/S100/Ultra→文档与指南类 skills） */
+app.post('/api/devices/:id/openclaw/ensure-board-skill-bundle', async (request, response) => {
+  const { id } = request.params;
+  try {
+    await handleEnsureBoardSkillBundle(runOnDevice, readDevices, request, response, id);
+  } catch (error) {
+    if (!response.headersSent) {
+      sendApiError(
+        response,
+        500,
+        'ENSURE_BOARD_SKILL_BUNDLE_FAILED',
+        error instanceof Error ? error.message : '同步板型技能包失败',
         { retryable: true },
       );
     }

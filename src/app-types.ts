@@ -28,6 +28,9 @@ export interface Device {
   ip: string;
   port?: number;
   description?: string;
+  /** 与 POST /board/detect?persist=1 写入的板型一致，如 rdk-x5 */
+  boardPlatform?: string | null;
+  boardModel?: string | null;
   /**
    * 本机是否至少成功完成过一次 SSH 可达验证（添加设备成功或 ping 成功）。
    * 未验证前 UI 一律不显示「在线」，避免刚进应用就沿用服务端/缓存的误判。
@@ -136,6 +139,8 @@ export interface ConfirmDialogState {
   variant?: 'default' | 'danger';
   /** 主按钮文案，默认「确认执行」 */
   confirmLabel?: string;
+  /** 仅展示主按钮（用于提示类弹窗，避免「取消」语义不当） */
+  hideCancel?: boolean;
 }
 
 export interface AgentPlanStep {

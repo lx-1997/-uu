@@ -106,6 +106,10 @@ declare global {
       hideUrl?: (url: string) => void;
       closeUrl?: (url: string) => void;
       setActiveUrl?: (url: string | null) => void;
+      /** IDE/VNC：true=独立可拖拽原生窗口，false=贴回主内容区 */
+      setEmbedFloatMode?: (url: string, floating: boolean, title?: string) => void;
+      /** 悬浮窗关闭或贴回主窗口后同步 UI */
+      onEmbedFloatDocked?: (cb: (payload: { url: string }) => void) => (() => void) | void;
       updateViewBounds?: (bounds: { x: number; y: number; width: number; height: number }) => void;
       onSubUrlOpen?: (cb: (url: string) => void) => void;
       onUrlLoadFailed?: (cb: (url: string, errorCode: number, errorDescription: string) => void) => void;

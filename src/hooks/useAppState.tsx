@@ -164,6 +164,7 @@ export interface AppState {
   setNewDeviceIp: (v: string) => void;
   scanForDevices: () => void;
   addNewDevice: (payload?: { host: string; port?: number; username: string; password: string; name?: string }) => void;
+  registerDeviceAfterVerify: (payload: { host: string; port?: number; username: string; password: string; name?: string }) => Promise<Device | null>;
   removeDevice: (id: string) => void;
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;

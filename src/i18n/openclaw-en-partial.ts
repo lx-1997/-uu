@@ -83,6 +83,10 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.switch.fail': 'Switch failed: {{msg}}',
   'oc.switch.ok': 'Switched to {{id}}',
   'oc.deploy.needKey': 'Enter model ID and API Key',
+  'oc.deploy.needModelId': 'Enter a model ID, or save the active model in RDKClaw settings first',
+  'oc.deploy.needKeyOrStudio': 'Enter an API Key, or save the model and key in RDKClaw settings first',
+  'oc.deploy.syncedWithStudio':
+    'Model and Base URL match the active model in RDKClaw settings; the API key from Studio will be used (no need to paste again).',
   'oc.deploy.startFail': 'Deploy failed to start (HTTP {{status}})',
   'oc.deploy.trackExisting': 'A deploy job is already running; tracking it',
   'oc.deploy.started': 'Deploy started; you can switch tabs and return for progress',
@@ -203,6 +207,12 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.modal.backgroundRun': 'Run in background',
   'oc.modal.deployDesc':
     'After deploy, OpenClaw is more stable. Success means CLI install; start the gateway before first chat; fix model tests later if needed.',
+  'oc.modal.autoInstallTitle': 'OpenClaw auto-install',
+  'oc.modal.autoInstallDesc':
+    'Wi‑Fi is connected on the board. Install started using the model credentials saved in Studio. Progress and logs are below; you can close this and run in the background.',
+  'oc.deploy.autoStarted': 'Wi‑Fi detected — starting OpenClaw install in the background…',
+  'oc.deploy.autoNeedStudioModel':
+    'Wi‑Fi is connected, but Studio has no model credentials saved, so auto-install cannot run. Configure AI model in Settings or use one-click deploy with your keys.',
   'oc.deploy.bannerHint': 'OpenClaw deploy in progress…',
   'oc.deploy.bannerWithId': 'OpenClaw deploy in progress (#{{id}})…',
   'oc.deploy.bannerOpenLog': 'View log',

@@ -46,6 +46,14 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
 
   // 通知主进程当前活跃的嵌入 URL（tab 切换时调用，null 表示无嵌入视图）
   setActiveUrl: (url) => ipcRenderer.send('rdk:set-active-url', { url }),
+  /** IDE/VNC：拆到独立原生窗口或贴回主窗口 */
+  setEmbedFloatMode: (url, floating, title) =>
+    ipcRenderer.send('rdk:set-embed-float', { url, floating, title }),
+  onEmbedFloatDocked: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('rdk:embed-float-docked', h);
+    return () => ipcRenderer.removeListener('rdk:embed-float-docked', h);
+  },
   updateViewBounds: (bounds) => ipcRenderer.send('rdk:update-view-bounds', { bounds }),
 
   /** Windows：列出与设备管理器一致的 COM 口（WMI），供 USB 串口标签与 Web Serial VID/PID 对照 */

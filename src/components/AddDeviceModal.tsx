@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../hooks/useAppState';
-import { verifyDeviceConnection, fetchTypecInterfaces, configureTypecInterface, type NetworkInterface } from '../api';
+import { verifyDeviceConnection, fetchTypecInterfaces, configureTypecInterface, fetchDeviceWifiList, type NetworkInterface } from '../api';
+import { fetchApi } from '../utils/apiBase';
+import { fetchWifiLinkState } from '../utils/wifi-link-probe';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { isDesktopMac } from '../utils/env';
@@ -13,7 +15,7 @@ import {
 import { appendStudioLog } from '../utils/console-log-capture';
 
 type ConnMethod = 'manual' | 'usb' | 'typec';
-type Step = 'method' | 'configure' | 'verify';
+type Step = 'method' | 'configure' | 'verify' | 'wifi';
 
 /** TypeC 闪连固定 IP 方案 */
 const TYPEC_DEVICE_IP = '192.168.128.10';
@@ -25,7 +27,7 @@ export default function AddDeviceModal() {
     showAddDevice, setShowAddDevice,
     addDeviceInitialMethod, setAddDeviceInitialMethod,
     newDeviceName, setNewDeviceName, newDeviceIp, setNewDeviceIp,
-    addNewDevice, setActiveTab, addToast,
+    registerDeviceAfterVerify, setActiveTab, addToast,
   } = useAppState();
   const { t } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
@@ -35,13 +37,23 @@ export default function AddDeviceModal() {
   const [sshUser, setSshUser] = useState('root');
   const [sshPass, setSshPass] = useState('root');
   const [sshPort, setSshPort] = useState('22');
-  const [wifiSsid, setWifiSsid] = useState('');
-  const [wifiPass, setWifiPass] = useState('');
-  const [showWifiConfig, setShowWifiConfig] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [verifyOk, setVerifyOk] = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  /** 验证通过后注册设备，供 WiFi 步骤调用板端 API */
+  const [wifiDeviceId, setWifiDeviceId] = useState<string | null>(null);
+  const [wifiLink, setWifiLink] = useState<'loading' | 'up' | 'down' | 'unknown'>('unknown');
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPass, setWifiPass] = useState('');
+  const [wifiList, setWifiList] = useState<string[]>([]);
+  const [wifiScanning, setWifiScanning] = useState(false);
+  const [wifiConnecting, setWifiConnecting] = useState(false);
+  const [showWifiPass, setShowWifiPass] = useState(false);
+  const [wifiConnectLog, setWifiConnectLog] = useState('');
   const prevShowAddDeviceRef = useRef(false);
+  /** 关闭弹窗或重开时递增，丢弃未完成的 TypeC 异步回调，避免竞态写状态 */
+  const typecSessionRef = useRef(0);
 
   // ── TypeC 闪连状态 ──
   const [typecInterfaces, setTypecInterfaces] = useState<NetworkInterface[]>([]);
@@ -76,6 +88,7 @@ export default function AddDeviceModal() {
   }, [addDeviceInitialMethod, addToast, setAddDeviceInitialMethod, showAddDevice, t]);
 
   const close = () => {
+    typecSessionRef.current += 1;
     setShowAddDevice(false);
     setStep('method');
     setMethod('manual');
@@ -88,7 +101,14 @@ export default function AddDeviceModal() {
     setSshPort('22');
     setWifiSsid('');
     setWifiPass('');
-    setShowWifiConfig(true);
+    setRegistering(false);
+    setWifiDeviceId(null);
+    setWifiLink('unknown');
+    setWifiList([]);
+    setWifiScanning(false);
+    setWifiConnecting(false);
+    setShowWifiPass(false);
+    setWifiConnectLog('');
     // 重置闪连状态
     setTypecInterfaces([]);
     setSelectedInterface('');
@@ -126,12 +146,14 @@ export default function AddDeviceModal() {
       addToast(t('addDevice.typec.selectNic', '请选择 TypeC 虚拟网卡'), 'warning');
       return;
     }
+    const session = ++typecSessionRef.current;
     appendStudioLog('info', `[TypeC] 开始闪连流程，选中网卡：${selectedInterface}`);
     setTypecStep('configuring');
     setTypecConfiguring(true);
 
     configureTypecInterface(selectedInterface, TYPEC_PC_IP, TYPEC_NETMASK)
       .then((res) => {
+        if (session !== typecSessionRef.current) return;
         if (!res.verified) {
           appendStudioLog('warn', '[TypeC] 本机 IP 校验未通过（verified=false），请确认网卡是否选对');
           addToast(t('addDevice.typec.ipNotVerified', 'IP 配置未生效，请检查网卡选择是否正确'), 'warning');
@@ -154,11 +176,13 @@ export default function AddDeviceModal() {
         appendStudioLog('info', `[TypeC] POST /api/devices/verify host=${TYPEC_DEVICE_IP} port=22`);
         verifyDeviceConnection({ host: TYPEC_DEVICE_IP, port: 22, username: 'root', password: 'root' })
           .then(() => {
+            if (session !== typecSessionRef.current) return;
             appendStudioLog('info', '[TypeC] SSH 验证成功');
             setVerifying(false);
             setVerifyOk(true);
           })
           .catch((error) => {
+            if (session !== typecSessionRef.current) return;
             setVerifying(false);
             setVerifyOk(false);
             const raw = error instanceof Error ? error.message : t('addDevice.err.verify', '连接验证失败');
@@ -173,19 +197,13 @@ export default function AddDeviceModal() {
           });
       })
       .catch((error) => {
+        if (session !== typecSessionRef.current) return;
         setTypecConfiguring(false);
         setTypecStep('select-nic');
         const msg = error instanceof Error ? error.message : '网卡配置失败';
         appendStudioLog('error', `[TypeC] 闪连中断：${msg}`);
         addToast(msg, 'error');
       });
-  };
-
-  /** 闪连确认添加设备 */
-  const confirmAddTypec = () => {
-    const alias = newDeviceName.trim() || 'RDK X5 (闪连)';
-    addNewDevice({ host: TYPEC_DEVICE_IP, port: 22, username: sshUser.trim() || 'root', password: sshPass.trim() || 'root', name: alias });
-    close();
   };
 
   /** USB 串口仅为本机调试（Web Serial），不经过服务器 SSH，也不「添加设备」 */
@@ -233,15 +251,119 @@ export default function AddDeviceModal() {
       });
   };
 
-  const confirmAdd = () => {
-    if (method !== 'manual') return;
-    const host = newDeviceIp.trim();
-    addNewDevice({ host, port: Number(sshPort || '22'), username: sshUser.trim() || 'root', password: sshPass.trim(), name: newDeviceName });
+  const goToWifiAfterVerify = async () => {
+    if (method === 'typec') {
+      setRegistering(true);
+      const d = await registerDeviceAfterVerify({
+        host: TYPEC_DEVICE_IP,
+        port: 22,
+        username: sshUser.trim() || 'root',
+        password: sshPass.trim() || 'root',
+        name: newDeviceName.trim() || 'RDK X5 (闪连)',
+      });
+      setRegistering(false);
+      if (d) {
+        setWifiDeviceId(d.id);
+        setStep('wifi');
+      }
+      return;
+    }
+    if (method === 'manual') {
+      setRegistering(true);
+      const d = await registerDeviceAfterVerify({
+        host: newDeviceIp.trim(),
+        port: Number(sshPort || '22'),
+        username: sshUser.trim() || 'root',
+        password: sshPass.trim(),
+        name: newDeviceName,
+      });
+      setRegistering(false);
+      if (d) {
+        setWifiDeviceId(d.id);
+        setStep('wifi');
+      }
+    }
+  };
+
+  const finishAddDeviceFlow = () => {
     close();
   };
 
+  const scanWifiOnDevice = () => {
+    if (!wifiDeviceId) return;
+    setWifiScanning(true);
+    fetchDeviceWifiList(wifiDeviceId)
+      .then((res) => {
+        const names = res.wifiNames?.filter(Boolean) || [];
+        setWifiList(names);
+      })
+      .catch(() => {
+        addToast(t('wifiModal.toast.scanFail', '扫描 WiFi 失败'), 'warning');
+      })
+      .finally(() => setWifiScanning(false));
+  };
+
+  const handleWifiConnect = async () => {
+    if (!wifiDeviceId || !wifiSsid.trim()) return;
+    setWifiConnecting(true);
+    setWifiConnectLog('');
+    try {
+      const res = await fetchApi(`/api/devices/${wifiDeviceId}/openclaw/wifi-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wifiName: wifiSsid, wifiPassword: wifiPass }),
+      });
+      const data = await res.json() as { ok: boolean; output?: string; error?: string };
+      if (data.output) setWifiConnectLog(data.output);
+      if (data.ok) {
+        addToast(tf('wifiModal.toast.connected', '已连接到 {{ssid}}', { ssid: wifiSsid }), 'success');
+        const s = await fetchWifiLinkState(wifiDeviceId);
+        setWifiLink(s === 'up' ? 'up' : s === 'down' ? 'down' : 'unknown');
+      } else {
+        addToast(data.error || data.output || t('wifiModal.toast.connectFail', 'WiFi 连接失败，请检查密码是否正确'), 'error');
+      }
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : t('wifiModal.toast.requestFail', 'WiFi 配置请求失败'), 'error');
+    } finally {
+      setWifiConnecting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (step !== 'wifi' || !wifiDeviceId) return;
+    let cancelled = false;
+    setWifiLink('loading');
+    void fetchWifiLinkState(wifiDeviceId).then((s) => {
+      if (cancelled) return;
+      if (s === 'up') setWifiLink('up');
+      else if (s === 'down') setWifiLink('down');
+      else setWifiLink('unknown');
+    });
+    setWifiScanning(true);
+    fetchDeviceWifiList(wifiDeviceId)
+      .then((res) => {
+        const names = res.wifiNames?.filter(Boolean) || [];
+        if (!cancelled) setWifiList(names);
+      })
+      .catch(() => {
+        addToast(t('wifiModal.toast.scanFail', '扫描 WiFi 失败'), 'warning');
+      })
+      .finally(() => {
+        if (!cancelled) setWifiScanning(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, wifiDeviceId, addToast, t]);
+
   if (!showAddDevice) return null;
-  const stepIndex = step === 'method' ? 0 : step === 'configure' ? 1 : 2;
+  const stepIndex = step === 'method' ? 0 : step === 'configure' ? 1 : step === 'verify' ? 2 : 3;
+  const stepLabels = [
+    t('addDevice.step.method', '连接方式'),
+    t('addDevice.step.configure', '配置'),
+    t('addDevice.step.verify', '验证'),
+    t('addDevice.step.wifi', 'WiFi'),
+  ];
 
   return (
     <div className="modal-overlay" onClick={close}>
@@ -254,6 +376,7 @@ export default function AddDeviceModal() {
               {step === 'method' && t('addDevice.sub.method', '选择连接方式')}
               {step === 'configure' && (method === 'manual' ? t('addDevice.sub.configureSsh', '配置 SSH 连接') : method === 'typec' ? t('addDevice.sub.typec', 'TypeC 闪连配置') : t('addDevice.sub.usbSerial', 'USB 串口调试'))}
               {step === 'verify' && t('addDevice.sub.verify', '验证连接')}
+              {step === 'wifi' && t('addDevice.sub.wifi', 'WiFi 无线网络')}
             </div>
           </div>
           <button className="btn-icon" onClick={close} title={t('addDevice.close', '关闭弹窗')} aria-label={t('addDevice.close', '关闭弹窗')}>
@@ -266,13 +389,13 @@ export default function AddDeviceModal() {
         {/* Step indicator（USB 串口仅一页说明，不展示三步） */}
         {!(method === 'usb' && step === 'configure') && (
           <div className="add-device-steps">
-            {[t('addDevice.step.method', '连接方式'), t('addDevice.step.configure', '配置'), t('addDevice.step.verify', '验证')].map((label, i) => (
+            {stepLabels.map((label, i) => (
               <div key={label} className={`add-device-step ${i < stepIndex ? 'done' : i === stepIndex ? 'active' : ''}`}>
                 <span className="add-device-step-num">
                   {i < stepIndex ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg> : i + 1}
                 </span>
                 <span className="add-device-step-label">{label}</span>
-                {i < 2 && <span className="add-device-step-line" />}
+                {i < stepLabels.length - 1 && <span className="add-device-step-line" />}
               </div>
             ))}
           </div>
@@ -389,24 +512,9 @@ export default function AddDeviceModal() {
                   <button type="button" className="chip" onClick={() => setNewDeviceIp('192.168.127.10')}>{t('addDevice.preset.wiredIp', '有线默认 IP')}</button>
                 </div>
 
-                <div className="add-device-wifi-toggle">
-                  <label>
-                    <input type="checkbox" checked={showWifiConfig} onChange={e => setShowWifiConfig(e.target.checked)} />
-                    <span>{t('addDevice.wifiToggle', '连接后顺便配置 WiFi')}</span>
-                  </label>
-                </div>
-                {showWifiConfig && (
-                  <div className="add-device-wifi-fields">
-                    <div className="add-device-field">
-                      <label>{t('addDevice.label.wifiSsid', 'WiFi 名称 (SSID)')}</label>
-                      <input className="input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder="MyWiFi" />
-                    </div>
-                    <div className="add-device-field">
-                      <label>{t('addDevice.label.wifiPass', 'WiFi 密码')}</label>
-                      <input className="input" type="password" value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder={t('addDevice.ph.wifiPass', '无密码可留空')} />
-                    </div>
-                  </div>
-                )}
+                <p className="add-device-wifi-hint" style={{ marginTop: 12, fontSize: 13, color: 'var(--text-muted)' }}>
+                  {t('addDevice.wifiAfterVerifyHint', '验证 SSH 成功后，将引导您检查板端 WiFi 连接；有线-only 环境也可跳过。')}
+                </p>
               </div>
             ) : method === 'typec' ? (
               /* ── TypeC 闪连配置 ── */
@@ -575,10 +683,125 @@ export default function AddDeviceModal() {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => { setStep('configure'); setVerifyOk(false); }}>{t('addDevice.back', '返回')}</button>
-              <button className="btn btn-primary" onClick={verifyOk ? (method === 'typec' ? confirmAddTypec : confirmAdd) : (method === 'typec' ? configureAndConnectTypec : goToVerify)} disabled={verifying}>
-                {verifying ? t('addDevice.verify.busy', '验证中...') : verifyOk ? t('addDevice.addToWorkspace', '添加到工作区') : t('addDevice.retry', '重试')}
+              <button className="btn btn-ghost" onClick={() => { setStep('configure'); setVerifyOk(false); }} disabled={registering}>{t('addDevice.back', '返回')}</button>
+              <button
+                className="btn btn-primary"
+                onClick={verifyOk ? goToWifiAfterVerify : (method === 'typec' ? configureAndConnectTypec : goToVerify)}
+                disabled={verifying || registering}
+              >
+                {verifying
+                  ? t('addDevice.verify.busy', '验证中...')
+                  : registering
+                    ? t('addDevice.wifi.registering', '正在加入工作区...')
+                    : verifyOk
+                      ? t('addDevice.wifi.next', '下一步：WiFi 网络')
+                      : t('addDevice.retry', '重试')}
               </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'wifi' && wifiDeviceId && (
+          <div className="modal-body add-device-wifi-step">
+            <p className="add-device-typec-lead">
+              {t('addDevice.wifi.lead', '设备已加入工作区。请确认开发板已连接 WiFi；若仅使用有线/TypeC，可跳过此步。')}
+            </p>
+            <div
+              className="add-device-wifi-status-banner"
+              style={{
+                padding: '10px 12px',
+                borderRadius: 8,
+                marginBottom: 12,
+                fontSize: 13,
+                background:
+                  wifiLink === 'up'
+                    ? 'rgba(34, 197, 94, 0.12)'
+                    : wifiLink === 'down'
+                      ? 'rgba(251, 191, 36, 0.12)'
+                      : 'var(--surface-2)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              {wifiLink === 'loading' && <span>{t('addDevice.wifi.probing', '正在检测板端 WiFi 状态…')}</span>}
+              {wifiLink === 'up' && <span>{t('addDevice.wifi.connected', '已检测到 WiFi 已连接')}</span>}
+              {wifiLink === 'down' && <span>{t('addDevice.wifi.notConnected', '未检测到 WiFi 连接，可在下方选择网络并连接')}</span>}
+              {wifiLink === 'unknown' && <span>{t('addDevice.wifi.unknown', '无法自动判断 WiFi 状态，可手动连接或跳过')}</span>}
+            </div>
+
+            {(wifiList.length > 0 || wifiScanning) && (
+              <div className="wifi-list-section">
+                <div className="wifi-list-header">
+                  <span className="wifi-list-title">
+                    {t('wifiModal.networks', '可用网络')}
+                    {wifiList.length > 0 ? ` (${wifiList.length})` : ''}
+                  </span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={scanWifiOnDevice} disabled={wifiScanning}>
+                    {wifiScanning ? t('wifiModal.scanning', '扫描中...') : t('wifiModal.refresh', '刷新')}
+                  </button>
+                </div>
+                {wifiScanning && wifiList.length === 0 ? (
+                  <div className="wifi-list-loading"><div className="spinner" /><span>{t('wifiModal.scanningList', '正在扫描...')}</span></div>
+                ) : (
+                  <div className="wifi-list-items">
+                    {wifiList.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className={`wifi-list-item ${wifiSsid === name ? 'selected' : ''}`}
+                        onClick={() => setWifiSsid(name)}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={wifiSsid === name ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="2">
+                          <path d="M5 12.55a11 11 0 0114.08 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/>
+                        </svg>
+                        <span>{name}</span>
+                        {wifiSsid === name && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {wifiList.length === 0 && !wifiScanning && (
+              <div className="wifi-list-empty" style={{ marginBottom: 12 }}>
+                <span>{t('wifiModal.empty', '未扫描到可用网络')}</span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={scanWifiOnDevice}>{t('wifiModal.retry', '重试')}</button>
+              </div>
+            )}
+
+            <div className="wifi-form">
+              <div className="add-device-field">
+                <label>{t('wifiModal.ssid', 'WiFi 名称 (SSID)')}</label>
+                <input className="input" value={wifiSsid} onChange={e => setWifiSsid(e.target.value)} placeholder={t('wifiModal.ssidPh', '输入或从上方选择')} />
+              </div>
+              <div className="add-device-field">
+                <label>{t('wifiModal.password', '密码')}</label>
+                <div className="add-device-pass-wrap">
+                  <input className="input" type={showWifiPass ? 'text' : 'password'} value={wifiPass} onChange={e => setWifiPass(e.target.value)} placeholder={t('wifiModal.passwordPh', '无密码可留空')} />
+                  <button type="button" className="btn-icon add-device-pass-toggle" onClick={() => setShowWifiPass(v => !v)}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      {showWifiPass ? <><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></> : <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>}
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {wifiConnectLog && (
+              <pre className="wifi-connect-log">{wifiConnectLog}</pre>
+            )}
+
+            <div className="wifi-hint" style={{ marginBottom: 12 }}>{t('wifiModal.hint', '连接时可能短暂断开当前 SSH 连接，请耐心等待设备重连。')}</div>
+
+            <div className="modal-footer" style={{ padding: 0, borderTop: 'none', justifyContent: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-primary" onClick={handleWifiConnect} disabled={!wifiSsid.trim() || wifiConnecting}>
+                {wifiConnecting ? t('wifiModal.connecting', '连接中...') : t('wifiModal.connect', '连接网络')}
+              </button>
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={finishAddDeviceFlow}>{t('addDevice.wifi.skipLater', '跳过，稍后配置')}</button>
+              <button type="button" className="btn btn-primary" onClick={finishAddDeviceFlow}>{t('addDevice.wifi.done', '完成')}</button>
             </div>
           </div>
         )}
