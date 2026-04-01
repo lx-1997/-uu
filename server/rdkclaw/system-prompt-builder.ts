@@ -123,6 +123,19 @@ export function buildStudioUiHintsPrompt(hints: StudioUiHints | undefined): stri
     );
   }
 
+  const bd = hints.board;
+  if (bd && (bd.platform || bd.model || bd.skillBundleSyncedAt != null)) {
+    const syncMin =
+      typeof bd.skillBundleSyncedAt === "number"
+        ? Math.max(0, Math.round((Date.now() - bd.skillBundleSyncedAt) / 60_000))
+        : null;
+    const syncLabel =
+      syncMin === null ? "未记录" : syncMin < 2 ? "约 1 分钟内" : `${syncMin} 分钟前`;
+    lines.push(
+      `- 板型与技能包: 平台=${bd.platform ?? "未知"}${bd.model ? ` · 型号=${bd.model}` : ""} · 板型技能包最近同步≈${syncLabel}`,
+    );
+  }
+
   lines.push(
     "",
     "**约束**",
@@ -132,6 +145,15 @@ export function buildStudioUiHintsPrompt(hints: StudioUiHints | undefined): stri
     "- 若板端或工具返回 `missing scope`、`operator.read` 等：属于 **Studio↔板端 Gateway 的鉴权/令牌权限**，不要笼统说成「网关坏了」或「网关没开」；若本段快照已写「网关=运行中」，你的解释必须与之一致。",
     "- 若需委派板端 OpenClaw 执行多步任务且快照与实际情况可能不一致时，再考虑 `board_openclaw_assess`，而不是例行 health。",
   );
+
+  if (oc?.installed === true) {
+    lines.push(
+      "",
+      "**OpenClaw 已安装（与板端协同 — 硬约束）**",
+      "- 板端已部署 OpenClaw：复杂/多步任务**必须**通过 `board_openclaw_chat` / `board_openclaw_assess` / `board_openclaw_delegate` 与板端协同推进，禁止仅靠长串 `device_exec` 硬顶替代板端 Agent。",
+      "- 若上表已记录「板型与技能包」：板端 `~/.openclaw/workspace/skills/` 已按板型预置文档与指南类 SKILL；执行任务前优先 `find_skills` / 读板端相关技能，再委派或执行，避免重复造轮子。",
+    );
+  }
 
   return lines.join("\n");
 }

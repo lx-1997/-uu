@@ -13,6 +13,7 @@ import Toasts from './components/Toasts';
 import AddDeviceModal from './components/AddDeviceModal';
 import SettingsPanel from './components/SettingsPanel';
 import ConfirmDialog from './components/ConfirmDialog';
+import DeviceOfflineListener from './components/DeviceOfflineListener';
 import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
 import StudioBrowserCaptureBridge from './components/StudioBrowserCaptureBridge';
@@ -259,6 +260,7 @@ function AppShell() {
       <AddDeviceModal />
       <SettingsPanel />
       <ConfirmDialog />
+      <DeviceOfflineListener />
       <StudioBrowserCaptureBridge />
     </div>
   );
@@ -345,6 +347,7 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
       <AddDeviceModal />
       <SettingsPanel />
       <ConfirmDialog />
+      <DeviceOfflineListener />
       <StudioBrowserCaptureBridge />
     </div>
   );

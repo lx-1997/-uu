@@ -64,10 +64,15 @@ export default function ConfirmDialog() {
           </div>
         </div>
 
-        <div className="modal-footer confirm-dialog-footer">
-          <button type="button" className="btn btn-ghost" onClick={() => setConfirmDialog(null)}>
-            {t('confirm.cancel', '取消')}
-          </button>
+        <div
+          className="modal-footer confirm-dialog-footer"
+          style={confirmDialog.hideCancel ? { justifyContent: 'flex-end' } : undefined}
+        >
+          {!confirmDialog.hideCancel && (
+            <button type="button" className="btn btn-ghost" onClick={() => setConfirmDialog(null)}>
+              {t('confirm.cancel', '取消')}
+            </button>
+          )}
           <button
             type="button"
             className={isDanger ? 'btn btn-danger' : 'btn btn-primary'}

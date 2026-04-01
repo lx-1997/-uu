@@ -160,6 +160,91 @@ registerSsoLoginIpc({ getMainWindow: () => mainWin });
 let serverProcess = null;
 // url -> WebContentsView 映射
 const viewsMap = {};
+/** IDE/VNC 从主窗口拆出到独立 BrowserWindow（可拖到副屏与 AI Dock 并排） */
+const embedFloatWins = Object.create(null);
+const embedDetachedUrls = new Set();
+
+function syncEmbedViewBoundsForFloat(win, view) {
+  if (!win || win.isDestroyed() || !view || view.webContents.isDestroyed()) return;
+  try {
+    const [cw, ch] = win.getContentSize();
+    view.setBounds({ x: 0, y: 0, width: cw, height: ch });
+  } catch {
+    /* ignore */
+  }
+}
+
+function dockEmbedToMain(url, notifyRenderer) {
+  const view = viewsMap[url];
+  const floatWin = embedFloatWins[url];
+  if (!view || view.webContents.isDestroyed()) {
+    if (floatWin && !floatWin.isDestroyed()) floatWin.destroy();
+    delete embedFloatWins[url];
+    embedDetachedUrls.delete(url);
+    return;
+  }
+  try {
+    if (floatWin && !floatWin.isDestroyed()) {
+      floatWin.contentView.removeChildView(view);
+    }
+  } catch {
+    /* ignore */
+  }
+  // 先于 destroy 清除，避免 float close 事件再次进入 dock 造成重入
+  embedDetachedUrls.delete(url);
+  delete embedFloatWins[url];
+  if (floatWin && !floatWin.isDestroyed()) {
+    floatWin.destroy();
+  }
+  if (!mainWin || mainWin.isDestroyed()) return;
+  try {
+    mainWin.contentView.addChildView(view);
+    view.setBounds(getViewBounds(mainWin));
+    view.setVisible(true);
+  } catch {
+    /* ignore */
+  }
+  if (notifyRenderer) safeSendToMainRenderer('rdk:embed-float-docked', { url });
+}
+
+function detachEmbedToFloat(url, title) {
+  const view = viewsMap[url];
+  if (!view || view.webContents.isDestroyed() || !mainWin || mainWin.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const { width: sw, height: sh } = display.workAreaSize;
+  const FW = Math.round(sw * 0.72);
+  const FH = Math.round(sh * 0.78);
+  const floatWin = new BrowserWindow({
+    width: FW,
+    height: FH,
+    minWidth: 420,
+    minHeight: 320,
+    show: true,
+    title: title || 'RDK Studio',
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  const pb = mainWin.getBounds();
+  floatWin.setPosition(Math.round(pb.x + (pb.width - FW) / 2), Math.round(pb.y + 72));
+  try {
+    mainWin.contentView.removeChildView(view);
+  } catch {
+    /* ignore */
+  }
+  floatWin.contentView.addChildView(view);
+  syncEmbedViewBoundsForFloat(floatWin, view);
+  embedFloatWins[url] = floatWin;
+  embedDetachedUrls.add(url);
+  floatWin.on('resize', () => syncEmbedViewBoundsForFloat(floatWin, view));
+  floatWin.on('close', (e) => {
+    if (!embedDetachedUrls.has(url)) return;
+    e.preventDefault();
+    dockEmbedToMain(url, true);
+  });
+}
 /** studio_embedded_browser_capture：独立小悬浮窗 captureId -> BrowserWindow */
 const captureFloatingWins = new Map();
 let latestRendererBounds = null;
@@ -1046,6 +1131,7 @@ async function createMainWindow() {
     resizeTimer = setTimeout(() => {
       const bounds = getViewBounds(mainWin);
       for (const url in viewsMap) {
+        if (embedDetachedUrls.has(url)) continue;
         const view = viewsMap[url];
         if (view && !view.webContents.isDestroyed()) {
           view.setBounds(bounds);
@@ -1082,9 +1168,14 @@ ipcMain.on('rdk:open-url', (event, { url }) => {
   if (viewsMap[url]) {
     const existing = viewsMap[url];
     existing.setVisible(true);
-    mainWin.contentView.removeChildView(existing);
-    mainWin.contentView.addChildView(existing);
-    existing.setBounds(getViewBounds(mainWin));
+    if (embedDetachedUrls.has(url)) {
+      embedFloatWins[url]?.show();
+      embedFloatWins[url]?.focus();
+    } else {
+      mainWin.contentView.removeChildView(existing);
+      mainWin.contentView.addChildView(existing);
+      existing.setBounds(getViewBounds(mainWin));
+    }
     return;
   }
 
@@ -1131,6 +1222,13 @@ ipcMain.on('rdk:set-active-url', (_event, { url }) => {
   for (const u in viewsMap) {
     const view = viewsMap[u];
     if (!view || view.webContents.isDestroyed()) continue;
+    if (embedDetachedUrls.has(u)) {
+      if (u === url) {
+        embedFloatWins[u]?.show();
+        embedFloatWins[u]?.focus();
+      }
+      continue;
+    }
     if (u === url) {
       view.setVisible(true);
       // 确保在最顶层
@@ -1149,6 +1247,7 @@ ipcMain.on('rdk:update-view-bounds', (_event, { bounds }) => {
   latestRendererBounds = bounds;
   const nextBounds = getViewBounds(mainWin);
   for (const url in viewsMap) {
+    if (embedDetachedUrls.has(url)) continue;
     const view = viewsMap[url];
     if (view && !view.webContents.isDestroyed()) {
       view.setBounds(nextBounds);
@@ -1158,19 +1257,46 @@ ipcMain.on('rdk:update-view-bounds', (_event, { bounds }) => {
 
 // ── IPC: 隐藏嵌入页面 ──
 ipcMain.on('rdk:hide-url', (_event, { url }) => {
-  if (viewsMap[url]) {
-    viewsMap[url].setVisible(false);
-  }
+  if (!viewsMap[url]) return;
+  if (embedDetachedUrls.has(url)) return;
+  viewsMap[url].setVisible(false);
 });
 
 // ── IPC: 关闭并销毁嵌入页面 ──
 ipcMain.on('rdk:close-url', (_event, { url }) => {
   if (!viewsMap[url]) return;
   const view = viewsMap[url];
-  mainWin?.contentView.removeChildView(view);
+  const floatWin = embedFloatWins[url];
+  if (floatWin && !floatWin.isDestroyed()) {
+    try {
+      floatWin.contentView.removeChildView(view);
+    } catch {
+      /* ignore */
+    }
+    floatWin.destroy();
+    delete embedFloatWins[url];
+    embedDetachedUrls.delete(url);
+  } else {
+    mainWin?.contentView.removeChildView(view);
+  }
   view.webContents.removeAllListeners();
   view.webContents.destroy();
   delete viewsMap[url];
+});
+
+// IDE/VNC：嵌入视图拆到独立窗口或贴回主窗口
+ipcMain.on('rdk:set-embed-float', (_event, { url, floating, title }) => {
+  const u = String(url || '').trim();
+  if (!u || !viewsMap[u]) return;
+  if (floating) {
+    if (embedDetachedUrls.has(u)) {
+      embedFloatWins[u]?.focus();
+      return;
+    }
+    detachEmbedToFloat(u, String(title || '').trim() || 'RDK Studio');
+  } else {
+    dockEmbedToMain(u, true);
+  }
 });
 
 /** 在 app.ready 后注册，避免个别环境下 IPC 未绑定；与悬浮窗抓取共用 */

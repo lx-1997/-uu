@@ -5,6 +5,7 @@ import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { isDesktop } from '../utils/env';
 import DeviceGuard from './DeviceGuard';
+import FloatingEmbedPanel from './FloatingEmbedPanel';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
@@ -20,6 +21,8 @@ export default function Vnc() {
   const [showLogs, setShowLogs] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  /** 桌面：独立原生窗口；浏览器：FloatingEmbedPanel */
+  const [embedFloating, setEmbedFloating] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -41,6 +44,29 @@ export default function Vnc() {
       rdk.hideUrl?.(activeUrlRef.current);
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const rdk = (window as any).rdkDesktop;
+    const off = rdk?.onEmbedFloatDocked?.((payload: { url?: string }) => {
+      if (payload?.url && payload.url === activeUrlRef.current) setEmbedFloating(false);
+    });
+    return () => {
+      off?.();
+    };
+  }, []);
+
+  const toggleEmbedFloat = () => {
+    if (!isDesktop()) {
+      setEmbedFloating((v) => !v);
+      return;
+    }
+    const url = activeUrlRef.current;
+    if (!url) return;
+    const next = !embedFloating;
+    (window as any).rdkDesktop?.setEmbedFloatMode?.(url, next, t('vnc.title', '远程桌面'));
+    setEmbedFloating(next);
+  };
 
   // 监听 WebContentsView 加载事件
   useEffect(() => {
@@ -159,6 +185,7 @@ export default function Vnc() {
 
   // ── 断开连接 ──
   const handleDisconnect = () => {
+    setEmbedFloating(false);
     if (isDesktop() && activeUrlRef.current) {
       (window as any).rdkDesktop.closeUrl(activeUrlRef.current);
       activeUrlRef.current = '';
@@ -229,6 +256,22 @@ export default function Vnc() {
         <div className="immersive-bar-right">
           {showIframe && (
             <>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={toggleEmbedFloat}
+                title={
+                  embedFloating
+                    ? t('vnc.title.floatDock', '贴回主窗口')
+                    : t('vnc.title.floatOut', '悬浮窗（可拖副屏）')
+                }
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <rect x="2" y="4" width="10" height="12" rx="1.5" />
+                  <rect x="14" y="6" width="8" height="14" rx="1.5" opacity="0.9" />
+                </svg>
+              </button>
+              <div className="immersive-bar-sep" />
               {/* 画质选择 */}
               <div className="immersive-quality">
                 {(['auto', 'high', 'low'] as const).map(q => (
@@ -290,17 +333,28 @@ export default function Vnc() {
                     <button className="btn btn-primary" onClick={() => { handleDisconnect(); }}>{t('vnc.backRetry', '返回重试')}</button>
                   </>
                 ) : (
-                  <span>{t('vnc.desktop.loaded', 'noVNC 已在独立视图中加载')}</span>
+                  <span>
+                    {embedFloating
+                      ? t('vnc.desktop.floating', '远程桌面已在独立窗口中，可拖到副屏与 Studio 并排')
+                      : t('vnc.desktop.loaded', 'noVNC 已在独立视图中加载')}
+                  </span>
                 )}
               </div>
             ) : (
-              <iframe
-                ref={iframeRef}
-                src={getVncUrl()}
-                className="vnc-iframe"
-                title="VNC Remote Desktop"
-                allow="clipboard-read; clipboard-write"
-              />
+              <FloatingEmbedPanel
+                title={t('vnc.title', '远程桌面')}
+                dockLabel={t('vnc.title.floatDock', '贴回')}
+                floating={embedFloating}
+                onFloatingChange={setEmbedFloating}
+              >
+                <iframe
+                  ref={iframeRef}
+                  src={getVncUrl()}
+                  className="vnc-iframe"
+                  title="VNC Remote Desktop"
+                  allow="clipboard-read; clipboard-write"
+                />
+              </FloatingEmbedPanel>
             )}
             {/* 日志抽屉 */}
             {showLogs && (

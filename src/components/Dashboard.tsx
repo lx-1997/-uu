@@ -5,6 +5,7 @@ import {
   fetchDeviceWorkspaceHealth,
   fetchStudioHealth,
   ensurePartnerAdvisorySkill,
+  ensureBoardSkillBundle,
   type OpenClawHealthStatus,
 } from '../api';
 import { useAppState } from '../hooks/useAppState';
@@ -19,7 +20,7 @@ import {
 } from '../i18n/prompts';
 import { parseMetrics } from '../utils/diagnostics';
 import { isDeviceShownOnline } from '../utils/device-connection';
-import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
+import { persistOpenClawHealthSnapshot, persistBoardSkillBundleHint } from '../studio-ui-hints';
 import OnboardingWizard from './OnboardingWizard';
 
 /**
@@ -236,6 +237,9 @@ export default function Dashboard() {
   }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
 
   const partnerSkillSyncedRef = useRef<Set<string>>(new Set());
+  /** 已尝试过同步同伴技能（避免 health 轮询每 30s 重复打 SSH） */
+  const partnerSkillAttemptedRef = useRef<Set<string>>(new Set());
+  const boardSkillBundleSyncedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!currentDevice) {
@@ -251,13 +255,36 @@ export default function Dashboard() {
             setOpenclawHealth(r.status);
             persistOpenClawHealthSnapshot(currentDevice.id, r.status);
           }
-          /* SSH 可达时自动同步内置「同伴商量」技能：已存在且版本与校验一致则服务端跳过 */
-          if (!cancelled && r.ok && !partnerSkillSyncedRef.current.has(currentDevice.id)) {
-            void ensurePartnerAdvisorySkill(currentDevice.id)
-              .then((res) => {
-                if (res?.ok && res.verified === true) partnerSkillSyncedRef.current.add(currentDevice.id);
-              })
-              .catch(() => {});
+          /* OpenClaw 已安装时：先尝试同步「同伴商量」，再按板型同步技能包（成功各记一次，避免轮询打满 SSH） */
+          if (!cancelled && r.ok && r.status.installed) {
+            const id = currentDevice.id;
+            const runBoardBundle = () => {
+              if (boardSkillBundleSyncedRef.current.has(id)) return;
+              void ensureBoardSkillBundle(id)
+                .then((bundleRes) => {
+                  if (!bundleRes?.ok) return;
+                  boardSkillBundleSyncedRef.current.add(id);
+                  persistBoardSkillBundleHint(id, {
+                    platform: bundleRes.platform ?? currentDevice.boardPlatform,
+                    model: currentDevice.boardModel,
+                    synced: true,
+                  });
+                })
+                .catch(() => {});
+            };
+            if (!partnerSkillAttemptedRef.current.has(id)) {
+              partnerSkillAttemptedRef.current.add(id);
+              void ensurePartnerAdvisorySkill(id)
+                .then((res) => {
+                  if (res?.ok && res.verified === true) partnerSkillSyncedRef.current.add(id);
+                })
+                .catch(() => {})
+                .finally(() => {
+                  runBoardBundle();
+                });
+            } else {
+              runBoardBundle();
+            }
           }
         })
         .catch(() => {});

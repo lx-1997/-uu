@@ -14,6 +14,8 @@ import {
   deployJobStorageKey as ocDeployJobLsKey,
   fetchOpenClawDeployJob,
 } from '../utils/openclawDeployPoll';
+import { fetchWifiLinkState } from '../utils/wifi-link-probe';
+import { fetchAgentConfig } from '../api';
 import io from 'socket.io-client';
 
 /* ═══════════════════════════════════════════
@@ -127,6 +129,15 @@ const API_TYPE_OPTIONS = [
   { value: 'openai-completions', label: 'OpenAI Completions' },
   { value: 'anthropic-messages', label: 'Anthropic Messages' },
 ];
+
+/** 工作室 AI 设置里的 provider id 与一键部署 chip 的 key 对齐 */
+function mapStudioProviderToDeployPreset(provider: string): string {
+  const p = String(provider || '').trim();
+  if (p === 'qwen') return 'bailian';
+  if (p === 'doubao') return 'volcengine';
+  if (p === 'gemini') return 'google';
+  return p;
+}
 
 /* ═══════════════════════════════════════════
    Component
@@ -255,11 +266,15 @@ export default function OpenClaw() {
   const [deployApi, setDeployApi] = useState('openai-completions');
   const [deployFeishuAppId, setDeployFeishuAppId] = useState('');
   const [deployFeishuAppSecret, setDeployFeishuAppSecret] = useState('');
+  /** 与 RDKClaw 设置中当前模型一致：已在服务端保存 API Key（或环境变量 OPENAI_API_KEY） */
+  const [deployHasStudioKey, setDeployHasStudioKey] = useState(false);
   const [deployRunning, setDeployRunning] = useState(false);
   const [deploySteps, setDeploySteps] = useState<DeployStepState[]>([]);
   const [deployJobId, setDeployJobId] = useState('');
   const [deployOutput, setDeployOutput] = useState('');
   const [showDeployGuideModal, setShowDeployGuideModal] = useState(false);
+  /** WiFi 已连时自动发起的安装：弹窗仅展示日志与步骤，不展示一键部署表单 */
+  const [deployGuideLogsOnly, setDeployGuideLogsOnly] = useState(false);
   /** 用户点「后台运行」后收起顶部横幅，避免主区域只剩一条「部署进行中」 */
   const [deployBannerDismissed, setDeployBannerDismissed] = useState(false);
   /** 安装阶段长时间无新日志时提示（非错误） */
@@ -288,6 +303,10 @@ export default function OpenClaw() {
   const ocDeployLsKey = currentDevice ? ocDeployJobLsKey(currentDevice.id) : '';
   const ocDeployGuideModalKey = currentDevice ? `oc-deploy-guide-modal-${currentDevice.id}` : '';
   const applyDeployJobRef = useRef<(job: DeployJob) => void>(() => {});
+  const deployRunningRef = useRef(false);
+  useEffect(() => {
+    deployRunningRef.current = deployRunning;
+  }, [deployRunning]);
   const nextChatMessageId = useCallback(() => {
     const now = Date.now();
     if (now <= messageIdRef.current) {
@@ -309,6 +328,12 @@ export default function OpenClaw() {
     setDeployBannerDismissed(false);
     stopOpenClawDeployPoll();
     if (ocDeployLsKey) localStorage.removeItem(ocDeployLsKey);
+    if (currentDevice?.id) {
+      try {
+        sessionStorage.removeItem(`oc-wifi-auto-pending-${currentDevice.id}`);
+      } catch { /* ignore */ }
+    }
+    setDeployGuideLogsOnly(false);
     if (job.status === 'done') {
       appendSystemMessage(tRef.current('oc.deploy.done', '**部署完成！** 模型配置已写入，Gateway 正在重启...'));
       setTimeout(async () => {
@@ -382,6 +407,71 @@ export default function OpenClaw() {
     }
   }, [currentDevice]);
 
+  /** 一键部署表单与 RDKClaw（工作室 → AI 模型）当前启用模型对齐 */
+  useEffect(() => {
+    if (activeTab !== 'openclaw') return;
+    let cancelled = false;
+    void fetchAgentConfig()
+      .then((cfg) => {
+        if (cancelled) return;
+        const models = cfg.models || [];
+        const aid = cfg.activeModelId?.trim();
+        const active = aid ? models.find((m) => m.id === aid) : models.find((m) => m.isActive);
+        const resolved = active || models[0];
+        const envOk = !!cfg.envApiKeyAvailable;
+
+        const applyResolved = (r: NonNullable<typeof resolved>) => {
+          const rawProv = String(r.provider || '').trim();
+          const presetKey = mapStudioProviderToDeployPreset(rawProv);
+          const preset = PROVIDER_PRESETS[presetKey];
+          if (preset) {
+            setDeployProvider(presetKey);
+            setDeployBaseUrl((r.baseUrl || '').trim() || preset.baseUrl);
+            setDeployModelId((r.model || '').trim());
+            setDeployApi(preset.api);
+          } else {
+            setDeployProvider('');
+            setDeployBaseUrl((r.baseUrl || '').trim());
+            setDeployModelId((r.model || '').trim());
+            setDeployApi(rawProv === 'anthropic' || rawProv === 'anthropic-compatible' ? 'anthropic-messages' : 'openai-completions');
+          }
+          setDeployApiKey('');
+          setDeployHasStudioKey(!!r.hasApiKey || envOk);
+        };
+
+        if (resolved) {
+          applyResolved(resolved);
+          return;
+        }
+        if (cfg.configured && cfg.provider && cfg.model) {
+          const p = String(cfg.provider || '');
+          const presetKey = mapStudioProviderToDeployPreset(p);
+          const preset = PROVIDER_PRESETS[presetKey];
+          if (preset) {
+            setDeployProvider(presetKey);
+            setDeployBaseUrl((cfg.baseUrl || '').trim() || preset.baseUrl);
+            setDeployModelId((cfg.model || '').trim());
+            setDeployApi(preset.api);
+          } else {
+            setDeployProvider('');
+            setDeployBaseUrl((cfg.baseUrl || '').trim());
+            setDeployModelId((cfg.model || '').trim());
+            setDeployApi(p === 'anthropic' || p === 'anthropic-compatible' ? 'anthropic-messages' : 'openai-completions');
+          }
+          setDeployApiKey('');
+          setDeployHasStudioKey(!!cfg.hasApiKey || envOk);
+          return;
+        }
+        setDeployHasStudioKey(envOk);
+      })
+      .catch(() => {
+        if (!cancelled) setDeployHasStudioKey(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, currentDevice?.id]);
+
   useEffect(() => {
     if (currentDevice && activeTab === 'openclaw') {
       void Promise.all([loadStatus(), loadConfig(), loadBoardSkills()]);
@@ -414,10 +504,103 @@ export default function OpenClaw() {
     if (ocDeployGuideModalKey) {
       try { saved = sessionStorage.getItem(ocDeployGuideModalKey) || ''; } catch { saved = ''; }
     }
+    if (deployGuideLogsOnly || deployRunning) return;
+    try {
+      if (currentDevice?.id && sessionStorage.getItem(`oc-wifi-auto-pending-${currentDevice.id}`)) return;
+    } catch { /* ignore */ }
     if (saved !== 'dismissed') {
       setShowDeployGuideModal(true);
     }
-  }, [activeTab, currentDevice, ocDeployGuideModalKey, status?.installed, status?.version, statusLoading]);
+  }, [activeTab, currentDevice, ocDeployGuideModalKey, status?.installed, status?.version, statusLoading, deployGuideLogsOnly, deployRunning]);
+
+  /** 切换设备时重置「仅日志」部署弹窗态 */
+  useEffect(() => {
+    setDeployGuideLogsOnly(false);
+  }, [currentDevice?.id]);
+
+  /** 板端已连 Wi‑Fi 且未安装 OpenClaw 时，使用工作室侧已保存的模型配置自动发起部署（与 POST /deploy/start 服务端逻辑一致） */
+  useEffect(() => {
+    if (!currentDevice) return;
+    const id = currentDevice.id;
+    const pendingKey = `oc-wifi-auto-pending-${id}`;
+    const skipCfgKey = `oc-wifi-auto-skip-nocfg-${id}`;
+    let cancelled = false;
+    let inFlight = false;
+
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      try {
+        if (sessionStorage.getItem(skipCfgKey) === '1') return;
+      } catch { /* ignore */ }
+
+      const wifi = await fetchWifiLinkState(id);
+      if (cancelled || wifi !== 'up') return;
+
+      let installed = false;
+      try {
+        const res = await fetchApi(`/api/devices/${id}/openclaw/status`);
+        if (!res.ok) return;
+        const data = (await res.json()) as GatewayStatus;
+        installed = !!(data?.installed ?? data?.version?.trim());
+      } catch {
+        return;
+      }
+      if (cancelled || installed) return;
+      if (deployRunningRef.current) return;
+
+      inFlight = true;
+      try {
+        try {
+          sessionStorage.setItem(pendingKey, '1');
+        } catch { /* ignore */ }
+        const res = await fetchApi(`/api/devices/${id}/openclaw/deploy/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = (await res.json().catch(() => ({}))) as { jobId?: string; code?: string; error?: string };
+        if (!res.ok || !data?.jobId) {
+          try {
+            sessionStorage.removeItem(pendingKey);
+          } catch { /* ignore */ }
+          if (res.status === 400 || data?.code === 'INVALID_DEPLOY_CONFIG') {
+            try {
+              sessionStorage.setItem(skipCfgKey, '1');
+            } catch { /* ignore */ }
+            addToast?.(
+              tRef.current(
+                'oc.deploy.autoNeedStudioModel',
+                '板端已连接 Wi‑Fi，但工作室未配置模型凭据，无法自动安装 OpenClaw。请在设置中配置 AI 模型，或使用一键部署手动填写。',
+              ),
+              'info',
+            );
+          }
+          return;
+        }
+        setDeployRunning(true);
+        setDeployBannerDismissed(false);
+        setDeployGuideLogsOnly(true);
+        setShowDeployGuideModal(true);
+        setDeploySteps(['running', 'pending', 'pending', 'pending']);
+        setDeployOutput('');
+        beginDeployPolling(data.jobId);
+        addToast?.(tRef.current('oc.deploy.autoStarted', '已检测到 Wi‑Fi，正在后台自动安装 OpenClaw…'), 'info');
+      } catch {
+        try {
+          sessionStorage.removeItem(pendingKey);
+        } catch { /* ignore */ }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void tick();
+    const iv = setInterval(tick, 42_000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [currentDevice?.id]);
 
   useEffect(() => {
     if (status !== null && config !== null && needsSetup()) {
@@ -931,14 +1114,22 @@ export default function OpenClaw() {
 
   const handleOneClickInstall = async () => {
     if (!currentDevice || deployRunning) return;
-    if (!deployApiKey || !deployModelId) {
-      addToast?.(t('oc.deploy.needKey', '请填写模型 ID 和 API Key'), 'warning');
+    if (!deployModelId.trim()) {
+      addToast?.(t('oc.deploy.needModelId', '请填写模型 ID，或先在 RDKClaw 设置中保存当前模型'), 'warning');
+      return;
+    }
+    if (!deployApiKey.trim() && !deployHasStudioKey) {
+      addToast?.(
+        t('oc.deploy.needKeyOrStudio', '请填写 API Key，或先在 RDKClaw 设置中保存模型与密钥'),
+        'warning',
+      );
       return;
     }
     try {
       const preset = PROVIDER_PRESETS[deployProvider];
       const baseUrl = deployBaseUrl || preset?.baseUrl || '';
       const api = deployApi || preset?.api || 'openai-completions';
+      setDeployGuideLogsOnly(false);
       setDeployRunning(true);
       setDeployBannerDismissed(false);
       setDeploySteps(['running', 'pending', 'pending', 'pending']);
@@ -950,8 +1141,8 @@ export default function OpenClaw() {
         body: JSON.stringify({
           provider: deployProvider || 'custom',
           baseUrl,
-          apiKey: deployApiKey,
-          modelId: deployModelId,
+          apiKey: deployApiKey.trim() || undefined,
+          modelId: deployModelId.trim(),
           api,
         }),
       });
@@ -1004,6 +1195,7 @@ export default function OpenClaw() {
   /** 关闭部署引导：部署中 = 真正「后台运行」（收起顶栏横幅）；未部署 = 本会话内不再自动弹出（用 sessionStorage） */
   const dismissDeployGuideModal = () => {
     setShowDeployGuideModal(false);
+    setDeployGuideLogsOnly(false);
     if (deployRunning) {
       setDeployBannerDismissed(true);
     }
@@ -1385,6 +1577,11 @@ export default function OpenClaw() {
               <div className="oc-accordion-content">
                 {deployWifiPrereqNotice}
                 <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>{t('oc.deploy.quickPick', '快速选择（自动填充，填充后可手动修改）')}</div>
+                {deployHasStudioKey && !deployApiKey.trim() && (
+                  <div style={{ fontSize: '0.625rem', color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.45 }}>
+                    {t('oc.deploy.syncedWithStudio', '模型与 Base URL 已与 RDKClaw 设置中的当前模型对齐；API Key 使用工作室已保存的凭据（无需重复填写）。')}
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 8 }}>
                   {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'china').map(([k, p]) => (
                     <button key={k} type="button" className={`chip ${deployProvider === k ? 'active' : ''}`} onClick={() => { setDeployProvider(k); setDeployBaseUrl(p.baseUrl); setDeployModelId(p.models[0]); setDeployApi(p.api); }} style={{ fontSize: '0.625rem', padding: '2px 7px' }}>{providerDisplayLabel(k, p)}</button>
@@ -1425,7 +1622,17 @@ export default function OpenClaw() {
                   <input className="input" type="password" value={deployFeishuAppSecret} onChange={(e) => setDeployFeishuAppSecret(e.target.value)} placeholder={t('oc.ph.feishuSecret', '飞书 App Secret (可跳过)')} />
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'stretch' }}>
-                  <button type="button" className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ flex: 1 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleOneClickInstall}
+                    disabled={
+                      deployRunning
+                      || !deployModelId.trim()
+                      || (!deployApiKey.trim() && !deployHasStudioKey)
+                    }
+                    style={{ flex: 1 }}
+                  >
                     {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
                   </button>
                   {deployRunning && (
@@ -1836,7 +2043,11 @@ export default function OpenClaw() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="config-header">
-              <strong>{t('oc.modal.deployTitle', 'OpenClaw 一键部署引导')}</strong>
+              <strong>
+                {deployGuideLogsOnly
+                  ? t('oc.modal.autoInstallTitle', 'OpenClaw 自动安装')
+                  : t('oc.modal.deployTitle', 'OpenClaw 一键部署引导')}
+              </strong>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1845,49 +2056,87 @@ export default function OpenClaw() {
                 {deployRunning ? t('oc.modal.backgroundRun', '后台运行') : t('oc.modal.later', '稍后配置')}
               </button>
             </div>
-            <p className="config-card-desc" style={{ marginTop: 4, marginBottom: 8 }}>
-              {t(
-                'oc.modal.deployDesc',
-                '完成部署后，OpenClaw 会更稳定更智能。以 CLI 安装成功为准；网关在首次对话前启动即可；若模型测试失败可稍后再修复。',
-              )}
-            </p>
-            {deployWifiPrereqNotice}
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.baseUrl', 'Base URL')}</span>
-              <input className="input" type="text" value={deployBaseUrl} onChange={(e) => { setDeployBaseUrl(e.target.value); setDeployProvider(''); }} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
-            </div>
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
-              <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
-            </div>
-            <OcApiKeyRow
-              value={deployApiKey}
-              onChange={setDeployApiKey}
-              placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'}
-              visible={deployApiKeyVisible}
-              onToggleVisible={() => setDeployApiKeyVisible((v) => !v)}
-            />
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.protocol', '协议')}</span>
-              <select className="select" value={deployApi} onChange={(e) => setDeployApi(e.target.value)} aria-label={t('oc.aria.apiProtocol', 'API 协议')}>
-                {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'stretch' }}>
-              <button type="button" className="btn btn-primary btn-sm" onClick={handleOneClickInstall} disabled={deployRunning || !deployApiKey || !deployModelId} style={{ flex: 1 }}>
-                {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
-              </button>
-              {deployRunning && (
+            {deployGuideLogsOnly ? (
+              <p className="config-card-desc" style={{ marginTop: 4, marginBottom: 8 }}>
+                {t(
+                  'oc.modal.autoInstallDesc',
+                  '检测到板端已连接 Wi‑Fi，已使用工作室保存的模型配置自动开始安装。下方为实时进度与日志，可先关闭本窗口在后台运行。',
+                )}
+              </p>
+            ) : (
+              <>
+                <p className="config-card-desc" style={{ marginTop: 4, marginBottom: 8 }}>
+                  {t(
+                    'oc.modal.deployDesc',
+                    '完成部署后，OpenClaw 会更稳定更智能。以 CLI 安装成功为准；网关在首次对话前启动即可；若模型测试失败可稍后再修复。',
+                  )}
+                </p>
+                {deployWifiPrereqNotice}
+                <div className="oc-form-row">
+                  <span className="oc-form-label">{t('oc.form.baseUrl', 'Base URL')}</span>
+                  <input className="input" type="text" value={deployBaseUrl} onChange={(e) => { setDeployBaseUrl(e.target.value); setDeployProvider(''); }} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+                </div>
+                <div className="oc-form-row">
+                  <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
+                  <input className="input" type="text" value={deployModelId} onChange={(e) => setDeployModelId(e.target.value)} placeholder="qwen-plus / deepseek-chat / gpt-4o" />
+                </div>
+                <OcApiKeyRow
+                  value={deployApiKey}
+                  onChange={setDeployApiKey}
+                  placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'}
+                  visible={deployApiKeyVisible}
+                  onToggleVisible={() => setDeployApiKeyVisible((v) => !v)}
+                />
+                <div className="oc-form-row">
+                  <span className="oc-form-label">{t('oc.form.protocol', '协议')}</span>
+                  <select className="select" value={deployApi} onChange={(e) => setDeployApi(e.target.value)} aria-label={t('oc.aria.apiProtocol', 'API 协议')}>
+                    {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+                {deployHasStudioKey && !deployApiKey.trim() && (
+                  <p className="config-card-desc" style={{ marginTop: 6, fontSize: '0.6875rem', color: 'var(--text-secondary)' }}>
+                    {t('oc.deploy.syncedWithStudio', '模型与 Base URL 已与 RDKClaw 设置中的当前模型对齐；API Key 使用工作室已保存的凭据（无需重复填写）。')}
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'stretch' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleOneClickInstall}
+                    disabled={
+                      deployRunning
+                      || !deployModelId.trim()
+                      || (!deployApiKey.trim() && !deployHasStudioKey)
+                    }
+                    style={{ flex: 1 }}
+                  >
+                    {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
+                  </button>
+                  {deployRunning && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleCancelDeploy}
+                      disabled={!deployJobId.trim() || deployCancelLoading}
+                    >
+                      {deployCancelLoading ? t('oc.test.testing', '...') : t('oc.deploy.cancelBtn', '取消部署')}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+            {deployGuideLogsOnly && deployRunning && deployJobId.trim() && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
                   onClick={handleCancelDeploy}
-                  disabled={!deployJobId.trim() || deployCancelLoading}
+                  disabled={deployCancelLoading}
                 >
                   {deployCancelLoading ? t('oc.test.testing', '...') : t('oc.deploy.cancelBtn', '取消部署')}
                 </button>
-              )}
-            </div>
+              </div>
+            )}
             {deploySteps.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: '0.625rem' }}>
                 {deployStepLabels.map((label, idx) => (
