@@ -93,10 +93,13 @@ export interface ConfigData {
   }>;
   pluginsAllow?: string[];
   allProviders?: Record<string, any>;
-  /** 对齐 OpenClaw `agents.defaults`：思考档位与推理可见性（写入 `reasoningDefault`，非旧版误用的 `reasoning`） */
+  /**
+   * 对齐 OpenClaw `agents.defaults`：思考档位与推理可见性。
+   * 保存时按板端 `openclaw --version` 写入 `reasoningDefault`（新）或 `reasoning`（旧），并迁移另一侧键以免启动失败。
+   */
   agentDefaults?: {
     thinkingDefault?: string;
-    /** 推理可见性；持久化到板端为 `reasoningDefault` */
+    /** 推理可见性（UI）；落盘键名由服务端根据板端版本决定 */
     reasoning?: string;
   };
 }
@@ -113,6 +116,142 @@ const OPENCLAW_THINKING_DEFAULTS_KNOWN = new Set([
 ]);
 /** 与 OpenClaw runtime-schema `agents.defaults.reasoningDefault` 一致 */
 const OPENCLAW_REASONING_DEFAULT_KNOWN = new Set(['off', 'on', 'stream']);
+
+/** 从 stdout 中取首段 x.y 或 x.y.z；用于 `openclaw --version` */
+function parseOpenClawVersionTuple(text: string): number[] | null {
+  const lines = text.split(/[\r\n]+/);
+  for (const line of lines) {
+    const s = line.trim();
+    if (!s) continue;
+    const m = s.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+    if (m) {
+      return [parseInt(m[1], 10), parseInt(m[2], 10), m[3] !== undefined ? parseInt(m[3], 10) : 0];
+    }
+  }
+  return null;
+}
+
+function versionTupleAtLeast(a: number[], b: number[]): boolean {
+  for (let i = 0; i < 3; i += 1) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return true;
+}
+
+/**
+ * true：向 openclaw.json 写入 `agents.defaults.reasoningDefault`（新 schema）；
+ * false：写入 `reasoning` 并迁移/移除 `reasoningDefault`（旧版 CLI 常因未知键启动失败）。
+ *
+ * - `OPENCLAW_FORCE_LEGACY_AGENT_REASONING=1`：强制旧键
+ * - `OPENCLAW_FORCE_REASONING_DEFAULT_KEY=1`：强制新键
+ * - `OPENCLAW_REASONING_DEFAULT_MIN_VERSION`：日历版本年(≥2026)时与板端版本比较；默认 2026.1.0
+ * - 非日历主版本号（如 1.x）且主版本小于 2026：视为 semver≥1.0.0 即使用新键（可与 MIN_VERSION 并用调参）
+ * - 探测失败：保守走旧键，避免再写入新键导致启动失败
+ */
+function openclawShouldUseReasoningDefaultKey(versionStdout: string, versionCmdOk: boolean): boolean {
+  if (process.env.OPENCLAW_FORCE_LEGACY_AGENT_REASONING === '1' || process.env.OPENCLAW_FORCE_LEGACY_AGENT_REASONING === 'true') {
+    return false;
+  }
+  if (process.env.OPENCLAW_FORCE_REASONING_DEFAULT_KEY === '1' || process.env.OPENCLAW_FORCE_REASONING_DEFAULT_KEY === 'true') {
+    return true;
+  }
+  const minRaw = process.env.OPENCLAW_REASONING_DEFAULT_MIN_VERSION?.trim() || '2026.1.0';
+  const minParts = parseOpenClawVersionTuple(minRaw) ?? [2026, 1, 0];
+
+  if (!versionCmdOk) return false;
+
+  const parts = parseOpenClawVersionTuple(versionStdout);
+  if (!parts) return false;
+
+  if (parts[0] >= 2026) {
+    return versionTupleAtLeast(parts, minParts);
+  }
+  return versionTupleAtLeast(parts, [1, 0, 0]);
+}
+
+/** 板端合并 openclaw.json：argv1=patch b64，argv2=1 使用 reasoningDefault / 0 使用 reasoning 并自愈旧配置 */
+const OPENCLAW_MERGE_PY =
+  `import json,os,sys,base64,traceback
+def _strip(v):
+  if v is None:
+    return ''
+  return str(v).strip()
+try:
+ p=os.path.expanduser('~/.openclaw/openclaw.json')
+ os.makedirs(os.path.dirname(p),exist_ok=True)
+ d=json.load(open(p)) if os.path.exists(p) else {}
+ pat=json.loads(base64.b64decode(sys.argv[1]).decode())
+ USE_RD=len(sys.argv)>2 and str(sys.argv[2]).strip()=='1'
+ def merge(a,b):
+  for k,v in b.items():
+   if k in a and isinstance(a.get(k),dict) and isinstance(v,dict):merge(a[k],v)
+   else:a[k]=v
+ merge(d,pat)
+ # models.mode（如 "merge"）为 CLI/内部合并提示，写盘时若保留可能触发运行时不认识键导致网关拒绝启动
+ _md=d.get('models')
+ if isinstance(_md,dict):
+  _md.pop('mode',None)
+ if 'channels' in pat and 'feishu' in pat['channels']:
+  d.setdefault('channels',{})['feishu']=pat['channels']['feishu']
+ _ag=d.get('agents')
+ if isinstance(_ag,dict):
+  _defs=_ag.get('defaults')
+  if isinstance(_defs,dict):
+   if USE_RD:
+    if not _strip(_defs.get('reasoningDefault')) and _strip(_defs.get('reasoning')):
+     _defs['reasoningDefault']=_defs.get('reasoning')
+    if 'reasoning' in _defs:
+     del _defs['reasoning']
+   else:
+    if not _strip(_defs.get('reasoning')) and _strip(_defs.get('reasoningDefault')):
+     _defs['reasoning']=_defs.get('reasoningDefault')
+    if 'reasoningDefault' in _defs:
+     del _defs['reasoningDefault']
+ _tw=d.setdefault('tools',{})
+ _w=_tw.setdefault('web',{})
+ _s=_w.setdefault('search',{})
+ _pv=_s.get('provider')
+ if _pv is None or (isinstance(_pv,str) and str(_pv).strip()==''):
+  _s['provider']='duckduckgo'
+  if _s.get('enabled') is None:
+   _s['enabled']=True
+  if _s.get('maxResults') is None:
+   _s['maxResults']=5
+ _rdk_ag=d.setdefault('agents',{})
+ _rdk_df=_rdk_ag.setdefault('defaults',{})
+ _rdk_ms=_rdk_df.get('memorySearch')
+ if not isinstance(_rdk_ms,dict):
+  _rdk_ms={}
+ else:
+  _rdk_ms=dict(_rdk_ms)
+ _rdk_ms['enabled']=False
+ _rdk_df['memorySearch']=_rdk_ms
+ _rdk_ag['defaults']=_rdk_df
+ d['agents']=_rdk_ag
+ json.dump(d,open(p,'w'),indent=2,ensure_ascii=False)
+ v=json.load(open(p))
+ mp=((v.get('models') or {}).get('providers') or {}).get('custom-gateway')
+ ap=((v.get('agents') or {}).get('defaults') or {}).get('model',{}).get('primary','')
+ ag=((v.get('agents') or {}).get('defaults') or {})
+ td=ag.get('thinkingDefault') or ''
+ rv=_strip(ag.get('reasoningDefault')) or _strip(ag.get('reasoning'))
+ _ag_ms=ag.get('memorySearch') if isinstance(ag.get('memorySearch'),dict) else {}
+ _ag_mse=_ag_ms.get('enabled')
+ ws=((v.get('tools') or {}).get('web') or {}).get('search') or {}
+ wsp=str(ws.get('provider','') or '—')
+ rk='reasoningDefault' if USE_RD else 'reasoning'
+ print('[OpenClaw] 配置已更新 | model-provider:',('ok' if mp else 'missing'),'| primary:',ap or 'none','| thinkingDefault:',td or '—','|',rk+':',rv or '—','| web_search:',wsp,'| memorySearch.enabled:',_ag_mse)
+except Exception as e:
+ traceback.print_exc()
+ print('[OpenClaw] 配置写入失败:',str(e))
+ sys.exit(1)`;
+
+const OPENCLAW_MERGE_PY_B64 = Buffer.from(OPENCLAW_MERGE_PY, 'utf8').toString('base64');
+/** 空 patch：仅触发 oc_merge.py 侧默认策略（含关闭 memorySearch） */
+const OPENCLAW_EMPTY_MERGE_PATCH_B64 = Buffer.from('{}', 'utf8').toString('base64');
 
 // 常量定义
 const NPM_NVM_CLEANUP =
@@ -147,6 +286,13 @@ except Exception:
 g = d.get("gateway") if isinstance(d.get("gateway"), dict) else {}
 g["mode"] = "local"
 g["bind"] = "loopback"
+# Studio 探活固定 18789；仅修正缺省/空/历史模板 8080，保留用户显式其它端口
+try:
+    _p = int(g.get("port")) if g.get("port") not in (None, "") else None
+except (TypeError, ValueError):
+    _p = None
+if _p is None or _p == 8080:
+    g["port"] = 18789
 d["gateway"] = g
 
 with open(p, "w", encoding="utf-8") as f:
@@ -194,6 +340,13 @@ const RUN_HEALTH =
   '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" health --json 2>&1 || "$OPENCLAW_CMD" status --all 2>&1 || "$OPENCLAW_CMD" status 2>&1 || echo "[OpenClaw] health 失败" >&2; else true; fi)';
 /** 与 board 安装脚本共用，避免 npm prefix 空 → /bin/openclaw */
 const RESOLVE_OPENCLAW_CMD = OPENCLAW_RESOLVE_CLI_SNIPPET;
+
+const OPENCLAW_VERSION_PROBE_CMD = [
+  'export PATH="$HOME/.npm-global/bin:$PATH"',
+  RESOLVE_OPENCLAW_CMD,
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; fi)',
+].join(' && ');
+
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
   'anthropic-messages',
@@ -1031,9 +1184,14 @@ print(json.dumps(result,ensure_ascii=False))`;
     
     const cmd = [
       'export PATH="$HOME/.npm-global/bin:$PATH"',
+      RESOLVE_OPENCLAW_CMD,
       'echo "[OpenClaw] 开始初始化配置..."',
       `openclaw onboard --non-interactive ${acceptRisk} ${skipHealth} ${gatewayBind} --auth-choice ${provider} --${provider} '${escapedKey}' --install-daemon 2>&1`,
-      'echo "[OpenClaw] 初始化完成"'
+      'echo "[OpenClaw] 初始化完成"',
+      'echo "[RDK Studio] 板端默认关闭 memorySearch（无 embedding 时避免 memory_search 失败；记忆请用桌面或读文件）"',
+      `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1'`,
+      ENSURE_GATEWAY_LOCAL_MODE,
+      RESTART_GATEWAY_FALLBACK,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 300000 });
   }
@@ -1053,8 +1211,8 @@ print(json.dumps(result,ensure_ascii=False))`;
     if (config.modelGateway?.baseUrl && config.modelGateway?.apiKey) {
       const modelId = config.modelGateway.modelId || 'default-model';
       const modelName = config.modelGateway.modelName || modelId;
+      // 勿写 models.mode：磁盘 schema 通常不包含该键，严格校验时可能导致网关无法启动；深度合并由 oc_merge.py 完成
       patch.models = {
-        mode: 'merge',
         providers: {
           'custom-gateway': {
             baseUrl: config.modelGateway.baseUrl,
@@ -1094,87 +1252,91 @@ print(json.dumps(result,ensure_ascii=False))`;
         allow: Array.from(new Set(allow)),
       };
     }
+    let pendingReasoningVisibility = '';
     if (config.agentDefaults) {
-      const ad: Record<string, string> = {};
       const td = String(config.agentDefaults.thinkingDefault ?? '').trim();
-      const rv = String(config.agentDefaults.reasoning ?? '').trim();
+      pendingReasoningVisibility = String(config.agentDefaults.reasoning ?? '').trim();
       if (td) {
         if (!OPENCLAW_THINKING_DEFAULTS_KNOWN.has(td)) {
           onOutput(
             `[OpenClaw] 提示: thinkingDefault="${td}" 不在常见列表内，仍将写入（请确认当前 openclaw 版本支持）\n`,
           );
         }
-        ad.thinkingDefault = td;
-      }
-      if (rv) {
-        if (!OPENCLAW_REASONING_DEFAULT_KNOWN.has(rv)) {
-          onOutput(`[OpenClaw] 提示: reasoningDefault="${rv}" 不在常见列表内，仍将写入\n`);
-        }
-        ad.reasoningDefault = rv;
-      }
-      if (Object.keys(ad).length > 0) {
         patch.agents = patch.agents || { defaults: {} };
-        patch.agents.defaults = { ...(patch.agents.defaults || {}), ...ad };
+        patch.agents.defaults = { ...(patch.agents.defaults || {}), thinkingDefault: td };
+      }
+      if (pendingReasoningVisibility) {
+        if (!OPENCLAW_REASONING_DEFAULT_KNOWN.has(pendingReasoningVisibility)) {
+          onOutput(
+            `[OpenClaw] 提示: 推理可见性="${pendingReasoningVisibility}" 不在常见列表 off/on/stream 内，仍将按板端兼容键写入\n`,
+          );
+        }
       }
     }
-    if (Object.keys(patch).length === 0) {
+    if (Object.keys(patch).length === 0 && !pendingReasoningVisibility) {
       onOutput('[OpenClaw] 无有效配置项，跳过更新\n');
       onComplete(true);
       return { abort: () => {} };
     }
-    const patchB64 = Buffer.from(JSON.stringify(patch), 'utf8').toString('base64');
-    const pyScript = `import json,os,sys,base64,traceback
-try:
- p=os.path.expanduser('~/.openclaw/openclaw.json')
- os.makedirs(os.path.dirname(p),exist_ok=True)
- d=json.load(open(p)) if os.path.exists(p) else {}
- pat=json.loads(base64.b64decode(sys.argv[1]).decode())
- def merge(a,b):
-  for k,v in b.items():
-   if k in a and isinstance(a.get(k),dict) and isinstance(v,dict):merge(a[k],v)
-   else:a[k]=v
- merge(d,pat)
- if 'channels' in pat and 'feishu' in pat['channels']:
-  d.setdefault('channels',{})['feishu']=pat['channels']['feishu']
- _ag=d.get('agents')
- if isinstance(_ag,dict):
-  _defs=_ag.get('defaults')
-  if isinstance(_defs,dict) and 'reasoning' in _defs:
-   del _defs['reasoning']
- _tw=d.setdefault('tools',{})
- _w=_tw.setdefault('web',{})
- _s=_w.setdefault('search',{})
- _pv=_s.get('provider')
- if _pv is None or (isinstance(_pv,str) and str(_pv).strip()==''):
-  _s['provider']='duckduckgo'
-  if _s.get('enabled') is None:
-   _s['enabled']=True
-  if _s.get('maxResults') is None:
-   _s['maxResults']=5
- json.dump(d,open(p,'w'),indent=2,ensure_ascii=False)
- v=json.load(open(p))
- mp=((v.get('models') or {}).get('providers') or {}).get('custom-gateway')
- ap=((v.get('agents') or {}).get('defaults') or {}).get('model',{}).get('primary','')
- ag=((v.get('agents') or {}).get('defaults') or {})
- td=ag.get('thinkingDefault') or ''
- rv=ag.get('reasoningDefault') or ag.get('reasoning') or ''
- ws=((v.get('tools') or {}).get('web') or {}).get('search') or {}
- wsp=str(ws.get('provider','') or '—')
- print('[OpenClaw] 配置已更新 | model-provider:',('ok' if mp else 'missing'),'| primary:',ap or 'none','| thinkingDefault:',td or '—','| reasoningDefault:',rv or '—','| web_search:',wsp)
-except Exception as e:
- traceback.print_exc()
- print('[OpenClaw] 配置写入失败:',str(e))
- sys.exit(1)`;
-    const base64Script = Buffer.from(pyScript, 'utf8').toString('base64');
-    const cmd = [
-      'export PATH="$HOME/.npm-global/bin:$PATH"',
-      RESOLVE_OPENCLAW_CMD,
-      `echo '${base64Script}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}'`,
-      ENSURE_GATEWAY_LOCAL_MODE,
-      RESTART_GATEWAY_FALLBACK,
-      'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
-    ].join(' && ');
-    return this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
+
+    let versionProbeHandle: { abort: () => void } | undefined;
+    let mergeHandle: { abort: () => void } | undefined;
+    let cancelled = false;
+
+    const runMerge = (useReasoningDefaultKey: boolean) => {
+      if (cancelled) return;
+      const finalPatch = JSON.parse(JSON.stringify(patch)) as Record<string, unknown>;
+      if (pendingReasoningVisibility) {
+        const agents = (finalPatch.agents as Record<string, unknown> | undefined) || {};
+        const defs = (agents.defaults as Record<string, unknown> | undefined) || {};
+        const reasoningKey = useReasoningDefaultKey ? 'reasoningDefault' : 'reasoning';
+        agents.defaults = { ...defs, [reasoningKey]: pendingReasoningVisibility };
+        finalPatch.agents = agents;
+      }
+      const flag = useReasoningDefaultKey ? '1' : '0';
+      const patchB64 = Buffer.from(JSON.stringify(finalPatch), 'utf8').toString('base64');
+      const cmd = [
+        'export PATH="$HOME/.npm-global/bin:$PATH"',
+        RESOLVE_OPENCLAW_CMD,
+        `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}' '${flag}'`,
+        ENSURE_GATEWAY_LOCAL_MODE,
+        RESTART_GATEWAY_FALLBACK,
+        'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
+      ].join(' && ');
+      mergeHandle = this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
+    };
+
+    let versionOutput = '';
+    versionProbeHandle = this.execCommand(
+      device,
+      OPENCLAW_VERSION_PROBE_CMD,
+      (chunk) => {
+        versionOutput += chunk;
+        if (pendingReasoningVisibility) onOutput(chunk);
+      },
+      (probeOk) => {
+        const useRD = openclawShouldUseReasoningDefaultKey(versionOutput, probeOk);
+        const firstLine = versionOutput
+          .split(/[\r\n]+/)
+          .map((s) => s.trim())
+          .find(Boolean);
+        if (pendingReasoningVisibility) {
+          onOutput(
+            `[OpenClaw] 推理可见性 → agents.defaults.${useRD ? 'reasoningDefault' : 'reasoning'}${firstLine ? ` | ${firstLine}` : ''}\n`,
+          );
+        }
+        runMerge(useRD);
+      },
+      { timeout: 15000 },
+    );
+
+    return {
+      abort: () => {
+        cancelled = true;
+        versionProbeHandle?.abort();
+        mergeHandle?.abort();
+      },
+    };
   }
 
   runRestartGateway(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -1286,6 +1448,10 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       OPENCLAW_ENSURE_NPM_SNIPPET,
       OPENCLAW_INSTALL_OPENCLAW_STEP,
       BOARD_FIND_SKILLS_INSTALL,
+      'echo "[RDK Studio] 板端默认关闭 memorySearch（避免未配置 embedding 时失败）"',
+      `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1'`,
+      ENSURE_GATEWAY_LOCAL_MODE,
+      RESTART_GATEWAY_FALLBACK,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }
@@ -1416,7 +1582,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     this.execCommand(device, script, collectOutput, wrapComplete, { timeout: 90000 });
   }
 
-  // OpenClaw 对话方法
+  // OpenClaw 对话方法（仅建立 SSH 客户端；成功与否应与板端 openclaw/status 结合展示，勿单独当作「Agent 已连接」）
   startInteractiveChat(
     device: Device,
     onData: (data: any, err?: string) => void,
