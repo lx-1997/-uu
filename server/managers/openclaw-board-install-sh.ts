@@ -44,8 +44,10 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
   'NPM_FAST_REG="${NPM_FAST_REG:-https://registry.npmjs.org}";',
   'ALT_REG="${ALT_REG:-https://registry.npmmirror.com}";',
   'for i in 1 2 3; do',
-  'if CI=1 npm install -g openclaw@latest --no-audit --no-fund --loglevel error --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
-  'if CI=1 npm install -g openclaw@latest --no-audit --no-fund --loglevel error --registry="${ALT_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+  // 勿用 --loglevel error：成功路径近乎静默，前端只能看到 Studio 心跳误以为无日志。info 会输出解析/下载/解压等进度（体积仍可控）。
+  // CI= 清空 CI：避免 npm 在 CI=1 时关闭 progress 且进一步减少输出。
+  'if CI= npm install -g openclaw@latest --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+  'if CI= npm install -g openclaw@latest --no-audit --no-fund --loglevel info --registry="${ALT_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
   '[ "${i}" = 3 ] && exit 1;',
   'sleep 3;',
   'done',

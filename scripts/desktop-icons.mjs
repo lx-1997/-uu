@@ -13,7 +13,7 @@
  *
  * 若前端缺少某项：用本仓库 public/branding/icon.png（若已有）→ 再退回 bundled noVNC 占位图。
  * 有 PNG 时会同步写入 public/branding/icon.png，供左侧栏等静态引用。
- * Windows 在仅有 PNG 时用 png-to-ico 生成 icon.ico（建议 PNG ≥256×256，否则回退 noVNC .ico）。
+ * Windows 在仅有 PNG 时用 sharp + to-ico 生成多尺寸 icon.ico（满足 NSIS ≥256×256）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -79,13 +79,21 @@ function firstExisting(base, relatives) {
 
 async function writeIcoFromPng(pngPath, icoPath, log) {
   try {
-    const pngToIco = require('png-to-ico');
-    const buf = await pngToIco(fs.readFileSync(pngPath));
+    const { default: sharp } = await import('sharp');
+    const toIco = require('to-ico');
+    const sizes = [16, 32, 48, 64, 128, 256];
+    const bg = { r: 0, g: 0, b: 0, alpha: 0 };
+    const pngBufs = await Promise.all(
+      sizes.map((s) =>
+        sharp(pngPath).resize(s, s, { fit: 'contain', background: bg }).png().toBuffer(),
+      ),
+    );
+    const buf = await toIco(pngBufs);
     fs.writeFileSync(icoPath, buf);
     log(`generated icon.ico from PNG (${path.basename(pngPath)})`);
     return true;
   } catch (e) {
-    log(`png-to-ico failed: ${e instanceof Error ? e.message : e}`, 'warn');
+    log(`ico generation failed: ${e instanceof Error ? e.message : e}`, 'warn');
     return false;
   }
 }
@@ -170,7 +178,7 @@ export async function prepareBuildResources(rootDir, opts = {}) {
     const ok = await writeIcoFromPng(pngForPack, destIco, log);
     if (!ok && fs.existsSync(FALLBACK_ICO(rootDir))) {
       fs.copyFileSync(FALLBACK_ICO(rootDir), destIco);
-      log(`→ build-resources/icon.ico (noVNC, png-to-ico 需 256×256 等尺寸)`, 'warn');
+      log(`→ build-resources/icon.ico (noVNC, sharp+to-ico 生成失败时回退)`, 'warn');
     }
   } else if (fs.existsSync(FALLBACK_ICO(rootDir))) {
     fs.copyFileSync(FALLBACK_ICO(rootDir), destIco);

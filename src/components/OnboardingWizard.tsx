@@ -275,11 +275,13 @@ export default function OnboardingWizard() {
           job.error === 'oc.deployPoll.interrupted'
             ? tRef.current(
                 'oc.deployPoll.interrupted',
-                '多次无法获取部署进度（网络或服务端可能异常）。请打开「OpenClaw」页面查看日志，或检查网络后重新发起一键部署。',
+                '长时间无法从本机拉取部署进度（烧录中或网络繁忙时常见）；板端任务可能仍在进行。请稍后打开「OpenClaw」页查看日志，或网络稳定后重试同步。',
               )
             : job.error || tRef.current('onboard.deploy.failShort', '部署失败，请查看日志');
         setOcInstallLog((prev) => `${prev}\n[错误] ${msg}\n`);
-        addToast(tRef.current('onboard.deploy.failToast', 'OpenClaw 一键部署失败，请查看日志'), 'warning');
+        if (job.error !== 'oc.deployPoll.interrupted') {
+          addToast(tRef.current('onboard.deploy.failToast', 'OpenClaw 一键部署失败，请查看日志'), 'warning');
+        }
         return;
       }
 

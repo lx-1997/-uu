@@ -374,7 +374,7 @@ export default function OpenClaw() {
       job.error === 'oc.deployPoll.interrupted'
         ? tRef.current(
             'oc.deployPoll.interrupted',
-            '多次无法获取部署进度（网络或服务端可能异常）。请查看下方日志并检查网络后重试。',
+            '长时间无法拉取部署进度（烧录或本机繁忙时常见）；板端可能仍在安装。请查看下方日志或稍后重试。',
           )
         : job.error || tRef.current('oc.deploy.fail', '部署失败，请查看日志输出');
     appendSystemMessage(fillTemplate(tRef.current('oc.deploy.failMsg', '**部署失败：** {{detail}}'), { detail: err }));
