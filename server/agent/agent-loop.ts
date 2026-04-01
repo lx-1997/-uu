@@ -32,6 +32,7 @@ import type {
   SimpleStreamOptions,
   Context as PiContext,
   ThinkingLevel,
+  StopReason,
 } from "@mariozechner/pi-ai";
 import {
   retryAsync,
@@ -40,6 +41,7 @@ import {
   isTransientError,
   describeError,
 } from "./provider/errors.js";
+import { truncateToolOutput } from "./context/tool-output-truncate.js";
 import { pruneContextMessages } from "./context/index.js";
 import { microcompact } from "./context/microcompact.js";
 import { createMiniAgentStream, type MiniAgentEvent, type MiniAgentResult } from "./agent-events.js";
@@ -223,6 +225,13 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
     let totalToolCalls = 0;
     let finalText = "";
     let overflowRecoveryLevel = 0; // 0=none, 1=microcompact, 2=llm-compact, 3=emergency-truncation
+    /** Level 2 的 prepareCompaction 连续失败次数 → 熔断后跳过 LLM 摘要 */
+    let llmCompactionFailureStreak = 0;
+    let skipLlmCompactionOnOverflow = false;
+
+    /** max_tokens 输出截断自动续写（每 run 最多 3 次） */
+    const MAX_OUTPUT_CONTINUATIONS = 3;
+    let outputContinuationCount = 0;
 
     // ── Run Metrics 追踪器（借鉴 claude-code） ──
     const runStartMs = Date.now();
@@ -312,6 +321,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           const toolCalls: { id: string; name: string; input: Record<string, unknown> }[] = [];
           const turnTextParts: string[] = [];
           let currentThinkingParts: string[] | null = null;
+          /** 本轮 LLM 流结束原因（来自 pi-ai AssistantMessage.stopReason） */
+          let streamStopReason: StopReason | undefined;
 
           try {
             await retryAsync(
@@ -319,6 +330,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 assistantContent.length = 0;
                 toolCalls.length = 0;
                 turnTextParts.length = 0;
+                streamStopReason = undefined;
 
                 const streamOpts: SimpleStreamOptions = {
                   maxTokens: modelDef.maxTokens,
@@ -396,14 +408,14 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   }
                 }
 
-                const result = eventStream.result();
-                await abortable(result, abortSignal);
+                const piAssistant = await abortable(eventStream.result(), abortSignal);
+                streamStopReason = piAssistant.stopReason;
               },
               {
                 attempts: 3,
                 minDelayMs: 300,
                 maxDelayMs: 30_000,
-                jitter: 0.1,
+                jitter: 0.25,
                 label: "llm-call",
                 shouldRetry: (err) => {
                   if (abortSignal.aborted) return false;
@@ -445,32 +457,52 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               }
 
               if (overflowRecoveryLevel === 2) {
-                // Level 2: LLM 摘要压缩
-                try {
-                  const overflowPrep = await prepareCompaction({
-                    messages: currentMessages,
-                    sessionKey,
-                    runId,
-                  });
-                  if (overflowPrep.summary && overflowPrep.summaryMessage) {
-                    compactionSummary = overflowPrep.summaryMessage;
-                    contextCompactions++;
-                    // 成功恢复后重置 level，让下次 overflow 从 Level 1 重新开始
-                    overflowRecoveryLevel = 0;
-                    turns--;
-                    continue;
-                  }
-                } catch {
-                  // LLM compact 也失败了，升级到 Level 3
+                if (skipLlmCompactionOnOverflow) {
                   overflowRecoveryLevel = 3;
+                } else {
+                  // Level 2: LLM 摘要压缩
+                  try {
+                    const overflowPrep = await prepareCompaction({
+                      messages: currentMessages,
+                      sessionKey,
+                      runId,
+                    });
+                    if (overflowPrep.summary && overflowPrep.summaryMessage) {
+                      compactionSummary = overflowPrep.summaryMessage;
+                      contextCompactions++;
+                      llmCompactionFailureStreak = 0;
+                      // 成功恢复后重置 level，让下次 overflow 从 Level 1 重新开始
+                      overflowRecoveryLevel = 0;
+                      turns--;
+                      continue;
+                    }
+                  } catch (compactErr) {
+                    llmCompactionFailureStreak++;
+                    console.warn(
+                      "[agent-loop] prepareCompaction failed during overflow recovery:",
+                      describeError(compactErr),
+                    );
+                    if (llmCompactionFailureStreak >= 2) {
+                      skipLlmCompactionOnOverflow = true;
+                      stream.push({ type: "compaction_fuse", failures: llmCompactionFailureStreak });
+                    }
+                    overflowRecoveryLevel = 3;
+                  }
                 }
               }
 
               if (overflowRecoveryLevel === 3) {
-                // Level 3: Emergency truncation — 直接丢弃旧消息，保留最近 6 条
-                // 这是最后的兜底，确保 Agent 不会因为上下文溢出而完全崩溃
-                const keepCount = Math.min(6, currentMessages.length);
-                const dropped = currentMessages.length - keepCount;
+                // Level 3: Emergency truncation — 先保留最近 6 条；若仍无法丢消息则收紧到 3 条/1 条
+                let keepCount = Math.min(6, currentMessages.length);
+                let dropped = currentMessages.length - keepCount;
+                if (dropped === 0 && currentMessages.length > 3) {
+                  keepCount = Math.min(3, currentMessages.length);
+                  dropped = currentMessages.length - keepCount;
+                }
+                if (dropped === 0 && currentMessages.length > 1) {
+                  keepCount = 1;
+                  dropped = currentMessages.length - keepCount;
+                }
                 if (dropped > 0) {
                   const kept = currentMessages.slice(-keepCount);
                   currentMessages.splice(0, currentMessages.length, ...kept);
@@ -499,6 +531,34 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           const turnText = turnTextParts.join("");
           if (turnText) {
             stream.push({ type: "message_end", message: assistantMsg, text: turnText });
+          }
+
+          // max_tokens 截断续写（pi-ai stopReason === "length"，纯文本无工具调用）
+          if (
+            streamStopReason === "length" &&
+            toolCalls.length === 0 &&
+            outputContinuationCount < MAX_OUTPUT_CONTINUATIONS &&
+            !abortSignal.aborted
+          ) {
+            const steer = await getSteeringMessages();
+            if (steer.length === 0) {
+              outputContinuationCount++;
+              stream.push({
+                type: "output_continuation",
+                attempt: outputContinuationCount,
+                maxAttempts: MAX_OUTPUT_CONTINUATIONS,
+              });
+              pendingMessages = [{
+                role: "user",
+                content: [{
+                  type: "text",
+                  text: "[系统提示] 你的上一次回复因输出长度上限（max_tokens）被截断。请从截断处继续写完，不要重复已输出的内容。",
+                }],
+                timestamp: Date.now(),
+              }];
+              stream.push({ type: "turn_end", turn: turns });
+              continue;
+            }
           }
 
           hasMoreToolCalls = toolCalls.length > 0;
@@ -593,14 +653,18 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 totalToolCalls++;
                 toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
                 if (isError) toolErrors++;
+
+                // 工具输出截断保护（并行路径）
+                const truncatedResult = isError ? result : truncateToolOutput(call.name, result);
+
                 stream.push({
                   type: "tool_execution_end",
                   toolCallId: call.id,
                   toolName: call.name,
-                  result: result.length > 500 ? `${result.slice(0, 500)}...` : result,
+                  result: truncatedResult.length > 500 ? `${truncatedResult.slice(0, 500)}...` : truncatedResult,
                   isError,
                 });
-                toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
+                toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: truncatedResult });
               }
               const steering = await getSteeringMessages();
               if (steering.length > 0) {
@@ -612,7 +676,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               for (let gi = 0; gi < group.calls.length; gi++) {
                 const call = group.calls[gi];
                 const tool = toolsForRun.find((t) => t.name === call.name);
-                let result: string;
+                let result = "";
+                let errFlag = !tool;
 
                 stream.push({ type: "tool_execution_start", toolCallId: call.id, toolName: call.name, args: call.input });
 
@@ -625,6 +690,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       stream.push({ type: "tool_approval_resolved", toolCallId: call.id, toolName: call.name, decision });
                       if (!approval.approved) {
                         result = "Tool execution denied by user.";
+                        errFlag = true;
                         totalToolCalls++;
                         stream.push({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError: true });
                         toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
@@ -642,6 +708,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       }
                     }
                   }
+                  const toolStartMs = Date.now();
                   try {
                     // PreToolUse hooks
                     if (params.toolHooks) {
@@ -650,6 +717,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       });
                       if (decision.action === "block") {
                         result = `[${hookName}] ${decision.reason}`;
+                        errFlag = true;
                         totalToolCalls++;
                         toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
                         toolErrors++;
@@ -665,18 +733,24 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       }
                     }
 
-                    const toolStartMs = Date.now();
-                    result = await tool.execute(call.input, { ...toolCtx, toolCallId: call.id });
-
-                    // PostToolUse hooks
-                    if (params.toolHooks) {
-                      result = await params.toolHooks.runPostHooks({
-                        tool, input: call.input, result, isError: false,
-                        durationMs: Date.now() - toolStartMs, ctx: toolCtx, sessionId: params.sessionKey,
-                      });
-                    }
+                    // 工具执行超时保护（借鉴 claude-code）
+                    const TOOL_TIMEOUT_MS = 120_000; // 2 分钟
+                    const toolTimeoutPromise = new Promise<never>((_, reject) =>
+                      setTimeout(() => reject(new Error(`工具 ${call.name} 执行超时（${TOOL_TIMEOUT_MS / 1000}s）`)), TOOL_TIMEOUT_MS),
+                    );
+                    result = await Promise.race([
+                      tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
+                      toolTimeoutPromise,
+                    ]);
                   } catch (err) {
                     result = `执行错误: ${(err as Error).message}`;
+                    errFlag = true;
+                  }
+                  if (params.toolHooks) {
+                    result = await params.toolHooks.runPostHooks({
+                      tool, input: call.input, result, isError: errFlag,
+                      durationMs: Date.now() - toolStartMs, ctx: toolCtx, sessionId: params.sessionKey,
+                    });
                   }
                 } else {
                   result = `未知工具: ${call.name}`;
@@ -684,16 +758,20 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
                 totalToolCalls++;
                 toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
-                const isError = !tool || result.startsWith("执行错误:") || result.startsWith("未知工具:");
+                const isError = errFlag;
                 if (isError) toolErrors++;
+
+                // 工具输出截断保护：防止单个工具输出占满上下文窗口
+                const truncatedResult = isError ? result : truncateToolOutput(call.name, result);
+
                 stream.push({
                   type: "tool_execution_end",
                   toolCallId: call.id,
                   toolName: call.name,
-                  result: result.length > 500 ? `${result.slice(0, 500)}...` : result,
+                  result: truncatedResult.length > 500 ? `${truncatedResult.slice(0, 500)}...` : truncatedResult,
                   isError,
                 });
-                toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
+                toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: truncatedResult });
 
                 const steering = await getSteeringMessages();
                 if (steering.length > 0) {

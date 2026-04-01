@@ -355,13 +355,7 @@ export default function Dashboard() {
       {/* ── Hero: device name as the centerpiece ── */}
       <div className="lp-hero lp-enter">
         <div className="lp-status-row">
-          <span
-            className={`lp-pill ${studioBackendOk ? 'ok' : ''}`}
-            title={t(
-              'dashboard.rdkclawPillHint',
-              'RDK Studio 后端（RDKClaw API）：通过本机 GET /api/health 探测服务是否响应',
-            )}
-          >
+          <span className={`lp-pill ${studioBackendOk ? 'ok' : ''}`}>
             <span
               className={`status-dot ${
                 studioBackendOk === null ? 'warn' : studioBackendOk ? 'online' : 'offline'
@@ -371,10 +365,6 @@ export default function Dashboard() {
           </span>
           <span
             className={`lp-pill ${openclawHealth?.installed || openclawHealth?.gatewayRunning ? 'ok' : ''}`}
-            title={t(
-              'dashboard.openclawPillHint',
-              '板端 OpenClaw：CLI 已安装或网关运行中（SSH 健康检查）；网关未起时仍可显示已安装',
-            )}
           >
             <span
               className={`status-dot ${
@@ -387,13 +377,7 @@ export default function Dashboard() {
             />
             OpenClaw
           </span>
-          <span
-            className={`lp-pill ${deviceChannelOk ? 'online' : ''}`}
-            title={t(
-              'dashboard.devicePillHint',
-              '「在线」表示后台已用当前保存的 SSH 凭据成功登录该设备。无凭据或密码错误时会显示离线；请重新连接设备以保存密码。',
-            )}
-          >
+          <span className={`lp-pill ${deviceChannelOk ? 'online' : ''}`}>
             <span className={`status-dot ${deviceChannelOk ? 'online' : 'offline'}`} />
             {deviceChannelOk
               ? t('dashboard.deviceOnline', '设备在线')

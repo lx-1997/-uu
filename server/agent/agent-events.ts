@@ -71,6 +71,10 @@ export type MiniAgentEvent =
   // 可观测性事件（借鉴 claude-code run metrics）
   | { type: "microcompact"; compressedCount: number; savedChars: number }
   | { type: "emergency_truncation"; droppedMessages: number; keptMessages: number }
+  /** 输出因 max_tokens 截断自动续写（借鉴 claude-code continuation） */
+  | { type: "output_continuation"; attempt: number; maxAttempts: number }
+  /** LLM 摘要压缩连续失败熔断，后续 overflow 跳过 Level 2 直走降级 */
+  | { type: "compaction_fuse"; failures: number }
   | { type: "run_metrics"; metrics: RunMetrics };
 
 /** Agent run 的完整执行统计（借鉴 claude-code） */

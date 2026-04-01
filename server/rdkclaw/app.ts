@@ -241,50 +241,60 @@ export class RDKClawApp {
       this.openClawManager.getInstalledSkills(
         board,
         (chunk) => {
-          const r = appendUtf8WithTailCap(output, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
-          output = r.value;
+          try {
+            const r = appendUtf8WithTailCap(output, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
+            output = r.value;
+          } catch {
+            /* 流式回调异常不阻塞 Promise，由超时兜底 */
+          }
         },
         () => {
           if (done) return;
           done = true;
           clearTimeout(timer);
-          const skillDetails: BoardSkillDetail[] = [];
-          const plugins: string[] = [];
-          let section = "";
-          for (const line of output.split("\n")) {
-            const trimmed = line.trim();
-            if (trimmed === "===SKILLS===") { section = "skills"; continue; }
-            if (trimmed === "===PLUGINS===") { section = "plugins"; continue; }
-            if (!trimmed || trimmed.startsWith("无已安装")) continue;
-            if (section === "skills") {
-              const parts = trimmed.split("|");
-              if (parts.length >= 3) {
-                skillDetails.push({
-                  name: parts[0].trim(),
-                  path: parts[1].trim(),
-                  description: parts[2].trim(),
-                  trigger: parts[3]?.trim() || "",
-                });
-              } else {
-                skillDetails.push({ name: trimmed, path: "", description: "", trigger: "" });
+          try {
+            const skillDetails: BoardSkillDetail[] = [];
+            const plugins: string[] = [];
+            let section = "";
+            for (const line of output.split("\n")) {
+              const trimmed = line.trim();
+              if (trimmed === "===SKILLS===") { section = "skills"; continue; }
+              if (trimmed === "===PLUGINS===") { section = "plugins"; continue; }
+              if (!trimmed || trimmed.startsWith("无已安装")) continue;
+              if (section === "skills") {
+                const parts = trimmed.split("|");
+                if (parts.length >= 3) {
+                  skillDetails.push({
+                    name: parts[0].trim(),
+                    path: parts[1].trim(),
+                    description: parts[2].trim(),
+                    trigger: parts[3]?.trim() || "",
+                  });
+                } else {
+                  skillDetails.push({ name: trimmed, path: "", description: "", trigger: "" });
+                }
+              } else if (section === "plugins") {
+                plugins.push(trimmed);
               }
-            } else if (section === "plugins") {
-              plugins.push(trimmed);
             }
+            const seen = new Set<string>();
+            const deduped = skillDetails.filter((s) => {
+              if (seen.has(s.name)) return false;
+              seen.add(s.name);
+              return true;
+            });
+            const value: BoardSnapshot = {
+              skills: deduped.map((s) => s.name),
+              skillDetails: deduped,
+              plugins: Array.from(new Set(plugins)),
+            };
+            this.boardSkillSnapshotCache.set(deviceId, { value, expiresAt: Date.now() + RDKClawApp.BOARD_SNAPSHOT_TTL_MS });
+            resolve(value);
+          } catch {
+            const empty: BoardSnapshot = { skills: [], skillDetails: [], plugins: [] };
+            this.boardSkillSnapshotCache.set(deviceId, { value: empty, expiresAt: Date.now() + RDKClawApp.BOARD_SNAPSHOT_TTL_MS });
+            resolve(empty);
           }
-          const seen = new Set<string>();
-          const deduped = skillDetails.filter((s) => {
-            if (seen.has(s.name)) return false;
-            seen.add(s.name);
-            return true;
-          });
-          const value: BoardSnapshot = {
-            skills: deduped.map((s) => s.name),
-            skillDetails: deduped,
-            plugins: Array.from(new Set(plugins)),
-          };
-          this.boardSkillSnapshotCache.set(deviceId, { value, expiresAt: Date.now() + RDKClawApp.BOARD_SNAPSHOT_TTL_MS });
-          resolve(value);
         },
       );
     });

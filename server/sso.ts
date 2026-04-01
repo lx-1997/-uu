@@ -118,17 +118,32 @@ export async function restoreSsoSessionsFromDisk(): Promise<void> {
   }
 }
 
-setInterval(() => {
-  const now = Date.now();
-  let removed = false;
-  for (const [key, session] of sessions.entries()) {
-    if (session.expiresAt < now) {
-      sessions.delete(key);
-      removed = true;
+let ssoSessionExpirySweep: ReturnType<typeof setInterval> | null = null;
+
+function startSsoSessionExpirySweep(): void {
+  if (ssoSessionExpirySweep) return;
+  ssoSessionExpirySweep = setInterval(() => {
+    const now = Date.now();
+    let removed = false;
+    for (const [key, session] of sessions.entries()) {
+      if (session.expiresAt < now) {
+        sessions.delete(key);
+        removed = true;
+      }
     }
+    if (removed) schedulePersistSsoSessions();
+  }, 60_000);
+}
+
+startSsoSessionExpirySweep();
+
+/** 测试/热重载时清理定时器，避免泄漏 */
+export function disposeSsoSessionExpirySweep(): void {
+  if (ssoSessionExpirySweep) {
+    clearInterval(ssoSessionExpirySweep);
+    ssoSessionExpirySweep = null;
   }
-  if (removed) schedulePersistSsoSessions();
-}, 60_000);
+}
 
 export function isSSOEnabled(): boolean {
   return !!(SSO_CLIENT_ID && SSO_CLIENT_SECRET);

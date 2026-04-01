@@ -79,6 +79,7 @@ import {
   getSessionSsoUserFromIncomingMessage,
   type SSOUser,
 } from './sso.js';
+import { describeError } from './agent/provider/errors.js';
 import { registerAnalyticsRoutes } from './analytics-routes.js';
 import { registerClawhubRoutes } from './clawhub-routes.js';
 import { getTokenUsageReport, recordTokenUsage, resetTokenUsage, removeTokenUsageByDevice } from './monitoring/token-usage.js';
@@ -207,6 +208,8 @@ function isPrivateIp(ip: string): boolean {
   return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost$)/.test(ip);
 }
 
+const NOVNC_PROXY_IDLE_MS = 30 * 60 * 1000;
+
 wss.on('connection', (ws, req) => {
   const urlParams = new URLSearchParams(req.url?.split('?')[1] || '');
   const target = urlParams.get('target');
@@ -224,18 +227,49 @@ wss.on('connection', (ws, req) => {
     console.log(`[noVNC] proxied to ${host}:${targetPort}`);
   });
 
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearIdle = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
+  const bumpIdle = () => {
+    clearIdle();
+    idleTimer = setTimeout(() => {
+      try { ws.close(); } catch { /* noop */ }
+      try { tcpSocket.destroy(); } catch { /* noop */ }
+    }, NOVNC_PROXY_IDLE_MS);
+  };
+
+  bumpIdle();
+
   tcpSocket.on('data', (data) => {
+    bumpIdle();
     if (ws.readyState === ws.OPEN) ws.send(data);
   });
-  
+
   ws.on('message', (msg: Buffer) => {
+    bumpIdle();
     if (!tcpSocket.destroyed) tcpSocket.write(msg);
   });
-  
-  tcpSocket.on('close', () => ws.close());
-  tcpSocket.on('error', () => ws.close());
-  ws.on('close', () => tcpSocket.destroy());
-  ws.on('error', () => tcpSocket.destroy());
+
+  tcpSocket.on('close', () => {
+    clearIdle();
+    ws.close();
+  });
+  tcpSocket.on('error', () => {
+    clearIdle();
+    ws.close();
+  });
+  ws.on('close', () => {
+    clearIdle();
+    tcpSocket.destroy();
+  });
+  ws.on('error', () => {
+    clearIdle();
+    tcpSocket.destroy();
+  });
 });
 
 const port = Number(process.env.PORT ?? 8787);
@@ -1506,7 +1540,8 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-Password', 'X-RDK-Sso-Session', 'X-Requested-With'],
   }),
 );
-app.use(express.json({ limit: '50mb' }));
+/** 全局 JSON 不宜过大，避免并发大请求 OOM；大文件请走专用上传路由 */
+app.use(express.json({ limit: '10mb' }));
 
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)
 registerSSORoutes(app);
@@ -5906,7 +5941,7 @@ app.post('/api/agent/chat', async (request, response) => {
 
     response.end();
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : 'Agent 执行失败';
+    const errorMsg = describeError(err) || 'Agent 执行失败';
     if (!response.headersSent) {
       response.status(500).json({ error: errorMsg });
     } else {
