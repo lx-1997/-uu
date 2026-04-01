@@ -298,6 +298,8 @@ export default function IconRail() {
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
+                    /** 先收起面板再弹出确认框，避免与侧栏同 z-index 层级时误以为「点了没反应」 */
+                    setShowDevicePanel(false);
                     confirmRemoveDevice(dev);
                   }}
                 >

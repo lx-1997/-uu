@@ -36,8 +36,34 @@ function removeVerifiedId(id: string) {
   s.delete(id);
   localStorage.setItem(SSH_VERIFIED_IDS_KEY, JSON.stringify([...s]));
 }
+
 import { useToastStore } from './useToastStore';
 import { useAuth } from './useAuth';
+
+/** 与下方 GET /api/devices 的 effect 使用同一映射，避免多处漂移 */
+function mapDevicesFromApiResponse(res: {
+  devices: Array<{
+    id: string;
+    username: string;
+    host: string;
+    port?: number;
+    boardPlatform?: string | null;
+    boardModel?: string | null;
+  }>;
+}): Device[] {
+  const verifiedIds = loadVerifiedIdSet();
+  return res.devices.map((device) => ({
+    id: device.id,
+    name: `${device.username}@${device.host}:${device.port ?? 22}`,
+    status: 'offline' as const,
+    ip: device.host,
+    port: device.port ?? 22,
+    description: `SSH ${device.username}:${device.port ?? 22}`,
+    boardPlatform: device.boardPlatform ?? null,
+    boardModel: device.boardModel ?? null,
+    sshSessionVerified: verifiedIds.has(device.id),
+  }));
+}
 
 /** 后台 ping 连续失败多少次后才标离线；过大会导致关机后长时间仍显示「已连接」 */
 const PING_FAILS_BEFORE_OFFLINE = 2;
@@ -241,6 +267,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     removeDeviceApi(id)
       .then(() => {
         devicesListFetchGenRef.current += 1;
+        const syncGen = devicesListFetchGenRef.current;
         const name = label();
         forgetDevicePassword(id);
         delete pingFailStreakRef.current[id];
@@ -255,6 +282,21 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         setDeviceListRevision((n) => n + 1);
         addToast(`设备 "${name}" 已删除`, 'info');
         addActivity(`删除设备: ${name}`);
+        /** 再拉一次服务端列表，避免与「正在飞行」的 GET /api/devices 竞态把已删项又写回 UI */
+        void (async () => {
+          try {
+            const res = await fetchDevices();
+            if (devicesListFetchGenRef.current !== syncGen) return;
+            const next = mapDevicesFromApiResponse(res);
+            setDevices(next);
+            setActiveDevice((prev) =>
+              prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? ''),
+            );
+            setDeviceListRevision((n) => n + 1);
+          } catch {
+            /* 本地已更新，忽略 */
+          }
+        })();
       })
       .catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
@@ -276,6 +318,13 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           addToast(`「${name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
           return;
         }
+        if (/\b401\b/.test(msg) || /unauthorized/i.test(msg)) {
+          addToast(
+            '删除失败：当前未登录或登录已过期，请重新登录后再试。（与是否 SSH 连接设备无关）',
+            'error',
+          );
+          return;
+        }
         addToast(msg || '删除设备失败', 'error');
       });
   }, [addToast, addActivity]);
@@ -292,19 +341,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       try {
         const res = await fetchDevices();
         if (cancelled || devicesListFetchGenRef.current !== fetchGen) return;
-        const verifiedIds = loadVerifiedIdSet();
-        const next = res.devices.map((device) => ({
-          id: device.id,
-          name: `${device.username}@${device.host}:${device.port ?? 22}`,
-          /* 进入应用时不采信服务端「已连接」，先标离线，由 ping 拉齐；曾验证过的设备仍带 verified 标记 */
-          status: 'offline' as const,
-          ip: device.host,
-          port: device.port ?? 22,
-          description: `SSH ${device.username}:${device.port ?? 22}`,
-          boardPlatform: device.boardPlatform ?? null,
-          boardModel: device.boardModel ?? null,
-          sshSessionVerified: verifiedIds.has(device.id),
-        }));
+        const next = mapDevicesFromApiResponse(res);
         setDevices(next);
         setActiveDevice((prev) => (prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? '')));
         setDeviceListRevision((n) => n + 1);
