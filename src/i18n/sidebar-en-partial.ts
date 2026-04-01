@@ -45,10 +45,10 @@ export const SIDEBAR_EN: Record<string, string> = {
   'sidebar.nav.flasher': 'Flash & backup',
   'sidebar.hint.flasher': 'Image write, verify, backup',
 
-  'sidebar.footer.cloud': 'Embodied cloud',
-  'sidebar.footer.cloudHint': 'Remote cloud workflows',
-  'sidebar.footer.community': 'Developer community',
-  'sidebar.footer.communityHint': 'Docs, images, ecosystem',
+  'sidebar.footer.community': 'D-Robotics developer hub',
+  'sidebar.footer.communityHint': 'Docs, hardware, ecosystem & support',
+  'sidebar.footer.robogo': 'RoboGo cloud',
+  'sidebar.footer.robogoHint': 'Cloud robotics & workflows',
   'sidebar.footer.settings': 'Client settings',
   'sidebar.footer.settingsHint': 'AI, Feishu, connection, UX',
 };

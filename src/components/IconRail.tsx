@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { Cloud, UsersRound } from 'lucide-react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
@@ -210,6 +211,37 @@ export default function IconRail() {
               <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             {railExpanded && <span className="rail-label">{t('rail.settings', '设置')}</span>}
+          </button>
+
+          <button
+            type="button"
+            className="rail-btn rail-external-link"
+            data-tooltip={
+              !railExpanded
+                ? `${t('sidebar.footer.community', '地瓜开发者社区')} · ${t('sidebar.footer.communityHint', '文档、硬件、生态与支持')}`
+                : undefined
+            }
+            onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}
+          >
+            <UsersRound width={20} height={20} strokeWidth={1.5} aria-hidden />
+            {railExpanded && (
+              <span className="rail-label">{t('sidebar.footer.community', '地瓜开发者社区')}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            className="rail-btn rail-external-link"
+            data-tooltip={
+              !railExpanded
+                ? `${t('sidebar.footer.robogo', 'RoboGo 云平台')} · ${t('sidebar.footer.robogoHint', '云端机器人与工作流')}`
+                : undefined
+            }
+            onClick={() => window.open('https://robogo.d-robotics.cc/', '_blank')}
+          >
+            <Cloud width={20} height={20} strokeWidth={1.5} aria-hidden />
+            {railExpanded && (
+              <span className="rail-label">{t('sidebar.footer.robogo', 'RoboGo 云平台')}</span>
+            )}
           </button>
 
           <button

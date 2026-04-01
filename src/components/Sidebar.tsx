@@ -242,18 +242,18 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-footer">
-        <button className="tool-btn" type="button" onClick={() => window.open('https://developer.d-robotics.cc/cloud', '_blank')}>
-          <span className="material-symbols-outlined nav-icon">cloud</span>
+        <button className="tool-btn" type="button" onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}>
+          <span className="material-symbols-outlined nav-icon">groups</span>
           <span className="tool-copy">
-            <span className="tool-label">{t('sidebar.footer.cloud', '具身云平台')}</span>
-            <span className="tool-hint">{t('sidebar.footer.cloudHint', '查看远程云端工作流')}</span>
+            <span className="tool-label">{t('sidebar.footer.community', '地瓜开发者社区')}</span>
+            <span className="tool-hint">{t('sidebar.footer.communityHint', '文档、硬件、生态与支持')}</span>
           </span>
         </button>
-        <button className="tool-btn" type="button" onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}>
-          <span className="tool-icon">🍠</span>
+        <button className="tool-btn" type="button" onClick={() => window.open('https://robogo.d-robotics.cc/', '_blank')}>
+          <span className="material-symbols-outlined nav-icon">cloud</span>
           <span className="tool-copy">
-            <span className="tool-label">{t('sidebar.footer.community', '开发者社区')}</span>
-            <span className="tool-hint">{t('sidebar.footer.communityHint', '文档、镜像、生态资源入口')}</span>
+            <span className="tool-label">{t('sidebar.footer.robogo', 'RoboGo 云平台')}</span>
+            <span className="tool-hint">{t('sidebar.footer.robogoHint', '云端机器人与工作流')}</span>
           </span>
         </button>
         <button className="tool-btn" type="button" onClick={() => setShowSettings(true)}>
