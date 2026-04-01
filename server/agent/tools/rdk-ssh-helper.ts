@@ -6,7 +6,12 @@
  */
 
 import { readDevices } from '../../storage.js';
-import { runRemoteCommands, uploadFileSftp, sshPasswordCandidates } from '../../ssh.js';
+import {
+  runRemoteCommands,
+  uploadFileSftp,
+  sshPasswordCandidates,
+  SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS,
+} from '../../ssh.js';
 import type { Device } from '../../../shared/types.js';
 import { runInDeviceLane } from '../../device-exec-scheduler.js';
 import * as fs from 'node:fs/promises';
@@ -40,7 +45,10 @@ function buildPasswordCandidatesForAgent(device: Device): string[] {
 
 function isTransientSshError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(msg);
+  return (
+    /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(msg) ||
+    /channel closed|connection lost|disconnect|not connected|write econnreset|write epipe|read econnreset|unexpected packet|no response|ssh_exchange/.test(msg)
+  );
 }
 
 function isSshAuthError(error: unknown): boolean {
@@ -49,7 +57,13 @@ function isSshAuthError(error: unknown): boolean {
 }
 
 const TRANSIENT_RETRY_DELAY_MS = 1500;
-const MAX_TRANSIENT_RETRIES = 2;
+/** 弱网下多给一次重试（仍保持串行 lane，不放大并发） */
+const MAX_TRANSIENT_RETRIES = 3;
+
+export type ExecOnDeviceOptions = {
+  /** 覆盖 runRemoteCommands 默认（见 SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS，当前 30min） */
+  timeoutMs?: number;
+};
 
 export async function getDevice(deviceId: string): Promise<Device | null> {
   const devices = await readDevices();
@@ -66,9 +80,14 @@ export function getDevicePassword(device: Device): string {
  * 在设备上执行命令，返回输出文本。
  * 口令顺序：缓存 → 持久化 → RDK_SSH_PASSWORD → 出厂常见候选；认证失败时换下一候选。
  */
-export async function execOnDevice(deviceId: string, commands: string[]): Promise<string> {
+export async function execOnDevice(
+  deviceId: string,
+  commands: string[],
+  options?: ExecOnDeviceOptions,
+): Promise<string> {
   const device = await getDevice(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
+  const runOpts = options?.timeoutMs != null ? { timeoutMs: options.timeoutMs } : undefined;
   return runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
     const pwdList = buildPasswordCandidatesForAgent(device);
@@ -82,6 +101,7 @@ export async function execOnDevice(deviceId: string, commands: string[]): Promis
           const output = await runRemoteCommands(
             { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
             commands,
+            runOpts,
           );
           devicePasswordCache.set(key, pwd);
           return output;
@@ -131,7 +151,12 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
             { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
             filePath,
             buf,
-            { timeoutMs: Math.max(120_000, Math.min(600_000, buf.length / 10 + 120_000)) },
+            {
+              timeoutMs: Math.max(
+                SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS,
+                Math.min(600_000, buf.length / 10 + SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS),
+              ),
+            },
           );
           devicePasswordCache.set(key, pwd);
           return;
@@ -165,9 +190,13 @@ export async function downloadDeviceFileToLocal(
   remotePath: string,
   localPath: string,
 ): Promise<{ bytes: number; localPath: string }> {
-  const encoded = await execOnDevice(deviceId, [
-    `bash -lc "if [ -f ${shEscape(remotePath)} ]; then base64 -w 0 ${shEscape(remotePath)}; else echo __RDK_NOT_FOUND__; fi"`,
-  ]);
+  const encoded = await execOnDevice(
+    deviceId,
+    [
+      `bash -lc "if [ -f ${shEscape(remotePath)} ]; then base64 -w 0 ${shEscape(remotePath)}; else echo __RDK_NOT_FOUND__; fi"`,
+    ],
+    { timeoutMs: SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS },
+  );
   const data = encoded.trim();
   if (!data || data === '__RDK_NOT_FOUND__') {
     throw new Error(`设备文件不存在: ${remotePath}`);
@@ -195,7 +224,10 @@ export async function uploadLocalFileToDevice(
     if (pwdList.length === 0) {
       throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
     }
-    const uploadTimeout = Math.max(120_000, Math.min(600_000, buffer.length / 10 + 120_000));
+    const uploadTimeout = Math.max(
+      SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS,
+      Math.min(600_000, buffer.length / 10 + SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS),
+    );
     let lastError: unknown = null;
     for (const pwd of pwdList) {
       for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {

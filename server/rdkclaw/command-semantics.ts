@@ -109,7 +109,7 @@ export const RDK_COMMAND_SEMANTICS: CommandSemantics[] = [
       /debconf.*unable/i,
       /Setting up/i,
     ],
-    suggestedTimeoutMs: 120000,
+    suggestedTimeoutMs: 1_800_000,
   },
   {
     pattern: /^(pip|pip3)\s+install/,
@@ -117,7 +117,7 @@ export const RDK_COMMAND_SEMANTICS: CommandSemantics[] = [
       /WARNING.*pip/i,
       /already satisfied/i,
     ],
-    suggestedTimeoutMs: 120000,
+    suggestedTimeoutMs: 1_800_000,
   },
   {
     pattern: /^npm\s+(install|i)\b/,
@@ -125,7 +125,7 @@ export const RDK_COMMAND_SEMANTICS: CommandSemantics[] = [
       /npm warn/i,
       /deprecated/i,
     ],
-    suggestedTimeoutMs: 120000,
+    suggestedTimeoutMs: 1_800_000,
   },
 
   // ── ROS2 类 ──

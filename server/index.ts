@@ -24,6 +24,7 @@ import {
   SSH_READY_TIMEOUT_MS,
   SSH_KEEPALIVE_INTERVAL_MS,
   SSH_KEEPALIVE_COUNT_MAX,
+  SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS,
 } from './ssh.js';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -1459,7 +1460,7 @@ async function runOnDevice(
     return null;
   }
   const candidates = [password];
-  const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? 120_000));
+  const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
   let lastError: unknown = null;
   const output = await runInDeviceLane(device.id, async () => {
     for (const pwd of candidates) {

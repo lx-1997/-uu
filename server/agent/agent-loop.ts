@@ -60,6 +60,7 @@ import {
   runPreToolHookChain,
   validateToolInputObject,
 } from "./tool-pipeline.js";
+import { SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS } from "../ssh.js";
 
 // ============== 类型定义 ==============
 
@@ -854,8 +855,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                         }
                       }
 
-                      // 工具执行超时保护（借鉴 claude-code）
-                      const TOOL_TIMEOUT_MS = 120_000; // 2 分钟
+                      // 工具执行超时保护；须 ≥ SSH 默认（板端长任务），否则 device_exec 会先被掐断
+                      const TOOL_TIMEOUT_MS = SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS;
                       const toolTimeoutPromise = new Promise<never>((_, reject) =>
                         setTimeout(() => reject(new Error(`工具 ${call.name} 执行超时（${TOOL_TIMEOUT_MS / 1000}s）`)), TOOL_TIMEOUT_MS),
                       );

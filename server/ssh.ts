@@ -12,6 +12,12 @@ export const SSH_READY_TIMEOUT_MS = 30_000;
 export const SSH_KEEPALIVE_INTERVAL_MS = 30_000;
 export const SSH_KEEPALIVE_COUNT_MAX = 3;
 
+/**
+ * 单条 `exec` 管道默认最长等待（未传 `timeoutMs`）。
+ * 板端 pip/npm/wget 常超过数分钟；120s 易误判为「不稳定」。
+ */
+export const SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
+
 const BUILTIN_DEFAULT_PASSWORDS = ['root', 'sunrise'];
 
 /**
@@ -88,7 +94,7 @@ export function runRemoteCommands(
   // Existing function
   return new Promise<string>((resolve, reject) => {
     const client = new Client();
-    const timeoutMs = Math.max(5_000, Number(options.timeoutMs ?? 120_000));
+    const timeoutMs = Math.max(5_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
@@ -161,7 +167,7 @@ export function runRemoteCommands(
 }
 
 export interface UploadFileSftpOptions {
-  /** 默认 120s；大文件 base64 解码写盘慢于 25s 时易误判失败 */
+  /** 默认与 SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS 一致；大文件 base64 解码写盘可能较慢 */
   timeoutMs?: number;
 }
 
@@ -173,7 +179,7 @@ export function uploadFileSftp(
 ) {
   // Stream base64 over SSH stdin to avoid ARG_MAX limits.
   // Keep command non-interactive to avoid sudo password prompts hanging the stream.
-  const uploadTimeoutMs = Math.max(15_000, Number(options.timeoutMs ?? 120_000));
+  const uploadTimeoutMs = Math.max(15_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
 
   return new Promise<void>((resolve, reject) => {
     const client = new Client();

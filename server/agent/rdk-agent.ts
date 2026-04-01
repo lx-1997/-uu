@@ -109,7 +109,8 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
     workspaceDir: process.cwd(),
     sessionKey,
     agentId: 'rdk-studio',
-    abortSignal: AbortSignal.timeout(120_000),
+    /** 单次 run 整体上限，须大于单工具 SSH 长任务（见 ssh.ts 默认 30min） */
+    abortSignal: AbortSignal.timeout(2 * 60 * 60 * 1000),
   };
 
   const userMessage: Message = {
@@ -152,7 +153,7 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
       return {};
     },
 
-    abortSignal: AbortSignal.timeout(120_000),
+    abortSignal: AbortSignal.timeout(2 * 60 * 60 * 1000),
   };
 
   const stream = runAgentLoop(loopParams);

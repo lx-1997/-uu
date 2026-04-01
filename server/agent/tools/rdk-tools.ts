@@ -89,6 +89,14 @@ export const BOARD_FIND_SKILLS_PACKAGE_ID = 'find-skills';
 const findSkillsEnsureCooldown = new Map<string, number>();
 const FIND_SKILLS_ENSURE_COOLDOWN_MS = 90_000;
 
+/** Agent SSH 更长任务：默认已为 30min，此处再放宽安装类上限 */
+const SSH_LONG_INSTALL_MS = 45 * 60 * 1000;
+const SSH_SKILL_INSTALL_MS = 20 * 60 * 1000;
+const SSH_FIND_SKILLS_MS = 15 * 60 * 1000;
+const SHERPA_SETUP_TIMEOUT_MS = 45 * 60 * 1000;
+const DEVICE_EXEC_TIMEOUT_MIN_MS = 5_000;
+const DEVICE_EXEC_TIMEOUT_MAX_MS = 2 * 60 * 60 * 1000;
+
 /**
  * 若板端未安装 find-skills，则 clawhub install + plugins.allow + 重启 gateway。
  * 短期冷却内不重复跑 SSH（避免同一会话多次委派刷安装）。
@@ -123,7 +131,7 @@ export async function ensureFindSkillsOnBoard(
   ].join('; ');
 
   onProgress?.('\n[板端] 检查 SkillHub 元技能 find-skills …\n');
-  const output = await execOnDevice(id, [`bash -lc '${cmds}'`]);
+  const output = await execOnDevice(id, [`bash -lc '${cmds}'`], { timeoutMs: SSH_FIND_SKILLS_MS });
   if (/RDK_FIND_SKILLS_ALREADY/.test(output)) {
     return { outcome: 'already_present', output };
   }
@@ -248,7 +256,7 @@ function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: stri
   };
 }
 
-function deviceExecTool(deviceId: string): Tool<{ command: string }> {
+function deviceExecTool(deviceId: string): Tool<{ command: string; timeoutMs?: number }> {
   return {
     name: 'device_exec',
     description:
@@ -257,7 +265,7 @@ function deviceExecTool(deviceId: string): Tool<{ command: string }> {
       '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
       '规则：\n' +
       '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
-      '- 长时间命令（编译、下载）加 timeout 参数或用 nohup 后台执行\n' +
+      '- 更长命令可传 timeoutMs（毫秒），范围 5000～7200000；不传则与 SSH 层默认一致（30 分钟）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
       '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功\n' +
       '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步\n' +
@@ -271,12 +279,24 @@ function deviceExecTool(deviceId: string): Tool<{ command: string }> {
           type: 'string',
           description: '单条 shell 命令字符串（由编排模型构造）；将直接在设备上执行，非展示给用户的说明文字',
         },
+        timeoutMs: {
+          type: 'number',
+          description:
+            '可选。整段命令的最长等待时间（毫秒），范围 5000～7200000；不传则默认 1800000（30 分钟）。',
+        },
       },
       required: ['command'],
     },
     async execute(input) {
       try {
-        const output = await execOnDevice(deviceId, [input.command]);
+        let execOpts: { timeoutMs: number } | undefined;
+        if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
+          const t = Math.floor(Number(input.timeoutMs));
+          execOpts = {
+            timeoutMs: Math.min(DEVICE_EXEC_TIMEOUT_MAX_MS, Math.max(DEVICE_EXEC_TIMEOUT_MIN_MS, t)),
+          };
+        }
+        const output = await execOnDevice(deviceId, [input.command], execOpts);
         if (!output) return '(命令执行成功，无输出)';
 
         // 命令语义化：从输出中提取结构化信息（如温度、内存使用率）
@@ -459,7 +479,7 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
       ].join(' ');
-      return execOnDevice(deviceId, [cmd]);
+      return execOnDevice(deviceId, [cmd], { timeoutMs: SSH_LONG_INSTALL_MS });
     },
   };
 }
@@ -491,7 +511,7 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
       ].join(' ');
-      return execOnDevice(deviceId, [cmd]);
+      return execOnDevice(deviceId, [cmd], { timeoutMs: SSH_LONG_INSTALL_MS });
     },
   };
 }
@@ -869,7 +889,7 @@ function boardOpenClawSkillInstallTool(deviceId: string): Tool<{ skillId: string
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true)',
         'echo "[OpenClaw] 技能安装完成"',
       ].join('; ');
-      return execOnDevice(deviceId, [`bash -lc '${cmds}'`]);
+      return execOnDevice(deviceId, [`bash -lc '${cmds}'`], { timeoutMs: SSH_SKILL_INSTALL_MS });
     },
   };
 }
@@ -1251,7 +1271,7 @@ function sherpaSetupTool(deviceId: string): Tool<Record<string, never>> {
         `echo "[sherpa-onnx] 安装完成"`,
       ];
       const cmd = `bash -lc "${steps.join(' && ')}"`;
-      return execOnDevice(deviceId, [cmd]);
+      return execOnDevice(deviceId, [cmd], { timeoutMs: SHERPA_SETUP_TIMEOUT_MS });
     },
   };
 }
