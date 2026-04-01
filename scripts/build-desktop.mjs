@@ -20,15 +20,17 @@ const supportedTargets = new Set(['win', 'mac', 'linux']);
 if (!supportedTargets.has(target)) {
   console.error(`[build:desktop] Invalid target: ${target || '<empty>'}`);
   console.error(
-    '[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir|zip|local]',
+    '[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir|zip|local|arm64]',
   );
   process.exit(1);
 }
 const macLocalSign = target === 'mac' && mode === 'local';
+const macArm64 = target === 'mac' && mode === 'arm64';
 if (
   mode &&
   !(target === 'win' && (mode === 'dir' || mode === 'zip')) &&
-  !macLocalSign
+  !macLocalSign &&
+  !macArm64
 ) {
   console.error(`[build:desktop] Unsupported mode "${mode}" for target "${target}"`);
   process.exit(1);
@@ -248,6 +250,9 @@ try {
         : [`--${target}`];
   /** 与 package.json build.win 一致为 x64；在 arm64 Mac 上若省略则会误打 win-arm64。 */
   let builderArgs = target === 'win' ? [...builderBaseArgs, '--x64'] : builderBaseArgs;
+  if (macArm64) {
+    builderArgs = [...builderArgs, '--arm64'];
+  }
   if (macLocalSign) {
     console.warn(
       '[build:desktop] mac local：使用 ad-hoc 签名（identity=-），仅适合本机/信任环境；勿对外正式发布。',

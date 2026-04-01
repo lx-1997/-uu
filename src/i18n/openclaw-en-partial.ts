@@ -196,6 +196,8 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.skills.installHint': 'Runs clawhub install. For complex skills use Skill Studio or chat-generated SKILL.md.',
   'oc.skills.pluginToggle': 'Plugin toggles',
   'oc.skills.savePlugins': 'Save plugins',
+  'oc.skills.webSearchPolicy':
+    'Device web_search: new installs default to DuckDuckGo (no key). Saving config here fills provider=duckduckgo when unset. For Brave, set provider to brave in ~/.openclaw/openclaw.json plus BRAVE_API_KEY (see OpenClaw docs); for Chinese results ask the agent to pass country=CN and language=zh on web_search.',
   'oc.modal.deployTitle': 'OpenClaw one-click deploy',
   'oc.modal.later': 'Later',
   'oc.modal.backgroundRun': 'Run in background',

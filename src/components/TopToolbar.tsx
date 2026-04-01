@@ -202,10 +202,22 @@ async function copyToClipboard(text: string) {
 
 const WIFI_LINK_POLL_MS = 30_000;
 
+/** 与 SsoLoginScreen 一致：无 OAuth 链接时的门户兜底 */
+const SSO_FALLBACK_PORTAL = 'https://sso.d-robotics.cc/';
+
+function openSsoLoginPortal(loginUrl: string | null): void {
+  if (window.rdkDesktop?.openSsoLoginWindow) {
+    void window.rdkDesktop.openSsoLoginWindow();
+    return;
+  }
+  const url = (loginUrl && loginUrl.trim()) || SSO_FALLBACK_PORTAL;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 export default function TopToolbar() {
   const { currentDevice } = useDeviceStore();
   const { addToast } = useToastStore();
-  const { ssoEnabled, user, logout } = useAuth();
+  const { ssoEnabled, user, logout, loginUrl } = useAuth();
   const { t } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const [copied, setCopied] = useState(false);
@@ -373,17 +385,22 @@ export default function TopToolbar() {
         </svg>
       </button>
 
-      {ssoEnabled && user && (
+      {ssoEnabled && (
         <div className="sso-user-chip" style={{ position: 'relative' }}>
           <button
+            type="button"
             className="btn-icon sso-avatar-btn"
-            title={getSsoDisplayLabel(user) || user.email || user.id}
+            title={
+              user
+                ? (getSsoDisplayLabel(user) || user.email || user.id)
+                : t('topbar.user.signInTitle', '点击登录')
+            }
             onClick={() => setShowUserMenu(v => !v)}
           >
-            {user.avatar ? (
+            {user?.avatar ? (
               <img src={user.avatar} alt="" style={{ width: 22, height: 22, borderRadius: '50%' }} />
             ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" />
               </svg>
             )}
@@ -399,24 +416,53 @@ export default function TopToolbar() {
               }}
               onMouseLeave={() => setShowUserMenu(false)}
             >
-              <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {getSsoDisplayLabel(user) || t('topbar.user.fallback', '用户')}
-                </div>
-                {user.email && <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 2 }}>{user.email}</div>}
-              </div>
-              <button
-                onClick={logout}
-                style={{
-                  display: 'block', width: '100%', padding: '8px 16px', textAlign: 'left',
-                  fontSize: '0.8125rem', color: 'var(--text-secondary)', cursor: 'pointer',
-                  background: 'transparent', border: 'none',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                {t('topbar.user.logout', '退出登录')}
-              </button>
+              {user ? (
+                <>
+                  <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {getSsoDisplayLabel(user) || t('topbar.user.fallback', '用户')}
+                    </div>
+                    {user.email && <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 2 }}>{user.email}</div>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={logout}
+                    style={{
+                      display: 'block', width: '100%', padding: '8px 16px', textAlign: 'left',
+                      fontSize: '0.8125rem', color: 'var(--text-secondary)', cursor: 'pointer',
+                      background: 'transparent', border: 'none',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {t('topbar.user.logout', '退出登录')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {t('topbar.user.guestHint', '未登录')}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUserMenu(false);
+                      openSsoLoginPortal(loginUrl);
+                    }}
+                    style={{
+                      display: 'block', width: '100%', padding: '8px 16px', textAlign: 'left',
+                      fontSize: '0.8125rem', color: 'var(--text-secondary)', cursor: 'pointer',
+                      background: 'transparent', border: 'none',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {t('topbar.user.signIn', '登录')}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

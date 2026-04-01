@@ -1014,9 +1014,12 @@ async function createMainWindow() {
     },
   });
 
-  // 外部链接用系统浏览器打开
+  // 外部链接用系统浏览器打开（勿对 about: 调用 openExternal，避免 macOS「无法打开 URL」）
   mainWin.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    const u = String(url || '').trim();
+    if (u.startsWith('http:') || u.startsWith('https:')) {
+      shell.openExternal(u);
+    }
     return { action: 'deny' };
   });
 
@@ -1076,53 +1079,246 @@ function sendFloatingBallMenu(payload) {
 }
 
 // ── IPC: 打开嵌入页面 ──
-ipcMain.on('rdk:open-url', (event, { url }) => {
-  if (!mainWin) return;
+// payload: { url } 作为 viewsMap 键；可选 loadUrl（实际加载，默认 url）；可选 token（论坛/RoboGo 免登录）
+ipcMain.on('rdk:open-url', (event, payload) => {
+  const url = String(payload?.url ?? '').trim();
+  const loadUrlRaw = payload?.loadUrl != null ? String(payload.loadUrl).trim() : '';
+  const loadUrl = loadUrlRaw || url;
+  const token = payload?.token != null ? String(payload.token).trim() : '';
 
-  if (viewsMap[url]) {
-    const existing = viewsMap[url];
-    existing.setVisible(true);
-    mainWin.contentView.removeChildView(existing);
-    mainWin.contentView.addChildView(existing);
-    existing.setBounds(getViewBounds(mainWin));
-    return;
+  if (!mainWin || !url) return;
+
+  const run = async () => {
+    const isDrPortal = isDrPortalMapUrl(url);
+    const failUrlKey = url;
+
+    if (viewsMap[url]) {
+      const existing = viewsMap[url];
+      const ses = existing.webContents.session;
+      if (isDrPortal) {
+        await applyDrAuthCookiesToSession(ses, token);
+        attachDrEmbedBearerToSession(ses, url, token);
+      }
+      existing.setVisible(true);
+      mainWin.contentView.removeChildView(existing);
+      mainWin.contentView.addChildView(existing);
+      existing.setBounds(getViewBounds(mainWin));
+      try {
+        await existing.webContents.loadURL(loadUrl);
+      } catch (err) {
+        console.error(`[rdk:open-url] failed to reload ${loadUrl}:`, err?.message || err);
+      }
+      return;
+    }
+
+    const webPreferences = {
+      contextIsolation: true,
+      nodeIntegration: false,
+    };
+    if (isDrPortal) {
+      try {
+        const host = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, '_');
+        webPreferences.partition = `persist:rdk-dr-embed-${host}`;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const view = new WebContentsView({ webPreferences });
+
+    view.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
+
+    if (isDrPortal) {
+      await applyDrAuthCookiesToSession(view.webContents.session, token);
+      attachDrEmbedBearerToSession(view.webContents.session, url, token);
+    }
+
+    const bounds = getViewBounds(mainWin);
+    view.setBounds(bounds);
+    mainWin.contentView.addChildView(view);
+
+    console.log(`[rdk:open-url] key=${url} load=${loadUrl}, bounds:`, bounds);
+
+    view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
+      console.error(`[rdk:open-url] did-fail-load ${failUrlKey}: ${errorCode} ${errorDescription}`);
+      event.sender.send('rdk:url-load-failed', { url: failUrlKey, errorCode, errorDescription });
+    });
+
+    view.webContents.on('did-finish-load', () => {
+      console.log(`[rdk:open-url] did-finish-load ${failUrlKey}`);
+      event.sender.send('rdk:url-loaded', { url: failUrlKey });
+    });
+
+    view.webContents.setWindowOpenHandler(({ url: sub }) => {
+      const u = String(sub || '').trim();
+      if (u.startsWith('http:') || u.startsWith('https:')) {
+        shell.openExternal(u);
+      }
+      return { action: 'deny' };
+    });
+
+    viewsMap[url] = view;
+
+    try {
+      await view.webContents.loadURL(loadUrl);
+    } catch (err) {
+      console.error(`[rdk:open-url] failed to load ${loadUrl}:`, err?.message || err);
+    }
+  };
+
+  void run();
+});
+
+/** 与旧版 rdkstudio_frontend 一致：forum / robogo 写入 .d-robotics.cc 的 token Cookie + Bearer */
+const DR_AUTH_COOKIE_URLS = [
+  'https://developer.d-robotics.cc',
+  'https://forum.d-robotics.cc',
+  'https://robogo.d-robotics.cc',
+];
+const DR_AUTH_WEBREQUEST_FILTER = {
+  urls: [
+    '*://developer.d-robotics.cc/*',
+    '*://forum.d-robotics.cc/*',
+    '*://robogo.d-robotics.cc/*',
+  ],
+};
+
+/** mapUrl（viewsMap 键）→ 卸载该嵌入视图 Bearer 注入的回调 */
+const drEmbedAuthCleanups = new Map();
+
+function isDrPortalMapUrl(urlStr) {
+  try {
+    const h = new URL(String(urlStr).trim()).hostname.toLowerCase();
+    return h === 'forum.d-robotics.cc' || h === 'robogo.d-robotics.cc';
+  } catch {
+    return false;
+  }
+}
+
+async function applyDrAuthCookiesToSession(ses, token) {
+  const t = String(token || '').trim();
+  if (!t || t === '__skip__') return;
+  const exp = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+  const cookieOpts = {
+    domain: '.d-robotics.cc',
+    path: '/',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'lax',
+    expirationDate: exp,
+  };
+  for (const baseUrl of DR_AUTH_COOKIE_URLS) {
+    try {
+      await ses.cookies.set({ ...cookieOpts, url: baseUrl, name: 'token', value: t });
+    } catch (err) {
+      console.warn('[rdk] dr-auth cookie set failed', baseUrl, err?.message || err);
+    }
+  }
+}
+
+function clearDrEmbedAuthListener(mapKey) {
+  const fn = drEmbedAuthCleanups.get(mapKey);
+  if (!fn) return;
+  try {
+    fn();
+  } catch {
+    /* ignore */
+  }
+  drEmbedAuthCleanups.delete(mapKey);
+}
+
+/** 仅用于论坛 / RoboGo 嵌入视图对应 partition，避免污染 defaultSession、与其它 WebContentsView 的 webRequest 冲突 */
+function attachDrEmbedBearerToSession(ses, mapKey, token) {
+  clearDrEmbedAuthListener(mapKey);
+  const t = String(token || '').trim();
+  if (!t || t === '__skip__') return;
+  const onHeaders = (details, callback) => {
+    if (details.requestHeaders) {
+      details.requestHeaders.Authorization = `Bearer ${t}`;
+    }
+    callback({ requestHeaders: details.requestHeaders });
+  };
+  ses.webRequest.onBeforeSendHeaders(DR_AUTH_WEBREQUEST_FILTER, onHeaders);
+  drEmbedAuthCleanups.set(mapKey, () => {
+    try {
+      ses.webRequest.onBeforeSendHeaders(DR_AUTH_WEBREQUEST_FILTER, null);
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+function hostnameIsForumOrRobogo(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return ['forum.d-robotics.cc', 'robogo.d-robotics.cc'].some((d) => h === d || h.endsWith(`.${d}`));
+}
+
+ipcMain.handle('rdk:open-drobotics-auth-browser', async (_event, payload) => {
+  const loadUrl = String(payload?.loadUrl || '').trim();
+  const token = String(payload?.token || '').trim();
+  if (!loadUrl.startsWith('https://')) {
+    return { ok: false, error: 'invalid loadUrl' };
+  }
+  let host;
+  try {
+    host = new URL(loadUrl).hostname;
+  } catch {
+    return { ok: false, error: 'invalid loadUrl' };
+  }
+  if (!hostnameIsForumOrRobogo(host)) {
+    return { ok: false, error: 'host not allowed' };
   }
 
-  const view = new WebContentsView({
+  const child = new BrowserWindow({
+    width: 1280,
+    height: 840,
+    minWidth: 800,
+    minHeight: 560,
+    title: loadUrl.includes('robogo') ? 'RoboGo' : '地瓜开发者论坛',
+    autoHideMenuBar: true,
+    show: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
-  view.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
+  const ses = child.webContents.session;
+  ses.setCertificateVerifyProc((_req, cb) => cb(0));
 
-  const bounds = getViewBounds(mainWin);
-  view.setBounds(bounds);
-  mainWin.contentView.addChildView(view);
+  if (token && token !== '__skip__') {
+    await applyDrAuthCookiesToSession(ses, token);
+    const onHeaders = (details, callback) => {
+      if (details.requestHeaders) {
+        details.requestHeaders.Authorization = `Bearer ${token}`;
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    };
+    ses.webRequest.onBeforeSendHeaders(DR_AUTH_WEBREQUEST_FILTER, onHeaders);
+    child.on('closed', () => {
+      try {
+        ses.webRequest.onBeforeSendHeaders(DR_AUTH_WEBREQUEST_FILTER, null);
+      } catch {
+        /* ignore */
+      }
+    });
+  }
 
-  console.log(`[rdk:open-url] loading ${url}, bounds:`, bounds);
-
-  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
-    console.error(`[rdk:open-url] did-fail-load ${url}: ${errorCode} ${errorDescription}`);
-    event.sender.send('rdk:url-load-failed', { url, errorCode, errorDescription });
-  });
-
-  view.webContents.on('did-finish-load', () => {
-    console.log(`[rdk:open-url] did-finish-load ${url}`);
-    event.sender.send('rdk:url-loaded', { url });
-  });
-
-  view.webContents.loadURL(url).catch(err => {
-    console.error(`[rdk:open-url] failed to load ${url}:`, err.message);
-  });
-
-  view.webContents.setWindowOpenHandler((details) => {
-    event.sender.send('rdk:sub-url-open', details.url);
+  child.webContents.setWindowOpenHandler(({ url: sub }) => {
+    const u = String(sub || '').trim();
+    if (u.startsWith('http:') || u.startsWith('https:')) {
+      shell.openExternal(u);
+    }
     return { action: 'deny' };
   });
 
-  viewsMap[url] = view;
+  try {
+    await child.loadURL(loadUrl);
+  } catch (err) {
+    if (!child.isDestroyed()) child.close();
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true };
 });
 
 // ── IPC: Tab 切换时同步 WebContentsView 可见性 ──
@@ -1166,6 +1362,7 @@ ipcMain.on('rdk:hide-url', (_event, { url }) => {
 // ── IPC: 关闭并销毁嵌入页面 ──
 ipcMain.on('rdk:close-url', (_event, { url }) => {
   if (!viewsMap[url]) return;
+  clearDrEmbedAuthListener(url);
   const view = viewsMap[url];
   mainWin?.contentView.removeChildView(view);
   view.webContents.removeAllListeners();

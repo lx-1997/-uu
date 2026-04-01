@@ -1141,6 +1141,16 @@ try:
   _defs=_ag.get('defaults')
   if isinstance(_defs,dict) and 'reasoning' in _defs:
    del _defs['reasoning']
+ _tw=d.setdefault('tools',{})
+ _w=_tw.setdefault('web',{})
+ _s=_w.setdefault('search',{})
+ _pv=_s.get('provider')
+ if _pv is None or (isinstance(_pv,str) and str(_pv).strip()==''):
+  _s['provider']='duckduckgo'
+  if _s.get('enabled') is None:
+   _s['enabled']=True
+  if _s.get('maxResults') is None:
+   _s['maxResults']=5
  json.dump(d,open(p,'w'),indent=2,ensure_ascii=False)
  v=json.load(open(p))
  mp=((v.get('models') or {}).get('providers') or {}).get('custom-gateway')
@@ -1148,7 +1158,9 @@ try:
  ag=((v.get('agents') or {}).get('defaults') or {})
  td=ag.get('thinkingDefault') or ''
  rv=ag.get('reasoningDefault') or ag.get('reasoning') or ''
- print('[OpenClaw] 配置已更新 | model-provider:',('ok' if mp else 'missing'),'| primary:',ap or 'none','| thinkingDefault:',td or '—','| reasoningDefault:',rv or '—')
+ ws=((v.get('tools') or {}).get('web') or {}).get('search') or {}
+ wsp=str(ws.get('provider','') or '—')
+ print('[OpenClaw] 配置已更新 | model-provider:',('ok' if mp else 'missing'),'| primary:',ap or 'none','| thinkingDefault:',td or '—','| reasoningDefault:',rv or '—','| web_search:',wsp)
 except Exception as e:
  traceback.print_exc()
  print('[OpenClaw] 配置写入失败:',str(e))

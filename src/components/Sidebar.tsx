@@ -84,6 +84,7 @@ const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   ide: { nav: '代码编辑', hint: '远程 code-server 工作区' },
   hardware: { nav: '硬件监控', hint: 'CPU/BPU/温度与健康态' },
   flasher: { nav: '烧录与备份', hint: '镜像写盘、校验、备份' },
+  'dr-embed': { nav: '生态网页', hint: '论坛与 RoboGo 内嵌' },
 };
 
 export default function Sidebar() {
@@ -96,6 +97,7 @@ export default function Sidebar() {
     activeTab,
     setShowAddDevice,
     setShowSettings,
+    openDrAuthenticatedPortal,
   } = useAppState();
   const confirmRemoveDevice = useConfirmRemoveDevice();
   const { t } = useI18n();
@@ -242,14 +244,26 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-footer">
-        <button className="tool-btn" type="button" onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}>
-          <span className="material-symbols-outlined nav-icon">groups</span>
+        <button
+          className="tool-btn"
+          type="button"
+          onClick={() => {
+            void openDrAuthenticatedPortal('forum', 'https://forum.d-robotics.cc/');
+          }}
+        >
+          <span className="material-symbols-outlined nav-icon">forum</span>
           <span className="tool-copy">
-            <span className="tool-label">{t('sidebar.footer.community', '地瓜开发者社区')}</span>
-            <span className="tool-hint">{t('sidebar.footer.communityHint', '文档、硬件、生态与支持')}</span>
+            <span className="tool-label">{t('sidebar.footer.forum', '地瓜开发者论坛')}</span>
+            <span className="tool-hint">{t('sidebar.footer.forumHint', '开发者交流与讨论：已登录 Studio 时自动带令牌（与 RoboGo 一致）')}</span>
           </span>
         </button>
-        <button className="tool-btn" type="button" onClick={() => window.open('https://robogo.d-robotics.cc/', '_blank')}>
+        <button
+          className="tool-btn"
+          type="button"
+          onClick={() => {
+            void openDrAuthenticatedPortal('robogo', 'https://robogo.d-robotics.cc/');
+          }}
+        >
           <span className="material-symbols-outlined nav-icon">cloud</span>
           <span className="tool-copy">
             <span className="tool-label">{t('sidebar.footer.robogo', 'RoboGo 云平台')}</span>

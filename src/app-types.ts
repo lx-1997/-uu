@@ -7,7 +7,19 @@ export type Tab =
   | 'ide'
   | 'openclaw'
   | 'hardware'
-  | 'skills';
+  | 'skills'
+  /** 桌面端：forum / RoboGo 内嵌 WebContentsView（与 VNC/IDE 同区域） */
+  | 'dr-embed';
+
+export type DrAuthenticatedPortalKind = 'forum' | 'robogo';
+
+export interface DrAuthenticatedPortal {
+  /** viewsMap 主键，须稳定（无 query） */
+  mapUrl: string;
+  loadUrl: string;
+  token: string;
+  kind: DrAuthenticatedPortalKind;
+}
 
 export interface Device {
   id: string;

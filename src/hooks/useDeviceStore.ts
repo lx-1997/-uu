@@ -114,6 +114,8 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const [devices, setDevices] = useState<Device[]>([]);
   /** 列表从服务端/缓存同步后递增，促使后台 ping 立即跑一轮（避免 length 不变时最长 ~10s 误显示未连接） */
   const [deviceListRevision, setDeviceListRevision] = useState(0);
+  /** 丢弃「启动时仍在飞行」的 GET /api/devices：避免与 DELETE 竞态导致旧列表覆盖刚删掉的项 */
+  const devicesListFetchGenRef = React.useRef(0);
   const currentDevice = devices.find((d) => d.id === activeDevice);
 
   const [showAddDevice, setShowAddDevice] = useState(false);
@@ -180,43 +182,52 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   }, [newDeviceIp, newDeviceName, addToast, addActivity]);
 
   const removeDevice = useCallback((id: string) => {
-    const dev = devices.find((d) => d.id === id);
-    if (!dev) return;
+    if (!id.trim()) {
+      addToast('无效的设备 ID', 'warning');
+      return;
+    }
+    const label = () => devicesRef.current.find((d) => d.id === id)?.name ?? id;
     removeDeviceApi(id)
       .then(() => {
+        devicesListFetchGenRef.current += 1;
+        const name = label();
         forgetDevicePassword(id);
         delete pingFailStreakRef.current[id];
         removeVerifiedId(id);
         setDevices((prev) => {
           const remaining = prev.filter((d) => d.id !== id);
-          if (activeDevice === id) {
+          if (activeDeviceRef.current === id) {
             setActiveDevice(remaining[0]?.id ?? '');
           }
           return remaining;
         });
-        addToast(`设备 "${dev.name}" 已删除`, 'info');
-        addActivity(`删除设备: ${dev.name}`);
+        setDeviceListRevision((n) => n + 1);
+        addToast(`设备 "${name}" 已删除`, 'info');
+        addActivity(`删除设备: ${name}`);
       })
       .catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
         const notOnServer = /\b404\b/.test(msg) || /设备不存在/i.test(msg) || /not\s*found/i.test(msg);
         if (notOnServer) {
+          devicesListFetchGenRef.current += 1;
+          const name = label();
           forgetDevicePassword(id);
           delete pingFailStreakRef.current[id];
           removeVerifiedId(id);
           setDevices((prev) => {
             const remaining = prev.filter((d) => d.id !== id);
-            if (activeDevice === id) {
+            if (activeDeviceRef.current === id) {
               setActiveDevice(remaining[0]?.id ?? '');
             }
             return remaining;
           });
-          addToast(`「${dev.name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
+          setDeviceListRevision((n) => n + 1);
+          addToast(`「${name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
           return;
         }
         addToast(msg || '删除设备失败', 'error');
       });
-  }, [devices, activeDevice, addToast, addActivity]);
+  }, [addToast, addActivity]);
 
   /**
    * SSO 开启时，在登录页也会挂载 DeviceProvider；此前在 401 时拉列表会失败且 effect 只跑一次，
@@ -224,11 +235,12 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!authReady) return;
+    const fetchGen = ++devicesListFetchGenRef.current;
     let cancelled = false;
     void (async () => {
       try {
         const res = await fetchDevices();
-        if (cancelled) return;
+        if (cancelled || devicesListFetchGenRef.current !== fetchGen) return;
         const verifiedIds = loadVerifiedIdSet();
         const next = res.devices.map((device) => ({
           id: device.id,
@@ -244,7 +256,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         setActiveDevice((prev) => (prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? '')));
         setDeviceListRevision((n) => n + 1);
       } catch {
-        if (cancelled) return;
+        if (cancelled || devicesListFetchGenRef.current !== fetchGen) return;
         const cached = loadDevicesFromCache();
         if (cached?.devices.length) {
           const verifiedIds = loadVerifiedIdSet();

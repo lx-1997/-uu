@@ -575,6 +575,69 @@ export function registerSSORoutes(app: any): void {
     }
   });
 
+  function appendDroboticsSsoQuery(url: string, accessToken: string): string {
+    if (!url || !accessToken || /[?&](?:token|bearer)=/i.test(url)) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    const tok = encodeURIComponent(accessToken);
+    return `${url}${sep}token=${tok}&bearer=${tok}`;
+  }
+
+  function parseForumRobogoTarget(raw: string):
+    | { ok: false; status: number; error: string }
+    | { ok: true; url: string } {
+    const trimmed = raw.trim();
+    if (!trimmed) return { ok: false, status: 400, error: 'missing url' };
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      return { ok: false, status: 400, error: 'invalid url' };
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { ok: false, status: 400, error: 'invalid protocol' };
+    }
+    const host = parsed.hostname.toLowerCase();
+    const allowed = ['forum.d-robotics.cc', 'robogo.d-robotics.cc'].some(
+      (d) => host === d || host.endsWith(`.${d}`),
+    );
+    if (!allowed) return { ok: false, status: 400, error: 'host not allowed' };
+    return { ok: true, url: trimmed };
+  }
+
+  /** 纯浏览器：URL 附带 token query（系统浏览器无 HttpOnly 跨域 Cookie） */
+  app.get('/api/sso/external-url', (req: Request, res: Response) => {
+    const parsed = parseForumRobogoTarget(String(req.query.url || ''));
+    if (!parsed.ok) {
+      res.status(parsed.status).json({ error: parsed.error });
+      return;
+    }
+    const sessionId = getSessionIdFromRequest(req);
+    const sess = sessionId ? sessions.get(sessionId) : undefined;
+    if (sess && sess.expiresAt > Date.now()) {
+      res.json({ url: appendDroboticsSsoQuery(parsed.url, sess.accessToken) });
+      return;
+    }
+    res.json({ url: parsed.url });
+  });
+
+  /** 桌面端：返回 loadUrl + accessToken，主进程写入 Cookie 并注入 Authorization（对齐旧版 Electron Studio） */
+  app.get('/api/sso/external-browser-bundle', (req: Request, res: Response) => {
+    const parsed = parseForumRobogoTarget(String(req.query.url || ''));
+    if (!parsed.ok) {
+      res.status(parsed.status).json({ error: parsed.error });
+      return;
+    }
+    const sessionId = getSessionIdFromRequest(req);
+    const sess = sessionId ? sessions.get(sessionId) : undefined;
+    let loadUrl = parsed.url;
+    let token: string | null = null;
+    if (sess && sess.expiresAt > Date.now()) {
+      token = sess.accessToken;
+      loadUrl = appendDroboticsSsoQuery(loadUrl, token);
+    }
+    res.json({ loadUrl, token });
+  });
+
   app.get('/api/sso/me', (req: Request, res: Response) => {
     if (!isSSORequired()) {
       res.json({ enabled: false, required: false, configured: isSSOEnabled(), user: null });

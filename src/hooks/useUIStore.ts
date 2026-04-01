@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
-import type { Tab, ConfirmDialogState, TransferItem } from '../app-types';
+import type { Tab, ConfirmDialogState, TransferItem, DrAuthenticatedPortal, DrAuthenticatedPortalKind } from '../app-types';
 import { getFlashImageLabel } from '../constants';
 import { fillTemplate } from '../i18n/en-extras';
 import { translate } from '../i18n/translate';
@@ -17,6 +17,9 @@ export interface UIStoreState {
   // Navigation
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
+  drAuthenticatedPortal: DrAuthenticatedPortal | null;
+  openDrAuthenticatedPortal: (kind: DrAuthenticatedPortalKind, baseUrl: string) => Promise<void>;
+  closeDrAuthenticatedPortal: () => void;
 
   // Onboarding
   obStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
@@ -152,13 +155,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.setAttribute('data-theme', 'aurora');
   }, []);
 
-  // ── Navigation ──
-  const [activeTab, setActiveTabState] = useState<Tab>('dashboard');
-  const setActiveTab = useCallback((tab: Tab) => {
-    setActiveTabState(tab);
-  }, []);
-
-  // ── Language（提前声明，供 Flash/VNC 等文案使用）──
+  // ── Language（须早于 openDrAuthenticatedPortal 等依赖 `t` 的回调）──
   const [language, setLanguageState] = useState<'zh-CN' | 'en'>(readStoredLocale);
   const setLanguage = (v: string) => {
     const next: AppLocale = v === 'en' ? 'en' : 'zh-CN';
@@ -172,6 +169,77 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
   }, [language]);
+
+  // ── Navigation ──
+  const [activeTab, setActiveTabState] = useState<Tab>('dashboard');
+  const [drAuthenticatedPortal, setDrAuthenticatedPortal] = useState<DrAuthenticatedPortal | null>(null);
+
+  const closeDrAuthenticatedPortal = useCallback(() => {
+    const p = drAuthenticatedPortal;
+    if (typeof window !== 'undefined' && p && (window as any).rdkDesktop?.closeUrl) {
+      try {
+        (window as any).rdkDesktop.closeUrl(p.mapUrl);
+      } catch {
+        /* ignore */
+      }
+    }
+    setDrAuthenticatedPortal(null);
+    setActiveTabState('dashboard');
+  }, [drAuthenticatedPortal]);
+
+  const openDrAuthenticatedPortal = useCallback(
+    async (kind: DrAuthenticatedPortalKind, baseUrl: string) => {
+      const rdk = typeof window !== 'undefined' ? (window as any).rdkDesktop : undefined;
+      if (rdk?.isDesktop && rdk.openUrl) {
+        try {
+          const { fetchApi } = await import('../utils/apiBase');
+          const r = await fetchApi(`/api/sso/external-browser-bundle?url=${encodeURIComponent(baseUrl)}`);
+          if (!r.ok) {
+            addToast(t('drPortal.err.bundle', '无法获取登录信息，请确认已在 Studio 登录'), 'error');
+            return;
+          }
+          const data = (await r.json()) as { loadUrl?: string; token?: string | null };
+          const loadUrl = typeof data.loadUrl === 'string' ? data.loadUrl : baseUrl;
+          const token = typeof data.token === 'string' ? data.token : '';
+          const u = new URL(baseUrl);
+          const mapUrl = `${u.origin}/`;
+          rdk.openUrl({ url: mapUrl, loadUrl, token });
+          setDrAuthenticatedPortal({ mapUrl, loadUrl, token, kind });
+          setActiveTabState('dr-embed');
+        } catch {
+          addToast(t('drPortal.err.open', '打开失败'), 'error');
+        }
+        return;
+      }
+      const { openDrExternalUrl } = await import('../utils/drExternalOpen');
+      await openDrExternalUrl(baseUrl, {
+        onPopupBlocked: () =>
+          addToast(t('rail.external.popupBlocked', '无法打开新窗口，已在当前页打开；请允许弹窗。'), 'warning'),
+      });
+    },
+    [addToast, t],
+  );
+
+  const setActiveTab = useCallback((tab: Tab) => {
+    setActiveTabState(tab);
+  }, []);
+
+  /** 离开内嵌门户 tab 时隐藏 WebContentsView（不切页则保留实例，便于再次打开） */
+  useEffect(() => {
+    if (activeTab === 'dr-embed') return;
+    setDrAuthenticatedPortal((p) => {
+      if (!p) return null;
+      const rdk = typeof window !== 'undefined' ? (window as any).rdkDesktop : undefined;
+      if (rdk?.hideUrl) {
+        try {
+          rdk.hideUrl(p.mapUrl);
+        } catch {
+          /* ignore */
+        }
+      }
+      return null;
+    });
+  }, [activeTab]);
 
   // ── Onboarding (persisted) ──
   const [obStep, setObStepRaw] = useState<'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done'>(() => {
@@ -389,7 +457,11 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
 
   const value: UIStoreState = {
     theme,
-    activeTab, setActiveTab,
+    activeTab,
+    setActiveTab,
+    drAuthenticatedPortal,
+    openDrAuthenticatedPortal,
+    closeDrAuthenticatedPortal,
     obStep, setObStep, selectedBoard, setSelectedBoard, obReturnStep, setObReturnStep,
     isLoading, loadingMsg, openWorkspace,
     flashImage, setFlashImage, flashTarget, setFlashTarget,

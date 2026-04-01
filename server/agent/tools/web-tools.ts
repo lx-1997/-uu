@@ -619,7 +619,7 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
   return {
     name: "web_search",
     description:
-      "在互联网上搜索关键词，返回标题、链接与（若有）摘要。默认零密钥：必应（中国）→百度→DuckDuckGo；若配置 TAVILY_API_KEY 则在免费链路均无结果后再调 Tavily（消耗额度）。需要 Tavily 优先时设置 WEB_SEARCH_TAVILY_FIRST=1。全文可对结果 URL 再 web_fetch。",
+      "在互联网上搜索关键词，返回标题、链接与（若有）摘要。策略（RDKClaw 本机）：默认必应（中国）→百度→DuckDuckGo，零密钥。按需：配置 TAVILY_API_KEY 后，免费链路无结果再调 Tavily（计费）；需要 Tavily 优先时设环境变量 WEB_SEARCH_TAVILY_FIRST=1。可对命中 URL 再 web_fetch。",
     inputSchema: {
       type: "object",
       properties: {

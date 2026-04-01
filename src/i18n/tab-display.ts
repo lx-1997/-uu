@@ -11,6 +11,7 @@ export const TAB_TITLE_ZH: Record<Tab, string> = {
   openclaw: 'OpenClaw',
   hardware: '硬件监控',
   skills: '技能工坊',
+  'dr-embed': '生态网页',
 };
 
 /** 使用与 `useI18n().t` 相同的 `translate` 封装 */

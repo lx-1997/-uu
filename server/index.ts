@@ -10,7 +10,7 @@ import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import type { ChatMessage, Device, StudioUiHints } from '../shared/types.js';
-import { readDevices, writeDevices } from './storage.js';
+import { readDevices, writeDevices, serializedWriteDevices } from './storage.js';
 import {
   devicePasswordCache,
   credentialCacheKey,
@@ -2805,18 +2805,24 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
 
 app.delete('/api/devices/:id', async (request, response) => {
   const { id } = request.params;
-  const devices = await readDevices();
-  const target = devices.find((device) => device.id === id);
+  await serializedWriteDevices(async () => {
+    const devices = await readDevices();
+    const target = devices.find((device) => device.id === id);
 
-  if (!target) {
-    response.status(404).json({ error: '设备不存在' });
-    return;
-  }
+    if (!target) {
+      if (!response.headersSent) {
+        response.status(404).json({ error: '设备不存在' });
+      }
+      return;
+    }
 
-  deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
-  await writeDevices(devices.filter((device) => device.id !== id));
-  const cleanup = purgeDeviceSoftwareState(target);
-  response.json({ removedId: id, cleanup });
+    deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
+    await writeDevices(devices.filter((device) => device.id !== id));
+    const cleanup = purgeDeviceSoftwareState(target);
+    if (!response.headersSent) {
+      response.json({ removedId: id, cleanup });
+    }
+  });
 });
 
 app.post('/api/devices/:id/openclaw', async (request, response) => {

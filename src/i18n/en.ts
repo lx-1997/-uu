@@ -65,6 +65,16 @@ export const EN: Record<string, string> = {
   'rail.chatSessions.emptyDevices': 'No devices yet. Add a board to start a device-scoped chat.',
   'rail.chatSessions.addDevice': '+ Add device (new chat window)',
 
+  'rail.forum.short': 'Digua Developer Forum',
+  'rail.forum.tooltip': 'Discourse — SSO when signed in to Studio',
+  'rail.external.popupBlocked': 'Pop-up blocked; opened in this tab. Allow pop-ups for this app if you want a new window.',
+
+  'tabs.drEmbed': 'D-Robotics web',
+  'drPortal.close': 'Close',
+  'drPortal.empty': 'Preparing page…',
+  'drPortal.err.bundle': 'Could not get SSO handoff — sign in to Studio first.',
+  'drPortal.err.open': 'Failed to open',
+
   'version.modal.title': 'About RDK Studio',
   'version.modal.subtitle': 'Version & product',
   'version.modal.features': 'Features',
@@ -77,6 +87,9 @@ export const EN: Record<string, string> = {
   'login.legal.mid': ' and ',
 
   'topbar.user.fallback': 'User',
+  'topbar.user.guestHint': 'Not signed in',
+  'topbar.user.signIn': 'Sign in',
+  'topbar.user.signInTitle': 'Sign in to your account',
 
   'chat.lang.switched': 'Language updated',
 

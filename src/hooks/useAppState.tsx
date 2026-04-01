@@ -1,5 +1,19 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef } from 'react';
-import type { Tab, Device, Toast, TerminalSession, TransferItem, Activity, ChatMessage, ConfirmDialogState, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
+import type {
+  Tab,
+  Device,
+  Toast,
+  TerminalSession,
+  TransferItem,
+  Activity,
+  ChatMessage,
+  ConfirmDialogState,
+  AgentPlan,
+  AgentExecutionState,
+  ChatAttachment,
+  DrAuthenticatedPortal,
+  DrAuthenticatedPortalKind,
+} from '../app-types';
 import type { CmdSuggestion } from '../constants';
 import type { Task } from '../ai';
 import type { AgentAttachmentPayload } from '../api';
@@ -29,6 +43,10 @@ export interface AppState {
   // Navigation
   activeTab: Tab;
   setActiveTab: (tab: Tab) => void;
+  /** 桌面：forum/RoboGo 内嵌页；浏览器无此状态 */
+  drAuthenticatedPortal: DrAuthenticatedPortal | null;
+  openDrAuthenticatedPortal: (kind: DrAuthenticatedPortalKind, baseUrl: string) => Promise<void>;
+  closeDrAuthenticatedPortal: () => void;
 
   // Onboarding
   obStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';

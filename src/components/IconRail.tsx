@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Cloud, UsersRound } from 'lucide-react';
+import { Cloud, MessagesSquare } from 'lucide-react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
@@ -76,6 +76,7 @@ export default function IconRail() {
     language, setLanguage, addToast,
     railExpanded, setRailExpanded,
     obReturnStep, setObReturnStep,
+    openDrAuthenticatedPortal,
   } = useAppState();
   const confirmRemoveDevice = useConfirmRemoveDevice();
   const { t } = useI18n();
@@ -218,15 +219,15 @@ export default function IconRail() {
             className="rail-btn rail-external-link"
             data-tooltip={
               !railExpanded
-                ? `${t('sidebar.footer.community', '地瓜开发者社区')} · ${t('sidebar.footer.communityHint', '文档、硬件、生态与支持')}`
+                ? `${t('rail.forum.short', '地瓜开发者论坛')} · ${t('rail.forum.tooltip', 'Discourse 社区，已登录免重复认证')}`
                 : undefined
             }
-            onClick={() => window.open('https://developer.d-robotics.cc/', '_blank')}
+            onClick={() => {
+              void openDrAuthenticatedPortal('forum', 'https://forum.d-robotics.cc/');
+            }}
           >
-            <UsersRound width={20} height={20} strokeWidth={1.5} aria-hidden />
-            {railExpanded && (
-              <span className="rail-label">{t('sidebar.footer.community', '地瓜开发者社区')}</span>
-            )}
+            <MessagesSquare width={20} height={20} strokeWidth={1.5} aria-hidden />
+            {railExpanded && <span className="rail-label">{t('rail.forum.short', '地瓜开发者论坛')}</span>}
           </button>
           <button
             type="button"
@@ -236,7 +237,9 @@ export default function IconRail() {
                 ? `${t('sidebar.footer.robogo', 'RoboGo 云平台')} · ${t('sidebar.footer.robogoHint', '云端机器人与工作流')}`
                 : undefined
             }
-            onClick={() => window.open('https://robogo.d-robotics.cc/', '_blank')}
+            onClick={() => {
+              void openDrAuthenticatedPortal('robogo', 'https://robogo.d-robotics.cc/');
+            }}
           >
             <Cloud width={20} height={20} strokeWidth={1.5} aria-hidden />
             {railExpanded && (

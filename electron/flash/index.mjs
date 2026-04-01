@@ -8,6 +8,7 @@ export {
   decompressXz,
   decompressGz,
   cancelActiveOp,
+  getActiveOperation,
   launchThirdPartyTool,
   runS100XburnFlash,
 } from './service.mjs';

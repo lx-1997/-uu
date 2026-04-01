@@ -25,7 +25,9 @@
     "build:desktop:win:dir": "node scripts/build-desktop.mjs win dir",
     "build:windows:dir": "node scripts/build-desktop.mjs win dir",
     "build:desktop:mac": "node scripts/build-desktop.mjs mac",
+    "build:desktop:mac:arm64": "node scripts/build-desktop.mjs mac arm64",
     "build:desktop:mac:local": "node scripts/build-desktop.mjs mac local",
+    "build:desktop:release:win-zip-mac-arm64": "node scripts/build-desktop.mjs win zip && RDK_DESKTOP_CLEAN_RELEASE=0 node scripts/build-desktop.mjs mac arm64",
     "build:desktop:linux": "node scripts/build-desktop.mjs linux",
     "verify:desktop:smoke:win": "node scripts/desktop-smoke-check.mjs win",
     "verify:desktop:smoke:mac": "node scripts/desktop-smoke-check.mjs mac",
@@ -118,7 +120,6 @@
         {
           "target": "dmg",
           "arch": [
-            "x64",
             "arm64"
           ]
         }

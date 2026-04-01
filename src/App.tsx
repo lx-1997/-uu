@@ -30,6 +30,7 @@ const IDE = lazy(() => import('./components/IDE'));
 const OpenClaw = lazy(() => import('./components/OpenClaw'));
 const Hardware = lazy(() => import('./components/Hardware'));
 const SkillBrowser = lazy(() => import('./components/SkillBrowser'));
+const DroboticsEmbed = lazy(() => import('./components/DroboticsEmbed'));
 
 /**
  * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：
@@ -120,18 +121,27 @@ function MainContent() {
           <IDE />
         </Suspense>
       </div>
+      <div className={`persistent-pane ${activeTab === 'dr-embed' ? 'is-active' : 'is-hidden'}`}>
+        <Suspense fallback={<RouteFallback />}>
+          <DroboticsEmbed />
+        </Suspense>
+      </div>
     </>
   );
 }
 
-function useDesktopTabSync(activeTab: string) {
+function useDesktopTabSync(activeTab: string, drPortalMapUrl: string | null) {
   useEffect(() => {
     const rdk = (window as any).rdkDesktop;
     if (!rdk?.setActiveUrl) return;
+    if (activeTab === 'dr-embed' && drPortalMapUrl) {
+      rdk.setActiveUrl(drPortalMapUrl);
+      return;
+    }
     if (activeTab !== 'vnc' && activeTab !== 'ide') {
       rdk.setActiveUrl(null);
     }
-  }, [activeTab]);
+  }, [activeTab, drPortalMapUrl]);
 }
 
 function useDesktopViewBounds(activeTab: string, railExpanded: boolean) {
@@ -178,10 +188,11 @@ function AppShell() {
   const {
     activeTab, currentDevice, theme, railExpanded,
     setChatExpanded, setActiveTab, addToast,
+    drAuthenticatedPortal,
   } = useAppState();
   const { t } = useI18n();
   useStudioPresence(activeTab);
-  useDesktopTabSync(activeTab);
+  useDesktopTabSync(activeTab, drAuthenticatedPortal?.mapUrl ?? null);
   useDesktopViewBounds(activeTab, railExpanded);
   useThemeSync();
 
@@ -218,6 +229,7 @@ function AppShell() {
       ide: t('tabs.ide', 'IDE'),
       hardware: t('tabs.hardware', '硬件监控'),
       flasher: t('tabs.flasher', '烧录工具'),
+      'dr-embed': t('tabs.drEmbed', '地瓜生态'),
     };
     return names[activeTab] ?? activeTab;
   }, [activeTab, t]);

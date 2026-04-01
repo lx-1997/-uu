@@ -45,7 +45,7 @@ import { truncateToolOutput } from "./context/tool-output-truncate.js";
 import { pruneContextMessages } from "./context/index.js";
 import { microcompact } from "./context/microcompact.js";
 import { createMiniAgentStream, type MiniAgentEvent, type MiniAgentResult } from "./agent-events.js";
-import { abortable } from "./tools/abort.js";
+import { abortable, combineAbortSignals } from "./tools/abort.js";
 import { convertMessagesToPi } from "./message-convert.js";
 import type { ToolHookRegistry } from "./tool-hooks.js";
 import type { CompactHookRegistry } from "./compact-hooks.js";
@@ -61,6 +61,30 @@ import {
   validateToolInputObject,
 } from "./tool-pipeline.js";
 import { SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS } from "../ssh.js";
+
+/**
+ * 单次 LLM 流式调用中，若始终收不到任何流事件，则主动中止，避免无限卡住。
+ * 默认关闭（0），与上游 pi-ai 行为一致；需要时再设环境变量 RDKCLAW_LLM_FIRST_CHUNK_TIMEOUT_MS（毫秒），例如 180000。
+ */
+function resolveLlmFirstChunkTimeoutMs(): number {
+  const raw = process.env.RDKCLAW_LLM_FIRST_CHUNK_TIMEOUT_MS;
+  if (!raw || !String(raw).trim()) return 0;
+  const n = Number.parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(3_600_000, Math.max(0, n));
+}
+
+/** 首包超时错误：不应按「瞬时故障」重试整段 LLM 调用（否则用户要等 N×超时） */
+class LlmFirstChunkTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmFirstChunkTimeoutError";
+  }
+}
+
+function isLlmFirstChunkTimeoutError(err: unknown): boolean {
+  return err instanceof LlmFirstChunkTimeoutError;
+}
 
 // ============== 类型定义 ==============
 
@@ -412,9 +436,33 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 turnTextParts.length = 0;
                 streamStopReason = undefined;
 
+                const firstChunkBudgetMs = resolveLlmFirstChunkTimeoutMs();
+                const firstChunkCtrl = new AbortController();
+                let firstChunkTimer: ReturnType<typeof setTimeout> | null = null;
+                let firstChunkTimedOut = false;
+                const clearFirstChunkTimer = () => {
+                  if (firstChunkTimer != null) {
+                    clearTimeout(firstChunkTimer);
+                    firstChunkTimer = null;
+                  }
+                };
+                if (firstChunkBudgetMs > 0) {
+                  firstChunkTimer = setTimeout(() => {
+                    firstChunkTimedOut = true;
+                    clearFirstChunkTimer();
+                    try {
+                      firstChunkCtrl.abort();
+                    } catch {
+                      /* noop */
+                    }
+                  }, firstChunkBudgetMs);
+                }
+                const streamSignal = combineAbortSignals(abortSignal, firstChunkCtrl.signal) ?? abortSignal;
+
+                try {
                 const streamOpts: SimpleStreamOptions = {
                   maxTokens: modelDef.maxTokens,
-                  signal: abortSignal,
+                  signal: streamSignal,
                   apiKey,
                   ...(temperature !== undefined ? { temperature } : {}),
                   ...(reasoning ? { reasoning } : {}),
@@ -423,6 +471,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
                 for await (const event of eventStream) {
                   if (abortSignal.aborted) break;
+                  // 任意流事件均视为「首包已到」：pi-ai 还会发 text_start / thinking_start / toolcall_delta 等
+                  clearFirstChunkTimer();
 
                   switch (event.type) {
                     case "thinking_delta":
@@ -488,8 +538,20 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   }
                 }
 
+                clearFirstChunkTimer();
                 const piAssistant = await abortable(eventStream.result(), abortSignal);
                 streamStopReason = piAssistant.stopReason;
+                } catch (streamErr) {
+                  clearFirstChunkTimer();
+                  if (firstChunkTimedOut && !abortSignal.aborted) {
+                    throw new LlmFirstChunkTimeoutError(
+                      `LLM 在 ${Math.round(firstChunkBudgetMs / 1000)} 秒内没有任何流式输出（含思考）。请检查网络/代理、Base URL、API Key 与模型是否可用；或尝试关闭扩展思考、更换模型后再试。`,
+                    );
+                  }
+                  throw streamErr;
+                } finally {
+                  clearFirstChunkTimer();
+                }
               },
               {
                 attempts: 3,
@@ -499,6 +561,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 label: "llm-call",
                 shouldRetry: (err) => {
                   if (abortSignal.aborted) return false;
+                  if (isLlmFirstChunkTimeoutError(err)) return false;
                   // 借鉴 claude-code: rate_limit + timeout + 网络错误 + 5xx 都重试
                   return isTransientError(describeError(err));
                 },

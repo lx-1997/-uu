@@ -67,13 +67,22 @@ else
     "port": 8080,
     "host": "0.0.0.0"
   },
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": true,
+        "provider": "duckduckgo",
+        "maxResults": 5
+      }
+    }
+  },
   "skills": [],
   "logging": {
     "level": "info"
   }
 }
 EOF
-    echo "已创建默认配置"
+    echo "已创建默认配置（板端 web_search 默认 DuckDuckGo，免 Key；若要 Brave 见脚本末尾说明）"
 fi
 
 # 步骤 4: 安装 OpenClaw Gateway
@@ -180,6 +189,12 @@ echo "时间: $(date)"
 echo "日志文件: $LOG_FILE"
 echo "=========================================="
 
+echo ""
+echo "联网搜索（OpenClaw web_search）:"
+echo "  默认: DuckDuckGo（免 Key，已在全新 openclaw.json 中写入）。"
+echo "  升级 Brave: 在 ~/.openclaw/openclaw.json 设 tools.web.search.provider=brave，"
+echo "    并配置 BRAVE_API_KEY（或 plugins.entries.brave.config.webSearch.apiKey，见 OpenClaw 文档）；"
+echo "    中文场景可在对话中让 Agent 调用 web_search 时带 country=CN、language=zh。"
 echo ""
 echo "快速参考:"
 echo "  启动服务: systemctl start openclaw"

@@ -1732,6 +1732,12 @@ export default function OpenClaw() {
                     </button>
                   ))}
                 </div>
+                <div style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', lineHeight: 1.45, marginTop: 6 }}>
+                  {t(
+                    'oc.skills.webSearchPolicy',
+                    '板端联网搜索：全新安装与在 Studio 保存本页配置时，若未指定引擎会自动写入 DuckDuckGo（免 Key）。要更高质量可在 ~/.openclaw/openclaw.json 将 tools.web.search.provider 改为 brave 并配置 BRAVE_API_KEY（及官方文档中的插件项）；中文检索可在对话中说明使用 country=CN、language=zh。',
+                  )}
+                </div>
                 <div className="oc-form-actions">
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => saveConfig('skills')} disabled={loading}>{loading ? t('oc.test.testing', '...') : t('oc.skills.savePlugins', '保存插件')}</button>
                 </div>

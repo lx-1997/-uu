@@ -45,8 +45,8 @@ export const SIDEBAR_EN: Record<string, string> = {
   'sidebar.nav.flasher': 'Flash & backup',
   'sidebar.hint.flasher': 'Image write, verify, backup',
 
-  'sidebar.footer.community': 'D-Robotics developer hub',
-  'sidebar.footer.communityHint': 'Docs, hardware, ecosystem & support',
+  'sidebar.footer.forum': 'Digua Developer Forum',
+  'sidebar.footer.forumHint': 'Developer discussions — Discourse SSO when signed in (same token flow as RoboGo)',
   'sidebar.footer.robogo': 'RoboGo cloud',
   'sidebar.footer.robogoHint': 'Cloud robotics & workflows',
   'sidebar.footer.settings': 'Client settings',

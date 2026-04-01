@@ -8,8 +8,20 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   // 打包后前端通过此字段拼接 API base URL（file:// 协议下相对路径失效）
   apiBase: 'http://localhost:8787',
 
-  // 在主窗口内嵌入一个 WebContentsView（用于 code-server / noVNC）
-  openUrl: (url) => ipcRenderer.send('rdk:open-url', { url }),
+  /** 论坛 / RoboGo 免登录：独立窗口种 token Cookie + Bearer（payload 来自 /api/sso/external-browser-bundle） */
+  openDroboticsAuthBrowser: (payload) => ipcRenderer.invoke('rdk:open-drobotics-auth-browser', payload),
+
+  // 在主窗口内嵌入 WebContentsView：字符串兼容 IDE/VNC；对象可带 loadUrl、token（论坛/RoboGo 内嵌免登录）
+  openUrl: (target) => {
+    if (typeof target === 'string') {
+      ipcRenderer.send('rdk:open-url', { url: target, loadUrl: target });
+    } else if (target && typeof target === 'object') {
+      const url = String(target.url ?? '').trim();
+      const loadUrl = target.loadUrl != null ? String(target.loadUrl).trim() : url;
+      const token = target.token != null ? String(target.token).trim() : '';
+      ipcRenderer.send('rdk:open-url', { url, loadUrl, token });
+    }
+  },
 
   // 隐藏（不销毁）嵌入页面
   hideUrl: (url) => ipcRenderer.send('rdk:hide-url', { url }),

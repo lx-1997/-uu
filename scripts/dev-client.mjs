@@ -47,10 +47,26 @@ function killPort(port) {
     return;
   }
 
+  /** macOS 上 `fuser -k PORT/tcp` 常常杀不掉监听进程，改用 lsof（Linux 同样适用） */
   try {
-    execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' });
+    const out = execSync(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`, { encoding: 'utf8' });
+    const pids = [...new Set(out.trim().split(/\n/).filter((x) => /^\d+$/.test(x)))];
+    if (pids.length > 0) {
+      console.log(`[dev:client] port ${port} occupied, killing PIDs: ${pids.join(', ')}`);
+      for (const pid of pids) {
+        try {
+          execSync(`kill -9 ${pid}`, { stdio: 'ignore' });
+        } catch {
+          // 进程可能已退出
+        }
+      }
+    }
   } catch {
-    // no process using this port
+    try {
+      execSync(`fuser -k ${port}/tcp`, { stdio: 'ignore' });
+    } catch {
+      // 端口空闲或无法释放
+    }
   }
 }
 

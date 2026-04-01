@@ -87,7 +87,22 @@ declare global {
       onSerialPortShowPicker?: (cb: (payload: SerialPickerPayload) => void) => (() => void) | void;
       sendSerialPortPickerResult?: (payload: { reqId: number; portId: string }) => void;
       consumeLastSerialPortMeta?: () => Promise<ElectronSerialPortMeta | null>;
-      openUrl?: (url: string) => void;
+      /** 论坛 / RoboGo：独立 BrowserWindow + token Cookie + Bearer（与旧版 Studio 免登录一致） */
+      openDroboticsAuthBrowser?: (payload: {
+        loadUrl: string;
+        token?: string;
+      }) => Promise<{ ok: boolean; error?: string }>;
+
+      openUrl?: (
+        target:
+          | string
+          | {
+              url: string;
+              loadUrl?: string;
+              /** SSO access_token：主进程写入 Cookie + Authorization（论坛 / RoboGo 内嵌） */
+              token?: string;
+            },
+      ) => void;
       hideUrl?: (url: string) => void;
       closeUrl?: (url: string) => void;
       setActiveUrl?: (url: string | null) => void;
