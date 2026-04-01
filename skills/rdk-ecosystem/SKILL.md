@@ -1,7 +1,7 @@
 ---
 name: RDK Ecosystem
 description: 在已无集中式生态注册表的前提下，通过联网文档、板型探测与板端 OpenClaw 完成「找方案—装依赖—跑起来」。触发词：技能、安装包、NodeHub、ModelZoo、TROS、示例、demo、模型部署。
-version: 1.2.0
+version: 1.2.1
 trigger: 技能,安装包,NodeHub,ModelZoo,TROS,ecosystem,install,示例,demo,example,模型部署,deploy model,yolo,onnx,推理,板端探索,探宝,tros,hobot,BPU,launch
 risk: medium
 permissions: device_exec,network
@@ -35,6 +35,13 @@ category: Procedure
 | **探宝** | 板上已有什么（包、目录、launch） | `device_exec`：`apt search tros`、`apt search hobot`、`dpkg -l \| grep -E 'tros\|hobot'`、`find /opt/tros -name '*.launch' 2>/dev/null \| head` 等短命令；输出必须可复述 |
 | **文档** | 官方怎么说、与板上事实对齐 | **双轨**：优先 `web_fetch` `developer.d-robotics.cc/rdk_doc`（及 `researchSeeds`）；若用户明确说本机已同步文档，再对 **板上路径**（如 `/tmp/rdk_doc/docs/`，以用户/探测为准）用 `device_exec` 列目录或 `grep`/`head`，**勿写死为唯一真理** |
 | **沉淀** | 同一套路出现多次 → 技能化 | 见 **Skill Manager**（`rdk-skill-authoring-guide`）：用户扩展目录 `~/.rdkstudio/rdkclaw-workspaces/<user-id>/skills/`，高于内置 `skills/` |
+
+### 板端优先的长链路（原独立技能已收敛）
+
+以下任务以 **板端 OpenClaw** 长命令、装依赖、跑 pipeline 为主，RDKClaw 侧只做 **assess / delegate / device_exec 短验证**，勿在 Studio 内置技能里再维护一份冗长步骤：
+
+- **OCR（如 PaddleOCR）**：用 `board_openclaw_delegate` 或板端 `board_openclaw_skill_install` / SkillHub；官方与仓库以 `web_search` 为准。
+- **离线 sherpa-onnx 全链路语音对话**：同上，优先板端技能或委派；Studio 侧若仅需单次播报/转写，可用工具 **TTS/STT** 技能（`rdk-tts` / `rdk-stt`），与 sherpa 全栈不同。
 
 ### 委派合同（使用 `board_openclaw_delegate` 时）
 `guidance` 中尽量显式包含，减少板端猜意图：

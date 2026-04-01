@@ -1,7 +1,7 @@
 ---
 name: RDK Board Knowledge
 description: RDK 硬件与板端协作框架；含 TROS（TogetheROS.Bot，ROS2 兼容，勿与 Tuya IoT 混淆）与环境探测要点。适用于设备操作、AI 推理、摄像头、GPIO、模型部署、ROS2/节点/话题、板端能力。
-version: 1.0.1
+version: 1.1.0
 trigger: 设备,能力,推理,摄像头,GPIO,模型,BPU,检测,分割,跟踪,语音,TTS,SLAM,导航,板端,硬件,X3,X5,S100,ROS,ROS2,TROS,ros2,节点,话题,导航节点
 risk: low
 permissions: none
@@ -134,6 +134,47 @@ pkill -f "进程关键字"
 # 强制停止 PID
 kill -9 <PID>
 ```
+
+## 板型专章：RDK X3（原独立 `rdk-x3-guide` 已并入本技能）
+
+本段仅在 **boardPlatform 为 rdk-x3** 或探测结果为 X3 时使用。
+
+- **SoC / 用户**：Bernoulli2 BPU；默认用户常为 `sunrise`（非 root）
+- **系统**：Ubuntu 20.04，ROS **Foxy**，TROS 常见 `source /opt/tros/setup.bash` 或 `/opt/tros/foxy/`
+- **内存**：约 2GB，大模型易 OOM；启动推理前可 `free -h`，建议保留约 500MB 以上可用内存
+- **模型与工具链**：`.bin` 与 X5/S100 **不通用**；转换链为 `hb_mapper`（非 `hb_mapper_x5`）
+- **BPU / 温度 / 摄像头**（与通用速查一致，路径以板为准）：
+```bash
+cat /sys/devices/system/bpu/bpu0/ratio
+cat /sys/class/thermal/thermal_zone0/temp
+ls /dev/video* && v4l2-ctl --list-devices
+source /opt/tros/setup.bash   # Foxy
+```
+- **推理示例**：`/app/ai_inference/`；预置模型目录常含 `/opt/hobot/model/rdkx3/`
+- **文档**：X3 硬件与快速开始见 developer.d-robotics.cc → Quick_start → rdk_x3
+
+## 板型专章：RDK S100 / S100P（原独立 `rdk-s100-guide` 已并入本技能）
+
+本段仅在 **boardPlatform 为 rdk-s100 / rdk-ultra** 或探测为 S100 系时使用。
+
+- **算力**：约 80T（S100）/ 128T（S100P），BPU **Nash-e**；默认用户常为 **root**
+- **系统**：Ubuntu 22.04 + **Humble**，TROS：`source /opt/tros/humble/setup.bash`
+- **接口**：多 USB3、双 MIPI CSI、千兆网、PCIe 等（以硬件文档为准）
+- **BPU / 温度**（多 zone / 多核）：
+```bash
+cat /sys/devices/system/bpu/bpu*/ratio
+cat /sys/class/thermal/thermal_zone*/temp
+free -h
+source /opt/tros/humble/setup.bash
+```
+- **相对 X5 的性能量级（示意）**：
+
+| 场景 | X5 (10T) | S100 (80T 级) |
+|------|----------|----------------|
+| YOLOv5s 等 | ~30 fps 量级 | ~120 fps 量级 |
+| DOSOD | ~12 fps | ~45 fps |
+
+- **文档**：S100 硬件与算法应用见 developer.d-robotics.cc → rdk_s；Model Zoo 可参考 `rdk_model_zoo_s`
 
 ## 文档入口
 - X3/X5: https://developer.d-robotics.cc/rdk_doc/

@@ -15,6 +15,8 @@ category: Delegation
 
 # RDK OpenClaw Bridge
 
+> **互补**：板端 OpenClaw 的安装、网关、HTTP API 与工具链运维见 **`rdk-openclaw`**（Studio 侧统一技能）。
+
 ## 适用场景
 - RDKClaw 需要通过板端 OpenClaw 执行复杂任务（模型部署、TROS pipeline、设备诊断修复等），且任务需软件端与板端协同完成。
 - 单独使用软件端工具无法完成全部步骤，需桥接板端能力补齐链路。

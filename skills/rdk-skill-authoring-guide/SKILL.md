@@ -1,7 +1,7 @@
 ---
 name: Skill Manager
 description: 创建、总结、优化 RDKClaw 技能（SKILL.md）。在用户要新技能、沉淀重复流程、或审查技能质量时激活；生成内容对齐 ClawHub/OpenClaw 与 create-skill 的高质量要求（description 可检索、步骤可执行、含示例与失败路径）。
-version: 2.1.0
+version: 2.2.0
 trigger: 创建技能,新技能,skill create,写技能,总结技能,技能管理,优化技能,技能规范,skill模板,技能中心,技能审查,skill review
 risk: low
 permissions: workspace_read,workspace_write
@@ -39,6 +39,14 @@ RDKClaw 从以下目录加载技能（优先级从高到低）：
 - 技能注册表每 3 秒检查一次变更
 - 新增/修改/删除 SKILL.md 后无需重启应用
 - 用户工作区的技能会覆盖同名内置技能
+
+### RDKClaw 内置技能合格清单（合并/新增前核对）
+
+1. **工具映射**：关键步骤能对应 `agent/TOOLS.md` 或当前会话已挂载工具；纯板端长脚本应改为 delegate 或板端 skill。
+2. **requires_board**：必须连设备才能完成时标 `true`。
+3. **受众**：仅板端 OpenClaw 阅读的 skill（如同伴商量协议）设 `enabled: false`，避免 RDKClaw 误匹配。
+4. **与板端分界**：安装/编译类长步骤优先写在板端或 SkillHub；Studio 侧保留编排、API、`assess`/`delegate` 合同。
+5. **去重**：与现有内置 skill 重叠时优先合并扩写，避免同名异路径。
 
 ## 一、创建新技能
 

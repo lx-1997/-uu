@@ -1,7 +1,7 @@
 ---
 name: RDKClaw Partner Advisory
-description: 板端 OpenClaw 遇阻、不确定或需在多方案间取舍时，主动向 RDKClaw 同伴商量并征求建议（不仅是索取信息，还包括策略与下一步）。
-version: 1.0.0
+description: 供板端 OpenClaw 阅读：遇阻时如何通过 [NEED_RDKCLAW] 向 RDKClaw 征求建议。文件由 Studio 同步到板端 skills/；RDKClaw 侧不参与本技能的触发匹配。
+version: 1.0.1
 trigger: 商量,征求建议,同伴,RDKClaw,卡住,不确定,失败,重试,策略,风险,取舍,咨询,求助,下一步
 risk: low
 permissions: network
@@ -9,7 +9,9 @@ delegate_preference: collaborative
 requires_board: false
 approval_level: none
 cooldown_seconds: 0
+scheduler_template: none
 category: Collaboration
+enabled: false
 ---
 
 # RDKClaw 同伴商量（板端 OpenClaw）

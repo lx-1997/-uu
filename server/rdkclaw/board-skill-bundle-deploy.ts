@@ -1,7 +1,7 @@
 /**
  * 按板型将 Studio 内置技能同步到板端 ~/.openclaw/workspace/skills/
  * - RDK X5: rdkx5_skills/ 下全部子目录（含 SKILL.md）
- * - RDK X3 / S100 / Ultra: skills/ 下文档与指南类技能组合
+ * - RDK X3 / S100 / Ultra: skills/ 下文档与指南类技能组合（板型专章已并入 rdk-board-knowledge，不再单独同步 rdk-x3-guide / rdk-s100-guide）
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,38 +28,35 @@ const RDKX5_SKILLS_ROOT = 'rdkx5_skills';
 
 /** X3：开发者文档 + OpenClaw 协作 + 板卡能力 */
 const BUNDLE_X3: string[] = [
-  'rdk-x3-guide',
   'rdk-developer-docs',
   'rdk-ecosystem',
   'rdk-app-development',
   'rdk-board-knowledge',
   'rdk-hardware',
   'rdk-openclaw-bridge',
-  'rdk-openclaw-lifecycle',
-  'rdk-openclaw-api',
+  'rdk-openclaw',
   'rdk-rdkclaw-partner-advisory',
   'rdk-device-ops',
   'rdk-terminal',
   'rdk-files',
   'rdk-flash',
+  'rdk-dev-efficiency',
 ];
 
 /** S100 / Ultra：文档型技能包（与 X5 的 rdkx5_skills 互补） */
 const BUNDLE_S100_LIKE: string[] = [
-  'rdk-s100-guide',
   'rdk-developer-docs',
   'rdk-ecosystem',
   'rdk-app-development',
   'rdk-board-knowledge',
   'rdk-hardware',
   'rdk-openclaw-bridge',
-  'rdk-openclaw-lifecycle',
-  'rdk-openclaw-api',
+  'rdk-openclaw',
   'rdk-rdkclaw-partner-advisory',
   'rdk-device-ops',
   'rdk-terminal',
   'rdk-files',
-  'rdk-problem-analysis',
+  'rdk-dev-efficiency',
 ];
 
 function listRdkX5SkillIds(cwd: string): string[] {

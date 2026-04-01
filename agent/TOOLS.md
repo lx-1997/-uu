@@ -27,6 +27,10 @@
 | `ros_topics` / `ros_nodes` | ROS2 操作 | 设备可能未装 ROS2 |
 | `vnc_start/stop/status` | 远程桌面 | |
 | `navigate:{tab}` | 页面跳转 | dashboard/flasher/terminal/files/vnc/ide/openclaw/hardware 等 |
+| `fleet_board_list` | 列出已注册板卡与能力画像 | 多设备前先调用；含同 IP 重复注册告警 |
+| `fleet_board_delegate` | 向指定板卡的 OpenClaw 委派任务 | 跨板协作；需 `targetDeviceId`； busy 板卡避免并行冲突 |
+| `fleet_board_broadcast` | 向多块板广播任务并汇总 | 多板同任务场景 |
+| `create_plan` / `update_plan` | 复杂任务结构化计划 | 计划落在 `.rdkclaw-runtime/plans/`；多步用 `update_plan` 标进度 |
 | `rdkclaw_task_create` | 创建定时/周期任务 | 定时提醒、定期巡检用这个 |
 | `rdkclaw_memory_append_daily` | 写入日记 | 有价值的联网结论、经验教训 |
 | `propose_soul_update` | 提议更新 SOUL | 用户表达长期偏好时 |
@@ -40,6 +44,8 @@
 - **日志分析**: openclaw_logs + exec(journalctl/dmesg)
 - **板端协作**: chat(了解能力) → assess(评估可行性) → delegate(委派执行) → 验证结果
 - **板端任务**: assess → delegate → 验证结果（确信可行时可跳过 chat）
+- **多板**: `fleet_board_list` → 按算力/角色选板 → `fleet_board_delegate` 或 `fleet_board_broadcast`
+- **长链路**: `create_plan` 拆步 → 执行 → `update_plan` 更新状态
 
 ## 执行策略
 
