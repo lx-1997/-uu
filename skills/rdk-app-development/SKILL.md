@@ -1,7 +1,7 @@
 ---
 name: RDK App Development
 description: 双 Agent 协作「一句话开发机器人应用」完整工作流。RDKClaw 负责知识准备与方案编排，OpenClaw 负责板端实施，端到端完成从需求到运行的全链路。
-version: 1.0.0
+version: 1.1.0
 trigger: 做应用,开发应用,生成应用,创建应用,写应用,一句话开发,搭建项目,写一个,做一个,创建一个,开发一个,机器人应用,帮我做,帮我写,帮我开发,帮我创建,最小可运行
 risk: medium
 permissions: workspace_read,device_exec,network
@@ -93,6 +93,15 @@ board_openclaw_assess(task="创建并运行一个 Python 人脸检测应用")
 ## 验收标准
 - {明确的成功判定条件}
 ```
+
+### 验收闭环（可演示 · 强制，针对 A/D）
+
+委派前后都须满足，避免「做完了但用户无感」或板型错误：
+
+1. **demo_success（用户可感知）**：用**一句白话**写清成功时长什么样（例如：窗口里能看到检测框 / 喇叭能播报 / 终端打印某一行 / 浏览器能打开某地址）。**禁止**只写「跑通 pipeline」而无现象。
+2. **verify_command**：写**一条**可复制执行的验证命令（或等价 UI 操作路径），供 RDKClaw 在 `board_openclaw_delegate` 返回后**独立执行**并核对输出；不得只信板端自述。
+3. **板型锁死**：guidance 中再次写明目标板型与模型路径；若 assess 与板型冲突，先纠正再委派。
+4. **失败可续**：若未达 demo_success，回复须含：现象、最可能原因、**下一步一条动作**（改依赖 / 换模型 / 降级为纯 SSH），避免无意义多轮。
 
 **板型适配要点**：
 - X3：优先轻量模型，注意 2GB 内存限制，TROS 用 Foxy

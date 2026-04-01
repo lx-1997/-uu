@@ -1,7 +1,7 @@
 ---
 name: RDK Board Delegate
 description: 当任务需要板端真实能力（硬件操作、模型推理、TROS pipeline 等软件端无法模拟的动作）时，将任务委派给板端 OpenClaw Agent；对于简单命令执行，可直接使用 device_exec 而无需委派。
-version: 1.0.0
+version: 1.1.0
 trigger: 板端,openclaw,委派,复杂任务,插件,部署,诊断修复
 risk: high
 permissions: device_exec,network
@@ -38,10 +38,14 @@ category: Delegation
      - 相关板端技能 / ClawHub: {名称及安装方式}
      ## 验收标准
      - {可观测的成功标志}
+     ## 可演示验收（强制，针对 A/C/D）
+     - demo_success: {用户不加设备也能听懂的一句「成功长什么样」}
+     - verify_command: {一条可复制命令或明确 UI 路径，用于 RDKClaw 独立核对}
+     - board_target: {X3/X5/S100 等与模型格式一致}
      ```
 4. **提交委派**：调用 `board_openclaw_delegate` 将结构化任务提交给板端 OpenClaw。
 5. **等待与监控**：等待板端返回结果；若超时主动轮询，若报错提炼可操作原因。
-6. **独立验证**：板端完成后，用 `device_exec` 独立验证执行结果（如检查进程、端口、日志），不仅依赖板端自报。
+6. **独立验证**：板端完成后，用 `device_exec` 执行上文的 **verify_command**（或等价检查），**未通过则不得宣称成功**；同一错因重复失败 ≤2 次即换方案或降级。
 7. **汇总报告**：汇报执行结果；如有异常，给出原因分析与修复建议。输出中标注"软件端执行"和"板端执行"各自的结果。
 
 > **降级路径**：若步骤 2 判定 OpenClaw 不可达，降级为 `device_exec` 执行简单操作并告知用户。

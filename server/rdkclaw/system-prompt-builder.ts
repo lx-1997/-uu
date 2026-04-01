@@ -171,6 +171,8 @@ export function buildCollaborationPrompt(
       "多步板端任务勿只用 device_exec 硬顶；预见要多轮试探时先 assess→delegate。",
       "后台子任务：sessions_spawn 用 explore/plan/verify（验收须 VERDICT 行）；细则见「子 Agent 与验收」专章。",
       "先做能做的；需板端 Agent 承接时先 assess 再 delegate。委派时在 guidance 提醒：做不到可用 find-skills 搜 SkillHub。",
+      "设备已连且需检索时：首轮尽量并行 web_search+assess，勿无故串行拖轮次。",
+      "delegate 的 guidance 须含：用户可感知的 demo_success + 一条 verify_command；板端返回后用 device_exec 核对。",
       boardSnapshot.skillDetails.length > 0
         ? `板端技能(${boardSnapshot.skillDetails.length}个): ${boardSnapshot.skillDetails.map((s) => s.name).join(', ')}`
         : "板端技能快照为空，需先生成技能再委派。",
@@ -209,6 +211,12 @@ export function buildCollaborationPrompt(
     "同一个 turn 中，以下工具可以并行调用（框架自动并行，你只需在同一轮同时发起）：",
     "web_search + web_fetch + board_openclaw_assess + device_diagnose + attachment_describe_image",
     "**典型并行模式**：收到复杂任务时，在同一轮同时调用 web_search（查资料）+ board_openclaw_assess（评估板端能力）+ web_fetch（拉取官方文档/GitHub）",
+    "",
+    "### 总耗时、少绕弯、可演示（与首包快慢无关，优先整体交付）",
+    "- **总耗时**：设备已连、任务允许联网时，知识检索与 `board_openclaw_assess` 应优先 **同轮并行**，勿无故串成多轮「先搜完再 assess」。",
+    "- **无效轮次**：同一错因、同一失败命令 **不重复超过 2 次**；立刻换假设、换路径或 assess→delegate，勿堆同一 delegate 话术。",
+    "- **可演示验收**：凡 delegate，guidance 里 **必须**写清：(1) 用户能直接感知到的成功现象（画面/声音/灯/一句无报错输出）；(2) **一条**可独立执行的验证方式（可复制命令或明确 UI 路径）；(3) 板端返回后 RDKClaw 用 `device_exec` 等做**独立验证**，未验证不得宣称成功。",
+    "- **板型与模型**：guidance 写明目标板型与 BPU/模型格式，禁止 X3/X5/S100 模型混用。",
     "若 **web_fetch** 仅得到空壳/极短正文（SPA、Next 等需执行 JS），且当前工具列表中存在 **web_browser_fetch**，再用它对同一 URL 抓渲染后文本（更重、更慢，勿滥用）。",
     "若页面 **需登录** 才有详情（如地瓜 NodeHub）：优先 **studio_embedded_browser_capture**（桌面端内嵌浏览器 + 用户会话），不要用无头抓取代替。",
     "等三者结果都回来后再制定方案和委派，而不是一个一个串行调用。",
