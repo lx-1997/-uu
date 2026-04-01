@@ -46,6 +46,13 @@ describe('isCommandDangerous', () => {
     expect(isCommandDangerous('pip install numpy').blocked).toBe(false);
     expect(isCommandDangerous('cat /etc/version').blocked).toBe(false);
   });
+
+  it('ignores shutdown/reboot inside heredoc body', () => {
+    const cmd = `cat <<EOF
+rclpy.shutdown()
+EOF`;
+    expect(isCommandDangerous(cmd).blocked).toBe(false);
+  });
 });
 
 describe('isPathProtected', () => {

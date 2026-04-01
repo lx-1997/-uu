@@ -43,7 +43,19 @@ export {
 export { SessionManager, type Message, type ContentBlock } from "./session.js";
 
 // Context — 按需加载 (AGENTS.md 等) + 裁剪 + 摘要压缩
-export { ContextLoader, type ContextFile } from "./context/index.js";
+export {
+  ContextLoader,
+  type ContextFile,
+  getEffectiveContextWindowTokens,
+  getProactiveCompactThreshold,
+  getContextWarningThreshold,
+  shouldProactiveCompactByWindowEconomics,
+  AUTOCOMPACT_BUFFER_TOKENS,
+  SUMMARY_OUTPUT_CAP_TOKENS,
+} from "./context/index.js";
+
+// Compaction 生命周期 hooks（RDKClaw / 扩展可注册）
+export { CompactHookRegistry } from "./compact-hooks.js";
 
 // Tools — 工具抽象 + 内置工具 (read/write/edit/exec/list/grep/memory_save)
 export {

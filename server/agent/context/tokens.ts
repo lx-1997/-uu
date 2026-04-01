@@ -13,7 +13,8 @@ function isCJK(code: number): boolean {
          (code >= 0xff00 && code <= 0xffef);
 }
 
-function estimateTokensForText(text: string): number {
+/** 导出供系统提示与窗口经济学做 token 估算（CJK-aware） */
+export function estimateTokensForText(text: string): number {
   if (!text) return 0;
   let cjkChars = 0;
   let otherChars = 0;

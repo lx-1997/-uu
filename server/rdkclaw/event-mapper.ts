@@ -80,6 +80,79 @@ export function mapMiniEvent(
           phase: "running",
           message: "检测到上下文超限，已自动触发压缩重试",
           context_overflow_error: event.error,
+          context_overflow_recovery_level: event.recoveryLevel,
+        },
+      };
+    case "proactive_compaction":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: "窗口经济学：估算接近上限，已主动触发压缩",
+          proactive_compaction: true,
+          estimated_tokens: event.estimatedTokens,
+          compact_threshold: event.threshold,
+          effective_context_tokens: event.effectiveContextTokens,
+        },
+      };
+    case "compaction_fuse":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `LLM 摘要连续失败 ${event.failures} 次，已熔断（仅 prune）`,
+          compaction_fuse_failures: event.failures,
+        },
+      };
+    case "microcompact":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `微压缩 ${event.compressedCount} 段，节省约 ${event.savedChars} 字符`,
+          microcompact_compressed_count: event.compressedCount,
+          microcompact_saved_chars: event.savedChars,
+        },
+      };
+    case "emergency_truncation":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `紧急截断：丢弃 ${event.droppedMessages} 条，保留 ${event.keptMessages} 条`,
+          emergency_dropped_messages: event.droppedMessages,
+          emergency_kept_messages: event.keptMessages,
+        },
+      };
+    case "output_continuation":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `输出因 max_tokens 截断，续写 ${event.attempt}/${event.maxAttempts}`,
+          output_continuation_attempt: event.attempt,
+          output_continuation_max_attempts: event.maxAttempts,
+        },
+      };
+    case "run_metrics":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "end",
+          message: "run 遥测指标",
+          run_metrics: event.metrics,
         },
       };
     case "subagent_summary":

@@ -44,9 +44,20 @@ const PROTECTED_PATH_KEYWORDS = [
   "/secret", "/token.json",
 ];
 
+/**
+ * Shell 危险扫描只应看「由 shell 解析」的部分，不应扫描 heredoc 正文。
+ * 否则源码/注释里的 shutdown、reboot、curl 等会误触发（如 ROS 示例里的 rclpy.shutdown）。
+ */
+export function stripShellPrefixBeforeHeredoc(command: string): string {
+  const idx = command.indexOf("<<");
+  if (idx === -1) return command;
+  return command.slice(0, idx);
+}
+
 export function isCommandDangerous(command: string): ChannelSafetyResult {
+  const shellOnly = stripShellPrefixBeforeHeredoc(command);
   for (const { pattern, reason } of DANGEROUS_COMMAND_PATTERNS) {
-    if (pattern.test(command)) {
+    if (pattern.test(shellOnly)) {
       return { blocked: true, reason };
     }
   }
@@ -100,11 +111,10 @@ export function validateExecCommand(command: string, channel: ChannelSource): Ch
   const check = isCommandDangerous(command);
   if (check.blocked) return check;
 
-  const words = command.toLowerCase().split(/\s+/);
+  const words = stripShellPrefixBeforeHeredoc(command).toLowerCase().split(/\s+/);
   if (words.some((w) => w === "rm" || w === "del" || w === "rmdir")) {
-    const hasProtected = PROTECTED_PATH_KEYWORDS.some((kw) =>
-      command.toLowerCase().replace(/\\/g, "/").includes(kw),
-    );
+    const shellForPaths = stripShellPrefixBeforeHeredoc(command).toLowerCase().replace(/\\/g, "/");
+    const hasProtected = PROTECTED_PATH_KEYWORDS.some((kw) => shellForPaths.includes(kw));
     if (hasProtected) {
       return { blocked: true, reason: "外部通道禁止删除受保护路径" };
     }

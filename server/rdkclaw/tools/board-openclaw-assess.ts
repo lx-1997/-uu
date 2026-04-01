@@ -131,13 +131,15 @@ export function boardOpenClawAssessTool(
   return {
     name: "board_openclaw_assess",
     description:
-      "向板端 OpenClaw 咨询：某个任务是否适合由板端执行（只评估不执行）。\n\n" +
-      "IMPORTANT 使用规则：\n" +
-      "- ALWAYS 在 board_openclaw_delegate 之前调用此工具评估可行性\n" +
-      "- 典型场景：任务需要板端专长（复杂板端操作、OpenClaw 技能链、板端应用开发）\n" +
-      "- 你能直接完成的任务（搜索、文档处理、知识问答）NEVER 需要咨询\n" +
-      "- 返回 canHandle/confidence/reason，confidence < 0.5 时建议用本地工具执行\n" +
-      "- 若 canHandle=false 但 reason 提示缺少技能，可先安装技能再重新评估",
+      "读者=编排模型。与板端 OpenClaw 的**正式能力握手**：只评估不执行，但**不是可跳过的一步**——在可能 delegate 前应先 assess，避免 RDKClaw 用 SSH 把整件事包办。\n" +
+      "向板端 OpenClaw 咨询：某任务是否适合由板端 Agent 承接（canHandle/confidence/reason）。\n\n" +
+      "选用时机：\n" +
+      "- 板端多步/试错/技能链/clawhub 流程；或你已预见要多轮 device_exec 试探\n" +
+      "- 不确定该 SSH 硬顶还是交给板端时——先 assess 再决定\n" +
+      "不适用：纯本机搜索/读文档/知识问答（与板端无关）；单条 shell 就能完成的原子命令（直接 device_exec）\n\n" +
+      "规则：\n" +
+      "- ALWAYS 在 board_openclaw_delegate 之前调用（同一复杂任务勿跳过）\n" +
+      "- 返回 confidence < 0.5 时：倾向用本地/SSH；若 reason 指缺技能，可先装技能再 assess\n",
     inputSchema: {
       type: "object",
       properties: {

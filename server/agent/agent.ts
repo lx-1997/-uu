@@ -41,6 +41,8 @@ import {
   evaluateContextWindowGuard,
   resolveContextWindowInfo,
 } from "./context-window-guard.js";
+import { getEffectiveContextWindowTokens } from "./context/window-economics.js";
+import type { CompactHookRegistry } from "./compact-hooks.js";
 import { SkillManager, type SkillMatch } from "./skills.js";
 import { HeartbeatManager, type HeartbeatResult } from "./heartbeat.js";
 import {
@@ -180,6 +182,10 @@ export interface AgentConfig {
       keepLastAssistants?: number;
     };
   };
+  /** Compaction 生命周期 hooks（Pre/Post compact） */
+  compactHooks?: CompactHookRegistry;
+  /** 系统提示遥测（RDKClaw 分层构建时传入 hash 与层数） */
+  systemPromptTelemetry?: { hashShort: string; layerCount: number };
 }
 
 export interface RunResult {
@@ -303,6 +309,12 @@ export class Agent {
    * - emit() 遍历 listeners 同步调用
    */
   private listeners = new Set<(event: MiniAgentEvent) => void>();
+
+  private compactHooks?: CompactHookRegistry;
+  /** 连续摘要失败（对齐 claude-code MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES） */
+  private compactionFailStreakBySession = new Map<string, number>();
+  private static readonly MAX_COMPACTION_FAILURE_STREAK = 3;
+  private systemPromptTelemetry?: { hashShort: string; layerCount: number };
 
   constructor(config: AgentConfig) {
     // Provider 初始化（对应 OpenClaw: attempt.ts → activeSession.agent.streamFn）
@@ -434,6 +446,8 @@ export class Agent {
 
     // Tool Result Guard（对应 OpenClaw: attempt.ts → guardSessionManager()）
     this.toolResultGuard = installSessionToolResultGuard(this.sessions);
+    this.compactHooks = config.compactHooks;
+    this.systemPromptTelemetry = config.systemPromptTelemetry;
   }
 
   /** 运行时替换工具列表（如 RDK Studio 在对话中连接设备后注入板端工具） */
@@ -503,11 +517,41 @@ export class Agent {
     summary?: string;
     summaryMessage?: Message;
   }> {
+    const effW = getEffectiveContextWindowTokens(this.contextTokens, this.modelDef.maxTokens ?? 8192);
+    await this.compactHooks?.runPreHooks({
+      sessionKey: params.sessionKey,
+      runId: params.runId,
+      messages: params.messages,
+      reason: "run_start",
+    });
+
+    const streak = this.compactionFailStreakBySession.get(params.sessionKey) ?? 0;
+    const skipLlm = streak >= Agent.MAX_COMPACTION_FAILURE_STREAK;
+
     const compacted = await compactHistoryIfNeeded({
       summarize: this.createSummarizeFn(),
       messages: params.messages,
-      contextWindowTokens: this.contextTokens,
+      contextWindowTokens: effW,
       pruningSettings: this.runtimePolicy.pruning,
+      skipLlmCompaction: skipLlm,
+    });
+
+    if (compacted.summary?.includes("Summary unavailable due to size limits")) {
+      this.compactionFailStreakBySession.set(
+        params.sessionKey,
+        Math.min(streak + 1, Agent.MAX_COMPACTION_FAILURE_STREAK + 2),
+      );
+    } else if (compacted.summary && compacted.summary.length > 80) {
+      this.compactionFailStreakBySession.set(params.sessionKey, 0);
+    }
+
+    await this.compactHooks?.runPostHooks({
+      sessionKey: params.sessionKey,
+      runId: params.runId,
+      summaryChars: compacted.summary?.length ?? 0,
+      droppedMessages: compacted.pruneResult.droppedMessages.length,
+      reason: "run_start",
+      success: Boolean(compacted.summary && compacted.summaryMessage),
     });
 
     if (compacted.summary && compacted.summaryMessage) {
@@ -908,6 +952,12 @@ export class Agent {
             reasoning: this.reasoning,
             maxTurns: this.maxTurns,
             contextTokens: this.contextTokens,
+            maxOutputTokens: this.modelDef.maxTokens,
+            compactHooks: this.compactHooks,
+            systemPromptMeta: this.systemPromptTelemetry ?? {
+              hashShort: crypto.createHash("sha256").update(systemPrompt).digest("hex").slice(0, 16),
+              layerCount: 0,
+            },
             getSteeringMessages,
             checkToolApproval,
             appendMessage: (sk, msg) => this.sessions.append(sk, msg),

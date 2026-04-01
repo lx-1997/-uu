@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import type { ChannelSource, RiskLevel } from './types.js';
+import { stripShellPrefixBeforeHeredoc } from './channel-safety.js';
 
 type GuardInput = {
   toolName: string;
@@ -68,6 +69,11 @@ const DEVICE_ALLOWED_WRITE_PREFIXES = [
   '/home',
   '/root/openclaw',
   '/root/.openclaw',
+  /** ROS/colcon 常见工作区（此前仅放行 /root/.openclaw，导致 /root/ros2_ws 等写入被误拦） */
+  '/root/ros2_ws',
+  '/root/ws',
+  '/root/colcon_ws',
+  '/root/catkin_ws',
   '/etc/openclaw',
   '/opt/openclaw',
 ];
@@ -174,8 +180,9 @@ function getCommandRisk(command: string): RiskLevel {
 }
 
 function checkDangerousCommand(command: string): string | null {
+  const shellOnly = stripShellPrefixBeforeHeredoc(command);
   for (const entry of DANGEROUS_COMMAND_PATTERNS) {
-    if (entry.pattern.test(command)) {
+    if (entry.pattern.test(shellOnly)) {
       return entry.reason;
     }
   }
@@ -244,8 +251,9 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
 
   if (toolName === 'device_exec' && permission.commandDangerGuardEnabled) {
     if (command) {
+      const shellOnly = stripShellPrefixBeforeHeredoc(command);
       for (const pat of DEVICE_DANGEROUS_DELETE_PATTERNS) {
-        if (pat.test(command)) {
+        if (pat.test(shellOnly)) {
           return { blocked: true, reason: '禁止在板端破坏 OpenClaw 核心文件或服务', risk: 'high' };
         }
       }

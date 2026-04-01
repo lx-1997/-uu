@@ -1,9 +1,11 @@
 /**
  * RDK Studio Agent — 设备工具集
  *
- * 遵循 openclaw-mini 的 Tool 接口，每个工具定义：
- * - name: LLM 调用时使用的名称
- * - description: 告诉 LLM 什么时候用
+ * 遵循 openclaw-mini 的 Tool 接口。`description` / `inputSchema` 的读者是 **发起 tool_calls 的编排模型**，
+ * 用于路由、互斥与参数含义；不是写给终端用户的产品说明。措辞应突出：何时选用、与相邻工具边界、如何解读返回。
+ *
+ * - name: 模型调用时使用的名称
+ * - description: 何时用、不用何工具代替
  * - inputSchema: JSON Schema 参数定义
  * - execute: 实际执行函数
  */
@@ -250,9 +252,10 @@ function deviceExecTool(deviceId: string): Tool<{ command: string }> {
   return {
     name: 'device_exec',
     description:
+      '读者=编排模型。在板上执行 shell；返回 stdout/stderr 文本供你解析，勿当作用户可见文案逐字念出。\n' +
       '在 RDK 设备上通过 SSH 执行 shell 命令。\n' +
-      '用途：运行任意命令、安装软件、查看系统状态、编译代码、管理进程等。\n\n' +
-      'IMPORTANT 使用规则：\n' +
+      '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
+      '规则：\n' +
       '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
       '- 长时间命令（编译、下载）加 timeout 参数或用 nohup 后台执行\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
@@ -264,7 +267,10 @@ function deviceExecTool(deviceId: string): Tool<{ command: string }> {
     inputSchema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: '要执行的 shell 命令' },
+        command: {
+          type: 'string',
+          description: '单条 shell 命令字符串（由编排模型构造）；将直接在设备上执行，非展示给用户的说明文字',
+        },
       },
       required: ['command'],
     },
@@ -296,9 +302,10 @@ function deviceFileReadTool(deviceId: string): Tool<{ path: string }> {
   return {
     name: 'device_file_read',
     description:
+      '读者=编排模型。拉取设备文件全文供你推理；大文件注意 token。\n' +
       '读取 RDK 设备上的文件内容。\n' +
-      '用途：查看配置文件、日志、代码、脚本等文本文件。\n\n' +
-      '使用规则：\n' +
+      '选用时机：读配置/源码/日志；**禁止**用 device_exec+cat 代替。\n\n' +
+      '规则：\n' +
       '- ALWAYS 使用绝对路径（如 /root/.openclaw/openclaw.json）\n' +
       '- 大文件（>100KB）建议先用 device_exec 查看行数再决定是否全量读取\n' +
       '- 二进制文件（图片、模型）不要用此工具，用 device_file_download_to_local 下载后处理\n' +
@@ -320,12 +327,14 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
   return {
     name: 'device_file_write',
     description:
+      '读者=编排模型。整文件覆盖写入；路径须落在策略允许前缀内，否则守卫会拒，你从错误里改参而非改绕路 echo。\n' +
       '写入文件到 RDK 设备。\n' +
-      '用途：创建脚本、配置文件、代码文件、systemd unit 等。\n\n' +
-      '使用规则：\n' +
+      '选用时机：创建/覆盖脚本、配置、源码；**禁止**用 device_exec+heredoc/echo 拼大段内容代替。\n\n' +
+      '规则：\n' +
       '- IMPORTANT: 写入已存在的文件前，ALWAYS 先用 device_file_read 读取当前内容\n' +
       '- 此工具会完全覆盖目标文件，不是追加\n' +
-      '- 目录不存在时不会自动创建，需先用 device_exec 创建目录\n' +
+      '- 典型允许路径：/userdata、/tmp、/home/...、/root/ros2_ws/...、/root/.openclaw/...（勿写到未允许的系统路径）\n' +
+      '- 父目录不存在时上传流程会尝试 mkdir -p；若仍失败再用 device_exec 建目录\n' +
       '- NEVER 用 device_exec + echo/tee/heredoc 替代此工具\n' +
       '- 写入后建议用 device_file_read 验证内容正确',
     inputSchema: {
@@ -347,8 +356,9 @@ function deviceFileListTool(deviceId: string): Tool<{ path?: string }> {
   return {
     name: 'device_file_list',
     description:
+      '读者=编排模型。列目录供你决定路径；**禁止**用 device_exec+ls 代替。\n' +
       '列出 RDK 设备上的目录内容。\n\n' +
-      '使用规则：\n' +
+      '规则：\n' +
       '- 默认列出 /root 目录\n' +
       '- ALWAYS 使用绝对路径\n' +
       '- NEVER 用 device_exec + ls 替代此工具',
@@ -368,9 +378,10 @@ function deviceDiagnoseTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'device_diagnose',
     description:
+      '读者=编排模型。结构化拉取板载指标，供你判断环境是否健康。\n' +
       '获取 RDK 设备硬件诊断信息：CPU 温度、BPU 负载、内存使用、磁盘空间、运行时间。\n\n' +
-      '使用规则：\n' +
-      '- 用户问"板子状态/温度/内存/磁盘"时 ALWAYS 使用此工具\n' +
+      '规则：\n' +
+      '- 任务需要板子状态/温度/内存/磁盘时 ALWAYS 使用此工具（不必等「用户口头问到」才用）\n' +
       '- 温度值需除以 1000 转为摄氏度（如 65000 → 65°C）\n' +
       '- BPU ratio 值 0-100 表示负载百分比\n' +
       '- 可与 board_openclaw_assess 并行调用',

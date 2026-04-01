@@ -44,6 +44,7 @@ export {
   estimateMessageTokens,
   estimateMessagesChars,
   estimateMessagesTokens,
+  estimateTokensForText,
 } from "./tokens.js";
 export {
   microcompact,
@@ -51,3 +52,11 @@ export {
   type MicroCompactConfig,
   type MicroCompactResult,
 } from "./microcompact.js";
+export {
+  getEffectiveContextWindowTokens,
+  getProactiveCompactThreshold,
+  getContextWarningThreshold,
+  shouldProactiveCompactByWindowEconomics,
+  AUTOCOMPACT_BUFFER_TOKENS,
+  SUMMARY_OUTPUT_CAP_TOKENS,
+} from "./window-economics.js";

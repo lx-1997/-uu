@@ -168,9 +168,10 @@ export function boardOpenClawDelegateTool(
   return {
     name: "board_openclaw_delegate",
     description:
-      "将任务委派给板端 OpenClaw 执行。这是 RDKClaw 与板端协作的核心工具。\n\n" +
-      "IMPORTANT 使用规则：\n" +
-      "- ALWAYS 在委派前先用 board_openclaw_assess 评估板端能力，确认可行后再委派\n" +
+      "读者=编排模型。把**一段板端责任**交给板端 OpenClaw 在其会话里执行（多步推理、技能链、迭代排障），不是「多调几次 SSH」的别名。\n" +
+      "将任务委派给板端 OpenClaw。RDKClaw 与板端协作的核心执行工具。\n\n" +
+      "规则：\n" +
+      "- ALWAYS 在委派前先用 board_openclaw_assess；assess 认为可承接后再 delegate（勿跳过 assess）\n" +
       "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
       "- ALWAYS 在 guidance 中写明验收标准（怎样算成功）\n" +
       "- 若任务可能超出板端当前技能，在 guidance 中提示：可先用 find-skills（SkillHub）检索/安装再执行\n" +

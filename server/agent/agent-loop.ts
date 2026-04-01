@@ -48,6 +48,14 @@ import { createMiniAgentStream, type MiniAgentEvent, type MiniAgentResult } from
 import { abortable } from "./tools/abort.js";
 import { convertMessagesToPi } from "./message-convert.js";
 import type { ToolHookRegistry } from "./tool-hooks.js";
+import type { CompactHookRegistry } from "./compact-hooks.js";
+import {
+  getEffectiveContextWindowTokens,
+  getProactiveCompactThreshold,
+  shouldProactiveCompactByWindowEconomics,
+} from "./context/window-economics.js";
+import { estimateMessagesTokens, estimateTokensForText } from "./context/tokens.js";
+import { shouldTriggerCompaction } from "./context/index.js";
 
 // ============== 类型定义 ==============
 
@@ -116,6 +124,12 @@ export interface AgentLoopParams {
   toolHooks?: ToolHookRegistry;
   /** 外部 abort 信号 */
   abortSignal: AbortSignal;
+  /** 模型 max_output，用于有效上下文窗口经济学 */
+  maxOutputTokens?: number;
+  /** Compaction 生命周期 hooks */
+  compactHooks?: CompactHookRegistry;
+  /** 遥测：系统提示 hash 与分层数（由 Agent 传入） */
+  systemPromptMeta?: { hashShort: string; layerCount: number };
 }
 
 // ============== skipToolCall (对齐 openclaw) ==============
@@ -218,6 +232,9 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
       appendMessage,
       prepareCompaction,
       abortSignal,
+      maxOutputTokens: maxOutputTokensParam,
+      compactHooks,
+      systemPromptMeta,
     } = params;
 
     let { compactionSummary } = params;
@@ -249,6 +266,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
       // ========== 外层循环 (follow-ups) ==========
       // 对应 OpenClaw: agent-loop.js outer while(true) loop
       outerLoop: while (true) {
+        let proactiveCompactionAttempted = false;
         let hasMoreToolCalls = true;
 
         // ========== 内层循环 (tools + steering) ==========
@@ -293,10 +311,67 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
             }
           }
 
-          // ===== Prune: 每轮都执行 =====
+          const maxOut = maxOutputTokensParam ?? modelDef.maxTokens ?? 8192;
+          const effectiveContextTokens = getEffectiveContextWindowTokens(contextTokens, maxOut);
+
+          // ===== 主动压缩（窗口经济学）：在 API 报 overflow 前触发 LLM 摘要 =====
+          if (
+            !proactiveCompactionAttempted &&
+            turns >= 2 &&
+            !abortSignal.aborted &&
+            shouldProactiveCompactByWindowEconomics({
+              estimatedPromptTokens:
+                estimateMessagesTokens(currentMessages) + estimateTokensForText(systemPrompt),
+              effectiveContextWindowTokens: effectiveContextTokens,
+            }) &&
+            shouldTriggerCompaction({
+              messages: currentMessages,
+              contextWindowTokens: effectiveContextTokens,
+            })
+          ) {
+            proactiveCompactionAttempted = true;
+            try {
+              await compactHooks?.runPreHooks({
+                sessionKey,
+                runId,
+                messages: currentMessages,
+                reason: "proactive",
+              });
+              const prep = await prepareCompaction({
+                messages: currentMessages,
+                sessionKey,
+                runId,
+              });
+              await compactHooks?.runPostHooks({
+                sessionKey,
+                runId,
+                summaryChars: prep.summary?.length ?? 0,
+                droppedMessages: 0,
+                reason: "proactive",
+                success: Boolean(prep.summary && prep.summaryMessage),
+              });
+              if (prep.summary && prep.summaryMessage) {
+                compactionSummary = prep.summaryMessage;
+                contextCompactions++;
+                stream.push({
+                  type: "proactive_compaction",
+                  estimatedTokens:
+                    estimateMessagesTokens(currentMessages) + estimateTokensForText(systemPrompt),
+                  threshold: getProactiveCompactThreshold(effectiveContextTokens),
+                  effectiveContextTokens,
+                });
+                turns--;
+                continue;
+              }
+            } catch (pe) {
+              console.warn("[agent-loop] proactive compaction failed:", describeError(pe));
+            }
+          }
+
+          // ===== Prune: 每轮都执行（使用有效上下文上限） =====
           const pruneResult = pruneContextMessages({
             messages: currentMessages,
-            contextWindowTokens: contextTokens,
+            contextWindowTokens: effectiveContextTokens,
           });
           let messagesForModel = pruneResult.messages;
           if (compactionSummary) {
@@ -462,10 +537,24 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 } else {
                   // Level 2: LLM 摘要压缩
                   try {
+                    await compactHooks?.runPreHooks({
+                      sessionKey,
+                      runId,
+                      messages: currentMessages,
+                      reason: "overflow",
+                    });
                     const overflowPrep = await prepareCompaction({
                       messages: currentMessages,
                       sessionKey,
                       runId,
+                    });
+                    await compactHooks?.runPostHooks({
+                      sessionKey,
+                      runId,
+                      summaryChars: overflowPrep.summary?.length ?? 0,
+                      droppedMessages: 0,
+                      reason: "overflow",
+                      success: Boolean(overflowPrep.summary && overflowPrep.summaryMessage),
                     });
                     if (overflowPrep.summary && overflowPrep.summaryMessage) {
                       compactionSummary = overflowPrep.summaryMessage;
@@ -820,6 +909,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
       // ========== 外层循环结束 ==========
 
       // 发射 run_metrics 事件（借鉴 claude-code run_complete）
+      const maxOutMetrics = maxOutputTokensParam ?? modelDef.maxTokens ?? 8192;
+      const effMetrics = getEffectiveContextWindowTokens(contextTokens, maxOutMetrics);
       stream.push({
         type: "run_metrics",
         metrics: {
@@ -834,6 +925,11 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           totalDurationMs: Date.now() - runStartMs,
           firstTokenMs,
           contextCompactions,
+          systemPromptChars: systemPrompt.length,
+          systemPromptHashShort: systemPromptMeta?.hashShort ?? "",
+          effectiveContextTokens: effMetrics,
+          llmCompactionFailureStreak,
+          systemPromptLayerCount: systemPromptMeta?.layerCount ?? 0,
         },
       });
 

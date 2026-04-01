@@ -75,6 +75,8 @@ export type MiniAgentEvent =
   | { type: "output_continuation"; attempt: number; maxAttempts: number }
   /** LLM 摘要压缩连续失败熔断，后续 overflow 跳过 Level 2 直走降级 */
   | { type: "compaction_fuse"; failures: number }
+  /** 窗口经济学：在溢出前主动触发摘要（对齐 claude-code shouldAutoCompact） */
+  | { type: "proactive_compaction"; estimatedTokens: number; threshold: number; effectiveContextTokens: number }
   | { type: "run_metrics"; metrics: RunMetrics };
 
 /** Agent run 的完整执行统计（借鉴 claude-code） */
@@ -90,6 +92,15 @@ export interface RunMetrics {
   totalDurationMs: number;
   firstTokenMs: number | null;
   contextCompactions: number;
+  /** 可观测性：系统提示长度与短 hash（对齐 claude-code betaSessionTracing） */
+  systemPromptChars: number;
+  systemPromptHashShort: string;
+  /** 有效上下文上限（已扣除 max_output 预留） */
+  effectiveContextTokens: number;
+  /** 与 overflow 熔断一致的连续摘要失败计数 */
+  llmCompactionFailureStreak: number;
+  /** 系统提示分层数量 */
+  systemPromptLayerCount: number;
 }
 
 // ============== 结果类型 ==============

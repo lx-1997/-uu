@@ -137,6 +137,7 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
     apiKey,
     temperature: 0.7,
     maxTurns: 10,
+    maxOutputTokens: modelDef.maxTokens ?? 8192,
     contextTokens: modelDef.contextWindow ?? 128000,
 
     async getSteeringMessages() {

@@ -617,6 +617,8 @@ export async function compactHistoryIfNeeded(params: {
   pruningSettings?: Partial<ContextPruningSettings>;
   compactionSettings?: Partial<CompactionSettings>;
   maxTokens?: number;
+  /** 连续压缩失败熔断：仅做 prune 切片，不调用 LLM 摘要（对齐 claude-code autoCompact circuit breaker） */
+  skipLlmCompaction?: boolean;
 }): Promise<{
   summary?: string;
   summaryMessage?: Message;
@@ -653,6 +655,10 @@ export async function compactHistoryIfNeeded(params: {
     pruneResult.totalChars = recalcKept + recalcDropped;
     pruneResult.keptChars = recalcKept;
     pruneResult.droppedChars = recalcDropped;
+  }
+
+  if (params.skipLlmCompaction) {
+    return { pruneResult };
   }
 
   const resolvedSettings = { ...DEFAULT_COMPACTION_SETTINGS, ...params.compactionSettings };
