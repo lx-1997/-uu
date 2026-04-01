@@ -2,20 +2,17 @@ import { useEffect, useLayoutEffect, useReducer, useRef } from 'react';
 
 /**
  * 揭示节奏（与产品对外表述对齐时 Dock 使用 `natural`）：
- * - `natural`：拟人步频（标点略停、缓冲落后时略加速），即「动态波动」的展示层实现。
+ * - `natural`：拟人步频（标点略停、缓冲落后时批量加速），比早期版本更贴 SSE，仍保留句读节奏。
  * - `uniform`：固定间隔、每步一字，仅用于刻意匀速演示，不对应默认产品话术。
  */
 export type StreamRevealPacing = 'natural' | 'uniform';
 
-/** 匀速模式：每字间隔（ms），约 28ms ≈ 36 字/秒 */
-const UNIFORM_CHAR_INTERVAL_MS = 28;
+/** 匀速模式：每字间隔（ms），约 22ms ≈ 45 字/秒 */
+const UNIFORM_CHAR_INTERVAL_MS = 22;
 
-/** 微调节奏：略偏快、少「粘滞」，展示更贴 SSE；尾段只做极轻放慢 */
-function phaseDelayMultiplier(visibleLen: number, behind: number): number {
-  let m = 1;
-  if (visibleLen < 24) m *= 0.9;
-  if (behind > 6 && behind < 28) m *= 1.05;
-  return m;
+/** 微调节奏：首段略加速；中段不再人为放慢，避免「跟手」感被拖住 */
+function phaseDelayMultiplier(visibleLen: number): number {
+  return visibleLen < 20 ? 0.82 : 1;
 }
 
 export type StreamRevealView = {
@@ -120,31 +117,33 @@ export function useStreamRevealSegments(
       n = 1;
       delayMs = UNIFORM_CHAR_INTERVAL_MS;
     } else {
-      const TAIL_SINGLE = 32;
+      /** 尾段仍逐字，保证收尾与 Markdown 切分稳定；更早进入 2～4 字批量以追赶 SSE */
+      const TAIL_SINGLE = 22;
       n =
         behind <= TAIL_SINGLE
           ? 1
-          : behind > 160
+          : behind > 120
             ? 4
-            : behind > 88
+            : behind > 52
               ? 3
-              : behind > 30
+              : behind > 16
                 ? 2
                 : 1;
 
       const ch = full[v] ?? '';
       if (n === 1) {
-        if (/[。！？!?]/.test(ch)) delayMs = 54;
-        else if (/[，、；：;,]/.test(ch)) delayMs = 28;
-        else if (ch === '\n') delayMs = 20;
-        else if (/\s/.test(ch)) delayMs = 5;
-        else delayMs = 9;
-        delayMs = Math.round(delayMs * phaseDelayMultiplier(v, behind));
-        delayMs = Math.max(3, delayMs);
+        // 句读仍略停，比例与旧版相近，绝对值下调以整体更轻快
+        if (/[。！？!?]/.test(ch)) delayMs = 36;
+        else if (/[，、；：;,]/.test(ch)) delayMs = 18;
+        else if (ch === '\n') delayMs = 12;
+        else if (/\s/.test(ch)) delayMs = 4;
+        else delayMs = 6;
+        delayMs = Math.round(delayMs * phaseDelayMultiplier(v));
+        delayMs = Math.max(2, delayMs);
       } else {
-        delayMs = Math.max(6, 16 - Math.floor(behind / 56));
-        delayMs = Math.round(delayMs * phaseDelayMultiplier(v, behind));
-        delayMs = Math.max(5, delayMs);
+        delayMs = Math.max(4, 11 - Math.floor(behind / 44));
+        delayMs = Math.round(delayMs * phaseDelayMultiplier(v));
+        delayMs = Math.max(3, delayMs);
       }
     }
 
