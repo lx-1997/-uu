@@ -38,7 +38,8 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.deploy.failMsg': '**Deploy failed:** {{detail}}',
   'oc.deployPoll.doneToast': 'OpenClaw one-click deploy finished',
   'oc.deployPoll.failToast': 'OpenClaw deploy failed — check the OpenClaw page log and retry',
-  'oc.deployPoll.interrupted': 'Could not fetch deploy progress repeatedly (network or server issue). Open the OpenClaw page for logs, check your network, then retry deploy.',
+  'oc.deployPoll.interrupted':
+    'Could not fetch deploy progress for an extended time (common while flashing or when the PC is busy); the device job may still be running. Open the OpenClaw page for logs, or retry once the network is stable.',
   'oc.chat.emptyResponse': 'OpenClaw returned no usable content. Check gateway or device credentials.',
   'oc.chat.errorPrefix': '**Error:**',
   'oc.toast.chatErr': 'OpenClaw chat error',

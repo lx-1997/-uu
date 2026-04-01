@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import iconv from 'iconv-lite';
 import type { ChatMessage, Device, StudioUiHints } from '../shared/types.js';
 import { readDevices, writeDevices } from './storage.js';
 import {
@@ -2217,6 +2218,42 @@ app.post('/api/devices/connect', async (request, response) => {
 // 安全要点：configure 入口对 interfaceName / pcIp 做格式校验；Windows 网卡名禁止 shell 元字符；
 // 实际改 IP 使用 netsh / ifconfig / ip 参数化调用，勿拼接未校验的用户输入。
 
+/** 中文等本地化 Windows 下 netsh/cmd 多为系统 ANSI（GBK）；按 UTF-8 读取会乱码且解析失败 */
+function decodeWindowsConsoleBytes(buf: Buffer): string {
+  if (buf.length === 0) return '';
+  return iconv.decode(buf, 'gbk');
+}
+
+function isWindowsNetshInterfaceConnected(state: string): boolean {
+  const lc = state.toLowerCase();
+  if (lc.includes('disconnected') || lc.includes('disconnecting')) return false;
+  if (lc === 'connecting' || lc.startsWith('connecting ')) return false;
+  if (/断开|未连接|禁用/i.test(state)) return false;
+  return lc.includes('connected') || /已连接/i.test(state);
+}
+
+/** 解析 `netsh interface ipv4 show interfaces` 表格行（与系统语言无关：按列拆分） */
+function parseNetshIpv4ShowInterfacesLines(raw: string): Array<{ name: string }> {
+  const EXCLUDED_WIN_NIC_KEYWORDS = [
+    'wlan', 'loopback', 'bluetooth', 'vpn', 'teredo', 'isatap', '6to4', 'wi-fi', 'wi fi',
+    '无线', '蓝牙', 'hyper-v', 'vethernet', 'virtualbox', 'vmware',
+  ];
+  const out: Array<{ name: string }> = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!/^\d/.test(trimmed)) continue;
+    const parts = trimmed.split(/\s{2,}/).filter(Boolean);
+    if (parts.length < 5) continue;
+    const state = parts[3];
+    const name = parts.slice(4).join(' ').trim();
+    if (!name || !isWindowsNetshInterfaceConnected(state)) continue;
+    const low = `${name}\n${state}`.toLowerCase();
+    if (EXCLUDED_WIN_NIC_KEYWORDS.some(kw => low.includes(kw))) continue;
+    out.push({ name });
+  }
+  return out;
+}
+
 /**
  * 跨平台枚举闪连候选网卡（与 old-studio ConnectionBehaviorEtherList 一致的前缀过滤，
  * 并在 macOS 上进一步排除 Wi-Fi / Thunderbolt 等无关接口）。
@@ -2289,28 +2326,16 @@ async function listTypecCandidateNics(): Promise<Array<{ name: string; portType?
       .map(name => ({ name }));
   }
 
-  // Windows: netsh interface ipv4 show interfaces，保留 connected 且排除 WLAN/Loopback/Bluetooth
-  const raw = await new Promise<string>((resolve, reject) => {
+  // Windows: netsh 在中文系统上为 GBK 输出，且「已连接」不等同于英文 connected，需按列解析
+  const buf = await new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
     const child = spawn('cmd', ['/c', 'netsh interface ipv4 show interfaces'], { timeout: 5000 });
-    let out = '';
-    child.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
-    child.on('close', (code) => code === 0 ? resolve(out) : reject(new Error(`netsh exit ${code}`)));
+    child.stdout?.on('data', (d: Buffer) => { chunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d)); });
+    child.on('close', (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`netsh exit ${code}`))));
     child.on('error', reject);
   });
-  // 排除无线网卡、回环接口、蓝牙、VPN 等不适合 TypeC 闪联的接口
-  const EXCLUDED_WIN_NIC_KEYWORDS = ['wlan', 'loopback', 'bluetooth', 'vpn', 'teredo', 'isatap', '6to4'];
-  return raw.split('\n')
-    .filter(line => {
-      const lc = line.toLowerCase();
-      return lc.includes('connected')
-        && !lc.includes('disconnected')
-        && !EXCLUDED_WIN_NIC_KEYWORDS.some(kw => lc.includes(kw));
-    })
-    .map(line => {
-      const idx = line.indexOf('connected');
-      return { name: line.substring(idx + 9).trim() };
-    })
-    .filter(item => item.name.length > 0);
+  const raw = decodeWindowsConsoleBytes(buf);
+  return parseNetshIpv4ShowInterfacesLines(raw);
 }
 
 function isValidTypecInterfaceName(name: string): boolean {
@@ -2541,11 +2566,16 @@ app.post('/api/typec/configure', async (request, response) => {
       const spawnNetsh = (args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> =>
         new Promise((resolve, reject) => {
           const child = spawn('netsh', args, { timeout: 15000, windowsHide: true });
-          let stdout = '';
-          let stderr = '';
-          child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-          child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-          child.on('close', (code) => resolve({ code, stdout, stderr }));
+          const outChunks: Buffer[] = [];
+          const errChunks: Buffer[] = [];
+          child.stdout?.on('data', (d: Buffer) => { outChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d)); });
+          child.stderr?.on('data', (d: Buffer) => { errChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d)); });
+          child.on('close', (code) =>
+            resolve({
+              code,
+              stdout: decodeWindowsConsoleBytes(Buffer.concat(outChunks)),
+              stderr: decodeWindowsConsoleBytes(Buffer.concat(errChunks)),
+            }));
           child.on('error', reject);
         });
 
@@ -2989,7 +3019,7 @@ async function executeOpenClawDeployJob(
           setInterval(() => {
             appendDeployOutput(
               job,
-              '\n[Studio] 板端仍在执行（依赖准备或安装可能数分钟无新日志），请耐心等待；可调整 OPENCLAW_INSTALL_TIMEOUT_MS（默认 30 分钟）。\n',
+              '\n[Studio] 约 2 分钟无新终端输出：apt/下载大包时板端可能长时间不刷行（属常见）。npm 安装已用 --loglevel info，正常应陆续有解析/下载日志；若仍仅有本提示，请检查板端网络与磁盘。超时请在「启动 Studio 后端」的环境变量中增大 OPENCLAW_INSTALL_TIMEOUT_MS（毫秒，默认 1800000≈30 分钟）。\n',
             );
           }, heartbeatMs),
         stop: (h: ReturnType<typeof setInterval>) => clearInterval(h),
