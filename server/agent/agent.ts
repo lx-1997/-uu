@@ -60,6 +60,11 @@ import {
 import type { MiniAgentEvent } from "./agent-events.js";
 import { runAgentLoop } from "./agent-loop.js";
 import { installSessionToolResultGuard } from "./session-tool-result-guard.js";
+import {
+  buildSubagentPromptAddon,
+  resolveSpawnToolSet,
+  type SpawnToolScope,
+} from "./spawn-profile.js";
 import type { Model, StreamFunction, ThinkingLevel } from "@mariozechner/pi-ai";
 import { streamSimple, completeSimple, getModel, getEnvApiKey } from "@mariozechner/pi-ai";
 
@@ -613,18 +618,23 @@ export class Agent {
     return `agent:${normalizeAgentId(agentId)}:subagent:${id}`;
   }
 
-  // 子代理工具范围
-  private subagentToolScopes = new Map<string, string>();
+  /** 子代理工具范围（sessions_spawn.toolScope） */
+  private subagentToolScopes = new Map<string, SpawnToolScope>();
+  /**
+   * 本会话最近一次已下发给模型的完整 system（含 Context/Skills/Memory/沙箱），用于 sessions_spawn 复用父快照。
+   */
+  private sessionLastBuiltSystemPrompt = new Map<string, string>();
+  /**
+   * 子代理冻结的 system：父会话快照 + explore/plan/verify 附加段（与 Claude fork 传递已渲染字节对齐）。
+   */
+  private subagentFrozenSystem = new Map<string, string>();
 
-  private static readonly TOOL_SCOPE_SETS: Record<string, Set<string>> = {
-    "read-only": new Set(["read", "list", "grep", "memory_search", "memory_get"]),
-    "device-read": new Set([
-      "read", "list", "grep", "memory_search", "memory_get",
-      "device_file_read", "device_file_list", "device_diagnose",
-      "board_openclaw_status", "board_openclaw_health", "board_openclaw_check",
-      "board_openclaw_logs", "ros_topics", "ros_nodes", "vnc_status", "flash_check",
-    ]),
-  };
+  /** 与会话结束时释放的 system / spawn 缓存，避免 Map 长期堆积 */
+  private forgetSessionSystemCache(sessionKey: string): void {
+    this.sessionLastBuiltSystemPrompt.delete(sessionKey);
+    this.subagentToolScopes.delete(sessionKey);
+    this.subagentFrozenSystem.delete(sessionKey);
+  }
 
   /**
    * 启动子代理
@@ -634,14 +644,22 @@ export class Agent {
     task: string;
     label?: string;
     cleanup?: "keep" | "delete";
-    toolScope?: "read-only" | "device-read" | "full";
+    toolScope?: SpawnToolScope;
   }): Promise<{ runId: string; sessionKey: string }> {
     if (isSubagentSessionKey(params.parentSessionKey)) {
       throw new Error("子代理会话不能再触发子代理");
     }
     const childSessionKey = this.buildSubagentSessionKey(this.agentId);
-    if (params.toolScope && params.toolScope !== "full") {
-      this.subagentToolScopes.set(childSessionKey, params.toolScope);
+    const scope = params.toolScope ?? "full";
+    if (scope !== "full") {
+      this.subagentToolScopes.set(childSessionKey, scope);
+    }
+    const parentSnap =
+      this.sessionLastBuiltSystemPrompt.get(params.parentSessionKey)?.trim() ?? "";
+    const addon = buildSubagentPromptAddon(scope);
+    const frozenBody = [parentSnap, addon.trim()].filter(Boolean).join("\n\n");
+    if (frozenBody) {
+      this.subagentFrozenSystem.set(childSessionKey, frozenBody);
     }
     const runPromise = this.run(childSessionKey, params.task);
     runPromise
@@ -674,7 +692,7 @@ export class Agent {
         });
       })
       .finally(() => {
-        this.subagentToolScopes.delete(childSessionKey);
+        this.forgetSessionSystemCache(childSessionKey);
       });
     return {
       runId: childSessionKey,
@@ -686,6 +704,15 @@ export class Agent {
    * 构建完整系统提示
    */
   private async buildSystemPrompt(params?: { sessionKey?: string }): Promise<string> {
+    const sk0 = params?.sessionKey;
+    if (sk0) {
+      const frozen = this.subagentFrozenSystem.get(sk0);
+      if (frozen !== undefined && frozen.length > 0) {
+        // 快照已含父会话 buildSystemPrompt 全文（含沙箱段）；勿再追加，避免重复 ## 沙箱
+        return frozen;
+      }
+    }
+
     let prompt = this.baseSystemPrompt;
     const availableTools = new Set(this.resolveToolsForRun().map((t) => t.name));
 
@@ -877,14 +904,15 @@ export class Agent {
 
           // 构建系统提示
           const systemPrompt = await this.buildSystemPrompt({ sessionKey });
+          this.sessionLastBuiltSystemPrompt.set(sessionKey, systemPrompt);
 
           // 工具包装: 注入 run-level abort signal + 子代理范围过滤（每轮重新 resolve，避免 setTools 后仍用旧列表）
           const buildToolsForRun = () => {
             let raw = this.resolveToolsForRun();
             const scopeName = this.subagentToolScopes.get(sessionKey);
-            if (scopeName) {
-              const allowed = Agent.TOOL_SCOPE_SETS[scopeName];
-              if (allowed) raw = raw.filter((t) => allowed.has(t.name));
+            const allowed = resolveSpawnToolSet(scopeName);
+            if (allowed) {
+              raw = raw.filter((t) => allowed.has(t.name));
             }
             return raw.map((t) => wrapToolWithAbortSignal(t, runAbortController.signal));
           };
@@ -1103,6 +1131,7 @@ export class Agent {
       sessionKey: sessionIdOrKey,
     });
     await this.sessions.clear(sessionKey);
+    this.forgetSessionSystemCache(sessionKey);
   }
 
   /**

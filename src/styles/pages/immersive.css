@@ -240,6 +240,61 @@
   color: var(--text-secondary);
 }
 
+/* ── 终端页：前端 console 抽屉 ── */
+.immersive-console-logs {
+  width: min(520px, 92vw);
+  max-height: min(420px, 55vh);
+}
+
+.immersive-console-logs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.immersive-console-logs-close {
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.immersive-console-log-empty {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  padding: 8px 0;
+}
+
+.immersive-console-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 4px;
+}
+
+.immersive-console-ts {
+  color: var(--text-muted);
+  margin-right: 6px;
+  user-select: none;
+}
+
+.immersive-console-lvl {
+  margin-right: 6px;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+.immersive-console-line--error .immersive-console-text {
+  color: var(--danger);
+}
+
+.immersive-console-line--warn .immersive-console-text {
+  color: #ca8a04;
+}
+
+.immersive-console-line--debug .immersive-console-lvl,
+.immersive-console-line--debug .immersive-console-text {
+  color: var(--text-muted);
+}
+
 /* ── Quality selector (VNC) ── */
 .immersive-quality {
   display: flex;

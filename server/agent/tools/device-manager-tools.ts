@@ -8,7 +8,6 @@ import { networkInterfaces } from "node:os";
 import QRCode from "qrcode";
 
 const DEFAULT_SSH_USER = "root";
-const DEFAULT_SSH_PASSWORDS = ["sunrise", "root", ""];
 const SCAN_PORT = 22;
 const SCAN_TIMEOUT_MS = 1500;
 
@@ -108,7 +107,7 @@ export const deviceScanTool: Tool<{ subnet?: string }> = {
       return `• ${ip}${tag}`;
     });
 
-    return `发现 ${found.length} 台设备:\n${lines.join("\n")}\n\n可以用 device_connect_ssh 连接新设备。RDK 默认用户名: root，默认密码: sunrise`;
+    return `发现 ${found.length} 台设备:\n${lines.join("\n")}\n\n可用 device_connect_ssh 连接；请传入与设备上一致的 SSH 用户名与密码（未传密码时仅当服务器设置了环境变量 RDK_SSH_PASSWORD 才会尝试单因子登录）。`;
   },
 };
 
@@ -120,13 +119,13 @@ export const deviceConnectTool: Tool<{
 }> = {
   name: "device_connect_ssh",
   description:
-    "通过 SSH 连接一台新的 RDK 设备并添加到 Studio。需要提供 IP 地址，用户名和密码可选（默认 root/sunrise）。在 RDK Studio 主会话中连接成功后会刷新本回合可用工具（含 device_exec 等板端能力）；若当前渠道未注入会话回调，则需再发一条消息。",
+    "通过 SSH 连接一台新的 RDK 设备并添加到 Studio。必填 host；username 默认 root；password 应与设备实际口令一致。若省略 password，仅当进程环境变量 RDK_SSH_PASSWORD 已设置时才会用该值尝试一次（不再自动猜测 sunrise/root）。连接成功后会刷新本会话的板端工具列表。",
   inputSchema: {
     type: "object",
     properties: {
       host: { type: "string", description: "设备 IP 地址，如 192.168.1.100" },
       username: { type: "string", description: "SSH 用户名（默认 root）" },
-      password: { type: "string", description: "SSH 密码（默认 sunrise）" },
+      password: { type: "string", description: "SSH 密码（与设备一致；省略时仅尝试 RDK_SSH_PASSWORD 环境变量）" },
       port: { type: "number", description: "SSH 端口（默认 22）" },
     },
     required: ["host"],
@@ -135,7 +134,16 @@ export const deviceConnectTool: Tool<{
     const host = input.host.trim();
     const port = input.port ?? 22;
     const username = input.username?.trim() || DEFAULT_SSH_USER;
-    const passwords = input.password ? [input.password] : DEFAULT_SSH_PASSWORDS;
+    const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
+    const passwords = input.password
+      ? [input.password]
+      : envPwd
+        ? [envPwd]
+        : [];
+
+    if (passwords.length === 0) {
+      return "请提供参数 password（与设备 SSH 口令一致），或在运行 Studio 服务端的环境中设置 RDK_SSH_PASSWORD。已取消自动尝试多种默认密码。";
+    }
 
     let connectedPassword = "";
     let lastError = "";
@@ -150,11 +158,8 @@ export const deviceConnectTool: Tool<{
       }
     }
 
-    if (!connectedPassword && !input.password) {
-      return `SSH 连接失败（尝试了默认密码）: ${lastError}\n请提供正确的密码后重试。`;
-    }
     if (!connectedPassword) {
-      return `SSH 连接失败: ${lastError}\n请检查 IP 地址、用户名和密码是否正确。`;
+      return `SSH 连接失败: ${lastError}\n请检查 IP、端口、用户名与密码是否与设备一致。`;
     }
 
     const devices = await readDevices();

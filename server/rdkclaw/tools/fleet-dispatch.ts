@@ -25,7 +25,7 @@ import type { RdkPlatform } from '../../../shared/board-types.js';
 function resolveDevicePassword(device: Device) {
   const persisted = (device as Device & { password?: string }).password ?? '';
   const envPwd = process.env.RDK_SSH_PASSWORD ?? '';
-  return persisted || envPwd || device.username;
+  return persisted || envPwd;
 }
 
 function toBoardDevice(device: Device) {

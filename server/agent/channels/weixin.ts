@@ -455,6 +455,7 @@ export class WeixinPollingChannel {
     const chunks: string[] = [];
     let finalText = "";
     const mediaPaths: MediaPath[] = [];
+    let lastWeixinRunProgressAt = 0;
 
     try {
       for await (const event of this.rdkclaw.streamChat({
@@ -480,6 +481,14 @@ export class WeixinPollingChannel {
           if (delta) chunks.push(delta);
         } else if (event.type === "message_end") {
           finalText = String(event.data?.text ?? "").trim();
+        } else if (event.type === "run_progress") {
+          const msg = String(event.data?.message ?? "").trim();
+          if (!msg) continue;
+          const now = Date.now();
+          if (now - lastWeixinRunProgressAt > 10_000) {
+            lastWeixinRunProgressAt = now;
+            await poller.client.sendText(fromUserId, contextToken, msg.slice(0, 450)).catch(() => {});
+          }
         } else if (event.type === "tool_start") {
           const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");
           const executor = String(event.data?.executor || (toolName === "board_openclaw_delegate" ? "board_openclaw" : "rdkclaw_local"));

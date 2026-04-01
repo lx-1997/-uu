@@ -10,6 +10,7 @@ import {
   RDK_DRIVER_CP210X_USB2UART_ZIP,
   RDK_OPEN_USB_SERIAL_EVENT,
 } from '../utils/web-serial';
+import { appendStudioLog } from '../utils/console-log-capture';
 
 type ConnMethod = 'manual' | 'usb' | 'typec';
 type Step = 'method' | 'configure' | 'verify';
@@ -125,12 +126,14 @@ export default function AddDeviceModal() {
       addToast(t('addDevice.typec.selectNic', '请选择 TypeC 虚拟网卡'), 'warning');
       return;
     }
+    appendStudioLog('info', `[TypeC] 开始闪连流程，选中网卡：${selectedInterface}`);
     setTypecStep('configuring');
     setTypecConfiguring(true);
 
     configureTypecInterface(selectedInterface, TYPEC_PC_IP, TYPEC_NETMASK)
       .then((res) => {
         if (!res.verified) {
+          appendStudioLog('warn', '[TypeC] 本机 IP 校验未通过（verified=false），请确认网卡是否选对');
           addToast(t('addDevice.typec.ipNotVerified', 'IP 配置未生效，请检查网卡选择是否正确'), 'warning');
           setTypecConfiguring(false);
           setTypecStep('select-nic');
@@ -148,12 +151,18 @@ export default function AddDeviceModal() {
         setStep('verify');
         setVerifying(true);
         setVerifyOk(false);
+        appendStudioLog('info', `[TypeC] POST /api/devices/verify host=${TYPEC_DEVICE_IP} port=22`);
         verifyDeviceConnection({ host: TYPEC_DEVICE_IP, port: 22, username: 'root', password: 'root' })
-          .then(() => { setVerifying(false); setVerifyOk(true); })
+          .then(() => {
+            appendStudioLog('info', '[TypeC] SSH 验证成功');
+            setVerifying(false);
+            setVerifyOk(true);
+          })
           .catch((error) => {
             setVerifying(false);
             setVerifyOk(false);
             const raw = error instanceof Error ? error.message : t('addDevice.err.verify', '连接验证失败');
+            appendStudioLog('error', `[TypeC] SSH 验证失败：${raw}`);
             if (raw.includes('[SSH_CONNECT_TIMEOUT]')) {
               addToast(t('addDevice.typec.timeout', '闪连超时：请确认 TypeC 线缆已连接到 RDK X5'), 'warning');
             } else if (raw.includes('[SSH_AUTH_FAILED]')) {
@@ -167,6 +176,7 @@ export default function AddDeviceModal() {
         setTypecConfiguring(false);
         setTypecStep('select-nic');
         const msg = error instanceof Error ? error.message : '网卡配置失败';
+        appendStudioLog('error', `[TypeC] 闪连中断：${msg}`);
         addToast(msg, 'error');
       });
   };

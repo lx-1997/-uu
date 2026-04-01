@@ -80,6 +80,10 @@ function buildS100XburnGuiOpenDialogOptions() {
 }
 
 let mainWin = null;
+/** 主窗口日志镜像（供独立「控制台日志」Electron 窗口；与渲染进程缓冲同步） */
+let consoleLogMirror = [];
+const CONSOLE_LOG_MIRROR_MAX = 2500;
+let consoleLogWin = null;
 /** 桌面悬浮球（仅桌面包；与主窗口独立） */
 let floatingBallWin = null;
 /** 主进程定时按全局光标移动悬浮窗（避免透明小窗在 setBounds 后指针落在窗外，renderer 收不到 pointermove） */
@@ -310,6 +314,177 @@ ipcMain.handle('rdk:save-text-file', async (_event, payload) => {
 
 /* ── 判断是否打包模式 ── */
 const isPacked = app.isPackaged;
+
+/**
+ * 安装系统菜单栏。此前未调用 SetApplicationMenu 时，Electron 在部分平台/版本下不会注册
+ * 「切换开发者工具」快捷键，开发态难以查看 Console / Network。
+ * - 未打包：视图菜单含「切换开发者工具」（⌘⌥I / Ctrl+Shift+I）
+ * - 已打包：同结构但不含开发者工具项
+ * - Windows 主窗口 autoHideMenuBar：按 Alt 可临时显示菜单栏
+ */
+function installApplicationMenu() {
+  const isMac = process.platform === 'darwin';
+  const includeDevTools = !isPacked;
+
+  const viewItems = [
+    { role: 'reload' },
+    { role: 'forceReload' },
+    ...(includeDevTools ? [{ role: 'toggleDevTools' }] : []),
+    { type: 'separator' },
+    { role: 'resetZoom' },
+    { role: 'zoomIn' },
+    { role: 'zoomOut' },
+    ...(isMac ? [] : [{ type: 'separator' }, { role: 'togglefullscreen' }]),
+  ];
+
+  const template = [
+    ...(isMac
+      ? [{
+          label: app.name,
+          submenu: [
+            { role: 'about' },
+            { type: 'separator' },
+            { role: 'services' },
+            { type: 'separator' },
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            { type: 'separator' },
+            { role: 'quit' },
+          ],
+        }]
+      : []),
+    {
+      label: isMac ? '文件' : 'File',
+      submenu: [isMac ? { role: 'close' } : { role: 'quit' }],
+    },
+    {
+      label: isMac ? '编辑' : 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac
+          ? [
+              { role: 'pasteAndMatchStyle' },
+              { role: 'delete' },
+              { role: 'selectAll' },
+            ]
+          : [{ role: 'delete' }, { type: 'separator' }, { role: 'selectAll' }]),
+      ],
+    },
+    { label: isMac ? '视图' : 'View', submenu: viewItems },
+    ...(isMac ? [{ role: 'windowMenu' }] : []),
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+ipcMain.handle('rdk:open-devtools', () => {
+  if (!mainWin || mainWin.isDestroyed()) return { ok: false };
+  mainWin.webContents.openDevTools();
+  return { ok: true };
+});
+
+function createConsoleLogWindow() {
+  if (consoleLogWin && !consoleLogWin.isDestroyed()) {
+    consoleLogWin.show();
+    consoleLogWin.focus();
+    try {
+      consoleLogWin.moveTop();
+    } catch {
+      /* noop */
+    }
+    return;
+  }
+  consoleLogWin = new BrowserWindow({
+    width: 960,
+    height: 700,
+    minWidth: 520,
+    minHeight: 320,
+    title: 'RDK Studio · 控制台日志',
+    icon: resolveWindowIcon(),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'console-log-preload.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  const htmlPath = path.join(__dirname, 'console-log-view.html');
+  consoleLogWin.loadFile(htmlPath).catch((err) => {
+    console.error('[console-log] loadFile failed:', err);
+  });
+  consoleLogWin.on('closed', () => {
+    consoleLogWin = null;
+  });
+}
+
+ipcMain.handle('rdk:console-log-open-window', () => {
+  try {
+    createConsoleLogWindow();
+    return { ok: true };
+  } catch (e) {
+    console.error('[console-log] open failed:', e);
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('rdk:console-log-snapshot', (ev) => {
+  if (!consoleLogWin || consoleLogWin.isDestroyed() || ev.sender !== consoleLogWin.webContents) {
+    return { lines: [] };
+  }
+  return { lines: consoleLogMirror.slice() };
+});
+
+ipcMain.on('rdk:studio-log-mirror', (ev, line) => {
+  if (!mainWin || mainWin.isDestroyed() || ev.sender !== mainWin.webContents) return;
+  if (!line || typeof line !== 'object') return;
+  consoleLogMirror.push(line);
+  if (consoleLogMirror.length > CONSOLE_LOG_MIRROR_MAX) {
+    consoleLogMirror = consoleLogMirror.slice(-CONSOLE_LOG_MIRROR_MAX);
+  }
+  if (consoleLogWin && !consoleLogWin.isDestroyed()) {
+    try {
+      consoleLogWin.webContents.send('rdk:console-log-append', line);
+    } catch {
+      /* noop */
+    }
+  }
+});
+
+ipcMain.on('rdk:studio-log-clear-mirror', (ev) => {
+  if (!mainWin || mainWin.isDestroyed() || ev.sender !== mainWin.webContents) return;
+  consoleLogMirror = [];
+  if (consoleLogWin && !consoleLogWin.isDestroyed()) {
+    try {
+      consoleLogWin.webContents.send('rdk:console-log-clear');
+    } catch {
+      /* noop */
+    }
+  }
+});
+
+ipcMain.on('rdk:console-log-clear-request', (ev) => {
+  if (!consoleLogWin || consoleLogWin.isDestroyed() || ev.sender !== consoleLogWin.webContents) return;
+  consoleLogMirror = [];
+  try {
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('rdk:studio-log-clear-ui');
+    }
+  } catch {
+    /* noop */
+  }
+  try {
+    consoleLogWin.webContents.send('rdk:console-log-clear');
+  } catch {
+    /* noop */
+  }
+});
 
 /* ── 获取应用根目录（ASAR 内） ── */
 function getAppRoot() {
@@ -1352,6 +1527,7 @@ ipcMain.handle('rdk:flash:s100-xburn', async (_event, payload) => {
 });
 
 app.whenReady().then(async () => {
+  installApplicationMenu();
   registerBrowserCaptureHandlers();
 
   /**
@@ -1419,6 +1595,10 @@ app.on('window-all-closed', async () => {
 });
 
 app.on('before-quit', async () => {
+  if (consoleLogWin && !consoleLogWin.isDestroyed()) {
+    consoleLogWin.close();
+    consoleLogWin = null;
+  }
   if (floatingBallWin && !floatingBallWin.isDestroyed()) {
     floatingBallWin.close();
     floatingBallWin = null;

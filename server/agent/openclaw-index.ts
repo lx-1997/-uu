@@ -105,6 +105,15 @@ export {
 // 消息格式转换 (内部消息 → pi-ai 格式)
 export { convertMessagesToPi } from "./message-convert.js";
 
+// 工具前置管道（schema 校验 + 可注册 PreToolHook）
+export {
+  registerPreToolHook,
+  clearPreToolHooksForTests,
+  validateToolInputObject,
+  type PreToolHook,
+  type PreToolHookResult,
+} from "./tool-pipeline.js";
+
 // =============================================
 // [扩展层] Extended - openclaw 特有，非通用必需
 // =============================================

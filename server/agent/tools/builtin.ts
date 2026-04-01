@@ -24,6 +24,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import type { SpawnToolScope } from "../spawn-profile.js";
 import type { Tool, ToolContext } from "./types.js";
 import { assertSandboxPath } from "../sandbox-paths.js";
 import {
@@ -734,16 +735,15 @@ export const sessionsSpawnTool: Tool<{
   task: string;
   label?: string;
   cleanup?: "keep" | "delete";
-  toolScope?: "read-only" | "device-read" | "full";
+  toolScope?: SpawnToolScope;
 }> = {
   name: "sessions_spawn",
   description:
-    "启动子代理执行后台任务，主线程不阻塞。\n\n" +
+    "启动子代理执行后台任务，主线程不阻塞，并回传摘要。\n\n" +
     "使用规则：\n" +
-    "- 适用场景：委派 OpenClaw 后做验证/监控、长时间 web 研究、并行信息收集\n" +
+    "- 适用场景：委派 OpenClaw 后做验证/监控、长时间 web 研究、并行信息收集；NEVER 用子代理替代你能直接完成的简单任务\n" +
     "- 子代理完成后自动将摘要写入当前会话\n" +
-    "- toolScope 控制子代理权限：read-only（仅读取）、device-read（加板端只读）、full（全量，默认）\n" +
-    "- NEVER 用子代理替代你能直接完成的简单任务",
+    "- toolScope：read-only（仅工作区读/搜）、device-read（加板端只读_diag）、explore（只读探索+联网+附件）、plan（explore+计划工具，须输出关键文件清单）、verify（exec/device_exec 验收，禁止写仓库；报告须含命令与输出，末行 VERDICT: PASS|FAIL|PARTIAL）、full（默认全量）",
   inputSchema: {
     type: "object",
     properties: {
@@ -752,8 +752,16 @@ export const sessionsSpawnTool: Tool<{
       cleanup: { type: "string", description: "完成后是否清理会话: keep|delete" },
       toolScope: {
         type: "string",
-        enum: ["read-only", "device-read", "full"],
-        description: "子代理工具范围: read-only=仅读取搜索, device-read=加板端只读, full=全量(默认)",
+        enum: [
+          "read-only",
+          "device-read",
+          "explore",
+          "plan",
+          "verify",
+          "full",
+        ],
+        description:
+          "子代理工具与行为模式；非平凡实现完成后应用 verify，task 中写明用户原始目标、改动文件与验收标准",
       },
     },
     required: ["task"],

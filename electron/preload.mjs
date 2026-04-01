@@ -114,4 +114,18 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
     ipcRenderer.on('rdk:floating-ball:menu', wrapped);
     return () => ipcRenderer.removeListener('rdk:floating-ball:menu', wrapped);
   },
+
+  /** 打开主窗口 Chromium DevTools（开发排查；亦可通过菜单「视图 → 切换开发者工具」） */
+  openDevTools: () => ipcRenderer.invoke('rdk:open-devtools'),
+
+  /** 将主窗口一行日志镜像到主进程缓冲（供独立控制台窗口） */
+  mirrorStudioLogLine: (line) => ipcRenderer.send('rdk:studio-log-mirror', line),
+  /** 主窗口清空日志时同步清空镜像与子窗口 */
+  notifyStudioLogClear: () => ipcRenderer.send('rdk:studio-log-clear-mirror'),
+  /** 打开原生控制台日志窗口（非浏览器页） */
+  openConsoleLogWindow: () => ipcRenderer.invoke('rdk:console-log-open-window'),
+});
+
+ipcRenderer.on('rdk:studio-log-clear-ui', () => {
+  window.dispatchEvent(new Event('rdk-studio-log-clear-ui'));
 });

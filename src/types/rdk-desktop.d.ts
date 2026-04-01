@@ -172,6 +172,14 @@ declare global {
       onFloatingBallMenu?: (
         cb: (payload: { action: string; tab?: string }) => void,
       ) => (() => void) | void;
+
+      /** 打开主窗口 Chromium DevTools（Electron） */
+      openDevTools?: () => Promise<{ ok: boolean }>;
+
+      mirrorStudioLogLine?: (line: { id: number; ts: number; level: string; text: string }) => void;
+      notifyStudioLogClear?: () => void;
+      /** 独立原生窗口展示控制台日志（非系统浏览器） */
+      openConsoleLogWindow?: () => Promise<{ ok: boolean }>;
     };
   }
 }

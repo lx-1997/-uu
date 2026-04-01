@@ -850,6 +850,14 @@ export class FeishuWebSocketChannel {
         } else if (event.type === "error") {
           const errorMsg = String(event.data?.error ?? "RDKClaw 执行失败");
           if (!chunks.length) chunks.push(errorMsg);
+        } else if (event.type === "run_progress") {
+          const msg = String(event.data?.message ?? "").trim();
+          if (!msg) continue;
+          const now = Date.now();
+          if (now - lastProgressAt > 8_000) {
+            lastProgressAt = now;
+            await this.sendText(chatId, msg.slice(0, 900)).catch(() => {});
+          }
         } else if (event.type === "tool_start") {
           toolCount++;
           const toolName = String(event.data?.name ?? event.data?.toolName ?? "unknown_tool");

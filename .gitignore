@@ -22,6 +22,7 @@ downloads/
 error.log
 *.log
 temp_*.txt
+tmp/
 
 # 本地 LLM token 统计（已改为仅内存，若旧版生成过可忽略）
 data/llm-token-usage.json

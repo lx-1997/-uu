@@ -19,7 +19,7 @@ export interface ProviderConfig {
   model: string;
   apiKey: string;
   baseUrl?: string;
-  /** 扩展思考档位：off / minimal / low / medium / high / xhigh / adaptive；空则 RDKClaw 默认 high */
+  /** 扩展思考档位：off / minimal / low / medium / high / xhigh；adaptive 在 UI 可选但发往 API 时会映射为 high */
   thinkingDefault?: string;
   /** 是否在 Studio 流式展示 thinking_delta：off / on / stream；空视为 stream */
   reasoningVisibility?: string;
@@ -37,7 +37,9 @@ export function resolveRdkclawAgentReasoning(cfg: ProviderConfig): ThinkingLevel
   const raw = normalizeText(cfg.thinkingDefault).toLowerCase();
   if (!raw) return 'high';
   if (raw === 'off') return null;
-  const allowed = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive']);
+  // UI 保留 adaptive；OpenAI 兼容 API 的 reasoning_effort 不认该取值，pi-ai 会原样发给上游 → 400
+  if (raw === 'adaptive') return 'high';
+  const allowed = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
   if (allowed.has(raw)) return raw as ThinkingLevel;
   return 'high';
 }

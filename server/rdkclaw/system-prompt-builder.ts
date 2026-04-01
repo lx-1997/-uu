@@ -1,4 +1,7 @@
 import type { StudioUiHints } from "../../shared/types.js";
+import type { RdkPlatform } from "../../shared/board-types.js";
+import type { SessionAttachment } from "../agent/tools/attachment-tools.js";
+import { getDeviceProfile, getResearchSeeds } from "../board/device-profiles.js";
 import type { PersonaProfile } from "./types.js";
 
 export type ModelTier = 'large' | 'medium' | 'small';
@@ -45,6 +48,7 @@ export function buildReasoningGuidancePrompt(tier: ModelTier): string {
     "在调用工具或给出关键结论前，先在推理中厘清：用户目标、隐含约束、成功标准、缺哪些事实。",
     "涉及**板端状态**（路径、进程、是否安装、ROS/TROS、网络）：必须以 `device_exec` / 诊断 / 板端协作工具的**实际输出**为依据；禁止仅凭常识或训练记忆断言「一定有/一定没有」。",
     "多步骤任务：先形成最短可行计划（通常 2～5 步），再执行；若某步输出与先前假设冲突，**修正假设**并说明再续，不要硬编原结论。",
+    "预计单次工具会较久（大下载、编译、长设备命令、板端 delegate）：在调用前用**一句**可见说明当前阶段与大致等待原因；Studio 会自动推送运行进度心跳，板端协作有流式输出，但最终答复仍须你归纳结果。",
     "信息不足时：优先**一个**最关键澄清问题；若必须继续，则**显式列出当前假设**并邀请用户确认。",
     "",
     "### 回复风格",
@@ -143,6 +147,7 @@ export function buildCollaborationPrompt(
       "你=主脑，板端 OpenClaw=执行者。",
       "- chat: 交流 | assess: 评估 | delegate: 委派",
       "多步板端任务勿只用 device_exec 硬顶；预见要多轮试探时先 assess→delegate。",
+      "后台子任务：sessions_spawn 用 explore/plan/verify（验收须 VERDICT 行）；细则见「子 Agent 与验收」专章。",
       "先做能做的；需板端 Agent 承接时先 assess 再 delegate。委派时在 guidance 提醒：做不到可用 find-skills 搜 SkillHub。",
       boardSnapshot.skillDetails.length > 0
         ? `板端技能(${boardSnapshot.skillDetails.length}个): ${boardSnapshot.skillDetails.map((s) => s.name).join(', ')}`
@@ -187,11 +192,8 @@ export function buildCollaborationPrompt(
     "等三者结果都回来后再制定方案和委派，而不是一个一个串行调用。",
     "",
     "### 子 Agent（sessions_spawn）",
-    "你有 sessions_spawn 工具，可以在后台启动子 agent 执行耗时任务，主线程不阻塞。",
-    "适用场景：",
-    "- 委派 OpenClaw 执行部署后，spawn 子 agent 做验证/监控",
-    "- 长时间 web 研究可以 spawn 子 agent，主线程继续和用户交互",
-    "子 agent 完成后会自动将摘要写入当前会话。",
+    "你有 sessions_spawn，可在后台起子代理，主线程不阻塞；完成后摘要写回本会话。**profile 与合同**见系统提示中专章「子 Agent 与验收（sessions_spawn）」。",
+    "速查：`toolScope=explore` 摸底只读 | `plan` 出方案与关键文件 | `verify` 独立跑命令验收（须 VERDICT 行）| `full` 默认全量。",
     "",
     boardSnapshot.skillDetails.length > 0
       ? `当前板端已安装 OpenClaw 技能（${boardSnapshot.skillDetails.length} 个）:\n` +
@@ -213,4 +215,140 @@ export function buildCollaborationPrompt(
     "- BPU状态: `hrut_smi` 或 `bputop`",
     "- 温度: `cat /sys/class/thermal/thermal_zone0/temp`（除以1000=摄氏度）",
   ].join("\n");
+}
+
+/**
+ * 主会话：何时 spawn、各 profile 分工、验收摘要须含 VERDICT（与子代理 spawn-profile 合同对齐）
+ */
+export function buildSpawnAndVerificationPrompt(
+  tier: ModelTier,
+  hasDevice: boolean,
+): string {
+  const deviceHint = hasDevice
+    ? "已连接设备：`verify` 可并行用宿主工作区 `exec`（构建/单测）与 `device_exec`（板端命令/curl/诊断）；`explore`/`plan` **不得**使用 `exec`/`device_exec`（工具集已限制）。"
+    : "未连接设备：`verify` 以宿主 `exec` + `read`/`grep` 为主，无法做板端实机检查时在最终 VERDICT 中说明范围局限。";
+
+  if (tier === "small") {
+    return [
+      "## 子 Agent 与验收（sessions_spawn）",
+      "后台子任务：`toolScope` 选 explore（只读摸底）/ plan（只读+计划+关键文件）/ verify（跑命令验收，禁止子代理写仓库）/ full。",
+      "**多文件改动、板端/接口/非平凡逻辑**完成后，应用 `verify`；`task` 里写清用户目标、改了哪些路径、怎么算过。",
+      "子代理总结里若含验收，**必须**出现一行 `VERDICT: PASS`、`VERDICT: FAIL` 或 `VERDICT: PARTIAL`；无则提醒用户结果未按合同验收。",
+      deviceHint,
+    ].join("\n");
+  }
+
+  return [
+    "## 子 Agent 与验收（sessions_spawn）",
+    "",
+    "### 何时 spawn",
+    "- **explore**：大范围读代码/目录、协议/文档检索，且中间输出不必留在主上下文。",
+    "- **plan**：需要独立**架构/步骤**与「关键文件」列表，但主线程继续交互。",
+    "- **verify**：实现已完成或自称完成——需要**独立**跑构建/测试/板端命令，**试图证伪**，禁止仅复读实现者说法。",
+    "- **full**：少数需全量能力（含写、委派）的后台任务；默认优先更窄的 profile。",
+    "",
+    "### toolScope 与分工（主线程选题）",
+    "- `explore`：只读；工作区 `read`/`grep`/`list`，可加 `web_*`、`find_skills`、`attachment_*`；有设备时只读板端 `device_file_*`/`device_diagnose` 等。",
+    "- `plan`：在 explore 工具集上增加 `create_plan` / `update_plan`；**不得**改文件或 `exec`。",
+    "- `verify`：在只读与网络检索基础上允许 `exec` 与 `device_exec`；**不得** `write`/`edit`/`device_file_write`、不得 OpenClaw/Fleet **delegate**、不得 `sessions_spawn` 套娃。",
+    "- `read-only` / `device-read`：极简白名单（仅搜索与板端只读_diag），用于极窄审计。",
+    "",
+    "### 主线程写 task 的最低要求",
+    "- **verify**：粘贴或概括**原始用户目标**、列出**已改动或声称改动的路径**、说明**如何复现与期望现象**；若需特定环境变量或服务，写清楚。",
+    "- **plan**：写需求与约束、已知结论；不要写「看你发现再改」式外包。",
+    "- **explore**：写搜索范围、深度（快/中/深）、与主线程已排除的弯路。",
+    "",
+    "### 子代理报告的验收摘要（主线程转发给用户前）",
+    "- 若本趟为 `verify`：检查报告中是否**每条关键结论**都附有「命令 + 原始输出摘录」；末行是否为 **`VERDICT: PASS` / `FAIL` / `PARTIAL`** 之一（一字不差）。",
+    "- 若不符合合同：主线程应视情况重开 `verify` 或自行补跑关键命令，**不要**把缺证据的 PASS 当完成。",
+    "",
+    deviceHint,
+  ].join("\n");
+}
+
+/**
+ * RDKClaw 主会话 system：**静态段**（宜跨轮稳定，置于 DYNAMIC_BOUNDARY 之前）
+ */
+export function buildRdkclawStaticSystemSections(args: {
+  persona: PersonaProfile;
+  modelTier: ModelTier;
+  hasDevice: boolean;
+  policyNetworkEnabled: boolean;
+  forumContextPrompt: string;
+}): string {
+  const { persona, modelTier, hasDevice, policyNetworkEnabled, forumContextPrompt } = args;
+  return [
+    buildPersonaPrompt(persona),
+    buildReasoningGuidancePrompt(modelTier),
+    buildSpawnAndVerificationPrompt(modelTier, hasDevice),
+    modelTier === "small"
+      ? "记住：发现用户偏好→memory_save；重复场景→创建技能。"
+      : "## 用户理解\n对话中注意捕捉用户偏好和习惯，用 memory_save 保存重要信息，用 memory_search 回顾历史。发现反复出现的操作模式时主动创建技能。",
+    policyNetworkEnabled
+      ? [
+          "## 内置 find-skills（腾讯 SkillHub）",
+          "RDK Studio **默认内置** `find_skills`：优先腾讯 SkillHub，零命中或失败再兜底 **官方 ClawHub**（默认 https://clawhub.ai）。`find_skills` **仅写审计** `.rdkstudio/find-skills-log.jsonl`，**不**因「搜过」就写入长期记忆。",
+          "若本轮**实际采用**了某 SkillHub 技能且任务**验收成功**，再调用 **`skill_mark_validated`**（填 `skill_slugs` + `task_summary`）：**下载** SKILL.md 到本机 `skills/<id>/`，已连接设备时**同步**到板端 `~/.openclaw/workspace/skills/<id>/`，并写记忆与 `.rdkstudio/validated-skills.jsonl`；纯本地采用填 `local_skill_refs`（不拉远端、不推板端）。失败、仅浏览、未采用则**禁止**调用。",
+          "**强制**：能力缺口时**必须先 `find_skills`**，再 `read` / 安装 / 执行；不得未检索可复用技能就宣称无法完成（用户明确禁止联网且本地无命中除外）。",
+          "仅需与 `CLAWHUB_REGISTRY` 换源一致时，再用 `skillhub_search`。",
+        ].join("\n")
+      : [
+          "## 内置 find-skills（仅本地）",
+          "联网关闭时无远程 SkillHub；缺流程时用 `find_skills` 匹配本地并 `read` SKILL.md。仅**任务成功**且采用了本地/板端技能后，可用 `skill_mark_validated`（local_skill_refs）内化，勿仅因检索而调用。",
+        ].join("\n"),
+    forumContextPrompt,
+  ].filter(Boolean).join("\n");
+}
+
+/**
+ * RDKClaw 主会话 system：**动态段**（会话/UI/板端快照，置于 DYNAMIC_BOUNDARY 之后）
+ */
+export function buildRdkclawDynamicSystemSections(args: {
+  deviceId?: string;
+  platform: RdkPlatform | undefined;
+  boardSnapshot: BoardSnapshot;
+  studioUiHints: StudioUiHints | undefined;
+  allAttachments: SessionAttachment[];
+  modelTier: ModelTier;
+}): string {
+  const { deviceId, platform, boardSnapshot, studioUiHints, allAttachments, modelTier } = args;
+  const hasDevice = Boolean(deviceId?.trim());
+  const deviceProfile = platform ? getDeviceProfile(platform) : null;
+  return [
+    deviceProfile
+      ? `当前平台: ${deviceProfile.displayName} (${deviceProfile.bpuTops}TOPS, ${deviceProfile.cpu}, ${deviceProfile.ramGb}GB RAM)。${deviceProfile.capabilityNotes?.length ? "能力: " + deviceProfile.capabilityNotes.join("；") : ""}${deviceProfile.limitations.length ? "。限制: " + deviceProfile.limitations.join("；") : ""}`
+      : "",
+    hasDevice
+      ? [
+          "## 资料与命令来源（无本地生态注册表）",
+          "需要官方安装步骤、示例或硬件说明时：用 web_search / web_fetch，优先 D-Robotics 文档与 GitHub（developer.d-robotics.cc/rdk_doc、github.com/D-Robotics），可检索 rdk_dock 等关键词。",
+          platform
+            ? "当前板型已识别，建议 web_fetch 入口：" + getResearchSeeds(platform).join(" | ")
+            : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。",
+          "## RDK 板端 ROS 环境（易误判）",
+          "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
+          "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
+          "ROS/节点/话题类任务可 `read` 工作区 skills 中的 RDK ROS（rdk-ros）与 RDK Board Knowledge（rdk-board-knowledge）的 SKILL.md。",
+          "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。",
+        ].join("\n")
+      : "",
+    hasDevice
+      ? ""
+      : [
+          "当前请求未携带 Studio 初始选中的设备 ID：在调用 device_connect_ssh / switch_device **成功之前**，可能没有 device_exec、device_diagnose、device_file_list 等板端工具。",
+          "exec 与 list 仅在 **RDK Studio 服务端工作区**（代码目录，常见含 server/、src/、skills/）执行，**不是**开发板上的文件系统；禁止把它们的输出描述为「在设备上」「板端 /root」或 SSH 在板子上的结果。",
+          "在 Studio 主会话中：连接或切换设备成功后会刷新**后续 LLM 回合**的工具列表；同一回合内若已出现 device_exec 等工具，即可在板端执行。若仍看不到板端工具，请再发一条短消息。",
+          "若仅有 exec/list 的输出却声称已检查板端硬件或设备目录，属于错误回复。",
+        ].join("\n"),
+    hasDevice && boardSnapshot.plugins.length > 0
+      ? `当前板端允许插件: ${boardSnapshot.plugins.join(", ")}`
+      : "",
+    hasDevice ? buildStudioUiHintsPrompt(studioUiHints) : "",
+    allAttachments.length > 0
+      ? allAttachments.some((a) => a.type === "image")
+        ? `当前会话已有 ${allAttachments.length} 个附件（含图片: ${allAttachments.filter((a) => a.type === "image").map((a) => `[${a.id}] ${a.name}`).join("、")}）。用户提及图片/照片时，请先调用 attachment_describe_image 分析后再回复。`
+        : `当前会话已有 ${allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
+      : "",
+    hasDevice ? buildCollaborationPrompt(boardSnapshot, modelTier) : "",
+  ].filter(Boolean).join("\n");
 }

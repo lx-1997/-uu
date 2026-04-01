@@ -2,6 +2,7 @@ import type { Device, DevicePayload } from './types';
 import type { AgentPlan } from './app-types';
 import { readStudioUiHintsForDevice } from './studio-ui-hints';
 import { applySsoMirrorToHeaders, fetchApi, resolveApiUrl } from './utils/apiBase';
+import { appendStudioLog } from './utils/console-log-capture';
 
 export interface DeviceExecResult {
   ok: boolean;
@@ -258,15 +259,49 @@ export interface NetworkInterface {
   portType?: string;
 }
 
-export function fetchTypecInterfaces() {
-  return request<{ ok: boolean; interfaces: NetworkInterface[] }>('/api/typec/interfaces');
+export async function fetchTypecInterfaces() {
+  appendStudioLog('info', '[TypeC] 请求网卡列表 GET /api/typec/interfaces');
+  try {
+    const r = await request<{ ok: boolean; interfaces: NetworkInterface[] }>('/api/typec/interfaces');
+    const names = (r.interfaces ?? []).map((i) => `${i.name}${i.portType ? ` (${i.portType})` : ''}`).join(', ');
+    appendStudioLog(
+      'info',
+      `[TypeC] 网卡 ${r.interfaces?.length ?? 0} 个${names ? `：${names}` : '（空）'}`,
+    );
+    return r;
+  } catch (e) {
+    appendStudioLog(
+      'error',
+      `[TypeC] 获取网卡失败：${e instanceof Error ? e.message : String(e)}`,
+    );
+    throw e;
+  }
 }
 
-export function configureTypecInterface(interfaceName: string, pcIp: string, netmask?: string) {
-  return request<{ ok: boolean; verified: boolean; output: string }>('/api/typec/configure', {
-    method: 'POST',
-    body: JSON.stringify({ interfaceName, pcIp, netmask }),
-  });
+export async function configureTypecInterface(interfaceName: string, pcIp: string, netmask?: string) {
+  const mask = netmask || '255.255.255.0';
+  appendStudioLog(
+    'info',
+    `[TypeC] 配置网卡 POST /api/typec/configure iface=${interfaceName} pcIp=${pcIp} netmask=${mask}`,
+  );
+  try {
+    const r = await request<{ ok: boolean; verified: boolean; output: string }>('/api/typec/configure', {
+      method: 'POST',
+      body: JSON.stringify({ interfaceName, pcIp, netmask: mask }),
+    });
+    const out = (r.output ?? '').trim().slice(0, 800);
+    appendStudioLog(
+      r.verified ? 'info' : 'warn',
+      `[TypeC] 配置完成 verified=${String(r.verified)}${out ? ` · ${out}` : ''}`,
+    );
+    return r;
+  } catch (e) {
+    appendStudioLog(
+      'error',
+      `[TypeC] 配置失败：${e instanceof Error ? e.message : String(e)}`,
+    );
+    throw e;
+  }
 }
 
 export function removeDevice(deviceId: string) {

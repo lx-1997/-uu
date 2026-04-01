@@ -30,6 +30,7 @@
  */
 
 import type { MemoryManager, MemorySearchResult } from "../memory.js";
+import type { SpawnToolScope } from "../spawn-profile.js";
 
 // ============== 执行上下文 ==============
 
@@ -60,7 +61,7 @@ export interface ToolContext {
     task: string;
     label?: string;
     cleanup?: "keep" | "delete";
-    toolScope?: "read-only" | "device-read" | "full";
+    toolScope?: SpawnToolScope;
   }) => Promise<{ runId: string; sessionKey: string }>;
   /** 中止信号: 支持取消长时间运行的操作 */
   abortSignal?: AbortSignal;

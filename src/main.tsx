@@ -4,6 +4,7 @@ import { AuthProvider } from './hooks/useAuth';
 import { AppProvider } from './hooks/useAppState';
 import App from './App';
 import './styles/index.css';
+import { startConsoleLogCapture } from './utils/console-log-capture';
 
 /** 开发态下仅屏蔽 React 的 DevTools 下载提示，不改动其它 console 行为 */
 if (import.meta.env.DEV) {
@@ -17,6 +18,8 @@ if (import.meta.env.DEV) {
   console.log = stripReactDevToolsBanner(console.log);
   console.info = stripReactDevToolsBanner(console.info);
 }
+
+startConsoleLogCapture();
 
 /**
  * 顺序必须为 AuthProvider → AppProvider → App：

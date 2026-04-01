@@ -522,7 +522,7 @@ function resolveStoredDevicePassword(device: Device) {
   const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
   const cachedPassword = devicePasswordCache.get(key);
   const persistedPassword = (device as Device & { password?: string }).password ?? '';
-  return cachedPassword || persistedPassword || defaultSshPassword || device.username;
+  return cachedPassword || persistedPassword || defaultSshPassword;
 }
 
 function purgeDeviceSoftwareState(device: Device) {
@@ -1461,7 +1461,17 @@ async function runOnDevice(
   }
 
   const { password, key } = resolvePassword(request, device);
-  const candidates = password ? [password] : passwordCandidates(device.username);
+  if (!password) {
+    sendApiError(
+      response,
+      400,
+      'DEVICE_AUTH_REQUIRED',
+      '设备密码缺失，请在设备管理中重新连接并填写密码，或通过请求头 X-Device-Password 传入',
+      { retryable: false },
+    );
+    return null;
+  }
+  const candidates = [password];
   const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? 120_000));
   let lastError: unknown = null;
   const output = await runInDeviceLane(device.id, async () => {
@@ -1636,11 +1646,10 @@ async function sshRunOnDevice(deviceId: string, commands: string[]): Promise<{ o
   const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
   const pwd = devicePasswordCache.get(key)
     || (device as Device & { password?: string }).password
-    || defaultSshPassword
-    || device.username;
-  const candidates = [pwd, ...passwordCandidates(device.username)];
+    || defaultSshPassword;
+  if (!pwd) return null;
   const output = await runInDeviceLane(device.id, async () => {
-    for (const p of [...new Set(candidates)]) {
+    for (const p of [pwd]) {
       try {
         const result = await runRemoteCommands(
           { host: device.host, port: device.port ?? 22, username: device.username, password: p },
@@ -2009,8 +2018,18 @@ app.post('/api/apps/one-shot-deploy', async (request, response) => {
   const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
   const cached = devicePasswordCache.get(key);
   const persistedPassword = (device as Device & { password?: string }).password ?? '';
-  const seedPassword = cached || persistedPassword || defaultSshPassword || device.username;
-  const candidates = Array.from(new Set([seedPassword, ...passwordCandidates(device.username)].filter(Boolean)));
+  const seedPassword = cached || persistedPassword || defaultSshPassword;
+  const candidates = seedPassword ? [seedPassword] : [];
+  if (candidates.length === 0) {
+    sendApiError(
+      response,
+      400,
+      'DEVICE_AUTH_REQUIRED',
+      '部署需要设备 SSH 密码：请在设备管理中重新连接并保存，或设置环境变量 RDK_SSH_PASSWORD',
+      { retryable: false },
+    );
+    return;
+  }
   let lastError: unknown = null;
 
   for (const pwd of candidates) {
@@ -2318,8 +2337,29 @@ function isIpv4DottedQuad(s: string): boolean {
   return true;
 }
 
+/** 将点分 IPv4 掩码转为 CIDR 前缀长度（非典型连续掩码时回退 24） */
+function ipv4NetmaskPrefixBits(mask: string): number {
+  const parts = mask.split('.').map(p => Number(p));
+  if (parts.length !== 4 || parts.some(p => Number.isNaN(p) || p < 0 || p > 255)) return 24;
+  const v = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+  let c = 0;
+  for (let i = 31; i >= 0; i--) {
+    if ((v >>> i) & 1) c++;
+    else break;
+  }
+  const expected = c === 0 ? 0 : (c === 32 ? 0xffffffff : (0xffffffff << (32 - c)) >>> 0);
+  if (v !== expected) return 24;
+  return c;
+}
+
 function isIfconfigPermissionDenied(msg: string): boolean {
-  return /permission denied|Operation not permitted/i.test(msg);
+  const m = (msg || '').trim();
+  if (!m) return false;
+  return (
+    /permission denied|operation not permitted|not authorized|must be root|super-user|EPERM/i.test(m)
+    // macOS 常见：ifconfig: ioctl (SIOCAIFADDR): Operation not permitted
+    || /\bSIOC[A-Z]+\b.*not permitted/i.test(m)
+  );
 }
 
 async function execFileWithTimeout(
@@ -2355,20 +2395,34 @@ async function execFileWithTimeout(
 /**
  * macOS：`ifconfig up` 需 root。先直接调用 /sbin/ifconfig，若遇 permission denied，
  * 再用 osascript 弹出系统密码框提权（与桌面端常见做法一致）。
+ *
+ * 与 Windows netsh 逻辑对齐：若 pcIp 已挂在**其它**网卡上（例如先前选过 en9 再改选 en10），
+ * 会先从那些接口 `inet <addr> delete`，再在所选接口上设置 IP。否则本机可能把去往 192.168.128.0/24
+ * 的流量从未接板子的接口发出，导致 ping / SSH 全失败。
  */
 async function configureDarwinTypecNic(
   interfaceName: string,
   pcIp: string,
   mask: string,
 ): Promise<string> {
-  const args = [interfaceName, pcIp, 'netmask', mask, 'up'];
-  const first = await execFileWithTimeout('/sbin/ifconfig', args, 15000);
-  if (first.code === 0) return first.stdout;
-  const errLine = (first.stderr || `exit code ${first.code}`).trim();
-  if (!isIfconfigPermissionDenied(first.stderr)) {
+  const ifaces = os.networkInterfaces();
+  const deleteParts: string[] = [];
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    if (name === interfaceName) continue;
+    if (!addrs?.some(a => a.family === 'IPv4' && a.address === pcIp)) continue;
+    deleteParts.push(`/sbin/ifconfig ${name} inet ${pcIp} delete`);
+  }
+  const setPart = `/sbin/ifconfig ${interfaceName} ${pcIp} netmask ${mask} up`;
+  const shellCmd = [...deleteParts, setPart].join('; ');
+
+  const first = await execFileWithTimeout('sh', ['-c', shellCmd], 25000);
+  if (first.code === 0) return [first.stdout, first.stderr].filter(Boolean).join('\n').trim();
+  // ifconfig 在部分系统/语言环境下把错误打在 stdout，仅用 stderr 会误判为「非权限问题」从而跳过 osascript，用户看不到系统密码框
+  const firstCombined = `${first.stderr}\n${first.stdout}`.trim();
+  const errLine = firstCombined || `exit code ${first.code}`;
+  if (!isIfconfigPermissionDenied(firstCombined)) {
     throw new Error(errLine);
   }
-  const shellCmd = `/sbin/ifconfig ${interfaceName} ${pcIp} netmask ${mask} up`;
   const escaped = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const appleScript = `do shell script "${escaped}" with administrator privileges`;
   const second = await execFileWithTimeout('osascript', ['-e', appleScript], 120000);
@@ -2380,11 +2434,36 @@ async function configureDarwinTypecNic(
   throw new Error(combined || `osascript exit ${second.code}`);
 }
 
+/**
+ * Linux 闪连：与 Windows netsh / macOS ifconfig 一致，先从**其它**网卡删除与 pcIp 相同的地址，
+ * 避免多接口同 IP 导致去往板子网段的流量走错 dev（ip 命令需与本机 `ifconfig up` 同源权限）。
+ */
 async function configureLinuxTypecNic(
   interfaceName: string,
   pcIp: string,
   mask: string,
 ): Promise<string> {
+  const cidr = ipv4NetmaskPrefixBits(mask);
+  const ifacesNow = os.networkInterfaces();
+  const ipBins = ['/sbin/ip', '/usr/sbin/ip'];
+  for (const [name, addrs] of Object.entries(ifacesNow)) {
+    if (name === interfaceName) continue;
+    if (!addrs?.some(a => a.family === 'IPv4' && a.address === pcIp)) continue;
+    for (const ipBin of ipBins) {
+      const r = await execFileWithTimeout(ipBin, ['addr', 'del', `${pcIp}/${cidr}`, 'dev', name], 12000);
+      if (r.code === 0) break;
+      if (r.code === 127) continue;
+      const combined = `${r.stderr}\n${r.stdout}`.trim();
+      if (/cannot assign|no such address|nodev|not found|does not exist/i.test(combined)) break;
+      if (isIfconfigPermissionDenied(combined)) {
+        throw new Error(
+          `${combined} · 需 root 从其它网卡删除冲突 IP，例如：sudo ${ipBin} addr del ${pcIp}/${cidr} dev ${name}`,
+        );
+      }
+      break;
+    }
+  }
+
   const bins = ['/sbin/ifconfig', '/usr/sbin/ifconfig'];
   let lastErr = '';
   for (const bin of bins) {
@@ -2420,7 +2499,10 @@ app.get('/api/typec/interfaces', async (_request, response) => {
   }
 });
 
-/** 配置 TypeC 虚拟网卡 IP（需要管理员权限） */
+/**
+ * 闪连：配置 TypeC 虚拟网卡本机 IP（需管理员 / root）。
+ * 三端一致：若 pcIp 已占用在其它接口上，会先删除再写到所选网卡（避免路由走错、ping/SSH 失败）。
+ */
 app.post('/api/typec/configure', async (request, response) => {
   const { interfaceName, pcIp, netmask } = request.body as {
     interfaceName?: string;
@@ -2651,6 +2733,16 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   const providedPassword = request.header('x-device-password') ?? '';
   const persistedPassword = (target as Device & { password?: string }).password ?? '';
   const password = providedPassword || cachedPassword || persistedPassword || defaultSshPassword;
+  if (!password) {
+    sendApiError(
+      response,
+      400,
+      'DEVICE_AUTH_REQUIRED',
+      '设备密码缺失，请在设备管理中重新连接并填写密码，或通过请求头 X-Device-Password 传入',
+      { retryable: false },
+    );
+    return;
+  }
 
   const targetModel = modelName?.trim() || 'doubao-seed-2.0-lite';
   if (!isSafeName(targetModel)) {
@@ -2666,7 +2758,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
     logs: `bash -lc '(journalctl -u openclaw --no-pager -n 120 || tail -n 120 /var/log/openclaw.log || echo "no openclaw logs found")'`,
   };
 
-  const candidates = password ? [password] : passwordCandidates(selectedUsername);
+  const candidates = [password];
   let lastError: unknown = null;
 
   for (const pwd of candidates) {
@@ -4364,30 +4456,34 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
     const device = await resolveDevice(request, response, id);
     if (!device) return;
     const { password } = resolvePassword(request, device);
-    const candidates = password ? [password] : passwordCandidates(device.username);
-    let lastError: unknown = null;
-    
-    for (const pwd of candidates) {
-      try {
-        await runInDeviceLane(device.id, async () => {
-          await runRemoteCommands(
-            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-            [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
-            { timeoutMs: 30_000 },
-          );
-          await uploadFileSftp(
-            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-            targetPath,
-            Buffer.from(content ?? '', 'utf-8'),
-          );
-        });
-        response.json({ ok: true, output: '写入完成', path: targetPath });
-        return;
-      } catch (e) {
-        lastError = e;
-      }
+    if (!password) {
+      sendApiError(
+        response,
+        400,
+        'DEVICE_AUTH_REQUIRED',
+        '设备密码缺失，请在设备管理中重新连接并填写密码，或通过请求头 X-Device-Password 传入',
+        { retryable: false },
+      );
+      return;
     }
-    response.status(500).json({ error: lastError instanceof Error ? lastError.message : '写入失败' });
+    const pwd = password;
+    try {
+      await runInDeviceLane(device.id, async () => {
+        await runRemoteCommands(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
+          { timeoutMs: 30_000 },
+        );
+        await uploadFileSftp(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          targetPath,
+          Buffer.from(content ?? '', 'utf-8'),
+        );
+      });
+      response.json({ ok: true, output: '写入完成', path: targetPath });
+    } catch (e) {
+      response.status(500).json({ error: e instanceof Error ? e.message : '写入失败' });
+    }
     return;
   }
 
@@ -4417,36 +4513,37 @@ app.post('/api/devices/:id/files/upload', async (request, response) => {
   if (!device) return;
 
   const { password } = resolvePassword(request, device);
-  const candidates = password ? [password] : passwordCandidates(device.username);
-  let lastError: unknown = null;
-
-  for (const pwd of candidates) {
-    try {
-      // Create folder if needed via exec first
-      await runInDeviceLane(device.id, async () => {
-        await runRemoteCommands(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-          [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
-          { timeoutMs: 30_000 },
-        );
-        const buffer = Buffer.from(contentBase64, 'base64');
-        await uploadFileSftp(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-          targetPath,
-          buffer,
-        );
-      });
-      
-      response.json({ ok: true, path: targetPath });
-      return;
-    } catch (e) {
-      lastError = e;
-    }
+  if (!password) {
+    sendApiError(
+      response,
+      400,
+      'DEVICE_AUTH_REQUIRED',
+      '设备密码缺失，请在设备管理中重新连接并填写密码，或通过请求头 X-Device-Password 传入',
+      { retryable: false },
+    );
+    return;
   }
-
-  response.status(500).json({
-    error: lastError instanceof Error ? `长传失败: ${lastError.message}` : '文件上传失败'
-  });
+  const pwd = password;
+  try {
+    await runInDeviceLane(device.id, async () => {
+      await runRemoteCommands(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+        [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
+        { timeoutMs: 30_000 },
+      );
+      const buffer = Buffer.from(contentBase64, 'base64');
+      await uploadFileSftp(
+        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+        targetPath,
+        buffer,
+      );
+    });
+    response.json({ ok: true, path: targetPath });
+  } catch (e) {
+    response.status(500).json({
+      error: e instanceof Error ? `长传失败: ${e.message}` : '文件上传失败',
+    });
+  }
 });
 
 app.get('/api/devices/:id/files/download', async (request, response) => {

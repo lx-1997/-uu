@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RDK Studio · 控制台日志</title>
+  <style>
+    :root {
+      --bg: #14161a;
+      --surface: #1e2228;
+      --border: #2d3340;
+      --text: #e6e9ef;
+      --muted: #8b93a5;
+      --danger: #f87171;
+      --warn: #fbbf24;
+      --accent: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, 'Menlo', 'Consolas', monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      -webkit-app-region: drag;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+    button {
+      font: inherit;
+      cursor: pointer;
+      padding: 5px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+    }
+    button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    #log {
+      flex: 1;
+      overflow: auto;
+      padding: 8px 12px;
+    }
+    .line {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 2px;
+    }
+    .line .ts {
+      color: var(--muted);
+      margin-right: 8px;
+      user-select: none;
+    }
+    .line--error .lvl, .line--error .txt { color: var(--danger); }
+    .line--warn .lvl, .line--warn .txt { color: var(--warn); }
+    .line--debug .lvl { color: var(--muted); }
+    .hint {
+      color: var(--muted);
+      padding: 16px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RDK Studio · 实时控制台日志</h1>
+    <div class="actions">
+      <button type="button" id="btn-clear">清空</button>
+      <button type="button" id="btn-sync">重新同步</button>
+    </div>
+  </header>
+  <div id="log"><p class="hint">正在连接主进程…</p></div>
+  <script>
+    (function () {
+      var logEl = document.getElementById('log');
+      var lines = [];
+      var native = window.rdkConsoleLogNative;
+
+      function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function fmtTs(ms) {
+        try {
+          var d = new Date(ms);
+          return d.toLocaleTimeString('zh-CN', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+        } catch (e) {
+          return '';
+        }
+      }
+
+      function render() {
+        if (!lines.length) {
+          logEl.innerHTML = '<p class="hint">暂无日志。主窗口产生的输出会镜像到此处。</p>';
+          return;
+        }
+        var html = lines.map(function (L) {
+          var lv = L.level || 'log';
+          return '<div class="line line--' + esc(lv) + '"><span class="ts">' + esc(fmtTs(L.ts)) + '</span><span class="lvl">[' + esc(lv) + ']</span> <span class="txt">' + esc(L.text || '') + '</span></div>';
+        }).join('');
+        logEl.innerHTML = html;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      if (!native || typeof native.getSnapshot !== 'function') {
+        logEl.innerHTML = '<p class="hint">未加载 Electron 预加载脚本，请从 RDK Studio 客户端打开此窗口。</p>';
+        return;
+      }
+
+      function applySnap(arr) {
+        lines = Array.isArray(arr) ? arr.slice() : [];
+        render();
+      }
+
+      native.getSnapshot().then(function (res) {
+        applySnap(res && res.lines);
+      }).catch(function () {
+        logEl.innerHTML = '<p class="hint">无法从主进程读取快照。</p>';
+      });
+
+      var unsub = native.subscribe({
+        onAppend: function (line) {
+          if (!line) return;
+          lines.push(line);
+          if (lines.length > 2500) lines = lines.slice(-2500);
+          render();
+        },
+        onClear: function () {
+          lines = [];
+          render();
+        },
+      });
+
+      window.addEventListener('beforeunload', function () {
+        try { unsub && unsub(); } catch (e) {}
+      });
+
+      document.getElementById('btn-clear').onclick = function () {
+        native.requestClearFromWindow();
+      };
+      document.getElementById('btn-sync').onclick = function () {
+        native.getSnapshot().then(function (res) {
+          applySnap(res && res.lines);
+        });
+      };
+    })();
+  </script>
+</body>
+</html>

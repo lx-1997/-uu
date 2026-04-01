@@ -35,6 +35,16 @@ import { createSkillDiscoveryTools } from "../agent/tools/skill-discovery-tools.
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { readDevices } from "../storage.js";
 import { CONVERSATION_SCHEMA, recordConversationTurn } from "../conversation-log.js";
+
+/** 长任务「仍在处理」心跳间隔。可用 RDKCLAW_RUN_PROGRESS_INTERVAL_MS 覆盖（毫秒，3s–300s）。 */
+function resolveRdkclawRunProgressIntervalMs(): number {
+  const raw = process.env.RDKCLAW_RUN_PROGRESS_INTERVAL_MS;
+  if (raw) {
+    const n = Number.parseInt(String(raw).trim(), 10);
+    if (Number.isFinite(n)) return Math.min(300_000, Math.max(3_000, n));
+  }
+  return 12_000;
+}
 import type { ConversationOutcome } from "../conversation-types.js";
 import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
@@ -137,7 +147,7 @@ function resolveProviderConfig(): ProviderConfig {
 function resolveBoardDevicePassword(device: { username: string; password?: string }) {
   const persisted = device.password ?? "";
   const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
-  return persisted || envPwd || device.username;
+  return persisted || envPwd;
 }
 
 type RuntimeHealthReport = {
@@ -919,7 +929,7 @@ export class RDKClawApp {
     const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
     const setupElapsedMs = Date.now() - runStartedAt;
     const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot);
-    const detectedPlatform = (req as any).platform as RdkPlatform | undefined;
+    const detectedPlatform = (req as { platform?: RdkPlatform }).platform as RdkPlatform | undefined;
     const deviceProfile = detectedPlatform ? getDeviceProfile(detectedPlatform) : null;
     const modelCaps = lookupModelCapabilities(providerConfig.provider, providerConfig.model);
     const modelTier = classifyModelTier(modelCaps.contextWindow, modelCaps.maxOutputTokens);
@@ -1161,6 +1171,50 @@ export class RDKClawApp {
       agent.abort();
     };
     externalAbortSignal?.addEventListener("abort", handleExternalAbort, { once: true });
+
+    const runProgressIntervalMs = resolveRdkclawRunProgressIntervalMs();
+    const runProgressIntervalSec = Math.max(1, Math.round(runProgressIntervalMs / 1000));
+    let progressTick = 0;
+    let lastToolProgressNudgeAt = 0;
+    const TOOL_START_NUDGE_MIN_GAP_MS = 6_000;
+
+    const pushRunProgress = (reason: "interval" | "tool_start", activeToolName?: string) => {
+      if (finished) return;
+      const now = Date.now();
+      if (reason === "tool_start") {
+        if (now - lastToolProgressNudgeAt < TOOL_START_NUDGE_MIN_GAP_MS) return;
+        lastToolProgressNudgeAt = now;
+      }
+      progressTick += 1;
+      const elapsedMs = now - runStartedAt;
+      const elapsedMin = Math.floor(elapsedMs / 60000);
+      const totalCalls = runMetrics.localToolCalls + runMetrics.boardToolCalls;
+      const latestTools = runMetrics.toolCallNames.slice(-3);
+      const toolHint = latestTools.length > 0 ? `，最近: ${latestTools.join(" → ")}` : "";
+      const elapsedHuman = elapsedMin > 0 ? `${elapsedMin} 分钟` : `${Math.floor(elapsedMs / 1000)} 秒`;
+      const head =
+        reason === "tool_start" && activeToolName
+          ? `开始执行「${activeToolName}」`
+          : "仍在处理中";
+      pushEvent({
+        type: "run_progress",
+        data: {
+          ...base,
+          tick: progressTick,
+          elapsed_ms: elapsedMs,
+          elapsed_display: elapsedHuman,
+          tool_calls: totalCalls,
+          latest_tools: latestTools,
+          message:
+            `${head}，已运行 ${elapsedHuman}，累计 ${totalCalls} 个工具步骤${toolHint}` +
+            `（约每 ${runProgressIntervalSec}s 推送一次进度；板端协作工具会额外流式输出）`,
+        },
+      });
+    };
+
+    const progressTimer = setInterval(() => pushRunProgress("interval"), runProgressIntervalMs);
+    const firstProgressHandle = setTimeout(() => pushRunProgress("interval"), 5_000);
+
     const unsubscribe = agent.subscribe((event) => {
       if (event.type === "compaction") {
         runMetrics.compactionCount += 1;
@@ -1179,6 +1233,7 @@ export class RDKClawApp {
         if (runMetrics.toolCallNames.length > 50) {
           runMetrics.toolCallNames = runMetrics.toolCallNames.slice(-30);
         }
+        pushRunProgress("tool_start", event.toolName);
       }
       if (event.type === "message_delta") {
         textSmoother.push(sanitizeSecrets(event.delta));
@@ -1200,32 +1255,6 @@ export class RDKClawApp {
       pushEvent({ type: "meta", data: { ...base, executor: "rdkclaw_local", phase: "heartbeat", message: content, reason } });
     });
 
-    /** 长任务心跳：过久无推送会像卡住；60s 与板端首包/工具间隔更匹配 */
-    const PROGRESS_INTERVAL_MS = 60_000;
-    let progressTick = 0;
-    const progressTimer = setInterval(() => {
-      if (finished) return;
-      progressTick++;
-      const elapsedMs = Date.now() - runStartedAt;
-      const elapsedMin = Math.floor(elapsedMs / 60000);
-      const totalCalls = runMetrics.localToolCalls + runMetrics.boardToolCalls;
-      const latestTools = runMetrics.toolCallNames.slice(-3);
-      const toolHint = latestTools.length > 0 ? `，最近: ${latestTools.join(' → ')}` : '';
-      pushEvent({
-        type: "run_progress",
-        data: {
-          ...base,
-          tick: progressTick,
-          elapsed_ms: elapsedMs,
-          elapsed_display: elapsedMin > 0 ? `${elapsedMin} 分钟` : `${Math.floor(elapsedMs / 1000)} 秒`,
-          tool_calls: totalCalls,
-          latest_tools: latestTools,
-          message: `仍在处理中，已运行 ${elapsedMin > 0 ? `${elapsedMin} 分钟` : `${Math.floor(elapsedMs / 1000)} 秒`}，` +
-            `执行了 ${totalCalls} 个工具调用${toolHint}`,
-        },
-      });
-    }, PROGRESS_INTERVAL_MS);
-
     const runPromise = agent
       .run(sessionKey, effectiveMessage || "请结合当前附件继续处理。")
       .then((result) => {
@@ -1236,6 +1265,7 @@ export class RDKClawApp {
       })
       .finally(() => {
         finished = true;
+        clearTimeout(firstProgressHandle);
         clearInterval(progressTimer);
         textSmoother.dispose();
         wakeQueue();

@@ -56,6 +56,10 @@ import {
 } from "./context/window-economics.js";
 import { estimateMessagesTokens, estimateTokensForText } from "./context/tokens.js";
 import { shouldTriggerCompaction } from "./context/index.js";
+import {
+  runPreToolHookChain,
+  validateToolInputObject,
+} from "./tool-pipeline.js";
 
 // ============== 类型定义 ==============
 
@@ -700,6 +704,16 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   const tool = toolsForRun.find((t) => t.name === call.name);
                   if (!tool) return { text: `未知工具: ${call.name}`, errFlag: true };
 
+                  const schemaCheck = validateToolInputObject(tool, call.input);
+                  if (!schemaCheck.ok) {
+                    return { text: schemaCheck.message, errFlag: true };
+                  }
+                  const hooked = await runPreToolHookChain(call.name, schemaCheck.value, params.sessionKey);
+                  if (!hooked.ok) {
+                    return { text: hooked.message, errFlag: true };
+                  }
+                  call.input = hooked.input;
+
                   // PreToolUse hooks
                   if (params.toolHooks) {
                     const { decision, hookName } = await params.toolHooks.runPreHooks({
@@ -771,7 +785,24 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 stream.push({ type: "tool_execution_start", toolCallId: call.id, toolName: call.name, args: call.input });
 
                 if (tool) {
-                  if (params.checkToolApproval) {
+                  let pipelineBlocked = false;
+                  const schemaCheck = validateToolInputObject(tool, call.input);
+                  if (!schemaCheck.ok) {
+                    result = schemaCheck.message;
+                    errFlag = true;
+                    pipelineBlocked = true;
+                  } else {
+                    const hooked = await runPreToolHookChain(call.name, schemaCheck.value, params.sessionKey);
+                    if (!hooked.ok) {
+                      result = hooked.message;
+                      errFlag = true;
+                      pipelineBlocked = true;
+                    } else {
+                      call.input = hooked.input;
+                    }
+                  }
+
+                  if (!pipelineBlocked && params.checkToolApproval) {
                     const approval = await params.checkToolApproval(call);
                     if (approval !== null) {
                       const decision = approval.decision as "allow-once" | "allow-always" | "deny";
@@ -797,49 +828,51 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       }
                     }
                   }
-                  const toolStartMs = Date.now();
-                  try {
-                    // PreToolUse hooks
-                    if (params.toolHooks) {
-                      const { decision, hookName } = await params.toolHooks.runPreHooks({
-                        tool, input: call.input, ctx: toolCtx, sessionId: params.sessionKey,
-                      });
-                      if (decision.action === "block") {
-                        result = `[${hookName}] ${decision.reason}`;
-                        errFlag = true;
-                        totalToolCalls++;
-                        toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
-                        toolErrors++;
-                        stream.push({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError: true });
-                        toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
-                        const steering = await getSteeringMessages();
-                        if (steering.length > 0) { steeringMessages = steering; pendingMessages = steering; }
-                        if (steeringMessages) break;
-                        continue;
+                  if (!pipelineBlocked) {
+                    const toolStartMs = Date.now();
+                    try {
+                      // PreToolUse hooks
+                      if (params.toolHooks) {
+                        const { decision, hookName } = await params.toolHooks.runPreHooks({
+                          tool, input: call.input, ctx: toolCtx, sessionId: params.sessionKey,
+                        });
+                        if (decision.action === "block") {
+                          result = `[${hookName}] ${decision.reason}`;
+                          errFlag = true;
+                          totalToolCalls++;
+                          toolCallsByName[call.name] = (toolCallsByName[call.name] ?? 0) + 1;
+                          toolErrors++;
+                          stream.push({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result, isError: true });
+                          toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: result });
+                          const steering = await getSteeringMessages();
+                          if (steering.length > 0) { steeringMessages = steering; pendingMessages = steering; }
+                          if (steeringMessages) break;
+                          continue;
+                        }
+                        if (decision.action === "modify") {
+                          call.input = decision.input;
+                        }
                       }
-                      if (decision.action === "modify") {
-                        call.input = decision.input;
-                      }
-                    }
 
-                    // 工具执行超时保护（借鉴 claude-code）
-                    const TOOL_TIMEOUT_MS = 120_000; // 2 分钟
-                    const toolTimeoutPromise = new Promise<never>((_, reject) =>
-                      setTimeout(() => reject(new Error(`工具 ${call.name} 执行超时（${TOOL_TIMEOUT_MS / 1000}s）`)), TOOL_TIMEOUT_MS),
-                    );
-                    result = await Promise.race([
-                      tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
-                      toolTimeoutPromise,
-                    ]);
-                  } catch (err) {
-                    result = `执行错误: ${(err as Error).message}`;
-                    errFlag = true;
-                  }
-                  if (params.toolHooks) {
-                    result = await params.toolHooks.runPostHooks({
-                      tool, input: call.input, result, isError: errFlag,
-                      durationMs: Date.now() - toolStartMs, ctx: toolCtx, sessionId: params.sessionKey,
-                    });
+                      // 工具执行超时保护（借鉴 claude-code）
+                      const TOOL_TIMEOUT_MS = 120_000; // 2 分钟
+                      const toolTimeoutPromise = new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error(`工具 ${call.name} 执行超时（${TOOL_TIMEOUT_MS / 1000}s）`)), TOOL_TIMEOUT_MS),
+                      );
+                      result = await Promise.race([
+                        tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
+                        toolTimeoutPromise,
+                      ]);
+                    } catch (err) {
+                      result = `执行错误: ${(err as Error).message}`;
+                      errFlag = true;
+                    }
+                    if (params.toolHooks) {
+                      result = await params.toolHooks.runPostHooks({
+                        tool, input: call.input, result, isError: errFlag,
+                        durationMs: Date.now() - toolStartMs, ctx: toolCtx, sessionId: params.sessionKey,
+                      });
+                    }
                   }
                 } else {
                   result = `未知工具: ${call.name}`;

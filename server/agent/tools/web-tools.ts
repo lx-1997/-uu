@@ -10,6 +10,11 @@ const DEFAULT_MAX_FETCH_CHARS = 16_000;
 /** 网络请求最大重试次数 */
 const MAX_NETWORK_RETRIES = 2;
 
+function envFlagTrue(name: string): boolean {
+  const v = (process.env[name] || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 function withTimeout(timeoutMs: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -182,6 +187,139 @@ const DDG_FETCH_HEADERS = {
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 };
+
+function formatWebSearchResults(
+  query: string,
+  engineLine: string,
+  results: Array<{ title: string; url: string; snippet?: string }>,
+): string {
+  const lines = results.map((item, i) => {
+    const sn = item.snippet ? `\n   snippet: ${item.snippet}` : "";
+    return `${i + 1}. ${item.title}\n   ${item.url}${sn}`;
+  });
+  return `query: ${query}\nengine: ${engineLine}\nresults:\n${lines.join("\n")}`;
+}
+
+/** 必应中国（cn.bing.com）PC 页：每条自然结果多为 <li class="b_algo"> 内 <h2><a href> */
+function extractBingChinaHtmlResults(html: string, limit: number): Array<{ title: string; url: string }> {
+  const out: Array<{ title: string; url: string }> = [];
+  const seen = new Set<string>();
+  const re = /<li class="b_algo"[\s\S]*?<h2[^>]*>\s*<a[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) && out.length < limit) {
+    const rawHref = (m[1] || "").trim();
+    if (!rawHref || rawHref.startsWith("javascript:")) continue;
+    let url: string;
+    try {
+      url = new URL(rawHref, "https://cn.bing.com").toString();
+    } catch {
+      continue;
+    }
+    try {
+      const u = new URL(url);
+      if ((u.hostname === "cn.bing.com" || u.hostname === "www.bing.com") && u.pathname.startsWith("/search")) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    const title = stripHtml(m[2] || "").slice(0, 200).trim();
+    if (!title || title.length < 2) continue;
+    const key = url.split("#")[0] || url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title, url });
+  }
+  return out.slice(0, limit);
+}
+
+async function fetchBingChinaHtml(
+  query: string,
+  signal: AbortSignal,
+): Promise<Array<{ html: string; status: number; via: string }>> {
+  const q = encodeURIComponent(query);
+  const out: Array<{ html: string; status: number; via: string }> = [];
+  try {
+    const res = await fetch(`https://cn.bing.com/search?q=${q}&setlang=zh-cn`, {
+      method: "GET",
+      signal,
+      headers: { ...DDG_FETCH_HEADERS, Referer: "https://cn.bing.com/" },
+    });
+    const text = await res.text();
+    if (text.length > 80) {
+      out.push({ html: text, status: res.status, via: "cn.bing.com" });
+    }
+  } catch {
+    /* 下一来源 */
+  }
+  return out;
+}
+
+function looksLikeBaiduCaptcha(html: string): boolean {
+  const h = html.slice(0, 12_000);
+  return /wappass\.baidu\.com|安全验证|请输入验证码|authcenter\.baidu/i.test(h);
+}
+
+async function fetchBaiduSerpHtml(
+  query: string,
+  signal: AbortSignal,
+): Promise<Array<{ html: string; status: number; via: string }>> {
+  const q = encodeURIComponent(query);
+  const out: Array<{ html: string; status: number; via: string }> = [];
+  try {
+    const res = await fetch(`https://www.baidu.com/s?wd=${q}&ie=utf-8`, {
+      method: "GET",
+      signal,
+      headers: { ...DDG_FETCH_HEADERS, Referer: "https://www.baidu.com/" },
+    });
+    const text = await res.text();
+    if (text.length > 80) {
+      out.push({ html: text, status: res.status, via: "www.baidu.com" });
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+/** 百度 PC 结果常见：<h3 class="t"><a href=...>title</a> */
+function extractBaiduHtmlResults(html: string, limit: number): Array<{ title: string; url: string }> {
+  const out: Array<{ title: string; url: string }> = [];
+  const seen = new Set<string>();
+  const re =
+    /<h3[^>]*class="[^"]*\bt\b[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) && out.length < limit) {
+    const rawHref = (m[1] || "").trim();
+    if (!rawHref || rawHref.startsWith("javascript:")) continue;
+    let url: string;
+    try {
+      url = new URL(rawHref, "https://www.baidu.com").toString();
+    } catch {
+      continue;
+    }
+    const title = stripHtml(m[2] || "").slice(0, 200).trim();
+    if (!title || title.length < 2) continue;
+    const key = url.split("#")[0] || url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title, url });
+  }
+  return out.slice(0, limit);
+}
+
+function extractBingResultsFromPages(
+  pages: Array<{ html: string; status: number; via: string }>,
+  limit: number,
+): { results: Array<{ title: string; url: string }>; via: string; status: number } | null {
+  for (const page of pages) {
+    const parsed = extractBingChinaHtmlResults(page.html, limit);
+    if (parsed.length > 0) {
+      return { results: parsed, via: page.via, status: page.status };
+    }
+  }
+  return null;
+}
 
 /**
  * DDG 连通性缓存：首次失败后标记不可用，避免后续请求重复等待。
@@ -428,7 +566,7 @@ async function searchTavily(
   };
 }
 
-/** 产品策略：先 DDG（无 API 成本），解析不到再 Tavily（TAVILY_API_KEY） */
+/** 从 DuckDuckGo HTML 页解析结果条 */
 function extractDdgResultsFromPages(
   pages: Array<{ html: string; status: number; via: string }>,
   limit: number,
@@ -442,33 +580,46 @@ function extractDdgResultsFromPages(
   return null;
 }
 
+type WebSearchDdgFailCtx = { tavilyFirstChain: boolean; tavilyAfterDomesticChain: boolean };
+
 function formatDdgSearchOutput(
   query: string,
   pages: Array<{ html: string; status: number; via: string }>,
   limit: number,
+  failCtx?: WebSearchDdgFailCtx,
 ): string {
+  const ctx = failCtx ?? { tavilyFirstChain: false, tavilyAfterDomesticChain: false };
   const got = extractDdgResultsFromPages(pages, limit);
   if (!got) {
     const last = pages[pages.length - 1];
     const hint = last
       ? last.status >= 400
-        ? `最后一跳 HTTP ${last.status}（${last.via}）。`
-        : `已尝试 ${pages.length} 种入口，解析到 0 条（末页约 ${last.html.length} 字符，${last.via}）。可能被反爬拦截、页面结构变更或网络不稳定；可换更短/英文关键词，或直接对已知文档 URL 使用 web_fetch。`
+        ? `DuckDuckGo 最后一跳 HTTP ${last.status}（${last.via}）。`
+        : `DuckDuckGo 已尝试 ${pages.length} 种入口，解析到 0 条（末页约 ${last.html.length} 字符，${last.via}）。可能被反爬拦截、页面结构变更或网络不稳定；可换更短/英文关键词，或直接对已知文档 URL 使用 web_fetch。`
       : "未能从 DuckDuckGo 拉取到页面（网络或 TLS 问题）。";
-    return `query: ${query}\n未检索到可用结果。\n${hint}`;
+    let chain: string;
+    if (ctx.tavilyFirstChain) {
+      chain = "已依次尝试：Tavily、国内多源网页（必应中国→百度→DuckDuckGo）。";
+    } else if (ctx.tavilyAfterDomesticChain) {
+      chain = "已依次尝试：国内多源网页（必应中国→百度→DuckDuckGo）、Tavily。";
+    } else {
+      chain = "已依次尝试：国内多源网页（必应中国→百度→DuckDuckGo）。";
+    }
+    return `query: ${query}\n未检索到可用结果。\n${chain}\n${hint}`;
   }
-  const lines = got.results.map((item, i) => `${i + 1}. ${item.title}\n   ${item.url}`);
-  return `query: ${query}\nengine: DuckDuckGo (${got.via}${got.status ? `, http ${got.status}` : ""})\nresults:\n${lines.join("\n")}`;
+  return formatWebSearchResults(
+    query,
+    `DuckDuckGo (${got.via}${got.status ? `, http ${got.status}` : ""})`,
+    got.results,
+  );
 }
 
 function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: number }> {
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const hasTavily = !!(process.env.TAVILY_API_KEY || "").trim();
   return {
     name: "web_search",
-    description: hasTavily
-      ? "在互联网上搜索关键词，返回标题、链接与（若有）摘要。优先 DuckDuckGo 网页解析；无可用结果时再调用 Tavily API。需要全文可对结果 URL 再使用 web_fetch。"
-      : "在互联网上搜索关键词，返回结果标题和链接（DuckDuckGo 网页解析；可在服务端配置 TAVILY_API_KEY，在无结果时启用 Tavily 兜底）。需要正文请对链接再使用 web_fetch。",
+    description:
+      "在互联网上搜索关键词，返回标题、链接与（若有）摘要。默认零密钥：必应（中国）→百度→DuckDuckGo；若配置 TAVILY_API_KEY 则在免费链路均无结果后再调 Tavily（消耗额度）。需要 Tavily 优先时设置 WEB_SEARCH_TAVILY_FIRST=1。全文可对结果 URL 再 web_fetch。",
     inputSchema: {
       type: "object",
       properties: {
@@ -487,37 +638,102 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
       for (let retry = 0; retry <= MAX_NETWORK_RETRIES; retry++) {
         const timeout = withTimeout(timeoutMs);
         try {
-          const pages = await fetchDuckDuckGoHtml(query, timeout.signal);
-          const ddg = extractDdgResultsFromPages(pages, limit);
-          if (ddg && ddg.results.length > 0) {
-            const lines = ddg.results.map((item, i) => `${i + 1}. ${item.title}\n   ${item.url}`);
-            return `query: ${query}\nengine: DuckDuckGo (${ddg.via}${ddg.status ? `, http ${ddg.status}` : ""})\nresults:\n${lines.join("\n")}`;
-          }
+          const tavilyKey = (process.env.TAVILY_API_KEY || "").trim();
+          const hasTavily = !!tavilyKey;
+          const tavilyWantsFirst = envFlagTrue("WEB_SEARCH_TAVILY_FIRST");
 
-          if ((process.env.TAVILY_API_KEY || "").trim()) {
+          let tavilyEarlyFailNote = "";
+          if (hasTavily && tavilyWantsFirst) {
             try {
               const tv = await searchTavily(query, limit, timeout.signal);
               if (tv.ok && tv.results.length > 0) {
-                const lines = tv.results.map((item, i) => {
-                  const sn = item.snippet ? `\n   snippet: ${item.snippet}` : "";
-                  return `${i + 1}. ${item.title}\n   ${item.url}${sn}`;
-                });
                 const rt =
                   tv.responseTime !== undefined ? `, ${tv.responseTime.toFixed(2)}s` : "";
-                return `query: ${query}\nengine: Tavily (basic${rt}, fallback after DDG empty)\nresults:\n${lines.join("\n")}`;
+                return formatWebSearchResults(
+                  query,
+                  `Tavily (basic${rt}, WEB_SEARCH_TAVILY_FIRST 优先)`,
+                  tv.results,
+                );
               }
-              const ddgFail = formatDdgSearchOutput(query, pages, limit);
-              const tvNote = !tv.ok
+              tavilyEarlyFailNote = !tv.ok
                 ? `Tavily 不可用（${tv.httpStatus ?? "?"}）：${tv.reason}`
                 : "Tavily 返回 0 条";
-              return `${ddgFail}\n\n[注] ${tvNote}`;
             } catch (e) {
-              const ddgFail = formatDdgSearchOutput(query, pages, limit);
-              return `${ddgFail}\n\n[注] Tavily 请求异常：${e instanceof Error ? e.message : String(e)}`;
+              tavilyEarlyFailNote = `Tavily 请求异常：${e instanceof Error ? e.message : String(e)}`;
             }
           }
 
-          return formatDdgSearchOutput(query, pages, limit);
+          const afterTavilyEarlyFoot =
+            tavilyEarlyFailNote !== ""
+              ? `\n\n[注] ${tavilyEarlyFailNote}；以下为免费国内多源命中。`
+              : "";
+
+          const bingPages = await fetchBingChinaHtml(query, timeout.signal);
+          const bingGot = extractBingResultsFromPages(bingPages, limit);
+          if (bingGot && bingGot.results.length > 0) {
+            return (
+              formatWebSearchResults(
+                query,
+                `必应（中国）(${bingGot.via}${bingGot.status ? `, http ${bingGot.status}` : ""})`,
+                bingGot.results,
+              ) + afterTavilyEarlyFoot
+            );
+          }
+
+          const baiduPages = await fetchBaiduSerpHtml(query, timeout.signal);
+          for (const bp of baiduPages) {
+            if (looksLikeBaiduCaptcha(bp.html)) continue;
+            const baiduResults = extractBaiduHtmlResults(bp.html, limit);
+            if (baiduResults.length > 0) {
+              return (
+                formatWebSearchResults(
+                  query,
+                  `百度 (${bp.via}${bp.status ? `, http ${bp.status}` : ""})`,
+                  baiduResults,
+                ) + afterTavilyEarlyFoot
+              );
+            }
+          }
+
+          const pages = await fetchDuckDuckGoHtml(query, timeout.signal);
+          const ddg = extractDdgResultsFromPages(pages, limit);
+          if (ddg && ddg.results.length > 0) {
+            return (
+              formatWebSearchResults(
+                query,
+                `DuckDuckGo (${ddg.via}${ddg.status ? `, http ${ddg.status}` : ""})`,
+                ddg.results,
+              ) + afterTavilyEarlyFoot
+            );
+          }
+
+          let tavilyLateNote = "";
+          if (hasTavily && !tavilyWantsFirst) {
+            try {
+              const tv = await searchTavily(query, limit, timeout.signal);
+              if (tv.ok && tv.results.length > 0) {
+                const rt =
+                  tv.responseTime !== undefined ? `, ${tv.responseTime.toFixed(2)}s` : "";
+                return formatWebSearchResults(
+                  query,
+                  `Tavily (basic${rt}, 免费多源无结果后补充)`,
+                  tv.results,
+                );
+              }
+              tavilyLateNote = !tv.ok
+                ? `Tavily 不可用（${tv.httpStatus ?? "?"}）：${tv.reason}`
+                : "Tavily 返回 0 条";
+            } catch (e) {
+              tavilyLateNote = `Tavily 请求异常：${e instanceof Error ? e.message : String(e)}`;
+            }
+          }
+
+          const ddgFail = formatDdgSearchOutput(query, pages, limit, {
+            tavilyFirstChain: hasTavily && tavilyWantsFirst,
+            tavilyAfterDomesticChain: hasTavily && !tavilyWantsFirst,
+          });
+          const extraNote = tavilyLateNote || tavilyEarlyFailNote;
+          return extraNote ? `${ddgFail}\n\n[注] ${extraNote}` : ddgFail;
         } catch (e) {
           lastError = e instanceof Error ? e : new Error(String(e));
           if (retry < MAX_NETWORK_RETRIES) {
