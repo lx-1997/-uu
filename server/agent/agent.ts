@@ -59,6 +59,7 @@ import {
 } from "./tool-approval.js";
 import type { MiniAgentEvent } from "./agent-events.js";
 import { runAgentLoop } from "./agent-loop.js";
+import { ToolHookRegistry, createExecLikeFailureHintHook } from "./tool-hooks.js";
 import { installSessionToolResultGuard } from "./session-tool-result-guard.js";
 import {
   buildSubagentPromptAddon,
@@ -191,6 +192,11 @@ export interface AgentConfig {
   compactHooks?: CompactHookRegistry;
   /** 系统提示遥测（RDKClaw 分层构建时传入 hash 与层数） */
   systemPromptTelemetry?: { hashShort: string; layerCount: number };
+  /**
+   * 工具 Pre/Post/Failure 钩子；不传则使用内置 Registry（含 exec/device_exec 失败恢复提示）。
+   * 若自行传入，请视需要调用 `createExecLikeFailureHintHook()` 注册失败提示。
+   */
+  toolHooks?: ToolHookRegistry;
 }
 
 export interface RunResult {
@@ -259,6 +265,7 @@ export class Agent {
   private allowlist: AllowlistManager;
   private contextTokens: number;
   private runtimePolicy: NonNullable<AgentConfig['runtimePolicy']>;
+  private toolHooks: ToolHookRegistry;
   private sandbox?: {
     enabled: boolean;
     allowExec: boolean;
@@ -453,6 +460,10 @@ export class Agent {
     this.toolResultGuard = installSessionToolResultGuard(this.sessions);
     this.compactHooks = config.compactHooks;
     this.systemPromptTelemetry = config.systemPromptTelemetry;
+    this.toolHooks = config.toolHooks ?? new ToolHookRegistry();
+    if (!config.toolHooks) {
+      this.toolHooks.registerPostFailure(createExecLikeFailureHintHook());
+    }
   }
 
   /** 运行时替换工具列表（如 RDK Studio 在对话中连接设备后注入板端工具） */
@@ -994,6 +1005,7 @@ export class Agent {
               return { summary: r.summary, summaryMessage: r.summaryMessage };
             },
             abortSignal: runAbortController.signal,
+            toolHooks: this.toolHooks,
           });
 
           // 对应 pi-agent-core: for await (const event of stream) + emit + state update

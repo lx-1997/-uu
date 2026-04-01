@@ -19,6 +19,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import { runAgentLoop, type AgentLoopParams } from './agent-loop.js';
+import { ToolHookRegistry, createExecLikeFailureHintHook } from './tool-hooks.js';
 import { SessionManager, type Message } from './session.js';
 import type { MiniAgentEvent, MiniAgentResult } from './agent-events.js';
 import type { Tool, ToolContext } from './tools/types.js';
@@ -38,6 +39,12 @@ import { SkillManager } from './skills.js';
 
 const AGENT_DIR = path.join(process.cwd(), 'agent');
 const SESSION_DIR = path.join(os.homedir(), '.rdkstudio', 'sessions');
+
+const rdkAgentFallbackToolHooks = (() => {
+  const r = new ToolHookRegistry();
+  r.registerPostFailure(createExecLikeFailureHintHook());
+  return r;
+})();
 
 function readAgentFile(filename: string): string {
   const filePath = path.join(AGENT_DIR, filename);
@@ -154,6 +161,7 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
     },
 
     abortSignal: AbortSignal.timeout(2 * 60 * 60 * 1000),
+    toolHooks: rdkAgentFallbackToolHooks,
   };
 
   const stream = runAgentLoop(loopParams);

@@ -541,13 +541,13 @@ export default function Flasher() {
         setError(
           t(
             'flasher.err.unsupportedFileType',
-            '不支持该文件类型，请选择 .img、.xz 或 .gz（如 .img.gz）镜像。',
+            '不支持该文件类型，请选择 .img、.xz、.gz（如 .img.gz）或 .zip 镜像。',
           ),
         );
         addToast(
           t(
             'flasher.err.unsupportedFileType',
-            '不支持该文件类型，请选择 .img、.xz 或 .gz（如 .img.gz）镜像。',
+            '不支持该文件类型，请选择 .img、.xz、.gz（如 .img.gz）或 .zip 镜像。',
           ),
           'error',
         );
@@ -680,7 +680,7 @@ export default function Flasher() {
     if (useLocalImage && imgPath.trim() && !isValidTfLocalImagePath(imgPath.trim())) {
       const msg = t(
         'flasher.err.unsupportedFileType',
-        '不支持该文件类型，请选择 .img、.xz 或 .gz（如 .img.gz）镜像。',
+        '不支持该文件类型，请选择 .img、.xz、.gz（如 .img.gz）或 .zip 镜像。',
       );
       setError(msg);
       addToast(msg, 'error');
@@ -1263,7 +1263,7 @@ export default function Flasher() {
                             'flasher.s100.pathPlaceholder',
                             '请填写或浏览：product.zip 或已解压固件文件夹路径',
                           )
-                          : t('flasher.localFile.placeholder', '或手动输入路径 (.img / .xz / .gz)')
+                          : t('flasher.localFile.placeholder', '或手动输入路径 (.img / .xz / .gz / .zip)')
                       }
                       value={localImagePath}
                       onChange={(e) => { setLocalImagePath(e.target.value); if (e.target.value) setUseLocalImage(true); }}

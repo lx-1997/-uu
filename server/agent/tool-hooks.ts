@@ -53,11 +53,31 @@ export interface PostToolUseHook {
   }): Promise<{ result: string } | null>;
 }
 
+// ============== PostToolUseFailure（仅在工具执行抛错或 errFlag 时） ==============
+
+export interface PostToolUseFailureHook {
+  name: string;
+  priority: number;
+  /**
+   * 在 PostToolUse 链之后、仅当本次工具结果为错误时调用。
+   * 可追加恢复建议、结构化错误提示；返回 null 表示不修改。
+   */
+  process(params: {
+    tool: Tool;
+    input: Record<string, unknown>;
+    result: string;
+    durationMs: number;
+    ctx: ToolContext;
+    sessionId: string;
+  }): Promise<{ result: string } | null>;
+}
+
 // ============== Hook Registry ==============
 
 export class ToolHookRegistry {
   private preHooks: PreToolUseHook[] = [];
   private postHooks: PostToolUseHook[] = [];
+  private postFailureHooks: PostToolUseFailureHook[] = [];
 
   registerPre(hook: PreToolUseHook): void {
     this.preHooks.push(hook);
@@ -67,6 +87,11 @@ export class ToolHookRegistry {
   registerPost(hook: PostToolUseHook): void {
     this.postHooks.push(hook);
     this.postHooks.sort((a, b) => a.priority - b.priority);
+  }
+
+  registerPostFailure(hook: PostToolUseFailureHook): void {
+    this.postFailureHooks.push(hook);
+    this.postFailureHooks.sort((a, b) => a.priority - b.priority);
   }
 
   /**
@@ -133,6 +158,33 @@ export class ToolHookRegistry {
 
     return currentResult;
   }
+
+  /**
+   * 工具执行失败（异常路径或 errFlag）后调用，在 runPostHooks 之后执行。
+   */
+  async runPostFailureHooks(params: {
+    tool: Tool;
+    input: Record<string, unknown>;
+    result: string;
+    durationMs: number;
+    ctx: ToolContext;
+    sessionId: string;
+  }): Promise<string> {
+    let currentResult = params.result;
+    for (const hook of this.postFailureHooks) {
+      try {
+        const modification = await hook.process({ ...params, result: currentResult });
+        if (modification) {
+          currentResult = modification.result;
+        }
+      } catch (err) {
+        process.stderr.write(
+          `[tool-hooks] PostToolUseFailure hook "${hook.name}" error: ${err instanceof Error ? err.message : err}\n`,
+        );
+      }
+    }
+    return currentResult;
+  }
 }
 
 // ============== 内置 Hooks ==============
@@ -183,6 +235,23 @@ export function createReadOnlyHook(
         return { action: "block", reason: "当前为只读模式，不允许执行写操作" };
       }
       return null;
+    },
+  };
+}
+
+/** 对 exec / device_exec 等 shell 类工具在失败时追加简短恢复提示（不修改成功结果） */
+export function createExecLikeFailureHintHook(
+  isExecLike: (toolName: string) => boolean = (name) => name === "exec" || name === "device_exec",
+): PostToolUseFailureHook {
+  const hint =
+    "\n\n[恢复建议] 核对：命令是否适用于当前环境（本机 workspace vs SSH 设备）、工作目录与绝对路径、权限/依赖/网络；可缩小为单步命令重试，并阅读 stderr/退出码。";
+  return {
+    name: "exec-like-failure-hint",
+    priority: 50,
+    async process({ tool, result }) {
+      if (!isExecLike(tool.name)) return null;
+      if (result.includes("[恢复建议]")) return null;
+      return { result: result + hint };
     },
   };
 }

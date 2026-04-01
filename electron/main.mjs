@@ -367,6 +367,7 @@ ipcMain.handle('rdk:flash:decompress-image', async (_event, payload) => {
   const lower = filePath.toLowerCase();
   if (lower.endsWith('.xz')) return flashService.decompressXz(filePath);
   if (lower.endsWith('.gz') && !lower.endsWith('.tar.gz')) return flashService.decompressGz(filePath);
+  if (lower.endsWith('.zip')) return flashService.decompressZipTfImage(filePath);
   return { ok: true, outputPath: filePath };
 });
 

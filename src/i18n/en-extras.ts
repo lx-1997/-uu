@@ -835,7 +835,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.section.localFile': 'Local image file',
   'flasher.localFile.picked': 'Local file selected',
   'flasher.localFile.pick': 'Choose local image…',
-  'flasher.localFile.placeholder': 'Or type path (.img / .xz / .gz)',
+  'flasher.localFile.placeholder': 'Or type path (.img / .xz / .gz / .zip)',
   'flasher.localFile.browse': 'Browse',
   'flasher.hint.xburnOptional': 'xburn flow: local file optional (you can pick the image inside xburn).',
   'flasher.hint.desktopWrite': 'Extra setup may be needed for direct write; you can use third-party tools.',
@@ -857,7 +857,8 @@ export const EN_EXTRAS: Record<string, string> = {
     'The list below is the official firmware catalog. Use “Manual download” for product.zip. One-click flash can use that zip or an extracted folder (same as reference Studio). Non-ASCII paths may be copied to a temporary English folder first. You can also flash manually in xburn-gui.',
   'flasher.s100.err.unsupportedFile':
     'S100 one-click flash needs product.zip or a firmware folder.',
-  'flasher.err.unsupportedFileType': 'Unsupported file type. Choose a .img, .xz, or .gz image (e.g. .img.gz).',
+  'flasher.err.unsupportedFileType':
+    'Unsupported file type. Choose a .img, .xz, .gz (e.g. .img.gz), or .zip image.',
   'flasher.s100.pickUnifiedDialogTitle': 'Choose product.zip or extracted firmware folder',
   'flasher.s100.pickFolderOnlyTitle': 'Choose extracted firmware folder',
   'flasher.s100.pickFirmware': 'Choose product.zip or extracted folder…',

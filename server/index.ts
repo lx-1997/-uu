@@ -2174,27 +2174,30 @@ app.post('/api/devices/connect', async (request, response) => {
     const normalizedPort = Number(port ?? 22);
     await verifySshConnection({ host, port: normalizedPort, username, password });
 
-    const devices = await readDevices();
-    const now = new Date().toISOString();
-    const nextDevice: Device & { password?: string } = {
-      id: devices.find((device) => device.host === host && (device.port ?? 22) === normalizedPort && device.username === username)?.id ?? uuid(),
-      host,
-      port: normalizedPort,
-      username,
-      password,
-      status: 'connected',
-      lastCheckedAt: now,
-    };
+    let nextDevice: Device & { password?: string };
+    await serializedWriteDevices(async () => {
+      const devices = await readDevices();
+      const now = new Date().toISOString();
+      nextDevice = {
+        id: devices.find((device) => device.host === host && (device.port ?? 22) === normalizedPort && device.username === username)?.id ?? uuid(),
+        host,
+        port: normalizedPort,
+        username,
+        password,
+        status: 'connected',
+        lastCheckedAt: now,
+      };
 
-    const nextDevices = [
-      nextDevice,
-      ...devices.filter((device) => !(device.host === host && (device.port ?? 22) === normalizedPort && device.username === username)),
-    ];
+      const nextDevices = [
+        nextDevice,
+        ...devices.filter((device) => !(device.host === host && (device.port ?? 22) === normalizedPort && device.username === username)),
+      ];
+
+      await writeDevices(nextDevices);
+    });
 
     setDevicePasswordCache(host, username, normalizedPort, password);
-
-    await writeDevices(nextDevices);
-    response.json({ device: sanitizeDevice(nextDevice) });
+    response.json({ device: sanitizeDevice(nextDevice!) });
   } catch (error) {
     if (isSshTimeoutError(error)) {
       sendApiError(
@@ -2838,24 +2841,36 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
 
 app.delete('/api/devices/:id', async (request, response) => {
   const { id } = request.params;
-  await serializedWriteDevices(async () => {
-    const devices = await readDevices();
-    const target = devices.find((device) => device.id === id);
+  try {
+    await serializedWriteDevices(async () => {
+      const devices = await readDevices();
+      const target = devices.find((device) => device.id === id);
 
-    if (!target) {
-      if (!response.headersSent) {
-        response.status(404).json({ error: '设备不存在' });
+      if (!target) {
+        if (!response.headersSent) {
+          response.status(404).json({ error: '设备不存在' });
+        }
+        return;
       }
-      return;
-    }
 
-    deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
-    await writeDevices(devices.filter((device) => device.id !== id));
-    const cleanup = purgeDeviceSoftwareState(target);
+      deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
+      await writeDevices(devices.filter((device) => device.id !== id));
+      const cleanup = purgeDeviceSoftwareState(target);
+      if (!response.headersSent) {
+        response.json({ removedId: id, cleanup });
+      }
+    });
+  } catch (error) {
     if (!response.headersSent) {
-      response.json({ removedId: id, cleanup });
+      sendApiError(
+        response,
+        500,
+        'DEVICE_PERSIST_FAILED',
+        error instanceof Error ? `保存设备列表失败：${error.message}` : '保存设备列表失败',
+        { retryable: true },
+      );
     }
-  });
+  }
 });
 
 app.post('/api/devices/:id/openclaw', async (request, response) => {
@@ -2896,13 +2911,23 @@ app.post('/api/devices/:id/openclaw', async (request, response) => {
       [installCommand ?? '', configureCommand ?? ''],
     ));
 
-    const nextDevice: Device = {
+    let nextDevice: Device = {
       ...device,
       status: 'connected',
       lastCheckedAt: new Date().toISOString(),
     };
 
-    await writeDevices(devices.map((item) => (item.id === nextDevice.id ? nextDevice : item)));
+    await serializedWriteDevices(async () => {
+      const fresh = await readDevices();
+      const still = fresh.find((item) => item.id === id);
+      if (!still) return;
+      nextDevice = {
+        ...still,
+        status: 'connected',
+        lastCheckedAt: new Date().toISOString(),
+      };
+      await writeDevices(fresh.map((item) => (item.id === nextDevice.id ? nextDevice : item)));
+    });
     response.json({ output, device: sanitizeDevice(nextDevice as Device & { password?: string }) });
   } catch (error) {
     if (isSshAuthError(error)) {
@@ -3870,20 +3895,23 @@ app.post('/api/devices/:id/board/detect', async (request, response) => {
   let deviceJson = sanitizeDevice(executed.device as Device & { password?: string });
 
   if (persist) {
-    const devices = await readDevices();
-    const nextDevices = devices.map((d) => {
-      if (d.id !== id) return d;
-      return {
-        ...d,
-        boardPlatform: platform ?? null,
-        boardModel: parsed.model || undefined,
-        boardOsVersion: parsed.osVersion || undefined,
-        boardDetectedAt: new Date().toISOString(),
-        researchSeeds,
-      };
+    await serializedWriteDevices(async () => {
+      const devices = await readDevices();
+      const nextDevices = devices.map((d) => {
+        if (d.id !== id) return d;
+        return {
+          ...d,
+          boardPlatform: platform ?? null,
+          boardModel: parsed.model || undefined,
+          boardOsVersion: parsed.osVersion || undefined,
+          boardDetectedAt: new Date().toISOString(),
+          researchSeeds,
+        };
+      });
+      await writeDevices(nextDevices);
     });
-    await writeDevices(nextDevices);
-    const refreshed = nextDevices.find((d) => d.id === id);
+    const after = await readDevices();
+    const refreshed = after.find((d) => d.id === id);
     if (refreshed) {
       deviceJson = sanitizeDevice(refreshed as Device & { password?: string });
     }

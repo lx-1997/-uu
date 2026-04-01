@@ -1,5 +1,5 @@
 import type { Tool, ToolContext } from "./types.js";
-import { readDevices, writeDevices } from "../../storage.js";
+import { readDevices, writeDevices, serializedWriteDevices } from "../../storage.js";
 import { setDevicePasswordCache, deleteDevicePasswordCache } from "../../device-password-cache.js";
 import { verifySshConnection } from "../../ssh.js";
 import { v4 as uuid } from "uuid";
@@ -162,33 +162,44 @@ export const deviceConnectTool: Tool<{
       return `SSH 连接失败: ${lastError}\n请检查 IP、端口、用户名与密码是否与设备一致。`;
     }
 
-    const devices = await readDevices();
-    const now = new Date().toISOString();
-    const existingId = devices.find(
-      (d) => d.host === host && (d.port ?? 22) === port && d.username === username,
-    )?.id;
-
-    const device = {
-      id: existingId ?? uuid(),
-      host,
-      port,
-      username,
-      password: connectedPassword,
-      status: "connected" as const,
-      lastCheckedAt: now,
+    let device: {
+      id: string;
+      host: string;
+      port: number;
+      username: string;
+      password: string;
+      status: "connected";
+      lastCheckedAt: string;
     };
+    await serializedWriteDevices(async () => {
+      const devices = await readDevices();
+      const now = new Date().toISOString();
+      const existingId = devices.find(
+        (d) => d.host === host && (d.port ?? 22) === port && d.username === username,
+      )?.id;
 
-    const nextDevices = [
-      device,
-      ...devices.filter(
-        (d) => !(d.host === host && (d.port ?? 22) === port && d.username === username),
-      ),
-    ];
-    await writeDevices(nextDevices);
+      device = {
+        id: existingId ?? uuid(),
+        host,
+        port,
+        username,
+        password: connectedPassword,
+        status: "connected",
+        lastCheckedAt: now,
+      };
+
+      const nextDevices = [
+        device,
+        ...devices.filter(
+          (d) => !(d.host === host && (d.port ?? 22) === port && d.username === username),
+        ),
+      ];
+      await writeDevices(nextDevices);
+    });
     setDevicePasswordCache(host, username, port, connectedPassword);
-    ctx.onStudioDeviceBound?.(device.id);
+    ctx.onStudioDeviceBound?.(device!.id);
 
-    return `设备连接成功!\n• IP: ${host}:${port}\n• 用户: ${username}\n• 设备ID: ${device.id}\n• 状态: connected\n\n说明：已保存凭据并尝试刷新本会话工具列表（含板端工具）。若模型仍看不到 device_exec，请再发一条短消息。`;
+    return `设备连接成功!\n• IP: ${host}:${port}\n• 用户: ${username}\n• 设备ID: ${device!.id}\n• 状态: connected\n\n说明：已保存凭据并尝试刷新本会话工具列表（含板端工具）。若模型仍看不到 device_exec，请再发一条短消息。`;
   },
 };
 
@@ -215,10 +226,15 @@ export const deviceRemoveTool: Tool<{ deviceId?: string; host?: string }> = {
       return `未找到设备 ${input.deviceId || input.host}`;
     }
 
-    const nextDevices = devices.filter((d) => d.id !== target.id);
+    const removedId = target.id;
     deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
-    await writeDevices(nextDevices);
-    ctx.onStudioDeviceRemoved?.(target.id);
+    await serializedWriteDevices(async () => {
+      const fresh = await readDevices();
+      const t = fresh.find((d) => d.id === removedId);
+      if (!t) return;
+      await writeDevices(fresh.filter((d) => d.id !== removedId));
+    });
+    ctx.onStudioDeviceRemoved?.(removedId);
     return `已移除设备 ${target.host}:${target.port ?? 22} (${target.username}) [id: ${target.id}]`;
   },
 };

@@ -794,7 +794,9 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   const startMs = Date.now();
                   let text: string;
                   let errFlag = false;
+                  let reachedExecute = false;
                   try {
+                    reachedExecute = true;
                     text = await tool.execute(call.input, { ...toolCtx, toolCallId: call.id });
                   } catch (err) {
                     text = `执行错误: ${(err as Error).message}`;
@@ -806,6 +808,16 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                     text = await params.toolHooks.runPostHooks({
                       tool, input: call.input, result: text, isError: errFlag,
                       durationMs: Date.now() - startMs, ctx: toolCtx, sessionId: params.sessionKey,
+                    });
+                  }
+                  if (errFlag && params.toolHooks && reachedExecute) {
+                    text = await params.toolHooks.runPostFailureHooks({
+                      tool,
+                      input: call.input,
+                      result: text,
+                      durationMs: Date.now() - startMs,
+                      ctx: toolCtx,
+                      sessionId: params.sessionKey,
                     });
                   }
                   return { text, errFlag };
@@ -894,6 +906,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   }
                   if (!pipelineBlocked) {
                     const toolStartMs = Date.now();
+                    let reachedExecute = false;
                     try {
                       // PreToolUse hooks
                       if (params.toolHooks) {
@@ -923,6 +936,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       const toolTimeoutPromise = new Promise<never>((_, reject) =>
                         setTimeout(() => reject(new Error(`工具 ${call.name} 执行超时（${TOOL_TIMEOUT_MS / 1000}s）`)), TOOL_TIMEOUT_MS),
                       );
+                      reachedExecute = true;
                       result = await Promise.race([
                         tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
                         toolTimeoutPromise,
@@ -935,6 +949,16 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       result = await params.toolHooks.runPostHooks({
                         tool, input: call.input, result, isError: errFlag,
                         durationMs: Date.now() - toolStartMs, ctx: toolCtx, sessionId: params.sessionKey,
+                      });
+                    }
+                    if (errFlag && params.toolHooks && reachedExecute) {
+                      result = await params.toolHooks.runPostFailureHooks({
+                        tool,
+                        input: call.input,
+                        result,
+                        durationMs: Date.now() - toolStartMs,
+                        ctx: toolCtx,
+                        sessionId: params.sessionKey,
                       });
                     }
                   }

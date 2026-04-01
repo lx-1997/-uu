@@ -5,7 +5,15 @@
  * - 可注册 async pre-hook：可改写 input 或拒绝执行
  */
 
+import type { ZodError } from "zod";
 import type { Tool } from "./tools/types.js";
+
+function formatZodToolError(toolName: string, err: ZodError): string {
+  const detail = err.issues
+    .map((i) => `${i.path.length > 0 ? i.path.join(".") : "root"}: ${i.message}`)
+    .join("; ");
+  return `${toolName}: 参数校验未通过 — ${detail}`;
+}
 
 export type PreToolHookContext = {
   toolName: string;
@@ -88,6 +96,11 @@ export function validateToolInputObject(
         }
         continue;
       }
+      // 已配置 Zod 时不在此做 JSON Schema 标量类型检查：否则 number 字段会拒绝字符串
+      // `"30000"`，导致永远走不到 Zod 的 coerce（LLM 常发字符串数字）。
+      if (tool.inputZodSchema) {
+        continue;
+      }
       if (!spec.type) continue;
       const t = spec.type;
       if (t === "string") {
@@ -116,6 +129,13 @@ export function validateToolInputObject(
         }
       }
     }
+  }
+  if (tool.inputZodSchema) {
+    const zr = tool.inputZodSchema.safeParse(obj);
+    if (!zr.success) {
+      return { ok: false, message: formatZodToolError(tool.name, zr.error) };
+    }
+    return { ok: true, value: zr.data as Record<string, unknown> };
   }
   return { ok: true, value: obj };
 }

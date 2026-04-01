@@ -116,7 +116,7 @@ export const EN: Record<string, string> = {
   'dock.mention.flash.optOfficial': 'Official catalog',
   'dock.mention.flash.optOfficialDesc': 'Choose a version from the list on the flash page (S100 often uses product.zip / xburn).',
   'dock.mention.flash.optLocal': 'Local image',
-  'dock.mention.flash.optLocalDesc': 'Browse or enter a local .img / .xz / .gz path on the flash page.',
+  'dock.mention.flash.optLocalDesc': 'Browse or enter a local .img / .xz / .gz / .zip path on the flash page.',
   'dock.mention.flash.next': 'Next',
   'dock.mention.flash.openFlasher': 'Open flash page',
   'dock.mention.flash.summaryDevice': 'Device',

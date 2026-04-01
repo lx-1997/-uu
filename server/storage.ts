@@ -61,6 +61,30 @@ function getDataFilePath() {
   return path.join(dataDir, 'devices.json');
 }
 
+/** Windows/索引类软件偶发 EBUSY/EPERM，短重试可提高 rename 成功率 */
+async function renameAtomic(tmpPath: string, dataFilePath: string) {
+  const max = 6;
+  for (let attempt = 0; attempt < max; attempt += 1) {
+    try {
+      await fs.rename(tmpPath, dataFilePath);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (
+        (code === 'EBUSY'
+          || code === 'EPERM'
+          || code === 'EACCES'
+          || code === 'UNKNOWN')
+        && attempt < max - 1
+      ) {
+        await new Promise((r) => setTimeout(r, 40 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 async function migrateLegacyDataIfNeeded(targetFilePath: string) {
   if (_legacyMigrated) return;
   _legacyMigrated = true;
@@ -110,7 +134,7 @@ export async function writeDevices(devices: Device[]) {
   // 原子写入：先写临时文件再 rename，防止写入中途崩溃导致 JSON 损坏
   const tmpPath = dataFilePath + '.tmp.' + process.pid;
   await fs.writeFile(tmpPath, JSON.stringify(devices, null, 2), 'utf-8');
-  await fs.rename(tmpPath, dataFilePath);
+  await renameAtomic(tmpPath, dataFilePath);
 }
 
 /**

@@ -29,6 +29,7 @@
  *    ```
  */
 
+import type { ZodTypeAny } from "zod";
 import type { MemoryManager, MemorySearchResult } from "../memory.js";
 import type { SpawnToolScope } from "../spawn-profile.js";
 
@@ -120,6 +121,12 @@ export interface Tool<TInput = any> {
     properties: Record<string, unknown>;
     required?: string[];
   };
+
+  /**
+   * 可选 Zod 模式：浅层 JSON Schema 校验通过后再 strict/coerce，减少 LLM 错参。
+   * 使用 ZodTypeAny：含 preprocess/effects 时输入侧多为 unknown，与 TInput 结构化输出并存。
+   */
+  inputZodSchema?: ZodTypeAny;
 
   /**
    * 执行函数

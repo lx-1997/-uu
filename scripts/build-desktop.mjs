@@ -26,6 +26,10 @@ if (!supportedTargets.has(target)) {
 }
 const macLocalSign = target === 'mac' && mode === 'local';
 const macArm64 = target === 'mac' && mode === 'arm64';
+/** 默认 ad-hoc；对外 Developer ID 分发时设 RDK_DESKTOP_MAC_USE_DEVELOPER_ID=1 */
+const macUseDeveloperId =
+  target === 'mac' &&
+  String(process.env.RDK_DESKTOP_MAC_USE_DEVELOPER_ID || '').trim() === '1';
 if (
   mode &&
   !(target === 'win' && (mode === 'dir' || mode === 'zip')) &&
@@ -253,12 +257,12 @@ try {
   if (macArm64) {
     builderArgs = [...builderArgs, '--arm64'];
   }
-  if (macLocalSign) {
+  if (target === 'mac' && !macUseDeveloperId) {
     console.warn(
-      '[build:desktop] mac local：使用 ad-hoc 签名（identity=-），仅适合本机/信任环境；勿对外正式发布。',
+      '[build:desktop] mac：ad-hoc 签名（-c.mac.identity=-），公证已关闭；对外分发若需 Developer ID 请设 RDK_DESKTOP_MAC_USE_DEVELOPER_ID=1。',
     );
     console.warn(
-      '[build:desktop] 若 .app/.dmg 经浏览器或 AirDrop 传递，可能带隔离属性；可右键「打开」或 xattr -dr com.apple.quarantine <路径>。',
+      '[build:desktop] 经浏览器/AirDrop 可能带隔离属性；可右键「打开」或 xattr -dr com.apple.quarantine <路径>。',
     );
     builderArgs = [
       ...builderArgs,

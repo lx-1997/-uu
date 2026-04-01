@@ -35,3 +35,13 @@ export function hashSystemPromptLayers(
   }
   return { combinedHashShort, combinedLength: combined.length, layerHashes };
 }
+
+/** 静/动前缀分别 hash，便于观察缓存候选段是否随请求漂移 */
+export function hashStableDynamicSystemPrompt(stablePrefix: string, dynamicSuffix: string): {
+  stableHashShort: string;
+  dynamicHashShort: string;
+} {
+  const stableHashShort = crypto.createHash("sha256").update(stablePrefix, "utf8").digest("hex").slice(0, 12);
+  const dynamicHashShort = crypto.createHash("sha256").update(dynamicSuffix, "utf8").digest("hex").slice(0, 12);
+  return { stableHashShort, dynamicHashShort };
+}

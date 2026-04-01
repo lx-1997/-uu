@@ -148,7 +148,7 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   }
 
   const method = (init?.method ?? 'GET').toUpperCase();
-  const maxAttempts = method === 'GET' || method === 'HEAD' ? 2 : 1;
+  const maxAttempts = method === 'GET' || method === 'HEAD' || method === 'DELETE' ? 2 : 1;
   let attempt = 0;
 
   while (attempt < maxAttempts) {

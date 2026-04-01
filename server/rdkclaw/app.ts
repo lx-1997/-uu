@@ -86,7 +86,7 @@ import {
   type ModelTier,
 } from "./system-prompt-builder.js";
 import { buildRdkclawSystemPromptBundle } from "./system-prompt-layers.js";
-import { hashSystemPromptLayers } from "./system-prompt-telemetry.js";
+import { hashSystemPromptLayers, hashStableDynamicSystemPrompt } from "./system-prompt-telemetry.js";
 import { CompactHookRegistry } from "../agent/compact-hooks.js";
 import {
   selectDelegateDecision,
@@ -945,6 +945,7 @@ export class RDKClawApp {
       policy,
     });
     const promptTelemetry = hashSystemPromptLayers(promptBundle.combined, promptBundle.layers);
+    const promptStableDynamic = hashStableDynamicSystemPrompt(promptBundle.stablePrefix, promptBundle.dynamicSuffix);
     const systemPrompt = promptBundle.combined;
     const effectiveContextTokens = getEffectiveContextWindowTokens(
       modelCaps.contextWindow,
@@ -1046,6 +1047,10 @@ export class RDKClawApp {
         },
         system_prompt_chars: promptTelemetry.combinedLength,
         system_prompt_hash_short: promptTelemetry.combinedHashShort,
+        system_prompt_stable_chars: promptBundle.stablePrefix.length,
+        system_prompt_dynamic_chars: promptBundle.dynamicSuffix.length,
+        system_prompt_stable_hash_short: promptStableDynamic.stableHashShort,
+        system_prompt_dynamic_hash_short: promptStableDynamic.dynamicHashShort,
         system_prompt_layer_count: promptBundle.layers.length,
         system_prompt_layer_hashes: promptTelemetry.layerHashes,
         effective_context_tokens: effectiveContextTokens,

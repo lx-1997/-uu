@@ -26,6 +26,18 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import type { SpawnToolScope } from "../spawn-profile.js";
 import type { Tool, ToolContext } from "./types.js";
+import {
+  readToolInputZod,
+  writeToolInputZod,
+  editToolInputZod,
+  execToolInputZod,
+  listToolInputZod,
+  grepToolInputZod,
+  memorySearchToolInputZod,
+  memoryGetToolInputZod,
+  memorySaveToolInputZod,
+  sessionsSpawnToolInputZod,
+} from "./tool-zod-schemas.js";
 import { assertSandboxPath } from "../sandbox-paths.js";
 import {
   appendUtf8WithTailCap,
@@ -89,6 +101,7 @@ export const readTool: Tool<{ file_path: string; limit?: number }> = {
     },
     required: ["file_path"],
   },
+  inputZodSchema: readToolInputZod,
   async execute(input, ctx) {
     let filePath: string;
     try {
@@ -145,6 +158,7 @@ export const writeTool: Tool<{ file_path: string; content: string }> = {
     },
     required: ["file_path", "content"],
   },
+  inputZodSchema: writeToolInputZod,
   async execute(input, ctx) {
     let filePath: string;
     try {
@@ -209,6 +223,7 @@ export const editTool: Tool<{
     },
     required: ["file_path", "old_string", "new_string"],
   },
+  inputZodSchema: editToolInputZod,
   async execute(input, ctx) {
     let filePath: string;
     try {
@@ -290,6 +305,7 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
     },
     required: ["command"],
   },
+  inputZodSchema: execToolInputZod,
   async execute(input, ctx) {
     const timeout = input.timeout ?? 30000;
 
@@ -398,6 +414,7 @@ export const listTool: Tool<{ path?: string; limit?: number }> = {
       limit: { type: "number", description: "最大条目数，默认 500" },
     },
   },
+  inputZodSchema: listToolInputZod,
   async execute(input, ctx) {
     let dirPath: string;
     try {
@@ -479,6 +496,7 @@ export const grepTool: Tool<{ pattern: string; path?: string }> = {
     },
     required: ["pattern"],
   },
+  inputZodSchema: grepToolInputZod,
   async execute(input, ctx) {
     try {
       const resolved = await assertSandboxPath({
@@ -612,6 +630,7 @@ export const memorySearchTool: Tool<{ query: string; limit?: number }> = {
     },
     required: ["query"],
   },
+  inputZodSchema: memorySearchToolInputZod,
   async execute(input, ctx) {
     const memory = ctx.memory;
     if (!memory) {
@@ -649,6 +668,7 @@ export const memoryGetTool: Tool<{ id: string }> = {
     },
     required: ["id"],
   },
+  inputZodSchema: memoryGetToolInputZod,
   async execute(input, ctx) {
     const memory = ctx.memory;
     if (!memory) {
@@ -694,6 +714,7 @@ export const memorySaveTool: Tool<{
     },
     required: ["content"],
   },
+  inputZodSchema: memorySaveToolInputZod,
   async execute(input, ctx) {
     const memory = ctx.memory;
     if (!memory) {
@@ -766,6 +787,7 @@ export const sessionsSpawnTool: Tool<{
     },
     required: ["task"],
   },
+  inputZodSchema: sessionsSpawnToolInputZod,
   async execute(input, ctx) {
     if (!ctx.spawnSubagent) {
       return "子代理系统未启用";

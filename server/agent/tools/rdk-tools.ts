@@ -12,6 +12,12 @@
 
 import type { Tool } from './types.js';
 import {
+  deviceExecToolInputZod,
+  deviceFileReadToolInputZod,
+  deviceFileWriteToolInputZod,
+  deviceFileUploadFromLocalInputZod,
+} from './tool-zod-schemas.js';
+import {
   execOnDevice,
   readDeviceFile,
   writeDeviceFile,
@@ -248,6 +254,7 @@ function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: stri
       },
       required: ['localPath', 'remotePath'],
     },
+    inputZodSchema: deviceFileUploadFromLocalInputZod,
     async execute(input, ctx) {
       const localAbs = path.resolve(ctx.workspaceDir, input.localPath);
       const result = await uploadLocalFileToDevice(deviceId, localAbs, input.remotePath);
@@ -287,6 +294,7 @@ function deviceExecTool(deviceId: string): Tool<{ command: string; timeoutMs?: n
       },
       required: ['command'],
     },
+    inputZodSchema: deviceExecToolInputZod,
     async execute(input) {
       try {
         let execOpts: { timeoutMs: number } | undefined;
@@ -337,6 +345,7 @@ function deviceFileReadTool(deviceId: string): Tool<{ path: string }> {
       },
       required: ['path'],
     },
+    inputZodSchema: deviceFileReadToolInputZod,
     async execute(input) {
       return readDeviceFile(deviceId, input.path);
     },
@@ -365,6 +374,7 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
       },
       required: ['path', 'content'],
     },
+    inputZodSchema: deviceFileWriteToolInputZod,
     async execute(input) {
       await writeDeviceFile(deviceId, input.path, input.content);
       return `文件已写入: ${input.path} (${input.content.length} 字符)`;

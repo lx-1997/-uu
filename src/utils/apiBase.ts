@@ -17,6 +17,18 @@ export function applySsoMirrorToHeaders(headers: Headers): void {
   }
 }
 
+/** 读取 localStorage 中的会话镜像 id（与 fetch 头逻辑一致） */
+export function getSsoSessionMirrorId(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
+    if (sid && /^[a-f0-9]{64}$/i.test(sid)) return sid;
+  } catch {
+    /* noop */
+  }
+  return '';
+}
+
 /** 登录态刷新或登出时同步镜像（sessionId 为 64 位 hex） */
 export function setSsoSessionMirror(sessionId: string | null | undefined): void {
   if (typeof window === 'undefined') return;
