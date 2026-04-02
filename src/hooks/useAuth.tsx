@@ -78,6 +78,24 @@ function isSameAppSoftLogoutTarget(url: string): boolean {
   }
 }
 
+/**
+ * 浏览器：整页跳统一认证登出端点。
+ * Electron（file://）：主窗口内 location.replace 常被拦或把整个应用导航走；改用系统浏览器打开 SSO 登出后再 reload。
+ */
+function navigateAfterSsoLogout(logoutUrl: string): void {
+  const url = logoutUrl.trim();
+  const desk = typeof window !== 'undefined' ? window.rdkDesktop : undefined;
+  afterNextPaint(() => {
+    if (desk?.openSsoExternal && /^https:\/\//i.test(url)) {
+      void Promise.resolve(desk.openSsoExternal(url)).finally(() => {
+        window.location.reload();
+      });
+      return;
+    }
+    window.location.replace(url);
+  });
+}
+
 export interface SSOUser {
   id: string;
   name: string;
@@ -313,6 +331,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const logoutUrl = data.logoutUrl?.trim() ?? '';
       setSsoSessionMirror(null);
 
+      if (!res.ok) {
+        flushSync(() => {
+          setUser(null);
+          setLogoutUiPhase('reload');
+        });
+        afterNextPaint(() => {
+          window.location.reload();
+        });
+        return;
+      }
+
       if (logoutUrl && isSameAppSoftLogoutTarget(logoutUrl)) {
         flushSync(() => {
           setLogoutUiPhase('reload');
@@ -330,9 +359,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLogoutUiPhase(logoutUrl ? 'redirect' : 'reload');
       });
       if (logoutUrl) {
-        afterNextPaint(() => {
-          window.location.replace(logoutUrl);
-        });
+        navigateAfterSsoLogout(logoutUrl);
       } else {
         afterNextPaint(() => {
           window.location.reload();

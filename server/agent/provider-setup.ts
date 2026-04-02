@@ -415,6 +415,27 @@ function loadBootstrapProviderRegistry(): ProviderConfigRegistry | null {
   }
 }
 
+/**
+ * 内置预设条目曾用 `doubao-seed-*` 作为 provider 键，与设置页「OpenAI 兼容协议」(`openai-compatible`) 对齐。
+ */
+function migrateStudioBootstrapPresetProviders(
+  registry: ProviderConfigRegistry,
+): { registry: ProviderConfigRegistry; changed: boolean } {
+  let changed = false;
+  const entries = registry.entries.map((e) => {
+    if (e.id === 'preset-doubao-seed-2.0-pro' && e.provider === 'doubao-seed-2.0-pro') {
+      changed = true;
+      return { ...e, provider: 'openai-compatible', updatedAt: Date.now() };
+    }
+    if (e.id === 'preset-doubao-seed-2.0-lite-quick' && e.provider === 'doubao-seed-2.0-lite') {
+      changed = true;
+      return { ...e, provider: 'openai-compatible', updatedAt: Date.now() };
+    }
+    return e;
+  });
+  return { registry: changed ? { ...registry, entries } : registry, changed };
+}
+
 /** quickActiveId 未设置时：写入内置快速条目 id，或仅一条配置时绑定该条（便于与深度剥离，无需「与深度相同」） */
 export function applyQuickLaneDefaultIfUnset(registry: ProviderConfigRegistry): ProviderConfigRegistry {
   const q = registry.quickActiveId?.trim() || '';
@@ -482,12 +503,13 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
     }
 
     const reg = ensureRegistryShape(parsed);
-    const next = applyQuickLaneDefaultIfUnset(reg);
-    if (next.quickActiveId !== reg.quickActiveId) {
+    const { registry: regM, changed: presetMigrated } = migrateStudioBootstrapPresetProviders(reg);
+    const next = applyQuickLaneDefaultIfUnset(regM);
+    if (presetMigrated || next.quickActiveId !== regM.quickActiveId) {
       saveProviderRegistry(next);
       return next;
     }
-    return reg;
+    return regM;
   } catch {
     const boot = loadBootstrapProviderRegistry();
     if (!boot) return { activeId: null, quickActiveId: null, entries: [] };

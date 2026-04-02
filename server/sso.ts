@@ -463,6 +463,21 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
     return;
   }
 
+  /**
+   * 多模型 Provider 配置持久化在本机 ~/.rdkstudio/agent-config.json，与 persona/policy 同属「本地偏好」。
+   * 未登录或 Electron file:// 下会话头/Cookie 未带上时，不应拦截设置页的读取、保存、导出、导入。
+   */
+  if (
+    (req.method === 'GET' && (req.path === '/api/agent/config' || req.path === '/api/agent/config/export'))
+    || (req.method === 'POST'
+      && (req.path === '/api/agent/config'
+        || req.path === '/api/agent/config/import'
+        || req.path === '/api/agent/config/vendor-ping'))
+  ) {
+    next();
+    return;
+  }
+
   /** 匿名行为埋点，不含聊天正文；便于未登录/跨源场景上报 */
   if (req.method === 'POST' && req.path === '/api/analytics/events') {
     next();

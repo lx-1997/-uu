@@ -47,7 +47,8 @@ function isTransientSshError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
     /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(msg) ||
-    /channel closed|connection lost|disconnect|not connected|write econnreset|write epipe|read econnreset|unexpected packet|no response|ssh_exchange/.test(msg)
+    /channel closed|connection lost|disconnect|not connected|write econnreset|write epipe|read econnreset|unexpected packet|no response|ssh_exchange/.test(msg) ||
+    /connection closed|closed by remote|kex_exchange|mac error|bad packet/.test(msg)
   );
 }
 
@@ -59,10 +60,17 @@ function isSshAuthError(error: unknown): boolean {
 const TRANSIENT_RETRY_DELAY_MS = 1500;
 /** 弱网下多给一次重试（仍保持串行 lane，不放大并发） */
 const MAX_TRANSIENT_RETRIES = 3;
+/**
+ * 握手/链路抖动时 ssh2 偶发报「authentication methods failed」，与真·错口令不易区分。
+ * 对同一候选口令先额外重试 1 次再换下一口令，减少模型/用户手工 echo 探测。
+ */
+const AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD = 1;
 
 export type ExecOnDeviceOptions = {
   /** 覆盖 runRemoteCommands 默认（见 SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS，当前 30min） */
   timeoutMs?: number;
+  /** 透传 SSH 流式输出（长任务进度） */
+  onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
 };
 
 export async function getDevice(deviceId: string): Promise<Device | null> {
@@ -87,7 +95,13 @@ export async function execOnDevice(
 ): Promise<string> {
   const device = await getDevice(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
-  const runOpts = options?.timeoutMs != null ? { timeoutMs: options.timeoutMs } : undefined;
+  const runOpts =
+    options?.timeoutMs != null || options?.onStreamChunk
+      ? {
+          ...(options.timeoutMs != null ? { timeoutMs: options.timeoutMs } : {}),
+          ...(options.onStreamChunk ? { onStreamChunk: options.onStreamChunk } : {}),
+        }
+      : undefined;
   return runInDeviceLane(device.id, async () => {
     const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
     const pwdList = buildPasswordCandidatesForAgent(device);
@@ -107,7 +121,16 @@ export async function execOnDevice(
           return output;
         } catch (err) {
           lastError = err;
-          if (isSshAuthError(err)) break;
+          if (isSshAuthError(err)) {
+            if (attempt < AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD) {
+              console.warn(
+                `[SSH] auth-shaped error on ${device.host}, retry same password (${attempt + 1}/${AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD + 1}): ${err instanceof Error ? err.message : err}`,
+              );
+              await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+              continue;
+            }
+            break;
+          }
           if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
             console.warn(
               `[SSH] transient error on ${device.host}, retry ${attempt + 1}/${MAX_TRANSIENT_RETRIES}: ${err instanceof Error ? err.message : err}`,
@@ -162,7 +185,13 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
           return;
         } catch (err) {
           lastError = err;
-          if (isSshAuthError(err)) break;
+          if (isSshAuthError(err)) {
+            if (attempt < AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD) {
+              await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+              continue;
+            }
+            break;
+          }
           if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
             await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
             continue;
@@ -242,7 +271,13 @@ export async function uploadLocalFileToDevice(
           return { bytes: buffer.length, remotePath };
         } catch (err) {
           lastError = err;
-          if (isSshAuthError(err)) break;
+          if (isSshAuthError(err)) {
+            if (attempt < AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD) {
+              await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+              continue;
+            }
+            break;
+          }
           if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
             await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
             continue;

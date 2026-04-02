@@ -5,6 +5,10 @@ import type { Device } from '../shared/types.js';
 import { OPENCLAW_GATEWAY_PORT } from './constants.js';
 import type { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
 import { recordTokenUsage } from './monitoring/token-usage.js';
+import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from './utils/stream-output-limit.js';
+
+/** Socket 侧为 token 统计累积的 assistant 文本上限（不影响已向浏览器 emit 的 chunk，只限制本地字符串） */
+const OPENCLAW_SOCKET_METRICS_CAP = Math.min(256_000, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
 
 export type SocketIoHandlerDeps = {
   readDevices: () => Promise<Device[]>;
@@ -34,6 +38,19 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
     let sshClient: Client | null = null;
     let sshStream: any = null;
     let openclawChatSession: { abort: () => void } | null = null;
+    const openclawLeasedIps = new Set<string>();
+    const ensureOpenClawLease = (ip: string) => {
+      const k = String(ip || '').trim();
+      if (!k || openclawLeasedIps.has(k)) return;
+      openClawManager.acquireOpenClawBridgeLease(k);
+      openclawLeasedIps.add(k);
+    };
+    const releaseAllOpenClawLeases = () => {
+      for (const ip of openclawLeasedIps) {
+        openClawManager.releaseOpenClawBridgeLease(ip);
+      }
+      openclawLeasedIps.clear();
+    };
 
     socket.on('openclaw:start', async (config) => {
       const { deviceId } = config;
@@ -46,6 +63,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
         }
 
         const deviceObj = toOpenClawDevice(device);
+        ensureOpenClawLease(deviceObj.ip);
 
         openClawManager.startInteractiveChat(
           deviceObj,
@@ -80,22 +98,30 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
         }
 
         const deviceObj = toOpenClawDevice(device);
+        ensureOpenClawLease(deviceObj.ip);
         let streamed = '';
+        let streamedMetricsTruncated = false;
 
         openclawChatSession = openClawManager.sendAgentMessage(
           message,
           (chunk) => {
-            streamed += chunk;
+            const r = appendUtf8WithTailCap(streamed, chunk, OPENCLAW_SOCKET_METRICS_CAP);
+            streamed = r.value;
+            if (r.truncated) streamedMetricsTruncated = true;
             socket.emit('openclaw:data', { chunk });
           },
           (success) => {
+            const completionForMetrics =
+              streamedMetricsTruncated && streamed
+                ? `${streamed}\n[openclaw:metrics tail-only; cap=${OPENCLAW_SOCKET_METRICS_CAP}]`
+                : streamed || '';
             recordTokenUsage({
               source: 'openclaw',
               deviceId,
               sessionId: `session-${socket.id}`,
               model: 'openclaw-gateway',
               promptText: String(message || ''),
-              completionText: streamed || '',
+              completionText: completionForMetrics,
               success,
               estimated: true,
             });
@@ -209,6 +235,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
     });
 
     socket.on('disconnect', () => {
+      releaseAllOpenClawLeases();
       if (openclawChatSession) {
         openclawChatSession.abort();
         openclawChatSession = null;

@@ -171,7 +171,19 @@ export default function Dashboard() {
   const [openclawHealth, setOpenclawHealth] = useState<OpenClawHealthStatus | null>(null);
   /** RDK Studio 本机服务（/api/health），与板端 OpenClaw 无关 */
   const [studioBackendOk, setStudioBackendOk] = useState<boolean | null>(null);
-  const [metrics, setMetrics] = useState({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+  const [metrics, setMetrics] = useState({
+    memory: '--',
+    temp: '--',
+    cpu: '--',
+    bpu: '--',
+    disk: '--',
+    uptime: '--',
+    tempC: -1,
+    memPct: -1,
+    cpuVal: -1,
+    bpuVal: -1,
+    diskPct: -1,
+  });
   type WorkspaceModule = { ready: boolean; installed: boolean; running?: boolean; summary: string; recommendedAction: string };
   const [wsHealth, setWsHealth] = useState<Record<string, WorkspaceModule> | null>(null);
 
@@ -193,7 +205,19 @@ export default function Dashboard() {
   /** 设备已判定离线时立即清空指标，避免关机后仍显示上一次的 MEM/TEMP/uptime */
   useEffect(() => {
     if (!currentDevice || isDeviceShownOnline(currentDevice)) return;
-    setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+    setMetrics({
+      memory: '--',
+      temp: '--',
+      cpu: '--',
+      bpu: '--',
+      disk: '--',
+      uptime: '--',
+      tempC: -1,
+      memPct: -1,
+      cpuVal: -1,
+      bpuVal: -1,
+      diskPct: -1,
+    });
   }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
 
   useEffect(() => {
@@ -203,7 +227,19 @@ export default function Dashboard() {
     const load = () => {
       if (!isDeviceShownOnline(currentDevice)) {
         if (!cancelled) {
-          setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+          setMetrics({
+            memory: '--',
+            temp: '--',
+            cpu: '--',
+            bpu: '--',
+            disk: '--',
+            uptime: '--',
+            tempC: -1,
+            memPct: -1,
+            cpuVal: -1,
+            bpuVal: -1,
+            diskPct: -1,
+          });
         }
         return;
       }
@@ -213,18 +249,37 @@ export default function Dashboard() {
           const m = parseMetrics(r.output);
           const memory =
             m.memUsed !== '--' && m.memTotal !== '--' ? `${m.memUsed}/${m.memTotal}` : '--';
+          const disk =
+            m.diskUsed !== '--' && m.diskTotal !== '--' ? `${m.diskUsed}/${m.diskTotal}` : '--';
           setMetrics({
             memory,
             temp: m.temp,
+            cpu: m.cpuUsage,
             bpu: m.bpu,
+            disk,
             uptime: m.uptime,
             tempC: m.tempC,
+            memPct: m.memPercent,
+            cpuVal: m.cpuUsageVal,
             bpuVal: m.bpuValue,
+            diskPct: m.diskPercent,
           });
         })
         .catch(() => {
           if (!cancelled) {
-            setMetrics({ memory: '--', temp: '--', bpu: '--', uptime: '--', tempC: -1, bpuVal: -1 });
+            setMetrics({
+              memory: '--',
+              temp: '--',
+              cpu: '--',
+              bpu: '--',
+              disk: '--',
+              uptime: '--',
+              tempC: -1,
+              memPct: -1,
+              cpuVal: -1,
+              bpuVal: -1,
+              diskPct: -1,
+            });
           }
         });
     };
@@ -364,9 +419,16 @@ export default function Dashboard() {
   }
 
   const stats = [
-    { key: 'mem', val: metrics.memory, label: t('dashboard.metric.mem', 'MEM') },
+    { key: 'mem', val: metrics.memory, label: t('dashboard.metric.mem', 'MEM'), warn: metrics.memPct >= 90 },
     { key: 'temp', val: metrics.temp, label: t('dashboard.metric.temp', 'TEMP'), warn: metrics.tempC >= 85 },
+    { key: 'cpu', val: metrics.cpu, label: t('dashboard.metric.cpu', 'CPU'), warn: metrics.cpuVal >= 90 },
     { key: 'bpu', val: metrics.bpu, label: t('dashboard.metric.bpu', 'BPU'), warn: metrics.bpuVal >= 90 },
+    {
+      key: 'disk',
+      val: metrics.disk,
+      label: t('dashboard.metric.disk', 'DISK'),
+      warn: metrics.diskPct >= 90,
+    },
     { key: 'up', val: metrics.uptime, label: t('dashboard.metric.uptime', 'UPTIME') },
   ];
 

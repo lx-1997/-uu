@@ -56,6 +56,8 @@ export interface SshCredentials {
 
 export interface RunRemoteCommandOptions {
   timeoutMs?: number;
+  /** 每收到一段远程 stdout/stderr 即回调（用于长命令 UI 进度，不做截断） */
+  onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
 }
 
 export interface VerifySshConnectionOptions {
@@ -91,6 +93,7 @@ export function runRemoteCommands(
   commands: string[],
   options: RunRemoteCommandOptions = {},
 ) {
+  const onStreamChunk = options.onStreamChunk;
   // Existing function
   return new Promise<string>((resolve, reject) => {
     const client = new Client();
@@ -147,12 +150,26 @@ export function runRemoteCommands(
               safeResolve(stdout + (stdoutTrunc || stderrTrunc ? truncNote : ''));
             })
             .on('data', (chunk: Buffer) => {
+              if (onStreamChunk && chunk.length) {
+                try {
+                  onStreamChunk(chunk.toString('utf8'), 'stdout');
+                } catch {
+                  /* ignore progress callback errors */
+                }
+              }
               const r = appendUtf8WithTailCap(stdout, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
               stdout = r.value;
               if (r.truncated) stdoutTrunc = true;
             });
 
           stream.stderr.on('data', (chunk: Buffer) => {
+            if (onStreamChunk && chunk.length) {
+              try {
+                onStreamChunk(chunk.toString('utf8'), 'stderr');
+              } catch {
+                /* ignore */
+              }
+            }
             const r = appendUtf8WithTailCap(stderr, chunk, STDERR_STREAM_CHAR_LIMIT);
             stderr = r.value;
             if (r.truncated) stderrTrunc = true;

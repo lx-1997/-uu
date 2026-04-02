@@ -8,7 +8,7 @@ import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload, StudioResponseMode } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
-import { resolveApiUrl, fetchApi } from '../utils/apiBase';
+import { resolveApiUrl, resolveMediaUrl, fetchApi } from '../utils/apiBase';
 import { getRdkEmbedPanel, getRdkEmbedDockCtx, openOpenClawPopout } from '../utils/embed-mode';
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
@@ -551,7 +551,7 @@ function BlockRenderer({
 
   if (block.type === 'image') {
     if (block.src) {
-      const imgUrl = resolveApiUrl(block.src);
+      const imgUrl = resolveMediaUrl(block.src);
       return (
         <div className="msg-block image-block">
           <img
@@ -580,7 +580,7 @@ function BlockRenderer({
   }
 
   if (block.type === 'video') {
-    const videoSrc = resolveApiUrl(block.src || '');
+    const videoSrc = resolveMediaUrl(block.src || '');
     const ext = videoSrc.split('.').pop()?.split('?')[0]?.toLowerCase() || 'mp4';
     const mimeMap: Record<string, string> = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo', mkv: 'video/x-matroska' };
     const mimeType = mimeMap[ext] || 'video/mp4';
@@ -607,7 +607,7 @@ function BlockRenderer({
       <div className="msg-block file-block">
         <a
           className="file-block-link"
-          href={resolveApiUrl(block.src)}
+          href={resolveMediaUrl(block.src)}
           download={block.fileName}
           target="_blank"
           rel="noopener noreferrer"
@@ -903,9 +903,11 @@ export default function AIDock() {
     openclawSendMessage,
     currentDevice, addToast, language, setLanguage,
     studioResponseMode, setStudioResponseMode,
+    exportDebugBundle,
   } = useAppState();
   const { t, isEn } = useI18n();
   const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
+  const [debugExporting, setDebugExporting] = useState(false);
   const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
@@ -1037,6 +1039,7 @@ export default function AIDock() {
   const streamScrollRef = useRef<HTMLDivElement | null>(null);
   /** 用户是否在底部附近；为 false 时流式更新不再强行滚到底，避免打断阅读 */
   const streamPinnedToBottomRef = useRef(true);
+  const prevChatExpandedRef = useRef(false);
   const prevChatLenRef = useRef(0);
   const prevAiTypingRef = useRef(false);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
@@ -1416,7 +1419,14 @@ export default function AIDock() {
 
   /* 展开 Dock、新消息、流式更新：仅在贴底时滚到底；单次赋值，避免每条 token 上双 rAF+多定时器抢主线程 */
   useLayoutEffect(() => {
+    const justOpened = chatExpanded && !prevChatExpandedRef.current;
+    prevChatExpandedRef.current = chatExpanded;
+
     if (!chatExpanded) return;
+
+    if (justOpened) {
+      streamPinnedToBottomRef.current = true;
+    }
 
     const len = chatMessages.length;
     if (len > prevChatLenRef.current) {
@@ -1431,6 +1441,19 @@ export default function AIDock() {
 
     el.scrollTop = el.scrollHeight;
   }, [chatExpanded, chatMessages, aiTyping, showAllMessages, compactFlowMode]);
+
+  /* 图片等异步撑高时，若仍在贴底则跟随到底部 */
+  useEffect(() => {
+    if (!chatExpanded || typeof ResizeObserver === 'undefined') return;
+    const el = streamScrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (!streamPinnedToBottomRef.current) return;
+      el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [chatExpanded]);
 
   /* OpenClaw Socket.IO connection */
   useEffect(() => {
@@ -1776,6 +1799,23 @@ export default function AIDock() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                   <path d="M3 3v5h5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className="btn-icon"
+                disabled={debugExporting}
+                onClick={() => {
+                  if (debugExporting) return;
+                  setDebugExporting(true);
+                  void exportDebugBundle().finally(() => setDebugExporting(false));
+                }}
+                title={t('dock.export.title', '导出排查包（对话快照、Agent 会话、可选板端 OpenClaw 日志）')}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
               </button>
               <button

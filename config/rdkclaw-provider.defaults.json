@@ -5,7 +5,7 @@
     {
       "id": "preset-doubao-seed-2.0-pro",
       "label": "RDKClaw Default / doubao-seed-2.0-pro",
-      "provider": "doubao-seed-2.0-pro",
+      "provider": "openai-compatible",
       "model": "doubao-seed-2.0-pro",
       "apiKey": "1cb7274d-4684-4984-99c2-3b177a6a66ad",
       "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
@@ -17,7 +17,7 @@
     {
       "id": "preset-doubao-seed-2.0-lite-quick",
       "label": "RDKClaw Default / doubao-seed-2.0-lite (quick)",
-      "provider": "doubao-seed-2.0-lite",
+      "provider": "openai-compatible",
       "model": "doubao-seed-2.0-lite",
       "apiKey": "1cb7274d-4684-4984-99c2-3b177a6a66ad",
       "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",

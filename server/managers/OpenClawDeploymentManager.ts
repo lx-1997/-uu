@@ -27,6 +27,17 @@ export const OPENCLAW_INSTALL_TIMEOUT_MS = (() => {
   return 1_800_000;
 })();
 
+/**
+ * 所有持有该设备 OpenClaw 长连的 Socket 断开后，延迟多久若无新连接则关闭 oc-bridge + 池化 SSH。
+ * 可由环境变量 RDK_OC_BRIDGE_IDLE_TEARDOWN_MS 覆盖（≥5000；未设置或非法则默认 60s）。
+ */
+export const OC_BRIDGE_IDLE_TEARDOWN_MS = (() => {
+  const raw = process.env.RDK_OC_BRIDGE_IDLE_TEARDOWN_MS;
+  const n = raw ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 5000) return Math.floor(n);
+  return 60_000;
+})();
+
 export interface Device {
   ip: string;
   userName: string;
@@ -519,8 +530,134 @@ function connectWs() {
 ws = connectWs();
 `;
 
+/**
+ * 板端一次性 shell：通过 127.0.0.1:18789 WebSocket + `chat.send` 验证模型链路。
+ * 新版 OpenClaw CLI 的 `openclaw message` 为渠道子命令（send/poll/…），不再用于网关对话；
+ * Agent 工具 board_openclaw_model_test 必须走此路径，与 UI 一键「模型测试」一致。
+ */
+export function buildBoardOpenClawModelTestRemoteShell(): string {
+  const jsScript = OPENCLAW_WS_CONNECT_HELPER + `
+
+const sessionKey = 'model-test-' + Date.now();
+const prompt = '请只回复一个词：OK';
+let text = '';
+let done = false;
+const sendId = 'send-' + Math.random().toString(16).slice(2);
+
+function finish(ok, payload) {
+  if (done) return;
+  done = true;
+  try { ws.close(); } catch {}
+  if (ok) {
+    process.stdout.write('MODEL_TEST_OK\\n');
+    process.stdout.write(String(payload || '').trim() + '\\n');
+    process.exit(0);
+  }
+  process.stderr.write('MODEL_TEST_FAIL: ' + String(payload || 'unknown') + '\\n');
+  process.exit(1);
+}
+
+const timer = setTimeout(() => finish(false, 'timeout waiting gateway response'), 90000);
+
+onConnected = () => {
+  ws.send(JSON.stringify({
+    type: 'req', id: sendId, method: 'chat.send',
+    params: { sessionKey, message: prompt, idempotencyKey: 'mt-' + Date.now() + '-' + Math.random().toString(36).slice(2) },
+  }));
+};
+onConnectFailed = (msg) => { clearTimeout(timer); finish(false, msg); };
+
+onFrame = (frame) => {
+  if (frame.type === 'res') {
+    if (frame.id === sendId && !frame.ok) return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+    return;
+  }
+  if (frame.type !== 'event') return;
+  const p = frame.payload || {};
+  const stream = p.stream;
+  const d = p.data || {};
+
+  if (stream === 'assistant') {
+    const chunk = d.delta || d.text || p.delta || p.text || '';
+    if (chunk) text += chunk;
+    return;
+  }
+  if (stream === 'thinking') return;
+  if (stream === 'tool') return;
+  if (stream === 'lifecycle') {
+    if (d.phase === 'end' || d.phase === 'complete') { clearTimeout(timer); return finish(true, text || '(done)'); }
+    if (d.phase === 'error') { clearTimeout(timer); return finish(false, d.error || d.message || 'lifecycle error'); }
+    return;
+  }
+  if (stream) return;
+
+  if (p.state === 'delta' && typeof p.text === 'string') { text += p.text; return; }
+  if (p.state === 'final') { clearTimeout(timer); return finish(!!(p.text || text).trim(), p.text || text || 'empty final'); }
+  if (p.state === 'error') { clearTimeout(timer); return finish(false, p.error || 'chat error'); }
+  if (p.type === 'message_delta' && typeof p.delta === 'string') { text += p.delta; return; }
+  if (p.type === 'message_end') { clearTimeout(timer); return finish(!!(p.text || text).trim(), p.text || text || 'empty'); }
+  if (p.type === 'agent_error') { clearTimeout(timer); return finish(false, p.error || 'agent error'); }
+};
+
+wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket closed unexpectedly'); } };
+`;
+  const jsB64 = Buffer.from(jsScript, 'utf8').toString('base64');
+  return [
+    'export PATH="$HOME/.npm-global/bin:$PATH"',
+    `echo '${jsB64}' | base64 -d > /tmp/oc_model_test.js`,
+    'node /tmp/oc_model_test.js',
+  ].join(' && ');
+}
+
 /** 一键部署日志：分段横线（与前端步骤条「依赖 / 安装」对应） */
 const STUDIO_DEPLOY_LOG_DIV = 'echo "────────────────────────────────────────────────────────"';
+
+const GATEWAY_PORT_CHECK = `python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_STREAM); s.settimeout(1.0); ok=(s.connect_ex(("127.0.0.1",18789))==0); s.close(); print("OPEN" if ok else "CLOSED")'`;
+const GATEWAY_DIAG_LOGS = [
+  'echo "--- openclaw logs ---"',
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" logs --limit 200 2>&1 || true; else echo "openclaw CLI 未找到，跳过 openclaw logs"; fi)',
+  'echo "--- journalctl (user/openclaw-gateway) ---"',
+  '(journalctl --user -u openclaw-gateway --no-pager -n 120 2>&1 || true)',
+  'echo "--- /tmp/openclaw log files ---"',
+  '(ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 3 | while read f; do echo "=== $f ==="; tail -n 120 "$f" 2>/dev/null || true; done || true)',
+].join(' ; ');
+
+/**
+ * 板端 shell：与本机 Gateway 建立设备信任（与 UI gateway-pair 一致）。
+ * - 新版 OpenClaw：`openclaw devices approve --latest`（`pair` 子命令已移除）
+ * - 旧版：回退 `openclaw pair --force` / `pair --reset`
+ */
+const RDK_OC_GATEWAY_PAIR_APPROVE_SNIPPET = [
+  'rdk_po="$("$OPENCLAW_CMD" devices approve --latest 2>&1)"; rdk_pe=$?',
+  'if [ "$rdk_pe" -ne 0 ] && echo "$rdk_po" | grep -qiE "unknown command.*devices"; then rdk_po="$("$OPENCLAW_CMD" pair --force 2>&1)"; rdk_pe=$?; fi',
+  'echo "$rdk_po"',
+  'exit "$rdk_pe"',
+].join(' && ');
+
+/** 子 shell 内执行 approve/pair，便于嵌入「仅当端口已监听」的脚本而不污染外层退出码语义 */
+const RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL =
+  '( rdk_po="$("$OPENCLAW_CMD" devices approve --latest 2>&1)"; rdk_pe=$?; ' +
+  'if [ "$rdk_pe" -ne 0 ] && echo "$rdk_po" | grep -qiE "unknown command.*devices"; then rdk_po="$("$OPENCLAW_CMD" pair --force 2>&1)"; rdk_pe=$?; fi; ' +
+  'echo "$rdk_po"; exit "$rdk_pe" )';
+
+/**
+ * 安装 / 升级 / 重启 Gateway 之后：等待 127.0.0.1:18789 再建立 CLI↔Gateway 信任。
+ * 若只做端口+token 探活，健康检查可通过，但板端会话内执行类工具仍可能报 pairing required。
+ */
+const ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART = [
+  BOARD_ENV_EXPORT,
+  RESOLVE_OPENCLAW_CMD,
+  'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] 跳过 CLI↔Gateway 信任：未找到 openclaw CLI"; else ' +
+    'echo "[OpenClaw] 等待 127.0.0.1:18789 后建立网关信任（devices approve / pair）..." && ' +
+    'ok=0 && ' +
+    `for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done && ` +
+    'if [ "$ok" != "1" ]; then echo "[OpenClaw] Gateway 端口未就绪，无法建立信任"; exit 1; fi && ' +
+    RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL +
+    '; fi',
+].join(' && ');
+
+const GATEWAY_RESTART_CMD =
+  `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && ${RESTART_GATEWAY_FALLBACK} && ${ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART} && echo "[OpenClaw] Gateway 已重启"`;
 
 /**
  * Studio 一键安装后默认安装元技能 find-skills。
@@ -557,6 +694,7 @@ const NPM_INSTALL_CMD = [
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
+  ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
   RUN_HEALTH,
   'echo "[OpenClaw] 安装完成"',
 ].join(' && ');
@@ -581,16 +719,35 @@ const OPENCLAW_PREPARE_CMD = [
 /** 仍需单次 SSH 合并时：准备子 shell 成功后衔接 NPM_INSTALL_CMD（安装段首已有分割线） */
 const OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD = `( ${OPENCLAW_PREPARE_CMD} ) && ${NPM_INSTALL_CMD}`;
 
-const GATEWAY_RESTART_CMD = `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && ${RESTART_GATEWAY_FALLBACK} && echo "[OpenClaw] Gateway 已重启"`;
-const GATEWAY_PORT_CHECK = `python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_STREAM); s.settimeout(1.0); ok=(s.connect_ex(("127.0.0.1",18789))==0); s.close(); print("OPEN" if ok else "CLOSED")'`;
-const GATEWAY_DIAG_LOGS = [
-  'echo "--- openclaw logs ---"',
-  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" logs --limit 200 2>&1 || true; else echo "openclaw CLI 未找到，跳过 openclaw logs"; fi)',
-  'echo "--- journalctl (user/openclaw-gateway) ---"',
-  '(journalctl --user -u openclaw-gateway --no-pager -n 120 2>&1 || true)',
-  'echo "--- /tmp/openclaw log files ---"',
-  '(ls -1t /tmp/openclaw/openclaw-*.log 2>/dev/null | head -n 3 | while read f; do echo "=== $f ==="; tail -n 120 "$f" 2>/dev/null || true; done || true)',
-].join(' ; ');
+export function buildBoardOpenClawGatewayPairRemoteShell(mode: 'force' | 'full'): string {
+  const pairForce = [
+    BOARD_ENV_EXPORT,
+    RESOLVE_OPENCLAW_CMD,
+    'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] gateway pair 失败：未找到 openclaw CLI"; exit 1; fi',
+    RDK_OC_GATEWAY_PAIR_APPROVE_SNIPPET,
+  ].join(' && ');
+  const pairFull = [
+    BOARD_ENV_EXPORT,
+    RESOLVE_OPENCLAW_CMD,
+    'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] gateway pair 失败：未找到 openclaw CLI"; exit 1; fi',
+    'echo "[OpenClaw] 停止 Gateway..."',
+    '"$OPENCLAW_CMD" gateway stop 2>/dev/null || true',
+    '(systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+    'echo "[OpenClaw] 清理待处理设备配对请求..."',
+    '("$OPENCLAW_CMD" devices clear --yes --pending 2>&1) || true',
+    'echo "[OpenClaw] 旧版 CLI: pair --reset（若不存在则跳过）..."',
+    '("$OPENCLAW_CMD" pair --reset 2>&1) || true',
+    'echo "[OpenClaw] 启动 Gateway..."',
+    ENSURE_GATEWAY_LOCAL_MODE,
+    START_GATEWAY_FALLBACK,
+    'echo "[OpenClaw] 等待 127.0.0.1:18789..."',
+    `ok=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
+    `if [ "$ok" != "1" ]; then echo "[OpenClaw] Gateway 端口未就绪"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
+    'echo "[OpenClaw] Gateway 已就绪 127.0.0.1:18789"',
+    RDK_OC_GATEWAY_PAIR_APPROVE_SNIPPET,
+  ].join(' && ');
+  return mode === 'full' ? pairFull : pairForce;
+}
 
 const NPM_UPGRADE_CMD = [
   BOARD_ENV_EXPORT,
@@ -609,6 +766,7 @@ const NPM_UPGRADE_CMD = [
   NPM_NVM_CLEANUP,
   RUN_DOCTOR,
   RESTART_GATEWAY_FALLBACK,
+  ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
   RUN_HEALTH,
   'echo "[OpenClaw] 升级完成"',
 ].join(' && ');
@@ -644,9 +802,56 @@ export class OpenClawDeploymentManager {
   private ocBridgeTransportByIp = new Map<string, OcBridgeTransport>();
   /** 同一设备串行发送，避免交错 reqId */
   private ocBridgeSendChain = new Map<string, Promise<void>>();
+  /** 仍有 Socket 挂着该板卡 OpenClaw UI 时的租约；归零后经 idle 再 destroyConnection */
+  private ocBridgeSocketLeaseByIp = new Map<string, number>();
+  private ocBridgeIdleTeardownTimerByIp = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(resourcesPath: string) {
     this.resourcesPath = resourcesPath;
+  }
+
+  /** 浏览器 Socket 与该板卡建立 OpenClaw 会话时调用；disconnect 时须 release */
+  acquireOpenClawBridgeLease(ip: string): void {
+    const trimmed = String(ip || '').trim();
+    if (!trimmed) return;
+    this.clearOcBridgeIdleTeardownTimer(trimmed);
+    this.ocBridgeSocketLeaseByIp.set(trimmed, (this.ocBridgeSocketLeaseByIp.get(trimmed) ?? 0) + 1);
+  }
+
+  /** Socket 断开时调用；最后一支释放后延迟回收桥接 */
+  releaseOpenClawBridgeLease(ip: string): void {
+    const trimmed = String(ip || '').trim();
+    if (!trimmed) return;
+    const cur = this.ocBridgeSocketLeaseByIp.get(trimmed) ?? 0;
+    if (cur <= 1) {
+      this.ocBridgeSocketLeaseByIp.delete(trimmed);
+      if (cur >= 1) {
+        this.scheduleOcBridgeIdleTeardown(trimmed);
+      }
+      return;
+    }
+    this.ocBridgeSocketLeaseByIp.set(trimmed, cur - 1);
+  }
+
+  private clearOcBridgeIdleTeardownTimer(ip: string): void {
+    const t = this.ocBridgeIdleTeardownTimerByIp.get(ip);
+    if (t) {
+      clearTimeout(t);
+      this.ocBridgeIdleTeardownTimerByIp.delete(ip);
+    }
+  }
+
+  private scheduleOcBridgeIdleTeardown(ip: string): void {
+    this.clearOcBridgeIdleTeardownTimer(ip);
+    this.ocBridgeIdleTeardownTimerByIp.set(
+      ip,
+      setTimeout(() => {
+        this.ocBridgeIdleTeardownTimerByIp.delete(ip);
+        if (!this.ocBridgeSocketLeaseByIp.has(ip)) {
+          this.destroyConnection(ip);
+        }
+      }, OC_BRIDGE_IDLE_TEARDOWN_MS),
+    );
   }
 
   private getScriptPath(name: string): string {
@@ -787,6 +992,7 @@ export class OpenClawDeploymentManager {
   }
 
   destroyConnection(ip: string): void {
+    this.clearOcBridgeIdleTeardownTimer(ip);
     const br = this.ocBridgeTransportByIp.get(ip);
     if (br) {
       try {
@@ -1257,6 +1463,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1'`,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
+      ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 300000 });
   }
@@ -1366,6 +1573,7 @@ print(json.dumps(result,ensure_ascii=False))`;
         `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}' '${flag}'`,
         ENSURE_GATEWAY_LOCAL_MODE,
         RESTART_GATEWAY_FALLBACK,
+        ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
         'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
       ].join(' && ');
       mergeHandle = this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
@@ -1414,7 +1622,9 @@ print(json.dumps(result,ensure_ascii=False))`;
       `ok=0; for i in 1 2 3 4 5 6; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
       `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${START_GATEWAY_FALLBACK}; fi`,
       `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
-      `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
+      `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; ` +
+        `if [ -n "$OPENCLAW_CMD" ]; then echo "[OpenClaw] 建立 CLI↔Gateway 信任（devices approve / pair）..."; ${RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL}; else true; fi; ` +
+        `else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
   }
@@ -1430,79 +1640,7 @@ print(json.dumps(result,ensure_ascii=False))`;
   }
 
   runModelTest(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const jsScript = OPENCLAW_WS_CONNECT_HELPER + `
-
-const sessionKey = 'model-test-' + Date.now();
-const prompt = '请只回复一个词：OK';
-let text = '';
-let done = false;
-const sendId = 'send-' + Math.random().toString(16).slice(2);
-
-function finish(ok, payload) {
-  if (done) return;
-  done = true;
-  try { ws.close(); } catch {}
-  if (ok) {
-    process.stdout.write('MODEL_TEST_OK\\n');
-    process.stdout.write(String(payload || '').trim() + '\\n');
-    process.exit(0);
-  }
-  process.stderr.write('MODEL_TEST_FAIL: ' + String(payload || 'unknown') + '\\n');
-  process.exit(1);
-}
-
-const timer = setTimeout(() => finish(false, 'timeout waiting gateway response'), 90000);
-
-onConnected = () => {
-  ws.send(JSON.stringify({
-    type: 'req', id: sendId, method: 'chat.send',
-    params: { sessionKey, message: prompt, idempotencyKey: 'mt-' + Date.now() + '-' + Math.random().toString(36).slice(2) },
-  }));
-};
-onConnectFailed = (msg) => { clearTimeout(timer); finish(false, msg); };
-
-onFrame = (frame) => {
-  if (frame.type === 'res') {
-    if (frame.id === sendId && !frame.ok) return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
-    return;
-  }
-  if (frame.type !== 'event') return;
-  const p = frame.payload || {};
-  const stream = p.stream;
-  const d = p.data || {};
-
-  if (stream === 'assistant') {
-    const chunk = d.delta || d.text || p.delta || p.text || '';
-    if (chunk) text += chunk;
-    return;
-  }
-  if (stream === 'thinking') return;
-  if (stream === 'tool') return;
-  if (stream === 'lifecycle') {
-    if (d.phase === 'end' || d.phase === 'complete') { clearTimeout(timer); return finish(true, text || '(done)'); }
-    if (d.phase === 'error') { clearTimeout(timer); return finish(false, d.error || d.message || 'lifecycle error'); }
-    return;
-  }
-  if (stream) return;
-
-  // legacy fallback
-  if (p.state === 'delta' && typeof p.text === 'string') { text += p.text; return; }
-  if (p.state === 'final') { clearTimeout(timer); return finish(!!(p.text || text).trim(), p.text || text || 'empty final'); }
-  if (p.state === 'error') { clearTimeout(timer); return finish(false, p.error || 'chat error'); }
-  if (p.type === 'message_delta' && typeof p.delta === 'string') { text += p.delta; return; }
-  if (p.type === 'message_end') { clearTimeout(timer); return finish(!!(p.text || text).trim(), p.text || text || 'empty'); }
-  if (p.type === 'agent_error') { clearTimeout(timer); return finish(false, p.error || 'agent error'); }
-};
-
-wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket closed unexpectedly'); } };
-`;
-    const jsB64 = Buffer.from(jsScript, 'utf8').toString('base64');
-    const cmd = [
-      'export PATH="$HOME/.npm-global/bin:$PATH"',
-      `echo '${jsB64}' | base64 -d > /tmp/oc_model_test.js`,
-      'node /tmp/oc_model_test.js',
-    ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000, pty: false });
+    this.execCommand(device, buildBoardOpenClawModelTestRemoteShell(), onOutput, onComplete, { timeout: 120000, pty: false });
   }
 
   runScriptInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -1518,6 +1656,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1'`,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
+      ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }
@@ -1545,8 +1684,9 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     const cmd = [
       BOARD_ENV_EXPORT,
       'echo "===SKILLS==="',
-      // List skill dirs and read SKILL.md frontmatter (name, description, trigger) for each
-      '(for d in /opt/openclaw/skills /root/.openclaw/workspace/skills; do' +
+      // List skill dirs and read SKILL.md frontmatter (name, description, trigger) for each.
+      // 含：Studio 写入的 workspace/skills；clawhub 在 workdir=HOME 时的 ~/skills；/root 下常见路径。
+      '(for d in /opt/openclaw/skills "$HOME/.openclaw/workspace/skills" "$HOME/skills" /root/.openclaw/workspace/skills /root/skills; do' +
       '  [ -d "$d" ] && for s in "$d"/*/; do' +
       '    [ -d "$s" ] || continue;' +
       '    sn=$(basename "$s");' +
@@ -1560,7 +1700,9 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       '    fi;' +
       '  done;' +
       'done | sort -t"|" -k1,1 -u || true)',
-      '[ -d /opt/openclaw/skills ] || [ -d /root/.openclaw/workspace/skills ] || echo "无已安装技能"',
+      '[ -d /opt/openclaw/skills ] || [ -d "$HOME/.openclaw/workspace/skills" ] || [ -d "$HOME/skills" ] || [ -d /root/.openclaw/workspace/skills ] || [ -d /root/skills ] || echo "无已安装技能"',
+      'echo "===CLAWHUB==="',
+      '(command -v clawhub >/dev/null 2>&1 && clawhub list 2>/dev/null || true)',
       'echo "===PLUGINS==="',
       '(cat ~/.openclaw/openclaw.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(chr(10).join(d.get(\'plugins\',{}).get(\'allow\',[])))" 2>/dev/null || echo "")',
     ].join(' ; ');
@@ -1600,8 +1742,8 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
   }
 
   /**
-   * 板端执行 `openclaw pair`（与 `pairing approve` 不同：建立本机 CLI ↔ Gateway 信任，缓解 pairing required / scope-upgrade）。
-   * force：`pair --force`；full：停网关 → `pair --reset` → 按既有逻辑再启动并等待 18789。
+   * 板端建立本机 CLI ↔ Gateway 设备信任（与飞书 `pairing approve` 不同）。
+   * 新版：`devices approve --latest`；旧版回退 `pair --force`；full：停网关 → clear pending → 旧版 `pair --reset`（可缺省）→ 重启等待 18789。
    */
   runGatewayPair(
     device: Device,
@@ -1609,29 +1751,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void,
   ): void {
-    const pairForce = [
-      BOARD_ENV_EXPORT,
-      RESOLVE_OPENCLAW_CMD,
-      'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] pair 失败：未找到 openclaw CLI"; exit 1; fi',
-      '"$OPENCLAW_CMD" pair --force 2>&1',
-    ].join(' && ');
-    const pairFull = [
-      BOARD_ENV_EXPORT,
-      RESOLVE_OPENCLAW_CMD,
-      'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] pair 失败：未找到 openclaw CLI"; exit 1; fi',
-      'echo "[OpenClaw] 停止 Gateway..."',
-      '"$OPENCLAW_CMD" gateway stop 2>/dev/null || true',
-      '(systemctl --user stop openclaw-gateway 2>/dev/null || true)',
-      'echo "[OpenClaw] pair --reset..."',
-      '"$OPENCLAW_CMD" pair --reset 2>&1',
-      'echo "[OpenClaw] 启动 Gateway..."',
-      ENSURE_GATEWAY_LOCAL_MODE,
-      START_GATEWAY_FALLBACK,
-      'echo "[OpenClaw] 等待 127.0.0.1:18789..."',
-      `ok=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
-      `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪 127.0.0.1:18789"; else echo "[OpenClaw] Gateway 端口未就绪"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
-    ].join(' && ');
-    const cmd = mode === 'full' ? pairFull : pairForce;
+    const cmd = buildBoardOpenClawGatewayPairRemoteShell(mode);
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000, pty: true });
   }
 
@@ -1916,26 +2036,13 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       studioSessionKey?: string;
     },
   ): { abort: () => void } {
+    void meta;
     const messageB64 = Buffer.from(message, 'utf8').toString('base64');
     const sessionB64 = Buffer.from(sessionId || 'main', 'utf8').toString('base64');
-    const metaB64 = Buffer.from(
-      JSON.stringify({
-        correlationId: meta?.correlationId ?? '',
-        studioRunId: meta?.studioRunId ?? '',
-        studioSessionKey: meta?.studioSessionKey ?? '',
-      }),
-      'utf8',
-    ).toString('base64');
     const wsScript = OPENCLAW_WS_CONNECT_HELPER + `
 
 const message = Buffer.from('${messageB64}', 'base64').toString('utf8').trim();
 const sessionKey = Buffer.from('${sessionB64}', 'base64').toString('utf8') || 'main';
-let __rdkMeta = {};
-try { __rdkMeta = JSON.parse(Buffer.from('${metaB64}', 'base64').toString('utf8')); } catch { __rdkMeta = {}; }
-const clientMeta = {};
-if (__rdkMeta.correlationId) clientMeta.correlationId = String(__rdkMeta.correlationId);
-if (__rdkMeta.studioRunId) clientMeta.studioRunId = String(__rdkMeta.studioRunId);
-if (__rdkMeta.studioSessionKey) clientMeta.studioSessionKey = String(__rdkMeta.studioSessionKey);
 if (!message) { console.error('__OPENCLAW_WS_FAILED__'); console.error('empty message'); process.exit(1); }
 
 let done = false;
@@ -1970,7 +2077,6 @@ const timer = setInterval(() => {
 
 onConnected = () => {
   const params = { sessionKey, message, idempotencyKey: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2) };
-  if (Object.keys(clientMeta).length) params.clientMeta = clientMeta;
   ws.send(JSON.stringify({ type: 'req', id: sendId, method: 'chat.send', params }));
 };
 onConnectFailed = (msg) => { clearInterval(timer); finish(false, msg); };

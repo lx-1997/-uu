@@ -96,7 +96,8 @@ import {
   resolveDelegationExpectationText,
   type DelegateDecision,
 } from "./delegation.js";
-import { appendSecurityAuditLog } from "./security-audit-store.js";
+import { appendSecurityAuditLog, listSecurityAuditLogs } from "./security-audit-store.js";
+import { buildStudioAgentSessionKey, createRdkclawDebugExportZip } from "./session-debug-export.js";
 import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from "../utils/stream-output-limit.js";
 import { syncWorkspaceMarkdownMemory } from "./memory-markdown-sync.js";
 
@@ -122,9 +123,9 @@ function recordConversationTurnFromReq(
   });
 }
 
-/** 无 ~/.rdkstudio/agent-config.json 且无 bootstrap 条目时的兜底；与 `config/rdkclaw-provider.defaults.json` 对齐 */
+/** 无 ~/.rdkstudio/agent-config.json 且无 bootstrap 条目时的兜底；与 `config/rdkclaw-provider.defaults.json` 对齐（provider 为 openai-compatible，端点仍为方舟） */
 const DEFAULT_CONFIG: ProviderConfig = {
-  provider: "doubao-seed-2.0-pro",
+  provider: "openai-compatible",
   model: "doubao-seed-2.0-pro",
   apiKey: "",
   baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
@@ -246,6 +247,7 @@ export class RDKClawApp {
             for (const line of output.split("\n")) {
               const trimmed = line.trim();
               if (trimmed === "===SKILLS===") { section = "skills"; continue; }
+              if (trimmed === "===CLAWHUB===") { section = "clawhub"; continue; }
               if (trimmed === "===PLUGINS===") { section = "plugins"; continue; }
               if (!trimmed || trimmed.startsWith("无已安装")) continue;
               if (section === "skills") {
@@ -260,6 +262,18 @@ export class RDKClawApp {
                 } else {
                   skillDetails.push({ name: trimmed, path: "", description: "", trigger: "" });
                 }
+              } else if (section === "clawhub") {
+                if (/no installed skills/i.test(trimmed)) continue;
+                const slug = trimmed.split(/\s+/)[0]?.trim() ?? "";
+                if (!slug || !/^[\w.-]+$/.test(slug)) continue;
+                const rest = trimmed.slice(slug.length).trim();
+                const verLabel = rest || "latest";
+                skillDetails.push({
+                  name: slug,
+                  path: "clawhub",
+                  description: `ClawHub 已安装 (${verLabel})`,
+                  trigger: "",
+                });
               } else if (section === "plugins") {
                 plugins.push(trimmed);
               }
@@ -402,6 +416,37 @@ export class RDKClawApp {
    * 将 SKILL.md 写入当前 Studio 用户对应的 RDKClaw 工作区 `skills/<skillId>/`（与对话侧技能热加载一致）。
    * 路径见 rdk-skill-authoring-guide：~/.rdkstudio/rdkclaw-workspaces/&lt;profile&gt;/skills/ 或自定义 workspaceRoot。
    */
+  /**
+   * 打包当前 Studio 会话排查材料（Agent JSONL、可选板端日志、UI 快照、安全审计）。
+   */
+  async exportDebugSessionBundle(input: {
+    userId?: string;
+    sessionId: string;
+    deviceId?: string;
+    includeBoardLogs?: boolean;
+    uiSnapshot?: unknown;
+  }): Promise<Buffer> {
+    const sessionId = String(input.sessionId || "").trim();
+    if (!sessionId) {
+      throw new Error("sessionId 不能为空");
+    }
+    const deviceId = String(input.deviceId || "").trim() || undefined;
+    const userProfile = input.userId ? this.personaStore.getUser(input.userId) : null;
+    const ws = await this.workspaceStore.getOrInit(input.userId, userProfile);
+    const sessionKey = buildStudioAgentSessionKey(deviceId, sessionId);
+    const includeBoard =
+      input.includeBoardLogs !== false && Boolean(deviceId);
+    const audit = listSecurityAuditLogs(80);
+    return createRdkclawDebugExportZip({
+      sessionDir: ws.sessionDir,
+      sessionKey,
+      deviceId,
+      includeBoardLogs: includeBoard,
+      uiSnapshot: input.uiSnapshot,
+      securityAudit: audit.length > 0 ? audit : undefined,
+    });
+  }
+
   async writeLocalSkill(userId: string | undefined, skillId: string, content: string): Promise<{ path: string }> {
     const name = String(skillId || '').trim();
     const md = String(content || '').trim();
@@ -696,6 +741,21 @@ export class RDKClawApp {
             fileName: info.fileName,
             bytes: info.bytes,
           }).catch(() => {});
+        },
+        onDeviceExecProgress: ({ chunk, toolCallId }) => {
+          emitEvent({
+            type: "tool_progress",
+            data: {
+              ...base,
+              toolName: "device_exec",
+              name: "device_exec",
+              toolCallId: toolCallId ?? "",
+              phase: "running",
+              executor: "rdkclaw_local",
+              chunk,
+              progressSource: "device_ssh",
+            },
+          });
         },
       });
       tools.push(...deviceTools);

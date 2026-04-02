@@ -34,15 +34,21 @@ import {
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   OPENCLAW_RESOLVE_CLI_SNIPPET,
 } from '../../managers/openclaw-board-install-sh.js';
+import {
+  buildBoardOpenClawGatewayPairRemoteShell,
+  buildBoardOpenClawModelTestRemoteShell,
+} from '../../managers/OpenClawDeploymentManager.js';
 import * as path from 'node:path';
 
 export interface RdkToolsCallbacks {
   onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
+  /** device_exec SSH 长任务：流式/心跳进度（经 SSE tool_progress 到前端） */
+  onDeviceExecProgress?: (payload: { chunk: string; toolCallId?: string }) => void;
 }
 
 export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks): Tool[] {
   const tools: Tool[] = [
-    deviceExecTool(deviceId),
+    deviceExecTool(deviceId, callbacks),
     deviceFileReadTool(deviceId),
     deviceFileWriteTool(deviceId),
     deviceFileListTool(deviceId),
@@ -59,6 +65,7 @@ export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks):
     boardOpenClawPairingListTool(deviceId),
     boardOpenClawPairingApproveTool(deviceId),
     boardOpenClawPairingRejectTool(deviceId),
+    boardOpenClawGatewayPairTool(deviceId),
     boardOpenClawLogsTool(deviceId),
     boardOpenClawRestartGatewayTool(deviceId),
     boardOpenClawDoctorTool(deviceId),
@@ -100,6 +107,7 @@ const FIND_SKILLS_ENSURE_COOLDOWN_MS = 90_000;
 const SSH_LONG_INSTALL_MS = 45 * 60 * 1000;
 const SSH_SKILL_INSTALL_MS = 20 * 60 * 1000;
 const SSH_FIND_SKILLS_MS = 15 * 60 * 1000;
+const SSH_OPENCLAW_GATEWAY_PAIR_MS = 180_000;
 const SHERPA_SETUP_TIMEOUT_MS = 45 * 60 * 1000;
 const DEVICE_EXEC_TIMEOUT_MIN_MS = 5_000;
 const DEVICE_EXEC_TIMEOUT_MAX_MS = 2 * 60 * 60 * 1000;
@@ -264,7 +272,14 @@ function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: stri
   };
 }
 
-function deviceExecTool(deviceId: string): Tool<{ command: string; timeoutMs?: number }> {
+const DEVICE_EXEC_PROGRESS_THROTTLE_MS = 200;
+const DEVICE_EXEC_PROGRESS_TAIL = 2000;
+/** 至少运行多久后，在无输出时开始发心跳 */
+const DEVICE_EXEC_HEARTBEAT_AFTER_MS = 15_000;
+/** 连续无输出多久发一条「仍在运行」 */
+const DEVICE_EXEC_HEARTBEAT_SILENT_MS = 15_000;
+
+function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{ command: string; timeoutMs?: number }> {
   return {
     name: 'device_exec',
     description:
@@ -274,6 +289,7 @@ function deviceExecTool(deviceId: string): Tool<{ command: string; timeoutMs?: n
       '规则：\n' +
       '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
       '- 更长命令可传 timeoutMs（毫秒），范围 5000～7200000；不传则与 SSH 层默认一致（30 分钟）\n' +
+      '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
       '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功\n' +
       '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步\n' +
@@ -296,16 +312,57 @@ function deviceExecTool(deviceId: string): Tool<{ command: string; timeoutMs?: n
       required: ['command'],
     },
     inputZodSchema: deviceExecToolInputZod,
-    async execute(input) {
+    async execute(input, ctx) {
+      const report = callbacks?.onDeviceExecProgress;
+      let hb: ReturnType<typeof setInterval> | null = null;
       try {
-        let execOpts: { timeoutMs: number } | undefined;
+        let execOpts: { timeoutMs?: number; onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void } | undefined;
+
         if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
           const t = Math.floor(Number(input.timeoutMs));
           execOpts = {
             timeoutMs: Math.min(DEVICE_EXEC_TIMEOUT_MAX_MS, Math.max(DEVICE_EXEC_TIMEOUT_MIN_MS, t)),
           };
         }
+
+        let pending = '';
+        let lastEmitAt = 0;
+        const flushProgress = (force: boolean) => {
+          if (!report) return;
+          const now = Date.now();
+          if (!force && now - lastEmitAt < DEVICE_EXEC_PROGRESS_THROTTLE_MS) return;
+          if (!pending.trim()) return;
+          const toSend =
+            pending.length > DEVICE_EXEC_PROGRESS_TAIL ? pending.slice(-DEVICE_EXEC_PROGRESS_TAIL) : pending;
+          pending = '';
+          lastEmitAt = now;
+          report({ chunk: toSend, toolCallId: ctx.toolCallId });
+        };
+
+        const startAt = Date.now();
+        let lastChunkAt = Date.now();
+
+        if (report) {
+          const onStreamChunk = (text: string, stream: 'stdout' | 'stderr') => {
+            lastChunkAt = Date.now();
+            if (!text) return;
+            pending += stream === 'stderr' ? (text.startsWith('\n') ? `[stderr]${text}` : `[stderr] ${text}`) : text;
+            flushProgress(false);
+          };
+          execOpts = { ...execOpts, onStreamChunk };
+          hb = setInterval(() => {
+            const total = Date.now() - startAt;
+            const silent = Date.now() - lastChunkAt;
+            if (total < DEVICE_EXEC_HEARTBEAT_AFTER_MS || silent < DEVICE_EXEC_HEARTBEAT_SILENT_MS) return;
+            const line = `\n· ${Math.floor(total / 1000)}s · 命令仍在运行（暂无新输出）…\n`;
+            lastChunkAt = Date.now();
+            lastEmitAt = Date.now();
+            report({ chunk: line, toolCallId: ctx.toolCallId });
+          }, 5000);
+        }
+
         const output = await execOnDevice(deviceId, [input.command], execOpts);
+        flushProgress(true);
         if (!output) return '(命令执行成功，无输出)';
 
         // 命令语义化：从输出中提取结构化信息（如温度、内存使用率）
@@ -322,6 +379,8 @@ function deviceExecTool(deviceId: string): Tool<{ command: string; timeoutMs?: n
         const msg = err instanceof Error ? err.message : String(err);
         // 关键：明确告诉 LLM 命令失败≠设备离线，防止误判后切换设备
         return `[命令执行失败] ${msg}\n\n注意：命令失败不代表设备离线。可能原因：命令本身报错、超时、SSH 瞬时抖动。请重试或换一条命令，不要切换设备。`;
+      } finally {
+        if (hb) clearInterval(hb);
       }
     },
   };
@@ -470,7 +529,7 @@ function boardOpenClawReadConfigTool(deviceId: string): Tool<{ path?: string }> 
 function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_install',
-    description: '一键安装板端 OpenClaw（官方 install.sh + doctor + restart + health）。',
+    description: '一键安装板端 OpenClaw（npm 安装 openclaw@与 Studio 默认规格一致，含 doctor + 网关重启 + health）。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmd = [
@@ -499,7 +558,7 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
 function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_upgrade',
-    description: '升级板端 OpenClaw（优先 openclaw update，失败回退 npm latest），并执行健康检查。',
+    description: '升级板端 OpenClaw（优先 openclaw update，失败回退 npm 重装与 Studio 默认规格一致），并执行健康检查。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmd = [
@@ -700,7 +759,9 @@ print(json.dumps({"ok":True,"enabled":${enabled ? 'true' : 'false'}},ensure_asci
 function boardOpenClawPairingListTool(deviceId: string): Tool<{ channel?: string }> {
   return {
     name: 'board_openclaw_pairing_list',
-    description: '查看板端 OpenClaw 某渠道的待配对请求，默认 feishu。',
+    description:
+      '列出板端 **即时通讯渠道**（如 feishu）的待配对请求。' +
+      '若问题是 WS 报 pairing required（本机 CLI ↔ 127.0.0.1:18789 网关），应改用 `board_openclaw_gateway_pair`，不是本工具。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -717,7 +778,9 @@ function boardOpenClawPairingListTool(deviceId: string): Tool<{ channel?: string
 function boardOpenClawPairingApproveTool(deviceId: string): Tool<{ code: string; channel?: string }> {
   return {
     name: 'board_openclaw_pairing_approve',
-    description: '批准板端 OpenClaw 配对码（默认 feishu）。',
+    description:
+      '批准板端 **渠道**配对码（默认 feishu）。' +
+      '与 `board_openclaw_gateway_pair`（本机网关信任）无关；后者才是消除 gateway pairing required 的正解。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -737,7 +800,7 @@ function boardOpenClawPairingApproveTool(deviceId: string): Tool<{ code: string;
 function boardOpenClawPairingRejectTool(deviceId: string): Tool<{ code: string; channel?: string }> {
   return {
     name: 'board_openclaw_pairing_reject',
-    description: '拒绝板端 OpenClaw 配对码（默认 feishu）。',
+    description: '拒绝板端 **渠道**配对码（默认 feishu）。不处理 gateway pairing required。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -750,6 +813,31 @@ function boardOpenClawPairingRejectTool(deviceId: string): Tool<{ code: string; 
       const channel = assertShellSafeToken('channel', input.channel || 'feishu');
       const code = assertShellSafeToken('code', input.code);
       return execOnDevice(deviceId, [`bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" pairing reject ${channel} ${code} 2>&1; else echo pairing_reject_failed:openclaw_not_found; fi'`]);
+    },
+  };
+}
+
+function boardOpenClawGatewayPairTool(deviceId: string): Tool<{ mode?: 'force' | 'full' }> {
+  return {
+    name: 'board_openclaw_gateway_pair',
+    description:
+      '在板端完成与本机 Gateway（127.0.0.1:18789）的设备信任：**新版** `openclaw devices approve --latest`，**旧版**回退 `openclaw pair --force`（面板「一键配对」与此一致）。' +
+      '用于解决 delegate/model-test 的 **pairing required**（不是飞书 `pairing approve`）。' +
+      '默认 mode=force；full：停网关→`devices clear --pending`→再拉起（无待审批时先触发「测试网关」）。完成后请 `board_openclaw_model_test` 或 health。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['force', 'full'],
+          description: 'force：devices approve --latest（或旧版 pair --force）；full：清 pending + 重启 gateway 后再 approve',
+        },
+      },
+    },
+    async execute(input) {
+      const mode = input.mode === 'full' ? 'full' : 'force';
+      const script = buildBoardOpenClawGatewayPairRemoteShell(mode);
+      return execOnDevice(deviceId, [script], { timeoutMs: SSH_OPENCLAW_GATEWAY_PAIR_MS });
     },
   };
 }
@@ -803,12 +891,16 @@ function boardOpenClawDoctorTool(deviceId: string): Tool<Record<string, never>> 
 function boardOpenClawModelTestTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_model_test',
-    description: '测试板端 OpenClaw 当前配置的模型是否可用（发送一条简单消息并检查是否有回复）。',
+    description:
+      '测试板端 OpenClaw 当前配置的模型是否可用：在板端本机连 ws://127.0.0.1:18789 并发送 chat.send（与设置里「模型测试」一致）。' +
+      '不调用 openclaw message（新版 CLI 中为即时通讯渠道子命令，非网关对话）。若 pairing required / token 不符，输出会含 MODEL_TEST_FAIL：优先 `board_openclaw_gateway_pair`（网关信任），渠道配对仍用 board_openclaw_pairing_*，或 doctor。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
-      return execOnDevice(deviceId, [
-        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" message --message "reply OK" --timeout 30 2>&1 || "$OPENCLAW_CMD" message "reply OK" 2>&1 || echo MODEL_TEST_UNAVAILABLE; else echo MODEL_TEST_UNAVAILABLE; fi)'`,
-      ]);
+      return execOnDevice(
+        deviceId,
+        [`bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; ${buildBoardOpenClawModelTestRemoteShell()}'`],
+        { timeoutMs: 120_000 },
+      );
     },
   };
 }

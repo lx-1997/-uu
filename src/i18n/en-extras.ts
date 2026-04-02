@@ -93,6 +93,10 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.history.empty': 'No local messages for this device',
   'dock.history.you': 'You',
   'dock.history.global': 'No device / global',
+  'dock.export.title': 'Export debug bundle (chat snapshot, agent session, optional board OpenClaw logs)',
+  'dock.export.ok': 'Debug bundle downloaded',
+  'dock.export.fail': 'Export failed: {{msg}}',
+  'dock.export.noSession': 'Cannot export: missing session id',
   'dock.task.status.running': 'Running',
   'dock.task.status.done': 'Done',
   'dock.task.status.failed': 'Failed',
@@ -566,6 +570,9 @@ export const EN_EXTRAS: Record<string, string> = {
   'topbar.wifi.titleConnected': 'Wi‑Fi connected (click to configure)',
   'topbar.wifi.titleDisconnected': 'Wi‑Fi not connected (click to configure)',
   'topbar.user.logout': 'Log out',
+  'topbar.user.accountTitle': 'Account',
+  'topbar.user.ssoDisabledHint':
+    'Unified login is off in this environment; you can still open the sign-in page.',
 
   'api.deviceAuth': 'Device auth expired; re-enter credentials',
   'api.cmdTimeout': 'Device timeout; retry later or check network',

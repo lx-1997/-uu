@@ -13,13 +13,12 @@
  *
  * 若前端缺少某项：用本仓库 public/branding/icon.png（若已有）→ 再退回 bundled noVNC 占位图。
  * 有 PNG 时会同步写入 public/branding/icon.png，供左侧栏等静态引用。
- * Windows 在仅有 PNG 时用 sharp + to-ico 生成多尺寸 icon.ico（满足 NSIS ≥256×256）。
+ * Windows 优先用 public/branding/icon.ico（与 Mac 同源品牌；npm run icons:brand-ico 可从 PNG 生成）；
+ * 否则在仅有 PNG 时用 sharp + to-ico 生成多尺寸 icon.ico（满足 NSIS ≥256×256）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
 
 const ICO_CANDIDATES = [
   'icon/icon.ico',
@@ -50,6 +49,8 @@ const PNG_CANDIDATES = [
 const ICNS_CANDIDATES = ['icon/icon.icns', 'build/icon.icns', 'resources/icon.icns'];
 
 const FALLBACK_PNG = (root) => path.join(root, 'public', 'branding', 'icon.png');
+/** 与 Mac/网页同源的 Windows 可执行文件图标（由 icon.png 生成，入库以便无 to-ico 时仍能一致打包） */
+const BRAND_ICO = (root) => path.join(root, 'public', 'branding', 'icon.ico');
 const FALLBACK_ICO = (root) => path.join(root, 'public', 'vnc', 'app', 'images', 'icons', 'novnc.ico');
 const FALLBACK_IOS_PNG = (root) =>
   path.join(root, 'public', 'vnc', 'app', 'images', 'icons', 'novnc-ios-180.png');
@@ -77,10 +78,11 @@ function firstExisting(base, relatives) {
   return null;
 }
 
-async function writeIcoFromPng(pngPath, icoPath, log) {
+async function writeIcoFromPng(pngPath, icoPath, log, rootDir) {
   try {
     const { default: sharp } = await import('sharp');
-    const toIco = require('to-ico');
+    const requireRoot = createRequire(path.join(rootDir, 'package.json'));
+    const toIco = requireRoot('to-ico');
     const sizes = [16, 32, 48, 64, 128, 256];
     const bg = { r: 0, g: 0, b: 0, alpha: 0 };
     const pngBufs = await Promise.all(
@@ -149,8 +151,12 @@ export async function prepareBuildResources(rootDir, opts = {}) {
     log(`PNG fallback: bundled noVNC ios icon`, 'warn');
   }
 
-  /** Windows .ico：优先前端；否则用 png 生成；最后再试 noVNC .ico */
+  /** Windows .ico：优先前端；其次本仓品牌 icon.ico（与 Mac PNG 一致）；否则用 png 现生成；最后再试 noVNC */
   let icoForWin = srcIco;
+  if (!icoForWin && fs.existsSync(BRAND_ICO(rootDir))) {
+    icoForWin = BRAND_ICO(rootDir);
+    log('Windows icon: public/branding/icon.ico（与 Mac / 网页品牌一致）');
+  }
   if (!icoForWin && !pngForPack && fs.existsSync(FALLBACK_ICO(rootDir))) {
     icoForWin = FALLBACK_ICO(rootDir);
     log(`ICO-only fallback: bundled noVNC .ico`, 'warn');
@@ -175,7 +181,7 @@ export async function prepareBuildResources(rootDir, opts = {}) {
     fs.copyFileSync(icoForWin, destIco);
     log(`→ build-resources/icon.ico`);
   } else if (pngForPack) {
-    const ok = await writeIcoFromPng(pngForPack, destIco, log);
+    const ok = await writeIcoFromPng(pngForPack, destIco, log, rootDir);
     if (!ok && fs.existsSync(FALLBACK_ICO(rootDir))) {
       fs.copyFileSync(FALLBACK_ICO(rootDir), destIco);
       log(`→ build-resources/icon.ico (noVNC, sharp+to-ico 生成失败时回退)`, 'warn');

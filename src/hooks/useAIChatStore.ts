@@ -18,6 +18,7 @@ import {
   setActiveRdkclawSession,
   stopRDKClawTask,
   streamAgentChat,
+  downloadRdkclawDebugBundle,
   fetchDevices,
   forgetDevicePassword,
   fetchDeviceOpenClawHealth,
@@ -53,6 +54,7 @@ import {
   extractNeedRdkclawBlocks,
   formatBoardOutboundLines,
   isBoardOpenClawCollabTool,
+  isBoardOpenClawExecutorTool,
 } from './sse-helpers';
 
 /** RDKClaw 当前轮次运行时间线（AI Dock 侧栏展示） */
@@ -130,6 +132,9 @@ export interface AIChatStoreState {
   /** 工作台 RDK 对话：思考沿设置页模型；快速弱化扩展思考与推理流 */
   studioResponseMode: StudioResponseMode;
   setStudioResponseMode: (v: StudioResponseMode) => void;
+
+  /** 导出排查 zip（服务端 Agent 会话、Dock 快照、可选板端日志） */
+  exportDebugBundle: (options?: { includeBoardLogs?: boolean }) => Promise<void>;
 }
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
@@ -321,6 +326,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const clearChatHistory = () => {
+    /** 必须先结束进行中的流式请求：否则旧 SSE 仍按已删消息 id 更新，且可能与新一轮竞态导致「发消息无回复」 */
+    abortInFlightRun(false);
     setChatMessages([]);
     try {
       const deviceId = chatDeviceIdRef.current;
@@ -387,7 +394,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     startedAt: number;
     /** 快速回答：本地工具不落 UI 时为 -1 */
     statusIndex: number;
-    /** 快速回答：仅板端 OpenClaw 协作展示工具气泡，其它工具仅后台执行 */
+    /** 快速回答：本地工具隐藏；凡 board_openclaw_* / 跨板调度仍展示 */
     hiddenQuick?: boolean;
     rawIndex?: number;
     /** 板端 OpenClaw 协作流式块（与 terminal 二选一） */
@@ -1183,9 +1190,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const toolName = resolveToolName(event.data);
                 const args = event.data.args as Record<string, unknown>;
                 const executor = String(
-                  event.data.executor || (isBoardOpenClawCollabTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
+                  event.data.executor || (isBoardOpenClawExecutorTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
                 );
-                if (studioResponseMode === 'quick' && !isBoardOpenClawCollabTool(toolName)) {
+                if (studioResponseMode === 'quick' && !isBoardOpenClawExecutorTool(toolName)) {
                   const toolCallIdHidden = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
                   toolTimelineRef.current[toolCallIdHidden] = {
                     toolName,
@@ -1250,7 +1257,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     previewLines: 12,
                   });
                 }
-                if (studioResponseMode !== 'quick') {
+                if (studioResponseMode !== 'quick' || isBoardOpenClawExecutorTool(toolName)) {
                   appendRunTimelineEntry(generation, {
                     kind: 'tool_start',
                     title: tf('chat.timeline.toolStart', '工具 · {{tool}}', { tool: toolName }),
@@ -1336,7 +1343,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const sig = String(bit).trim().slice(0, 240);
                       if (sig && sig !== boardToolTimelineSigRef.current) {
                         boardToolTimelineSigRef.current = sig;
-                        if (studioResponseMode !== 'quick') {
+                        if (studioResponseMode !== 'quick' || isBoardOpenClawExecutorTool(toolName)) {
                           appendRunTimelineEntry(generation, {
                             kind: 'board_tool',
                             title: t('chat.timeline.boardTool', '板端工具'),
@@ -1680,7 +1687,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const risk = String(event.data.risk || 'medium') as 'low' | 'medium' | 'high';
                 const runId = String(event.data.runId || currentRunId || '');
                 const executor = String(
-                  event.data.executor || (isBoardOpenClawCollabTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
+                  event.data.executor || (isBoardOpenClawExecutorTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
                 );
                 const summary = `${toolName} · ${executorLabel(executor)} · ${t('chat.approval.risk', '风险')} ${risk.toUpperCase()}`;
                 approvalBlockRef.current[approvalId] = aiBlocks.length;
@@ -2531,6 +2538,53 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
+  const exportDebugBundle = useCallback(
+    async (options?: { includeBoardLogs?: boolean }) => {
+      const sessionId = String(sessionIdRef.current || '').trim();
+      if (!sessionId) {
+        addToast(translate(isEn, 'dock.export.noSession', '无法导出：缺少会话 ID'), 'warning');
+        return;
+      }
+      try {
+        const uiSnapshot = {
+          exportedAt: new Date().toISOString(),
+          studioSessionId: sessionId,
+          chatDeviceId: chatDeviceIdRef.current,
+          studioResponseMode,
+          device: currentDevice
+            ? { id: currentDevice.id, ip: currentDevice.ip, name: currentDevice.name }
+            : null,
+          chatMessages: stripHeavyDataUrlsForStorage(chatMessages),
+          rdkClawRunTimeline,
+          agentExecution,
+        };
+        await downloadRdkclawDebugBundle({
+          sessionId,
+          deviceId: currentDevice?.id,
+          userId: userIdRef.current,
+          includeBoardLogs: options?.includeBoardLogs !== false,
+          uiSnapshot,
+        });
+        addToast(translate(isEn, 'dock.export.ok', '排查包已下载'), 'success');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        addToast(
+          fillTemplate(translate(isEn, 'dock.export.fail', '导出失败：{{msg}}'), { msg }),
+          'error',
+        );
+      }
+    },
+    [
+      addToast,
+      isEn,
+      studioResponseMode,
+      currentDevice,
+      chatMessages,
+      rdkClawRunTimeline,
+      agentExecution,
+    ],
+  );
+
   const value: AIChatStoreState = {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, setChatMessages, chatExpanded, setChatExpanded,
@@ -2541,6 +2595,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     backgroundRuns, stopBackgroundRun,
     rdkClawRunTimeline, runTimelinePanelOpen, setRunTimelinePanelOpen,
     studioResponseMode, setStudioResponseMode,
+    exportDebugBundle,
   };
 
   return React.createElement(AIChatContext.Provider, { value }, children);

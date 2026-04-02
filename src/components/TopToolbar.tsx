@@ -208,6 +208,7 @@ export default function TopToolbar() {
   const [ipLoading, setIpLoading] = useState(false);
   const [ipListWarn, setIpListWarn] = useState<BoardIpWarn>(null);
   const ipWrapRef = useRef<HTMLDivElement | null>(null);
+  const ssoChipRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!showIpMenu || !currentDevice) return;
@@ -266,6 +267,17 @@ export default function TopToolbar() {
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [showIpMenu]);
+
+  useEffect(() => {
+    if (!showUserMenu) return;
+    const close = (e: MouseEvent) => {
+      if (ssoChipRef.current && !ssoChipRef.current.contains(e.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [showUserMenu]);
 
   const handleCopyIp = async (ip: string) => {
     const ok = await copyToClipboard(ip);
@@ -363,88 +375,95 @@ export default function TopToolbar() {
         </svg>
       </button>
 
-      {ssoEnabled && (
-        <div className="sso-user-chip" style={{ position: 'relative' }}>
-          <button
-            type="button"
-            className="btn-icon sso-avatar-btn"
-            title={
-              user
-                ? (getSsoDisplayLabel(user) || user.email || user.id)
-                : t('topbar.user.signInTitle', '点击登录')
-            }
-            onClick={() => setShowUserMenu(v => !v)}
-          >
-            {user?.avatar ? (
-              <img src={user.avatar} alt="" style={{ width: 22, height: 22, borderRadius: '50%' }} />
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" />
-              </svg>
-            )}
-          </button>
-          {showUserMenu && (
-            <div
-              className="sso-user-menu"
-              style={{
-                position: 'absolute', top: '100%', right: 0, marginTop: 6,
-                background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)',
-                padding: '8px 0', minWidth: 180, zIndex: 100,
-              }}
-              onMouseLeave={() => setShowUserMenu(false)}
-            >
-              {user ? (
-                <>
-                  <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {getSsoDisplayLabel(user) || t('topbar.user.fallback', '用户')}
-                    </div>
-                    {user.email && <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 2 }}>{user.email}</div>}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={logout}
-                    style={{
-                      display: 'block', width: '100%', padding: '8px 16px', textAlign: 'left',
-                      fontSize: '0.8125rem', color: 'var(--text-secondary)', cursor: 'pointer',
-                      background: 'transparent', border: 'none',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    {t('topbar.user.logout', '退出登录')}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {t('topbar.user.guestHint', '未登录')}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowUserMenu(false);
-                      openSsoLoginPortal(loginUrl);
-                    }}
-                    style={{
-                      display: 'block', width: '100%', padding: '8px 16px', textAlign: 'left',
-                      fontSize: '0.8125rem', color: 'var(--text-secondary)', cursor: 'pointer',
-                      background: 'transparent', border: 'none',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    {t('topbar.user.signIn', '登录')}
-                  </button>
-                </>
-              )}
-            </div>
+      <div className="sso-user-chip" ref={ssoChipRef} style={{ position: 'relative' }}>
+        <button
+          type="button"
+          className="btn-icon sso-avatar-btn"
+          title={
+            user
+              ? (getSsoDisplayLabel(user) || user.email || user.id)
+              : ssoEnabled
+                ? t('topbar.user.signInTitle', '点击登录')
+                : t('topbar.user.accountTitle', '账户')
+          }
+          onClick={() => setShowUserMenu(v => !v)}
+        >
+          {user?.avatar ? (
+            <img src={user.avatar} alt="" style={{ width: 22, height: 22, borderRadius: '50%' }} />
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" />
+            </svg>
           )}
-        </div>
-      )}
+        </button>
+        {showUserMenu && (
+          <div
+            className="sso-user-menu"
+            style={{
+              position: 'absolute', top: '100%', right: 0, marginTop: 6,
+              background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)',
+              padding: '8px 0', minWidth: 180, zIndex: 100,
+            }}
+          >
+            {user ? (
+              <>
+                <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {getSsoDisplayLabel(user) || t('topbar.user.fallback', '用户')}
+                  </div>
+                  {user.email && <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 2 }}>{user.email}</div>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    void logout();
+                  }}
+                  style={{
+                    display: 'block', width: '100%', padding: '8px 16px', textAlign: 'left',
+                    fontSize: '0.8125rem', color: 'var(--text-secondary)', cursor: 'pointer',
+                    background: 'transparent', border: 'none',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  {t('topbar.user.logout', '退出登录')}
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {t('topbar.user.guestHint', '未登录')}
+                  </div>
+                  {!ssoEnabled && (
+                    <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.35 }}>
+                      {t('topbar.user.ssoDisabledHint', '当前环境未启用统一登录；仍可打开认证页。')}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    openSsoLoginPortal(loginUrl);
+                  }}
+                  style={{
+                    display: 'block', width: '100%', padding: '8px 16px', textAlign: 'left',
+                    fontSize: '0.8125rem', color: 'var(--text-secondary)', cursor: 'pointer',
+                    background: 'transparent', border: 'none',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-inset)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  {t('topbar.user.signIn', '登录')}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {showWifiModal && createPortal(
         <WifiConfigModal

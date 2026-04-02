@@ -29,7 +29,6 @@ import {
 } from './ssh.js';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { Client } from 'ssh2';
 import WebSocket, { WebSocketServer } from 'ws';
 import * as net from 'net';
 import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
@@ -107,6 +106,7 @@ import {
   cancelStudioBrowserCapture,
   cancelAllPendingStudioBrowserCaptures,
 } from './studio-browser-capture.js';
+import { registerSocketIoHandlers } from './socket-io-handlers.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -585,12 +585,30 @@ function toOpenClawDevice(device: Device, password?: string) {
   };
 }
 
+registerSocketIoHandlers(io, {
+  readDevices,
+  credentialCacheKey,
+  defaultSshPassword,
+  devicePasswordCache,
+  toOpenClawDevice,
+  openClawManager,
+});
+
 /** 默认口令候选见 `./ssh.js` 的 sshPasswordCandidates */
 
 function isTransientSshError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(message);
+  return (
+    /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(message) ||
+    /channel closed|connection lost|disconnect|not connected|write econnreset|write epipe|read econnreset|unexpected packet|no response|ssh_exchange/.test(message) ||
+    /connection closed|closed by remote|kex_exchange|mac error|bad packet/.test(message)
+  );
 }
+
+/** 与 rdk-ssh-helper.execOnDevice 对齐 */
+const SSH_DEVICE_LANE_TRANSIENT_RETRIES = 3;
+const SSH_DEVICE_LANE_RETRY_DELAY_MS = 1500;
+const SSH_AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD = 1;
 
 function isSshTimeoutError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -1472,7 +1490,7 @@ async function runOnDevice(
   let lastError: unknown = null;
   const output = await runInDeviceLane(device.id, async () => {
     for (const pwd of candidates) {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      for (let attempt = 0; attempt <= SSH_DEVICE_LANE_TRANSIENT_RETRIES; attempt += 1) {
         try {
           const result = await runRemoteCommands(
             {
@@ -1488,9 +1506,18 @@ async function runOnDevice(
           return result;
         } catch (error) {
           lastError = error;
-          if (!(attempt === 0 && isTransientSshError(error))) {
+          if (isSshAuthError(error)) {
+            if (attempt < SSH_AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD) {
+              await new Promise((r) => setTimeout(r, SSH_DEVICE_LANE_RETRY_DELAY_MS * (attempt + 1)));
+              continue;
+            }
             break;
           }
+          if (attempt < SSH_DEVICE_LANE_TRANSIENT_RETRIES && isTransientSshError(error)) {
+            await new Promise((r) => setTimeout(r, SSH_DEVICE_LANE_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
+          break;
         }
       }
     }
@@ -2795,7 +2822,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   let lastError: unknown = null;
 
   for (const pwd of candidates) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt <= SSH_DEVICE_LANE_TRANSIENT_RETRIES; attempt += 1) {
       try {
         const output = await runInDeviceLane(target.id, () => runRemoteCommands(
           {
@@ -2819,9 +2846,18 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
         return;
       } catch (error) {
         lastError = error;
-        if (!(attempt === 0 && isTransientSshError(error))) {
+        if (isSshAuthError(error)) {
+          if (attempt < SSH_AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD) {
+            await new Promise((r) => setTimeout(r, SSH_DEVICE_LANE_RETRY_DELAY_MS * (attempt + 1)));
+            continue;
+          }
           break;
         }
+        if (attempt < SSH_DEVICE_LANE_TRANSIENT_RETRIES && isTransientSshError(error)) {
+          await new Promise((r) => setTimeout(r, SSH_DEVICE_LANE_RETRY_DELAY_MS * (attempt + 1)));
+          continue;
+        }
+        break;
       }
     }
   }
@@ -3567,18 +3603,49 @@ app.get('/api/devices/:id/openclaw/skills', async (request, response) => {
   const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.getInstalledSkills(deviceObj, (chunk) => { output += chunk; }, (success) => {
-    const skills: string[] = [];
+    const fsRows: string[] = [];
+    const clawhubRows: string[] = [];
     const plugins: string[] = [];
     let section = '';
     for (const line of output.split('\n')) {
       const trimmed = line.trim();
-      if (trimmed === '===SKILLS===') { section = 'skills'; continue; }
-      if (trimmed === '===PLUGINS===') { section = 'plugins'; continue; }
+      if (trimmed === '===SKILLS===') {
+        section = 'skills';
+        continue;
+      }
+      if (trimmed === '===CLAWHUB===') {
+        section = 'clawhub';
+        continue;
+      }
+      if (trimmed === '===PLUGINS===') {
+        section = 'plugins';
+        continue;
+      }
       if (!trimmed || trimmed.startsWith('无已安装')) continue;
-      if (section === 'skills') skills.push(trimmed);
-      else if (section === 'plugins') plugins.push(trimmed);
+      if (section === 'skills') {
+        fsRows.push(trimmed);
+      } else if (section === 'clawhub') {
+        if (/no installed skills/i.test(trimmed)) continue;
+        const slug = trimmed.split(/\s+/)[0]?.trim() ?? '';
+        if (!slug || !/^[\w.-]+$/.test(slug)) continue;
+        const rest = trimmed.slice(slug.length).trim();
+        const verLabel = rest || 'latest';
+        clawhubRows.push(`${slug}|clawhub|ClawHub 已安装 (${verLabel})|`);
+      } else if (section === 'plugins') {
+        plugins.push(trimmed);
+      }
     }
-    response.json({ ok: success, skills, plugins, raw: output });
+    const seen = new Set<string>();
+    const skills: string[] = [];
+    /** 目录扫描优先，其次 ClawHub lockfile（去重同名） */
+    for (const row of [...fsRows, ...clawhubRows]) {
+      const name = row.split('|')[0]?.trim() ?? '';
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      skills.push(row);
+    }
+    const ok = success || skills.length > 0;
+    response.json({ ok, skills, plugins, raw: output });
   });
 });
 
@@ -3591,7 +3658,7 @@ app.get('/api/devices/:id/openclaw/skill-content', async (request, response) => 
   }
 
   const run = await runOnDevice(request, response, id, [
-    `bash -lc "python3 -c \\"import base64,sys,os,json;raw=base64.b64decode(sys.argv[1]).decode('utf-8','ignore').strip();bases=['/opt/openclaw/skills','/root/.openclaw/workspace/skills'];c=[raw,raw.split()[0] if raw else '',raw.replace('openclaw.','',1), (raw.split()[0] if raw else '').replace('openclaw.','',1)];cand=[];[cand.append(x) for x in c if x and x not in cand];found='';\nfor base in bases:\n  if not os.path.isdir(base):\n    continue\n  paths=[]\n  [paths.extend([f'{base}/{x}/SKILL.md',f'{base}/{x}/skill.md']) for x in cand]\n  for p in paths:\n    if os.path.isfile(p):\n      found=p\n      break\n  if found:\n    break\n  dirs=sorted(os.listdir(base))\n  for x in cand:\n    m=''\n    for d in dirs:\n      if d==x or d.startswith(x):\n        m=d\n        break\n    if m:\n      for p in (f'{base}/{m}/SKILL.md',f'{base}/{m}/skill.md'):\n        if os.path.isfile(p):\n          found=p\n          break\n    if found:\n      break\n  if found:\n    break\ncontent=''\nif found:\n  try:\n    content=open(found,'r',encoding='utf-8',errors='ignore').read()\n  except Exception:\n    content=''\nprint(json.dumps({'ok':bool(found),'path':found,'content':content}, ensure_ascii=False))\\" '${Buffer.from(skillIdRaw).toString('base64')}'"`,
+    `bash -lc "python3 -c \\"import base64,sys,os,json;raw=base64.b64decode(sys.argv[1]).decode('utf-8','ignore').strip();_b=['/opt/openclaw/skills',os.path.expanduser('~/.openclaw/workspace/skills'),os.path.expanduser('~/skills'),'/root/.openclaw/workspace/skills','/root/skills'];bases=[];[bases.append(x) for x in _b if x not in bases];c=[raw,raw.split()[0] if raw else '',raw.replace('openclaw.','',1), (raw.split()[0] if raw else '').replace('openclaw.','',1)];cand=[];[cand.append(x) for x in c if x and x not in cand];found='';\nfor base in bases:\n  if not os.path.isdir(base):\n    continue\n  paths=[]\n  [paths.extend([f'{base}/{x}/SKILL.md',f'{base}/{x}/skill.md']) for x in cand]\n  for p in paths:\n    if os.path.isfile(p):\n      found=p\n      break\n  if found:\n    break\n  dirs=sorted(os.listdir(base))\n  for x in cand:\n    m=''\n    for d in dirs:\n      if d==x or d.startswith(x):\n        m=d\n        break\n    if m:\n      for p in (f'{base}/{m}/SKILL.md',f'{base}/{m}/skill.md'):\n        if os.path.isfile(p):\n          found=p\n          break\n    if found:\n      break\n  if found:\n    break\ncontent=''\nif found:\n  try:\n    content=open(found,'r',encoding='utf-8',errors='ignore').read()\n  except Exception:\n    content=''\nprint(json.dumps({'ok':bool(found),'path':found,'content':content}, ensure_ascii=False))\\" '${Buffer.from(skillIdRaw).toString('base64')}'"`,
   ]);
   if (!run) return;
 
@@ -3640,8 +3707,7 @@ app.post('/api/devices/:id/openclaw/skill-write', async (request, response) => {
 
 /**
  * 删除板端技能目录：同时尝试
- * - /root/.openclaw/workspace/skills/<id>（用户/Studio 部署）
- * - /opt/openclaw/skills/<id>（系统或预装）
+ * - ~/.openclaw/workspace/skills、~/skills、/root 下同名路径、/opt/openclaw/skills
  * 与列表 API 扫描范围一致，避免「能读到、删不掉」。
  */
 app.post('/api/devices/:id/openclaw/skill-delete', async (request, response) => {
@@ -3656,17 +3722,15 @@ app.post('/api/devices/:id/openclaw/skill-delete', async (request, response) => 
     sendApiError(response, 400, 'INVALID_SKILL_ID', 'skillId 只能包含字母、数字、下划线和横线', { retryable: false });
     return;
   }
-  const wsDir = `/root/.openclaw/workspace/skills/${name}`;
-  const optDir = `/opt/openclaw/skills/${name}`;
   const run = await runOnDevice(request, response, id, [
-    `bash -lc "out=NOT_FOUND; [ -d '${wsDir}' ] && rm -rf '${wsDir}' && out=OK; [ -d '${optDir}' ] && rm -rf '${optDir}' && out=OK; echo \\$out"`,
+    `bash -lc "out=NOT_FOUND; for d in \\"\\$HOME/.openclaw/workspace/skills/${name}\\" \\"\\$HOME/skills/${name}\\" /root/.openclaw/workspace/skills/${name} /root/skills/${name} /opt/openclaw/skills/${name}; do [ -d \\"\\$d\\" ] && rm -rf \\"\\$d\\" && out=OK; done; echo \\$out"`,
   ]);
   if (!run) return;
   const out = String(run.output || '').trim();
   if (out.endsWith('OK')) {
     response.json({
       ok: true,
-      message: `已删除板端技能 ${name}（若存在于工作区与 /opt/openclaw/skills 均已移除）`,
+      message: `已删除板端技能 ${name}（上述扫描路径中存在的目录均已移除）`,
     });
     return;
   }
@@ -3675,7 +3739,7 @@ app.post('/api/devices/:id/openclaw/skill-delete', async (request, response) => 
       response,
       404,
       'SKILL_NOT_FOUND_ON_DEVICE',
-      '板端未找到该技能目录（已检查 ~/.openclaw/workspace/skills 与 /opt/openclaw/skills）。请刷新列表后重试，或在设备上确认路径。',
+      '板端未找到该技能目录（已检查 ~/.openclaw/workspace/skills、~/skills、/opt/openclaw/skills 等）。请刷新列表后重试，或在设备上确认路径。',
       { retryable: false },
     );
     return;
@@ -3783,7 +3847,7 @@ app.post('/api/devices/:id/openclaw/pairing/reject', async (request, response) =
   });
 });
 
-/** 板端 `openclaw pair`：CLI ↔ 本地 Gateway 信任（非飞书渠道 pairing） */
+/** 板端网关设备信任：`devices approve --latest`（新版）或 `pair --force`（旧版）；非飞书渠道 pairing */
 app.post('/api/devices/:id/openclaw/gateway-pair', async (request, response) => {
   const { id } = request.params;
   const { mode } = request.body as { mode?: string };
@@ -4871,6 +4935,70 @@ app.get('/api/agent/config', (_request, response) => {
   });
 });
 
+/**
+ * 本机直连厂商 HTTP，复用 OpenClaw「测试 API」逻辑；Key 可从表单、已保存条目或 OPENAI_API_KEY 解析。
+ */
+app.post('/api/agent/config/vendor-ping', async (request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  const body = (request.body ?? {}) as {
+    entryId?: string;
+    baseUrl?: string;
+    model?: string;
+    provider?: string;
+    apiKey?: string;
+  };
+  const entryId = typeof body.entryId === 'string' ? body.entryId.trim() : '';
+  const registry = loadProviderRegistry();
+  const entry = entryId ? registry.entries.find((e) => e.id === entryId) : undefined;
+
+  let baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '';
+  let modelId = typeof body.model === 'string' ? body.model.trim() : '';
+  let provider = typeof body.provider === 'string' ? body.provider.trim() : '';
+  if (entry) {
+    if (!baseUrl) baseUrl = String(entry.baseUrl || '').trim();
+    if (!modelId) modelId = String(entry.model || '').trim();
+    if (!provider) provider = String(entry.provider || '').trim();
+  }
+
+  let apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+  if (!apiKey && entry?.apiKey) apiKey = String(entry.apiKey || '').trim();
+  if (!apiKey) apiKey = String(process.env.OPENAI_API_KEY || '').trim();
+
+  if (!baseUrl || !modelId) {
+    response.json({
+      ok: false,
+      error: 'MISSING_FIELDS',
+      detail: '缺少 Base URL 或模型名称',
+    });
+    return;
+  }
+  if (!apiKey) {
+    response.json({
+      ok: false,
+      error: 'MISSING_KEY',
+      detail: '缺少 API Key（表单留空且无已保存密钥 / 环境变量）',
+    });
+    return;
+  }
+
+  const api =
+    provider === 'anthropic' || provider === 'anthropic-compatible'
+      ? 'anthropic-messages'
+      : 'openai-completions';
+
+  const result = await pingVendorModel({ baseUrl, apiKey, modelId, api });
+  if (result.ok) {
+    response.json({ ok: true, latencyMs: result.latencyMs });
+    return;
+  }
+  response.json({
+    ok: false,
+    error: result.error,
+    detail: result.detail,
+    status: result.status,
+  });
+});
+
 app.post('/api/agent/config', (request, response) => {
   const body = (request.body ?? {}) as {
     action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset';
@@ -5230,6 +5358,44 @@ app.get('/api/rdkclaw/security-audit', (request, response) => {
 app.post('/api/rdkclaw/security-audit/clear', (_request, response) => {
   clearSecurityAuditLogs();
   response.json({ ok: true });
+});
+
+/** AI Dock：导出当前会话排查包（zip：Agent JSONL、Dock 快照、可选板端 OpenClaw 日志、安全审计） */
+app.post('/api/rdkclaw/export-debug-bundle', async (request, response) => {
+  try {
+    const body = request.body as {
+      sessionId?: string;
+      deviceId?: string;
+      userId?: string;
+      includeBoardLogs?: boolean;
+      uiSnapshot?: unknown;
+    };
+    const sessionId = String(body?.sessionId || '').trim();
+    if (!sessionId) {
+      response.status(400).json({ error: '缺少 sessionId' });
+      return;
+    }
+    const deviceId = String(body?.deviceId || '').trim() || undefined;
+    const userId = String(body?.userId || '').trim() || undefined;
+    const includeBoardLogs = body?.includeBoardLogs !== false;
+    const buf = await rdkclaw.exportDebugSessionBundle({
+      userId,
+      sessionId,
+      deviceId,
+      includeBoardLogs,
+      uiSnapshot: body?.uiSnapshot,
+    });
+    const safeTs = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `rdkclaw-debug-${safeTs}.zip`;
+    response.setHeader('Content-Type', 'application/zip');
+    response.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    response.send(buf);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!response.headersSent) {
+      response.status(500).json({ error: msg });
+    }
+  }
 });
 
 app.get('/api/rdkclaw/forum/auth', (_request, response) => {
@@ -6336,196 +6502,6 @@ app.post('/api/chat', async (request, response) => {
       error: error instanceof Error ? `模型调用失败: ${error.message}` : '模型调用失败',
     });
   }
-});
-
-io.on('connection', (socket) => {
-  let sshClient: Client | null = null;
-  let sshStream: any = null;
-  let openclawChatSession: { abort: () => void } | null = null;
-
-  // OpenClaw Chat Events
-  socket.on('openclaw:start', async (config) => {
-    const { deviceId } = config;
-    try {
-      const devices = await readDevices();
-      const device = devices.find(d => d.id === deviceId);
-      if (!device) {
-        socket.emit('openclaw:error', { error: 'Device not found' });
-        return;
-      }
-
-      const deviceObj = toOpenClawDevice(device);
-      
-      openClawManager.startInteractiveChat(
-        deviceObj,
-        (data, err) => {
-          if (err) {
-            socket.emit('openclaw:error', { error: err });
-            return;
-          }
-          socket.emit('openclaw:ready', { status: 'connected' });
-        },
-        () => {
-          socket.emit('openclaw:disconnected', {});
-          openclawChatSession = null;
-        },
-        `session-${socket.id}`
-      );
-    } catch (e: any) {
-      socket.emit('openclaw:error', { error: e.message });
-    }
-  });
-
-  socket.on('openclaw:send', async (data) => {
-    const { deviceId, message } = data;
-    if (!message?.trim()) return;
-
-    try {
-      const devices = await readDevices();
-      const device = devices.find(d => d.id === deviceId);
-      if (!device) {
-        socket.emit('openclaw:error', { error: 'Device not found' });
-        return;
-      }
-
-      const deviceObj = toOpenClawDevice(device);
-      let streamed = '';
-
-      openclawChatSession = openClawManager.sendAgentMessage(
-        message,
-        (chunk) => {
-          streamed += chunk;
-          socket.emit('openclaw:data', { chunk });
-        },
-        (success) => {
-          recordTokenUsage({
-            source: 'openclaw',
-            deviceId,
-            sessionId: `session-${socket.id}`,
-            model: 'openclaw-gateway',
-            promptText: String(message || ''),
-            completionText: streamed || '',
-            success,
-            estimated: true,
-          });
-          if (!success) {
-            const raw = (streamed || '').trim();
-            let msg = raw || 'OpenClaw 会话执行失败，请检查设备连接、密码或 Gateway 状态';
-            if (/__OPENCLAW_HTTP_FAILED__/i.test(raw)) {
-              msg = raw
-                .replace(/__OPENCLAW_HTTP_FAILED__/gi, '')
-                .trim() || `OpenClaw Gateway HTTP 接口不可用，请检查 ${OPENCLAW_GATEWAY_PORT} 端口与网关配置`;
-            }
-            if (/__OPENCLAW_WS_FAILED__/i.test(raw)) {
-              msg = raw
-                .replace(/__OPENCLAW_WS_FAILED__/gi, '')
-                .trim() || `OpenClaw Gateway WS 调用失败，请检查 ${OPENCLAW_GATEWAY_PORT} 端口、token 与网关权限`;
-            }
-            if (/plugins\.allow is empty/i.test(raw)) {
-              msg = 'OpenClaw 插件安全策略阻止加载本地插件（plugins.allow 为空）。请在 openclaw.json 中显式配置受信任插件 IDs，或移除未受信插件后重试。';
-            }
-            socket.emit('openclaw:error', { error: msg });
-          }
-          socket.emit('openclaw:complete', { success });
-          openclawChatSession = null;
-        },
-        `session-${socket.id}`,
-        deviceObj
-      );
-    } catch (e: any) {
-      socket.emit('openclaw:error', { error: e.message });
-    }
-  });
-
-  socket.on('openclaw:stop', async (data) => {
-    const { deviceId } = data;
-    if (openclawChatSession) {
-      openclawChatSession.abort();
-      openclawChatSession = null;
-    }
-    
-    try {
-      const devices = await readDevices();
-      const device = devices.find(d => d.id === deviceId);
-      if (device) {
-        const deviceObj = toOpenClawDevice(device);
-        openClawManager.stopInteractiveChat(`session-${socket.id}`, deviceObj);
-      }
-    } catch (e: any) {
-      // Ignore errors on stop
-    }
-    
-    socket.emit('openclaw:stopped', {});
-  });
-
-  socket.on('init', async (config) => {
-    const { deviceId, password, cols, rows } = config;
-    try {
-      const devices = await readDevices();
-      const device = devices.find(d => d.id === deviceId);
-      if (!device) {
-        socket.emit('data', '\r\n\x1b[31m[Error] Device not found.\x1b[0m\r\n');
-        return;
-      }
-      
-      const passKey = credentialCacheKey(device.host, device.username, device.port ?? 22);
-      const persistedPassword = (device as Device & { password?: string }).password ?? '';
-      const pwd =
-        password
-        || devicePasswordCache.get(passKey)
-        || persistedPassword
-        || defaultSshPassword;
-
-      sshClient = new Client();
-      sshClient.on('ready', () => {
-        sshClient!.shell({ term: 'xterm-256color', cols: cols || 80, rows: rows || 24 }, (err, stream) => {
-          if (err) {
-            socket.emit('data', `\r\n\x1b[31m[Error] Shell error: ${err.message}\x1b[0m\r\n`);
-            sshClient?.end();
-            return;
-          }
-          sshStream = stream;
-          stream.on('data', (d: any) => socket.emit('data', d.toString('utf-8')));
-          stream.on('close', () => {
-            socket.emit('data', '\r\n\x1b[33m[Session closed]\x1b[0m\r\n');
-            sshClient?.end();
-          });
-        });
-      }).on('error', (err) => {
-        socket.emit('data', `\r\n\x1b[31m[SSH Error] ${err.message}\x1b[0m\r\n`);
-      }).connect({
-        host: device.host,
-        port: device.port ?? 22,
-        username: device.username,
-        password: pwd,
-        readyTimeout: SSH_READY_TIMEOUT_MS,
-        keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
-        keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
-      });
-
-    } catch (e: any) {
-      socket.emit('data', `\r\n\x1b[31m[Internal Error] ${e.message}\x1b[0m\r\n`);
-    }
-  });
-
-  socket.on('data', (d) => {
-    if (sshStream) sshStream.write(d);
-  });
-
-  socket.on('resize', ({ cols, rows }) => {
-    if (sshStream && sshStream.setWindow) {
-      sshStream.setWindow(rows, cols, 0, 0);
-    }
-  });
-
-  socket.on('disconnect', () => {
-    if (openclawChatSession) {
-      openclawChatSession.abort();
-      openclawChatSession = null;
-    }
-    sshStream?.end();
-    sshClient?.end();
-  });
 });
 
 async function startServer() {

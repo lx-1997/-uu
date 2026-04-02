@@ -53,6 +53,21 @@ export function resolveApiUrl(path: string): string {
 }
 
 /**
+ * 对话里图片/视频等 src：桌面端补 apiBase；data/blob/http(s) 原样返回；无前导 / 的相对路径会先规范为以 / 开头。
+ */
+export function resolveMediaUrl(src: string): string {
+  const s = String(src || '').trim();
+  if (!s) return s;
+  if (s.startsWith('data:') || s.startsWith('blob:')) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith('//') && typeof window !== 'undefined') {
+    return `${window.location.protocol}${s}`;
+  }
+  const path = s.startsWith('/') ? s : `/${s.replace(/^\.\//, '')}`;
+  return resolveApiUrl(path);
+}
+
+/**
  * 与 resolveApiUrl 对齐的 WebSocket 基址：桌面端直连 apiBase；浏览器开发态与页面同 host（走 Vite 代理到 8787）。
  */
 /** 一键部署日志 SSE：与 fetchApi 一样附带 rdk_sso_session，避免跨端口/iframe 下无 Cookie。 */

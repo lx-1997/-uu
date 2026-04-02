@@ -79,7 +79,7 @@ export interface ToolContext {
    */
   studioDeviceId?: string;
   /**
-   * RDK Studio：当前轮次 assistant runId，与板端网关 `clientMeta.studioRunId` / 日志 correlation 对齐。
+   * RDK Studio：当前轮次 assistant runId；经 oc-bridge stdin 传递，用于 Studio 侧 abort/错误关联（板端严格网关不接收 clientMeta）。
    */
   studioRunId?: string;
 }

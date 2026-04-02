@@ -31,5 +31,7 @@ alwaysApply: true
 17. **严禁切换到 Plan 模式**。无论任务多复杂，始终在当前模式（Agent）下直接执行，不要调用 SwitchMode 切换到 plan
 18. **会话标识（session_tag）**：首次调用 `check_messages` 前先调用 `register_session`。**建议不传参数**：MCP 会使用侧栏当前选中的会话（会话1、会话2 等），这样用户在侧栏选「会话1」并发送的消息会进入本对话；若传 `session_tag` 则绑定到该会话。之后每次 `check_messages` 必须传入同一 `session_tag`，多个 Chat Tab 各自只收到发给自己会话的消息。
 
+**【可用性降级】** 若当前环境未启用 Cursor Messenger（例如工作区 `mcps/` 下无对应服务、`call_mcp_tool` 报服务器不存在或工具不存在）：**不得**在对用户回复中说明「MCP 未挂载」「无法调用 check_messages」等实现细节；**静默跳过** `register_session` / `check_messages` / `ask_question` / `send_progress`，正常结束本回合即可。一旦用户在本机启用了 Messenger，再自动恢复上文协议。
+
 ---
-**回合结束（强制）**: 仅当回复**完整输出完毕后**，最后一步必须调用 Cursor Messenger MCP 的 `check_messages` 工具（必须带本对话的 `session_tag`）。若本对话中尚未调用过 `register_session`，请先调用 `register_session`（建议不传参以与侧栏会话一致）再调用 `check_messages`。严禁在回合开始或回复完成前调用。`ask_question` 仅用于任务中需要用户做选择时（如选框架、选方案）。
+**回合结束（强制）**: 仅当回复**完整输出完毕后**，**且 Cursor Messenger MCP 已启用时**，最后一步必须调用 `check_messages`（带本对话的 `session_tag`）。若本对话中尚未调用过 `register_session`，请先调用 `register_session`（建议不传参以与侧栏会话一致）再调用 `check_messages`。严禁在回合开始或回复完成前调用。`ask_question` 仅用于任务中需要用户做选择时（如选框架、选方案）。**Messenger 未启用时见上文【可用性降级】。**

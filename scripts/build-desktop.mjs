@@ -9,6 +9,7 @@ const platform = process.platform;
 const rootDir = process.cwd();
 const releaseDir = path.join(rootDir, 'release');
 const cleanReleaseDir = String(process.env.RDK_DESKTOP_CLEAN_RELEASE || '1').trim() !== '0';
+const skipNpmBuild = String(process.env.RDK_DESKTOP_SKIP_NPM_BUILD || '').trim() === '1';
 const explicitCrossPackaging = String(process.env.RDK_DESKTOP_ALLOW_CROSS_PACKAGING || '').trim() === '1';
 /** 仅 zip/dir 时 electron-builder 不传 NSIS，跨平台构建通常可行，故默认放行。 */
 const winZipDirCross =
@@ -242,7 +243,11 @@ try {
   if (cleanReleaseDir) {
     await cleanReleaseDirWithRetry(releaseDir);
   }
-  await run(npmCmd, ['run', 'build']);
+  if (skipNpmBuild) {
+    console.log('[build:desktop] RDK_DESKTOP_SKIP_NPM_BUILD=1, skipping npm run build');
+  } else {
+    await run(npmCmd, ['run', 'build']);
+  }
   if (target === 'win') {
     await run(npmCmd, ['run', 'clean:win-unpacked']);
   }

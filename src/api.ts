@@ -468,6 +468,45 @@ export function setActiveRdkclawDevice(deviceId: string) {
   });
 }
 
+export interface RdkclawDebugExportPayload {
+  sessionId: string;
+  deviceId?: string;
+  userId?: string;
+  /** 默认 true；为 false 时跳过 SSH 拉取板端 openclaw logs */
+  includeBoardLogs?: boolean;
+  uiSnapshot?: unknown;
+}
+
+/** 下载 RDKClaw 排查 zip（Agent JSONL、Dock 快照、可选板端日志、安全审计） */
+export async function downloadRdkclawDebugBundle(payload: RdkclawDebugExportPayload): Promise<void> {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  applySsoMirrorToHeaders(headers);
+  const res = await fetch(resolveUrl('/api/rdkclaw/export-debug-bundle'), {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error || `导出失败 (${res.status})`);
+  }
+  const cd = res.headers.get('Content-Disposition');
+  let filename = `rdkclaw-debug-${Date.now()}.zip`;
+  const m = cd?.match(/filename="([^"]+)"/);
+  if (m?.[1]) filename = m[1];
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export interface FeishuConfigView {
   enabled: boolean;
   connectionMode: 'websocket' | 'webhook';

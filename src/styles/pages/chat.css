@@ -1887,6 +1887,32 @@
   background: var(--bg-inset);
 }
 
+/* Markdown 正文中的 ![alt](url)（与 extractMedia 提取块并存时样式一致） */
+.dock-bubble .md-inline-img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  max-height: 360px;
+  margin: 6px 0;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+  background: var(--bg-inset);
+  vertical-align: middle;
+}
+
+.config-chat-msg .md-inline-img,
+.oc-chat-body .md-inline-img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  margin: 6px 0;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+  background: var(--bg-inset);
+}
+
 .dock-bubble .image-block-real:hover {
   transform: scale(1.02);
 }

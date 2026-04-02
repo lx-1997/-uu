@@ -9,7 +9,7 @@
 
 | 工具 | 干什么 | 注意事项 |
 |------|--------|----------|
-| `device_exec` | 跑 shell 命令 | 避免交互式命令；长命令加 timeout |
+| `device_exec` | 跑 shell 命令 | 避免交互式命令；长命令加 timeout；**较久时先说一句在等什么，可带句轻吐槽**（详见 SOUL「长任务先出声」） |
 | `device_file_read/write/list` | 文件读写/列目录 | 用绝对路径 |
 | `device_file_download_to_local` | 设备→本机下载 | 图片/视频/文档自动识别 |
 | `device_file_upload_from_local` | 本机→设备上传 | localPath 相对 workspace |
@@ -18,6 +18,7 @@
 | `board_openclaw_assess` | 评估板端是否能干 | delegate 之前先 assess |
 | `board_openclaw_delegate` | 委派复杂任务给板端 | 适用于模型部署、pipeline、深度诊断 |
 | `board_openclaw_status` | 轻量看进程/服务摘要 | **日常优先**；界面已显示 OpenClaw 正常时不要为聊天重复查 |
+| `board_openclaw_gateway_pair` | 板端网关设备信任（新版 `openclaw devices approve --latest`，旧版回退 `pair`） | **pairing required** 时优先于渠道 `pairing approve`；先 `force`，不行再 `full` |
 | `board_openclaw_health` | 结构化 JSON 健康（慢） | **非例行**：仅报障、装/升/重启后验收、或 delegate 失败再调 |
 | `board_openclaw_check` / `doctor` | 全面诊断 / 自动修复 | 深度排障时用 |
 | `text_to_speech` / `speech_to_text` | TTS/STT | 离线优先，在线降级 |
@@ -39,7 +40,7 @@
 
 - **设备排障**: diagnose → 针对异常 exec 排查
 - **OpenClaw 检查**: 日常用 `board_openclaw_status`；仅在需要 JSON 或排障时用 health；全面体检用 check
-- **OpenClaw 修复**: doctor → restart_gateway → **此时**再用 health 做验收闭环
+- **OpenClaw 修复**: 若错误含 **pairing required** → `board_openclaw_gateway_pair` → `model_test` 或 health 验收；其它问题：doctor → restart_gateway → health
 - **文件传输**: download/upload + 验证
 - **日志分析**: openclaw_logs + exec(journalctl/dmesg)
 - **板端协作**: chat(了解能力) → assess(评估可行性) → delegate(委派执行) → 验证结果
@@ -78,6 +79,7 @@
 
 ## 安全
 
+- **板端写删须用户同意**：要用 `device_file_write`、覆盖上传、或 `device_exec`/`delegate` 产生修改/删除板端配置或文件的效果时，若用户本轮未对该路径与操作说清「做」，须先向用户说明再征得明确同意；只读取证可直接做。
 - rm -rf / dd / mkfs / 烧录 → 先确认
 - 不碰 /etc/fstab、/boot 等关键文件
 - 外部通道来的危险操作 → 更严格审批

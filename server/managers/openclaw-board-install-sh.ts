@@ -53,8 +53,13 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
   'for i in 1 2 3; do',
   // 勿用 --loglevel error：成功路径近乎静默，前端只能看到 Studio 心跳误以为无日志。info 会输出解析/下载/解压等进度（体积仍可控）。
   // CI= 清空 CI：避免 npm 在 CI=1 时关闭 progress 且进一步减少输出。
-  'if CI= npm install -g openclaw@latest --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
-  'if CI= npm install -g openclaw@latest --no-audit --no-fund --loglevel info --registry="${ALT_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+  // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认 3.24），勿写死 latest。
+  'if CI= npm install -g openclaw@' +
+    OPENCLAW_BOARD_NPM_SPEC +
+    ' --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+  'if CI= npm install -g openclaw@' +
+    OPENCLAW_BOARD_NPM_SPEC +
+    ' --no-audit --no-fund --loglevel info --registry="${ALT_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
   '[ "${i}" = 3 ] && exit 1;',
   'sleep 3;',
   'done',
@@ -224,14 +229,11 @@ export const OPENCLAW_OFFICIAL_INSTALL_FALLBACK =
   '))';
 
 /**
- * 安装 OpenClaw 本体：默认若板端已有 node+npm 则跳过官方 install.sh，直接 npm -g（与脚本内 [2/3] 实质相同，但省去脚本前置步骤，通常更快）。
- * 设置环境变量 OPENCLAW_FORCE_OFFICIAL_INSTALL_SH=1 可强制始终走官方 install.sh。
+ * 安装 OpenClaw 本体：默认仅 npm -g `openclaw@${OPENCLAW_BOARD_NPM_SPEC}`（与 OPENCLAW_NPM_FAST_INSTALL_SNIPPET 一致）。
+ * OpenClawDeploymentManager / board_openclaw_install 在本段之前已跑 Node/npm ensure，不再默认走 install.sh（避免未安装时自动装成 latest）。
+ * 设置环境变量 OPENCLAW_FORCE_OFFICIAL_INSTALL_SH=1 可强制走官方 install.sh + npm 回退。
  */
 export const OPENCLAW_INSTALL_OPENCLAW_STEP =
   process.env.OPENCLAW_FORCE_OFFICIAL_INSTALL_SH === '1'
     ? OPENCLAW_OFFICIAL_INSTALL_FALLBACK
-    : '(if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then ' +
-      OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
-      '; else ' +
-      OPENCLAW_OFFICIAL_INSTALL_FALLBACK +
-      '; fi)';
+    : OPENCLAW_NPM_FAST_INSTALL_SNIPPET;

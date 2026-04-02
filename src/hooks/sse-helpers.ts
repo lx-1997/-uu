@@ -43,6 +43,19 @@ export function isBoardOpenClawCollabTool(toolName: string): boolean {
   );
 }
 
+/**
+ * 凡经板端 OpenClaw 网关的工具（与 server/rdkclaw/event-mapper resolveExecutor 对齐）。
+ * 快速回答模式下也要在对话区展示这些步骤与输出，不能只显示 delegate/chat/assess。
+ */
+export function isBoardOpenClawExecutorTool(toolName: string): boolean {
+  if (!toolName) return false;
+  return (
+    toolName.startsWith('board_openclaw_')
+    || toolName === 'fleet_board_delegate'
+    || toolName === 'fleet_board_broadcast'
+  );
+}
+
 /** 从 tool_start 参数生成「发给板端 OpenClaw」的展示行（LLM 填写的委派/对话内容） */
 export function formatBoardOutboundLines(toolName: string, args: Record<string, unknown> | undefined): string[] {
   if (!args) return [];

@@ -252,6 +252,7 @@ export interface AppState {
 
   studioResponseMode: StudioResponseMode;
   setStudioResponseMode: (v: StudioResponseMode) => void;
+  exportDebugBundle: (options?: { includeBoardLogs?: boolean }) => Promise<void>;
 }
 
 /** 与 app-state-context 同源，供仅需 Context 引用的模块直接导入（避免经本文件再取 context） */

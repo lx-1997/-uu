@@ -1,0 +1,16 @@
+---
+description: RDKClaw 板端写删须用户同意
+globs:
+  - "server/rdkclaw/**"
+  - "server/agent/**"
+  - "agent/**"
+  - "skills/**"
+alwaysApply: false
+---
+
+# 板端配置与文件变更
+
+- **RDKClaw**（Studio 侧 Agent）在**修改、覆盖或删除**板卡端配置文件或文件前，若用户未在本轮对话对该路径与操作给出明确授权，**必须先说明影响并征得用户明确同意**，再调用 `device_file_write`、覆盖上传、`device_exec`/`board_openclaw_delegate` 等会产生写删效果的工具。
+- **只读**取证（读文件、列目录、诊断类命令）可照常执行。
+- 用户已明确说清具体操作（例如指定路径的删除或改写）的，视为已授权；SOUL 中「板端落盘」等已约定的人格/工作区同步场景，在完成用户确认后执行。
+- 改提示词时：`agent/SOUL.md`、`agent/TOOLS.md` 与 `server/rdkclaw/system-prompt-builder.ts` 中的相关段落应保持一致。

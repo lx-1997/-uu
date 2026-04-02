@@ -1652,6 +1652,27 @@ export default function OpenClaw() {
                   <button type="button" className={`chip ${activeOp === 'restart-gateway' ? 'active' : ''}`} onClick={() => runAction('restart-gateway')} disabled={loading}>{t('oc.ops.restartGw', '重启网关')}</button>
                   <button type="button" className={`chip ${activeOp === 'logs' ? 'active' : ''}`} onClick={() => runAction('logs', { limit: 300 })} disabled={loading}>{t('oc.ops.logs', '查看日志')}</button>
                 </div>
+                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: '6px 0 4px', lineHeight: 1.35 }}>
+                  {t('oc.pairing.gatewayTrustHint', '与下方「渠道配对码」不同：用于板端 openclaw 与本机 18789 网关建立信任，可消除 pairing required。')}
+                </div>
+                <div className="oc-actions-grid" style={{ marginBottom: 4 }}>
+                  <button
+                    type="button"
+                    className={`chip ${activeOp === 'gateway-pair' ? 'active' : ''}`}
+                    onClick={() => runAction('gateway-pair', { mode: 'force' })}
+                    disabled={loading}
+                  >
+                    {t('oc.pairing.gatewayPairForce', '一键配对（推荐）')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip ${activeOp === 'gateway-pair' ? 'active' : ''}`}
+                    onClick={() => runAction('gateway-pair', { mode: 'full' })}
+                    disabled={loading}
+                  >
+                    {t('oc.pairing.gatewayPairFull', '重置并配对')}
+                  </button>
+                </div>
                 <div className="divider" style={{ margin: '8px 0' }} />
                 <div className="oc-actions-grid">
                   <button type="button" className={`chip ${activeOp === 'prepare' ? 'active' : ''}`} onClick={() => runAction('prepare')} disabled={loading}>{t('oc.ops.prepare', '环境准备')}</button>

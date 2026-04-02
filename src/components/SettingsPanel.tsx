@@ -155,7 +155,7 @@ export default function SettingsPanel() {
   };
 
   /* ── AI Model State ── */
-  const [aiProvider, setAiProvider] = useState('qwen');
+  const [aiProvider, setAiProvider] = useState('openai-compatible');
   const [aiModel, setAiModel] = useState('');
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiBaseUrl, setAiBaseUrl] = useState('');
@@ -178,7 +178,7 @@ export default function SettingsPanel() {
   const [aiReasoningVisibility, setAiReasoningVisibility] = useState('stream');
   const [aiSamplingTemperature, setAiSamplingTemperature] = useState('0.1');
   const [aiSamplingTopP, setAiSamplingTopP] = useState('1');
-  const [quickAiProvider, setQuickAiProvider] = useState('qwen');
+  const [quickAiProvider, setQuickAiProvider] = useState('openai-compatible');
   const [quickAiModel, setQuickAiModel] = useState('');
   const [quickAiApiKey, setQuickAiApiKey] = useState('');
   const [quickAiBaseUrl, setQuickAiBaseUrl] = useState('');
@@ -191,6 +191,8 @@ export default function SettingsPanel() {
   /** AI 引擎卡片内：同一位置切换深度 / 快速，表单状态仍各自独立 */
   const [aiEngineLaneTab, setAiEngineLaneTab] = useState<'thinking' | 'quick'>('thinking');
   const [aiSaving, setAiSaving] = useState(false);
+  const [thinkingVendorTest, setThinkingVendorTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [quickVendorTest, setQuickVendorTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [aiEnvApiKeyAvailable, setAiEnvApiKeyAvailable] = useState(false);
   const [studioDefaultPreset, setStudioDefaultPreset] = useState<{
     id: string;
@@ -211,7 +213,7 @@ export default function SettingsPanel() {
   const applyAiModelToForm = (entry: typeof aiSavedModels[number]) => {
     setSelectedAiModelId(entry.id);
     setAiLabel(entry.label || '');
-    setAiProvider(entry.provider || 'qwen');
+    setAiProvider(entry.provider || 'openai-compatible');
     setAiModel(entry.model || '');
     setAiBaseUrl(entry.baseUrl || '');
     setAiThinkingDefault((entry.thinkingDefault || '').trim());
@@ -219,13 +221,13 @@ export default function SettingsPanel() {
     setAiSamplingTemperature((entry.samplingTemperature || '').trim());
     setAiSamplingTopP((entry.samplingTopP || '').trim());
     setAiApiKey('');
-    loadedAiProviderRef.current = entry.provider || 'qwen';
+    loadedAiProviderRef.current = entry.provider || 'openai-compatible';
   };
 
   const applyQuickFormFromEntry = (entry: typeof aiSavedModels[number]) => {
     setQuickSelectedAiModelId(entry.id);
     setQuickAiLabel(entry.label || '');
-    setQuickAiProvider(entry.provider || 'qwen');
+    setQuickAiProvider(entry.provider || 'openai-compatible');
     setQuickAiModel(entry.model || '');
     setQuickAiBaseUrl(entry.baseUrl || '');
     setQuickAiThinkingDefault((entry.thinkingDefault || '').trim());
@@ -233,7 +235,7 @@ export default function SettingsPanel() {
     setQuickAiSamplingTemperature((entry.samplingTemperature || '').trim());
     setQuickAiSamplingTopP((entry.samplingTopP || '').trim());
     setQuickAiApiKey('');
-    quickLoadedAiProviderRef.current = entry.provider || 'qwen';
+    quickLoadedAiProviderRef.current = entry.provider || 'openai-compatible';
   };
 
   const refreshAiConfig = async () => {
@@ -257,7 +259,7 @@ export default function SettingsPanel() {
     } else {
       setSelectedAiModelId('');
       setAiLabel('');
-      setAiProvider(cfg.provider || 'qwen');
+      setAiProvider(cfg.provider || 'openai-compatible');
       setAiModel(cfg.model || '');
       setAiBaseUrl(cfg.baseUrl || '');
       setAiThinkingDefault((cfg.thinkingDefault || '').trim());
@@ -272,15 +274,15 @@ export default function SettingsPanel() {
     } else {
       setQuickSelectedAiModelId('');
       setQuickAiLabel('');
-      setQuickAiProvider('qwen');
+      setQuickAiProvider('openai-compatible');
       setQuickAiModel('');
-      setQuickAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
+      setQuickAiBaseUrl(AI_PROVIDER_DEFAULTS['openai-compatible'].baseUrl);
       setQuickAiThinkingDefault('');
       setQuickAiReasoningVisibility('');
       setQuickAiSamplingTemperature('');
       setQuickAiSamplingTopP('');
       setQuickAiApiKey('');
-      quickLoadedAiProviderRef.current = 'qwen';
+      quickLoadedAiProviderRef.current = 'openai-compatible';
     }
 
     setAiConfigured(
@@ -805,9 +807,9 @@ export default function SettingsPanel() {
   const handleCreateNewThinkingModel = () => {
     setSelectedAiModelId('');
     setAiLabel('');
-    setAiProvider('qwen');
+    setAiProvider('openai-compatible');
     setAiModel('');
-    setAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
+    setAiBaseUrl(AI_PROVIDER_DEFAULTS['openai-compatible'].baseUrl);
     setAiThinkingDefault('');
     setAiReasoningVisibility('');
     setAiSamplingTemperature('');
@@ -818,15 +820,110 @@ export default function SettingsPanel() {
   const handleCreateNewQuickModel = () => {
     setQuickSelectedAiModelId('');
     setQuickAiLabel('');
-    setQuickAiProvider('qwen');
+    setQuickAiProvider('openai-compatible');
     setQuickAiModel('');
-    setQuickAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
+    setQuickAiBaseUrl(AI_PROVIDER_DEFAULTS['openai-compatible'].baseUrl);
     setQuickAiThinkingDefault('');
     setQuickAiReasoningVisibility('');
     setQuickAiSamplingTemperature('');
     setQuickAiSamplingTopP('');
     setQuickAiApiKey('');
   };
+
+  /** 与 OpenClaw「测试 API」一致：本机直连厂商，不经板端 Gateway */
+  const handleTestVendorApi = useCallback(
+    async (lane: 'thinking' | 'quick') => {
+      const setVendorTest = lane === 'thinking' ? setThinkingVendorTest : setQuickVendorTest;
+      const entryId = lane === 'thinking' ? selectedAiModelId.trim() : quickSelectedAiModelId.trim();
+      const provider = lane === 'thinking' ? aiProvider : quickAiProvider;
+      const baseUrlRaw = lane === 'thinking' ? aiBaseUrl : quickAiBaseUrl;
+      const modelRaw = lane === 'thinking' ? aiModel : quickAiModel;
+      const apiKeyRaw = lane === 'thinking' ? aiApiKey : quickAiApiKey;
+      const selectedEntry = entryId ? aiSavedModels.find((i) => i.id === entryId) : undefined;
+      const providerDefaults = AI_PROVIDER_DEFAULTS[provider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
+      const baseUrl = (baseUrlRaw.trim() || providerDefaults.baseUrl || '').trim();
+      const model = (modelRaw.trim() || providerDefaults.model || '').trim();
+      if (!baseUrl || !model) {
+        addToast(
+          t(
+            'settings.ai.vendorTestNeedEndpoint',
+            '请填写 Base URL 与模型名称后再测试（当前表单为空或仅有服务商占位）。',
+          ),
+          'warning',
+        );
+        return;
+      }
+      const apiKey = apiKeyRaw.trim();
+      if (!apiKey && !selectedEntry?.hasApiKey && !aiEnvApiKeyAvailable) {
+        addToast(
+          t(
+            'settings.ai.vendorTestNeedKey',
+            '请填写 API Key，或绑定已保存密钥的配置 / 设置环境变量 OPENAI_API_KEY。',
+          ),
+          'warning',
+        );
+        return;
+      }
+      setVendorTest('testing');
+      try {
+        const res = await fetchApi('/api/agent/config/vendor-ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            entryId: entryId || undefined,
+            baseUrl,
+            model,
+            provider,
+            ...(apiKey ? { apiKey } : {}),
+          }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          latencyMs?: number;
+          detail?: string;
+          status?: number;
+          error?: string;
+        };
+        const passed = !!data?.ok;
+        setVendorTest(passed ? 'ok' : 'fail');
+        if (passed) {
+          const ms = typeof data.latencyMs === 'number' ? data.latencyMs : null;
+          addToast(
+            ms != null
+              ? tf('oc.test.vendorOkMs', '厂商 API 可用（{{ms}} ms）', { ms: String(ms) })
+              : t('oc.test.vendorOk', '厂商 API 可用'),
+            'success',
+          );
+        } else {
+          const detail = [data?.detail, data?.status ? `HTTP ${data.status}` : '', data?.error]
+            .filter(Boolean)
+            .join(' · ');
+          addToast(detail || t('oc.test.vendorFail', '厂商 API 测试失败'), 'warning');
+        }
+      } catch {
+        setVendorTest('fail');
+        addToast(t('oc.test.vendorFailNet', '厂商 API 测试失败（网络或服务异常）'), 'error');
+      }
+      setTimeout(() => setVendorTest('idle'), 5000);
+    },
+    [
+      selectedAiModelId,
+      quickSelectedAiModelId,
+      aiProvider,
+      quickAiProvider,
+      aiBaseUrl,
+      quickAiBaseUrl,
+      aiModel,
+      quickAiModel,
+      aiApiKey,
+      quickAiApiKey,
+      aiSavedModels,
+      aiEnvApiKeyAvailable,
+      addToast,
+      t,
+      tf,
+    ],
+  );
 
   const handleRestoreStudioDefaultModel = async () => {
     if (!studioDefaultPreset) return;
@@ -862,6 +959,11 @@ export default function SettingsPanel() {
       if (!registry || typeof registry !== 'object') {
         throw new Error(t('toast.exportFail', '导出失败'));
       }
+      if (!Array.isArray(registry.entries) || registry.entries.length === 0) {
+        throw new Error(
+          t('toast.exportNoEntries', '当前没有已保存的模型配置可导出，请先在「AI 引擎」中添加并保存至少一条配置'),
+        );
+      }
       const fileName = `rdkstudio-agent-config-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
       const json = JSON.stringify(registry, null, 2);
       const save = typeof window !== 'undefined' ? window.rdkDesktop?.saveTextFile : undefined;
@@ -893,7 +995,10 @@ export default function SettingsPanel() {
     setAiSaving(true);
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as AgentConfigExportPayload;
+      const raw = JSON.parse(text) as AgentConfigExportPayload & { registry?: AgentConfigExportPayload; ok?: boolean };
+      /** 兼容直接保存了「完整 API 响应」或嵌套 registry 的备份文件 */
+      const parsed: AgentConfigExportPayload =
+        raw && typeof raw === 'object' && raw.registry && Array.isArray(raw.registry.entries) ? raw.registry : raw;
       if (!Array.isArray(parsed?.entries) || parsed.entries.length === 0) throw new Error(t('err.importNoEntries', '导入文件无有效 entries'));
       await importAgentConfig({ registry: parsed, setActiveId: parsed.activeId || undefined, merge: true });
     } catch (error) {
@@ -1492,6 +1597,31 @@ export default function SettingsPanel() {
                     </div>
                   </div>
                   <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+                    <span className="settings-row-label">{t('settings.ai.vendorTest', '连通性')}</span>
+                    <div className="settings-row-value" style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => void handleTestVendorApi('thinking')}
+                          disabled={thinkingVendorTest === 'testing' || aiSaving}
+                        >
+                          {thinkingVendorTest === 'testing'
+                            ? '...'
+                            : thinkingVendorTest === 'ok'
+                              ? t('oc.test.vendorOkLabel', 'API 正常')
+                              : t('oc.test.vendorRun', '测试 API')}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.35, maxWidth: 420 }}>
+                        {t(
+                          'settings.ai.vendorTestHint',
+                          '从本机直连厂商 HTTP 发短请求（与板端 OpenClaw Gateway 无关）。Key 可留空若当前条目已保存密钥或已配置 OPENAI_API_KEY。',
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="settings-row" style={{ alignItems: 'flex-start' }}>
                     <span className="settings-row-label">{t('settings.ai.brainAdvanced', '推理')}</span>
                     <div className="settings-row-value" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
@@ -1781,6 +1911,31 @@ export default function SettingsPanel() {
                         value={quickAiBaseUrl}
                         onChange={(e) => setQuickAiBaseUrl(e.target.value)}
                       />
+                    </div>
+                  </div>
+                  <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+                    <span className="settings-row-label">{t('settings.ai.vendorTest', '连通性')}</span>
+                    <div className="settings-row-value" style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => void handleTestVendorApi('quick')}
+                          disabled={quickVendorTest === 'testing' || aiSaving}
+                        >
+                          {quickVendorTest === 'testing'
+                            ? '...'
+                            : quickVendorTest === 'ok'
+                              ? t('oc.test.vendorOkLabel', 'API 正常')
+                              : t('oc.test.vendorRun', '测试 API')}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.35, maxWidth: 420 }}>
+                        {t(
+                          'settings.ai.vendorTestHint',
+                          '从本机直连厂商 HTTP 发短请求（与板端 OpenClaw Gateway 无关）。Key 可留空若当前条目已保存密钥或已配置 OPENAI_API_KEY。',
+                        )}
+                      </span>
                     </div>
                   </div>
                   <div className="settings-row" style={{ alignItems: 'flex-start' }}>

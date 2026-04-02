@@ -1,4 +1,5 @@
 import React from 'react';
+import { resolveMediaUrl } from '../utils/apiBase';
 
 export type RenderMarkdownOptions = {
   /**
@@ -324,11 +325,26 @@ function renderInlineMarkdown(text: string, keyOffset: number, streaming?: boole
 
 /** 行内：反引号链接等仍要求成对闭合；加粗在 streaming 下支持未闭合 **… */
 function renderPlainTokens(s: string, keyBase: number, wrapStrong: boolean): React.ReactNode[] {
-  const TOKEN_RE = /(`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  const TOKEN_RE = /(`[^`]+`|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\))/g;
   const parts = s.split(TOKEN_RE);
   const inner = parts.map((part, i) => {
     if (part.startsWith('`') && part.endsWith('`'))
       return <code key={`pt-${keyBase}-c-${i}`} className="md-inline-code">{part.slice(1, -1)}</code>;
+    const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      const url = resolveMediaUrl(imgMatch[2]);
+      const alt = imgMatch[1] || '';
+      return (
+        <img
+          key={`pt-${keyBase}-img-${i}`}
+          className="md-inline-img"
+          src={url}
+          alt={alt}
+          loading="lazy"
+          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+        />
+      );
+    }
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch)
       return <a key={`pt-${keyBase}-a-${i}`} href={linkMatch[2]} target="_blank" rel="noopener noreferrer">{linkMatch[1]}</a>;
@@ -367,13 +383,28 @@ function renderInline(text: string, streaming?: boolean): React.ReactNode {
   if (streaming) {
     return renderInlineStreamingBold(text);
   }
-  const TOKEN_RE = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  const TOKEN_RE = /(\*\*[^*]+\*\*|`[^`]+`|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\))/g;
   const parts = text.split(TOKEN_RE);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**'))
       return <strong key={i} style={{ fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
     if (part.startsWith('`') && part.endsWith('`'))
       return <code key={i} className="md-inline-code">{part.slice(1, -1)}</code>;
+    const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      const url = resolveMediaUrl(imgMatch[2]);
+      const alt = imgMatch[1] || '';
+      return (
+        <img
+          key={i}
+          className="md-inline-img"
+          src={url}
+          alt={alt}
+          loading="lazy"
+          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+        />
+      );
+    }
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch)
       return <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer">{linkMatch[1]}</a>;

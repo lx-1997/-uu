@@ -2,7 +2,7 @@ import type { Tool } from "../../agent/tools/types.js";
 import { ensureFindSkillsOnBoard } from "../../agent/tools/rdk-tools.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager, type OpenClawHealthStatus } from "../../managers/OpenClawDeploymentManager.js";
-import type { Device } from "../../../shared/types.js";
+import type { Device as SharedDevice } from "../../../shared/types.js";
 import {
   getCachedOpenClawAiReady,
   invalidateOpenClawHealthCache,
@@ -13,15 +13,19 @@ import {
   formatAssessInjectBlock,
   logDualAgentEvent,
 } from "../board-dual-agent-orchestration.js";
-import { normalizeOpenClawWsFailureText, openClawBridgeMeta } from "../openclaw-bridge-meta.js";
+import {
+  mentionsOpenClawGatewayPairingRequired,
+  openClawBridgeMeta,
+  parseOpenClawBoardRpcError,
+} from "../openclaw-bridge-meta.js";
 
-function resolveDevicePassword(device: Device) {
-  const persisted = (device as Device & { password?: string }).password ?? "";
+function resolveDevicePassword(device: SharedDevice) {
+  const persisted = (device as SharedDevice & { password?: string }).password ?? "";
   const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
   return persisted || envPwd;
 }
 
-function toBoardDevice(device: Device) {
+function toBoardDevice(device: SharedDevice) {
   return {
     ip: device.host,
     userName: device.username,
@@ -30,33 +34,8 @@ function toBoardDevice(device: Device) {
   };
 }
 
-function parseBoardError(raw: string): string {
-  const text = (raw || "").trim();
-  if (!text) return "板端 OpenClaw 未返回结果";
-  if (/__OPENCLAW_WS_FAILED__/i.test(text)) {
-    return normalizeOpenClawWsFailureText(text);
-  }
-  if (/missing\s+scope|operator\.(read|write|admin)/i.test(text)) {
-    return (
-      "板端网关鉴权范围不足（scope，例如 operator.read）。"
-      + "请检查 RDK Studio 与板端 Gateway 的 token / pairing；"
-      + "这与「网关进程未运行」不是同一类问题——若健康检查显示网关在跑，应说明为鉴权或权限配置。"
-    );
-  }
-  if (/__OPENCLAW_HTTP_FAILED__/i.test(text)) {
-    const inner = text.replace(/__OPENCLAW_HTTP_FAILED__/gi, "").trim();
-    if (/missing\s+scope|operator\.(read|write|admin)/i.test(inner)) {
-      return parseBoardError(inner);
-    }
-    return inner || "板端 OpenClaw 网关调用失败";
-  }
-  if (/plugins\.allow is empty/i.test(text)) {
-    return "板端 OpenClaw 插件策略阻止执行（plugins.allow 为空），请先在板端配置受信任插件。";
-  }
-  return text;
-}
-
 function isRetryableFailure(output: string): boolean {
+  if (mentionsOpenClawGatewayPairingRequired(output)) return false;
   const lower = output.toLowerCase();
   return /__openclaw_ws_failed__/i.test(output)
     || /ssh error|econnreset|econnrefused|connection reset|socket closed|timed out|timeout|handshake|broken pipe|websocket connect failed|websocket closed unexpectedly/i.test(lower);
@@ -299,6 +278,7 @@ export function boardOpenClawDelegateTool(
         });
 
       let lastOutput = "";
+      let gatewayPairRecoveryDone = false;
       for (let attempt = 0; attempt <= DELEGATE_MAX_RETRIES; attempt++) {
         const { output, success } = await runOnce();
         if (success) {
@@ -323,6 +303,31 @@ export function boardOpenClawDelegateTool(
           return body + suffix;
         }
         lastOutput = output;
+        if (
+          !gatewayPairRecoveryDone &&
+          mentionsOpenClawGatewayPairingRequired(output)
+        ) {
+          gatewayPairRecoveryDone = true;
+          onProgress?.(
+            "\n[板端 pairing required：正自动建立 CLI↔Gateway 信任（devices approve / pair）...]\n",
+            ctx.toolCallId,
+          );
+          if (deviceId) invalidateOpenClawHealthCache(deviceId);
+          const pairOk = await new Promise<boolean>((resolvePair) => {
+            manager.runGatewayPair(
+              boardDevice,
+              "force",
+              (chunk) => onProgress?.(chunk, ctx.toolCallId),
+              resolvePair,
+            );
+          });
+          manager.destroyConnection(boardDevice.ip);
+          if (pairOk) {
+            await abortAwareDelay(DELEGATE_RETRY_DELAY_MS, ctx.abortSignal);
+            attempt--;
+            continue;
+          }
+        }
         const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
         if (cleanOutput.length > 20 && !isRetryableFailure(output)) {
           const partial = cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
@@ -350,7 +355,15 @@ export function boardOpenClawDelegateTool(
         });
         return need.text;
       }
-      throw new Error(parseBoardError(lastOutput));
+      if (deviceId) {
+        if (
+          mentionsOpenClawGatewayPairingRequired(lastOutput)
+          || /missing\s+scope|operator\.(read|write|admin)/i.test(lastOutput)
+        ) {
+          invalidateOpenClawHealthCache(deviceId);
+        }
+      }
+      throw new Error(parseOpenClawBoardRpcError(lastOutput));
     },
   };
 }

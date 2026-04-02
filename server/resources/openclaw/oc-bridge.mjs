@@ -385,12 +385,9 @@ function startTurn(cmd) {
     }
   };
 
-  const clientMeta = {};
-  if (activeCorrelationId) clientMeta.correlationId = activeCorrelationId;
-  if (activeStudioRunId) clientMeta.studioRunId = activeStudioRunId;
-  if (activeStudioSessionKey) clientMeta.studioSessionKey = activeStudioSessionKey;
+  // 不向板端附带 clientMeta：旧版/严格网关会拒绝未知字段（如 unexpected property 'clientMeta'）。
+  // correlation / runId 仍用于本进程 emit 与 chat.cancel，见 activeCorrelationId 等。
   const params = { sessionKey, message, idempotencyKey };
-  if (Object.keys(clientMeta).length) params.clientMeta = clientMeta;
 
   try {
     ws.send(
