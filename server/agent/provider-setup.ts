@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { streamSimple, streamSimpleAnthropic, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
 import type { Model, StreamFunction, ThinkingLevel } from '@mariozechner/pi-ai';
 import { lookupModelCapabilities, fetchModelCapabilitiesFromProvider, registerModelCapabilities } from './model-registry.js';
@@ -89,7 +90,7 @@ export const STUDIO_DEFAULT_SAMPLING_TEMPERATURE = '0.1';
 export const STUDIO_DEFAULT_SAMPLING_TOP_P = '1';
 
 const BOOTSTRAP_PROVIDER_FILE_ENV = 'RDK_PROVIDER_BOOTSTRAP_FILE';
-const BOOTSTRAP_PROVIDER_FALLBACK = path.join(process.cwd(), 'config', 'rdkclaw-provider.defaults.json');
+const BOOTSTRAP_FILENAME = 'rdkclaw-provider.defaults.json';
 
 type ProviderProtocol = 'openai' | 'anthropic';
 
@@ -299,10 +300,40 @@ function expandEnvVars(template: string): string {
   });
 }
 
+function findBootstrapFileWalkingUp(fromDir: string, maxUp: number): string | null {
+  let cur = path.resolve(fromDir);
+  for (let i = 0; i <= maxUp; i++) {
+    const candidate = path.join(cur, 'config', BOOTSTRAP_FILENAME);
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return null;
+}
+
 function resolveBootstrapProviderConfigPath(): string | null {
   const envPath = normalizeText(process.env[BOOTSTRAP_PROVIDER_FILE_ENV]);
-  if (envPath) return envPath;
-  return fs.existsSync(BOOTSTRAP_PROVIDER_FALLBACK) ? BOOTSTRAP_PROVIDER_FALLBACK : null;
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates: string[] = [];
+  if (envPath && fs.existsSync(envPath)) {
+    candidates.push(path.normalize(envPath));
+  }
+  candidates.push(
+    path.join(process.cwd(), 'config', BOOTSTRAP_FILENAME),
+    path.join(moduleDir, '..', '..', 'config', BOOTSTRAP_FILENAME),
+    path.join(moduleDir, '..', '..', '..', 'config', BOOTSTRAP_FILENAME),
+  );
+  const walked = findBootstrapFileWalkingUp(process.cwd(), 6);
+  if (walked) candidates.push(walked);
+  const seen = new Set<string>();
+  for (const p of candidates) {
+    const resolved = path.normalize(p);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    if (fs.existsSync(resolved)) return resolved;
+  }
+  return null;
 }
 
 function ensureRegistryShape(input: unknown): ProviderConfigRegistry {

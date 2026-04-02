@@ -2,7 +2,7 @@
 /**
  * RDK Studio — OpenClaw 常驻桥（板端）
  * stdin/stdout NDJSON；维持单条 WS 到 127.0.0.1:18789。
- * RDK_OC_BRIDGE_VERSION 4 — clientMeta、chat.cancel（尽力）、结构化 error.code
+ * RDK_OC_BRIDGE_VERSION 5 — WS 重连指数退避（对齐 Studio GatewayClient 1s→30s）
  */
 import fs from 'fs';
 import os from 'os';
@@ -94,7 +94,7 @@ function buildConnectParams(nonce, ts) {
     scopes: SCOPES,
     device: signChallenge(nonce, ts),
     locale: 'zh-CN',
-    userAgent: 'rdkstudio-oc-bridge/3',
+    userAgent: 'rdkstudio-oc-bridge/5',
     caps: ['agent-events', 'tool-events'],
   };
   if (token) params.auth = { token };
@@ -102,8 +102,9 @@ function buildConnectParams(nonce, ts) {
 }
 
 const WS_URL = 'ws://127.0.0.1:18789';
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000;
+/** 与 server/agent/gateway/client.ts GatewayClient 对齐 */
+const WS_BACKOFF_MIN_MS = 1000;
+const WS_BACKOFF_MAX_MS = 30000;
 
 function emit(obj) {
   try {
@@ -111,8 +112,26 @@ function emit(obj) {
   } catch {}
 }
 
-let wsRetries = 0;
+let wsReconnectBackoffMs = WS_BACKOFF_MIN_MS;
+let wsReconnectTimer = null;
 let ws = null;
+
+function clearWsReconnectTimer() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+}
+
+function scheduleWsReconnect() {
+  clearWsReconnectTimer();
+  const delay = wsReconnectBackoffMs;
+  wsReconnectBackoffMs = Math.min(wsReconnectBackoffMs * 2, WS_BACKOFF_MAX_MS);
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    ws = connectWs();
+  }, delay);
+}
 let wsConnected = false;
 let bridgeReadyEmitted = false;
 let onFrame = () => {};
@@ -125,7 +144,7 @@ function emitBridgeReadyOnce() {
 
 function handleConnectSuccess() {
   wsConnected = true;
-  wsRetries = 0;
+  wsReconnectBackoffMs = WS_BACKOFF_MIN_MS;
   emitBridgeReadyOnce();
   drainInboundQueue();
 }
@@ -149,6 +168,7 @@ function drainInboundQueue() {
 }
 
 function connectWs() {
+  clearWsReconnectTimer();
   const sock = new WebSocketImpl(WS_URL);
   const connectId = 'connect-' + Math.random().toString(16).slice(2);
   sock.onmessage = (ev) => {
@@ -173,6 +193,10 @@ function connectWs() {
           emit({ v: 1, type: 'error', code: 'CONNECT_FAILED', message: msg, reqId: activeReqId, correlationId: activeCorrelationId || undefined });
           finishTurn(false, msg);
         }
+        try {
+          sock.close();
+        } catch {}
+        /** onclose 内统一 scheduleWsReconnect，避免 backoff 双计 */
         return;
       }
       handleConnectSuccess();
@@ -180,22 +204,8 @@ function connectWs() {
     }
     onFrame(frame);
   };
-  sock.onerror = () => {
-    if (wsConnected) return;
-    if (wsRetries < MAX_RETRIES) {
-      wsRetries++;
-      setTimeout(() => {
-        ws = connectWs();
-      }, RETRY_DELAY);
-    } else {
-      const msg = 'websocket connect failed after ' + MAX_RETRIES + ' retries (127.0.0.1:18789)';
-      emit({ v: 1, type: 'bridge', ready: false, ws: false, message: msg });
-      if (activeReqId) {
-        emit({ v: 1, type: 'error', code: 'WS_CONNECT_RETRY_EXHAUSTED', message: msg, reqId: activeReqId, correlationId: activeCorrelationId || undefined });
-        finishTurn(false, msg);
-      }
-    }
-  };
+  /** 失败时通常紧跟 onclose；重连只挂在 onclose，避免双重 schedule */
+  sock.onerror = () => {};
   sock.onclose = () => {
     wsConnected = false;
     bridgeReadyEmitted = false;
@@ -204,10 +214,7 @@ function connectWs() {
       emit({ v: 1, type: 'error', code: 'WS_CLOSED', message: 'websocket closed unexpectedly', reqId: activeReqId, correlationId: activeCorrelationId || undefined });
       finishTurn(false, 'ws closed');
     }
-    setTimeout(() => {
-      wsRetries = 0;
-      ws = connectWs();
-    }, RETRY_DELAY);
+    scheduleWsReconnect();
   };
   return sock;
 }

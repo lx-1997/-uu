@@ -40,6 +40,7 @@ export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
 export type SystemPromptLayerId =
   | "persona"
   | "reasoning"
+  | "quick_session_policy"
   | "tool_contracts"
   | "device_platform"
   | "device_research_ros"
@@ -108,6 +109,16 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
 
   pushStable("tool_contracts", buildToolContractQuickOverviewPrompt());
   pushStable(
+    "quick_session_policy",
+    [
+      "## 快速模式（延迟敏感）",
+      "下方「## 上下文文件 (已注入)」已含 AGENTS/SOUL/USER/HEARTBEAT、memory 日记等要点。",
+      "**默认禁止**再用 `read`/`list` 打开上述同名路径或 `memory/` 下文件（系统已注入，重复拉取浪费一整轮推理）。",
+      "仅当用户**明确**要查看磁盘上未展示的片段、或你要改工作区文件时，再 `read`/`write`。",
+      "普通问答与闲聊：**零工具**，直接答。",
+    ].join("\n"),
+  );
+  pushStable(
     "memory_hint",
     "偏好与结论可用 memory_save；需要时用 memory_search。",
   );
@@ -116,10 +127,10 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   if (input.policy.network.enabled) {
     pushStable(
       "find_skills_policy",
-      "缺技能时 `find_skills`；成功落地后再 `skill_mark_validated`。",
+      "非必要不检索技能；用户明确要跑板端流程或缺步骤时再 `find_skills`。",
     );
   } else {
-    pushStable("find_skills_policy", "联网关：只用本地 `find_skills` / `read`。");
+    pushStable("find_skills_policy", "联网关：非必要不 `find_skills`；简短直接答。");
   }
 
   if (input.deviceProfile) {

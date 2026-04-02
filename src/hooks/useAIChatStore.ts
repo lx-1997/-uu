@@ -385,7 +385,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     toolName: string;
     executor: string;
     startedAt: number;
+    /** 快速回答：本地工具不落 UI 时为 -1 */
     statusIndex: number;
+    /** 快速回答：仅板端 OpenClaw 协作展示工具气泡，其它工具仅后台执行 */
+    hiddenQuick?: boolean;
     rawIndex?: number;
     /** 板端 OpenClaw 协作流式块（与 terminal 二选一） */
     collabIndex?: number;
@@ -478,8 +481,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     if (announce) {
       abortCooldownRef.current = true;
       setTimeout(() => { abortCooldownRef.current = false; }, 600);
+      const abortAiTs = Date.now();
       setChatMessages((prev) => [...prev, {
-        id: Date.now(),
+        id: abortAiTs,
         role: 'ai',
         text: t('chat.abort.taskEnded', '当前任务已结束。你可以继续输入新的指令。'),
         blocks: [{
@@ -542,7 +546,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         // /settings — quick command to open settings
         if (requestAttachments.length === 0 && userMsg === '/settings') {
           setShowSettings(true);
-          setChatMessages(prev => [...prev, { id: msgId + 1, role: 'ai', text: t('chat.cmd.settingsOpened', '已打开设置面板。') }]);
+          setChatMessages(prev => [...prev, {
+            id: msgId + 1,
+            role: 'ai',
+            durationMs: Math.max(0, Date.now() - msgId),
+            text: t('chat.cmd.settingsOpened', '已打开设置面板。'),
+          }]);
           setAiTyping(false);
           return;
         }
@@ -584,6 +593,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: t('chat.oneShot.done', '已完成应用骨架生成。'),
               source: 'studio',
               blocks: [
@@ -617,6 +627,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: tf('chat.oneShot.fail', '应用生成失败：{{msg}}', {
                 msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
               }),
@@ -637,6 +648,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: t('chat.run.none', '还没有可运行的生成应用，请先执行一句话生成。'),
               source: 'studio',
             }]);
@@ -652,6 +664,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: run.ok ? t('chat.run.doneOk', '应用已执行完成。') : t('chat.run.doneFail', '应用执行失败。'),
               source: 'studio',
               blocks: [
@@ -682,6 +695,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: tf('chat.run.err', '应用执行失败：{{msg}}', {
                 msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
               }),
@@ -702,6 +716,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: t('chat.deploy.needDevice', '请先连接目标设备，再执行部署。'),
               source: 'studio',
             }]);
@@ -712,6 +727,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: t('chat.deploy.none', '还没有可部署的生成应用，请先执行一句话生成。'),
               source: 'studio',
             }]);
@@ -740,6 +756,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: t('chat.deploy.ok', '应用已部署到设备。'),
               source: 'studio',
               blocks: [
@@ -790,6 +807,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: tf('chat.deploy.fail', '部署失败：{{msg}}', {
                 msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
               }),
@@ -811,6 +829,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: t('chat.fix.none', '暂无可执行修复建议，请先完成一次部署并产生建议。'),
               source: 'studio',
             }]);
@@ -823,6 +842,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: tf('chat.fix.noCmd', '第 {{n}} 条建议没有可执行命令，请手动处理。', { n: index }),
               source: 'studio',
             }]);
@@ -843,6 +863,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: tf('chat.fix.done', '已执行修复建议 #{{n}}：{{title}}，并自动重试运行。', { n: index, title: selected.title }),
               source: 'studio',
               blocks: [
@@ -880,6 +901,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: tf('chat.fix.err', '修复执行失败：{{msg}}', {
                 msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
               }),
@@ -900,6 +922,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: result.message || tf('chat.feishu.bindOk', '绑定成功，账号：{{id}}', { id: result.openId || '***' }),
               source: 'studio',
             }]);
@@ -907,6 +930,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             setChatMessages(prev => [...prev, {
               id: msgId + 1,
               role: 'ai',
+              durationMs: Math.max(0, Date.now() - msgId),
               text: tf('chat.feishu.bindFail', '绑定失败：{{msg}}', {
                 msg: error instanceof Error ? error.message : t('chat.feishu.bindInvalid', '授权码无效或已过期'),
               }),
@@ -938,6 +962,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               setChatMessages(prev => [...prev, {
                 id: msgId + 1,
                 role: 'ai',
+                durationMs: Math.max(0, Date.now() - msgId),
                 text: tf('chat.stop.task', '已停止任务：{{id}}（当前轮次会被中断，状态切换为 paused）', { id: taskId }),
                 source: 'studio',
               }]);
@@ -945,6 +970,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               setChatMessages(prev => [...prev, {
                 id: msgId + 1,
                 role: 'ai',
+                durationMs: Math.max(0, Date.now() - msgId),
                 text: tf('chat.stop.fail', '停止任务失败：{{msg}}', {
                   msg: error instanceof Error ? error.message : t('common.unknownError', '未知错误'),
                 }),
@@ -1016,6 +1042,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             }
             switch (event.type) {
               case 'meta': {
+                if (studioResponseMode === 'quick') break;
                 currentRunId = eventRunId || currentRunId;
                 currentRunIdRef.current = currentRunId;
                 const executor = String(event.data.executor || 'rdkclaw_local');
@@ -1121,6 +1148,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'thinking_delta': {
+                if (studioResponseMode === 'quick') break;
                 const delta = String(event.data.delta ?? '');
                 if (!delta) break;
                 const idx = reasoningBlockIndexRef.current;
@@ -1157,6 +1185,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const executor = String(
                   event.data.executor || (isBoardOpenClawCollabTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
                 );
+                if (studioResponseMode === 'quick' && !isBoardOpenClawCollabTool(toolName)) {
+                  const toolCallIdHidden = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
+                  toolTimelineRef.current[toolCallIdHidden] = {
+                    toolName,
+                    executor,
+                    startedAt: Date.now(),
+                    statusIndex: -1,
+                    hiddenQuick: true,
+                  };
+                  updateAiMessage(aiText, aiBlocks);
+                  break;
+                }
                 if (isBoardOpenClawCollabTool(toolName)) {
                   boardToolTimelineSigRef.current = '';
                 }
@@ -1210,11 +1250,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     previewLines: 12,
                   });
                 }
-                appendRunTimelineEntry(generation, {
-                  kind: 'tool_start',
-                  title: tf('chat.timeline.toolStart', '工具 · {{tool}}', { tool: toolName }),
-                  detail: `${executorLabel(executor)} · ${phase} · ${argStr}`.slice(0, 500),
-                });
+                if (studioResponseMode !== 'quick') {
+                  appendRunTimelineEntry(generation, {
+                    kind: 'tool_start',
+                    title: tf('chat.timeline.toolStart', '工具 · {{tool}}', { tool: toolName }),
+                    detail: `${executorLabel(executor)} · ${phase} · ${argStr}`.slice(0, 500),
+                  });
+                }
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
@@ -1228,6 +1270,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const toolId = rawToolId && toolTimelineRef.current[rawToolId] ? rawToolId : fallbackId;
                 if (!toolId || !toolTimelineRef.current[toolId]) break;
                 const state = toolTimelineRef.current[toolId];
+                if (state.hiddenQuick) break;
                 const statusBlock = aiBlocks[state.statusIndex];
                 if (statusBlock?.type === 'status' && statusBlock.items[0]) {
                   statusBlock.items[0].value = tf('chat.tool.runningVal', '执行中 · {{exec}} · 实时输出更新', {
@@ -1293,11 +1336,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const sig = String(bit).trim().slice(0, 240);
                       if (sig && sig !== boardToolTimelineSigRef.current) {
                         boardToolTimelineSigRef.current = sig;
-                        appendRunTimelineEntry(generation, {
-                          kind: 'board_tool',
-                          title: t('chat.timeline.boardTool', '板端工具'),
-                          detail: sig,
-                        });
+                        if (studioResponseMode !== 'quick') {
+                          appendRunTimelineEntry(generation, {
+                            kind: 'board_tool',
+                            title: t('chat.timeline.boardTool', '板端工具'),
+                            detail: sig,
+                          });
+                        }
                       }
                     }
                   }
@@ -1330,7 +1375,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const toolCallId = resolveToolId(event.data);
                 const state = toolTimelineRef.current[toolCallId || ''];
                 const elapsedMs = state ? Date.now() - state.startedAt : 0;
-                if (state) {
+                if (state && !state.hiddenQuick && state.statusIndex >= 0) {
                   const statusBlock = aiBlocks[state.statusIndex];
                   if (statusBlock?.type === 'status' && statusBlock.items[0]) {
                     statusBlock.items[0] = {
@@ -1346,14 +1391,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     };
                   }
                 }
-                appendRunTimelineEntry(generation, {
-                  kind: 'tool_end',
-                  title: state?.toolName || toolName,
-                  detail: tf('chat.timeline.toolEndVal', '{{state}} · {{ms}} ms', {
-                    state: isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成'),
-                    ms: Math.max(1, elapsedMs),
-                  }),
-                });
+                if (!state?.hiddenQuick) {
+                  appendRunTimelineEntry(generation, {
+                    kind: 'tool_end',
+                    title: state?.toolName || toolName,
+                    detail: tf('chat.timeline.toolEndVal', '{{state}} · {{ms}} ms', {
+                      state: isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成'),
+                      ms: Math.max(1, elapsedMs),
+                    }),
+                  });
+                }
 
                 if (!isError && (toolName === 'device_connect_ssh' || toolName === 'switch_device')) {
                   let boundId: string | null = null;
@@ -1539,7 +1586,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   mediaHandled = true;
                 }
 
-                if (!mediaHandled) {
+                if (!mediaHandled && !state?.hiddenQuick) {
                   if (result.includes('\n') || result.length > 100) {
                     aiBlocks.push({
                       type: 'terminal',
@@ -1684,6 +1731,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'queue_status': {
+                if (studioResponseMode === 'quick') break;
                 const pos = Number(event.data.position ?? 0);
                 const current = String(event.data.currentTask ?? '');
                 const channel = String(event.data.currentChannel ?? '');
@@ -1736,6 +1784,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               }
               case 'done':
                 {
+                  if (studioResponseMode === 'quick') break;
                   const tokenUsage = event.data.token_usage as {
                     promptTokens?: number;
                     completionTokens?: number;
@@ -1825,6 +1874,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 }
                 break;
               case 'run_progress': {
+                if (studioResponseMode === 'quick') break;
                 const msg = String(event.data.message || t('chat.progress.wait', '仍在处理中...'));
                 const existingIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && (b as any)._runProgress,
@@ -1848,6 +1898,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'run_complete': {
+                if (studioResponseMode === 'quick') break;
                 const progressIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && (b as any)._runProgress,
                 );
@@ -1887,6 +1938,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         await done;
         if (rafHandle) { cancelAnimationFrame(rafHandle); flushAiMessage(); }
         if (generation !== streamGenerationRef.current) return;
+        const streamCompletedAt = Date.now();
+        setChatMessages((prev) => prev.map((m) => (m.id === aiMsgId ? { ...m, durationMs: Math.max(0, streamCompletedAt - msgId) } : m)));
         setAiTyping(false);
       } finally {
         if (generation === streamGenerationRef.current) {
@@ -1906,8 +1959,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     if (action === 'cancel_run') {
       if (!runId) return;
       cancelRDKClawRun(runId).catch(() => null);
+      const cancelAiTs = Date.now();
       setChatMessages((prev) => [...prev, {
-        id: Date.now(),
+        id: cancelAiTs,
         role: 'ai',
         text: '',
         blocks: [{
@@ -1962,8 +2016,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         await cancelAllRDKClawRuns();
       }
       setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
+      const stopSentTs = Date.now();
       setChatMessages((prev) => [...prev, {
-        id: Date.now(),
+        id: stopSentTs,
         role: 'ai',
         text: t('chat.stop.sent', '停止指令已发送，当前任务将尽快结束。'),
         blocks: [{
@@ -1999,8 +2054,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       if (cancelledAutonomyRuns > 0) {
         detailParts.push(tf('chat.stopAll.cancelled', '已中断定时任务运行 {{n}} 个', { n: cancelledAutonomyRuns }));
       }
+      const stopAllTs = Date.now();
       setChatMessages((prev) => [...prev, {
-        id: Date.now(),
+        id: stopAllTs,
         role: 'ai',
         text: '',
         blocks: [{
@@ -2028,8 +2084,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     setBackgroundRuns((prev) => prev.map((item) => (
       item.runId === runId ? { ...item, status: 'ended' as const } : item
     )));
+    const bgEndTs = Date.now();
     setChatMessages((prev) => [...prev, {
-      id: Date.now(),
+      id: bgEndTs,
       role: 'ai',
       text: t('chat.bg.ended', '后台任务已结束。'),
       blocks: [{
@@ -2231,6 +2288,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               {
                 id: messageId,
                 role: 'ai',
+                startedAt: Date.now(),
                 text: '',
                 source: 'studio',
                 blocks: [
@@ -2295,7 +2353,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   previewLines: 8,
                 });
               }
-              return { ...item, blocks: nextBlocks };
+              return {
+                ...item,
+                blocks: nextBlocks,
+                ...(payload.rdkEventKind === 'tool_result'
+                  ? { durationMs: Math.max(0, Date.now() - (item.startedAt ?? item.id)) }
+                  : {}),
+              };
             }));
             return;
           }
@@ -2305,13 +2369,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             feishuToolMessageRef.current[streamKey] = fallbackMessageId;
             feishuLastToolKeyRef.current = streamKey;
           }
+          const feishuFallbackStartedAt = Date.now();
           setChatMessages((prev) => [
             ...prev,
             {
               id: fallbackMessageId,
               role: 'ai',
+              startedAt: feishuFallbackStartedAt,
               text: '',
               source: 'studio',
+              ...(payload.rdkEventKind === 'tool_result'
+                ? { durationMs: Math.max(0, Date.now() - feishuFallbackStartedAt) }
+                : {}),
               blocks: [
                 {
                   type: 'status',

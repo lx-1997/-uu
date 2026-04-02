@@ -124,8 +124,8 @@ function recordConversationTurnFromReq(
 
 /** 无 ~/.rdkstudio/agent-config.json 且无 bootstrap 条目时的兜底；与 `config/rdkclaw-provider.defaults.json` 对齐 */
 const DEFAULT_CONFIG: ProviderConfig = {
-  provider: "doubao-seed-2.0-lite",
-  model: "doubao-seed-2.0-lite",
+  provider: "doubao-seed-2.0-pro",
+  model: "doubao-seed-2.0-pro",
   apiKey: "",
   baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
 };
@@ -1000,8 +1000,11 @@ export class RDKClawApp {
     const baseUrl = getBaseUrl(providerConfig);
 
     const runtimePolicy = {
-      dailyMemoryDays: Math.max(1, policy.memory.dailyMemoryDays || 2),
-      mainReadsMemory: policy.memory.mainSessionReadsMemory,
+      /** 快速：只带今日日记，跳过 MEMORY.md 全文，减少预填与「再 read 一遍」的冲动 */
+      dailyMemoryDays: studioQuick
+        ? 1
+        : Math.max(1, policy.memory.dailyMemoryDays || 2),
+      mainReadsMemory: studioQuick ? false : policy.memory.mainSessionReadsMemory,
       sharedBlocksMemory: policy.memory.sharedSessionBlocksMemory,
       pruning: studioQuick
         ? {
@@ -1178,10 +1181,12 @@ export class RDKClawApp {
       memoryDir: workspace.memoryDir,
       extraAllowedRoots: extraRoots.length > 0 ? extraRoots : undefined,
       enableContext: true,
-      enableSkills: true,
+      /** 快速：不注入「先 read SKILL.md」链，避免首轮工具往返 */
+      enableSkills: !studioQuick,
       enableMemory: true,
       enableHeartbeat: !studioQuick,
-      maxTurns: studioQuick ? 6 : 12,
+      contextBootstrapMaxChars: studioQuick ? 9000 : undefined,
+      maxTurns: studioQuick ? 4 : 12,
       temperature: resolveSamplingTemperature(providerConfig),
       topP: resolveSamplingTopP(providerConfig),
       reasoning: rdkReasoning === null ? null : rdkReasoning,
@@ -1268,8 +1273,12 @@ export class RDKClawApp {
       });
     };
 
-    const progressTimer = setInterval(() => pushRunProgress("interval"), runProgressIntervalMs);
-    const firstProgressHandle = setTimeout(() => pushRunProgress("interval"), 5_000);
+    let progressTimer: ReturnType<typeof setInterval> | undefined;
+    let firstProgressHandle: ReturnType<typeof setTimeout> | undefined;
+    if (!studioQuick) {
+      progressTimer = setInterval(() => pushRunProgress("interval"), runProgressIntervalMs);
+      firstProgressHandle = setTimeout(() => pushRunProgress("interval"), 5_000);
+    }
 
     const unsubscribe = agent.subscribe((event) => {
       if (event.type === "compaction") {
@@ -1321,8 +1330,8 @@ export class RDKClawApp {
       })
       .finally(() => {
         finished = true;
-        clearTimeout(firstProgressHandle);
-        clearInterval(progressTimer);
+        if (firstProgressHandle) clearTimeout(firstProgressHandle);
+        if (progressTimer) clearInterval(progressTimer);
         textSmoother.dispose();
         wakeQueue();
         unsubscribe();

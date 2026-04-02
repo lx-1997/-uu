@@ -54,6 +54,16 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+/** 相对路径解析目录：RDKClaw 用户工作台在 bootstrapDir，须先于工程 workspaceDir */
+function sandboxPathCtx(ctx: ToolContext): {
+  cwd: string;
+  root: string;
+  extraRoots?: string[];
+} {
+  const cwd = ctx.bootstrapDir?.trim() ? ctx.bootstrapDir : ctx.workspaceDir;
+  return { cwd, root: ctx.workspaceDir, extraRoots: ctx.extraAllowedRoots };
+}
+
 async function resolveMemoryRoot(ctx: ToolContext): Promise<string> {
   const candidates = [
     ctx.bootstrapDir,
@@ -91,8 +101,9 @@ export const readTool: Tool<{ file_path: string; limit?: number }> = {
     "读取本机工作区文件内容，返回带行号的文本。\n\n" +
     "使用规则：\n" +
     "- 这是本机文件，不是 RDK 设备上的文件。读取设备文件用 device_file_read\n" +
+    "- 相对路径以 **用户工作台（bootstrap）** 为基准，不是工程根目录\n" +
     "- 默认最多 500 行，大文件可指定 limit\n" +
-    "- NEVER 对同一文件重复读取——已读过的内容在上下文中",
+    "- NEVER 对同一文件重复读取——已读过的内容在上下文中；Project Context 已注入的勿再 read",
   inputSchema: {
     type: "object",
     properties: {
@@ -105,11 +116,12 @@ export const readTool: Tool<{ file_path: string; limit?: number }> = {
   async execute(input, ctx) {
     let filePath: string;
     try {
+      const sp = sandboxPathCtx(ctx);
       const resolved = await assertSandboxPath({
         filePath: input.file_path,
-        cwd: ctx.workspaceDir,
-        root: ctx.workspaceDir,
-        extraRoots: ctx.extraAllowedRoots,
+        cwd: sp.cwd,
+        root: sp.root,
+        extraRoots: sp.extraRoots,
       });
       filePath = resolved.resolved;
     } catch (err) {
@@ -162,11 +174,12 @@ export const writeTool: Tool<{ file_path: string; content: string }> = {
   async execute(input, ctx) {
     let filePath: string;
     try {
+      const sp = sandboxPathCtx(ctx);
       const resolved = await assertSandboxPath({
         filePath: input.file_path,
-        cwd: ctx.workspaceDir,
-        root: ctx.workspaceDir,
-        extraRoots: ctx.extraAllowedRoots,
+        cwd: sp.cwd,
+        root: sp.root,
+        extraRoots: sp.extraRoots,
       });
       filePath = resolved.resolved;
     } catch (err) {
@@ -227,11 +240,12 @@ export const editTool: Tool<{
   async execute(input, ctx) {
     let filePath: string;
     try {
+      const sp = sandboxPathCtx(ctx);
       const resolved = await assertSandboxPath({
         filePath: input.file_path,
-        cwd: ctx.workspaceDir,
-        root: ctx.workspaceDir,
-        extraRoots: ctx.extraAllowedRoots,
+        cwd: sp.cwd,
+        root: sp.root,
+        extraRoots: sp.extraRoots,
       });
       filePath = resolved.resolved;
     } catch (err) {
@@ -418,11 +432,12 @@ export const listTool: Tool<{ path?: string; limit?: number }> = {
   async execute(input, ctx) {
     let dirPath: string;
     try {
+      const sp = sandboxPathCtx(ctx);
       const resolved = await assertSandboxPath({
         filePath: input.path ?? ".",
-        cwd: ctx.workspaceDir,
-        root: ctx.workspaceDir,
-        extraRoots: ctx.extraAllowedRoots,
+        cwd: sp.cwd,
+        root: sp.root,
+        extraRoots: sp.extraRoots,
       });
       dirPath = resolved.resolved;
     } catch (err) {
@@ -499,16 +514,17 @@ export const grepTool: Tool<{ pattern: string; path?: string }> = {
   inputZodSchema: grepToolInputZod,
   async execute(input, ctx) {
     try {
+      const sp = sandboxPathCtx(ctx);
       const resolved = await assertSandboxPath({
         filePath: input.path ?? ".",
-        cwd: ctx.workspaceDir,
-        root: ctx.workspaceDir,
-        extraRoots: ctx.extraAllowedRoots,
+        cwd: sp.cwd,
+        root: sp.root,
+        extraRoots: sp.extraRoots,
       });
       const searchPath = resolved.resolved;
 
       const output = await runRipgrep({
-        cwd: ctx.workspaceDir,
+        cwd: sp.cwd,
         pattern: input.pattern,
         searchPath,
         timeoutMs: 10000,

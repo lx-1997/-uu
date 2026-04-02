@@ -125,6 +125,9 @@ export const EN: Record<string, string> = {
   'dock.mention.flash.srcOfficial': 'Official image (pick version on the flash page)',
   'dock.mention.flash.toastOpened': 'Opened image flash',
   'dock.mention.flash.applied': 'Applied choices from @ flash',
+  'dock.msg.took': 'Took',
+  'dock.msg.replying': 'Replying…',
+  'dock.msg.durationUnknown': '—',
 
   'device.listTitle': 'Devices',
   'device.empty': 'No devices yet. Add an RDK board.',

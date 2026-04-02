@@ -160,6 +160,7 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.ph.feishuSecret': 'Feishu App Secret (optional)',
   'oc.deploy.startBtn': 'Start deploy',
   'oc.deploy.cancelBtn': 'Cancel deploy',
+  'oc.deploy.dismissProgress': 'Closed deploy progress',
   'oc.deploy.cancelSent': 'Cancel requested; status will update shortly',
   'oc.deploy.cancelBlockedAutoUntilRestart':
     'Deploy canceled. Wi‑Fi auto‑install stays off until you restart the studio; you can still use **Start deploy** manually.',

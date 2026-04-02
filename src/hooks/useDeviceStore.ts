@@ -263,68 +263,79 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       addToast('无效的设备 ID', 'warning');
       return;
     }
-    const label = () => devicesRef.current.find((d) => d.id === id)?.name ?? id;
+    const prevDevices = [...devicesRef.current];
+    const prevActive = activeDeviceRef.current;
+    const removed = prevDevices.find((d) => d.id === id);
+    if (!removed) {
+      addToast('设备已从列表移除', 'info');
+      return;
+    }
+    const name = removed.name;
+
+    /** 乐观更新：避免 DELETE 往返较慢时侧栏看似「没反应」；失败则回滚 */
+    const opGen = ++devicesListFetchGenRef.current;
+    setDevices((prev) => {
+      const remaining = prev.filter((d) => d.id !== id);
+      if (activeDeviceRef.current === id) {
+        setActiveDevice(remaining[0]?.id ?? '');
+      }
+      return remaining;
+    });
+    setDeviceListRevision((n) => n + 1);
+
+    const resyncFromServer = () => {
+      void (async () => {
+        try {
+          const res = await fetchDevices();
+          if (devicesListFetchGenRef.current !== opGen) return;
+          const next = mapDevicesFromApiResponse(res);
+          setDevices(next);
+          setActiveDevice((prev) =>
+            prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? ''),
+          );
+          setDeviceListRevision((n) => n + 1);
+        } catch {
+          /* 本地已更新，忽略 */
+        }
+      })();
+    };
+
     removeDeviceApi(id)
       .then(() => {
-        devicesListFetchGenRef.current += 1;
-        const syncGen = devicesListFetchGenRef.current;
-        const name = label();
         forgetDevicePassword(id);
         delete pingFailStreakRef.current[id];
         removeVerifiedId(id);
-        setDevices((prev) => {
-          const remaining = prev.filter((d) => d.id !== id);
-          if (activeDeviceRef.current === id) {
-            setActiveDevice(remaining[0]?.id ?? '');
-          }
-          return remaining;
-        });
-        setDeviceListRevision((n) => n + 1);
         addToast(`设备 "${name}" 已删除`, 'info');
         addActivity(`删除设备: ${name}`);
         /** 再拉一次服务端列表，避免与「正在飞行」的 GET /api/devices 竞态把已删项又写回 UI */
-        void (async () => {
-          try {
-            const res = await fetchDevices();
-            if (devicesListFetchGenRef.current !== syncGen) return;
-            const next = mapDevicesFromApiResponse(res);
-            setDevices(next);
-            setActiveDevice((prev) =>
-              prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? ''),
-            );
-            setDeviceListRevision((n) => n + 1);
-          } catch {
-            /* 本地已更新，忽略 */
-          }
-        })();
+        resyncFromServer();
       })
       .catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
         const notOnServer = /\b404\b/.test(msg) || /设备不存在/i.test(msg) || /not\s*found/i.test(msg);
         if (notOnServer) {
-          devicesListFetchGenRef.current += 1;
-          const name = label();
           forgetDevicePassword(id);
           delete pingFailStreakRef.current[id];
           removeVerifiedId(id);
-          setDevices((prev) => {
-            const remaining = prev.filter((d) => d.id !== id);
-            if (activeDeviceRef.current === id) {
-              setActiveDevice(remaining[0]?.id ?? '');
-            }
-            return remaining;
-          });
-          setDeviceListRevision((n) => n + 1);
           addToast(`「${name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
+          resyncFromServer();
           return;
         }
         if (/\b401\b/.test(msg) || /unauthorized/i.test(msg)) {
+          devicesListFetchGenRef.current += 1;
+          setDevices(prevDevices);
+          setActiveDevice(prevActive);
+          setDeviceListRevision((n) => n + 1);
           addToast(
             '删除失败：当前未登录或登录已过期，请重新登录后再试。（与是否 SSH 连接设备无关）',
             'error',
           );
           return;
         }
+        devicesListFetchGenRef.current += 1;
+        setDevices(prevDevices);
+        setActiveDevice(prevActive);
+        setDeviceListRevision((n) => n + 1);
         addToast(msg || '删除设备失败', 'error');
       });
   }, [addToast, addActivity]);

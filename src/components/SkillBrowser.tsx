@@ -7,9 +7,14 @@ import { fetchDeviceOpenClawHealth } from '../api';
 import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
 import { fetchApi } from '../utils/apiBase';
 import skillCenterManifestJson from '../skill-center/manifest.json';
-import type { SkillCenterManifest } from '../skill-center/types';
+import type { SkillCenterManifest, SkillCenterItem } from '../skill-center/types';
 
 const skillCenterManifest = skillCenterManifestJson as SkillCenterManifest;
+
+/** 未在 manifest.json 单独分类的 skills/ 条目归入此类（筛选下拉中展示） */
+const STUDIO_BUNDLED_CATEGORY_ID = 'studio-bundled';
+
+type StudioApiSkillRow = { folder?: string; name?: string; description?: string };
 
 interface OpenClawSkillsPayload {
   ok?: boolean;
@@ -272,6 +277,8 @@ export default function SkillBrowser() {
   const [localRdkclawWriteLoading, setLocalRdkclawWriteLoading] = useState(false);
   const [centerBatchSelected, setCenterBatchSelected] = useState<Set<string>>(() => new Set());
   const [clawhubBatchSelected, setClawhubBatchSelected] = useState<Set<string>>(() => new Set());
+  /** null：尚未拉取 / 失败，回退仅 manifest；[]：已拉取但无技能 */
+  const [studioApiSkills, setStudioApiSkills] = useState<StudioApiSkillRow[] | null>(null);
 
   // Create skill state
   const [newSkillId, setNewSkillId] = useState('');
@@ -400,14 +407,71 @@ export default function SkillBrowser() {
     return boardSkills.filter((s) => s.toLowerCase().includes(q));
   }, [boardSkills, search]);
 
+  const manifestByFolder = useMemo(
+    () => new Map(skillCenterManifest.items.map((it) => [it.folder, it])),
+    [],
+  );
+
+  const centerCatalogItems: SkillCenterItem[] = useMemo(() => {
+    if (studioApiSkills === null) {
+      return skillCenterManifest.items;
+    }
+    if (studioApiSkills.length === 0) {
+      return [];
+    }
+    const rows: SkillCenterItem[] = [];
+    for (const s of studioApiSkills) {
+      const folder = String(s.folder || '').trim();
+      if (!folder) continue;
+      const m = manifestByFolder.get(folder);
+      rows.push({
+        folder,
+        category: m?.category ?? STUDIO_BUNDLED_CATEGORY_ID,
+        title: m?.title ?? String(s.name || folder),
+      });
+    }
+    rows.sort((a, b) => a.folder.localeCompare(b.folder));
+    return rows;
+  }, [studioApiSkills, manifestByFolder]);
+
+  const centerCategoryOptions = useMemo(() => {
+    const bundledLabel = t('skillBrowser.center.catBundled', 'Studio 内置技能包');
+    const hasBundled = centerCatalogItems.some((i) => i.category === STUDIO_BUNDLED_CATEGORY_ID);
+    const base = skillCenterManifest.categories.map((c) => ({ ...c }));
+    if (hasBundled && !base.some((c) => c.id === STUDIO_BUNDLED_CATEGORY_ID)) {
+      base.push({ id: STUDIO_BUNDLED_CATEGORY_ID, label: bundledLabel });
+    }
+    return base;
+  }, [centerCatalogItems, t]);
+
   const filteredCenterItems = useMemo(() => {
     const q = centerSearch.trim().toLowerCase();
-    return skillCenterManifest.items.filter((it) => {
+    return centerCatalogItems.filter((it) => {
       if (centerCategory !== 'all' && it.category !== centerCategory) return false;
       if (!q) return true;
       return it.folder.toLowerCase().includes(q) || it.title.toLowerCase().includes(q);
     });
-  }, [centerSearch, centerCategory]);
+  }, [centerSearch, centerCategory, centerCatalogItems]);
+
+  useEffect(() => {
+    if (hubMode !== 'center' || centerSub !== 'catalog') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetchApi('/api/skills');
+        const data = (await res.json().catch(() => ({}))) as { skills?: StudioApiSkillRow[] };
+        if (!res.ok || cancelled) return;
+        const list = data.skills ?? [];
+        if (cancelled) return;
+        setStudioApiSkills(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setStudioApiSkills(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hubMode, centerSub]);
 
   useEffect(() => {
     setCenterBatchSelected(new Set());
@@ -1105,7 +1169,7 @@ export default function SkillBrowser() {
           )}
           {hubMode === 'center' && (
             <span className="badge badge-muted">
-              {tf('skillBrowser.center.badge', '内置 {{n}} 条', { n: skillCenterManifest.items.length })}
+              {tf('skillBrowser.center.badge', '内置 {{n}} 条', { n: centerCatalogItems.length })}
             </span>
           )}
           {openclawHealth && hubMode === 'board' && (
@@ -1229,7 +1293,7 @@ export default function SkillBrowser() {
                       style={{ fontSize: '0.75rem', padding: '4px 6px' }}
                     >
                       <option value="all">{t('skillBrowser.center.catAll', '全部分类')}</option>
-                      {skillCenterManifest.categories.map((c) => (
+                      {centerCategoryOptions.map((c) => (
                         <option key={c.id} value={c.id}>{c.label}</option>
                       ))}
                     </select>
@@ -1275,7 +1339,7 @@ export default function SkillBrowser() {
                   <div style={{ flex: 1, overflowY: 'auto' }}>
                     {filteredCenterItems.length === 0 && (
                       <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
-                        {skillCenterManifest.items.length === 0
+                        {centerCatalogItems.length === 0
                           ? t(
                               'skillBrowser.center.emptyCatalog',
                               '暂无 Skill 中心条目，接入清单后将在此展示。',

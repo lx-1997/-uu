@@ -86,6 +86,10 @@ export interface ChatAttachment {
 export interface ChatMessage {
   id: number;
   role: 'user' | 'ai';
+  /** AI 气泡：本条回复自用户发出到生成结束所耗时间（ms），用于展示「用时」 */
+  durationMs?: number;
+  /** 部分场景（如飞书工具流）用于计算耗时：本条 AI 气泡开始展示时的时间戳 */
+  startedAt?: number;
   text: string;
   source?: 'studio' | 'feishu';
   channelMeta?: {

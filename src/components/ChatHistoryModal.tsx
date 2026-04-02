@@ -7,6 +7,16 @@ import {
 } from '../utils/chat-history-storage';
 import { chatMessageToPlainText } from '../utils/chat-message-plain';
 
+function formatDurationMsLabel(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const s = ms / 1000;
+  if (s < 60) return s < 10 ? `${s.toFixed(1)} s` : `${Math.round(s)} s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s % 60);
+  return `${m}m ${rs}s`;
+}
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -95,7 +105,10 @@ export function ChatHistoryModal({ open, onClose, devices, preferredDeviceId, t 
           ) : (
             messages.map(msg => {
               const plain = chatMessageToPlainText(msg, t);
-              const time = new Date(msg.id).toLocaleString();
+              const time =
+                msg.role === 'ai' && msg.durationMs != null
+                  ? `${t('dock.msg.took', '用时')} ${formatDurationMsLabel(msg.durationMs)}`
+                  : new Date(msg.id).toLocaleString();
               return (
                 <div key={msg.id} className={`chat-history-row ${msg.role}`}>
                   <div className="chat-history-row-meta">

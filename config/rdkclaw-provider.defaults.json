@@ -1,12 +1,12 @@
 {
-  "activeId": "preset-doubao-seed-2.0-lite",
+  "activeId": "preset-doubao-seed-2.0-pro",
   "quickActiveId": "preset-doubao-seed-2.0-lite-quick",
   "entries": [
     {
-      "id": "preset-doubao-seed-2.0-lite",
-      "label": "RDKClaw Default / doubao-seed-2.0-lite",
-      "provider": "doubao-seed-2.0-lite",
-      "model": "doubao-seed-2.0-lite",
+      "id": "preset-doubao-seed-2.0-pro",
+      "label": "RDKClaw Default / doubao-seed-2.0-pro",
+      "provider": "doubao-seed-2.0-pro",
+      "model": "doubao-seed-2.0-pro",
       "apiKey": "1cb7274d-4684-4984-99c2-3b177a6a66ad",
       "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
       "thinkingDefault": "high",

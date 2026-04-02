@@ -1,4 +1,11 @@
 /**
+ * 板端 `npm install -g openclaw@...` 的版本（勿默认 `latest`，便于验收与回滚）。
+ * 可用环境变量 `OPENCLAW_NPM_VERSION` 覆盖（例如钉死 patch：`3.24.2`）。
+ */
+export const OPENCLAW_BOARD_NPM_SPEC =
+  process.env.OPENCLAW_NPM_VERSION?.trim() || '3.24';
+
+/**
  * 板端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
  * 供 OpenClawDeploymentManager 与 Agent `board_openclaw_install` 共用，避免分叉。
  *
@@ -94,8 +101,8 @@ export const OPENCLAW_RESOLVE_CLI_SNIPPET = [
  * 避免交互式 SSH 里 `openclaw` / `clawctl` command not found（与 OPENCLAW_RESOLVE_CLI_SNIPPET 探测路径一致）。
  * 重复执行会先 sed 删除旧标记块再追加，避免重复堆积。
  */
-export const OPENCLAW_ENSURE_SHELL_PATH_SNIPPET = [
-  '(',
+// bash 不允许子 shell 以 `(;` 开头（会报 syntax error near `;`），故用 `( inner… )` 拼接。
+const OPENCLAW_ENSURE_SHELL_PATH_INNER = [
   'echo "[OpenClaw] 更新 ~/.bashrc：登录后可执行 openclaw / clawctl（新开终端或 source ~/.bashrc）" 1>&2',
   '_OC_RC="${HOME}/.bashrc"',
   'touch "$_OC_RC"',
@@ -105,8 +112,9 @@ export const OPENCLAW_ENSURE_SHELL_PATH_SNIPPET = [
   'printf \'%s\\n\' \'export PATH="$(npm prefix -g 2>/dev/null)/bin:${HOME}/.npm-global/bin:${HOME}/.local/bin:${PATH}"\' >> "$_OC_RC"',
   'printf \'%s\\n\' \'# <<< rdk-studio-openclaw-path <<<\' >> "$_OC_RC"',
   'hash -r 2>/dev/null || true',
-  ')',
 ].join('; ');
+export const OPENCLAW_ENSURE_SHELL_PATH_SNIPPET =
+  '( ' + OPENCLAW_ENSURE_SHELL_PATH_INNER + ' )';
 
 export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = [
   '(',

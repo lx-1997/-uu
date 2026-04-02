@@ -448,14 +448,41 @@ let onFrame = () => {};
 let wsConnected = false;
 
 const WS_URL = 'ws://127.0.0.1:18789';
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000;
-let wsRetries = 0;
+const WS_BACKOFF_MIN_MS = 1000;
+const WS_BACKOFF_MAX_MS = 30000;
+const MAX_WS_CONNECT_ATTEMPTS = 12;
+let wsReconnectBackoffMs = WS_BACKOFF_MIN_MS;
+let wsReconnectTimer = null;
+let wsConnectFailCount = 0;
 let ws;
 
 let wsOnClose = null;
 
+function clearWsReconnectTimer() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+}
+
+function scheduleWsReconnect() {
+  clearWsReconnectTimer();
+  wsConnectFailCount++;
+  if (wsConnectFailCount > MAX_WS_CONNECT_ATTEMPTS) {
+    onConnectFailed('websocket connect failed after ' + MAX_WS_CONNECT_ATTEMPTS + ' attempts (127.0.0.1:18789)');
+    return;
+  }
+  const delay = wsReconnectBackoffMs;
+  wsReconnectBackoffMs = Math.min(wsReconnectBackoffMs * 2, WS_BACKOFF_MAX_MS);
+  console.error('[WS] connect retry ' + wsConnectFailCount + '/' + MAX_WS_CONNECT_ATTEMPTS + ' in ' + delay + 'ms');
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    ws = connectWs();
+  }, delay);
+}
+
 function connectWs() {
+  clearWsReconnectTimer();
   const sock = new WebSocket(WS_URL);
   const connectId = 'connect-' + Math.random().toString(16).slice(2);
   sock.onmessage = (ev) => {
@@ -471,22 +498,22 @@ function connectWs() {
     if (frame.type === 'res' && frame.id === connectId) {
       if (!frame.ok) { onConnectFailed((frame.error && frame.error.message) || 'connect failed'); return; }
       wsConnected = true;
+      wsConnectFailCount = 0;
+      wsReconnectBackoffMs = WS_BACKOFF_MIN_MS;
       onConnected();
       return;
     }
     onFrame(frame);
   };
-  sock.onerror = () => {
-    if (wsConnected) return;
-    if (wsRetries < MAX_RETRIES) {
-      wsRetries++;
-      console.error('[WS] connect failed, retry ' + wsRetries + '/' + MAX_RETRIES + '...');
-      setTimeout(() => { ws = connectWs(); }, RETRY_DELAY);
-    } else {
-      onConnectFailed('websocket connect failed after ' + MAX_RETRIES + ' retries (gateway may not be running on 127.0.0.1:18789)');
+  sock.onerror = () => {};
+  sock.onclose = () => {
+    if (wsConnected) {
+      wsConnected = false;
+      if (wsOnClose) wsOnClose();
+      return;
     }
+    scheduleWsReconnect();
   };
-  sock.onclose = () => { if (wsOnClose) wsOnClose(); };
   return sock;
 }
 ws = connectWs();
@@ -587,6 +614,27 @@ const NPM_UPGRADE_CMD = [
 ].join(' && ');
 
 export class OpenClawDeploymentManager {
+  /** oc-bridge 可安全重试一轮（仅在无 assistant/tool 输出时由 Studio 再建桥重试一次） */
+  private static readonly OC_BRIDGE_TRANSIENT_CODES = new Set([
+    'WS_CLOSED',
+    'WS_SEND_EXCEPTION',
+    'WS_CONNECT_RETRY_EXHAUSTED',
+    'CONNECT_FAILED',
+  ]);
+
+  private static readonly OC_BRIDGE_TRANSPORT_RETRY_MS = 400;
+
+  private static isTransientBridgeTurnFailure(
+    doneReason: string | undefined,
+    sawTransientCode: boolean,
+    receivedAnyOutput: boolean,
+  ): boolean {
+    if (receivedAnyOutput) return false;
+    if (sawTransientCode) return true;
+    const r = String(doneReason ?? '').toLowerCase();
+    return /ws closed|websocket closed|not connected|econnrefused|socket hang up|broken pipe/.test(r);
+  }
+
   private sshPool: Map<string, Promise<Client>> = new Map();
   private resourcesPath: string;
 
@@ -722,6 +770,20 @@ export class OpenClawDeploymentManager {
     this.sshPool.set(ip, promise);
     promise.catch(() => this.sshPool.delete(ip));
     return promise;
+  }
+
+  /** 关掉板端桥 SSH 流并从缓存移除；下次 getOrCreate 会新建（用于断线后安全重试） */
+  private invalidateOcBridgeTransport(device: Device): void {
+    const ip = device.ip;
+    const br = this.ocBridgeTransportByIp.get(ip);
+    if (br) {
+      try {
+        br.destroy();
+      } catch {
+        /* ignore */
+      }
+      this.ocBridgeTransportByIp.delete(ip);
+    }
   }
 
   destroyConnection(ip: string): void {
@@ -1658,7 +1720,10 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     if (process.env.RDK_OPENCLAW_BRIDGE === '0') {
       return this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta);
     }
+    type BridgeTurnEnd = 'success' | 'retry' | 'fail_user' | 'fail_silent';
     const abortCtl = { aborted: false };
+    /** 结束 executeBridgeTurn 内挂起的 Promise，避免取消后 runOcBridgeSerial 链死锁 */
+    const bridgeTurnHook: { complete: ((end: BridgeTurnEnd) => void) | null } = { complete: null };
     let legacyAbort: (() => void) | null = null;
     let unsub: (() => void) | null = null;
     let activeReqId = '';
@@ -1675,6 +1740,8 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       } catch {
         /* ignore */
       }
+      bridgeTurnHook.complete?.('fail_user');
+      bridgeTurnHook.complete = null;
       if (activeReqId) {
         try {
           this.ocBridgeTransportByIp.get(device.ip)?.send({
@@ -1695,20 +1762,23 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     };
 
     void this.runOcBridgeSerial(device.ip, async () => {
-      try {
+      let turnEnd: BridgeTurnEnd = 'fail_user';
+
+      const executeBridgeTurn = async (allowRetryAfterTransient: boolean): Promise<BridgeTurnEnd> => {
+        if (abortCtl.aborted) return 'fail_user';
         const transport = await this.getOrCreateBridgeTransport(device);
-        if (!transport || abortCtl.aborted) {
-          if (!abortCtl.aborted) {
-            legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta).abort;
-          }
-          return;
+        if (abortCtl.aborted) return 'fail_user';
+        if (!transport) {
+          return allowRetryAfterTransient ? 'retry' : 'fail_silent';
         }
+
         activeReqId = `r-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-        await new Promise<void>((resolve) => {
+        let receivedAnyOutput = false;
+        let sawTransientError = false;
+
+        return await new Promise<BridgeTurnEnd>((resolve) => {
           let settled = false;
-          const finish = (success: boolean) => {
-            if (settled || abortCtl.aborted) return;
-            settled = true;
+          const cleanup = () => {
             if (turnTimer) {
               clearTimeout(turnTimer);
               turnTimer = null;
@@ -1719,27 +1789,42 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
               /* ignore */
             }
             unsub = null;
-            if (!abortCtl.aborted) onComplete(success);
-            resolve();
           };
-          turnTimer = setTimeout(() => finish(false), 600000);
+          const finishTurn = (end: BridgeTurnEnd) => {
+            if (settled) return;
+            settled = true;
+            bridgeTurnHook.complete = null;
+            cleanup();
+            resolve(end);
+          };
+          bridgeTurnHook.complete = finishTurn;
+
+          turnTimer = setTimeout(() => {
+            if (!abortCtl.aborted) onComplete(false);
+            finishTurn('fail_user');
+          }, 600000);
+
           unsub = transport.onLine((line) => {
             if (abortCtl.aborted) return;
             const rid = line.reqId != null ? String(line.reqId) : '';
             if (rid && rid !== activeReqId) return;
             if (line.type === 'assistant' && typeof line.text === 'string') {
+              receivedAnyOutput = true;
               onChunk(line.text);
             }
             if (line.type === 'tool') {
+              receivedAnyOutput = true;
               const tn = String(line.name || '');
               const tp = String(line.phase || '');
               const det = String(line.detail || '').slice(0, 200);
               onChunk(`\n[TOOL:${tp}] ${tn}${det ? ` -> ${det}` : ''}\n`);
             }
             if (line.type === 'error' && (!rid || rid === activeReqId)) {
-              const ocCode = typeof (line as { code?: unknown }).code === 'string'
-                ? String((line as { code: string }).code).trim()
-                : '';
+              const rawCode = line.code;
+              const ocCode = typeof rawCode === 'string' ? rawCode.trim() : '';
+              if (ocCode && OpenClawDeploymentManager.OC_BRIDGE_TRANSIENT_CODES.has(ocCode)) {
+                sawTransientError = true;
+              }
               const ocMsg = String(line.message || 'gateway error');
               const payload = ocCode
                 ? JSON.stringify({ ocCode, message: ocMsg, correlationId: meta?.correlationId ?? null })
@@ -1747,23 +1832,67 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
               onChunk(`__OPENCLAW_WS_FAILED__${payload}`);
             }
             if (line.type === 'done' && (!rid || rid === activeReqId)) {
-              finish(!!line.ok);
+              const ok = !!line.ok;
+              const reason = line.reason != null ? String(line.reason) : '';
+              if (ok) {
+                if (!abortCtl.aborted) onComplete(true);
+                finishTurn('success');
+                return;
+              }
+              const transient = OpenClawDeploymentManager.isTransientBridgeTurnFailure(
+                reason,
+                sawTransientError,
+                receivedAnyOutput,
+              );
+              if (transient && allowRetryAfterTransient) {
+                finishTurn('retry');
+                return;
+              }
+              if (!abortCtl.aborted) onComplete(false);
+              finishTurn('fail_user');
             }
           });
-          transport.send({
-            op: 'chat.send',
-            reqId: activeReqId,
-            sessionKey: sessionId || 'main',
-            message,
-            idempotencyKey: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            correlationId: meta?.correlationId,
-            runId: meta?.studioRunId,
-            studioSessionKey: meta?.studioSessionKey,
-          });
+          try {
+            transport.send({
+              op: 'chat.send',
+              reqId: activeReqId,
+              sessionKey: sessionId || 'main',
+              message,
+              idempotencyKey: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              correlationId: meta?.correlationId,
+              runId: meta?.studioRunId,
+              studioSessionKey: meta?.studioSessionKey,
+            });
+          } catch {
+            if (abortCtl.aborted) {
+              finishTurn('fail_user');
+            } else {
+              finishTurn(allowRetryAfterTransient ? 'retry' : 'fail_silent');
+            }
+          }
         });
+      };
+
+      try {
+        turnEnd = await executeBridgeTurn(true);
+        if (turnEnd === 'retry' && !abortCtl.aborted) {
+          this.invalidateOcBridgeTransport(device);
+          await new Promise((r) => setTimeout(r, OpenClawDeploymentManager.OC_BRIDGE_TRANSPORT_RETRY_MS));
+          turnEnd = await executeBridgeTurn(false);
+        }
+        if (!abortCtl.aborted && (turnEnd === 'fail_silent' || turnEnd === 'retry')) {
+          legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta).abort;
+        }
       } catch {
         if (!abortCtl.aborted) {
           legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta).abort;
+        }
+      }
+      if (abortCtl.aborted && turnEnd !== 'success') {
+        try {
+          onComplete(false);
+        } catch {
+          /* ignore */
         }
       }
     }).catch(() => {

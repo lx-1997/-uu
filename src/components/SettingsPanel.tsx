@@ -1262,6 +1262,42 @@ export default function SettingsPanel() {
                       </span>
                     </div>
                   </div>
+                  {studioDefaultPreset ? (
+                    <div className="settings-row">
+                      <span className="settings-row-label">{t('settings.ai.builtin', '内置模型')}</span>
+                      <div className="settings-row-value" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={aiSaving || studioDefaultPreset.isActive}
+                          title={studioDefaultPreset.label}
+                          onClick={() => void handleRestoreStudioDefaultModel()}
+                        >
+                          {studioDefaultPreset.isActive
+                            ? t('settings.ai.builtin.current', '当前为系统内置')
+                            : t('settings.ai.builtin.use', '使用系统内置模型')}
+                        </button>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.35, maxWidth: 420 }}>
+                          {t(
+                            'settings.ai.builtin.hint',
+                            '将安装包预设（含默认端点与 Key）合并到本机并切换为深度/快速默认条目；与下方「填入示例模型」不同。',
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="settings-row">
+                      <span className="settings-row-label">{t('settings.ai.builtin', '内置模型')}</span>
+                      <div className="settings-row-value">
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                          {t(
+                            'settings.ai.builtin.missing',
+                            '未检测到安装包内置预设文件。开发目录请从项目根启动；可设置环境变量 RDK_PROVIDER_BOOTSTRAP_FILE 指向 rdkclaw-provider.defaults.json。',
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {aiEngineLaneTab === 'thinking' ? (
                   <>
                   <div className="settings-row">
@@ -1838,25 +1874,6 @@ export default function SettingsPanel() {
                     ) : null}
                   </div>
                   </>
-                  )}
-
-                  {studioDefaultPreset && (
-                    <div className="settings-row">
-                      <span className="settings-row-label">{t('settings.ai.builtin', '内置模型')}</span>
-                      <div className="settings-row-value">
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          disabled={aiSaving || studioDefaultPreset.isActive}
-                          title={studioDefaultPreset.label}
-                          onClick={() => void handleRestoreStudioDefaultModel()}
-                        >
-                          {studioDefaultPreset.isActive
-                            ? t('settings.ai.builtin.current', '当前为系统内置')
-                            : t('settings.ai.builtin.use', '使用系统内置模型')}
-                        </button>
-                      </div>
-                    </div>
                   )}
                   <div className="settings-actions">
                     <button type="button" className="btn btn-ghost btn-sm" onClick={handleExportAgentConfig} disabled={aiSaving}>

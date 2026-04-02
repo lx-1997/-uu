@@ -8,6 +8,8 @@ const WORKSPACES_DIR = path.join(CONFIG_DIR, "rdkclaw-workspaces");
 
 const CORE_FILES = [
   "AGENTS.md",
+  /** 与 `agent/AGENTS.md`「先读 SOUL」对齐；无 bundled 模板时用短占位，避免 read 落地失败多耗一轮模型 */
+  "SOUL.md",
   "TOOLS.md",
   "USER.md",
   "HEARTBEAT.md",
@@ -30,10 +32,32 @@ function sanitizeProfileId(raw: string): string {
   return trimmed || "default";
 }
 
-function defaultContentFor(file: CoreFileName, userId?: string): string {
+function defaultContentFor(file: CoreFileName, _userId?: string): string {
+  if (file === "SOUL.md") {
+    return [
+      "# SOUL.md",
+      "",
+      "> 人格与语气由 RDK Studio **系统提示**统一注入；本文件为工作区副本，便于 `read` 与会话连续性。",
+      "> 直接服务用户即可，不必为「对齐人格」反复读取。",
+      "",
+      "（若安装目录含 `agent/SOUL.md`，`getOrInit` 会写入完整版替代本占位。）",
+      "",
+    ].join("\n");
+  }
   if (file === "USER.md") {
-    const who = userId?.trim() || "unknown-user";
-    return `# USER.md\n\n- userId: ${who}\n- 偏好: （待补充）\n- 约束: （待补充）\n`;
+    return (
+      `# USER.md - 关于你的用户\n\n` +
+      `*了解你正在帮助的人。持续更新。*\n\n` +
+      `- **姓名：**\n` +
+      `- **称呼方式：**\n` +
+      `- **代词：** *(可选)*\n` +
+      `- **时区：**\n` +
+      `- **备注：**\n\n` +
+      `## Context\n\n` +
+      `*(他们在意什么？正在做什么项目？讨厌什么？什么能逗乐他们？逐步建立。)*\n\n` +
+      `---\n\n` +
+      `了解得越多，越能帮到他们。但要记住——你是在认识一个人，不是在建立档案。\n`
+    );
   }
   if (file === "TOOLS.md") {
     return "# TOOLS.md\n\n记录本地可用工具、约束和最佳实践。\n";
@@ -44,7 +68,11 @@ function defaultContentFor(file: CoreFileName, userId?: string): string {
   if (file === "MEMORY.md") {
     return "# MEMORY.md - 长期记忆\n\n- 仅保留长期有效结论，不写流水账。\n";
   }
-  return "# AGENTS.md\n\n把这个目录当成家。会话开始前先读取 USER/HEARTBEAT/memory/MEMORY（SOUL 由系统层注入）。\n";
+  return (
+    "# AGENTS.md\n\n" +
+    "把这个目录当成家。会话开始前先读 **SOUL.md**（与系统人格一致）→ **USER.md** → **HEARTBEAT.md** → " +
+    "`memory/` 今日与昨日 → 主会话再视需要读 **MEMORY.md**。\n"
+  );
 }
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -143,10 +171,7 @@ export class UserWorkspaceStore {
       if (await fileExists(filePath)) {
         continue;
       }
-      let content = await this.resolveTemplate(file);
-      if (file === "USER.md" && !/userId\s*:/i.test(content)) {
-        content = `${content.trimEnd()}\n\n- userId: ${userId?.trim() || "unknown-user"}\n`;
-      }
+      const content = await this.resolveTemplate(file);
       await fs.writeFile(filePath, content, "utf-8");
     }
 
@@ -174,8 +199,9 @@ export class UserWorkspaceStore {
         if (await fileExists(destSkill)) continue;
         const srcSkill = path.join(bundledSkillsDir, entry.name, "SKILL.md");
         if (!(await fileExists(srcSkill))) continue;
-        await fs.mkdir(destDir, { recursive: true });
-        await fs.copyFile(srcSkill, destSkill);
+        await fs.cp(path.join(bundledSkillsDir, entry.name), destDir, {
+          recursive: true,
+        });
       }
     } catch {
       // bundled skills dir may not exist in some environments

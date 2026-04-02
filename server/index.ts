@@ -33,6 +33,7 @@ import { Client } from 'ssh2';
 import WebSocket, { WebSocketServer } from 'ws';
 import * as net from 'net';
 import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
+import { OPENCLAW_BOARD_NPM_SPEC } from './managers/openclaw-board-install-sh.js';
 import { pingVendorModel } from './openclaw-vendor-model-ping.js';
 import * as path from 'path';
 import {
@@ -291,7 +292,7 @@ const port = Number(process.env.PORT ?? 8787);
 /** 与仓库 `config/rdkclaw-provider.defaults.json` 对齐；RDKClaw 主链路以 ~/.rdkstudio/agent-config.json 为准 */
 const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
-const model = process.env.OPENAI_MODEL ?? 'doubao-seed-2.0-lite';
+const model = process.env.OPENAI_MODEL ?? 'doubao-seed-2.0-pro';
 const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
@@ -1721,8 +1722,11 @@ app.get('/api/skills', (_request, response) => {
   response.json({
     ok: true,
     internalOnly: true,
-    message: '兼容接口：仅供内部调试或历史功能使用，不作为技能工坊数据源。',
-    skills: loadedSkills.map(s => ({
+    message:
+      'Studio skills/ 扫描结果；技能工坊「本地清单」与 /md 预览均按 folder（目录名）索引。',
+    skills: loadedSkills.map((s) => ({
+      /** skills/<folder>/SKILL.md，与 getRawSkillMd、板端 skills 目录一致 */
+      folder: path.basename(path.dirname(s.filePath)),
       name: s.name,
       description: s.description,
       version: s.version,
@@ -2780,7 +2784,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   }
   const safeModel = shellEscape(targetModel);
   const commandMap: Record<'start' | 'status' | 'switch' | 'install' | 'logs', string> = {
-    install: `bash -lc '(curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard || curl -fsSL https://code-server.dev/install.sh | sh || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
+    install: `bash -lc '(command -v npm >/dev/null 2>&1 && CI= npm install -g openclaw@${OPENCLAW_BOARD_NPM_SPEC} --no-audit --no-fund) || (curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard || curl -fsSL https://code-server.dev/install.sh | sh || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
     start: `bash -lc '(openclaw gateway start --port ${OPENCLAW_GATEWAY_PORT} || openclaw start || clawctl start || true); (openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     status: `bash -lc '(openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     switch: `bash -lc '(openclaw model use ${safeModel} || clawctl model use ${safeModel} || echo "switch command unavailable"); (openclaw status || clawctl status || true)'`,
@@ -4812,12 +4816,13 @@ app.get('/api/agent/config', (_request, response) => {
         isActive: registry.activeId === bootstrapPresets.thinking.id,
       }
     : null;
-  const studioQuickDefaultPreset = bootstrapPresets?.quick
+  const quickBootstrap = bootstrapPresets?.quick ?? null;
+  const studioQuickDefaultPreset = quickBootstrap
     ? {
-        id: bootstrapPresets.quick.id,
-        label: bootstrapPresets.quick.label,
-        inRegistry: registry.entries.some((e) => e.id === bootstrapPresets.quick.id),
-        isQuickLane: (registry.quickActiveId?.trim() || null) === bootstrapPresets.quick.id,
+        id: quickBootstrap.id,
+        label: quickBootstrap.label,
+        inRegistry: registry.entries.some((e) => e.id === quickBootstrap.id),
+        isQuickLane: (registry.quickActiveId?.trim() || null) === quickBootstrap.id,
       }
     : null;
   const quickAid = registry.quickActiveId?.trim() || null;

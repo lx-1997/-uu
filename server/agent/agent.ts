@@ -156,6 +156,8 @@ export interface AgentConfig {
   enableSkills?: boolean;
   /** 是否启用主动唤醒 */
   enableHeartbeat?: boolean;
+  /** 注入的 Project Context（bootstrap 文件）总字符上限；用于快速模式收窄预填 */
+  contextBootstrapMaxChars?: number;
   /** Heartbeat 检查间隔 (毫秒) */
   heartbeatInterval?: number;
   /** 上下文窗口大小（token 估算） */
@@ -287,6 +289,7 @@ export class Agent {
   private enableContext: boolean;
   private enableSkills: boolean;
   private enableHeartbeat: boolean;
+  private contextBootstrapMaxChars?: number;
 
   /**
    * 运行中的 AbortController 映射 (runId → controller)
@@ -416,6 +419,7 @@ export class Agent {
       Math.floor(config.contextTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS),
     );
     this.runtimePolicy = config.runtimePolicy ?? {};
+    this.contextBootstrapMaxChars = config.contextBootstrapMaxChars;
     this.sandbox = {
       enabled: config.sandbox?.enabled ?? false,
       allowExec: config.sandbox?.allowExec ?? false,
@@ -431,6 +435,7 @@ export class Agent {
         this.bootstrapDir && path.resolve(this.bootstrapDir) !== path.resolve(this.workspaceDir)
           ? this.workspaceDir
           : undefined,
+      maxChars: this.contextBootstrapMaxChars,
       memoryPolicy: {
         dailyMemoryDays: this.runtimePolicy.dailyMemoryDays,
         mainReadsMemory: this.runtimePolicy.mainReadsMemory,

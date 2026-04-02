@@ -1159,13 +1159,8 @@ export default function OpenClaw() {
     }
   };
 
-  const stopLocalDeployAndBlockWifiAuto = (deviceId: string) => {
-    try {
-      sessionStorage.setItem(openclawWifiAutoUserBlockKey(deviceId), '1');
-    } catch { /* ignore */ }
-    try {
-      sessionStorage.removeItem(`oc-wifi-auto-pending-${deviceId}`);
-    } catch { /* ignore */ }
+  /** 仅清前面板进度与轮询（不阻止 Wi‑Fi 自动安装） */
+  const clearDeployUiState = (deviceId: string) => {
     stopDeployPolling();
     try {
       localStorage.removeItem(ocDeployJobLsKey(deviceId));
@@ -1177,9 +1172,28 @@ export default function OpenClaw() {
     deployLogBubbleInitializedRef.current = false;
   };
 
+  const stopLocalDeployAndBlockWifiAuto = (deviceId: string) => {
+    try {
+      sessionStorage.setItem(openclawWifiAutoUserBlockKey(deviceId), '1');
+    } catch { /* ignore */ }
+    try {
+      sessionStorage.removeItem(`oc-wifi-auto-pending-${deviceId}`);
+    } catch { /* ignore */ }
+    clearDeployUiState(deviceId);
+  };
+
   const handleCancelDeploy = async () => {
-    if (!currentDevice || deployCancelLoading || !deployRunning) return;
+    if (!currentDevice || deployCancelLoading) return;
+
     const devId = currentDevice.id;
+
+    if (!deployRunning && deploySteps.length > 0) {
+      clearDeployUiState(devId);
+      addToast?.(t('oc.deploy.dismissProgress', '已关闭部署进度'), 'info');
+      return;
+    }
+
+    if (!deployRunning) return;
     const jid = deployJobId.trim();
 
     if (!jid) {
@@ -1277,7 +1291,7 @@ export default function OpenClaw() {
     );
   };
 
-  /** 一键部署：仅四步进度条 +（进行中时）取消部署；详细日志见对话区 / 其它入口 */
+  /** 一键部署：四步进度条 + 取消部署（进行中中断；已失败/结束时关闭进度条） */
   const renderDeployMainStrip = () => {
     if (!deployRunning && deploySteps.length === 0) return null;
     return (
@@ -1286,18 +1300,16 @@ export default function OpenClaw() {
           <span className="oc-deploy-main-strip-title">
             {deployRunning ? t('oc.deploy.mainStripRunning', '一键部署进行中') : t('oc.deploy.mainStripProgress', '部署进度')}
           </span>
-          {deployRunning ? (
-            <div className="oc-deploy-main-strip-actions">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => void handleCancelDeploy()}
-                disabled={deployCancelLoading}
-              >
-                {deployCancelLoading ? t('oc.test.testing', '...') : t('oc.deploy.cancelBtn', '取消部署')}
-              </button>
-            </div>
-          ) : null}
+          <div className="oc-deploy-main-strip-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => void handleCancelDeploy()}
+              disabled={deployCancelLoading}
+            >
+              {deployCancelLoading ? t('oc.test.testing', '...') : t('oc.deploy.cancelBtn', '取消部署')}
+            </button>
+          </div>
         </div>
         {renderDeployProgressTrack()}
       </div>
@@ -1716,7 +1728,7 @@ export default function OpenClaw() {
                   >
                     {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
                   </button>
-                  {deployRunning && (
+                  {(deployRunning || deploySteps.length > 0) && (
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"

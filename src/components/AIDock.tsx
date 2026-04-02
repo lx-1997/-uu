@@ -964,6 +964,22 @@ export default function AIDock() {
     [t],
   );
 
+  const formatDockDurationMs = useCallback(
+    (ms: number) => {
+      if (!Number.isFinite(ms) || ms < 0) return t('dock.msg.durationUnknown', '—');
+      if (ms < 1000) return `${Math.round(ms)}${isEn ? ' ms' : ' 毫秒'}`;
+      const s = ms / 1000;
+      if (s < 60) {
+        const str = s < 10 ? s.toFixed(1) : String(Math.round(s));
+        return isEn ? `${str} s` : `${str} 秒`;
+      }
+      const m = Math.floor(s / 60);
+      const rs = Math.round(s % 60);
+      return isEn ? `${m}m ${rs}s` : `${m} 分 ${rs} 秒`;
+    },
+    [isEn, t],
+  );
+
   const rdkEmbedPanel = useMemo(() => (typeof window !== 'undefined' ? getRdkEmbedPanel() : null), []);
   const embedDockCtxTab = useMemo(() => getRdkEmbedDockCtx(), []);
 
@@ -1321,6 +1337,10 @@ export default function AIDock() {
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
   const hiddenCount = Math.max(0, chatMessages.length - visibleMessages.length);
+  /** 流式一轮会先追加一条 ai 占位消息，此时不再单独画底部「第二行头像」打字条 */
+  const lastVisibleMsg = visibleMessages[visibleMessages.length - 1];
+  const streamMergedIntoLastAiBubble =
+    aiTyping && lastVisibleMsg?.role === 'ai';
   const shouldKeepStatusInCompact = useCallback((block: Extract<ChatBlock, { type: 'status' }>) => {
     /** RDKClaw run_progress（⏳ 进度）；极简模式也保留，避免长任务像「死机」 */
     if ((block as { _runProgress?: boolean })._runProgress) return true;
@@ -1934,17 +1954,17 @@ export default function AIDock() {
                           </>
                         );
                       })()}
-                      {msg.text && (() => {
-                        const { cleanText, mediaBlocks } = extractMediaFromText(msg.text);
+                      {(msg.text || isStreamingBubble) && (() => {
+                        const { cleanText, mediaBlocks } = extractMediaFromText(msg.text || '');
                         return (
                           <>
-                            {cleanText && (
+                            {(isStreamingBubble || cleanText) && (
                               <div className={`msg-text${isStreamingBubble ? ' msg-text--streaming' : ''}`}>
                                 {isStreamingBubble ? (
                                   <DockStreamingPlainBody key={msg.id} text={cleanText} />
-                                ) : (
+                                ) : cleanText ? (
                                   renderMarkdown(cleanText, t('markdown.copy', '复制'))
-                                )}
+                                ) : null}
                               </div>
                             )}
                             {mediaBlocks.map((mb, i) => (
@@ -1953,6 +1973,23 @@ export default function AIDock() {
                           </>
                         );
                       })()}
+                      {isStreamingBubble && (
+                        <div className="dock-typing dock-typing--in-bubble">
+                          {msg.text?.trim() ? (
+                            <div className="typing-dots" aria-hidden>
+                              <span className="typing-dot" />
+                              <span className="typing-dot" />
+                              <span className="typing-dot" />
+                            </div>
+                          ) : null}
+                          <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
+                            {t('dock.typing.stopCurrent', '结束当前')}
+                          </button>
+                          <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
+                            {t('dock.typing.stopAll', '全部停止')}
+                          </button>
+                        </div>
+                      )}
                     </>
                   )}
                   {msg.action && (
@@ -1960,15 +1997,21 @@ export default function AIDock() {
                       {msg.action.label} →
                     </button>
                   )}
-                  <span className="dock-msg-time">
-                    {new Date(msg.id).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  {msg.role === 'ai' && (
+                    <span className="dock-msg-time">
+                      {isStreamingBubble
+                        ? t('dock.msg.replying', '回复中…')
+                        : msg.durationMs != null
+                          ? `${t('dock.msg.took', '用时')} ${formatDockDurationMs(msg.durationMs)}`
+                          : t('dock.msg.durationUnknown', '—')}
+                    </span>
+                  )}
                 </div>
               </div>
               );
             })}
 
-            {aiTyping && (
+            {aiTyping && !streamMergedIntoLastAiBubble && (
               <div className="dock-msg ai">
                 <div className="dock-avatar ai">
                   <img src={rdkclawAvatarUrl} alt="" className="dock-avatar-img" />
@@ -1976,8 +2019,8 @@ export default function AIDock() {
                 <div className="dock-bubble ai">
                   <div className="dock-typing">
                     <div className="typing-dots"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
-                    <button className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>{t('dock.typing.stopCurrent', '结束当前')}</button>
-                    <button className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>{t('dock.typing.stopAll', '全部停止')}</button>
+                    <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>{t('dock.typing.stopCurrent', '结束当前')}</button>
+                    <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>{t('dock.typing.stopAll', '全部停止')}</button>
                   </div>
                 </div>
               </div>

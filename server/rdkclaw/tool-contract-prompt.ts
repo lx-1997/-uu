@@ -8,6 +8,7 @@ export function buildToolContractQuickOverviewPrompt(): string {
   return [
     "## 工具契约（速览）",
     "本机 `exec`/`read`/`write`：仅 Studio 工程目录；`device_*`：SSH 板，简单查询优先 `device_exec`。",
+    "工作区开局：按需 `read` **AGENTS.md → USER.md**（及 HEARTBEAT/MEMORY）；**SOUL.md 已由工作区初始化提供**，与系统人格一致，勿编造路径去读不存在的文件。",
     "板端多步/技能链用 `board_openclaw_assess`→`delegate`；单条命令勿委派。",
     "回复用户：结论先行、短段落；非必要不落长清单。",
   ].join("\n");
@@ -21,6 +22,7 @@ export function buildToolContractOverviewPrompt(): string {
     "",
     "### 三条能力链（互斥职责）",
     "1. **本机工作区**（`exec` / `read` / `write` / `list` / `grep` …）：只动 **RDK Studio 所在机器** 的项目目录，**不是**开发板磁盘。",
+    "   - **工作区根文件**：Studio 用户工作区会初始化 `AGENTS.md` / **SOUL.md** / `USER.md` / `HEARTBEAT.md` / `MEMORY.md` / `TOOLS.md`。按 `AGENTS.md` 顺序阅读；**禁止臆造文件名**（例如把 `SOUL.md` 读成别的路径）以免工具失败多耗一整轮推理。",
     "2. **设备 SSH**（`device_exec` / `device_file_*` / `device_diagnose` / `ros_*` …）：经 Studio 连板，**直连 shell/文件**，不经过板端 OpenClaw LLM。",
     "3. **板端 OpenClaw**（`board_openclaw_chat` / `board_openclaw_assess` / `board_openclaw_delegate` …）：板上网关上的 **另一套 Agent**，可跑技能链、多轮板端推理、与 clawhub/插件生态衔接；与 2 **不是**「多敲几条命令」的区别，而是 **是否把一段板端责任交给板端 Agent**。",
     "",

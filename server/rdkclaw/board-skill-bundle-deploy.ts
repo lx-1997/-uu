@@ -26,8 +26,12 @@ type ReadDevicesFn = () => Promise<Device[]>;
 const SKILLS_ROOT = 'skills';
 const RDKX5_SKILLS_ROOT = 'rdkx5_skills';
 
+/** 全板型通用：RDK 文档库与算法部署指引（SKILL 在本仓 skills/ 下） */
+const BUNDLE_SHARED_DOCS_AND_ROBOT: string[] = ['rdk-doc', 'rdk-doc-optimized', 'rdk-robot-dev'];
+
 /** X3：开发者文档 + OpenClaw 协作 + 板卡能力 */
 const BUNDLE_X3: string[] = [
+  ...BUNDLE_SHARED_DOCS_AND_ROBOT,
   'rdk-developer-docs',
   'rdk-ecosystem',
   'rdk-app-development',
@@ -45,6 +49,7 @@ const BUNDLE_X3: string[] = [
 
 /** S100 / Ultra：文档型技能包（与 X5 的 rdkx5_skills 互补） */
 const BUNDLE_S100_LIKE: string[] = [
+  ...BUNDLE_SHARED_DOCS_AND_ROBOT,
   'rdk-developer-docs',
   'rdk-ecosystem',
   'rdk-app-development',
@@ -76,7 +81,12 @@ export function resolveSkillBundleForPlatform(platform: RdkPlatform | null): {
 } {
   const cwd = process.cwd();
   if (platform === 'rdk-x5') {
-    return { root: RDKX5_SKILLS_ROOT, skillIds: listRdkX5SkillIds(cwd) };
+    const x5Ids = listRdkX5SkillIds(cwd);
+    const merged = [...x5Ids];
+    for (const id of BUNDLE_SHARED_DOCS_AND_ROBOT) {
+      if (!merged.includes(id)) merged.push(id);
+    }
+    return { root: RDKX5_SKILLS_ROOT, skillIds: merged };
   }
   if (platform === 'rdk-x3') {
     return { root: SKILLS_ROOT, skillIds: [...BUNDLE_X3] };
@@ -88,9 +98,13 @@ export function resolveSkillBundleForPlatform(platform: RdkPlatform | null): {
 }
 
 function readLocalSkillMd(cwd: string, root: string, skillId: string): string | null {
-  const p = path.join(cwd, root, skillId, 'SKILL.md');
-  if (!fs.existsSync(p)) return null;
-  return fs.readFileSync(p, 'utf8');
+  const primary = path.join(cwd, root, skillId, 'SKILL.md');
+  if (fs.existsSync(primary)) return fs.readFileSync(primary, 'utf8');
+  if (root !== SKILLS_ROOT) {
+    const fallback = path.join(cwd, SKILLS_ROOT, skillId, 'SKILL.md');
+    if (fs.existsSync(fallback)) return fs.readFileSync(fallback, 'utf8');
+  }
+  return null;
 }
 
 async function deployOneSkill(
