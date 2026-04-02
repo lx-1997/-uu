@@ -100,6 +100,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.task.status.running': 'Running',
   'dock.task.status.done': 'Done',
   'dock.task.status.failed': 'Failed',
+  'dock.task.status.confirming': 'Awaiting confirm',
   'dock.task.status.pending': 'Pending',
   'dock.task.cancel': 'Cancel',
   'dock.empty.cleared': 'Chat cleared — send a message to continue.',

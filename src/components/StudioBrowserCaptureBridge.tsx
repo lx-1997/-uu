@@ -2,6 +2,43 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import io from 'socket.io-client';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { fetchApi } from '../utils/apiBase';
+import { dispatchStudioAgentWebOpen } from '../utils/studio-agent-web';
+
+function coerceStudioWebUrl(raw: string): string {
+  const u = String(raw || '').trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(\/.*)?$/i.test(u)) return `https://${u}`;
+  return '';
+}
+
+/** 抓取回退路径：主窗口内嵌（需 captureEmbeddedPageText / closeUrl） */
+function openCaptureEmbedInMain(url: string) {
+  const rdk = window.rdkDesktop;
+  if (rdk?.openUrl) {
+    rdk.openUrl(url);
+    rdk.setActiveUrl?.(url);
+    dispatchStudioAgentWebOpen(url);
+  }
+}
+
+/** studio_open_url：优先独立弹窗（可关）；失败再回退内嵌或 window.open */
+async function openStudioAgentBrowsePopup(url: string) {
+  const rdk = window.rdkDesktop;
+  if (rdk?.openAgentBrowserPopup) {
+    const r = await rdk.openAgentBrowserPopup(url);
+    if (r?.ok) return;
+  }
+  if (rdk?.openUrl) {
+    openCaptureEmbedInMain(url);
+    return;
+  }
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch {
+    /* ignore */
+  }
+}
 
 type Pending = {
   captureId: string;
@@ -137,7 +174,7 @@ export default function StudioBrowserCaptureBridge() {
     const socket = io(resolveSocketUrl(), socketIoClientOptions);
     const onReq = (data: { captureId?: string; url?: string }) => {
       const captureId = String(data?.captureId || '').trim();
-      const url = String(data?.url || '').trim();
+      const url = coerceStudioWebUrl(String(data?.url || ''));
       if (!captureId || !url) return;
       captureOpenedAtRef.current = 0;
       setPending({ captureId, url });
@@ -169,22 +206,30 @@ export default function StudioBrowserCaptureBridge() {
           captureModeRef.current = 'embed';
           setDockMode('full');
           if (rdk.openUrl) {
-            rdk.openUrl(url);
+            openCaptureEmbedInMain(url);
             captureOpenedAtRef.current = Date.now();
           }
           setStatus('已回退到主窗口内嵌，请用下方按钮抓取');
           return;
         }
         if (rdk?.openUrl) {
-          rdk.openUrl(url);
+          openCaptureEmbedInMain(url);
           captureOpenedAtRef.current = Date.now();
           setStatus('已打开内嵌页（旧版），请用下方按钮抓取');
         }
       })();
     };
+    const onOpenUrl = (data: { url?: string }) => {
+      const url = coerceStudioWebUrl(String(data?.url || ''));
+      if (!url) return;
+      void openStudioAgentBrowsePopup(url);
+    };
+
     socket.on('studio_browser_capture_request', onReq);
+    socket.on('studio_open_url_request', onOpenUrl);
     return () => {
       socket.off('studio_browser_capture_request', onReq);
+      socket.off('studio_open_url_request', onOpenUrl);
       socket.disconnect();
     };
   }, []);

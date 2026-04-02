@@ -1,9 +1,11 @@
 /**
  * 板端 `npm install -g openclaw@...` 的版本（勿默认 `latest`，便于验收与回滚）。
- * 可用环境变量 `OPENCLAW_NPM_VERSION` 覆盖（例如钉死 patch：`3.24.2`）。
+ * 可用环境变量 `OPENCLAW_NPM_VERSION` 覆盖（例如升级到 `2026.4.1`）。
+ * 注意：npm 包使用日历版本（2026.x.y），勿误用旧约定如 `3.24`（registry 上不存在）。
+ * 板端安装即标准：`CI= npm install -g openclaw@<本常量> ...`（无额外魔法）。
  */
 export const OPENCLAW_BOARD_NPM_SPEC =
-  process.env.OPENCLAW_NPM_VERSION?.trim() || '3.24';
+  process.env.OPENCLAW_NPM_VERSION?.trim() || '2026.3.24';
 
 /**
  * 板端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
@@ -53,7 +55,7 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
   'for i in 1 2 3; do',
   // 勿用 --loglevel error：成功路径近乎静默，前端只能看到 Studio 心跳误以为无日志。info 会输出解析/下载/解压等进度（体积仍可控）。
   // CI= 清空 CI：避免 npm 在 CI=1 时关闭 progress 且进一步减少输出。
-  // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认 3.24），勿写死 latest。
+  // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认钉死 2026.3.24，可环境变量覆盖），勿改用裸 `latest` 以免不可追溯。
   'if CI= npm install -g openclaw@' +
     OPENCLAW_BOARD_NPM_SPEC +
     ' --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
@@ -196,11 +198,11 @@ export const OPENCLAW_ENSURE_NPM_SNIPPET = [
   'if command -v corepack >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then (corepack enable 2>/dev/null || true) && CI=1 corepack prepare npm@latest --activate 2>&1 || true;',
   'fi;',
   'if ! command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then ',
-  'if [ "$(id -u)" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y npm;',
-  'elif command -v sudo >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y npm;',
+  'if [ "$(id -u)" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
+  'elif command -v sudo >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
   'else true; fi;',
   'fi;',
-  'if ! command -v npm >/dev/null 2>&1 && command -v opkg >/dev/null 2>&1; then opkg update && (opkg install npm || opkg install nodejs-npm || true); fi;',
+  'if ! command -v npm >/dev/null 2>&1 && command -v opkg >/dev/null 2>&1; then opkg update || true; (opkg install npm || opkg install nodejs-npm || true); fi;',
   'if ! command -v npm >/dev/null 2>&1 && command -v apk >/dev/null 2>&1; then ',
   'if [ "$(id -u)" -eq 0 ]; then apk add --no-cache npm;',
   'elif command -v sudo >/dev/null 2>&1; then sudo apk add --no-cache npm;',

@@ -1807,6 +1807,59 @@ app.get('/api/health', (_request, response) => {
   });
 });
 
+/** 全局进行中任务（OpenClaw 一键部署、烧录镜像备份等），供顶栏队列展示 */
+function resolveOpenClawDeployActiveStep(
+  steps: Record<OpenClawDeployStepName, OpenClawDeployStepState>,
+): OpenClawDeployStepName {
+  const order: OpenClawDeployStepName[] = ['check', 'prepare', 'install', 'config'];
+  for (const key of order) {
+    if (steps[key] === 'running') return key;
+  }
+  for (const key of order) {
+    if (steps[key] === 'pending') return key;
+  }
+  return 'config';
+}
+
+app.get('/api/runtime/active-tasks', async (_request, response) => {
+  cleanupOpenClawDeployJobs();
+  cleanupFlashBackupJobs();
+  let devices: Device[] = [];
+  try {
+    devices = await readDevices();
+  } catch {
+    devices = [];
+  }
+  const deviceLabel = (deviceId: string) => {
+    const d = devices.find((x) => x.id === deviceId);
+    return d ? `${d.username}@${d.host}` : deviceId.slice(0, 8);
+  };
+
+  const openclawDeploy = Array.from(openClawDeployJobs.values())
+    .filter((j) => j.status === 'running')
+    .map((j) => ({
+      kind: 'openclaw_deploy' as const,
+      id: j.id,
+      deviceId: j.deviceId,
+      deviceLabel: deviceLabel(j.deviceId),
+      step: resolveOpenClawDeployActiveStep(j.steps),
+      startedAt: j.startedAt,
+    }));
+
+  const flashBackup = Array.from(flashBackupJobs.values())
+    .filter((j) => j.status === 'running')
+    .map((j) => ({
+      kind: 'flash_backup' as const,
+      id: j.id,
+      deviceId: j.deviceId,
+      deviceLabel: deviceLabel(j.deviceId),
+      startedAt: j.startedAt,
+    }));
+
+  const tasks = [...openclawDeploy, ...flashBackup].sort((a, b) => a.startedAt - b.startedAt);
+  response.json({ ok: true, tasks });
+});
+
 app.get('/api/devices/scheduler/stats', (_request, response) => {
   response.json({
     ok: true,

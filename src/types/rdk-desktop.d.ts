@@ -93,6 +93,9 @@ declare global {
         token?: string;
       }) => Promise<{ ok: boolean; error?: string }>;
 
+      /** studio_open_url：独立原生浏览窗口（可关闭），非主窗口内嵌 */
+      openAgentBrowserPopup?: (url: string) => Promise<{ ok: boolean; error?: string }>;
+
       openUrl?: (
         target:
           | string

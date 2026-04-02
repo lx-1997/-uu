@@ -1176,6 +1176,19 @@ ipcMain.on('rdk:open-url', (event, payload) => {
   if (!mainWin || !url) return;
 
   const run = async () => {
+    const focusMainForEmbed = () => {
+      try {
+        if (mainWin && !mainWin.isDestroyed()) {
+          if (mainWin.isMinimized()) mainWin.restore();
+          mainWin.show();
+          mainWin.focus();
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    focusMainForEmbed();
+
     const isDrPortal = isDrPortalMapUrl(url);
     const failUrlKey = url;
 
@@ -1200,6 +1213,7 @@ ipcMain.on('rdk:open-url', (event, payload) => {
       } catch (err) {
         console.error(`[rdk:open-url] failed to reload ${loadUrl}:`, err?.message || err);
       }
+      focusMainForEmbed();
       return;
     }
 
@@ -1256,6 +1270,7 @@ ipcMain.on('rdk:open-url', (event, payload) => {
     } catch (err) {
       console.error(`[rdk:open-url] failed to load ${loadUrl}:`, err?.message || err);
     }
+    focusMainForEmbed();
   };
 
   void run();
@@ -1413,6 +1428,64 @@ ipcMain.handle('rdk:open-drobotics-auth-browser', async (_event, payload) => {
   return { ok: true };
 });
 
+/** RDKClaw studio_open_url：独立 BrowserWindow（系统关闭按钮），避免主窗口 WebContentsView 无法关闭 */
+ipcMain.handle('rdk:open-agent-browser-popup', async (_event, payload) => {
+  const loadUrl = String(payload?.url ?? '').trim();
+  if (!loadUrl.startsWith('http:') && !loadUrl.startsWith('https:')) {
+    return { ok: false, error: 'invalid url' };
+  }
+  let host = '';
+  try {
+    host = new URL(loadUrl).hostname;
+  } catch {
+    return { ok: false, error: 'invalid url' };
+  }
+
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const W = Math.min(1280, Math.max(800, Math.round(sw * 0.88)));
+  const H = Math.min(920, Math.max(560, Math.round(sh * 0.88)));
+
+  const win = new BrowserWindow({
+    width: W,
+    height: H,
+    minWidth: 520,
+    minHeight: 420,
+    title: `浏览 · ${host}`,
+    autoHideMenuBar: true,
+    show: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  win.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
+  win.webContents.setWindowOpenHandler(({ url: sub }) => {
+    const u = String(sub || '').trim();
+    if (u.startsWith('http:') || u.startsWith('https:')) {
+      shell.openExternal(u);
+    }
+    return { action: 'deny' };
+  });
+
+  try {
+    await win.loadURL(loadUrl);
+  } catch (err) {
+    if (!win.isDestroyed()) win.close();
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  try {
+    if (mainWin && !mainWin.isDestroyed()) {
+      if (mainWin.isMinimized()) mainWin.restore();
+      mainWin.show();
+    }
+    win.focus();
+  } catch {
+    /* ignore */
+  }
+  return { ok: true };
+});
+
 // ── IPC: Tab 切换时同步 WebContentsView 可见性 ──
 // 渲染层切换 tab 时发送当前活跃的 url（或 null 表示无嵌入视图）
 ipcMain.on('rdk:set-active-url', (_event, { url }) => {
@@ -1565,14 +1638,15 @@ function registerBrowserCaptureHandlers() {
       }
       captureFloatingWins.delete(id);
     }
-    const FW = 540;
-    const FH = 700;
+    const pb = mainWin.getBounds();
+    const FW = Math.min(1200, Math.max(760, Math.round(pb.width * 0.72)));
+    const FH = Math.min(920, Math.max(560, Math.round(pb.height * 0.82)));
     const win = new BrowserWindow({
       parent: mainWin,
       modal: false,
       width: FW,
       height: FH,
-      minWidth: 360,
+      minWidth: 480,
       minHeight: 420,
       show: true,
       title: 'RDK Studio · 页面抓取',
@@ -1583,7 +1657,6 @@ function registerBrowserCaptureHandlers() {
       },
     });
     win.webContents.session.setCertificateVerifyProc((_req, cb) => cb(0));
-    const pb = mainWin.getBounds();
     const margin = 20;
     const x = Math.max(0, Math.round(pb.x + pb.width - FW - margin));
     const y = Math.max(0, Math.round(pb.y + pb.height - FH - margin));

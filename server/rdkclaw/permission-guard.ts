@@ -200,6 +200,9 @@ function checkLocalHostPollution(command: string): string | null {
 
 export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResult {
   const { toolName, args, workspaceDir, channel, permission } = input;
+  if (toolName === 'studio_open_url' || toolName === 'studio_embedded_browser_capture') {
+    return { blocked: false, risk: 'low' };
+  }
   const command = extractString(args, 'command');
   if (command) {
     if (permission.commandDangerGuardEnabled) {

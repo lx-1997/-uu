@@ -10,6 +10,17 @@ import type { Server as SocketIOServer } from "socket.io";
 import type { Tool } from "./agent/tools/types.js";
 import { assertBrowserFetchUrlSafe } from "./agent/tools/browser-tools.js";
 
+/** 用户只说 www.example.com 时补全 https://，便于 studio_open_url 与抓取工具 */
+function coerceHttpUrlInput(raw: string): string {
+  const v = raw.trim();
+  if (!v) return v;
+  if (/^https?:\/\//i.test(v)) return v;
+  if (/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(\/.*)?$/i.test(v)) {
+    return `https://${v}`;
+  }
+  return v;
+}
+
 const MAX_SUBMIT_CHARS = 150_000;
 
 export type StudioBrowserCaptureConfig = {
@@ -99,7 +110,7 @@ export async function waitForStudioEmbeddedCapture(
   if (!ioRef) {
     throw new Error("Studio 浏览器捕获未初始化（服务端未挂载 Socket.IO）");
   }
-  const safe = await assertBrowserFetchUrlSafe(urlRaw);
+  const safe = await assertBrowserFetchUrlSafe(coerceHttpUrlInput(urlRaw));
   const url = safe.toString();
   const cfg = loadStudioBrowserCaptureConfig();
   const rules = (cfg.allowedHostSuffixes || []).map((s) => String(s).trim()).filter(Boolean);
@@ -160,6 +171,47 @@ export async function waitForStudioEmbeddedCapture(
     });
     ioRef!.emit("studio_browser_capture_request", { captureId, url });
   });
+}
+
+/**
+ * 仅打开链接（内嵌 WebView），不进入抓取等待；**不检查** studio-browser-capture.json 的白名单。
+ * 仍经 assertBrowserFetchUrlSafe（与无头抓取一致的 SSRF 规则）。
+ */
+export function emitStudioOpenUrlToClients(url: string): void {
+  ioRef?.emit("studio_open_url_request", { url });
+}
+
+function studioOpenUrlTool(): Tool<{ url: string }> {
+  return {
+    name: "studio_open_url",
+    description:
+      "【RDK Studio 桌面端】用户说「打开某网页/网站」时**必须调用本工具**（独立原生窗口，标题栏可关闭）。不等待抓取。不受 studio-browser-capture.json 白名单限制。失败时回显工具返回值；勿编造「环境限制」。纯 Web 时走新标签。要登录后抓正文给 Agent 用 studio_embedded_browser_capture。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "http(s) 页面 URL" },
+      },
+      required: ["url"],
+    },
+    async execute(input) {
+      if (!ioRef) {
+        return "studio_open_url 失败：Socket.IO 未初始化，无法通知界面打开。";
+      }
+      try {
+        const safe = await assertBrowserFetchUrlSafe(coerceHttpUrlInput(String(input.url || "")));
+        const url = safe.toString();
+        emitStudioOpenUrlToClients(url);
+        return `studio_open_url_ok: 已请求打开 ${url}（桌面端为独立浏览弹窗；若未看见请确认已用 RDK Studio 桌面包且前端已连上 Socket）。`;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return `studio_open_url 失败：${msg}`;
+      }
+    },
+  };
+}
+
+export function createStudioOpenUrlTool(): Tool[] {
+  return [studioOpenUrlTool()];
 }
 
 function studioEmbeddedBrowserCaptureTool(): Tool<{ url: string; timeoutMs?: number }> {

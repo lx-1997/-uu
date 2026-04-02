@@ -53,18 +53,38 @@ export function resolveApiUrl(path: string): string {
 }
 
 /**
- * 对话里图片/视频等 src：桌面端补 apiBase；data/blob/http(s) 原样返回；无前导 / 的相对路径会先规范为以 / 开头。
+ * Electron 打包后页面为 file://，<img> 请求 :8787 常不带 Cookie；与 EventSource 一样用 query 补会话（见 sso getSessionIdFromRequest）。
+ */
+function appendSsoSessionToLocalFilesUrl(url: string): string {
+  if (typeof window === 'undefined') return url;
+  if (!url.includes('/api/local-files/')) return url;
+  try {
+    const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
+    if (!sid || !/^[a-f0-9]{64}$/i.test(sid)) return url;
+    const u = new URL(url, 'http://localhost');
+    if (u.searchParams.has('rdk_sso_session')) return url;
+    u.searchParams.set('rdk_sso_session', sid);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * 对话里图片/视频等 src：桌面端补 apiBase；data/blob 原样返回；http(s) 与相对路径均会补全并在需 SSO 时为 local-files 附加 rdk_sso_session。
  */
 export function resolveMediaUrl(src: string): string {
   const s = String(src || '').trim();
   if (!s) return s;
   if (s.startsWith('data:') || s.startsWith('blob:')) return s;
-  if (/^https?:\/\//i.test(s)) return s;
+  if (/^https?:\/\//i.test(s)) {
+    return appendSsoSessionToLocalFilesUrl(s);
+  }
   if (s.startsWith('//') && typeof window !== 'undefined') {
-    return `${window.location.protocol}${s}`;
+    return appendSsoSessionToLocalFilesUrl(`${window.location.protocol}${s}`);
   }
   const path = s.startsWith('/') ? s : `/${s.replace(/^\.\//, '')}`;
-  return resolveApiUrl(path);
+  return appendSsoSessionToLocalFilesUrl(resolveApiUrl(path));
 }
 
 /**

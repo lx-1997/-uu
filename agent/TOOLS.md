@@ -25,6 +25,7 @@
 | `web_search` / `web_fetch` | 联网搜索与拉取页面 | 结论给来源链接；不确定能不能做时先搜再 fetch；板型与能力看设备记录与 board_openclaw_assess |
 | `web_browser_fetch` | 无头 Chromium 打开页面并抓渲染后文本 | 需服务端 `BROWSER_FETCH_ENABLED=1` 且已 `playwright install chromium`；SPA/Next 等壳页在 web_fetch 不足时用，更重更慢 |
 | `studio_embedded_browser_capture` | **桌面端**独立小悬浮窗打开页面并提交正文 | 不挡主界面；登录态与 NodeHub 一致；团队允许域名见 `config/studio-browser-capture.json` |
+| `studio_open_url` | **桌面端**独立浏览弹窗打开链接（可关闭） | **不抓正文**、不经 `studio-browser-capture.json` 白名单；失败时可能回退内嵌；登录后要给 Agent 正文仍用上一行 |
 | `ros_topics` / `ros_nodes` | ROS2 操作 | 设备可能未装 ROS2 |
 | `vnc_start/stop/status` | 远程桌面 | |
 | `navigate:{tab}` | 页面跳转 | dashboard/flasher/terminal/files/vnc/ide/openclaw/hardware 等 |

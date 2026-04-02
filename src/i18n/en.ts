@@ -16,6 +16,27 @@ export const EN: Record<string, string> = {
   'tabs.flasher': 'Flasher',
   'tabs.openclaw': 'OpenClaw',
 
+  /** 顶栏工作台任务（RDKClaw 编排 / 智能体 / 后台对话） */
+  'runtimeTasks.regionWorkspace': 'Workspace tasks in progress',
+  'runtimeTasks.titleWorkspaceExec': 'Workspace execution',
+  'runtimeTasks.emptyWorkspaceExec':
+    'Nothing is running. Start one-shot dev / health check on the workspace, or send a command in RDKClaw chat.',
+  'runtimeTasks.openFlasher': 'Open flasher',
+  'runtimeTasks.flashInProgress': 'Image flash',
+  'runtimeTasks.flowCheckHint': 'Flow validation in progress',
+  'runtimeTasks.flowChecking': 'Flow check',
+  'runtimeTasks.flowCheckingDetail': 'Node-RED / ROS validation…',
+  'runtimeTasks.workspaceLoading': 'Loading',
+  'runtimeTasks.openHardware': 'Open hardware monitor',
+  'runtimeTasks.rosRecording': 'ROS recording',
+  'runtimeTasks.rosRecordingDetail': 'Recording topics',
+  'runtimeTasks.rdkclawExecuting': 'RDKClaw run',
+  'runtimeTasks.studioThinking': 'Thinking / tools running…',
+  'runtimeTasks.openRdkDock': 'Open RDKClaw chat and run timeline',
+  'runtimeTasks.openBackgroundRun': 'Open chat to see background run timeline',
+  'runtimeTasks.backgroundRun': 'Background chat',
+  'runtimeTasks.openTaskDock': 'Open chat and task panel',
+
   // Icon rail — primary
   'nav.dashboard.label': 'Workspace',
   'nav.dashboard.desc': 'Device overview and shortcuts',

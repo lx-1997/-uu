@@ -265,6 +265,9 @@ const OPENCLAW_MERGE_PY_B64 = Buffer.from(OPENCLAW_MERGE_PY, 'utf8').toString('b
 /** 空 patch：仅触发 oc_merge.py 侧默认策略（含关闭 memorySearch） */
 const OPENCLAW_EMPTY_MERGE_PATCH_B64 = Buffer.from('{}', 'utf8').toString('base64');
 
+/** oc_merge 失败不阻断安装/onboard（无 python、磁盘只读等时常见） */
+const OPENCLAW_MERGE_EMPTY_LENIENT_SHELL = `( echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1' ) 2>&1 || echo "[OpenClaw] oc_merge 失败（已跳过，可稍后同步配置）" >&2`;
+
 // 常量定义
 const NPM_NVM_CLEANUP =
   '(npm config delete prefix 2>/dev/null || true) && (npm config delete globalconfig 2>/dev/null || true)';
@@ -338,14 +341,9 @@ if not token:
     json.dump(d, f, indent=2, ensure_ascii=False)
 `.trim(), 'utf8').toString('base64');
 
-const ENSURE_GATEWAY_LOCAL_MODE = [
-  `echo '${ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_mode.py`,
-  'python3 /tmp/oc_fix_gateway_mode.py 2>&1 || echo "[OpenClaw] gateway mode 修复失败" >&2',
-].join(' && ');
-const ENSURE_GATEWAY_AUTH_TOKEN = [
-  `echo '${ENSURE_GATEWAY_AUTH_TOKEN_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_token.py`,
-  'python3 /tmp/oc_fix_gateway_token.py 2>&1 || echo "[OpenClaw] gateway token 修复失败" >&2',
-].join(' && ');
+/** base64/ python 任一失败均不阻断安装链（与 `&&` 串联时避免 silent skip：此前 decode 失败会导致根本未执行 python） */
+const ENSURE_GATEWAY_LOCAL_MODE = `( echo '${ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_mode.py && python3 /tmp/oc_fix_gateway_mode.py ) 2>&1 || echo "[OpenClaw] gateway mode 脚本失败（已跳过）" >&2`;
+const ENSURE_GATEWAY_AUTH_TOKEN = `( echo '${ENSURE_GATEWAY_AUTH_TOKEN_SCRIPT_B64}' | base64 -d > /tmp/oc_fix_gateway_token.py && python3 /tmp/oc_fix_gateway_token.py ) 2>&1 || echo "[OpenClaw] gateway token 脚本失败（已跳过）" >&2`;
 const RUN_DOCTOR =
   '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 失败" >&2; else true; fi)';
 const RUN_HEALTH =
@@ -441,12 +439,12 @@ function buildConnectParams(nonce, ts) {
   const params = {
     minProtocol: 3,
     maxProtocol: 3,
-    client: { id: CLIENT_ID, version: '1.0.0', platform: os.platform(), mode: CLIENT_MODE },
+    client: { id: CLIENT_ID, version: '1.0.1', platform: os.platform(), mode: CLIENT_MODE },
     role: ROLE,
     scopes: SCOPES,
     device: signChallenge(nonce, ts),
     locale: 'zh-CN',
-    userAgent: 'rdkstudio/1.0.0',
+    userAgent: 'rdkstudio/1.0.1',
     caps: ['agent-events', 'tool-events'],
   };
   if (token) params.auth = { token };
@@ -623,37 +621,55 @@ const GATEWAY_DIAG_LOGS = [
 ].join(' ; ');
 
 /**
+ * `devices approve --latest` 在无待审批时常打印 “No pending…” 却以非零退出；网关已就绪时通常表示 CLI 已信任，不应阻断整段安装。
+ */
+const RDK_OC_GATEWAY_PAIR_APPROVE_BENIGN_RE =
+  'no pending|nothing to approve|no[[:space:]]+pending|no .*requests to approve|already paired|already approved|nothing pending|not pending|no devices?[[:space:]]+to approve';
+
+/**
  * 板端 shell：与本机 Gateway 建立设备信任（与 UI gateway-pair 一致）。
  * - 新版 OpenClaw：`openclaw devices approve --latest`（`pair` 子命令已移除）
  * - 旧版：回退 `openclaw pair --force` / `pair --reset`
+ * - 对 “no pending” 类输出：最多重试 3 次（网关刚就绪时的竞态），仍失败则视为可继续。
  */
-const RDK_OC_GATEWAY_PAIR_APPROVE_SNIPPET = [
-  'rdk_po="$("$OPENCLAW_CMD" devices approve --latest 2>&1)"; rdk_pe=$?',
-  'if [ "$rdk_pe" -ne 0 ] && echo "$rdk_po" | grep -qiE "unknown command.*devices"; then rdk_po="$("$OPENCLAW_CMD" pair --force 2>&1)"; rdk_pe=$?; fi',
-  'echo "$rdk_po"',
-  'exit "$rdk_pe"',
-].join(' && ');
-
-/** 子 shell 内执行 approve/pair，便于嵌入「仅当端口已监听」的脚本而不污染外层退出码语义 */
-const RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL =
-  '( rdk_po="$("$OPENCLAW_CMD" devices approve --latest 2>&1)"; rdk_pe=$?; ' +
+const RDK_OC_GATEWAY_PAIR_APPROVE_INLINE =
+  'rdk_pe=1; rdk_po=""; ' +
+  'for rdk_attempt in 1 2 3; do ' +
+  'rdk_po="$("$OPENCLAW_CMD" devices approve --latest 2>&1)"; rdk_pe=$?; ' +
+  '[ "$rdk_pe" -eq 0 ] && break; ' +
+  `echo "$rdk_po" | grep -qiE "${RDK_OC_GATEWAY_PAIR_APPROVE_BENIGN_RE}" && { rdk_pe=0; break; }; ` +
+  '[ "$rdk_attempt" -lt 3 ] && sleep 2; ' +
+  'done; ' +
   'if [ "$rdk_pe" -ne 0 ] && echo "$rdk_po" | grep -qiE "unknown command.*devices"; then rdk_po="$("$OPENCLAW_CMD" pair --force 2>&1)"; rdk_pe=$?; fi; ' +
-  'echo "$rdk_po"; exit "$rdk_pe" )';
+  `if [ "$rdk_pe" -ne 0 ] && echo "$rdk_po" | grep -qiE "${RDK_OC_GATEWAY_PAIR_APPROVE_BENIGN_RE}"; then rdk_pe=0; fi; ` +
+  'echo "$rdk_po"; ' +
+  `if [ "$rdk_pe" -eq 0 ] && echo "$rdk_po" | grep -qiE "${RDK_OC_GATEWAY_PAIR_APPROVE_BENIGN_RE}"; then echo "[OpenClaw] CLI↔Gateway：无待审批设备（视为已信任），继续部署" >&2; fi; ` +
+  'if [ "${OPENCLAW_STRICT_GATEWAY_TRUST:-0}" = "1" ] && [ "$rdk_pe" -ne 0 ]; then exit "$rdk_pe"; fi; ' +
+  'if [ "${RDK_OC_PAIR_LENIENT:-0}" = "1" ] && [ "$rdk_pe" -ne 0 ]; then echo "[OpenClaw] 警告: CLI↔Gateway 信任未完成（见上文）；流程仍继续。若报 pairing required 请使用面板「一键配对」。" >&2; rdk_pe=0; fi; ' +
+  'exit "$rdk_pe"';
+
+/** 必须包在子 shell 中，避免外层 `prev && …` 与后续 `; for` 被 bash 拆成无条件执行 */
+const RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL = '( ' + RDK_OC_GATEWAY_PAIR_APPROVE_INLINE + ' )';
+const RDK_OC_GATEWAY_PAIR_APPROVE_SNIPPET = RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL;
 
 /**
  * 安装 / 升级 / 重启 Gateway 之后：等待 127.0.0.1:18789 再建立 CLI↔Gateway 信任。
- * 若只做端口+token 探活，健康检查可通过，但板端会话内执行类工具仍可能报 pairing required。
+ * 默认宽容：端口暂不可用、`devices approve` 失败等不阻断整段安装（板端设 `OPENCLAW_STRICT_GATEWAY_TRUST=1` 可恢复遇错即停）。
+ * 面板「一键配对 / 重置并配对」走 `buildBoardOpenClawGatewayPairRemoteShell`，不设置 RDK_OC_PAIR_LENIENT。
  */
 const ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART = [
   BOARD_ENV_EXPORT,
   RESOLVE_OPENCLAW_CMD,
   'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] 跳过 CLI↔Gateway 信任：未找到 openclaw CLI"; else ' +
+    'export RDK_OC_PAIR_LENIENT=1; ' +
     'echo "[OpenClaw] 等待 127.0.0.1:18789 后建立网关信任（devices approve / pair）..." && ' +
     'ok=0 && ' +
     `for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done && ` +
-    'if [ "$ok" != "1" ]; then echo "[OpenClaw] Gateway 端口未就绪，无法建立信任"; exit 1; fi && ' +
+    'if [ "$ok" = "1" ]; then ' +
     RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL +
-    '; fi',
+    '; else echo "[OpenClaw] Gateway 端口未就绪，跳过 CLI 信任（安装/同步仍继续）。可稍后 restart 网关或面板「一键配对」。" >&2; ' +
+    GATEWAY_DIAG_LOGS +
+    '; fi; fi',
 ].join(' && ');
 
 const GATEWAY_RESTART_CMD =
@@ -1460,7 +1476,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       `openclaw onboard --non-interactive ${acceptRisk} ${skipHealth} ${gatewayBind} --auth-choice ${provider} --${provider} '${escapedKey}' --install-daemon 2>&1`,
       'echo "[OpenClaw] 初始化完成"',
       'echo "[RDK Studio] 板端默认关闭 memorySearch（无 embedding 时避免 memory_search 失败；记忆请用桌面或读文件）"',
-      `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1'`,
+      OPENCLAW_MERGE_EMPTY_LENIENT_SHELL,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
       ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
@@ -1570,11 +1586,11 @@ print(json.dumps(result,ensure_ascii=False))`;
       const cmd = [
         'export PATH="$HOME/.npm-global/bin:$PATH"',
         RESOLVE_OPENCLAW_CMD,
-        `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}' '${flag}'`,
+        `( echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}' '${flag}' ) 2>&1 || echo "[OpenClaw] oc_merge 失败（已跳过写入，可稍后重试保存配置）" >&2`,
         ENSURE_GATEWAY_LOCAL_MODE,
         RESTART_GATEWAY_FALLBACK,
         ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
-        'echo "[OpenClaw] 配置已保存，Gateway 已重启"',
+        'echo "[OpenClaw] 保存与 Gateway 重启流程已结束（若曾提示 oc_merge 失败请稍后在设置中重试保存）"',
       ].join(' && ');
       mergeHandle = this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
     };
@@ -1623,7 +1639,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${START_GATEWAY_FALLBACK}; fi`,
       `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
       `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; ` +
-        `if [ -n "$OPENCLAW_CMD" ]; then echo "[OpenClaw] 建立 CLI↔Gateway 信任（devices approve / pair）..."; ${RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL}; else true; fi; ` +
+        `if [ -n "$OPENCLAW_CMD" ]; then export RDK_OC_PAIR_LENIENT=1; echo "[OpenClaw] 建立 CLI↔Gateway 信任（devices approve / pair）..."; ${RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL}; else true; fi; ` +
         `else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
@@ -1653,7 +1669,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
       BOARD_FIND_SKILLS_INSTALL,
       'echo "[RDK Studio] 板端默认关闭 memorySearch（避免未配置 embedding 时失败）"',
-      `echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${OPENCLAW_EMPTY_MERGE_PATCH_B64}' '1'`,
+      OPENCLAW_MERGE_EMPTY_LENIENT_SHELL,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
       ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,

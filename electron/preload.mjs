@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   /** 论坛 / RoboGo 免登录：独立窗口种 token Cookie + Bearer（payload 来自 /api/sso/external-browser-bundle） */
   openDroboticsAuthBrowser: (payload) => ipcRenderer.invoke('rdk:open-drobotics-auth-browser', payload),
 
+  /** RDKClaw studio_open_url：独立原生窗口（标题栏带关闭），不占用主窗口内嵌区 */
+  openAgentBrowserPopup: (url) =>
+    ipcRenderer.invoke('rdk:open-agent-browser-popup', { url: String(url ?? '').trim() }),
+
   // 在主窗口内嵌入 WebContentsView：字符串兼容 IDE/VNC；对象可带 loadUrl、token（论坛/RoboGo 内嵌免登录）
   openUrl: (target) => {
     if (typeof target === 'string') {

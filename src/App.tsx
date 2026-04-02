@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { initAnalyticsFlushListeners } from './analytics/client';
 import { useStudioPresence } from './analytics/useStudioPresence';
 import { useAppState } from './hooks/useAppState';
@@ -16,11 +16,13 @@ import ConfirmDialog from './components/ConfirmDialog';
 import DeviceOfflineListener from './components/DeviceOfflineListener';
 import ErrorBoundary from './components/ErrorBoundary';
 import OpenClawDeployPollHost from './components/OpenClawDeployPollHost';
+import RuntimeActiveTaskQueue from './components/RuntimeActiveTaskQueue';
 import StudioBrowserCaptureBridge from './components/StudioBrowserCaptureBridge';
 import ElectronSerialPortPicker from './components/ElectronSerialPortPicker';
 import { isDeviceShownOnline } from './utils/device-connection';
 import { getRdkEmbedPanel, type RdkEmbedPanel } from './utils/embed-mode';
 import type { Tab } from './app-types';
+import { STUDIO_AGENT_WEB_OPEN } from './utils/studio-agent-web';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Flasher = lazy(() => import('./components/Flasher'));
@@ -131,7 +133,11 @@ function MainContent() {
   );
 }
 
-function useDesktopTabSync(activeTab: string, drPortalMapUrl: string | null) {
+function useDesktopTabSync(
+  activeTab: string,
+  drPortalMapUrl: string | null,
+  agentWebPreviewUrl: string | null,
+) {
   useEffect(() => {
     const rdk = (window as any).rdkDesktop;
     if (!rdk?.setActiveUrl) return;
@@ -139,10 +145,15 @@ function useDesktopTabSync(activeTab: string, drPortalMapUrl: string | null) {
       rdk.setActiveUrl(drPortalMapUrl);
       return;
     }
-    if (activeTab !== 'vnc' && activeTab !== 'ide') {
-      rdk.setActiveUrl(null);
+    if (activeTab === 'vnc' || activeTab === 'ide') {
+      return;
     }
-  }, [activeTab, drPortalMapUrl]);
+    if (agentWebPreviewUrl) {
+      rdk.setActiveUrl(agentWebPreviewUrl);
+      return;
+    }
+    rdk.setActiveUrl(null);
+  }, [activeTab, drPortalMapUrl, agentWebPreviewUrl]);
 }
 
 function useDesktopViewBounds(activeTab: string, railExpanded: boolean) {
@@ -157,10 +168,13 @@ function useDesktopViewBounds(activeTab: string, railExpanded: boolean) {
         const viewport = document.querySelector('.content-area') as HTMLElement | null;
         if (!viewport) return;
         const rect = viewport.getBoundingClientRect();
+        const x = Math.round(rect.left);
+        const y = Math.round(rect.top);
+        const width = Math.round(Math.max(rect.width, window.innerWidth - x));
         rdk.updateViewBounds?.({
-          x: Math.round(rect.left),
-          y: Math.round(rect.top),
-          width: Math.round(rect.width),
+          x,
+          y,
+          width,
           height: Math.round(rect.height),
         });
       });
@@ -192,8 +206,19 @@ function AppShell() {
     drAuthenticatedPortal,
   } = useAppState();
   const { t } = useI18n();
+  const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const h = (e: Event) => {
+      const u = String((e as CustomEvent<{ url?: string }>).detail?.url || '').trim();
+      if (u) setAgentWebPreviewUrl(u);
+    };
+    window.addEventListener(STUDIO_AGENT_WEB_OPEN, h);
+    return () => window.removeEventListener(STUDIO_AGENT_WEB_OPEN, h);
+  }, []);
+
   useStudioPresence(activeTab);
-  useDesktopTabSync(activeTab, drAuthenticatedPortal?.mapUrl ?? null);
+  useDesktopTabSync(activeTab, drAuthenticatedPortal?.mapUrl ?? null, agentWebPreviewUrl);
   useDesktopViewBounds(activeTab, railExpanded);
   useThemeSync();
 
@@ -242,38 +267,41 @@ function AppShell() {
       <OpenClawDeployPollHost />
       <IconRail />
 
-      <header className="top-bar">
-        <div className="topbar-left">
-          <span className="topbar-page-name">{tabTitle}</span>
-        </div>
-        <div className="topbar-right">
-          {currentDevice && (
-            <div className="topbar-device-chip">
-              <span className={`status-dot ${deviceOnline ? 'online' : 'offline'}`} />
-              <span className="mono truncate" style={{ maxWidth: 180 }}>
-                {currentDevice.name} · {currentDevice.ip}
-              </span>
-            </div>
-          )}
-          <TopToolbar />
-        </div>
-      </header>
+      <div className="app-main-stack">
+        <header className="top-bar">
+          <div className="topbar-left">
+            <span className="topbar-page-name">{tabTitle}</span>
+          </div>
+          <div className="topbar-right">
+            {currentDevice && (
+              <div className="topbar-device-chip">
+                <span className={`status-dot ${deviceOnline ? 'online' : 'offline'}`} />
+                <span className="mono truncate" style={{ maxWidth: 180 }}>
+                  {currentDevice.name} · {currentDevice.ip}
+                </span>
+              </div>
+            )}
+            <TopToolbar />
+          </div>
+        </header>
+        <RuntimeActiveTaskQueue />
 
-      <main className="content-area">
-        <ErrorBoundary>
-          <MainContent />
-        </ErrorBoundary>
-        {/* 引导期间也需挂载：第 5 步「发送」会展开 Dock 并提交表单；若此处不渲染则 .dock-input 不存在 */}
-        <AIDock />
-      </main>
+        <main className="content-area">
+          <ErrorBoundary>
+            <MainContent />
+          </ErrorBoundary>
+          {/* 引导期间也需挂载：第 5 步「发送」会展开 Dock 并提交表单；若此处不渲染则 .dock-input 不存在 */}
+          <AIDock />
+        </main>
 
-      <Toasts />
-      <ElectronSerialPortPicker />
-      <AddDeviceModal />
-      <SettingsPanel />
-      <ConfirmDialog />
-      <DeviceOfflineListener />
-      <StudioBrowserCaptureBridge />
+        <Toasts />
+        <ElectronSerialPortPicker />
+        <AddDeviceModal />
+        <SettingsPanel />
+        <ConfirmDialog />
+        <DeviceOfflineListener />
+        <StudioBrowserCaptureBridge />
+      </div>
     </div>
   );
 }
@@ -284,6 +312,8 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
     currentDevice, theme, setChatExpanded, setActiveTab,
   } = useAppState();
   const { t } = useI18n();
+  const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
+
   useStudioPresence(panel === 'openclaw' ? 'openclaw' : 'dashboard');
 
   useEffect(() => {
@@ -291,9 +321,26 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
   }, [theme]);
 
   useEffect(() => {
+    const h = (e: Event) => {
+      const u = String((e as CustomEvent<{ url?: string }>).detail?.url || '').trim();
+      if (u) setAgentWebPreviewUrl(u);
+    };
+    window.addEventListener(STUDIO_AGENT_WEB_OPEN, h);
+    return () => window.removeEventListener(STUDIO_AGENT_WEB_OPEN, h);
+  }, []);
+
+  useEffect(() => {
+    const rdk = (window as any).rdkDesktop;
+    if (!rdk?.setActiveUrl || !agentWebPreviewUrl) return;
+    rdk.setActiveUrl(agentWebPreviewUrl);
+  }, [agentWebPreviewUrl]);
+
+  useEffect(() => {
     setChatExpanded(true);
     setActiveTab(panel === 'openclaw' ? 'openclaw' : 'dashboard');
   }, [panel, setChatExpanded, setActiveTab]);
+
+  useDesktopViewBounds(panel === 'openclaw' ? 'openclaw' : 'dashboard', false);
 
   const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
   const embedTitle = panel === 'ai-dock'
@@ -312,55 +359,57 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
     <div className={`app-shell rdk-embed`} data-rdk-embed={panel}>
       <OpenClawDeployPollHost />
 
-      <header className="top-bar rdk-embed-topbar">
-        <div className="topbar-left">
-          <span className="topbar-page-name">{embedTitle}</span>
-          <span className="rdk-embed-hint">{t('embed.dragHint', '可拖到另一显示器与主窗口并排')}</span>
-        </div>
-        <div className="topbar-right">
-          {currentDevice && (
-            <div className="topbar-device-chip">
-              <span className={`status-dot ${deviceOnline ? 'online' : 'offline'}`} />
-              <span className="mono truncate" style={{ maxWidth: 180 }}>
-                {currentDevice.name} · {currentDevice.ip}
-              </span>
-            </div>
-          )}
-          {typeof window !== 'undefined' && window.opener && (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={focusMain}>
-              {t('embed.focusMain', '切换到主窗口')}
-            </button>
-          )}
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => window.close()}>
-            {t('embed.closePopout', '关闭副屏')}
-          </button>
-        </div>
-      </header>
-
-      <main className="content-area rdk-embed-main">
-        <ErrorBoundary>
-          {panel === 'openclaw' ? (
-            <Suspense fallback={<RouteFallback />}>
-              <div className="page-slot page-enter rdk-embed-openclaw-slot">
-                <OpenClaw />
+      <div className="app-main-stack">
+        <header className="top-bar rdk-embed-topbar">
+          <div className="topbar-left">
+            <span className="topbar-page-name">{embedTitle}</span>
+            <span className="rdk-embed-hint">{t('embed.dragHint', '可拖到另一显示器与主窗口并排')}</span>
+          </div>
+          <div className="topbar-right">
+            {currentDevice && (
+              <div className="topbar-device-chip">
+                <span className={`status-dot ${deviceOnline ? 'online' : 'offline'}`} />
+                <span className="mono truncate" style={{ maxWidth: 180 }}>
+                  {currentDevice.name} · {currentDevice.ip}
+                </span>
               </div>
-            </Suspense>
-          ) : (
-            <div className="rdk-embed-ai-dock-placeholder" aria-hidden>
-              <p>{t('embed.aiDock.placeholder', '下方为 RDKClaw 对话区，可与主窗口的 IDE / OpenClaw 并排使用。')}</p>
-            </div>
-          )}
-        </ErrorBoundary>
-        <AIDock />
-      </main>
+            )}
+            {typeof window !== 'undefined' && window.opener && (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={focusMain}>
+                {t('embed.focusMain', '切换到主窗口')}
+              </button>
+            )}
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => window.close()}>
+              {t('embed.closePopout', '关闭副屏')}
+            </button>
+          </div>
+        </header>
 
-      <Toasts />
-      <ElectronSerialPortPicker />
-      <AddDeviceModal />
-      <SettingsPanel />
-      <ConfirmDialog />
-      <DeviceOfflineListener />
-      <StudioBrowserCaptureBridge />
+        <main className="content-area rdk-embed-main">
+          <ErrorBoundary>
+            {panel === 'openclaw' ? (
+              <Suspense fallback={<RouteFallback />}>
+                <div className="page-slot page-enter rdk-embed-openclaw-slot">
+                  <OpenClaw />
+                </div>
+              </Suspense>
+            ) : (
+              <div className="rdk-embed-ai-dock-placeholder" aria-hidden>
+                <p>{t('embed.aiDock.placeholder', '下方为 RDKClaw 对话区，可与主窗口的 IDE / OpenClaw 并排使用。')}</p>
+              </div>
+            )}
+          </ErrorBoundary>
+          <AIDock />
+        </main>
+
+        <Toasts />
+        <ElectronSerialPortPicker />
+        <AddDeviceModal />
+        <SettingsPanel />
+        <ConfirmDialog />
+        <DeviceOfflineListener />
+        <StudioBrowserCaptureBridge />
+      </div>
     </div>
   );
 }
