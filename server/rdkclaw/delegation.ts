@@ -1,11 +1,11 @@
-import type { RDKClawChatRequest, RDKClawSkillMeta } from "./types.js";
+import type { PersonaProfile, RDKClawChatRequest, RDKClawSkillMeta } from "./types.js";
 import type { BoardSnapshot } from "./system-prompt-builder.js";
 
 export interface DelegateDecision {
   path: "local_only" | "collaborative" | "board_primary";
   canLocalComplete: boolean;
   needsBoardCollaboration: boolean;
-  source: "user_mode" | "skill_policy" | "task_analysis" | "default";
+  source: "user_mode" | "skill_policy" | "task_analysis" | "default" | "persona";
   reason: string;
   confidence: number;
 }
@@ -26,6 +26,7 @@ export function selectDelegateDecision(
   req: RDKClawChatRequest,
   matchedSkills: RDKClawSkillMeta[],
   boardSnapshot: BoardSnapshot,
+  delegationBias: PersonaProfile["delegationBias"] = "balanced",
 ): DelegateDecision {
   if (!req.deviceId) {
     return {
@@ -82,6 +83,31 @@ export function selectDelegateDecision(
   }
 
   const hasBoardSkills = boardSnapshot.skills.length > 0;
+
+  if (delegationBias === "local-first") {
+    return {
+      path: "local_only",
+      canLocalComplete: true,
+      needsBoardCollaboration: false,
+      source: "persona",
+      reason: hasBoardSkills
+        ? `委派倾向为 Studio 优先：默认用 device_* / 本地工具链；仅在技能强制、用户指定 board 模式或本地多次失败且确需板端技能链时再使用 OpenClaw（assess/delegate）`
+        : "委派倾向为 Studio 优先：默认本地与 SSH 工具链完成；确需板端 OpenClaw 时再评估",
+      confidence: 0.88,
+    };
+  }
+
+  if (delegationBias === "board-first" && hasBoardSkills) {
+    return {
+      path: "board_primary",
+      canLocalComplete: false,
+      needsBoardCollaboration: true,
+      source: "persona",
+      reason: `委派倾向为板端优先且板端已有技能：复杂板端任务优先走 OpenClaw（assess→delegate），本地作兜底`,
+      confidence: 0.82,
+    };
+  }
+
   return {
     path: "collaborative",
     canLocalComplete: true,

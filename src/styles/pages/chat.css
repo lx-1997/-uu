@@ -976,14 +976,197 @@
 /* ── Context strip (AI Native) ── */
 .dock-context-strip {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
   padding: 4px 8px 2px;
+  overflow: visible;
+}
+
+.dock-context-strip-lead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dock-context-strip-scroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.dock-context-strip::-webkit-scrollbar {
+.dock-context-strip-scroll::-webkit-scrollbar {
   height: 0;
+}
+
+/* Gemini 式：回复模式下拉 */
+.dock-response-mode-wrap {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.dock-response-mode-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 2.25rem;
+  padding: 4px 10px 4px 12px;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  text-align: left;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  border: 1px solid var(--border, transparent);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.dock-response-mode-trigger:hover {
+  background: var(--chip-bg-active);
+  color: var(--chip-text-active);
+  border-color: var(--accent-border);
+}
+
+.dock-response-mode-trigger-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+}
+
+.dock-response-mode-trigger .dock-response-mode-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+}
+
+.dock-response-mode-trigger .dock-response-mode-desc {
+  font-size: 0.625rem;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--text-muted);
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-response-mode-trigger:hover .dock-response-mode-desc {
+  color: var(--chip-text-active);
+}
+
+.dock-response-mode-trigger.is-thinking {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
+}
+
+.dock-response-mode-trigger.is-thinking .dock-response-mode-desc {
+  color: var(--text-muted);
+  opacity: 0.95;
+}
+
+.dock-response-mode-chevron {
+  display: flex;
+  flex-shrink: 0;
+  opacity: 0.72;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.dock-response-mode-trigger.is-open .dock-response-mode-chevron {
+  transform: rotate(180deg);
+}
+
+[data-theme="cyber"] .dock-response-mode-trigger:hover {
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.dock-response-mode-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: min(17.5rem, calc(100vw - 2rem));
+  padding: 6px 4px 8px;
+  border-radius: var(--radius-lg, 12px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.18));
+  animation: fadeUp var(--duration-fast) var(--ease-out);
+}
+
+.dock-response-mode-panel-hd {
+  padding: 6px 12px 4px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.dock-response-mode-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  margin: 0 2px;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  font-family: inherit;
+  text-align: left;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.dock-response-mode-option:hover {
+  background: var(--chip-bg-active);
+}
+
+.dock-response-mode-option-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dock-response-mode-option-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.dock-response-mode-option-desc {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.25;
+  color: var(--text-muted);
+}
+
+.dock-response-mode-option.is-selected .dock-response-mode-option-desc {
+  color: var(--text-muted);
+  opacity: 0.92;
+}
+
+.dock-response-mode-check {
+  flex-shrink: 0;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-response-mode-check-disc {
+  opacity: 1;
 }
 
 .dock-ctx-chip {
@@ -1008,6 +1191,12 @@
 
 [data-theme="cyber"] .dock-ctx-chip:hover {
   box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.dock-ctx-chip.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent-border);
 }
 
 /* ── Suggestions dropdown (idle) ── */

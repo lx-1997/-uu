@@ -20,6 +20,9 @@ export interface RDKClawAttachment {
 
 export type ChannelSource = "studio" | "weixin" | "feishu" | "autonomy";
 
+/** 工作台 Studio：思考模式沿用户模型配置；快速模式降低扩展思考与推理展示并略抬高温度 */
+export type StudioResponseMode = "quick" | "thinking";
+
 export interface RDKClawChatRequest {
   message: string;
   deviceId?: string;
@@ -36,6 +39,8 @@ export interface RDKClawChatRequest {
   trainingDataOptIn?: boolean;
   /** Studio 界面已校验的设备/OpenClaw 快照（可选） */
   studioUiHints?: StudioUiHints;
+  /** Studio 工作台：快速 / 思考（影响本轮模型采样与思考档位，默认 thinking） */
+  studioResponseMode?: StudioResponseMode;
   // 服务端内部字段：用于在 SSE 断连时中止当前 run
   abortSignal?: AbortSignal;
 }
@@ -88,6 +93,9 @@ export interface RDKClawEvent {
 
 export type ApprovalMode = "always" | "risk-based" | "auto";
 export type RiskLevel = "low" | "medium" | "high";
+
+/** 对话引擎：thinking=沿用 AI 模型页配置（推荐长任务）；fast=低延迟短答覆盖 */
+export type EnginePreset = "thinking" | "fast";
 export type ApprovalDecisionMode =
   | "allow_once"
   | "allow_session_auto"
@@ -95,6 +103,8 @@ export type ApprovalDecisionMode =
   | "deny";
 
 export interface RDKClawPolicy {
+  /** 缺省 thinking，与旧版 rdkclaw-policy.json 兼容 */
+  enginePreset?: EnginePreset;
   approval: {
     mode: ApprovalMode;
     riskThreshold: RiskLevel;

@@ -1,5 +1,6 @@
 {
   "activeId": "preset-doubao-seed-2.0-lite",
+  "quickActiveId": "preset-doubao-seed-2.0-lite-quick",
   "entries": [
     {
       "id": "preset-doubao-seed-2.0-lite",
@@ -7,7 +8,23 @@
       "provider": "doubao-seed-2.0-lite",
       "model": "doubao-seed-2.0-lite",
       "apiKey": "1cb7274d-4684-4984-99c2-3b177a6a66ad",
-      "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3"
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "thinkingDefault": "high",
+      "reasoningVisibility": "stream",
+      "samplingTemperature": "0.1",
+      "samplingTopP": "1"
+    },
+    {
+      "id": "preset-doubao-seed-2.0-lite-quick",
+      "label": "RDKClaw Default / doubao-seed-2.0-lite (quick)",
+      "provider": "doubao-seed-2.0-lite",
+      "model": "doubao-seed-2.0-lite",
+      "apiKey": "1cb7274d-4684-4984-99c2-3b177a6a66ad",
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "thinkingDefault": "off",
+      "reasoningVisibility": "off",
+      "samplingTemperature": "0.35",
+      "samplingTopP": "1"
     }
   ]
 }

@@ -5,7 +5,7 @@ import { useI18n } from '../i18n/use-i18n';
 import { parseUiLanguageCommand } from '../i18n/language-command';
 import { useStreamRevealSegments } from '../hooks/useStreamReveal';
 import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
-import type { AgentAttachmentPayload } from '../api';
+import type { AgentAttachmentPayload, StudioResponseMode } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, fetchApi } from '../utils/apiBase';
@@ -87,6 +87,8 @@ type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
 const MAX_PENDING_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const MAX_PENDING_VIDEO_BYTES = 50 * 1024 * 1024;
+
+const RESPONSE_MODE_ORDER: StudioResponseMode[] = ['quick', 'thinking'];
 
 const OFFICE_DOC_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -900,10 +902,33 @@ export default function AIDock() {
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
     currentDevice, addToast, language, setLanguage,
+    studioResponseMode, setStudioResponseMode,
   } = useAppState();
   const { t, isEn } = useI18n();
   const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
+  const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
+  const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
+
+  useEffect(() => {
+    if (!responseModeMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = responseModeMenuRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        // 延后一帧再关，避免同一次点击还要触发发送等操作时被子树更新干扰
+        window.requestAnimationFrame(() => setResponseModeMenuOpen(false));
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setResponseModeMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [responseModeMenuOpen]);
 
   const mentionParse = useMemo(() => parseTrailingAtMention(cmd), [cmd]);
   const filteredMentionCaps = useMemo(() => {
@@ -1733,7 +1758,12 @@ export default function AIDock() {
                   <path d="M3 3v5h5" />
                 </svg>
               </button>
-              <button className="btn-icon" onClick={clearChatHistory} title={t('dock.task.clearHistoryTitle', '清空')}>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={clearChatHistory}
+                title={t('dock.task.clearHistoryTitle', '新对话（本窗口独立线程，不清除长期记忆）')}
+              >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
               </button>
               <button className="btn-icon" onClick={closeDock} title={t('dock.task.closeTitle', '关闭')}>{Icon.close}</button>
@@ -2188,21 +2218,113 @@ export default function AIDock() {
 
         {/* Context strip (AI Native) */}
         <div className="dock-context-strip">
-          {activeTab === 'openclaw' && (
-            <button
-              className="dock-ctx-chip active"
-              onClick={() => setDockOcMode((prev) => !prev)}
-              title={dockOcMode ? t('dock.ocMode.titleOpenClaw', '当前：OpenClaw Agent 模式（点击切换到 RDKClaw）') : t('dock.ocMode.titleRdk', '当前：RDKClaw 模式（点击切换到 OpenClaw Agent）')}
-              style={{ fontWeight: 600 }}
-            >
-              {dockOcMode ? '🤖 OpenClaw ↔' : '🔧 RDKClaw ↔'}
-            </button>
-          )}
-          {quickPrompts.map((p) => (
-            <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw)}>
-              {p.label}
-            </button>
-          ))}
+          <div className="dock-context-strip-lead">
+            <div className="dock-response-mode-wrap" ref={responseModeMenuRef}>
+              <button
+                type="button"
+                className={`dock-response-mode-trigger ${responseModeMenuOpen ? 'is-open' : ''} ${studioResponseMode === 'thinking' ? 'is-thinking' : 'is-quick'}`}
+                aria-expanded={responseModeMenuOpen}
+                aria-haspopup="listbox"
+                title={
+                  activeTab === 'openclaw' && dockOcMode && openclawSendMessage
+                    ? t('dock.responseMode.hintOpenClaw', '使用 RDKClaw 对话时生效；当前为 OpenClaw Agent 直连')
+                    : t('dock.responseMode.hint', '选择回复模式：快速回答或解决复杂任务')
+                }
+                aria-label={t('dock.responseMode.triggerAria', '回复模式菜单')}
+                onClick={() => setResponseModeMenuOpen((o) => !o)}
+              >
+                <span className="dock-response-mode-trigger-copy">
+                  <span className="dock-response-mode-title">
+                    {studioResponseMode === 'quick'
+                      ? t('dock.responseMode.quick', '快速')
+                      : t('dock.responseMode.thinking', '思考')}
+                  </span>
+                  <span className="dock-response-mode-desc">
+                    {studioResponseMode === 'quick'
+                      ? t('dock.responseMode.quickSub', '快速回答')
+                      : t('dock.responseMode.thinkingSub', '解决复杂任务')}
+                  </span>
+                </span>
+                <span className="dock-response-mode-chevron" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              </button>
+              {responseModeMenuOpen && (
+                <div
+                  className="dock-response-mode-panel"
+                  role="listbox"
+                  aria-label={t('dock.responseMode.panelTitle', '回复模式')}
+                >
+                  <div className="dock-response-mode-panel-hd">
+                    {t('dock.responseMode.panelTitle', '回复模式')}
+                  </div>
+                  {RESPONSE_MODE_ORDER.map((id) => {
+                    const selected = studioResponseMode === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        className={`dock-response-mode-option${selected ? ' is-selected' : ''}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setStudioResponseMode(id);
+                          setResponseModeMenuOpen(false);
+                        }}
+                      >
+                        <span className="dock-response-mode-option-copy">
+                          <span className="dock-response-mode-option-title">
+                            {id === 'quick'
+                              ? t('dock.responseMode.quick', '快速')
+                              : t('dock.responseMode.thinking', '思考')}
+                          </span>
+                          <span className="dock-response-mode-option-desc">
+                            {id === 'quick'
+                              ? t('dock.responseMode.quickSub', '快速回答')
+                              : t('dock.responseMode.thinkingSub', '解决复杂任务')}
+                          </span>
+                        </span>
+                        {selected && (
+                          <span className="dock-response-mode-check" aria-hidden>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                              <circle className="dock-response-mode-check-disc" cx="12" cy="12" r="10" fill="currentColor" />
+                              <path
+                                d="M8 12l2.5 2.5L16 9"
+                                stroke="var(--dock-response-mode-check-mark, #fff)"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {activeTab === 'openclaw' && (
+              <button
+                className="dock-ctx-chip active"
+                onClick={() => setDockOcMode((prev) => !prev)}
+                title={dockOcMode ? t('dock.ocMode.titleOpenClaw', '当前：OpenClaw Agent 模式（点击切换到 RDKClaw）') : t('dock.ocMode.titleRdk', '当前：RDKClaw 模式（点击切换到 OpenClaw Agent）')}
+                style={{ fontWeight: 600 }}
+              >
+                {dockOcMode ? '🤖 OpenClaw ↔' : '🔧 RDKClaw ↔'}
+              </button>
+            )}
+          </div>
+          <div className="dock-context-strip-scroll">
+            {quickPrompts.map((p) => (
+              <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

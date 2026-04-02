@@ -134,6 +134,8 @@ export interface AgentConfig {
   };
   /** 温度参数（0-1，对应 OpenClaw: agents.defaults.models[provider/model].params.temperature） */
   temperature?: number;
+  /** nucleus top_p（0–1），经 agent-loop onPayload 注入 */
+  topP?: number;
   /** 思考级别: minimal / low / medium / high / xhigh；`null` 关闭扩展思考（不传给上游） */
   reasoning?: ThinkingLevel | null;
   /** 最大循环次数 */
@@ -249,6 +251,7 @@ export class Agent {
   private modelDef: Model<any>;
   private apiKey?: string;
   private temperature?: number;
+  private topP?: number;
   private reasoning?: ThinkingLevel | undefined;
   private agentId: string;
   private baseSystemPrompt: string;
@@ -398,6 +401,7 @@ export class Agent {
     this.extraAllowedRoots = config.extraAllowedRoots;
     this.apiKey = config.apiKey ?? getEnvApiKey(provider);
     this.temperature = config.temperature;
+    this.topP = config.topP;
     if (config.reasoning === null) {
       this.reasoning = undefined;
     } else {
@@ -988,6 +992,7 @@ export class Agent {
             streamFn: this.streamFn,
             apiKey: this.apiKey,
             temperature: this.temperature,
+            topP: this.topP,
             reasoning: this.reasoning,
             maxTurns: this.maxTurns,
             contextTokens: this.contextTokens,

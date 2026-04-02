@@ -1648,10 +1648,15 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     onChunk: (chunk: string) => void,
     onComplete: (success: boolean) => void,
     sessionId: string,
-    device: Device
+    device: Device,
+    meta?: {
+      correlationId?: string;
+      studioRunId?: string;
+      studioSessionKey?: string;
+    },
   ): { abort: () => void } {
     if (process.env.RDK_OPENCLAW_BRIDGE === '0') {
-      return this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device);
+      return this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta);
     }
     const abortCtl = { aborted: false };
     let legacyAbort: (() => void) | null = null;
@@ -1672,7 +1677,12 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
       }
       if (activeReqId) {
         try {
-          this.ocBridgeTransportByIp.get(device.ip)?.send({ op: 'abort', reqId: activeReqId });
+          this.ocBridgeTransportByIp.get(device.ip)?.send({
+            op: 'abort',
+            reqId: activeReqId,
+            correlationId: meta?.correlationId,
+            studioRunId: meta?.studioRunId,
+          });
         } catch {
           /* ignore */
         }
@@ -1689,7 +1699,7 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
         const transport = await this.getOrCreateBridgeTransport(device);
         if (!transport || abortCtl.aborted) {
           if (!abortCtl.aborted) {
-            legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device).abort;
+            legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta).abort;
           }
           return;
         }
@@ -1727,7 +1737,14 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
               onChunk(`\n[TOOL:${tp}] ${tn}${det ? ` -> ${det}` : ''}\n`);
             }
             if (line.type === 'error' && (!rid || rid === activeReqId)) {
-              onChunk(`__OPENCLAW_WS_FAILED__${String(line.message || '')}`);
+              const ocCode = typeof (line as { code?: unknown }).code === 'string'
+                ? String((line as { code: string }).code).trim()
+                : '';
+              const ocMsg = String(line.message || 'gateway error');
+              const payload = ocCode
+                ? JSON.stringify({ ocCode, message: ocMsg, correlationId: meta?.correlationId ?? null })
+                : ocMsg;
+              onChunk(`__OPENCLAW_WS_FAILED__${payload}`);
             }
             if (line.type === 'done' && (!rid || rid === activeReqId)) {
               finish(!!line.ok);
@@ -1739,16 +1756,19 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
             sessionKey: sessionId || 'main',
             message,
             idempotencyKey: `msg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            correlationId: meta?.correlationId,
+            runId: meta?.studioRunId,
+            studioSessionKey: meta?.studioSessionKey,
           });
         });
       } catch {
         if (!abortCtl.aborted) {
-          legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device).abort;
+          legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta).abort;
         }
       }
     }).catch(() => {
       if (!abortCtl.aborted) {
-        legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device).abort;
+        legacyAbort = this.sendAgentMessageOneShot(message, onChunk, onComplete, sessionId, device, meta).abort;
       }
     });
 
@@ -1760,14 +1780,33 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
     onChunk: (chunk: string) => void,
     onComplete: (success: boolean) => void,
     sessionId: string,
-    device: Device
+    device: Device,
+    meta?: {
+      correlationId?: string;
+      studioRunId?: string;
+      studioSessionKey?: string;
+    },
   ): { abort: () => void } {
     const messageB64 = Buffer.from(message, 'utf8').toString('base64');
     const sessionB64 = Buffer.from(sessionId || 'main', 'utf8').toString('base64');
+    const metaB64 = Buffer.from(
+      JSON.stringify({
+        correlationId: meta?.correlationId ?? '',
+        studioRunId: meta?.studioRunId ?? '',
+        studioSessionKey: meta?.studioSessionKey ?? '',
+      }),
+      'utf8',
+    ).toString('base64');
     const wsScript = OPENCLAW_WS_CONNECT_HELPER + `
 
 const message = Buffer.from('${messageB64}', 'base64').toString('utf8').trim();
 const sessionKey = Buffer.from('${sessionB64}', 'base64').toString('utf8') || 'main';
+let __rdkMeta = {};
+try { __rdkMeta = JSON.parse(Buffer.from('${metaB64}', 'base64').toString('utf8')); } catch { __rdkMeta = {}; }
+const clientMeta = {};
+if (__rdkMeta.correlationId) clientMeta.correlationId = String(__rdkMeta.correlationId);
+if (__rdkMeta.studioRunId) clientMeta.studioRunId = String(__rdkMeta.studioRunId);
+if (__rdkMeta.studioSessionKey) clientMeta.studioSessionKey = String(__rdkMeta.studioSessionKey);
 if (!message) { console.error('__OPENCLAW_WS_FAILED__'); console.error('empty message'); process.exit(1); }
 
 let done = false;
@@ -1780,7 +1819,15 @@ const finish = (ok, reason) => {
   done = true;
   try { ws.close(); } catch {}
   if (ok) { process.exit(0); }
-  else { console.error('__OPENCLAW_WS_FAILED__'); console.error(String(reason || 'unknown error')); process.exit(1); }
+  else {
+    let m = String(reason || 'unknown error');
+    if (reason && typeof reason === 'object' && reason.code) {
+      m = JSON.stringify({ ocCode: String(reason.code), message: String(reason.message || reason) });
+    }
+    console.error('__OPENCLAW_WS_FAILED__');
+    console.error(m);
+    process.exit(1);
+  }
 };
 const IDLE_TIMEOUT = 300000;
 const timer = setInterval(() => {
@@ -1793,14 +1840,19 @@ const timer = setInterval(() => {
 }, 5000);
 
 onConnected = () => {
-  ws.send(JSON.stringify({ type: 'req', id: sendId, method: 'chat.send', params: { sessionKey, message, idempotencyKey: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2) } }));
+  const params = { sessionKey, message, idempotencyKey: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2) };
+  if (Object.keys(clientMeta).length) params.clientMeta = clientMeta;
+  ws.send(JSON.stringify({ type: 'req', id: sendId, method: 'chat.send', params }));
 };
 onConnectFailed = (msg) => { clearInterval(timer); finish(false, msg); };
 
 onFrame = (frame) => {
   lastActivity = Date.now();
   if (frame.type === 'res') {
-    if (frame.id === sendId && !frame.ok) return finish(false, (frame.error && frame.error.message) || 'chat.send failed');
+    if (frame.id === sendId && !frame.ok) {
+      const er = frame.error || {};
+      return finish(false, { code: er.code || 'CHAT_SEND_FAILED', message: er.message || 'chat.send failed' });
+    }
     return;
   }
   if (frame.type !== 'event') return;

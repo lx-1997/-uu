@@ -128,6 +128,18 @@ function isTransientRequestError(error: unknown) {
   );
 }
 
+/** 防止「后端不可达」时 fetch 长期挂起、界面一直转圈 */
+function apiTimeoutSignal(ms: number): AbortSignal | undefined {
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof (AbortSignal as { timeout?: (n: number) => AbortSignal }).timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   // 将相对路径转为绝对 URL（桌面端）
   if (typeof input === 'string' && input.startsWith('/')) {
@@ -523,15 +535,25 @@ function dispatchSseBlock(raw: string, onEvent?: AgentEventCallback) {
   }
 }
 
+export type StudioResponseMode = 'quick' | 'thinking';
+
+/** 避免可选参数错位导致 attachments/onEvent 传错 */
+export interface StreamAgentChatOptions {
+  attachments?: AgentAttachmentPayload[];
+  studioResponseMode?: StudioResponseMode;
+}
+
 export function streamAgentChat(
   message: string,
   deviceId?: string,
   sessionId?: string,
   userId?: string,
-  attachments?: AgentAttachmentPayload[],
+  options?: StreamAgentChatOptions,
   onEvent?: AgentEventCallback,
 ): { abort: () => void; done: Promise<void> } {
   const controller = new AbortController();
+  const attachments = options?.attachments;
+  const studioResponseMode = options?.studioResponseMode;
 
   const done = (async () => {
     try {
@@ -546,6 +568,7 @@ export function streamAgentChat(
           deviceId,
           sessionId,
           userId,
+          studioResponseMode,
           attachments,
           ...(studioUiHints ? { studioUiHints } : {}),
         }),
@@ -609,7 +632,11 @@ export function fetchAgentConfig() {
     baseUrl?: string;
     thinkingDefault?: string;
     reasoningVisibility?: string;
+    samplingTemperature?: string;
+    samplingTopP?: string;
     activeModelId?: string | null;
+    /** Dock「快速回答」绑定的模型条目 id（加载配置时会尽量补全为内置快速条目） */
+    quickActiveModelId?: string | null;
     envApiKeyAvailable?: boolean;
     /** 安装包内置默认模型（bootstrap），用于「恢复默认」 */
     studioDefaultPreset?: {
@@ -617,6 +644,13 @@ export function fetchAgentConfig() {
       label: string;
       inRegistry: boolean;
       isActive: boolean;
+    } | null;
+    /** 安装包内置「快速回答」默认条目（来自 rdkclaw-provider.defaults.json） */
+    studioQuickDefaultPreset?: {
+      id: string;
+      label: string;
+      inRegistry: boolean;
+      isQuickLane: boolean;
     } | null;
     models?: Array<{
       id: string;
@@ -626,8 +660,11 @@ export function fetchAgentConfig() {
       hasApiKey: boolean;
       baseUrl?: string;
       isActive: boolean;
+      isQuickLane?: boolean;
       thinkingDefault?: string;
       reasoningVisibility?: string;
+      samplingTemperature?: string;
+      samplingTopP?: string;
     }>;
   }>('/api/agent/config');
 }
@@ -648,6 +685,7 @@ export function saveRDKClawPersona(patch: Partial<PersonaProfile>) {
   return request<{ ok: boolean; persona: PersonaProfile }>('/api/rdkclaw/persona', {
     method: 'POST',
     body: JSON.stringify(patch),
+    signal: apiTimeoutSignal(20_000),
   });
 }
 
@@ -659,6 +697,7 @@ export function saveRDKClawPolicy(patch: Partial<RDKClawPolicy>) {
   return request<{ ok: boolean; policy: RDKClawPolicy }>('/api/rdkclaw/policy', {
     method: 'POST',
     body: JSON.stringify(patch),
+    signal: apiTimeoutSignal(20_000),
   });
 }
 
@@ -920,7 +959,9 @@ export function restartWeixinChannel() {
 }
 
 export function saveAgentConfig(config: {
-  action?: 'upsert' | 'switch' | 'delete' | 'restore_bootstrap_preset';
+  action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset';
+  /** duplicate_for_quick：源配置 id，省略则用当前深度思考 active */
+  sourceId?: string;
   id?: string;
   label?: string;
   provider?: string;
@@ -930,9 +971,15 @@ export function saveAgentConfig(config: {
   setActive?: boolean;
   thinkingDefault?: string;
   reasoningVisibility?: string;
+  samplingTemperature?: string;
+  samplingTopP?: string;
 }) {
   return request<{
     ok: boolean;
+    /** action 为 upsert 时返回的条目 id（新建或更新后） */
+    savedId?: string;
+    quickActiveModelId?: string | null;
+    createdId?: string;
     active?: {
       id: string;
       provider: string;
@@ -950,6 +997,7 @@ export interface AgentConfigExportPayload {
   version: number;
   exportedAt: number;
   activeId: string | null;
+  quickActiveId?: string | null;
   entries: Array<{
     id: string;
     label: string;
@@ -960,6 +1008,8 @@ export interface AgentConfigExportPayload {
     baseUrl?: string;
     thinkingDefault?: string;
     reasoningVisibility?: string;
+    samplingTemperature?: string;
+    samplingTopP?: string;
     createdAt: number;
     updatedAt: number;
   }>;

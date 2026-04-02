@@ -451,6 +451,18 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
     return;
   }
 
+  /**
+   * 人格 / 执行策略仅写入本机 ~/.rdkstudio 下 JSON，不含密钥；与设备、OpenClaw 无关。
+   * 未登录或 Electron file:// 下 Cookie/镜像会话未带上时，不应阻止用户保存本地偏好（否则设置页永久 401）。
+   */
+  if (
+    (req.method === 'GET' || req.method === 'POST')
+    && (req.path === '/api/rdkclaw/persona' || req.path === '/api/rdkclaw/policy')
+  ) {
+    next();
+    return;
+  }
+
   /** 匿名行为埋点，不含聊天正文；便于未登录/跨源场景上报 */
   if (req.method === 'POST' && req.path === '/api/analytics/events') {
     next();

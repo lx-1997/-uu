@@ -3,12 +3,17 @@ import { ensureFindSkillsOnBoard } from "../../agent/tools/rdk-tools.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager, type OpenClawHealthStatus } from "../../managers/OpenClawDeploymentManager.js";
 import type { Device } from "../../../shared/types.js";
-import type { RdkPlatform } from "../../../shared/board-types.js";
 import {
   getCachedOpenClawAiReady,
   invalidateOpenClawHealthCache,
   setCachedOpenClawAiReady,
 } from "../openclaw-health-cache.js";
+import {
+  applyNeedStreakPolicy,
+  formatAssessInjectBlock,
+  logDualAgentEvent,
+} from "../board-dual-agent-orchestration.js";
+import { normalizeOpenClawWsFailureText, openClawBridgeMeta } from "../openclaw-bridge-meta.js";
 
 function resolveDevicePassword(device: Device) {
   const persisted = (device as Device & { password?: string }).password ?? "";
@@ -28,6 +33,9 @@ function toBoardDevice(device: Device) {
 function parseBoardError(raw: string): string {
   const text = (raw || "").trim();
   if (!text) return "板端 OpenClaw 未返回结果";
+  if (/__OPENCLAW_WS_FAILED__/i.test(text)) {
+    return normalizeOpenClawWsFailureText(text);
+  }
   if (/missing\s+scope|operator\.(read|write|admin)/i.test(text)) {
     return (
       "板端网关鉴权范围不足（scope，例如 operator.read）。"
@@ -198,13 +206,23 @@ export function boardOpenClawDelegateTool(
 
       const boardDevice = toBoardDevice(device);
       await ensureBoardGatewayReady(manager, boardDevice, (chunk) => onProgress?.(chunk, ctx.toolCallId), ctx.abortSignal);
-      const platform = device.boardPlatform as RdkPlatform | undefined;
       const useSkills = input.encourageSkills !== false;
+      const assessInject = formatAssessInjectBlock(ctx.sessionKey, deviceId);
+      logDualAgentEvent({
+        event: "delegate_start",
+        sessionKey: ctx.sessionKey,
+        deviceId,
+        toolCallId: ctx.toolCallId ?? null,
+        hasAssessInject: Boolean(assessInject),
+      });
       const msgParts = [
         input.intent ? `intent: ${input.intent}` : "",
         input.context ? `context: ${input.context}` : "",
         `task: ${input.task}`,
       ];
+      if (assessInject) {
+        msgParts.push(`\n${assessInject}`);
+      }
       if (input.guidance?.trim()) {
         msgParts.push(`\nrdkclaw_guidance: ${input.guidance.trim()}`);
       }
@@ -212,22 +230,17 @@ export function boardOpenClawDelegateTool(
         const installed = boardSkills.map((s) =>
           `  - ${s.name}: ${s.description || "无描述"} [${s.path}]`
         ).join("\n");
-        msgParts.push(`\nyour_installed_skills (${boardSkills.length} 个):\n${installed}`);
+        msgParts.push(`\ninstalled_skills (${boardSkills.length}):\n${installed}`);
       }
       if (useSkills) {
         msgParts.push(
-          "\nhint: 优先使用你已安装的技能完成任务。" +
-          "若判断**现有技能/工具无法完成**或缺少能力：请优先使用 **find-skills**（腾讯 SkillHub 元技能；Studio 一键安装板端 OpenClaw 后默认应已 `clawhub install find-skills`）在板端检索并安装合适技能后再执行。" +
-          "亦可 `clawhub install <owner/slug>` 安装其他技能。" +
-          "完成后简要说明你用了哪些技能或工具链。",
+          "\nhint: 优先用已装技能；不够则 `find-skills` 再执行，必要时 `clawhub install <owner/slug>`。收尾一句话说明用到的技能/命令链。",
         );
       }
       msgParts.push(
-        "\n[reverse_consultation] 如果你在执行过程中需要联网搜索、查文档、查生态能力等信息" +
-        "（这些是 RDKClaw 的专属能力，你无法直接获取），" +
-        "请在回复中用 [NEED_RDKCLAW]...[/NEED_RDKCLAW] 格式告诉我，例如：\n" +
-        "[NEED_RDKCLAW]\ntype: web_search\nquery: RDK X5 如何安装 hobot_dnn\nreason: 需要确认官方安装命令\n[/NEED_RDKCLAW]\n" +
-        "我会在后续消息中把结果发给你，我们共享同一会话，你可以继续基于新信息完成任务。",
+        "\n[NEED_RDKCLAW] 缺联网、文档或生态信息时，在回复中包一层（勿与正文混写）：\n" +
+          "[NEED_RDKCLAW]\ntype: web_search|documentation|advisory\nquery: …\nreason: …\n[/NEED_RDKCLAW]\n" +
+          "同 session 内 RDKClaw 会补发结果，你可据此继续。",
       );
       const msg = msgParts.filter(Boolean).join("\n");
       const sessionId = input.sessionId?.trim() || conversationId || `rdkclaw-board-${deviceId}-${Date.now()}`;
@@ -281,6 +294,7 @@ export function boardOpenClawDelegateTool(
             },
             sessionId,
             boardDevice,
+            openClawBridgeMeta(ctx),
           );
         });
 
@@ -289,22 +303,34 @@ export function boardOpenClawDelegateTool(
         const { output, success } = await runOnce();
         if (success) {
           const result = output.trim() || "板端 OpenClaw 执行完成（无文本输出）";
-          const hasConsultationRequest = /\[NEED_RDKCLAW\]/i.test(result);
+          const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, result, {
+            phase: "delegate",
+            toolCallId: ctx.toolCallId,
+          });
+          const body = need.text;
+          const hasConsultationRequest = /\[NEED_RDKCLAW\]/i.test(body);
           const suffix = hasConsultationRequest
-            ? "\n\n---\n[RDKClaw 提示：OpenClaw 在回复中发出了求助信号 [NEED_RDKCLAW]。" +
-              "请提取其中的 type/query/reason，用你的本地工具（web_search、web_fetch 等）获取所需信息，" +
-              "然后通过 board_openclaw_chat 把结果发回给 OpenClaw，让它继续完成任务。" +
-              "共享同一会话，OpenClaw 能看到你的补充信息。]"
+            ? need.degraded
+              ? "\n\n---\n[RDKClaw：已按上限处理 NEED；请按上文 [Studio 策略] 用本机补全后 chat 一次，勿再循环 NEED。]"
+              : "\n\n---\n[RDKClaw 提示：OpenClaw 在回复中发出了求助信号 [NEED_RDKCLAW]。" +
+                "请提取其中的 type/query/reason，用你的本地工具（web_search、web_fetch 等）获取所需信息，" +
+                "然后通过 board_openclaw_chat 把结果发回给 OpenClaw，让它继续完成任务。" +
+                "共享同一会话，OpenClaw 能看到你的补充信息。]"
             : "\n\n---\n[RDKClaw 提示：请评估 OpenClaw 的执行结果。" +
               "如果它用了好的技能或方案，记在记忆中以备推荐；" +
               "如果有可改进之处，下次委派时在 guidance 中补充。" +
               "如果发现可复用的板端经验，建议创建为 OpenClaw 技能。]";
-          return result + suffix;
+          return body + suffix;
         }
         lastOutput = output;
         const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
         if (cleanOutput.length > 20 && !isRetryableFailure(output)) {
-          return cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+          const partial = cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+          const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, partial, {
+            phase: "delegate",
+            toolCallId: ctx.toolCallId,
+          });
+          return need.text;
         }
         if (attempt < DELEGATE_MAX_RETRIES && isRetryableFailure(output)) {
           console.warn(`[board-delegate] retryable failure on attempt ${attempt + 1}, retrying in ${DELEGATE_RETRY_DELAY_MS}ms`);
@@ -317,7 +343,12 @@ export function boardOpenClawDelegateTool(
       }
       const finalClean = lastOutput.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
       if (finalClean.length > 20) {
-        return finalClean + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+        const partial = finalClean + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+        const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, partial, {
+          phase: "delegate",
+          toolCallId: ctx.toolCallId,
+        });
+        return need.text;
       }
       throw new Error(parseBoardError(lastOutput));
     },

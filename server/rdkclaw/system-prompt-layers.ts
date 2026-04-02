@@ -18,13 +18,17 @@ import { getResearchSeeds } from "../board/device-profiles.js";
 import {
   buildPersonaPrompt,
   buildReasoningGuidancePrompt,
+  buildWebSearchTriggerPrompt,
   buildCollaborationPrompt,
   buildStudioUiHintsPrompt,
   type BoardSnapshot,
   type ModelTier,
 } from "./system-prompt-builder.js";
 import { buildForumAuthContextPrompt } from "./forum-context-prompt.js";
-import { buildToolContractOverviewPrompt } from "./tool-contract-prompt.js";
+import {
+  buildToolContractOverviewPrompt,
+  buildToolContractQuickOverviewPrompt,
+} from "./tool-contract-prompt.js";
 
 /** 动态段 layer id（勿并入 stable；修改此列表需谨慎） */
 export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
@@ -46,7 +50,8 @@ export type SystemPromptLayerId =
   | "collaboration"
   | "memory_hint"
   | "find_skills_policy"
-  | "forum";
+  | "forum"
+  | "web_search_triggers";
 
 export type SystemPromptLayerStability = "stable" | "dynamic";
 
@@ -79,9 +84,103 @@ export interface SystemPromptLayerBuildInput {
   studioUiHints: StudioUiHints | undefined;
   allAttachments: AttachmentLike[];
   policy: RDKClawPolicy;
+  /** 工作台 Dock「快速」：极简提示 + 跳过重章节，优先 TTFT */
+  studioQuickAnswer?: boolean;
+}
+
+/**
+ * 「快速回答」专用 bundle：显著缩短 stable 段，通常比对完整 bundle 少数千～上万字符预填。
+ */
+function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput): BuiltRdkclawSystemPrompt {
+  const stableLayers: SystemPromptLayer[] = [];
+  const dynamicLayers: SystemPromptLayer[] = [];
+
+  const pushStable = (id: SystemPromptLayerId, content: string) => {
+    const c = content.trim();
+    if (!c) return;
+    stableLayers.push({ id, content: c, stability: "stable" });
+  };
+  const pushDynamic = (id: SystemPromptLayerId, content: string) => {
+    const c = content.trim();
+    if (!c) return;
+    dynamicLayers.push({ id, content: c, stability: "dynamic" });
+  };
+
+  pushStable("tool_contracts", buildToolContractQuickOverviewPrompt());
+  pushStable(
+    "memory_hint",
+    "偏好与结论可用 memory_save；需要时用 memory_search。",
+  );
+  pushStable("persona", buildPersonaPrompt(input.persona));
+
+  if (input.policy.network.enabled) {
+    pushStable(
+      "find_skills_policy",
+      "缺技能时 `find_skills`；成功落地后再 `skill_mark_validated`。",
+    );
+  } else {
+    pushStable("find_skills_policy", "联网关：只用本地 `find_skills` / `read`。");
+  }
+
+  if (input.deviceProfile) {
+    const dp = input.deviceProfile;
+    pushStable(
+      "device_platform",
+      `平台: ${dp.displayName}（${dp.bpuTops}TOPS · ${dp.cpu} · ${dp.ramGb}GB）。`,
+    );
+  }
+
+  if (!input.deviceId) {
+    pushStable(
+      "no_device_guard",
+      "未选设备时无 device_*；仅能用本机工作区工具。",
+    );
+  }
+
+  if (input.deviceId && input.boardSnapshot.plugins.length > 0) {
+    pushStable("board_plugins", `板端插件: ${input.boardSnapshot.plugins.slice(0, 12).join(", ")}`);
+  }
+
+  if (input.deviceId) {
+    const hintsBlock = buildStudioUiHintsPrompt(input.studioUiHints, input.persona.delegationBias);
+    if (hintsBlock) {
+      const cap = 1400;
+      pushDynamic(
+        "studio_ui_hints",
+        hintsBlock.length > cap ? `${hintsBlock.slice(0, cap)}\n\n…(速览已截断)` : hintsBlock,
+      );
+    }
+  }
+
+  if (input.allAttachments.length > 0) {
+    const hasImage = input.allAttachments.some((a) => a.type === "image");
+    pushDynamic(
+      "attachments",
+      hasImage
+        ? `附件 ${input.allAttachments.length} 个（含图）；述图前先 attachment_describe_image。`
+        : `附件 ${input.allAttachments.length} 个；需要时用 attachment_*。`,
+    );
+  }
+
+  if (input.deviceId) {
+    const names = input.boardSnapshot.skillDetails.map((s) => s.name).slice(0, 24);
+    const skillLine =
+      names.length > 0
+        ? `板端技能(最多列24): ${names.join(", ")}`
+        : "板端技能快照空（快速模式未 SSH 拉取时可忽略）。";
+    pushDynamic("collaboration", `## 协作（速览）\n${skillLine}\nOpenClaw 多步再 assess→delegate；否则 SSH。`);
+  }
+
+  const stablePrefix = stableLayers.map((l) => l.content).join("\n\n");
+  const dynamicSuffix = dynamicLayers.map((l) => l.content).join("\n\n");
+  const combined = [stablePrefix, dynamicSuffix].filter((s) => s.length > 0).join("\n\n");
+  return { combined, stablePrefix, dynamicSuffix, layers: [...stableLayers, ...dynamicLayers] };
 }
 
 export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInput): BuiltRdkclawSystemPrompt {
+  if (input.studioQuickAnswer) {
+    return buildRdkclawSystemPromptBundleQuick(input);
+  }
   const stableLayers: SystemPromptLayer[] = [];
   const dynamicLayers: SystemPromptLayer[] = [];
 
@@ -128,7 +227,11 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   );
 
   pushStable("persona", buildPersonaPrompt(input.persona));
-  pushStable("reasoning", buildReasoningGuidancePrompt(input.modelTier));
+  pushStable("reasoning", buildReasoningGuidancePrompt(input.modelTier, input.persona.delegationBias));
+  pushStable(
+    "web_search_triggers",
+    buildWebSearchTriggerPrompt(input.policy.network.enabled, input.persona.delegationBias),
+  );
 
   if (input.deviceProfile) {
     const dp = input.deviceProfile;
@@ -139,6 +242,10 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   }
 
   if (input.deviceId) {
+    const deviceRosCloseLine =
+      input.persona.delegationBias === "local-first"
+        ? "确认命令后再 device_exec；**Studio 优先**：默认 SSH 工具链完成；确需板端 OpenClaw 技能链/多轮迭代时再 `board_openclaw_assess` / `delegate`。"
+        : "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。";
     pushStable(
       "device_research_ros",
       [
@@ -151,7 +258,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
         "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
         "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
         "ROS/节点/话题类任务可 `read` 工作区 skills 中的 RDK ROS（rdk-ros）与 RDK Board Knowledge（rdk-board-knowledge）的 SKILL.md。",
-        "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。",
+        deviceRosCloseLine,
       ].join("\n"),
     );
   } else {
@@ -171,7 +278,10 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   }
 
   if (input.deviceId) {
-    pushDynamic("studio_ui_hints", buildStudioUiHintsPrompt(input.studioUiHints));
+    pushDynamic(
+      "studio_ui_hints",
+      buildStudioUiHintsPrompt(input.studioUiHints, input.persona.delegationBias),
+    );
   }
 
   if (input.allAttachments.length > 0) {
@@ -185,7 +295,10 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   }
 
   if (input.deviceId) {
-    pushDynamic("collaboration", buildCollaborationPrompt(input.boardSnapshot, input.modelTier));
+    pushDynamic(
+      "collaboration",
+      buildCollaborationPrompt(input.boardSnapshot, input.modelTier, input.persona.delegationBias),
+    );
   }
 
   const stablePrefix = stableLayers.map((l) => l.content).join("\n\n");

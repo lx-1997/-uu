@@ -11,6 +11,7 @@ import * as os from 'node:os';
 import { streamSimple, streamSimpleAnthropic, registerBuiltInApiProviders } from '@mariozechner/pi-ai';
 import type { Model, StreamFunction, ThinkingLevel } from '@mariozechner/pi-ai';
 import { lookupModelCapabilities, fetchModelCapabilitiesFromProvider, registerModelCapabilities } from './model-registry.js';
+import type { StudioResponseMode } from '../rdkclaw/types.js';
 
 registerBuiltInApiProviders();
 
@@ -23,6 +24,10 @@ export interface ProviderConfig {
   thinkingDefault?: string;
   /** 是否在 Studio 流式展示 thinking_delta：off / on / stream；空视为 stream */
   reasoningVisibility?: string;
+  /** 模型采样温度（字符串便于表单与 JSON）；留空则不传给上游，使用其默认 */
+  samplingTemperature?: string;
+  /** nucleus top_p，0–1；留空则不传 */
+  samplingTopP?: string;
 }
 
 export interface ProviderConfigEntry extends ProviderConfig {
@@ -50,14 +55,39 @@ export function rdkclawShouldStreamThinking(cfg: ProviderConfig): boolean {
   return v !== 'off';
 }
 
+/** 解析为请求级 temperature；无效或留空返回 undefined */
+export function resolveSamplingTemperature(cfg: ProviderConfig): number | undefined {
+  const raw = normalizeText(cfg.samplingTemperature);
+  if (!raw) return undefined;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(2, Math.max(0, n));
+}
+
+/** 解析 top_p；无效或留空返回 undefined（经 onPayload 注入，因 pi-ai 类型未声明该字段） */
+export function resolveSamplingTopP(cfg: ProviderConfig): number | undefined {
+  const raw = normalizeText(cfg.samplingTopP);
+  if (!raw) return undefined;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(1, Math.max(0, n));
+}
+
 export interface ProviderConfigRegistry {
+  /** Dock「深度思考」与各非聊天链路默认使用的条目 */
   activeId: string | null;
+  /** Dock「快速回答」专用条目；应与深度条目区分（安装包内置快速 id 会在加载配置时自动补全） */
+  quickActiveId?: string | null;
   entries: ProviderConfigEntry[];
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.rdkstudio');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'agent-config.json');
 const DEFAULT_ENTRY_ID = 'default';
+/** Studio 推荐默认：偏稳、适合长任务；配置文件中可留空，解析时用此缺省 */
+export const STUDIO_DEFAULT_SAMPLING_TEMPERATURE = '0.1';
+export const STUDIO_DEFAULT_SAMPLING_TOP_P = '1';
+
 const BOOTSTRAP_PROVIDER_FILE_ENV = 'RDK_PROVIDER_BOOTSTRAP_FILE';
 const BOOTSTRAP_PROVIDER_FALLBACK = path.join(process.cwd(), 'config', 'rdkclaw-provider.defaults.json');
 
@@ -166,9 +196,33 @@ function resolveProviderBaseUrl(config: ProviderConfig): string {
   return PROVIDER_DEFAULTS[config.provider]?.baseUrl || 'https://api.openai.com/v1';
 }
 
-export function loadProviderConfig(): ProviderConfig | null {
+/** quickActiveId 为空时：优先绑定内置快速条目，其次仅一条配置时用该条，否则回退到当前 active（兼容旧数据） */
+export function getStudioLaneProviderEntry(
+  registry: ProviderConfigRegistry,
+  lane: "thinking" | "quick",
+): ProviderConfigEntry | null {
+  if (registry.entries.length === 0) return null;
+  if (lane === "thinking") {
+    return getActiveProviderEntry(registry);
+  }
+  const qid = registry.quickActiveId?.trim();
+  if (qid && registry.entries.some((e) => e.id === qid)) {
+    return registry.entries.find((e) => e.id === qid) || null;
+  }
+  const presets = getBootstrapStudioDefaultPresetsMeta();
+  const bid = presets?.quick?.id?.trim();
+  if (bid && registry.entries.some((e) => e.id === bid)) {
+    return registry.entries.find((e) => e.id === bid) || null;
+  }
+  if (registry.entries.length === 1) {
+    return registry.entries[0];
+  }
+  return getActiveProviderEntry(registry);
+}
+
+export function loadProviderConfigForStudioLane(lane: "thinking" | "quick"): ProviderConfig | null {
   const registry = loadProviderRegistry();
-  const active = getActiveProviderEntry(registry);
+  const active = getStudioLaneProviderEntry(registry, lane);
   if (!active) return null;
   return {
     provider: active.provider,
@@ -177,11 +231,65 @@ export function loadProviderConfig(): ProviderConfig | null {
     baseUrl: active.baseUrl,
     thinkingDefault: active.thinkingDefault,
     reasoningVisibility: active.reasoningVisibility,
+    samplingTemperature: effectiveSamplingTemperature(active.samplingTemperature),
+    samplingTopP: effectiveSamplingTopP(active.samplingTopP),
   };
+}
+
+export function loadProviderConfig(): ProviderConfig | null {
+  return loadProviderConfigForStudioLane("thinking");
 }
 
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export function effectiveSamplingTemperature(stored: string | undefined): string {
+  return normalizeText(stored) || STUDIO_DEFAULT_SAMPLING_TEMPERATURE;
+}
+
+export function effectiveSamplingTopP(stored: string | undefined): string {
+  return normalizeText(stored) || STUDIO_DEFAULT_SAMPLING_TOP_P;
+}
+
+/**
+ * 历史兼容：此前 Dock 快速模式曾在「与 active 同条目」时强行覆盖思考/采样。
+ * 现 Studio 流式对话已改为完全使用对应条目的持久化字段；此函数仅为潜在调用方保留语义参考。
+ */
+export function mergeStudioResponseMode(
+  cfg: ProviderConfig,
+  mode: StudioResponseMode | undefined,
+): ProviderConfig {
+  if (!mode || mode === "thinking") {
+    return { ...cfg };
+  }
+  return {
+    ...cfg,
+    thinkingDefault: "off",
+    reasoningVisibility: "off",
+    samplingTemperature: "0.35",
+    samplingTopP: "1",
+  };
+}
+
+/**
+ * 执行策略中的「引擎模式」：`thinking` 完全沿用 AI 模型页（含缺省 0.1 / 1 / high）。
+ * `fast` 在运行时覆盖为低延迟、短答取向（不修改磁盘上的 agent-config）。
+ */
+export function applyEnginePresetToProviderConfig(
+  cfg: ProviderConfig,
+  preset: "thinking" | "fast" | undefined,
+): ProviderConfig {
+  if (!preset || preset === "thinking") {
+    return { ...cfg };
+  }
+  return {
+    ...cfg,
+    thinkingDefault: "minimal",
+    reasoningVisibility: "off",
+    samplingTemperature: "0.35",
+    samplingTopP: "1",
+  };
 }
 
 function expandEnvVars(template: string): string {
@@ -215,6 +323,8 @@ function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
     const labelMatchesContent = storedLabel && (storedLabel.includes(model) || storedLabel === canonical);
     const thinkingDefault = normalizeText(item.thinkingDefault) || undefined;
     const reasoningVisibility = normalizeText(item.reasoningVisibility) || undefined;
+    const samplingTemperature = normalizeText(item.samplingTemperature) || undefined;
+    const samplingTopP = normalizeText(item.samplingTopP) || undefined;
     entries.push({
       id: normalizeText(item.id) || `cfg-${Math.random().toString(36).slice(2, 10)}`,
       label: labelMatchesContent ? storedLabel : canonical,
@@ -224,13 +334,20 @@ function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
       baseUrl: normalizeText(item.baseUrl) || undefined,
       ...(thinkingDefault ? { thinkingDefault } : {}),
       ...(reasoningVisibility ? { reasoningVisibility } : {}),
+      ...(samplingTemperature ? { samplingTemperature } : {}),
+      ...(samplingTopP ? { samplingTopP } : {}),
       createdAt: Number.isFinite(item.createdAt) ? Number(item.createdAt) : now,
       updatedAt: Number.isFinite(item.updatedAt) ? Number(item.updatedAt) : now,
     });
   }
   const activeId = normalizeText(maybe.activeId) || null;
+  const resolvedActive = entries.some((e) => e.id === activeId) ? activeId : entries[0]?.id || null;
+  const quickRaw = normalizeText((maybe as { quickActiveId?: unknown }).quickActiveId as string | undefined);
+  const quickActiveId =
+    quickRaw && entries.some((e) => e.id === quickRaw) ? quickRaw : null;
   return {
-    activeId: entries.some((e) => e.id === activeId) ? activeId : (entries[0]?.id || null),
+    activeId: resolvedActive,
+    quickActiveId,
     entries,
   };
 }
@@ -257,16 +374,39 @@ function loadBootstrapProviderRegistry(): ProviderConfigRegistry | null {
     const activeId = entries.some((entry) => entry.id === normalized.activeId)
       ? normalized.activeId
       : entries[0]?.id || null;
-    return { activeId, entries };
+    const quickActiveId =
+      normalized.quickActiveId && entries.some((e) => e.id === normalized.quickActiveId)
+        ? normalized.quickActiveId
+        : null;
+    return { activeId, quickActiveId, entries };
   } catch {
     return null;
   }
 }
 
+/** quickActiveId 未设置时：写入内置快速条目 id，或仅一条配置时绑定该条（便于与深度剥离，无需「与深度相同」） */
+export function applyQuickLaneDefaultIfUnset(registry: ProviderConfigRegistry): ProviderConfigRegistry {
+  const q = registry.quickActiveId?.trim() || '';
+  if (q && registry.entries.some((e) => e.id === q)) {
+    return registry;
+  }
+  const bootstrap = loadBootstrapProviderRegistry();
+  const bid = bootstrap?.quickActiveId?.trim();
+  if (bid && registry.entries.some((e) => e.id === bid)) {
+    return { ...registry, quickActiveId: bid };
+  }
+  if (registry.entries.length === 1) {
+    return { ...registry, quickActiveId: registry.entries[0].id };
+  }
+  return registry;
+}
+
 export function loadProviderRegistry(): ProviderConfigRegistry {
   try {
     if (!fs.existsSync(CONFIG_FILE)) {
-      return loadBootstrapProviderRegistry() || { activeId: null, entries: [] };
+      const boot = loadBootstrapProviderRegistry();
+      if (!boot) return { activeId: null, quickActiveId: null, entries: [] };
+      return applyQuickLaneDefaultIfUnset(boot);
     }
     const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
     const parsed = JSON.parse(raw) as unknown;
@@ -281,8 +421,9 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
         return { activeId: null, entries: [] };
       }
       const now = Date.now();
-      return {
+      const legacyReg: ProviderConfigRegistry = {
         activeId: DEFAULT_ENTRY_ID,
+        quickActiveId: null,
         entries: [{
           id: DEFAULT_ENTRY_ID,
           label: `${provider}/${model}`,
@@ -296,15 +437,30 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
           ...(normalizeText((legacy as ProviderConfig).reasoningVisibility)
             ? { reasoningVisibility: normalizeText((legacy as ProviderConfig).reasoningVisibility) }
             : {}),
+          ...(normalizeText((legacy as ProviderConfig).samplingTemperature)
+            ? { samplingTemperature: normalizeText((legacy as ProviderConfig).samplingTemperature) }
+            : {}),
+          ...(normalizeText((legacy as ProviderConfig).samplingTopP)
+            ? { samplingTopP: normalizeText((legacy as ProviderConfig).samplingTopP) }
+            : {}),
           createdAt: now,
           updatedAt: now,
         }],
       };
+      return applyQuickLaneDefaultIfUnset(legacyReg);
     }
 
-    return ensureRegistryShape(parsed);
+    const reg = ensureRegistryShape(parsed);
+    const next = applyQuickLaneDefaultIfUnset(reg);
+    if (next.quickActiveId !== reg.quickActiveId) {
+      saveProviderRegistry(next);
+      return next;
+    }
+    return reg;
   } catch {
-    return loadBootstrapProviderRegistry() || { activeId: null, entries: [] };
+    const boot = loadBootstrapProviderRegistry();
+    if (!boot) return { activeId: null, quickActiveId: null, entries: [] };
+    return applyQuickLaneDefaultIfUnset(boot);
   }
 }
 
@@ -336,11 +492,14 @@ export function saveProviderConfig(config: ProviderConfig): void {
     baseUrl: config.baseUrl,
     thinkingDefault: config.thinkingDefault ?? active?.thinkingDefault,
     reasoningVisibility: config.reasoningVisibility ?? active?.reasoningVisibility,
+    samplingTemperature: config.samplingTemperature ?? active?.samplingTemperature,
+    samplingTopP: config.samplingTopP ?? active?.samplingTopP,
     createdAt: active?.createdAt || now,
     updatedAt: now,
   };
   const others = registry.entries.filter((entry) => entry.id !== id);
   saveProviderRegistry({
+    ...registry,
     activeId: id,
     entries: [normalized, ...others],
   });
@@ -356,6 +515,8 @@ export function upsertProviderConfigEntry(input: {
   setActive?: boolean;
   thinkingDefault?: string;
   reasoningVisibility?: string;
+  samplingTemperature?: string;
+  samplingTopP?: string;
 }): ProviderConfigEntry {
   const registry = loadProviderRegistry();
   const now = Date.now();
@@ -371,6 +532,14 @@ export function upsertProviderConfigEntry(input: {
     input.reasoningVisibility !== undefined
       ? (normalizeText(input.reasoningVisibility) || undefined)
       : existing?.reasoningVisibility ?? active?.reasoningVisibility;
+  const nextSamplingTemp =
+    input.samplingTemperature !== undefined
+      ? (normalizeText(input.samplingTemperature) || undefined)
+      : existing?.samplingTemperature ?? active?.samplingTemperature;
+  const nextSamplingTopP =
+    input.samplingTopP !== undefined
+      ? (normalizeText(input.samplingTopP) || undefined)
+      : existing?.samplingTopP ?? active?.samplingTopP;
   const next: ProviderConfigEntry = {
     id,
     label: normalizeText(input.label) || existing?.label || `${input.provider}/${input.model}`,
@@ -380,12 +549,18 @@ export function upsertProviderConfigEntry(input: {
     baseUrl: normalizeText(input.baseUrl) || existing?.baseUrl || undefined,
     ...(nextThinking ? { thinkingDefault: nextThinking } : {}),
     ...(nextReasoningVis ? { reasoningVisibility: nextReasoningVis } : {}),
+    ...(nextSamplingTemp ? { samplingTemperature: nextSamplingTemp } : {}),
+    ...(nextSamplingTopP ? { samplingTopP: nextSamplingTopP } : {}),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
   const entries = [next, ...registry.entries.filter((entry) => entry.id !== id)];
   const activeId = input.setActive === false ? (registry.activeId || next.id) : next.id;
-  saveProviderRegistry({ activeId, entries });
+  saveProviderRegistry({
+    ...registry,
+    activeId,
+    entries,
+  });
   return next;
 }
 
@@ -396,24 +571,105 @@ export function switchActiveProviderConfig(id: string): boolean {
   return true;
 }
 
+/** Dock「快速回答」绑定条目；传空 id 时回退为安装包内置快速条目（若已在 registry 中） */
+export function switchQuickActiveProviderConfig(id: string | null | undefined): boolean {
+  const registry = loadProviderRegistry();
+  let next = id?.trim() || null;
+  if (next && !registry.entries.some((entry) => entry.id === next)) {
+    return false;
+  }
+  if (!next) {
+    const presets = getBootstrapStudioDefaultPresetsMeta();
+    const bid = presets?.quick?.id?.trim();
+    if (bid && registry.entries.some((e) => e.id === bid)) {
+      next = bid;
+    } else {
+      return false;
+    }
+  }
+  saveProviderRegistry({ ...registry, quickActiveId: next });
+  return true;
+}
+
+/**
+ * 复制指定条目为「快速回答」专用（新 id），默认参数偏延迟敏感；不改变当前深度思考 activeId。
+ */
+export function duplicateProviderEntryForQuickLane(sourceId?: string | null): {
+  ok: boolean;
+  error?: string;
+  newId?: string;
+} {
+  const registry = loadProviderRegistry();
+  const sid = normalizeText(sourceId) || normalizeText(registry.activeId || '');
+  const src = registry.entries.find((e) => e.id === sid);
+  if (!src) return { ok: false, error: '源配置不存在' };
+  const effectiveKey = src.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
+  if (!effectiveKey) return { ok: false, error: '源模型未配置 API Key' };
+  const now = Date.now();
+  const newId = `cfg-${Math.random().toString(36).slice(2, 10)}`;
+  const baseLabel = normalizeText(src.label) || `${src.provider}/${src.model}`;
+  const clone: ProviderConfigEntry = {
+    id: newId,
+    label: `${baseLabel} (快速)`.slice(0, 200),
+    provider: src.provider,
+    model: src.model,
+    apiKey: src.apiKey,
+    baseUrl: src.baseUrl,
+    thinkingDefault: 'off',
+    reasoningVisibility: 'off',
+    samplingTemperature: '0.35',
+    samplingTopP: '1',
+    createdAt: now,
+    updatedAt: now,
+  };
+  saveProviderRegistry({
+    ...registry,
+    quickActiveId: newId,
+    entries: [clone, ...registry.entries],
+  });
+  return { ok: true, newId };
+}
+
 export function deleteProviderConfigEntry(id: string): boolean {
   const registry = loadProviderRegistry();
   if (!registry.entries.some((entry) => entry.id === id)) return false;
   const entries = registry.entries.filter((entry) => entry.id !== id);
   const activeId = registry.activeId === id ? (entries[0]?.id || null) : registry.activeId;
-  saveProviderRegistry({ activeId, entries });
+  let quickActiveId = registry.quickActiveId ?? null;
+  if (quickActiveId === id) quickActiveId = null;
+  let next: ProviderConfigRegistry = { ...registry, activeId, entries, quickActiveId };
+  next = applyQuickLaneDefaultIfUnset(next);
+  saveProviderRegistry(next);
   return true;
 }
 
-/** 安装包/仓库 `config/rdkclaw-provider.defaults.json` 中的内置模型元信息（无文件时返回 null） */
-export function getBootstrapStudioDefaultPresetMeta(): { id: string; label: string } | null {
+/** 安装包内置的「深度思考」与「快速回答」默认条目元信息（无文件或无条目时返回 null） */
+export function getBootstrapStudioDefaultPresetsMeta(): {
+  thinking: { id: string; label: string };
+  quick: { id: string; label: string } | null;
+} | null {
   const bootstrap = loadBootstrapProviderRegistry();
   if (!bootstrap || bootstrap.entries.length === 0) return null;
-  const targetId = bootstrap.activeId && bootstrap.entries.some((e) => e.id === bootstrap.activeId)
-    ? bootstrap.activeId
-    : bootstrap.entries[0].id;
-  const entry = bootstrap.entries.find((e) => e.id === targetId) || bootstrap.entries[0];
-  return { id: entry.id, label: entry.label };
+  const thinkingId =
+    bootstrap.activeId && bootstrap.entries.some((e) => e.id === bootstrap.activeId)
+      ? bootstrap.activeId
+      : bootstrap.entries[0].id;
+  const thinkingEntry = bootstrap.entries.find((e) => e.id === thinkingId) || bootstrap.entries[0];
+  const qid = bootstrap.quickActiveId?.trim();
+  const quickEntry =
+    qid && bootstrap.entries.some((e) => e.id === qid)
+      ? bootstrap.entries.find((e) => e.id === qid)!
+      : null;
+  return {
+    thinking: { id: thinkingEntry.id, label: thinkingEntry.label },
+    quick: quickEntry ? { id: quickEntry.id, label: quickEntry.label } : null,
+  };
+}
+
+/** 仅返回深度思考内置条目的 id/label（兼容旧调用方） */
+export function getBootstrapStudioDefaultPresetMeta(): { id: string; label: string } | null {
+  const m = getBootstrapStudioDefaultPresetsMeta();
+  return m?.thinking ?? null;
 }
 
 /**
@@ -435,7 +691,7 @@ export function restoreStudioDefaultPresetFromBootstrap(): { ok: boolean; error?
     }
   }
   if (merged.length !== registry.entries.length) {
-    saveProviderRegistry({ activeId: registry.activeId, entries: merged });
+    saveProviderRegistry({ ...registry, entries: merged });
     registry = loadProviderRegistry();
   }
   const targetId =
@@ -452,6 +708,11 @@ export function restoreStudioDefaultPresetFromBootstrap(): { ok: boolean; error?
   }
   if (!switchActiveProviderConfig(targetId)) {
     return { ok: false, error: '切换内置模型失败' };
+  }
+  registry = loadProviderRegistry();
+  const quickId = bootstrap.quickActiveId?.trim();
+  if (quickId && registry.entries.some((e) => e.id === quickId)) {
+    switchQuickActiveProviderConfig(quickId);
   }
   return { ok: true };
 }

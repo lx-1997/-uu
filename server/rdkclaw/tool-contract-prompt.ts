@@ -3,6 +3,16 @@
  * 用于路由与约束推理；不替代服务端权限守卫。
  */
 
+/** 工作台「快速回答」：极短契约，优先降低预填与首字延迟 */
+export function buildToolContractQuickOverviewPrompt(): string {
+  return [
+    "## 工具契约（速览）",
+    "本机 `exec`/`read`/`write`：仅 Studio 工程目录；`device_*`：SSH 板，简单查询优先 `device_exec`。",
+    "板端多步/技能链用 `board_openclaw_assess`→`delegate`；单条命令勿委派。",
+    "回复用户：结论先行、短段落；非必要不落长清单。",
+  ].join("\n");
+}
+
 export function buildToolContractOverviewPrompt(): string {
   return [
     "## 工具契约总纲（边界 · 依赖 · 顺序）",

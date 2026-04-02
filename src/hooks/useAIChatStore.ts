@@ -23,13 +23,17 @@ import {
   fetchDeviceOpenClawHealth,
   type AgentAttachmentPayload,
   type AgentSSEEvent,
+  type StudioResponseMode,
 } from '../api';
 import { persistOpenClawHealthSnapshot, persistGatewayStatusSnapshot } from '../studio-ui-hints';
 import {
   CHAT_HISTORY_LEGACY_KEY,
   GLOBAL_CHAT_DEVICE_ID,
+  chatHistoryLegacyDeviceKey,
   chatHistoryStorageKey,
+  getOrCreateStudioChatSessionId,
   loadChatHistoryFromStorage,
+  persistStudioChatSessionId,
   toChatDeviceId,
 } from '../utils/chat-history-storage';
 import { fetchApi } from '../utils/apiBase';
@@ -122,6 +126,10 @@ export interface AIChatStoreState {
   rdkClawRunTimeline: RdkClawTimelineEntry[];
   runTimelinePanelOpen: boolean;
   setRunTimelinePanelOpen: (v: boolean) => void;
+
+  /** 工作台 RDK 对话：思考沿设置页模型；快速弱化扩展思考与推理流 */
+  studioResponseMode: StudioResponseMode;
+  setStudioResponseMode: (v: StudioResponseMode) => void;
 }
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
@@ -129,11 +137,17 @@ const AIChatContext = createContext<AIChatStoreState | null>(null);
 /** 内存中对话条数上限，避免长会话撑爆渲染进程 */
 const MAX_CHAT_MESSAGES_IN_MEMORY = 100;
 const LARGE_DATA_URL_STORAGE_CHARS = 48_000;
-const CHAT_SESSION_KEY_PREFIX = 'rdk:chat:session-id:';
 const CHAT_DRAFT_KEY_PREFIX = 'rdk:chat:draft:';
+const STUDIO_RESPONSE_MODE_LS = 'rdk:studio-response-mode';
 
-function chatSessionStorageKey(deviceId: string) {
-  return `${CHAT_SESSION_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
+function parseStoredStudioResponseMode(): StudioResponseMode {
+  try {
+    const v = localStorage.getItem(STUDIO_RESPONSE_MODE_LS)?.trim();
+    if (v === 'quick') return 'quick';
+  } catch {
+    /* ignore */
+  }
+  return 'thinking';
 }
 
 function chatDraftStorageKey(deviceId: string) {
@@ -205,11 +219,28 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const tf = (key: string, zh: string, vars: Record<string, string | number>) =>
     fillTemplate(t(key, zh), vars);
   const initialChatDeviceId = toChatDeviceId(currentDevice?.id);
+  const initialStudioSessionId =
+    typeof window !== 'undefined' ? getOrCreateStudioChatSessionId(initialChatDeviceId) : `ui-${Date.now()}`;
+  const chatDeviceIdRef = useRef(initialChatDeviceId);
+  const sessionIdRef = useRef(initialStudioSessionId);
 
   // ── State ──
   const [cmd, setCmd] = useState('');
+  const [studioResponseMode, setStudioResponseModeState] = useState<StudioResponseMode>(() => parseStoredStudioResponseMode());
+  const setStudioResponseMode = useCallback((v: StudioResponseMode) => {
+    setStudioResponseModeState(v);
+    try {
+      localStorage.setItem(STUDIO_RESPONSE_MODE_LS, v);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => loadChatHistoryFromStorage(initialChatDeviceId));
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() =>
+    typeof window !== 'undefined'
+      ? loadChatHistoryFromStorage(initialChatDeviceId, initialStudioSessionId)
+      : [],
+  );
 
   useEffect(() => {
     if (chatMessages.length <= MAX_CHAT_MESSAGES_IN_MEMORY) return;
@@ -293,16 +324,28 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     setChatMessages([]);
     try {
       const deviceId = chatDeviceIdRef.current;
-      localStorage.removeItem(chatHistoryStorageKey(deviceId));
+      const sid = sessionIdRef.current;
+      localStorage.removeItem(chatHistoryStorageKey(deviceId, sid));
+      localStorage.removeItem(chatHistoryLegacyDeviceKey(deviceId));
       localStorage.removeItem(chatDraftStorageKey(deviceId));
       if (toChatDeviceId(deviceId) === GLOBAL_CHAT_DEVICE_ID) {
         localStorage.removeItem(CHAT_HISTORY_LEGACY_KEY);
       }
+      const nextSid = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      sessionIdRef.current = nextSid;
+      persistStudioChatSessionId(deviceId, nextSid);
+      void setActiveRdkclawSession(nextSid);
     } catch {
       // ignore
     }
     setRdkClawRunTimeline([]);
-    addToast(t('chat.store.historyCleared', '对话记录已清空'), 'info');
+    addToast(
+      t(
+        'chat.store.historyCleared',
+        '已在本窗口开启新对话线程，长期记忆与工作区档案仍保留。',
+      ),
+      'info',
+    );
   };
 
   // ── Cancel task ──
@@ -356,8 +399,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const reasoningBlockIndexRef = useRef<number | null>(null);
   const reasoningTimelineSentRef = useRef(false);
   const approvalBlockRef = useRef<Record<string, number>>({});
-  const chatDeviceIdRef = useRef<string>(initialChatDeviceId);
-  const sessionStorageKey = chatSessionStorageKey(initialChatDeviceId);
   const userStorageKey = 'rdk:chat:user-id';
   const readOrCreateStableId = (key: string, prefix: string) => {
     try {
@@ -370,17 +411,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       return `${prefix}-${Date.now()}`;
     }
   };
-  const sessionIdRef = useRef(readOrCreateStableId(sessionStorageKey, 'ui'));
   const userIdRef = useRef(readOrCreateStableId(userStorageKey, 'studio-user'));
   const persistSessionId = (value: string) => {
     const next = String(value || '').trim();
     if (!next) return;
     sessionIdRef.current = next;
-    try {
-      localStorage.setItem(chatSessionStorageKey(chatDeviceIdRef.current), next);
-    } catch {
-      // ignore persistence failures
-    }
+    persistStudioChatSessionId(chatDeviceIdRef.current, next);
   };
   const feishuMirrorSeenRef = useRef<Set<string>>(new Set());
   const feishuToolMessageRef = useRef<Record<string, number>>({});
@@ -970,7 +1006,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           currentDevice?.id,
           sessionIdRef.current,
           userIdRef.current,
-          requestAttachments,
+          { attachments: requestAttachments, studioResponseMode },
           (event: AgentSSEEvent) => {
             if (generation !== streamGenerationRef.current) return;
             const eventRunId = String(event.data.runId || '').trim();
@@ -2020,21 +2056,22 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const prevToSave = stripHeavyDataUrlsForStorage(chatMessages.slice(-50));
-      localStorage.setItem(chatHistoryStorageKey(prevDeviceId), JSON.stringify(prevToSave));
+      localStorage.setItem(chatHistoryStorageKey(prevDeviceId, sessionIdRef.current), JSON.stringify(prevToSave));
       localStorage.setItem(chatDraftStorageKey(prevDeviceId), cmd);
     } catch {
       // ignore
     }
 
     chatDeviceIdRef.current = nextDeviceId;
+    sessionIdRef.current = getOrCreateStudioChatSessionId(nextDeviceId);
 
-    const loadedForDevice = loadChatHistoryFromStorage(nextDeviceId);
+    const loadedForDevice = loadChatHistoryFromStorage(nextDeviceId, sessionIdRef.current);
     if (prevDeviceId === GLOBAL_CHAT_DEVICE_ID && nextDeviceId !== GLOBAL_CHAT_DEVICE_ID) {
       const merged = mergeChatMessagesById(chatMessages, loadedForDevice);
       setChatMessages(merged);
       try {
         localStorage.setItem(
-          chatHistoryStorageKey(nextDeviceId),
+          chatHistoryStorageKey(nextDeviceId, sessionIdRef.current),
           JSON.stringify(stripHeavyDataUrlsForStorage(merged.slice(-50))),
         );
       } catch {
@@ -2058,7 +2095,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       setCmd('');
     }
 
-    sessionIdRef.current = readOrCreateStableId(chatSessionStorageKey(nextDeviceId), 'ui');
     reportActiveSession('device-switch');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDevice?.id]);
@@ -2373,7 +2409,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     chatPersistTimerRef.current = setTimeout(() => {
       try {
         const toSave = stripHeavyDataUrlsForStorage(chatMessages.slice(-50));
-        localStorage.setItem(chatHistoryStorageKey(chatDeviceIdRef.current), JSON.stringify(toSave));
+        localStorage.setItem(
+          chatHistoryStorageKey(chatDeviceIdRef.current, sessionIdRef.current),
+          JSON.stringify(toSave),
+        );
         localStorage.setItem(chatDraftStorageKey(chatDeviceIdRef.current), cmd);
         if (toChatDeviceId(chatDeviceIdRef.current) === GLOBAL_CHAT_DEVICE_ID) {
           localStorage.setItem(CHAT_HISTORY_LEGACY_KEY, JSON.stringify(toSave));
@@ -2407,7 +2446,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.storageArea !== localStorage || !e.key) return;
-      if (e.key !== chatHistoryStorageKey(chatDeviceIdRef.current)) return;
+      if (e.key !== chatHistoryStorageKey(chatDeviceIdRef.current, sessionIdRef.current)) return;
       if (!e.newValue) {
         setChatMessages([]);
         return;
@@ -2432,6 +2471,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,
     rdkClawRunTimeline, runTimelinePanelOpen, setRunTimelinePanelOpen,
+    studioResponseMode, setStudioResponseMode,
   };
 
   return React.createElement(AIChatContext.Provider, { value }, children);

@@ -30,6 +30,8 @@ import {
   getApiKey,
   getBaseUrl,
   loadProviderConfig,
+  resolveSamplingTemperature,
+  resolveSamplingTopP,
   type ProviderConfig,
 } from './provider-setup.js';
 import { createRdkTools } from './tools/rdk-tools.js';
@@ -143,7 +145,8 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
     modelDef,
     streamFn,
     apiKey,
-    temperature: 0.7,
+    temperature: resolveSamplingTemperature(config),
+    topP: resolveSamplingTopP(config),
     maxTurns: 10,
     maxOutputTokens: modelDef.maxTokens ?? 8192,
     contextTokens: modelDef.contextWindow ?? 128000,

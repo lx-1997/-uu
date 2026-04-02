@@ -164,12 +164,32 @@ export default function SettingsPanel() {
   const [aiSavedModels, setAiSavedModels] = useState<Array<{
     id: string; label: string; provider: string; model: string;
     hasApiKey: boolean; baseUrl?: string; isActive: boolean;
+    isQuickLane?: boolean;
     thinkingDefault?: string;
     reasoningVisibility?: string;
+    samplingTemperature?: string;
+    samplingTopP?: string;
   }>>([]);
-  const [aiThinkingDefault, setAiThinkingDefault] = useState('');
-  const [aiReasoningVisibility, setAiReasoningVisibility] = useState('');
+  /** 服务端：快速回答绑定的条目 id */
+  const [quickLaneModelId, setQuickLaneModelId] = useState('');
+  /** 快速区块当前编辑的条目 id（新建草稿时为空） */
+  const [quickSelectedAiModelId, setQuickSelectedAiModelId] = useState('');
+  const [aiThinkingDefault, setAiThinkingDefault] = useState('high');
+  const [aiReasoningVisibility, setAiReasoningVisibility] = useState('stream');
+  const [aiSamplingTemperature, setAiSamplingTemperature] = useState('0.1');
+  const [aiSamplingTopP, setAiSamplingTopP] = useState('1');
+  const [quickAiProvider, setQuickAiProvider] = useState('qwen');
+  const [quickAiModel, setQuickAiModel] = useState('');
+  const [quickAiApiKey, setQuickAiApiKey] = useState('');
+  const [quickAiBaseUrl, setQuickAiBaseUrl] = useState('');
+  const [quickAiLabel, setQuickAiLabel] = useState('');
+  const [quickAiThinkingDefault, setQuickAiThinkingDefault] = useState('high');
+  const [quickAiReasoningVisibility, setQuickAiReasoningVisibility] = useState('stream');
+  const [quickAiSamplingTemperature, setQuickAiSamplingTemperature] = useState('0.1');
+  const [quickAiSamplingTopP, setQuickAiSamplingTopP] = useState('1');
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
+  /** AI 引擎卡片内：同一位置切换深度 / 快速，表单状态仍各自独立 */
+  const [aiEngineLaneTab, setAiEngineLaneTab] = useState<'thinking' | 'quick'>('thinking');
   const [aiSaving, setAiSaving] = useState(false);
   const [aiEnvApiKeyAvailable, setAiEnvApiKeyAvailable] = useState(false);
   const [studioDefaultPreset, setStudioDefaultPreset] = useState<{
@@ -178,8 +198,15 @@ export default function SettingsPanel() {
     inRegistry: boolean;
     isActive: boolean;
   } | null>(null);
+  const [studioQuickDefaultPreset, setStudioQuickDefaultPreset] = useState<{
+    id: string;
+    label: string;
+    inRegistry: boolean;
+    isQuickLane: boolean;
+  } | null>(null);
   const importAgentConfigRef = useRef<HTMLInputElement | null>(null);
   const loadedAiProviderRef = useRef('');
+  const quickLoadedAiProviderRef = useRef('');
 
   const applyAiModelToForm = (entry: typeof aiSavedModels[number]) => {
     setSelectedAiModelId(entry.id);
@@ -189,8 +216,24 @@ export default function SettingsPanel() {
     setAiBaseUrl(entry.baseUrl || '');
     setAiThinkingDefault((entry.thinkingDefault || '').trim());
     setAiReasoningVisibility((entry.reasoningVisibility || '').trim());
+    setAiSamplingTemperature((entry.samplingTemperature || '').trim());
+    setAiSamplingTopP((entry.samplingTopP || '').trim());
     setAiApiKey('');
     loadedAiProviderRef.current = entry.provider || 'qwen';
+  };
+
+  const applyQuickFormFromEntry = (entry: typeof aiSavedModels[number]) => {
+    setQuickSelectedAiModelId(entry.id);
+    setQuickAiLabel(entry.label || '');
+    setQuickAiProvider(entry.provider || 'qwen');
+    setQuickAiModel(entry.model || '');
+    setQuickAiBaseUrl(entry.baseUrl || '');
+    setQuickAiThinkingDefault((entry.thinkingDefault || '').trim());
+    setQuickAiReasoningVisibility((entry.reasoningVisibility || '').trim());
+    setQuickAiSamplingTemperature((entry.samplingTemperature || '').trim());
+    setQuickAiSamplingTopP((entry.samplingTopP || '').trim());
+    setQuickAiApiKey('');
+    quickLoadedAiProviderRef.current = entry.provider || 'qwen';
   };
 
   const refreshAiConfig = async () => {
@@ -199,25 +242,50 @@ export default function SettingsPanel() {
     setAiSavedModels(models);
     setAiEnvApiKeyAvailable(!!cfg.envApiKeyAvailable);
     setStudioDefaultPreset(cfg.studioDefaultPreset ?? null);
+    setStudioQuickDefaultPreset(cfg.studioQuickDefaultPreset ?? null);
+    const nextQuick = cfg.quickActiveModelId?.trim() || '';
+    setQuickLaneModelId(nextQuick);
     const aid = cfg.activeModelId?.trim();
     const active = aid
       ? models.find((item) => item.id === aid)
       : models.find((item) => item.isActive);
+    const quickTarget = nextQuick ? models.find((m) => m.id === nextQuick) : undefined;
+
     const resolved = active || models[0];
     if (resolved) {
       applyAiModelToForm(resolved);
-      setAiConfigured(!!resolved.hasApiKey || !!cfg.envApiKeyAvailable);
-      return;
+    } else {
+      setSelectedAiModelId('');
+      setAiLabel('');
+      setAiProvider(cfg.provider || 'qwen');
+      setAiModel(cfg.model || '');
+      setAiBaseUrl(cfg.baseUrl || '');
+      setAiThinkingDefault((cfg.thinkingDefault || '').trim());
+      setAiReasoningVisibility((cfg.reasoningVisibility || '').trim());
+      setAiSamplingTemperature((cfg.samplingTemperature || '').trim());
+      setAiSamplingTopP((cfg.samplingTopP || '').trim());
+      setAiApiKey('');
     }
-    setAiConfigured(false);
-    setSelectedAiModelId('');
-    setAiLabel('');
-    setAiProvider(cfg.provider || 'qwen');
-    setAiModel(cfg.model || '');
-    setAiBaseUrl(cfg.baseUrl || '');
-    setAiThinkingDefault((cfg.thinkingDefault || '').trim());
-    setAiReasoningVisibility((cfg.reasoningVisibility || '').trim());
-    setAiApiKey('');
+
+    if (quickTarget) {
+      applyQuickFormFromEntry(quickTarget);
+    } else {
+      setQuickSelectedAiModelId('');
+      setQuickAiLabel('');
+      setQuickAiProvider('qwen');
+      setQuickAiModel('');
+      setQuickAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
+      setQuickAiThinkingDefault('');
+      setQuickAiReasoningVisibility('');
+      setQuickAiSamplingTemperature('');
+      setQuickAiSamplingTopP('');
+      setQuickAiApiKey('');
+      quickLoadedAiProviderRef.current = 'qwen';
+    }
+
+    setAiConfigured(
+      !!(resolved?.hasApiKey || quickTarget?.hasApiKey || cfg.envApiKeyAvailable),
+    );
   };
 
   /* ── Feishu State ── */
@@ -246,8 +314,8 @@ export default function SettingsPanel() {
 
   /* ── RDKClaw Persona & Policy ── */
   const [persona, setPersona] = useState<PersonaProfile>({
-    name: 'RDKClaw', extraInstructions: '', riskLevel: 'balanced',
-    delegationBias: 'balanced', autonomyLevel: 'assisted',
+    name: '小地瓜', extraInstructions: '', riskLevel: 'balanced',
+    delegationBias: 'local-first', autonomyLevel: 'assisted',
   });
   const [policy, setPolicy] = useState<RDKClawPolicy>({
     approval: { mode: 'risk-based', riskThreshold: 'medium' },
@@ -258,8 +326,8 @@ export default function SettingsPanel() {
       commandDangerGuardEnabled: true,
       auditLogEnabled: true,
     },
-    memory: { mainSessionReadsMemory: true, sharedSessionBlocksMemory: false, dailyMemoryDays: 7 },
-    network: { enabled: true, maxFetchChars: 30000, requireApproval: false },
+    memory: { mainSessionReadsMemory: true, sharedSessionBlocksMemory: true, dailyMemoryDays: 2 },
+    network: { enabled: true, maxFetchChars: 16000, requireApproval: false },
     context: { contextTokens: 128000, maxHistoryShare: 0.5, softTrimRatio: 0.3, hardClearRatio: 0.5, keepLastAssistants: 3 },
   });
   const [securityAudit, setSecurityAudit] = useState<SecurityAuditLogEntry[]>([]);
@@ -411,7 +479,16 @@ export default function SettingsPanel() {
       const res = await saveRDKClawPersona(persona);
       setPersona(res.persona);
       addToast(t('toast.personaSaved', '人格设定已保存'), 'success');
-    } catch { addToast(t('toast.personaSaveFail', '保存人格设定失败'), 'error'); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      const timedOut = (e as { name?: string }).name === 'TimeoutError' || /abort|timeout/i.test(msg);
+      addToast(
+        timedOut
+          ? t('toast.personaSaveTimeout', '保存超时：请确认本机后端已启动且桌面端能连上 API（可重试）')
+          : t('toast.personaSaveFail', '保存人格设定失败'),
+        'error',
+      );
+    }
     finally { setRdkclawSaving(false); }
   };
 
@@ -421,7 +498,16 @@ export default function SettingsPanel() {
       const res = await saveRDKClawPolicy(policy);
       setPolicy(res.policy);
       addToast(t('toast.policySaved', '执行策略已保存'), 'success');
-    } catch { addToast(t('toast.policySaveFail', '保存执行策略失败'), 'error'); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      const timedOut = (e as { name?: string }).name === 'TimeoutError' || /abort|timeout/i.test(msg);
+      addToast(
+        timedOut
+          ? t('toast.policySaveTimeout', '保存超时：请确认本机后端已启动且桌面端能连上 API（可重试）')
+          : t('toast.policySaveFail', '保存执行策略失败'),
+        'error',
+      );
+    }
     finally { setRdkclawSaving(false); }
   };
 
@@ -512,7 +598,7 @@ export default function SettingsPanel() {
     }
   };
 
-  const handleSaveAiConfig = async () => {
+  const handleSaveThinkingAiConfig = async () => {
     const selectedEntry = aiSavedModels.find((item) => item.id === selectedAiModelId);
     if (!aiApiKey.trim() && !selectedEntry?.hasApiKey && !aiEnvApiKeyAvailable) {
       addToast(t('toast.needApiKey', '请填写 API Key'), 'warning');
@@ -542,6 +628,8 @@ export default function SettingsPanel() {
         setActive: true,
         thinkingDefault: aiThinkingDefault,
         reasoningVisibility: aiReasoningVisibility,
+        samplingTemperature: aiSamplingTemperature,
+        samplingTopP: aiSamplingTopP,
       });
     } catch (err) {
       addToast(
@@ -557,7 +645,7 @@ export default function SettingsPanel() {
     try {
       await refreshAiConfig();
     } catch {
-      /* 保存已成功，刷新失败不阻断成功提示 */
+      /* ignore */
     }
     const savedModel = `${aiProvider}/${effectiveModel}`;
     addToast(
@@ -568,8 +656,91 @@ export default function SettingsPanel() {
     );
   };
 
-  const handleDeleteAiModel = async () => {
-    if (!selectedAiModelId) { addToast(t('toast.pickModel', '请先选择一个模型'), 'warning'); return; }
+  const handleSaveQuickAiConfig = async () => {
+    const selectedEntry = aiSavedModels.find((item) => item.id === quickSelectedAiModelId);
+    if (!quickAiApiKey.trim() && !selectedEntry?.hasApiKey && !aiEnvApiKeyAvailable) {
+      addToast(t('toast.needApiKey', '请填写 API Key'), 'warning');
+      return;
+    }
+    const providerDefaults = AI_PROVIDER_DEFAULTS[quickAiProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
+    const trimmedModelInput = quickAiModel.trim();
+    const effectiveModel = (trimmedModelInput || providerDefaults.model || '').trim();
+    if (!effectiveModel) {
+      addToast(t('toast.needModelName', '请填写模型名称'), 'warning');
+      return;
+    }
+    const providerChanged = selectedEntry && selectedEntry.provider !== quickAiProvider;
+    const modelChanged = selectedEntry && selectedEntry.model !== effectiveModel;
+    const autoLabel = `${quickAiProvider}/${effectiveModel}`;
+    const label = (providerChanged || modelChanged) ? autoLabel : (quickAiLabel.trim() || autoLabel);
+    const activeRowId = aiSavedModels.find((r) => r.isActive)?.id;
+    const isQuickNewDraft = !quickSelectedAiModelId;
+    let setActive = false;
+    if (!isQuickNewDraft && activeRowId && quickSelectedAiModelId === activeRowId) {
+      setActive = true;
+    }
+    setAiSaving(true);
+    let saveResult: Awaited<ReturnType<typeof saveAgentConfig>> | null = null;
+    try {
+      saveResult = await saveAgentConfig({
+        action: 'upsert',
+        id: quickSelectedAiModelId || undefined,
+        label,
+        provider: quickAiProvider,
+        model: effectiveModel,
+        apiKey: quickAiApiKey || undefined,
+        baseUrl: quickAiBaseUrl || providerDefaults.baseUrl || undefined,
+        setActive,
+        thinkingDefault: quickAiThinkingDefault,
+        reasoningVisibility: quickAiReasoningVisibility,
+        samplingTemperature: quickAiSamplingTemperature,
+        samplingTopP: quickAiSamplingTopP,
+      });
+    } catch (err) {
+      addToast(
+        tf('toast.aiSaveFailMsg', '保存失败: {{msg}}', {
+          msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+        }),
+        'error',
+      );
+      return;
+    } finally {
+      setAiSaving(false);
+    }
+    if (isQuickNewDraft && saveResult?.savedId) {
+      setAiSaving(true);
+      try {
+        await saveAgentConfig({ action: 'switch_quick', id: saveResult.savedId });
+      } catch (err) {
+        addToast(
+          tf('toast.aiSaveFailMsg', '已保存但未绑定为快速回答: {{msg}}', {
+            msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+          }),
+          'warning',
+        );
+      } finally {
+        setAiSaving(false);
+      }
+    }
+    try {
+      await refreshAiConfig();
+    } catch {
+      /* ignore */
+    }
+    const savedModel = `${quickAiProvider}/${effectiveModel}`;
+    addToast(
+      quickSelectedAiModelId
+        ? tf('toast.aiModelUpdated', '模型已更新: {{name}}', { name: savedModel })
+        : tf('toast.aiModelAddedQuickBound', '已新增并设为快速回答: {{name}}', { name: savedModel }),
+      'success',
+    );
+  };
+
+  const handleDeleteThinkingAiModel = async () => {
+    if (!selectedAiModelId) {
+      addToast(t('toast.pickModel', '请先选择一个模型'), 'warning');
+      return;
+    }
     const entry = aiSavedModels.find((item) => item.id === selectedAiModelId);
     setAiSaving(true);
     try {
@@ -598,14 +769,63 @@ export default function SettingsPanel() {
     );
   };
 
-  const handleCreateNewAiModel = () => {
-    setSelectedAiModelId(''); setAiLabel('');
+  const handleDeleteQuickAiModel = async () => {
+    if (!quickSelectedAiModelId) {
+      addToast(t('toast.pickModel', '请先选择一个模型'), 'warning');
+      return;
+    }
+    const entry = aiSavedModels.find((item) => item.id === quickSelectedAiModelId);
+    setAiSaving(true);
+    try {
+      await saveAgentConfig({ action: 'delete', id: quickSelectedAiModelId });
+    } catch (err) {
+      addToast(
+        tf('toast.aiDeleteFailMsg', '删除失败: {{msg}}', {
+          msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+        }),
+        'error',
+      );
+      return;
+    } finally {
+      setAiSaving(false);
+    }
+    try {
+      await refreshAiConfig();
+    } catch {
+      /* ignore */
+    }
+    addToast(
+      tf('toast.aiDeleted', '已删除: {{id}}', {
+        id: entry ? `${entry.provider}/${entry.model}` : quickSelectedAiModelId,
+      }),
+      'success',
+    );
+  };
+
+  const handleCreateNewThinkingModel = () => {
+    setSelectedAiModelId('');
+    setAiLabel('');
     setAiProvider('qwen');
     setAiModel('');
     setAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
     setAiThinkingDefault('');
     setAiReasoningVisibility('');
+    setAiSamplingTemperature('');
+    setAiSamplingTopP('');
     setAiApiKey('');
+  };
+
+  const handleCreateNewQuickModel = () => {
+    setQuickSelectedAiModelId('');
+    setQuickAiLabel('');
+    setQuickAiProvider('qwen');
+    setQuickAiModel('');
+    setQuickAiBaseUrl(AI_PROVIDER_DEFAULTS.qwen.baseUrl);
+    setQuickAiThinkingDefault('');
+    setQuickAiReasoningVisibility('');
+    setQuickAiSamplingTemperature('');
+    setQuickAiSamplingTopP('');
+    setQuickAiApiKey('');
   };
 
   const handleRestoreStudioDefaultModel = async () => {
@@ -696,15 +916,26 @@ export default function SettingsPanel() {
     addToast(t('toast.importOk', '模型配置导入成功'), 'success');
   };
 
-  const applyAiProviderPreset = (nextProvider: string) => {
-    const prevDefaults = AI_PROVIDER_DEFAULTS[aiProvider];
+  const applyAiProviderPreset = (lane: 'thinking' | 'quick', nextProvider: string) => {
+    if (lane === 'thinking') {
+      const prevDefaults = AI_PROVIDER_DEFAULTS[aiProvider];
+      const nextDefaults = AI_PROVIDER_DEFAULTS[nextProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
+      const shouldReplaceModel = !aiModel || aiModel === prevDefaults?.model;
+      const shouldReplaceBaseUrl = !aiBaseUrl || aiBaseUrl === prevDefaults?.baseUrl;
+      setAiLabel('');
+      setAiProvider(nextProvider);
+      if (shouldReplaceModel) setAiModel(nextDefaults.model);
+      if (shouldReplaceBaseUrl) setAiBaseUrl(nextDefaults.baseUrl);
+      return;
+    }
+    const prevDefaults = AI_PROVIDER_DEFAULTS[quickAiProvider];
     const nextDefaults = AI_PROVIDER_DEFAULTS[nextProvider] || AI_PROVIDER_DEFAULTS['openai-compatible'];
-    const shouldReplaceModel = !aiModel || aiModel === prevDefaults?.model;
-    const shouldReplaceBaseUrl = !aiBaseUrl || aiBaseUrl === prevDefaults?.baseUrl;
-    setAiLabel('');
-    setAiProvider(nextProvider);
-    if (shouldReplaceModel) setAiModel(nextDefaults.model);
-    if (shouldReplaceBaseUrl) setAiBaseUrl(nextDefaults.baseUrl);
+    const shouldReplaceModel = !quickAiModel || quickAiModel === prevDefaults?.model;
+    const shouldReplaceBaseUrl = !quickAiBaseUrl || quickAiBaseUrl === prevDefaults?.baseUrl;
+    setQuickAiLabel('');
+    setQuickAiProvider(nextProvider);
+    if (shouldReplaceModel) setQuickAiModel(nextDefaults.model);
+    if (shouldReplaceBaseUrl) setQuickAiBaseUrl(nextDefaults.baseUrl);
   };
 
   /* ── WeChat Handlers ── */
@@ -998,27 +1229,76 @@ export default function SettingsPanel() {
               <section id="ai-engine" className="settings-section" ref={registerSectionRef('ai-engine')}>
                 <H title={t('settings.ai.title', 'AI 引擎')} desc={t('settings.ai.desc', 'RDKClaw 的思考核心。选择服务商、填入 API Key 即可启用。')} />
                 <div className="settings-card">
+                  <div className="settings-row" style={{ borderTop: 'none', paddingTop: 0 }}>
+                    <span className="settings-row-label">{t('settings.ai.editingLane', '编辑')}</span>
+                    <div className="settings-row-value" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      <div className="settings-segmented" role="tablist" aria-label={t('settings.ai.laneTabs', '深度或快速配置')}>
+                        <button
+                          type="button"
+                          role="tab"
+                          className="settings-segmented-btn"
+                          aria-selected={aiEngineLaneTab === 'thinking'}
+                          aria-pressed={aiEngineLaneTab === 'thinking'}
+                          onClick={() => setAiEngineLaneTab('thinking')}
+                        >
+                          {t('settings.ai.laneThinking', '深度思考')}
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          className="settings-segmented-btn"
+                          aria-selected={aiEngineLaneTab === 'quick'}
+                          aria-pressed={aiEngineLaneTab === 'quick'}
+                          onClick={() => setAiEngineLaneTab('quick')}
+                        >
+                          {t('settings.ai.laneQuick', '快速回答')}
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'right', maxWidth: 280, lineHeight: 1.35 }}>
+                        {t(
+                          'settings.ai.laneSwitchHint',
+                          '在此切换深度与快速；两套配置各自独立保存，互不影响。',
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                  {aiEngineLaneTab === 'thinking' ? (
+                  <>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.ai.currentModel', '当前模型')}</span>
                     <div className="settings-row-value">
-                      <select className="select" title={t('settings.ai.savedModels.title', '已保存模型')} aria-label={t('settings.ai.savedModels.aria', '已保存模型')} value={selectedAiModelId} disabled={aiSaving}
+                      <select
+                        className="select"
+                        title={t('settings.ai.savedModels.title', '已保存模型')}
+                        aria-label={t('settings.ai.savedModels.aria', '已保存模型')}
+                        value={selectedAiModelId}
+                        disabled={aiSaving}
                         onChange={async (e) => {
                           const id = e.target.value;
-                          if (!id) { handleCreateNewAiModel(); return; }
-                          const entry = aiSavedModels.find(i => i.id === id);
+                          if (!id) {
+                            handleCreateNewThinkingModel();
+                            return;
+                          }
+                          const entry = aiSavedModels.find((i) => i.id === id);
                           if (!entry) return;
                           if (!entry.isActive) {
                             if (!entry.hasApiKey && !aiEnvApiKeyAvailable) {
                               applyAiModelToForm(entry);
-                              addToast(t('toast.aiNoKeyWarn', '该模型未配置 API Key，请先编辑并保存后再切换（或配置环境变量 OPENAI_API_KEY）'), 'warning');
+                              addToast(
+                                t(
+                                  'toast.aiNoKeyWarn',
+                                  '该模型未配置 API Key，请先编辑并保存后再切换（或配置环境变量 OPENAI_API_KEY）',
+                                ),
+                                'warning',
+                              );
                               return;
                             }
                             applyAiModelToForm(entry);
                             setAiSaving(true);
                             let switchResult: Awaited<ReturnType<typeof saveAgentConfig>> | null = null;
                             try {
-                                switchResult = await saveAgentConfig({ action: 'switch', id });
-                                if (switchResult.active?.id === id) {
+                              switchResult = await saveAgentConfig({ action: 'switch', id });
+                              if (switchResult.active?.id === id) {
                                 applyAiModelToForm({
                                   id: switchResult.active.id,
                                   label: entry.label,
@@ -1028,6 +1308,8 @@ export default function SettingsPanel() {
                                   baseUrl: switchResult.active.baseUrl,
                                   thinkingDefault: entry.thinkingDefault,
                                   reasoningVisibility: entry.reasoningVisibility,
+                                  samplingTemperature: entry.samplingTemperature,
+                                  samplingTopP: entry.samplingTopP,
                                   isActive: true,
                                 });
                               }
@@ -1035,7 +1317,8 @@ export default function SettingsPanel() {
                               await refreshAiConfig().catch(() => {});
                               addToast(
                                 tf('toast.aiSwitchFailMsg', '切换失败: {{msg}}', {
-                                  msg: err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+                                  msg:
+                                    err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
                                 }),
                                 'error',
                               );
@@ -1055,30 +1338,72 @@ export default function SettingsPanel() {
                             return;
                           }
                           applyAiModelToForm(entry);
-                        }}>
+                        }}
+                      >
                         <option value="">{t('settings.ai.newProfile', '+ 新建配置')}</option>
-                        {aiSavedModels.map(i => {
-                          const realName = `${i.provider}/${i.model}`;
-                          const display = (i.label && i.label !== realName) ? `${i.label} (${realName})` : realName;
-                          const keyStatus = i.hasApiKey ? '' : t('settings.ai.noKeySuffix', ' [未配置Key]');
-                          return <option key={i.id} value={i.id}>{display}{keyStatus}{i.isActive ? ' ✓' : ''}</option>;
-                        })}
+                        {studioDefaultPreset?.inRegistry ? (
+                          <option value={studioDefaultPreset.id}>
+                            {t('settings.ai.systemDefaultThinking', '系统默认（深度思考）')}
+                            {' — '}
+                            {studioDefaultPreset.label}
+                          </option>
+                        ) : null}
+                        {aiSavedModels
+                          .filter((i) => !studioDefaultPreset?.inRegistry || i.id !== studioDefaultPreset.id)
+                          .map((i) => {
+                            const realName = `${i.provider}/${i.model}`;
+                            const display =
+                              i.label && i.label !== realName ? `${i.label} (${realName})` : realName;
+                            const keyStatus = i.hasApiKey ? '' : t('settings.ai.noKeySuffix', ' [未配置Key]');
+                            const mark = `${i.isActive ? ' ✓' : ''}${i.isQuickLane ? ' ⚡' : ''}`;
+                            return (
+                              <option key={i.id} value={i.id}>
+                                {display}
+                                {keyStatus}
+                                {mark}
+                              </option>
+                            );
+                          })}
                       </select>
-                      {aiConfigured && <span className="settings-status-badge ok">{t('settings.ai.configured', '已配置')}</span>}
+                      {aiConfigured && (
+                        <span className="settings-status-badge ok">{t('settings.ai.configured', '已配置')}</span>
+                      )}
                     </div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.ai.provider', '服务商')}</span>
                     <div className="settings-row-value">
-                      <select className="select" title={t('settings.ai.provider', '服务商')} aria-label={t('settings.ai.provider', '服务商')} value={aiProvider} onChange={e => applyAiProviderPreset(e.target.value)}>
-                        {AI_PROVIDER_OPTIONS.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
+                      <select
+                        className="select"
+                        title={t('settings.ai.provider', '服务商')}
+                        aria-label={t('settings.ai.provider', '服务商')}
+                        value={aiProvider}
+                        onChange={(e) => applyAiProviderPreset('thinking', e.target.value)}
+                      >
+                        {AI_PROVIDER_OPTIONS.map((i) => (
+                          <option key={i.value} value={i.value}>
+                            {i.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.ai.model', '模型')}</span>
                     <div className="settings-row-value" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                      <input type="text" className="input" style={{ flex: '1 1 200px', minWidth: 0 }} title={t('settings.ai.model', '模型')} aria-label={t('settings.ai.model', '模型')} placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model} value={aiModel} onChange={e => { setAiModel(e.target.value); setAiLabel(''); }} />
+                      <input
+                        type="text"
+                        className="input"
+                        style={{ flex: '1 1 200px', minWidth: 0 }}
+                        title={t('settings.ai.model', '模型')}
+                        aria-label={t('settings.ai.model', '模型')}
+                        placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.model}
+                        value={aiModel}
+                        onChange={(e) => {
+                          setAiModel(e.target.value);
+                          setAiLabel('');
+                        }}
+                      />
                       {AI_PROVIDER_DEFAULTS[aiProvider]?.model ? (
                         <button
                           type="button"
@@ -1100,11 +1425,35 @@ export default function SettingsPanel() {
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">API Key</span>
-                    <div className="settings-row-value"><input type="password" className="input" title="API Key" aria-label="API Key" placeholder={(aiConfigured && aiProvider === loadedAiProviderRef.current) ? t('settings.ai.apiKey.placeholder.saved', '已保存，留空不更新') : t('settings.ai.apiKey.placeholder.input', '请输入 API Key')} value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} /></div>
+                    <div className="settings-row-value">
+                      <input
+                        type="password"
+                        className="input"
+                        title="API Key"
+                        aria-label="API Key"
+                        placeholder={
+                          aiConfigured && aiProvider === loadedAiProviderRef.current
+                            ? t('settings.ai.apiKey.placeholder.saved', '已保存，留空不更新')
+                            : t('settings.ai.apiKey.placeholder.input', '请输入 API Key')
+                        }
+                        value={aiApiKey}
+                        onChange={(e) => setAiApiKey(e.target.value)}
+                      />
+                    </div>
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">Base URL</span>
-                    <div className="settings-row-value"><input type="text" className="input" title="Base URL" aria-label="Base URL" placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl || 'https://...'} value={aiBaseUrl} onChange={e => setAiBaseUrl(e.target.value)} /></div>
+                    <div className="settings-row-value">
+                      <input
+                        type="text"
+                        className="input"
+                        title="Base URL"
+                        aria-label="Base URL"
+                        placeholder={AI_PROVIDER_DEFAULTS[aiProvider]?.baseUrl || 'https://...'}
+                        value={aiBaseUrl}
+                        onChange={(e) => setAiBaseUrl(e.target.value)}
+                      />
+                    </div>
                   </div>
                   <div className="settings-row" style={{ alignItems: 'flex-start' }}>
                     <span className="settings-row-label">{t('settings.ai.brainAdvanced', '推理')}</span>
@@ -1112,7 +1461,7 @@ export default function SettingsPanel() {
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                         {t(
                           'settings.ai.brainAdvancedHint',
-                          '与板端 OpenClaw 选项对齐：思考档位对应扩展思考强度；推理可见性控制是否在聊天里流式展示思考块（模型需支持）。留空表示默认（档位 high、展示 on/stream）。',
+                          '思考档位、推理可见性可与板端 OpenClaw 对齐；留空表示由运行时使用默认（档位 high、展示 stream）。下方温度为模型采样参数，留空则不传给 API（用上游默认）。',
                         )}
                       </span>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -1150,9 +1499,347 @@ export default function SettingsPanel() {
                             <option value="stream">stream</option>
                           </select>
                         </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.samplingTemperature', '温度 temperature')}</span>
+                          <input
+                            type="text"
+                            className="input"
+                            style={{ width: 100 }}
+                            inputMode="decimal"
+                            title={t('settings.ai.samplingTemperature', '温度 temperature')}
+                            aria-label={t('settings.ai.samplingTemperature', '温度 temperature')}
+                            placeholder={t('settings.ai.samplingPlaceholder', '如 0.7，留空默认')}
+                            value={aiSamplingTemperature}
+                            onChange={(e) => setAiSamplingTemperature(e.target.value)}
+                          />
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.samplingTopP', 'top_p')}</span>
+                          <input
+                            type="text"
+                            className="input"
+                            style={{ width: 100 }}
+                            inputMode="decimal"
+                            title={t('settings.ai.samplingTopP', 'top_p')}
+                            aria-label={t('settings.ai.samplingTopP', 'top_p')}
+                            placeholder={t('settings.ai.topPPlaceholder', '如 0.9，留空不传')}
+                            value={aiSamplingTopP}
+                            onChange={(e) => setAiSamplingTopP(e.target.value)}
+                          />
+                        </label>
                       </div>
                     </div>
                   </div>
+                  <div className="settings-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleSaveThinkingAiConfig}
+                      disabled={aiSaving}
+                    >
+                      {aiSaving ? '...' : selectedAiModelId ? t('settings.ai.save', '保存') : t('settings.ai.addEnable', '新增并启用')}
+                    </button>
+                    {selectedAiModelId ? (
+                      <button type="button" className="btn btn-danger btn-sm" onClick={handleDeleteThinkingAiModel} disabled={aiSaving}>
+                        {t('settings.ai.delete', '删除')}
+                      </button>
+                    ) : null}
+                  </div>
+                  </>
+                  ) : (
+                  <>
+                  {studioQuickDefaultPreset && !studioQuickDefaultPreset.inRegistry ? (
+                    <div className="settings-row" style={{ minHeight: 'auto', alignItems: 'flex-start' }}>
+                      <span className="settings-row-label" />
+                      <div className="settings-row-value" style={{ justifyContent: 'flex-start' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                          {t(
+                            'settings.ai.systemDefaultRestoreHint',
+                            '若列表里没有「系统默认（快速）」，可先点击下方「使用系统内置模型」将安装包预设合并进本地后再选。',
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="settings-row">
+                    <span className="settings-row-label">{t('settings.ai.currentModel', '当前模型')}</span>
+                    <div className="settings-row-value">
+                      <select
+                        className="select"
+                        title={t('settings.ai.savedModels.title', '已保存模型')}
+                        aria-label={t('settings.ai.savedModels.aria', '已保存模型')}
+                        value={
+                          quickSelectedAiModelId.trim() ||
+                          (aiSavedModels.length > 0 ? '__quick_pick__' : '')
+                        }
+                        disabled={aiSaving}
+                        onChange={async (e) => {
+                          const raw = e.target.value;
+                          if (raw === '__quick_pick__') return;
+                          const id = raw;
+                          if (!id) {
+                            handleCreateNewQuickModel();
+                            return;
+                          }
+                          const entry = aiSavedModels.find((i) => i.id === id);
+                          if (!entry) return;
+                          const bound = quickLaneModelId.trim();
+                          if (bound !== entry.id) {
+                            if (!entry.hasApiKey && !aiEnvApiKeyAvailable) {
+                              applyQuickFormFromEntry(entry);
+                              addToast(
+                                t(
+                                  'toast.aiNoKeyWarn',
+                                  '该模型未配置 API Key，请先编辑并保存后再切换（或配置环境变量 OPENAI_API_KEY）',
+                                ),
+                                'warning',
+                              );
+                              return;
+                            }
+                            applyQuickFormFromEntry(entry);
+                            setAiSaving(true);
+                            try {
+                              await saveAgentConfig({ action: 'switch_quick', id: entry.id });
+                              await refreshAiConfig();
+                              const name = `${entry.provider}/${entry.model}`;
+                              addToast(
+                                tf('toast.aiQuickLaneUpdated', '快速回答模型已设为：{{name}}', { name }),
+                                'success',
+                              );
+                            } catch (err) {
+                              await refreshAiConfig().catch(() => {});
+                              addToast(
+                                tf('toast.aiSwitchFailMsg', '切换失败: {{msg}}', {
+                                  msg:
+                                    err instanceof Error ? err.message : t('toast.unknownErr', '未知错误'),
+                                }),
+                                'error',
+                              );
+                            } finally {
+                              setAiSaving(false);
+                            }
+                            return;
+                          }
+                          applyQuickFormFromEntry(entry);
+                        }}
+                      >
+                        {!quickSelectedAiModelId.trim() && aiSavedModels.length > 0 ? (
+                          <option value="__quick_pick__" disabled>
+                            {t('settings.ai.pickQuickModel', '请选择快速回答所用配置')}
+                          </option>
+                        ) : null}
+                        <option value="">{t('settings.ai.newProfile', '+ 新建配置')}</option>
+                        {studioQuickDefaultPreset?.inRegistry ? (
+                          <option value={studioQuickDefaultPreset.id}>
+                            {t('settings.ai.systemDefaultQuick', '系统默认（快速回答）')}
+                            {' — '}
+                            {studioQuickDefaultPreset.label}
+                          </option>
+                        ) : null}
+                        {aiSavedModels
+                          .filter(
+                            (i) =>
+                              !studioQuickDefaultPreset?.inRegistry ||
+                              i.id !== studioQuickDefaultPreset.id,
+                          )
+                          .map((i) => {
+                            const realName = `${i.provider}/${i.model}`;
+                            const display =
+                              i.label && i.label !== realName ? `${i.label} (${realName})` : realName;
+                            const keyStatus = i.hasApiKey ? '' : t('settings.ai.noKeySuffix', ' [未配置Key]');
+                            const mark = `${i.isActive ? ' ✓' : ''}${i.isQuickLane ? ' ⚡' : ''}`;
+                            return (
+                              <option key={i.id} value={i.id}>
+                                {display}
+                                {keyStatus}
+                                {mark}
+                              </option>
+                            );
+                          })}
+                      </select>
+                      {aiConfigured && (
+                        <span className="settings-status-badge ok">{t('settings.ai.configured', '已配置')}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">{t('settings.ai.provider', '服务商')}</span>
+                    <div className="settings-row-value">
+                      <select
+                        className="select"
+                        title={t('settings.ai.provider', '服务商')}
+                        aria-label={t('settings.ai.provider', '服务商')}
+                        value={quickAiProvider}
+                        onChange={(e) => applyAiProviderPreset('quick', e.target.value)}
+                      >
+                        {AI_PROVIDER_OPTIONS.map((i) => (
+                          <option key={i.value} value={i.value}>
+                            {i.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">{t('settings.ai.model', '模型')}</span>
+                    <div className="settings-row-value" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                      <input
+                        type="text"
+                        className="input"
+                        style={{ flex: '1 1 200px', minWidth: 0 }}
+                        title={t('settings.ai.model', '模型')}
+                        aria-label={t('settings.ai.model', '模型')}
+                        placeholder={AI_PROVIDER_DEFAULTS[quickAiProvider]?.model}
+                        value={quickAiModel}
+                        onChange={(e) => {
+                          setQuickAiModel(e.target.value);
+                          setQuickAiLabel('');
+                        }}
+                      />
+                      {AI_PROVIDER_DEFAULTS[quickAiProvider]?.model ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={aiSaving}
+                          title={t('settings.ai.fillExampleHint', '填入该服务商占位符中的示例模型名与 Base URL，保存后生效')}
+                          onClick={() => {
+                            const d = AI_PROVIDER_DEFAULTS[quickAiProvider];
+                            if (!d?.model) return;
+                            setQuickAiModel(d.model);
+                            if (d.baseUrl) setQuickAiBaseUrl(d.baseUrl);
+                            setQuickAiLabel('');
+                          }}
+                        >
+                          {t('settings.ai.fillExample', '填入示例模型')}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">API Key</span>
+                    <div className="settings-row-value">
+                      <input
+                        type="password"
+                        className="input"
+                        title="API Key"
+                        aria-label="API Key"
+                        placeholder={
+                          aiConfigured && quickAiProvider === quickLoadedAiProviderRef.current
+                            ? t('settings.ai.apiKey.placeholder.saved', '已保存，留空不更新')
+                            : t('settings.ai.apiKey.placeholder.input', '请输入 API Key')
+                        }
+                        value={quickAiApiKey}
+                        onChange={(e) => setQuickAiApiKey(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <span className="settings-row-label">Base URL</span>
+                    <div className="settings-row-value">
+                      <input
+                        type="text"
+                        className="input"
+                        title="Base URL"
+                        aria-label="Base URL"
+                        placeholder={AI_PROVIDER_DEFAULTS[quickAiProvider]?.baseUrl || 'https://...'}
+                        value={quickAiBaseUrl}
+                        onChange={(e) => setQuickAiBaseUrl(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+                    <span className="settings-row-label">{t('settings.ai.brainAdvanced', '推理')}</span>
+                    <div className="settings-row-value" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                        {t(
+                          'settings.ai.brainAdvancedHint',
+                          '思考档位、推理可见性可与板端 OpenClaw 对齐；留空表示由运行时使用默认（档位 high、展示 stream）。下方温度为模型采样参数，留空则不传给 API（用上游默认）。',
+                        )}
+                      </span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.thinkingDefault', '思考档位')}</span>
+                          <select
+                            className="select"
+                            title={t('settings.ai.thinkingDefault', '思考档位')}
+                            aria-label={t('settings.ai.thinkingDefault', '思考档位')}
+                            value={quickAiThinkingDefault}
+                            onChange={(e) => setQuickAiThinkingDefault(e.target.value)}
+                          >
+                            <option value="">{t('settings.ai.brainInherit', '默认 (high)')}</option>
+                            <option value="off">off</option>
+                            <option value="minimal">minimal</option>
+                            <option value="low">low</option>
+                            <option value="medium">medium</option>
+                            <option value="high">high</option>
+                            <option value="xhigh">xhigh</option>
+                            <option value="adaptive">adaptive</option>
+                          </select>
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.reasoningVisibility', '推理可见性')}</span>
+                          <select
+                            className="select"
+                            title={t('settings.ai.reasoningVisibility', '推理可见性')}
+                            aria-label={t('settings.ai.reasoningVisibility', '推理可见性')}
+                            value={quickAiReasoningVisibility}
+                            onChange={(e) => setQuickAiReasoningVisibility(e.target.value)}
+                          >
+                            <option value="">{t('settings.ai.brainStreamDefault', '默认 (stream)')}</option>
+                            <option value="off">off</option>
+                            <option value="on">on</option>
+                            <option value="stream">stream</option>
+                          </select>
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.samplingTemperature', '温度 temperature')}</span>
+                          <input
+                            type="text"
+                            className="input"
+                            style={{ width: 100 }}
+                            inputMode="decimal"
+                            title={t('settings.ai.samplingTemperature', '温度 temperature')}
+                            aria-label={t('settings.ai.samplingTemperature', '温度 temperature')}
+                            placeholder={t('settings.ai.samplingPlaceholder', '如 0.7，留空默认')}
+                            value={quickAiSamplingTemperature}
+                            onChange={(e) => setQuickAiSamplingTemperature(e.target.value)}
+                          />
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: '0.75rem' }}>
+                          <span>{t('settings.ai.samplingTopP', 'top_p')}</span>
+                          <input
+                            type="text"
+                            className="input"
+                            style={{ width: 100 }}
+                            inputMode="decimal"
+                            title={t('settings.ai.samplingTopP', 'top_p')}
+                            aria-label={t('settings.ai.samplingTopP', 'top_p')}
+                            placeholder={t('settings.ai.topPPlaceholder', '如 0.9，留空不传')}
+                            value={quickAiSamplingTopP}
+                            onChange={(e) => setQuickAiSamplingTopP(e.target.value)}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="settings-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleSaveQuickAiConfig}
+                      disabled={aiSaving}
+                    >
+                      {aiSaving ? '...' : quickSelectedAiModelId ? t('settings.ai.save', '保存') : t('settings.ai.addEnable', '新增并启用')}
+                    </button>
+                    {quickSelectedAiModelId ? (
+                      <button type="button" className="btn btn-danger btn-sm" onClick={handleDeleteQuickAiModel} disabled={aiSaving}>
+                        {t('settings.ai.delete', '删除')}
+                      </button>
+                    ) : null}
+                  </div>
+                  </>
+                  )}
+
                   {studioDefaultPreset && (
                     <div className="settings-row">
                       <span className="settings-row-label">{t('settings.ai.builtin', '内置模型')}</span>
@@ -1172,11 +1859,23 @@ export default function SettingsPanel() {
                     </div>
                   )}
                   <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveAiConfig} disabled={aiSaving}>{aiSaving ? '...' : (selectedAiModelId ? t('settings.ai.save', '保存') : t('settings.ai.addEnable', '新增并启用'))}</button>
-                    {selectedAiModelId && <button type="button" className="btn btn-danger btn-sm" onClick={handleDeleteAiModel} disabled={aiSaving}>{t('settings.ai.delete', '删除')}</button>}
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={handleExportAgentConfig} disabled={aiSaving}>{t('settings.ai.export', '导出')}</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => importAgentConfigRef.current?.click()} disabled={aiSaving}>{t('settings.ai.import', '导入')}</button>
-                    <input ref={importAgentConfigRef} type="file" className="sr-only" accept=".json" onChange={e => { const f = e.target.files?.[0]; if (f) void handleImportAgentConfig(f); }} title={t('settings.ai.import.title', '导入')} />
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={handleExportAgentConfig} disabled={aiSaving}>
+                      {t('settings.ai.export', '导出')}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => importAgentConfigRef.current?.click()} disabled={aiSaving}>
+                      {t('settings.ai.import', '导入')}
+                    </button>
+                    <input
+                      ref={importAgentConfigRef}
+                      type="file"
+                      className="sr-only"
+                      accept=".json"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleImportAgentConfig(f);
+                      }}
+                      title={t('settings.ai.import.title', '导入')}
+                    />
                   </div>
                 </div>
               </section>
@@ -1205,7 +1904,7 @@ export default function SettingsPanel() {
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.persona.delegation', '委派倾向')}</span>
-                    <div className="settings-row-value"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation', '委派倾向')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先')}</option><option value="balanced">{t('settings.persona.delegation.balanced', '均衡')}</option><option value="board-first">{t('settings.persona.delegation.board', '板端优先')}</option></select></div>
+                    <div className="settings-row-value"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation.hint', '委派倾向；Studio 优先为推荐默认，适合 OpenClaw 在开发板、主推理在 Studio 的架构')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先（推荐）')}</option><option value="balanced">{t('settings.persona.delegation.balanced', '均衡')}</option><option value="board-first">{t('settings.persona.delegation.board', '板端优先')}</option></select></div>
                   </div>
                   <div className="settings-actions">
                     <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePersona} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : t('settings.persona.save', '保存')}</button>

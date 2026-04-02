@@ -151,7 +151,23 @@ export const EN: Record<string, string> = {
 
   'settings.ai.title': 'AI engine',
   'settings.ai.desc': 'Core brain for RDKClaw. Pick a provider and API key to enable.',
+  'settings.ai.laneThinking': 'Deep (thinking)',
+  'settings.ai.laneQuick': 'Quick reply',
+  'settings.ai.laneTabs': 'Deep vs quick AI profile',
+  'settings.ai.editingLane': 'Editing',
+  'settings.ai.laneSwitchHint': 'Same fields below for both lanes; the dropdown chooses which saved profile you edit or bind.',
   'settings.ai.currentModel': 'Active model',
+  'settings.ai.quickLaneModel': 'Quick reply model',
+  'settings.ai.quickLaneHint':
+    'Quick mode uses a saved profile. Prefer the bundled system default (quick) or duplicate from depth; merge bundled presets first if options are missing. Edit key/model below and save.',
+  'settings.ai.pickQuickModel': 'Choose a profile for quick replies',
+  'settings.ai.systemDefaultThinking': 'System default (deep)',
+  'settings.ai.systemDefaultQuick': 'System default (quick)',
+  'settings.ai.systemDefaultRestoreHint':
+    'If “system default” options are missing, use “Restore bundled default” below to merge presets into your saved list.',
+  'settings.ai.quickDuplicateFromActive': 'Duplicate active profile for quick',
+  'settings.ai.quickDuplicateHint': 'Creates a new saved profile from the current depth (active) model, with quick-oriented defaults you can edit.',
+  'toast.aiQuickDuplicated': 'Quick profile created and selected',
   'settings.ai.savedModels.title': 'Saved models',
   'settings.ai.savedModels.aria': 'Saved models',
   'settings.ai.newProfile': '+ New profile',
@@ -190,7 +206,9 @@ export const EN: Record<string, string> = {
   'settings.persona.autonomy.assisted': 'Assisted',
   'settings.persona.autonomy.autonomous': 'Autonomous',
   'settings.persona.delegation': 'Delegation bias',
-  'settings.persona.delegation.studio': 'Studio first',
+  'settings.persona.delegation.hint':
+    'Delegation bias; Studio first is the recommended default when OpenClaw runs on the board and Studio drives planning',
+  'settings.persona.delegation.studio': 'Studio first (recommended)',
   'settings.persona.delegation.balanced': 'Balanced',
   'settings.persona.delegation.board': 'Board first',
 
@@ -312,8 +330,12 @@ export const EN: Record<string, string> = {
   'toast.readConfigFail': 'Failed to load config',
   'toast.personaSaved': 'Persona saved',
   'toast.personaSaveFail': 'Failed to save persona',
+  'toast.personaSaveTimeout':
+    'Save timed out — check that the backend is running and the app can reach the API, then retry',
   'toast.policySaved': 'Policy saved',
   'toast.policySaveFail': 'Failed to save policy',
+  'toast.policySaveTimeout':
+    'Save timed out — check that the backend is running and the app can reach the API, then retry',
   'toast.forumNeedCreds': 'Enter forum username and password',
   'toast.forumSavedOk': 'Forum credentials verified',
   'toast.forumSavedWarn': 'Saved but SSO verification failed',
@@ -332,6 +354,7 @@ export const EN: Record<string, string> = {
   'toast.needApiKey': 'Enter an API key',
   'toast.aiModelUpdated': 'Model updated: {{name}}',
   'toast.aiModelAdded': 'Added and enabled: {{name}}',
+  'toast.aiModelAddedQuickBound': 'Added and set as quick-reply profile: {{name}}',
   'toast.aiSaveFailMsg': 'Save failed: {{msg}}',
   'toast.aiDeleted': 'Deleted: {{id}}',
   'toast.aiDeleteFailMsg': 'Delete failed: {{msg}}',
@@ -340,6 +363,7 @@ export const EN: Record<string, string> = {
   'toast.weixinLoginFailMsg': 'Login failed: {{msg}}',
   'toast.weixinEsLost': 'Connection lost, please retry',
   'toast.aiSwitchedTo': 'Switched to {{name}}',
+  'toast.aiQuickLaneUpdated': 'Quick reply model: {{name}}',
   'toast.aiSwitchFailMsg': 'Switch failed: {{msg}}',
   'toast.pickModel': 'Select a model first',
   'toast.exportOk': 'Model config exported',
@@ -376,7 +400,8 @@ export const EN: Record<string, string> = {
   'chat.store.executing': 'Executing…',
   'chat.store.cancelled': 'Cancelled',
   'chat.store.cancelledDetail': 'Action cancelled',
-  'chat.store.historyCleared': 'Chat history cleared',
+  'chat.store.historyCleared':
+    'Started a new chat thread in this window. Long-term memory and workspace files are kept.',
   'chat.store.taskCancelled': 'Task cancelled',
 
   'err.importNoEntries': 'No valid entries in import file',

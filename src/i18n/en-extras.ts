@@ -83,7 +83,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'files.modal.cancel': 'Cancel download',
 
   'dock.task.panelTitle': 'Tasks',
-  'dock.task.clearHistoryTitle': 'Clear chat',
+  'dock.task.clearHistoryTitle': 'New chat (this window only; keeps long-term memory)',
   'dock.task.closeTitle': 'Close',
   'dock.history.openTitle': 'View local chat history',
   'dock.history.title': 'Chat history',
@@ -138,6 +138,14 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.strip.weixinTotal': 'WeChat · {{n}} msgs',
   'dock.ocMode.titleOpenClaw': 'OpenClaw Agent mode — click to use RDKClaw',
   'dock.ocMode.titleRdk': 'RDKClaw mode — click for OpenClaw Agent',
+  'dock.responseMode.thinking': 'Thinking',
+  'dock.responseMode.thinkingSub': 'Complex tasks',
+  'dock.responseMode.quick': 'Quick',
+  'dock.responseMode.quickSub': 'Quick answers',
+  'dock.responseMode.panelTitle': 'Response mode',
+  'dock.responseMode.triggerAria': 'Response mode menu',
+  'dock.responseMode.hint': 'Choose quick answers or complex-task mode.',
+  'dock.responseMode.hintOpenClaw': 'Applies to RDKClaw chat; you are on OpenClaw Agent direct mode now.',
 
   'dock.status.fallback': 'Details',
   'dock.terminal.copyAllTitle': 'Copy all output',

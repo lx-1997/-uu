@@ -3,7 +3,7 @@ import type { Device } from '../app-types';
 import {
   GLOBAL_CHAT_DEVICE_ID,
   listStoredChatHistoryDeviceIds,
-  loadChatHistoryFromStorage,
+  loadAnyChatHistoryForDevice,
 } from '../utils/chat-history-storage';
 import { chatMessageToPlainText } from '../utils/chat-message-plain';
 
@@ -47,7 +47,7 @@ export function ChatHistoryModal({ open, onClose, devices, preferredDeviceId, t 
     return d?.name?.trim() || d?.ip || id;
   };
 
-  const messages = selectedId ? loadChatHistoryFromStorage(selectedId) : [];
+  const messages = selectedId ? loadAnyChatHistoryForDevice(selectedId) : [];
 
   if (!open) return null;
 

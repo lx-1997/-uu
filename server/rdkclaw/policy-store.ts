@@ -1,15 +1,21 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { RDKClawPolicy } from "./types.js";
+import type { EnginePreset, RDKClawPolicy } from "./types.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".rdkstudio");
 const POLICY_FILE = path.join(CONFIG_DIR, "rdkclaw-policy.json");
 
+function normalizeEnginePreset(v: unknown): EnginePreset {
+  return v === "fast" ? "fast" : "thinking";
+}
+
 const DEFAULT_POLICY: RDKClawPolicy = {
+  enginePreset: "thinking",
   approval: {
-    mode: "auto",
-    riskThreshold: "high",
+    /** 长任务：多数步骤自动执行；中危及以上仍走审批，比「全自动+高阈值」更稳 */
+    mode: "risk-based",
+    riskThreshold: "medium",
   },
   permission: {
     workspaceBoundaryEnabled: true,
@@ -62,6 +68,7 @@ export class RDKClawPolicyStore {
       return {
         ...DEFAULT_POLICY,
         ...parsed,
+        enginePreset: normalizeEnginePreset(parsed.enginePreset),
         approval: { ...DEFAULT_POLICY.approval, ...(parsed.approval ?? {}) },
         permission: { ...DEFAULT_POLICY.permission, ...(parsed.permission ?? {}) },
         memory: { ...DEFAULT_POLICY.memory, ...(parsed.memory ?? {}) },
@@ -81,6 +88,7 @@ export class RDKClawPolicyStore {
     const next: RDKClawPolicy = {
       ...prev,
       ...patch,
+      enginePreset: patch.enginePreset !== undefined ? normalizeEnginePreset(patch.enginePreset) : prev.enginePreset ?? DEFAULT_POLICY.enginePreset,
       approval: { ...prev.approval, ...(patch.approval ?? {}) },
       permission: { ...prev.permission, ...(patch.permission ?? {}) },
       memory: { ...prev.memory, ...(patch.memory ?? {}) },

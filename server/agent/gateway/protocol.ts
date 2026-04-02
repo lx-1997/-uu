@@ -52,6 +52,8 @@ export const ErrorCodes = {
   INVALID_REQUEST: "INVALID_REQUEST",
   UNAUTHORIZED: "UNAUTHORIZED",
   UNAVAILABLE: "UNAVAILABLE",
+  /** 当前会话没有可取消的在途 chat 轮次 */
+  NO_ACTIVE_TURN: "NO_ACTIVE_TURN",
 } as const;
 
 export function errorShape(code: string, message: string): ErrorShape {
@@ -94,7 +96,7 @@ export const HANDSHAKE_TIMEOUT_MS = 10_000;
 export const REQUEST_TIMEOUT_MS = 60_000;
 
 export const GATEWAY_METHODS = [
-  "connect", "chat.send", "chat.history",
+  "connect", "chat.send", "chat.cancel", "chat.history",
   "sessions.list", "sessions.reset", "health",
 ] as const;
 

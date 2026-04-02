@@ -358,6 +358,11 @@ export function fleetBoardDelegateTool(
           },
           sessionId,
           boardDevice,
+          {
+            correlationId: ctx.toolCallId,
+            studioRunId: ctx.studioRunId,
+            studioSessionKey: ctx.sessionKey,
+          },
         );
       });
     },
@@ -461,6 +466,11 @@ export function fleetBoardBroadcastTool(
             },
             sessionId,
             boardDevice,
+            {
+              correlationId: ctx.toolCallId,
+              studioRunId: ctx.studioRunId,
+              studioSessionKey: ctx.sessionKey,
+            },
           );
         });
       });

@@ -78,6 +78,10 @@ export interface ToolContext {
    * RDK Studio：当前会话选中的设备 ID（已连接设备时）。`skill_mark_validated` 可将 SkillHub 技能同步写入板端 `skills/`。
    */
   studioDeviceId?: string;
+  /**
+   * RDK Studio：当前轮次 assistant runId，与板端网关 `clientMeta.studioRunId` / 日志 correlation 对齐。
+   */
+  studioRunId?: string;
 }
 
 // ============== 工具定义 ==============

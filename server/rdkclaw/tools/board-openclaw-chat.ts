@@ -1,6 +1,8 @@
 import type { Tool } from "../../agent/tools/types.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager } from "../../managers/OpenClawDeploymentManager.js";
+import { applyNeedStreakPolicy } from "../board-dual-agent-orchestration.js";
+import { openClawBridgeMeta } from "../openclaw-bridge-meta.js";
 import type { Device } from "../../../shared/types.js";
 
 /** 板端推理可能较慢；默认 120s，可用 RDK_BOARD_OPENCLAW_CHAT_TIMEOUT_MS 覆盖（5000–600000） */
@@ -76,12 +78,13 @@ export function boardOpenClawChatTool(
       }
 
       const boardDevice = toBoardDevice(device);
+      /** 板端收到的用户消息前缀：短契约，与 delegate 的 NEED 块口径一致 */
       const prompt = [
-        "你的伙伴 RDKClaw（RDK Studio 的主交互智能体）正在和你交流。",
-        "请根据你对板端设备、已安装技能、当前系统状态和你自身能力的了解，如实回答或分享你的想法。",
-        "如果涉及你的模型能力（如是否支持视觉、支持哪些语言、上下文长度等），请据实说明。",
-        input.context ? `背景信息: ${input.context}` : "",
-        `RDKClaw: ${input.message}`,
+        "[RDKClaw↔OpenClaw] Studio 侧主智能体与你对话（本 turn 以交流与对齐为主，复杂长任务用 delegate 已在其它消息中下达）。",
+        "依据板端实况答复：设备状态、技能、文件与模型能力据实说；不确定写明「不确定」勿编造。",
+        "缺联网/上游文档才能结论时：可在回复中使用与 delegate 相同的 [NEED_RDKCLAW]…[/NEED_RDKCLAW] 块（type/query/reason）。",
+        input.context ? `背景: ${input.context}` : "",
+        `—\nRDKClaw: ${input.message}`,
       ].filter(Boolean).join("\n");
 
       const waitMs = boardOpenClawChatTimeoutMs();
@@ -91,10 +94,14 @@ export function boardOpenClawChatTool(
         onProgress?.(blurb, ctx.toolCallId, { progressSource: 'studio_wait' });
 
         const timeout = setTimeout(() => {
-          resolve(
+          const line =
             output.trim() ||
-              `OpenClaw 未在 ${Math.round(waitMs / 1000)} 秒内回复（板端推理慢或网关未返回时可重试 / 检查 OpenClaw 状态）`,
-          );
+            `OpenClaw 未在 ${Math.round(waitMs / 1000)} 秒内回复（板端推理慢或网关未返回时可重试 / 检查 OpenClaw 状态）`;
+          const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, line, {
+            phase: "chat",
+            toolCallId: ctx.toolCallId,
+          });
+          resolve(need.text);
         }, waitMs);
 
         manager.sendAgentMessage(
@@ -107,13 +114,24 @@ export function boardOpenClawChatTool(
             clearTimeout(timeout);
             if (!success) {
               const clean = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
-              resolve(clean || "与 OpenClaw 的交流中断");
+              const line = clean || "与 OpenClaw 的交流中断";
+              const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, line, {
+                phase: "chat",
+                toolCallId: ctx.toolCallId,
+              });
+              resolve(need.text);
               return;
             }
-            resolve(output.trim() || "OpenClaw 回复为空");
+            const trimmed = output.trim() || "OpenClaw 回复为空";
+            const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, trimmed, {
+              phase: "chat",
+              toolCallId: ctx.toolCallId,
+            });
+            resolve(need.text);
           },
           sessionId,
           boardDevice,
+          openClawBridgeMeta(ctx),
         );
       });
     },

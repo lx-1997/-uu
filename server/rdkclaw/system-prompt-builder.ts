@@ -17,6 +17,15 @@ export function buildPersonaPrompt(persona: PersonaProfile) {
     `你是 ${persona.name}。`,
     `风险偏好: ${persona.riskLevel}，委派: ${persona.delegationBias}，自治: ${persona.autonomyLevel}。`,
   ];
+  if (persona.delegationBias === "local-first") {
+    lines.push(
+      "**Studio 优先（运行契约）**：默认用 `device_exec` / `device_file_*` / `device_diagnose` 等在板端完成；不要把 `board_openclaw_assess` / `delegate` 当作例行第一步。仅在 Skill 要求板端 OpenClaw、用户明确要求、或本地多轮仍失败且任务确实依赖板端技能链时，再 assess→delegate。",
+    );
+  } else if (persona.delegationBias === "board-first") {
+    lines.push(
+      "**板端优先（运行契约）**：复杂/多步板端任务在 assess 可行时优先 `board_openclaw_delegate`，由板端迭代；Studio 侧负责联网、文档与验收核对。",
+    );
+  }
   if (persona.extraInstructions?.trim()) {
     lines.push(`额外指令: ${persona.extraInstructions.trim()}`);
   }
@@ -27,17 +36,50 @@ export function buildPersonaPrompt(persona: PersonaProfile) {
  * 与 Agent reasoning（如 high）配合：引导深度推理落在「验证据、拆步骤、控风险」上，
  * 而非冗长内心独白；对用户回复仍保持简洁可执行。
  */
-export function buildReasoningGuidancePrompt(tier: ModelTier): string {
+export function buildReasoningGuidancePrompt(
+  tier: ModelTier,
+  delegationBias: PersonaProfile["delegationBias"] = "balanced",
+): string {
+  const openClawCollaborationSection =
+    delegationBias === "local-first"
+      ? [
+          "### 与板端 OpenClaw（Studio 优先）",
+          "板端工具仍在列表中，但**默认不启用**多轮 OpenClaw 对话链。",
+          "- **先做**：`device_*` 取证与执行；需要板端事实时优先一条或少量 `device_exec`，而非 chat/delegate。",
+          "- **再上 OpenClaw**：仅当 Skill `requires_board`、用户点名板端 Agent、或本地已证明需要板端技能链/会话延续时，再用 `board_openclaw_assess`；`delegate` 须有明确验收标准。",
+          "- **不要**为「看起来复杂」就首轮并行 assess；能 SSH 解决就不要再耗板端 LLM。",
+        ].join("\n")
+      : [
+          "### 与板端 OpenClaw 协作",
+          "你是 RDKClaw（云端/PC 端），OpenClaw 是板端伙伴。你们各有所长：",
+          "- 你的优势：联网搜索、RDK 文档知识、多设备管理、复杂推理、代码生成。",
+          "- OpenClaw 的优势：板端本地操作、硬件交互、本地模型推理、技能链执行。",
+          "委派 OpenClaw 前：ALWAYS 先用 board_openclaw_assess 评估可行性；本地已明确任务边界、验收标准与风险点；在 `board_openclaw_delegate` 的 guidance/context 里写清，减少板端反复试探。",
+          "已连接设备时：复杂任务可在一轮内并行「检索 + 板端评估」（见「双 Agent 协作」），推理中合并结果再决策。",
+        ].join("\n");
+
   if (tier === "small") {
-    return [
+    const smallBase = [
       "## 任务推理（简版）",
+      "**微流程**：领会目标 → 缺啥查啥（工具/必要时联网）→ 动手 → 看输出再答。",
+      "**反思（勿贴给用户）**：动工具前——还缺哪条事实、下一步能否补上？回复前——结论有没有输出或来源？",
       "先想清楚目标再动工具；板端/路径/是否安装要凭命令输出，勿瞎猜。",
       "若推断**现有手段做不下去**：先 `find_skills`，再 `read` 或安装。**任务真成功后**再用 `skill_mark_validated`（SkillHub 填 slug）落到 `skills/` 并记记忆；搜过不等于内化。",
       "对用户：结论先行，命令与步骤短而可执行。",
-    ].join("\n");
+    ];
+    if (delegationBias === "local-first") {
+      smallBase.push("", openClawCollaborationSection);
+    }
+    return smallBase.join("\n");
   }
   return [
     "## 任务推理与交付（与深度推理配合）",
+    "",
+    "### 每轮执行顺序（简单单步可压缩）",
+    "1. **领会**：用户要什么、怎样算完成、有无隐含约束。",
+    "2. **取证**：用工具补齐事实（设备/文件/检索）；勿用训练记忆顶替当前环境。",
+    "3. **行动**：最短工具链执行；多步任务每步核对输出再继续。",
+    "4. **收敛**：对照成功标准检查；再结论先行回复用户。",
     "",
     "### 核心行为准则",
     "- 每次只做用户要求的事。NEVER 主动添加用户没要求的功能、重构、或「顺便优化」。",
@@ -59,16 +101,46 @@ export function buildReasoningGuidancePrompt(tier: ModelTier): string {
     "NEVER 在回复中重复用户的原话或自我对话。",
     "NEVER 在一次回复中调用超过 8 个工具——如果需要更多步骤，分批执行并中间汇报进展。",
     "",
-    "### 与板端 OpenClaw 协作",
-    "你是 RDKClaw（云端/PC 端），OpenClaw 是板端伙伴。你们各有所长：",
-    "- 你的优势：联网搜索、RDK 文档知识、多设备管理、复杂推理、代码生成。",
-    "- OpenClaw 的优势：板端本地操作、硬件交互、本地模型推理、技能链执行。",
-    "委派 OpenClaw 前：ALWAYS 先用 board_openclaw_assess 评估可行性；本地已明确任务边界、验收标准与风险点；在 `board_openclaw_delegate` 的 guidance/context 里写清，减少板端反复试探。",
-    "已连接设备时：复杂任务可在一轮内并行「检索 + 板端评估」（见「双 Agent 协作」），推理中合并结果再决策。",
+    "### 固定反思（内化，勿原文贴给用户）",
+    "- **动工具前**：目标与成功标准是否已写清？还缺哪条事实？下一工具能否补上？若涉及版本/官方步骤/第三方 API，是否已准备检索？",
+    "- **回复用户前**：可见结论是否有工具输出或可核对来源支撑？不确定处是否已标明边界或给了一条最短验证路径？",
+    "",
+    openClawCollaborationSection,
     "",
     "### 能力缺口处理",
     "**能力缺口（硬约束）**：当推理结论为「无合适工具/流程、或连续失败、或缺领域技能」时，**必须先调用内置 `find_skills`**（腾讯 SkillHub 目录 + 本地 SKILL），据返回再 `read`、安装或委派；禁止跳过检索直接放弃（用户禁止联网且本地无命中除外）。",
     "**技能内化**：`find_skills` 只产生审计日志；**任务已成功**且某 **SkillHub** 技能确被采用并起作用时，再调用 **`skill_mark_validated`**（`skill_slugs`）——写入本机 `skills/<id>/`，**已连接设备时同步到板端 OpenClaw 工作区**；并记入记忆；勿在失败或仅检索时调用。",
+  ].join("\n");
+}
+
+/**
+ * 联网检索触发策略：减少凭训练数据胡编，又避免无意义搜索。
+ * policy.network.enabled 为 false 时由调用方生成「禁止联网」约束。
+ */
+export function buildWebSearchTriggerPrompt(
+  networkEnabled: boolean,
+  delegationBias: PersonaProfile["delegationBias"] = "balanced",
+): string {
+  if (!networkEnabled) {
+    return [
+      "## 联网检索（策略：关闭）",
+      "当前会话未启用联网：**禁止**调用 `web_search` / `web_fetch` / `web_browser_fetch` / `web_extract`。",
+      "用本地 `read` / `grep` / `find_skills` / `device_*` 与用户提供的材料补齐事实；缺上游文档时请用户粘贴链接或稍后开启联网。",
+    ].join("\n");
+  }
+  const assessParallelHint =
+    delegationBias === "local-first"
+      ? "下列**任一条**成立时，应先检索，再下结论或写安装命令（**勿**为凑并行而首轮例行 `board_openclaw_assess`）："
+      : "下列**任一条**成立时，应先检索（可与 `board_openclaw_assess` 等**同轮并行**），再下结论或写安装命令：";
+  return [
+    "## 何时必须 web_search / web_fetch",
+    assessParallelHint,
+    "- 涉及**具体版本号、发布日期、是否仍维护**或与**当前 OS/板型**的兼容性。",
+    "- **官方安装/升级/刷机/弃用路径**、CLI 旗标、**breaking change**、REST/GraphQL 行为变更。",
+    "- **第三方库、Model Zoo/Hub、许可证、CVE**、或论坛/issue 里的非常规 workaround。",
+    "- 用户问「最新」「文档怎么说」「和某某能不能一起用」而你手头无当日可信摘录。",
+    "**通常不必为搜索而搜索**：纯板端**当前**状态（`device_exec`/diagnose 更直接）；本工具契约或 SKILL 已写清且不涉上游改名；用户给出的单条命令无可疑版本依赖。",
+    "**输出**：引用联网结论时附**来源标题 + URL**；若检索无结果，说明已搜过并给出下一步（本机命令验证或请用户提供文档）。",
   ].join("\n");
 }
 
@@ -95,7 +167,10 @@ function yn(v: boolean | undefined, yes: string, no: string) {
  * 将 Studio 已展示的设备/OpenClaw 状态注入系统提示，避免「问一句状态」就重复 board_openclaw_health，
  * 并区分网关/AI 就绪/飞书插件等与联网检索失败之间的关系。
  */
-export function buildStudioUiHintsPrompt(hints: StudioUiHints | undefined): string {
+export function buildStudioUiHintsPrompt(
+  hints: StudioUiHints | undefined,
+  delegationBias: PersonaProfile["delegationBias"] = "balanced",
+): string {
   if (!hints?.capturedAt || typeof hints.capturedAt !== "number") return "";
   const ageSec = Math.max(0, Math.round((Date.now() - hints.capturedAt) / 1000));
   const ageLabel = ageSec < 90 ? "约 1 分钟内" : `${Math.floor(ageSec / 60)} 分钟前`;
@@ -147,23 +222,84 @@ export function buildStudioUiHintsPrompt(hints: StudioUiHints | undefined): stri
   );
 
   if (oc?.installed === true) {
-    lines.push(
-      "",
-      "**OpenClaw 已安装（与板端协同 — 硬约束）**",
-      "- 板端已部署 OpenClaw：复杂/多步任务**必须**通过 `board_openclaw_chat` / `board_openclaw_assess` / `board_openclaw_delegate` 与板端协同推进，禁止仅靠长串 `device_exec` 硬顶替代板端 Agent。",
-      "- 若上表已记录「板型与技能包」：板端 `~/.openclaw/workspace/skills/` 已按板型预置文档与指南类 SKILL；执行任务前优先 `find_skills` / 读板端相关技能，再委派或执行，避免重复造轮子。",
-    );
+    if (delegationBias === "local-first") {
+      lines.push(
+        "",
+        "**OpenClaw 已安装（Studio 优先 — 软约束）**",
+        "- 默认仍用 `device_*` 完成板端操作；长串 shell 若**可确定**为机械步骤可继续用 SSH，但若已预见需要多轮试错且依赖板端已装技能链，可再用 `board_openclaw_assess` → `delegate`。",
+        "- 若上表已记录「板型与技能包」：板端 `~/.openclaw/workspace/skills/` 有预置 SKILL；需要读流程时用 `find_skills` / `read`，**不必**为读文档就先 delegate。",
+      );
+    } else {
+      lines.push(
+        "",
+        "**OpenClaw 已安装（与板端协同 — 硬约束）**",
+        "- 板端已部署 OpenClaw：复杂/多步任务**必须**通过 `board_openclaw_chat` / `board_openclaw_assess` / `board_openclaw_delegate` 与板端协同推进，禁止仅靠长串 `device_exec` 硬顶替代板端 Agent。",
+        "- 若上表已记录「板型与技能包」：板端 `~/.openclaw/workspace/skills/` 已按板型预置文档与指南类 SKILL；执行任务前优先 `find_skills` / 读板端相关技能，再委派或执行，避免重复造轮子。",
+      );
+    }
   }
 
   return lines.join("\n");
 }
 
+function buildCollaborationPromptLocalFirst(boardSnapshot: BoardSnapshot, tier: ModelTier): string {
+  const skillsLine =
+    boardSnapshot.skillDetails.length > 0
+      ? `板端技能(${boardSnapshot.skillDetails.length}个): ${boardSnapshot.skillDetails.map((s) => s.name).join(", ")}`
+      : "板端技能快照为空。";
+  if (tier === "small") {
+    return [
+      "## 协作（简版 · Studio 优先）",
+      "（工具契约总纲仍适用。）",
+      "- **默认路径**：`device_exec` / `device_file_*` / `device_diagnose`；能一条命令查清就不要开板端对话。",
+      "- **OpenClaw**（chat / assess / delegate）：仅当 Skill 强制板端、用户要求、或本地多次失败且任务依赖板端技能会话时再上。",
+      "- assess 不是开场白；delegate 须有验收标准与 guidance。",
+      skillsLine,
+      "常用: WiFi→nmcli | 摄像头→ls /dev/video* | 版本→rdkos_info | 温度→thermal_zone0",
+    ].join("\n");
+  }
+  return [
+    "## 双 Agent 协作（Studio 优先）",
+    "",
+    "### 默认",
+    "- **先做** Studio 侧：`device_*`、联网检索、`find_skills`、工作区 `read`/`exec`。",
+    "- **再做** OpenClaw：**不要**把 `board_openclaw_assess` 当成每轮必发；仅当已判断需要板端技能链/会话延续、或 Skill `requires_board`、或用户指定用板端 Agent 时再 assess；`delegate` 前须有明确验收标准。",
+    "",
+    "### 何时仍应用 OpenClaw",
+    "- 多轮本地尝试失败，且错误栈表明需要板端已装技能或 OpenClaw 插件能力。",
+    "- 用户明确要求「让板端 OpenClaw 做」或对话里须与板端 Agent 对齐状态（可用 **chat**，少用无目的闲聊）。",
+    "- **NEVER** 用 delegate 代替单条 `device_exec` 能完成的动作。",
+    "",
+    "### 与均衡模式的差异",
+    "- 不要求「复杂任务首轮就 web_search + assess 并行」；检索可以单独发起，assess 留到确需板端承接时。",
+    "- 板端返回 [NEED_RDKCLAW] 时仍按原流程补给，但避免与同一轮无必要的 assess 堆叠。",
+    "",
+    skillsLine,
+    "",
+    "### 子 Agent（sessions_spawn）",
+    "后台子任务仍可用 explore / plan / verify；verify 须 VERDICT 行。",
+  ].join("\n");
+}
+
 export function buildCollaborationPrompt(
   boardSnapshot: BoardSnapshot,
   tier: ModelTier,
+  delegationBias: PersonaProfile["delegationBias"] = "balanced",
 ): string {
+  if (delegationBias === "local-first") {
+    return buildCollaborationPromptLocalFirst(boardSnapshot, tier);
+  }
+  const boardFirstLead =
+    delegationBias === "board-first"
+      ? [
+          "### 偏好：板端优先",
+          "用户设置倾向于板端 OpenClaw：**复杂多步**板端任务在 assess 可行时尽早 **assess→delegate**；单条可执行的命令仍直接 `device_exec`。Studio 负责联网检索、长文档与验收用的独立核对命令。",
+          "",
+        ]
+      : [];
   if (tier === 'small') {
     return [
+      ...boardFirstLead,
       "## 协作（简版）",
       "（三条链与工具边界见 **工具契约总纲**。）",
       "你=主脑，板端 OpenClaw=执行者。",
@@ -180,6 +316,7 @@ export function buildCollaborationPrompt(
     ].join("\n");
   }
   return [
+    ...boardFirstLead,
     "## 双 Agent 协作",
     "（SSH 与 OpenClaw 的分工、依赖与典型顺序见系统提示中 **工具契约总纲**；本节细化 chat/assess/delegate 与并行模式。）",
     "",
@@ -309,7 +446,7 @@ export function buildRdkclawStaticSystemSections(args: {
   const { persona, modelTier, hasDevice, policyNetworkEnabled, forumContextPrompt } = args;
   return [
     buildPersonaPrompt(persona),
-    buildReasoningGuidancePrompt(modelTier),
+    buildReasoningGuidancePrompt(modelTier, persona.delegationBias),
     buildSpawnAndVerificationPrompt(modelTier, hasDevice),
     modelTier === "small"
       ? "记住：发现用户偏好→memory_save；重复场景→创建技能。"
@@ -340,10 +477,23 @@ export function buildRdkclawDynamicSystemSections(args: {
   studioUiHints: StudioUiHints | undefined;
   allAttachments: SessionAttachment[];
   modelTier: ModelTier;
+  delegationBias?: PersonaProfile["delegationBias"];
 }): string {
-  const { deviceId, platform, boardSnapshot, studioUiHints, allAttachments, modelTier } = args;
+  const {
+    deviceId,
+    platform,
+    boardSnapshot,
+    studioUiHints,
+    allAttachments,
+    modelTier,
+    delegationBias = "balanced",
+  } = args;
   const hasDevice = Boolean(deviceId?.trim());
   const deviceProfile = platform ? getDeviceProfile(platform) : null;
+  const deviceRosTail =
+    delegationBias === "local-first"
+      ? "确认命令后再 device_exec；**Studio 优先**：默认 SSH 工具链完成；确需板端 OpenClaw 技能链/多轮迭代时再 `board_openclaw_assess` / `delegate`。"
+      : "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。";
   return [
     deviceProfile
       ? `当前平台: ${deviceProfile.displayName} (${deviceProfile.bpuTops}TOPS, ${deviceProfile.cpu}, ${deviceProfile.ramGb}GB RAM)。${deviceProfile.capabilityNotes?.length ? "能力: " + deviceProfile.capabilityNotes.join("；") : ""}${deviceProfile.limitations.length ? "。限制: " + deviceProfile.limitations.join("；") : ""}`
@@ -359,7 +509,7 @@ export function buildRdkclawDynamicSystemSections(args: {
           "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
           "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
           "ROS/节点/话题类任务可 `read` 工作区 skills 中的 RDK ROS（rdk-ros）与 RDK Board Knowledge（rdk-board-knowledge）的 SKILL.md。",
-          "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。",
+          deviceRosTail,
         ].join("\n")
       : "",
     hasDevice
@@ -373,12 +523,12 @@ export function buildRdkclawDynamicSystemSections(args: {
     hasDevice && boardSnapshot.plugins.length > 0
       ? `当前板端允许插件: ${boardSnapshot.plugins.join(", ")}`
       : "",
-    hasDevice ? buildStudioUiHintsPrompt(studioUiHints) : "",
+    hasDevice ? buildStudioUiHintsPrompt(studioUiHints, delegationBias) : "",
     allAttachments.length > 0
       ? allAttachments.some((a) => a.type === "image")
         ? `当前会话已有 ${allAttachments.length} 个附件（含图片: ${allAttachments.filter((a) => a.type === "image").map((a) => `[${a.id}] ${a.name}`).join("、")}）。用户提及图片/照片时，请先调用 attachment_describe_image 分析后再回复。`
         : `当前会话已有 ${allAttachments.length} 个附件可供使用；如需深入读取，请调用 attachment_* 工具。`
       : "",
-    hasDevice ? buildCollaborationPrompt(boardSnapshot, modelTier) : "",
+    hasDevice ? buildCollaborationPrompt(boardSnapshot, modelTier, delegationBias) : "",
   ].filter(Boolean).join("\n");
 }

@@ -11,10 +11,12 @@ import {
   buildStreamFn,
   getApiKey,
   getBaseUrl,
-  loadProviderConfig,
+  loadProviderConfigForStudioLane,
   warmupModelCapabilities,
   rdkclawShouldStreamThinking,
   resolveRdkclawAgentReasoning,
+  resolveSamplingTemperature,
+  resolveSamplingTopP,
   type ProviderConfig,
 } from "../agent/provider-setup.js";
 import { lookupModelCapabilities } from "../agent/model-registry.js";
@@ -128,8 +130,8 @@ const DEFAULT_CONFIG: ProviderConfig = {
   baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
 };
 
-function resolveProviderConfig(): ProviderConfig {
-  const config = loadProviderConfig();
+function resolveProviderConfigForLane(lane: "thinking" | "quick"): ProviderConfig {
+  const config = loadProviderConfigForStudioLane(lane);
   if (config) {
     return {
       ...config,
@@ -189,11 +191,18 @@ export class RDKClawApp {
   /** 贯穿 compaction 生命周期的 hooks（RDKClaw 默认可为空注册表，便于后续注入） */
   private readonly rdkCompactHooks = new CompactHookRegistry();
 
-  private async getBoardSkillSnapshot(deviceId?: string): Promise<BoardSnapshot> {
+  private async getBoardSkillSnapshot(
+    deviceId?: string,
+    opts?: { timeoutMs?: number; cacheOnly?: boolean },
+  ): Promise<BoardSnapshot> {
     if (!deviceId) return { skills: [], skillDetails: [], plugins: [] };
     const cached = this.boardSkillSnapshotCache.get(deviceId);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
+    }
+    /** 快速模式：不 SSH，仅用有效 TTL 缓存；冷启动为空以换首字时间 */
+    if (opts?.cacheOnly) {
+      return { skills: [], skillDetails: [], plugins: [] };
     }
     const devices = await readDevices();
     const hit = devices.find((d) => d.id === deviceId);
@@ -204,7 +213,8 @@ export class RDKClawApp {
       id: hit.id,
       password: resolveBoardDevicePassword(hit as { username: string; password?: string }),
     };
-    const timeoutMs = 9000;
+    /** 快速模式缩短等待，避免 SSH 拉技能清单占满首字前的 9s 预算 */
+    const timeoutMs = Math.max(1500, Math.min(9000, opts?.timeoutMs ?? 9000));
     return await new Promise<BoardSnapshot>((resolve) => {
       let output = "";
       let done = false;
@@ -796,6 +806,18 @@ export class RDKClawApp {
     return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base, channel));
   }
 
+  /**
+   * Agent 磁盘会话隔离：必须带 Studio 客户端 sessionId，否则多窗口/副屏会共用 device: 键导致上下文串台。
+   */
+  private studioAgentSessionKey(req: RDKClawChatRequest): string {
+    const sid = req.sessionId?.trim();
+    const did = req.deviceId?.trim();
+    if (did && sid) return `device:${did}:studio:${sid}`;
+    if (did) return `device:${did}`;
+    if (sid) return `local:studio:${sid}`;
+    return "local";
+  }
+
   async *streamChat(req: RDKClawChatRequest): AsyncGenerator<RDKClawEvent> {
     const externalAbortSignal = req.abortSignal;
     let abortedByClient = Boolean(externalAbortSignal?.aborted);
@@ -808,8 +830,10 @@ export class RDKClawApp {
       });
       return;
     }
-    const providerConfig = resolveProviderConfig();
-    if (!providerConfig.apiKey) {
+    const lane = req.studioResponseMode === "quick" ? "quick" : "thinking";
+
+    const rawProviderConfig = resolveProviderConfigForLane(lane);
+    if (!rawProviderConfig.apiKey) {
       recordConversationTurnFromReq(req, {
         outcome: "error",
         assistantMessage: "",
@@ -818,9 +842,11 @@ export class RDKClawApp {
       });
       throw new Error("未配置 AI 模型 API Key，请先在设置中配置。");
     }
+    /** 深度 / 快速各用 registry 中对应条目的模型与参数；不在运行时二次覆盖采样与思考档位 */
+    const providerConfig = rawProviderConfig;
 
     const deviceLane = this.deviceQueue.getLane(req.deviceId);
-    const sessionKey = req.deviceId?.trim() ? `device:${req.deviceId.trim()}` : "local";
+    const sessionKey = this.studioAgentSessionKey(req);
 
     const queueStatus = this.deviceQueue.getStatus(deviceLane);
     if (queueStatus.running) {
@@ -892,11 +918,15 @@ export class RDKClawApp {
     };
 
     const userProfile = req.userId ? this.personaStore.getUser(req.userId) : null;
+    const studioQuick = req.studioResponseMode === "quick";
     const runStartedAt = Date.now();
     const workspaceStartedAt = Date.now();
     const workspacePromise = this.workspaceStore.getOrInit(req.userId, userProfile);
     const boardSnapshotStartedAt = Date.now();
-    const boardSnapshotPromise = this.getBoardSkillSnapshot(req.deviceId);
+    const boardSnapshotPromise = this.getBoardSkillSnapshot(req.deviceId, {
+      timeoutMs: studioQuick ? 4000 : 9000,
+      cacheOnly: studioQuick,
+    });
     const attachmentPrepareStartedAt = Date.now();
     const attachmentState = await prepareSessionAttachments(sessionKey, req.attachments);
     const attachmentPrepareMs = Date.now() - attachmentPrepareStartedAt;
@@ -928,7 +958,7 @@ export class RDKClawApp {
     const policy = this.policyStore.getPolicy();
     const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
     const setupElapsedMs = Date.now() - runStartedAt;
-    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot);
+    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot, persona.delegationBias);
     const detectedPlatform = (req as { platform?: RdkPlatform }).platform as RdkPlatform | undefined;
     const deviceProfile = detectedPlatform ? getDeviceProfile(detectedPlatform) : null;
     const modelCaps = lookupModelCapabilities(providerConfig.provider, providerConfig.model);
@@ -943,6 +973,7 @@ export class RDKClawApp {
       studioUiHints: req.studioUiHints,
       allAttachments: attachmentState.allAttachments,
       policy,
+      studioQuickAnswer: studioQuick,
     });
     const promptTelemetry = hashSystemPromptLayers(promptBundle.combined, promptBundle.layers);
     const promptStableDynamic = hashStableDynamicSystemPrompt(promptBundle.stablePrefix, promptBundle.dynamicSuffix);
@@ -956,7 +987,14 @@ export class RDKClawApp {
       this.modelCapWarmedUp.add(warmupKey);
       warmupModelCapabilities(providerConfig).catch(() => {});
     }
-    const modelDef = buildModelDef(providerConfig);
+    const modelDefBase = buildModelDef(providerConfig);
+    const modelDef =
+      studioQuick && typeof (modelDefBase as { maxTokens?: number }).maxTokens === "number"
+        ? {
+            ...modelDefBase,
+            maxTokens: Math.min((modelDefBase as { maxTokens: number }).maxTokens, 2048),
+          }
+        : modelDefBase;
     const streamFn = buildStreamFn(providerConfig);
     const apiKey = getApiKey(providerConfig);
     const baseUrl = getBaseUrl(providerConfig);
@@ -965,12 +1003,20 @@ export class RDKClawApp {
       dailyMemoryDays: Math.max(1, policy.memory.dailyMemoryDays || 2),
       mainReadsMemory: policy.memory.mainSessionReadsMemory,
       sharedBlocksMemory: policy.memory.sharedSessionBlocksMemory,
-      pruning: {
-        maxHistoryShare: policy.context.maxHistoryShare,
-        softTrimRatio: policy.context.softTrimRatio,
-        hardClearRatio: policy.context.hardClearRatio,
-        keepLastAssistants: policy.context.keepLastAssistants,
-      },
+      pruning: studioQuick
+        ? {
+            /** 快速：尽量压输入 token，逼近 TTFT 目标（仍保留最近 1 条助手轮） */
+            maxHistoryShare: Math.min(policy.context.maxHistoryShare, 0.22),
+            softTrimRatio: Math.min(policy.context.softTrimRatio, 0.22),
+            hardClearRatio: Math.min(policy.context.hardClearRatio, 0.4),
+            keepLastAssistants: Math.min(policy.context.keepLastAssistants, 1),
+          }
+        : {
+            maxHistoryShare: policy.context.maxHistoryShare,
+            softTrimRatio: policy.context.softTrimRatio,
+            hardClearRatio: policy.context.hardClearRatio,
+            keepLastAssistants: policy.context.keepLastAssistants,
+          },
     };
 
     const runId = crypto.randomUUID();
@@ -1031,6 +1077,7 @@ export class RDKClawApp {
         network_require_approval: policy.network.requireApproval,
         delegation_mode: resolveDelegationModeText(decision),
         delegation_expectation: resolveDelegationExpectationText(decision),
+        studio_response_mode: req.studioResponseMode ?? "thinking",
         can_local_complete: decision.canLocalComplete,
         needs_board_collaboration: decision.needsBoardCollaboration,
         attachments_count: attachmentState.allAttachments.length,
@@ -1107,6 +1154,7 @@ export class RDKClawApp {
       tools: buildSessionTools(),
       studioDeviceIdResolver: () => sessionDeviceIdRef.current,
       toolContextExtras: {
+        studioRunId: runId,
         onStudioDeviceBound: (id) => {
           sessionDeviceIdRef.current = id;
           this.switchDeviceCallback?.(id);
@@ -1132,19 +1180,22 @@ export class RDKClawApp {
       enableContext: true,
       enableSkills: true,
       enableMemory: true,
-      enableHeartbeat: true,
-      maxTurns: 12,
-      temperature: 0.5,
+      enableHeartbeat: !studioQuick,
+      maxTurns: studioQuick ? 6 : 12,
+      temperature: resolveSamplingTemperature(providerConfig),
+      topP: resolveSamplingTopP(providerConfig),
       reasoning: rdkReasoning === null ? null : rdkReasoning,
       contextTokens: Math.max(16_000, Number(policy.context.contextTokens) || modelCaps.contextWindow),
       runtimePolicy,
     });
     agentInstance = agent;
 
-    const markdownMemorySync = await syncWorkspaceMarkdownMemory({
-      workspaceDir: workspace.workspaceDir,
-      memory: agent.getMemory(),
-    });
+    const markdownMemorySync = studioQuick
+      ? { imported: 0, projectionPath: "", projectionCount: 0 }
+      : await syncWorkspaceMarkdownMemory({
+          workspaceDir: workspace.workspaceDir,
+          memory: agent.getMemory(),
+        });
     if (markdownMemorySync.imported > 0) {
       pushEvent({
         type: "meta",
@@ -1384,10 +1435,10 @@ export class RDKClawApp {
           overflowRecoveryCount: runMetrics.overflowRecoveryCount,
           policy: {
             contextTokens: policy.context.contextTokens,
-            maxHistoryShare: policy.context.maxHistoryShare,
-            softTrimRatio: policy.context.softTrimRatio,
-            hardClearRatio: policy.context.hardClearRatio,
-            keepLastAssistants: policy.context.keepLastAssistants,
+            maxHistoryShare: runtimePolicy.pruning.maxHistoryShare,
+            softTrimRatio: runtimePolicy.pruning.softTrimRatio,
+            hardClearRatio: runtimePolicy.pruning.hardClearRatio,
+            keepLastAssistants: runtimePolicy.pruning.keepLastAssistants,
           },
         },
         execution: {

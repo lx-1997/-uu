@@ -86,6 +86,19 @@ function isLlmFirstChunkTimeoutError(err: unknown): boolean {
   return err instanceof LlmFirstChunkTimeoutError;
 }
 
+/** pi-ai 未在 SimpleStreamOptions 声明 top_p，通过 onPayload 注入 OpenAI/Anthropic 请求体 */
+function chainTopPOnPayload(
+  topP: number,
+  existing?: SimpleStreamOptions["onPayload"],
+): SimpleStreamOptions["onPayload"] {
+  return (payload: unknown) => {
+    if (payload && typeof payload === "object") {
+      (payload as Record<string, unknown>).top_p = topP;
+    }
+    existing?.(payload);
+  };
+}
+
 // ============== 类型定义 ==============
 
 export interface AgentLoopParams {
@@ -104,6 +117,8 @@ export interface AgentLoopParams {
   streamFn: StreamFunction;
   apiKey?: string;
   temperature?: number;
+  /** nucleus sampling，与 temperature 独立；经 onPayload 写入 top_p */
+  topP?: number;
   /** 思考级别: 传入后启用 extended thinking */
   reasoning?: ThinkingLevel;
   maxTurns: number;
@@ -253,6 +268,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
       streamFn,
       apiKey,
       temperature,
+      topP,
       reasoning,
       maxTurns,
       contextTokens,
@@ -466,6 +482,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   apiKey,
                   ...(temperature !== undefined ? { temperature } : {}),
                   ...(reasoning ? { reasoning } : {}),
+                  ...(topP !== undefined ? { onPayload: chainTopPOnPayload(topP) } : {}),
                 };
                 const eventStream = streamFn(modelDef, piContext, streamOpts);
 

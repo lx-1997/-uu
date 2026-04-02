@@ -57,10 +57,15 @@ import {
   saveProviderRegistry,
   upsertProviderConfigEntry,
   switchActiveProviderConfig,
+  switchQuickActiveProviderConfig,
+  duplicateProviderEntryForQuickLane,
+  applyQuickLaneDefaultIfUnset,
   deleteProviderConfigEntry,
-  getBootstrapStudioDefaultPresetMeta,
+  getBootstrapStudioDefaultPresetsMeta,
   getActiveProviderEntry,
   restoreStudioDefaultPresetFromBootstrap,
+  effectiveSamplingTemperature,
+  effectiveSamplingTopP,
   type ProviderConfigRegistry,
 } from './agent/provider-setup.js';
 import { RDKClawApp } from './rdkclaw/app.js';
@@ -76,7 +81,7 @@ import { verifyForumSsoLogin } from './agent/tools/forum-tools.js';
 import { WeixinPollingChannel } from './agent/channels/weixin.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
-import type { ApprovalDecisionMode, RDKClawExecutionMode } from './rdkclaw/types.js';
+import type { ApprovalDecisionMode, RDKClawExecutionMode, StudioResponseMode } from './rdkclaw/types.js';
 import { clearSecurityAuditLogs, listSecurityAuditLogs } from './rdkclaw/security-audit-store.js';
 import {
   isSSOEnabled,
@@ -4798,15 +4803,24 @@ app.get('/api/agent/config', (_request, response) => {
   const config = loadProviderConfig();
   const registry = loadProviderRegistry();
   const envApiKeyAvailable = Boolean(String(process.env.OPENAI_API_KEY || '').trim());
-  const bootstrapPreset = getBootstrapStudioDefaultPresetMeta();
-  const studioDefaultPreset = bootstrapPreset
+  const bootstrapPresets = getBootstrapStudioDefaultPresetsMeta();
+  const studioDefaultPreset = bootstrapPresets
     ? {
-        id: bootstrapPreset.id,
-        label: bootstrapPreset.label,
-        inRegistry: registry.entries.some((e) => e.id === bootstrapPreset.id),
-        isActive: registry.activeId === bootstrapPreset.id,
+        id: bootstrapPresets.thinking.id,
+        label: bootstrapPresets.thinking.label,
+        inRegistry: registry.entries.some((e) => e.id === bootstrapPresets.thinking.id),
+        isActive: registry.activeId === bootstrapPresets.thinking.id,
       }
     : null;
+  const studioQuickDefaultPreset = bootstrapPresets?.quick
+    ? {
+        id: bootstrapPresets.quick.id,
+        label: bootstrapPresets.quick.label,
+        inRegistry: registry.entries.some((e) => e.id === bootstrapPresets.quick.id),
+        isQuickLane: (registry.quickActiveId?.trim() || null) === bootstrapPresets.quick.id,
+      }
+    : null;
+  const quickAid = registry.quickActiveId?.trim() || null;
   const models = registry.entries.map((entry) => ({
     id: entry.id,
     label: entry.label,
@@ -4815,16 +4829,21 @@ app.get('/api/agent/config', (_request, response) => {
     hasApiKey: !!entry.apiKey,
     baseUrl: entry.baseUrl,
     isActive: entry.id === registry.activeId,
+    isQuickLane: Boolean(quickAid && entry.id === quickAid),
     thinkingDefault: entry.thinkingDefault ?? '',
     reasoningVisibility: entry.reasoningVisibility ?? '',
+    samplingTemperature: effectiveSamplingTemperature(entry.samplingTemperature),
+    samplingTopP: effectiveSamplingTopP(entry.samplingTopP),
   }));
   if (!config) {
     response.json({
       configured: false,
       models,
       activeModelId: registry.activeId || null,
+      quickActiveModelId: quickAid,
       envApiKeyAvailable,
       studioDefaultPreset,
+      studioQuickDefaultPreset,
     });
     return;
   }
@@ -4836,16 +4855,22 @@ app.get('/api/agent/config', (_request, response) => {
     baseUrl: config.baseUrl,
     thinkingDefault: config.thinkingDefault ?? '',
     reasoningVisibility: config.reasoningVisibility ?? '',
+    samplingTemperature: effectiveSamplingTemperature(config.samplingTemperature),
+    samplingTopP: effectiveSamplingTopP(config.samplingTopP),
     models,
     activeModelId: registry.activeId || null,
+    quickActiveModelId: quickAid,
     envApiKeyAvailable,
     studioDefaultPreset,
+    studioQuickDefaultPreset,
   });
 });
 
 app.post('/api/agent/config', (request, response) => {
   const body = (request.body ?? {}) as {
-    action?: 'upsert' | 'switch' | 'delete' | 'restore_bootstrap_preset';
+    action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset';
+    /** duplicate_for_quick：源条目 id，缺省为当前 active */
+    sourceId?: string;
     id?: string;
     label?: string;
     provider?: string;
@@ -4855,6 +4880,8 @@ app.post('/api/agent/config', (request, response) => {
     setActive?: boolean;
     thinkingDefault?: string;
     reasoningVisibility?: string;
+    samplingTemperature?: string;
+    samplingTopP?: string;
   };
 
   const action = body.action || 'upsert';
@@ -4919,6 +4946,52 @@ app.post('/api/agent/config', (request, response) => {
     return;
   }
 
+  if (action === 'switch_quick') {
+    const rawId = body.id !== undefined && body.id !== null ? String(body.id).trim() : '';
+    let id = rawId;
+    const registry = loadProviderRegistry();
+    if (!id) {
+      const presets = getBootstrapStudioDefaultPresetsMeta();
+      const bid = presets?.quick?.id?.trim();
+      if (bid && registry.entries.some((e) => e.id === bid)) {
+        id = bid;
+      } else {
+        response.status(400).json({ error: '请选择快速回答模型，或先合并安装包内置预设' });
+        return;
+      }
+    } else {
+      const entry = registry.entries.find((item) => item.id === id);
+      if (!entry) {
+        response.status(404).json({ error: '模型不存在' });
+        return;
+      }
+      const effectiveKey = entry.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
+      if (!effectiveKey) {
+        response.status(400).json({ error: '目标模型未配置 API Key' });
+        return;
+      }
+    }
+    if (!switchQuickActiveProviderConfig(id)) {
+      response.status(404).json({ error: '快速回答模型设置失败' });
+      return;
+    }
+    const regAfter = loadProviderRegistry();
+    response.json({ ok: true, quickActiveModelId: regAfter.quickActiveId?.trim() || id });
+    return;
+  }
+
+  if (action === 'duplicate_for_quick') {
+    const rawSource =
+      body.sourceId !== undefined && body.sourceId !== null ? String(body.sourceId).trim() : '';
+    const result = duplicateProviderEntryForQuickLane(rawSource || undefined);
+    if (!result.ok || !result.newId) {
+      response.status(400).json({ error: result.error || '复制快速配置失败' });
+      return;
+    }
+    response.json({ ok: true, quickActiveModelId: result.newId, createdId: result.newId });
+    return;
+  }
+
   if (action === 'delete') {
     const id = String(body.id || '').trim();
     if (!id) {
@@ -4955,7 +5028,7 @@ app.post('/api/agent/config', (request, response) => {
     return;
   }
 
-  upsertProviderConfigEntry({
+  const saved = upsertProviderConfigEntry({
     id: legacyMode ? undefined : body.id,
     label: body.label,
     provider,
@@ -4965,8 +5038,10 @@ app.post('/api/agent/config', (request, response) => {
     setActive: body.setActive ?? true,
     ...(body.thinkingDefault !== undefined ? { thinkingDefault: body.thinkingDefault } : {}),
     ...(body.reasoningVisibility !== undefined ? { reasoningVisibility: body.reasoningVisibility } : {}),
+    ...(body.samplingTemperature !== undefined ? { samplingTemperature: body.samplingTemperature } : {}),
+    ...(body.samplingTopP !== undefined ? { samplingTopP: body.samplingTopP } : {}),
   });
-  response.json({ ok: true });
+  response.json({ ok: true, savedId: saved.id });
 });
 
 app.get('/api/agent/config/export', (request, response) => {
@@ -4976,6 +5051,7 @@ app.get('/api/agent/config/export', (request, response) => {
     version: 1,
     exportedAt: Date.now(),
     activeId: registry.activeId || null,
+    quickActiveId: registry.quickActiveId ?? null,
     entries: registry.entries.map((entry) => ({
       id: entry.id,
       label: entry.label,
@@ -4986,6 +5062,8 @@ app.get('/api/agent/config/export', (request, response) => {
       baseUrl: entry.baseUrl,
       thinkingDefault: entry.thinkingDefault,
       reasoningVisibility: entry.reasoningVisibility,
+      samplingTemperature: entry.samplingTemperature,
+      samplingTopP: entry.samplingTopP,
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     })),
@@ -4998,6 +5076,7 @@ app.post('/api/agent/config/import', (request, response) => {
     registry?: {
       version?: number;
       activeId?: string | null;
+      quickActiveId?: string | null;
       entries?: Array<{
         id?: string;
         label?: string;
@@ -5007,6 +5086,8 @@ app.post('/api/agent/config/import', (request, response) => {
         baseUrl?: string;
         thinkingDefault?: string;
         reasoningVisibility?: string;
+        samplingTemperature?: string;
+        samplingTopP?: string;
         createdAt?: number;
         updatedAt?: number;
       }>;
@@ -5033,6 +5114,8 @@ app.post('/api/agent/config/import', (request, response) => {
       const baseUrl = String(entry.baseUrl || '').trim() || undefined;
       const thinkingDefault = String(entry.thinkingDefault || '').trim() || undefined;
       const reasoningVisibility = String(entry.reasoningVisibility || '').trim() || undefined;
+      const samplingTemperature = String(entry.samplingTemperature || '').trim() || undefined;
+      const samplingTopP = String(entry.samplingTopP || '').trim() || undefined;
       const createdAt = Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : now;
       const updatedAt = Number.isFinite(entry.updatedAt) ? Number(entry.updatedAt) : now;
       return {
@@ -5044,6 +5127,8 @@ app.post('/api/agent/config/import', (request, response) => {
         baseUrl,
         ...(thinkingDefault ? { thinkingDefault } : {}),
         ...(reasoningVisibility ? { reasoningVisibility } : {}),
+        ...(samplingTemperature ? { samplingTemperature } : {}),
+        ...(samplingTopP ? { samplingTopP } : {}),
         createdAt,
         updatedAt,
       };
@@ -5067,14 +5152,26 @@ app.post('/api/agent/config/import', (request, response) => {
     : (entries[0]?.id || null);
   const nextRegistry: ProviderConfigRegistry = {
     activeId,
+    quickActiveId:
+      incoming.quickActiveId !== undefined
+        ? typeof incoming.quickActiveId === 'string' && incoming.quickActiveId.trim()
+          ? incoming.quickActiveId.trim()
+          : null
+        : merge
+          ? current.quickActiveId ?? null
+          : null,
     entries,
   };
-  saveProviderRegistry(nextRegistry);
+  if (nextRegistry.quickActiveId && !entries.some((e) => e.id === nextRegistry.quickActiveId)) {
+    nextRegistry.quickActiveId = null;
+  }
+  const finalizedRegistry = applyQuickLaneDefaultIfUnset(nextRegistry);
+  saveProviderRegistry(finalizedRegistry);
   response.json({
     ok: true,
     imported: normalizedEntries.length,
     total: entries.length,
-    activeId: nextRegistry.activeId,
+    activeId: finalizedRegistry.activeId,
     merged: merge,
   });
 });
@@ -6028,12 +6125,22 @@ function parseStudioUiHintsPayload(raw: unknown): StudioUiHints | undefined {
 // ─── Agent Chat (SSE) ───
 
 app.post('/api/agent/chat', async (request, response) => {
-  const { message, deviceId, sessionId, userId, mode, attachments, studioUiHints: studioUiHintsRaw } = request.body as {
+  const {
+    message,
+    deviceId,
+    sessionId,
+    userId,
+    mode,
+    attachments,
+    studioUiHints: studioUiHintsRaw,
+    studioResponseMode: studioResponseModeRaw,
+  } = request.body as {
   message?: string;
   deviceId?: string;
   sessionId?: string;
   userId?: string;
   mode?: RDKClawExecutionMode;
+  studioResponseMode?: string;
   studioUiHints?: unknown;
   attachments?: Array<{
       id: string;
@@ -6101,6 +6208,10 @@ app.post('/api/agent/chat', async (request, response) => {
       const ssoUser = (request as { ssoUser?: SSOUser }).ssoUser;
       const ssoUserName = formatConversationArchiveUserName(ssoUser, userId);
       const studioUiHints = parseStudioUiHintsPayload(studioUiHintsRaw);
+      const studioResponseMode: StudioResponseMode | undefined =
+        studioResponseModeRaw === 'quick' || studioResponseModeRaw === 'thinking'
+          ? studioResponseModeRaw
+          : undefined;
 
       for await (const event of rdkclaw.streamChat({
         message: String(message || '').trim(),
@@ -6113,6 +6224,7 @@ app.post('/api/agent/chat', async (request, response) => {
         channel: 'studio',
         trainingDataOptIn: false,
         studioUiHints,
+        studioResponseMode,
         abortSignal: requestAbortController.signal,
       })) {
         sendEvent(event.type, event.data);

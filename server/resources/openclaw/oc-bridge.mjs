@@ -2,7 +2,7 @@
 /**
  * RDK Studio — OpenClaw 常驻桥（板端）
  * stdin/stdout NDJSON；维持单条 WS 到 127.0.0.1:18789。
- * RDK_OC_BRIDGE_VERSION 3
+ * RDK_OC_BRIDGE_VERSION 4 — clientMeta、chat.cancel（尽力）、结构化 error.code
  */
 import fs from 'fs';
 import os from 'os';
@@ -132,6 +132,15 @@ function handleConnectSuccess() {
 
 const inboundQueue = [];
 
+/** 须在 connectWs() / drainInboundQueue 之前初始化，避免回调极早触发时 TDZ */
+let activeReqId = null;
+let activeWsSendId = null;
+let activeSessionKey = 'main';
+let activeCorrelationId = '';
+let activeStudioRunId = '';
+let activeStudioSessionKey = '';
+let collected = '';
+
 function drainInboundQueue() {
   while (wsConnected && inboundQueue.length && !activeReqId) {
     const c = inboundQueue.shift();
@@ -161,7 +170,7 @@ function connectWs() {
         const msg = (frame.error && frame.error.message) || 'connect failed';
         emit({ v: 1, type: 'bridge', ready: false, ws: false, message: msg });
         if (activeReqId) {
-          emit({ v: 1, type: 'error', message: msg, reqId: activeReqId });
+          emit({ v: 1, type: 'error', code: 'CONNECT_FAILED', message: msg, reqId: activeReqId, correlationId: activeCorrelationId || undefined });
           finishTurn(false, msg);
         }
         return;
@@ -182,7 +191,7 @@ function connectWs() {
       const msg = 'websocket connect failed after ' + MAX_RETRIES + ' retries (127.0.0.1:18789)';
       emit({ v: 1, type: 'bridge', ready: false, ws: false, message: msg });
       if (activeReqId) {
-        emit({ v: 1, type: 'error', message: msg, reqId: activeReqId });
+        emit({ v: 1, type: 'error', code: 'WS_CONNECT_RETRY_EXHAUSTED', message: msg, reqId: activeReqId, correlationId: activeCorrelationId || undefined });
         finishTurn(false, msg);
       }
     }
@@ -192,7 +201,7 @@ function connectWs() {
     bridgeReadyEmitted = false;
     emit({ v: 1, type: 'bridge', ws: false, message: 'websocket closed' });
     if (activeReqId) {
-      emit({ v: 1, type: 'error', message: 'websocket closed unexpectedly', reqId: activeReqId });
+      emit({ v: 1, type: 'error', code: 'WS_CLOSED', message: 'websocket closed unexpectedly', reqId: activeReqId, correlationId: activeCorrelationId || undefined });
       finishTurn(false, 'ws closed');
     }
     setTimeout(() => {
@@ -205,15 +214,43 @@ function connectWs() {
 
 ws = connectWs();
 
-let activeReqId = null;
-let collected = '';
+function gatewayCancelBestEffort() {
+  if (process.env.RDK_OC_BRIDGE_GATEWAY_CANCEL === '0') return;
+  if (!ws || !wsConnected || !activeWsSendId) return;
+  try {
+    ws.send(
+      JSON.stringify({
+        type: 'req',
+        id: 'cancel-' + Math.random().toString(16).slice(2),
+        method: 'chat.cancel',
+        params: {
+          sessionKey: activeSessionKey,
+          requestId: activeWsSendId,
+          correlationId: activeCorrelationId || undefined,
+          studioRunId: activeStudioRunId || undefined,
+        },
+      }),
+    );
+  } catch (_) {}
+}
 
 function finishTurn(ok, reason) {
   const rid = activeReqId;
   if (rid == null) return;
   activeReqId = null;
+  activeWsSendId = null;
   onFrame = () => {};
-  emit({ v: 1, type: 'done', ok, reqId: rid, reason: reason !== undefined ? String(reason) : undefined });
+  emit({
+    v: 1,
+    type: 'done',
+    ok,
+    reqId: rid,
+    reason: reason !== undefined ? String(reason) : undefined,
+    correlationId: activeCorrelationId || undefined,
+  });
+  activeCorrelationId = '';
+  activeStudioRunId = '';
+  activeStudioSessionKey = '';
   drainInboundQueue();
 }
 
@@ -230,24 +267,31 @@ function startTurn(cmd) {
 
   collected = '';
   activeReqId = cmd.reqId || 'req-unknown';
-  const sessionKey = String(cmd.sessionKey || 'main');
+  activeSessionKey = String(cmd.sessionKey || 'main');
+  activeCorrelationId = cmd.correlationId ? String(cmd.correlationId) : '';
+  activeStudioRunId = cmd.runId ? String(cmd.runId) : '';
+  activeStudioSessionKey = cmd.studioSessionKey ? String(cmd.studioSessionKey) : '';
+  const sessionKey = activeSessionKey;
   const message = String(cmd.message || '').trim();
   const idempotencyKey = String(cmd.idempotencyKey || 'msg-' + Date.now());
 
   if (!message) {
-    emit({ v: 1, type: 'error', message: 'empty message', reqId: activeReqId });
+    emit({ v: 1, type: 'error', code: 'EMPTY_MESSAGE', message: 'empty message', reqId: activeReqId, correlationId: activeCorrelationId || undefined });
     finishTurn(false, 'empty message');
     return;
   }
 
   const sendId = 'send-' + Math.random().toString(16).slice(2);
+  activeWsSendId = sendId;
 
   onFrame = (frame) => {
     if (!activeReqId) return;
     if (frame.type === 'res') {
       if (frame.id === sendId && !frame.ok) {
-        const msg = (frame.error && frame.error.message) || 'chat.send failed';
-        emit({ v: 1, type: 'error', message: msg, reqId: activeReqId });
+        const er = frame.error || {};
+        const code = (er.code && String(er.code)) || 'CHAT_SEND_FAILED';
+        const msg = er.message || 'chat.send failed';
+        emit({ v: 1, type: 'error', code, message: msg, reqId: activeReqId, correlationId: activeCorrelationId || undefined });
         finishTurn(false, msg);
       }
       return;
@@ -290,7 +334,7 @@ function startTurn(cmd) {
         return;
       }
       if (d.phase === 'error') {
-        emit({ v: 1, type: 'error', message: d.error || d.message || 'lifecycle error', reqId: activeReqId });
+        emit({ v: 1, type: 'error', code: 'LIFECYCLE_ERROR', message: d.error || d.message || 'lifecycle error', reqId: activeReqId, correlationId: activeCorrelationId || undefined });
         finishTurn(false, d.error || 'lifecycle error');
       }
       return;
@@ -311,7 +355,7 @@ function startTurn(cmd) {
       return;
     }
     if (p.state === 'error') {
-      emit({ v: 1, type: 'error', message: p.error || 'chat error', reqId: activeReqId });
+      emit({ v: 1, type: 'error', code: 'CHAT_STATE_ERROR', message: p.error || 'chat error', reqId: activeReqId, correlationId: activeCorrelationId || undefined });
       finishTurn(false, p.error);
       return;
     }
@@ -329,10 +373,17 @@ function startTurn(cmd) {
       return;
     }
     if (p.type === 'agent_error') {
-      emit({ v: 1, type: 'error', message: p.error || 'agent error', reqId: activeReqId });
+      emit({ v: 1, type: 'error', code: 'AGENT_ERROR', message: p.error || 'agent error', reqId: activeReqId, correlationId: activeCorrelationId || undefined });
       finishTurn(false, p.error);
     }
   };
+
+  const clientMeta = {};
+  if (activeCorrelationId) clientMeta.correlationId = activeCorrelationId;
+  if (activeStudioRunId) clientMeta.studioRunId = activeStudioRunId;
+  if (activeStudioSessionKey) clientMeta.studioSessionKey = activeStudioSessionKey;
+  const params = { sessionKey, message, idempotencyKey };
+  if (Object.keys(clientMeta).length) params.clientMeta = clientMeta;
 
   try {
     ws.send(
@@ -340,12 +391,12 @@ function startTurn(cmd) {
         type: 'req',
         id: sendId,
         method: 'chat.send',
-        params: { sessionKey, message, idempotencyKey },
+        params,
       }),
     );
   } catch (e) {
     const msg = String(e && e.message ? e.message : e);
-    emit({ v: 1, type: 'error', message: msg, reqId: activeReqId });
+    emit({ v: 1, type: 'error', code: 'WS_SEND_EXCEPTION', message: msg, reqId: activeReqId, correlationId: activeCorrelationId || undefined });
     finishTurn(false, msg);
   }
 }
@@ -368,8 +419,14 @@ rl.on('line', (line) => {
   }
   if (cmd.op === 'abort') {
     if (cmd.reqId && cmd.reqId === activeReqId) {
-      emit({ v: 1, type: 'done', ok: false, reqId: cmd.reqId, reason: 'aborted' });
+      gatewayCancelBestEffort();
+      emit({ v: 1, type: 'done', ok: false, reqId: cmd.reqId, reason: 'aborted', correlationId: activeCorrelationId || cmd.correlationId || undefined });
       activeReqId = null;
+      activeWsSendId = null;
+      activeCorrelationId = '';
+      activeStudioRunId = '';
+      activeStudioSessionKey = '';
+      onFrame = () => {};
       drainInboundQueue();
     }
     return;

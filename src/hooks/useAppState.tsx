@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef } from 'react';
+import React, { useContext, useEffect, useMemo, useRef } from 'react';
+import { AppStateContext } from './app-state-context';
 import type {
   Tab,
   Device,
@@ -16,7 +17,7 @@ import type {
 } from '../app-types';
 import type { CmdSuggestion } from '../constants';
 import type { Task } from '../ai';
-import type { AgentAttachmentPayload } from '../api';
+import type { AgentAttachmentPayload, StudioResponseMode } from '../api';
 
 import { translate } from '../i18n/translate';
 import { fillTemplate } from '../i18n/en-extras';
@@ -248,13 +249,16 @@ export interface AppState {
   rdkClawRunTimeline: RdkClawTimelineEntry[];
   runTimelinePanelOpen: boolean;
   setRunTimelinePanelOpen: (v: boolean) => void;
+
+  studioResponseMode: StudioResponseMode;
+  setStudioResponseMode: (v: StudioResponseMode) => void;
 }
 
-/** 供 useI18n 等在 Provider 暂不可用时降级（避免 HMR 偶发崩溃） */
-export const AppStateContext = createContext<AppState | null>(null);
+/** 与 app-state-context 同源，供仅需 Context 引用的模块直接导入（避免经本文件再取 context） */
+export { AppStateContext } from './app-state-context';
 
-export function useAppState() {
-  const ctx = useContext(AppStateContext);
+export function useAppState(): AppState {
+  const ctx = useContext(AppStateContext) as AppState | null;
   if (!ctx) throw new Error('useAppState must be used within AppProvider');
   return ctx;
 }

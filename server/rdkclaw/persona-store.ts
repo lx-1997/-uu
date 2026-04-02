@@ -12,7 +12,7 @@ const DEFAULT_PERSONA: PersonaProfile = {
   name: "小地瓜",
   extraInstructions: "",
   riskLevel: "balanced",
-  delegationBias: "board-first",
+  delegationBias: "local-first",
   autonomyLevel: "assisted",
 };
 

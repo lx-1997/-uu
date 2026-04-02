@@ -43,6 +43,9 @@ export type HandlerContext = {
 export type HandlerResult = { ok: boolean; payload?: unknown; error?: ErrorShape };
 export type Handler = (params: unknown, client: GwClient, ctx: HandlerContext) => Promise<HandlerResult>;
 
+/** 每会话当前活跃的 chat.send → agent runId（用于 chat.cancel / turn 级中止） */
+const chatTurnRunIdBySession = new Map<string, string>();
+
 // ============== 安全工具（对齐 openclaw auth.ts safeEqual） ==============
 
 /** 防计时攻击的字符串比较 */
@@ -101,7 +104,12 @@ const handleConnect: Handler = async (params, client, ctx) => {
  * 3. agent 事件流 → broadcast("agent") + broadcast("chat" delta/final)
  */
 const handleChatSend: Handler = async (params, _client, ctx) => {
-  const p = params as { sessionKey?: string; message?: string } | undefined;
+  const p = params as {
+    sessionKey?: string;
+    message?: string;
+    idempotencyKey?: string;
+    clientMeta?: { correlationId?: string; studioRunId?: string; studioSessionKey?: string };
+  } | undefined;
   if (!p?.message) {
     return { ok: false, error: errorShape(ErrorCodes.INVALID_REQUEST, "message required") };
   }
@@ -121,6 +129,7 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
     // 捕获 agent 内部 runId，用于后续事件关联
     if (event.type === "agent_start" && event.sessionKey === sessionKey) {
       agentRunId = event.runId;
+      chatTurnRunIdBySession.set(sessionKey, event.runId);
     }
 
     // 仅转发属于本次 run 的事件（按 sessionKey 过滤，避免并发混杂）
@@ -154,9 +163,50 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
       // 广播运行时错误，确保客户端能收到错误通知
       ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "error", error: String(err) });
     })
-    .finally(() => unsub());
+    .finally(() => {
+      unsub();
+      const rid = agentRunId;
+      if (rid && chatTurnRunIdBySession.get(sessionKey) === rid) {
+        chatTurnRunIdBySession.delete(sessionKey);
+      }
+    });
 
-  return { ok: true, payload: { sessionKey } };
+  return {
+    ok: true,
+    payload: {
+      sessionKey,
+      clientMeta: p.clientMeta,
+      idempotencyKey: p.idempotencyKey,
+    },
+  };
+};
+
+// ============== chat.cancel（turn 级取消，对齐 Studio/oc-bridge 尽力调用） ==============
+
+const handleChatCancel: Handler = async (params, _client, ctx) => {
+  const p = params as {
+    sessionKey?: string;
+    requestId?: string;
+    correlationId?: string;
+  } | undefined;
+  const sessionKey = p?.sessionKey || "main";
+  const runId = chatTurnRunIdBySession.get(sessionKey);
+  if (!runId) {
+    return { ok: false, error: errorShape(ErrorCodes.NO_ACTIVE_TURN, "no active chat turn for session") };
+  }
+  ctx.agent.abort(runId);
+  if (chatTurnRunIdBySession.get(sessionKey) === runId) {
+    chatTurnRunIdBySession.delete(sessionKey);
+  }
+  return {
+    ok: true,
+    payload: {
+      sessionKey,
+      runId,
+      requestId: p?.requestId,
+      correlationId: p?.correlationId,
+    },
+  };
 };
 
 // ============== chat.history ==============
@@ -202,6 +252,7 @@ const handleHealth: Handler = async (_params, _client, ctx) => {
 export const handlers: Record<string, Handler> = {
   "connect": handleConnect,
   "chat.send": handleChatSend,
+  "chat.cancel": handleChatCancel,
   "chat.history": handleChatHistory,
   "sessions.list": handleSessionsList,
   "sessions.reset": handleSessionsReset,

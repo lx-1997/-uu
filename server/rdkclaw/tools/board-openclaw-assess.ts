@@ -1,6 +1,11 @@
 import type { Tool, ToolContext } from "../../agent/tools/types.js";
 import { readDevices } from "../../storage.js";
 import { OpenClawDeploymentManager } from "../../managers/OpenClawDeploymentManager.js";
+import {
+  logDualAgentEvent,
+  recordAssessSnapshot,
+} from "../board-dual-agent-orchestration.js";
+import { normalizeOpenClawWsFailureText, openClawBridgeMeta } from "../openclaw-bridge-meta.js";
 import type { Device } from "../../../shared/types.js";
 
 function resolveDevicePassword(device: Device) {
@@ -21,6 +26,9 @@ function toBoardDevice(device: Device) {
 function parseBoardError(raw: string): string {
   const text = (raw || "").trim();
   if (!text) return "板端 OpenClaw 未返回结果";
+  if (/__OPENCLAW_WS_FAILED__/i.test(text)) {
+    return normalizeOpenClawWsFailureText(text);
+  }
   if (/missing\s+scope|operator\.(read|write|admin)/i.test(text)) {
     return (
       "板端网关鉴权范围不足（scope）。请检查 RDK Studio 与板端 Gateway 的 token / pairing；"
@@ -77,6 +85,14 @@ function asBool(value: unknown): boolean | null {
   return null;
 }
 
+function normalizeSuggestedPath(value: unknown): "board" | "local" | undefined {
+  if (typeof value !== "string") return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === "board" || v === "local") return v;
+  if (v === "ssh" || v === "device" || v === "studio" || v === "rdkclaw") return "local";
+  return undefined;
+}
+
 function normalizeAssessment(raw: string, fallbackReason?: string) {
   const obj = extractJsonObject(raw);
   const can =
@@ -85,7 +101,6 @@ function normalizeAssessment(raw: string, fallbackReason?: string) {
     asBool(obj?.canDo) ??
     asBool(obj?.capable);
   let canHandle = can ?? false;
-  const lower = (raw || "").toLowerCase();
   if (can === null) {
     if (/不能|无法|做不到|失败|不支持/.test(raw)) canHandle = false;
     else if (/可以|可执行|能做|可完成/.test(raw)) canHandle = true;
@@ -104,10 +119,15 @@ function normalizeAssessment(raw: string, fallbackReason?: string) {
           ? 0.7
           : 0.6;
   const confidence = Math.max(0, Math.min(1, Number.isFinite(confidenceRaw) ? confidenceRaw : 0.6));
+  const suggestedPath =
+    normalizeSuggestedPath(obj?.suggestedPath) ??
+    normalizeSuggestedPath(obj?.suggested_path) ??
+    normalizeSuggestedPath(obj?.path);
   return {
     canHandle,
     confidence,
     reason,
+    suggestedPath,
   };
 }
 
@@ -162,14 +182,13 @@ export function boardOpenClawAssessTool(
 
       const boardDevice = toBoardDevice(device);
       const skillContext = boardSkills && boardSkills.length > 0
-        ? `\n你当前已安装的技能（${boardSkills.length} 个）:\n` +
-          boardSkills.map((s) => `- ${s.name}: ${s.description || "无描述"} [${s.path}]`).join("\n") +
-          "\n评估时请考虑这些已安装技能是否能完成任务。"
+        ? `已装技能（${boardSkills.length}）:\n` +
+          boardSkills.map((s) => `- ${s.name}: ${s.description || "无描述"} [${s.path}]`).join("\n")
         : "";
       const prompt = [
-        "你是板端 OpenClaw 的任务评估器，只做可行性评估，不执行任务。",
-        "请严格返回 JSON（不要 markdown，不要代码块）：",
-        '{"canHandle": true|false, "confidence": 0~1, "reason": "一句话原因", "suggestedPath": "board|local"}',
+        "[assess] 仅评估是否适合由你在板端承接，不要执行 task 中的操作。",
+        "只输出一个 JSON 对象，禁止 markdown/代码围栏/前后解说。Schema:",
+        '{"canHandle":true|false,"confidence":0~1,"reason":"一句","suggestedPath":"board|local"}',
         skillContext,
         input.context ? `context: ${input.context}` : "",
         `task: ${input.task}`,
@@ -189,9 +208,16 @@ export function boardOpenClawAssessTool(
               const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
               if (cleanOutput.length > 10) {
                 const normalized = normalizeAssessment(cleanOutput, "板端连接中断，基于部分输出评估");
+                recordAssessSnapshot(ctx.sessionKey, deviceId, normalized, input.task);
                 resolve(JSON.stringify(normalized, null, 2));
               } else {
                 const reason = parseBoardError(output);
+                logDualAgentEvent({
+                  event: "assess_failed",
+                  sessionKey: ctx.sessionKey,
+                  deviceId,
+                  reason: "short_or_empty_output",
+                });
                 resolve(JSON.stringify({
                   canHandle: false,
                   confidence: 0.2,
@@ -201,10 +227,12 @@ export function boardOpenClawAssessTool(
               return;
             }
             const normalized = normalizeAssessment(output);
+            recordAssessSnapshot(ctx.sessionKey, deviceId, normalized, input.task);
             resolve(JSON.stringify(normalized, null, 2));
           },
           sessionId,
           boardDevice,
+          openClawBridgeMeta(ctx),
         );
       });
     },
