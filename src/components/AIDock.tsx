@@ -1042,6 +1042,8 @@ export default function AIDock() {
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
   const [quickMoreMenuOpen, setQuickMoreMenuOpen] = useState(false);
   const quickMoreMenuRef = useRef<HTMLDivElement | null>(null);
+  const [dockHeaderMoreOpen, setDockHeaderMoreOpen] = useState(false);
+  const dockHeaderMoreRef = useRef<HTMLDivElement | null>(null);
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
   const [unsatisfiedModal, setUnsatisfiedModal] = useState<{ msgId: number; preview: string } | null>(null);
   const [unsatisfiedNote, setUnsatisfiedNote] = useState('');
@@ -1122,6 +1124,29 @@ export default function AIDock() {
       window.removeEventListener('keydown', onKey);
     };
   }, [quickMoreMenuOpen]);
+
+  useEffect(() => {
+    if (!dockHeaderMoreOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = dockHeaderMoreRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        window.requestAnimationFrame(() => setDockHeaderMoreOpen(false));
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDockHeaderMoreOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [dockHeaderMoreOpen]);
+
+  useEffect(() => {
+    if (!chatExpanded) setDockHeaderMoreOpen(false);
+  }, [chatExpanded]);
 
   const mentionParse = useMemo(() => parseTrailingAtMention(cmd), [cmd]);
   const filteredMentionCaps = useMemo(() => {
@@ -1980,100 +2005,185 @@ export default function AIDock() {
               </div>
             </div>
             <div className="dock-header-right">
-              {!rdkEmbedPanel && activeTab === 'openclaw' && (
+              <div className="dock-header-toolbar" role="toolbar" aria-label={t('dock.header.toolbarAria', '对话与运行工具')}>
+                <div
+                  className="dock-header-segmented"
+                  role="radiogroup"
+                  aria-label={t('dock.header.viewModeAria', '回复展示密度')}
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={compactFlowMode}
+                    className={`dock-header-seg${compactFlowMode ? ' is-active' : ''}`}
+                    title={t('dock.compact.titleOn', '已开启极简流程视图（点击查看完整过程）')}
+                    onClick={() => setCompactFlowMode(true)}
+                  >
+                    {t('dock.compact.btnCompact', '极简')}
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!compactFlowMode}
+                    className={`dock-header-seg${!compactFlowMode ? ' is-active' : ''}`}
+                    title={t('dock.compact.titleOff', '已关闭极简流程视图（点击只看结论）')}
+                    onClick={() => setCompactFlowMode(false)}
+                  >
+                    {t('dock.compact.btnFull', '完整')}
+                  </button>
+                </div>
+
+                <span className="dock-header-toolbar-divider" aria-hidden />
+
+                <div className="dock-header-tool-cluster">
+                  <button
+                    type="button"
+                    className={`dock-header-toolbtn${runTimelinePanelOpen ? ' is-active' : ''}`}
+                    onClick={() => setRunTimelinePanelOpen(!runTimelinePanelOpen)}
+                    title={t('dock.timeline.toggleTitle', '运行时间线（当前轮次步骤与心跳）')}
+                    aria-expanded={runTimelinePanelOpen}
+                    aria-label={t('dock.header.timeline', '时间线')}
+                  >
+                    <span className="dock-timeline-btn-inner">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                        <line x1="6" y1="4" x2="6" y2="20" />
+                        <circle cx="6" cy="8" r="1.5" fill="currentColor" stroke="none" />
+                        <circle cx="6" cy="14" r="1.5" fill="currentColor" stroke="none" />
+                        <path d="M9 8h10M9 14h7" />
+                      </svg>
+                      {aiTyping && rdkClawRunTimeline.length > 0 && !runTimelinePanelOpen ? (
+                        <span className="dock-timeline-live-dot" aria-hidden />
+                      ) : null}
+                    </span>
+                    <span className="dock-header-toolbtn-label">{t('dock.header.timeline', '时间线')}</span>
+                  </button>
+                  {taskHistory.length > 0 && (
+                    <button
+                      type="button"
+                      className={`dock-header-toolbtn${showTaskPanel ? ' is-active' : ''}`}
+                      onClick={() => setShowTaskPanel(!showTaskPanel)}
+                      title={t('dock.task.panelTitle', '任务')}
+                      aria-label={t('dock.header.tasks', '任务')}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                        <path d="M9 11l3 3L22 4" />
+                        <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+                      </svg>
+                      <span className="dock-header-toolbtn-label">{t('dock.header.tasks', '任务')}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="dock-header-toolbtn"
+                    onClick={() => setShowChatHistoryModal(true)}
+                    title={t('dock.history.openTitle', '查看本地对话历史')}
+                    aria-label={t('dock.header.sessions', '会话')}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M4 6h12v10H8l-3 3V6z" />
+                      <path d="M8 10h8M8 13h5" />
+                    </svg>
+                    <span className="dock-header-toolbtn-label">{t('dock.header.sessions', '会话')}</span>
+                  </button>
+                </div>
+
+                <span className="dock-header-toolbar-divider" aria-hidden />
+
                 <button
                   type="button"
-                  className="btn-icon"
-                  onClick={() => openOpenClawPopout()}
-                  title={t('dock.popout.openclawTitle', '新窗口仅打开 OpenClaw 页面')}
+                  className="dock-header-newchat"
+                  onClick={clearChatHistory}
+                  title={t('dock.task.clearHistoryTitle', '新对话（本窗口独立线程，不清除长期记忆）')}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                    <path d="M9 9h6v6H9z" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
+                  <span>{t('dock.header.newChat', '新对话')}</span>
                 </button>
-              )}
-              {isSubpageTab && (
-                <button
-                  className="btn-icon"
-                  onClick={toggleSubpageDockVisibility}
-                  title={t('dock.hide', '隐藏 AI Dock')}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32"/>
-                    <path d="M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.89 11 8a11.8 11.8 0 01-4.17 5.94"/>
-                    <line x1="1" y1="1" x2="23" y2="23"/>
-                  </svg>
-                </button>
-              )}
-              <button
-                className={`btn-icon dock-view-toggle ${compactFlowMode ? 'active' : ''}`}
-                onClick={() => setCompactFlowMode((prev) => !prev)}
-                title={compactFlowMode ? t('dock.compact.titleOn', '已开启极简流程视图（点击查看完整过程）') : t('dock.compact.titleOff', '已关闭极简流程视图（点击只看结论）')}
-              >
-                {compactFlowMode ? t('dock.compact.btnCompact', '极简') : t('dock.compact.btnFull', '完整')}
-              </button>
+
+                <div className="dock-header-more-wrap" ref={dockHeaderMoreRef}>
+                  <button
+                    type="button"
+                    className={`dock-header-toolbtn dock-header-more-trigger${dockHeaderMoreOpen ? ' is-open' : ''}`}
+                    aria-expanded={dockHeaderMoreOpen}
+                    aria-haspopup="menu"
+                    onClick={() => setDockHeaderMoreOpen((o) => !o)}
+                    aria-label={t('dock.header.moreAria', '更多与诊断')}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                      <circle cx="12" cy="6" r="1.5" fill="currentColor" stroke="none" />
+                      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                      <circle cx="12" cy="18" r="1.5" fill="currentColor" stroke="none" />
+                    </svg>
+                    <span className="dock-header-toolbtn-label">{t('dock.header.more', '更多')}</span>
+                  </button>
+                  {dockHeaderMoreOpen && (
+                    <div
+                      className="dock-header-more-panel"
+                      role="menu"
+                      aria-label={t('dock.header.moreMenuAria', '更多菜单')}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="dock-header-more-item"
+                        disabled={debugExporting}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setDockHeaderMoreOpen(false);
+                          if (debugExporting) return;
+                          setDebugExporting(true);
+                          void exportDebugBundle().finally(() => setDebugExporting(false));
+                        }}
+                      >
+                        <span className="dock-header-more-item-title">{t('dock.header.exportDebug', '导出诊断包')}</span>
+                        <span className="dock-header-more-item-desc">{t('dock.header.exportDebugDesc', '对话快照与 Agent 会话，便于排障')}</span>
+                      </button>
+                      {!rdkEmbedPanel && activeTab === 'openclaw' && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="dock-header-more-item"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setDockHeaderMoreOpen(false);
+                            openOpenClawPopout();
+                          }}
+                        >
+                          <span className="dock-header-more-item-title">{t('dock.header.popoutOpenclaw', '新窗口打开 OpenClaw')}</span>
+                          <span className="dock-header-more-item-desc">{t('dock.header.popoutOpenclawDesc', '仅 OpenClaw 页面')}</span>
+                        </button>
+                      )}
+                      {isSubpageTab && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="dock-header-more-item"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setDockHeaderMoreOpen(false);
+                            toggleSubpageDockVisibility();
+                          }}
+                        >
+                          <span className="dock-header-more-item-title">{t('dock.header.hideDock', '隐藏 AI Dock')}</span>
+                          <span className="dock-header-more-item-desc">{t('dock.header.hideDockDesc', '在本页收起对话面板')}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <button
                 type="button"
-                className={`btn-icon dock-timeline-toggle ${runTimelinePanelOpen ? 'active' : ''}`}
-                onClick={() => setRunTimelinePanelOpen(!runTimelinePanelOpen)}
-                title={t('dock.timeline.toggleTitle', '运行时间线（当前轮次步骤与心跳）')}
-                aria-expanded={runTimelinePanelOpen}
+                className="dock-header-close btn-icon"
+                onClick={closeDock}
+                title={t('dock.task.closeTitle', '关闭')}
+                aria-label={t('dock.task.closeTitle', '关闭')}
               >
-                <span className="dock-timeline-btn-inner">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <line x1="6" y1="4" x2="6" y2="20" />
-                    <circle cx="6" cy="8" r="1.5" fill="currentColor" stroke="none" />
-                    <circle cx="6" cy="14" r="1.5" fill="currentColor" stroke="none" />
-                    <path d="M9 8h10M9 14h7" />
-                  </svg>
-                  {aiTyping && rdkClawRunTimeline.length > 0 && !runTimelinePanelOpen ? (
-                    <span className="dock-timeline-live-dot" aria-hidden />
-                  ) : null}
-                </span>
+                {Icon.close}
               </button>
-              {taskHistory.length > 0 && (
-                <button className="btn-icon" onClick={() => setShowTaskPanel(!showTaskPanel)} title={t('dock.task.panelTitle', '任务')}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn-icon"
-                onClick={() => setShowChatHistoryModal(true)}
-                title={t('dock.history.openTitle', '查看本地对话历史')}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                  <path d="M3 3v5h5" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="btn-icon"
-                disabled={debugExporting}
-                onClick={() => {
-                  if (debugExporting) return;
-                  setDebugExporting(true);
-                  void exportDebugBundle().finally(() => setDebugExporting(false));
-                }}
-                title={t('dock.export.title', '导出排查包（对话快照、Agent 会话、可选板端 OpenClaw 日志）')}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="btn-icon"
-                onClick={clearChatHistory}
-                title={t('dock.task.clearHistoryTitle', '新对话（本窗口独立线程，不清除长期记忆）')}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-              </button>
-              <button className="btn-icon" onClick={closeDock} title={t('dock.task.closeTitle', '关闭')}>{Icon.close}</button>
             </div>
           </div>
 
