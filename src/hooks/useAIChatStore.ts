@@ -40,6 +40,7 @@ import {
   toChatDeviceId,
 } from '../utils/chat-history-storage';
 import { fetchApi } from '../utils/apiBase';
+import { sanitizeTerminalLineForDisplay } from '../utils/strip-ansi';
 import { getRdkEmbedPanel } from '../utils/embed-mode';
 import type { Task } from '../ai';
 import { useToastStore } from './useToastStore';
@@ -1510,7 +1511,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     }
                   }
                 } else {
-                  const progressLines = rawChunk.split('\n').map((line) => line.trim()).filter(Boolean).slice(-20);
+                  const progressLines = rawChunk
+                    .split(/\r?\n/)
+                    .map((line) => sanitizeTerminalLineForDisplay(line.trim()))
+                    .filter(Boolean)
+                    .slice(-20);
                   if (progressLines.length === 0) break;
                   if (typeof state.rawIndex === 'number') {
                     const rawBlock = aiBlocks[state.rawIndex];
@@ -1655,16 +1660,26 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (!isError && result.startsWith('{')) {
                   try {
                     const parsed = JSON.parse(result) as Record<string, unknown>;
-                    if (parsed.__type === 'image_download' && typeof parsed.imageUrl === 'string') {
-                      aiBlocks.push({
-                        type: 'image',
-                        src: parsed.imageUrl as string,
-                        caption: tf('chat.img.caption', '{{name}} ({{bytes}} bytes) — 来自设备', {
-                          name: String(parsed.fileName || t('chat.media.image', '图片')),
-                          bytes: String(parsed.bytes || 0),
-                        }),
-                      });
-                      mediaHandled = true;
+                    if (parsed.__type === 'image_download') {
+                      const fileName =
+                        typeof parsed.fileName === 'string' && String(parsed.fileName).trim()
+                          ? String(parsed.fileName).trim()
+                          : '';
+                      const fromUrl = typeof parsed.imageUrl === 'string' ? String(parsed.imageUrl).trim() : '';
+                      const src =
+                        fromUrl
+                        || (fileName ? `/api/local-files/${encodeURIComponent(fileName)}` : '');
+                      if (src) {
+                        aiBlocks.push({
+                          type: 'image',
+                          src,
+                          caption: tf('chat.img.caption', '{{name}} ({{bytes}} bytes) — 来自设备', {
+                            name: fileName || t('chat.media.image', '图片'),
+                            bytes: String(parsed.bytes || 0),
+                          }),
+                        });
+                        mediaHandled = true;
+                      }
                     } else if (
                       parsed.__type === 'studio_local_preview' &&
                       typeof parsed.imageUrl === 'string' &&
@@ -1678,21 +1693,53 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         ),
                       });
                       mediaHandled = true;
-                    } else if (parsed.__type === 'video_download' && typeof parsed.videoUrl === 'string') {
-                      aiBlocks.push({
-                        type: 'video',
-                        src: parsed.videoUrl as string,
-                        caption: tf('chat.video.caption', '{{name}} ({{mb}} MB) — 来自设备', {
-                          name: String(parsed.fileName || t('chat.media.video', '视频')),
-                          mb: ((parsed.bytes as number) / 1024 / 1024).toFixed(1),
-                        }),
-                      });
-                      mediaHandled = true;
+                    } else if (parsed.__type === 'video_download') {
+                      const vName =
+                        typeof parsed.fileName === 'string' && String(parsed.fileName).trim()
+                          ? String(parsed.fileName).trim()
+                          : '';
+                      const fromV = typeof parsed.videoUrl === 'string' ? String(parsed.videoUrl).trim() : '';
+                      const vSrc =
+                        fromV
+                        || (vName ? `/api/local-files/${encodeURIComponent(vName)}` : '');
+                      if (vSrc) {
+                        aiBlocks.push({
+                          type: 'video',
+                          src: vSrc,
+                          caption: tf('chat.video.caption', '{{name}} ({{mb}} MB) — 来自设备', {
+                            name: vName || t('chat.media.video', '视频'),
+                            mb: ((parsed.bytes as number) / 1024 / 1024).toFixed(1),
+                          }),
+                        });
+                        mediaHandled = true;
+                      }
                     } else if (parsed.localPath && typeof parsed.fileName === 'string') {
                       const ext = String(parsed.fileName).split('.').pop()?.toLowerCase() || '';
+                      const imgExts = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico']);
+                      const vidExts = new Set(['mp4', 'webm', 'mov', 'avi', 'mkv', 'm4v']);
                       const docExts = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf', 'csv', 'txt', 'md', 'zip', 'rar', '7z']);
-                      if (docExts.has(ext)) {
-                        const fileUrl = `/api/local-files/${encodeURIComponent(parsed.fileName as string)}`;
+                      const fileUrl = `/api/local-files/${encodeURIComponent(parsed.fileName as string)}`;
+                      if (imgExts.has(ext)) {
+                        aiBlocks.push({
+                          type: 'image',
+                          src: fileUrl,
+                          caption: tf('chat.img.caption', '{{name}} ({{bytes}} bytes) — 来自设备', {
+                            name: String(parsed.fileName),
+                            bytes: String(parsed.bytes ?? 0),
+                          }),
+                        });
+                        mediaHandled = true;
+                      } else if (vidExts.has(ext)) {
+                        aiBlocks.push({
+                          type: 'video',
+                          src: fileUrl,
+                          caption: tf('chat.video.caption', '{{name}} ({{mb}} MB) — 来自设备', {
+                            name: String(parsed.fileName),
+                            mb: ((Number(parsed.bytes) || 0) / 1024 / 1024).toFixed(1),
+                          }),
+                        });
+                        mediaHandled = true;
+                      } else if (docExts.has(ext)) {
                         aiBlocks.push({
                           type: 'file',
                           src: fileUrl,
@@ -1792,7 +1839,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   } else if (result.includes('\n') || result.length > 100) {
                     aiBlocks.push({
                       type: 'terminal',
-                      lines: result.split('\n').slice(0, 60),
+                      lines: result
+                        .split(/\r?\n/)
+                        .slice(0, 60)
+                        .map((ln) => sanitizeTerminalLineForDisplay(ln)),
                       label: tf('chat.tool.finalLabel', '{{tool}} · 最终结果', { tool: toolName }),
                       collapsible: true,
                       previewLines: 10,

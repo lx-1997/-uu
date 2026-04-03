@@ -28,6 +28,7 @@ import {
 } from '../constants/dock-mention-capabilities';
 import io from 'socket.io-client';
 import { Copy } from 'lucide-react';
+import { sanitizeTerminalLineForDisplay } from '../utils/strip-ansi';
 
 import rdkclawAvatarUrl from '../assets/chat/rdkclaw-avatar.png';
 import userAvatarUrl from '../assets/chat/user-avatar.png';
@@ -524,7 +525,9 @@ function BlockRenderer({
           <div className="dock-agent-card-actions">
             <DockCopyIconButton
               label={t('dock.terminal.copyOut', '复制输出')}
-              onCopy={() => { void copyDockPlainText(block.lines.join('\n')); }}
+              onCopy={() => {
+                void copyDockPlainText(block.lines.map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n'));
+              }}
             />
             {collapsible ? (
               <button
@@ -540,9 +543,9 @@ function BlockRenderer({
             ) : null}
           </div>
         </div>
-        <div className="dock-agent-shell" role="log">
+        <div className="dock-agent-shell dock-agent-shell--sanitized" role="log">
           {visibleLines.map((line, i) => (
-            <div key={i} className="dock-agent-shell-line">{line}</div>
+            <div key={i} className="dock-agent-shell-line">{sanitizeTerminalLineForDisplay(line)}</div>
           ))}
         </div>
       </div>
@@ -587,7 +590,9 @@ function BlockRenderer({
           <div className="dock-agent-card-actions">
             <DockCopyIconButton
               label={t('dock.terminal.copyOut', '复制输出')}
-              onCopy={() => { void copyDockPlainText(block.lines.join('\n')); }}
+              onCopy={() => {
+                void copyDockPlainText(block.lines.map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n'));
+              }}
             />
             {collapsible ? (
               <button
@@ -603,9 +608,11 @@ function BlockRenderer({
             ) : null}
           </div>
         </div>
-        <div className="collab-block-body dock-agent-shell">
+        <div className="collab-block-body dock-agent-shell dock-agent-shell--sanitized">
           {visibleLines.map((line, i) => (
-            <div key={i} className="collab-block-line dock-agent-shell-line">{line}</div>
+            <div key={i} className="collab-block-line dock-agent-shell-line">
+              {sanitizeTerminalLineForDisplay(line)}
+            </div>
           ))}
         </div>
       </div>
@@ -885,14 +892,25 @@ function BlockRenderer({
   }
 
   if (block.type === 'task-result') {
+    const detailClean = block.detail
+      ? block.detail.split('\n').map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n')
+      : '';
     return (
       <div className={`msg-block task-result-block dock-agent-card dock-agent-card--result ${block.success ? 'success' : 'fail'}`}>
         <div className="task-result-header dock-agent-card-head">
           <span className="dock-agent-card-icon" aria-hidden>{block.success ? '✓' : '✗'}</span>
           <span className="dock-agent-card-title">{block.title}</span>
+          {block.detail?.trim() ? (
+            <div className="dock-agent-card-actions">
+              <DockCopyIconButton
+                label={t('dock.taskResult.copyDetail', '复制结果详情')}
+                onCopy={() => { void copyDockPlainText(detailClean); }}
+              />
+            </div>
+          ) : null}
         </div>
         {block.detail ? (
-          <pre className="task-result-detail dock-agent-result-body">{block.detail}</pre>
+          <pre className="task-result-detail dock-agent-result-body">{detailClean}</pre>
         ) : null}
       </div>
     );
@@ -930,8 +948,16 @@ const OMITTED_STORAGE_URL = '[omitted-large-data-url]';
 function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   const { t } = useI18n();
   const rawUrl = attachment.url?.trim() ?? '';
-  const resolvedSrc =
+  let resolvedSrc =
     rawUrl && rawUrl !== OMITTED_STORAGE_URL ? resolveMediaUrl(rawUrl) : '';
+  if (
+    !resolvedSrc
+    && attachment.name
+    && MEDIA_IMAGE_RE.test(attachment.name)
+    && (attachment.type === 'file' || attachment.type === 'image')
+  ) {
+    resolvedSrc = resolveMediaUrl(`/api/local-files/${encodeURIComponent(attachment.name)}`);
+  }
 
   if (attachment.type === 'image') {
     return (
@@ -953,6 +979,23 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
             </span>
           </div>
         )}
+      </div>
+    );
+  }
+  if (
+    attachment.type === 'file'
+    && resolvedSrc
+    && MEDIA_IMAGE_RE.test(attachment.name)
+  ) {
+    return (
+      <div className="chat-attachment chat-attachment-image">
+        <img
+          src={resolvedSrc}
+          alt={attachment.name}
+          loading="lazy"
+          onClick={() => window.open(resolvedSrc, '_blank', 'noopener,noreferrer')}
+        />
+        {attachment.name ? <div className="image-block-caption">{attachment.name}</div> : null}
       </div>
     );
   }

@@ -2,6 +2,12 @@ import React from 'react';
 import { Copy } from 'lucide-react';
 import { resolveMediaUrl } from '../utils/apiBase';
 
+/** 行内链接：图片扩展名则渲染为 <img>（含 /api/local-files/xxx.jpg） */
+function isMarkdownImageHref(href: string): boolean {
+  const base = (href.trim().split(/[?#]/)[0] || '').trim();
+  return /\.(jpe?g|png|gif|webp|bmp|svg|ico|tiff?)$/i.test(base);
+}
+
 export type RenderMarkdownOptions = {
   /**
    * 为 true 时：未闭合 ``` 按「生成中」渲染；行内 `**` 在未写出闭合 `**` 前也按加粗显示（适合流式前缀）。
@@ -355,8 +361,28 @@ function renderPlainTokens(s: string, keyBase: number, wrapStrong: boolean): Rea
       );
     }
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (linkMatch)
-      return <a key={`pt-${keyBase}-a-${i}`} href={linkMatch[2]} target="_blank" rel="noopener noreferrer">{linkMatch[1]}</a>;
+    if (linkMatch) {
+      const hrefRaw = linkMatch[2];
+      if (isMarkdownImageHref(hrefRaw)) {
+        const url = resolveMediaUrl(hrefRaw);
+        const label = linkMatch[1] || '';
+        return (
+          <img
+            key={`pt-${keyBase}-imglnk-${i}`}
+            className="md-inline-img"
+            src={url}
+            alt={label}
+            loading="lazy"
+            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+          />
+        );
+      }
+      return (
+        <a key={`pt-${keyBase}-a-${i}`} href={hrefRaw} target="_blank" rel="noopener noreferrer">
+          {linkMatch[1]}
+        </a>
+      );
+    }
     return <span key={`pt-${keyBase}-s-${i}`}>{part}</span>;
   });
   if (inner.length === 0) return [];
@@ -415,8 +441,28 @@ function renderInline(text: string, streaming?: boolean): React.ReactNode {
       );
     }
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-    if (linkMatch)
-      return <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer">{linkMatch[1]}</a>;
+    if (linkMatch) {
+      const hrefRaw = linkMatch[2];
+      if (isMarkdownImageHref(hrefRaw)) {
+        const url = resolveMediaUrl(hrefRaw);
+        const label = linkMatch[1] || '';
+        return (
+          <img
+            key={i}
+            className="md-inline-img"
+            src={url}
+            alt={label}
+            loading="lazy"
+            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+          />
+        );
+      }
+      return (
+        <a key={i} href={hrefRaw} target="_blank" rel="noopener noreferrer">
+          {linkMatch[1]}
+        </a>
+      );
+    }
     return <span key={i}>{part}</span>;
   });
 }

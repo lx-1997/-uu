@@ -2002,6 +2002,12 @@
   overflow-y: auto;
 }
 
+.dock-bubble .dock-agent-shell--sanitized {
+  font-variant-ligatures: none;
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
 .dock-bubble .dock-agent-shell-line {
   white-space: pre-wrap;
   word-break: break-word;

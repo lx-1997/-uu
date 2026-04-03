@@ -249,6 +249,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.status.fallback': 'Details',
   'dock.terminal.copyAllTitle': 'Copy all output',
   'dock.terminal.copyOut': 'Copy output',
+  'dock.taskResult.copyDetail': 'Copy result details',
   'dock.terminal.collapseOut': 'Collapse output',
   'dock.terminal.expandOut': 'Expand output',
   'dock.terminal.collapse': 'Collapse',
