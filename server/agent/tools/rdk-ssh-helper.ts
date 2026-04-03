@@ -6,6 +6,7 @@
  */
 
 import { readDevices, invalidateDevicesReadCache, resolveDataDir } from '../../storage.js';
+import { ensureAgentMediaDownloadDir } from '../../local-files-roots.js';
 import {
   runRemoteCommands,
   uploadFileSftp,
@@ -228,6 +229,11 @@ export async function downloadDeviceFileToLocal(
     throw new Error(`设备文件不存在: ${remotePath}`);
   }
   const buffer = Buffer.from(data, 'base64');
+  try {
+    ensureAgentMediaDownloadDir();
+  } catch {
+    /* 下载目标可能为绝对路径落在其它目录；下面 mkdir/write 仍会尝试 */
+  }
   await fs.mkdir(path.dirname(localPath), { recursive: true });
   await fs.writeFile(localPath, buffer);
   return { bytes: buffer.length, localPath };

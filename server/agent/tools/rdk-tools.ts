@@ -197,14 +197,14 @@ function deviceFileDownloadToLocalTool(
       '把设备上的文件下载到本机（RDK Studio 所在电脑）。\n' +
       '用途：下载图片、视频、模型文件、日志等到本地查看或处理。\n\n' +
       '使用规则：\n' +
-      '- 可选 localPath（相对路径基于 ~/.rdkstudio/agent-downloads），不填则保存到该默认下载目录\n' +
+      '- 可选 localPath（相对路径基于 Studio 数据目录下的 agent-downloads，与 devices.json 同根），不填则保存到该默认下载目录\n' +
       '- 下载图片/视频后会返回可预览的 URL\n' +
       '- 大文件下载可能较慢，先告知用户',
     inputSchema: {
       type: 'object',
       properties: {
         remotePath: { type: 'string', description: '设备文件绝对路径，如 /userdata/a.txt' },
-        localPath: { type: 'string', description: '本机保存路径（可选；绝对路径或相对于 ~/.rdkstudio/agent-downloads 的相对路径）' },
+        localPath: { type: 'string', description: '本机保存路径（可选；绝对路径或相对于数据目录 agent-downloads 的相对路径）' },
       },
       required: ['remotePath'],
     },
@@ -391,8 +391,9 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
           return (
             `[命令执行失败] ${msg}\n\n` +
             `这是 **SSH 登录/认证阶段**失败（尚未在板端执行你拼的命令），不是拍照命令本身的输出错误。\n` +
-            `常见原因：Studio 里保存的板端密码/用户名已变或未同步；sshd 仅允许密钥；网络切换后仍用旧配置。\n` +
-            `请到 **设备管理** 对该设备「测试连接」并重新保存；或用本机终端对同一 host/user 试一次 ssh。\n` +
+            `本工具当前绑定的设备 ID：\`${deviceId}\`。若你刚用 device_connect_ssh 换过账号，请先在 Studio **侧栏选中对应设备**再发消息，或再发一条以刷新会话工具绑定。\n` +
+            `常见原因：Studio 里该 **deviceId** 对应条目密码/用户名与板端不一致；sshd 仅允许密钥；网络切换后仍用旧配置。\n` +
+            `请到 **设备管理** 对该 IP 下 **当前使用的用户** 点「测试连接」并保存；或用本机终端对同一 host/user 试一次 ssh。\n` +
             `**OpenClaw 在板上正常 ≠ Studio 的 SSH 一定成功**（板内进程与宿主机连板的 SSH 是两条链路）。认证未恢复前，反复改 gst/v4l2 命令通常无效。\n` +
             `勿因本条切换设备；先修连接。`
           );

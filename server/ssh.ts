@@ -1,4 +1,4 @@
-import { Client } from 'ssh2';
+import { Client, type ConnectConfig } from 'ssh2';
 import {
   appendUtf8WithTailCap,
   DEFAULT_STREAM_OUTPUT_CHAR_LIMIT,
@@ -18,7 +18,8 @@ export const SSH_KEEPALIVE_COUNT_MAX = 3;
  */
 export const SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 
-const BUILTIN_DEFAULT_PASSWORDS = ['root', 'sunrise'];
+/** 仅保留产品默认 root；其它常见口令请用 RDK_DEFAULT_PASSWORDS（逗号分隔），避免自动误试锁账户 */
+const BUILTIN_DEFAULT_PASSWORDS = ['root'];
 
 /**
  * 板端常见默认口令候选（与 index 中设备发现逻辑一致）。
@@ -35,16 +36,34 @@ export function sshPasswordCandidates(username: string): string[] {
   return Array.from(new Set(candidates));
 }
 
-function sshConnectBase(credentials: SshCredentials) {
+function sshConnectBase(credentials: SshCredentials): ConnectConfig {
+  const pwd = credentials.password;
+  const kb =
+    typeof pwd === 'string' && pwd.length > 0
+      ? {
+          tryKeyboard: true,
+          onKeyboardInteractive: (
+            _name: string,
+            _instr: string,
+            _lang: string,
+            prompts: { prompt: string; echo?: boolean }[],
+            finish: (responses: string[]) => void,
+          ) => {
+            if (prompts.length) finish(prompts.map(() => pwd));
+            else finish([]);
+          },
+        }
+      : {};
   return {
     host: credentials.host,
     port: credentials.port ?? 22,
     username: credentials.username,
-    password: credentials.password,
+    password: pwd,
     readyTimeout: SSH_READY_TIMEOUT_MS,
     keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
     keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
-  };
+    ...kb,
+  } as ConnectConfig;
 }
 
 export interface SshCredentials {

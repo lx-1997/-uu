@@ -95,9 +95,9 @@ export function buildStudioOpenLocalPreviewTool(emit: (absPath: string) => void)
   return {
     name: "studio_open_local_preview",
     description:
-      "【仅 RDK Studio 桌面端有效】用**系统默认应用**打开**当前会话工作区内已存在的图片**，同时若文件落在 **`~/.rdkstudio/agent-downloads`**、项目 `downloads/` 或 `workspace/downloads/` 下，**聊天气泡内会自动出现预览**（无需对用户说「对话框不能显示图」）。传入相对路径或允许根下的绝对路径；**禁止**打开 http(s)（用 `studio_open_url`）。允许扩展名：" +
+      "【仅 RDK Studio 桌面端有效】用**系统默认应用**打开**当前会话工作区内已存在的图片**，同时若文件落在 **Studio 数据目录 `agent-downloads`**（旧版路径可能为 `~/.rdkstudio/agent-downloads`）、项目 `downloads/` 或 `workspace/downloads/` 下，**聊天气泡内会自动出现预览**（无需对用户说「对话框不能显示图」）。传入相对路径或允许根下的绝对路径；**禁止**打开 http(s)（用 `studio_open_url`）。允许扩展名：" +
       [...STUDIO_LOCAL_PREVIEW_EXTENSIONS].sort().join(", ") +
-      "。若用户要「在对话里直接看到图」，请先把图存到上述目录（默认 Agent 下载为 `~/.rdkstudio/agent-downloads`）再调用本工具；也可用 Markdown `![说明](/api/local-files/文件名)` 辅助展示。",
+      "。若用户要「在对话里直接看到图」，请先把图存到上述目录（默认 Agent 下载为数据目录 `agent-downloads`）再调用本工具；也可用 Markdown `![说明](/api/local-files/文件名)` 辅助展示。",
     inputSchema: {
       type: "object",
       properties: {
@@ -121,7 +121,7 @@ export function buildStudioOpenLocalPreviewTool(emit: (absPath: string) => void)
           fileName: base,
           message: servable
             ? `已请求系统看图打开 ${abs}；对话内将显示同一图片预览。`
-            : `已请求系统看图打开 ${abs}。若还需聊天气泡内嵌预览，请将图片保存到 ~/.rdkstudio/agent-downloads/ 或项目 downloads/、workspace/downloads/ 后再调用本工具或回复中附 ![desc](/api/local-files/${encodeURIComponent(base)})（basename 须一致）。`,
+            : `已请求系统看图打开 ${abs}。若还需聊天气泡内嵌预览，请将图片保存到 Studio 数据目录 agent-downloads/ 或项目 downloads/、workspace/downloads/ 后再调用本工具或回复中附 ![desc](/api/local-files/${encodeURIComponent(base)})（basename 须一致）。`,
         };
         if (servable) {
           payload.imageUrl = `/api/local-files/${encodeURIComponent(base)}`;

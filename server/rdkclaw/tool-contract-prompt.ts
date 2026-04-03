@@ -31,7 +31,7 @@ export function buildToolContractOverviewPrompt(): string {
     "### Studio 宿主界面工具（≠ SkillHub / ≠ skills/ 目录）",
     "- `studio_open_url`、`studio_embedded_browser_capture` 等是 **RDK Studio 桌面内置的 function tool**，由宿主调 Socket/Electron **打开窗口或内嵌浏览**；**不是** `skills/<slug>/SKILL.md`，**不是** SkillHub/ClawHub 上可下载的「浏览器技能」。",
     "- 用户只说「打开某网站 / 在软件里开个网页」→ **本回合直接** `studio_open_url`；需要登录后把页面正文交给 Agent → `studio_embedded_browser_capture`。",
-    "- 用户要看**工作区内已保存的图片**→ **`studio_open_local_preview`**；图在 **`~/.rdkstudio/agent-downloads`**、工作区 **`downloads/`**、**`workspace/downloads/`** 时，气泡内可预览，**不要**说「对话框无法插图」。Markdown 用 **`![说明](/api/local-files/文件名)`**（仅 basename）；勿把 `file:///Users/...` 直接当 img src。**不要**把本地路径当网页 URL 传给 `studio_open_url`。",
+    "- 用户要看**工作区内已保存的图片**→ **`studio_open_local_preview`**；图在 **Studio 数据目录下 `agent-downloads`**（与 devices.json 同根；旧版曾用 `~/.rdkstudio/agent-downloads`）、工作区 **`downloads/`**、**`workspace/downloads/`** 时，气泡内可预览，**不要**说「对话框无法插图」。Markdown 用 **`![说明](/api/local-files/文件名)`**（仅 basename）；勿把 `file:///Users/...` 直接当 img src。**不要**把本地路径当网页 URL 传给 `studio_open_url`。",
     "- **禁止**：为上述需求先 `find_skills`、向远端索要「打开浏览器」类技能、或把域名当成技能名安装；**禁止**用 `sessions_spawn` 去「找打开网页的技能」。若工具列表中暂时未见，用 `load_tools` + `names: [\"studio_open_url\"]`，不要猜 Skill 名。",
     "",
     "### 何时优先走 OpenClaw（勿用 SSH 硬顶）",

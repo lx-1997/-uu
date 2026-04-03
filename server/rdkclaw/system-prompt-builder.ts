@@ -378,7 +378,7 @@ export function buildCollaborationPrompt(
       : "当前板端技能快照为空（可能未安装或读取失败）。如任务匹配不到现有技能，请优先生成并下发新技能，再继续执行。",
     "",
     "### 你的本地能力速查",
-    "打开公网网页→**studio_open_url** | 工作区图片→**studio_open_local_preview**；图在 **`~/.rdkstudio/agent-downloads`**、工作区 **`downloads/`**、**`workspace/downloads/`** 时气泡内可 **`![alt](/api/local-files/仅文件名)`** 预览（勿写整段 `/Users/...` 或 `file://` 作 src）。勿声称「不能显示」。| 述用户上传附件→attachment_describe_image | 联网→web_search/web_fetch | 设备→device_exec | 文件→device_file_* | 诊断→device_diagnose",
+    "打开公网网页→**studio_open_url** | 工作区图片→**studio_open_local_preview**；图在 **数据目录 `agent-downloads`**、工作区 **`downloads/`**、**`workspace/downloads/`** 时气泡内可 **`![alt](/api/local-files/仅文件名)`** 预览（勿写整段 `/Users/...` 或 `file://` 作 src）。勿声称「不能显示」。| 述用户上传附件→attachment_describe_image | 联网→web_search/web_fetch | 设备→device_exec | 文件→device_file_* | 诊断→device_diagnose",
     "",
     "### 用户常见问题快答（无需搜索，直接用 device_exec 执行）",
     "- WiFi: `nmcli dev wifi list` → `nmcli dev wifi connect \"SSID\" password \"密码\"`",

@@ -699,8 +699,10 @@ export class WeixinPollingChannel {
         const exact = devices.find(d => d.id === latestUiDeviceId && d.status === "connected");
         if (exact) return latestUiDeviceId;
       }
-      const connected = devices.find(d => d.status === "connected");
-      return connected?.id || "";
+      const connected = devices.filter((d) => d.status === "connected");
+      if (connected.length === 0) return "";
+      connected.sort((a, b) => String(b.lastCheckedAt).localeCompare(String(a.lastCheckedAt)));
+      return connected[0]?.id || "";
     } catch {
       return latestUiDeviceId || "";
     }
