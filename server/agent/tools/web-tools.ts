@@ -10,6 +10,61 @@ const DEFAULT_MAX_FETCH_CHARS = 16_000;
 /** 网络请求最大重试次数 */
 const MAX_NETWORK_RETRIES = 2;
 
+/** 连续汉字（含扩展区）：对足够长的片段加英文双引号，提示搜索引擎按「精确短语」匹配，减轻分词把品牌/专名拆成前缀字导致的跑偏。 */
+const CJK_RUN_RE = /[\u4e00-\u9fff\u3400-\u4dbf]+/g;
+
+const MIN_CJK_PHRASE_QUOTE_LEN = 3;
+
+function applyCjkPhraseQuotes(raw: string): { query: string; changed: boolean } {
+  const q = raw.trim();
+  if (!q) return { query: q, changed: false };
+  let changed = false;
+  const out = q.replace(CJK_RUN_RE, (run, offset) => {
+    if (run.length < MIN_CJK_PHRASE_QUOTE_LEN) return run;
+    const before = offset > 0 ? q[offset - 1] : "";
+    const after = offset + run.length < q.length ? q[offset + run.length] : "";
+    if (before === '"' && after === '"') return run;
+    changed = true;
+    return `"${run}"`;
+  });
+  return { query: out, changed };
+}
+
+/**
+ * 不改变模型传入的语义，只做送引擎前的通用规范化。
+ * 若模型把「泡泡玛特」截成「泡泡」，服务端无法可靠猜回全称——须在工具契约中禁止截断专名；输出里会并列展示 tool_argument 与 search_query 以便核对。
+ */
+function prepareWebSearchQuery(raw: string): { query: string; expansionNote?: string } {
+  const q0 = raw.trim();
+  if (!q0) return { query: q0 };
+  const { query, changed } = applyCjkPhraseQuotes(q0);
+  if (!changed) return { query };
+  return {
+    query,
+    expansionNote: `已为连续中文专名片段（≥${MIN_CJK_PHRASE_QUOTE_LEN} 字）添加精确短语引号再送搜索引擎，减轻整词被拆分成单字义项的噪声命中`,
+  };
+}
+
+/**
+ * 整段 query 仅为单个高歧义 token 时返回拒绝原因文案，否则返回 null。
+ * 多词（如「pop music」「泡泡 战士」）一律放行，避免误伤。
+ */
+export function ambiguousSoleWebSearchQueryReason(raw: string): string | null {
+  const q0 = raw.trim();
+  if (!q0) return null;
+  const stripped = q0.replace(/^["']+|["']+$/g, "").trim();
+  const tokens = stripped.split(/\s+/).filter(Boolean);
+  if (tokens.length !== 1) return null;
+  const one = tokens[0];
+  if (one === "泡泡") {
+    return "web_search 被拒：仅「泡泡」歧义过大。请改为完整品牌名（如「泡泡玛特」），港股可再加股份代号 09992。";
+  }
+  if (/^pop$/i.test(one)) {
+    return "web_search 被拒：仅「pop」歧义过大。若指 Pop Mart 请用「Pop Mart」「泡泡玛特」等并可加 09992；其他主题请补充限定词（如「pop music」）。";
+  }
+  return null;
+}
+
 function envFlagTrue(name: string): boolean {
   const v = (process.env[name] || "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes";
@@ -192,12 +247,18 @@ function formatWebSearchResults(
   query: string,
   engineLine: string,
   results: Array<{ title: string; url: string; snippet?: string }>,
+  opts?: { toolArgument?: string },
 ): string {
   const lines = results.map((item, i) => {
     const sn = item.snippet ? `\n   snippet: ${item.snippet}` : "";
     return `${i + 1}. ${item.title}\n   ${item.url}${sn}`;
   });
-  return `query: ${query}\nengine: ${engineLine}\nresults:\n${lines.join("\n")}`;
+  const arg = opts?.toolArgument;
+  const head =
+    arg !== undefined
+      ? `tool_argument: ${arg.trim()}\nsearch_query: ${query}\n`
+      : `query: ${query}\n`;
+  return `${head}engine: ${engineLine}\nresults:\n${lines.join("\n")}`;
 }
 
 /** 必应中国（cn.bing.com）PC 页：每条自然结果多为 <li class="b_algo"> 内 <h2><a href> */
@@ -233,21 +294,28 @@ function extractBingChinaHtmlResults(html: string, limit: number): Array<{ title
   return out.slice(0, limit);
 }
 
-async function fetchBingChinaHtml(
+/** 与 skills/multi-search-engine/config.json 中 Bing CN / Bing INT 模板对齐 */
+async function fetchBingSerpHtml(
   query: string,
   signal: AbortSignal,
+  variant: "cn" | "intl",
 ): Promise<Array<{ html: string; status: number; via: string }>> {
   const q = encodeURIComponent(query);
   const out: Array<{ html: string; status: number; via: string }> = [];
+  const url =
+    variant === "cn"
+      ? `https://cn.bing.com/search?q=${q}&setlang=zh-cn`
+      : `https://cn.bing.com/search?q=${q}&ensearch=1`;
+  const via = variant === "cn" ? "cn.bing.com(zh)" : "cn.bing.com(intl)";
   try {
-    const res = await fetch(`https://cn.bing.com/search?q=${q}&setlang=zh-cn`, {
+    const res = await fetch(url, {
       method: "GET",
       signal,
       headers: { ...DDG_FETCH_HEADERS, Referer: "https://cn.bing.com/" },
     });
     const text = await res.text();
     if (text.length > 80) {
-      out.push({ html: text, status: res.status, via: "cn.bing.com" });
+      out.push({ html: text, status: res.status, via });
     }
   } catch {
     /* 下一来源 */
@@ -587,9 +655,13 @@ function formatDdgSearchOutput(
   pages: Array<{ html: string; status: number; via: string }>,
   limit: number,
   failCtx?: WebSearchDdgFailCtx,
+  opts?: { toolArgument?: string },
 ): string {
   const ctx = failCtx ?? { tavilyFirstChain: false, tavilyAfterDomesticChain: false };
   const got = extractDdgResultsFromPages(pages, limit);
+  const arg = opts?.toolArgument;
+  const qHead =
+    arg !== undefined ? `tool_argument: ${arg.trim()}\nsearch_query: ${query}\n` : `query: ${query}\n`;
   if (!got) {
     const last = pages[pages.length - 1];
     const hint = last
@@ -599,18 +671,22 @@ function formatDdgSearchOutput(
       : "未能从 DuckDuckGo 拉取到页面（网络或 TLS 问题）。";
     let chain: string;
     if (ctx.tavilyFirstChain) {
-      chain = "已依次尝试：Tavily、国内多源网页（必应中国→百度→DuckDuckGo）。";
+      chain =
+        "已依次尝试：Tavily、联网搜索首选 Multi-Search-Engine（多引擎顺序：百度→必应中国→必应国际→DuckDuckGo）。";
     } else if (ctx.tavilyAfterDomesticChain) {
-      chain = "已依次尝试：国内多源网页（必应中国→百度→DuckDuckGo）、Tavily。";
+      chain =
+        "已依次尝试：联网搜索首选 Multi-Search-Engine（多引擎顺序：百度→必应中国→必应国际→DuckDuckGo）、Tavily。";
     } else {
-      chain = "已依次尝试：国内多源网页（必应中国→百度→DuckDuckGo）。";
+      chain =
+        "已依次尝试：联网搜索首选 Multi-Search-Engine（多引擎顺序：百度→必应中国→必应国际→DuckDuckGo）。";
     }
-    return `query: ${query}\n未检索到可用结果。\n${chain}\n${hint}`;
+    return `${qHead}未检索到可用结果。\n${chain}\n${hint}`;
   }
   return formatWebSearchResults(
     query,
     `DuckDuckGo (${got.via}${got.status ? `, http ${got.status}` : ""})`,
     got.results,
+    opts,
   );
 }
 
@@ -619,19 +695,30 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
   return {
     name: "web_search",
     description:
-      "在互联网上搜索关键词，返回标题、链接与（若有）摘要。策略（RDKClaw 本机）：默认必应（中国）→百度→DuckDuckGo，零密钥。按需：配置 TAVILY_API_KEY 后，免费链路无结果再调 Tavily（计费）；需要 Tavily 优先时设环境变量 WEB_SEARCH_TAVILY_FIRST=1。可对命中 URL 再 web_fetch。",
+      "在互联网上搜索关键词，返回标题、链接与（若有）摘要。**联网搜索首选 Multi-Search-Engine（多引擎顺序）**（RDKClaw 本机）：按仓库 `skills/multi-search-engine` 的引擎列表依次请求，当前已实现顺序为 百度→必应（中国）→必应（国际）→DuckDuckGo，零密钥。配置 `TAVILY_API_KEY` 后，可在该链路无结果时再调 Tavily（计费）；若需 Tavily 先于 Multi-Search-Engine，设环境变量 `WEB_SEARCH_TAVILY_FIRST=1`。可对命中 URL 再 `web_fetch`。**关键**：`query` 必须与你在推理里决定使用的关键词一致；品牌名、公司名、产品名等**专有名词须完整逐字写入**，禁止缩成更易歧义的前缀（中文：「泡泡玛特」不得只传「泡泡」；英文：`Pop Mart` 不得只传 `pop`）。**上市公司**检索宜在 query 中同时包含 **证券简称/全称 + 交易所代号**（例：`泡泡玛特 09992 回购`）。中文连续专名（≥3 字）服务端可能自动加短语引号以减轻分词跑偏。",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "搜索关键词" },
+        query: {
+          type: "string",
+          description:
+            "搜索关键词：与推理中计划的检索词一致；专名、品牌全称完整输入（勿「泡泡」「pop」等歧义缩写）；港股可含代号如 09992。",
+        },
         limit: { type: "number", description: "返回条数，默认 5，最大 10" },
       },
       required: ["query"],
     },
     async execute(input) {
-      const query = input.query.trim();
+      const toolArgument = input.query.trim();
+      const ambiguous = ambiguousSoleWebSearchQueryReason(input.query);
+      if (ambiguous) throw new Error(ambiguous);
+      const { query: preparedQuery, expansionNote } = prepareWebSearchQuery(input.query);
+      const query = preparedQuery;
       if (!query) throw new Error("query 不能为空");
       const limit = Math.min(10, Math.max(1, Number(input.limit || 5)));
+      const expansionFoot = expansionNote ? `\n\n[query_expansion] ${expansionNote}` : "";
+      const fmtOpts = { toolArgument };
+      const finalize = (body: string) => body + expansionFoot;
 
       // 网络请求重试：DNS/TLS 首次慢或临时网络波动
       let lastError: Error | null = null;
@@ -649,10 +736,13 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
               if (tv.ok && tv.results.length > 0) {
                 const rt =
                   tv.responseTime !== undefined ? `, ${tv.responseTime.toFixed(2)}s` : "";
-                return formatWebSearchResults(
-                  query,
-                  `Tavily (basic${rt}, WEB_SEARCH_TAVILY_FIRST 优先)`,
-                  tv.results,
+                return finalize(
+                  formatWebSearchResults(
+                    query,
+                    `Tavily (basic${rt}, WEB_SEARCH_TAVILY_FIRST 优先)`,
+                    tv.results,
+                    fmtOpts,
+                  ),
                 );
               }
               tavilyEarlyFailNote = !tv.ok
@@ -665,45 +755,62 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
 
           const afterTavilyEarlyFoot =
             tavilyEarlyFailNote !== ""
-              ? `\n\n[注] ${tavilyEarlyFailNote}；以下为免费国内多源命中。`
+              ? `\n\n[注] ${tavilyEarlyFailNote}；以下为 Multi-Search-Engine（多引擎顺序）链路命中。`
               : "";
 
-          const bingPages = await fetchBingChinaHtml(query, timeout.signal);
-          const bingGot = extractBingResultsFromPages(bingPages, limit);
-          if (bingGot && bingGot.results.length > 0) {
-            return (
-              formatWebSearchResults(
-                query,
-                `必应（中国）(${bingGot.via}${bingGot.status ? `, http ${bingGot.status}` : ""})`,
-                bingGot.results,
-              ) + afterTavilyEarlyFoot
-            );
-          }
-
+          // 联网搜索首选 Multi-Search-Engine（多引擎顺序）；与 skills/multi-search-engine/config.json 前段一致
           const baiduPages = await fetchBaiduSerpHtml(query, timeout.signal);
           for (const bp of baiduPages) {
             if (looksLikeBaiduCaptcha(bp.html)) continue;
             const baiduResults = extractBaiduHtmlResults(bp.html, limit);
             if (baiduResults.length > 0) {
-              return (
+              return finalize(
                 formatWebSearchResults(
                   query,
                   `百度 (${bp.via}${bp.status ? `, http ${bp.status}` : ""})`,
                   baiduResults,
-                ) + afterTavilyEarlyFoot
+                  fmtOpts,
+                ) + afterTavilyEarlyFoot,
               );
             }
+          }
+
+          const bingCnPages = await fetchBingSerpHtml(query, timeout.signal, "cn");
+          const bingCnGot = extractBingResultsFromPages(bingCnPages, limit);
+          if (bingCnGot && bingCnGot.results.length > 0) {
+            return finalize(
+              formatWebSearchResults(
+                query,
+                `必应（中国）(${bingCnGot.via}${bingCnGot.status ? `, http ${bingCnGot.status}` : ""})`,
+                bingCnGot.results,
+                fmtOpts,
+              ) + afterTavilyEarlyFoot,
+            );
+          }
+
+          const bingIntlPages = await fetchBingSerpHtml(query, timeout.signal, "intl");
+          const bingIntlGot = extractBingResultsFromPages(bingIntlPages, limit);
+          if (bingIntlGot && bingIntlGot.results.length > 0) {
+            return finalize(
+              formatWebSearchResults(
+                query,
+                `必应（国际）(${bingIntlGot.via}${bingIntlGot.status ? `, http ${bingIntlGot.status}` : ""})`,
+                bingIntlGot.results,
+                fmtOpts,
+              ) + afterTavilyEarlyFoot,
+            );
           }
 
           const pages = await fetchDuckDuckGoHtml(query, timeout.signal);
           const ddg = extractDdgResultsFromPages(pages, limit);
           if (ddg && ddg.results.length > 0) {
-            return (
+            return finalize(
               formatWebSearchResults(
                 query,
                 `DuckDuckGo (${ddg.via}${ddg.status ? `, http ${ddg.status}` : ""})`,
                 ddg.results,
-              ) + afterTavilyEarlyFoot
+                fmtOpts,
+              ) + afterTavilyEarlyFoot,
             );
           }
 
@@ -714,10 +821,13 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
               if (tv.ok && tv.results.length > 0) {
                 const rt =
                   tv.responseTime !== undefined ? `, ${tv.responseTime.toFixed(2)}s` : "";
-                return formatWebSearchResults(
-                  query,
-                  `Tavily (basic${rt}, 免费多源无结果后补充)`,
-                  tv.results,
+                return finalize(
+                  formatWebSearchResults(
+                    query,
+                    `Tavily (basic${rt}, Multi-Search-Engine 链路无结果后补充)`,
+                    tv.results,
+                    fmtOpts,
+                  ),
                 );
               }
               tavilyLateNote = !tv.ok
@@ -728,12 +838,18 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
             }
           }
 
-          const ddgFail = formatDdgSearchOutput(query, pages, limit, {
-            tavilyFirstChain: hasTavily && tavilyWantsFirst,
-            tavilyAfterDomesticChain: hasTavily && !tavilyWantsFirst,
-          });
+          const ddgFail = formatDdgSearchOutput(
+            query,
+            pages,
+            limit,
+            {
+              tavilyFirstChain: hasTavily && tavilyWantsFirst,
+              tavilyAfterDomesticChain: hasTavily && !tavilyWantsFirst,
+            },
+            fmtOpts,
+          );
           const extraNote = tavilyLateNote || tavilyEarlyFailNote;
-          return extraNote ? `${ddgFail}\n\n[注] ${extraNote}` : ddgFail;
+          return finalize(extraNote ? `${ddgFail}\n\n[注] ${extraNote}` : ddgFail);
         } catch (e) {
           lastError = e instanceof Error ? e : new Error(String(e));
           if (retry < MAX_NETWORK_RETRIES) {

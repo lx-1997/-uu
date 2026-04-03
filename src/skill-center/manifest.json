@@ -1,13 +1,19 @@
 {
   "version": 1,
   "categories": [
-    { "id": "meta", "label": "技能发现 / Meta" }
+    { "id": "meta", "label": "技能发现 / Meta" },
+    { "id": "browser", "label": "浏览器自动化" }
   ],
   "items": [
     {
       "folder": "rdk-skillhub-discovery",
       "category": "meta",
       "title": "SkillHub 技能发现（find_skills）"
+    },
+    {
+      "folder": "agent-browser",
+      "category": "browser",
+      "title": "Agent Browser（无头 CLI）"
     }
   ]
 }

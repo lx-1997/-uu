@@ -21,11 +21,10 @@ import { OpenClawDeploymentManager } from '../../managers/OpenClawDeploymentMana
 import type { Device } from '../../../shared/types.js';
 import { DEVICE_PROFILES, type DeviceProfile } from '../../board/device-profiles.js';
 import type { RdkPlatform } from '../../../shared/board-types.js';
+import { resolvePersistedOrDefaultSshPassword } from '../../device-ssh-credentials.js';
 
 function resolveDevicePassword(device: Device) {
-  const persisted = (device as Device & { password?: string }).password ?? '';
-  const envPwd = process.env.RDK_SSH_PASSWORD ?? '';
-  return persisted || envPwd;
+  return resolvePersistedOrDefaultSshPassword(device);
 }
 
 function toBoardDevice(device: Device) {

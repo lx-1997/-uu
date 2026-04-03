@@ -11,6 +11,7 @@ import type { AutonomyTask } from '../../rdkclaw/autonomy-scheduler.js';
 import { getTokenUsageReport } from '../../monitoring/token-usage.js';
 import {
   createStudioEmbeddedBrowserCaptureTool,
+  createStudioOpenLocalPreviewTool,
   createStudioOpenUrlTool,
 } from '../../studio-browser-capture.js';
 
@@ -439,6 +440,7 @@ export function createStudioTools(runtime?: StudioAutonomyRuntime): Tool[] {
     tokenUsageReportTool(),
     ...createStudioEmbeddedBrowserCaptureTool(),
     ...createStudioOpenUrlTool(),
+    ...createStudioOpenLocalPreviewTool(),
   ];
   if (runtime) {
     tools.push(

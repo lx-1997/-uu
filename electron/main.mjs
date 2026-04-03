@@ -957,11 +957,14 @@ function startEmbeddedServer() {
     const dataPath = envDataDir || path.join(app.getPath('userData'), 'data');
     fs.mkdirSync(dataPath, { recursive: true });
 
+    const appRoot = getAppRoot();
+    const bootstrapDefaults = path.join(appRoot, 'config', 'rdkclaw-provider.defaults.json');
+
     console.log('[server] starting embedded server:', serverPath);
     console.log('[server] data path:', dataPath);
 
     const child = spawn(process.execPath, [serverPath], {
-      cwd: getAppRoot(),
+      cwd: appRoot,
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
@@ -969,6 +972,7 @@ function startEmbeddedServer() {
         PORT: String(SERVER_PORT),
         NODE_ENV: 'production',
         RDK_DATA_DIR: dataPath,
+        ...(fs.existsSync(bootstrapDefaults) ? { RDK_PROVIDER_BOOTSTRAP_FILE: bootstrapDefaults } : {}),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -1428,7 +1432,7 @@ ipcMain.handle('rdk:open-drobotics-auth-browser', async (_event, payload) => {
   return { ok: true };
 });
 
-/** RDKClaw studio_open_url：独立 BrowserWindow（系统关闭按钮），避免主窗口 WebContentsView 无法关闭 */
+/** RDKClaw studio_open_url：默认可缩放、非全屏的独立 BrowserWindow（系统关闭）；主窗口内嵌仅为回退 */
 ipcMain.handle('rdk:open-agent-browser-popup', async (_event, payload) => {
   const loadUrl = String(payload?.url ?? '').trim();
   if (!loadUrl.startsWith('http:') && !loadUrl.startsWith('https:')) {
@@ -1442,17 +1446,22 @@ ipcMain.handle('rdk:open-agent-browser-popup', async (_event, payload) => {
   }
 
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  const W = Math.min(1280, Math.max(800, Math.round(sw * 0.88)));
-  const H = Math.min(920, Math.max(560, Math.round(sh * 0.88)));
+  /** 默认约占工作区 ~62%，避免「像全屏盖住主界面」；用户可自行拖放边缘放大缩小 */
+  const W = Math.min(1200, Math.max(720, Math.round(sw * 0.62)));
+  const H = Math.min(840, Math.max(520, Math.round(sh * 0.62)));
 
   const win = new BrowserWindow({
     width: W,
     height: H,
-    minWidth: 520,
-    minHeight: 420,
+    minWidth: 480,
+    minHeight: 360,
     title: `浏览 · ${host}`,
     autoHideMenuBar: true,
     show: true,
+    center: true,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -1482,6 +1491,44 @@ ipcMain.handle('rdk:open-agent-browser-popup', async (_event, payload) => {
     win.focus();
   } catch {
     /* ignore */
+  }
+  return { ok: true };
+});
+
+/** studio_open_local_preview：系统默认应用打开工作区图片（主进程仅做存在性与扩展名二次校验） */
+const LOCAL_PREVIEW_IMAGE_EXT = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.svg',
+  '.bmp',
+  '.ico',
+  '.avif',
+]);
+
+ipcMain.handle('rdk:open-local-preview', async (_event, payload) => {
+  const filePathRaw = String(payload?.filePath ?? '').trim();
+  if (!filePathRaw) {
+    return { ok: false, error: 'empty path' };
+  }
+  let st;
+  try {
+    st = await fs.promises.stat(filePathRaw);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (!st.isFile()) {
+    return { ok: false, error: 'not a file' };
+  }
+  const ext = path.extname(filePathRaw).toLowerCase();
+  if (!LOCAL_PREVIEW_IMAGE_EXT.has(ext)) {
+    return { ok: false, error: `extension not allowed: ${ext || '(none)'}` };
+  }
+  const err = await shell.openPath(filePathRaw);
+  if (err) {
+    return { ok: false, error: err };
   }
   return { ok: true };
 });

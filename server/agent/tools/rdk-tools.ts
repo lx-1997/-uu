@@ -11,6 +11,7 @@
  */
 
 import type { Tool } from './types.js';
+import { getAgentMediaDownloadDir } from '../../local-files-roots.js';
 import {
   deviceExecToolInputZod,
   deviceFileReadToolInputZod,
@@ -19,6 +20,9 @@ import {
 } from './tool-zod-schemas.js';
 import {
   execOnDevice,
+  getDevice,
+  getDevicePassword,
+  isSshAuthError,
   readDeviceFile,
   writeDeviceFile,
   listDeviceFiles,
@@ -37,6 +41,7 @@ import {
 import {
   buildBoardOpenClawGatewayPairRemoteShell,
   buildBoardOpenClawModelTestRemoteShell,
+  type OpenClawDeploymentManager,
 } from '../../managers/OpenClawDeploymentManager.js';
 import * as path from 'node:path';
 
@@ -44,6 +49,8 @@ export interface RdkToolsCallbacks {
   onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
   /** device_exec SSH 长任务：流式/心跳进度（经 SSE tool_progress 到前端） */
   onDeviceExecProgress?: (payload: { chunk: string; toolCallId?: string }) => void;
+  /** 安装完成后同步内置 skills 到板端（与 UI 一键安装一致） */
+  openClawManager?: OpenClawDeploymentManager;
 }
 
 export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks): Tool[] {
@@ -56,7 +63,7 @@ export function createRdkTools(deviceId: string, callbacks?: RdkToolsCallbacks):
     deviceFileUploadFromLocalTool(deviceId),
     boardOpenClawStatusTool(deviceId),
     boardOpenClawReadConfigTool(deviceId),
-    boardOpenClawInstallTool(deviceId),
+    boardOpenClawInstallTool(deviceId, callbacks),
     boardOpenClawUpgradeTool(deviceId),
     boardOpenClawUninstallTool(deviceId),
     boardOpenClawModelSwitchTool(deviceId),
@@ -190,22 +197,25 @@ function deviceFileDownloadToLocalTool(
       '把设备上的文件下载到本机（RDK Studio 所在电脑）。\n' +
       '用途：下载图片、视频、模型文件、日志等到本地查看或处理。\n\n' +
       '使用规则：\n' +
-      '- 可选 localPath，不填则下载到 workspace/downloads/\n' +
+      '- 可选 localPath（相对路径基于 ~/.rdkstudio/agent-downloads），不填则保存到该默认下载目录\n' +
       '- 下载图片/视频后会返回可预览的 URL\n' +
       '- 大文件下载可能较慢，先告知用户',
     inputSchema: {
       type: 'object',
       properties: {
         remotePath: { type: 'string', description: '设备文件绝对路径，如 /userdata/a.txt' },
-        localPath: { type: 'string', description: '本机保存路径（可选，相对路径基于 workspace）' },
+        localPath: { type: 'string', description: '本机保存路径（可选；绝对路径或相对于 ~/.rdkstudio/agent-downloads 的相对路径）' },
       },
       required: ['remotePath'],
     },
     async execute(input, ctx) {
       const fileName = path.basename(input.remotePath);
+      const agentDl = getAgentMediaDownloadDir();
       const target = input.localPath
-        ? path.resolve(ctx.workspaceDir, input.localPath)
-        : path.resolve(ctx.workspaceDir, 'downloads', fileName);
+        ? path.isAbsolute(input.localPath.trim())
+          ? input.localPath.trim()
+          : path.join(agentDl, input.localPath.trim().replace(/^\.\//, ''))
+        : path.join(agentDl, fileName);
       const result = await downloadDeviceFileToLocal(deviceId, input.remotePath, target);
 
       const ext = path.extname(fileName).toLowerCase();
@@ -377,6 +387,16 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
         return output;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        if (isSshAuthError(err)) {
+          return (
+            `[命令执行失败] ${msg}\n\n` +
+            `这是 **SSH 登录/认证阶段**失败（尚未在板端执行你拼的命令），不是拍照命令本身的输出错误。\n` +
+            `常见原因：Studio 里保存的板端密码/用户名已变或未同步；sshd 仅允许密钥；网络切换后仍用旧配置。\n` +
+            `请到 **设备管理** 对该设备「测试连接」并重新保存；或用本机终端对同一 host/user 试一次 ssh。\n` +
+            `**OpenClaw 在板上正常 ≠ Studio 的 SSH 一定成功**（板内进程与宿主机连板的 SSH 是两条链路）。认证未恢复前，反复改 gst/v4l2 命令通常无效。\n` +
+            `勿因本条切换设备；先修连接。`
+          );
+        }
         // 关键：明确告诉 LLM 命令失败≠设备离线，防止误判后切换设备
         return `[命令执行失败] ${msg}\n\n注意：命令失败不代表设备离线。可能原因：命令本身报错、超时、SSH 瞬时抖动。请重试或换一条命令，不要切换设备。`;
       } finally {
@@ -526,10 +546,11 @@ function boardOpenClawReadConfigTool(deviceId: string): Tool<{ path?: string }> 
   };
 }
 
-function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>> {
+function boardOpenClawInstallTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_install',
-    description: '一键安装板端 OpenClaw（npm 安装 openclaw@与 Studio 默认规格一致，含 doctor + 网关重启 + health）。',
+    description:
+      '一键安装板端 OpenClaw（npm 安装 openclaw@与 Studio 默认规格一致，含 doctor + 网关重启 + health）。成功后若本机可访问 Studio 仓库 skills 目录，会将内置 skills 同步到板端 ~/.openclaw/workspace/skills/（与 UI 安装一致）。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmd = [
@@ -550,7 +571,27 @@ function boardOpenClawInstallTool(deviceId: string): Tool<Record<string, never>>
         '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
       ].join(' ');
-      return execOnDevice(deviceId, [cmd], { timeoutMs: SSH_LONG_INSTALL_MS });
+      const out = await execOnDevice(deviceId, [cmd], { timeoutMs: SSH_LONG_INSTALL_MS });
+      const mgr = callbacks?.openClawManager;
+      if (!mgr) return out;
+      try {
+        const dev = await getDevice(deviceId);
+        if (!dev) return `${out}\n[Studio] WARN: 未找到设备记录，跳过内置 skills 同步\n`;
+        const ocDev = {
+          ip: dev.host,
+          userName: dev.username,
+          password: getDevicePassword(dev),
+          id: dev.id,
+        };
+        let syncLog = '';
+        const syncOk = await mgr.syncBuiltinStudioSkillsToBoard(ocDev, (chunk) => {
+          syncLog += chunk;
+          callbacks.onDeviceExecProgress?.({ chunk, toolCallId: undefined });
+        });
+        return `${out}${syncLog}${syncOk ? '' : '\n[Studio] WARN: 内置 skills 同步未完全成功，可稍后重试\n'}`;
+      } catch (e) {
+        return `${out}\n[Studio] WARN: 内置 skills 同步异常: ${e instanceof Error ? e.message : String(e)}\n`;
+      }
     },
   };
 }
@@ -1196,7 +1237,7 @@ asyncio.run(main())
         return `TTS 合成失败:\n${output}\n\n提示: 请确保设备已联网且可访问 Microsoft Edge TTS 服务。`;
       }
 
-      const localPath = path.resolve(ctx.workspaceDir, 'downloads', localFileName);
+      const localPath = path.join(getAgentMediaDownloadDir(), localFileName);
       const result = await downloadDeviceFileToLocal(deviceId, remoteOut, localPath);
       const audioUrl = `/api/local-files/${encodeURIComponent(localFileName)}`;
 
@@ -1482,7 +1523,7 @@ except Exception as e:
           return `离线 TTS 合成失败: ${result.error}` + offlineFallbackHint;
         }
 
-        const localPath = path.resolve(ctx.workspaceDir, 'downloads', localFileName);
+        const localPath = path.join(getAgentMediaDownloadDir(), localFileName);
         const dlResult = await downloadDeviceFileToLocal(deviceId, remoteOut, localPath);
         const audioUrl = `/api/local-files/${encodeURIComponent(localFileName)}`;
 

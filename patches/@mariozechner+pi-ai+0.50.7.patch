@@ -1,0 +1,103 @@
+diff --git a/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js b/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
+index 989ab44..38c3f71 100644
+--- a/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
++++ b/node_modules/@mariozechner/pi-ai/dist/providers/anthropic.js
+@@ -369,25 +369,58 @@ function buildParams(model, context, isOAuthToken, options) {
+     };
+     // For OAuth tokens, we MUST include Claude Code identity
+     const cacheTtl = getCacheTtl(model.baseUrl);
++    const cacheControl = {
++        type: "ephemeral",
++        ...(cacheTtl && { ttl: cacheTtl }),
++    };
++    const parts = context.systemPromptParts;
++    const useSplit = parts &&
++        typeof parts.stable === "string" &&
++        typeof parts.dynamic === "string" &&
++        (parts.stable.trim().length > 0 || parts.dynamic.trim().length > 0);
++    function pushSystemFromParts(arr) {
++        if (parts.stable.trim().length > 0) {
++            arr.push({
++                type: "text",
++                text: sanitizeSurrogates(parts.stable),
++                cache_control: cacheControl,
++            });
++        }
++        if (parts.dynamic.trim().length > 0) {
++            arr.push({
++                type: "text",
++                text: sanitizeSurrogates(parts.dynamic),
++                cache_control: cacheControl,
++            });
++        }
++    }
+     if (isOAuthToken) {
+         params.system = [
+             {
+                 type: "text",
+                 text: "You are Claude Code, Anthropic's official CLI for Claude.",
+-                cache_control: {
+-                    type: "ephemeral",
+-                    ...(cacheTtl && { ttl: cacheTtl }),
+-                },
++                cache_control: cacheControl,
+             },
+         ];
+-        if (context.systemPrompt) {
++        if (useSplit) {
++            pushSystemFromParts(params.system);
++        }
++        else if (context.systemPrompt) {
++            params.system.push({
++                type: "text",
++                text: sanitizeSurrogates(context.systemPrompt),
++                cache_control: cacheControl,
++            });
++        }
++    }
++    else if (useSplit) {
++        params.system = [];
++        pushSystemFromParts(params.system);
++        if (params.system.length === 0 && context.systemPrompt) {
+             params.system.push({
+                 type: "text",
+                 text: sanitizeSurrogates(context.systemPrompt),
+-                cache_control: {
+-                    type: "ephemeral",
+-                    ...(cacheTtl && { ttl: cacheTtl }),
+-                },
++                cache_control: cacheControl,
+             });
+         }
+     }
+@@ -397,10 +430,7 @@ function buildParams(model, context, isOAuthToken, options) {
+             {
+                 type: "text",
+                 text: sanitizeSurrogates(context.systemPrompt),
+-                cache_control: {
+-                    type: "ephemeral",
+-                    ...(cacheTtl && { ttl: cacheTtl }),
+-                },
++                cache_control: cacheControl,
+             },
+         ];
+     }
+diff --git a/node_modules/@mariozechner/pi-ai/dist/types.d.ts b/node_modules/@mariozechner/pi-ai/dist/types.d.ts
+index c7df8ca..1a9b394 100644
+--- a/node_modules/@mariozechner/pi-ai/dist/types.d.ts
++++ b/node_modules/@mariozechner/pi-ai/dist/types.d.ts
+@@ -112,6 +112,14 @@ export interface Tool<TParameters extends TSchema = TSchema> {
+ }
+ export interface Context {
+     systemPrompt?: string;
++    /**
++     * Anthropic Messages API: split system into stable + volatile blocks for prompt caching
++     * (each block gets cache_control in anthropic provider). Ignored by other providers.
++     */
++    systemPromptParts?: {
++        stable: string;
++        dynamic: string;
++    };
+     messages: Message[];
+     tools?: Tool[];
+ }

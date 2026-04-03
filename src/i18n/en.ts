@@ -7,6 +7,7 @@ import { EN_EXTRAS } from './en-extras';
 export const EN: Record<string, string> = {
   // Top bar tab titles
   'tabs.dashboard': 'Workspace',
+  'tabs.ai-chat-hub': 'AI Chat',
   'tabs.skills': 'Skill Studio',
   'tabs.terminal': 'Terminal',
   'tabs.files': 'Files',
@@ -111,6 +112,7 @@ export const EN: Record<string, string> = {
   'topbar.user.guestHint': 'Not signed in',
   'topbar.user.signIn': 'Sign in',
   'topbar.user.signInTitle': 'Sign in to your account',
+  'topbar.embedWeb.close': 'Close embedded page',
 
   'chat.lang.switched': 'Language updated',
 
@@ -148,7 +150,18 @@ export const EN: Record<string, string> = {
   'dock.mention.flash.applied': 'Applied choices from @ flash',
   'dock.msg.took': 'Took',
   'dock.msg.replying': 'Replying…',
+  'dock.stream.organizing': 'Organizing answer',
   'dock.msg.durationUnknown': '—',
+  'dock.msg.unsatisfied': 'Not satisfied',
+  'dock.msg.unsatisfiedTitle': 'Try a better reply',
+  'dock.msg.unsatisfiedHint':
+    'What was wrong, or how should the answer change? (Optional — the assistant will ask if you leave this blank.)',
+  'dock.msg.unsatisfiedPlaceholder': 'e.g. too vague / wrong about ROS2 / need step-by-step…',
+  'dock.msg.unsatisfiedCancel': 'Cancel',
+  'dock.msg.unsatisfiedSubmit': 'Ask again',
+  'dock.msg.unsatisfiedBusy': 'Wait for the current reply to finish.',
+  'dock.msg.unsatisfiedPreview': 'Unsatisfied with last reply — please improve.',
+  'dock.msg.unsatisfiedPreviewWithNote': 'Unsatisfied with last reply — {{note}}',
 
   'device.listTitle': 'Devices',
   'device.empty': 'No devices yet. Add an RDK board.',

@@ -118,11 +118,14 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
   // 追踪 agent 内部的 runId（通过 agent_start 事件获取）
   let agentRunId: string | undefined;
 
-  // Delta 限流状态（对齐 openclaw server-chat.ts: 150ms 限流 + 文本累积）
+  // Delta 限流（对齐 openclaw，并增强首包与累计字符_flush，改善长流式体感）
   let deltaBuffer = "";
   let lastDeltaSentAt = 0;
-  let lastDeltaSentLen = 0; // 上次广播时 buffer 的长度，用于计算新增部分
-  const DELTA_THROTTLE_MS = 150;
+  let lastDeltaSentLen = 0;
+  let firstDeltaFlushed = false;
+  const DELTA_THROTTLE_MS = 120;
+  /** 未满节流间隔但已积压足够字符时也推送，避免长段落「半天不动」 */
+  const DELTA_CHAR_FLUSH = 56;
 
   // 异步执行，不阻塞响应（对齐 openclaw chat.send 的 ACK-then-stream 模式）
   const unsub = ctx.agent.subscribe((event: MiniAgentEvent) => {
@@ -141,17 +144,24 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
 
     // 转换为 chat delta/final（对齐 openclaw emitChatDelta / emitChatFinal）
     if (event.type === "message_delta") {
-      // Delta 限流（对齐 openclaw: 150ms 内最多发送一次，只广播新增部分）
       deltaBuffer += event.delta;
       const now = Date.now();
-      if (now - lastDeltaSentAt >= DELTA_THROTTLE_MS) {
+      const pendingChars = deltaBuffer.length - lastDeltaSentLen;
+      const dueTime = lastDeltaSentAt === 0 || now - lastDeltaSentAt >= DELTA_THROTTLE_MS;
+      const dueBulk = pendingChars >= DELTA_CHAR_FLUSH;
+      const dueFirst = !firstDeltaFlushed && pendingChars > 0;
+      if (pendingChars > 0 && (dueFirst || dueTime || dueBulk)) {
+        firstDeltaFlushed = true;
         lastDeltaSentAt = now;
         const newText = deltaBuffer.slice(lastDeltaSentLen);
         lastDeltaSentLen = deltaBuffer.length;
         ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "delta", text: newText }, { dropIfSlow: true });
       }
     } else if (event.type === "message_end") {
-      // Final 发送完整文本（对齐 openclaw emitChatFinal: 从 buffer 取完整文本）
+      deltaBuffer = "";
+      lastDeltaSentLen = 0;
+      lastDeltaSentAt = 0;
+      firstDeltaFlushed = false;
       ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "final", text: event.text });
     } else if (event.type === "agent_error") {
       ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "error", error: event.error });

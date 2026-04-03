@@ -200,6 +200,7 @@ export interface AppState {
     e: React.FormEvent,
     options?: {
       messageOverride?: string;
+      chatPreviewText?: string;
       attachments?: AgentAttachmentPayload[];
       displayAttachments?: ChatAttachment[];
     },

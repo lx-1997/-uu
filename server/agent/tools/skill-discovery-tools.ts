@@ -9,6 +9,7 @@ import {
   type ClawhubSearchHit,
 } from '../../clawhub-registry.js';
 import type { RDKClawSkillMeta } from '../../rdkclaw/types.js';
+import { findSkillsQueryLooksLikeOpenWebDistractor } from '../../rdkclaw/open-web-intent.js';
 import { persistFindSkillsAuditOnly, persistValidatedSkillUsage } from './skill-discovery-persistence.js';
 
 const HUB_CAP = 12;
@@ -58,6 +59,7 @@ function buildFindSkillsTool(opts: SkillDiscoveryToolOptions): Tool<{ query: str
   return {
     name: 'find_skills',
     description:
+      '用户**仅要打开/浏览网页**时用 **`studio_open_url`**（宿主工具），**不要**用本工具搜「浏览器」类技能。' +
       '**内置检索**：优先 **腾讯 SkillHub** API；若**零命中**或请求**失败**，自动再查 **官方 ClawHub**（默认 https://clawhub.ai，可用 `CLAWHUB_OFFICIAL_FALLBACK_BASE` 改）。合并本地 `SKILL.md`。' +
       '能力缺口时**必须**调用；关键词 1～5 个词。' +
       '安装：板端/CLI 一般为 `clawhub install <技能短名>`（如 `find-skills`）；注册表返回的 `slug` 常为 `owner/skill` 亦可用于 install；`clawhub clone owner/skill` 用于克隆仓库。' +
@@ -80,6 +82,12 @@ function buildFindSkillsTool(opts: SkillDiscoveryToolOptions): Tool<{ query: str
       const q = String(input.query || '').trim();
       if (!q) {
         return JSON.stringify({ ok: false, error: 'query 不能为空' });
+      }
+      if (findSkillsQueryLooksLikeOpenWebDistractor(q)) {
+        console.warn('[find_skills] query resembles open-web intent; model should use studio_open_url', {
+          query: q.slice(0, 160),
+          sessionKey: ctx.sessionKey,
+        });
       }
       const lim = Math.min(HUB_CAP, Math.max(1, Number(input.hub_limit) || HUB_CAP));
 

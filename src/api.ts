@@ -582,6 +582,39 @@ export interface StreamAgentChatOptions {
   studioResponseMode?: StudioResponseMode;
 }
 
+/** 等待 HTTP 响应头（含网关排队） */
+const AGENT_CHAT_FETCH_HEADERS_TIMEOUT_MS = 120_000;
+/** 首段 SSE 数据：模型冷启动 + 长思考可能较慢 */
+const AGENT_CHAT_SSE_FIRST_CHUNK_TIMEOUT_MS = 180_000;
+/** 相邻数据块之间：长输出时偶尔停顿 */
+const AGENT_CHAT_SSE_CHUNK_IDLE_TIMEOUT_MS = 300_000;
+
+class SseIdleError extends Error {
+  override name = 'SseIdleError';
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+function readSseChunkWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new SseIdleError('idle')), idleMs);
+    reader.read().then(
+      (r) => {
+        clearTimeout(t);
+        resolve(r);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 export function streamAgentChat(
   message: string,
   deviceId?: string,
@@ -593,8 +626,13 @@ export function streamAgentChat(
   const controller = new AbortController();
   const attachments = options?.attachments;
   const studioResponseMode = options?.studioResponseMode;
+  let abortKind: 'user' | 'headers' | null = null;
 
   const done = (async () => {
+    const headersTimer = setTimeout(() => {
+      abortKind = 'headers';
+      controller.abort();
+    }, AGENT_CHAT_FETCH_HEADERS_TIMEOUT_MS);
     try {
       const studioUiHints = readStudioUiHintsForDevice(deviceId);
       const agentHeaders = new Headers({ 'Content-Type': 'application/json' });
@@ -614,6 +652,8 @@ export function streamAgentChat(
         signal: controller.signal,
         credentials: 'include',
       });
+
+      clearTimeout(headersTimer);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Agent 请求失败' }));
@@ -638,11 +678,40 @@ export function streamAgentChat(
         }
       };
 
+      let awaitingFirstChunk = true;
       while (true) {
-        const { done: readerDone, value } = await reader.read();
+        const idleMs = awaitingFirstChunk
+          ? AGENT_CHAT_SSE_FIRST_CHUNK_TIMEOUT_MS
+          : AGENT_CHAT_SSE_CHUNK_IDLE_TIMEOUT_MS;
+        let readerDone: boolean;
+        let value: Uint8Array | undefined;
+        try {
+          const r = await readSseChunkWithIdleTimeout(reader, idleMs);
+          readerDone = r.done;
+          value = r.value;
+        } catch (e) {
+          if (e instanceof SseIdleError) {
+            onEvent?.({
+              type: 'error',
+              data: {
+                error: awaitingFirstChunk
+                  ? '等待服务端首包超时（长时间无数据）。请确认本机网络与 RDK Studio 后端未卡住，或稍后重试。'
+                  : '长时间未收到新的流式数据，已断开。若推理时间过长可改用「快捷回答」或缩短问题后重试。',
+              },
+            });
+            try {
+              await reader.cancel();
+            } catch {
+              /* noop */
+            }
+            return;
+          }
+          throw e;
+        }
+        awaitingFirstChunk = false;
         if (readerDone) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        buffer += decoder.decode(value!, { stream: true });
         flushCompleteBlocks();
       }
 
@@ -653,13 +722,28 @@ export function streamAgentChat(
         }
       }
     } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        onEvent?.({ type: 'error', data: { error: (err as Error).message } });
+      if ((err as Error).name === 'AbortError') {
+        if (abortKind === 'headers') {
+          onEvent?.({
+            type: 'error',
+            data: { error: '等待接口响应超时。请检查后端是否在运行、网络与 VPN/代理是否正常。' },
+          });
+        }
+        return;
       }
+      onEvent?.({ type: 'error', data: { error: (err as Error).message } });
+    } finally {
+      clearTimeout(headersTimer);
     }
   })();
 
-  return { abort: () => controller.abort(), done };
+  return {
+    abort: () => {
+      abortKind = 'user';
+      controller.abort();
+    },
+    done,
+  };
 }
 
 export function fetchAgentConfig() {

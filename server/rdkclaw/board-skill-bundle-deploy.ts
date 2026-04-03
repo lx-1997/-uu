@@ -1,6 +1,6 @@
 /**
  * 按板型将 Studio 内置技能同步到板端 ~/.openclaw/workspace/skills/
- * - RDK X5: rdkx5_skills/ 下全部子目录（含 SKILL.md）
+ * - RDK X5: rdkx5_skills/ 下全部子目录（含 SKILL.md）+ 通用 skills/（文档库、agent-browser 等）
  * - RDK X3 / S100 / Ultra: skills/ 下文档与指南类技能组合（板型专章已并入 rdk-board-knowledge，不再单独同步 rdk-x3-guide / rdk-s100-guide）
  */
 import * as fs from 'fs';
@@ -29,9 +29,13 @@ const RDKX5_SKILLS_ROOT = 'rdkx5_skills';
 /** 全板型通用：RDK 文档库与算法部署指引（SKILL 在本仓 skills/ 下） */
 const BUNDLE_SHARED_DOCS_AND_ROBOT: string[] = ['rdk-doc', 'rdk-doc-optimized', 'rdk-robot-dev'];
 
+/** 全板型通用：Studio 仓库内置工具类技能（目录在 skills/） */
+const BUNDLE_UNIVERSAL_STUDIO: string[] = ['agent-browser'];
+
 /** X3：开发者文档 + OpenClaw 协作 + 板卡能力 */
 const BUNDLE_X3: string[] = [
   ...BUNDLE_SHARED_DOCS_AND_ROBOT,
+  ...BUNDLE_UNIVERSAL_STUDIO,
   'rdk-developer-docs',
   'rdk-ecosystem',
   'rdk-app-development',
@@ -50,6 +54,7 @@ const BUNDLE_X3: string[] = [
 /** S100 / Ultra：文档型技能包（与 X5 的 rdkx5_skills 互补） */
 const BUNDLE_S100_LIKE: string[] = [
   ...BUNDLE_SHARED_DOCS_AND_ROBOT,
+  ...BUNDLE_UNIVERSAL_STUDIO,
   'rdk-developer-docs',
   'rdk-ecosystem',
   'rdk-app-development',
@@ -84,6 +89,9 @@ export function resolveSkillBundleForPlatform(platform: RdkPlatform | null): {
     const x5Ids = listRdkX5SkillIds(cwd);
     const merged = [...x5Ids];
     for (const id of BUNDLE_SHARED_DOCS_AND_ROBOT) {
+      if (!merged.includes(id)) merged.push(id);
+    }
+    for (const id of BUNDLE_UNIVERSAL_STUDIO) {
       if (!merged.includes(id)) merged.push(id);
     }
     return { root: RDKX5_SKILLS_ROOT, skillIds: merged };

@@ -19,7 +19,7 @@ npm run dev
 
 ## 实机联调（推荐流程）
 
-1. 打开设备添加弹窗，优先尝试官方常见 SSH 账户：`sunrise/sunrise`（串口常见 `root/root`）。
+1. 打开设备添加弹窗，默认已填 `root` / `root`；若板卡仍用其他账户（如历史镜像的 `sunrise/sunrise`），再按实机修改。
 2. 默认有线网络常见 IP 为 `192.168.127.10`，若不通请先确认 PC 与板卡同网段。
 3. 连接成功后先在终端执行：
 
@@ -47,7 +47,7 @@ npm run verify:modules
 
 ## 常见问题排查
 
-- SSH 连接失败：优先检查用户名密码（`sunrise/sunrise`）、端口（默认 `22`）、同网段配置。
+- SSH 连接失败：优先检查用户名密码（默认 `root`/`root`）、端口（默认 `22`）、同网段配置。
 - ROS 无话题：如果输出 `ROS2_NOT_INSTALLED`，请先在设备安装 ROS2 基础包后重试。
 - VNC 不可用：先在板端用 `srpi-config -> Interface Options -> VNC` 使能，再检查 `x11vnc/vncserver` 服务。
 - Node-RED 不可用：先看服务状态，再执行启动命令并复查状态。

@@ -1,10 +1,12 @@
 import { execSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, '..', '.env') });
+const repoRoot = path.join(__dirname, '..');
+dotenv.config({ path: path.join(repoRoot, '.env') });
 
 const DEFAULT_API_PORT = Number.parseInt(String(process.env.PORT || '8787'), 10);
 const API_PORT = Number.isFinite(DEFAULT_API_PORT) && DEFAULT_API_PORT > 0 ? DEFAULT_API_PORT : 8787;
@@ -84,9 +86,17 @@ killPort(API_PORT);
 
 const tsxBin = process.platform === 'win32' ? 'node_modules\\.bin\\tsx.cmd' : 'node_modules/.bin/tsx';
 
+const bootstrapDefaults = path.join(repoRoot, 'config', 'rdkclaw-provider.defaults.json');
+const childEnv = {
+  ...process.env,
+  PORT: String(API_PORT),
+  ...(fs.existsSync(bootstrapDefaults) ? { RDK_PROVIDER_BOOTSTRAP_FILE: bootstrapDefaults } : {}),
+};
+
 const child = spawn(tsxBin, ['watch', 'server/index.ts'], {
   stdio: 'inherit',
-  env: { ...process.env, PORT: String(API_PORT) },
+  cwd: repoRoot,
+  env: childEnv,
   shell: process.platform === 'win32',
 });
 

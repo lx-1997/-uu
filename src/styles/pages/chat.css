@@ -479,11 +479,103 @@
   color: var(--text-muted);
 }
 
+.dock-msg-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
 .dock-msg-time {
-  display: block;
   font-size: 0.625rem;
   color: var(--text-muted);
-  margin-top: 4px;
+  margin: 0;
+}
+
+.dock-bubble-retry {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 0.625rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dock-bubble-retry:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dock-bubble-retry:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 「不满意此回复」轻量弹窗 */
+.dock-retry-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dock-retry-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.dock-retry-modal h3 {
+  margin: 0 0 8px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dock-retry-modal-hint {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.dock-retry-modal-input {
+  width: 100%;
+  min-height: 88px;
+  padding: 8px 10px;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.dock-retry-modal-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dock-retry-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 /* ── Channel badge (feishu / weixin) ── */
@@ -540,8 +632,13 @@
 .dock-typing--in-bubble {
   margin-top: 4px;
   padding: 4px 0 0;
-  border-top: 1px solid var(--border);
+  border-top: none;
   flex-wrap: wrap;
+}
+
+/** 已有流式正文时再分割线，避免仅有「正在准备上下文 / 组织回答」时出现孤立横线 */
+.dock-typing--in-bubble.dock-typing--after-stream-text {
+  border-top: 1px solid var(--border);
 }
 
 /* Task panel */
@@ -848,6 +945,12 @@
 .dock-action-btn.recording {
   color: var(--danger);
   animation: pulse 1s infinite;
+}
+
+/** 输入栏「全部停止」：默认与附件按钮一致，悬停提示危险操作 */
+.dock-action-btn.dock-action-btn--stop-all:hover {
+  color: var(--danger);
+  background: var(--bg-inset);
 }
 
 .dock-cmd-input {
@@ -2199,6 +2302,311 @@
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-primary);
+}
+
+/* ── AI 对话中心（主工作区：历史 + 当前线程） ── */
+/* 外层给明确高度（避免仅 height:100% 在个别父级下坍缩），内层 Grid 再分包滚动 */
+.ai-chat-hub-page {
+  width: 100%;
+  box-sizing: border-box;
+  height: calc(100dvh - var(--topbar-height) - 56px);
+  min-height: 320px;
+  max-height: calc(100dvh - var(--topbar-height) - 56px);
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px 12px;
+}
+
+/* Grid 子项默认 min-height:auto 会按内容撑满，导致内部 overflow:auto 永远不出现滚动条 */
+.ai-chat-hub {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.ai-chat-hub > .ai-chat-hub-sidebar,
+.ai-chat-hub > .ai-chat-hub-main {
+  min-height: 0;
+  min-width: 0;
+}
+
+.ai-chat-hub-sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-muted);
+  overflow: hidden;
+}
+
+.ai-chat-hub-side-head {
+  padding: 16px 16px 12px;
+  flex-shrink: 0;
+}
+
+.ai-chat-hub-side-title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.ai-chat-hub-side-desc {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.ai-chat-hub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px;
+  flex-shrink: 0;
+}
+
+.ai-chat-hub-device-stack {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 8px 16px;
+  scrollbar-gutter: stable;
+}
+
+.ai-chat-hub-device-section {
+  margin-bottom: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-chat-hub-device-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.ai-chat-hub-device-head {
+  padding: 6px 8px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.ai-chat-hub-device-name {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 2px;
+  border-radius: var(--radius-sm);
+  line-height: 1.35;
+}
+
+.ai-chat-hub-device-name:hover {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.ai-chat-hub-thread-empty {
+  padding: 6px 12px 10px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.ai-chat-hub-stack-empty {
+  padding: 12px 16px 16px;
+  line-height: 1.5;
+}
+
+.ai-chat-hub-thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ai-chat-hub-thread-list > li {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.ai-chat-hub-thread-list > li:last-child {
+  border-bottom: none;
+}
+
+.ai-chat-hub-thread-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 0;
+  padding: 10px 8px 10px 10px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+
+.ai-chat-hub-thread-btn:hover {
+  background: var(--bg-elevated);
+}
+
+.ai-chat-hub-thread-ctx-menu {
+  position: fixed;
+  z-index: 12000;
+  min-width: 160px;
+  padding: 4px;
+  margin: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--text-primary) 18%, transparent);
+}
+
+.ai-chat-hub-thread-ctx-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.ai-chat-hub-thread-ctx-item:hover {
+  background: var(--bg-muted);
+}
+
+.ai-chat-hub-thread-ctx-danger {
+  color: var(--danger, #c45c4a);
+}
+
+.ai-chat-hub-thread-ctx-danger:hover {
+  background: color-mix(in srgb, var(--danger, #c45c4a) 12%, var(--bg-muted));
+}
+
+.ai-chat-hub-thread-btn.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* 第一行：时间（与正文概要分行，避免挤在同一行） */
+.ai-chat-hub-thread-time {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+  line-height: 1.35;
+}
+
+/* 第二行：对话概要（可多行截断） */
+.ai-chat-hub-thread-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.ai-chat-hub-thread-meta {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.ai-chat-hub-thread-meta .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.625rem;
+}
+
+.ai-chat-hub-main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.ai-chat-hub-main-head {
+  flex-shrink: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-chat-hub-main-title {
+  margin: 0 0 4px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.ai-chat-hub-main-sub {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+}
+
+.ai-chat-hub-stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px 16px 24px;
+  scrollbar-gutter: stable;
+}
+
+.ai-chat-hub-empty {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  .ai-chat-hub-page {
+    height: calc(100dvh - var(--topbar-height) - 48px);
+    max-height: calc(100dvh - var(--topbar-height) - 48px);
+    padding: 6px 8px 10px;
+  }
+
+  .ai-chat-hub {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 42vh) minmax(0, 1fr);
+  }
+
+  .ai-chat-hub-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 /* ── Dock @ 提及菜单 ── */

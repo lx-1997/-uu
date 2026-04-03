@@ -141,7 +141,10 @@ export function buildWebSearchTriggerPrompt(
     "- **官方安装/升级/刷机/弃用路径**、CLI 旗标、**breaking change**、REST/GraphQL 行为变更。",
     "- **第三方库、Model Zoo/Hub、许可证、CVE**、或论坛/issue 里的非常规 workaround。",
     "- 用户问「最新」「文档怎么说」「和某某能不能一起用」而你手头无当日可信摘录。",
+    "**联网搜索首选 Multi-Search-Engine（多引擎顺序）**：`web_search` 按仓库 `skills/multi-search-engine` 的策略依次尝试多引擎（细节见工具 `description`）。向用户描述检索路径时可沿用此话术。",
+    "**对用户说明来源（避免误解）**：工具结果里的 `engine:` 是**本轮实际返回条目的站点**（命中即停，前面引擎无有效结果才会继续）。该顺序下**第一站多为百度**，故出现「百度」仍属于 Multi-Search-Engine 策略，不是「只接了单一商业搜索引擎」。回复用户时建议写：**按 Multi-Search-Engine（多引擎顺序）检索，本轮由 {与 engine 一致的站点名} 返回结果**；不要只答「我用的是百度搜索」而让人以为未走多引擎链路。",
     "**通常不必为搜索而搜索**：纯板端**当前**状态（`device_exec`/diagnose 更直接）；本工具契约或 SKILL 已写清且不涉上游改名；用户给出的单条命令无可疑版本依赖。",
+    "**web_search 与推理一致**：调用时的 `query` **必须与你在推理里决定要搜的关键词逐字一致**（含品牌/机构/产品全名）。禁止为「省事」把专名截成前缀导致歧义（例：用户问「泡泡玛特」却传「泡泡」；英文「Pop Mart」不得只传 `pop`——会与流行音乐、软件栈等混淆）。港股公司等宜带 **股份代号**（如泡泡玛特 `09992.HK`）与 **全称** 同搜，勿依赖过短 token。工具结果里会并列 `tool_argument` 与 `search_query`：`tool_argument` 即模型传入；若两者不同多为服务端加了中文短语引号以降低分词跑偏。",
     "**输出**：引用联网结论时附**来源标题 + URL**；若检索无结果，说明已搜过并给出下一步（本机命令验证或请用户提供文档）。",
   ].join("\n");
 }
@@ -358,7 +361,7 @@ export function buildCollaborationPrompt(
     "- **板型与模型**：guidance 写明目标板型与 BPU/模型格式，禁止 X3/X5/S100 模型混用。",
     "若 **web_fetch** 仅得到空壳/极短正文（SPA、Next 等需执行 JS），且当前工具列表中存在 **web_browser_fetch**，再用它对同一 URL 抓渲染后文本（更重、更慢，勿滥用）。",
     "若页面 **需登录** 才有详情（如地瓜 NodeHub）：优先 **studio_embedded_browser_capture**（桌面端内嵌浏览器 + 用户会话），不要用无头抓取代替。",
-    "若用户只说「打开某网页看看」、**不需要把页面正文交给 Agent**：**本回合必须调用** **studio_open_url**（桌面端独立浏览弹窗、可关闭；不受 capture 域名白名单限制；仍遵守 SSRF 与 http(s) 规则）。",
+    "若用户只说「打开某网页看看」、**不需要把页面正文交给 Agent**：**本回合必须调用** **studio_open_url**（桌面端默认可缩放独立浏览窗口，约六成屏、可关；失败可能回退内嵌；不受 capture 域名白名单限制；仍遵守 SSRF 与 http(s) 规则）。",
     "**禁止**：在用户要打开网页时，**不调用**上述工具却回复「环境限制」「无法在用户浏览器打开」「只能手动复制链接」等——除非工具已调用且返回明确失败原因。",
     "等三者结果都回来后再制定方案和委派，而不是一个一个串行调用。",
     "",
@@ -375,7 +378,7 @@ export function buildCollaborationPrompt(
       : "当前板端技能快照为空（可能未安装或读取失败）。如任务匹配不到现有技能，请优先生成并下发新技能，再继续执行。",
     "",
     "### 你的本地能力速查",
-    "打开网页给用户看→**studio_open_url**（须调用，勿口头让用户手打链接）| 图片→attachment_describe_image | 联网→web_search/web_fetch（壳页不足时若存在则 web_browser_fetch）| 设备命令→device_exec | 文件→device_file_* | 诊断→device_diagnose",
+    "打开公网网页→**studio_open_url** | 工作区图片→**studio_open_local_preview**；图在 **`~/.rdkstudio/agent-downloads`**、工作区 **`downloads/`**、**`workspace/downloads/`** 时气泡内可 **`![alt](/api/local-files/仅文件名)`** 预览（勿写整段 `/Users/...` 或 `file://` 作 src）。勿声称「不能显示」。| 述用户上传附件→attachment_describe_image | 联网→web_search/web_fetch | 设备→device_exec | 文件→device_file_* | 诊断→device_diagnose",
     "",
     "### 用户常见问题快答（无需搜索，直接用 device_exec 执行）",
     "- WiFi: `nmcli dev wifi list` → `nmcli dev wifi connect \"SSID\" password \"密码\"`",

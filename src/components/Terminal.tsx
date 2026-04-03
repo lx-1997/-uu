@@ -482,9 +482,9 @@ export default function Terminal() {
     const remembered = getRememberedDevicePassword(currentDevice.id);
     if (remembered) { setTerminalPassword(remembered); return; }
     const lower = currentDevice.name.toLowerCase();
-    if (lower.includes('sunrise@')) { setTerminalPassword('sunrise'); return; }
     if (lower.includes('root@')) { setTerminalPassword('root'); return; }
-    setTerminalPassword('');
+    if (lower.includes('sunrise@')) { setTerminalPassword('sunrise'); return; }
+    setTerminalPassword('root');
   }, [currentDevice?.id]);
 
   const sessionIds = terminalSessions.map((s) => `${s.id}:${s.transport ?? 'ssh'}`).join(',');

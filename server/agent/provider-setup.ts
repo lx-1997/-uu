@@ -170,9 +170,10 @@ const PROVIDER_DEFAULTS: Record<string, ProviderDefault> = {
     baseUrl: 'https://api.siliconflow.cn/v1',
     model: 'deepseek-ai/DeepSeek-V3',
   },
+  /** 与仓库 config/rdkclaw-provider.defaults.json、RDKClaw DEFAULT_CONFIG 对齐（火山方舟 OpenAI 兼容） */
   'openai-compatible': {
-    baseUrl: '',
-    model: 'gpt-4o-mini',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+    model: 'doubao-seed-2.0-pro',
   },
   'anthropic-compatible': {
     baseUrl: '',
@@ -268,7 +269,7 @@ export function mergeStudioResponseMode(
     ...cfg,
     thinkingDefault: "off",
     reasoningVisibility: "off",
-    samplingTemperature: "0.35",
+    samplingTemperature: "0",
     samplingTopP: "1",
   };
 }
@@ -288,7 +289,7 @@ export function applyEnginePresetToProviderConfig(
     ...cfg,
     thinkingDefault: "minimal",
     reasoningVisibility: "off",
-    samplingTemperature: "0.35",
+    samplingTemperature: "0",
     samplingTopP: "1",
   };
 }
@@ -319,8 +320,18 @@ function resolveBootstrapProviderConfigPath(): string | null {
   if (envPath && fs.existsSync(envPath)) {
     candidates.push(path.normalize(envPath));
   }
+  candidates.push(path.join(process.cwd(), 'config', BOOTSTRAP_FILENAME));
+  /**
+   * 自本文件向上若干层直接拼 config/（不依赖仅靠 cwd）：兼容
+   * - 源码 server/agent、编译产物 dist-server/server/agent、更深 monorepo 路径
+   */
+  for (let up = 2; up <= 8; up++) {
+    candidates.push(path.join(moduleDir, ...Array.from({ length: up }, () => '..'), 'config', BOOTSTRAP_FILENAME));
+  }
+  /** 自本文件目录向上探测，兼容任意深度的 dist/monorepo 布局（固定 ../.. 不够用时不致丢预设） */
+  const walkedFromModule = findBootstrapFileWalkingUp(moduleDir, 14);
+  if (walkedFromModule) candidates.push(walkedFromModule);
   candidates.push(
-    path.join(process.cwd(), 'config', BOOTSTRAP_FILENAME),
     path.join(moduleDir, '..', '..', 'config', BOOTSTRAP_FILENAME),
     path.join(moduleDir, '..', '..', '..', 'config', BOOTSTRAP_FILENAME),
   );
@@ -387,7 +398,7 @@ function loadBootstrapProviderRegistry(): ProviderConfigRegistry | null {
   const bootstrapPath = resolveBootstrapProviderConfigPath();
   if (!bootstrapPath) return null;
   try {
-    const raw = fs.readFileSync(bootstrapPath, 'utf-8');
+    const raw = fs.readFileSync(bootstrapPath, 'utf-8').replace(/^\uFEFF/, '');
     const parsed = JSON.parse(raw) as unknown;
     const normalized = ensureRegistryShape(parsed);
     if (normalized.entries.length === 0) return null;
@@ -504,6 +515,16 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
 
     const reg = ensureRegistryShape(parsed);
     const { registry: regM, changed: presetMigrated } = migrateStudioBootstrapPresetProviders(reg);
+    /** agent-config 存在但条目被清空/损坏时，与无文件冷启动一致：回滚到安装包/仓库 bootstrap，避免设置页只剩「新建」。 */
+    if (regM.entries.length === 0) {
+      const boot = loadBootstrapProviderRegistry();
+      if (boot && boot.entries.length > 0) {
+        const recovered = applyQuickLaneDefaultIfUnset(boot);
+        saveProviderRegistry(recovered);
+        return recovered;
+      }
+      return { activeId: null, quickActiveId: null, entries: [] };
+    }
     const next = applyQuickLaneDefaultIfUnset(regM);
     if (presetMigrated || next.quickActiveId !== regM.quickActiveId) {
       saveProviderRegistry(next);
@@ -670,7 +691,7 @@ export function duplicateProviderEntryForQuickLane(sourceId?: string | null): {
     baseUrl: src.baseUrl,
     thinkingDefault: 'off',
     reasoningVisibility: 'off',
-    samplingTemperature: '0.35',
+    samplingTemperature: '0',
     samplingTopP: '1',
     createdAt: now,
     updatedAt: now,

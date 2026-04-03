@@ -1,11 +1,11 @@
 /**
- * 板端 `npm install -g openclaw@...` 的版本（勿默认 `latest`，便于验收与回滚）。
- * 可用环境变量 `OPENCLAW_NPM_VERSION` 覆盖（例如升级到 `2026.4.1`）。
+ * 板端 `npm install -g openclaw@...` 的版本。
+ * 默认 `latest`（每次安装/回退重装取 registry 当前最新）；需要固定版本做验收或回滚时设环境变量 `OPENCLAW_NPM_VERSION`（如 `2026.4.1`）。
  * 注意：npm 包使用日历版本（2026.x.y），勿误用旧约定如 `3.24`（registry 上不存在）。
  * 板端安装即标准：`CI= npm install -g openclaw@<本常量> ...`（无额外魔法）。
  */
 export const OPENCLAW_BOARD_NPM_SPEC =
-  process.env.OPENCLAW_NPM_VERSION?.trim() || '2026.3.24';
+  process.env.OPENCLAW_NPM_VERSION?.trim() || 'latest';
 
 /**
  * 板端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
@@ -55,7 +55,7 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
   'for i in 1 2 3; do',
   // 勿用 --loglevel error：成功路径近乎静默，前端只能看到 Studio 心跳误以为无日志。info 会输出解析/下载/解压等进度（体积仍可控）。
   // CI= 清空 CI：避免 npm 在 CI=1 时关闭 progress 且进一步减少输出。
-  // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认钉死 2026.3.24，可环境变量覆盖），勿改用裸 `latest` 以免不可追溯。
+  // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认 latest；可 OPENCLAW_NPM_VERSION 钉版本）。
   'if CI= npm install -g openclaw@' +
     OPENCLAW_BOARD_NPM_SPEC +
     ' --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
@@ -232,7 +232,7 @@ export const OPENCLAW_OFFICIAL_INSTALL_FALLBACK =
 
 /**
  * 安装 OpenClaw 本体：默认仅 npm -g `openclaw@${OPENCLAW_BOARD_NPM_SPEC}`（与 OPENCLAW_NPM_FAST_INSTALL_SNIPPET 一致）。
- * OpenClawDeploymentManager / board_openclaw_install 在本段之前已跑 Node/npm ensure，不再默认走 install.sh（避免未安装时自动装成 latest）。
+ * OpenClawDeploymentManager / board_openclaw_install 在本段之前已跑 Node/npm ensure，不再默认走 install.sh（与 npm 路径统一为同一规格）。
  * 设置环境变量 OPENCLAW_FORCE_OFFICIAL_INSTALL_SH=1 可强制走官方 install.sh + npm 回退。
  */
 export const OPENCLAW_INSTALL_OPENCLAW_STEP =

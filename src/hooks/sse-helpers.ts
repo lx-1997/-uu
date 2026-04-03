@@ -56,6 +56,44 @@ export function isBoardOpenClawExecutorTool(toolName: string): boolean {
   );
 }
 
+/**
+ * 板端桥接对每条工具事件都打 `[TOOL:phase] name`（见 OpenClawDeploymentManager onLine）；
+ * 长 `exec` 往往无 detail，流式会刷成百条相同行。折叠连续重复，保留 ×N。
+ */
+export function collapseRepeatedBoardToolNotifyLines(lines: string[]): string[] {
+  const out: string[] = [];
+  let runLine: string | null = null;
+  let runCount = 0;
+  const flush = () => {
+    if (runLine && runCount > 0) {
+      out.push(runCount === 1 ? runLine : `${runLine} ×${runCount}`);
+    }
+    runLine = null;
+    runCount = 0;
+  };
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (!t) {
+      if (runLine == null) out.push(raw);
+      continue;
+    }
+    if (t.startsWith('[TOOL:')) {
+      if (t === runLine) {
+        runCount += 1;
+      } else {
+        flush();
+        runLine = t;
+        runCount = 1;
+      }
+      continue;
+    }
+    flush();
+    out.push(raw);
+  }
+  flush();
+  return out;
+}
+
 /** 从 tool_start 参数生成「发给板端 OpenClaw」的展示行（LLM 填写的委派/对话内容） */
 export function formatBoardOutboundLines(toolName: string, args: Record<string, unknown> | undefined): string[] {
   if (!args) return [];

@@ -25,7 +25,12 @@ export class TextDeltaSmoother {
 
   push(rawDelta: string) {
     if (!rawDelta) return;
+    const wasIdle = !this.timer && this.buf.length === 0;
     this.buf += rawDelta;
+    // 首包不再等第一个 tick，缩短 TTFD（仍由后续 tick 做小口切分）
+    if (wasIdle) {
+      this.pump();
+    }
     this.ensureTimer();
   }
 

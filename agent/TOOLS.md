@@ -22,10 +22,12 @@
 | `board_openclaw_health` | 结构化 JSON 健康（慢） | **非例行**：仅报障、装/升/重启后验收、或 delegate 失败再调 |
 | `board_openclaw_check` / `doctor` | 全面诊断 / 自动修复 | 深度排障时用 |
 | `text_to_speech` / `speech_to_text` | TTS/STT | 离线优先，在线降级 |
-| `web_search` / `web_fetch` | 联网搜索与拉取页面 | 结论给来源链接；不确定能不能做时先搜再 fetch；板型与能力看设备记录与 board_openclaw_assess |
+| `web_search` / `web_fetch` | 联网搜索与拉取页面 | **联网搜索首选 Multi-Search-Engine（多引擎顺序）**（见 `skills/multi-search-engine`）；结论给来源链接；**web_search 的 query 与推理中计划的关键词一致**，专名勿截成前缀（尤其勿用「泡泡」「pop」指泡泡玛特）；服务端对**仅单 token** 的「泡泡」「pop」会直接报错要求改写；港股可带股份代号；板型与能力看设备记录与 board_openclaw_assess |
 | `web_browser_fetch` | 无头 Chromium 打开页面并抓渲染后文本 | 需服务端 `BROWSER_FETCH_ENABLED=1` 且已 `playwright install chromium`；SPA/Next 等壳页在 web_fetch 不足时用，更重更慢 |
 | `studio_embedded_browser_capture` | **桌面端**独立小悬浮窗打开页面并提交正文 | 不挡主界面；登录态与 NodeHub 一致；团队允许域名见 `config/studio-browser-capture.json` |
-| `studio_open_url` | **桌面端**独立浏览弹窗打开链接（可关闭） | **不抓正文**、不经 `studio-browser-capture.json` 白名单；失败时可能回退内嵌；登录后要给 Agent 正文仍用上一行 |
+| `studio_open_url` | **桌面端**默认可缩放独立浏览窗口（约六成屏、系统可关）；失败回退主窗口内嵌 | **内置 function tool，不是 Skill**；打开网页**勿**先 `find_skills`。**不抓正文**、不经 `studio-browser-capture.json` 白名单；登录后要给 Agent 正文仍用上一行 |
+| **Skill `agent-browser`** | 仓库内置 **`skills/agent-browser/SKILL.md`**：`agent-browser` CLI 多步自动化、无障碍树 `@ref` 操作 | 与 `web_browser_fetch`/桌面嵌页工具互补；需环境已装 `agent-browser` + Chromium；板上用 `device_exec` 跑 CLI 前确认路径与依赖 |
+| `studio_open_local_preview` | **桌面端**用系统默认应用打开**工作区内图片**（相对路径或允许根下绝对路径） | 仅常见图片扩展名；路径须落在 workspace/bootstrap/extraAllowedRoots；**本地文件勿用** `studio_open_url` |
 | `ros_topics` / `ros_nodes` | ROS2 操作 | 设备可能未装 ROS2 |
 | `vnc_start/stop/status` | 远程桌面 | |
 | `navigate:{tab}` | 页面跳转 | dashboard/flasher/terminal/files/vnc/ide/openclaw/hardware 等 |
@@ -48,6 +50,12 @@
 - **板端任务**: assess → delegate → 验证结果（确信可行时可跳过 chat）
 - **多板**: `fleet_board_list` → 按算力/角色选板 → `fleet_board_delegate` 或 `fleet_board_broadcast`
 - **长链路**: `create_plan` 拆步 → 执行 → `update_plan` 更新状态
+- **板端单张拍照**（用户「拍张照」「抓拍一张」等，非整段视觉 pipeline）：**优先本流程**，不必为拍照先 `board_openclaw_delegate`。
+  1. `device_exec` 探一下：`test -e /dev/video0 && echo ok || ls /dev/video*`（无节点再排查接线/驱动）。
+  2. 确认有 **`fswebcam`**（`command -v fswebcam`；没有则 `sudo apt-get update && sudo apt-get install -y fswebcam`，属板端装包——若你们策略要求装包前先征得用户同意，就先说明再执行）。
+  3. 抓拍：`fswebcam -r 1280x720 --no-banner /tmp/photo.jpg`（路径/分辨率可按板子调整；也可用 `v4l2-still`/`v4l2-ctl` 等板端已有工具）。
+  4. **`device_file_download_to_local`** 把 `/tmp/photo.jpg`（或你用的路径）拉回 Studio 本机下载目录。
+  5. **`studio_open_local_preview`** 用本地预览打开（工作区/下载目录规则以工具说明为准）；**勿**把 `file://` 或仅 basename 当网页 URL 丢给 `studio_open_url`。
 
 ## 执行策略
 

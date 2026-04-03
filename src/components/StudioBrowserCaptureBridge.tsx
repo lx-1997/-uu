@@ -22,7 +22,7 @@ function openCaptureEmbedInMain(url: string) {
   }
 }
 
-/** studio_open_url：优先独立弹窗（可关）；失败再回退内嵌或 window.open */
+/** studio_open_url：桌面端优先独立 BrowserWindow（默认可缩放、非全屏、系统关闭）；失败再回退主窗口内嵌或 window.open */
 async function openStudioAgentBrowsePopup(url: string) {
   const rdk = window.rdkDesktop;
   if (rdk?.openAgentBrowserPopup) {
@@ -224,12 +224,26 @@ export default function StudioBrowserCaptureBridge() {
       if (!url) return;
       void openStudioAgentBrowsePopup(url);
     };
+    const onLocalPreview = (data: { filePath?: string }) => {
+      const fp = String(data?.filePath || '').trim();
+      if (!fp) return;
+      const rdk = window.rdkDesktop;
+      if (rdk?.openLocalPreview) {
+        void rdk.openLocalPreview(fp).then((r) => {
+          if (!r?.ok) {
+            console.warn('[studio_open_local_preview]', r?.error || 'open failed');
+          }
+        });
+      }
+    };
 
     socket.on('studio_browser_capture_request', onReq);
     socket.on('studio_open_url_request', onOpenUrl);
+    socket.on('studio_open_local_preview_request', onLocalPreview);
     return () => {
       socket.off('studio_browser_capture_request', onReq);
       socket.off('studio_open_url_request', onOpenUrl);
+      socket.off('studio_open_local_preview_request', onLocalPreview);
       socket.disconnect();
     };
   }, []);

@@ -40,7 +40,7 @@
   <input id="username" type="text" placeholder="root" value="root">
 
   <label for="password">密码</label>
-  <input id="password" type="password" placeholder="sunrise" value="sunrise">
+  <input id="password" type="password" placeholder="root" value="root">
 
   <button id="connectBtn" onclick="doConnect()">连接设备</button>
   <div id="result"></div>
@@ -51,7 +51,7 @@ async function doConnect() {
   const host = document.getElementById('host').value.trim();
   const port = parseInt(document.getElementById('port').value) || 22;
   const username = document.getElementById('username').value.trim() || 'root';
-  const password = document.getElementById('password').value || 'sunrise';
+  const password = document.getElementById('password').value || 'root';
   const btn = document.getElementById('connectBtn');
   const result = document.getElementById('result');
 

@@ -9,6 +9,7 @@ import * as path from "node:path";
 import type { Server as SocketIOServer } from "socket.io";
 import type { Tool } from "./agent/tools/types.js";
 import { assertBrowserFetchUrlSafe } from "./agent/tools/browser-tools.js";
+import { buildStudioOpenLocalPreviewTool } from "./studio-local-preview.js";
 
 /** 用户只说 www.example.com 时补全 https://，便于 studio_open_url 与抓取工具 */
 function coerceHttpUrlInput(raw: string): string {
@@ -181,11 +182,15 @@ export function emitStudioOpenUrlToClients(url: string): void {
   ioRef?.emit("studio_open_url_request", { url });
 }
 
+export function emitStudioOpenLocalPreviewToClients(filePath: string): void {
+  ioRef?.emit("studio_open_local_preview_request", { filePath });
+}
+
 function studioOpenUrlTool(): Tool<{ url: string }> {
   return {
     name: "studio_open_url",
     description:
-      "【RDK Studio 桌面端】用户说「打开某网页/网站」时**必须调用本工具**（独立原生窗口，标题栏可关闭）。不等待抓取。不受 studio-browser-capture.json 白名单限制。失败时回显工具返回值；勿编造「环境限制」。纯 Web 时走新标签。要登录后抓正文给 Agent 用 studio_embedded_browser_capture。",
+      "【RDK Studio 桌面端】用户说「打开某网页/网站」时**必须调用本工具**（默认可缩放的独立浏览窗口，约为屏幕约六成、系统标题栏可关；失败时回退主窗口内嵌）。不等待抓取。不受 studio-browser-capture.json 白名单限制。失败时回显工具返回值；勿编造「环境限制」。纯 Web 时走新标签。要登录后抓正文给 Agent 用 studio_embedded_browser_capture。",
     inputSchema: {
       type: "object",
       properties: {
@@ -201,7 +206,7 @@ function studioOpenUrlTool(): Tool<{ url: string }> {
         const safe = await assertBrowserFetchUrlSafe(coerceHttpUrlInput(String(input.url || "")));
         const url = safe.toString();
         emitStudioOpenUrlToClients(url);
-        return `studio_open_url_ok: 已请求打开 ${url}（桌面端为独立浏览弹窗；若未看见请确认已用 RDK Studio 桌面包且前端已连上 Socket）。`;
+        return `studio_open_url_ok: 已请求打开 ${url}（桌面端默认可缩放独立窗口；失败时可能回退内嵌。若未看见请确认已用 RDK Studio 桌面包且前端已连上 Socket）。`;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return `studio_open_url 失败：${msg}`;
@@ -212,6 +217,21 @@ function studioOpenUrlTool(): Tool<{ url: string }> {
 
 export function createStudioOpenUrlTool(): Tool[] {
   return [studioOpenUrlTool()];
+}
+
+export function createStudioOpenLocalPreviewTool(): Tool[] {
+  const inner = buildStudioOpenLocalPreviewTool((abs) => emitStudioOpenLocalPreviewToClients(abs));
+  return [
+    {
+      ...inner,
+      execute: async (input, ctx) => {
+        if (!ioRef) {
+          return "studio_open_local_preview 失败：Socket.IO 未初始化，无法通知界面打开。";
+        }
+        return inner.execute(input, ctx);
+      },
+    },
+  ];
 }
 
 function studioEmbeddedBrowserCaptureTool(): Tool<{ url: string; timeoutMs?: number }> {

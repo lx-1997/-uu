@@ -115,6 +115,7 @@ describe('getExternalChannelPolicy', () => {
     expect(getExternalChannelPolicy('web_browser_fetch')).toBe('allow');
     expect(getExternalChannelPolicy('studio_embedded_browser_capture')).toBe('allow');
     expect(getExternalChannelPolicy('studio_open_url')).toBe('allow');
+    expect(getExternalChannelPolicy('studio_open_local_preview')).toBe('allow');
   });
 });
 

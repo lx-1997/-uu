@@ -274,7 +274,7 @@ export default function AddDeviceModal() {
         host: newDeviceIp.trim(),
         port: Number(sshPort || '22'),
         username: sshUser.trim() || 'root',
-        password: sshPass.trim(),
+        password: sshPass.trim() || 'root',
         name: newDeviceName,
       });
       setRegistering(false);

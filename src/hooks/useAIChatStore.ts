@@ -33,7 +33,9 @@ import {
   chatHistoryLegacyDeviceKey,
   chatHistoryStorageKey,
   getOrCreateStudioChatSessionId,
+  purgeLocalChatThread,
   loadChatHistoryFromStorage,
+  peekStudioChatSessionId,
   persistStudioChatSessionId,
   toChatDeviceId,
 } from '../utils/chat-history-storage';
@@ -55,7 +57,9 @@ import {
   formatBoardOutboundLines,
   isBoardOpenClawCollabTool,
   isBoardOpenClawExecutorTool,
+  collapseRepeatedBoardToolNotifyLines,
 } from './sse-helpers';
+import { applyClientActionsFromAssistantText } from '../utils/client-action-bridge';
 
 /** RDKClaw 当前轮次运行时间线（AI Dock 侧栏展示） */
 export type RdkClawTimelineKind =
@@ -92,6 +96,8 @@ export interface AIChatStoreState {
     e: React.FormEvent,
     options?: {
       messageOverride?: string;
+      /** 仅影响聊天列表展示；发给模型的内容仍用 messageOverride（用于「不满意重试」等短气泡） */
+      chatPreviewText?: string;
       attachments?: AgentAttachmentPayload[];
       displayAttachments?: ChatAttachment[];
     },
@@ -99,6 +105,10 @@ export interface AIChatStoreState {
   executeConfirm: (confirmId: string) => void;
   dismissConfirm: (confirmId: string) => void;
   clearChatHistory: () => void;
+  /** 切换到本机已存档的对话线程（可跨设备），并展开 Dock */
+  resumeStudioThread: (deviceId: string, studioSessionId: string) => void;
+  /** 删除指定线程的本机存档；若即当前 Dock 会话则中止请求并开启新线程 */
+  deleteStudioThread: (deviceId: string, studioSessionId: string) => void;
   agentMode: boolean;
   setAgentMode: (v: boolean) => void;
   agentPlan: AgentPlan | null;
@@ -228,6 +238,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     typeof window !== 'undefined' ? getOrCreateStudioChatSessionId(initialChatDeviceId) : `ui-${Date.now()}`;
   const chatDeviceIdRef = useRef(initialChatDeviceId);
   const sessionIdRef = useRef(initialStudioSessionId);
+  const chatPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 用于主导航 tab 切换时判断是否为「AI 对话 → 工作台」（双击历史跳转时勿收起 Dock） */
+  const prevNavTabRef = useRef<string | null>(null);
 
   // ── State ──
   const [cmd, setCmd] = useState('');
@@ -246,6 +259,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       ? loadChatHistoryFromStorage(initialChatDeviceId, initialStudioSessionId)
       : [],
   );
+  /** 每轮渲染与 state 同步，供 debounce 持久化避免闭包 stale */
+  const chatMessagesRef = useRef<ChatMessage[]>([]);
+  chatMessagesRef.current = chatMessages;
 
   useEffect(() => {
     if (chatMessages.length <= MAX_CHAT_MESSAGES_IN_MEMORY) return;
@@ -510,6 +526,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     e: React.FormEvent,
     options?: {
       messageOverride?: string;
+      chatPreviewText?: string;
       attachments?: AgentAttachmentPayload[];
       displayAttachments?: ChatAttachment[];
     },
@@ -530,7 +547,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       .map((attachment) => attachment.transcript?.trim())
       .filter(Boolean)
       .join('\n');
-    const displayText = userMsg || transcriptText || '';
+    const previewRaw = options?.chatPreviewText?.trim();
+    const displayText =
+      previewRaw != null && previewRaw !== ''
+        ? previewRaw
+        : userMsg || transcriptText || '';
     reportActiveSession('user-command');
     reportActiveDevice('user-command');
     const msgId = Date.now();
@@ -1049,9 +1070,34 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             }
             switch (event.type) {
               case 'meta': {
-                if (studioResponseMode === 'quick') break;
                 currentRunId = eventRunId || currentRunId;
                 currentRunIdRef.current = currentRunId;
+                const metaDataEarly = event.data as Record<string, unknown>;
+                const phaseEarly = String(metaDataEarly.phase || '');
+                const trReason = String(metaDataEarly.turn_transition_reason || '').trim();
+                if (phaseEarly === 'limit' || trReason) {
+                  const limitMsg = String(metaDataEarly.message || '').trim();
+                  if (limitMsg) {
+                    aiBlocks.push({
+                      type: 'status',
+                      items: [
+                        {
+                          label: t('chat.stopNotice.title', '运行结束说明'),
+                          value: limitMsg,
+                          ok: false,
+                        },
+                      ],
+                    });
+                    appendRunTimelineEntry(generation, {
+                      kind: 'context',
+                      title: t('chat.stopNotice.timeline', '结束原因'),
+                      detail: limitMsg.slice(0, 500),
+                    });
+                    updateAiMessage(aiText, aiBlocks, true);
+                  }
+                  break;
+                }
+                if (studioResponseMode === 'quick') break;
                 const executor = String(event.data.executor || 'rdkclaw_local');
                 const phase = String(event.data.phase || 'start');
                 const message = String(event.data.message || t('chat.stream.start', '开始处理请求'));
@@ -1071,6 +1117,77 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 }
 
                 if (phase === 'heartbeat') {
+                  break;
+                }
+
+                const data = event.data as Record<string, unknown>;
+
+                /** run 遥测由后端经 meta(run_metrics) + 前端 done 展示，勿再套「执行路径」全卡，否则会多出重复的「默认」条 */
+                if (phase === 'end' && data.run_metrics != null) {
+                  break;
+                }
+
+                /** 后端已不再推送；旧服务端若仍发 memory_sync，静默忽略以免每轮重复占位 */
+                if (phase === 'memory_sync') {
+                  break;
+                }
+
+                if (phase === 'running') {
+                  const runIdx = aiBlocks.findIndex(
+                    (b) => b.type === 'status' && (b as { _rdkMetaRunning?: boolean })._rdkMetaRunning,
+                  );
+                  const runBlock = {
+                    type: 'status' as const,
+                    _rdkMetaRunning: true as const,
+                    collapsible: true,
+                    defaultCollapsed: true,
+                    summary: message.slice(0, 120),
+                    items: [{ label: t('chat.stream.runtimeNote', '运行说明'), value: message, ok: true }],
+                  };
+                  if (runIdx >= 0) aiBlocks[runIdx] = runBlock;
+                  else aiBlocks.push(runBlock);
+                  appendRunTimelineEntry(generation, {
+                    kind: 'context',
+                    title: t('chat.timeline.agentNote', 'Agent 提示'),
+                    detail: message.slice(0, 400),
+                  });
+                  updateAiMessage(aiText, aiBlocks, true);
+                  break;
+                }
+
+                if (phase === 'end' && data.subagent_summary != null) {
+                  const subSummary = String(data.subagent_summary ?? '');
+                  aiBlocks.push({
+                    type: 'status',
+                    collapsible: true,
+                    defaultCollapsed: true,
+                    summary: message.slice(0, 100),
+                    items: [{ label: t('chat.stream.subagent', '子代理'), value: subSummary || message, ok: true }],
+                  });
+                  appendRunTimelineEntry(generation, {
+                    kind: 'context',
+                    title: message.slice(0, 80),
+                    detail: subSummary.slice(0, 400),
+                  });
+                  updateAiMessage(aiText, aiBlocks, true);
+                  break;
+                }
+
+                /** 完整「编排上下文」卡仅对应 server 单次 phase=start（含委派/技能/模型能力），避免其它 meta 缺字段时用「默认」填空造成视觉重复 */
+                if (phase !== 'start') {
+                  aiBlocks.push({
+                    type: 'status',
+                    collapsible: true,
+                    defaultCollapsed: true,
+                    summary: message.slice(0, 100),
+                    items: [{ label: executorLabel(executor), value: message, ok: true }],
+                  });
+                  appendRunTimelineEntry(generation, {
+                    kind: 'context',
+                    title: message.slice(0, 80),
+                    detail: message.slice(0, 400),
+                  });
+                  updateAiMessage(aiText, aiBlocks, true);
                   break;
                 }
 
@@ -1155,9 +1272,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'thinking_delta': {
-                if (studioResponseMode === 'quick') break;
                 const delta = String(event.data.delta ?? '');
                 if (!delta) break;
+                /** 快捷模式原先跳过推理流：部分模型仅通过 thinking 通道输出正文，会导致气泡空白仅剩「用时」 */
+                if (studioResponseMode === 'quick') {
+                  aiText += delta;
+                  updateAiMessage(aiText, aiBlocks);
+                  break;
+                }
                 const idx = reasoningBlockIndexRef.current;
                 const existing =
                   idx != null && idx < aiBlocks.length && aiBlocks[idx]?.type === 'reasoning'
@@ -1317,13 +1439,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     const collabBlock = aiBlocks[state.collabIndex];
                     if (collabBlock?.type === 'collab' && collabBlock.side === 'openclaw') {
                       state.openclawStreamBuf = (state.openclawStreamBuf ?? '') + rawChunk;
-                      const bufLines = state.openclawStreamBuf.split('\n');
+                      const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));
                       collabBlock.lines = bufLines.length > 240 ? bufLines.slice(-240) : bufLines;
                     }
                   } else {
                     state.collabIndex = aiBlocks.length;
                     state.openclawStreamBuf = rawChunk;
-                    const bufLines = state.openclawStreamBuf.split('\n');
+                    const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));
                     const lines = bufLines.length > 240 ? bufLines.slice(-240) : bufLines;
                     aiBlocks.push({
                       type: 'collab',
@@ -1493,6 +1615,19 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         }),
                       });
                       mediaHandled = true;
+                    } else if (
+                      parsed.__type === 'studio_local_preview' &&
+                      typeof parsed.imageUrl === 'string' &&
+                      parsed.ok === true
+                    ) {
+                      aiBlocks.push({
+                        type: 'image',
+                        src: parsed.imageUrl as string,
+                        caption: String(
+                          parsed.fileName || t('chat.media.localPreview', '本地预览'),
+                        ),
+                      });
+                      mediaHandled = true;
                     } else if (parsed.__type === 'video_download' && typeof parsed.videoUrl === 'string') {
                       aiBlocks.push({
                         type: 'video',
@@ -1593,8 +1728,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   mediaHandled = true;
                 }
 
-                if (!mediaHandled && !state?.hiddenQuick) {
-                  if (result.includes('\n') || result.length > 100) {
+                if (!mediaHandled) {
+                  if (state?.hiddenQuick) {
+                    const r = result.trim();
+                    if (r) {
+                      if (isError) {
+                        const errLine = tf('chat.tool.errLine', '{{tool}} 失败：{{msg}}', { tool: toolName, msg: r });
+                        aiText = aiText.trim() ? `${aiText.trim()}\n\n${errLine}` : errLine;
+                      } else {
+                        aiText = aiText.trim() ? `${aiText.trim()}\n\n${r}` : r;
+                      }
+                    }
+                  } else if (result.includes('\n') || result.length > 100) {
                     aiBlocks.push({
                       type: 'terminal',
                       lines: result.split('\n').slice(0, 60),
@@ -1675,7 +1820,27 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               }
               case 'message_end': {
                 if (!aiText.trim()) {
-                  aiText = String(event.data.text || '');
+                  const serverFill = String(event.data.text || '');
+                  const serverTrim = serverFill.trim();
+                  const reasoningWithText = aiBlocks.find(
+                    (b): b is Extract<ChatBlock, { type: 'reasoning' }> =>
+                      b.type === 'reasoning' && Boolean((b as Extract<ChatBlock, { type: 'reasoning' }>).text?.trim()),
+                  );
+                  /**
+                   * agent-loop 在正文为空时会把 `<thinking>` 解出塞进 message_end.text（visibleAssistantText），
+                   * 与已在客户端 reasoning 块中展示的内容重复 → 主气泡出现长篇「推理原文」。
+                   * 若已有推理块且服务端回填与之一致，则不要写入主文，保留折叠展示。
+                   */
+                  if (reasoningWithText) {
+                    const rNorm = reasoningWithText.text.replace(/\r\n/g, '\n').trim();
+                    const sNorm = serverTrim.replace(/\r\n/g, '\n');
+                    aiText = !serverTrim || sNorm === rNorm ? '' : serverFill;
+                  } else {
+                    aiText = serverFill;
+                  }
+                }
+                if (/<client-action\b/i.test(aiText)) {
+                  aiText = applyClientActionsFromAssistantText(aiText);
                 }
                 updateAiMessage(aiText, aiBlocks, true);
                 break;
@@ -1875,8 +2040,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         summary: usageItems.map((i) => `${i.label}: ${i.value}`).join(' · '),
                         items: usageItems,
                       });
-                      updateAiMessage(aiText, aiBlocks, true);
                     }
+                    /** 无 perf 块时也必须 flush，否则前面从推理提升的正文仍留在闭包、pendingText 未更新 */
+                    if (/<client-action\b/i.test(aiText)) {
+                      aiText = applyClientActionsFromAssistantText(aiText);
+                    }
+                    updateAiMessage(aiText, aiBlocks, true);
                   }
                 }
                 break;
@@ -1905,26 +2074,36 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'run_complete': {
-                if (studioResponseMode === 'quick') break;
                 const progressIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && (b as any)._runProgress,
                 );
                 if (progressIdx >= 0) {
-                  aiBlocks[progressIdx] = { type: 'status' as const, items: [] };
+                  /** 勿保留 items:[] 的 status，否则会渲染成中间空白框 */
+                  aiBlocks.splice(progressIdx, 1);
                 }
                 const elapsed = String(event.data.elapsed_display || '');
                 const calls = Number(event.data.tool_calls || 0);
                 const isError = Boolean(event.data.error);
                 const isCancelled = Boolean(event.data.cancelled);
+                const stopReason = String((event.data as { stop_reason?: string }).stop_reason || '').trim();
+                const stopHint = String((event.data as { stop_hint?: string }).stop_hint || '').trim();
                 const detail: string[] = [];
                 if (elapsed) detail.push(elapsed);
                 if (calls > 0) detail.push(tf('chat.runComplete.steps', '{{n}} 步', { n: calls }));
+                if (stopHint) detail.push(stopHint);
                 const label = isCancelled
                   ? t('chat.runComplete.cancelled', '⊘ 已取消')
                   : isError
                     ? t('chat.runComplete.err', '✗ 执行出错')
-                    : t('chat.runComplete.ok', '✓ 回复完成');
-                const ok = !isError && !isCancelled;
+                    : stopReason === 'max_turns_reached'
+                      ? t('chat.runComplete.maxTurns', '✓ 已完成（已达轮次上限）')
+                      : t('chat.runComplete.ok', '✓ 回复完成');
+                const ok = !isError && !isCancelled && stopReason !== 'max_turns_reached';
+                const showCompleteFooter = studioResponseMode !== 'quick' || stopReason === 'max_turns_reached' || isError || isCancelled;
+                if (!showCompleteFooter) {
+                  updateAiMessage(aiText, aiBlocks, true);
+                  break;
+                }
                 aiBlocks.push({
                   type: 'status',
                   items: [{ label, value: detail.length > 0 ? detail.join(' · ') : '', ok }],
@@ -1934,6 +2113,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   title: label,
                   detail: detail.length > 0 ? detail.join(' · ') : undefined,
                 });
+                if (/<client-action\b/i.test(aiText)) {
+                  aiText = applyClientActionsFromAssistantText(aiText);
+                }
                 updateAiMessage(aiText, aiBlocks, true);
                 break;
               }
@@ -1946,13 +2128,37 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         if (rafHandle) { cancelAnimationFrame(rafHandle); flushAiMessage(); }
         if (generation !== streamGenerationRef.current) return;
         const streamCompletedAt = Date.now();
-        setChatMessages((prev) => prev.map((m) => (m.id === aiMsgId ? { ...m, durationMs: Math.max(0, streamCompletedAt - msgId) } : m)));
+        let bodyTrim = (pendingText || aiText).trim();
+        if (/<client-action\b/i.test(bodyTrim)) {
+          bodyTrim = applyClientActionsFromAssistantText(bodyTrim).trim();
+        }
+        if (!bodyTrim) {
+          const fallback = t(
+            'chat.err.emptyReply',
+            '未收到可见回复。请重试一次；仍无输出时请检查模型与网络，或改用「快捷回答」。',
+          );
+          setChatMessages((prev) => prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  text: fallback,
+                  blocks: [...pendingBlocks],
+                  durationMs: Math.max(0, streamCompletedAt - msgId),
+                }
+              : m,
+          ));
+        } else {
+          setChatMessages((prev) => prev.map((m) =>
+            m.id === aiMsgId ? { ...m, durationMs: Math.max(0, streamCompletedAt - msgId) } : m,
+          ));
+        }
         setAiTyping(false);
       } finally {
         if (generation === streamGenerationRef.current) {
           streamAbortRef.current = null;
           currentRunIdRef.current = '';
           commandLockRef.current = false;
+          setAiTyping(false);
         }
       }
     })();
@@ -2104,6 +2310,125 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       }],
     }]);
   };
+
+  const resumeStudioThread = useCallback(
+    (rawDeviceId: string, targetSessionId: string) => {
+      const nextDeviceId = toChatDeviceId(rawDeviceId);
+      const sid = String(targetSessionId || '').trim();
+      if (!sid) return;
+
+      if (chatPersistTimerRef.current) {
+        clearTimeout(chatPersistTimerRef.current);
+        chatPersistTimerRef.current = null;
+      }
+
+      abortInFlightRun(false);
+      setRdkClawRunTimeline([]);
+
+      try {
+        const prevToSave = stripHeavyDataUrlsForStorage(chatMessagesRef.current.slice(-50));
+        localStorage.setItem(
+          chatHistoryStorageKey(chatDeviceIdRef.current, sessionIdRef.current),
+          JSON.stringify(prevToSave),
+        );
+        localStorage.setItem(chatDraftStorageKey(chatDeviceIdRef.current), cmd);
+      } catch {
+        /* ignore */
+      }
+
+      persistStudioChatSessionId(nextDeviceId, sid);
+
+      const dockDeviceId = nextDeviceId === GLOBAL_CHAT_DEVICE_ID ? '' : nextDeviceId;
+      /**
+       * 必须先对齐 chatDeviceIdRef，再 setActiveDevice。
+       * 否则设备切换 effect 会看到「ref 仍是旧设备、state 已是新设备」，
+       * 误走整段切换逻辑（getOrCreate 会话 / 合并全局消息），把刚恢复的线程冲掉。
+       */
+      chatDeviceIdRef.current = nextDeviceId;
+      sessionIdRef.current = sid;
+
+      setChatMessages(loadChatHistoryFromStorage(nextDeviceId, sid));
+      try {
+        setCmd(localStorage.getItem(chatDraftStorageKey(nextDeviceId)) ?? '');
+      } catch {
+        setCmd('');
+      }
+
+      if (toChatDeviceId(currentDevice?.id) !== nextDeviceId) {
+        setActiveDevice(dockDeviceId);
+      }
+
+      reportActiveSession('resume-thread');
+      reportActiveDevice(
+        'resume-thread',
+        nextDeviceId === GLOBAL_CHAT_DEVICE_ID ? undefined : nextDeviceId,
+      );
+
+      setChatExpanded(true);
+    },
+    [
+      abortInFlightRun,
+      cmd,
+      currentDevice?.id,
+      setActiveDevice,
+      setChatExpanded,
+      setChatMessages,
+      setCmd,
+    ],
+  );
+
+  const deleteStudioThread = useCallback(
+    (rawDeviceId: string, targetSessionId: string) => {
+      const nextDeviceId = toChatDeviceId(rawDeviceId);
+      const sid = String(targetSessionId || '').trim();
+      if (!sid) return;
+
+      purgeLocalChatThread(nextDeviceId, sid);
+
+      const isCurrent =
+        chatDeviceIdRef.current === nextDeviceId && sessionIdRef.current === sid;
+
+      if (!isCurrent) {
+        try {
+          const peek = peekStudioChatSessionId(nextDeviceId);
+          if (peek === sid) {
+            const fresh = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+            persistStudioChatSessionId(nextDeviceId, fresh);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if (isCurrent) {
+        abortInFlightRun(false);
+        setChatMessages([]);
+        try {
+          localStorage.removeItem(chatHistoryLegacyDeviceKey(nextDeviceId));
+          localStorage.removeItem(chatDraftStorageKey(nextDeviceId));
+          if (nextDeviceId === GLOBAL_CHAT_DEVICE_ID) {
+            localStorage.removeItem(CHAT_HISTORY_LEGACY_KEY);
+          }
+        } catch {
+          /* ignore */
+        }
+        const nextSid = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        sessionIdRef.current = nextSid;
+        persistStudioChatSessionId(nextDeviceId, nextSid);
+        void setActiveRdkclawSession(nextSid);
+        setRdkClawRunTimeline([]);
+      }
+
+      addToast(
+        t(
+          'chat.hub.threadDeletedToast',
+          '已删除该会话的本机存档。',
+        ),
+        'info',
+      );
+    },
+    [abortInFlightRun, addToast, setChatMessages, t],
+  );
 
   // ── Effects ──
 
@@ -2479,12 +2804,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   }, [language]);
 
   // Persist chat history (debounced to avoid blocking main thread during streaming)
-  const chatPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (chatPersistTimerRef.current) clearTimeout(chatPersistTimerRef.current);
     chatPersistTimerRef.current = setTimeout(() => {
       try {
-        const toSave = stripHeavyDataUrlsForStorage(chatMessages.slice(-50));
+        const toSave = stripHeavyDataUrlsForStorage(chatMessagesRef.current.slice(-50));
         localStorage.setItem(
           chatHistoryStorageKey(chatDeviceIdRef.current, sessionIdRef.current),
           JSON.stringify(toSave),
@@ -2501,7 +2825,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         chatPersistTimerRef.current = null;
       }
     };
-  }, [chatMessages, aiTyping, cmd]);
+  }, [chatMessages, aiTyping, cmd]); /* chatMessages 参与调度；正文用 ref 避免闭包与 sessionId 不同步 */
 
   // Cleanup task intervals on unmount
   useEffect(() => {
@@ -2514,6 +2838,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   // Close chat panel on tab change（副屏常驻展开，不受主导航切换影响）
   useEffect(() => {
     if (getRdkEmbedPanel()) return;
+    const prev = prevNavTabRef.current;
+    prevNavTabRef.current = activeTab;
+
+    if (activeTab === 'ai-chat-hub') return;
+
+    /** 从「AI 对话」进入工作台：保留展开态，避免刚恢复的历史消息被立刻收起而看似「没还原」 */
+    if (prev === 'ai-chat-hub' && activeTab === 'dashboard') return;
+
     if (chatExpanded) setChatExpanded(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
@@ -2589,7 +2921,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, setChatMessages, chatExpanded, setChatExpanded,
     aiTyping, setAiTyping, handleCommand,
-    executeConfirm, dismissConfirm, clearChatHistory,
+    executeConfirm, dismissConfirm, clearChatHistory, resumeStudioThread, deleteStudioThread,
     agentMode, setAgentMode, agentPlan, agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask, handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns, backgroundCurrentRun,
     backgroundRuns, stopBackgroundRun,

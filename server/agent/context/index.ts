@@ -53,6 +53,17 @@ export {
   type MicroCompactResult,
 } from "./microcompact.js";
 export {
+  invalidateStaleReadToolResults,
+  STALE_READ_PLACEHOLDER,
+  toolPathKey,
+} from "./stale-read-invalidate.js";
+export {
+  snipTailOversizedToolResults,
+  DEFAULT_TAIL_SNIP_CONFIG,
+  type TailToolSnipConfig,
+  type TailToolSnipResult,
+} from "./tail-tool-snip.js";
+export {
   getEffectiveContextWindowTokens,
   getProactiveCompactThreshold,
   getContextWarningThreshold,

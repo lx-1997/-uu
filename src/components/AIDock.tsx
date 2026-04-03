@@ -12,7 +12,7 @@ import { resolveApiUrl, resolveMediaUrl, fetchApi } from '../utils/apiBase';
 import { getRdkEmbedPanel, getRdkEmbedDockCtx, openOpenClawPopout } from '../utils/embed-mode';
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
-import { chatMessageToPlainText } from '../utils/chat-message-plain';
+import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-message-plain';
 import { ChatHistoryModal } from './ChatHistoryModal';
 import { DockFlashMentionWizard } from './DockFlashMentionWizard';
 import {
@@ -54,6 +54,12 @@ const Icon = {
   close: (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
+  /** 与「清空输入」并列：停止全部 RDKClaw 运行 */
+  stopAll: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <rect x="5" y="5" width="14" height="14" rx="2" />
     </svg>
   ),
   flash: (
@@ -213,6 +219,47 @@ function collectClipboardFiles(evt: ClipboardEvent): File[] {
   return out;
 }
 
+/** 气泡内持久预览：小于此大小的图片转为 data URL，避免发送后立即 revokeObjectURL 导致消息里「裂图」 */
+const DISPLAY_IMAGE_DATA_URL_MAX_BYTES = 8 * 1024 * 1024;
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result ?? ''));
+    r.onerror = () => reject(r.error ?? new Error('FileReader'));
+    r.readAsDataURL(file);
+  });
+}
+
+/** 与 PendingAttachment 对应，生成写入 chatMessages 的附件（释放 pending 的 blob，换 data URL 或新 blob） */
+async function buildDisplayAttachmentsFromPending(
+  pending: PendingAttachment[],
+): Promise<ChatAttachment[]> {
+  return Promise.all(
+    pending.map(async (a) => {
+      const { file, ...rest } = a;
+      if (rest.type === 'image' && file.size > 0 && file.size <= DISPLAY_IMAGE_DATA_URL_MAX_BYTES) {
+        try {
+          const dataUrl = await fileToDataUrl(file);
+          if (dataUrl.startsWith('data:')) {
+            URL.revokeObjectURL(a.url);
+            return { ...rest, url: dataUrl };
+          }
+        } catch {
+          /* 走下方新 blob */
+        }
+      }
+      if (rest.type === 'image' || rest.type === 'video' || rest.type === 'audio') {
+        const nu = URL.createObjectURL(file);
+        URL.revokeObjectURL(a.url);
+        return { ...rest, url: nu };
+      }
+      URL.revokeObjectURL(a.url);
+      return { ...rest };
+    }),
+  );
+}
+
 async function fileToBase64(file: File) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
@@ -340,7 +387,7 @@ function DockStreamingPlainBody({ text }: { text: string }) {
     <>
       {showWarmup && (
         <span className="dock-stream-warmup" aria-live="polite">
-          正在组织回答
+          {t('dock.stream.organizing', '正在组织回答')}
           <span className="dock-stream-warmup-dots" aria-hidden>…</span>
         </span>
       )}
@@ -529,6 +576,9 @@ function BlockRenderer({
   }
 
   if (block.type === 'status') {
+    if (!block.items || block.items.length === 0) {
+      return null;
+    }
     if (block.collapsible) {
       return (
         <StatusCollapsible
@@ -807,17 +857,32 @@ function BlockRenderer({
   return null;
 }
 
+const OMITTED_STORAGE_URL = '[omitted-large-data-url]';
+
 function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   const { t } = useI18n();
+  const rawUrl = attachment.url?.trim() ?? '';
+  const resolvedSrc =
+    rawUrl && rawUrl !== OMITTED_STORAGE_URL ? resolveMediaUrl(rawUrl) : '';
+
   if (attachment.type === 'image') {
     return (
       <div className="chat-attachment chat-attachment-image">
-        {attachment.url ? (
-          <img src={attachment.url} alt={attachment.name} loading="lazy" onClick={() => window.open(attachment.url, '_blank', 'noopener,noreferrer')} />
+        {resolvedSrc ? (
+          <img
+            src={resolvedSrc}
+            alt={attachment.name}
+            loading="lazy"
+            onClick={() => window.open(resolvedSrc, '_blank', 'noopener,noreferrer')}
+          />
         ) : (
           <div className="file-attachment-info">
             <span className="file-attachment-name">{attachment.name}</span>
-            <span className="file-attachment-size">{t('dock.attach.imageHint', '图片附件已上传，可在当前会话继续分析')}</span>
+            <span className="file-attachment-size">
+              {rawUrl === OMITTED_STORAGE_URL
+                ? t('dock.attach.imageNotStored', '已从存档中省略大图预览，可重新发送图片')
+                : t('dock.attach.imageHint', '图片附件已上传，可在当前会话继续分析')}
+            </span>
           </div>
         )}
       </div>
@@ -826,8 +891,8 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   if (attachment.type === 'video') {
     return (
       <div className="chat-attachment chat-attachment-video">
-        {attachment.url ? (
-          <video src={attachment.url} controls preload="metadata" />
+        {resolvedSrc ? (
+          <video src={resolvedSrc} controls preload="metadata" />
         ) : (
           <div className="file-attachment-info">
             <span className="file-attachment-name">{attachment.name}</span>
@@ -843,7 +908,7 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
         <div className="audio-msg-icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
         </div>
-        {attachment.url ? <audio src={attachment.url} controls preload="metadata" /> : <span className="file-attachment-size">{t('dock.attach.audioHint', '语音附件已上传')}</span>}
+        {resolvedSrc ? <audio src={resolvedSrc} controls preload="metadata" /> : <span className="file-attachment-size">{t('dock.attach.audioHint', '语音附件已上传')}</span>}
         {attachment.transcript && (
           <div className="file-attachment-info">
             <span className="file-attachment-size">{t('dock.attach.transcriptPrefix', '转写：')}{attachment.transcript}</span>
@@ -911,6 +976,46 @@ export default function AIDock() {
   const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
+  const [unsatisfiedModal, setUnsatisfiedModal] = useState<{ msgId: number; preview: string } | null>(null);
+  const [unsatisfiedNote, setUnsatisfiedNote] = useState('');
+
+  const submitUnsatisfiedRetry = useCallback(() => {
+    if (!unsatisfiedModal) return;
+    if (aiTyping) {
+      addToast(t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。'), 'warning');
+      return;
+    }
+    const clip = unsatisfiedModal.preview;
+    const note = unsatisfiedNote.trim();
+    const body = isEn
+      ? note
+        ? `[rdk-studio: retry-previous-reply]\nImprove your previous assistant message using the excerpt below.\n\n---\n${clip}\n---\nUser note: ${note}`
+        : `[rdk-studio: retry-previous-reply]\nThe user gave no details. Briefly confirm what was wrong or missing, then improve.\n\n---\n${clip}\n---`
+      : note
+        ? `[rdk-studio: 对上一则助手回复不满意]\n请针对下列节选改进上一则回答（更完整、更具体或更正错误）。\n\n---\n${clip}\n---\n用户补充：${note}`
+        : `[rdk-studio: 对上一则助手回复不满意]\n用户未写补充说明；请先简短确认诉求或偏差，再给出更好的回答。\n\n---\n${clip}\n---`;
+    const chatPreviewText = note
+      ? fillTemplate(t('dock.msg.unsatisfiedPreviewWithNote', '不满意上一则 · {{note}}'), { note })
+      : t('dock.msg.unsatisfiedPreview', '不满意上一则回复，请改进。');
+    handleCommand({ preventDefault() {} } as React.FormEvent, {
+      messageOverride: body,
+      chatPreviewText,
+    });
+    setUnsatisfiedModal(null);
+    setUnsatisfiedNote('');
+  }, [unsatisfiedModal, unsatisfiedNote, aiTyping, addToast, t, isEn, handleCommand]);
+
+  useEffect(() => {
+    if (!unsatisfiedModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setUnsatisfiedModal(null);
+        setUnsatisfiedNote('');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [unsatisfiedModal]);
 
   useEffect(() => {
     if (!responseModeMenuOpen) return;
@@ -1358,6 +1463,8 @@ export default function AIDock() {
       if (block.type === 'reasoning') return true;
       if (block.type === 'collab') return true;
       if (block.type === 'image' || block.type === 'video' || block.type === 'file' || block.type === 'code') return true;
+      /** 工具最终输出与步骤条：原先在极简流程中整类去掉，会导致仅有主文本为空时什么都不显示 */
+      if (block.type === 'terminal' || block.type === 'progress') return true;
       if (block.type === 'status') return shouldKeepStatusInCompact(block);
       return false;
     });
@@ -1659,13 +1766,14 @@ export default function AIDock() {
       const attachmentPayloads = hasAttachments
         ? await materializeAgentAttachments(pendingAttachments)
         : [];
-      const displayAttachments = pendingAttachments.map(({ file: _file, ...attachment }) => attachment);
+      const displayAttachments = hasAttachments
+        ? await buildDisplayAttachmentsFromPending(pendingAttachments)
+        : [];
       handleCommand(e, {
         messageOverride: requestText,
         attachments: attachmentPayloads,
         displayAttachments,
       });
-      pendingAttachments.forEach(a => URL.revokeObjectURL(a.url));
       setPendingAttachments([]);
       setRecordingTranscript('');
     } catch (error) {
@@ -2014,7 +2122,11 @@ export default function AIDock() {
                         );
                       })()}
                       {isStreamingBubble && (
-                        <div className="dock-typing dock-typing--in-bubble">
+                        <div
+                          className={`dock-typing dock-typing--in-bubble${
+                            msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
+                          }`}
+                        >
                           {msg.text?.trim() ? (
                             <div className="typing-dots" aria-hidden>
                               <span className="typing-dot" />
@@ -2038,13 +2150,41 @@ export default function AIDock() {
                     </button>
                   )}
                   {msg.role === 'ai' && (
-                    <span className="dock-msg-time">
-                      {isStreamingBubble
-                        ? t('dock.msg.replying', '回复中…')
-                        : msg.durationMs != null
-                          ? `${t('dock.msg.took', '用时')} ${formatDockDurationMs(msg.durationMs)}`
-                          : t('dock.msg.durationUnknown', '—')}
-                    </span>
+                    <div className="dock-msg-footer">
+                      <span className="dock-msg-time">
+                        {isStreamingBubble
+                          ? t('dock.msg.replying', '回复中…')
+                          : msg.durationMs != null
+                            ? `${t('dock.msg.took', '用时')} ${formatDockDurationMs(msg.durationMs)}`
+                            : t('dock.msg.durationUnknown', '—')}
+                      </span>
+                      {(() => {
+                        if (isStreamingBubble || msg.channelMeta) return null;
+                        const plainRetry = chatMessageRetryExcerpt(msg, t).trim();
+                        if (!plainRetry) return null;
+                        return (
+                          <button
+                            type="button"
+                            className="dock-bubble-retry"
+                            disabled={aiTyping}
+                            title={
+                              aiTyping
+                                ? t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。')
+                                : t('dock.msg.unsatisfied', '不满意此回复')
+                            }
+                            onClick={() => {
+                              setUnsatisfiedNote('');
+                              setUnsatisfiedModal({
+                                msgId: msg.id,
+                                preview: chatMessageRetryExcerpt(msg, t),
+                              });
+                            }}
+                          >
+                            {t('dock.msg.unsatisfied', '不满意此回复')}
+                          </button>
+                        );
+                      })()}
+                    </div>
                   )}
                 </div>
               </div>
@@ -2201,8 +2341,23 @@ export default function AIDock() {
             }}
           />
 
-          {cmd.trim() && (
-            <button type="button" className="dock-action-btn" onClick={() => setCmd('')} title={t('dock.input.clearInput', '清空')}>{Icon.close}</button>
+          {(cmd.trim() || aiTyping) && (
+            <div className="dock-form-actions" role="group" aria-label={t('dock.input.inputBarActions', '输入栏：停止任务与清空')}>
+              <button
+                type="button"
+                className="dock-action-btn dock-action-btn--stop-all"
+                onClick={() => { void stopAllRuns(); }}
+                title={t('dock.input.stopAllTitle', '停止全部运行中的任务（本机对话、飞书、微信、定时任务等）')}
+                aria-label={t('dock.typing.stopAll', '全部停止')}
+              >
+                {Icon.stopAll}
+              </button>
+              {cmd.trim() ? (
+                <button type="button" className="dock-action-btn" onClick={() => setCmd('')} title={t('dock.input.clearInput', '清空')}>
+                  {Icon.close}
+                </button>
+              ) : null}
+            </div>
           )}
           {!chatExpanded && (
             <>
@@ -2411,6 +2566,56 @@ export default function AIDock() {
         </div>
       </div>
     </div>
+    {unsatisfiedModal ? (
+      <div
+        className="dock-retry-modal-backdrop"
+        role="presentation"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setUnsatisfiedModal(null);
+            setUnsatisfiedNote('');
+          }
+        }}
+      >
+        <div
+          className="dock-retry-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dock-retry-modal-title"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 id="dock-retry-modal-title">{t('dock.msg.unsatisfiedTitle', '重新回答')}</h3>
+          <p className="dock-retry-modal-hint">
+            {t(
+              'dock.msg.unsatisfiedHint',
+              '可填写：哪里不满意、或希望怎样改进（留空则请助手先简短确认需求再答）。',
+            )}
+          </p>
+          <textarea
+            className="dock-retry-modal-input"
+            value={unsatisfiedNote}
+            onChange={(e) => setUnsatisfiedNote(e.target.value)}
+            placeholder={t('dock.msg.unsatisfiedPlaceholder', '例如：太笼统 / 和 ROS2 不符 / 需要分步骤…')}
+            autoComplete="off"
+          />
+          <div className="dock-retry-modal-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setUnsatisfiedModal(null);
+                setUnsatisfiedNote('');
+              }}
+            >
+              {t('dock.msg.unsatisfiedCancel', '取消')}
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={submitUnsatisfiedRetry}>
+              {t('dock.msg.unsatisfiedSubmit', '发送')}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     <ChatHistoryModal
       open={showChatHistoryModal}
       onClose={() => setShowChatHistoryModal(false)}

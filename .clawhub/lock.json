@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "skills": {
+    "nano-banana-pro": {
+      "version": "1.0.1",
+      "installedAt": 1775188082781
+    },
+    "agent-browser-clawdbot": {
+      "version": "0.1.0",
+      "installedAt": 1775208166341
+    },
+    "multi-search-engine": {
+      "version": "2.0.1",
+      "installedAt": 1775215852957
+    },
+    "duckduckgo-search": {
+      "version": "1.0.0",
+      "installedAt": 1775215922963
+    }
+  }
+}

@@ -1,5 +1,7 @@
 export type Tab =
   | 'dashboard'
+  /** 桌面 / Web：RDKClaw 会话与完整本地历史 */
+  | 'ai-chat-hub'
   | 'flasher'
   | 'terminal'
   | 'files'
@@ -27,6 +29,8 @@ export interface Device {
   status: string;
   ip: string;
   port?: number;
+  /** SSH 登录名（与 GET /api/devices 的 username 一致；老缓存可能没有） */
+  sshUsername?: string;
   description?: string;
   /** 与 POST /board/detect?persist=1 写入的板型一致，如 rdk-x5 */
   boardPlatform?: string | null;

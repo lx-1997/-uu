@@ -1,6 +1,7 @@
 /**
  * 进程内 SSH 密码缓存（与 devices.json 落盘密码互补）。
- * /api/devices/connect 与 device_connect_ssh 成功时写入，供 HTTP/Socket 在未带 x-device-password 时快速复用。
+ * /api/devices/connect、device_connect_ssh 成功时写入；Agent 侧 `execOnDevice`/device_exec
+ * 与此共享同一 Map，避免连接成功后备份缓存不一致导致认证失败。
  */
 export const devicePasswordCache = new Map<string, string>();
 

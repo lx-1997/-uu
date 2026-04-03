@@ -11,7 +11,14 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import iconv from 'iconv-lite';
 import type { ChatMessage, Device, StudioUiHints } from '../shared/types.js';
-import { readDevices, writeDevices, serializedWriteDevices } from './storage.js';
+import {
+  readDevices,
+  writeDevices,
+  serializedWriteDevices,
+  invalidateDevicesReadCache,
+  resolveDataDir,
+} from './storage.js';
+import { buildSshPasswordCandidatesForDevice, resolvePrimarySshPassword } from './device-ssh-credentials.js';
 import {
   devicePasswordCache,
   credentialCacheKey,
@@ -35,6 +42,7 @@ import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.
 import { OPENCLAW_BOARD_NPM_SPEC } from './managers/openclaw-board-install-sh.js';
 import { pingVendorModel } from './openclaw-vendor-model-ping.js';
 import * as path from 'path';
+import { ensureAgentMediaDownloadDir, getLocalFilesServeDirs } from './local-files-roots.js';
 import {
   buildBoardDetectionCommand,
   parseBoardDetection,
@@ -45,6 +53,7 @@ import type { RdkPlatform } from '../shared/board-types.js';
 import { shellEscape, isSafeName } from './utils/shell-escape.js';
 import { stripAnsi } from './utils/strip-ansi.js';
 import {
+  DEFAULT_SSH_PASSWORD,
   DEFAULT_VNC_PORT, OPENCLAW_GATEWAY_PORT,
   AI_REQUEST_TIMEOUT_MS,
   FLASH_TMP_IMAGE_XZ, FLASH_TMP_IMAGE_RAW, FLASH_DEFAULT_DEST,
@@ -293,7 +302,8 @@ const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
 const model = process.env.OPENAI_MODEL ?? 'doubao-seed-2.0-pro';
-const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
+/** 与 device_connect_ssh / 设备扫描说明一致：未设置环境变量时回退常见出厂口令 */
+const defaultSshPassword = process.env.RDK_SSH_PASSWORD?.trim() || 'root';
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
   'anthropic-messages',
@@ -527,18 +537,14 @@ async function resolveDevice(request: express.Request, response: express.Respons
 
 function resolvePassword(request: express.Request, device: Device) {
   const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const cachedPassword = devicePasswordCache.get(key);
-  const providedPassword = request.header('x-device-password') ?? '';
-  const persistedPassword = (device as Device & { password?: string }).password ?? '';
-  const password = providedPassword || cachedPassword || persistedPassword || defaultSshPassword;
+  const password = resolvePrimarySshPassword(device, {
+    requestHeaderPassword: request.header('x-device-password') ?? '',
+  });
   return { password, key };
 }
 
 function resolveStoredDevicePassword(device: Device) {
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const cachedPassword = devicePasswordCache.get(key);
-  const persistedPassword = (device as Device & { password?: string }).password ?? '';
-  return cachedPassword || persistedPassword || defaultSshPassword;
+  return resolvePrimarySshPassword(device);
 }
 
 function purgeDeviceSoftwareState(device: Device) {
@@ -1469,13 +1475,16 @@ async function runOnDevice(
   commands: string[],
   options?: { timeoutMs?: number },
 ) {
+  invalidateDevicesReadCache();
   const device = await resolveDevice(request, response, id);
   if (!device) {
     return null;
   }
 
-  const { password, key } = resolvePassword(request, device);
-  if (!password) {
+  const candidates = buildSshPasswordCandidatesForDevice(device, {
+    requestHeaderPassword: request.header('x-device-password') ?? '',
+  });
+  if (candidates.length === 0) {
     sendApiError(
       response,
       400,
@@ -1485,7 +1494,6 @@ async function runOnDevice(
     );
     return null;
   }
-  const candidates = [password];
   const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
   let lastError: unknown = null;
   const output = await runInDeviceLane(device.id, async () => {
@@ -1502,7 +1510,7 @@ async function runOnDevice(
             commands,
             { timeoutMs },
           );
-          devicePasswordCache.set(key, pwd);
+          setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
           return result;
         } catch (error) {
           lastError = error;
@@ -1530,12 +1538,12 @@ async function runOnDevice(
     return { device, output };
   }
 
-  if (!password) {
+  if (isSshAuthError(lastError)) {
     sendApiError(
       response,
-      400,
-      'DEVICE_AUTH_REQUIRED',
-      '设备密码缺失或不正确。请在左侧设备列表中点击该设备，重新输入正确的 SSH 密码后再试',
+      401,
+      'SSH_AUTH_FAILED',
+      'SSH 认证失败（已尝试当前保存的多种口令候选）。请在设备管理中「测试连接」并保存正确密码，或通过请求头 X-Device-Password 传入',
       { retryable: false },
     );
     return null;
@@ -1636,13 +1644,9 @@ app.get('/quick-connect', (_req, res) => {
 });
 
 // Serve agent-downloaded files — search multiple directories for the requested file
-const localFilesDirs = [
-  path.join(process.cwd(), 'workspace', 'downloads'),
-  path.join(process.cwd(), 'downloads'),
-];
 app.get('/api/local-files/:filename', (req, res) => {
   const filename = path.basename(decodeURIComponent(req.params.filename));
-  for (const dir of localFilesDirs) {
+  for (const dir of getLocalFilesServeDirs()) {
     const filePath = path.join(dir, filename);
     if (existsSync(filePath)) {
       const ext = path.extname(filename).toLowerCase();
@@ -1663,22 +1667,20 @@ app.get('/api/local-files/:filename', (req, res) => {
 // ─── Ecosystem Bridge ───
 
 async function sshRunOnDevice(deviceId: string, commands: string[]): Promise<{ output: string } | null> {
+  invalidateDevicesReadCache();
   const devices = await readDevices();
   const device = devices.find((d) => d.id === deviceId);
   if (!device) return null;
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const pwd = devicePasswordCache.get(key)
-    || (device as Device & { password?: string }).password
-    || defaultSshPassword;
-  if (!pwd) return null;
+  const candidates = buildSshPasswordCandidatesForDevice(device);
+  if (candidates.length === 0) return null;
   const output = await runInDeviceLane(device.id, async () => {
-    for (const p of [pwd]) {
+    for (const p of candidates) {
       try {
         const result = await runRemoteCommands(
           { host: device.host, port: device.port ?? 22, username: device.username, password: p },
           commands,
         );
-        devicePasswordCache.set(key, p);
+        setDevicePasswordCache(device.host, device.username, device.port ?? 22, p);
         return result;
       } catch {
         // try next candidate
@@ -2094,11 +2096,9 @@ app.post('/api/apps/one-shot-deploy', async (request, response) => {
     (file) => file.relativePath.replace(/\\/g, '/').toLowerCase() === 'requirements.txt',
   );
 
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const cached = devicePasswordCache.get(key);
-  const persistedPassword = (device as Device & { password?: string }).password ?? '';
-  const seedPassword = cached || persistedPassword || defaultSshPassword;
-  const candidates = seedPassword ? [seedPassword] : [];
+  const candidates = buildSshPasswordCandidatesForDevice(device, {
+    requestHeaderPassword: request.header('x-device-password') ?? '',
+  });
   if (candidates.length === 0) {
     sendApiError(
       response,
@@ -2184,7 +2184,7 @@ app.post('/api/apps/one-shot-deploy', async (request, response) => {
         ));
       }
 
-      devicePasswordCache.set(key, pwd);
+      setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
       let run: { ok: boolean; output: string } | null = null;
       if (runAfterDeploy !== false) {
         const runEntryCommand = normalizedRunCommand || 'python main.py';
@@ -2782,6 +2782,7 @@ const PING_SSH_READY_TIMEOUT_MS = 8000;
  */
 app.get('/api/devices/:id/ping', async (request, response) => {
   const { id } = request.params;
+  invalidateDevicesReadCache();
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
@@ -2791,29 +2792,40 @@ app.get('/api/devices/:id/ping', async (request, response) => {
     return;
   }
 
-  const { password } = resolvePassword(request, device);
-  const pwd = String(password ?? '').trim();
-  if (!pwd) {
+  const candidates = buildSshPasswordCandidatesForDevice(device, {
+    requestHeaderPassword: request.header('x-device-password') ?? '',
+  });
+  if (candidates.length === 0) {
     devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_FAIL_CACHE_TTL_MS });
     response.json({ ok: false, status: 'offline' });
     return;
   }
 
-  try {
-    await verifySshConnection(
-      {
-        host: device.host,
-        port: device.port ?? 22,
-        username: device.username,
-        password: pwd,
-      },
-      { readyTimeoutMs: PING_SSH_READY_TIMEOUT_MS },
-    );
-    response.json({ ok: true, status: 'connected' });
-  } catch {
-    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_FAIL_CACHE_TTL_MS });
-    response.json({ ok: false, status: 'offline' });
+  let ok = false;
+  for (const pwd of candidates) {
+    try {
+      await verifySshConnection(
+        {
+          host: device.host,
+          port: device.port ?? 22,
+          username: device.username,
+          password: pwd,
+        },
+        { readyTimeoutMs: PING_SSH_READY_TIMEOUT_MS },
+      );
+      setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
+      ok = true;
+      break;
+    } catch {
+      /* try next candidate */
+    }
   }
+  if (ok) {
+    response.json({ ok: true, status: 'connected' });
+    return;
+  }
+  devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_FAIL_CACHE_TTL_MS });
+  response.json({ ok: false, status: 'offline' });
 });
 
 app.post('/api/openclaw/agent-action', async (request, response) => {
@@ -2841,12 +2853,11 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
 
   const selectedUsername = username ?? target.username;
   const selectedPort = target.port ?? 22;
-  const passKey = credentialCacheKey(target.host, selectedUsername, selectedPort);
-  const cachedPassword = devicePasswordCache.get(passKey);
-  const providedPassword = request.header('x-device-password') ?? '';
-  const persistedPassword = (target as Device & { password?: string }).password ?? '';
-  const password = providedPassword || cachedPassword || persistedPassword || defaultSshPassword;
-  if (!password) {
+  const deviceForCreds: Device = { ...target, username: selectedUsername, port: selectedPort };
+  const candidates = buildSshPasswordCandidatesForDevice(deviceForCreds, {
+    requestHeaderPassword: request.header('x-device-password') ?? '',
+  });
+  if (candidates.length === 0) {
     sendApiError(
       response,
       400,
@@ -2870,8 +2881,6 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
     switch: `bash -lc '(openclaw model use ${safeModel} || clawctl model use ${safeModel} || echo "switch command unavailable"); (openclaw status || clawctl status || true)'`,
     logs: `bash -lc '(journalctl -u openclaw --no-pager -n 120 || tail -n 120 /var/log/openclaw.log || echo "no openclaw logs found")'`,
   };
-
-  const candidates = [password];
   let lastError: unknown = null;
 
   for (const pwd of candidates) {
@@ -2887,7 +2896,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
           [commandMap[action]],
         ));
 
-        devicePasswordCache.set(passKey, pwd);
+        setDevicePasswordCache(target.host, selectedUsername, selectedPort, pwd);
 
         response.json({
           ok: true,
@@ -2913,11 +2922,6 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
         break;
       }
     }
-  }
-
-  if (!password) {
-    sendApiError(response, 400, 'DEVICE_PASSWORD_MISSING', '设备密码缺失。请在左侧设备列表中点击该设备，重新输入 SSH 密码后再试', { retryable: false });
-    return;
   }
 
   if (isSshAuthError(lastError)) {
@@ -6558,6 +6562,7 @@ app.post('/api/chat', async (request, response) => {
 });
 
 async function startServer() {
+  ensureAgentMediaDownloadDir();
   await restoreSsoSessionsFromDisk();
   await restoreRuntimeJobsState();
   httpServer.once('error', (err: NodeJS.ErrnoException) => {
@@ -6572,6 +6577,26 @@ async function startServer() {
   });
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`RDK Studio server running on http://0.0.0.0:${port}`);
+    const dataDir = resolveDataDir();
+    console.log(`[server] 设备数据目录 (RDK_DATA_DIR): ${dataDir}`);
+    if (
+      typeof process.getuid === 'function' &&
+      process.getuid() === 0 &&
+      !String(process.env.RDK_DATA_DIR ?? '').trim()
+    ) {
+      const su = String(process.env.SUDO_USER ?? '').trim();
+      if (su) {
+        console.log(
+          `[server] 检测到 sudo（SUDO_USER=${su}）：设备数据目录已对齐到该用户主目录下的 .rdk-studio/data（与直接登录该用户时使用同一份 devices.json）。`,
+        );
+      } else {
+        console.warn(
+          '[server] 当前以 root 运行且未设置 RDK_DATA_DIR、也无 SUDO_USER；设备库在 root 的 ~/.rdk-studio/data。',
+          '若曾在普通用户下保存过设备凭据，与当前进程读的不是同一份，可能导致 SSH 反复认证失败。',
+          '建议：不使用 sudo 启动；或设置 RDK_DATA_DIR；或使用 `sudo -E` 保留 SUDO_USER 以便自动对齐数据目录。',
+        );
+      }
+    }
   });
 }
 

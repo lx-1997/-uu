@@ -66,7 +66,12 @@ const AI_PROVIDER_DEFAULTS: Record<string, { label: string; model: string; baseU
   xai: { label: 'xAI (Grok)', model: 'grok-2-latest', baseUrl: 'https://api.x.ai/v1' },
   ollama: { label: 'Ollama (本地)', model: 'qwen2.5:7b', baseUrl: 'http://127.0.0.1:11434/v1' },
   /** 与 server/agent/provider-setup.ts PROVIDER_DEFAULTS 对齐，模型留空保存时才能回落到有效 model */
-  'openai-compatible': { label: 'OpenAI 兼容协议', model: 'gpt-4o-mini', baseUrl: '' },
+  /** 与 config/rdkclaw-provider.defaults.json 内置预设一致（占位示例，非 OpenAI 官网） */
+  'openai-compatible': {
+    label: 'OpenAI 兼容协议',
+    model: 'doubao-seed-2.0-pro',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+  },
   'anthropic-compatible': { label: 'Anthropic 兼容协议', model: 'claude-sonnet-4-20250514', baseUrl: '', protocol: 'anthropic' },
 };
 
@@ -185,7 +190,7 @@ export default function SettingsPanel() {
   const [quickAiLabel, setQuickAiLabel] = useState('');
   const [quickAiThinkingDefault, setQuickAiThinkingDefault] = useState('high');
   const [quickAiReasoningVisibility, setQuickAiReasoningVisibility] = useState('stream');
-  const [quickAiSamplingTemperature, setQuickAiSamplingTemperature] = useState('0.1');
+  const [quickAiSamplingTemperature, setQuickAiSamplingTemperature] = useState('0');
   const [quickAiSamplingTopP, setQuickAiSamplingTopP] = useState('1');
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
   /** AI 引擎卡片内：同一位置切换深度 / 快速，表单状态仍各自独立 */

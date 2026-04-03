@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { initAnalyticsFlushListeners } from './analytics/client';
 import { useStudioPresence } from './analytics/useStudioPresence';
 import { useAppState } from './hooks/useAppState';
@@ -22,9 +22,10 @@ import ElectronSerialPortPicker from './components/ElectronSerialPortPicker';
 import { isDeviceShownOnline } from './utils/device-connection';
 import { getRdkEmbedPanel, type RdkEmbedPanel } from './utils/embed-mode';
 import type { Tab } from './app-types';
-import { STUDIO_AGENT_WEB_OPEN } from './utils/studio-agent-web';
+import { STUDIO_AGENT_WEB_CLOSE, STUDIO_AGENT_WEB_OPEN } from './utils/studio-agent-web';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
+const AiChatHubPage = lazy(() => import('./components/AiChatHubPage'));
 const Flasher = lazy(() => import('./components/Flasher'));
 const Terminal = lazy(() => import('./components/Terminal'));
 const Files = lazy(() => import('./components/Files'));
@@ -84,6 +85,7 @@ function MainContent() {
 
   const standardViews: Record<string, ReactNode> = {
     dashboard: <Dashboard />,
+    'ai-chat-hub': <AiChatHubPage />,
     files: <Files />,
     hardware: <Hardware />,
     skills: <SkillBrowser />,
@@ -207,6 +209,22 @@ function AppShell() {
   } = useAppState();
   const { t } = useI18n();
   const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
+  const agentWebPreviewUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    agentWebPreviewUrlRef.current = agentWebPreviewUrl;
+  }, [agentWebPreviewUrl]);
+
+  const closeAgentWebPreview = useCallback(() => {
+    const u = agentWebPreviewUrlRef.current;
+    if (u && window.rdkDesktop?.closeUrl) {
+      try {
+        window.rdkDesktop.closeUrl(u);
+      } catch {
+        /* ignore */
+      }
+    }
+    setAgentWebPreviewUrl(null);
+  }, []);
 
   useEffect(() => {
     const h = (e: Event) => {
@@ -215,6 +233,22 @@ function AppShell() {
     };
     window.addEventListener(STUDIO_AGENT_WEB_OPEN, h);
     return () => window.removeEventListener(STUDIO_AGENT_WEB_OPEN, h);
+  }, []);
+
+  useEffect(() => {
+    const onClose = () => {
+      const u = agentWebPreviewUrlRef.current;
+      if (u && window.rdkDesktop?.closeUrl) {
+        try {
+          window.rdkDesktop.closeUrl(u);
+        } catch {
+          /* ignore */
+        }
+      }
+      setAgentWebPreviewUrl(null);
+    };
+    window.addEventListener(STUDIO_AGENT_WEB_CLOSE, onClose);
+    return () => window.removeEventListener(STUDIO_AGENT_WEB_CLOSE, onClose);
   }, []);
 
   useStudioPresence(activeTab);
@@ -247,6 +281,7 @@ function AppShell() {
   const tabTitle = useMemo(() => {
     const names: Record<string, string> = {
       dashboard: t('tabs.dashboard', '工作台'),
+      'ai-chat-hub': t('tabs.ai-chat-hub', 'AI 对话'),
       openclaw: t('tabs.openclaw', 'OpenClaw'),
       skills: t('tabs.skills', '技能工坊'),
       terminal: t('tabs.terminal', '终端'),
@@ -269,8 +304,22 @@ function AppShell() {
 
       <div className="app-main-stack">
         <header className="top-bar">
-          <div className="topbar-left">
+          <div className="topbar-left topbar-left-with-embed">
             <span className="topbar-page-name">{tabTitle}</span>
+            {agentWebPreviewUrl ? (
+              <div className="topbar-embed-web-strip" role="status">
+                <span className="topbar-embed-web-url mono" title={agentWebPreviewUrl}>
+                  {agentWebPreviewUrl}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary topbar-embed-web-close"
+                  onClick={closeAgentWebPreview}
+                >
+                  {t('topbar.embedWeb.close', '关闭内嵌网页')}
+                </button>
+              </div>
+            ) : null}
           </div>
           <div className="topbar-right">
             {currentDevice && (
@@ -313,6 +362,22 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
   } = useAppState();
   const { t } = useI18n();
   const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
+  const agentWebPreviewUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    agentWebPreviewUrlRef.current = agentWebPreviewUrl;
+  }, [agentWebPreviewUrl]);
+
+  const closeAgentWebPreview = useCallback(() => {
+    const u = agentWebPreviewUrlRef.current;
+    if (u && window.rdkDesktop?.closeUrl) {
+      try {
+        window.rdkDesktop.closeUrl(u);
+      } catch {
+        /* ignore */
+      }
+    }
+    setAgentWebPreviewUrl(null);
+  }, []);
 
   useStudioPresence(panel === 'openclaw' ? 'openclaw' : 'dashboard');
 
@@ -327,6 +392,22 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
     };
     window.addEventListener(STUDIO_AGENT_WEB_OPEN, h);
     return () => window.removeEventListener(STUDIO_AGENT_WEB_OPEN, h);
+  }, []);
+
+  useEffect(() => {
+    const onClose = () => {
+      const u = agentWebPreviewUrlRef.current;
+      if (u && window.rdkDesktop?.closeUrl) {
+        try {
+          window.rdkDesktop.closeUrl(u);
+        } catch {
+          /* ignore */
+        }
+      }
+      setAgentWebPreviewUrl(null);
+    };
+    window.addEventListener(STUDIO_AGENT_WEB_CLOSE, onClose);
+    return () => window.removeEventListener(STUDIO_AGENT_WEB_CLOSE, onClose);
   }, []);
 
   useEffect(() => {
@@ -361,9 +442,25 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
 
       <div className="app-main-stack">
         <header className="top-bar rdk-embed-topbar">
-          <div className="topbar-left">
+          <div className="topbar-left topbar-left-with-embed">
             <span className="topbar-page-name">{embedTitle}</span>
-            <span className="rdk-embed-hint">{t('embed.dragHint', '可拖到另一显示器与主窗口并排')}</span>
+            {!agentWebPreviewUrl ? (
+              <span className="rdk-embed-hint">{t('embed.dragHint', '可拖到另一显示器与主窗口并排')}</span>
+            ) : null}
+            {agentWebPreviewUrl ? (
+              <div className="topbar-embed-web-strip" role="status">
+                <span className="topbar-embed-web-url mono" title={agentWebPreviewUrl}>
+                  {agentWebPreviewUrl}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary topbar-embed-web-close"
+                  onClick={closeAgentWebPreview}
+                >
+                  {t('topbar.embedWeb.close', '关闭内嵌网页')}
+                </button>
+              </div>
+            ) : null}
           </div>
           <div className="topbar-right">
             {currentDevice && (

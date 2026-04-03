@@ -36,6 +36,7 @@ import { createSkillhubTools } from "../agent/tools/skillhub-tools.js";
 import { createSkillDiscoveryTools } from "../agent/tools/skill-discovery-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { readDevices } from "../storage.js";
+import { DEFAULT_SSH_PASSWORD } from "../constants.js";
 import { CONVERSATION_SCHEMA, recordConversationTurn } from "../conversation-log.js";
 
 /** 长任务「仍在处理」心跳间隔。可用 RDKCLAW_RUN_PROGRESS_INTERVAL_MS 覆盖（毫秒，3s–300s）。 */
@@ -46,6 +47,19 @@ function resolveRdkclawRunProgressIntervalMs(): number {
     if (Number.isFinite(n)) return Math.min(300_000, Math.max(3_000, n));
   }
   return 12_000;
+}
+
+/**
+ * Agent 外层 reasoning 轮次上限（内层每轮 = 一次模型调用，常含多工具）。
+ * 「思考」与「快捷回答」共用同一上限；默认 32 轮，可用 RDKCLAW_MAX_AGENT_TURNS 提高（上限 200 防抖）。
+ */
+function resolveRdkclawMaxAgentTurns(): number {
+  const raw = process.env.RDKCLAW_MAX_AGENT_TURNS;
+  if (raw) {
+    const n = Number.parseInt(String(raw).trim(), 10);
+    if (Number.isFinite(n) && n > 0) return Math.min(200, n);
+  }
+  return 32;
 }
 import type { ConversationOutcome } from "../conversation-types.js";
 import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
@@ -77,7 +91,8 @@ import {
   getExternalChannelPolicy,
   validateExecCommand,
 } from "./channel-safety.js";
-import { evaluatePermissionGuard } from "./permission-guard.js";
+import { getAgentMediaDownloadDir } from "../local-files-roots.js";
+import { evaluatePermissionGuard, type SandboxGuardContext } from "./permission-guard.js";
 import { mapMiniEvent, resolveExecutor } from "./event-mapper.js";
 import { sanitizeSecrets } from "./secret-sanitizer.js";
 import { TextDeltaSmoother } from "./text-delta-smoother.js";
@@ -148,9 +163,19 @@ function resolveProviderConfigForLane(lane: "thinking" | "quick"): ProviderConfi
 }
 
 function resolveBoardDevicePassword(device: { username: string; password?: string }) {
-  const persisted = device.password ?? "";
-  const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
-  return persisted || envPwd;
+  const persisted = String(device.password ?? "").trim();
+  return persisted || process.env.RDK_SSH_PASSWORD?.trim() || DEFAULT_SSH_PASSWORD;
+}
+
+/**
+ * 明显寒暄/试探：无附件时可跳过每轮 Markdown→主存全量同步，缩短首包前耗时。
+ * 若必须在本轮注入 WORKSPACE 的 MEMORY.md/USER.md，请发非寒暄句或带附件。
+ */
+function isTrivialStudioChatMessage(message: string): boolean {
+  const t = message.trim();
+  if (t.length === 0 || t.length > 48) return false;
+  if (/[\n\r`#[\](){}\/\\]|附件|设备|ssh|ros|板|部署|错误|log|api|http/i.test(t)) return false;
+  return /^(你好|您好|嗨|hi|hello|hey|在吗|在么|早上好|晚上好|谢谢|多谢|哈喽|hallo)(?:[!！。.?？~～\s]*)$/i.test(t);
 }
 
 type RuntimeHealthReport = {
@@ -554,6 +579,8 @@ export class RDKClawApp {
     emitEvent: (event: RDKClawEvent) => void,
     base: { runId: string; sessionId: string },
     channel: ChannelSource = "studio",
+    sandbox: SandboxGuardContext,
+    isPackagedDesktop: boolean,
   ): Tool {
     return {
       ...tool,
@@ -586,6 +613,8 @@ export class RDKClawApp {
           workspaceDir: this.workspaceDir,
           channel,
           permission: policy.permission,
+          sandbox,
+          isPackagedDesktop,
         });
         if (guardResult.blocked) {
           if (policy.permission.auditLogEnabled) {
@@ -705,7 +734,9 @@ export class RDKClawApp {
     providerConfig: ProviderConfig,
     sessionAttachments: Awaited<ReturnType<typeof prepareSessionAttachments>>["allAttachments"],
     safeMode: boolean,
-    boardSnapshot?: BoardSnapshot,
+    boardSnapshot: BoardSnapshot | undefined,
+    sandbox: SandboxGuardContext,
+    isPackagedDesktop: boolean,
   ): Tool[] {
     const tools: Tool[] = [
       ...builtinTools,
@@ -735,6 +766,7 @@ export class RDKClawApp {
     }
     if (req.deviceId) {
       const deviceTools = createRdkTools(req.deviceId, {
+        openClawManager: this.openClawManager,
         onMediaDownloaded: (info) => {
           registerToolDownloadedAttachment(base.sessionId, sessionAttachments, {
             localPath: info.localPath,
@@ -859,11 +891,15 @@ export class RDKClawApp {
       ];
       const filtered = tools.filter((tool) => !blockPatterns.some((pattern) => pattern.test(tool.name)));
       const channel = req.channel || "studio";
-      return filtered.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base, channel));
+      return filtered.map((tool) =>
+        this.wrapToolWithApproval(tool, policy, emitEvent, base, channel, sandbox, isPackagedDesktop),
+      );
     }
 
     const channel = req.channel || "studio";
-    return tools.map((tool) => this.wrapToolWithApproval(tool, policy, emitEvent, base, channel));
+    return tools.map((tool) =>
+      this.wrapToolWithApproval(tool, policy, emitEvent, base, channel, sandbox, isPackagedDesktop),
+    );
   }
 
   /**
@@ -965,11 +1001,12 @@ export class RDKClawApp {
     const externalAbortSignal = req.abortSignal;
     let abortedByClient = Boolean(externalAbortSignal?.aborted);
 
-    const earlyRunId = crypto.randomUUID();
+    /** 与下方 `runAgents.set` 使用同一 ID，避免首条 setup meta 与真实 run 不一致导致客户端 cancel 404 */
+    const runId = crypto.randomUUID();
     yield {
       type: "meta",
       data: {
-        runId: earlyRunId,
+        runId,
         sessionId: sessionKey,
         executor: "rdkclaw_local",
         phase: "setup",
@@ -996,7 +1033,8 @@ export class RDKClawApp {
       providerConfig,
       attachmentState.newAttachments.map((item) => item.id),
     );
-    const boardSnapshot = await boardSnapshotPromise;
+    /** 快照与 workspace 互不依赖：并行等待以压缩 setup 阶段（不改变提示词与决策输入） */
+    const [boardSnapshot, workspace] = await Promise.all([boardSnapshotPromise, workspacePromise]);
     const boardSnapshotMs = Date.now() - boardSnapshotStartedAt;
     if (req.deviceId) {
       const devices = await readDevices();
@@ -1006,7 +1044,6 @@ export class RDKClawApp {
         (req as { platform?: RdkPlatform }).platform = bp as RdkPlatform;
       }
     }
-    const workspace = await workspacePromise;
     const workspaceInitMs = Date.now() - workspaceStartedAt;
     if (workspace.workspaceDir !== this.workspaceDir) {
       this.skills.addExtraDir(path.join(workspace.workspaceDir, "skills"));
@@ -1034,6 +1071,7 @@ export class RDKClawApp {
       allAttachments: attachmentState.allAttachments,
       policy,
       studioQuickAnswer: studioQuick,
+      latestUserMessage: effectiveMessage,
     });
     const promptTelemetry = hashSystemPromptLayers(promptBundle.combined, promptBundle.layers);
     const promptStableDynamic = hashStableDynamicSystemPrompt(promptBundle.stablePrefix, promptBundle.dynamicSuffix);
@@ -1082,7 +1120,6 @@ export class RDKClawApp {
           },
     };
 
-    const runId = crypto.randomUUID();
     const base = { runId, sessionId: sessionKey };
     const queue: RDKClawEvent[] = [];
     let queueWaiters: Array<() => void> = [];
@@ -1181,9 +1218,25 @@ export class RDKClawApp {
         },
       },
     });
-    const extraRoots: string[] = [];
+    const extraRoots: string[] = [getAgentMediaDownloadDir()];
     if (workspace.workspaceDir !== this.workspaceDir) {
       extraRoots.push(workspace.workspaceDir);
+    }
+
+    /** 权限守卫与 read/write 使用同一套路径解析，禁止落盘/读取 Studio 安装目录 */
+    const sandboxForGuard: SandboxGuardContext = {
+      studioInstallRoot: this.workspaceDir,
+      bootstrapDir: workspace.workspaceDir,
+      extraAllowedRoots: extraRoots,
+    };
+    const isPackagedDesktop = process.env.RDK_PACKAGED_DESKTOP === "1";
+    if (
+      !isPackagedDesktop &&
+      path.resolve(workspace.workspaceDir) === path.resolve(this.workspaceDir)
+    ) {
+      console.warn(
+        "[rdkclaw] 用户工作台与 Studio 工程目录相同：开发模式下将拦截对该目录的读写；建议工作台单独使用 ~/.rdkstudio/rdkclaw-workspaces。",
+      );
     }
 
     const sessionDeviceIdRef: { current: string | undefined } = {
@@ -1201,6 +1254,8 @@ export class RDKClawApp {
         attachmentState.allAttachments,
         health.safeMode,
         boardSnapshot,
+        sandboxForGuard,
+        isPackagedDesktop,
       );
 
     const rdkReasoning = resolveRdkclawAgentReasoning(providerConfig);
@@ -1209,6 +1264,10 @@ export class RDKClawApp {
     const agent = new Agent({
       agentId: "rdkclaw",
       systemPrompt,
+      systemPromptSplit: {
+        stable: promptBundle.stablePrefix,
+        dynamic: promptBundle.dynamicSuffix,
+      },
       systemPromptTelemetry: {
         hashShort: promptTelemetry.combinedHashShort,
         layerCount: promptBundle.layers.length,
@@ -1239,14 +1298,14 @@ export class RDKClawApp {
       bootstrapDir: workspace.workspaceDir,
       sessionDir: workspace.sessionDir,
       memoryDir: workspace.memoryDir,
-      extraAllowedRoots: extraRoots.length > 0 ? extraRoots : undefined,
+      extraAllowedRoots: extraRoots,
       enableContext: true,
       /** 快速：不注入「先 read SKILL.md」链，避免首轮工具往返 */
       enableSkills: !studioQuick,
       enableMemory: true,
       enableHeartbeat: !studioQuick,
       contextBootstrapMaxChars: studioQuick ? 9000 : undefined,
-      maxTurns: studioQuick ? 4 : 12,
+      maxTurns: resolveRdkclawMaxAgentTurns(),
       temperature: resolveSamplingTemperature(providerConfig),
       topP: resolveSamplingTopP(providerConfig),
       reasoning: rdkReasoning === null ? null : rdkReasoning,
@@ -1255,27 +1314,25 @@ export class RDKClawApp {
     });
     agentInstance = agent;
 
-    const markdownMemorySync = studioQuick
+    const skipMarkdownMemorySync =
+      studioQuick ||
+      (attachmentState.allAttachments.length === 0 && isTrivialStudioChatMessage(String(req.message || "").trim()));
+    const markdownMemorySync = skipMarkdownMemorySync
       ? { imported: 0, projectionPath: "", projectionCount: 0 }
       : await syncWorkspaceMarkdownMemory({
           workspaceDir: workspace.workspaceDir,
           memory: agent.getMemory(),
         });
+    /** 每轮同步仍执行（见 syncWorkspaceMarkdownMemory）；不向 UI 推 meta（条数常固定，易成噪声） */
     if (markdownMemorySync.imported > 0) {
-      pushEvent({
-        type: "meta",
-        data: {
-          ...base,
-          executor: "rdkclaw_local",
-          phase: "memory_sync",
-          message: `已同步 ${markdownMemorySync.imported} 条 Markdown 记忆到结构化主存`,
-          projection_path: markdownMemorySync.projectionPath,
-          projection_count: markdownMemorySync.projectionCount,
-        },
-      });
+      console.debug(
+        `[rdkclaw] markdown memory sync: imported=${markdownMemorySync.imported} projection=${markdownMemorySync.projectionCount} ${markdownMemorySync.projectionPath}`,
+      );
     }
     let finished = false;
     let failed: unknown = null;
+    /** agent-loop 在触顶或中止时推送 turn_transition，用于 run_complete 向 UI 说明「并非无故结束」 */
+    let turnTransitionReason: string | null = null;
     let runResult:
       | { runId?: string; text: string; turns: number; toolCalls: number; skillTriggered?: string; memoriesUsed?: number }
       | null = null;
@@ -1335,12 +1392,33 @@ export class RDKClawApp {
 
     let progressTimer: ReturnType<typeof setInterval> | undefined;
     let firstProgressHandle: ReturnType<typeof setTimeout> | undefined;
+    /** 模型已开始向用户显示流式输出时，停止「仍在处理中」心跳，避免末尾与完成条重复 */
+    let idleProgressMuted = false;
+    const muteIdleProgressPolling = () => {
+      if (studioQuick || idleProgressMuted) return;
+      idleProgressMuted = true;
+      if (firstProgressHandle) {
+        clearTimeout(firstProgressHandle);
+        firstProgressHandle = undefined;
+      }
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = undefined;
+      }
+    };
+    const resumeProgressPollingForLongTools = () => {
+      if (studioQuick || finished || progressTimer) return;
+      progressTimer = setInterval(() => pushRunProgress("interval"), runProgressIntervalMs);
+    };
     if (!studioQuick) {
       progressTimer = setInterval(() => pushRunProgress("interval"), runProgressIntervalMs);
       firstProgressHandle = setTimeout(() => pushRunProgress("interval"), 5_000);
     }
 
     const unsubscribe = agent.subscribe((event) => {
+      if (event.type === "turn_transition") {
+        turnTransitionReason = event.reason;
+      }
       if (event.type === "compaction") {
         runMetrics.compactionCount += 1;
         runMetrics.compactionDroppedMessages += Math.max(0, Number(event.droppedMessages || 0));
@@ -1358,14 +1436,19 @@ export class RDKClawApp {
         if (runMetrics.toolCallNames.length > 50) {
           runMetrics.toolCallNames = runMetrics.toolCallNames.slice(-30);
         }
+        resumeProgressPollingForLongTools();
         pushRunProgress("tool_start", event.toolName);
       }
       if (event.type === "message_delta") {
+        muteIdleProgressPolling();
         textSmoother.push(sanitizeSecrets(event.delta));
         return;
       }
       // 扩展思考流式块：独立于正文 smoother，避免每个 token 都 flush 正文
       if (event.type === "thinking_delta") {
+        if (streamThinkingToClient && String((event as { delta?: string }).delta ?? "").length > 0) {
+          muteIdleProgressPolling();
+        }
         if (!streamThinkingToClient) return;
         const mapped = mapMiniEvent(event, base);
         if (mapped) pushEvent(mapped);
@@ -1550,6 +1633,13 @@ export class RDKClawApp {
         elapsed_display: elapsedDisplay,
         tool_calls: totalCalls,
         compaction_count: runMetrics.compactionCount,
+        ...(turnTransitionReason === "max_turns_reached"
+          ? {
+              stop_reason: "max_turns_reached",
+              stop_hint:
+                "本轮已达推理轮次上限，若答复不完整可提高环境变量 RDKCLAW_MAX_AGENT_TURNS（≤200）后重启 Studio。",
+            }
+          : {}),
       },
     };
   }

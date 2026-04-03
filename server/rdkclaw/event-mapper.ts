@@ -120,6 +120,30 @@ export function mapMiniEvent(
           microcompact_saved_chars: event.savedChars,
         },
       };
+    case "stale_read_invalidate":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `剔除过时读取 ${event.invalidatedCount} 处，节省约 ${event.savedChars} 字符`,
+          stale_read_invalidated_count: event.invalidatedCount,
+          stale_read_saved_chars: event.savedChars,
+        },
+      };
+    case "tail_tool_snip":
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `尾段超长工具输出截断 ${event.snippedCount} 处，节省约 ${event.savedChars} 字符`,
+          tail_tool_snip_count: event.snippedCount,
+          tail_tool_snip_saved_chars: event.savedChars,
+        },
+      };
     case "emergency_truncation":
       return {
         type: "meta",
@@ -175,6 +199,29 @@ export function mapMiniEvent(
           subagent_label: event.label,
         },
       };
+    case "turn_transition": {
+      const { turn, reason } = event;
+      let message: string;
+      if (reason === "max_turns_reached") {
+        message =
+          `已达到本轮推理轮次上限（第 ${turn} 轮），编排在此结束，回复可能不完整。可将环境变量 RDKCLAW_MAX_AGENT_TURNS 调大（≤200）并重启 Studio，或拆成多段对话。「快捷」与「思考」模式本轮次上限一致。`;
+      } else if (reason === "aborted_by_user") {
+        message = "推理已被中止（你点了停止、或页面/网络连接断开导致取消）。";
+      } else {
+        message = `推理已结束（原因: ${reason}，第 ${turn} 轮）。`;
+      }
+      return {
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "limit",
+          message,
+          turn_transition_reason: reason,
+          turn_transition_turn: turn,
+        },
+      };
+    }
     case "agent_end":
       return null;
     default:

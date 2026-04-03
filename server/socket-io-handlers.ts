@@ -189,8 +189,8 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
         const persistedPassword = (device as Device & { password?: string }).password ?? '';
         const pwd =
           password
-          || devicePasswordCache.get(passKey)
           || persistedPassword
+          || devicePasswordCache.get(passKey)
           || defaultSshPassword;
 
         sshClient = new Client();

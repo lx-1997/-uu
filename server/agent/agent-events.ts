@@ -70,6 +70,10 @@ export type MiniAgentEvent =
 
   // 可观测性事件（借鉴 claude-code run metrics）
   | { type: "microcompact"; compressedCount: number; savedChars: number }
+  /** 文件被改写后，剔除过时 read/device_file_read 的大段 tool_result（零 LLM） */
+  | { type: "stale_read_invalidate"; invalidatedCount: number; savedChars: number }
+  /** 长上下文：近尾段仍保留的 tool_result 中超长条单行截断 */
+  | { type: "tail_tool_snip"; snippedCount: number; savedChars: number }
   | { type: "emergency_truncation"; droppedMessages: number; keptMessages: number }
   /** 输出因 max_tokens 截断自动续写（借鉴 claude-code continuation） */
   | { type: "output_continuation"; attempt: number; maxAttempts: number }

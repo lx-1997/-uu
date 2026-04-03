@@ -10,6 +10,7 @@ import { FeishuAuthStore } from "../../rdkclaw/feishu-auth-store.js";
 import type { NotificationHub } from "../../rdkclaw/notification-hub.js";
 import { readDevices } from "../../storage.js";
 import { matchTextApproval } from "../../rdkclaw/channel-safety.js";
+import { getAgentMediaDownloadDir } from "../../local-files-roots.js";
 
 type WeixinChannelOptions = {
   rdkclaw: RDKClawApp;
@@ -575,6 +576,7 @@ export class WeixinPollingChannel {
           const basename = path.basename(decodeURIComponent(p.replace("/api/local-files/", "")));
           const workDir = process.env.RDK_WORKSPACE_DIR || process.cwd();
           const candidates = [
+            path.join(getAgentMediaDownloadDir(), basename),
             path.join(workDir, "workspace", "downloads", basename),
             path.join(workDir, "downloads", basename),
           ];

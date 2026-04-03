@@ -9,6 +9,7 @@ const defaultPermission = {
 };
 
 import * as path from 'node:path';
+import * as os from 'node:os';
 
 const workspaceDir = path.resolve(process.cwd());
 
@@ -240,5 +241,78 @@ describe('risk classification', () => {
     expect(guard('exec', { command: 'ls -la' }).risk).toBe('medium');
     expect(guard('exec', { command: 'rm old.log' }).risk).toBe('high');
     expect(guard('exec', { command: 'npm install express' }).risk).toBe('high');
+  });
+});
+
+describe('sandbox studio install root (matches tool path resolution)', () => {
+  const studioRoot = path.resolve(process.cwd());
+  const tmpBootstrap = path.join(os.tmpdir(), `rdkclaw-guard-bootstrap-${process.pid}`);
+
+  it('blocks write with absolute path into studio install', () => {
+    const abs = path.join(studioRoot, 'server/index.ts');
+    const result = evaluatePermissionGuard({
+      toolName: 'write',
+      args: { file_path: abs, content: 'x' },
+      workspaceDir: studioRoot,
+      channel: 'studio',
+      permission: defaultPermission,
+      sandbox: { studioInstallRoot: studioRoot, bootstrapDir: tmpBootstrap },
+      isPackagedDesktop: false,
+    });
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toMatch(/开发模式|工程/);
+  });
+
+  it('allows write resolved only under bootstrap (e.g. user src/)', () => {
+    const result = evaluatePermissionGuard({
+      toolName: 'write',
+      args: { file_path: 'src/app.py', content: 'x' },
+      workspaceDir: studioRoot,
+      channel: 'studio',
+      permission: defaultPermission,
+      sandbox: { studioInstallRoot: studioRoot, bootstrapDir: tmpBootstrap },
+      isPackagedDesktop: false,
+    });
+    expect(result.blocked).toBe(false);
+  });
+
+  it('blocks read with absolute path into studio install', () => {
+    const abs = path.join(studioRoot, 'package.json');
+    const result = evaluatePermissionGuard({
+      toolName: 'read',
+      args: { file_path: abs },
+      workspaceDir: studioRoot,
+      channel: 'studio',
+      permission: defaultPermission,
+      sandbox: { studioInstallRoot: studioRoot, bootstrapDir: tmpBootstrap },
+      isPackagedDesktop: false,
+    });
+    expect(result.blocked).toBe(true);
+  });
+
+  it('when bootstrap equals studio root, blocks mutating package.json via relative path', () => {
+    const result = evaluatePermissionGuard({
+      toolName: 'write',
+      args: { file_path: 'package.json', content: '{}' },
+      workspaceDir: studioRoot,
+      channel: 'studio',
+      permission: defaultPermission,
+      sandbox: { studioInstallRoot: studioRoot, bootstrapDir: studioRoot },
+      isPackagedDesktop: false,
+    });
+    expect(result.blocked).toBe(true);
+  });
+
+  it('packaged app (isPackagedDesktop true) allows write under studio tree via relaxed policy', () => {
+    const result = evaluatePermissionGuard({
+      toolName: 'write',
+      args: { file_path: 'server/index.ts', content: '// x' },
+      workspaceDir: studioRoot,
+      channel: 'studio',
+      permission: defaultPermission,
+      sandbox: { studioInstallRoot: studioRoot, bootstrapDir: studioRoot },
+      isPackagedDesktop: true,
+    });
+    expect(result.blocked).toBe(false);
   });
 });

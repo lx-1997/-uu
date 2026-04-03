@@ -1,6 +1,15 @@
 import * as path from 'node:path';
 import type { ChannelSource, RiskLevel } from './types.js';
 import { stripShellPrefixBeforeHeredoc } from './channel-safety.js';
+import { resolveSandboxPath } from '../agent/sandbox-paths.js';
+
+export type SandboxGuardContext = {
+  /** RDK Studio 安装 / 源码根目录（与 Agent.workspaceDir 一致） */
+  studioInstallRoot: string;
+  /** 用户工作台根（与 Agent.bootstrapDir / read·write 的 cwd 一致） */
+  bootstrapDir: string;
+  extraAllowedRoots?: string[];
+};
 
 type GuardInput = {
   toolName: string;
@@ -13,6 +22,14 @@ type GuardInput = {
     hostMutationGuardEnabled: boolean;
     commandDangerGuardEnabled: boolean;
   };
+  /** 传入时按真实沙箱解析路径，禁止读写落入安装目录（防绝对路径与 bootstrap 误指向仓库） */
+  sandbox?: SandboxGuardContext;
+  /**
+   * 桌面包安装（Electron `RDK_PACKAGED_DESKTOP=1`）时为 true：**不**对安装目录做强沙箱（仅 SOUL/.git 等基线防护）。
+   * 开发态（未设该变量）为 false：**启用**安装目录沙箱，防止 Agent 改本机上的 Studio 源码/工程目录。
+   * 未传 `isPackagedDesktop` 且未传 `sandbox` 时走 legacy（单测）。
+   */
+  isPackagedDesktop?: boolean;
 };
 
 export type PermissionGuardResult = {
@@ -149,6 +166,39 @@ function isSensitiveReadPath(targetPath: string, workspaceDir: string): boolean 
   return SENSITIVE_READ_PATTERNS.some((pat) => normalized.includes(pat));
 }
 
+function isPathUnderDir(filePath: string, dirPath: string): boolean {
+  const absFile = path.resolve(filePath);
+  const absDir = path.resolve(dirPath);
+  if (absFile === absDir) return true;
+  const rel = path.relative(absDir, absFile);
+  return !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function resolvedPathHasProtectedSegment(absPath: string): boolean {
+  const normalized = normalizePathLike(absPath).toLowerCase();
+  return LOCAL_PROTECTED_SEGMENTS.some((segment) => normalized.includes(segment));
+}
+
+function resolvedPathHasSensitiveReadSegment(absPath: string): boolean {
+  const normalized = normalizePathLike(absPath).toLowerCase();
+  return SENSITIVE_READ_PATTERNS.some((pat) => normalized.includes(pat));
+}
+
+/** 与 read/write 工具一致的路径解析；失败表示逃逸到未授权根，不在此拦截（交由工具报错） */
+function tryResolveSandboxTarget(filePath: string, sandbox: SandboxGuardContext): string | null {
+  try {
+    const { resolved } = resolveSandboxPath({
+      filePath,
+      cwd: sandbox.bootstrapDir,
+      root: sandbox.studioInstallRoot,
+      extraRoots: sandbox.extraAllowedRoots,
+    });
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
 function isSystemManagedPath(targetPath: string): boolean {
   const normalized = normalizePathLike(targetPath).toLowerCase();
   const baseName = path.posix.basename(normalized);
@@ -199,8 +249,12 @@ function checkLocalHostPollution(command: string): string | null {
 }
 
 export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResult {
-  const { toolName, args, workspaceDir, channel, permission } = input;
-  if (toolName === 'studio_open_url' || toolName === 'studio_embedded_browser_capture') {
+  const { toolName, args, workspaceDir, channel, permission, sandbox, isPackagedDesktop } = input;
+  if (
+    toolName === 'studio_open_url' ||
+    toolName === 'studio_embedded_browser_capture' ||
+    toolName === 'studio_open_local_preview'
+  ) {
     return { blocked: false, risk: 'low' };
   }
   const command = extractString(args, 'command');
@@ -221,24 +275,105 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
 
   if ((toolName === 'write' || toolName === 'edit') && permission.workspaceBoundaryEnabled) {
     const targetPath = extractString(args, 'file_path');
-    if (targetPath && isSystemManagedPath(targetPath)) {
-      return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
-    }
-    if (targetPath && isProtectedLocalPath(targetPath, workspaceDir)) {
-      return { blocked: true, reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules/.env 等）', risk: 'high' };
-    }
-    if (targetPath && isStudioSourcePath(targetPath, workspaceDir)) {
-      return { blocked: true, reason: '禁止修改 RDK Studio 源代码文件（server/src/package.json 等）', risk: 'high' };
+    if (targetPath) {
+      const strictInstallSandbox = isPackagedDesktop !== true && Boolean(sandbox);
+      const relaxedPackagedApp = isPackagedDesktop === true;
+
+      if (strictInstallSandbox && sandbox) {
+        const resolvedTarget = tryResolveSandboxTarget(targetPath, sandbox);
+        if (
+          resolvedTarget &&
+          isPathUnderDir(resolvedTarget, sandbox.studioInstallRoot)
+        ) {
+          return {
+            blocked: true,
+            reason:
+              '开发模式下禁止修改 RDK Studio 工程/安装目录。请只改用户工作台（如 ~/.rdkstudio/rdkclaw-workspaces）；桌面包内不做此项整目录拦截。',
+            risk: 'high',
+          };
+        }
+        if (resolvedTarget) {
+          if (isSystemManagedPath(targetPath)) {
+            return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
+          }
+          if (resolvedPathHasProtectedSegment(resolvedTarget)) {
+            return {
+              blocked: true,
+              reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules/.env 等）',
+              risk: 'high',
+            };
+          }
+        }
+      } else if (relaxedPackagedApp) {
+        if (isSystemManagedPath(targetPath)) {
+          return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
+        }
+        if (isProtectedLocalPath(targetPath, workspaceDir)) {
+          return {
+            blocked: true,
+            reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules/.env 等）',
+            risk: 'high',
+          };
+        }
+      } else {
+        if (isSystemManagedPath(targetPath)) {
+          return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
+        }
+        if (isProtectedLocalPath(targetPath, workspaceDir)) {
+          return { blocked: true, reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules/.env 等）', risk: 'high' };
+        }
+        if (isStudioSourcePath(targetPath, workspaceDir)) {
+          return { blocked: true, reason: '禁止修改 RDK Studio 源代码文件（server/src/package.json 等）', risk: 'high' };
+        }
+      }
     }
   }
 
   if (toolName === 'read' && permission.workspaceBoundaryEnabled) {
     const targetPath = extractString(args, 'file_path');
-    if (targetPath && isSystemManagedPath(targetPath)) {
-      return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
-    }
-    if (targetPath && isSensitiveReadPath(targetPath, workspaceDir)) {
-      return { blocked: true, reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）', risk: 'high' };
+    if (targetPath) {
+      const strictInstallSandbox = isPackagedDesktop !== true && Boolean(sandbox);
+      const relaxedPackagedApp = isPackagedDesktop === true;
+
+      if (strictInstallSandbox && sandbox) {
+        const resolvedTarget = tryResolveSandboxTarget(targetPath, sandbox);
+        if (
+          resolvedTarget &&
+          isPathUnderDir(resolvedTarget, sandbox.studioInstallRoot)
+        ) {
+          return {
+            blocked: true,
+            reason: '开发模式下禁止读取 RDK Studio 工程/安装目录（请使用用户工作台中的文件）',
+            risk: 'high',
+          };
+        }
+        if (resolvedTarget) {
+          if (isSystemManagedPath(targetPath)) {
+            return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
+          }
+          if (resolvedPathHasSensitiveReadSegment(resolvedTarget)) {
+            return {
+              blocked: true,
+              reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）',
+              risk: 'high',
+            };
+          }
+        }
+      } else if (relaxedPackagedApp) {
+        if (isSystemManagedPath(targetPath)) {
+          return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
+        }
+        if (isSensitiveReadPath(targetPath, workspaceDir)) {
+          return { blocked: true, reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）', risk: 'high' };
+        }
+      } else {
+        if (isSystemManagedPath(targetPath)) {
+          return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
+        }
+        if (isSensitiveReadPath(targetPath, workspaceDir)) {
+          return { blocked: true, reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）', risk: 'high' };
+        }
+      }
     }
   }
 

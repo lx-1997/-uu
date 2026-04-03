@@ -68,6 +68,56 @@ export function persistStudioChatSessionId(deviceId: string, sessionId: string):
   }
 }
 
+/** 只读当前窗口为该设备选中的会话 id（不创建新 id） */
+export function peekStudioChatSessionId(deviceId: string): string | null {
+  const key = chatSessionStorageKey(deviceId);
+  const isEmbed = typeof window !== 'undefined' && getRdkEmbedPanel() != null;
+  try {
+    const fromSession = sessionStorage.getItem(key)?.trim();
+    if (fromSession) return fromSession;
+    if (!isEmbed) {
+      return localStorage.getItem(key)?.trim() || null;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** 某设备下已在 localStorage 中出现的 Studio 线程 id（可多会话分片存档） */
+export function listStoredStudioSessionIdsForDevice(deviceId: string): string[] {
+  const dev = toChatDeviceId(deviceId);
+  const basePrefix = `${CHAT_HISTORY_KEY_PREFIX}${dev}`;
+  const ids = new Set<string>();
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k === basePrefix) {
+        const p = peekStudioChatSessionId(dev);
+        if (p) ids.add(p);
+        else if (localStorage.getItem(basePrefix)) {
+          ids.add(getOrCreateStudioChatSessionId(dev));
+        }
+        continue;
+      }
+      if (k.startsWith(`${basePrefix}:`)) {
+        const sid = k.slice(basePrefix.length + 1);
+        if (sid) ids.add(sid);
+      }
+    }
+    if (dev === GLOBAL_CHAT_DEVICE_ID && localStorage.getItem(CHAT_HISTORY_LEGACY_KEY)) {
+      const p = peekStudioChatSessionId(GLOBAL_CHAT_DEVICE_ID);
+      if (p) ids.add(p);
+    }
+  } catch {
+    /* ignore */
+  }
+  const peek = peekStudioChatSessionId(dev);
+  if (peek) ids.add(peek);
+  return [...ids].sort();
+}
+
 /** 升级前「每设备单文件」存档键（已无会话后缀） */
 export function chatHistoryLegacyDeviceKey(deviceId: string) {
   return `${CHAT_HISTORY_KEY_PREFIX}${toChatDeviceId(deviceId)}`;
@@ -78,6 +128,62 @@ export function chatHistoryStorageKey(deviceId: string, studioSessionId: string)
   const dev = toChatDeviceId(deviceId);
   const sid = String(studioSessionId || '').trim() || '_na';
   return `${CHAT_HISTORY_KEY_PREFIX}${dev}:${sid}`;
+}
+
+/**
+ * 删除某设备下指定 Studio 线程的本机对话存档（localStorage 中的 JSON 分片）。
+ * 不改动 `rdk:chat:session-id:*`；若正在使用该线程的窗口需由调用方重置会话 id（见 deleteStudioThread）。
+ */
+export function purgeLocalChatThread(deviceId: string, studioSessionId: string): void {
+  const dev = toChatDeviceId(deviceId);
+  const sid = String(studioSessionId || '').trim();
+  if (!sid) return;
+  try {
+    localStorage.removeItem(chatHistoryStorageKey(dev, sid));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 本地是否确有非空对话存档（用于历史页列表：排除仅有会话指针、从未持久化过消息的「空线程」） */
+export function hasPersistedChatHistoryForSession(deviceId: string, studioSessionId: string): boolean {
+  const dev = toChatDeviceId(deviceId);
+  const sid = String(studioSessionId || '').trim();
+  if (!sid) return false;
+
+  const isNonEmptyJsonMessages = (raw: string | null): boolean => {
+    if (raw == null) return false;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed === '[]') return false;
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      return Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      return true;
+    }
+  };
+
+  try {
+    if (isNonEmptyJsonMessages(localStorage.getItem(chatHistoryStorageKey(dev, sid)))) {
+      return true;
+    }
+    const legacy = localStorage.getItem(chatHistoryLegacyDeviceKey(dev));
+    if (isNonEmptyJsonMessages(legacy) && peekStudioChatSessionId(dev) === sid) {
+      return true;
+    }
+    if (dev === GLOBAL_CHAT_DEVICE_ID) {
+      const legacyGlobal = localStorage.getItem(CHAT_HISTORY_LEGACY_KEY);
+      if (
+        isNonEmptyJsonMessages(legacyGlobal)
+        && peekStudioChatSessionId(GLOBAL_CHAT_DEVICE_ID) === sid
+      ) {
+        return true;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
 }
 
 export function loadChatHistoryFromStorage(deviceId: string, studioSessionId: string): ChatMessage[] {

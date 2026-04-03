@@ -1,5 +1,9 @@
 /** Server-wide constants — single source of truth for magic values. */
 
+/** 与 AddDeviceModal、quick-connect 及常见 RDK 镜像出厂配置一致 */
+export const DEFAULT_SSH_USERNAME = 'root';
+export const DEFAULT_SSH_PASSWORD = 'root';
+
 export const DEFAULT_SSH_PORT = 22;
 export const DEFAULT_VNC_PORT = 5900;
 export const OPENCLAW_GATEWAY_PORT = 18789;

@@ -70,6 +70,43 @@ function appendSsoSessionToLocalFilesUrl(url: string): string {
   }
 }
 
+const MEDIA_EXT_FOR_LOCAL_FILES =
+  /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|mp4|webm|mov|avi|mkv)$/i;
+
+/**
+ * 将 file://、本机绝对路径、或纯文件名（如 liyanhong.jpg）映射为 /api/local-files/basename，
+ * 与后端在 downloads、workspace/downloads、及（媒体扩展名时）项目根目录的查找一致。
+ */
+function mapToLocalFilesApiPath(s: string): string | null {
+  let p = s.trim();
+  if (!p || p.includes('..')) return null;
+
+  if (p.startsWith('file:')) {
+    try {
+      let rest = p.replace(/^file:\/\//i, '');
+      if (/^\/[A-Za-z]:/i.test(rest)) rest = rest.slice(1);
+      p = decodeURI(rest);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!p.includes('/') && !p.includes('\\')) {
+    if (MEDIA_EXT_FOR_LOCAL_FILES.test(p) && !/^https?:/i.test(p)) {
+      return `/api/local-files/${encodeURIComponent(p)}`;
+    }
+    return null;
+  }
+
+  if (!p.startsWith('/')) return null;
+  const noQuery = (p.split('?')[0] ?? p).trim();
+  const lastSlash = noQuery.lastIndexOf('/');
+  const base = lastSlash >= 0 ? noQuery.slice(lastSlash + 1) : noQuery;
+  if (!base || !MEDIA_EXT_FOR_LOCAL_FILES.test(base)) return null;
+  if (noQuery.startsWith('/api/')) return null;
+  return `/api/local-files/${encodeURIComponent(base)}`;
+}
+
 /**
  * 对话里图片/视频等 src：桌面端补 apiBase；data/blob 原样返回；http(s) 与相对路径均会补全并在需 SSO 时为 local-files 附加 rdk_sso_session。
  */
@@ -83,8 +120,12 @@ export function resolveMediaUrl(src: string): string {
   if (s.startsWith('//') && typeof window !== 'undefined') {
     return appendSsoSessionToLocalFilesUrl(`${window.location.protocol}${s}`);
   }
-  const path = s.startsWith('/') ? s : `/${s.replace(/^\.\//, '')}`;
-  return appendSsoSessionToLocalFilesUrl(resolveApiUrl(path));
+  const localFiles = mapToLocalFilesApiPath(s);
+  if (localFiles) {
+    return appendSsoSessionToLocalFilesUrl(resolveApiUrl(localFiles));
+  }
+  const urlPath = s.startsWith('/') ? s : `/${s.replace(/^\.\//, '')}`;
+  return appendSsoSessionToLocalFilesUrl(resolveApiUrl(urlPath));
 }
 
 /**

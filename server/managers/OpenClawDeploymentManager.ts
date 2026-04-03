@@ -18,6 +18,10 @@ import {
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   OPENCLAW_RESOLVE_CLI_SNIPPET,
 } from './openclaw-board-install-sh.js';
+import {
+  boardOpenclawRemoteSkillsDir,
+  syncBuiltinStudioSkillsOverSftp,
+} from './board-openclaw-builtin-skills-sync.js';
 
 /** 板端一键安装/升级 SSH 超时（毫秒）。默认 30 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式 npm 全局装包常超过 10 分钟。 */
 export const OPENCLAW_INSTALL_TIMEOUT_MS = (() => {
@@ -679,6 +683,8 @@ const GATEWAY_RESTART_CMD =
  * Studio 一键安装后默认安装元技能 find-skills。
  * ClawHub CLI：`clawhub install <技能短名>`（文档示例：`clawhub install summarize`）；与 `clawhub clone owner/skill` 不同。
  * `RDK_SKIP_BOARD_FIND_SKILLS=1` 可跳过。
+ *
+ * 安装完成后由 TypeScript 侧将 Studio 仓库 `skills/` + `rdkx5_skills/` SFTP 到板端 `~/.openclaw/workspace/skills/`（见 syncBuiltinStudioSkills / RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC）。
  */
 const BOARD_FIND_SKILLS_INSTALL =
   process.env.RDK_SKIP_BOARD_FIND_SKILLS === '1' || process.env.RDK_SKIP_BOARD_FIND_SKILLS === 'true'
@@ -1164,7 +1170,13 @@ export class OpenClawDeploymentManager {
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void,
   ): { abort: () => void } {
-    return this.execCommand(device, OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD, onOutput, onComplete, {
+    return this.execCommand(device, OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD, onOutput, (success) => {
+      if (!success) {
+        onComplete(false);
+        return;
+      }
+      void this.runBuiltinSkillsSyncAfterInstall(device, onOutput).finally(() => onComplete(true));
+    }, {
       pty: true,
       timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
     });
@@ -1185,7 +1197,51 @@ export class OpenClawDeploymentManager {
   }
 
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
-    return this.execCommand(device, NPM_INSTALL_CMD, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
+    return this.execCommand(device, NPM_INSTALL_CMD, onOutput, (success) => {
+      if (!success) {
+        onComplete(false);
+        return;
+      }
+      void this.runBuiltinSkillsSyncAfterInstall(device, onOutput).finally(() => onComplete(true));
+    }, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
+  }
+
+  /**
+   * 将 Studio 当前工作目录下内置的 `skills/`、`rdkx5_skills/` 同步到板端 OpenClaw workspace（SFTP）。
+   * 安装流程结束后会自动调用；亦可被 Agent `board_openclaw_install` 或手工补救使用。
+   * 设 `RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC=1` 可跳过。
+   */
+  async syncBuiltinStudioSkillsToBoard(device: Device, onOutput: (chunk: string) => void): Promise<boolean> {
+    if (process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === '1' || process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === 'true') {
+      onOutput('[Studio] RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC 已设置，跳过内置 skill 同步\n');
+      return true;
+    }
+    try {
+      const client = await this.getClient(device);
+      const remote = boardOpenclawRemoteSkillsDir(device.userName);
+      const r = await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput);
+      return r.ok;
+    } catch (e) {
+      onOutput(`[Studio] WARN 内置 skill 同步异常: ${e instanceof Error ? e.message : String(e)}\n`);
+      return false;
+    }
+  }
+
+  private async runBuiltinSkillsSyncAfterInstall(device: Device, onOutput: (chunk: string) => void): Promise<void> {
+    if (process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === '1' || process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === 'true') {
+      onOutput('[Studio] RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC 已设置，跳过内置 skill 同步\n');
+      return;
+    }
+    try {
+      const client = await this.getClient(device);
+      const remote = boardOpenclawRemoteSkillsDir(device.userName);
+      await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput);
+    } catch (e) {
+      onOutput(
+        `[Studio] WARN 内置 skill 同步失败（OpenClaw 已安装，可稍后重试或调 API ensure-board-skill-bundle）: ` +
+          `${e instanceof Error ? e.message : String(e)}\n`,
+      );
+    }
   }
 
   runUpgrade(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {

@@ -4,6 +4,7 @@ import { OpenClawDeploymentManager } from "../../managers/OpenClawDeploymentMana
 import { applyNeedStreakPolicy } from "../board-dual-agent-orchestration.js";
 import { openClawBridgeMeta } from "../openclaw-bridge-meta.js";
 import type { Device } from "../../../shared/types.js";
+import { resolvePersistedOrDefaultSshPassword } from "../../device-ssh-credentials.js";
 
 /** 板端推理可能较慢；默认 120s，可用 RDK_BOARD_OPENCLAW_CHAT_TIMEOUT_MS 覆盖（5000–600000） */
 function boardOpenClawChatTimeoutMs(): number {
@@ -26,9 +27,7 @@ const WAITING_BLURBS = [
 ];
 
 function resolveDevicePassword(device: Device) {
-  const persisted = (device as Device & { password?: string }).password ?? "";
-  const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
-  return persisted || envPwd;
+  return resolvePersistedOrDefaultSshPassword(device);
 }
 
 function toBoardDevice(device: Device) {

@@ -7,11 +7,10 @@ import {
 } from "../board-dual-agent-orchestration.js";
 import { openClawBridgeMeta, parseOpenClawBoardRpcError } from "../openclaw-bridge-meta.js";
 import type { Device } from "../../../shared/types.js";
+import { resolvePersistedOrDefaultSshPassword } from "../../device-ssh-credentials.js";
 
 function resolveDevicePassword(device: Device) {
-  const persisted = (device as Device & { password?: string }).password ?? "";
-  const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
-  return persisted || envPwd;
+  return resolvePersistedOrDefaultSshPassword(device);
 }
 
 function toBoardDevice(device: Device) {

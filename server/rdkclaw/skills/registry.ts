@@ -131,11 +131,28 @@ export class SkillRegistry {
   }
 
   matchByText(text: string): RDKClawSkillMeta[] {
-    const q = text.toLowerCase();
+    const q = text.toLowerCase().trim();
+    if (!q) return [];
+    /**
+     * 仅 ASCII 词参与「多词全命中」；避免查询里夹中文（如「自动化」）时误要求英文名技能正文中出现中文。
+     */
+    const asciiWords = [
+      ...new Set(q.split(/[^\p{L}\p{N}]+/u).filter((t) => /^[a-z0-9]{2,}$/i.test(t))),
+    ];
     return this.list().filter((s) => {
       if (!s.enabled) return false;
-      if (s.name.toLowerCase().includes(q)) return true;
-      if (s.description.toLowerCase().includes(q)) return true;
+      const nameL = s.name.toLowerCase();
+      const descL = s.description.toLowerCase();
+      if (nameL.includes(q)) return true;
+      if (descL.includes(q)) return true;
+      /** 连字符技能名与「agent browser」类空格查询对齐 */
+      const nameSpaced = nameL.replace(/-/g, " ");
+      if (nameSpaced.includes(q) || q.includes(nameSpaced)) return true;
+      if (asciiWords.length > 0) {
+        const nameHay = nameSpaced;
+        const descHay = descL.replace(/-/g, " ");
+        if (asciiWords.every((t) => nameHay.includes(t) || descHay.includes(t))) return true;
+      }
       return s.trigger.some((t) => q.includes(t.toLowerCase()));
     });
   }

@@ -14,6 +14,7 @@
  * In Electron production builds, RDK_DATA_DIR points to the app's
  * user-data directory instead of the project root.
  */
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,10 +22,62 @@ import type { Device } from '../shared/types.js';
 
 let _legacyMigrated = false;
 
+let _sudoInvokerHomeMemo: string | null | undefined;
+
+/**
+ * `sudo npm run desktop` 时 effective uid 为 root，但 `os.homedir()` 会落到 root 的家目录，
+ * 与用户在设备管理里保存的 `~/.rdk-studio/data` 不一致。若环境中有 SUDO_USER，则解析其主目录。
+ */
+function homedirOfSudoInvoker(): string | null {
+  if (_sudoInvokerHomeMemo !== undefined) return _sudoInvokerHomeMemo;
+  const sudoUser = String(process.env.SUDO_USER ?? '').trim();
+  if (!sudoUser || typeof process.getuid !== 'function' || process.getuid() !== 0) {
+    _sudoInvokerHomeMemo = null;
+    return null;
+  }
+  try {
+    if (process.platform === 'darwin') {
+      const out = execFileSync('dscl', ['.', '-read', `/Users/${sudoUser}`, 'NFSHomeDirectory'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const line = out.split('\n').find((l) => /NFSHomeDirectory/i.test(l));
+      const home = line?.replace(/^[^:]+:\s*/, '').trim();
+      if (home && home.startsWith('/')) {
+        _sudoInvokerHomeMemo = home;
+        return home;
+      }
+    } else if (process.platform !== 'win32') {
+      const out = execFileSync('getent', ['passwd', sudoUser], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      const parts = out.split(':');
+      if (parts.length >= 6 && parts[5]?.startsWith('/')) {
+        _sudoInvokerHomeMemo = parts[5];
+        return parts[5];
+      }
+    }
+  } catch {
+    /* dscl/getent 不可用或非标准环境 */
+  }
+  if (process.platform === 'darwin') {
+    _sudoInvokerHomeMemo = path.join('/Users', sudoUser);
+    return _sudoInvokerHomeMemo;
+  }
+  if (process.platform !== 'win32') {
+    _sudoInvokerHomeMemo = path.join('/home', sudoUser);
+    return _sudoInvokerHomeMemo;
+  }
+  _sudoInvokerHomeMemo = null;
+  return null;
+}
+
 export function resolveDataDir() {
   const envDataDir = String(process.env.RDK_DATA_DIR ?? '').trim();
   if (envDataDir) return envDataDir;
-  return path.join(os.homedir(), '.rdk-studio', 'data');
+  const base = homedirOfSudoInvoker() ?? os.homedir();
+  return path.join(base, '.rdk-studio', 'data');
 }
 
 /** SSO 会话落盘路径（与 devices.json 同目录，重启后端后可恢复登录态） */
@@ -105,6 +158,14 @@ async function migrateLegacyDataIfNeeded(targetFilePath: string) {
 
 let _deviceCache: { data: Device[]; expiresAt: number } | null = null;
 const DEVICE_CACHE_TTL_MS = 3000;
+
+/**
+ * 下一轮 `readDevices()` 强制读盘，不返回 TTL 内的内存快照。
+ * 供板端 SSH/SFTP 前使用，避免刚写入的密码等字段仍被短 TTL 挡住。
+ */
+export function invalidateDevicesReadCache(): void {
+  _deviceCache = null;
+}
 
 export async function readDevices(): Promise<Device[]> {
   if (_deviceCache && _deviceCache.expiresAt > Date.now()) {

@@ -65,10 +65,15 @@ const Icons: Record<string, React.ReactNode> = {
       <path d="M8 17h8"></path>
     </svg>
   ),
+  'ai-chat-hub': (
+    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+      <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+    </svg>
+  ),
 };
 
 const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> = [
-  { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'openclaw', 'skills'] },
+  { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'ai-chat-hub', 'openclaw', 'skills'] },
   { titleKey: 'sidebar.group.connect', titleZh: '连接控制', tabs: ['terminal', 'files', 'vnc', 'ide'] },
   { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['hardware', 'flasher'] },
 ];
@@ -76,6 +81,7 @@ const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> 
 /** 中文默认文案（英文走 en-extras sidebar.nav.* / sidebar.hint.*） */
 const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   dashboard: { nav: '总览', hint: '新手流程与设备主控台' },
+  'ai-chat-hub': { nav: 'AI 对话', hint: 'RDKClaw 会话、本地历史与继续对话' },
   openclaw: { nav: 'OpenClaw', hint: 'AI 网关、渠道与技能中心' },
   skills: { nav: '技能工坊', hint: '生成 OpenClaw 技能并部署到板端' },
   terminal: { nav: '终端', hint: '直接执行命令与排障' },

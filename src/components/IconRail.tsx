@@ -7,7 +7,6 @@ import StudioVersionFooter from './StudioVersionFooter';
 import { isDeviceShownOnline } from '../utils/device-connection';
 import { isDesktop } from '../utils/env';
 import { useConfirmRemoveDevice } from '../hooks/useConfirmRemoveDevice';
-import DesktopChatSessionsPanel from './DesktopChatSessionsPanel';
 
 interface NavItemDef {
   tab: Tab;
@@ -82,7 +81,6 @@ export default function IconRail() {
   const { t } = useI18n();
 
   const [showDevicePanel, setShowDevicePanel] = useState(false);
-  const [showChatSessionsPanel, setShowChatSessionsPanel] = useState(false);
   const [railLogoFailed, setRailLogoFailed] = useState(false);
   const onRailLogoError = useCallback(() => setRailLogoFailed(true), []);
   const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
@@ -125,13 +123,13 @@ export default function IconRail() {
           {isDesktop() && (
             <button
               type="button"
-              className={`rail-btn rail-chat-sessions-btn ${showChatSessionsPanel ? 'active' : ''}`}
+              className={`rail-btn rail-chat-sessions-btn ${activeTab === 'ai-chat-hub' ? 'active' : ''}`}
               aria-label={t('rail.chatSessions.short', 'AI 对话')}
-              data-tooltip={!railExpanded ? t('rail.chatSessions.tooltip', 'AI 对话（按设备切换）') : undefined}
-              aria-pressed={showChatSessionsPanel}
+              data-tooltip={!railExpanded ? t('rail.chatSessions.tooltipHub', 'AI 对话与历史（主工作区）') : undefined}
+              aria-pressed={activeTab === 'ai-chat-hub'}
               onClick={() => {
                 setShowDevicePanel(false);
-                setShowChatSessionsPanel((p) => !p);
+                setActiveTab('ai-chat-hub');
               }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -164,10 +162,7 @@ export default function IconRail() {
           <button
             className="rail-btn"
             data-tooltip={!railExpanded ? (currentDevice ? currentDevice.name : t('rail.pickDevice', '选择设备')) : undefined}
-            onClick={() => {
-              setShowChatSessionsPanel(false);
-              setShowDevicePanel(!showDevicePanel);
-            }}
+            onClick={() => setShowDevicePanel(!showDevicePanel)}
           >
             <span className={`rail-device-dot ${deviceOnline ? 'online' : 'offline'}`} />
             {railExpanded && <span className="rail-label">{currentDevice ? currentDevice.name : t('rail.device', '设备')}</span>}
@@ -259,11 +254,6 @@ export default function IconRail() {
           </button>
         </div>
       </nav>
-
-      <DesktopChatSessionsPanel
-        open={showChatSessionsPanel}
-        onClose={() => setShowChatSessionsPanel(false)}
-      />
 
       {showDevicePanel && (
         <>

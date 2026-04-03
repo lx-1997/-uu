@@ -93,8 +93,11 @@ declare global {
         token?: string;
       }) => Promise<{ ok: boolean; error?: string }>;
 
-      /** studio_open_url：独立原生浏览窗口（可关闭），非主窗口内嵌 */
+      /** studio_open_url：默认可缩放独立窗口；失败时由渲染层回退主窗口内嵌 openUrl */
       openAgentBrowserPopup?: (url: string) => Promise<{ ok: boolean; error?: string }>;
+
+      /** studio_open_local_preview：系统默认应用打开工作区内图片（绝对路径） */
+      openLocalPreview?: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
 
       openUrl?: (
         target:

@@ -23,7 +23,7 @@
       "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
       "thinkingDefault": "off",
       "reasoningVisibility": "off",
-      "samplingTemperature": "0.35",
+      "samplingTemperature": "0",
       "samplingTopP": "1"
     }
   ]

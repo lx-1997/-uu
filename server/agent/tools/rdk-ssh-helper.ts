@@ -5,43 +5,18 @@
  * 供 Agent 工具直接调用，不依赖 Express request/response。
  */
 
-import { readDevices } from '../../storage.js';
+import { readDevices, invalidateDevicesReadCache, resolveDataDir } from '../../storage.js';
 import {
   runRemoteCommands,
   uploadFileSftp,
-  sshPasswordCandidates,
   SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS,
 } from '../../ssh.js';
 import type { Device } from '../../../shared/types.js';
 import { runInDeviceLane } from '../../device-exec-scheduler.js';
+import { setDevicePasswordCache } from '../../device-password-cache.js';
+import { buildSshPasswordCandidatesForDevice } from '../../device-ssh-credentials.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-
-const defaultSshPassword = process.env.RDK_SSH_PASSWORD ?? '';
-const devicePasswordCache = new Map<string, string>();
-
-function credentialCacheKey(host: string, username: string, port = 22) {
-  return `${host}:${port}::${username}`;
-}
-
-/**
- * 与 HTTP 设备 API 对齐：缓存/持久化/环境变量优先，再尝试出厂常见口令（用户名、root、sunrise 等）。
- */
-function buildPasswordCandidatesForAgent(device: Device): string[] {
-  const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-  const cached = devicePasswordCache.get(key) ?? '';
-  const persisted = (device as Device & { password?: string }).password ?? '';
-  const ordered: string[] = [];
-  const push = (p: string) => {
-    const t = p.trim();
-    if (t && !ordered.includes(t)) ordered.push(t);
-  };
-  push(cached);
-  push(persisted);
-  push(defaultSshPassword);
-  for (const p of sshPasswordCandidates(device.username)) push(p);
-  return ordered;
-}
 
 function isTransientSshError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -52,7 +27,8 @@ function isTransientSshError(error: unknown): boolean {
   );
 }
 
-function isSshAuthError(error: unknown): boolean {
+/** 供 device_exec 等向上返回更可读的失败说明（与 isTransientSshError 互补）。 */
+export function isSshAuthError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return /all configured authentication methods failed|permission denied|authentication failure|auth fail/.test(msg);
 }
@@ -66,6 +42,24 @@ const MAX_TRANSIENT_RETRIES = 3;
  */
 const AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD = 1;
 
+/** SSH 认证失败时附带设备库路径，便于排查 sudo / 多用户导致的两份 devices.json */
+function augmentAuthFailureError(err: unknown): Error {
+  const base = err instanceof Error ? err : new Error(String(err));
+  if (!isSshAuthError(base)) return base;
+  const dataFile = path.join(resolveDataDir(), 'devices.json');
+  let detail = `\n\nStudio 设备库: ${dataFile}`;
+  if (
+    typeof process.getuid === 'function' &&
+    process.getuid() === 0 &&
+    !String(process.env.RDK_DATA_DIR ?? '').trim() &&
+    !String(process.env.SUDO_USER ?? '').trim()
+  ) {
+    detail +=
+      '\n提示：进程以 **root** 运行且未设置 **RDK_DATA_DIR**、也无 **SUDO_USER** 时，设备数据在 root 的 ~/.rdk-studio/data，与普通用户下的 ~/.rdk-studio/data **不是同一份**。请避免无环境的 root 启动；或使用 `sudo npm run desktop`（保留 SUDO_USER）；或在 `.env` 中设置 `RDK_DATA_DIR` 统一路径。';
+  }
+  return new Error(`${base.message}${detail}`);
+}
+
 export type ExecOnDeviceOptions = {
   /** 覆盖 runRemoteCommands 默认（见 SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS，当前 30min） */
   timeoutMs?: number;
@@ -78,10 +72,15 @@ export async function getDevice(deviceId: string): Promise<Device | null> {
   return devices.find((d) => d.id === deviceId) ?? null;
 }
 
+/** SSH/SFTP 前取设备：先失效读缓存，保证与 devices.json / 刚完成的 connect 一致 */
+async function getDeviceFreshForExec(deviceId: string): Promise<Device | null> {
+  invalidateDevicesReadCache();
+  return getDevice(deviceId);
+}
+
 /** 当前优先使用的口令（首个候选），供仅需单值场景 */
 export function getDevicePassword(device: Device): string {
-  const list = buildPasswordCandidatesForAgent(device);
-  return list[0] ?? '';
+  return buildSshPasswordCandidatesForDevice(device)[0] ?? '';
 }
 
 /**
@@ -93,7 +92,7 @@ export async function execOnDevice(
   commands: string[],
   options?: ExecOnDeviceOptions,
 ): Promise<string> {
-  const device = await getDevice(deviceId);
+  const device = await getDeviceFreshForExec(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
   const runOpts =
     options?.timeoutMs != null || options?.onStreamChunk
@@ -103,8 +102,7 @@ export async function execOnDevice(
         }
       : undefined;
   return runInDeviceLane(device.id, async () => {
-    const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-    const pwdList = buildPasswordCandidatesForAgent(device);
+    const pwdList = buildSshPasswordCandidatesForDevice(device);
     if (pwdList.length === 0) {
       throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
     }
@@ -117,7 +115,7 @@ export async function execOnDevice(
             commands,
             runOpts,
           );
-          devicePasswordCache.set(key, pwd);
+          setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
           return output;
         } catch (err) {
           lastError = err;
@@ -142,7 +140,7 @@ export async function execOnDevice(
         }
       }
     }
-    throw lastError instanceof Error ? lastError : new Error('SSH 命令执行失败');
+    throw augmentAuthFailureError(lastError ?? new Error('SSH 命令执行失败'));
   });
 }
 
@@ -157,11 +155,10 @@ export async function readDeviceFile(deviceId: string, filePath: string): Promis
  * 写入文件到设备
  */
 export async function writeDeviceFile(deviceId: string, filePath: string, content: string): Promise<void> {
-  const device = await getDevice(deviceId);
+  const device = await getDeviceFreshForExec(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
   await runInDeviceLane(device.id, async () => {
-    const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-    const pwdList = buildPasswordCandidatesForAgent(device);
+    const pwdList = buildSshPasswordCandidatesForDevice(device);
     if (pwdList.length === 0) {
       throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
     }
@@ -181,7 +178,7 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
               ),
             },
           );
-          devicePasswordCache.set(key, pwd);
+          setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
           return;
         } catch (err) {
           lastError = err;
@@ -200,7 +197,7 @@ export async function writeDeviceFile(deviceId: string, filePath: string, conten
         }
       }
     }
-    throw lastError instanceof Error ? lastError : new Error('设备文件写入失败');
+    throw augmentAuthFailureError(lastError ?? new Error('设备文件写入失败'));
   });
 }
 
@@ -244,12 +241,11 @@ export async function uploadLocalFileToDevice(
   localPath: string,
   remotePath: string,
 ): Promise<{ bytes: number; remotePath: string }> {
-  const device = await getDevice(deviceId);
+  const device = await getDeviceFreshForExec(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
   const buffer = await fs.readFile(localPath);
   return runInDeviceLane(device.id, async () => {
-    const key = credentialCacheKey(device.host, device.username, device.port ?? 22);
-    const pwdList = buildPasswordCandidatesForAgent(device);
+    const pwdList = buildSshPasswordCandidatesForDevice(device);
     if (pwdList.length === 0) {
       throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
     }
@@ -267,7 +263,7 @@ export async function uploadLocalFileToDevice(
             buffer,
             { timeoutMs: uploadTimeout },
           );
-          devicePasswordCache.set(key, pwd);
+          setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
           return { bytes: buffer.length, remotePath };
         } catch (err) {
           lastError = err;
@@ -286,7 +282,7 @@ export async function uploadLocalFileToDevice(
         }
       }
     }
-    throw lastError instanceof Error ? lastError : new Error('本地文件上传到设备失败');
+    throw augmentAuthFailureError(lastError ?? new Error('本地文件上传到设备失败'));
   });
 }
 

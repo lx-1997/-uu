@@ -18,11 +18,10 @@ import {
   openClawBridgeMeta,
   parseOpenClawBoardRpcError,
 } from "../openclaw-bridge-meta.js";
+import { resolvePersistedOrDefaultSshPassword } from "../../device-ssh-credentials.js";
 
 function resolveDevicePassword(device: SharedDevice) {
-  const persisted = (device as SharedDevice & { password?: string }).password ?? "";
-  const envPwd = process.env.RDK_SSH_PASSWORD ?? "";
-  return persisted || envPwd;
+  return resolvePersistedOrDefaultSshPassword(device);
 }
 
 function toBoardDevice(device: SharedDevice) {

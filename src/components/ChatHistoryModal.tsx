@@ -5,6 +5,7 @@ import {
   listStoredChatHistoryDeviceIds,
   loadAnyChatHistoryForDevice,
 } from '../utils/chat-history-storage';
+import { buildThreadSummaryLine } from '../utils/chat-history-thread-label';
 import { chatMessageToPlainText } from '../utils/chat-message-plain';
 
 function formatDurationMsLabel(ms: number): string {
@@ -15,6 +16,38 @@ function formatDurationMsLabel(ms: number): string {
   const m = Math.floor(s / 60);
   const rs = Math.round(s % 60);
   return `${m}m ${rs}s`;
+}
+
+function deviceFriendlyLabel(
+  id: string,
+  devices: Device[],
+  tr: (key: string, zh: string) => string,
+): string {
+  if (id === GLOBAL_CHAT_DEVICE_ID) {
+    return tr('dock.history.global', '未绑定设备 / 全局');
+  }
+  const d = devices.find((x) => x.id === id);
+  return d?.name?.trim() || d?.ip || id;
+}
+
+function dropdownLabelForStoredDevice(
+  id: string,
+  devices: Device[],
+  tr: (key: string, zh: string) => string,
+): string {
+  const friendly = deviceFriendlyLabel(id, devices, tr);
+  const messages = loadAnyChatHistoryForDevice(id);
+  if (!messages.length) {
+    return friendly;
+  }
+  const startAt = messages[0].id;
+  const summary = buildThreadSummaryLine(messages, tr);
+  const timeLabel = new Date(startAt).toLocaleString();
+  const core = summary ? `${timeLabel} · ${summary}` : timeLabel;
+  if (friendly && friendly !== id) {
+    return `${friendly} — ${core}`;
+  }
+  return core;
 }
 
 type Props = {
@@ -49,13 +82,13 @@ export function ChatHistoryModal({ open, onClose, devices, preferredDeviceId, t 
     }
   }, [open, preferredDeviceId, deviceOptions]);
 
-  const labelForId = (id: string) => {
-    if (id === GLOBAL_CHAT_DEVICE_ID) {
-      return t('dock.history.global', '未绑定设备 / 全局');
+  const optionLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const id of deviceOptions) {
+      map.set(id, dropdownLabelForStoredDevice(id, devices, t));
     }
-    const d = devices.find(x => x.id === id);
-    return d?.name?.trim() || d?.ip || id;
-  };
+    return map;
+  }, [deviceOptions, devices, t]);
 
   const messages = selectedId ? loadAnyChatHistoryForDevice(selectedId) : [];
 
@@ -94,7 +127,7 @@ export function ChatHistoryModal({ open, onClose, devices, preferredDeviceId, t 
               <option value="">{t('dock.history.noDevices', '无存档')}</option>
             ) : (
               deviceOptions.map(id => (
-                <option key={id} value={id}>{labelForId(id)}</option>
+                <option key={id} value={id}>{optionLabels.get(id) ?? id}</option>
               ))
             )}
           </select>

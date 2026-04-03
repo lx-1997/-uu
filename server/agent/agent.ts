@@ -66,6 +66,13 @@ import {
   resolveSpawnToolSet,
   type SpawnToolScope,
 } from "./spawn-profile.js";
+import {
+  LAZY_LOAD_MIN_TOOL_COUNT,
+  isLazyCoreToolName,
+  shouldPreloadDeferrableWithStudioDevice,
+  toolLazyLoadDisabledByEnv,
+} from "./tools/lazy-tool-policy.js";
+import { createLoadToolsTool } from "./tools/load-tools-meta.js";
 import type { Model, StreamFunction, ThinkingLevel } from "@mariozechner/pi-ai";
 import { streamSimple, completeSimple, getModel, getEnvApiKey } from "@mariozechner/pi-ai";
 
@@ -106,6 +113,11 @@ export interface AgentConfig {
   agentId?: string;
   /** 系统提示 */
   systemPrompt?: string;
+  /**
+   * RDKClaw：与 `systemPrompt` 同源拆分（stablePrefix / dynamicSuffix），用于 Anthropic 多段 system + prompt caching。
+   * 须满足：`systemPrompt ===` 与 `buildRdkclawSystemPrompt` 相同的 combined 拼接规则（见 system-prompt-layers）。
+   */
+  systemPromptSplit?: { stable: string; dynamic: string };
   /** 工具列表 */
   tools?: Tool[];
   /** 工具策略（allow/deny） */
@@ -201,6 +213,11 @@ export interface AgentConfig {
    * 若自行传入，请视需要调用 `createExecLikeFailureHintHook()` 注册失败提示。
    */
   toolHooks?: ToolHookRegistry;
+  /**
+   * 工具延迟加载：仅挂载核心工具 + load_tools，其余按会话登记（大工具列表时省 token）。
+   * 默认开启；可用环境变量 `RDKCLAW_TOOL_LAZY_LOAD=0` 关闭；工具总数低于阈值时行为等同关闭。
+   */
+  toolLazyLoad?: boolean;
 }
 
 export interface RunResult {
@@ -257,6 +274,8 @@ export class Agent {
   private reasoning?: ThinkingLevel | undefined;
   private agentId: string;
   private baseSystemPrompt: string;
+  /** 可选：RDK 分层 system，请求层拆块缓存（见 systemPromptSplit） */
+  private baseSystemSplit?: { stable: string; dynamic: string };
   private tools: Tool[];
   private toolContextExtras?: Partial<ToolContext>;
   private studioDeviceIdResolver?: () => string | undefined;
@@ -334,6 +353,11 @@ export class Agent {
   private static readonly MAX_COMPACTION_FAILURE_STREAK = 3;
   private systemPromptTelemetry?: { hashShort: string; layerCount: number };
 
+  /** 延迟加载：除核心集外，按会话登记的工具名 */
+  private toolLazyLoadEnabled: boolean;
+  private lazyToolsActiveBySession = new Map<string, Set<string>>();
+  private loadToolsTool?: Tool;
+
   constructor(config: AgentConfig) {
     // Provider 初始化（对应 OpenClaw: attempt.ts → activeSession.agent.streamFn）
     const provider = config.provider ?? "anthropic";
@@ -395,6 +419,7 @@ export class Agent {
     this.streamFn = config.streamFn ?? streamSimple;
     this.agentId = normalizeAgentId(config.agentId ?? "main");
     this.baseSystemPrompt = config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    this.baseSystemSplit = config.systemPromptSplit;
     this.tools = config.tools ?? builtinTools;
     this.toolContextExtras = config.toolContextExtras;
     this.studioDeviceIdResolver = config.studioDeviceIdResolver;
@@ -470,6 +495,7 @@ export class Agent {
     this.compactHooks = config.compactHooks;
     this.systemPromptTelemetry = config.systemPromptTelemetry;
     this.toolHooks = config.toolHooks ?? new ToolHookRegistry();
+    this.toolLazyLoadEnabled = config.toolLazyLoad !== false && !toolLazyLoadDisabledByEnv();
     if (!config.toolHooks) {
       this.toolHooks.registerPostFailure(createExecLikeFailureHintHook());
     }
@@ -654,6 +680,35 @@ export class Agent {
     this.sessionLastBuiltSystemPrompt.delete(sessionKey);
     this.subagentToolScopes.delete(sessionKey);
     this.subagentFrozenSystem.delete(sessionKey);
+    this.lazyToolsActiveBySession.delete(sessionKey);
+  }
+
+  /** 策略过滤后的工具列表（不含 abort 包装），含子代理 scope 裁剪 */
+  private resolveRawToolsForSession(sessionKey: string): Tool[] {
+    let raw = this.resolveToolsForRun();
+    const scopeName = this.subagentToolScopes.get(sessionKey);
+    const allowed = resolveSpawnToolSet(scopeName);
+    if (allowed) {
+      raw = raw.filter((t) => allowed.has(t.name));
+    }
+    return raw;
+  }
+
+  private ensureLoadToolsTool(): Tool {
+    if (this.loadToolsTool) return this.loadToolsTool;
+    this.loadToolsTool = createLoadToolsTool({
+      getDeferrableCatalog: (ctx) =>
+        this.resolveRawToolsForSession(ctx.sessionKey).filter((t) => !isLazyCoreToolName(t.name)),
+      getLoadedSet: (sessionKey) => {
+        let s = this.lazyToolsActiveBySession.get(sessionKey);
+        if (!s) {
+          s = new Set();
+          this.lazyToolsActiveBySession.set(sessionKey, s);
+        }
+        return s;
+      },
+    });
+    return this.loadToolsTool;
   }
 
   /**
@@ -768,6 +823,12 @@ export class Agent {
       const writeHint = this.sandbox.allowWrite ? "可写" : "只读";
       const execHint = this.sandbox.allowExec ? "允许" : "禁止";
       prompt += `\n\n## 沙箱\n当前为沙箱模式：工作区${writeHint}，命令执行${execHint}。`;
+    }
+
+    if (this.toolLazyLoadEnabled) {
+      prompt +=
+        "\n\n## 工具加载（延迟加载）\n" +
+        "首轮请求通常只挂载**常用本机工具**。若需 **设备 SSH、联网检索、飞书/微信、板端 OpenClaw、浏览器截图、附件处理、SkillHub** 等，请先调用 **load_tools**：传入 `names`（精确工具名数组）、或 `query`（名称/描述关键词）、或 `load_all: true`（大批量）。登记后**下一轮**模型请求即可调用这些工具。";
     }
 
     return prompt;
@@ -926,15 +987,52 @@ export class Agent {
           const systemPrompt = await this.buildSystemPrompt({ sessionKey });
           this.sessionLastBuiltSystemPrompt.set(sessionKey, systemPrompt);
 
-          // 工具包装: 注入 run-level abort signal + 子代理范围过滤（每轮重新 resolve，避免 setTools 后仍用旧列表）
+          let systemPromptParts:
+            | { stable: string; dynamic: string }
+            | undefined;
+          if (
+            this.baseSystemSplit &&
+            !isSubagentSessionKey(sessionKey) &&
+            systemPrompt.startsWith(this.baseSystemPrompt)
+          ) {
+            const afterBase = systemPrompt.slice(this.baseSystemPrompt.length);
+            systemPromptParts = {
+              stable: this.baseSystemSplit.stable,
+              dynamic: this.baseSystemSplit.dynamic + afterBase,
+            };
+          }
+
+          // 工具包装: 注入 run-level abort signal + 子代理范围过滤 + 可选延迟加载（每轮重新 resolve）
           const buildToolsForRun = () => {
-            let raw = this.resolveToolsForRun();
-            const scopeName = this.subagentToolScopes.get(sessionKey);
-            const allowed = resolveSpawnToolSet(scopeName);
-            if (allowed) {
-              raw = raw.filter((t) => allowed.has(t.name));
+            const rawUnwrapped = this.resolveRawToolsForSession(sessionKey);
+            const useLazy =
+              this.toolLazyLoadEnabled && rawUnwrapped.length >= LAZY_LOAD_MIN_TOOL_COUNT;
+
+            if (!useLazy) {
+              return rawUnwrapped.map((t) => wrapToolWithAbortSignal(t, runAbortController.signal));
             }
-            return raw.map((t) => wrapToolWithAbortSignal(t, runAbortController.signal));
+
+            let loaded = this.lazyToolsActiveBySession.get(sessionKey);
+            if (!loaded) {
+              loaded = new Set();
+              this.lazyToolsActiveBySession.set(sessionKey, loaded);
+            }
+
+            const deferOnly = rawUnwrapped.filter((t) => !isLazyCoreToolName(t.name));
+            const boundDeviceId = this.studioDeviceIdResolver?.()?.trim();
+            if (boundDeviceId) {
+              for (const t of deferOnly) {
+                if (shouldPreloadDeferrableWithStudioDevice(t.name)) {
+                  loaded.add(t.name);
+                }
+              }
+            }
+
+            const meta = this.ensureLoadToolsTool();
+            const core = rawUnwrapped.filter((t) => isLazyCoreToolName(t.name));
+            const activated = deferOnly.filter((t) => loaded.has(t.name));
+            const out = [...core, ...activated, meta];
+            return out.map((t) => wrapToolWithAbortSignal(t, runAbortController.signal));
           };
 
           // ===== Agent Loop（EventStream 模式） =====
@@ -990,6 +1088,7 @@ export class Agent {
             currentMessages,
             compactionSummary,
             systemPrompt,
+            systemPromptParts,
             toolsForRun: buildToolsForRun(),
             getToolsForRun: buildToolsForRun,
             toolCtx,

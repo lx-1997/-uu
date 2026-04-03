@@ -10,6 +10,11 @@ import {
 } from '../api';
 import { isDeviceSshConnected } from '../utils/device-connection';
 import { confirmDeviceUnreachable } from '../utils/device-reachability';
+import {
+  orderDevicesForStudio,
+  preferRootOverSunriseOnSameHost,
+  shouldDeferSunriseBackgroundPing,
+} from '../utils/device-display-order';
 
 /** 曾成功 SSH 验证过的设备 id（本机持久化，用于「先离线、验证后再显示在线」） */
 const SSH_VERIFIED_IDS_KEY = 'rdk-device-ssh-verified-ids-v1';
@@ -52,17 +57,19 @@ function mapDevicesFromApiResponse(res: {
   }>;
 }): Device[] {
   const verifiedIds = loadVerifiedIdSet();
-  return res.devices.map((device) => ({
+  const mapped = res.devices.map((device) => ({
     id: device.id,
     name: `${device.username}@${device.host}:${device.port ?? 22}`,
     status: 'offline' as const,
     ip: device.host,
     port: device.port ?? 22,
+    sshUsername: device.username,
     description: `SSH ${device.username}:${device.port ?? 22}`,
     boardPlatform: device.boardPlatform ?? null,
     boardModel: device.boardModel ?? null,
     sshSessionVerified: verifiedIds.has(device.id),
   }));
+  return orderDevicesForStudio(mapped);
 }
 
 /** 后台 ping 连续失败多少次后才标离线；过大会导致关机后长时间仍显示「已连接」 */
@@ -95,6 +102,36 @@ function saveDevicesToCache(deviceList: Device[], activeId: string) {
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * 首屏前从本机缓存恢复设备与当前选中项，与 auth effect 失败分支一致。
+ * 避免 AIChat 先用 `__global__` 加载历史、待 GET /api/devices 返回后再切到真实设备时触发
+ * global→device 合并，把「未绑定设备」会话错混进设备会话（重启后尤为明显）。
+ */
+function getHydratedDevicesBootstrap(): { devices: Device[]; activeDevice: string } {
+  if (typeof window === 'undefined') {
+    return { devices: [], activeDevice: '' };
+  }
+  const cached = loadDevicesFromCache();
+  if (!cached?.devices.length) {
+    return { devices: [], activeDevice: '' };
+  }
+  const verifiedIds = loadVerifiedIdSet();
+  const devices = orderDevicesForStudio(
+    cached.devices.map((d) => ({
+      ...d,
+      status: 'offline' as const,
+      sshSessionVerified: verifiedIds.has(d.id),
+    })),
+  );
+  let activeDevice = '';
+  if (cached.activeDevice && devices.some((d) => d.id === cached.activeDevice)) {
+    activeDevice = preferRootOverSunriseOnSameHost(devices, cached.activeDevice);
+  } else {
+    activeDevice = devices[0]?.id ?? '';
+  }
+  return { devices, activeDevice };
 }
 
 export interface DeviceStoreState {
@@ -141,8 +178,15 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
    */
   const authReady = !authLoading && (!ssoRequired || !!user);
 
-  const [activeDevice, setActiveDevice] = useState('');
-  const [devices, setDevices] = useState<Device[]>([]);
+  const bootstrapRef = React.useRef<{ devices: Device[]; activeDevice: string } | null>(null);
+  const [devices, setDevices] = useState<Device[]>(() => {
+    if (bootstrapRef.current === null) bootstrapRef.current = getHydratedDevicesBootstrap();
+    return bootstrapRef.current.devices;
+  });
+  const [activeDevice, setActiveDevice] = useState<string>(() => {
+    if (bootstrapRef.current === null) bootstrapRef.current = getHydratedDevicesBootstrap();
+    return bootstrapRef.current.activeDevice;
+  });
   /** 列表从服务端/缓存同步后递增，促使后台 ping 立即跑一轮（避免 length 不变时最长 ~10s 误显示未连接） */
   const [deviceListRevision, setDeviceListRevision] = useState(0);
   /** 丢弃「启动时仍在飞行」的 GET /api/devices：避免与 DELETE 竞态导致旧列表覆盖刚删掉的项 */
@@ -191,13 +235,14 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           status: res.device.status === 'connected' ? 'online' : 'offline',
           ip: res.device.host,
           port: res.device.port ?? 22,
+          sshUsername: res.device.username,
           description: `SSH ${res.device.username}:${res.device.port ?? 22}`,
           boardPlatform: res.device.boardPlatform ?? null,
           boardModel: res.device.boardModel ?? null,
           sshSessionVerified: true,
         };
         persistVerifiedId(device.id);
-        setDevices((prev) => [device, ...prev.filter((item) => item.id !== device.id)]);
+        setDevices((prev) => orderDevicesForStudio([device, ...prev.filter((item) => item.id !== device.id)]));
         setActiveDevice(device.id);
         setDeviceListRevision((n) => n + 1);
         addToast(`设备 "${device.name}" 已加入工作区`, 'success');
@@ -235,13 +280,14 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           status: res.device.status === 'connected' ? 'online' : 'offline',
           ip: res.device.host,
           port: res.device.port ?? 22,
+          sshUsername: res.device.username,
           description: `SSH ${res.device.username}:${res.device.port ?? 22}`,
           boardPlatform: res.device.boardPlatform ?? null,
           boardModel: res.device.boardModel ?? null,
           sshSessionVerified: true,
         };
         persistVerifiedId(device.id);
-        setDevices((prev) => [device, ...prev.filter((item) => item.id !== device.id)]);
+        setDevices((prev) => orderDevicesForStudio([device, ...prev.filter((item) => item.id !== device.id)]));
         setActiveDevice(device.id);
         setShowAddDevice(false);
         setNewDeviceName('');
@@ -290,9 +336,12 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           if (devicesListFetchGenRef.current !== opGen) return;
           const next = mapDevicesFromApiResponse(res);
           setDevices(next);
-          setActiveDevice((prev) =>
-            prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? ''),
-          );
+          setActiveDevice((prev) => {
+            if (prev && next.some((item) => item.id === prev)) {
+              return preferRootOverSunriseOnSameHost(next, prev);
+            }
+            return next[0]?.id ?? '';
+          });
           setDeviceListRevision((n) => n + 1);
         } catch {
           /* 本地已更新，忽略 */
@@ -354,26 +403,34 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         if (cancelled || devicesListFetchGenRef.current !== fetchGen) return;
         const next = mapDevicesFromApiResponse(res);
         setDevices(next);
-        setActiveDevice((prev) => (prev && next.some((item) => item.id === prev) ? prev : (next[0]?.id ?? '')));
+        setActiveDevice((prev) => {
+          if (prev && next.some((item) => item.id === prev)) {
+            return preferRootOverSunriseOnSameHost(next, prev);
+          }
+          return next[0]?.id ?? '';
+        });
         setDeviceListRevision((n) => n + 1);
       } catch {
         if (cancelled || devicesListFetchGenRef.current !== fetchGen) return;
         const cached = loadDevicesFromCache();
         if (cached?.devices.length) {
           const verifiedIds = loadVerifiedIdSet();
-          setDevices(
+          const list = orderDevicesForStudio(
             cached.devices.map((d) => ({
               ...d,
               status: 'offline',
               sshSessionVerified: verifiedIds.has(d.id),
             })),
           );
+          setDevices(list);
           setActiveDevice((prev) => {
-            if (prev && cached.devices.some((d) => d.id === prev)) return prev;
-            if (cached.activeDevice && cached.devices.some((d) => d.id === cached.activeDevice)) {
-              return cached.activeDevice;
+            if (prev && list.some((d) => d.id === prev)) {
+              return preferRootOverSunriseOnSameHost(list, prev);
             }
-            return cached.devices[0]?.id ?? '';
+            if (cached.activeDevice && list.some((d) => d.id === cached.activeDevice)) {
+              return preferRootOverSunriseOnSameHost(list, cached.activeDevice);
+            }
+            return list[0]?.id ?? '';
           });
           addToast('已从本机恢复设备列表（服务端暂不可用或未携带登录态）', 'info');
           setDeviceListRevision((n) => n + 1);
@@ -407,6 +464,9 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       pinging = true;
       try {
         const newDevices = await Promise.all(snapshot.map(async (dev) => {
+          if (shouldDeferSunriseBackgroundPing(dev, snapshot, activeDeviceRef.current)) {
+            return dev;
+          }
           const verified = dev.sshSessionVerified === true;
           try {
             const res = await checkDevicePing(dev.id);

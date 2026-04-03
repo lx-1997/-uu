@@ -8,6 +8,8 @@
  *   避免稀释前缀缓存命中（pi-ai 仍用单段 systemPrompt 时，稳定字节前置仍有利于未来扩展多段 system）。
  *
  * `combined ===` stablePrefix 与 dynamicSuffix 的非空拼接（双换行分隔）。
+ * RDKClaw 将 stable/dynamic 传入 `Agent` 的 `systemPromptSplit`，经 pi-ai 以两段 `system` 发往 Anthropic，
+ * 便于 stable 前缀在动态后缀变化时仍命中 prompt cache。
  */
 
 import type { StudioUiHints } from "../../shared/types.js";
@@ -29,9 +31,11 @@ import {
   buildToolContractOverviewPrompt,
   buildToolContractQuickOverviewPrompt,
 } from "./tool-contract-prompt.js";
+import { buildOpenWebRouteHintBlock, detectOpenWebUserIntent } from "./open-web-intent.js";
 
 /** 动态段 layer id（勿并入 stable；修改此列表需谨慎） */
 export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
+  "open_web_route",
   "studio_ui_hints",
   "attachments",
   "collaboration",
@@ -46,6 +50,7 @@ export type SystemPromptLayerId =
   | "device_research_ros"
   | "no_device_guard"
   | "board_plugins"
+  | "open_web_route"
   | "studio_ui_hints"
   | "attachments"
   | "collaboration"
@@ -87,6 +92,18 @@ export interface SystemPromptLayerBuildInput {
   policy: RDKClawPolicy;
   /** 工作台 Dock「快速」：极简提示 + 跳过重章节，优先 TTFT */
   studioQuickAnswer?: boolean;
+  /** 本轮用户消息（节选）；用于「打开网页」路由提示等动态层 */
+  latestUserMessage?: string;
+}
+
+function appendOpenWebRouteDynamic(
+  input: SystemPromptLayerBuildInput,
+  pushDynamic: (id: SystemPromptLayerId, content: string) => void,
+): void {
+  const msg = String(input.latestUserMessage ?? "").trim();
+  if (msg && detectOpenWebUserIntent(msg)) {
+    pushDynamic("open_web_route", buildOpenWebRouteHintBlock());
+  }
 }
 
 /**
@@ -151,6 +168,8 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   if (input.deviceId && input.boardSnapshot.plugins.length > 0) {
     pushStable("board_plugins", `板端插件: ${input.boardSnapshot.plugins.slice(0, 12).join(", ")}`);
   }
+
+  appendOpenWebRouteDynamic(input, pushDynamic);
 
   if (input.deviceId) {
     const hintsBlock = buildStudioUiHintsPrompt(input.studioUiHints, input.persona.delegationBias);
@@ -217,6 +236,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
         "RDK Studio **默认内置** `find_skills`：优先腾讯 SkillHub，零命中或失败再兜底 **官方 ClawHub**（默认 https://clawhub.ai）。`find_skills` **仅写审计** `.rdkstudio/find-skills-log.jsonl`，**不**因「搜过」就写入长期记忆。" +
           "若本轮**实际采用**了某 SkillHub 技能且任务**验收成功**，再调用 **`skill_mark_validated`**（填 `skill_slugs` + `task_summary`）：**下载** SKILL.md 到本机 `skills/<id>/`，已连接设备时**同步**到板端 `~/.openclaw/workspace/skills/<id>/`，并写记忆与 `.rdkstudio/validated-skills.jsonl`；纯本地采用填 `local_skill_refs`（不拉远端、不推板端）。失败、仅浏览、未采用则**禁止**调用。",
         "**强制**：能力缺口时**必须先 `find_skills`**，再 `read` / 安装 / 执行；不得未检索可复用技能就宣称无法完成（用户明确禁止联网且本地无命中除外）。",
+        "**例外（勿检索技能）**：仅「打开 URL / 在用户桌面显示网页」→ 只用 **`studio_open_url`**；需登录态正文 → **`studio_embedded_browser_capture`**。这是宿主工具，**不要**为此 `find_skills` 或装远端「浏览器」技能。",
         "仅需与 `CLAWHUB_REGISTRY` 换源一致时，再用 `skillhub_search`。",
       ].join("\n"),
     );
@@ -287,6 +307,8 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   if (input.deviceId && input.boardSnapshot.plugins.length > 0) {
     pushStable("board_plugins", `当前板端允许插件: ${input.boardSnapshot.plugins.join(", ")}`);
   }
+
+  appendOpenWebRouteDynamic(input, pushDynamic);
 
   if (input.deviceId) {
     pushDynamic(

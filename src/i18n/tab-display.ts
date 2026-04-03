@@ -3,6 +3,7 @@ import type { Tab } from '../app-types';
 /** 与 `App.tsx` 顶栏、`tabs.*` 中文回退一致 */
 export const TAB_TITLE_ZH: Record<Tab, string> = {
   dashboard: '工作台',
+  'ai-chat-hub': 'AI 对话',
   flasher: '烧录工具',
   terminal: '终端',
   files: '文件',

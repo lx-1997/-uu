@@ -42,8 +42,12 @@ import {
   describeError,
 } from "./provider/errors.js";
 import { truncateToolOutput } from "./context/tool-output-truncate.js";
-import { pruneContextMessages } from "./context/index.js";
-import { microcompact } from "./context/microcompact.js";
+import {
+  pruneContextMessages,
+  invalidateStaleReadToolResults,
+  snipTailOversizedToolResults,
+} from "./context/index.js";
+import { microcompact, type MicroCompactConfig } from "./context/microcompact.js";
 import { createMiniAgentStream, type MiniAgentEvent, type MiniAgentResult } from "./agent-events.js";
 import { abortable, combineAbortSignals } from "./tools/abort.js";
 import { convertMessagesToPi } from "./message-convert.js";
@@ -52,6 +56,7 @@ import type { CompactHookRegistry } from "./compact-hooks.js";
 import {
   getEffectiveContextWindowTokens,
   getProactiveCompactThreshold,
+  getContextWarningThreshold,
   shouldProactiveCompactByWindowEconomics,
 } from "./context/window-economics.js";
 import { estimateMessagesTokens, estimateTokensForText } from "./context/tokens.js";
@@ -61,6 +66,7 @@ import {
   validateToolInputObject,
 } from "./tool-pipeline.js";
 import { SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS } from "../ssh.js";
+import { LOAD_TOOLS_META_NAME } from "./tools/load-tools-meta.js";
 
 /**
  * 单次 LLM 流式调用中，若始终收不到任何流事件，则主动中止，避免无限卡住。
@@ -86,6 +92,37 @@ function isLlmFirstChunkTimeoutError(err: unknown): boolean {
   return err instanceof LlmFirstChunkTimeoutError;
 }
 
+/**
+ * 部分厂商/模型把用户可见内容只放在 extended thinking 通道，正文 text 为空。
+ * thinking_end 落盘为 `<thinking>...</thinking>`，此处抽出作 stream message_end 与 finalText，避免 Studio 主气泡空白。
+ */
+function extractVisibleTextFromThinkingBlocks(content: ContentBlock[]): string {
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block.type !== "text" || typeof block.text !== "string") continue;
+    const trimmed = block.text.trim();
+    const m = /^<thinking>\n?([\s\S]*?)\n?<\/thinking>\s*$/i.exec(trimmed);
+    if (m?.[1]?.trim()) parts.push(m[1].trim());
+  }
+  return parts.join("\n\n");
+}
+
+/**
+ * 推给前端的 tool 结果预览：原先统一 500 字截断会导致 `{"__type":"image_download",...}` 解析失败，
+ * 聊天气泡内嵌图片不出现；结构化 JSON 放宽上限（上下文仍用截断后的 truncatedResult）。
+ */
+function formatToolResultForSsePreview(truncatedResult: string, isError: boolean): string {
+  if (isError) {
+    return truncatedResult.length > 500 ? `${truncatedResult.slice(0, 500)}...` : truncatedResult;
+  }
+  const trimmed = truncatedResult.trimStart();
+  if (trimmed.startsWith("{") && trimmed.includes('"__type"')) {
+    const max = 12_000;
+    return truncatedResult.length > max ? `${truncatedResult.slice(0, max)}...` : truncatedResult;
+  }
+  return truncatedResult.length > 500 ? `${truncatedResult.slice(0, 500)}...` : truncatedResult;
+}
+
 /** pi-ai 未在 SimpleStreamOptions 声明 top_p，通过 onPayload 注入 OpenAI/Anthropic 请求体 */
 function chainTopPOnPayload(
   topP: number,
@@ -109,6 +146,10 @@ export interface AgentLoopParams {
   currentMessages: Message[];
   compactionSummary: Message | undefined;
   systemPrompt: string;
+  /**
+   * Anthropic：stable / dynamic 两段 system（pi-ai `systemPromptParts`），用于前缀 prompt caching。
+   */
+  systemPromptParts?: { stable: string; dynamic: string };
   toolsForRun: Tool[];
   /** 若提供，则每个 LLM 回合前重新获取工具列表（支持对话中连接设备后注入板端工具） */
   getToolsForRun?: () => Tool[];
@@ -223,10 +264,19 @@ interface ToolExecGroup {
 function groupToolCallsForExecution(
   calls: { id: string; name: string; input: Record<string, unknown> }[],
 ): ToolExecGroup[] {
-  if (calls.length <= 1) return [{ calls, parallel: false }];
+  const ordered = partitionLoadToolsFirst(calls);
+  if (ordered.length <= 1) return [{ calls: ordered, parallel: false }];
   const groups: ToolExecGroup[] = [];
-  let pending: typeof calls = [];
-  for (const call of calls) {
+  let pending: typeof ordered = [];
+  for (const call of ordered) {
+    if (call.name === LOAD_TOOLS_META_NAME) {
+      if (pending.length > 0) {
+        groups.push({ calls: pending, parallel: true });
+        pending = [];
+      }
+      groups.push({ calls: [call], parallel: false });
+      continue;
+    }
     if (PARALLEL_SAFE_TOOLS.has(call.name)) {
       pending.push(call);
     } else {
@@ -239,6 +289,100 @@ function groupToolCallsForExecution(
   }
   if (pending.length > 0) groups.push({ calls: pending, parallel: true });
   return groups;
+}
+
+/** 当前已解析的 tool_calls 前缀是否全是并行安全工具，且均已在本轮 API 的 tools 列表中（延迟加载工具未登记前不可抢先执行） */
+function earlyParallelPrefixEligible(
+  calls: { id: string; name: string; input: Record<string, unknown> }[],
+  toolsForRun: Tool[],
+): boolean {
+  if (calls.length === 0) return false;
+  const available = new Set(toolsForRun.map((t) => t.name));
+  for (const c of calls) {
+    if (!PARALLEL_SAFE_TOOLS.has(c.name)) return false;
+    if (!available.has(c.name)) return false;
+  }
+  return true;
+}
+
+/** load_tools 登记的工具须在下一次 getToolsForRun() 后才可执行；同轮内将其固定排在最前并单独成组，避免与依赖它的工具并行竞态 */
+function partitionLoadToolsFirst(
+  calls: { id: string; name: string; input: Record<string, unknown> }[],
+): typeof calls {
+  const loads = calls.filter((c) => c.name === LOAD_TOOLS_META_NAME);
+  const rest = calls.filter((c) => c.name !== LOAD_TOOLS_META_NAME);
+  return [...loads, ...rest];
+}
+
+/** 单并行安全工具执行（与内层 Promise.allSettled 路径共享逻辑） */
+async function runParallelSafeToolCall(
+  call: { id: string; name: string; input: Record<string, unknown> },
+  deps: {
+    toolsForRun: Tool[];
+    toolCtx: ToolContext;
+    sessionKey: string;
+    toolHooks?: ToolHookRegistry;
+  },
+): Promise<{ text: string; errFlag: boolean }> {
+  const tool = deps.toolsForRun.find((t) => t.name === call.name);
+  if (!tool) return { text: `未知工具: ${call.name}`, errFlag: true };
+
+  const schemaCheck = validateToolInputObject(tool, call.input);
+  if (!schemaCheck.ok) return { text: schemaCheck.message, errFlag: true };
+
+  const hooked = await runPreToolHookChain(call.name, schemaCheck.value, deps.sessionKey);
+  if (!hooked.ok) return { text: hooked.message, errFlag: true };
+  call.input = hooked.input;
+
+  if (deps.toolHooks) {
+    const { decision, hookName } = await deps.toolHooks.runPreHooks({
+      tool,
+      input: call.input,
+      ctx: deps.toolCtx,
+      sessionId: deps.sessionKey,
+    });
+    if (decision.action === "block") {
+      return { text: `[${hookName}] ${decision.reason}`, errFlag: true };
+    }
+    if (decision.action === "modify") {
+      call.input = decision.input;
+    }
+  }
+
+  const startMs = Date.now();
+  let text: string;
+  let errFlag = false;
+  let reachedExecute = false;
+  try {
+    reachedExecute = true;
+    text = await tool.execute(call.input, { ...deps.toolCtx, toolCallId: call.id });
+  } catch (err) {
+    text = `执行错误: ${(err as Error).message}`;
+    errFlag = true;
+  }
+
+  if (deps.toolHooks) {
+    text = await deps.toolHooks.runPostHooks({
+      tool,
+      input: call.input,
+      result: text,
+      isError: errFlag,
+      durationMs: Date.now() - startMs,
+      ctx: deps.toolCtx,
+      sessionId: deps.sessionKey,
+    });
+  }
+  if (errFlag && deps.toolHooks && reachedExecute) {
+    text = await deps.toolHooks.runPostFailureHooks({
+      tool,
+      input: call.input,
+      result: text,
+      durationMs: Date.now() - startMs,
+      ctx: deps.toolCtx,
+      sessionId: deps.sessionKey,
+    });
+  }
+  return { text, errFlag };
 }
 
 // ============== 主循环 ==============
@@ -262,6 +406,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
       agentId,
       currentMessages,
       systemPrompt,
+      systemPromptParts,
       getToolsForRun,
       toolCtx,
       modelDef,
@@ -329,7 +474,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           turns++;
           stream.push({ type: "turn_start", turn: turns });
 
-          const toolsForRun = getToolsForRun ? getToolsForRun() : params.toolsForRun;
+          let toolsForRun = getToolsForRun ? getToolsForRun() : params.toolsForRun;
 
           // 注入 pending 消息（steering 或 follow-up）
           if (pendingMessages.length > 0) {
@@ -340,11 +485,47 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
             pendingMessages = [];
           }
 
-          // ===== MicroCompact: 压缩旧 tool_result（零 LLM 调用） =====
-          // 借鉴 claude-code: 每轮 LLM 调用前，自动把已处理过的 tool_result
-          // 替换为占位符，大幅减少 token 消耗而不丢失关键信息。
+          const maxOut = maxOutputTokensParam ?? modelDef.maxTokens ?? 8192;
+          const effectiveContextTokens = getEffectiveContextWindowTokens(contextTokens, maxOut);
+          const estPromptTokens =
+            estimateMessagesTokens(currentMessages) + estimateTokensForText(systemPrompt);
+          const proactiveLine = getProactiveCompactThreshold(effectiveContextTokens);
+          const warnLine = getContextWarningThreshold(effectiveContextTokens);
+
+          // ===== 失效旧读取 + 尾段超长截断 + 自适应 MicroCompact（零 LLM） =====
+          // 长上下文：靠近主动压缩线时加强 microcompact；预警带内对近尾超长 tool_result 先单行截断。
           if (turns > 1) {
-            const mcResult = microcompact(currentMessages);
+            const staleInv = invalidateStaleReadToolResults(currentMessages);
+            if (staleInv.savedChars > 0) {
+              currentMessages.splice(0, currentMessages.length, ...staleInv.messages);
+              microcompactTotalSavedChars += staleInv.savedChars;
+              stream.push({
+                type: "stale_read_invalidate",
+                invalidatedCount: staleInv.invalidatedCount,
+                savedChars: staleInv.savedChars,
+              });
+            }
+            if (estPromptTokens >= warnLine) {
+              const tailSnip = snipTailOversizedToolResults(currentMessages);
+              if (tailSnip.savedChars > 0) {
+                currentMessages.splice(0, currentMessages.length, ...tailSnip.messages);
+                microcompactTotalSavedChars += tailSnip.savedChars;
+                stream.push({
+                  type: "tail_tool_snip",
+                  snippedCount: tailSnip.snippedCount,
+                  savedChars: tailSnip.savedChars,
+                });
+              }
+            }
+            const mcOpts: Partial<MicroCompactConfig> = {};
+            if (estPromptTokens >= proactiveLine - 2_500) {
+              mcOpts.keepRecentResults = 2;
+              mcOpts.minContentLength = 50;
+            } else if (estPromptTokens >= warnLine) {
+              mcOpts.keepRecentResults = 4;
+              mcOpts.minContentLength = 100;
+            }
+            const mcResult = microcompact(currentMessages, mcOpts);
             if (mcResult.compressedCount > 0) {
               currentMessages.splice(0, currentMessages.length, ...mcResult.messages);
               microcompactTotalSavedChars += mcResult.savedChars;
@@ -355,9 +536,6 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               });
             }
           }
-
-          const maxOut = maxOutputTokensParam ?? modelDef.maxTokens ?? 8192;
-          const effectiveContextTokens = getEffectiveContextWindowTokens(contextTokens, maxOut);
 
           // ===== 主动压缩（窗口经济学）：在 API 报 overflow 前触发 LLM 摘要 =====
           if (
@@ -434,6 +612,9 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
             systemPrompt,
             messages: piMessages,
             ...(piTools.length > 0 ? { tools: piTools } : {}),
+            ...(systemPromptParts && modelDef.api === "anthropic-messages"
+              ? { systemPromptParts }
+              : {}),
           };
 
           // ===== 带重试的 LLM 调用 =====
@@ -443,6 +624,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           let currentThinkingParts: string[] | null = null;
           /** 本轮 LLM 流结束原因（来自 pi-ai AssistantMessage.stopReason） */
           let streamStopReason: StopReason | undefined;
+          /** 流式解析中与网络重叠执行的并行安全工具（claude-code StreamingToolExecutor 思路） */
+          const earlyParallelPromises = new Map<string, Promise<{ text: string; errFlag: boolean }>>();
 
           try {
             await retryAsync(
@@ -451,6 +634,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 toolCalls.length = 0;
                 turnTextParts.length = 0;
                 streamStopReason = undefined;
+                earlyParallelPromises.clear();
 
                 const firstChunkBudgetMs = resolveLlmFirstChunkTimeoutMs();
                 const firstChunkCtrl = new AbortController();
@@ -538,6 +722,20 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                         name: tc.name,
                         input: tcArgs,
                       });
+                      if (earlyParallelPrefixEligible(toolCalls, toolsForRun)) {
+                        const last = toolCalls[toolCalls.length - 1];
+                        if (!earlyParallelPromises.has(last.id)) {
+                          earlyParallelPromises.set(
+                            last.id,
+                            runParallelSafeToolCall(last, {
+                              toolsForRun,
+                              toolCtx,
+                              sessionKey,
+                              toolHooks: params.toolHooks,
+                            }),
+                          );
+                        }
+                      }
                       break;
                     }
 
@@ -605,14 +803,37 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               });
 
               if (overflowRecoveryLevel === 1) {
-                // Level 1: 激进 microcompact（保留更少的 tool_result）
-                const mcResult = microcompact(currentMessages, { keepRecentResults: 2, minContentLength: 50 });
+                // Level 1: 剔除过时读取 + 激进 microcompact（零 LLM）
+                let recovered = false;
+                const staleOv = invalidateStaleReadToolResults(currentMessages);
+                if (staleOv.savedChars > 0) {
+                  currentMessages.splice(0, currentMessages.length, ...staleOv.messages);
+                  microcompactTotalSavedChars += staleOv.savedChars;
+                  stream.push({
+                    type: "stale_read_invalidate",
+                    invalidatedCount: staleOv.invalidatedCount,
+                    savedChars: staleOv.savedChars,
+                  });
+                  recovered = true;
+                }
+                const mcResult = microcompact(currentMessages, {
+                  keepRecentResults: 2,
+                  minContentLength: 50,
+                });
                 if (mcResult.compressedCount > 0) {
                   currentMessages.splice(0, currentMessages.length, ...mcResult.messages);
+                  microcompactTotalSavedChars += mcResult.savedChars;
+                  stream.push({
+                    type: "microcompact",
+                    compressedCount: mcResult.compressedCount,
+                    savedChars: mcResult.savedChars,
+                  });
+                  recovered = true;
+                }
+                if (recovered) {
                   turns--;
                   continue;
                 }
-                // microcompact 没效果，升级到 Level 2
                 overflowRecoveryLevel = 2;
               }
 
@@ -703,9 +924,11 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           currentMessages.push(assistantMsg);
 
           const turnText = turnTextParts.join("");
-          if (turnText) {
-            stream.push({ type: "message_end", message: assistantMsg, text: turnText });
-          }
+          const turnTrim = turnText.trim();
+          const thinkingFallback = turnTrim ? "" : extractVisibleTextFromThinkingBlocks(assistantContent);
+          const visibleAssistantText = turnTrim || thinkingFallback;
+          /** 必须始终下发 message_end，否则前端无法结束 message_end 回填逻辑（纯 thinking 流时 turnText 曾为空被跳过） */
+          stream.push({ type: "message_end", message: assistantMsg, text: visibleAssistantText });
 
           // max_tokens 截断续写（pi-ai stopReason === "length"，纯文本无工具调用）
           if (
@@ -739,7 +962,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
           // 没有工具调用 → 内层循环结束条件之一
           if (!hasMoreToolCalls) {
-            finalText = turnText || "";
+            finalText = visibleAssistantText;
             // 空回复检测：LLM 没有输出任何文本也没有调用工具
             // 借鉴 claude-code: 空回复时注入提示让 LLM 重新生成
             if (!finalText.trim() && turns < maxTurns - 1) {
@@ -767,6 +990,11 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           const toolGroups = groupToolCallsForExecution(toolCalls);
 
           for (const group of toolGroups) {
+            if (getToolsForRun) {
+              toolsForRun = getToolsForRun();
+            } else {
+              toolsForRun = params.toolsForRun;
+            }
             if (steeringMessages) {
               for (const call of group.calls) {
                 stream.push({ type: "tool_skipped", toolCallId: call.id, toolName: call.name });
@@ -782,62 +1010,14 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
               }
               const settled = await Promise.allSettled(
                 group.calls.map(async (call) => {
-                  const tool = toolsForRun.find((t) => t.name === call.name);
-                  if (!tool) return { text: `未知工具: ${call.name}`, errFlag: true };
-
-                  const schemaCheck = validateToolInputObject(tool, call.input);
-                  if (!schemaCheck.ok) {
-                    return { text: schemaCheck.message, errFlag: true };
-                  }
-                  const hooked = await runPreToolHookChain(call.name, schemaCheck.value, params.sessionKey);
-                  if (!hooked.ok) {
-                    return { text: hooked.message, errFlag: true };
-                  }
-                  call.input = hooked.input;
-
-                  // PreToolUse hooks
-                  if (params.toolHooks) {
-                    const { decision, hookName } = await params.toolHooks.runPreHooks({
-                      tool, input: call.input, ctx: toolCtx, sessionId: params.sessionKey,
-                    });
-                    if (decision.action === "block") {
-                      return { text: `[${hookName}] ${decision.reason}`, errFlag: true };
-                    }
-                    if (decision.action === "modify") {
-                      call.input = decision.input;
-                    }
-                  }
-
-                  const startMs = Date.now();
-                  let text: string;
-                  let errFlag = false;
-                  let reachedExecute = false;
-                  try {
-                    reachedExecute = true;
-                    text = await tool.execute(call.input, { ...toolCtx, toolCallId: call.id });
-                  } catch (err) {
-                    text = `执行错误: ${(err as Error).message}`;
-                    errFlag = true;
-                  }
-
-                  // PostToolUse hooks
-                  if (params.toolHooks) {
-                    text = await params.toolHooks.runPostHooks({
-                      tool, input: call.input, result: text, isError: errFlag,
-                      durationMs: Date.now() - startMs, ctx: toolCtx, sessionId: params.sessionKey,
-                    });
-                  }
-                  if (errFlag && params.toolHooks && reachedExecute) {
-                    text = await params.toolHooks.runPostFailureHooks({
-                      tool,
-                      input: call.input,
-                      result: text,
-                      durationMs: Date.now() - startMs,
-                      ctx: toolCtx,
-                      sessionId: params.sessionKey,
-                    });
-                  }
-                  return { text, errFlag };
+                  const pre = earlyParallelPromises.get(call.id);
+                  if (pre) return pre;
+                  return runParallelSafeToolCall(call, {
+                    toolsForRun,
+                    toolCtx,
+                    sessionKey,
+                    toolHooks: params.toolHooks,
+                  });
                 }),
               );
               for (let j = 0; j < group.calls.length; j++) {
@@ -857,7 +1037,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   type: "tool_execution_end",
                   toolCallId: call.id,
                   toolName: call.name,
-                  result: truncatedResult.length > 500 ? `${truncatedResult.slice(0, 500)}...` : truncatedResult,
+                  result: formatToolResultForSsePreview(truncatedResult, isError),
                   isError,
                 });
                 toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: truncatedResult });
@@ -995,7 +1175,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   type: "tool_execution_end",
                   toolCallId: call.id,
                   toolName: call.name,
-                  result: truncatedResult.length > 500 ? `${truncatedResult.slice(0, 500)}...` : truncatedResult,
+                  result: formatToolResultForSsePreview(truncatedResult, isError),
                   isError,
                 });
                 toolResults.push({ type: "tool_result", tool_use_id: call.id, name: call.name, content: truncatedResult });
