@@ -189,3 +189,29 @@ export function summarizeToolArgs(args: Record<string, unknown>) {
     return `${k}: ${String(v)}`;
   }).join(' | ');
 }
+
+/** 用于状态卡片标题：优先文件路径、命令等，避免只显示工具名 */
+export function primaryToolArgSummary(args: Record<string, unknown>) {
+  const a = args || {};
+  const pathKeys = ['file_path', 'path', 'target_path', 'filePath', 'uri', 'url'] as const;
+  for (const k of pathKeys) {
+    const v = a[k as string];
+    if (typeof v === 'string' && v.trim()) return v.replace(/\s+/g, ' ').trim().slice(0, 220);
+  }
+  if (typeof a.command === 'string' && a.command.trim()) {
+    return a.command.replace(/\s+/g, ' ').trim().slice(0, 140);
+  }
+  if (typeof a.pattern === 'string' && a.pattern.trim()) {
+    return `pattern: ${a.pattern.replace(/\s+/g, ' ').trim().slice(0, 100)}`;
+  }
+  const full = summarizeToolArgs(a);
+  if (full === '无参数') return '';
+  return full.slice(0, 200);
+}
+
+/** 卡片主标题：工具名 + 主要目标（路径/命令等） */
+export function formatToolStatusTitle(toolName: string, args: Record<string, unknown>) {
+  const target = primaryToolArgSummary(args);
+  if (target) return `${toolName} · ${target}`;
+  return toolName;
+}

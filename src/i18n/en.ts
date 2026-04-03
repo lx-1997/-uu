@@ -64,6 +64,8 @@ export const EN: Record<string, string> = {
   'dock.header.popoutShort': 'Pop out',
   'dock.header.hideShort': 'Hide',
 
+  'dock.history.expandTelemetry': 'Show full record (incl. run details)',
+
   'dock.msg.retry': 'Retry',
   'dock.msg.retryTitle': 'Regenerate this reply with the same user message',
   'dock.retry.attachPartial': 'Some attachments could not be re-sent; invalid items were skipped.',

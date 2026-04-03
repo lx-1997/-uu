@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppState } from '../hooks/useAppState';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
@@ -10,12 +11,14 @@ import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, resolveMediaUrl, fetchApi } from '../utils/apiBase';
 import { getRdkEmbedPanel, getRdkEmbedDockCtx, openOpenClawPopout } from '../utils/embed-mode';
+import { useHubDockAnchor } from '../contexts/HubDockAnchorContext';
 import { isDeviceShownOnline } from '../utils/device-connection';
 import { DASHBOARD_CHAT_INTRO_PROMPT_EN, DASHBOARD_CHAT_INTRO_PROMPT_ZH } from '../i18n/prompts';
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-message-plain';
-import { ChatHistoryModal } from './ChatHistoryModal';
+import { buildChatTranscriptTxt, downloadTranscriptTxt } from '../utils/export-chat-transcript';
+import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
 import { DockFlashMentionWizard } from './DockFlashMentionWizard';
 import {
   DOCK_MENTION_CAPABILITIES,
@@ -24,6 +27,7 @@ import {
   type DockMentionCapabilityId,
 } from '../constants/dock-mention-capabilities';
 import io from 'socket.io-client';
+import { Copy } from 'lucide-react';
 
 import rdkclawAvatarUrl from '../assets/chat/rdkclaw-avatar.png';
 import userAvatarUrl from '../assets/chat/user-avatar.png';
@@ -340,10 +344,10 @@ function ReasoningCollapsible({ block }: { block: Extract<ChatBlock, { type: 're
   const summary =
     block.summary
     || (block.text.trim().length > 0
-      ? t('dock.reasoning.summaryHasContent', '推理过程 · 点击展开')
-      : t('dock.reasoning.summaryEmpty', '推理过程'));
+      ? t('dock.reasoning.summaryHasContent', '思考过程（点击展开）')
+      : t('dock.reasoning.summaryEmpty', '思考过程'));
   return (
-    <div className={`msg-block reasoning-collapsible ${open ? 'open' : ''}`}>
+    <div className={`msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking ${open ? 'open' : ''}`}>
       <div className="reasoning-collapsible-toolbar">
         <button
           type="button"
@@ -355,16 +359,14 @@ function ReasoningCollapsible({ block }: { block: Extract<ChatBlock, { type: 're
           </svg>
           <span className="reasoning-collapsible-summary">{summary}</span>
         </button>
-        {block.text.trim().length > 0 && (
-          <button
-            type="button"
-            className="chat-panel-action"
-            title={t('dock.reasoning.copyTitle', '复制推理全文')}
-            onClick={() => { void copyDockPlainText(block.text); }}
-          >
-            {t('dock.reasoning.copy', '复制')}
-          </button>
-        )}
+        {block.text.trim().length > 0 ? (
+          <div className="reasoning-collapsible-actions">
+            <DockCopyIconButton
+              label={t('dock.reasoning.copy', '复制思考过程')}
+              onCopy={() => { void copyDockPlainText(block.text); }}
+            />
+          </div>
+        ) : null}
       </div>
       {open && (
         <pre className="reasoning-collapsible-body">{block.text}</pre>
@@ -377,7 +379,7 @@ function StatusCollapsible({ block }: { block: Extract<ChatBlock, { type: 'statu
   const { t } = useI18n();
   const [open, setOpen] = useState(!block.defaultCollapsed);
   return (
-    <div className={`msg-block status-collapsible ${open ? 'open' : ''}`}>
+    <div className={`msg-block status-collapsible dock-agent-card dock-agent-card--meta ${open ? 'open' : ''}`}>
       <button
         type="button"
         className="status-collapsible-trigger"
@@ -515,38 +517,32 @@ function BlockRenderer({
       ? block.lines.slice(-previewLines)
       : block.lines;
     return (
-      <div className="msg-block terminal-block">
-        <div className="terminal-block-header">
-          <span className="terminal-block-dots">
-            <span className="td red" /><span className="td yellow" /><span className="td green" />
-          </span>
-          <span className="terminal-block-label">{block.label || 'Terminal'}</span>
-          <button
-            type="button"
-            className="chat-panel-action"
-            title={t('dock.terminal.copyAllTitle', '复制全部输出')}
-            onClick={() => {
-              void copyDockPlainText(block.lines.join('\n'));
-            }}
-          >
-            {t('dock.terminal.copyOut', '复制输出')}
-          </button>
-          {collapsible && (
-            <button
-              type="button"
-              className="chat-panel-action"
-              onClick={() => setExpandedTerminal((prev) => !prev)}
-              title={expandedTerminal ? t('dock.terminal.collapseOut', '收起输出') : t('dock.terminal.expandOut', '展开输出')}
-            >
-              {expandedTerminal
-                ? t('dock.terminal.collapse', '收起')
-                : tf('dock.terminal.expandLines', '展开 ({{n}} 行)', { n: block.lines.length })}
-            </button>
-          )}
+      <div className="msg-block terminal-block dock-agent-card dock-agent-card--terminal">
+        <div className="dock-agent-card-head">
+          <span className="dock-agent-card-icon" aria-hidden>▸</span>
+          <span className="dock-agent-card-title">{block.label || t('dock.agent.shell', '终端输出')}</span>
+          <div className="dock-agent-card-actions">
+            <DockCopyIconButton
+              label={t('dock.terminal.copyOut', '复制输出')}
+              onCopy={() => { void copyDockPlainText(block.lines.join('\n')); }}
+            />
+            {collapsible ? (
+              <button
+                type="button"
+                className="dock-card-aux-btn"
+                onClick={() => setExpandedTerminal((prev) => !prev)}
+                title={expandedTerminal ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+              >
+                {expandedTerminal
+                  ? t('dock.terminal.collapse', '收起')
+                  : tf('dock.terminal.expandLines', '展开 ({{n}} 行)', { n: block.lines.length })}
+              </button>
+            ) : null}
+          </div>
         </div>
-        <div className="terminal-block-body">
+        <div className="dock-agent-shell" role="log">
           {visibleLines.map((line, i) => (
-            <div key={i} className="terminal-block-line">{line}</div>
+            <div key={i} className="dock-agent-shell-line">{line}</div>
           ))}
         </div>
       </div>
@@ -581,39 +577,35 @@ function BlockRenderer({
             ? t('dock.collab.badgeWaitHint', 'RDKClaw · 等板端')
             : 'RDKClaw';
     return (
-      <div className={`msg-block collab-block ${sideClass}`}>
-        <div className="collab-block-header">
+      <div className={`msg-block collab-block dock-agent-card dock-agent-card--collab ${sideClass}`}>
+        <div className="collab-block-header dock-agent-card-head">
           <span className={`collab-block-badge ${sideClass}`}>{badge}</span>
           <div className="collab-block-titles">
             {block.title && <div className="collab-block-title">{block.title}</div>}
             {block.subtitle && <div className="collab-block-subtitle">{block.subtitle}</div>}
           </div>
-          <button
-            type="button"
-            className="chat-panel-action"
-            title={t('dock.terminal.copyAllTitle', '复制全部输出')}
-            onClick={() => {
-              void copyDockPlainText(block.lines.join('\n'));
-            }}
-          >
-            {t('dock.terminal.copyOut', '复制输出')}
-          </button>
-          {collapsible && (
-            <button
-              type="button"
-              className="chat-panel-action"
-              onClick={() => setExpandedCollab((prev) => !prev)}
-              title={expandedCollab ? t('dock.terminal.collapseOut', '收起输出') : t('dock.terminal.expandOut', '展开输出')}
-            >
-              {expandedCollab
-                ? t('dock.terminal.collapse', '收起')
-                : tf('dock.terminal.expandLines', '展开 ({{n}} 行)', { n: block.lines.length })}
-            </button>
-          )}
+          <div className="dock-agent-card-actions">
+            <DockCopyIconButton
+              label={t('dock.terminal.copyOut', '复制输出')}
+              onCopy={() => { void copyDockPlainText(block.lines.join('\n')); }}
+            />
+            {collapsible ? (
+              <button
+                type="button"
+                className="dock-card-aux-btn"
+                onClick={() => setExpandedCollab((prev) => !prev)}
+                title={expandedCollab ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+              >
+                {expandedCollab
+                  ? t('dock.terminal.collapse', '收起')
+                  : tf('dock.terminal.expandLines', '展开 ({{n}} 行)', { n: block.lines.length })}
+              </button>
+            ) : null}
+          </div>
         </div>
-        <div className="collab-block-body">
+        <div className="collab-block-body dock-agent-shell">
           {visibleLines.map((line, i) => (
-            <div key={i} className="collab-block-line">{line}</div>
+            <div key={i} className="collab-block-line dock-agent-shell-line">{line}</div>
           ))}
         </div>
       </div>
@@ -622,18 +614,18 @@ function BlockRenderer({
 
   if (block.type === 'code') {
     return (
-      <div className="msg-block code-block">
-        <div className="code-block-header">
-          <span className="code-block-lang">{block.lang}</span>
-          <button
-            type="button"
-            className="chat-panel-action"
-            onClick={() => { void copyDockPlainText(block.content); }}
-          >
-            {t('dock.code.copy', '复制')}
-          </button>
+      <div className="msg-block code-block dock-agent-card dock-agent-card--code">
+        <div className="code-block-header dock-agent-card-head">
+          <span className="dock-agent-card-icon" aria-hidden>#</span>
+          <span className="dock-agent-card-title dock-agent-card-title--mono">{block.lang || 'text'}</span>
+          <div className="dock-agent-card-actions">
+            <DockCopyIconButton
+              label={t('dock.code.copy', '复制代码')}
+              onCopy={() => { void copyDockPlainText(block.content); }}
+            />
+          </div>
         </div>
-        <pre className="code-block-body"><code>{block.content}</code></pre>
+        <pre className="code-block-body dock-agent-code-body"><code>{block.content}</code></pre>
       </div>
     );
   }
@@ -649,15 +641,22 @@ function BlockRenderer({
         />
       );
     }
+    const headTitle = block.title ?? t('dock.agent.status', '运行状态');
     return (
-      <div className="msg-block status-block">
-        {block.items.map((item) => (
-          <div key={item.label} className="status-block-item">
-            <span className={`status-block-dot ${item.ok ? 'ok' : 'warn'}`} />
-            <span className="status-block-label">{item.label}</span>
-            <span className="status-block-value">{item.value}</span>
-          </div>
-        ))}
+      <div className={`msg-block status-block dock-agent-card dock-agent-card--status${block.title ? ' dock-agent-card--tool-step' : ''}`}>
+        <div className="dock-agent-card-head dock-agent-card-head--compact">
+          <span className="dock-agent-card-icon" aria-hidden>{block.title ? '▸' : '≡'}</span>
+          <span className="dock-agent-card-title">{headTitle}</span>
+        </div>
+        <div className="dock-agent-status-body">
+          {block.items.map((item) => (
+            <div key={item.label} className="status-block-item">
+              <span className={`status-block-dot ${item.ok ? 'ok' : 'warn'}`} />
+              <span className="status-block-label">{item.label}</span>
+              <span className="status-block-value">{item.value}</span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -858,15 +857,21 @@ function BlockRenderer({
   if (block.type === 'progress') {
     const hasRunning = block.steps.some(s => s.status === 'running');
     return (
-      <div className="msg-block progress-block">
-        {block.steps.map((step, i) => (
-          <div key={i} className={`progress-step ${step.status}`}>
-            <span className="progress-step-icon">
-              {step.status === 'done' ? '✓' : step.status === 'running' ? '◉' : '○'}
-            </span>
-            <span className="progress-step-label">{step.label}</span>
-          </div>
-        ))}
+      <div className="msg-block progress-block dock-agent-card dock-agent-card--progress">
+        <div className="dock-agent-card-head dock-agent-card-head--compact">
+          <span className="dock-agent-card-icon" aria-hidden>↳</span>
+          <span className="dock-agent-card-title">{t('dock.agent.steps', '执行步骤')}</span>
+        </div>
+        <ul className="dock-agent-step-list">
+          {block.steps.map((step, i) => (
+            <li key={i} className={`dock-agent-step-line dock-agent-step-line--${step.status}`}>
+              <span className="dock-agent-step-mark" aria-hidden>
+                {step.status === 'done' ? '·' : step.status === 'running' ? '›' : '○'}
+              </span>
+              <span className="dock-agent-step-label">{step.label}</span>
+            </li>
+          ))}
+        </ul>
         {hasRunning && block.taskId && onCancelTask && (
           <button className="task-cancel-btn" onClick={() => onCancelTask(block.taskId!)}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -881,12 +886,14 @@ function BlockRenderer({
 
   if (block.type === 'task-result') {
     return (
-      <div className={`msg-block task-result-block ${block.success ? 'success' : 'fail'}`}>
-        <div className="task-result-header">
-          <span className="task-result-icon">{block.success ? '✓' : '✗'}</span>
-          <span className="task-result-title">{block.title}</span>
+      <div className={`msg-block task-result-block dock-agent-card dock-agent-card--result ${block.success ? 'success' : 'fail'}`}>
+        <div className="task-result-header dock-agent-card-head">
+          <span className="dock-agent-card-icon" aria-hidden>{block.success ? '✓' : '✗'}</span>
+          <span className="dock-agent-card-title">{block.title}</span>
         </div>
-        {block.detail && <p className="task-result-detail">{block.detail}</p>}
+        {block.detail ? (
+          <pre className="task-result-detail dock-agent-result-body">{block.detail}</pre>
+        ) : null}
       </div>
     );
   }
@@ -896,21 +903,19 @@ function BlockRenderer({
       return <ReasoningCollapsible block={block} />;
     }
     return (
-      <div className="msg-block reasoning-collapsible open">
+      <div className="msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking open">
         <div className="reasoning-collapsible-toolbar">
           <span className="reasoning-collapsible-summary reasoning-collapsible-summary--static">
-            {t('dock.reasoning.title', '推理过程')}
+            {t('dock.reasoning.title', '思考过程')}
           </span>
-          {block.text.trim().length > 0 && (
-            <button
-              type="button"
-              className="chat-panel-action"
-              title={t('dock.reasoning.copyTitle', '复制推理全文')}
-              onClick={() => { void copyDockPlainText(block.text); }}
-            >
-              {t('dock.reasoning.copy', '复制')}
-            </button>
-          )}
+          {block.text.trim().length > 0 ? (
+            <div className="reasoning-collapsible-actions">
+              <DockCopyIconButton
+                label={t('dock.reasoning.copy', '复制思考过程')}
+                onCopy={() => { void copyDockPlainText(block.text); }}
+              />
+            </div>
+          ) : null}
         </div>
         <pre className="reasoning-collapsible-body">{block.text}</pre>
       </div>
@@ -994,6 +999,31 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   );
 }
 
+/** 卡片/思考区：图标复制（竞品式，悬停强化，避免长文案「复制」挤在栏外） */
+function DockCopyIconButton({
+  label,
+  onCopy,
+}: {
+  label: string;
+  onCopy: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="dock-card-icon-btn"
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onCopy();
+      }}
+    >
+      <Copy size={15} strokeWidth={2} aria-hidden />
+    </button>
+  );
+}
+
 async function copyDockPlainText(text: string): Promise<boolean> {
   if (!text.trim()) return false;
   try {
@@ -1031,13 +1061,13 @@ export default function AIDock() {
     openclawSendMessage,
     currentDevice, addToast, language, setLanguage,
     studioResponseMode, setStudioResponseMode,
-    exportDebugBundle,
+    getStudioChatSessionId,
     setShowAddDevice,
     setObStep,
   } = useAppState();
+  const { hubAnchorEl, defaultHostNode } = useHubDockAnchor();
   const { t, isEn } = useI18n();
   const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
-  const [debugExporting, setDebugExporting] = useState(false);
   const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
   const [quickMoreMenuOpen, setQuickMoreMenuOpen] = useState(false);
@@ -1228,7 +1258,6 @@ export default function AIDock() {
     }
   });
   const [showAllMessages, setShowAllMessages] = useState(false);
-  const [showChatHistoryModal, setShowChatHistoryModal] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
@@ -1241,6 +1270,29 @@ export default function AIDock() {
     if (!currentDevice) return t('dock.device.unbound', '未绑定设备');
     return `${activeDeviceName || t('dock.device.unnamed', '未命名设备')} · ${activeDeviceEndpoint}`;
   }, [activeDeviceName, activeDeviceEndpoint, currentDevice, t]);
+
+  const beginNewChat = useCallback(async () => {
+    await confirmAndBeginNewChat({ aiTyping, taskHistory, t, stopAllRuns, clearChatHistory });
+  }, [aiTyping, taskHistory, stopAllRuns, clearChatHistory, t]);
+
+  const exportDockTranscript = useCallback(() => {
+    try {
+      const body = buildChatTranscriptTxt(chatMessages, t, {
+        deviceLabel: activeRdkclawDeviceLabel,
+        sessionId: getStudioChatSessionId(),
+      });
+      const sid = getStudioChatSessionId().replace(/[^\w.-]+/g, '_').slice(0, 24);
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      downloadTranscriptTxt(`rdkclaw-chat-${sid || stamp}.txt`, body);
+      addToast(t('chat.export.done', '对话已导出为 TXT'), 'success');
+    } catch (e) {
+      addToast(
+        e instanceof Error ? e.message : t('chat.export.fail', '导出失败'),
+        'error',
+      );
+    }
+  }, [chatMessages, t, activeRdkclawDeviceLabel, getStudioChatSessionId, addToast]);
+
   const channelStats = useMemo(() => {
     let feishuInbound = 0;
     let feishuTotal = 0;
@@ -1844,6 +1896,13 @@ export default function AIDock() {
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
   const shouldHideDock = isSubpageTab && hideDockInSubpage;
+  const hubDockEmbedded =
+    !rdkEmbedPanel
+    && activeTab === 'ai-chat-hub'
+    && chatExpanded
+    && !workspaceMode
+    && hubAnchorEl != null;
+  const useSubpageCompact = chatExpanded && isSubpageTab && !workspaceMode && !hubDockEmbedded;
 
   const submitQuickPrompt = (text: string, placeholder?: string, forceRdkclaw?: boolean) => {
     if (!text && placeholder) {
@@ -1948,7 +2007,7 @@ export default function AIDock() {
       <button
         type="button"
         className="dock-restore-btn"
-        title={t('dock.restore', '显示 AI Dock')}
+        title={t('dock.tt.restoreDock', '显示对话栏')}
         onClick={() => setHideDockInSubpage(false)}
       >
         {t('dock.restore', '显示 AI Dock')}
@@ -1956,9 +2015,10 @@ export default function AIDock() {
     );
   }
 
-  return (
-    <>
-    <div className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''} ${chatExpanded && isSubpageTab && !workspaceMode ? 'subpage-compact' : ''}`}>
+  const dockInner = (
+    <div
+      className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''} ${useSubpageCompact ? 'subpage-compact' : ''} ${hubDockEmbedded ? 'dock--hub-embedded' : ''}`}
+    >
       {/* ── Chat panel (expanded) ── */}
       {chatExpanded && (
         <div className="dock-chat">
@@ -1980,7 +2040,11 @@ export default function AIDock() {
               </div>
             </div>
             <div className="dock-header-right">
-              <div className="dock-header-toolbar" role="toolbar" aria-label={t('dock.header.toolbarAria', '对话与运行工具')}>
+              <div
+                className="dock-header-toolbar dock-header-toolbar--chatlike"
+                role="toolbar"
+                aria-label={t('dock.header.toolbarAria', '对话与运行工具')}
+              >
                 <div
                   className="dock-header-segmented"
                   role="radiogroup"
@@ -1991,7 +2055,7 @@ export default function AIDock() {
                     role="radio"
                     aria-checked={compactFlowMode}
                     className={`dock-header-seg${compactFlowMode ? ' is-active' : ''}`}
-                    title={t('dock.compact.titleOn', '已开启极简流程视图（点击查看完整过程）')}
+                    title={t('dock.tt.compactOn', '简洁视图')}
                     onClick={() => setCompactFlowMode(true)}
                   >
                     {t('dock.compact.btnCompact', '极简')}
@@ -2001,21 +2065,19 @@ export default function AIDock() {
                     role="radio"
                     aria-checked={!compactFlowMode}
                     className={`dock-header-seg${!compactFlowMode ? ' is-active' : ''}`}
-                    title={t('dock.compact.titleOff', '已关闭极简流程视图（点击只看结论）')}
+                    title={t('dock.tt.compactOff', '完整视图')}
                     onClick={() => setCompactFlowMode(false)}
                   >
                     {t('dock.compact.btnFull', '完整')}
                   </button>
                 </div>
 
-                <span className="dock-header-toolbar-divider" aria-hidden />
-
                 <div className="dock-header-tool-cluster">
                   <button
                     type="button"
                     className={`dock-header-toolbtn${runTimelinePanelOpen ? ' is-active' : ''}`}
                     onClick={() => setRunTimelinePanelOpen(!runTimelinePanelOpen)}
-                    title={t('dock.timeline.toggleTitle', '运行时间线（当前轮次步骤与心跳）')}
+                    title={t('dock.tt.timeline', '运行记录')}
                     aria-expanded={runTimelinePanelOpen}
                     aria-label={t('dock.header.timeline', '时间线')}
                   >
@@ -2037,7 +2099,7 @@ export default function AIDock() {
                       type="button"
                       className={`dock-header-toolbtn${showTaskPanel ? ' is-active' : ''}`}
                       onClick={() => setShowTaskPanel(!showTaskPanel)}
-                      title={t('dock.task.panelTitle', '任务')}
+                      title={t('dock.tt.tasks', '后台任务')}
                       aria-label={t('dock.header.tasks', '任务')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
@@ -2047,49 +2109,15 @@ export default function AIDock() {
                       <span className="dock-header-toolbtn-label">{t('dock.header.tasks', '任务')}</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="dock-header-toolbtn"
-                    onClick={() => setShowChatHistoryModal(true)}
-                    title={t('dock.history.openTitle', '查看本地对话历史')}
-                    aria-label={t('dock.header.sessions', '会话')}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M4 6h12v10H8l-3 3V6z" />
-                      <path d="M8 10h8M8 13h5" />
-                    </svg>
-                    <span className="dock-header-toolbtn-label">{t('dock.header.sessions', '会话')}</span>
-                  </button>
                 </div>
 
-                <span className="dock-header-toolbar-divider" aria-hidden />
-
                 <div className="dock-header-tool-cluster dock-header-tool-cluster--utility">
-                  <button
-                    type="button"
-                    className="dock-header-toolbtn"
-                    disabled={debugExporting}
-                    onClick={() => {
-                      if (debugExporting) return;
-                      setDebugExporting(true);
-                      void exportDebugBundle().finally(() => setDebugExporting(false));
-                    }}
-                    title={t('dock.export.title', '导出排查包（对话快照、Agent 会话、可选板端 OpenClaw 日志）')}
-                    aria-label={t('dock.header.diagnose', '导出诊断包')}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7 10 12 15 17 10" />
-                      <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    <span className="dock-header-toolbtn-label">{t('dock.header.diagnose', '诊断')}</span>
-                  </button>
                   {!rdkEmbedPanel && activeTab === 'openclaw' && (
                     <button
                       type="button"
                       className="dock-header-toolbtn"
                       onClick={() => openOpenClawPopout()}
-                      title={t('dock.popout.openclawTitle', '新窗口仅打开 OpenClaw 页面')}
+                      title={t('dock.tt.popoutOc', '新窗口打开 OpenClaw')}
                       aria-label={t('dock.header.popoutOpenclaw', '新窗口打开 OpenClaw')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -2104,7 +2132,7 @@ export default function AIDock() {
                       type="button"
                       className="dock-header-toolbtn"
                       onClick={toggleSubpageDockVisibility}
-                      title={t('dock.hide', '隐藏 AI Dock')}
+                      title={t('dock.tt.hideDock', '隐藏对话栏')}
                       aria-label={t('dock.header.hideDock', '隐藏 AI Dock')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -2117,13 +2145,27 @@ export default function AIDock() {
                   )}
                 </div>
 
-                <span className="dock-header-toolbar-divider" aria-hidden />
+                <button
+                  type="button"
+                  className="dock-header-export"
+                  onClick={exportDockTranscript}
+                  title={t('dock.tt.exportChat', '导出为文本')}
+                  aria-label={t('dock.header.exportChat', '导出对话')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="12" y1="18" x2="12" y2="12" />
+                    <line x1="9" y1="15" x2="15" y2="15" />
+                  </svg>
+                  <span className="dock-header-export-label">{t('dock.header.exportChat', '导出')}</span>
+                </button>
 
                 <button
                   type="button"
                   className="dock-header-newchat"
-                  onClick={clearChatHistory}
-                  title={t('dock.task.clearHistoryTitle', '新对话（本窗口独立线程，不清除长期记忆）')}
+                  onClick={() => void beginNewChat()}
+                  title={t('dock.tt.newChat', '新对话')}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
                     <line x1="12" y1="5" x2="12" y2="19" />
@@ -2137,7 +2179,7 @@ export default function AIDock() {
                 type="button"
                 className="dock-header-close btn-icon"
                 onClick={closeDock}
-                title={t('dock.task.closeTitle', '关闭')}
+                title={t('dock.tt.closePanel', '关闭')}
                 aria-label={t('dock.task.closeTitle', '关闭')}
               >
                 {Icon.close}
@@ -2267,7 +2309,8 @@ export default function AIDock() {
                         <button
                           type="button"
                           className="dock-bubble-copy"
-                          title={t('dock.bubble.copyTitle', '复制本条全文（纯文本）')}
+                          title={t('dock.tt.copyMessage', '复制文字')}
+                          aria-label={t('dock.tt.copyMessage', '复制文字')}
                           onClick={() => {
                             void copyDockPlainText(plain).then((ok) => {
                               addToast(
@@ -2277,7 +2320,7 @@ export default function AIDock() {
                             });
                           }}
                         >
-                          {t('dock.bubble.copyBtn', '复制')}
+                          <Copy size={14} strokeWidth={2} aria-hidden />
                         </button>
                       </div>
                     );
@@ -2380,8 +2423,8 @@ export default function AIDock() {
                                 disabled={aiTyping}
                                 title={
                                   aiTyping
-                                    ? t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。')
-                                    : t('dock.msg.retryTitle', '使用同一条用户消息重新生成回复')
+                                    ? t('dock.tt.waitReply', '请等待当前回复结束')
+                                    : t('dock.tt.regenerate', '用同一条消息重新生成')
                                 }
                                 onClick={() => void runRegenerate(msg.id)}
                               >
@@ -2395,8 +2438,8 @@ export default function AIDock() {
                                 disabled={aiTyping}
                                 title={
                                   aiTyping
-                                    ? t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。')
-                                    : t('dock.msg.unsatisfied', '不满意此回复')
+                                    ? t('dock.tt.waitReply', '请等待当前回复结束')
+                                    : t('dock.tt.feedbackBadReply', '反馈不满意，请改进回复')
                                 }
                                 onClick={() => {
                                   setUnsatisfiedNote('');
@@ -2506,15 +2549,15 @@ export default function AIDock() {
         )}
 
         <form className="dock-form dock-input" onSubmit={handleUnifiedCommand}>
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple title={t('dock.input.pickFiles', '选择文件')} className="sr-only" />
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple title={t('dock.tt.addFiles', '添加文件')} className="sr-only" />
 
           <div className="dock-form-actions">
-            <button type="button" className="dock-action-btn" onClick={handleFilePick} title={t('dock.input.attachments', '附件')}>
+            <button type="button" className="dock-action-btn" onClick={handleFilePick} title={t('dock.tt.attach', '添加附件')}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
               </svg>
             </button>
-            <button type="button" className={`dock-action-btn ${isRecording ? 'recording' : ''}`} onClick={toggleVoiceRecord} title={isRecording ? t('dock.input.voiceStop', '停止') : t('dock.input.voice', '语音')}>
+            <button type="button" className={`dock-action-btn ${isRecording ? 'recording' : ''}`} onClick={toggleVoiceRecord} title={isRecording ? t('dock.tt.stopVoice', '停止录音') : t('dock.tt.voice', '语音输入')}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
               </svg>
@@ -2575,13 +2618,13 @@ export default function AIDock() {
                 type="button"
                 className="dock-action-btn dock-action-btn--stop-all"
                 onClick={() => { void stopAllRuns(); }}
-                title={t('dock.input.stopAllTitle', '停止全部运行中的任务（本机对话、飞书、微信、定时任务等）')}
+                title={t('dock.tt.stopAll', '停止进行中的任务')}
                 aria-label={t('dock.typing.stopAll', '全部停止')}
               >
                 {Icon.stopAll}
               </button>
               {cmd.trim() ? (
-                <button type="button" className="dock-action-btn" onClick={() => setCmd('')} title={t('dock.input.clearInput', '清空')}>
+                <button type="button" className="dock-action-btn" onClick={() => setCmd('')} title={t('dock.tt.clearInput', '清空输入')}>
                   {Icon.close}
                 </button>
               ) : null}
@@ -2592,19 +2635,22 @@ export default function AIDock() {
               <button
                 type="button"
                 className="dock-action-btn"
-                onClick={() => setShowChatHistoryModal(true)}
-                title={t('dock.history.openTitle', '查看本地对话历史')}
+                onClick={exportDockTranscript}
+                title={t('dock.tt.exportChat', '导出为文本')}
+                aria-label={t('dock.header.exportChat', '导出对话')}
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                  <path d="M3 3v5h5" />
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="12" y1="18" x2="12" y2="12" />
+                  <line x1="9" y1="15" x2="15" y2="15" />
                 </svg>
               </button>
               <button
                 type="button"
                 className="dock-action-btn"
                 onClick={() => setChatExpanded(true)}
-                title={t('dock.openChatPanel', '打开聊天面板')}
+                title={t('dock.tt.expandChat', '展开对话')}
               >
                 {Icon.expand}
               </button>
@@ -2615,7 +2661,7 @@ export default function AIDock() {
               type="button"
               className="dock-action-btn"
               onClick={toggleSubpageDockVisibility}
-              title={t('dock.hide', '隐藏 AI Dock')}
+              title={t('dock.tt.hideDock', '隐藏对话栏')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32"/>
@@ -2624,7 +2670,7 @@ export default function AIDock() {
               </svg>
             </button>
           )}
-          <button type="submit" className={`dock-send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`} disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping} title={t('dock.send', '发送')}>
+          <button type="submit" className={`dock-send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`} disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping} title={t('dock.tt.send', '发送')}>
             {Icon.send}
           </button>
         </form>
@@ -2664,14 +2710,14 @@ export default function AIDock() {
             {(channelStats.feishuTotal > 0 || channelStats.weixinTotal > 0) && (
               <div className="dock-channel-strip" aria-label={t('dock.strip.aria.channels', '渠道消息概览')}>
                 {channelStats.feishuTotal > 0 && (
-                  <span className="dock-channel-chip" title={t('dock.strip.feishuMsgsTitle', '飞书消息')}>
+                  <span className="dock-channel-chip" title={t('dock.tt.feishuInbox', '飞书收件')}>
                     {channelStats.feishuInbound > 0
                       ? tfDock('dock.strip.feishuInbound', '飞书 来信 {{n}}', { n: channelStats.feishuInbound })
                       : tfDock('dock.strip.feishuTotal', '飞书 消息 {{n}}', { n: channelStats.feishuTotal })}
                   </span>
                 )}
                 {channelStats.weixinTotal > 0 && (
-                  <span className="dock-channel-chip" title={t('dock.strip.weixinMsgsTitle', '微信消息')}>
+                  <span className="dock-channel-chip" title={t('dock.tt.weixinInbox', '微信收件')}>
                     {channelStats.weixinInbound > 0
                       ? tfDock('dock.strip.weixinInbound', '微信 来信 {{n}}', { n: channelStats.weixinInbound })
                       : tfDock('dock.strip.weixinTotal', '微信 消息 {{n}}', { n: channelStats.weixinTotal })}
@@ -2691,11 +2737,7 @@ export default function AIDock() {
                 className={`dock-response-mode-trigger ${responseModeMenuOpen ? 'is-open' : ''} ${studioResponseMode === 'thinking' ? 'is-thinking' : 'is-quick'}`}
                 aria-expanded={responseModeMenuOpen}
                 aria-haspopup="listbox"
-                title={
-                  activeTab === 'openclaw' && dockOcMode && openclawSendMessage
-                    ? t('dock.responseMode.hintOpenClaw', '使用 RDKClaw 对话时生效；当前为 OpenClaw Agent 直连')
-                    : t('dock.responseMode.hint', '选择回复模式：快速回答或解决复杂任务')
-                }
+                title={t('dock.tt.responseMode', '切换快速或深度思考')}
                 aria-label={t('dock.responseMode.triggerAria', '回复模式菜单')}
                 onClick={() => setResponseModeMenuOpen((o) => !o)}
               >
@@ -2777,7 +2819,7 @@ export default function AIDock() {
               <button
                 className="dock-ctx-chip active"
                 onClick={() => setDockOcMode((prev) => !prev)}
-                title={dockOcMode ? t('dock.ocMode.titleOpenClaw', '当前：OpenClaw Agent 模式（点击切换到 RDKClaw）') : t('dock.ocMode.titleRdk', '当前：RDKClaw 模式（点击切换到 OpenClaw Agent）')}
+                title={dockOcMode ? t('dock.tt.useRdkDock', '切到 RDKClaw 对话') : t('dock.tt.useOpenclaw', '切到 OpenClaw 直连')}
                 style={{ fontWeight: 600 }}
               >
                 {dockOcMode ? '🤖 OpenClaw ↔' : '🔧 RDKClaw ↔'}
@@ -2879,6 +2921,11 @@ export default function AIDock() {
         </div>
       </div>
     </div>
+  );
+  const portalHost = hubDockEmbedded ? hubAnchorEl : defaultHostNode;
+  return (
+    <>
+    {portalHost ? createPortal(dockInner, portalHost) : dockInner}
     {unsatisfiedModal ? (
       <div
         className="dock-retry-modal-backdrop"
@@ -2929,13 +2976,6 @@ export default function AIDock() {
         </div>
       </div>
     ) : null}
-    <ChatHistoryModal
-      open={showChatHistoryModal}
-      onClose={() => setShowChatHistoryModal(false)}
-      devices={devices}
-      preferredDeviceId={currentDevice?.id}
-      t={t}
-    />
     <DockFlashMentionWizard
       open={dockFlashWizardOpen}
       onClose={() => setDockFlashWizardOpen(false)}

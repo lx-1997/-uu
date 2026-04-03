@@ -58,6 +58,7 @@ import {
   isBoardOpenClawCollabTool,
   isBoardOpenClawExecutorTool,
   collapseRepeatedBoardToolNotifyLines,
+  formatToolStatusTitle,
 } from './sse-helpers';
 import { applyClientActionsFromAssistantText } from '../utils/client-action-bridge';
 
@@ -151,6 +152,10 @@ export interface AIChatStoreState {
 
   /** 导出排查 zip（服务端 Agent 会话、Dock 快照、可选板端日志） */
   exportDebugBundle: (options?: { includeBoardLogs?: boolean }) => Promise<void>;
+  /** 当前窗口 RDKClaw 对话绑定的 Studio 会话 id（与 Dock 一致） */
+  getStudioChatSessionId: () => string;
+  /** 对话存档所用设备桶（`__global__` 或具体设备 id） */
+  getStudioChatDeviceId: () => string;
 }
 
 const AIChatContext = createContext<AIChatStoreState | null>(null);
@@ -425,6 +430,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     waitHintCollabIndex?: number;
     /** 合并逐字/逐块 SSE，避免每个 chunk 被当成一行导致竖排假换行 */
     openclawStreamBuf?: string;
+    /** summarizeToolArgs，进度/结束时保留路径等目标信息 */
+    argDetail?: string;
+    cardTitle?: string;
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
   /** 当前轮 assistant 消息里 reasoning 块的 aiBlocks 下标 */
@@ -1334,12 +1342,15 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 );
                 if (studioResponseMode === 'quick' && !isBoardOpenClawExecutorTool(toolName)) {
                   const toolCallIdHidden = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
+                  const argDetailHidden = summarizeToolArgs(args);
                   toolTimelineRef.current[toolCallIdHidden] = {
                     toolName,
                     executor,
                     startedAt: Date.now(),
                     statusIndex: -1,
                     hiddenQuick: true,
+                    argDetail: argDetailHidden,
+                    cardTitle: formatToolStatusTitle(toolName, args),
                   };
                   updateAiMessage(aiText, aiBlocks);
                   break;
@@ -1349,17 +1360,15 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 }
                 const phase = resolvePhase(event.data.phase);
                 const argStr = summarizeToolArgs(args);
+                const cardTitle = formatToolStatusTitle(toolName, args);
                 const statusIndex = aiBlocks.length;
                 aiBlocks.push({
                   type: 'status',
+                  title: cardTitle,
                   items: [
                     {
-                      label: tf('chat.tool.step', '第 {{n}} 步 · {{tool}} · {{exec}}', {
-                        n: toolStepNo,
-                        tool: toolName,
-                        exec: executorLabel(executor),
-                      }),
-                      value: `${phase}... ${argStr}`,
+                      label: executorLabel(executor),
+                      value: `${phase} · ${argStr}`,
                       ok: true,
                     },
                   ],
@@ -1370,6 +1379,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   executor,
                   startedAt: Date.now(),
                   statusIndex,
+                  argDetail: argStr,
+                  cardTitle,
                   ...(isBoardOpenClawCollabTool(toolName) ? { openclawStreamBuf: '' } : {}),
                 };
                 if (isBoardOpenClawCollabTool(toolName)) {
@@ -1420,9 +1431,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (state.hiddenQuick) break;
                 const statusBlock = aiBlocks[state.statusIndex];
                 if (statusBlock?.type === 'status' && statusBlock.items[0]) {
-                  statusBlock.items[0].value = tf('chat.tool.runningVal', '执行中 · {{exec}} · 实时输出更新', {
-                    exec: executorLabel(state.executor),
-                  });
+                  const ad = state.argDetail;
+                  const hasTarget = Boolean(ad && ad !== '无参数');
+                  const running = t('chat.tool.runningShort', '执行中…');
+                  statusBlock.items[0].value = hasTarget
+                    ? `${ad} · ${running}`
+                    : tf('chat.tool.runningVal', '执行中 · {{exec}} · 实时输出更新', {
+                        exec: executorLabel(state.executor),
+                      });
                 }
                 const isBoardOpenClaw =
                   isBoardOpenClawCollabTool(toolName) || state.executor === 'board_openclaw';
@@ -1525,17 +1541,33 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (state && !state.hiddenQuick && state.statusIndex >= 0) {
                   const statusBlock = aiBlocks[state.statusIndex];
                   if (statusBlock?.type === 'status' && statusBlock.items[0]) {
+                    const ad = state.argDetail;
+                    const hasTarget = Boolean(ad && ad !== '无参数');
+                    const stateWord = isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成');
+                    const ms = Math.max(1, elapsedMs);
+                    let valueLine = hasTarget
+                      ? tf('chat.tool.resultWithDetail', '{{detail}} · {{state}} · {{ms}} ms', {
+                          detail: ad as string,
+                          state: stateWord,
+                          ms,
+                        })
+                      : tf('chat.tool.resultNoDetail', '{{tool}} · {{state}} · {{ms}} ms', {
+                          tool: state.toolName,
+                          state: stateWord,
+                          ms,
+                        });
+                    if (isError && result.trim()) {
+                      const errOne = result.trim().replace(/\s+/g, ' ').slice(0, 220);
+                      valueLine = `${valueLine} — ${errOne}`;
+                    }
                     statusBlock.items[0] = {
-                      label: tf('chat.tool.resultLabel', '{{tool}} · {{exec}}', {
-                        tool: state.toolName,
-                        exec: executorLabel(state.executor),
-                      }),
-                      value: tf('chat.tool.doneMs', '{{state}} · {{ms}}ms', {
-                        state: isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成'),
-                        ms: Math.max(1, elapsedMs),
-                      }),
+                      label: executorLabel(state.executor),
+                      value: valueLine,
                       ok: !isError,
                     };
+                    if (state.cardTitle && !statusBlock.title) {
+                      statusBlock.title = state.cardTitle;
+                    }
                   }
                 }
                 if (!state?.hiddenQuick) {
@@ -1766,10 +1798,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       previewLines: 10,
                     });
                   } else if (!state) {
+                    const execFallback = String(
+                      (event.data as { executor?: string }).executor || 'rdkclaw_local',
+                    );
                     aiBlocks.push({
                       type: 'status',
+                      title: toolName,
                       items: [{
-                        label: toolName,
+                        label: executorLabel(execFallback),
                         value: result || (isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成')),
                         ok: !isError,
                       }],
@@ -2888,6 +2924,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
+  const getStudioChatSessionId = useCallback(() => String(sessionIdRef.current || '').trim(), []);
+  const getStudioChatDeviceId = useCallback(() => chatDeviceIdRef.current, []);
+
   const exportDebugBundle = useCallback(
     async (options?: { includeBoardLogs?: boolean }) => {
       const sessionId = String(sessionIdRef.current || '').trim();
@@ -2946,6 +2985,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     rdkClawRunTimeline, runTimelinePanelOpen, setRunTimelinePanelOpen,
     studioResponseMode, setStudioResponseMode,
     exportDebugBundle,
+    getStudioChatSessionId,
+    getStudioChatDeviceId,
   };
 
   return React.createElement(AIChatContext.Provider, { value }, children);

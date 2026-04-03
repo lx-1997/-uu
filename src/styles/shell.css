@@ -85,7 +85,11 @@
   padding: 12px 0;
   gap: 2px;
   background: var(--rail-bg);
-  border-right: 1px solid var(--rail-border);
+  /* 与主内容区分：避免整根硬边框线，改用极轻内描边 + 漫射阴影（竞品常见做法） */
+  border-right: none;
+  box-shadow:
+    inset -1px 0 0 rgba(15, 23, 42, 0.05),
+    6px 0 32px -20px rgba(15, 23, 42, 0.07);
   -webkit-backdrop-filter: var(--glass);
   backdrop-filter: var(--glass);
   z-index: var(--z-rail);
@@ -217,13 +221,14 @@
 .rail-btn.active::before {
   content: '';
   position: absolute;
-  left: -6px;
+  left: -5px;
   top: 50%;
   transform: translateY(-50%);
-  width: 3px;
-  height: 20px;
+  width: 2px;
+  height: 18px;
   border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
   background: var(--rail-active-indicator);
+  opacity: 0.88;
 }
 
 .rail-btn svg {

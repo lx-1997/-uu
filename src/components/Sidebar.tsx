@@ -81,7 +81,7 @@ const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> 
 /** 中文默认文案（英文走 en-extras sidebar.nav.* / sidebar.hint.*） */
 const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   dashboard: { nav: '总览', hint: '新手流程与设备主控台' },
-  'ai-chat-hub': { nav: 'AI 对话', hint: 'RDKClaw 会话、本地历史与继续对话' },
+  'ai-chat-hub': { nav: 'AI 对话', hint: '左侧切换本机已存会话，右侧与 Dock 同步继续聊' },
   openclaw: { nav: 'OpenClaw', hint: 'AI 网关、渠道与技能中心' },
   skills: { nav: '技能工坊', hint: '生成 OpenClaw 技能并部署到板端' },
   terminal: { nav: '终端', hint: '直接执行命令与排障' },

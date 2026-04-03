@@ -101,7 +101,8 @@ export function chatMessageToPlainText(
       } else if (b.type === 'code') {
         parts.push(`\`\`\`${b.lang}\n${b.content}\n\`\`\``);
       } else if (b.type === 'status') {
-        parts.push(b.items.map((i) => `${i.label}: ${i.value}`).join('\n'));
+        const lines = b.items.map((i) => `${i.label}: ${i.value}`);
+        parts.push([b.title, ...lines].filter(Boolean).join('\n'));
       } else if (b.type === 'reasoning' && b.text.trim()) {
         parts.push(`${tr('dock.reasoning.title', '推理过程')}\n${b.text.trim()}`);
       } else if (b.type === 'confirm' || b.type === 'approval') {

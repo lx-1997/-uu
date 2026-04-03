@@ -116,7 +116,7 @@ export type ChatBlock =
   | { type: 'terminal'; lines: string[]; label?: string; collapsible?: boolean; previewLines?: number }
   /** RDKClaw ↔ 板端 OpenClaw 协作：区分双方输出；outbound=发给板端，hint=结果中的 RDKClaw 说明 */
   | { type: 'collab'; side: 'openclaw' | 'rdkclaw'; collabRole?: 'outbound' | 'hint' | 'reverse' | 'wait_hint'; title?: string; subtitle?: string; lines: string[]; collapsible?: boolean; previewLines?: number }
-  | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }>; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }
+  | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }>; title?: string; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }
   /** 模型扩展思考（reasoning / thinking_delta 流式合并） */
   | { type: 'reasoning'; text: string; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }
   | { type: 'confirm'; text: string; confirmId: string }

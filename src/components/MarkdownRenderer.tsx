@@ -1,4 +1,5 @@
 import React from 'react';
+import { Copy } from 'lucide-react';
 import { resolveMediaUrl } from '../utils/apiBase';
 
 export type RenderMarkdownOptions = {
@@ -68,7 +69,15 @@ function renderMarkdownComplete(text: string, streaming: boolean | undefined, co
       <div key={`cb-${segments.length}`} className="md-code-block">
         <div className="md-code-header">
           <span className="md-code-lang">{lang || 'code'}</span>
-          <button type="button" className="md-code-copy" onClick={() => { navigator.clipboard.writeText(code); }}>{copyLabel}</button>
+          <button
+            type="button"
+            className="md-code-copy"
+            aria-label={copyLabel}
+            title={copyLabel}
+            onClick={() => { void navigator.clipboard.writeText(code); }}
+          >
+            <Copy size={15} strokeWidth={2} aria-hidden />
+          </button>
         </div>
         <pre className="md-code-body"><code>{code}</code></pre>
       </div>,

@@ -214,6 +214,8 @@ export interface AppState {
   executeConfirm: (confirmId: string) => void;
   dismissConfirm: (confirmId: string) => void;
   clearChatHistory: () => void;
+  resumeStudioThread: (deviceId: string, studioSessionId: string) => void;
+  deleteStudioThread: (deviceId: string, studioSessionId: string) => void;
   agentMode: boolean;
   setAgentMode: (v: boolean) => void;
   agentPlan: AgentPlan | null;
@@ -260,6 +262,8 @@ export interface AppState {
   studioResponseMode: StudioResponseMode;
   setStudioResponseMode: (v: StudioResponseMode) => void;
   exportDebugBundle: (options?: { includeBoardLogs?: boolean }) => Promise<void>;
+  getStudioChatSessionId: () => string;
+  getStudioChatDeviceId: () => string;
 }
 
 /** 与 app-state-context 同源，供仅需 Context 引用的模块直接导入（避免经本文件再取 context） */

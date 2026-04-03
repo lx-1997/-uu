@@ -23,6 +23,7 @@ import { isDeviceShownOnline } from './utils/device-connection';
 import { getRdkEmbedPanel, type RdkEmbedPanel } from './utils/embed-mode';
 import type { Tab } from './app-types';
 import { STUDIO_AGENT_WEB_CLOSE, STUDIO_AGENT_WEB_OPEN } from './utils/studio-agent-web';
+import { HubDockAnchorProvider } from './contexts/HubDockAnchorContext';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const AiChatHubPage = lazy(() => import('./components/AiChatHubPage'));
@@ -336,11 +337,13 @@ function AppShell() {
         <RuntimeActiveTaskQueue />
 
         <main className="content-area">
-          <ErrorBoundary>
-            <MainContent />
-          </ErrorBoundary>
-          {/* 引导期间也需挂载：第 5 步「发送」会展开 Dock 并提交表单；若此处不渲染则 .dock-input 不存在 */}
-          <AIDock />
+          <HubDockAnchorProvider>
+            <ErrorBoundary>
+              <MainContent />
+            </ErrorBoundary>
+            {/* 引导期间也需挂载：第 5 步「发送」会展开 Dock 并提交表单；若此处不渲染则 .dock-input 不存在 */}
+            <AIDock />
+          </HubDockAnchorProvider>
         </main>
 
         <Toasts />
