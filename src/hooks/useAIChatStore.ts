@@ -1565,11 +1565,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     }
                   }
                 } else {
+                  /** 勿对单包再 slice 行数：服务端可能一次下发多行，截断会导致时间顺序断裂、与「完成」状态错位 */
                   const progressLines = rawChunk
                     .split(/\r?\n/)
                     .map((line) => sanitizeTerminalLineForDisplay(line.trim()))
-                    .filter(Boolean)
-                    .slice(-20);
+                    .filter(Boolean);
                   if (progressLines.length === 0) break;
                   if (typeof state.rawIndex === 'number') {
                     const rawBlock = aiBlocks[state.rawIndex];
@@ -2118,98 +2118,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'done':
-                {
-                  const tokenUsage = event.data.token_usage as {
-                    promptTokens?: number;
-                    completionTokens?: number;
-                    totalTokens?: number;
-                    estimated?: boolean;
-                  } | undefined;
-                  const contextStats = event.data.context as {
-                    compactionCount?: number;
-                    droppedMessages?: number;
-                    summaryChars?: number;
-                    overflowRecoveryCount?: number;
-                    policy?: {
-                      contextTokens?: number;
-                      maxHistoryShare?: number;
-                      softTrimRatio?: number;
-                      hardClearRatio?: number;
-                      keepLastAssistants?: number;
-                    };
-                  } | undefined;
-                  const executionStats = event.data.execution as {
-                    boardToolCalls?: number;
-                    localToolCalls?: number;
-                    toolCallNames?: string[];
-                  } | undefined;
-                  const performanceStats = event.data.performance as {
-                    setupElapsedMs?: number;
-                    workspaceInitMs?: number;
-                    attachmentPrepareMs?: number;
-                    boardSnapshotMs?: number;
-                    firstEventMs?: number | null;
-                    firstTextDeltaMs?: number | null;
-                    totalElapsedMs?: number;
-                  } | undefined;
-                  if (tokenUsage || performanceStats || executionStats) {
-                    const usageItems: Array<{ label: string; value: string; ok: boolean }> = [];
-                    if (performanceStats) {
-                      const totalMs = Math.max(0, Math.round(Number(performanceStats.totalElapsedMs || 0)));
-                      const firstTextMs = Number(performanceStats.firstTextDeltaMs);
-                      const label = Number.isFinite(firstTextMs)
-                        ? tf('chat.perf.totalFirst', '总 {{ms}}ms · 首字 {{first}}ms', {
-                            ms: totalMs,
-                            first: Math.round(firstTextMs),
-                          })
-                        : tf('chat.perf.total', '总 {{ms}}ms', { ms: totalMs });
-                      usageItems.push({ label: t('chat.perf.time', '耗时'), value: label, ok: true });
-                    }
-                    if (tokenUsage) {
-                      const total = Math.max(0, Number(tokenUsage.totalTokens || 0));
-                      usageItems.push({
-                        label: 'Tokens',
-                        value: `${total}${tokenUsage.estimated ? t('chat.perf.est', ' (估)') : ''}`,
-                        ok: true,
-                      });
-                    }
-                    if (executionStats) {
-                      const board = Math.max(0, Number(executionStats.boardToolCalls || 0));
-                      const local = Math.max(0, Number(executionStats.localToolCalls || 0));
-                      if (board + local > 0) {
-                        usageItems.push({
-                          label: t('chat.perf.tools', '工具调用'),
-                          value: tf('chat.perf.toolsVal', '本地 {{local}} · 板端 {{board}}', { local, board }),
-                          ok: true,
-                        });
-                      }
-                    }
-                    if (contextStats) {
-                      const compaction = Math.max(0, Number(contextStats.compactionCount || 0));
-                      if (compaction > 0) {
-                        usageItems.push({
-                          label: t('chat.perf.compact', '上下文压缩'),
-                          value: tf('chat.perf.compactVal', '{{n}} 次', { n: compaction }),
-                          ok: true,
-                        });
-                      }
-                    }
-                    if (usageItems.length > 0) {
-                      pushAiBlock({
-                        type: 'status',
-                        collapsible: true,
-                        defaultCollapsed: false,
-                        summary: usageItems.map((i) => `${i.label}: ${i.value}`).join(' · '),
-                        items: usageItems,
-                      });
-                    }
-                    /** 无 perf 块时也必须 flush，否则前面从推理提升的正文仍留在闭包、pendingText 未更新 */
-                    if (/<client-action\b/i.test(aiText)) {
-                      applyClientActionsAcrossMarkdownSlots();
-                    }
-                    updateAiMessage(aiText, aiBlocks, true);
-                  }
+                /** 不在气泡内展示 Token/耗时等遥测卡，仅刷新正文与 client-action */
+                if (/<client-action\b/i.test(aiText)) {
+                  applyClientActionsAcrossMarkdownSlots();
                 }
+                updateAiMessage(aiText, aiBlocks, true);
                 break;
               case 'run_progress': {
                 const msg = String(event.data.message || t('chat.progress.wait', '仍在处理中...'));
@@ -2257,14 +2170,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   ? t('chat.runComplete.cancelled', '⊘ 已取消')
                   : isError
                     ? t('chat.runComplete.err', '✗ 执行出错')
-                    : stopReason === 'max_turns_reached'
+                    : stopReason === 'max_turns_reached' || stopReason === 'tool_followup_cap_reached'
                       ? t('chat.runComplete.maxTurns', '✓ 已完成（已达轮次上限）')
                       : t('chat.runComplete.ok', '✓ 回复完成');
-                const ok = !isError && !isCancelled && stopReason !== 'max_turns_reached';
-                pushAiBlock({
-                  type: 'status',
-                  items: [{ label, value: detail.length > 0 ? detail.join(' · ') : '', ok }],
-                });
                 appendRunTimelineEntry(generation, {
                   kind: 'complete',
                   title: label,
@@ -2384,72 +2292,82 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     addToast(t('chat.soul.closed', 'SOUL 更新入口已关闭：请通过 USER.md 调整偏好'), 'info');
   };
 
-  const stopCurrentRun = async () => {
+  const stopCurrentRun = () => {
     const runId = currentRunIdRef.current;
     abortInFlightRun(false);
-    try {
-      if (runId) {
-        await cancelRDKClawRun(runId);
-      } else {
-        await cancelAllRDKClawRuns();
-      }
-      setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
-      const stopSentTs = Date.now();
-      setChatMessages((prev) => [...prev, {
-        id: stopSentTs,
-        role: 'ai',
-        text: t('chat.stop.sent', '停止指令已发送，当前任务将尽快结束。'),
-        blocks: [{
-          type: 'task-result',
-          success: true,
-          title: t('chat.stop.title', '已请求停止任务'),
-          detail: runId
-            ? tf('chat.stop.detailRun', 'runId: {{id}}', { id: runId })
-            : t('chat.stop.detailAll', '已请求停止所有运行中的任务'),
-        }],
-        source: 'studio',
-      }]);
-    } catch {
+    setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
+    const stopSentTs = Date.now();
+    setChatMessages((prev) => [...prev, {
+      id: stopSentTs,
+      role: 'ai',
+      text: t('chat.stop.sent', '停止指令已发送，当前任务将尽快结束。'),
+      blocks: [{
+        type: 'task-result',
+        success: true,
+        title: t('chat.stop.title', '已请求停止任务'),
+        detail: runId
+          ? tf('chat.stop.detailRun', 'runId: {{id}}', { id: runId })
+          : t('chat.stop.detailAll', '已请求停止所有运行中的任务'),
+      }],
+      source: 'studio',
+    }]);
+    currentRunIdRef.current = '';
+    commandLockRef.current = false;
+    setAiTyping(false);
+    void (runId ? cancelRDKClawRun(runId) : cancelAllRDKClawRuns()).catch(() => {
       addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
-    } finally {
-      setAiTyping(false);
-      commandLockRef.current = false;
-      currentRunIdRef.current = '';
-    }
+    });
   };
 
-  const stopAllRuns = async () => {
+  const stopAllRuns = () => {
     abortInFlightRun(false);
-    try {
-      const res = await cancelAllRDKClawRuns();
-      const count = res.cancelled ?? 0;
-      const pausedAutonomyTasks = Number(res.pausedAutonomyTasks ?? 0);
-      const cancelledAutonomyRuns = Number(res.cancelledAutonomyRuns ?? 0);
-      const detailParts = [t('chat.stopAll.detail1', '包括来自 Studio、飞书、微信的任务')];
-      if (pausedAutonomyTasks > 0) {
-        detailParts.push(tf('chat.stopAll.paused', '已暂停定时任务 {{n}} 个', { n: pausedAutonomyTasks }));
-      }
-      if (cancelledAutonomyRuns > 0) {
-        detailParts.push(tf('chat.stopAll.cancelled', '已中断定时任务运行 {{n}} 个', { n: cancelledAutonomyRuns }));
-      }
-      const stopAllTs = Date.now();
-      setChatMessages((prev) => [...prev, {
-        id: stopAllTs,
-        role: 'ai',
-        text: '',
-        blocks: [{
-          type: 'task-result',
-          success: true,
-          title: tf('chat.stopAll.title', '已停止所有运行中的任务（{{n}} 个）', { n: count }),
-          detail: detailParts.join(t('chat.stopAll.sep', '；')),
-        }],
-        source: 'studio',
-      }]);
-      setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
-      addToast(tf('chat.stopAll.toast', '已停止 {{n}} 个运行中的任务', { n: count }), 'info');
-    } catch {
-      addToast(t('chat.stopAll.fail', '停止所有任务失败'), 'error');
-    }
+    currentRunIdRef.current = '';
+    commandLockRef.current = false;
+    setAiTyping(false);
+    const stopAllTs = Date.now();
+    setChatMessages((prev) => [...prev, {
+      id: stopAllTs,
+      role: 'ai',
+      text: '',
+      blocks: [{
+        type: 'task-result',
+        success: true,
+        title: t('chat.stopAll.submitting', '已提交停止请求'),
+        detail: t('chat.stopAll.submittingHint', '正在通知后端取消任务，计数稍后更新…'),
+      }],
+      source: 'studio',
+    }]);
+    setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
+    void cancelAllRDKClawRuns()
+      .then((res) => {
+        const count = res.cancelled ?? 0;
+        const pausedAutonomyTasks = Number(res.pausedAutonomyTasks ?? 0);
+        const cancelledAutonomyRuns = Number(res.cancelledAutonomyRuns ?? 0);
+        const detailParts = [t('chat.stopAll.detail1', '包括来自 Studio、飞书、微信的任务')];
+        if (pausedAutonomyTasks > 0) {
+          detailParts.push(tf('chat.stopAll.paused', '已暂停定时任务 {{n}} 个', { n: pausedAutonomyTasks }));
+        }
+        if (cancelledAutonomyRuns > 0) {
+          detailParts.push(tf('chat.stopAll.cancelled', '已中断定时任务运行 {{n}} 个', { n: cancelledAutonomyRuns }));
+        }
+        setChatMessages((prev) => prev.map((m) => (
+          m.id === stopAllTs
+            ? {
+                ...m,
+                blocks: [{
+                  type: 'task-result',
+                  success: true,
+                  title: tf('chat.stopAll.title', '已停止所有运行中的任务（{{n}} 个）', { n: count }),
+                  detail: detailParts.join(t('chat.stopAll.sep', '；')),
+                }],
+              }
+            : m
+        )));
+        addToast(tf('chat.stopAll.toast', '已停止 {{n}} 个运行中的任务', { n: count }), 'info');
+      })
+      .catch(() => {
+        addToast(t('chat.stopAll.fail', '停止所有任务失败'), 'error');
+      });
   };
 
   const backgroundCurrentRun = () => {

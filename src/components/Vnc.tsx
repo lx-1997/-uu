@@ -4,6 +4,7 @@ import { useAppState } from '../hooks/useAppState';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { isDesktop } from '../utils/env';
+import { shouldUseSshTunnelForDevice } from '../utils/device-tunnel';
 import DeviceGuard from './DeviceGuard';
 import FloatingEmbedPanel from './FloatingEmbedPanel';
 
@@ -98,7 +99,9 @@ export default function Vnc() {
     const backendPort = isDesktopMode ? 8787 : ((import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80));
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
     const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;
-    const wsPath = `websockify?target=${hostOrIp}:5900`;
+    const wsPath = shouldUseSshTunnelForDevice(currentDevice)
+      ? `websockify?deviceId=${encodeURIComponent(currentDevice.id)}&remotePort=5900`
+      : `websockify?target=${hostOrIp}:5900`;
     return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
   }, [currentDevice, quality, urlVersion]);
 

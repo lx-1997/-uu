@@ -6,6 +6,8 @@ export const DEFAULT_SSH_PASSWORD = 'root';
 
 export const DEFAULT_SSH_PORT = 22;
 export const DEFAULT_VNC_PORT = 5900;
+/** 与 `src/components/IDE.tsx` code-server 启动端口一致 */
+export const CODE_SERVER_HTTP_PORT = 9888;
 export const OPENCLAW_GATEWAY_PORT = 18789;
 export const AI_REQUEST_TIMEOUT_MS = 30_000;
 export const AGENT_PLAN_TIMEOUT_MS = 60_000;

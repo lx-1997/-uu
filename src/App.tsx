@@ -36,7 +36,6 @@ const OpenClaw = lazy(() => import('./components/OpenClaw'));
 const Hardware = lazy(() => import('./components/Hardware'));
 const SkillBrowser = lazy(() => import('./components/SkillBrowser'));
 const DroboticsEmbed = lazy(() => import('./components/DroboticsEmbed'));
-
 /**
  * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：
  * Suspense fallback 在部分并发渲染路径下可能拿不到上层 Context，会触发

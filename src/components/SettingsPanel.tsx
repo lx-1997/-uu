@@ -36,7 +36,7 @@ import {
   removeWeixinAccount,
   restartWeixinChannel,
 } from '../api';
-import { RDK_SSO_SESSION_MIRROR_KEY, fetchApi, resolveApiUrl } from '../utils/apiBase';
+import { RDK_SSO_SESSION_MIRROR_KEY, fetchApi, resolveApiUrl, resolveApiUrlAbsolute } from '../utils/apiBase';
 import { isDesktop } from '../utils/env';
 import { fillTemplate } from '../i18n/en-extras';
 import { useAuth } from '../hooks/useAuth';
@@ -1103,17 +1103,19 @@ export default function SettingsPanel() {
     setWeixinLoginStatus(t('settings.weixin.fetchQr', '正在获取二维码...'));
 
     let settled = false;
-    const loginUrl = (() => {
-      const base = resolveApiUrl('/api/rdkclaw/weixin/login');
-      try {
-        const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
-        if (sid && /^[a-f0-9]{64}$/i.test(sid)) {
-          const sep = base.includes('?') ? '&' : '?';
-          return `${base}${sep}rdk_sso_session=${encodeURIComponent(sid)}`;
-        }
-      } catch { /* ignore */ }
-      return base;
-    })();
+    const loginUrl = resolveApiUrlAbsolute(
+      (() => {
+        const base = resolveApiUrl('/api/rdkclaw/weixin/login');
+        try {
+          const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
+          if (sid && /^[a-f0-9]{64}$/i.test(sid)) {
+            const sep = base.includes('?') ? '&' : '?';
+            return `${base}${sep}rdk_sso_session=${encodeURIComponent(sid)}`;
+          }
+        } catch { /* ignore */ }
+        return base;
+      })(),
+    );
     const es = new EventSource(loginUrl);
     setWeixinLoginEventSource(es);
 

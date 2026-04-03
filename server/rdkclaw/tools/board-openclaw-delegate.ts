@@ -1,7 +1,11 @@
 import type { Tool } from "../../agent/tools/types.js";
 import { ensureFindSkillsOnBoard } from "../../agent/tools/rdk-tools.js";
 import { readDevices } from "../../storage.js";
-import { OpenClawDeploymentManager, type OpenClawHealthStatus } from "../../managers/OpenClawDeploymentManager.js";
+import {
+  OpenClawDeploymentManager,
+  sshEndpointKey,
+  type OpenClawHealthStatus,
+} from "../../managers/OpenClawDeploymentManager.js";
 import type { Device as SharedDevice } from "../../../shared/types.js";
 import {
   getCachedOpenClawAiReady,
@@ -27,6 +31,7 @@ function resolveDevicePassword(device: SharedDevice) {
 function toBoardDevice(device: SharedDevice) {
   return {
     ip: device.host,
+    port: device.port ?? 22,
     userName: device.username,
     id: device.id,
     password: resolveDevicePassword(device),
@@ -54,7 +59,7 @@ function abortAwareDelay(ms: number, signal?: AbortSignal): Promise<void> {
 
 function getBoardHealth(
   manager: OpenClawDeploymentManager,
-  boardDevice: { ip: string; userName: string; id?: string; password?: string },
+  boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
 ): Promise<OpenClawHealthStatus> {
   return new Promise((resolve) => {
     manager.getHealthStatus(boardDevice, (status) => resolve(status));
@@ -63,7 +68,7 @@ function getBoardHealth(
 
 function restartGateway(
   manager: OpenClawDeploymentManager,
-  boardDevice: { ip: string; userName: string; id?: string; password?: string },
+  boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
   onProgress?: (chunk: string) => void,
 ): Promise<boolean> {
   return new Promise((resolve) => {
@@ -86,7 +91,7 @@ async function maybeEnsureBoardFindSkills(deviceId: string, onProgress?: (chunk:
 
 async function ensureBoardGatewayReady(
   manager: OpenClawDeploymentManager,
-  boardDevice: { ip: string; userName: string; id?: string; password?: string },
+  boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
   onProgress?: (chunk: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -320,7 +325,7 @@ export function boardOpenClawDelegateTool(
               resolvePair,
             );
           });
-          manager.destroyConnection(boardDevice.ip);
+          manager.destroyConnection(sshEndpointKey(boardDevice));
           if (pairOk) {
             await abortAwareDelay(DELEGATE_RETRY_DELAY_MS, ctx.abortSignal);
             attempt--;
@@ -339,7 +344,7 @@ export function boardOpenClawDelegateTool(
         if (attempt < DELEGATE_MAX_RETRIES && isRetryableFailure(output)) {
           console.warn(`[board-delegate] retryable failure on attempt ${attempt + 1}, retrying in ${DELEGATE_RETRY_DELAY_MS}ms`);
           onProgress?.("\n[连接中断，正在自动重试...]\n", ctx.toolCallId);
-          manager.destroyConnection(boardDevice.ip);
+          manager.destroyConnection(sshEndpointKey(boardDevice));
           await abortAwareDelay(DELEGATE_RETRY_DELAY_MS, ctx.abortSignal);
           continue;
         }

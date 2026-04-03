@@ -296,6 +296,11 @@ export default function AddDeviceModal() {
       .then((res) => {
         const names = res.wifiNames?.filter(Boolean) || [];
         setWifiList(names);
+        if (!res.ok && res.errorHint) {
+          addToast(res.errorHint, 'warning');
+        } else if (!res.ok && names.length === 0) {
+          addToast(t('wifiModal.toast.scanFail', '扫描 WiFi 失败'), 'warning');
+        }
       })
       .catch(() => {
         addToast(t('wifiModal.toast.scanFail', '扫描 WiFi 失败'), 'warning');
@@ -344,6 +349,11 @@ export default function AddDeviceModal() {
       .then((res) => {
         const names = res.wifiNames?.filter(Boolean) || [];
         if (!cancelled) setWifiList(names);
+        if (!cancelled && !res.ok && res.errorHint) {
+          addToast(res.errorHint, 'warning');
+        } else if (!cancelled && !res.ok && names.length === 0) {
+          addToast(t('wifiModal.toast.scanFail', '扫描 WiFi 失败'), 'warning');
+        }
       })
       .catch(() => {
         addToast(t('wifiModal.toast.scanFail', '扫描 WiFi 失败'), 'warning');

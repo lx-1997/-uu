@@ -63,9 +63,17 @@ export class DeviceQueue {
   async acquireSlot(
     deviceLane: string,
     meta: DeviceEnqueueMeta,
+    signal?: AbortSignal,
   ): Promise<{ release: () => void }> {
-    const slotAcquired = deferred<void>();
+    if (signal?.aborted) {
+      return { release: () => {} };
+    }
+
     const slotReleased = deferred<void>();
+    const slotOutcome = deferred<
+      | { kind: "leased"; release: () => void }
+      | { kind: "cancelled" }
+    >();
 
     pendingCounts.set(deviceLane, (pendingCounts.get(deviceLane) ?? 0) + 1);
 
@@ -76,12 +84,21 @@ export class DeviceQueue {
           deviceLane,
           Math.max(0, (pendingCounts.get(deviceLane) ?? 1) - 1),
         );
+        if (signal?.aborted) {
+          slotOutcome.resolve({ kind: "cancelled" });
+          return;
+        }
         activeRuns.set(deviceLane, {
           channel: meta.channel,
           messageSummary: summarize(meta.messageSummary),
           startedAt: Date.now(),
         });
-        slotAcquired.resolve();
+        slotOutcome.resolve({
+          kind: "leased",
+          release: () => {
+            slotReleased.resolve();
+          },
+        });
         await slotReleased.promise;
         activeRuns.delete(deviceLane);
         if ((pendingCounts.get(deviceLane) ?? 0) <= 0) {
@@ -89,10 +106,13 @@ export class DeviceQueue {
         }
       },
     ).catch(() => {
-      slotAcquired.resolve();
+      slotOutcome.resolve({ kind: "cancelled" });
     });
 
-    await slotAcquired.promise;
-    return { release: () => slotReleased.resolve() };
+    const outcome = await slotOutcome.promise;
+    if (outcome.kind === "cancelled") {
+      return { release: () => {} };
+    }
+    return { release: outcome.release };
   }
 }

@@ -626,13 +626,14 @@ export function streamAgentChat(
   const controller = new AbortController();
   const attachments = options?.attachments;
   const studioResponseMode = options?.studioResponseMode;
-  let abortKind: 'user' | 'headers' | null = null;
+  let abortKind: 'user' | 'headers' | 'sse_meaningful_idle' | null = null;
 
   const done = (async () => {
     const headersTimer = setTimeout(() => {
       abortKind = 'headers';
       controller.abort();
     }, AGENT_CHAT_FETCH_HEADERS_TIMEOUT_MS);
+    let sseMeaningfulWatchdog: ReturnType<typeof setInterval> | undefined;
     try {
       const studioUiHints = readStudioUiHintsForDevice(deviceId);
       const agentHeaders = new Headers({ 'Content-Type': 'application/json' });
@@ -667,6 +668,53 @@ export function streamAgentChat(
         return;
       }
 
+      /**
+       * 服务端 SSE 会写 `: keepalive`，每次 read 都有数据，原「相邻块空闲」计时几乎永不触发。
+       * 用「有效 JSON 事件」时间做看门狗，避免排队/卡住时界面永久「正在组织回答」。
+       */
+      const streamBodyStartedAt = Date.now();
+      let lastMeaningfulEventAt = 0;
+      let awaitingFirstMeaningfulChunk = true;
+      let closedBySseMeaningfulIdle = false;
+      const FIRST_MEANINGFUL_WALL_MS = 900_000;
+      const MEANINGFUL_GAP_MS = 600_000;
+
+      const emit: AgentEventCallback = (e) => {
+        lastMeaningfulEventAt = Date.now();
+        awaitingFirstMeaningfulChunk = false;
+        onEvent?.(e);
+      };
+
+      sseMeaningfulWatchdog = setInterval(() => {
+        if (closedBySseMeaningfulIdle) return;
+        const now = Date.now();
+        if (lastMeaningfulEventAt === 0) {
+          if (now - streamBodyStartedAt > FIRST_MEANINGFUL_WALL_MS) {
+            closedBySseMeaningfulIdle = true;
+            abortKind = 'sse_meaningful_idle';
+            emit({
+              type: 'error',
+              data: {
+                error:
+                  '长时间只收到连接心跳、未收到有效对话事件（常见于在设备队列中久候或链路异常）。请点「结束当前」后重试，或检查后端与网络。',
+              },
+            });
+            controller.abort();
+          }
+        } else if (now - lastMeaningfulEventAt > MEANINGFUL_GAP_MS) {
+          closedBySseMeaningfulIdle = true;
+          abortKind = 'sse_meaningful_idle';
+          emit({
+            type: 'error',
+            data: {
+              error:
+                '长时间未收到新的有效流式事件。若板端仍在执行可再等待；否则请点「结束当前」或稍后重试。',
+            },
+          });
+          controller.abort();
+        }
+      }, 4000);
+
       const decoder = new TextDecoder();
       let buffer = '';
 
@@ -674,13 +722,12 @@ export function streamAgentChat(
         const parts = buffer.split('\n\n');
         buffer = parts.pop() || '';
         for (const block of parts) {
-          if (block.trim()) dispatchSseBlock(block, onEvent);
+          if (block.trim()) dispatchSseBlock(block, emit);
         }
       };
 
-      let awaitingFirstChunk = true;
       while (true) {
-        const idleMs = awaitingFirstChunk
+        const idleMs = awaitingFirstMeaningfulChunk
           ? AGENT_CHAT_SSE_FIRST_CHUNK_TIMEOUT_MS
           : AGENT_CHAT_SSE_CHUNK_IDLE_TIMEOUT_MS;
         let readerDone: boolean;
@@ -691,10 +738,10 @@ export function streamAgentChat(
           value = r.value;
         } catch (e) {
           if (e instanceof SseIdleError) {
-            onEvent?.({
+            emit({
               type: 'error',
               data: {
-                error: awaitingFirstChunk
+                error: awaitingFirstMeaningfulChunk
                   ? '等待服务端首包超时（长时间无数据）。请确认本机网络与 RDK Studio 后端未卡住，或稍后重试。'
                   : '长时间未收到新的流式数据，已断开。若推理时间过长可改用「快捷回答」或缩短问题后重试。',
               },
@@ -708,7 +755,6 @@ export function streamAgentChat(
           }
           throw e;
         }
-        awaitingFirstChunk = false;
         if (readerDone) break;
 
         buffer += decoder.decode(value!, { stream: true });
@@ -718,8 +764,21 @@ export function streamAgentChat(
       buffer += decoder.decode();
       if (buffer.trim()) {
         for (const block of buffer.split('\n\n')) {
-          if (block.trim()) dispatchSseBlock(block, onEvent);
+          if (block.trim()) dispatchSseBlock(block, emit);
         }
+      }
+      /**
+       * 服务端在 headers 之后立刻结束、且正文里没有任何可解析的 JSON SSE 时，此前逻辑会「正常结束」但从未 emit，
+       * 前端只剩「未收到可见回复」兜底（用户误以为是我们改坏了流）。这里显式给 error，便于对照后端日志。
+       */
+      if (lastMeaningfulEventAt === 0 && !closedBySseMeaningfulIdle) {
+        emit({
+          type: 'error',
+          data: {
+            error:
+              '连接已关闭，但未收到任何有效对话事件（常见于后端在首包前异常退出、会话被中止或代理剥掉了 SSE 正文）。请查看 RDK Studio 后端终端日志并重试；若刚点了「结束当前」，可忽略本条。',
+          },
+        });
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
@@ -734,6 +793,7 @@ export function streamAgentChat(
       onEvent?.({ type: 'error', data: { error: (err as Error).message } });
     } finally {
       clearTimeout(headersTimer);
+      if (sseMeaningfulWatchdog) clearInterval(sseMeaningfulWatchdog);
     }
   })();
 
@@ -1359,7 +1419,9 @@ export function executeDeviceCommand(deviceId: string, command: string, password
 }
 
 export function fetchDeviceWifiList(deviceId: string) {
-  return request<{ ok: boolean; wifiNames: string[] }>(`/api/devices/${deviceId}/openclaw/wifi-list`);
+  return request<{ ok: boolean; wifiNames: string[]; errorHint?: string }>(
+    `/api/devices/${deviceId}/openclaw/wifi-list`,
+  );
 }
 
 export function fetchDeviceDiagnostics(deviceId: string, password?: string) {

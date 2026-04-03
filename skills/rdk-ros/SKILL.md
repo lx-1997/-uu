@@ -40,6 +40,10 @@ echo 'source /opt/tros/humble/setup.bash' >> ~/.bashrc
 
 追加后新开终端或 `source ~/.bashrc` 再测 `ros2 --help`。
 
+## 官方文档交叉核验（必做）
+
+在板上用 `device_exec` / `find` / `ros2 launch` 等**找到包路径、launch 文件或可运行命令后**，不要仅凭板上目录下结论：必须用 **`web_fetch`** 打开 **https://developer.d-robotics.cc/rdk_doc** 上与该场景对应的文档页（如 TROS/ROS2、算法包、NodeHub 说明），核对**当前官方推荐的 launch 参数、依赖与版本说明是否更新**，再在回复中同时写明「板上路径」与「文档要点」。本地 `/tmp/rdk_doc` 若与官网不一致，**以官网为准**并提醒用户同步镜像或文档。
+
 ## 适用场景
 - 用户说：ROS、ROS2、TROS、topic、话题、节点、扫描话题。
 - 用户问「板上有没有 ROS」——先按上文区分 **TROS 已装未 source** vs **未安装**。

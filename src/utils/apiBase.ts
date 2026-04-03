@@ -44,12 +44,83 @@ export function setSsoSessionMirror(sessionId: string | null | undefined): void 
   }
 }
 
+function useSameOriginApiInDev(): boolean {
+  if (!(import.meta as any).env?.DEV) return false;
+  if (typeof window === 'undefined') return false;
+  const { protocol } = window.location;
+  if (protocol === 'file:') return false;
+  return protocol === 'http:' || protocol === 'https:';
+}
+
+/**
+ * 供 fetchApi 使用：相对 `/api/...` 原样返回；已是绝对 URL 时只取 pathname+search，
+ * 以便与 resolveMediaUrl 拼出的 http(s) 地址兼容。
+ */
+export function apiPathForFetch(pathOrUrl: string): string {
+  const s = String(pathOrUrl || '').trim();
+  if (!s) return s;
+  if (s.startsWith('/')) return s;
+  try {
+    const u = new URL(s);
+    return `${u.pathname}${u.search}`;
+  } catch {
+    return s;
+  }
+}
+
 /** 与 src/api.ts 中桌面端逻辑一致，供非 request() 场景的 fetch 使用 */
 export function resolveApiUrl(path: string): string {
   if (!path.startsWith('/')) return path;
   const apiBase = (window as unknown as { rdkDesktop?: { apiBase?: string } }).rdkDesktop?.apiBase;
-  if (apiBase) return `${apiBase}${path}`;
+  /** 避免误用 apiBase 直连 :8787 导致与 Vite 不同源 CORS（浏览器开发态应走 /api 代理） */
+  if (apiBase && !useSameOriginApiInDev()) {
+    return `${apiBase}${path}`;
+  }
   return path;
+}
+
+/**
+ * 将相对 `/api/...`（可含 query）解析为绝对 http(s) URL：与当前页同源（如 dev :5173），
+ * `file://` 或 Electron 无 host 时用 `rdkDesktop.apiBase`。
+ * 勿用裸 `http://localhost` 作 base（会落到默认 :80）。
+ */
+export function resolveUrlBaseForRelativeApi(): string {
+  if (typeof window === 'undefined') return 'http://localhost:8787';
+  const { protocol, host } = window.location;
+  if (protocol === 'file:' || !host) {
+    const apiBase = (window as unknown as { rdkDesktop?: { apiBase?: string } }).rdkDesktop?.apiBase?.replace(/\/$/, '');
+    return apiBase || 'http://localhost:8787';
+  }
+  return window.location.origin;
+}
+
+/**
+ * `resolveApiUrl` 在浏览器开发态常返回相对路径；EventSource、Electron loadURL、带 SSO query 的拼接等需要绝对 URL。
+ */
+export function resolveApiUrlAbsolute(pathOrUrl: string): string {
+  const s = String(pathOrUrl || '').trim();
+  if (!s) return s;
+  if (/^https?:\/\//i.test(s)) return s;
+  if (!s.startsWith('/')) return s;
+  try {
+    return new URL(s, resolveUrlBaseForRelativeApi()).href;
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * iframe / Electron WebContentsView `loadURL` 等场景必须用绝对 URL；开发态 `resolveApiUrl` 仍可能是 `/api/...` 相对路径。
+ * 桌面端存在 `rdkDesktop.apiBase` 时一律拼到后端根（与 preload 一致，如 http://localhost:8787）。
+ */
+export function resolveApiUrlForEmbed(path: string): string {
+  if (!path.startsWith('/')) return path;
+  const raw = (window as unknown as { rdkDesktop?: { apiBase?: string } }).rdkDesktop?.apiBase?.trim();
+  const apiBase = raw?.replace(/\/$/, '');
+  if (apiBase) {
+    return `${apiBase}${path}`;
+  }
+  return resolveApiUrlAbsolute(path);
 }
 
 /**
@@ -61,7 +132,7 @@ function appendSsoSessionToLocalFilesUrl(url: string): string {
   try {
     const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
     if (!sid || !/^[a-f0-9]{64}$/i.test(sid)) return url;
-    const u = new URL(url, 'http://localhost');
+    const u = new URL(url, resolveUrlBaseForRelativeApi());
     if (u.searchParams.has('rdk_sso_session')) return url;
     u.searchParams.set('rdk_sso_session', sid);
     return u.toString();
@@ -145,13 +216,13 @@ export function resolveOpenClawDeployStreamUrl(deviceId: string, jobId: string):
   } catch {
     /* ignore */
   }
-  return base;
+  return resolveApiUrlAbsolute(base);
 }
 
 export function resolveApiWsUrl(path: string): string {
   if (!path.startsWith('/')) return path;
   const apiBase = (window as unknown as { rdkDesktop?: { apiBase?: string } }).rdkDesktop?.apiBase;
-  if (apiBase) {
+  if (apiBase && !useSameOriginApiInDev()) {
     try {
       const u = new URL(apiBase);
       const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';

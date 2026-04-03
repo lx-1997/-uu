@@ -66,6 +66,8 @@ export type ExecOnDeviceOptions = {
   timeoutMs?: number;
   /** 透传 SSH 流式输出（长任务进度） */
   onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
+  /** 与 Agent run 级 abort 对齐，停止时断开 SSH exec */
+  abortSignal?: AbortSignal;
 };
 
 export async function getDevice(deviceId: string): Promise<Device | null> {
@@ -96,10 +98,11 @@ export async function execOnDevice(
   const device = await getDeviceFreshForExec(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
   const runOpts =
-    options?.timeoutMs != null || options?.onStreamChunk
+    options?.timeoutMs != null || options?.onStreamChunk || options?.abortSignal
       ? {
           ...(options.timeoutMs != null ? { timeoutMs: options.timeoutMs } : {}),
           ...(options.onStreamChunk ? { onStreamChunk: options.onStreamChunk } : {}),
+          ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
         }
       : undefined;
   return runInDeviceLane(device.id, async () => {

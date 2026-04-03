@@ -40,6 +40,10 @@ export interface Device {
    * 未验证前 UI 一律不显示「在线」，避免刚进应用就沿用服务端/缓存的误判。
    */
   sshSessionVerified?: boolean;
+  lanSshHost?: string;
+  lanSshPort?: number;
+  frpRemotePort?: number;
+  sshReachability?: 'direct' | 'tunnel';
 }
 
 export interface Toast {

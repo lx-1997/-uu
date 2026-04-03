@@ -283,7 +283,8 @@ function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: stri
 }
 
 const DEVICE_EXEC_PROGRESS_THROTTLE_MS = 200;
-const DEVICE_EXEC_PROGRESS_TAIL = 2000;
+/** 待发进度缓冲上限；超出时压缩为「标记 + 尾部」再整段上报，避免旧逻辑只 slice 尾部导致大量行从未下发、顺序错乱 */
+const DEVICE_EXEC_PROGRESS_BUFFER_CAP = 96_000;
 /** 至少运行多久后，在无输出时开始发心跳 */
 const DEVICE_EXEC_HEARTBEAT_AFTER_MS = 15_000;
 /** 连续无输出多久发一条「仍在运行」 */
@@ -326,13 +327,18 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
       const report = callbacks?.onDeviceExecProgress;
       let hb: ReturnType<typeof setInterval> | null = null;
       try {
-        let execOpts: { timeoutMs?: number; onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void } | undefined;
+        let execOpts: {
+          timeoutMs?: number;
+          onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
+          abortSignal?: AbortSignal;
+        } = {};
 
         if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
           const t = Math.floor(Number(input.timeoutMs));
-          execOpts = {
-            timeoutMs: Math.min(DEVICE_EXEC_TIMEOUT_MAX_MS, Math.max(DEVICE_EXEC_TIMEOUT_MIN_MS, t)),
-          };
+          execOpts.timeoutMs = Math.min(DEVICE_EXEC_TIMEOUT_MAX_MS, Math.max(DEVICE_EXEC_TIMEOUT_MIN_MS, t));
+        }
+        if (ctx.abortSignal) {
+          execOpts.abortSignal = ctx.abortSignal;
         }
 
         let pending = '';
@@ -342,8 +348,12 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
           const now = Date.now();
           if (!force && now - lastEmitAt < DEVICE_EXEC_PROGRESS_THROTTLE_MS) return;
           if (!pending.trim()) return;
-          const toSend =
-            pending.length > DEVICE_EXEC_PROGRESS_TAIL ? pending.slice(-DEVICE_EXEC_PROGRESS_TAIL) : pending;
+          while (pending.length > DEVICE_EXEC_PROGRESS_BUFFER_CAP) {
+            pending =
+              '\n…[输出过长，省略更早片段；以下为连续尾部]…\n' +
+              pending.slice(-(DEVICE_EXEC_PROGRESS_BUFFER_CAP - 80));
+          }
+          const toSend = pending;
           pending = '';
           lastEmitAt = now;
           report({ chunk: toSend, toolCallId: ctx.toolCallId });
@@ -359,19 +369,24 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
             pending += stream === 'stderr' ? (text.startsWith('\n') ? `[stderr]${text}` : `[stderr] ${text}`) : text;
             flushProgress(false);
           };
-          execOpts = { ...execOpts, onStreamChunk };
+          execOpts.onStreamChunk = onStreamChunk;
           hb = setInterval(() => {
             const total = Date.now() - startAt;
             const silent = Date.now() - lastChunkAt;
             if (total < DEVICE_EXEC_HEARTBEAT_AFTER_MS || silent < DEVICE_EXEC_HEARTBEAT_SILENT_MS) return;
             const line = `\n· ${Math.floor(total / 1000)}s · 命令仍在运行（暂无新输出）…\n`;
             lastChunkAt = Date.now();
+            flushProgress(true);
             lastEmitAt = Date.now();
             report({ chunk: line, toolCallId: ctx.toolCallId });
           }, 5000);
         }
 
-        const output = await execOnDevice(deviceId, [input.command], execOpts);
+        const output = await execOnDevice(
+          deviceId,
+          [input.command],
+          Object.keys(execOpts).length > 0 ? execOpts : undefined,
+        );
         flushProgress(true);
         if (!output) return '(命令执行成功，无输出)';
 

@@ -44,7 +44,7 @@ export function getRdkEmbedDockCtx(): Tab | null {
 }
 
 export function buildRdkEmbedUrl(panel: RdkEmbedPanel, opts?: { dockCtx?: Tab }): string {
-  const u = new URL(typeof window !== 'undefined' ? window.location.href : 'http://localhost/');
+  const u = new URL(typeof window !== 'undefined' ? window.location.href : 'http://localhost:5173/');
   u.searchParams.set(PARAM_EMBED, panel === 'ai-dock' ? 'ai-dock' : 'openclaw');
   if (opts?.dockCtx) u.searchParams.set(PARAM_DOCK_CTX, opts.dockCtx);
   return u.toString();

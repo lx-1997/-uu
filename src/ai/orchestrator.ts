@@ -40,7 +40,12 @@ function makeOrchI18n(isEn: boolean): OrchI18n {
 function getApiBase(): string {
   const isDesktop = !!(window as any).rdkDesktop?.isDesktop;
   if (isDesktop) return 'http://localhost:8787';
-  if ((import.meta as any).env?.DEV) return 'http://localhost:8787';
+  if ((import.meta as any).env?.DEV) {
+    if (typeof window !== 'undefined' && window.location.protocol !== 'file:') {
+      return '';
+    }
+    return 'http://localhost:8787';
+  }
   return '';
 }
 

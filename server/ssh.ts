@@ -1,4 +1,5 @@
 import { Client, type ConnectConfig } from 'ssh2';
+import type { Duplex } from 'node:stream';
 import {
   appendUtf8WithTailCap,
   DEFAULT_STREAM_OUTPUT_CHAR_LIMIT,
@@ -77,6 +78,8 @@ export interface RunRemoteCommandOptions {
   timeoutMs?: number;
   /** 每收到一段远程 stdout/stderr 即回调（用于长命令 UI 进度，不做截断） */
   onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
+  /** Agent / 用户中止时关闭 SSH 与会话，避免「点停止后仍刷 device_exec」 */
+  abortSignal?: AbortSignal;
 }
 
 export interface VerifySshConnectionOptions {
@@ -107,23 +110,36 @@ export function verifySshConnection(credentials: SshCredentials, options?: Verif
   });
 }
 
+/**
+ * 经已建立的 SSH 会话在板端打开 TCP（direct-tcpip），用于 noVNC / code-server 等「非 22 端口映射」场景。
+ */
+export function forwardOutRemoteTcp(
+  client: Client,
+  destHost: string,
+  destPort: number,
+): Promise<Duplex> {
+  return new Promise((resolve, reject) => {
+    client.forwardOut('127.0.0.1', 0, destHost, destPort, (err, stream) => {
+      if (err) reject(err);
+      else resolve(stream);
+    });
+  });
+}
+
 export function runRemoteCommands(
   credentials: SshCredentials,
   commands: string[],
   options: RunRemoteCommandOptions = {},
 ) {
   const onStreamChunk = options.onStreamChunk;
+  const abortSignal = options.abortSignal;
   // Existing function
   return new Promise<string>((resolve, reject) => {
     const client = new Client();
+    /** ssh2 exec channel，abort 时尽早 close，缩短「停止」体感延迟 */
+    let execStream: { close?: () => void } | null = null;
     const timeoutMs = Math.max(5_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
     let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      client.end();
-      reject(new Error(`SSH 命令执行超时（${timeoutMs}ms）`));
-    }, timeoutMs);
 
     const safeResolve = (output: string) => {
       if (settled) return;
@@ -139,6 +155,44 @@ export function runRemoteCommands(
       reject(error instanceof Error ? error : new Error(String(error)));
     };
 
+    const timer = setTimeout(() => {
+      try {
+        execStream?.close?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        client.end();
+      } catch {
+        /* ignore */
+      }
+      safeReject(new Error(`SSH 命令执行超时（${timeoutMs}ms）`));
+    }, timeoutMs);
+
+    const tearDownOnAbort = () => {
+      if (settled) return;
+      try {
+        execStream?.close?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        client.end();
+      } catch {
+        /* ignore */
+      }
+      safeReject(new Error('SSH 命令已中止'));
+    };
+
+    if (abortSignal?.aborted) {
+      clearTimeout(timer);
+      tearDownOnAbort();
+      return;
+    }
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', tearDownOnAbort, { once: true });
+    }
+
     client
       .on('ready', () => {
         const fullCommand = commands.filter(Boolean).join(' && ');
@@ -148,6 +202,8 @@ export function runRemoteCommands(
             safeReject(error);
             return;
           }
+
+          execStream = stream;
 
           let stdout = '';
           let stderr = '';

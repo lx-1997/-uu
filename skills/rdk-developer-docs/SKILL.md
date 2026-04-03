@@ -20,7 +20,7 @@ category: Knowledge
 当用户询问 RDK 开发相关问题时，你应该：
 1. **识别板型**：从 system prompt 的设备快照中获取板型（X3/X5/S100），若缺失则先问用户或用 `device_exec` 检测
 2. 根据板型和问题关键词，从下方文档索引中定位最相关的页面 URL
-3. 使用 `web_fetch` 获取该页面内容
+3. 使用 `web_fetch` 获取该页面内容（**优先**拉取 `https://developer.d-robotics.cc/rdk_doc` 下实时页面以确认未过期；若用户已在板上找到路径/命令，仍必须再 fetch 对应文档节做**更新核对**）
 4. 从获取的内容中提取关键信息，**根据板型适配后**回答用户
 5. 如果需要在板端操作，结合 `device_exec` 执行
 

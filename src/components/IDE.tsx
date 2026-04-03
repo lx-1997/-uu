@@ -4,6 +4,8 @@ import { executeDeviceCommand } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { isDesktop } from '../utils/env';
+import { resolveApiUrlForEmbed } from '../utils/apiBase';
+import { shouldUseSshTunnelForDevice } from '../utils/device-tunnel';
 import { openOpenClawPopout, openRdkClawChatPopout } from '../utils/embed-mode';
 import DeviceGuard from './DeviceGuard';
 import FloatingEmbedPanel from './FloatingEmbedPanel';
@@ -65,6 +67,10 @@ export default function IDE() {
   /* ── 构建 code-server URL ── */
   const getCodeServerUrl = () => {
     if (!currentDevice) return vscodeWebUrl;
+    if (shouldUseSshTunnelForDevice(currentDevice)) {
+      const base = resolveApiUrlForEmbed(`/api/devices/${currentDevice.id}/code-server-proxy/`);
+      return `${base}?folder=/root`;
+    }
     return `http://${currentDevice.ip}:${CODE_SERVER_PORT}/?folder=/root`;
   };
 

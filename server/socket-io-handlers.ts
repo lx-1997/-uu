@@ -3,7 +3,7 @@ import { Client } from 'ssh2';
 import { SSH_READY_TIMEOUT_MS, SSH_KEEPALIVE_INTERVAL_MS, SSH_KEEPALIVE_COUNT_MAX } from './ssh.js';
 import type { Device } from '../shared/types.js';
 import { OPENCLAW_GATEWAY_PORT } from './constants.js';
-import type { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
+import { sshEndpointKey, type OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
 import { recordTokenUsage } from './monitoring/token-usage.js';
 import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from './utils/stream-output-limit.js';
 
@@ -17,6 +17,7 @@ export type SocketIoHandlerDeps = {
   devicePasswordCache: Map<string, string>;
   toOpenClawDevice: (device: Device, password?: string) => {
     ip: string;
+    port?: number;
     userName: string;
     id: string;
     password: string;
@@ -63,7 +64,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
         }
 
         const deviceObj = toOpenClawDevice(device);
-        ensureOpenClawLease(deviceObj.ip);
+        ensureOpenClawLease(sshEndpointKey(deviceObj));
 
         openClawManager.startInteractiveChat(
           deviceObj,
@@ -98,7 +99,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
         }
 
         const deviceObj = toOpenClawDevice(device);
-        ensureOpenClawLease(deviceObj.ip);
+        ensureOpenClawLease(sshEndpointKey(deviceObj));
         let streamed = '';
         let streamedMetricsTruncated = false;
 

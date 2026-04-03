@@ -44,11 +44,23 @@ export const OC_BRIDGE_IDLE_TEARDOWN_MS = (() => {
 
 export interface Device {
   ip: string;
+  /** SSH 端口；缺省 22。经 frp 映射时多为 6000 等非 22，必须与设备档案一致 */
+  port?: number;
   userName: string;
   password?: string;
   id?: string;
   name?: string;
   deviceType?: string;
+}
+
+/** SSH 连接池 / oc-bridge 缓存 key；同一公网 IP 下不同映射端口必须区分 */
+export function sshEndpointKey(device: { ip: string; port?: number }): string {
+  const raw = device.port;
+  const p =
+    typeof raw === 'number' && Number.isFinite(raw) && raw > 0 && raw <= 65535
+      ? Math.floor(raw)
+      : 22;
+  return `${device.ip}:${p}`;
 }
 
 export interface GatewayStatus {
@@ -793,6 +805,15 @@ const NPM_UPGRADE_CMD = [
   'echo "[OpenClaw] 升级完成"',
 ].join(' && ');
 
+/** 解析 nmcli WiFi 列表 stdout；排除表头与隐藏网占位「--」 */
+function parseWifiSsidsFromNmcliOutput(output: string): string[] {
+  const names = (output || '')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s && s !== 'SSID' && s !== '--');
+  return [...new Set(names)];
+}
+
 export class OpenClawDeploymentManager {
   /** oc-bridge 可安全重试一轮（仅在无 assistant/tool 输出时由 Studio 再建桥重试一次） */
   private static readonly OC_BRIDGE_TRANSIENT_CODES = new Set([
@@ -893,8 +914,8 @@ export class OpenClawDeploymentManager {
   }
 
   private ensureOcBridgeScriptOnDevice(device: Device): Promise<boolean> {
-    const ip = device.ip;
-    if (this.ocBridgeScriptOk.has(ip)) return Promise.resolve(true);
+    const key = sshEndpointKey(device);
+    if (this.ocBridgeScriptOk.has(key)) return Promise.resolve(true);
     let src: string;
     try {
       src = fs.readFileSync(this.getOcBridgeSourcePath(), 'utf8');
@@ -914,7 +935,7 @@ export class OpenClawDeploymentManager {
         cmd,
         () => {},
         (ok) => {
-          if (ok) this.ocBridgeScriptOk.add(ip);
+          if (ok) this.ocBridgeScriptOk.add(key);
           resolve(ok);
         },
         { timeout: 120000 },
@@ -923,8 +944,8 @@ export class OpenClawDeploymentManager {
   }
 
   private async getOrCreateBridgeTransport(device: Device): Promise<OcBridgeTransport | null> {
-    const ip = device.ip;
-    const existing = this.ocBridgeTransportByIp.get(ip);
+    const key = sshEndpointKey(device);
+    const existing = this.ocBridgeTransportByIp.get(key);
     if (existing) return existing;
     const scriptOk = await this.ensureOcBridgeScriptOnDevice(device);
     if (!scriptOk) return null;
@@ -932,7 +953,7 @@ export class OpenClawDeploymentManager {
     const remoteCmd =
       'bash -lc \'export PATH="$HOME/.npm-global/bin:$PATH" && exec node ~/.rdk-studio/oc-bridge.mjs\'';
     const transport = await startOcBridgeRemote(client, remoteCmd, () => {
-      this.ocBridgeTransportByIp.delete(ip);
+      this.ocBridgeTransportByIp.delete(key);
     });
     if (!transport) return null;
     try {
@@ -943,24 +964,33 @@ export class OpenClawDeploymentManager {
       } catch {
         /* ignore */
       }
-      this.ocBridgeTransportByIp.delete(ip);
+      this.ocBridgeTransportByIp.delete(key);
       return null;
     }
-    this.ocBridgeTransportByIp.set(ip, transport);
+    this.ocBridgeTransportByIp.set(key, transport);
     return transport;
   }
 
   /** 同一设备上 oc-bridge 对话串行（板端桥内部也有队列，Studio 侧再串行避免 reqId 乱序） */
-  private runOcBridgeSerial<T>(ip: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.ocBridgeSendChain.get(ip) ?? Promise.resolve();
+  private runOcBridgeSerial<T>(endpointKey: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.ocBridgeSendChain.get(endpointKey) ?? Promise.resolve();
     const p = prev.then(() => fn());
-    this.ocBridgeSendChain.set(ip, p.then(() => {}).catch(() => {}));
+    this.ocBridgeSendChain.set(endpointKey, p.then(() => {}).catch(() => {}));
     return p;
   }
 
+  /** noVNC / IDE 等经 SSH 隧道访问板端服务时复用与 OpenClaw 相同的连接池与端口配置 */
+  getSshClientForDevice(device: Device): Promise<Client> {
+    return this.getClient(device);
+  }
+
   private async getClient(device: Device): Promise<Client> {
-    const ip = device.ip;
-    const cached = this.sshPool.get(ip);
+    const key = sshEndpointKey(device);
+    const sshPort =
+      typeof device.port === 'number' && Number.isFinite(device.port) && device.port > 0 && device.port <= 65535
+        ? Math.floor(device.port)
+        : 22;
+    const cached = this.sshPool.get(key);
     if (cached) {
       try {
         const client = await cached;
@@ -971,7 +1001,7 @@ export class OpenClawDeploymentManager {
       } catch (_) {
         // stale cached promise, recreate below
       }
-      this.sshPool.delete(ip);
+      this.sshPool.delete(key);
     }
 
     const promise = new Promise<Client>((resolve, reject) => {
@@ -979,13 +1009,13 @@ export class OpenClawDeploymentManager {
       client
         .on('ready', () => resolve(client))
         .on('error', (err) => {
-          this.sshPool.delete(ip);
+          this.sshPool.delete(key);
           reject(err);
         })
-        .on('close', () => this.sshPool.delete(ip))
+        .on('close', () => this.sshPool.delete(key))
         .connect({
           host: device.ip,
-          port: 22,
+          port: sshPort,
           username: device.userName,
           password: device.password || device.userName,
           readyTimeout: SSH_READY_TIMEOUT_MS,
@@ -994,40 +1024,40 @@ export class OpenClawDeploymentManager {
         });
     });
 
-    this.sshPool.set(ip, promise);
-    promise.catch(() => this.sshPool.delete(ip));
+    this.sshPool.set(key, promise);
+    promise.catch(() => this.sshPool.delete(key));
     return promise;
   }
 
   /** 关掉板端桥 SSH 流并从缓存移除；下次 getOrCreate 会新建（用于断线后安全重试） */
   private invalidateOcBridgeTransport(device: Device): void {
-    const ip = device.ip;
-    const br = this.ocBridgeTransportByIp.get(ip);
+    const key = sshEndpointKey(device);
+    const br = this.ocBridgeTransportByIp.get(key);
     if (br) {
       try {
         br.destroy();
       } catch {
         /* ignore */
       }
-      this.ocBridgeTransportByIp.delete(ip);
+      this.ocBridgeTransportByIp.delete(key);
     }
   }
 
-  destroyConnection(ip: string): void {
-    this.clearOcBridgeIdleTeardownTimer(ip);
-    const br = this.ocBridgeTransportByIp.get(ip);
+  destroyConnection(endpointKey: string): void {
+    this.clearOcBridgeIdleTeardownTimer(endpointKey);
+    const br = this.ocBridgeTransportByIp.get(endpointKey);
     if (br) {
       try {
         br.destroy();
       } catch {
         /* ignore */
       }
-      this.ocBridgeTransportByIp.delete(ip);
+      this.ocBridgeTransportByIp.delete(endpointKey);
     }
-    this.ocBridgeSendChain.delete(ip);
-    const p = this.sshPool.get(ip);
+    this.ocBridgeSendChain.delete(endpointKey);
+    const p = this.sshPool.get(endpointKey);
     if (!p) return;
-    this.sshPool.delete(ip);
+    this.sshPool.delete(endpointKey);
     p.then((client) => { try { client.end(); } catch (_) {} }).catch(() => {});
   }
 
@@ -1070,7 +1100,7 @@ export class OpenClawDeploymentManager {
       ? setTimeout(() => {
           if (!finished) {
             onOutput(`[TIMEOUT] 命令执行超时 (${effectiveTimeout / 1000}s)，已中断\n`);
-            this.destroyConnection(device.ip);
+            this.destroyConnection(sshEndpointKey(device));
             finish(false, -1);
           }
         }, effectiveTimeout)
@@ -1099,9 +1129,9 @@ export class OpenClawDeploymentManager {
         if (finished || aborted) return;
         client.exec(command, opts, (err, stream) => {
           if (err) {
-            this.destroyConnection(device.ip);
+            this.destroyConnection(sshEndpointKey(device));
             if (retriesLeft > 0 && !aborted && OpenClawDeploymentManager.isTransientSshError(err)) {
-              console.warn(`[OCM] exec transient error on ${device.ip}, retrying (${retriesLeft} left): ${err.message}`);
+              console.warn(`[OCM] exec transient error on ${sshEndpointKey(device)}, retrying (${retriesLeft} left): ${err.message}`);
               setTimeout(() => attemptExec(retriesLeft - 1), OpenClawDeploymentManager.SSH_RETRY_DELAY_MS);
               return;
             }
@@ -1115,9 +1145,9 @@ export class OpenClawDeploymentManager {
           stream.on('close', (code: number) => finish(code === 0, code));
         });
       }).catch((err: any) => {
-        this.destroyConnection(device.ip);
+        this.destroyConnection(sshEndpointKey(device));
         if (retriesLeft > 0 && !aborted && OpenClawDeploymentManager.isTransientSshError(err)) {
-          console.warn(`[OCM] connection error on ${device.ip}, retrying (${retriesLeft} left): ${err.message}`);
+          console.warn(`[OCM] connection error on ${sshEndpointKey(device)}, retrying (${retriesLeft} left): ${err.message}`);
           setTimeout(() => attemptExec(retriesLeft - 1), OpenClawDeploymentManager.SSH_RETRY_DELAY_MS);
           return;
         }
@@ -1827,19 +1857,34 @@ print(json.dumps(result,ensure_ascii=False))`;
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000, pty: true });
   }
 
-  getWifiList(device: Device, onResult: (wifiNames: string[], success: boolean) => void): void {
-    const cmd = 'sudo nmcli device wifi rescan 2>/dev/null; sleep 2; nmcli -f "SSID" device wifi list 2>/dev/null | awk \'NR>1 {gsub(/^[[:space:]]+|[[:space:]]+$/,""); if($0!="") print $0}\' | sort -u';
+  getWifiList(
+    device: Device,
+    onResult: (wifiNames: string[], success: boolean, errorHint?: string) => void,
+  ): void {
+    /**
+     * 使用 bash --noprofile --norc 避免用户 ~/.bashrc 里 `set -o pipefail` 导致管道中任一步非零即整体失败，
+     * 进而 SSH exec 退出码非 0、原逻辑丢弃全部 stdout，界面显示「未扫描到网络」。
+     * LANG=C 避免本地化表头与 awk 不匹配；list 与 rescan 均走 sudo，与板端手动 nmcli 权限一致。
+     */
+    const inner =
+      'LANG=C LC_ALL=C sudo nmcli device wifi rescan 2>/dev/null; sleep 2; LANG=C LC_ALL=C sudo nmcli -f SSID device wifi list 2>/dev/null | awk \'NR>1 {gsub(/^[[:space:]]+|[[:space:]]+$/,""); if($0!="" && $0!="--") print $0}\' | sort -u';
+    const cmd = `bash --noprofile --norc -c ${JSON.stringify(inner)}`;
     let output = '';
     this.execCommand(device, cmd, (chunk) => { output += chunk; }, (success) => {
-      if (!success) {
-        onResult([], false);
+      const names = parseWifiSsidsFromNmcliOutput(output);
+      if (names.length > 0) {
+        onResult(names, true);
         return;
       }
-      const names = (output || '')
-        .split('\n')
-        .map((s) => s.trim())
-        .filter((s) => s && s !== 'SSID');
-      onResult([...new Set(names)], true);
+      if (!success) {
+        const sshAuthFail = /SSH Error|\[ERROR\]|All configured authentication methods failed/i.test(output);
+        const hint = sshAuthFail
+          ? `SSH 未连上板端（当前使用端口 ${device.port ?? 22}）。经 frp 时请确认设备档案里 SSH 端口为映射端口（如 6000），并已重启 Studio 后端使修复生效。`
+          : undefined;
+        onResult([], false, hint);
+        return;
+      }
+      onResult([], true);
     }, { timeout: 30000 });
   }
 
@@ -1936,7 +1981,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       bridgeTurnHook.complete = null;
       if (activeReqId) {
         try {
-          this.ocBridgeTransportByIp.get(device.ip)?.send({
+          this.ocBridgeTransportByIp.get(sshEndpointKey(device))?.send({
             op: 'abort',
             reqId: activeReqId,
             correlationId: meta?.correlationId,
@@ -1953,7 +1998,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       }
     };
 
-    void this.runOcBridgeSerial(device.ip, async () => {
+    void this.runOcBridgeSerial(sshEndpointKey(device), async () => {
       let turnEnd: BridgeTurnEnd = 'fail_user';
 
       const executeBridgeTurn = async (allowRetryAfterTransient: boolean): Promise<BridgeTurnEnd> => {

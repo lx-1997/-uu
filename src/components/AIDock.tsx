@@ -10,6 +10,7 @@ import type { AgentAttachmentPayload, StudioResponseMode } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, resolveMediaUrl, fetchApi } from '../utils/apiBase';
+import { useLocalFilesBlobPlayUrl } from '../hooks/useLocalFilesBlobPlayUrl';
 import { getRdkEmbedPanel, getRdkEmbedDockCtx, openOpenClawPopout } from '../utils/embed-mode';
 import { useHubDockAnchor } from '../contexts/HubDockAnchorContext';
 import { isDeviceShownOnline } from '../utils/device-connection';
@@ -507,6 +508,58 @@ function DockStreamingPlainBody({ text }: { text: string }) {
   );
 }
 
+function VideoBlockPlayer({ block }: { block: ChatBlock & { type: 'video' } }) {
+  const { t } = useI18n();
+  const videoSrc = resolveMediaUrl(block.src || '');
+  const { playUrl, loading } = useLocalFilesBlobPlayUrl(videoSrc);
+  const ext =
+    videoSrc
+      .split('/')
+      .pop()
+      ?.split('?')[0]
+      ?.split('.')
+      .pop()
+      ?.toLowerCase() || 'mp4';
+  const mimeMap: Record<string, string> = {
+    mp4: 'video/mp4',
+    webm: 'video/webm',
+    mov: 'video/quicktime',
+    avi: 'video/x-msvideo',
+    mkv: 'video/x-matroska',
+  };
+  const mimeType = mimeMap[ext] || 'video/mp4';
+
+  return (
+    <div className="msg-block video-block">
+      {loading ? (
+        <div
+          className="video-block-player video-block-loading"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 120,
+            background: '#1a1a1a',
+            color: '#888',
+            fontSize: 13,
+            borderRadius: 8,
+          }}
+        >
+          {t('dock.video.loading', '加载视频中…')}
+        </div>
+      ) : (
+        <video className="video-block-player" controls playsInline preload="auto">
+          {playUrl ? <source src={playUrl} type={mimeType} /> : null}
+        </video>
+      )}
+      {block.caption && <div className="video-block-caption">{block.caption}</div>}
+      <a className="video-block-download" href={videoSrc} download target="_blank" rel="noopener noreferrer">
+        {t('dock.video.download', '下载视频')}
+      </a>
+    </div>
+  );
+}
+
 function BlockRenderer({
   block,
   onConfirm,
@@ -725,26 +778,7 @@ function BlockRenderer({
   }
 
   if (block.type === 'video') {
-    const videoSrc = resolveMediaUrl(block.src || '');
-    const ext = videoSrc.split('.').pop()?.split('?')[0]?.toLowerCase() || 'mp4';
-    const mimeMap: Record<string, string> = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo', mkv: 'video/x-matroska' };
-    const mimeType = mimeMap[ext] || 'video/mp4';
-    return (
-      <div className="msg-block video-block">
-        <video
-          className="video-block-player"
-          controls
-          playsInline
-          preload="auto"
-        >
-          <source src={videoSrc} type={mimeType} />
-        </video>
-        {block.caption && <div className="video-block-caption">{block.caption}</div>}
-        <a className="video-block-download" href={videoSrc} download target="_blank" rel="noopener noreferrer">
-          {t('dock.video.download', '下载视频')}
-        </a>
-      </div>
-    );
+    return <VideoBlockPlayer block={block as ChatBlock & { type: 'video' }} />;
   }
 
   if (block.type === 'file') {
@@ -971,6 +1005,32 @@ function BlockRenderer({
 
 const OMITTED_STORAGE_URL = '[omitted-large-data-url]';
 
+function AttachmentVideoPlayer({ resolvedSrc, name }: { resolvedSrc: string; name: string }) {
+  const { t } = useI18n();
+  const { playUrl, loading } = useLocalFilesBlobPlayUrl(resolvedSrc);
+  if (loading) {
+    return (
+      <div className="chat-attachment-video chat-attachment-loading" style={{ padding: '12px 0', color: 'var(--muted, #888)', fontSize: 12 }}>
+        {t('dock.video.loading', '加载视频中…')}
+      </div>
+    );
+  }
+  return <video src={playUrl} controls preload="metadata" aria-label={name} />;
+}
+
+function AttachmentAudioPlayer({ resolvedSrc, name }: { resolvedSrc: string; name: string }) {
+  const { t } = useI18n();
+  const { playUrl, loading } = useLocalFilesBlobPlayUrl(resolvedSrc);
+  if (loading) {
+    return (
+      <span className="file-attachment-size" style={{ color: 'var(--muted, #888)' }}>
+        {t('dock.audio.loading', '加载音频中…')}
+      </span>
+    );
+  }
+  return <audio src={playUrl} controls preload="metadata" aria-label={name} />;
+}
+
 function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   const { t } = useI18n();
   const rawUrl = attachment.url?.trim() ?? '';
@@ -1029,7 +1089,7 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
     return (
       <div className="chat-attachment chat-attachment-video">
         {resolvedSrc ? (
-          <video src={resolvedSrc} controls preload="metadata" />
+          <AttachmentVideoPlayer resolvedSrc={resolvedSrc} name={attachment.name} />
         ) : (
           <div className="file-attachment-info">
             <span className="file-attachment-name">{attachment.name}</span>
@@ -1045,7 +1105,11 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
         <div className="audio-msg-icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
         </div>
-        {resolvedSrc ? <audio src={resolvedSrc} controls preload="metadata" /> : <span className="file-attachment-size">{t('dock.attach.audioHint', '语音附件已上传')}</span>}
+        {resolvedSrc ? (
+          <AttachmentAudioPlayer resolvedSrc={resolvedSrc} name={attachment.name} />
+        ) : (
+          <span className="file-attachment-size">{t('dock.attach.audioHint', '语音附件已上传')}</span>
+        )}
         {attachment.transcript && (
           <div className="file-attachment-info">
             <span className="file-attachment-size">{t('dock.attach.transcriptPrefix', '转写：')}{attachment.transcript}</span>

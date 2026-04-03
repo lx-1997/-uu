@@ -646,6 +646,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.stopAll.cancelled': 'Interrupted {{n}} scheduled runs',
   'chat.stopAll.title': 'Stopped {{n}} running task(s)',
   'chat.stopAll.toast': 'Stopped {{n}} running task(s)',
+  'chat.stopAll.submitting': 'Stop request sent',
+  'chat.stopAll.submittingHint': 'Notifying the server to cancel tasks; counts will update shortly…',
   'chat.stopAll.fail': 'Failed to stop all tasks',
   'chat.stopAll.sep': '; ',
   'chat.bg.ended': 'Background task ended.',

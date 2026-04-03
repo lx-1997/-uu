@@ -42,6 +42,7 @@ import {
   describeError,
 } from "./provider/errors.js";
 import { truncateToolOutput } from "./context/tool-output-truncate.js";
+import { resolveToolFollowupBypassCap } from "../rdkclaw/max-agent-turns.js";
 import {
   pruneContextMessages,
   invalidateStaleReadToolResults,
@@ -385,6 +386,15 @@ async function runParallelSafeToolCall(
   return { text, errFlag };
 }
 
+/** 上下文末尾是否为「刚写入的工具结果」user 消息，尚缺一次模型调用来读结果并回复用户 */
+export function lastMessageNeedsToolFollowUpLlm(messages: Message[]): boolean {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user") return false;
+  const c = last.content;
+  if (!Array.isArray(c)) return false;
+  return c.some((b) => b && typeof b === "object" && (b as { type?: string }).type === "tool_result");
+}
+
 // ============== 主循环 ==============
 
 /**
@@ -429,6 +439,9 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
     let { compactionSummary } = params;
     let turns = 0;
+    /** 已超过 maxTurns 后，因末尾仍有 tool_result 而额外放行的 LLM 次数（防止长工具链在触顶后突然断在「下一步」话术中间） */
+    let postLimitToolFollowUpsUsed = 0;
+    const toolFollowupBypassCap = resolveToolFollowupBypassCap(maxTurns);
     let totalToolCalls = 0;
     let finalText = "";
     let overflowRecoveryLevel = 0; // 0=none, 1=microcompact, 2=llm-compact, 3=emergency-truncation
@@ -463,8 +476,19 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
         // 对应 OpenClaw: inner while (hasMoreToolCalls || pendingMessages.length > 0)
         while (hasMoreToolCalls || pendingMessages.length > 0) {
           if (turns >= maxTurns) {
-            stream.push({ type: "turn_transition", turn: turns, reason: "max_turns_reached" });
-            break outerLoop;
+            // 达到轮次上限时，若末尾仍是 tool_result 的 user 消息，必须再跑模型读结果（可能多轮：触顶后模型仍会继续 device_exec 等）。
+            // 仅放行 turns===maxTurns 不够：第二轮工具后 turns 已是 maxTurns+1，会在此处被误杀，表现为正文停在「接下来要…：」且永远没有后续工具/总结。
+            const needsToolFollow = lastMessageNeedsToolFollowUpLlm(currentMessages);
+            if (needsToolFollow && postLimitToolFollowUpsUsed < toolFollowupBypassCap) {
+              postLimitToolFollowUpsUsed += 1;
+            } else {
+              stream.push({
+                type: "turn_transition",
+                turn: turns,
+                reason: needsToolFollow ? "tool_followup_cap_reached" : "max_turns_reached",
+              });
+              break outerLoop;
+            }
           }
           if (abortSignal.aborted) {
             stream.push({ type: "turn_transition", turn: turns, reason: "aborted_by_user" });

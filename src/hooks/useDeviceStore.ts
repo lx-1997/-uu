@@ -46,7 +46,7 @@ import { useToastStore } from './useToastStore';
 import { useAuth } from './useAuth';
 
 /** 与下方 GET /api/devices 的 effect 使用同一映射，避免多处漂移 */
-function mapDevicesFromApiResponse(res: {
+export function mapDevicesFromApiResponse(res: {
   devices: Array<{
     id: string;
     username: string;
@@ -54,6 +54,10 @@ function mapDevicesFromApiResponse(res: {
     port?: number;
     boardPlatform?: string | null;
     boardModel?: string | null;
+    lanSshHost?: string;
+    lanSshPort?: number;
+    frpRemotePort?: number;
+    sshReachability?: 'direct' | 'tunnel';
   }>;
 }): Device[] {
   const verifiedIds = loadVerifiedIdSet();
@@ -68,6 +72,10 @@ function mapDevicesFromApiResponse(res: {
     boardPlatform: device.boardPlatform ?? null,
     boardModel: device.boardModel ?? null,
     sshSessionVerified: verifiedIds.has(device.id),
+    lanSshHost: device.lanSshHost,
+    lanSshPort: device.lanSshPort,
+    frpRemotePort: device.frpRemotePort,
+    sshReachability: device.sshReachability,
   }));
   return orderDevicesForStudio(mapped);
 }

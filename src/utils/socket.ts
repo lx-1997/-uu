@@ -13,16 +13,25 @@ export const socketIoClientOptions = {
   timeout: 15000,
 };
 
+function isViteBrowserDev(): boolean {
+  if (!(import.meta as any).env?.DEV) return false;
+  if (typeof window === 'undefined') return false;
+  const { protocol } = window.location;
+  if (protocol === 'file:') return false;
+  return protocol === 'http:' || protocol === 'https:';
+}
+
 /**
  * Resolve the Socket.IO / API base URL.
  *
- * In dev mode we always connect to the local dev server.
- * In desktop (Electron) mode the renderer may be loaded from file://,
- * so we derive the host from the preload-injected apiBase.
- * In production web mode we use the page origin.
+ * 浏览器 + Vite 开发（如 localhost:5173）：与页面同源，经 Vite 代理到后端（见 vite.config proxy）。
+ * Electron file://：使用 preload 注入的 apiBase（通常为 http://localhost:8787）。
+ * 生产 Web：使用页面 origin。
  */
 export function resolveSocketUrl(): string {
-  if ((import.meta as any).env?.DEV) return 'http://localhost:8787';
+  if (isViteBrowserDev()) {
+    return window.location.origin;
+  }
 
   const apiBase = (window as any).rdkDesktop?.apiBase as string | undefined;
   if (apiBase) {

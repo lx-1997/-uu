@@ -22,6 +22,7 @@
 
 import crypto from "node:crypto";
 import path from "node:path";
+import { RDKCLAW_DEFAULT_MAX_AGENT_TURNS } from "../rdkclaw/max-agent-turns.js";
 import type { Tool, ToolContext } from "./tools/types.js";
 import { builtinTools } from "./tools/builtin.js";
 import { wrapToolWithAbortSignal } from "./tools/abort.js";
@@ -423,7 +424,8 @@ export class Agent {
     this.tools = config.tools ?? builtinTools;
     this.toolContextExtras = config.toolContextExtras;
     this.studioDeviceIdResolver = config.studioDeviceIdResolver;
-    this.maxTurns = config.maxTurns ?? 20;
+    /** 与 RDKClaw `resolveRdkclawMaxAgentTurns()` 默认一致，便于 CLI/Gateway 未显式传参时长任务不致过早触顶 */
+    this.maxTurns = config.maxTurns ?? RDKCLAW_DEFAULT_MAX_AGENT_TURNS;
     this.workspaceDir = config.workspaceDir ?? process.cwd();
     this.bootstrapDir = config.bootstrapDir;
     this.extraAllowedRoots = config.extraAllowedRoots;

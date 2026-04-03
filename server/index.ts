@@ -28,6 +28,7 @@ import {
 import {
   runRemoteCommands,
   verifySshConnection,
+  forwardOutRemoteTcp,
   uploadFileSftp,
   SSH_READY_TIMEOUT_MS,
   SSH_KEEPALIVE_INTERVAL_MS,
@@ -38,7 +39,7 @@ import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import WebSocket, { WebSocketServer } from 'ws';
 import * as net from 'net';
-import { OpenClawDeploymentManager } from './managers/OpenClawDeploymentManager.js';
+import { OpenClawDeploymentManager, sshEndpointKey } from './managers/OpenClawDeploymentManager.js';
 import { OPENCLAW_BOARD_NPM_SPEC } from './managers/openclaw-board-install-sh.js';
 import { pingVendorModel } from './openclaw-vendor-model-ping.js';
 import * as path from 'path';
@@ -54,7 +55,9 @@ import { shellEscape, isSafeName } from './utils/shell-escape.js';
 import { stripAnsi } from './utils/strip-ansi.js';
 import {
   DEFAULT_SSH_PASSWORD,
-  DEFAULT_VNC_PORT, OPENCLAW_GATEWAY_PORT,
+  DEFAULT_VNC_PORT,
+  CODE_SERVER_HTTP_PORT,
+  OPENCLAW_GATEWAY_PORT,
   AI_REQUEST_TIMEOUT_MS,
   FLASH_TMP_IMAGE_XZ, FLASH_TMP_IMAGE_RAW, FLASH_DEFAULT_DEST,
   DIAGNOSTIC_COMMANDS, buildSystemPrompt,
@@ -77,6 +80,7 @@ import {
   effectiveSamplingTopP,
   type ProviderConfigRegistry,
 } from './agent/provider-setup.js';
+import { SshTunnelHttpAgent } from './code-server-tunnel-agent.js';
 import { RDKClawApp } from './rdkclaw/app.js';
 import { FeishuChannelAdapter } from './rdkclaw/feishu-channel-adapter.js';
 import { FeishuApiClient } from './rdkclaw/feishu-api-client.js';
@@ -116,6 +120,7 @@ import {
   cancelAllPendingStudioBrowserCaptures,
 } from './studio-browser-capture.js';
 import { registerSocketIoHandlers } from './socket-io-handlers.js';
+import { registerFrpRoutes } from './frp-routes.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -229,73 +234,7 @@ httpServer.prependListener('upgrade', (request, socket, head) => {
   }
 });
 
-function isPrivateIp(ip: string): boolean {
-  return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost$)/.test(ip);
-}
-
-const NOVNC_PROXY_IDLE_MS = 30 * 60 * 1000;
-
-wss.on('connection', (ws, req) => {
-  const urlParams = new URLSearchParams(req.url?.split('?')[1] || '');
-  const target = urlParams.get('target');
-  if (!target) { ws.close(); return; }
-
-  const [host, portStr] = target.split(':');
-  const targetPort = Number(portStr || DEFAULT_VNC_PORT);
-  if (!isPrivateIp(host) || targetPort < 1 || targetPort > 65535) {
-    console.warn(`[noVNC] rejected proxy to non-private target: ${target}`);
-    ws.close();
-    return;
-  }
-
-  const tcpSocket = net.connect(targetPort, host, () => {
-    console.log(`[noVNC] proxied to ${host}:${targetPort}`);
-  });
-
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
-  const clearIdle = () => {
-    if (idleTimer) {
-      clearTimeout(idleTimer);
-      idleTimer = null;
-    }
-  };
-  const bumpIdle = () => {
-    clearIdle();
-    idleTimer = setTimeout(() => {
-      try { ws.close(); } catch { /* noop */ }
-      try { tcpSocket.destroy(); } catch { /* noop */ }
-    }, NOVNC_PROXY_IDLE_MS);
-  };
-
-  bumpIdle();
-
-  tcpSocket.on('data', (data) => {
-    bumpIdle();
-    if (ws.readyState === ws.OPEN) ws.send(data);
-  });
-
-  ws.on('message', (msg: Buffer) => {
-    bumpIdle();
-    if (!tcpSocket.destroyed) tcpSocket.write(msg);
-  });
-
-  tcpSocket.on('close', () => {
-    clearIdle();
-    ws.close();
-  });
-  tcpSocket.on('error', () => {
-    clearIdle();
-    ws.close();
-  });
-  ws.on('close', () => {
-    clearIdle();
-    tcpSocket.destroy();
-  });
-  ws.on('error', () => {
-    clearIdle();
-    tcpSocket.destroy();
-  });
-});
+/** noVNC websockify：在 openClawManager 初始化后注册（见下方 registerNovncWebsockify） */
 
 const port = Number(process.env.PORT ?? 8787);
 /** 与仓库 `config/rdkclaw-provider.defaults.json` 对齐；RDKClaw 主链路以 ~/.rdkstudio/agent-config.json 为准 */
@@ -446,6 +385,282 @@ const WORKSPACE_HEALTH_COMMAND = `bash -lc ${shellEscape(WORKSPACE_HEALTH_SCRIPT
 // OpenClaw Manager
 const resourcesPath = path.join(process.cwd(), 'build-resources');
 const openClawManager = new OpenClawDeploymentManager(resourcesPath);
+
+/** noVNC：局域网直连 target=私网:5900；经 frp 时用 deviceId + SSH forwardOut 到板端 127.0.0.1:5900 */
+(function registerNovncWebsockify() {
+  const NOVNC_PROXY_IDLE_MS = 30 * 60 * 1000;
+
+  function isPrivateIpLocal(ip: string): boolean {
+    return /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|localhost$)/.test(ip);
+  }
+
+  function pipeNovncStreamToWs(ws: WebSocket, tcp: NodeJS.ReadWriteStream | net.Socket) {
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearIdle = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+    };
+    const bumpIdle = () => {
+      clearIdle();
+      idleTimer = setTimeout(() => {
+        try {
+          ws.close();
+        } catch {
+          /* noop */
+        }
+        try {
+          (tcp as net.Socket).destroy?.();
+        } catch {
+          /* noop */
+        }
+      }, NOVNC_PROXY_IDLE_MS);
+    };
+    bumpIdle();
+    tcp.on('data', (data: Buffer) => {
+      bumpIdle();
+      if (ws.readyState === ws.OPEN) ws.send(data);
+    });
+    ws.on('message', (msg: Buffer) => {
+      bumpIdle();
+      try {
+        (tcp as NodeJS.WritableStream).write(msg);
+      } catch {
+        /* noop */
+      }
+    });
+    tcp.on('close', () => {
+      clearIdle();
+      ws.close();
+    });
+    tcp.on('error', () => {
+      clearIdle();
+      ws.close();
+    });
+    ws.on('close', () => {
+      clearIdle();
+      try {
+        (tcp as net.Socket).destroy?.();
+      } catch {
+        /* noop */
+      }
+    });
+    ws.on('error', () => {
+      clearIdle();
+      try {
+        (tcp as net.Socket).destroy?.();
+      } catch {
+        /* noop */
+      }
+    });
+  }
+
+  async function handleNovncWebSocket(ws: WebSocket, req: http.IncomingMessage) {
+    const urlParams = new URLSearchParams(req.url?.split('?')[1] || '');
+    const deviceId = urlParams.get('deviceId')?.trim();
+    const remotePortRaw = urlParams.get('remotePort') || urlParams.get('rport');
+    const remotePort = Number(remotePortRaw || DEFAULT_VNC_PORT) || DEFAULT_VNC_PORT;
+
+    if (deviceId) {
+      if (isSSORequired()) {
+        const user = getSessionSsoUserFromIncomingMessage(req);
+        if (!user) {
+          ws.close();
+          return;
+        }
+      }
+      let devices: Device[];
+      try {
+        devices = await readDevices();
+      } catch {
+        ws.close();
+        return;
+      }
+      const device = devices.find((d) => d.id === deviceId);
+      if (!device) {
+        ws.close();
+        return;
+      }
+      const pwd = resolvePrimarySshPassword(device, {
+        requestHeaderPassword: String(req.headers['x-device-password'] ?? ''),
+      });
+      const deviceObj = toOpenClawDevice(device, pwd);
+      let stream: NodeJS.ReadWriteStream;
+      try {
+        const client = await openClawManager.getSshClientForDevice(deviceObj);
+        stream = await forwardOutRemoteTcp(client, '127.0.0.1', remotePort);
+      } catch (e) {
+        console.warn('[noVNC] ssh tunnel failed:', e instanceof Error ? e.message : e);
+        ws.close();
+        return;
+      }
+      console.log(
+        `[noVNC] ssh tunnel → board 127.0.0.1:${remotePort} (ssh ${device.host}:${device.port ?? 22})`,
+      );
+      pipeNovncStreamToWs(ws, stream);
+      return;
+    }
+
+    const target = urlParams.get('target');
+    if (!target) {
+      ws.close();
+      return;
+    }
+
+    const [host, portStr] = target.split(':');
+    const targetPort = Number(portStr || DEFAULT_VNC_PORT);
+    if (!isPrivateIpLocal(host) || targetPort < 1 || targetPort > 65535) {
+      console.warn(`[noVNC] rejected proxy to non-private target: ${target}`);
+      ws.close();
+      return;
+    }
+
+    const tcpSocket = net.connect(targetPort, host, () => {
+      console.log(`[noVNC] proxied to ${host}:${targetPort}`);
+    });
+    pipeNovncStreamToWs(ws, tcpSocket);
+  }
+
+  wss.on('connection', (ws, req) => {
+    void handleNovncWebSocket(ws, req).catch((err) => {
+      console.warn('[noVNC] handler error:', err instanceof Error ? err.message : err);
+      try {
+        ws.close();
+      } catch {
+        /* noop */
+      }
+    });
+  });
+})();
+
+/** code-server 代理路径：/api/devices/:id/code-server-proxy/... → 板端 127.0.0.1:CODE_SERVER_HTTP_PORT/... */
+const CODE_SERVER_PROXY_PATH = /^\/api\/devices\/([^/]+)\/code-server-proxy(\/.*)?$/;
+
+function matchCodeServerProxyPath(pathname: string): { deviceId: string; remainder: string } | null {
+  const m = pathname.match(CODE_SERVER_PROXY_PATH);
+  if (!m) return null;
+  const remainder = m[2] && m[2].length > 0 ? m[2] : '/';
+  return { deviceId: m[1], remainder };
+}
+
+function buildRawHttpRequestForCodeServerUpstream(req: http.IncomingMessage, upstreamPath: string): string {
+  const ver = req.httpVersion || '1.1';
+  const lines: string[] = [`${req.method || 'GET'} ${upstreamPath} HTTP/${ver}`];
+  lines.push(`Host: 127.0.0.1:${CODE_SERVER_HTTP_PORT}`);
+  for (const key of Object.keys(req.headers)) {
+    const low = key.toLowerCase();
+    if (low === 'host') continue;
+    const val = req.headers[key];
+    if (val === undefined) continue;
+    if (Array.isArray(val)) {
+      for (const v of val) lines.push(`${key}: ${v}`);
+    } else {
+      lines.push(`${key}: ${val}`);
+    }
+  }
+  return `${lines.join('\r\n')}\r\n\r\n`;
+}
+
+/**
+ * code-server 依赖 WebSocket；仅 Express pipe HTTP 不够。经 SSH forwardOut 把升级请求与双向数据转到板端。
+ */
+function registerCodeServerProxyUpgradeHandler() {
+  httpServer.prependListener('upgrade', (request, socket, head) => {
+    let urlStr = request.url || '';
+    try {
+      const u = new URL(urlStr, 'http://localhost');
+      const matched = matchCodeServerProxyPath(u.pathname);
+      if (!matched) return;
+
+      void (async () => {
+        try {
+          if (isSSORequired()) {
+            const user = getSessionSsoUserFromIncomingMessage(request);
+            if (!user) {
+              socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+              socket.destroy();
+              return;
+            }
+          }
+          const devices = await readDevices();
+          const device = devices.find((d) => d.id === matched.deviceId);
+          if (!device) {
+            socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+            socket.destroy();
+            return;
+          }
+          const pwd = resolvePrimarySshPassword(device, {
+            requestHeaderPassword: String(request.headers['x-device-password'] ?? ''),
+          });
+          const deviceObj = toOpenClawDevice(device, pwd);
+          const client = await openClawManager.getSshClientForDevice(deviceObj);
+          const stream = await forwardOutRemoteTcp(client, '127.0.0.1', CODE_SERVER_HTTP_PORT);
+          const upstreamPath = `${matched.remainder}${u.search}`;
+          const raw = buildRawHttpRequestForCodeServerUpstream(request, upstreamPath);
+          const headBuf = head && head.length > 0 ? head : Buffer.alloc(0);
+          const cleanup = () => {
+            try {
+              socket.destroy();
+            } catch {
+              /* noop */
+            }
+            try {
+              (stream as net.Socket).destroy?.();
+            } catch {
+              /* noop */
+            }
+          };
+          stream.on('error', (err) => {
+            console.warn('[code-server-proxy] upstream stream error:', err instanceof Error ? err.message : err);
+            cleanup();
+          });
+          socket.on('error', cleanup);
+          const startDuplex = () => {
+            socket.pipe(stream);
+            stream.pipe(socket);
+          };
+          stream.write(raw, (err) => {
+            if (err) {
+              console.warn('[code-server-proxy] write request failed:', err instanceof Error ? err.message : err);
+              cleanup();
+              return;
+            }
+            if (headBuf.length) {
+              stream.write(headBuf, (err2) => {
+                if (err2) {
+                  cleanup();
+                  return;
+                }
+                startDuplex();
+              });
+            } else {
+              startDuplex();
+            }
+          });
+        } catch (e) {
+          console.warn('[code-server-proxy] upgrade failed:', e instanceof Error ? e.message : e);
+          try {
+            socket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+          } catch {
+            /* noop */
+          }
+          socket.destroy();
+        }
+      })();
+    } catch (err) {
+      console.warn('[code-server-proxy] upgrade parse failed:', err instanceof Error ? err.message : err);
+      try {
+        socket.destroy();
+      } catch {
+        /* noop */
+      }
+    }
+  });
+}
+
+registerCodeServerProxyUpgradeHandler();
+
 const rdkclaw = new RDKClawApp(process.cwd(), openClawManager);
 const notificationHub = new NotificationHub(io);
 const feishuAdapter = new FeishuChannelAdapter(rdkclaw);
@@ -585,6 +800,7 @@ function purgeDeviceSoftwareState(device: Device) {
 function toOpenClawDevice(device: Device, password?: string) {
   return {
     ip: device.host,
+    port: device.port ?? 22,
     userName: device.username,
     id: device.id,
     password: password || resolveStoredDevicePassword(device),
@@ -648,6 +864,15 @@ function sendApiError(
   };
   response.status(status).json(payload);
 }
+
+registerFrpRoutes(app, {
+  sendApiError,
+  readDevices,
+  writeDevices,
+  serializedWriteDevices,
+  invalidateDevicesReadCache,
+  sanitizeDevice,
+});
 
 function normalizeOpenClawApi(raw: unknown): string {
   const value = String(raw || '').trim();
@@ -1581,6 +1806,65 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-Password', 'X-RDK-Sso-Session', 'X-Requested-With'],
   }),
 );
+/**
+ * 经 frp 时浏览器无法直连板端 code-server；通过 SSH forwardOut 到 127.0.0.1:CODE_SERVER_HTTP_PORT。
+ * 必须挂在 express.json 之前，否则 POST/PUT 等请求体会被解析，无法 pipe 到上游。
+ * SSO：本路由在 ssoAuthMiddleware 之前，内部自行校验会话（与 rosbridge 等一致）。
+ */
+app.use('/api/devices/:deviceId/code-server-proxy', (req, res, next) => {
+  void (async () => {
+    try {
+      const { deviceId } = req.params;
+      if (isSSORequired()) {
+        const user = getSessionSsoUserFromIncomingMessage(req);
+        if (!user) {
+          res.status(401).send('unauthorized');
+          return;
+        }
+      }
+      const devices = await readDevices();
+      const device = devices.find((d) => d.id === deviceId);
+      if (!device) {
+        res.status(404).send('device not found');
+        return;
+      }
+      const pwd = resolvePrimarySshPassword(device, {
+        requestHeaderPassword: String(req.headers['x-device-password'] ?? ''),
+      });
+      const deviceObj = toOpenClawDevice(device, pwd);
+      const agent = new SshTunnelHttpAgent(
+        () => openClawManager.getSshClientForDevice(deviceObj),
+        CODE_SERVER_HTTP_PORT,
+      );
+      const targetPath = req.url || '/';
+      const proxyReq = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: CODE_SERVER_HTTP_PORT,
+          path: targetPath,
+          method: req.method,
+          headers: {
+            ...req.headers,
+            host: `127.0.0.1:${CODE_SERVER_HTTP_PORT}`,
+          },
+          agent,
+        },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+          proxyRes.pipe(res);
+        },
+      );
+      proxyReq.on('error', (err) => {
+        if (!res.headersSent) {
+          res.status(502).send(`code-server proxy: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+      req.pipe(proxyReq);
+    } catch (e) {
+      next(e);
+    }
+  })();
+});
 /** 全局 JSON 不宜过大，避免并发大请求 OOM；大文件请走专用上传路由 */
 app.use(express.json({ limit: '10mb' }));
 
@@ -3437,7 +3721,8 @@ app.post('/api/devices/:id/openclaw/deploy/cancel', async (request, response) =>
       /* ignore */
     }
   }
-  openClawManager.destroyConnection(device.host);
+  const { password: cancelPwd } = resolvePassword(request, device);
+  openClawManager.destroyConnection(sshEndpointKey(toOpenClawDevice(device, cancelPwd)));
   response.json({ ok: true });
 });
 
@@ -3926,8 +4211,8 @@ app.get('/api/devices/:id/openclaw/wifi-list', async (request, response) => {
 
   const { password } = resolvePassword(request, device);
   const deviceObj = toOpenClawDevice(device, password);
-  openClawManager.getWifiList(deviceObj, (wifiNames, success) => {
-    response.json({ ok: success, wifiNames });
+  openClawManager.getWifiList(deviceObj, (wifiNames, success, errorHint) => {
+    response.json({ ok: success, wifiNames, ...(errorHint ? { errorHint } : {}) });
   });
 });
 
@@ -6406,7 +6691,11 @@ app.post('/api/agent/chat', async (request, response) => {
       requestAbortController.abort();
     };
 
-    request.on('close', handleDisconnect);
+    /**
+     * 勿对 POST 的 `request` 监听 `close`：Express 已用 body-parser 读完 JSON 正文后，
+     * IncomingMessage 常会视为「请求消息已结束」而触发 `close`，与「客户端断开」无关。
+     * 若在此 abort，会在首条 SSE 事件前就掐断 streamChat，前端表现为「无任何有效对话事件」（~100ms 内结束）。
+     */
     request.on('aborted', handleDisconnect);
     response.on('close', handleDisconnect);
 
@@ -6459,7 +6748,6 @@ app.post('/api/agent/chat', async (request, response) => {
       }
     } finally {
       clearInterval(keepAlive);
-      request.off('close', handleDisconnect);
       request.off('aborted', handleDisconnect);
       response.off('close', handleDisconnect);
     }

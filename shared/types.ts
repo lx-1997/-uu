@@ -21,6 +21,13 @@ export interface Device {
   boardDetectedAt?: string;
   /** Suggested web_fetch / search entry points for this board */
   researchSeeds?: string[];
+  /** 启用 FRP 前备份的局域网 SSH 地址（切回局域网时使用） */
+  lanSshHost?: string;
+  lanSshPort?: number;
+  /** frps 上映射的 SSH 远程端口 */
+  frpRemotePort?: number;
+  /** direct=直连当前 host；tunnel=经 frp 公网映射 */
+  sshReachability?: 'direct' | 'tunnel';
 }
 
 export interface DevicePayload {

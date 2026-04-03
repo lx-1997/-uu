@@ -38,6 +38,8 @@ import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager
 import { readDevices } from "../storage.js";
 import { DEFAULT_SSH_PASSWORD } from "../constants.js";
 import { CONVERSATION_SCHEMA, recordConversationTurn } from "../conversation-log.js";
+import type { ConversationOutcome } from "../conversation-types.js";
+import { resolveRdkclawMaxAgentTurns } from "./max-agent-turns.js";
 
 /** 长任务「仍在处理」心跳间隔。可用 RDKCLAW_RUN_PROGRESS_INTERVAL_MS 覆盖（毫秒，3s–300s）。 */
 function resolveRdkclawRunProgressIntervalMs(): number {
@@ -49,19 +51,6 @@ function resolveRdkclawRunProgressIntervalMs(): number {
   return 12_000;
 }
 
-/**
- * Agent 外层 reasoning 轮次上限（内层每轮 = 一次模型调用，常含多工具）。
- * 「思考」与「快捷回答」共用同一上限；默认 32 轮，可用 RDKCLAW_MAX_AGENT_TURNS 提高（上限 200 防抖）。
- */
-function resolveRdkclawMaxAgentTurns(): number {
-  const raw = process.env.RDKCLAW_MAX_AGENT_TURNS;
-  if (raw) {
-    const n = Number.parseInt(String(raw).trim(), 10);
-    if (Number.isFinite(n) && n > 0) return Math.min(200, n);
-  }
-  return 32;
-}
-import type { ConversationOutcome } from "../conversation-types.js";
 import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
 import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
 import { boardOpenClawChatTool } from "./tools/board-openclaw-chat.js";
@@ -959,10 +948,58 @@ export class RDKClawApp {
 
     const channel: import("./types.js").ChannelSource = req.channel || "studio";
     const enqueuedAt = Date.now();
-    const slot = await this.deviceQueue.acquireSlot(deviceLane, {
-      channel,
-      messageSummary: String(req.message || "").slice(0, 60),
-    });
+    const slotPromise = this.deviceQueue.acquireSlot(
+      deviceLane,
+      {
+        channel,
+        messageSummary: String(req.message || "").slice(0, 60),
+      },
+      externalAbortSignal,
+    );
+
+    let lastQueuePulse = Date.now();
+    let slot: { release: () => void };
+    for (;;) {
+      if (externalAbortSignal?.aborted) {
+        abortedByClient = true;
+        recordConversationTurnFromReq(req, {
+          outcome: "cancelled",
+          assistantMessage: "",
+          toolsUsed: [],
+          errorDetail: "aborted_waiting_device_slot",
+        });
+        return;
+      }
+      const got = await Promise.race([
+        slotPromise,
+        new Promise<null>((r) => setTimeout(() => r(null), 500)),
+      ]);
+      if (got) {
+        if (externalAbortSignal?.aborted) {
+          got.release();
+          abortedByClient = true;
+          recordConversationTurnFromReq(req, {
+            outcome: "cancelled",
+            assistantMessage: "",
+            toolsUsed: [],
+            errorDetail: "aborted_waiting_device_slot",
+          });
+          return;
+        }
+        slot = got;
+        break;
+      }
+      if (Date.now() - lastQueuePulse >= 8000) {
+        lastQueuePulse = Date.now();
+        yield {
+          type: "run_progress" as const,
+          data: {
+            message:
+              "上一任务仍占用设备执行队列，本条消息在排队中，请稍候。若长时间无进展，可点「结束当前」或检查板端命令是否卡住。",
+          },
+        };
+      }
+    }
 
     try {
       if (enqueuedAt <= this.cancelQueuedBeforeTs) {
@@ -1637,9 +1674,15 @@ export class RDKClawApp {
           ? {
               stop_reason: "max_turns_reached",
               stop_hint:
-                "本轮已达推理轮次上限，若答复不完整可提高环境变量 RDKCLAW_MAX_AGENT_TURNS（≤200）后重启 Studio。",
+                "本轮已达推理轮次上限，若答复不完整可提高环境变量 RDKCLAW_MAX_AGENT_TURNS（≤256）后重启 Studio。",
             }
-          : {}),
+          : turnTransitionReason === "tool_followup_cap_reached"
+            ? {
+                stop_reason: "tool_followup_cap_reached",
+                stop_hint:
+                  "触顶后工具链收尾次数已达上限，若仍停在「下一步」话术可提高 RDKCLAW_MAX_AGENT_TURNS 或拆成多段对话。",
+              }
+            : {}),
       },
     };
   }

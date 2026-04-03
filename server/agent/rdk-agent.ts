@@ -19,6 +19,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import { runAgentLoop, type AgentLoopParams } from './agent-loop.js';
+import { resolveRdkclawMaxAgentTurns } from '../rdkclaw/max-agent-turns.js';
 import { ToolHookRegistry, createExecLikeFailureHintHook } from './tool-hooks.js';
 import { SessionManager, type Message } from './session.js';
 import type { MiniAgentEvent, MiniAgentResult } from './agent-events.js';
@@ -147,7 +148,7 @@ export async function runRdkAgent(options: RdkAgentRunOptions): Promise<RdkAgent
     apiKey,
     temperature: resolveSamplingTemperature(config),
     topP: resolveSamplingTopP(config),
-    maxTurns: 10,
+    maxTurns: resolveRdkclawMaxAgentTurns(),
     maxOutputTokens: modelDef.maxTokens ?? 8192,
     contextTokens: modelDef.contextWindow ?? 128000,
 

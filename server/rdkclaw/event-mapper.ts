@@ -204,7 +204,10 @@ export function mapMiniEvent(
       let message: string;
       if (reason === "max_turns_reached") {
         message =
-          `已达到本轮推理轮次上限（第 ${turn} 轮），编排在此结束，回复可能不完整。可将环境变量 RDKCLAW_MAX_AGENT_TURNS 调大（≤200）并重启 Studio，或拆成多段对话。「快捷」与「思考」模式本轮次上限一致。`;
+          `已达到本轮推理轮次上限（第 ${turn} 轮），编排在此结束，回复可能不完整。可将环境变量 RDKCLAW_MAX_AGENT_TURNS 调大（≤256）并重启 Studio，或拆成多段对话。「快捷」与「思考」模式本轮次上限一致。`;
+      } else if (reason === "tool_followup_cap_reached") {
+        message =
+          `已达到触顶后的工具收尾次数上限（第 ${turn} 轮），编排在此结束；常见现象是正文停在「接下来要执行…」而未见后续命令。请提高 RDKCLAW_MAX_AGENT_TURNS，或将任务拆成多轮对话。`;
       } else if (reason === "aborted_by_user") {
         message = "推理已被中止（你点了停止、或页面/网络连接断开导致取消）。";
       } else {

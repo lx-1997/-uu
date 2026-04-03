@@ -36,6 +36,14 @@ export default defineConfig(({ mode }) => {
           target: apiTarget,
           changeOrigin: true,
           ws: true,
+          /** 避免整段缓冲大响应；配合 Range 时利于 /api/local-files 下视频分段播放 */
+          buffer: false,
+        },
+        /** Socket.IO 默认路径；开发态须与 /api 一样走代理，否则会直连 :8787 触发 CORS / 连接失败 */
+        '/socket.io': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
         },
       },
     },
