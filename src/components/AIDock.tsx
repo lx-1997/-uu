@@ -1042,8 +1042,6 @@ export default function AIDock() {
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
   const [quickMoreMenuOpen, setQuickMoreMenuOpen] = useState(false);
   const quickMoreMenuRef = useRef<HTMLDivElement | null>(null);
-  const [dockHeaderMoreOpen, setDockHeaderMoreOpen] = useState(false);
-  const dockHeaderMoreRef = useRef<HTMLDivElement | null>(null);
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
   const [unsatisfiedModal, setUnsatisfiedModal] = useState<{ msgId: number; preview: string } | null>(null);
   const [unsatisfiedNote, setUnsatisfiedNote] = useState('');
@@ -1124,29 +1122,6 @@ export default function AIDock() {
       window.removeEventListener('keydown', onKey);
     };
   }, [quickMoreMenuOpen]);
-
-  useEffect(() => {
-    if (!dockHeaderMoreOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const el = dockHeaderMoreRef.current;
-      if (el && !el.contains(e.target as Node)) {
-        window.requestAnimationFrame(() => setDockHeaderMoreOpen(false));
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDockHeaderMoreOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [dockHeaderMoreOpen]);
-
-  useEffect(() => {
-    if (!chatExpanded) setDockHeaderMoreOpen(false);
-  }, [chatExpanded]);
 
   const mentionParse = useMemo(() => parseTrailingAtMention(cmd), [cmd]);
   const filteredMentionCaps = useMemo(() => {
@@ -2089,6 +2064,61 @@ export default function AIDock() {
 
                 <span className="dock-header-toolbar-divider" aria-hidden />
 
+                <div className="dock-header-tool-cluster dock-header-tool-cluster--utility">
+                  <button
+                    type="button"
+                    className="dock-header-toolbtn"
+                    disabled={debugExporting}
+                    onClick={() => {
+                      if (debugExporting) return;
+                      setDebugExporting(true);
+                      void exportDebugBundle().finally(() => setDebugExporting(false));
+                    }}
+                    title={t('dock.export.title', '导出排查包（对话快照、Agent 会话、可选板端 OpenClaw 日志）')}
+                    aria-label={t('dock.header.diagnose', '导出诊断包')}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    <span className="dock-header-toolbtn-label">{t('dock.header.diagnose', '诊断')}</span>
+                  </button>
+                  {!rdkEmbedPanel && activeTab === 'openclaw' && (
+                    <button
+                      type="button"
+                      className="dock-header-toolbtn"
+                      onClick={() => openOpenClawPopout()}
+                      title={t('dock.popout.openclawTitle', '新窗口仅打开 OpenClaw 页面')}
+                      aria-label={t('dock.header.popoutOpenclaw', '新窗口打开 OpenClaw')}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M9 9h6v6H9z" />
+                      </svg>
+                      <span className="dock-header-toolbtn-label">{t('dock.header.popoutShort', '弹窗')}</span>
+                    </button>
+                  )}
+                  {isSubpageTab && (
+                    <button
+                      type="button"
+                      className="dock-header-toolbtn"
+                      onClick={toggleSubpageDockVisibility}
+                      title={t('dock.hide', '隐藏 AI Dock')}
+                      aria-label={t('dock.header.hideDock', '隐藏 AI Dock')}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32" />
+                        <path d="M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.89 11 8a11.8 11.8 0 01-4.17 5.94" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                      <span className="dock-header-toolbtn-label">{t('dock.header.hideShort', '隐藏')}</span>
+                    </button>
+                  )}
+                </div>
+
+                <span className="dock-header-toolbar-divider" aria-hidden />
+
                 <button
                   type="button"
                   className="dock-header-newchat"
@@ -2101,78 +2131,6 @@ export default function AIDock() {
                   </svg>
                   <span>{t('dock.header.newChat', '新对话')}</span>
                 </button>
-
-                <div className="dock-header-more-wrap" ref={dockHeaderMoreRef}>
-                  <button
-                    type="button"
-                    className={`dock-header-toolbtn dock-header-more-trigger${dockHeaderMoreOpen ? ' is-open' : ''}`}
-                    aria-expanded={dockHeaderMoreOpen}
-                    aria-haspopup="menu"
-                    onClick={() => setDockHeaderMoreOpen((o) => !o)}
-                    aria-label={t('dock.header.moreAria', '更多与诊断')}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
-                      <circle cx="12" cy="6" r="1.5" fill="currentColor" stroke="none" />
-                      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
-                      <circle cx="12" cy="18" r="1.5" fill="currentColor" stroke="none" />
-                    </svg>
-                    <span className="dock-header-toolbtn-label">{t('dock.header.more', '更多')}</span>
-                  </button>
-                  {dockHeaderMoreOpen && (
-                    <div
-                      className="dock-header-more-panel"
-                      role="menu"
-                      aria-label={t('dock.header.moreMenuAria', '更多菜单')}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="dock-header-more-item"
-                        disabled={debugExporting}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setDockHeaderMoreOpen(false);
-                          if (debugExporting) return;
-                          setDebugExporting(true);
-                          void exportDebugBundle().finally(() => setDebugExporting(false));
-                        }}
-                      >
-                        <span className="dock-header-more-item-title">{t('dock.header.exportDebug', '导出诊断包')}</span>
-                        <span className="dock-header-more-item-desc">{t('dock.header.exportDebugDesc', '对话快照与 Agent 会话，便于排障')}</span>
-                      </button>
-                      {!rdkEmbedPanel && activeTab === 'openclaw' && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="dock-header-more-item"
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            setDockHeaderMoreOpen(false);
-                            openOpenClawPopout();
-                          }}
-                        >
-                          <span className="dock-header-more-item-title">{t('dock.header.popoutOpenclaw', '新窗口打开 OpenClaw')}</span>
-                          <span className="dock-header-more-item-desc">{t('dock.header.popoutOpenclawDesc', '仅 OpenClaw 页面')}</span>
-                        </button>
-                      )}
-                      {isSubpageTab && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          className="dock-header-more-item"
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            setDockHeaderMoreOpen(false);
-                            toggleSubpageDockVisibility();
-                          }}
-                        >
-                          <span className="dock-header-more-item-title">{t('dock.header.hideDock', '隐藏 AI Dock')}</span>
-                          <span className="dock-header-more-item-desc">{t('dock.header.hideDockDesc', '在本页收起对话面板')}</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
               </div>
 
               <button

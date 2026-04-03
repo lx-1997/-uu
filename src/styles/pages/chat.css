@@ -57,7 +57,8 @@
   border: 1px solid var(--dock-border);
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   box-shadow: var(--dock-shadow);
-  overflow: hidden;
+  /* 顶栏工具需能叠在内容之上，不能用 hidden 裁掉整块（会吃掉向上展开的菜单） */
+  overflow: visible;
 }
 
 .dock.workspace .dock-chat {
@@ -77,6 +78,9 @@
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   gap: 8px;
+  position: relative;
+  z-index: 4;
+  background: var(--dock-bg);
 }
 
 .dock-header-left {
@@ -210,10 +214,10 @@
   display: none;
 }
 
-@media (min-width: 900px) {
+@media (min-width: 720px) {
   .dock-header-toolbtn-label {
     display: inline;
-    max-width: 4.5rem;
+    max-width: 5rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -246,69 +250,8 @@
   transform: scale(0.98);
 }
 
-.dock-header-more-wrap {
-  position: relative;
-  flex-shrink: 0;
-  z-index: 12;
-}
-
-.dock-header-more-trigger.is-open {
-  color: var(--accent);
-  background: var(--accent-subtle);
-}
-
-.dock-header-more-panel {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  top: auto;
-  right: 0;
-  min-width: min(16rem, calc(100vw - 2rem));
-  max-width: min(20rem, calc(100vw - 1.5rem));
-  padding: 6px 4px 8px;
-  border-radius: var(--radius-lg, 12px);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.18));
-  animation: fadeUp var(--duration-fast) var(--ease-out);
-}
-
-.dock-header-more-item {
-  display: block;
-  width: calc(100% - 4px);
-  margin: 0 2px 2px;
-  padding: 9px 11px;
-  border: none;
-  border-radius: var(--radius-md, 10px);
-  font-family: inherit;
-  text-align: left;
-  background: transparent;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out);
-}
-
-.dock-header-more-item:hover:not(:disabled) {
-  background: var(--chip-bg-active);
-}
-
-.dock-header-more-item:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.dock-header-more-item-title {
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.dock-header-more-item-desc {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.6875rem;
-  color: var(--text-muted);
-  line-height: 1.3;
+.dock-header-tool-cluster--utility {
+  gap: 1px;
 }
 
 .dock-header-close {
@@ -2501,19 +2444,28 @@
   color: var(--text-primary);
 }
 
+.chat-history-modal-controls {
+  flex-shrink: 0;
+  margin: 0 14px 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm, 10px);
+  background: var(--bg-inset, rgba(128, 128, 128, 0.06));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
 .chat-history-modal-hint {
   margin: 0;
-  padding: 8px 14px 0;
+  padding: 0 0 10px;
   font-size: 0.75rem;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--text-muted);
 }
 
 .chat-history-modal-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 12px;
+  padding: 0;
 }
 
 .chat-history-modal-label {
@@ -2529,12 +2481,13 @@
 
 .chat-history-modal-body {
   flex: 1;
-  min-height: 200px;
+  min-height: 0;
   overflow: auto;
-  padding: 8px 14px 14px;
+  padding: 4px 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
 }
 
 .chat-history-modal-empty {

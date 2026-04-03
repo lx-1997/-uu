@@ -110,27 +110,29 @@ export function ChatHistoryModal({ open, onClose, devices, preferredDeviceId, t 
             ×
           </button>
         </div>
-        <p className="chat-history-modal-hint">
-          {t('dock.history.hint', '以下为已保存在本机的对话记录（按设备分档）。与当前窗口内容一致，最多保留近期若干条。')}
-        </p>
-        <div className="chat-history-modal-toolbar">
-          <label className="chat-history-modal-label" htmlFor="chat-history-device-select">
-            {t('dock.history.device', '设备')}
-          </label>
-          <select
-            id="chat-history-device-select"
-            className="select chat-history-device-select"
-            value={selectedId}
-            onChange={e => setSelectedId(e.target.value)}
-          >
-            {deviceOptions.length === 0 ? (
-              <option value="">{t('dock.history.noDevices', '无存档')}</option>
-            ) : (
-              deviceOptions.map(id => (
-                <option key={id} value={id}>{optionLabels.get(id) ?? id}</option>
-              ))
-            )}
-          </select>
+        <div className="chat-history-modal-controls">
+          <p className="chat-history-modal-hint">
+            {t('dock.history.hint', '以下为已保存在本机的对话记录（按设备分档）。与当前窗口内容一致，最多保留近期若干条。')}
+          </p>
+          <div className="chat-history-modal-toolbar">
+            <label className="chat-history-modal-label" htmlFor="chat-history-device-select">
+              {t('dock.history.device', '设备')}
+            </label>
+            <select
+              id="chat-history-device-select"
+              className="select chat-history-device-select"
+              value={selectedId}
+              onChange={e => setSelectedId(e.target.value)}
+            >
+              {deviceOptions.length === 0 ? (
+                <option value="">{t('dock.history.noDevices', '无存档')}</option>
+              ) : (
+                deviceOptions.map(id => (
+                  <option key={id} value={id}>{optionLabels.get(id) ?? id}</option>
+                ))
+              )}
+            </select>
+          </div>
         </div>
         <div className="chat-history-modal-body">
           {messages.length === 0 ? (

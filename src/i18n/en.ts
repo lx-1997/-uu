@@ -60,6 +60,9 @@ export const EN: Record<string, string> = {
   'dock.header.popoutOpenclawDesc': 'OpenClaw page only',
   'dock.header.hideDock': 'Hide AI Dock',
   'dock.header.hideDockDesc': 'Collapse the chat panel on this page',
+  'dock.header.diagnose': 'Diagnose',
+  'dock.header.popoutShort': 'Pop out',
+  'dock.header.hideShort': 'Hide',
 
   'dock.msg.retry': 'Retry',
   'dock.msg.retryTitle': 'Regenerate this reply with the same user message',
