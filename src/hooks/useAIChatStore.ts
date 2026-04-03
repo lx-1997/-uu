@@ -100,6 +100,12 @@ export interface AIChatStoreState {
       chatPreviewText?: string;
       attachments?: AgentAttachmentPayload[];
       displayAttachments?: ChatAttachment[];
+      regenerate?: {
+        removeAiMessageId: number;
+        anchorUserMessageId: number;
+        message: string;
+        attachments: AgentAttachmentPayload[];
+      };
     },
   ) => void;
   executeConfirm: (confirmId: string) => void;
@@ -529,11 +535,21 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       chatPreviewText?: string;
       attachments?: AgentAttachmentPayload[];
       displayAttachments?: ChatAttachment[];
+      regenerate?: {
+        removeAiMessageId: number;
+        anchorUserMessageId: number;
+        message: string;
+        attachments: AgentAttachmentPayload[];
+      };
     },
   ) => {
     e.preventDefault();
-    const userMsg = String(options?.messageOverride ?? cmd).trim();
-    const requestAttachments = options?.attachments ?? [];
+    const regen = options?.regenerate;
+    if (regen) {
+      setChatMessages((prev) => prev.filter((m) => m.id !== regen.removeAiMessageId));
+    }
+    const userMsg = String(regen ? regen.message : options?.messageOverride ?? cmd).trim();
+    const requestAttachments = regen?.attachments ?? options?.attachments ?? [];
     const displayAttachments = options?.displayAttachments ?? [];
     if (!userMsg && requestAttachments.length === 0) return;
     if (abortCooldownRef.current) {
@@ -554,14 +570,16 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         : userMsg || transcriptText || '';
     reportActiveSession('user-command');
     reportActiveDevice('user-command');
-    const msgId = Date.now();
-    setChatMessages(prev => [...prev, {
-      id: msgId,
-      role: 'user',
-      text: displayText,
-      source: 'studio',
-      attachments: displayAttachments.length > 0 ? displayAttachments : undefined,
-    }]);
+    const msgId = regen ? regen.anchorUserMessageId : Date.now();
+    if (!regen) {
+      setChatMessages((prev) => [...prev, {
+        id: msgId,
+        role: 'user',
+        text: displayText,
+        source: 'studio',
+        attachments: displayAttachments.length > 0 ? displayAttachments : undefined,
+      }]);
+    }
     setChatExpanded(true);
     setCmd('');
     setShowSuggestions(false);
@@ -1011,7 +1029,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         }
 
         // ── Agent Loop (SSE) — primary path ──
-        const aiMsgId = msgId + 1;
+        const aiMsgId = regen ? Math.max(Date.now(), msgId + 1) : msgId + 1;
         let aiText = '';
         const aiBlocks: ChatBlock[] = [];
         let currentRunId = '';

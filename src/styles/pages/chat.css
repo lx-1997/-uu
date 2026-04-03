@@ -488,6 +488,15 @@
   flex-wrap: wrap;
 }
 
+.dock-msg-footer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
 .dock-msg-time {
   font-size: 0.625rem;
   color: var(--text-muted);
@@ -514,6 +523,16 @@
 .dock-bubble-retry:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.dock-bubble-retry--primary {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.dock-bubble-retry--primary:hover:not(:disabled) {
+  background: var(--accent-subtle);
 }
 
 /* 「不满意此回复」轻量弹窗 */
@@ -1087,22 +1106,25 @@
 .dock-context-strip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px 2px;
+  gap: 8px;
+  padding: 6px 10px 4px;
   overflow: visible;
+  flex-wrap: wrap;
 }
 
 .dock-context-strip-lead {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .dock-context-strip-scroll {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   overflow-x: auto;
@@ -1321,6 +1343,91 @@
   color: var(--accent);
   background: var(--accent-subtle);
   border-color: var(--accent-border);
+}
+
+.dock-ctx-chip--accent {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
+  font-weight: 600;
+}
+
+.dock-ctx-chip--more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border);
+  background: transparent;
+}
+
+.dock-ctx-chip--more:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+.dock-ctx-chip--more.is-open .dock-quick-more-chevron {
+  transform: rotate(180deg);
+}
+
+.dock-quick-more-chevron {
+  display: flex;
+  opacity: 0.75;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.dock-quick-more-wrap {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 6;
+}
+
+.dock-quick-more-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: min(14rem, calc(100vw - 2rem));
+  max-width: min(22rem, calc(100vw - 1.5rem));
+  padding: 6px 4px 8px;
+  border-radius: var(--radius-lg, 12px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.18));
+  animation: fadeUp var(--duration-fast) var(--ease-out);
+}
+
+.dock-quick-more-panel-hd {
+  padding: 6px 12px 4px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.dock-quick-more-option {
+  display: block;
+  width: calc(100% - 4px);
+  margin: 0 2px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius-md, 10px);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.dock-quick-more-option:hover {
+  background: var(--chip-bg-active);
+}
+
+.dock-quick-more-option-title {
+  display: block;
+  line-height: 1.3;
 }
 
 /* ── Suggestions dropdown (idle) ── */

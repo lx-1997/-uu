@@ -203,6 +203,12 @@ export interface AppState {
       chatPreviewText?: string;
       attachments?: AgentAttachmentPayload[];
       displayAttachments?: ChatAttachment[];
+      regenerate?: {
+        removeAiMessageId: number;
+        anchorUserMessageId: number;
+        message: string;
+        attachments: AgentAttachmentPayload[];
+      };
     },
   ) => void;
   executeConfirm: (confirmId: string) => void;

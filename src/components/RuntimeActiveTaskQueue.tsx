@@ -4,6 +4,7 @@ import type { Task } from '../ai';
 import type { RdkClawTimelineEntry } from '../hooks/useAIChatStore';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
+import { isDeviceShownOnline } from '../utils/device-connection';
 
 const ACTIVE_ORCHESTRATOR = new Set<Task['status']>(['pending', 'confirming', 'running']);
 
@@ -75,7 +76,10 @@ export default function RuntimeActiveTaskQueue() {
     isLoading,
     loadingMsg,
     rosRecording,
+    currentDevice,
   } = useAppState();
+
+  const deviceOnline = Boolean(currentDevice && isDeviceShownOnline(currentDevice));
 
   const activeOrchestratorTasks = useMemo(() => {
     const list = taskHistory.filter((x) => ACTIVE_ORCHESTRATOR.has(x.status));
@@ -145,10 +149,15 @@ export default function RuntimeActiveTaskQueue() {
 
         {!hasChips && (
           <span className="runtime-task-queue-status">
-            {t(
-              'runtimeTasks.emptyWorkspaceExec',
-              '当前没有正在执行的操作。在工作台发起「一句话开发」或设备体检、或在对话里下达指令后会显示进度。',
-            )}
+            {deviceOnline
+              ? t(
+                  'runtimeTasks.emptyWorkspaceExec',
+                  '当前无进行中的任务。可在工作台发起「一句话开发」、设备体检，或在对话中下达指令，进度将显示于此。',
+                )
+              : t(
+                  'runtimeTasks.emptyWorkspaceExecNoDevice',
+                  '当前无进行中的任务。请先添加并连接开发板以使用完整能力；若想循序渐进了解平台，可在工作台点击「重新开始引导」进入新手引导。有任务执行时，进度将显示于此。',
+                )}
           </span>
         )}
 

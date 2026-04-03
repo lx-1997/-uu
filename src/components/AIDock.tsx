@@ -10,6 +10,8 @@ import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { resolveApiUrl, resolveMediaUrl, fetchApi } from '../utils/apiBase';
 import { getRdkEmbedPanel, getRdkEmbedDockCtx, openOpenClawPopout } from '../utils/embed-mode';
+import { isDeviceShownOnline } from '../utils/device-connection';
+import { DASHBOARD_CHAT_INTRO_PROMPT_EN, DASHBOARD_CHAT_INTRO_PROMPT_ZH } from '../i18n/prompts';
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-message-plain';
@@ -258,6 +260,67 @@ async function buildDisplayAttachmentsFromPending(
       return { ...rest };
     }),
   );
+}
+
+function findPreviousStudioUserMessage(messages: ChatMessage[], aiMessageId: number): ChatMessage | null {
+  const idx = messages.findIndex((m) => m.id === aiMessageId);
+  if (idx <= 0) return null;
+  for (let i = idx - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'user' && !m.channelMeta && (m.source === 'studio' || !m.source)) return m;
+  }
+  return null;
+}
+
+/** 将历史气泡中的附件再编码为 Agent 请求体（重试时用） */
+async function chatAttachmentsToAgentPayloadForRetry(
+  attachments: ChatAttachment[],
+): Promise<{ payloads: AgentAttachmentPayload[]; dropped: boolean }> {
+  const payloads: AgentAttachmentPayload[] = [];
+  let dropped = false;
+  for (const a of attachments) {
+    try {
+      const payload: AgentAttachmentPayload = {
+        id: a.id,
+        type: a.type,
+        name: a.name,
+        mimeType: a.mimeType,
+        size: a.size,
+        transcript: a.transcript,
+        textContent: a.textContent,
+        source: 'studio',
+      };
+      const url = (a.url || '').trim();
+      if (url.startsWith('data:')) {
+        const comma = url.indexOf(',');
+        if (comma >= 0) {
+          const header = url.slice(5, comma);
+          const raw = url.slice(comma + 1);
+          if (header.includes('base64')) payload.contentBase64 = raw;
+        }
+        payloads.push(payload);
+        continue;
+      }
+      if (url) {
+        const fetchUrl = /^https?:\/\//i.test(url) ? url : resolveMediaUrl(url);
+        const res = await fetch(fetchUrl);
+        if (!res.ok) throw new Error('fetch');
+        const buf = await res.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let j = 0; j < bytes.length; j += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(j, j + chunk));
+        }
+        payload.contentBase64 = btoa(binary);
+        if (!payload.mimeType) payload.mimeType = res.headers.get('content-type') || undefined;
+      }
+      payloads.push(payload);
+    } catch {
+      dropped = true;
+    }
+  }
+  return { payloads, dropped };
 }
 
 async function fileToBase64(file: File) {
@@ -969,12 +1032,16 @@ export default function AIDock() {
     currentDevice, addToast, language, setLanguage,
     studioResponseMode, setStudioResponseMode,
     exportDebugBundle,
+    setShowAddDevice,
+    setObStep,
   } = useAppState();
   const { t, isEn } = useI18n();
   const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
   const [debugExporting, setDebugExporting] = useState(false);
   const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
+  const [quickMoreMenuOpen, setQuickMoreMenuOpen] = useState(false);
+  const quickMoreMenuRef = useRef<HTMLDivElement | null>(null);
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
   const [unsatisfiedModal, setUnsatisfiedModal] = useState<{ msgId: number; preview: string } | null>(null);
   const [unsatisfiedNote, setUnsatisfiedNote] = useState('');
@@ -1037,6 +1104,25 @@ export default function AIDock() {
     };
   }, [responseModeMenuOpen]);
 
+  useEffect(() => {
+    if (!quickMoreMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = quickMoreMenuRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        window.requestAnimationFrame(() => setQuickMoreMenuOpen(false));
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setQuickMoreMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [quickMoreMenuOpen]);
+
   const mentionParse = useMemo(() => parseTrailingAtMention(cmd), [cmd]);
   const filteredMentionCaps = useMemo(() => {
     if (!mentionParse) return [];
@@ -1085,6 +1171,41 @@ export default function AIDock() {
       return isEn ? `${m}m ${rs}s` : `${m} 分 ${rs} 秒`;
     },
     [isEn, t],
+  );
+
+  const runRegenerate = useCallback(
+    async (aiMsgId: number) => {
+      if (aiTyping) {
+        addToast(t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。'), 'warning');
+        return;
+      }
+      const aiEntry = chatMessages.find((m) => m.id === aiMsgId);
+      if (!aiEntry || aiEntry.role !== 'ai') return;
+      const prev = findPreviousStudioUserMessage(chatMessages, aiMsgId);
+      if (!prev) return;
+      let attachments: AgentAttachmentPayload[] = [];
+      if (prev.attachments && prev.attachments.length > 0) {
+        const { payloads, dropped } = await chatAttachmentsToAgentPayloadForRetry(prev.attachments);
+        attachments = payloads;
+        if (dropped) {
+          addToast(t('dock.retry.attachPartial', '部分附件无法再次发送，已跳过无效项。'), 'warning');
+        }
+      }
+      const msgLine = prev.text.trim();
+      if (!msgLine && attachments.length === 0) {
+        addToast(t('dock.retry.nothingToSend', '没有可重试的内容。'), 'warning');
+        return;
+      }
+      handleCommand({ preventDefault() {} } as React.FormEvent, {
+        regenerate: {
+          removeAiMessageId: aiMsgId,
+          anchorUserMessageId: prev.id,
+          message: msgLine,
+          attachments,
+        },
+      });
+    },
+    [addToast, aiTyping, chatMessages, handleCommand, t],
   );
 
   const rdkEmbedPanel = useMemo(() => (typeof window !== 'undefined' ? getRdkEmbedPanel() : null), []);
@@ -1624,35 +1745,9 @@ export default function AIDock() {
 
   type QuickPrompt = { id: string; icon: string; label: string; text: string; placeholder?: string; forceRdkclaw?: boolean };
   const promptsByTab = useMemo((): Record<string, QuickPrompt[]> => {
-    const appgenZh = [
-      '我要在板端部署一个应用，请按通用流程执行，并在执行前给我确认：',
-      '1) 先判断当前设备硬件是否匹配（板卡型号、相机/传感器/麦克风等连接状态）；',
-      '2) 以板卡探测与板端 assess 做实时可用性核验，不要依赖过时的静态注册表；',
-      '3) 联网检索官网文档/开源仓库，确认可行方案；',
-      '4) 给出 skill/流程草案、依赖与风险；',
-      '5) 明确征求我确认“是否执行”；',
-      '6) 我确认后再部署或执行。',
-    ].join('\n');
     return {
-    dashboard: [
-      { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '一键体检'), text: t('dock.quick.dash.diag.text', '帮我全面检查设备健康状态，包括温度、负载和网络') },
-      { id: 'stat', icon: '📊', label: t('dock.quick.dash.stat.label', '能力盘点'), text: t('dock.quick.dash.stat.text', '汇总当前设备上应用、模型与 OpenClaw 技能等可编排能力') },
-      {
-        id: 'cap-report',
-        icon: '🧭',
-        label: t('dock.quick.dash.cap.label', '能力汇报'),
-        text: t('dock.quick.dash.cap.text', '请分别汇报 RDKClaw 和 OpenClaw 当前能做什么：各列 5 条能力，并给每条配一个可立即执行的一句话示例。'),
-        forceRdkclaw: true,
-      },
-      {
-        id: 'appgen',
-        icon: '✨',
-        label: t('dock.quick.dash.appgen.label', '快速部署应用'),
-        text: t('dock.quick.dash.appgen.text', appgenZh),
-        forceRdkclaw: true,
-      },
-      { id: 'new-device', icon: '🔌', label: t('dock.quick.dash.newdev.label', '新设备接管'), text: t('dock.quick.dash.newdev.text', '把当前设备当成一台全新设备，检查连接、OpenClaw 与可开发环境是否就绪') },
-    ],
+    /** 工作台快捷条在组件内单独渲染（主操作 +「更多」+ 未连接时的引导） */
+    dashboard: [],
     terminal: [
       { id: 'cmd', icon: '⌨️', label: t('dock.quick.term.cmd.label', '帮我写命令'), text: t('dock.quick.term.cmd.text', '我想做什么操作，帮我生成终端命令') },
       { id: 'err', icon: '🔍', label: t('dock.quick.term.err.label', '分析输出'), text: t('dock.quick.term.err.text', '帮我分析终端最近的输出，定位问题并给修复建议') },
@@ -1698,10 +1793,54 @@ export default function AIDock() {
     { id: 'hw', icon: '🌡️', label: t('dock.quick.def.hw.label', '硬件状态'), text: t('dock.quick.def.hw.text', '检查当前设备的 BPU 负载和芯片温度') },
     { id: 'plan', icon: '📋', label: t('dock.quick.def.plan.label', '执行计划'), text: t('dock.quick.def.plan.text', '把当前需求拆成 3 步并立即开始执行第一步') },
   ], [t]);
+  /** 工作台：主栏 3 项 +「更多」收纳，避免底栏拥挤 */
+  const dashboardDockQuick = useMemo((): { main: QuickPrompt[]; more: QuickPrompt[] } => {
+    const appgenZh = [
+      '我要在板端部署一个应用，请按通用流程执行，并在执行前给我确认：',
+      '1) 先判断当前设备硬件是否匹配（板卡型号、相机/传感器/麦克风等连接状态）；',
+      '2) 以板卡探测与板端 assess 做实时可用性核验，不要依赖过时的静态注册表；',
+      '3) 联网检索官网文档/开源仓库，确认可行方案；',
+      '4) 给出 skill/流程草案、依赖与风险；',
+      '5) 明确征求我确认“是否执行”；',
+      '6) 我确认后再部署或执行。',
+    ].join('\n');
+    return {
+      main: [
+        { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '一键体检'), text: t('dock.quick.dash.diag.text', '帮我全面检查设备健康状态，包括温度、负载和网络') },
+        { id: 'stat', icon: '📊', label: t('dock.quick.dash.stat.label', '能力盘点'), text: t('dock.quick.dash.stat.text', '汇总当前设备上应用、模型与 OpenClaw 技能等可编排能力') },
+        {
+          id: 'appgen',
+          icon: '✨',
+          label: t('dock.quick.dash.appgen.label', '快速部署应用'),
+          text: t('dock.quick.dash.appgen.text', appgenZh),
+          forceRdkclaw: true,
+        },
+      ],
+      more: [
+        {
+          id: 'cap-report',
+          icon: '🧭',
+          label: t('dock.quick.dash.cap.label', '能力汇报'),
+          text: t('dock.quick.dash.cap.text', '请分别汇报 RDKClaw 和 OpenClaw 当前能做什么：各列 5 条能力，并给每条配一个可立即执行的一句话示例。'),
+          forceRdkclaw: true,
+        },
+        { id: 'new-device', icon: '🔌', label: t('dock.quick.dash.newdev.label', '新设备接管'), text: t('dock.quick.dash.newdev.text', '把当前设备当成一台全新设备，检查连接、OpenClaw 与可开发环境是否就绪') },
+      ],
+    };
+  }, [t]);
   const effectiveTab = embedDockCtxTab
     ? (embedDockCtxTab === 'openclaw' && !dockOcMode ? '_rdkclaw_fallback' : embedDockCtxTab)
     : ((activeTab === 'openclaw' && !dockOcMode) ? '_rdkclaw_fallback' : activeTab);
-  const quickPrompts = promptsByTab[effectiveTab] ?? defaultPrompts;
+  const quickPrompts = useMemo(() => {
+    if (effectiveTab === 'dashboard') return [];
+    return promptsByTab[effectiveTab] ?? defaultPrompts;
+  }, [effectiveTab, promptsByTab, defaultPrompts]);
+  const deviceOnline = Boolean(currentDevice && isDeviceShownOnline(currentDevice));
+
+  useEffect(() => {
+    setQuickMoreMenuOpen(false);
+  }, [effectiveTab]);
+
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
   const shouldHideDock = isSubpageTab && hideDockInSubpage;
@@ -2160,28 +2299,49 @@ export default function AIDock() {
                       </span>
                       {(() => {
                         if (isStreamingBubble || msg.channelMeta) return null;
+                        const prevUserForRetry = findPreviousStudioUserMessage(chatMessages, msg.id);
                         const plainRetry = chatMessageRetryExcerpt(msg, t).trim();
-                        if (!plainRetry) return null;
+                        const showUnsatisfied = Boolean(plainRetry);
+                        if (!prevUserForRetry && !showUnsatisfied) return null;
                         return (
-                          <button
-                            type="button"
-                            className="dock-bubble-retry"
-                            disabled={aiTyping}
-                            title={
-                              aiTyping
-                                ? t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。')
-                                : t('dock.msg.unsatisfied', '不满意此回复')
-                            }
-                            onClick={() => {
-                              setUnsatisfiedNote('');
-                              setUnsatisfiedModal({
-                                msgId: msg.id,
-                                preview: chatMessageRetryExcerpt(msg, t),
-                              });
-                            }}
-                          >
-                            {t('dock.msg.unsatisfied', '不满意此回复')}
-                          </button>
+                          <div className="dock-msg-footer-actions">
+                            {prevUserForRetry && (
+                              <button
+                                type="button"
+                                className="dock-bubble-retry dock-bubble-retry--primary"
+                                disabled={aiTyping}
+                                title={
+                                  aiTyping
+                                    ? t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。')
+                                    : t('dock.msg.retryTitle', '使用同一条用户消息重新生成回复')
+                                }
+                                onClick={() => void runRegenerate(msg.id)}
+                              >
+                                {t('dock.msg.retry', '重试')}
+                              </button>
+                            )}
+                            {showUnsatisfied && (
+                              <button
+                                type="button"
+                                className="dock-bubble-retry"
+                                disabled={aiTyping}
+                                title={
+                                  aiTyping
+                                    ? t('dock.msg.unsatisfiedBusy', '请等待当前回复结束后再试。')
+                                    : t('dock.msg.unsatisfied', '不满意此回复')
+                                }
+                                onClick={() => {
+                                  setUnsatisfiedNote('');
+                                  setUnsatisfiedModal({
+                                    msgId: msg.id,
+                                    preview: chatMessageRetryExcerpt(msg, t),
+                                  });
+                                }}
+                              >
+                                {t('dock.msg.unsatisfied', '不满意此回复')}
+                              </button>
+                            )}
+                          </div>
                         );
                       })()}
                     </div>
@@ -2557,11 +2717,96 @@ export default function AIDock() {
             )}
           </div>
           <div className="dock-context-strip-scroll">
-            {quickPrompts.map((p) => (
-              <button key={p.id} className="dock-ctx-chip" onClick={() => submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw)}>
-                {p.label}
-              </button>
-            ))}
+            {effectiveTab === 'dashboard' && !deviceOnline && (
+              <>
+                <button
+                  type="button"
+                  className="dock-ctx-chip dock-ctx-chip--accent"
+                  onClick={() => setShowAddDevice(true)}
+                >
+                  {t('dashboard.addDevice', '添加设备')}
+                </button>
+                <button
+                  type="button"
+                  className="dock-ctx-chip"
+                  onClick={() => setObStep('board')}
+                >
+                  {t('dock.quick.dash.onboarding', '新手引导')}
+                </button>
+                <button
+                  type="button"
+                  className="dock-ctx-chip"
+                  onClick={() => submitQuickPrompt(isEn ? DASHBOARD_CHAT_INTRO_PROMPT_EN : DASHBOARD_CHAT_INTRO_PROMPT_ZH)}
+                >
+                  {t('dock.quick.dash.capIntro', '了解能力')}
+                </button>
+              </>
+            )}
+            {effectiveTab === 'dashboard' && deviceOnline && (
+              <>
+                {dashboardDockQuick.main.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="dock-ctx-chip"
+                    onClick={() => submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <div className="dock-quick-more-wrap" ref={quickMoreMenuRef}>
+                  <button
+                    type="button"
+                    className={`dock-ctx-chip dock-ctx-chip--more${quickMoreMenuOpen ? ' is-open' : ''}`}
+                    aria-expanded={quickMoreMenuOpen}
+                    aria-haspopup="menu"
+                    onClick={() => setQuickMoreMenuOpen((o) => !o)}
+                  >
+                    {t('dock.quick.more', '更多')}
+                    <span className="dock-quick-more-chevron" aria-hidden>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </span>
+                  </button>
+                  {quickMoreMenuOpen && (
+                    <div
+                      className="dock-quick-more-panel"
+                      role="menu"
+                      aria-label={t('dock.quick.morePanel', '更多快捷指令')}
+                    >
+                      <div className="dock-quick-more-panel-hd">{t('dock.quick.morePanel', '更多快捷指令')}</div>
+                      {dashboardDockQuick.more.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          role="menuitem"
+                          className="dock-quick-more-option"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setQuickMoreMenuOpen(false);
+                            submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw);
+                          }}
+                        >
+                          <span className="dock-quick-more-option-title">{p.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            {effectiveTab !== 'dashboard' &&
+              quickPrompts.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="dock-ctx-chip"
+                  onClick={() => submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw)}
+                >
+                  {p.label}
+                </button>
+              ))}
           </div>
         </div>
       </div>

@@ -21,7 +21,9 @@ export const EN: Record<string, string> = {
   'runtimeTasks.regionWorkspace': 'Workspace tasks in progress',
   'runtimeTasks.titleWorkspaceExec': 'Workspace execution',
   'runtimeTasks.emptyWorkspaceExec':
-    'Nothing is running. Start one-shot dev / health check on the workspace, or send a command in RDKClaw chat.',
+    'No tasks in progress. Start one-shot dev or a health check here, or send a command in chat — progress will appear here.',
+  'runtimeTasks.emptyWorkspaceExecNoDevice':
+    'No tasks in progress. Add and connect your board first for full features; use “Restart onboarding” on the workspace to learn the platform step by step. Progress will show here when something runs.',
   'runtimeTasks.openFlasher': 'Open flasher',
   'runtimeTasks.flashInProgress': 'Image flash',
   'runtimeTasks.flowCheckHint': 'Flow validation in progress',
@@ -37,6 +39,16 @@ export const EN: Record<string, string> = {
   'runtimeTasks.openBackgroundRun': 'Open chat to see background run timeline',
   'runtimeTasks.backgroundRun': 'Background chat',
   'runtimeTasks.openTaskDock': 'Open chat and task panel',
+
+  'dock.quick.more': 'More',
+  'dock.quick.morePanel': 'More shortcuts',
+  'dock.quick.dash.onboarding': 'Guided tour',
+  'dock.quick.dash.capIntro': 'What can you do?',
+
+  'dock.msg.retry': 'Retry',
+  'dock.msg.retryTitle': 'Regenerate this reply with the same user message',
+  'dock.retry.attachPartial': 'Some attachments could not be re-sent; invalid items were skipped.',
+  'dock.retry.nothingToSend': 'Nothing to retry.',
 
   // Icon rail — primary
   'nav.dashboard.label': 'Workspace',
