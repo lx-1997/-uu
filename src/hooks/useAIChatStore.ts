@@ -1,5 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, ChatBlock, AgentPlan, AgentExecutionState, ChatAttachment } from '../app-types';
+import type {
+  AiDockContentSlot,
+  ChatMessage,
+  ChatBlock,
+  AgentPlan,
+  AgentExecutionState,
+  ChatAttachment,
+} from '../app-types';
 import { CMD_SUGGESTIONS, type CmdSuggestion } from '../constants';
 import { translate } from '../i18n/translate';
 import { fillTemplate } from '../i18n/en-extras';
@@ -147,7 +154,7 @@ export interface AIChatStoreState {
   runTimelinePanelOpen: boolean;
   setRunTimelinePanelOpen: (v: boolean) => void;
 
-  /** 工作台 RDK 对话：思考沿设置页模型；快速弱化扩展思考与推理流 */
+  /** 工作台 RDK 对话：quick / thinking 对应不同模型配置；对话内均展示 meta、工具与步骤 */
   studioResponseMode: StudioResponseMode;
   setStudioResponseMode: (v: StudioResponseMode) => void;
 
@@ -1041,6 +1048,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const aiMsgId = regen ? Math.max(Date.now(), msgId + 1) : msgId + 1;
         let aiText = '';
         const aiBlocks: ChatBlock[] = [];
+        const contentSlots: AiDockContentSlot[] = [];
         let currentRunId = '';
         currentRunIdRef.current = '';
         toolTimelineRef.current = {};
@@ -1063,8 +1071,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           rafHandle = null;
           const t = pendingText;
           const b = [...pendingBlocks];
+          const slots = [...contentSlots];
           setChatMessages(prev => prev.map(m =>
-            m.id === aiMsgId ? { ...m, text: t, blocks: b } : m
+            m.id === aiMsgId ? { ...m, text: t, blocks: b, contentSlots: slots } : m
           ));
         };
         /** 文本增量仅合并到下一帧 paint（~60fps），不再额外 setTimeout 限频，避免「一顿一顿」 */
@@ -1080,6 +1089,77 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             rafHandle = requestAnimationFrame(flushAiMessage);
           }
         };
+
+        function reconcileSlotsAfterBlockRemoved(removedIdx: number) {
+          const next = contentSlots
+            .map((s) => {
+              if (s.kind !== 'block') return s;
+              if (s.index === removedIdx) return null;
+              if (s.index > removedIdx) return { ...s, index: s.index - 1 };
+              return s;
+            })
+            .filter((x): x is AiDockContentSlot => x != null);
+          contentSlots.length = 0;
+          contentSlots.push(...next);
+        }
+
+        function pushAiBlock(block: ChatBlock) {
+          aiBlocks.push(block);
+          contentSlots.push({ kind: 'block', index: aiBlocks.length - 1 });
+        }
+
+        function appendMarkdownDelta(delta: string) {
+          if (!delta) return;
+          aiText += delta;
+          const last = contentSlots[contentSlots.length - 1];
+          if (last?.kind === 'markdown') last.text += delta;
+          else contentSlots.push({ kind: 'markdown', text: delta });
+        }
+
+        function appendMarkdownParagraph(p: string) {
+          const trimmed = p.trim();
+          if (!trimmed) return;
+          const last = contentSlots[contentSlots.length - 1];
+          if (last?.kind === 'markdown') {
+            last.text = last.text.trim() ? `${last.text.trim()}\n\n${trimmed}` : trimmed;
+          } else {
+            contentSlots.push({ kind: 'markdown', text: trimmed });
+          }
+          aiText = aiText.trim() ? `${aiText.trim()}\n\n${trimmed}` : trimmed;
+        }
+
+        function stripMarkdownSlotsKeepBlocks() {
+          const blocksOnly = contentSlots.filter((s): s is Extract<AiDockContentSlot, { kind: 'block' }> => s.kind === 'block');
+          contentSlots.length = 0;
+          contentSlots.push(...blocksOnly);
+        }
+
+        function rebuildContentSlotsFromBlocksAndText(blocks: ChatBlock[], tailMarkdown: string) {
+          contentSlots.length = 0;
+          for (let i = 0; i < blocks.length; i++) {
+            contentSlots.push({ kind: 'block', index: i });
+          }
+          if (tailMarkdown.trim()) {
+            contentSlots.push({ kind: 'markdown', text: tailMarkdown });
+          }
+        }
+
+        function applyClientActionsAcrossMarkdownSlots() {
+          if (contentSlots.some((s) => s.kind === 'markdown')) {
+            for (const s of contentSlots) {
+              if (s.kind === 'markdown') {
+                s.text = applyClientActionsFromAssistantText(s.text);
+              }
+            }
+            aiText = contentSlots
+              .filter((s): s is Extract<AiDockContentSlot, { kind: 'markdown' }> => s.kind === 'markdown')
+              .map((s) => s.text)
+              .join('');
+          } else if (/<client-action\b/i.test(aiText)) {
+            aiText = applyClientActionsFromAssistantText(aiText);
+          }
+        }
+
         let toolStepNo = 0;
 
         const { done, abort } = streamAgentChat(
@@ -1105,7 +1185,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (phaseEarly === 'limit' || trReason) {
                   const limitMsg = String(metaDataEarly.message || '').trim();
                   if (limitMsg) {
-                    aiBlocks.push({
+                    pushAiBlock({
                       type: 'status',
                       items: [
                         {
@@ -1124,13 +1204,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   }
                   break;
                 }
-                if (studioResponseMode === 'quick') break;
                 const executor = String(event.data.executor || 'rdkclaw_local');
                 const phase = String(event.data.phase || 'start');
                 const message = String(event.data.message || t('chat.stream.start', '开始处理请求'));
 
                 if (phase === 'setup') {
-                  aiBlocks.push({
+                  pushAiBlock({
                     type: 'status',
                     items: [{ label: executorLabel(executor), value: message, ok: true }],
                   });
@@ -1167,12 +1246,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     type: 'status' as const,
                     _rdkMetaRunning: true as const,
                     collapsible: true,
-                    defaultCollapsed: true,
+                    defaultCollapsed: false,
                     summary: message.slice(0, 120),
                     items: [{ label: t('chat.stream.runtimeNote', '运行说明'), value: message, ok: true }],
                   };
                   if (runIdx >= 0) aiBlocks[runIdx] = runBlock;
-                  else aiBlocks.push(runBlock);
+                  else pushAiBlock(runBlock);
                   appendRunTimelineEntry(generation, {
                     kind: 'context',
                     title: t('chat.timeline.agentNote', 'Agent 提示'),
@@ -1184,10 +1263,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
                 if (phase === 'end' && data.subagent_summary != null) {
                   const subSummary = String(data.subagent_summary ?? '');
-                  aiBlocks.push({
+                  pushAiBlock({
                     type: 'status',
                     collapsible: true,
-                    defaultCollapsed: true,
+                    defaultCollapsed: false,
                     summary: message.slice(0, 100),
                     items: [{ label: t('chat.stream.subagent', '子代理'), value: subSummary || message, ok: true }],
                   });
@@ -1202,10 +1281,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
                 /** 完整「编排上下文」卡仅对应 server 单次 phase=start（含委派/技能/模型能力），避免其它 meta 缺字段时用「默认」填空造成视觉重复 */
                 if (phase !== 'start') {
-                  aiBlocks.push({
+                  pushAiBlock({
                     type: 'status',
                     collapsible: true,
-                    defaultCollapsed: true,
+                    defaultCollapsed: false,
                     summary: message.slice(0, 100),
                     items: [{ label: executorLabel(executor), value: message, ok: true }],
                   });
@@ -1272,15 +1351,15 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   aiBlocks[existingSetupIdx] = {
                     type: 'status',
                     collapsible: true,
-                    defaultCollapsed: true,
+                    defaultCollapsed: false,
                     summary: summaryParts.join(' · '),
                     items: metaItems,
                   };
                 } else {
-                  aiBlocks.push({
+                  pushAiBlock({
                     type: 'status',
                     collapsible: true,
-                    defaultCollapsed: true,
+                    defaultCollapsed: false,
                     summary: summaryParts.join(' · '),
                     items: metaItems,
                   });
@@ -1294,19 +1373,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'text': {
-                aiText += (event.data.delta as string) || '';
+                appendMarkdownDelta((event.data.delta as string) || '');
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
               case 'thinking_delta': {
                 const delta = String(event.data.delta ?? '');
                 if (!delta) break;
-                /** 快捷模式原先跳过推理流：部分模型仅通过 thinking 通道输出正文，会导致气泡空白仅剩「用时」 */
-                if (studioResponseMode === 'quick') {
-                  aiText += delta;
-                  updateAiMessage(aiText, aiBlocks);
-                  break;
-                }
                 const idx = reasoningBlockIndexRef.current;
                 const existing =
                   idx != null && idx < aiBlocks.length && aiBlocks[idx]?.type === 'reasoning'
@@ -1316,11 +1389,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   existing.text += delta;
                 } else {
                   reasoningBlockIndexRef.current = aiBlocks.length;
-                  aiBlocks.push({
+                  pushAiBlock({
                     type: 'reasoning',
                     text: delta,
                     collapsible: true,
-                    defaultCollapsed: true,
+                    defaultCollapsed: false,
                   });
                 }
                 if (!reasoningTimelineSentRef.current) {
@@ -1341,21 +1414,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const executor = String(
                   event.data.executor || (isBoardOpenClawExecutorTool(toolName) ? 'board_openclaw' : 'rdkclaw_local'),
                 );
-                if (studioResponseMode === 'quick' && !isBoardOpenClawExecutorTool(toolName)) {
-                  const toolCallIdHidden = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
-                  const argDetailHidden = summarizeToolArgs(args);
-                  toolTimelineRef.current[toolCallIdHidden] = {
-                    toolName,
-                    executor,
-                    startedAt: Date.now(),
-                    statusIndex: -1,
-                    hiddenQuick: true,
-                    argDetail: argDetailHidden,
-                    cardTitle: formatToolStatusTitle(toolName, args),
-                  };
-                  updateAiMessage(aiText, aiBlocks);
-                  break;
-                }
                 if (isBoardOpenClawCollabTool(toolName)) {
                   boardToolTimelineSigRef.current = '';
                 }
@@ -1363,7 +1421,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const argStr = summarizeToolArgs(args);
                 const cardTitle = formatToolStatusTitle(toolName, args);
                 const statusIndex = aiBlocks.length;
-                aiBlocks.push({
+                pushAiBlock({
                   type: 'status',
                   title: cardTitle,
                   items: [
@@ -1398,7 +1456,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                           : toolName === 'fleet_board_broadcast'
                             ? t('dock.collab.outboundFleetBroadcastSubtitle', '向多块板卡广播任务')
                             : t('dock.collab.outboundDelegateSubtitle', '委派任务与执行建议');
-                  aiBlocks.push({
+                  pushAiBlock({
                     type: 'collab',
                     side: 'rdkclaw',
                     collabRole: 'outbound',
@@ -1409,13 +1467,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     previewLines: 12,
                   });
                 }
-                if (studioResponseMode !== 'quick' || isBoardOpenClawExecutorTool(toolName)) {
-                  appendRunTimelineEntry(generation, {
-                    kind: 'tool_start',
-                    title: tf('chat.timeline.toolStart', '工具 · {{tool}}', { tool: toolName }),
-                    detail: `${executorLabel(executor)} · ${phase} · ${argStr}`.slice(0, 500),
-                  });
-                }
+                appendRunTimelineEntry(generation, {
+                  kind: 'tool_start',
+                  title: tf('chat.timeline.toolStart', '工具 · {{tool}}', { tool: toolName }),
+                  detail: `${executorLabel(executor)} · ${phase} · ${argStr}`.slice(0, 500),
+                });
                 updateAiMessage(aiText, aiBlocks);
                 break;
               }
@@ -1453,7 +1509,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       }
                     } else {
                       state.waitHintCollabIndex = aiBlocks.length;
-                      aiBlocks.push({
+                      pushAiBlock({
                         type: 'collab',
                         side: 'rdkclaw',
                         collabRole: 'wait_hint',
@@ -1482,7 +1538,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     state.openclawStreamBuf = rawChunk;
                     const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));
                     const lines = bufLines.length > 240 ? bufLines.slice(-240) : bufLines;
-                    aiBlocks.push({
+                    pushAiBlock({
                       type: 'collab',
                       side: 'openclaw',
                       title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
@@ -1500,13 +1556,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const sig = String(bit).trim().slice(0, 240);
                       if (sig && sig !== boardToolTimelineSigRef.current) {
                         boardToolTimelineSigRef.current = sig;
-                        if (studioResponseMode !== 'quick' || isBoardOpenClawExecutorTool(toolName)) {
-                          appendRunTimelineEntry(generation, {
-                            kind: 'board_tool',
-                            title: t('chat.timeline.boardTool', '板端工具'),
-                            detail: sig,
-                          });
-                        }
+                        appendRunTimelineEntry(generation, {
+                          kind: 'board_tool',
+                          title: t('chat.timeline.boardTool', '板端工具'),
+                          detail: sig,
+                        });
                       }
                     }
                   }
@@ -1524,7 +1578,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     }
                   } else {
                     state.rawIndex = aiBlocks.length;
-                    aiBlocks.push({
+                    pushAiBlock({
                       type: 'terminal',
                       label: tf('chat.tool.rawLabel', '{{tool}} · 原始中间输出', { tool: state.toolName }),
                       lines: progressLines,
@@ -1670,7 +1724,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         fromUrl
                         || (fileName ? `/api/local-files/${encodeURIComponent(fileName)}` : '');
                       if (src) {
-                        aiBlocks.push({
+                        pushAiBlock({
                           type: 'image',
                           src,
                           caption: tf('chat.img.caption', '{{name}} ({{bytes}} bytes) — 来自设备', {
@@ -1685,7 +1739,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       typeof parsed.imageUrl === 'string' &&
                       parsed.ok === true
                     ) {
-                      aiBlocks.push({
+                      pushAiBlock({
                         type: 'image',
                         src: parsed.imageUrl as string,
                         caption: String(
@@ -1703,7 +1757,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         fromV
                         || (vName ? `/api/local-files/${encodeURIComponent(vName)}` : '');
                       if (vSrc) {
-                        aiBlocks.push({
+                        pushAiBlock({
                           type: 'video',
                           src: vSrc,
                           caption: tf('chat.video.caption', '{{name}} ({{mb}} MB) — 来自设备', {
@@ -1720,7 +1774,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const docExts = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf', 'csv', 'txt', 'md', 'zip', 'rar', '7z']);
                       const fileUrl = `/api/local-files/${encodeURIComponent(parsed.fileName as string)}`;
                       if (imgExts.has(ext)) {
-                        aiBlocks.push({
+                        pushAiBlock({
                           type: 'image',
                           src: fileUrl,
                           caption: tf('chat.img.caption', '{{name}} ({{bytes}} bytes) — 来自设备', {
@@ -1730,7 +1784,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         });
                         mediaHandled = true;
                       } else if (vidExts.has(ext)) {
-                        aiBlocks.push({
+                        pushAiBlock({
                           type: 'video',
                           src: fileUrl,
                           caption: tf('chat.video.caption', '{{name}} ({{mb}} MB) — 来自设备', {
@@ -1740,7 +1794,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         });
                         mediaHandled = true;
                       } else if (docExts.has(ext)) {
-                        aiBlocks.push({
+                        pushAiBlock({
                           type: 'file',
                           src: fileUrl,
                           fileName: parsed.fileName as string,
@@ -1767,7 +1821,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   const { cleaned, extracts } = extractNeedRdkclawBlocks(body);
                   const pushReverseBlocks = () => {
                     for (const ex of extracts) {
-                      aiBlocks.push({
+                      pushAiBlock({
                         type: 'collab',
                         side: 'rdkclaw',
                         collabRole: 'reverse',
@@ -1797,7 +1851,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       pushReverseBlocks();
                     }
                   } else if (cleaned.trim()) {
-                    aiBlocks.push({
+                    pushAiBlock({
                       type: 'collab',
                       side: 'openclaw',
                       title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
@@ -1811,7 +1865,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     pushReverseBlocks();
                   }
                   if (rdkHint) {
-                    aiBlocks.push({
+                    pushAiBlock({
                       type: 'collab',
                       side: 'rdkclaw',
                       collabRole: 'hint',
@@ -1831,13 +1885,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     if (r) {
                       if (isError) {
                         const errLine = tf('chat.tool.errLine', '{{tool}} 失败：{{msg}}', { tool: toolName, msg: r });
-                        aiText = aiText.trim() ? `${aiText.trim()}\n\n${errLine}` : errLine;
+                        appendMarkdownParagraph(errLine);
                       } else {
-                        aiText = aiText.trim() ? `${aiText.trim()}\n\n${r}` : r;
+                        appendMarkdownParagraph(r);
                       }
                     }
                   } else if (result.includes('\n') || result.length > 100) {
-                    aiBlocks.push({
+                    pushAiBlock({
                       type: 'terminal',
                       lines: result
                         .split(/\r?\n/)
@@ -1851,7 +1905,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     const execFallback = String(
                       (event.data as { executor?: string }).executor || 'rdkclaw_local',
                     );
-                    aiBlocks.push({
+                    pushAiBlock({
                       type: 'status',
                       title: toolName,
                       items: [{
@@ -1893,7 +1947,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   };
                   existing.summary = tf('chat.think.summaryRound', '思考轮次 · 第 {{n}} 轮', { n: turn });
                 } else {
-                  aiBlocks.push({
+                  pushAiBlock({
                     type: 'status',
                     collapsible: true,
                     defaultCollapsed: true,
@@ -1935,6 +1989,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                    * 与已在客户端 reasoning 块中展示的内容重复 → 主气泡出现长篇「推理原文」。
                    * 若已有推理块且服务端回填与之一致，则不要写入主文，保留折叠展示。
                    */
+                  stripMarkdownSlotsKeepBlocks();
                   if (reasoningWithText) {
                     const rNorm = reasoningWithText.text.replace(/\r\n/g, '\n').trim();
                     const sNorm = serverTrim.replace(/\r\n/g, '\n');
@@ -1942,9 +1997,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   } else {
                     aiText = serverFill;
                   }
+                  if (aiText.trim()) {
+                    contentSlots.push({ kind: 'markdown', text: aiText });
+                  }
                 }
                 if (/<client-action\b/i.test(aiText)) {
-                  aiText = applyClientActionsFromAssistantText(aiText);
+                  applyClientActionsAcrossMarkdownSlots();
                 }
                 updateAiMessage(aiText, aiBlocks, true);
                 break;
@@ -1960,7 +2018,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 );
                 const summary = `${toolName} · ${executorLabel(executor)} · ${t('chat.approval.risk', '风险')} ${risk.toUpperCase()}`;
                 approvalBlockRef.current[approvalId] = aiBlocks.length;
-                aiBlocks.push({
+                pushAiBlock({
                   type: 'approval',
                   approvalId,
                   runId,
@@ -1978,7 +2036,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const options = (event.data.options as Array<{ id: string; label: string; description: string; recommended?: boolean }>) || [];
                 const allowAutoExecute = Boolean(event.data.allowAutoExecute);
                 const runId = String(event.data.runId || currentRunId || '');
-                aiBlocks.push({
+                pushAiBlock({
                   type: 'recommendation',
                   recommendationId: recId,
                   runId,
@@ -2007,7 +2065,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'queue_status': {
-                if (studioResponseMode === 'quick') break;
                 const pos = Number(event.data.position ?? 0);
                 const current = String(event.data.currentTask ?? '');
                 const channel = String(event.data.currentChannel ?? '');
@@ -2019,7 +2076,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const posLabel = pos > 0
                   ? tf('chat.queue.pos', '排在第 {{n}} 位', { n: pos })
                   : t('chat.queue.waiting', '正在排队');
-                aiBlocks.push({
+                pushAiBlock({
                   type: 'status',
                   items: [
                     { label: t('chat.queue.state', '队列状态'), value: posLabel, ok: false },
@@ -2051,16 +2108,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   friendlyText = aiText || t('chat.err.generic', '请求出错，请稍后重试。');
                 }
 
-                aiBlocks.push({
+                pushAiBlock({
                   type: 'status',
                   items: [{ label: t('chat.err.hint', '提示'), value: friendlyDetail, ok: false }],
                 });
-                updateAiMessage(friendlyText, aiBlocks, true);
+                rebuildContentSlotsFromBlocksAndText(aiBlocks, friendlyText);
+                aiText = friendlyText;
+                updateAiMessage(aiText, aiBlocks, true);
                 break;
               }
               case 'done':
                 {
-                  if (studioResponseMode === 'quick') break;
                   const tokenUsage = event.data.token_usage as {
                     promptTokens?: number;
                     completionTokens?: number;
@@ -2137,24 +2195,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       }
                     }
                     if (usageItems.length > 0) {
-                      aiBlocks.push({
+                      pushAiBlock({
                         type: 'status',
                         collapsible: true,
-                        defaultCollapsed: true,
+                        defaultCollapsed: false,
                         summary: usageItems.map((i) => `${i.label}: ${i.value}`).join(' · '),
                         items: usageItems,
                       });
                     }
                     /** 无 perf 块时也必须 flush，否则前面从推理提升的正文仍留在闭包、pendingText 未更新 */
                     if (/<client-action\b/i.test(aiText)) {
-                      aiText = applyClientActionsFromAssistantText(aiText);
+                      applyClientActionsAcrossMarkdownSlots();
                     }
                     updateAiMessage(aiText, aiBlocks, true);
                   }
                 }
                 break;
               case 'run_progress': {
-                if (studioResponseMode === 'quick') break;
                 const msg = String(event.data.message || t('chat.progress.wait', '仍在处理中...'));
                 const existingIdx = aiBlocks.findIndex(
                   (b) => b.type === 'status' && (b as any)._runProgress,
@@ -2167,7 +2224,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (existingIdx >= 0) {
                   aiBlocks[existingIdx] = progressBlock;
                 } else {
-                  aiBlocks.push(progressBlock);
+                  pushAiBlock(progressBlock);
                 }
                 appendRunTimelineEntry(generation, {
                   kind: 'progress',
@@ -2184,6 +2241,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (progressIdx >= 0) {
                   /** 勿保留 items:[] 的 status，否则会渲染成中间空白框 */
                   aiBlocks.splice(progressIdx, 1);
+                  reconcileSlotsAfterBlockRemoved(progressIdx);
                 }
                 const elapsed = String(event.data.elapsed_display || '');
                 const calls = Number(event.data.tool_calls || 0);
@@ -2203,12 +2261,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       ? t('chat.runComplete.maxTurns', '✓ 已完成（已达轮次上限）')
                       : t('chat.runComplete.ok', '✓ 回复完成');
                 const ok = !isError && !isCancelled && stopReason !== 'max_turns_reached';
-                const showCompleteFooter = studioResponseMode !== 'quick' || stopReason === 'max_turns_reached' || isError || isCancelled;
-                if (!showCompleteFooter) {
-                  updateAiMessage(aiText, aiBlocks, true);
-                  break;
-                }
-                aiBlocks.push({
+                pushAiBlock({
                   type: 'status',
                   items: [{ label, value: detail.length > 0 ? detail.join(' · ') : '', ok }],
                 });
@@ -2218,7 +2271,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   detail: detail.length > 0 ? detail.join(' · ') : undefined,
                 });
                 if (/<client-action\b/i.test(aiText)) {
-                  aiText = applyClientActionsFromAssistantText(aiText);
+                  applyClientActionsAcrossMarkdownSlots();
                 }
                 updateAiMessage(aiText, aiBlocks, true);
                 break;
@@ -2234,19 +2287,27 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const streamCompletedAt = Date.now();
         let bodyTrim = (pendingText || aiText).trim();
         if (/<client-action\b/i.test(bodyTrim)) {
-          bodyTrim = applyClientActionsFromAssistantText(bodyTrim).trim();
+          applyClientActionsAcrossMarkdownSlots();
+          bodyTrim = aiText.trim();
         }
         if (!bodyTrim) {
           const fallback = t(
             'chat.err.emptyReply',
             '未收到可见回复。请重试一次；仍无输出时请检查模型与网络，或改用「快捷回答」。',
           );
+          const b = [...pendingBlocks];
+          const fallbackSlots: AiDockContentSlot[] = [];
+          for (let i = 0; i < b.length; i++) {
+            fallbackSlots.push({ kind: 'block', index: i });
+          }
+          fallbackSlots.push({ kind: 'markdown', text: fallback });
           setChatMessages((prev) => prev.map((m) =>
             m.id === aiMsgId
               ? {
                   ...m,
                   text: fallback,
-                  blocks: [...pendingBlocks],
+                  blocks: b,
+                  contentSlots: fallbackSlots,
                   durationMs: Math.max(0, streamCompletedAt - msgId),
                 }
               : m,

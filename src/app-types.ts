@@ -87,6 +87,11 @@ export interface ChatAttachment {
   textContent?: string;
 }
 
+/** Studio Agent SSE：正文与工具块按到达顺序交错，避免「整块工具在上、总结在下」的割裂感 */
+export type AiDockContentSlot =
+  | { kind: 'markdown'; text: string }
+  | { kind: 'block'; index: number };
+
 export interface ChatMessage {
   id: number;
   role: 'user' | 'ai';
@@ -95,6 +100,8 @@ export interface ChatMessage {
   /** 部分场景（如飞书工具流）用于计算耗时：本条 AI 气泡开始展示时的时间戳 */
   startedAt?: number;
   text: string;
+  /** 存在时 AI Dock 按此顺序渲染（与 Cursor 类似自上而下）；缺省时回退为 blocks 再 text */
+  contentSlots?: AiDockContentSlot[];
   source?: 'studio' | 'feishu';
   channelMeta?: {
     channel: 'feishu';

@@ -35,8 +35,8 @@ export const EN: Record<string, string> = {
   'runtimeTasks.rosRecordingDetail': 'Recording topics',
   'runtimeTasks.rdkclawExecuting': 'RDKClaw run',
   'runtimeTasks.studioThinking': 'Thinking / tools running…',
-  'runtimeTasks.openRdkDock': 'Open RDKClaw chat and run timeline',
-  'runtimeTasks.openBackgroundRun': 'Open chat to see background run timeline',
+  'runtimeTasks.openRdkDock': 'Open RDKClaw chat',
+  'runtimeTasks.openBackgroundRun': 'Open chat for background runs',
   'runtimeTasks.backgroundRun': 'Background chat',
   'runtimeTasks.openTaskDock': 'Open chat and task panel',
 

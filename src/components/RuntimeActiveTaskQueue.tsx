@@ -66,7 +66,6 @@ export default function RuntimeActiveTaskQueue() {
     agentExecution,
     agentPlan,
     backgroundRuns,
-    setRunTimelinePanelOpen,
     aiTyping,
     rdkClawRunTimeline,
     isFlashing,
@@ -121,16 +120,8 @@ export default function RuntimeActiveTaskQueue() {
     setShowTaskPanel(true);
   };
 
-  const openDockTimeline = () => {
+  const openDockChat = () => {
     setChatExpanded(true);
-    setRunTimelinePanelOpen(true);
-  };
-
-  const openRdkRun = () => {
-    setChatExpanded(true);
-    if (timelineHint || rdkClawRunTimeline.length > 0) {
-      setRunTimelinePanelOpen(true);
-    }
   };
 
   return (
@@ -247,8 +238,8 @@ export default function RuntimeActiveTaskQueue() {
               <button
                 type="button"
                 className="runtime-task-chip"
-                onClick={openRdkRun}
-                title={t('runtimeTasks.openRdkDock', '打开 RDKClaw 对话与时间线')}
+                onClick={openDockChat}
+                title={t('runtimeTasks.openRdkDock', '打开 RDKClaw 对话')}
               >
                 <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
                   smart_toy
@@ -281,8 +272,8 @@ export default function RuntimeActiveTaskQueue() {
                 key={r.runId}
                 type="button"
                 className="runtime-task-chip"
-                onClick={openDockTimeline}
-                title={t('runtimeTasks.openBackgroundRun', '打开对话查看后台运行时间线')}
+                onClick={openDockChat}
+                title={t('runtimeTasks.openBackgroundRun', '打开对话查看后台任务')}
               >
                 <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
                   clouds

@@ -433,6 +433,28 @@
   gap: 12px;
 }
 
+/* 单一流式：主回复占满宽度，工具块外框更轻，接近 Cursor 对话节奏 */
+.dock-stream--cursor-flow {
+  gap: 10px;
+}
+
+.dock-stream--cursor-flow .dock-msg.ai .dock-bubble {
+  max-width: 100%;
+}
+
+.dock-stream--cursor-flow .dock-bubble.ai .msg-block.dock-agent-card {
+  box-shadow: none;
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+.dock-stream--cursor-flow .dock-bubble.ai .dock-agent-card-head {
+  background: color-mix(in srgb, var(--bg-elevated) 50%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--border) 35%, transparent);
+  min-height: 34px;
+}
+
 .dock-empty-hint {
   margin: auto 0;
   text-align: center;
@@ -1636,6 +1658,15 @@
   font-weight: 500;
   color: var(--text-muted);
   letter-spacing: 0.02em;
+}
+
+.dock-response-mode-panel-hint {
+  margin: 0 12px 8px;
+  padding: 0;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  opacity: 0.92;
 }
 
 .dock-response-mode-option {

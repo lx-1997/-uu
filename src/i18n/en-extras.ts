@@ -206,11 +206,18 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.responseMode.thinking': 'Thinking',
   'dock.responseMode.thinkingSub': 'Complex tasks',
   'dock.responseMode.quick': 'Quick',
-  'dock.responseMode.quickSub': 'Quick answers',
+  'dock.responseMode.quickSub': 'Quick lane model',
   'dock.responseMode.panelTitle': 'Response mode',
   'dock.responseMode.triggerAria': 'Response mode menu',
-  'dock.responseMode.hint': 'Choose quick answers or complex-task mode.',
+  'dock.responseMode.hint':
+    'Quick vs thinking chooses the model profile; both show tools, context, and steps in the thread.',
   'dock.responseMode.hintOpenClaw': 'Applies to RDKClaw chat; you are on OpenClaw Agent direct mode now.',
+
+  'dock.displayMode.aria': 'Conversation display',
+  'dock.displayMode.full': 'Full',
+  'dock.displayMode.minimal': 'Minimal',
+  'dock.displayMode.fullTitle': 'Show tool calls, context, and intermediate output in order',
+  'dock.displayMode.minimalTitle': 'Show only the answer text and result media',
 
   'dock.tt.copy': 'Copy',
   'dock.tt.collapse': 'Collapse',

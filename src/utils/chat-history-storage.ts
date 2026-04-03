@@ -213,10 +213,16 @@ export function loadChatHistoryFromStorage(deviceId: string, studioSessionId: st
     const parsed = JSON.parse(raw) as ChatMessage[];
     return parsed
       .slice(-MAX_CHAT_MESSAGES_IN_MEMORY)
-      .map(m => ({
-        ...m,
-        blocks: m.blocks?.filter(b => b.type !== 'confirm' && b.type !== 'progress'),
-      }));
+      .map((m) => {
+        const prevLen = m.blocks?.length ?? 0;
+        const blocks = m.blocks?.filter((b) => b.type !== 'confirm' && b.type !== 'progress');
+        const nextLen = blocks?.length ?? 0;
+        return {
+          ...m,
+          blocks,
+          ...(prevLen !== nextLen ? { contentSlots: undefined } : {}),
+        };
+      });
   } catch {
     return [];
   }
@@ -255,10 +261,16 @@ export function loadAnyChatHistoryForDevice(deviceId: string): ChatMessage[] {
   return Array.from(map.values())
     .sort((x, y) => x.id - y.id)
     .slice(-MAX_CHAT_MESSAGES_IN_MEMORY)
-    .map(m => ({
-      ...m,
-      blocks: m.blocks?.filter(b => b.type !== 'confirm' && b.type !== 'progress'),
-    }));
+    .map((m) => {
+      const prevLen = m.blocks?.length ?? 0;
+      const blocks = m.blocks?.filter((b) => b.type !== 'confirm' && b.type !== 'progress');
+      const nextLen = blocks?.length ?? 0;
+      return {
+        ...m,
+        blocks,
+        ...(prevLen !== nextLen ? { contentSlots: undefined } : {}),
+      };
+    });
 }
 
 /** 列出 localStorage 中已有对话存档的设备 id（含 `__global__`） */

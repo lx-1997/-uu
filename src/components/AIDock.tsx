@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppState } from '../hooks/useAppState';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { parseUiLanguageCommand } from '../i18n/language-command';
 import { useStreamRevealSegments } from '../hooks/useStreamReveal';
-import type { ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
+import type { AiDockContentSlot, ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
 import type { AgentAttachmentPayload, StudioResponseMode } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
@@ -190,6 +190,32 @@ function extractMediaFromText(text: string): { cleanText: string; mediaBlocks: C
 
   t = t.replace(/\n{3,}/g, '\n\n').trim();
   return { cleanText: t, mediaBlocks };
+}
+
+/** 极简模式保留：正文 + 媒体/代码/审批等「结果」，隐藏工具/状态/推理/终端等过程块 */
+function isResultLikeDockBlock(block: ChatBlock): boolean {
+  switch (block.type) {
+    case 'image':
+    case 'video':
+    case 'file':
+    case 'code':
+    case 'task-result':
+    case 'approval':
+    case 'confirm':
+    case 'recommendation':
+    case 'soul-update':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function filterContentSlotsMinimal(slots: AiDockContentSlot[], blocks: ChatBlock[]): AiDockContentSlot[] {
+  return slots.filter((slot) => {
+    if (slot.kind === 'markdown') return true;
+    const b = blocks[slot.index];
+    return b ? isResultLikeDockBlock(b) : false;
+  });
 }
 
 /** 从粘贴事件中收集文件。同一份内容常在 items.getAsFile() 与 files[] 各出现一次，且 lastModified 可能不一致，故不能合并两轮扫描。 */
@@ -1098,7 +1124,6 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    rdkClawRunTimeline, runTimelinePanelOpen, setRunTimelinePanelOpen,
     handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
@@ -1113,8 +1138,6 @@ export default function AIDock() {
   const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
   const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
-  const [quickMoreMenuOpen, setQuickMoreMenuOpen] = useState(false);
-  const quickMoreMenuRef = useRef<HTMLDivElement | null>(null);
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
   const [unsatisfiedModal, setUnsatisfiedModal] = useState<{ msgId: number; preview: string } | null>(null);
   const [unsatisfiedNote, setUnsatisfiedNote] = useState('');
@@ -1176,25 +1199,6 @@ export default function AIDock() {
       window.removeEventListener('keydown', onKey);
     };
   }, [responseModeMenuOpen]);
-
-  useEffect(() => {
-    if (!quickMoreMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const el = quickMoreMenuRef.current;
-      if (el && !el.contains(e.target as Node)) {
-        window.requestAnimationFrame(() => setQuickMoreMenuOpen(false));
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setQuickMoreMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [quickMoreMenuOpen]);
 
   const mentionParse = useMemo(() => parseTrailingAtMention(cmd), [cmd]);
   const filteredMentionCaps = useMemo(() => {
@@ -1286,13 +1290,6 @@ export default function AIDock() {
 
   const [workspaceMode, setWorkspaceMode] = useState(false);
   const [dockOcMode, setDockOcMode] = useState(true);
-  const [compactFlowMode, setCompactFlowMode] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('rdk:dock:compact-flow') !== '0';
-    } catch {
-      return true;
-    }
-  });
   const [hideDockInSubpage, setHideDockInSubpage] = useState<boolean>(() => {
     try {
       return localStorage.getItem('rdk:dock:hide-subpage') === '1';
@@ -1300,6 +1297,21 @@ export default function AIDock() {
       return false;
     }
   });
+  /** false = 完整（过程+结果）；true = 极简（仅结果型块+正文，回复完成后生效；流式中仍显示过程以免空白） */
+  const [minimalResultMode, setMinimalResultMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('rdk:dock:minimal-result') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('rdk:dock:minimal-result', minimalResultMode ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [minimalResultMode]);
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -1665,27 +1677,6 @@ export default function AIDock() {
   const lastVisibleMsg = visibleMessages[visibleMessages.length - 1];
   const streamMergedIntoLastAiBubble =
     aiTyping && lastVisibleMsg?.role === 'ai';
-  const shouldKeepStatusInCompact = useCallback((block: Extract<ChatBlock, { type: 'status' }>) => {
-    /** RDKClaw run_progress（⏳ 进度）；极简模式也保留，避免长任务像「死机」 */
-    if ((block as { _runProgress?: boolean })._runProgress) return true;
-    const summary = block.summary || '';
-    if (/Time|耗时|Token|token|tool|Tool|compact|压缩/i.test(summary)) return true;
-    return block.items.some((item) => /失败|错误|异常|提示|拒绝|超时|fail|error|denied|timeout|hint|warning/i.test(`${item.label} ${item.value}`));
-  }, []);
-  const filterAiBlocksForCompact = useCallback((blocks: ChatBlock[]) => {
-    if (!compactFlowMode) return blocks;
-    return blocks.filter((block) => {
-      if (block.type === 'approval' || block.type === 'confirm' || block.type === 'task-result' || block.type === 'recommendation' || block.type === 'soul-update') return true;
-      if (block.type === 'reasoning') return true;
-      if (block.type === 'collab') return true;
-      if (block.type === 'image' || block.type === 'video' || block.type === 'file' || block.type === 'code') return true;
-      /** 工具最终输出与步骤条：原先在极简流程中整类去掉，会导致仅有主文本为空时什么都不显示 */
-      if (block.type === 'terminal' || block.type === 'progress') return true;
-      if (block.type === 'status') return shouldKeepStatusInCompact(block);
-      return false;
-    });
-  }, [compactFlowMode, shouldKeepStatusInCompact]);
-
   /* Escape exits workspace mode */
   useEffect(() => {
     if (!workspaceMode) return;
@@ -1707,11 +1698,11 @@ export default function AIDock() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('rdk:dock:compact-flow', compactFlowMode ? '1' : '0');
+      localStorage.removeItem('rdk:dock:compact-flow');
     } catch {
       // ignore localStorage errors
     }
-  }, [compactFlowMode]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -1763,7 +1754,7 @@ export default function AIDock() {
     if (!el) return;
 
     el.scrollTop = el.scrollHeight;
-  }, [chatExpanded, chatMessages, aiTyping, showAllMessages, compactFlowMode]);
+  }, [chatExpanded, chatMessages, aiTyping, showAllMessages]);
 
   /* 图片等异步撑高时，若仍在贴底则跟随到底部 */
   useEffect(() => {
@@ -1888,8 +1879,8 @@ export default function AIDock() {
     { id: 'hw', icon: '🌡️', label: t('dock.quick.def.hw.label', '硬件状态'), text: t('dock.quick.def.hw.text', '检查当前设备的 BPU 负载和芯片温度') },
     { id: 'plan', icon: '📋', label: t('dock.quick.def.plan.label', '执行计划'), text: t('dock.quick.def.plan.text', '把当前需求拆成 3 步并立即开始执行第一步') },
   ], [t]);
-  /** 工作台：主栏 3 项 +「更多」收纳，避免底栏拥挤 */
-  const dashboardDockQuick = useMemo((): { main: QuickPrompt[]; more: QuickPrompt[] } => {
+  /** 工作台底栏：全部快捷指令平铺，横向滚动（不再使用「更多」下拉） */
+  const dashboardDockChips = useMemo((): QuickPrompt[] => {
     const appgenZh = [
       '我要在板端部署一个应用，请按通用流程执行，并在执行前给我确认：',
       '1) 先判断当前设备硬件是否匹配（板卡型号、相机/传感器/麦克风等连接状态）；',
@@ -1899,29 +1890,25 @@ export default function AIDock() {
       '5) 明确征求我确认“是否执行”；',
       '6) 我确认后再部署或执行。',
     ].join('\n');
-    return {
-      main: [
-        { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '一键体检'), text: t('dock.quick.dash.diag.text', '帮我全面检查设备健康状态，包括温度、负载和网络') },
-        { id: 'stat', icon: '📊', label: t('dock.quick.dash.stat.label', '能力盘点'), text: t('dock.quick.dash.stat.text', '汇总当前设备上应用、模型与 OpenClaw 技能等可编排能力') },
-        {
-          id: 'appgen',
-          icon: '✨',
-          label: t('dock.quick.dash.appgen.label', '快速部署应用'),
-          text: t('dock.quick.dash.appgen.text', appgenZh),
-          forceRdkclaw: true,
-        },
-      ],
-      more: [
-        {
-          id: 'cap-report',
-          icon: '🧭',
-          label: t('dock.quick.dash.cap.label', '能力汇报'),
-          text: t('dock.quick.dash.cap.text', '请分别汇报 RDKClaw 和 OpenClaw 当前能做什么：各列 5 条能力，并给每条配一个可立即执行的一句话示例。'),
-          forceRdkclaw: true,
-        },
-        { id: 'new-device', icon: '🔌', label: t('dock.quick.dash.newdev.label', '新设备接管'), text: t('dock.quick.dash.newdev.text', '把当前设备当成一台全新设备，检查连接、OpenClaw 与可开发环境是否就绪') },
-      ],
-    };
+    return [
+      { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '一键体检'), text: t('dock.quick.dash.diag.text', '帮我全面检查设备健康状态，包括温度、负载和网络') },
+      { id: 'stat', icon: '📊', label: t('dock.quick.dash.stat.label', '能力盘点'), text: t('dock.quick.dash.stat.text', '汇总当前设备上应用、模型与 OpenClaw 技能等可编排能力') },
+      {
+        id: 'appgen',
+        icon: '✨',
+        label: t('dock.quick.dash.appgen.label', '快速部署应用'),
+        text: t('dock.quick.dash.appgen.text', appgenZh),
+        forceRdkclaw: true,
+      },
+      {
+        id: 'cap-report',
+        icon: '🧭',
+        label: t('dock.quick.dash.cap.label', '能力汇报'),
+        text: t('dock.quick.dash.cap.text', '请分别汇报 RDKClaw 和 OpenClaw 当前能做什么：各列 5 条能力，并给每条配一个可立即执行的一句话示例。'),
+        forceRdkclaw: true,
+      },
+      { id: 'new-device', icon: '🔌', label: t('dock.quick.dash.newdev.label', '新设备接管'), text: t('dock.quick.dash.newdev.text', '把当前设备当成一台全新设备，检查连接、OpenClaw 与可开发环境是否就绪') },
+    ];
   }, [t]);
   const effectiveTab = embedDockCtxTab
     ? (embedDockCtxTab === 'openclaw' && !dockOcMode ? '_rdkclaw_fallback' : embedDockCtxTab)
@@ -1931,10 +1918,6 @@ export default function AIDock() {
     return promptsByTab[effectiveTab] ?? defaultPrompts;
   }, [effectiveTab, promptsByTab, defaultPrompts]);
   const deviceOnline = Boolean(currentDevice && isDeviceShownOnline(currentDevice));
-
-  useEffect(() => {
-    setQuickMoreMenuOpen(false);
-  }, [effectiveTab]);
 
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
@@ -2091,52 +2074,31 @@ export default function AIDock() {
                 <div
                   className="dock-header-segmented"
                   role="radiogroup"
-                  aria-label={t('dock.header.viewModeAria', '回复展示密度')}
+                  aria-label={t('dock.displayMode.aria', '对话展示')}
                 >
                   <button
                     type="button"
                     role="radio"
-                    aria-checked={compactFlowMode}
-                    className={`dock-header-seg${compactFlowMode ? ' is-active' : ''}`}
-                    title={t('dock.tt.compactOn', '简洁视图')}
-                    onClick={() => setCompactFlowMode(true)}
+                    aria-checked={!minimalResultMode}
+                    className={`dock-header-seg${!minimalResultMode ? ' is-active' : ''}`}
+                    title={t('dock.displayMode.fullTitle', '展示工具调用、上下文与过程输出')}
+                    onClick={() => setMinimalResultMode(false)}
                   >
-                    {t('dock.compact.btnCompact', '极简')}
+                    {t('dock.displayMode.full', '完整')}
                   </button>
                   <button
                     type="button"
                     role="radio"
-                    aria-checked={!compactFlowMode}
-                    className={`dock-header-seg${!compactFlowMode ? ' is-active' : ''}`}
-                    title={t('dock.tt.compactOff', '完整视图')}
-                    onClick={() => setCompactFlowMode(false)}
+                    aria-checked={minimalResultMode}
+                    className={`dock-header-seg${minimalResultMode ? ' is-active' : ''}`}
+                    title={t('dock.displayMode.minimalTitle', '仅保留正文与图片等结果')}
+                    onClick={() => setMinimalResultMode(true)}
                   >
-                    {t('dock.compact.btnFull', '完整')}
+                    {t('dock.displayMode.minimal', '极简')}
                   </button>
                 </div>
 
                 <div className="dock-header-tool-cluster">
-                  <button
-                    type="button"
-                    className={`dock-header-toolbtn${runTimelinePanelOpen ? ' is-active' : ''}`}
-                    onClick={() => setRunTimelinePanelOpen(!runTimelinePanelOpen)}
-                    title={t('dock.tt.timeline', '运行记录')}
-                    aria-expanded={runTimelinePanelOpen}
-                    aria-label={t('dock.header.timeline', '时间线')}
-                  >
-                    <span className="dock-timeline-btn-inner">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                        <line x1="6" y1="4" x2="6" y2="20" />
-                        <circle cx="6" cy="8" r="1.5" fill="currentColor" stroke="none" />
-                        <circle cx="6" cy="14" r="1.5" fill="currentColor" stroke="none" />
-                        <path d="M9 8h10M9 14h7" />
-                      </svg>
-                      {aiTyping && rdkClawRunTimeline.length > 0 && !runTimelinePanelOpen ? (
-                        <span className="dock-timeline-live-dot" aria-hidden />
-                      ) : null}
-                    </span>
-                    <span className="dock-header-toolbtn-label">{t('dock.header.timeline', '时间线')}</span>
-                  </button>
                   {taskHistory.length > 0 && (
                     <button
                       type="button"
@@ -2230,49 +2192,6 @@ export default function AIDock() {
             </div>
           </div>
 
-          {/* RDKClaw 运行时间线（当前 SSE 轮次） */}
-          {runTimelinePanelOpen && (
-            <div className="dock-timeline" role="region" aria-label={t('dock.timeline.regionLabel', 'RDKClaw 运行时间线')}>
-              <div className="dock-timeline-head">
-                <span className="dock-timeline-title">{t('dock.timeline.title', '运行时间线')}</span>
-                <span className="dock-timeline-sub">
-                  {rdkClawRunTimeline.length === 0
-                    ? t('dock.timeline.emptyHint', '发送消息后，步骤与板端工具会出现在此')
-                    : tfDock('dock.timeline.count', '共 {{n}} 条事件', { n: rdkClawRunTimeline.length })}
-                </span>
-              </div>
-              {rdkClawRunTimeline.length === 0 ? (
-                <div className="dock-timeline-empty">{t('dock.timeline.waitStart', '等待本轮对话开始…')}</div>
-              ) : (
-                <ul className="dock-timeline-list">
-                  {(() => {
-                    const t0 = rdkClawRunTimeline[0]?.at ?? Date.now();
-                    return rdkClawRunTimeline.map((e) => {
-                      const relS = Math.max(0, (e.at - t0) / 1000);
-                      const clock =
-                        relS < 60
-                          ? `+${relS.toFixed(1)}s`
-                          : `+${Math.floor(relS / 60)}m ${Math.floor(relS % 60)}s`;
-                      return (
-                        <li key={e.id} className={`dock-timeline-item kind-${e.kind}`}>
-                          <span className="dock-timeline-clock" title={new Date(e.at).toLocaleTimeString()}>
-                            {clock}
-                          </span>
-                          <div className="dock-timeline-body">
-                            <span className="dock-timeline-item-title">{e.title}</span>
-                            {e.detail ? (
-                              <pre className="dock-timeline-detail">{e.detail}</pre>
-                            ) : null}
-                          </div>
-                        </li>
-                      );
-                    });
-                  })()}
-                </ul>
-              )}
-            </div>
-          )}
-
           {/* Task panel */}
           {showTaskPanel && (
             <div className="dock-tasks">
@@ -2298,7 +2217,7 @@ export default function AIDock() {
           )}
 
           {/* Chat stream */}
-          <div className="dock-stream" ref={streamScrollRef} onScroll={handleStreamScroll}>
+          <div className="dock-stream dock-stream--cursor-flow" ref={streamScrollRef} onScroll={handleStreamScroll}>
             {chatMessages.length === 0 && !aiTyping && (
               <div className="dock-empty-hint">{t('dock.empty.cleared', '聊天已清空，输入新消息即可继续。')}</div>
             )}
@@ -2315,6 +2234,12 @@ export default function AIDock() {
                 aiTyping
                 && msg.role === 'ai'
                 && msgIndex === visibleMessages.length - 1;
+              const useSlotLayout = Boolean(msg.contentSlots?.length && msg.blocks?.length);
+              const stripProcessForMinimal = minimalResultMode && !isStreamingBubble;
+              const slotsToRender =
+                useSlotLayout && msg.blocks && stripProcessForMinimal
+                  ? filterContentSlotsMinimal(msg.contentSlots!, msg.blocks)
+                  : msg.contentSlots;
               return (
               <div key={msg.id} className={`dock-msg ${msg.role}${channelClass}${directionClass}`}>
                 <div className={`dock-avatar ${msg.role}`}>
@@ -2380,61 +2305,123 @@ export default function AIDock() {
                   )}
                   {msg.role === 'ai' && (
                     <>
-                      {(() => {
-                        const rawBlocks = msg.blocks ?? [];
-                        const visibleBlocks = filterAiBlocksForCompact(rawBlocks);
-                        const foldedCount = Math.max(0, rawBlocks.length - visibleBlocks.length);
-                        return (
+                      {slotsToRender && slotsToRender.length > 0 && msg.blocks
+                        ? (
                           <>
-                            {compactFlowMode && foldedCount > 0 && (
-                              <div className="dock-hidden-hint">{fillTemplate(t('dock.compact.foldedHint', '已折叠中间过程 {{n}} 项（切换到「完整」可查看）'), { n: foldedCount })}</div>
-                            )}
-                            {visibleBlocks.map((block, i) => (
-                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} />
-                            ))}
-                          </>
-                        );
-                      })()}
-                      {(msg.text || isStreamingBubble) && (() => {
-                        const { cleanText, mediaBlocks } = extractMediaFromText(msg.text || '');
-                        return (
-                          <>
-                            {(isStreamingBubble || cleanText) && (
-                              <div className={`msg-text${isStreamingBubble ? ' msg-text--streaming' : ''}`}>
-                                {isStreamingBubble ? (
-                                  <DockStreamingPlainBody key={msg.id} text={cleanText} />
-                                ) : cleanText ? (
-                                  renderMarkdown(cleanText, t('markdown.copy', '复制'))
+                            {slotsToRender.map((slot, i) => {
+                              const lastSlot = i === slotsToRender.length - 1;
+                              const blockProps = {
+                                onConfirm: executeConfirm,
+                                onDismiss: dismissConfirm,
+                                onCancelTask: cancelRunningTask,
+                                onApprovalAction: handleApprovalAction,
+                                onRecommendationChoice: handleRecommendationChoice,
+                                onSoulUpdateDecision: handleSoulUpdateDecision,
+                              } as const;
+                              if (slot.kind === 'markdown') {
+                                const { cleanText, mediaBlocks } = extractMediaFromText(slot.text || '');
+                                const streamHere = Boolean(isStreamingBubble && lastSlot);
+                                if (!cleanText && !streamHere && mediaBlocks.length === 0) return null;
+                                return (
+                                  <Fragment key={`slot-md-${msg.id}-${i}`}>
+                                    {(streamHere || cleanText) && (
+                                      <div className={`msg-text${streamHere ? ' msg-text--streaming' : ''}`}>
+                                        {streamHere ? (
+                                          <DockStreamingPlainBody key={msg.id} text={cleanText} />
+                                        ) : cleanText ? (
+                                          renderMarkdown(cleanText, t('markdown.copy', '复制'))
+                                        ) : null}
+                                      </div>
+                                    )}
+                                    {mediaBlocks.map((mb, j) => (
+                                      <BlockRenderer key={`slot-md-${msg.id}-${i}-m-${j}`} block={mb} {...blockProps} />
+                                    ))}
+                                  </Fragment>
+                                );
+                              }
+                              const block = (msg.blocks ?? [])[slot.index];
+                              if (!block) return null;
+                              return (
+                                <BlockRenderer
+                                  key={`slot-b-${msg.id}-${i}-${slot.index}`}
+                                  block={block}
+                                  {...blockProps}
+                                />
+                              );
+                            })}
+                            {isStreamingBubble && (
+                              <div
+                                className={`dock-typing dock-typing--in-bubble${
+                                  msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
+                                }`}
+                              >
+                                {msg.text?.trim() ? (
+                                  <div className="typing-dots" aria-hidden>
+                                    <span className="typing-dot" />
+                                    <span className="typing-dot" />
+                                    <span className="typing-dot" />
+                                  </div>
                                 ) : null}
+                                <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
+                                  {t('dock.typing.stopCurrent', '结束当前')}
+                                </button>
+                                <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
+                                  {t('dock.typing.stopAll', '全部停止')}
+                                </button>
                               </div>
                             )}
-                            {mediaBlocks.map((mb, i) => (
-                              <BlockRenderer key={`extracted-media-${i}`} block={mb} />
-                            ))}
                           </>
-                        );
-                      })()}
-                      {isStreamingBubble && (
-                        <div
-                          className={`dock-typing dock-typing--in-bubble${
-                            msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
-                          }`}
-                        >
-                          {msg.text?.trim() ? (
-                            <div className="typing-dots" aria-hidden>
-                              <span className="typing-dot" />
-                              <span className="typing-dot" />
-                              <span className="typing-dot" />
-                            </div>
-                          ) : null}
-                          <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
-                            {t('dock.typing.stopCurrent', '结束当前')}
-                          </button>
-                          <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
-                            {t('dock.typing.stopAll', '全部停止')}
-                          </button>
-                        </div>
-                      )}
+                        )
+                        : (
+                          <>
+                            {(stripProcessForMinimal
+                              ? (msg.blocks ?? []).filter(isResultLikeDockBlock)
+                              : (msg.blocks ?? [])
+                            ).map((block, i) => (
+                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} />
+                            ))}
+                            {(msg.text || isStreamingBubble) && (() => {
+                              const { cleanText, mediaBlocks } = extractMediaFromText(msg.text || '');
+                              return (
+                                <>
+                                  {(isStreamingBubble || cleanText) && (
+                                    <div className={`msg-text${isStreamingBubble ? ' msg-text--streaming' : ''}`}>
+                                      {isStreamingBubble ? (
+                                        <DockStreamingPlainBody key={msg.id} text={cleanText} />
+                                      ) : cleanText ? (
+                                        renderMarkdown(cleanText, t('markdown.copy', '复制'))
+                                      ) : null}
+                                    </div>
+                                  )}
+                                  {mediaBlocks.map((mb, j) => (
+                                    <BlockRenderer key={`extracted-media-${j}`} block={mb} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} />
+                                  ))}
+                                </>
+                              );
+                            })()}
+                            {isStreamingBubble && (
+                              <div
+                                className={`dock-typing dock-typing--in-bubble${
+                                  msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
+                                }`}
+                              >
+                                {msg.text?.trim() ? (
+                                  <div className="typing-dots" aria-hidden>
+                                    <span className="typing-dot" />
+                                    <span className="typing-dot" />
+                                    <span className="typing-dot" />
+                                  </div>
+                                ) : null}
+                                <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
+                                  {t('dock.typing.stopCurrent', '结束当前')}
+                                </button>
+                                <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
+                                  {t('dock.typing.stopAll', '全部停止')}
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
                     </>
                   )}
                   {msg.action && (
@@ -2444,6 +2431,7 @@ export default function AIDock() {
                   )}
                   {msg.role === 'ai' && (
                     <div className="dock-msg-footer">
+                      {(!minimalResultMode || isStreamingBubble) && (
                       <span className="dock-msg-time">
                         {isStreamingBubble
                           ? t('dock.msg.replying', '回复中…')
@@ -2451,6 +2439,7 @@ export default function AIDock() {
                             ? `${t('dock.msg.took', '用时')} ${formatDockDurationMs(msg.durationMs)}`
                             : t('dock.msg.durationUnknown', '—')}
                       </span>
+                      )}
                       {(() => {
                         if (isStreamingBubble || msg.channelMeta) return null;
                         const prevUserForRetry = findPreviousStudioUserMessage(chatMessages, msg.id);
@@ -2792,7 +2781,7 @@ export default function AIDock() {
                   </span>
                   <span className="dock-response-mode-desc">
                     {studioResponseMode === 'quick'
-                      ? t('dock.responseMode.quickSub', '快速回答')
+                      ? t('dock.responseMode.quickSub', '快捷模型通道')
                       : t('dock.responseMode.thinkingSub', '解决复杂任务')}
                   </span>
                 </span>
@@ -2811,6 +2800,12 @@ export default function AIDock() {
                   <div className="dock-response-mode-panel-hd">
                     {t('dock.responseMode.panelTitle', '回复模式')}
                   </div>
+                  <p className="dock-response-mode-panel-hint">
+                    {t(
+                      'dock.responseMode.hint',
+                      '「快速」与「思考」主要区别在模型配置；对话里都会展示运行上下文、工具调用与步骤，最后才是总结与结果。',
+                    )}
+                  </p>
                   {RESPONSE_MODE_ORDER.map((id) => {
                     const selected = studioResponseMode === id;
                     return (
@@ -2834,7 +2829,7 @@ export default function AIDock() {
                           </span>
                           <span className="dock-response-mode-option-desc">
                             {id === 'quick'
-                              ? t('dock.responseMode.quickSub', '快速回答')
+                              ? t('dock.responseMode.quickSub', '快捷模型通道')
                               : t('dock.responseMode.thinkingSub', '解决复杂任务')}
                           </span>
                         </span>
@@ -2897,7 +2892,7 @@ export default function AIDock() {
             )}
             {effectiveTab === 'dashboard' && deviceOnline && (
               <>
-                {dashboardDockQuick.main.map((p) => (
+                {dashboardDockChips.map((p) => (
                   <button
                     key={p.id}
                     type="button"
@@ -2907,46 +2902,6 @@ export default function AIDock() {
                     {p.label}
                   </button>
                 ))}
-                <div className="dock-quick-more-wrap" ref={quickMoreMenuRef}>
-                  <button
-                    type="button"
-                    className={`dock-ctx-chip dock-ctx-chip--more${quickMoreMenuOpen ? ' is-open' : ''}`}
-                    aria-expanded={quickMoreMenuOpen}
-                    aria-haspopup="menu"
-                    onClick={() => setQuickMoreMenuOpen((o) => !o)}
-                  >
-                    {t('dock.quick.more', '更多')}
-                    <span className="dock-quick-more-chevron" aria-hidden>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </span>
-                  </button>
-                  {quickMoreMenuOpen && (
-                    <div
-                      className="dock-quick-more-panel"
-                      role="menu"
-                      aria-label={t('dock.quick.morePanel', '更多快捷指令')}
-                    >
-                      <div className="dock-quick-more-panel-hd">{t('dock.quick.morePanel', '更多快捷指令')}</div>
-                      {dashboardDockQuick.more.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          role="menuitem"
-                          className="dock-quick-more-option"
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            setQuickMoreMenuOpen(false);
-                            submitQuickPrompt(p.text, p.placeholder, p.forceRdkclaw);
-                          }}
-                        >
-                          <span className="dock-quick-more-option-title">{p.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
               </>
             )}
             {effectiveTab !== 'dashboard' &&
