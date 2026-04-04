@@ -1250,25 +1250,29 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return events;
         };
 
-        /** 无 [TOOL:…] 时仍可能含「[板端]…」契约行，用于更新看板「最近更新」 */
+        /** 无 [TOOL:…] 时仍可能含「[板端…]」契约行，用于更新看板「最近更新」；优先展示「结果」再「过程/进行」 */
         const extractBoardVisibilityLine = (raw: string): string | null => {
           const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-          for (let i = lines.length - 1; i >= 0; i--) {
-            const ln = lines[i];
-            if (/^\[板端\]/i.test(ln)) return ln.length > 200 ? `${ln.slice(0, 198)}…` : ln;
-          }
-          for (let i = lines.length - 1; i >= 0; i--) {
-            const ln = lines[i];
-            if (/^\[预检\]/i.test(ln) || /^\[板端 OpenClaw 正在推理/i.test(ln)) {
-              return ln.length > 200 ? `${ln.slice(0, 198)}…` : ln;
+          const pick = (re: RegExp) => {
+            for (let i = lines.length - 1; i >= 0; i--) {
+              const ln = lines[i];
+              if (re.test(ln)) return ln.length > 220 ? `${ln.slice(0, 218)}…` : ln;
             }
-          }
-          return null;
+            return null;
+          };
+          return (
+            pick(/^\[板端·结果\]/i)
+            || pick(/^\[板端·过程\]/i)
+            || pick(/^\[板端·进行\]/i)
+            || pick(/^\[板端\]/i)
+            || pick(/^\[预检\]/i)
+            || pick(/^\[板端 OpenClaw 正在推理/i)
+          );
         };
 
         const humanizeBoardToolLine = (line: string) => {
           const trimmed = line.trim();
-          if (/^\[板端\]/i.test(trimmed)) {
+          if (/^\[板端[·.]/i.test(trimmed) || /^\[板端\]/i.test(trimmed)) {
             return trimmed;
           }
           const m = trimmed.match(/^\[TOOL:(start|update|result|error)\]\s*([^\s]+)(?:\s*×(\d+))?$/i);
@@ -1907,7 +1911,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const now = Date.now();
                       const shouldRender =
                         /\[TOOL:(start|result|error)\]/i.test(rawChunk)
-                        || /\[板端\]/i.test(rawChunk)
+                        || /\[板端[·.]?/i.test(rawChunk)
                         || /\[预检\]/i.test(rawChunk)
                         || /\[板端 OpenClaw 正在推理/i.test(rawChunk)
                         || now - (state.boardCollabLastPaintAt ?? 0) > 1200;

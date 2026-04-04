@@ -23,8 +23,8 @@ category: Delegation
 
 ## 板端可见性（强烈建议）
 
-- 委派后用户在 Studio 里依赖 **协作块流式输出** 理解进度。板端应遵循服务端注入的 **board_visibility_contract**（「[板端] 阶段 · …」）。
-- 在板端安装技能 **`RDK Board Progress Reporter`**（仓库 `skills/rdk-board-progress-reporter`）可统一话术；也可用 `find-skills` 检索后安装。
+- 委派后用户在 Studio 里依赖 **协作块流式输出** 理解进度。板端应遵循 **board_visibility_contract**，并按技能 **RDK Board Progress Reporter** 使用 **`[板端·进行]` / `[板端·过程]` / `[板端·结果]`** 成对传递意图与结果。
+- 在板端安装该技能（仓库 `skills/rdk-board-progress-reporter`）；也可用 `find-skills` 检索后安装。
 
 ## 执行流程
 1. **知识准备**（推荐）：调用 `web_search` / `web_fetch` 查官方文档与仓库；结合设备信息与 `board_openclaw_assess` 核对插件、模型、pipeline 是否就绪。此步骤与 SOUL.md「先查后委」原则对齐。**注意**：assess 对常见 RDK 例程可能 **短路由瞬时返回**，可与 `web_fetch` 同轮。
