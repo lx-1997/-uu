@@ -15,6 +15,14 @@ export const EN_EXTRAS: Record<string, string> = {
   'api.err.serverWrap': '{{msg}} (server error)',
   'api.err.sshConnectTimeout':
     'SSH timed out before handshake completed. Ensure the device is on and reachable; if this PC is writing a large image, try again later.',
+  'api.err.ctxSkillHub': '[SkillHub] ',
+  'api.err.ctxOpenClaw': '[OpenClaw] ',
+  'api.err.ctxRdkClaw': '[RDKClaw] ',
+  'api.err.ctxDevice': '[Device] ',
+  'api.err.networkWrap': '{{msg}} · {{hint}}',
+  'api.err.retryOrCheckService': 'Check network and that the Studio service is running, then retry',
+  'api.err.abortedWrap': '{{msg}} · {{hint}}',
+  'api.err.abortedHint': 'Request was interrupted; you can retry',
 
   'deviceGuard.titleFeature': '{{feature}} requires a connected device',
   'deviceGuard.title': 'Connect a device first',

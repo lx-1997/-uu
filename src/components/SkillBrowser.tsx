@@ -5,7 +5,7 @@ import { useI18n } from '../i18n/use-i18n';
 import { fillTemplate } from '../i18n/en-extras';
 import { fetchDeviceOpenClawHealth } from '../api';
 import { persistOpenClawHealthSnapshot } from '../studio-ui-hints';
-import { fetchApi } from '../utils/apiBase';
+import { fetchApi, reportFetchApiFailure, reportFetchApiNetworkFailure } from '../utils/apiBase';
 import skillCenterManifestJson from '../skill-center/manifest.json';
 import type { SkillCenterManifest, SkillCenterItem } from '../skill-center/types';
 
@@ -559,16 +559,26 @@ export default function SkillBrowser() {
     setClawhubMdLoading(true);
     setClawhubMd('');
     setClawhubResolvedVersion(null);
+    const mdPath = `/api/clawhub/skills/${encodeURIComponent(slug)}/skill-md`;
     try {
-      const res = await fetchApi(`/api/clawhub/skills/${encodeURIComponent(slug)}/skill-md`);
-      const data = await res.json() as {
+      const res = await fetchApi(mdPath);
+      const text = await res.text();
+      let data = {} as {
         ok?: boolean;
         markdown?: string;
         version?: string;
         error?: string;
         message?: string;
       };
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        reportFetchApiFailure(res.status, mdPath, { message: text.slice(0, 240), code: 'BAD_RESPONSE_BODY' });
+        setClawhubMd(tf('skillBrowser.center.loadErr', '加载失败: HTTP {{status}}', { status: res.status }));
+        return;
+      }
       if (!res.ok || !data.ok) {
+        reportFetchApiFailure(res.status, mdPath, data as Record<string, unknown>);
         setClawhubMd(
           data.message
             || data.error
@@ -579,9 +589,9 @@ export default function SkillBrowser() {
       setClawhubMd(data.markdown || '');
       setClawhubResolvedVersion(data.version ?? null);
     } catch (e) {
-      setClawhubMd(
-        e instanceof Error ? e.message : t('api.err.default', '网络错误'),
-      );
+      const msg = e instanceof Error ? e.message : t('api.err.default', '网络错误');
+      setClawhubMd(msg);
+      reportFetchApiNetworkFailure(mdPath, e, { messageOverride: msg });
     } finally {
       setClawhubMdLoading(false);
     }
@@ -606,17 +616,31 @@ export default function SkillBrowser() {
     setClawhubSearchErr(null);
     const ac = new AbortController();
     const tid = window.setTimeout(() => ac.abort(), 75_000);
+    const searchPath = `/api/clawhub/search?q=${encodeURIComponent(q)}&limit=30`;
     try {
-      const res = await fetchApi(`/api/clawhub/search?q=${encodeURIComponent(q)}&limit=30`, {
+      const res = await fetchApi(searchPath, {
         signal: ac.signal,
       });
-      const data = await res.json() as {
+      const text = await res.text();
+      let data = {} as {
         ok?: boolean;
         results?: { slug: string; displayName?: string; summary?: string; score?: number }[];
         error?: string;
         message?: string;
       };
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        reportFetchApiFailure(res.status, searchPath, {
+          message: text.slice(0, 240),
+          code: 'BAD_RESPONSE_BODY',
+        });
+        setClawhubSearchErr(t('skillBrowser.clawhub.searchFail', '搜索失败'));
+        setClawhubResults([]);
+        return;
+      }
       if (!res.ok || data.ok === false) {
+        reportFetchApiFailure(res.status, searchPath, data as Record<string, unknown>);
         setClawhubSearchErr(data.message || data.error || t('skillBrowser.clawhub.searchFail', '搜索失败'));
         setClawhubResults([]);
         return;
@@ -630,11 +654,13 @@ export default function SkillBrowser() {
       }
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') {
-        setClawhubSearchErr(
-          t('skillBrowser.clawhub.searchTimeout', '搜索超时，请再试一次（首次连接技能源可能较慢）'),
-        );
+        const msg = t('skillBrowser.clawhub.searchTimeout', '搜索超时，请再试一次（首次连接技能源可能较慢）');
+        setClawhubSearchErr(msg);
+        reportFetchApiNetworkFailure(searchPath, e, { aborted: true, messageOverride: msg });
       } else {
-        setClawhubSearchErr(e instanceof Error ? e.message : t('api.err.default', '网络错误'));
+        const msg = e instanceof Error ? e.message : t('api.err.default', '网络错误');
+        setClawhubSearchErr(msg);
+        reportFetchApiNetworkFailure(searchPath, e, { messageOverride: msg });
       }
       setClawhubResults([]);
     } finally {

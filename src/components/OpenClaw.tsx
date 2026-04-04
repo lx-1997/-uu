@@ -4,7 +4,7 @@ import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { renderMarkdown } from './MarkdownRenderer';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
-import { fetchApi } from '../utils/apiBase';
+import { fetchApi, reportFetchApiFailure, reportFetchApiNetworkFailure } from '../utils/apiBase';
 import { stripAnsi } from '../utils/strip-ansi';
 import { persistGatewayStatusSnapshot } from '../studio-ui-hints';
 import {
@@ -855,14 +855,17 @@ export default function OpenClaw() {
         data = rawText ? JSON.parse(rawText) : {};
       } catch {
         updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n\`\`\`\n${rawText || t('oc.run.emptyBody', '(空响应)')}\n\`\`\``);
-        addToast?.(t('oc.toast.badResponse', '操作完成，但响应格式异常'), 'warning');
+        reportFetchApiFailure(res.status, `/api/devices/${currentDevice.id}/openclaw/${action}`, {
+          message: t('oc.toast.badResponse', '操作完成，但响应格式异常'),
+          code: 'BAD_RESPONSE_BODY',
+        });
         return;
       }
 
       if (!res.ok) {
         const errMsg = data.error || data.message || `HTTP ${res.status}`;
         updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n${t('oc.chat.errorPrefix', '**错误：**')} ${errMsg}`);
-        addToast?.(errMsg, 'error');
+        reportFetchApiFailure(res.status, `/api/devices/${currentDevice.id}/openclaw/${action}`, data);
       } else {
         const output = data.output?.trim() || JSON.stringify(data, null, 2);
         updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n\`\`\`\n${output}\n\`\`\``);
@@ -875,11 +878,16 @@ export default function OpenClaw() {
       clearTimeout(fetchTimer);
       if (progressTimer) clearInterval(progressTimer);
       const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const path = `/api/devices/${currentDevice.id}/openclaw/${action}`;
       const msg = err.name === 'AbortError'
         ? tf('oc.run.timeout', '操作超时 ({{s}}s)，命令可能仍在板端运行', { s: Math.round(fetchTimeout / 1000) })
         : err.message;
       updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n${t('oc.chat.errorPrefix', '**错误：**')} ${msg}`);
-      addToast?.(msg, 'error');
+      if (err.name === 'AbortError') {
+        reportFetchApiNetworkFailure(path, err, { aborted: true, messageOverride: msg });
+      } else {
+        reportFetchApiNetworkFailure(path, err, { messageOverride: msg });
+      }
     } finally {
       setLoading(false);
       setActiveOp(null);

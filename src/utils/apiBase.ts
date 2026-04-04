@@ -264,3 +264,48 @@ export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
     credentials: init?.credentials ?? 'include',
   });
 }
+
+/** 与 `src/api.ts` 中 `request()` 一致：将失败广播给全局 `rdk-api-error` 监听器（统一 Toast + 来源前缀）。 */
+export function reportFetchApiFailure(
+  status: number,
+  path: string,
+  body: Record<string, unknown>,
+): void {
+  if (typeof window === 'undefined') return;
+  const message = String(body.message ?? body.error ?? `HTTP ${status}`);
+  const code = String(body.code ?? '');
+  const retryable = Boolean(body.retryable);
+  const url = resolveApiUrl(apiPathForFetch(path));
+  window.dispatchEvent(
+    new CustomEvent('rdk-api-error', {
+      detail: { status, url, message, code, retryable },
+    }),
+  );
+}
+
+/**
+ * fetch 未到达 HTTP 响应（断网、CORS、超时中止等）时上报。
+ * `aborted` 为 true 时 code=CLIENT_ABORT（多为用户或超时 AbortController）。
+ */
+export function reportFetchApiNetworkFailure(
+  path: string,
+  err: unknown,
+  opts?: { messageOverride?: string; aborted?: boolean },
+): void {
+  if (typeof window === 'undefined') return;
+  const message = String(opts?.messageOverride ?? (err instanceof Error ? err.message : String(err ?? 'network error')));
+  const aborted = Boolean(opts?.aborted);
+  const code = aborted ? 'CLIENT_ABORT' : 'NETWORK_ERROR';
+  const url = resolveApiUrl(apiPathForFetch(path));
+  window.dispatchEvent(
+    new CustomEvent('rdk-api-error', {
+      detail: {
+        status: 0,
+        url,
+        message,
+        code,
+        retryable: true,
+      },
+    }),
+  );
+}

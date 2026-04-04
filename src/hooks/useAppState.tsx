@@ -358,13 +358,24 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
     const tf = (key: string, zh: string, vars: Record<string, string | number>) =>
       fillTemplate(t(key, zh), vars);
 
+    const apiFailureContextPrefix = (url: string): string => {
+      const u = String(url || '').toLowerCase();
+      if (u.includes('/clawhub')) return t('api.err.ctxSkillHub', '[SkillHub] ');
+      if (u.includes('/openclaw')) return t('api.err.ctxOpenClaw', '[OpenClaw] ');
+      if (u.includes('/rdkclaw')) return t('api.err.ctxRdkClaw', '[RDKClaw] ');
+      if (u.includes('/api/devices/')) return t('api.err.ctxDevice', '[设备] ');
+      return '';
+    };
+
     const onApiError = (evt: Event) => {
       const e = evt as CustomEvent<ApiErrorDetail>;
       const detail = e.detail ?? {};
       const code = String(detail.code || '').trim();
-      const message = String(detail.message || t('api.err.default', '请求失败')).trim();
+      const rawMessage = String(detail.message || t('api.err.default', '请求失败')).trim();
       const status = Number(detail.status || 0);
       const retryable = Boolean(detail.retryable);
+      const prefix = apiFailureContextPrefix(String(detail.url || ''));
+      const message = prefix ? `${prefix}${rawMessage}` : rawMessage;
 
       const key = `${status}:${code}:${message}`;
       const now = Date.now();
@@ -375,6 +386,28 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       if (code === 'DEVICE_AUTH_REQUIRED') {
         toast.addToast(t('api.err.deviceAuth', '设备认证失效，请重新填写账号密码'), 'warning');
         device.setShowAddDevice(true);
+        return;
+      }
+
+      if (code === 'NETWORK_ERROR') {
+        toast.addToast(
+          tf('api.err.networkWrap', '{{msg}} · {{hint}}', {
+            msg: message,
+            hint: t('api.err.retryOrCheckService', '请检查本机网络与工作室服务是否运行后再试'),
+          }),
+          'warning',
+        );
+        return;
+      }
+
+      if (code === 'CLIENT_ABORT') {
+        toast.addToast(
+          tf('api.err.abortedWrap', '{{msg}} · {{hint}}', {
+            msg: message,
+            hint: t('api.err.abortedHint', '请求已中断，可重试同一操作'),
+          }),
+          'warning',
+        );
         return;
       }
 
