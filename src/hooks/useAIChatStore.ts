@@ -1250,6 +1250,22 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return events;
         };
 
+        /** 无 [TOOL:…] 时仍可能含「[板端]…」契约行，用于更新看板「最近更新」 */
+        const extractBoardVisibilityLine = (raw: string): string | null => {
+          const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const ln = lines[i];
+            if (/^\[板端\]/i.test(ln)) return ln.length > 200 ? `${ln.slice(0, 198)}…` : ln;
+          }
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const ln = lines[i];
+            if (/^\[预检\]/i.test(ln) || /^\[板端 OpenClaw 正在推理/i.test(ln)) {
+              return ln.length > 200 ? `${ln.slice(0, 198)}…` : ln;
+            }
+          }
+          return null;
+        };
+
         const humanizeBoardToolLine = (line: string) => {
           const trimmed = line.trim();
           if (/^\[板端\]/i.test(trimmed)) {
@@ -1849,6 +1865,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       });
                     }
                     upsertBoardStageStatus(state);
+                  } else {
+                    const vis = extractBoardVisibilityLine(rawChunk);
+                    if (vis) {
+                      state.boardLastEventAt = Date.now();
+                      state.boardLastEventText = vis;
+                      state.boardActiveTool = t('chat.board.active.streaming', '板端执行中');
+                      upsertBoardStageStatus(state);
+                    }
                   }
                   if (toolName === 'board_openclaw_chat' && progressSource === 'studio_wait') {
                     const more = rawChunk.split('\n').map((l) => l.trimEnd()).filter((l) => l.length > 0);
@@ -1883,6 +1907,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const now = Date.now();
                       const shouldRender =
                         /\[TOOL:(start|result|error)\]/i.test(rawChunk)
+                        || /\[板端\]/i.test(rawChunk)
+                        || /\[预检\]/i.test(rawChunk)
+                        || /\[板端 OpenClaw 正在推理/i.test(rawChunk)
                         || now - (state.boardCollabLastPaintAt ?? 0) > 1200;
                       if (shouldRender) {
                         const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));

@@ -31,6 +31,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.board.phaseHint.error': 'This sub-step failed',
   'chat.board.phaseHint.start': 'Board started this step',
   'chat.board.phaseHint.update': 'In progress',
+  'chat.board.active.streaming': 'Board-side run',
   'chat.board.lineUrl': 'Link: {{url}}',
   'chat.board.lineOut': 'Output excerpt: {{snippet}}',
 
