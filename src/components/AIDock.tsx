@@ -18,7 +18,6 @@ import { DASHBOARD_CHAT_INTRO_PROMPT_EN, DASHBOARD_CHAT_INTRO_PROMPT_ZH } from '
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-message-plain';
-import { buildChatTranscriptTxt, downloadTranscriptTxt } from '../utils/export-chat-transcript';
 import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
 import { DockFlashMentionWizard } from './DockFlashMentionWizard';
 import {
@@ -1466,23 +1465,11 @@ export default function AIDock() {
     await confirmAndBeginNewChat({ aiTyping, taskHistory, t, stopAllRuns, clearChatHistory });
   }, [aiTyping, taskHistory, stopAllRuns, clearChatHistory, t]);
 
-  const exportDockTranscript = useCallback(() => {
-    try {
-      const body = buildChatTranscriptTxt(chatMessages, t, {
-        deviceLabel: activeRdkclawDeviceLabel,
-        sessionId: getStudioChatSessionId(),
-      });
-      const sid = getStudioChatSessionId().replace(/[^\w.-]+/g, '_').slice(0, 24);
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadTranscriptTxt(`rdkclaw-chat-${sid || stamp}.txt`, body);
-      addToast(t('chat.export.done', '对话已导出为 TXT'), 'success');
-    } catch (e) {
-      addToast(
-        e instanceof Error ? e.message : t('chat.export.fail', '导出失败'),
-        'error',
-      );
-    }
-  }, [chatMessages, t, activeRdkclawDeviceLabel, getStudioChatSessionId, addToast]);
+  const beginNewChatAndOpenPage = useCallback(async () => {
+    await beginNewChat();
+    setActiveTab('ai-chat-hub');
+    setChatExpanded(true);
+  }, [beginNewChat, setActiveTab, setChatExpanded]);
 
   const channelStats = useMemo(() => {
     let feishuInbound = 0;
@@ -2471,17 +2458,15 @@ export default function AIDock() {
                     <button
                       type="button"
                       className="dock-header-export"
-                      onClick={exportDockTranscript}
-                      title={t('dock.tt.exportChat', '导出为文本')}
-                      aria-label={t('dock.header.exportChat', '导出对话')}
+                      onClick={() => void beginNewChatAndOpenPage()}
+                      title={t('dock.tt.newChatOpen', '新建并打开对话页')}
+                      aria-label={t('dock.header.newChatOpen', '新建并打开')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <line x1="12" y1="18" x2="12" y2="12" />
-                        <line x1="9" y1="15" x2="15" y2="15" />
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
-                      <span className="dock-header-export-label">{t('dock.header.exportChat', '导出')}</span>
+                      <span className="dock-header-export-label">{t('dock.header.newChatOpen', '新建并打开')}</span>
                     </button>
 
                     <button
@@ -3032,15 +3017,13 @@ export default function AIDock() {
               <button
                 type="button"
                 className="dock-action-btn"
-                onClick={exportDockTranscript}
-                title={t('dock.tt.exportChat', '导出为文本')}
-                aria-label={t('dock.header.exportChat', '导出对话')}
+                onClick={() => void beginNewChatAndOpenPage()}
+                title={t('dock.tt.newChatOpen', '新建并打开对话页')}
+                aria-label={t('dock.header.newChatOpen', '新建并打开')}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="12" y1="18" x2="12" y2="12" />
-                  <line x1="9" y1="15" x2="15" y2="15" />
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
               </button>
               <button

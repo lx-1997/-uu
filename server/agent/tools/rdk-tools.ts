@@ -398,6 +398,17 @@ function appendRosLongRunForegroundHint(command: string, runBackground: boolean,
   );
 }
 
+/**
+ * 模型常在 command 外再包一层 `bash -c "..."`，在后台封装场景里会形成多层 quoting，
+ * 既不必要也更易引发语法噪音；此处仅剥一层最外壳，保留内部真实命令。
+ */
+function unwrapOuterBashDashC(command: string): string {
+  const trimmed = String(command || '').trim();
+  const m = trimmed.match(/^bash\s+-c\s+(["'])([\s\S]*)\1$/i);
+  if (!m) return command;
+  return m[2].trim() || command;
+}
+
 /** 在已 source 的环境中，对每个 topic 用短超时 `ros2 topic echo | head -1` 判断是否已有数据 */
 function buildRos2TopicVerifyCommand(topics: string[], ros2SetupBash?: string): string {
   const setup =
@@ -405,9 +416,21 @@ function buildRos2TopicVerifyCommand(topics: string[], ros2SetupBash?: string): 
     'for f in /opt/tros/*/setup.bash; do [ -f "$f" ] && . "$f" && break; done';
   const checks = topics.map((t) => {
     const q = shEscapeUnix(t);
-    return `echo "=== topic ${q} ==="; if timeout 8s ros2 topic echo ${q} 2>/dev/null | head -n 1 | grep -q .; then echo "RDK_TOPIC_OK:${q}"; else echo "RDK_TOPIC_NO_DATA:${q}"; fi`;
+    return `echo "=== topic ${q} ==="; if timeout 8s ros2 topic echo ${q} 2>/dev/null | head -n 1 | grep -q .; then echo "RDK_TOPIC_OK:${q}"; exit 0; else echo "RDK_TOPIC_NO_DATA:${q}"; fi`;
   });
-  return `${setup}; ${checks.join('; ')}`;
+  return `${setup}; ${checks.join('; ')}; exit 0`;
+}
+
+function resolveRos2VerifyExecTimeoutMs(topicCount: number): number {
+  const n = Math.max(1, Math.floor(topicCount));
+  // 3s setup margin + 8s per topic + 5s tail margin, capped to 45s for responsiveness.
+  return Math.min(45_000, 8_000 * n + 8_000);
+}
+
+function resolveRos2VerifyQuickTimeoutMs(topicCount: number): number {
+  const n = Math.max(1, Math.floor(topicCount));
+  // 后台模式仅做「快速命中」探测：总等待控制在 6~12s。
+  return Math.min(12_000, Math.max(6_000, 4_000 + n * 2_000));
 }
 
 /**
@@ -429,8 +452,14 @@ function wrapBackgroundDeviceCommand(userCommand: string, inheritPersistentShell
     'echo "--- 初始输出（约 2 秒，进程仍在后台） ---"',
     'head -c 12000 "$LOG" 2>/dev/null || true',
   ].join('\n');
-  const outer = inheritPersistentShellEnv ? 'bash -c' : 'bash -lc';
-  return `${outer} ${JSON.stringify(script)}`;
+
+  // 持久 shell 场景：直接在当前会话启动后台任务，保留前序 source/export 的环境。
+  if (inheritPersistentShellEnv) {
+    return script;
+  }
+
+  // 非持久模式兜底：显式走 bash -lc，保证语义与历史行为一致。
+  return `bash -lc ${shEscapeUnix(script)}`;
 }
 
 function deviceExecTool(
@@ -523,7 +552,10 @@ function deviceExecTool(
       const autoBackground =
         runBackground && input.background !== true && input.background !== false;
       try {
-        let commandToExecute = input.command;
+        const normalizedCommand = (runBackground || runDetached)
+          ? unwrapOuterBashDashC(input.command)
+          : input.command;
+        let commandToExecute = normalizedCommand;
         /** 与持久 SSH shell 同时开启时，后台包装改用 bash -c，便于继承上一条 source */
         const inheritRosEnvFromSession = isPersistentShellEnabled();
 
@@ -606,19 +638,40 @@ function deviceExecTool(
 
         const verifyTopics = input.ros2VerifyTopics?.filter((t) => String(t).trim().length > 0);
         if (verifyTopics && verifyTopics.length > 0) {
-          const delayMs = Math.min(
-            300_000,
-            Math.max(0, Number(input.ros2VerifyTopicsDelayMs ?? 8000)),
-          );
-          await abortAwareDelay(delayMs, ctx.abortSignal);
           const verifyCmd = buildRos2TopicVerifyCommand(verifyTopics, input.ros2SetupBash);
-          const verifyOut = await execOnDevice(deviceId, [verifyCmd], {
-            timeoutMs: 120_000,
-            rejectOnNonZeroExit: false,
-            persistentShell: true,
-            abortSignal: ctx.abortSignal,
-          });
-          output = `${output}\n\n[ROS2 话题验收]\n${verifyOut}`;
+          if (runBackground || runDetached) {
+            let verifyOut = '';
+            try {
+              await abortAwareDelay(1_500, ctx.abortSignal);
+              verifyOut = await execOnDevice(deviceId, [verifyCmd], {
+                timeoutMs: resolveRos2VerifyQuickTimeoutMs(verifyTopics.length),
+                rejectOnNonZeroExit: false,
+                persistentShell: true,
+                abortSignal: ctx.abortSignal,
+              });
+            } catch {
+              verifyOut = '';
+            }
+            const hit = verifyOut.match(/RDK_TOPIC_OK:([^\n\r]+)/);
+            if (hit) {
+              output = `${output}\n\n[ROS2 话题验收] 快速命中：${hit[1]}`;
+            } else {
+              output = `${output}\n\n[ROS2 话题验收] 未在快速窗口内命中（后台任务已启动，后续可按需再查）。`;
+            }
+          } else {
+            const delayMs = Math.min(
+              300_000,
+              Math.max(0, Number(input.ros2VerifyTopicsDelayMs ?? 8000)),
+            );
+            await abortAwareDelay(delayMs, ctx.abortSignal);
+            const verifyOut = await execOnDevice(deviceId, [verifyCmd], {
+              timeoutMs: resolveRos2VerifyExecTimeoutMs(verifyTopics.length),
+              rejectOnNonZeroExit: false,
+              persistentShell: true,
+              abortSignal: ctx.abortSignal,
+            });
+            output = `${output}\n\n[ROS2 话题验收]\n${verifyOut}`;
+          }
         }
 
         if (!output) {

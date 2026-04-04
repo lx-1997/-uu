@@ -76,6 +76,12 @@ export function resetRdkDocUrlIndexCacheForTests(): void {
 /** 注入 system 动态段：紧凑列出 detection 与根地址，避免整表塞满 token */
 export function buildRdkDocHintForSystemPrompt(): string {
   const idx = loadRdkDocUrlIndex();
+  const normalizeDetectionName = (entry: RdkDocUrlEntry): string => {
+    if (entry.url.endsWith('/detection/fcos')) return 'FCOS';
+    if (entry.url.endsWith('/detection/yolo')) return 'YOLO';
+    if (entry.url.endsWith('/detection/hobot_yolo_world')) return 'YOLO-World';
+    return entry.name;
+  };
   const detection = idx.entries.filter(
     (e) =>
       e.url.includes('/Robot_development/boxs/detection/') &&
@@ -100,7 +106,7 @@ export function buildRdkDocHintForSystemPrompt(): string {
   );
   lines.push(
     '**目标检测（detection，未贴 URL 时按任务选一条先 web_fetch）**：',
-    ...detection.map((e) => `- **${e.name}**：\`${e.url}\``),
+    ...detection.map((e) => `- **${normalizeDetectionName(e)}**：\`${e.url}\``),
   );
   lines.push(
     '**图像分割（segmentation，用户说「分割一切」等时优先 MobileSAM / EdgeSAM）**：',

@@ -6920,6 +6920,7 @@ app.post('/api/agent/chat', async (request, response) => {
         studioUiHints,
         studioResponseMode,
         studioRegenerate: Boolean(studioRegenerateRaw),
+        requestHeaderPassword: request.header('x-device-password') ?? '',
         abortSignal: requestAbortController.signal,
       })) {
         sendEvent(event.type, event.data);

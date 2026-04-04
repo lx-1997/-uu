@@ -41,6 +41,7 @@ export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
   "open_web_route",
   "rdk_doc_route",
   "delegation_runtime",
+  "device_connectivity",
   "studio_ui_hints",
   "attachments",
   "collaboration",
@@ -58,6 +59,7 @@ export type SystemPromptLayerId =
   | "open_web_route"
   | "rdk_doc_route"
   | "delegation_runtime"
+  | "device_connectivity"
   | "studio_ui_hints"
   | "attachments"
   | "collaboration"
@@ -103,6 +105,13 @@ export interface SystemPromptLayerBuildInput {
   latestUserMessage?: string;
   /** 与 meta 事件一致的委派决策，注入「本轮编排期望」避免模型只跑 SSH */
   delegateDecision?: DelegateDecision;
+  /** 每轮开局设备连通性快照（与 /api/devices/:id/ping 同源） */
+  deviceConnectivity?: {
+    reachable: boolean;
+    status: string;
+    detail: string;
+    publicNetworkReady?: boolean | null;
+  };
 }
 
 function appendOpenWebRouteDynamic(
@@ -153,6 +162,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
       "**默认禁止**再用 `read`/`list` 打开上述同名路径或 `memory/` 下文件（系统已注入，重复拉取浪费一整轮推理）。",
       "仅当用户**明确**要查看磁盘上未展示的片段、或你要改工作区文件时，再 `read`/`write`。",
       "普通问答与闲聊：**零工具**，直接答。",
+      "涉及设备执行时，先给 2-4 步短计划；再尽量合并为一次 `device_exec` 在同一 SSH 终端连续执行，避免碎片化多次试探。",
     ].join("\n"),
   );
   pushStable(
@@ -195,6 +205,19 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   if (input.deviceId && input.delegateDecision) {
     const dr = buildDelegationRuntimePrompt(input.delegateDecision, input.boardSnapshot.skills.length);
     pushDynamic("delegation_runtime", dr.length > 1600 ? `${dr.slice(0, 1600)}\n\n…(速览已截断)` : dr);
+  }
+
+  if (input.deviceId && input.deviceConnectivity) {
+    const c = input.deviceConnectivity;
+    const netReady = c.publicNetworkReady;
+    pushDynamic(
+      "device_connectivity",
+      !c.reachable
+        ? `## 设备连通性（本轮实时）\n当前设备 SSH 不可达（${c.status}：${c.detail}）。本轮**禁止**直接执行 board_openclaw_*、device_exec、update/install 等板端命令；先引导用户恢复连接（检查电源/网线/Wi-Fi、重新连接设备、校验密码）再继续。`
+        : netReady === false
+          ? `## 设备连通性（本轮实时）\n当前设备 SSH 可达，但公网不可达（${c.detail}）。本轮**禁止** openclaw、update/install、在线拉包；优先离线命令与本地方案。`
+          : `## 设备连通性（本轮实时）\n当前设备 SSH 可达且公网可达（${c.status}）。可按需执行 board_openclaw_* / device_exec。`,
+    );
   }
 
   if (input.deviceId) {
@@ -286,6 +309,15 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   pushStable("persona", buildPersonaPrompt(input.persona));
   pushStable("reasoning", buildReasoningGuidancePrompt(input.modelTier, input.persona.delegationBias));
   pushStable(
+    "quick_session_policy",
+    [
+      "## 执行编排纪律",
+      "涉及设备命令时先给计划再执行：先列 2-4 步可验证计划，再开始落命令。",
+      "默认优先单次 `device_exec`（同一持久 SSH 终端）连续完成相关命令，避免无计划地分散成多轮小命令。",
+      "执行结束必须给出验收结论（成功/失败、下一步）。",
+    ].join("\n"),
+  );
+  pushStable(
     "web_search_triggers",
     buildWebSearchTriggerPrompt(input.policy.network.enabled, input.persona.delegationBias),
   );
@@ -341,6 +373,19 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
     pushDynamic(
       "delegation_runtime",
       buildDelegationRuntimePrompt(input.delegateDecision, input.boardSnapshot.skills.length),
+    );
+  }
+
+  if (input.deviceId && input.deviceConnectivity) {
+    const c = input.deviceConnectivity;
+    const netReady = c.publicNetworkReady;
+    pushDynamic(
+      "device_connectivity",
+      !c.reachable
+        ? `## 设备连通性（本轮实时）\n当前设备 SSH 不可达（${c.status}：${c.detail}）。本轮**禁止**直接执行 board_openclaw_*、device_exec、update/install 等板端命令；先引导用户恢复连接（检查电源/网线/Wi-Fi、重新连接设备、校验密码）再继续。`
+        : netReady === false
+          ? `## 设备连通性（本轮实时）\n当前设备 SSH 可达，但公网不可达（${c.detail}）。本轮**禁止** openclaw、update/install、在线拉包；优先离线命令与本地方案。`
+          : `## 设备连通性（本轮实时）\n当前设备 SSH 可达且公网可达（${c.status}）。可按需执行 board_openclaw_* / device_exec。`,
     );
   }
 

@@ -109,6 +109,9 @@ import { appendSecurityAuditLog, listSecurityAuditLogs } from "./security-audit-
 import { buildStudioAgentSessionKey, createRdkclawDebugExportZip } from "./session-debug-export.js";
 import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from "../utils/stream-output-limit.js";
 import { syncWorkspaceMarkdownMemory } from "./memory-markdown-sync.js";
+import { runDevicePingProbe } from "./device-ping-probe.js";
+import type { Device } from "../../shared/types.js";
+import { execOnDevice } from "../agent/tools/rdk-ssh-helper.js";
 
 function recordConversationTurnFromReq(
   req: RDKClawChatRequest,
@@ -180,6 +183,15 @@ type RuntimeHealthReport = {
   totalSkills: number;
 };
 
+type DeviceConnectivitySnapshot = {
+  reachable: boolean;
+  status: "connected" | "offline" | "unknown" | "not_selected";
+  detail: string;
+  publicNetworkReady: boolean | null;
+  publicNetworkDetail: string;
+  fromFailCache?: boolean;
+};
+
 export class RDKClawApp {
   private readonly workspaceDir: string;
   private readonly openClawManager: OpenClawDeploymentManager;
@@ -202,8 +214,13 @@ export class RDKClawApp {
   private runAgents = new Map<string, Agent>();
   private sessionAutoApprove = new Map<string, boolean>();
   private boardSkillSnapshotCache = new Map<string, { expiresAt: number; value: BoardSnapshot }>();
+  private devicePublicNetworkCache = new Map<string, {
+    expiresAt: number;
+    value: { ready: boolean; detail: string };
+  }>();
   private modelCapWarmedUp = new Set<string>();
   private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
+  private static readonly DEVICE_PUBLIC_NETWORK_TTL_MS = 20_000;
   private readonly deviceQueue = new DeviceQueue();
   private cancelQueuedBeforeTs = 0;
   /**
@@ -684,6 +701,8 @@ export class RDKClawApp {
     sessionAttachments: Awaited<ReturnType<typeof prepareSessionAttachments>>["allAttachments"],
     safeMode: boolean,
     boardSnapshot: BoardSnapshot | undefined,
+    deviceReachable: boolean,
+    devicePublicNetworkReady: boolean,
     sandbox: SandboxGuardContext,
     isPackagedDesktop: boolean,
   ): Tool[] {
@@ -713,7 +732,7 @@ export class RDKClawApp {
         ...createSkillhubTools(),
       );
     }
-    if (req.deviceId) {
+    if (req.deviceId && deviceReachable) {
       const deviceTools = createRdkTools(req.deviceId, {
         openClawManager: this.openClawManager,
         onMediaDownloaded: (info) => {
@@ -739,7 +758,22 @@ export class RDKClawApp {
           });
         },
       });
-      tools.push(...deviceTools);
+      const gatedDeviceTools = deviceTools.map((tool) => {
+        if (tool.name !== "device_exec" || devicePublicNetworkReady) return tool;
+        return {
+          ...tool,
+          execute: async (input, ctx) => {
+            const cmd = String((input as { command?: unknown })?.command ?? "").trim();
+            const needsInternet = /\b(apt(?:-get)?\s+(?:update|upgrade|install)|pip(?:3)?\s+install|npm\s+(?:install|update)|pnpm\s+(?:add|install|update)|yarn\s+add|uv\s+pip\s+install|git\s+clone|curl\s+https?:\/\/|wget\s+https?:\/\/)/i.test(cmd);
+            if (needsInternet) {
+              return "公网不可达：已拦截在线更新/拉包命令。请先恢复设备外网（DNS/网关）后再执行 update/install。";
+            }
+            return tool.execute(input, ctx);
+          },
+        };
+      });
+      tools.push(...gatedDeviceTools);
+      if (devicePublicNetworkReady) {
       const skillsForBoard = boardSnapshot?.skillDetails.map((s) => ({
         name: s.name,
         path: s.path,
@@ -823,6 +857,7 @@ export class RDKClawApp {
           },
         });
       }));
+      }
     }
     tools.push(...planTools);
 
@@ -849,6 +884,104 @@ export class RDKClawApp {
     return tools.map((tool) =>
       this.wrapToolWithApproval(tool, policy, emitEvent, base, channel, sandbox, isPackagedDesktop),
     );
+  }
+
+  private async probeDevicePublicNetwork(
+    deviceId: string,
+  ): Promise<{ ready: boolean; detail: string; fromCache: boolean }> {
+    const cached = this.devicePublicNetworkCache.get(deviceId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ready: cached.value.ready, detail: cached.value.detail, fromCache: true };
+    }
+    const probeCmd = [
+      'bash -lc "net_ok=0; ',
+      'if ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then net_ok=1; fi; ',
+      'if [ \"$net_ok\" != \"1\" ]; then if curl -sI --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1 || wget -q --spider --timeout=6 https://registry.npmjs.org >/dev/null 2>&1; then net_ok=1; fi; fi; ',
+      'if [ \"$net_ok\" = \"1\" ]; then echo NETWORK_READY; else echo NETWORK_OFFLINE; fi"',
+    ].join('');
+
+    try {
+      const output = await execOnDevice(
+        deviceId,
+        [probeCmd],
+        {
+          timeoutMs: 20_000,
+          rejectOnNonZeroExit: false,
+        },
+      );
+      const ready = String(output || '').toUpperCase().includes('NETWORK_READY');
+      const detail = ready ? '公网可达' : '公网不可达';
+      this.devicePublicNetworkCache.set(deviceId, {
+        expiresAt: Date.now() + RDKClawApp.DEVICE_PUBLIC_NETWORK_TTL_MS,
+        value: { ready, detail },
+      });
+      return { ready, detail, fromCache: false };
+    } catch {
+      const detail = '公网探测异常';
+      this.devicePublicNetworkCache.set(deviceId, {
+        expiresAt: Date.now() + RDKClawApp.DEVICE_PUBLIC_NETWORK_TTL_MS,
+        value: { ready: false, detail },
+      });
+      return { ready: false, detail, fromCache: false };
+    }
+  }
+
+  private async resolveDeviceConnectivity(req: RDKClawChatRequest): Promise<DeviceConnectivitySnapshot> {
+    const deviceId = String(req.deviceId || "").trim();
+    if (!deviceId) {
+      return {
+        reachable: false,
+        status: "not_selected",
+        detail: "未选择设备",
+        publicNetworkReady: null,
+        publicNetworkDetail: "未选择设备",
+      };
+    }
+    const devices = await readDevices();
+    const device = devices.find((item) => item.id === deviceId);
+    if (!device) {
+      return {
+        reachable: false,
+        status: "unknown",
+        detail: "设备不存在或已被移除",
+        publicNetworkReady: null,
+        publicNetworkDetail: "设备不存在或已被移除",
+      };
+    }
+    try {
+      const ping = await runDevicePingProbe(
+        deviceId,
+        device as Device,
+        String(req.requestHeaderPassword || ""),
+      );
+      if (!ping.ok) {
+        return {
+          reachable: false,
+          status: "offline",
+          detail: "SSH 握手失败或无可用凭据",
+          publicNetworkReady: null,
+          publicNetworkDetail: "SSH 不可达，无法探测公网",
+          fromFailCache: ping.fromFailCache,
+        };
+      }
+      const net = await this.probeDevicePublicNetwork(deviceId);
+      return {
+        reachable: true,
+        status: "connected",
+        detail: "SSH 握手成功",
+        publicNetworkReady: net.ready,
+        publicNetworkDetail: net.detail,
+        fromFailCache: ping.fromFailCache,
+      };
+    } catch {
+      return {
+        reachable: false,
+        status: "unknown",
+        detail: "在线探测异常",
+        publicNetworkReady: null,
+        publicNetworkDetail: "在线探测异常",
+      };
+    }
   }
 
   /**
@@ -1061,10 +1194,13 @@ export class RDKClawApp {
       cacheOnly: studioQuick,
     });
     const attachmentPrepareStartedAt = Date.now();
+    const connectivityStartedAt = Date.now();
+    const connectivityPromise = this.resolveDeviceConnectivity(req);
     let attachmentPrepareMs = 0;
     let attachmentState: Awaited<ReturnType<typeof prepareSessionAttachments>>;
     let boardSnapshot: BoardSnapshot;
     let workspace: ResolvedWorkspace;
+    let deviceConnectivity: DeviceConnectivitySnapshot;
     try {
       attachmentState = await abortable(
         prepareSessionAttachments(sessionKey, req.attachments),
@@ -1081,8 +1217,8 @@ export class RDKClawApp {
         externalAbortSignal,
       );
       /** 快照与 workspace 互不依赖：并行等待以压缩 setup 阶段（不改变提示词与决策输入） */
-      [boardSnapshot, workspace] = await abortable(
-        Promise.all([boardSnapshotPromise, workspacePromise]),
+      [boardSnapshot, workspace, deviceConnectivity] = await abortable(
+        Promise.all([boardSnapshotPromise, workspacePromise, connectivityPromise]),
         externalAbortSignal,
       );
     } catch (e) {
@@ -1093,6 +1229,7 @@ export class RDKClawApp {
       }
       throw e;
     }
+    const connectivityMs = Date.now() - connectivityStartedAt;
     const boardSnapshotMs = Date.now() - boardSnapshotStartedAt;
     if (req.deviceId) {
       const devices = await readDevices();
@@ -1131,6 +1268,17 @@ export class RDKClawApp {
       studioQuickAnswer: studioQuick,
       latestUserMessage: effectiveMessage,
       delegateDecision: decision,
+      deviceConnectivity: req.deviceId
+        ? {
+            reachable: deviceConnectivity.reachable,
+            status: deviceConnectivity.status,
+            publicNetworkReady: deviceConnectivity.publicNetworkReady,
+            detail:
+              deviceConnectivity.publicNetworkReady === null
+                ? `${deviceConnectivity.detail}；公网状态未知`
+                : `${deviceConnectivity.detail}；公网${deviceConnectivity.publicNetworkReady ? '可达' : '不可达'}（${deviceConnectivity.publicNetworkDetail}）`,
+          }
+        : undefined,
     });
     const promptTelemetry = hashSystemPromptLayers(promptBundle.combined, promptBundle.layers);
     const promptStableDynamic = hashStableDynamicSystemPrompt(promptBundle.stablePrefix, promptBundle.dynamicSuffix);
@@ -1264,6 +1412,13 @@ export class RDKClawApp {
         setup_workspace_ms: workspaceInitMs,
         setup_attachments_ms: attachmentPrepareMs,
         setup_board_snapshot_ms: boardSnapshotMs,
+        setup_connectivity_ms: connectivityMs,
+        device_reachable: req.deviceId ? deviceConnectivity.reachable : null,
+        device_reachability_status: req.deviceId ? deviceConnectivity.status : null,
+        device_reachability_detail: req.deviceId ? deviceConnectivity.detail : null,
+        device_public_network_ready: req.deviceId ? deviceConnectivity.publicNetworkReady : null,
+        device_public_network_detail: req.deviceId ? deviceConnectivity.publicNetworkDetail : null,
+        device_ping_from_fail_cache: req.deviceId ? Boolean(deviceConnectivity.fromFailCache) : null,
         studio_ui_hints_age_ms:
           req.studioUiHints?.capturedAt != null
             ? Math.max(0, Date.now() - req.studioUiHints.capturedAt)
@@ -1313,9 +1468,35 @@ export class RDKClawApp {
         attachmentState.allAttachments,
         health.safeMode,
         boardSnapshot,
+        deviceConnectivity.reachable,
+        deviceConnectivity.publicNetworkReady === true,
         sandboxForGuard,
         isPackagedDesktop,
       );
+
+    if (req.deviceId && !deviceConnectivity.reachable) {
+      pushEvent({
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `当前设备离线（${deviceConnectivity.detail}），先执行连通性恢复，再进行 OpenClaw/更新等板端动作。`,
+          device_reachability_status: deviceConnectivity.status,
+        },
+      });
+    } else if (req.deviceId && deviceConnectivity.publicNetworkReady === false) {
+      pushEvent({
+        type: "meta",
+        data: {
+          ...base,
+          executor: "rdkclaw_local",
+          phase: "running",
+          message: `设备已连通但公网不可达（${deviceConnectivity.publicNetworkDetail}），本轮不使用 OpenClaw/在线更新类指令，优先离线或本地方案。`,
+          device_public_network_ready: false,
+        },
+      });
+    }
 
     const rdkReasoning = resolveRdkclawAgentReasoning(providerConfig);
     const streamThinkingToClient = rdkclawShouldStreamThinking(providerConfig);

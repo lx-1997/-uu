@@ -184,6 +184,77 @@ const LARGE_DATA_URL_STORAGE_CHARS = 48_000;
 const CHAT_DRAFT_KEY_PREFIX = 'rdk:chat:draft:';
 const STUDIO_RESPONSE_MODE_LS = 'rdk:studio-response-mode';
 
+const LONG_HEX_TOKEN_RE = /\b[a-fA-F0-9]{64,}\b/g;
+const LONG_BASE64_TOKEN_RE = /\b[A-Za-z0-9+/_-]{80,}={0,2}\b/g;
+const ENCRYPTED_FIELD_RE =
+  /"(payload|cipher|ciphertext|encrypted|signature|token|authTag)"\s*:\s*"([A-Za-z0-9+/_=-]{40,})"/gi;
+const RDK_SHELL_READY_RE = /__RDK_SHELL_READY__/i;
+const RDK_SHELL_EXIT_RE = /__RDK_EXIT__[a-f0-9]{16,}__(?:\d+)?/i;
+const RDK_SHELL_WRAPPER_RE =
+  /(?:stty\s+-echo\b.*base64\s+-d|eval\s+"\$\(printf\b.*base64\s+-d|printf\s+'\\n__RDK_EXIT__)/i;
+const INTERNAL_DRAFT_TOOL_RE = /(device_exec|load_tools|board_openclaw_[a-z_]+|工具列表|未知工具|调用工具)/i;
+const INTERNAL_DRAFT_TONE_RE = /(不对|我先|先看看|先确认|那我先|可能是|或者|所以我现在|让我先)/;
+
+function stripRdkShellProtocolNoise(input: string): string {
+  const text = String(input || '');
+  if (!text) return '';
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const kept: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      kept.push(line);
+      continue;
+    }
+    if (RDK_SHELL_READY_RE.test(trimmed)) continue;
+    if (RDK_SHELL_EXIT_RE.test(trimmed)) continue;
+    if (RDK_SHELL_WRAPPER_RE.test(trimmed)) continue;
+    kept.push(line);
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trimStart();
+}
+
+function sanitizeCipherLikeText(input: string): string {
+  const text = stripRdkShellProtocolNoise(input);
+  if (!text) return '';
+  const withFieldMask = text.replace(
+    ENCRYPTED_FIELD_RE,
+    (_m, key: string, value: string) => `"${key}":"[hidden-${value.length}]"`,
+  );
+  const withHexMask = withFieldMask.replace(LONG_HEX_TOKEN_RE, (token) => `[hex-${token.length}]`);
+  return withHexMask.replace(LONG_BASE64_TOKEN_RE, (token) => {
+    const hasAlpha = /[A-Za-z]/.test(token);
+    const hasDigit = /\d/.test(token);
+    return hasAlpha && hasDigit ? `[cipher-${token.length}]` : token;
+  });
+}
+
+function sanitizeTerminalDisplayText(input: string): string {
+  return sanitizeCipherLikeText(sanitizeTerminalLineForDisplay(stripRdkShellProtocolNoise(input)));
+}
+
+function sanitizeReasoningDisplayText(input: string): string {
+  return sanitizeCipherLikeText(stripRdkShellProtocolNoise(input));
+}
+
+function stripInternalDraftMonologue(input: string): string {
+  const text = String(input || '');
+  if (!text) return '';
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const suspiciousCount = lines.reduce((n, line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return n;
+    return INTERNAL_DRAFT_TOOL_RE.test(trimmed) && INTERNAL_DRAFT_TONE_RE.test(trimmed) ? n + 1 : n;
+  }, 0);
+  if (suspiciousCount < 3) return text;
+  const kept = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+    return !(INTERNAL_DRAFT_TOOL_RE.test(trimmed) && INTERNAL_DRAFT_TONE_RE.test(trimmed));
+  });
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function parseStoredStudioResponseMode(): StudioResponseMode {
   try {
     const v = localStorage.getItem(STUDIO_RESPONSE_MODE_LS)?.trim();
@@ -1707,12 +1778,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     ? (aiBlocks[idx] as Extract<ChatBlock, { type: 'reasoning' }>)
                     : null;
                 if (existing) {
-                  existing.text += delta;
+                  existing.text = sanitizeReasoningDisplayText(`${existing.text}${delta}`);
                 } else {
                   reasoningBlockIndexRef.current = aiBlocks.length;
                   pushAiBlock({
                     type: 'reasoning',
-                    text: delta,
+                    text: sanitizeReasoningDisplayText(delta),
                     collapsible: true,
                     defaultCollapsed: false,
                   });
@@ -1961,7 +2032,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   /** 勿对单包再 slice 行数：服务端可能一次下发多行，截断会导致时间顺序断裂、与「完成」状态错位 */
                   const progressLines = rawChunk
                     .split(/\r?\n/)
-                    .map((line) => sanitizeTerminalLineForDisplay(line.trim()))
+                    .map((line) => sanitizeTerminalDisplayText(line.trim()))
                     .filter(Boolean);
                   if (progressLines.length === 0) break;
                   if (typeof state.rawIndex === 'number') {
@@ -1986,6 +2057,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               case 'tool_result': {
                 const toolName = resolveToolName(event.data);
                 const result = (event.data.result as string) || '';
+                const displayResult = sanitizeReasoningDisplayText(result);
                 const isError = event.data.isError as boolean;
                 const toolCallId = resolveToolId(event.data);
                 const state = toolTimelineRef.current[toolCallId || ''];
@@ -2012,8 +2084,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                           state: stateWord,
                           ms,
                         });
-                    if (isError && result.trim()) {
-                      const errOne = result.trim().replace(/\s+/g, ' ').slice(0, 220);
+                    if (isError && displayResult.trim()) {
+                      const errOne = displayResult.trim().replace(/\s+/g, ' ').slice(0, 220);
                       valueLine = `${valueLine} — ${errOne}`;
                     }
                     statusBlock.items[0] = {
@@ -2309,21 +2381,22 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (!mediaHandled) {
                   if (state?.hiddenQuick) {
                     const r = result.trim();
-                    if (r) {
+                    const rSafe = sanitizeReasoningDisplayText(r);
+                    if (rSafe) {
                       if (isError) {
-                        const errLine = tf('chat.tool.errLine', '{{tool}} 失败：{{msg}}', { tool: toolName, msg: r });
+                        const errLine = tf('chat.tool.errLine', '{{tool}} 失败：{{msg}}', { tool: toolName, msg: rSafe });
                         appendMarkdownParagraph(errLine);
                       } else {
-                        appendMarkdownParagraph(r);
+                        appendMarkdownParagraph(rSafe);
                       }
                     }
-                  } else if (result.includes('\n') || result.length > 100) {
+                  } else if (displayResult.includes('\n') || displayResult.length > 100) {
                     pushAiBlock({
                       type: 'terminal',
-                      lines: result
+                      lines: displayResult
                         .split(/\r?\n/)
                         .slice(0, 60)
-                        .map((ln) => sanitizeTerminalLineForDisplay(ln)),
+                        .map((ln) => sanitizeTerminalDisplayText(ln)),
                       label: tf('chat.tool.finalLabel', '{{tool}} · 最终结果', { tool: toolName }),
                       collapsible: true,
                       previewLines: 10,
@@ -2337,7 +2410,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       title: toolName,
                       items: [{
                         label: executorLabel(execFallback),
-                        value: result || (isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成')),
+                        value: displayResult || (isError ? t('chat.tool.fail', '失败') : t('chat.tool.done', '完成')),
                         ok: !isError,
                       }],
                     });
@@ -2420,9 +2493,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   if (reasoningWithText) {
                     const rNorm = reasoningWithText.text.replace(/\r\n/g, '\n').trim();
                     const sNorm = serverTrim.replace(/\r\n/g, '\n');
-                    aiText = !serverTrim || sNorm === rNorm ? '' : serverFill;
+                    aiText = !serverTrim || sNorm === rNorm ? '' : stripInternalDraftMonologue(serverFill);
                   } else {
-                    aiText = serverFill;
+                    aiText = stripInternalDraftMonologue(serverFill);
                   }
                   if (aiText.trim()) {
                     contentSlots.push({ kind: 'markdown', text: aiText });
@@ -2633,6 +2706,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         if (rafHandle) { cancelAnimationFrame(rafHandle); flushAiMessage(); }
         if (generation !== streamGenerationRef.current) return;
         const streamCompletedAt = Date.now();
+        const cleanedMonologueText = stripInternalDraftMonologue(pendingText || aiText);
+        if (cleanedMonologueText !== (pendingText || aiText)) {
+          aiText = cleanedMonologueText;
+          pendingText = cleanedMonologueText;
+          rebuildContentSlotsFromBlocksAndText(pendingBlocks.length > 0 ? pendingBlocks : aiBlocks, cleanedMonologueText);
+          updateAiMessage(aiText, pendingBlocks.length > 0 ? pendingBlocks : aiBlocks, true);
+        }
         let bodyTrim = (pendingText || aiText).trim();
         if (/<client-action\b/i.test(bodyTrim)) {
           applyClientActionsAcrossMarkdownSlots();

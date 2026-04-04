@@ -22,24 +22,28 @@ import type { Device } from '../shared/types.js';
 const READY_TOKEN = '__RDK_SHELL_READY__';
 const MAX_SESSION_AGE_MS = 2 * 60 * 60 * 1000;
 const IDLE_CLOSE_MS = 45 * 60 * 1000;
+const EXIT_TOKEN_LINE_RE = /__RDK_EXIT__[a-f0-9]{16,}__(?:\d+)?/i;
+const WRAPPER_EVAL_LINE_RE = /(?:stty\s+-echo\b.*base64\s+-d|eval\s+"\$\(printf\b.*base64\s+-d|printf\s+'\\n__RDK_EXIT__)/i;
 
 /**
  * PTY 常把本端写入的 `eval "$(printf ...` 整行回显到 stdout，且含超长 base64，易占满「最终结果」。
  * 连续剥掉若干行若以该回显开头（偶发重复回显或换行拆分）。
  */
 function stripPtyEchoedEvalWrapper(raw: string): string {
-  let t = raw.replace(/\r\n/g, '\n');
-  while (true) {
-    const lines = t.split('\n');
-    if (lines.length === 0) break;
-    const first = lines[0].trimStart();
-    if (first.startsWith('eval "$(printf')) {
-      t = lines.slice(1).join('\n').trimStart();
+  const lines = raw.replace(/\r\n/g, '\n').split('\n');
+  const kept: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      kept.push(line);
       continue;
     }
-    break;
+    if (trimmed.includes(READY_TOKEN)) continue;
+    if (EXIT_TOKEN_LINE_RE.test(trimmed)) continue;
+    if (WRAPPER_EVAL_LINE_RE.test(trimmed)) continue;
+    kept.push(line);
   }
-  return t;
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trimStart();
 }
 
 /** 供 exec 层二次净化；持久 shell 关闭时不会调用 */
