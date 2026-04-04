@@ -52,6 +52,10 @@ import { microcompact, type MicroCompactConfig } from "./context/microcompact.js
 import { createMiniAgentStream, type MiniAgentEvent, type MiniAgentResult } from "./agent-events.js";
 import { abortable, combineAbortSignals } from "./tools/abort.js";
 import { convertMessagesToPi } from "./message-convert.js";
+import {
+  createInlineThinkingRouter,
+  splitThinkingTagsFromAssistantText,
+} from "./inline-thinking-stream.js";
 import type { ToolHookRegistry } from "./tool-hooks.js";
 import type { CompactHookRegistry } from "./compact-hooks.js";
 import {
@@ -101,11 +105,49 @@ function extractVisibleTextFromThinkingBlocks(content: ContentBlock[]): string {
   const parts: string[] = [];
   for (const block of content) {
     if (block.type !== "text" || typeof block.text !== "string") continue;
-    const trimmed = block.text.trim();
-    const m = /^<thinking>\n?([\s\S]*?)\n?<\/thinking>\s*$/i.exec(trimmed);
-    if (m?.[1]?.trim()) parts.push(m[1].trim());
+    const { thinkingBodies } = splitThinkingTagsFromAssistantText(block.text);
+    for (const b of thinkingBodies) {
+      const t = b.trim();
+      if (t) parts.push(t);
+    }
   }
   return parts.join("\n\n");
+}
+
+const MESSAGE_DELTA_CATCHUP_CHUNK = 96;
+
+async function pushMessageDeltaCatchup(
+  stream: { push: (e: MiniAgentEvent) => void },
+  text: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!text) return;
+  const step = MESSAGE_DELTA_CATCHUP_CHUNK;
+  for (let i = 0; i < text.length; i += step) {
+    if (signal.aborted) break;
+    const delta = text.slice(i, i + step);
+    if (delta) stream.push({ type: "message_delta", delta });
+    if (i + step < text.length) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+  }
+}
+
+async function pushThinkingDeltaCatchup(
+  stream: { push: (e: MiniAgentEvent) => void },
+  body: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!body || signal.aborted) return;
+  const step = 72;
+  for (let i = 0; i < body.length; i += step) {
+    if (signal.aborted) break;
+    const delta = body.slice(i, i + step);
+    if (delta) stream.push({ type: "thinking_delta", delta });
+    if (i + step < body.length) {
+      await new Promise<void>((r) => setImmediate(r));
+    }
+  }
 }
 
 /**
@@ -660,6 +702,15 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 streamStopReason = undefined;
                 earlyParallelPromises.clear();
 
+                const inlineThinking = createInlineThinkingRouter();
+                /** 已推给前端的「可见正文」累计；用于对比 text_end 终包，避免仅终包才有 message_delta */
+                let streamedVisibleAccum = "";
+                /** 是否有任何 thinking_delta 已下发（含原生通道与正文内联拆分） */
+                let thinkingStreamedToClient = false;
+                const markThinkingStreamed = (delta: unknown) => {
+                  if (String(delta ?? "").length > 0) thinkingStreamedToClient = true;
+                };
+
                 const firstChunkBudgetMs = resolveLlmFirstChunkTimeoutMs();
                 const firstChunkCtrl = new AbortController();
                 let firstChunkTimer: ReturnType<typeof setTimeout> | null = null;
@@ -700,12 +751,14 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                   clearFirstChunkTimer();
 
                   switch (event.type) {
-                    case "thinking_delta":
-                      stream.push({ type: "thinking_delta", delta: (event as any).delta });
-                      // 累积 thinking 内容用于持久化
+                    case "thinking_delta": {
+                      const td = (event as any).delta;
+                      markThinkingStreamed(td);
+                      stream.push({ type: "thinking_delta", delta: td });
                       if (!currentThinkingParts) currentThinkingParts = [];
                       currentThinkingParts.push((event as any).delta);
                       break;
+                    }
 
                     case "thinking_end":
                       // 将 thinking 内容持久化到 assistant message
@@ -719,15 +772,87 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       }
                       break;
 
-                    case "text_delta":
-                      if (!firstTokenMs) firstTokenMs = Date.now() - runStartMs;
-                      stream.push({ type: "message_delta", delta: event.delta });
+                    case "text_delta": {
+                      const routed = inlineThinking.push(event.delta);
+                      if (routed.thinking.length > 0 || routed.message.length > 0) {
+                        if (!firstTokenMs) firstTokenMs = Date.now() - runStartMs;
+                      }
+                      for (const th of routed.thinking) {
+                        markThinkingStreamed(th);
+                        stream.push({ type: "thinking_delta", delta: th });
+                        if (!currentThinkingParts) currentThinkingParts = [];
+                        currentThinkingParts.push(th);
+                      }
+                      for (const msg of routed.message) {
+                        stream.push({ type: "message_delta", delta: msg });
+                        streamedVisibleAccum += msg;
+                      }
                       break;
+                    }
 
-                    case "text_end":
-                      turnTextParts.push(event.content);
-                      assistantContent.push({ type: "text", text: event.content });
+                    case "text_end": {
+                      const raw = String(event.content ?? "");
+                      const { thinkingBodies, visible } = splitThinkingTagsFromAssistantText(raw);
+
+                      for (const body of thinkingBodies) {
+                        assistantContent.push({
+                          type: "text",
+                          text: `<thinking>\n${body}\n</thinking>`,
+                        });
+                      }
+
+                      if (thinkingBodies.length > 0) {
+                        currentThinkingParts = null;
+                      } else if (currentThinkingParts && currentThinkingParts.length > 0) {
+                        const thinkingText = currentThinkingParts.join("").trim();
+                        if (thinkingText) {
+                          assistantContent.push({
+                            type: "text",
+                            text: `<thinking>\n${thinkingText}\n</thinking>`,
+                          });
+                        }
+                        currentThinkingParts = null;
+                      } else {
+                        currentThinkingParts = null;
+                      }
+
+                      if (visible.trim()) {
+                        assistantContent.push({ type: "text", text: visible });
+                      }
+                      turnTextParts.push(visible);
+
+                      if (
+                        !thinkingStreamedToClient &&
+                        thinkingBodies.length > 0 &&
+                        !abortSignal.aborted
+                      ) {
+                        for (const body of thinkingBodies) {
+                          if (!body || abortSignal.aborted) continue;
+                          await pushThinkingDeltaCatchup(stream, body, abortSignal);
+                          thinkingStreamedToClient = true;
+                        }
+                      }
+
+                      let catchUp = "";
+                      if (visible === streamedVisibleAccum) {
+                        catchUp = "";
+                      } else if (visible.startsWith(streamedVisibleAccum)) {
+                        catchUp = visible.slice(streamedVisibleAccum.length);
+                      } else if (!streamedVisibleAccum.trim()) {
+                        catchUp = visible;
+                      }
+
+                      if (catchUp && !abortSignal.aborted) {
+                        if (!firstTokenMs) firstTokenMs = Date.now() - runStartMs;
+                        await pushMessageDeltaCatchup(stream, catchUp, abortSignal);
+                      }
+
+                      streamedVisibleAccum = "";
+                      inlineThinking.reset();
+                      /** 下一轮正文段重新判定是否需 thinking 终包补推 */
+                      thinkingStreamedToClient = false;
                       break;
+                    }
 
                     case "toolcall_start":
                       break;
@@ -776,6 +901,31 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                     }
                   }
                 }
+
+                const orphan = inlineThinking.end();
+                for (const th of orphan.thinking) {
+                  markThinkingStreamed(th);
+                  stream.push({ type: "thinking_delta", delta: th });
+                  if (!currentThinkingParts) currentThinkingParts = [];
+                  currentThinkingParts.push(th);
+                }
+                for (const msg of orphan.message) {
+                  if (!firstTokenMs) firstTokenMs = Date.now() - runStartMs;
+                  stream.push({ type: "message_delta", delta: msg });
+                  streamedVisibleAccum += msg;
+                }
+                if (currentThinkingParts && currentThinkingParts.length > 0) {
+                  const t = currentThinkingParts.join("").trim();
+                  if (t) {
+                    assistantContent.push({ type: "text", text: `<thinking>\n${t}\n</thinking>` });
+                  }
+                  currentThinkingParts = null;
+                }
+                if (streamedVisibleAccum.trim()) {
+                  assistantContent.push({ type: "text", text: streamedVisibleAccum });
+                  turnTextParts.push(streamedVisibleAccum);
+                }
+                streamedVisibleAccum = "";
 
                 clearFirstChunkTimer();
                 const piAssistant = await abortable(eventStream.result(), abortSignal);

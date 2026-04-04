@@ -42,6 +42,7 @@ import {
   evaluateContextWindowGuard,
   resolveContextWindowInfo,
 } from "./context-window-guard.js";
+import { compactSubagentSummaryForParent } from "./context/subagent-summary-compact.js";
 import { getEffectiveContextWindowTokens } from "./context/window-economics.js";
 import type { CompactHookRegistry } from "./compact-hooks.js";
 import { SkillManager, type SkillMatch } from "./skills.js";
@@ -741,7 +742,7 @@ export class Agent {
     const runPromise = this.run(childSessionKey, params.task);
     runPromise
       .then(async (result) => {
-        const summary = result.text.slice(0, 2000);
+        const summary = compactSubagentSummaryForParent(result.text);
         this.emit({
           type: "subagent_summary",
           childSessionKey,
@@ -751,7 +752,7 @@ export class Agent {
         });
         const summaryMsg: Message = {
           role: "user",
-          content: `[子代理摘要]\n${summary}`,
+          content: `[子代理摘要${params.label ? ` · ${params.label}` : ""}]\n${summary}`,
           timestamp: Date.now(),
         };
         await this.sessions.append(params.parentSessionKey, summaryMsg);

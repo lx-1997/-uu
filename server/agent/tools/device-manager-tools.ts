@@ -1,6 +1,8 @@
 import type { Tool, ToolContext } from "./types.js";
+import type { Device } from "../../../shared/types.js";
 import { readDevices, writeDevices, serializedWriteDevices } from "../../storage.js";
 import { setDevicePasswordCache, deleteDevicePasswordCache } from "../../device-password-cache.js";
+import { buildSshPasswordCandidatesForDevice } from "../../device-ssh-credentials.js";
 import { verifySshConnection } from "../../ssh.js";
 import { v4 as uuid } from "uuid";
 import * as net from "node:net";
@@ -12,6 +14,32 @@ import { DEFAULT_SSH_PASSWORD, DEFAULT_SSH_USERNAME } from "../../constants.js";
 const DEFAULT_SSH_USER = DEFAULT_SSH_USERNAME;
 const SCAN_PORT = 22;
 const SCAN_TIMEOUT_MS = 1500;
+
+/** 与 `/api/devices/:id/ping` 一致：短握手超时，避免关机设备拖死列表 */
+const DEVICE_LIST_SSH_PROBE_MS = 8_000;
+
+async function probeSshReachable(device: Device): Promise<"reachable" | "unreachable" | "no_credentials"> {
+  const candidates = buildSshPasswordCandidatesForDevice(device);
+  if (candidates.length === 0) return "no_credentials";
+  for (const password of candidates) {
+    try {
+      await verifySshConnection(
+        {
+          host: device.host,
+          port: device.port ?? 22,
+          username: device.username,
+          password,
+        },
+        { readyTimeoutMs: DEVICE_LIST_SSH_PROBE_MS },
+      );
+      setDevicePasswordCache(device.host, device.username, device.port ?? 22, password);
+      return "reachable";
+    } catch {
+      /* try next */
+    }
+  }
+  return "unreachable";
+}
 
 function getLocalSubnets(): string[] {
   const nets = networkInterfaces();
@@ -50,17 +78,33 @@ function scanHost(ip: string, port: number, timeoutMs: number): Promise<boolean>
 
 export const deviceListTool: Tool<Record<string, never>> = {
   name: "device_list_all",
-  description: "列出 RDK Studio 中所有已添加的设备及其连接状态。无需参数。",
+  description:
+    "列出 RDK Studio 中所有已添加的设备。**会对每台设备做一次快速 SSH 握手探测**（与侧栏「在线」逻辑一致），并同时给出库内记录状态。" +
+    "库内 `connected` 只表示曾成功保存凭据，**不等于**当前网络一定能执行 device_exec；若探测为不可达，应先让用户在设备管理中重新连接或检查网络。无需参数。",
   inputSchema: { type: "object", properties: {} },
   async execute() {
     const devices = await readDevices();
     if (devices.length === 0) {
       return "当前没有已添加的设备。可以用 device_scan_network 扫描局域网，或用 device_connect_ssh 直接连接。";
     }
-    const lines = devices.map(
-      (d) => `• ${d.host}:${d.port ?? 22} (${d.username}) — ${d.status} [id: ${d.id}]`,
-    );
-    return `已添加 ${devices.length} 台设备:\n${lines.join("\n")}`;
+    const lines: string[] = [];
+    for (const d of devices) {
+      const live = await probeSshReachable(d as Device);
+      const liveLabel =
+        live === "reachable"
+          ? "当前SSH:可达"
+          : live === "unreachable"
+            ? "当前SSH:不可达（无法握手/认证，device_exec 可能无输出）"
+            : "当前SSH:无可用凭据";
+      const checked = (d as Device).lastCheckedAt ? ` 上次验证: ${(d as Device).lastCheckedAt}` : "";
+      lines.push(
+        `• ${d.host}:${d.port ?? 22} (${d.username}) — 库内:${d.status} | ${liveLabel}${checked} [id: ${d.id}]`,
+      );
+    }
+    const footer =
+      "\n\n说明：`库内:connected` 来自上次成功保存的凭据；「当前SSH」为本轮探测结果。" +
+      "若侧栏已显示离线但此处库内仍为 connected，属正常现象——请以「当前SSH」为准安排 device_exec，或让用户重新连接设备。";
+    return `已添加 ${devices.length} 台设备:\n${lines.join("\n")}${footer}`;
   },
 };
 
@@ -377,8 +421,12 @@ export const switchDeviceTool = (
       const available = devices.map((d) => `• ${d.host} (${d.status}) [id: ${d.id}]`);
       return `未找到设备 "${query}"。当前已添加的设备:\n${available.join("\n") || "（无）"}`;
     }
-    if (match.status !== "connected") {
-      return `设备 ${match.host} 当前状态为 ${match.status}，需要先连接才能切换。可以用 device_connect_ssh 重新连接。`;
+    /**
+     * 库内 `status` 在成功连接后长期为 connected，不会在断网时自动改为 disconnected
+     * （与侧栏「在线」由 ping 实时刷新不同）。不在此处用陈旧 status 拦截切换。
+     */
+    if (match.status === "disconnected") {
+      return `设备 ${match.host} 在库中标记为 disconnected，请先用 device_connect_ssh 重新连接后再切换。`;
     }
 
     if (ctx.onStudioDeviceBound) {

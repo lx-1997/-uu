@@ -15,6 +15,8 @@ export interface DeviceRunInfo {
   channel: ChannelSource;
   messageSummary: string;
   startedAt: number;
+  /** `_executeChat` 生成 runId 后回写，便于 queue_status 串联占用方 */
+  runId?: string;
 }
 
 export interface DeviceQueueStatus {
@@ -52,6 +54,13 @@ export class DeviceQueue {
       running: activeRuns.get(deviceLane) ?? null,
       pendingCount: pendingCounts.get(deviceLane) ?? 0,
     };
+  }
+
+  /** 当前设备 lane 已占用时，由 RDKClaw 在生成 runId 后写入，供排队方展示占用中的 trace */
+  updateActiveRunId(deviceLane: string, runId: string): void {
+    const cur = activeRuns.get(deviceLane);
+    if (!cur) return;
+    activeRuns.set(deviceLane, { ...cur, runId });
   }
 
   /**

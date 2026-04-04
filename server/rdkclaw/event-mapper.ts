@@ -1,6 +1,9 @@
 import type { MiniAgentEvent } from "../agent/openclaw-index.js";
 import type { RDKClawEvent } from "./types.js";
 import { sanitizeSecrets } from "./secret-sanitizer.js";
+import { compactSubagentSummaryForParent } from "../agent/context/subagent-summary-compact.js";
+
+export type RdkclawEventBase = { runId: string; sessionId: string; channel?: string };
 
 export function resolveExecutor(toolName?: string) {
   if (!toolName) return "rdkclaw_local";
@@ -12,7 +15,7 @@ export function resolveExecutor(toolName?: string) {
 
 export function mapMiniEvent(
   event: MiniAgentEvent,
-  base: { runId: string; sessionId: string },
+  base: RdkclawEventBase,
 ): RDKClawEvent | null {
   switch (event.type) {
     case "message_delta":
@@ -185,9 +188,9 @@ export function mapMiniEvent(
         data: {
           ...base,
           executor: "rdkclaw_local",
-          phase: "end",
+          phase: "subagent_done",
           message: `子代理完成: ${event.label || "task"}`,
-          subagent_summary: event.summary,
+          subagent_summary: compactSubagentSummaryForParent(event.summary),
         },
       };
     case "subagent_error":

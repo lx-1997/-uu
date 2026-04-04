@@ -2065,6 +2065,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'queue_status': {
+                if (studioResponseMode === 'quick') break;
+                const userHint = String(event.data.userHint ?? '').trim();
                 const pos = Number(event.data.position ?? 0);
                 const current = String(event.data.currentTask ?? '');
                 const channel = String(event.data.currentChannel ?? '');
@@ -2072,7 +2074,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   ? t('chat.queue.feishu', '飞书')
                   : channel === 'weixin'
                     ? t('chat.queue.weixin', '微信')
-                    : channel || t('chat.queue.other', '其他渠道');
+                    : channel === 'studio'
+                      ? t('chat.queue.studio', '工作台')
+                      : channel === 'autonomy'
+                        ? t('chat.queue.autonomy', '定时任务')
+                        : channel || t('chat.queue.other', '其他渠道');
                 const posLabel = pos > 0
                   ? tf('chat.queue.pos', '排在第 {{n}} 位', { n: pos })
                   : t('chat.queue.waiting', '正在排队');
@@ -2082,7 +2088,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     { label: t('chat.queue.state', '队列状态'), value: posLabel, ok: false },
                     ...(current ? [{ label: t('chat.queue.current', '当前任务'), value: `${channelLabel}: ${current}`, ok: true }] : []),
                   ],
-                  summary: tf('chat.queue.busy', '设备正忙，{{pos}}，请稍候...', { pos: posLabel }),
+                  summary: userHint || tf('chat.queue.busy', '设备正忙，{{pos}}，请稍候...', { pos: posLabel }),
                 });
                 updateAiMessage(aiText, aiBlocks);
                 break;

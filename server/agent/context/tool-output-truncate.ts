@@ -11,22 +11,26 @@
 /** 不同工具类型的截断阈值 */
 const TOOL_OUTPUT_LIMITS: Record<string, number> = {
   // 板端命令输出可能很长（编译日志、apt 安装等）
-  device_exec: 30_000,
+  device_exec: 24_000,
   // 文件内容
-  device_file_read: 50_000,
-  read: 50_000,
+  device_file_read: 40_000,
+  read: 40_000,
   // 搜索结果
-  web_search: 10_000,
-  web_fetch: 40_000,
+  web_search: 9000,
+  web_fetch: 32_000,
   // OpenClaw 交互
-  board_openclaw_delegate: 20_000,
-  board_openclaw_chat: 15_000,
-  board_openclaw_assess: 10_000,
+  board_openclaw_delegate: 16_000,
+  board_openclaw_chat: 12_000,
+  board_openclaw_assess: 9000,
+  fleet_board_delegate: 16_000,
+  fleet_board_broadcast: 14_000,
   // 诊断输出
-  device_diagnose: 15_000,
+  device_diagnose: 12_000,
+  exec: 18_000,
+  bash: 18_000,
 };
 
-const DEFAULT_LIMIT = 20_000;
+const DEFAULT_LIMIT = 16_000;
 
 /**
  * 智能截断工具输出：保留 head + tail，丢弃中间

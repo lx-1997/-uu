@@ -85,6 +85,9 @@ import { evaluatePermissionGuard, type SandboxGuardContext } from "./permission-
 import { mapMiniEvent, resolveExecutor } from "./event-mapper.js";
 import { sanitizeSecrets } from "./secret-sanitizer.js";
 import { TextDeltaSmoother } from "./text-delta-smoother.js";
+import { getRdkclawTextSmootherOpts } from "../streaming-by-channel.js";
+import { buildQueueStatusPayload } from "./queue-status-format.js";
+import { rdkclawRunTrace } from "./run-trace-log.js";
 import {
   classifyModelTier,
   type BoardSnapshot,
@@ -935,14 +938,23 @@ export class RDKClawApp {
 
     const queueStatus = this.deviceQueue.getStatus(deviceLane);
     if (queueStatus.running) {
+      const pos = queueStatus.pendingCount + 1;
+      rdkclawRunTrace("queue_wait", {
+        deviceLane,
+        position: pos,
+        currentChannel: queueStatus.running.channel,
+        currentTask: queueStatus.running.messageSummary,
+        runningRunId: queueStatus.running.runId,
+      });
       yield {
         type: "queue_status" as const,
-        data: {
-          position: queueStatus.pendingCount + 1,
+        data: buildQueueStatusPayload({
+          deviceLane,
+          position: pos,
           currentTask: queueStatus.running.messageSummary,
           currentChannel: queueStatus.running.channel,
-          deviceLane,
-        },
+          runningRunId: queueStatus.running.runId,
+        }),
       };
     }
 
@@ -1023,7 +1035,7 @@ export class RDKClawApp {
         };
         return;
       }
-      yield* this._executeChat(req, sessionKey, providerConfig, slot);
+      yield* this._executeChat(req, sessionKey, providerConfig, slot, deviceLane);
     } finally {
       slot.release();
     }
@@ -1034,17 +1046,28 @@ export class RDKClawApp {
     sessionKey: string,
     providerConfig: ProviderConfig,
     _slot: { release: () => void },
+    deviceLane: string,
   ): AsyncGenerator<RDKClawEvent> {
     const externalAbortSignal = req.abortSignal;
     let abortedByClient = Boolean(externalAbortSignal?.aborted);
 
     /** 与下方 `runAgents.set` 使用同一 ID，避免首条 setup meta 与真实 run 不一致导致客户端 cancel 404 */
     const runId = crypto.randomUUID();
+    const traceChannel = req.channel || "studio";
+    this.deviceQueue.updateActiveRunId(deviceLane, runId);
+    rdkclawRunTrace("run_start", {
+      runId,
+      sessionId: sessionKey,
+      channel: traceChannel,
+      phase: "setup",
+      deviceLane,
+    });
     yield {
       type: "meta",
       data: {
         runId,
         sessionId: sessionKey,
+        channel: traceChannel,
         executor: "rdkclaw_local",
         phase: "setup",
         message: "正在准备上下文...",
@@ -1157,7 +1180,7 @@ export class RDKClawApp {
           },
     };
 
-    const base = { runId, sessionId: sessionKey };
+    const base = { runId, sessionId: sessionKey, channel: traceChannel };
     const queue: RDKClawEvent[] = [];
     let queueWaiters: Array<() => void> = [];
     const wakeQueue = () => {
@@ -1374,11 +1397,12 @@ export class RDKClawApp {
       | { runId?: string; text: string; turns: number; toolCalls: number; skillTriggered?: string; memoriesUsed?: number }
       | null = null;
     this.runAgents.set(runId, agent);
+    const smootherOpts = getRdkclawTextSmootherOpts(traceChannel, studioQuick);
     const textSmoother = TextDeltaSmoother.create(
       (delta) => {
         pushEvent({ type: "text", data: { delta, ...base } });
       },
-      { tickMs: 8, minPerTick: 1 },
+      smootherOpts,
     );
     const handleExternalAbort = () => {
       abortedByClient = true;
@@ -1542,6 +1566,13 @@ export class RDKClawApp {
           toolsUsed: toolsUsedFail,
           errorDetail: "run_aborted",
         });
+        rdkclawRunTrace("run_done", {
+          runId,
+          sessionId: sessionKey,
+          channel: traceChannel,
+          outcome: "cancelled",
+          tool_calls: runMetrics.localToolCalls + runMetrics.boardToolCalls,
+        });
         yield {
           type: "run_complete",
           data: {
@@ -1556,6 +1587,13 @@ export class RDKClawApp {
         return;
       }
       const errMsg = failed instanceof Error ? failed.message : String(failed);
+      rdkclawRunTrace("run_error", {
+        runId,
+        sessionId: sessionKey,
+        channel: traceChannel,
+        error: errMsg.slice(0, 500),
+        tool_calls: runMetrics.localToolCalls + runMetrics.boardToolCalls,
+      });
       recordConversationTurnFromReq(req, {
         outcome: "error",
         assistantMessage: "",
@@ -1661,6 +1699,14 @@ export class RDKClawApp {
     const elapsedDisplay = elapsedSec >= 60
       ? `${Math.floor(elapsedSec / 60)} 分 ${elapsedSec % 60} 秒`
       : `${elapsedSec} 秒`;
+    rdkclawRunTrace("run_done", {
+      runId,
+      sessionId: sessionKey,
+      channel: traceChannel,
+      outcome: "ok",
+      tool_calls: totalCalls,
+      elapsed_ms: totalElapsedMs,
+    });
     yield {
       type: "run_complete",
       data: {

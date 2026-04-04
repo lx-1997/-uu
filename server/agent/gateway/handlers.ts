@@ -20,6 +20,10 @@ import {
   TICK_INTERVAL_MS, MAX_PAYLOAD_BYTES,
   type HelloOk, type ErrorShape,
 } from "./protocol.js";
+import {
+  getGatewayChatDeltaProfile,
+  normalizeStreamChannel,
+} from "../../streaming-by-channel.js";
 
 // ============== 类型 ==============
 
@@ -108,24 +112,31 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
     sessionKey?: string;
     message?: string;
     idempotencyKey?: string;
-    clientMeta?: { correlationId?: string; studioRunId?: string; studioSessionKey?: string };
+    /** 来源渠道：板端网关可传 openclaw / studio，用于 delta 节奏 */
+    channel?: string;
+    clientMeta?: {
+      correlationId?: string;
+      studioRunId?: string;
+      studioSessionKey?: string;
+      channel?: string;
+    };
   } | undefined;
   if (!p?.message) {
     return { ok: false, error: errorShape(ErrorCodes.INVALID_REQUEST, "message required") };
   }
   const sessionKey = p.sessionKey || "main";
+  const streamCh = normalizeStreamChannel(p.channel || p.clientMeta?.channel);
+  const { throttleMs: DELTA_THROTTLE_MS, charFlush: DELTA_CHAR_FLUSH } =
+    getGatewayChatDeltaProfile(streamCh);
 
   // 追踪 agent 内部的 runId（通过 agent_start 事件获取）
   let agentRunId: string | undefined;
 
-  // Delta 限流（对齐 openclaw，并增强首包与累计字符_flush，改善长流式体感）
+  // Delta 限流（对齐 openclaw，并增强首包与累计字符_flush；参数按渠道在 streaming-by-channel 调优）
   let deltaBuffer = "";
   let lastDeltaSentAt = 0;
   let lastDeltaSentLen = 0;
   let firstDeltaFlushed = false;
-  const DELTA_THROTTLE_MS = 120;
-  /** 未满节流间隔但已积压足够字符时也推送，避免长段落「半天不动」 */
-  const DELTA_CHAR_FLUSH = 56;
 
   // 异步执行，不阻塞响应（对齐 openclaw chat.send 的 ACK-then-stream 模式）
   const unsub = ctx.agent.subscribe((event: MiniAgentEvent) => {
@@ -139,8 +150,12 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
     const eventRunId = "runId" in event ? (event as { runId: string }).runId : undefined;
     if (eventRunId && eventRunId !== agentRunId) return;
 
-    // 桥接 agent 事件 → gateway 广播
-    ctx.broadcast("agent", { ...event, sessionKey });
+    // 桥接 agent 事件 → gateway 广播（附带 trace 便于板端/VPN 弱网下排障）
+    ctx.broadcast("agent", {
+      ...event,
+      sessionKey,
+      streamChannel: streamCh,
+    });
 
     // 转换为 chat delta/final（对齐 openclaw emitChatDelta / emitChatFinal）
     if (event.type === "message_delta") {
@@ -155,23 +170,45 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
         lastDeltaSentAt = now;
         const newText = deltaBuffer.slice(lastDeltaSentLen);
         lastDeltaSentLen = deltaBuffer.length;
-        ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "delta", text: newText }, { dropIfSlow: true });
+        ctx.broadcast(
+          "chat",
+          { runId: agentRunId, sessionKey, state: "delta", text: newText, streamChannel: streamCh },
+          { dropIfSlow: true },
+        );
       }
     } else if (event.type === "message_end") {
       deltaBuffer = "";
       lastDeltaSentLen = 0;
       lastDeltaSentAt = 0;
       firstDeltaFlushed = false;
-      ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "final", text: event.text });
+      ctx.broadcast("chat", {
+        runId: agentRunId,
+        sessionKey,
+        state: "final",
+        text: event.text,
+        streamChannel: streamCh,
+      });
     } else if (event.type === "agent_error") {
-      ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "error", error: event.error });
+      ctx.broadcast("chat", {
+        runId: agentRunId,
+        sessionKey,
+        state: "error",
+        error: event.error,
+        streamChannel: streamCh,
+      });
     }
   });
 
   ctx.agent.run(sessionKey, p.message)
     .catch((err) => {
       // 广播运行时错误，确保客户端能收到错误通知
-      ctx.broadcast("chat", { runId: agentRunId, sessionKey, state: "error", error: String(err) });
+      ctx.broadcast("chat", {
+        runId: agentRunId,
+        sessionKey,
+        state: "error",
+        error: String(err),
+        streamChannel: streamCh,
+      });
     })
     .finally(() => {
       unsub();

@@ -469,11 +469,7 @@ export class WeixinPollingChannel {
         channel: "weixin",
       })) {
         if (event.type === "queue_status") {
-          const pos = Number(event.data?.position ?? 0);
-          const current = String(event.data?.currentTask ?? "");
-          const hint = pos > 0
-            ? `当前设备正在处理其他任务${current ? `（${current}）` : ""}，你的请求排在第 ${pos} 位，请稍候...`
-            : "正在排队中，请稍候...";
+          const hint = String(event.data?.userHint || "").trim() || "正在排队中，请稍候...";
           await poller.client.sendText(fromUserId, contextToken, hint).catch(() => {});
           continue;
         }
