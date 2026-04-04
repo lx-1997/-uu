@@ -111,6 +111,41 @@ export interface BoardSkillInfo {
   description: string;
 }
 
+const KNOWN_RDK_EXAMPLE_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /fcos|yolo(?![\w]*\s*world)|mobilenet.*ssd|efficientnet.*det|目标检测|物体检测|检测例程/i, label: "目标检测" },
+  { pattern: /yolo.?world|开放词汇.*检测|open.?vocab/i, label: "YOLO-World 开放词汇检测" },
+  { pattern: /mono2d.*body|人体检测|人体识别|骨骼|body_detection/i, label: "人体检测" },
+  { pattern: /hobot_usb_cam|hobot_mipi_cam|相机节点|usb_cam.*launch/i, label: "相机节点" },
+  { pattern: /hobot_codec|图像编解码/i, label: "图像编解码" },
+  { pattern: /hobot_stereo|双目|stereo_usb_cam/i, label: "双目相机" },
+  { pattern: /hand_lmk|hand_gesture|手势识别|手部关键点/i, label: "手势识别" },
+  { pattern: /parking_perception|停车区域/i, label: "停车区域检测" },
+  { pattern: /elevation_net|高程网络/i, label: "高程网络" },
+  { pattern: /hobot_dnn_example|bpu.*推理|dnn.*example/i, label: "BPU 推理" },
+  { pattern: /slam|建图|vslam|orb.?slam|cartographer/i, label: "SLAM 建图" },
+  { pattern: /导航|navigation|nav2|move_base/i, label: "自主导航" },
+  { pattern: /语义分割|semantic.*seg|hobot_sem/i, label: "语义分割" },
+  { pattern: /图像分类|image.*classif|mobilenet.*cls|resnet/i, label: "图像分类" },
+  { pattern: /hobot_audio|语音|audio.*asr|tts|智能语音/i, label: "音频/语音" },
+  { pattern: /跟踪|tracking|hobot_mot|多目标跟踪/i, label: "目标跟踪" },
+  { pattern: /姿态估计|pose.*estim|人体姿态/i, label: "姿态估计" },
+  { pattern: /点云|point.?cloud|lidar|雷达/i, label: "点云/LiDAR" },
+  { pattern: /hobot_visualization|web.*可视化|foxglove/i, label: "可视化" },
+  { pattern: /模型.*部署|hbm.*转换|bpu.*编译|model.*convert/i, label: "模型部署" },
+];
+
+function tryShortCircuitAssess(task: string): string | null {
+  const hit = KNOWN_RDK_EXAMPLE_PATTERNS.find((p) => p.pattern.test(task));
+  if (!hit) return null;
+  return JSON.stringify({
+    canHandle: true,
+    confidence: 0.95,
+    reason: `任务匹配 RDK 官方标准例程（${hit.label}），板端 OpenClaw 可承接`,
+    suggestedPath: "board",
+    shortCircuit: true,
+  }, null, 2);
+}
+
 export function boardOpenClawAssessTool(
   deviceId: string,
   manager: OpenClawDeploymentManager,
@@ -152,6 +187,13 @@ export function boardOpenClawAssessTool(
           confidence: 0,
           reason: "设备不存在，无法进行板端能力评估",
         }, null, 2);
+      }
+
+      const shortCircuit = tryShortCircuitAssess(input.task);
+      if (shortCircuit) {
+        const normalized = normalizeAssessment(shortCircuit);
+        recordAssessSnapshot(ctx.sessionKey, deviceId, normalized, input.task);
+        return shortCircuit;
       }
 
       const boardDevice = toBoardDevice(device);

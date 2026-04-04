@@ -33,6 +33,7 @@ import { createStudioTools, type StudioAutonomyRuntime } from "../agent/tools/st
 import { createForumTools } from "../agent/tools/forum-tools.js";
 import { createWebTools } from "../agent/tools/web-tools.js";
 import { createSkillhubTools } from "../agent/tools/skillhub-tools.js";
+import { initRdkDocCache, stopRefreshTimer } from "./rdk-doc-local-cache.js";
 import { createSkillDiscoveryTools } from "../agent/tools/skill-discovery-tools.js";
 import { OpenClawDeploymentManager } from "../managers/OpenClawDeploymentManager.js";
 import { readDevices } from "../storage.js";
@@ -333,6 +334,10 @@ export class RDKClawApp {
     this.policyStore = new RDKClawPolicyStore();
     this.workspaceStore = new UserWorkspaceStore(workspaceDir);
     this.pendingMapsCleanupInterval = setInterval(() => this.cleanupStalePendingMaps(), 60_000);
+
+    initRdkDocCache().catch((err) => {
+      console.warn('[RDKClawApp] rdk-doc 本地缓存初始化失败（不影响正常功能）:', err);
+    });
   }
 
   /** 释放定时器等资源，用于热重载和测试场景 */
@@ -341,6 +346,7 @@ export class RDKClawApp {
       clearInterval(this.pendingMapsCleanupInterval);
       this.pendingMapsCleanupInterval = null;
     }
+    stopRefreshTimer();
     this.sessionAutoApprove.clear();
     this.boardSkillSnapshotCache.clear();
     this.pendingApprovals.clear();

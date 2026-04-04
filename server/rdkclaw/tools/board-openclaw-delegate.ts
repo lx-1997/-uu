@@ -42,6 +42,11 @@ function toBoardDevice(device: SharedDevice) {
 const DELEGATE_MAX_RETRIES = 1;
 const DELEGATE_RETRY_DELAY_MS = 2000;
 
+const DELEGATE_STALL_CHECK_MS = 10_000;
+const DELEGATE_STALL_FIRST_ALERT_MS = 25_000;
+const DELEGATE_STALL_REPEAT_MS = 30_000;
+const DELEGATE_MAX_EXECUTION_MS = 5 * 60 * 1000;
+
 function getBoardHealth(
   manager: OpenClawDeploymentManager,
   boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
@@ -186,7 +191,13 @@ export function boardOpenClawDelegateTool(
         msgParts.push(`\n${assessInject}`);
       }
       if (input.guidance?.trim()) {
-        msgParts.push(`\nrdkclaw_guidance: ${input.guidance.trim()}`);
+        const g = input.guidance.trim();
+        const hasConfirmedCmd = /RDKClaw\s*已确认|已由\s*RDKClaw\s*确认|已确认.*可直接执行/i.test(g);
+        msgParts.push(
+          hasConfirmedCmd
+            ? `\nrdkclaw_guidance (含已确认命令，可直接执行无需重复探测): ${g}`
+            : `\nrdkclaw_guidance: ${g}`,
+        );
       }
       if (boardSkills && boardSkills.length > 0) {
         const installed = boardSkills.map((s) =>
@@ -218,12 +229,19 @@ export function boardOpenClawDelegateTool(
           const settle = (fn: () => void) => {
             if (settled) return;
             settled = true;
+            if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
+            if (execTimeout) { clearTimeout(execTimeout); execTimeout = null; }
             fn();
           };
           let output = "";
           let pending = "";
           let lastEmitAt = 0;
           let handle: { abort: () => void } | null = null;
+          let stallTimer: ReturnType<typeof setInterval> | null = null;
+          let execTimeout: ReturnType<typeof setTimeout> | null = null;
+          const startAt = Date.now();
+          let lastChunkAt = Date.now();
+
           const flushProgress = (force = false) => {
             const now = Date.now();
             if (!force && now - lastEmitAt < 200) return;
@@ -233,6 +251,30 @@ export function boardOpenClawDelegateTool(
             lastEmitAt = now;
             onProgress?.(toSend, ctx.toolCallId);
           };
+
+          if (onProgress) {
+            let firstAlertDone = false;
+            stallTimer = setInterval(() => {
+              if (settled) return;
+              const silent = Date.now() - lastChunkAt;
+              const total = Math.floor((Date.now() - startAt) / 1000);
+              const threshold = firstAlertDone ? DELEGATE_STALL_REPEAT_MS : DELEGATE_STALL_FIRST_ALERT_MS;
+              if (silent < threshold) return;
+              firstAlertDone = true;
+              lastChunkAt = Date.now();
+              onProgress?.(`\n[板端 OpenClaw 正在推理中… 总计 ${total}s]\n`, ctx.toolCallId);
+            }, DELEGATE_STALL_CHECK_MS);
+          }
+
+          execTimeout = setTimeout(() => {
+            if (settled) return;
+            try { handle?.abort(); } catch { /* ignore */ }
+            const partial = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
+            const fallback = partial.length > 20
+              ? partial + "\n\n[RDKClaw：板端执行超时（5 分钟），以上为已收集的部分结果。建议用 device_exec 直接执行已确认命令。]"
+              : "板端 OpenClaw 执行超时（5 分钟），未收到有效结果。建议用 device_exec 直接执行已确认命令，或拆分为更小的步骤。";
+            settle(() => resolve({ output: fallback, success: partial.length > 20 }));
+          }, DELEGATE_MAX_EXECUTION_MS);
 
           const onAbort = () => {
             try { handle?.abort(); } catch { /* ignore */ }
@@ -244,6 +286,7 @@ export function boardOpenClawDelegateTool(
             msg,
             (chunk) => {
               if (settled) return;
+              lastChunkAt = Date.now();
               output += chunk;
               pending += chunk;
               flushProgress(false);

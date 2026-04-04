@@ -2,6 +2,7 @@ import type { Tool } from "./types.js";
 import { decodeEntities, normalizeUrl, stripHtml, truncate } from "./web-text-utils.js";
 import type { WebToolOptions } from "./web-tool-options.js";
 import { createBrowserFetchTools } from "./browser-tools.js";
+import { readCachedDoc } from "../../rdkclaw/rdk-doc-local-cache.js";
 
 export type { WebToolOptions };
 
@@ -883,6 +884,21 @@ function webFetchTool(options: WebToolOptions): Tool<{ url: string; maxChars?: n
     async execute(input) {
       const url = normalizeUrl(input.url);
       const maxChars = Math.max(2000, Math.min(120_000, Number(input.maxChars || maxFetchChars)));
+
+      // ── rdk_doc 本地缓存快速路径 ──
+      const cachedMd = readCachedDoc(url);
+      if (cachedMd) {
+        const body = truncate(cachedMd, maxChars);
+        return [
+          `source: ${url}`,
+          `cache: local (rdk-doc-cache, GitHub D-Robotics/rdk_doc)`,
+          `content_type: text/markdown`,
+          `fetched_at: ${new Date().toISOString()}`,
+          '',
+          body,
+        ].join('\n');
+      }
+
       const timeout = withTimeout(timeoutMs);
       try {
         const { res, text: raw, retried } = await httpGetPageText(url, timeout.signal);
