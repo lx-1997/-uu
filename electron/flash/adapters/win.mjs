@@ -131,7 +131,8 @@ function resolveIoPolicy(options = {}) {
 
 function runPowerShell(script) {
   return new Promise((resolve, reject) => {
-    const child = spawn(getPowerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+    /** -NonInteractive：避免宿主在异常路径下尝试交互，缩短部分环境下的冷启动体感 */
+    const child = spawn(getPowerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
       windowsHide: true,
     });
     let stdout = '';

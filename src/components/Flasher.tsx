@@ -238,6 +238,8 @@ export default function Flasher() {
   /* ── drive state ── */
   const [drives, setDrives] = useState<FlashDrive[]>([]);
   const [selectedDrive, setSelectedDrive] = useState('');
+  /** 磁盘枚举为 IPC + 系统调用（Win: PowerShell Get-Disk），避免无反馈显得「卡住」 */
+  const [drivesScanning, setDrivesScanning] = useState(false);
 
   /* ── flash execution state ── */
   const [phase, setPhase] = useState<FlashPhase>('idle');
@@ -492,6 +494,8 @@ export default function Flasher() {
       );
       return;
     }
+    setDrivesScanning(true);
+    setError('');
     try {
       const result = await window.rdkDesktop.flashListDrives();
       if (!result.ok) {
@@ -514,6 +518,8 @@ export default function Flasher() {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg || t('flasher.err.scanException', '磁盘扫描异常'));
+    } finally {
+      setDrivesScanning(false);
     }
   };
 
@@ -1468,9 +1474,11 @@ export default function Flasher() {
                     <div className="config-grid">
                       {drives.length === 0 ? (
                         <div className="config-card-desc">
-                          {caps.supportsDriveScan
-                            ? t('flasher.drives.empty', '未检测到可用 SD/eMMC 目标盘，请插入 TF/SD 卡后刷新')
-                            : t('flasher.drives.unsupported', '当前环境暂不支持磁盘检测')}
+                          {drivesScanning
+                            ? t('flasher.drives.scanning', '正在枚举本机磁盘，请稍候…')
+                            : caps.supportsDriveScan
+                              ? t('flasher.drives.empty', '未检测到可用 SD/eMMC 目标盘，请插入 TF/SD 卡后刷新')
+                              : t('flasher.drives.unsupported', '当前环境暂不支持磁盘检测')}
                         </div>
                       ) : (
                         drives.map((d) => (
@@ -1490,8 +1498,16 @@ export default function Flasher() {
                       )}
                     </div>
                     {caps.supportsDriveScan && (
-                      <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={scanDrives}>
-                        {t('flasher.btn.refreshDrives', '刷新磁盘列表')}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ marginTop: 8 }}
+                        disabled={drivesScanning}
+                        onClick={() => void scanDrives()}
+                      >
+                        {drivesScanning
+                          ? t('flasher.btn.scanningDrives', '正在扫描磁盘…')
+                          : t('flasher.btn.refreshDrives', '刷新磁盘列表')}
                       </button>
                     )}
                   </div>

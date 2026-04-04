@@ -117,6 +117,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.hub.sidebarHintShort': 'Tap to switch · synced with the chat panel',
   'chat.hub.threadActivePill': 'Live',
   'chat.hub.time.yesterday': 'Yesterday',
+  'chat.hub.timeLocalHint': 'Shown in your system timezone',
   'chat.hub.continueHint':
     'Use the Dock below to continue the selected thread; switching on the left loads that session from this device and syncs with the Dock.',
   'chat.hub.sidebarHint': 'Click a thread to open it and continue in the Dock below.',
@@ -1038,6 +1039,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.drives.empty': 'No SD/eMMC target found; insert a card and refresh',
   'flasher.drives.unsupported': 'Drive detection not available in this environment',
   'flasher.btn.refreshDrives': 'Refresh drives',
+  'flasher.btn.scanningDrives': 'Scanning drives…',
+  'flasher.drives.scanning': 'Enumerating disks…',
   'flasher.section.summary': 'Summary',
   'flasher.label.device': 'Device',
   'flasher.label.image': 'Image',

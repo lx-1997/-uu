@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, MessageSquarePlus, Trash2 } from 'lucide-react';
+import { Download, MessageSquarePlus, Search, Trash2 } from 'lucide-react';
 import { useHubDockAnchor } from '../contexts/HubDockAnchorContext';
 import { useAppState } from '../hooks/useAppState';
 import { useAIChatStore } from '../hooks/useAIChatStore';
@@ -13,17 +13,9 @@ import {
   toChatDeviceId,
 } from '../utils/chat-history-storage';
 import { buildThreadSummaryLine } from '../utils/chat-history-thread-label';
+import { threadLastActivityMs } from '../utils/chat-message-timestamp';
 import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
-import type { ChatMessage, Device } from '../app-types';
-
-function threadLastActivityMs(msgs: ChatMessage[]): number {
-  if (!msgs.length) return 0;
-  let max = 0;
-  for (const m of msgs) {
-    max = Math.max(max, m.id, m.startedAt ?? 0);
-  }
-  return max;
-}
+import type { Device } from '../app-types';
 
 function deviceSectionLabel(id: string, devices: Device[], tr: (k: string, zh: string) => string): string {
   if (id === GLOBAL_CHAT_DEVICE_ID) return tr('dock.history.global', '未绑定设备 / 全局');
@@ -37,7 +29,17 @@ function deviceSectionLabel(id: string, devices: Device[], tr: (k: string, zh: s
   return `${tr('chat.hub.archivedBucket', '本机存档')} · ${id.slice(0, 8)}…`;
 }
 
-/** 侧栏列表用短时间标签（降低视觉噪音） */
+/** 扁平列表用短设备名（避免与摘要抢宽度） */
+function deviceRowShortLabel(id: string, devices: Device[], tr: (k: string, zh: string) => string): string {
+  if (id === GLOBAL_CHAT_DEVICE_ID) return tr('chat.hub.deviceShort.global', '全局');
+  const d = devices.find((x) => x.id === id);
+  const name = d?.name?.trim();
+  if (name) return name.length > 14 ? `${name.slice(0, 12)}…` : name;
+  if (d?.ip) return d.ip;
+  return `${id.slice(0, 6)}…`;
+}
+
+/** 侧栏列表时间：统一按用户本机时区 */
 function formatChatHubThreadTime(
   ms: number,
   tr: (k: string, zh: string) => string,
@@ -48,7 +50,11 @@ function formatChatHubThreadTime(
   const now = new Date();
   const sod = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diffDays = Math.round((sod(now) - sod(d)) / 86400000);
-  const hm = d.toLocaleTimeString(isEn ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const hm = new Intl.DateTimeFormat(isEn ? 'en-US' : 'zh-CN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: isEn,
+  }).format(d);
   if (diffDays === 0) return hm;
   if (diffDays === 1) {
     return `${tr('chat.hub.time.yesterday', '昨天')} ${hm}`;
@@ -63,11 +69,14 @@ function formatChatHubThreadTime(
 
 type SelectedThread = { devId: string; sessionId: string };
 
+type ThreadRow = { sessionId: string; summary: string; lastAt: number };
+
+type ThreadViewMode = 'all' | 'live';
+
 export default function AiChatHubPage() {
   const {
     devices,
     activeDevice,
-    setActiveDevice,
     setChatExpanded,
     addToast,
     showConfirm,
@@ -84,6 +93,9 @@ export default function AiChatHubPage() {
 
   const [archiveRev, setArchiveRev] = useState(0);
   const [selected, setSelected] = useState<SelectedThread | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [viewMode, setViewMode] = useState<ThreadViewMode>('all');
+  const [deviceFilter, setDeviceFilter] = useState<'all' | string>('all');
 
   const studioDev = getStudioChatDeviceId();
   const studioSid = getStudioChatSessionId();
@@ -98,6 +110,7 @@ export default function AiChatHubPage() {
     setSelected({ devId: studioDev, sessionId: studioSid });
   }, [studioDev, studioSid]);
 
+  /** 不依赖 chatMessages：避免每条消息触发全量扫盘 */
   const deviceBuckets = useMemo(() => {
     const stored = listStoredChatHistoryDeviceIds();
     const ids = new Set<string>([GLOBAL_CHAT_DEVICE_ID, ...stored, ...devices.map((d) => d.id)]);
@@ -105,21 +118,22 @@ export default function AiChatHubPage() {
     if (pref) ids.add(pref);
     ids.add(studioDev);
     return [...ids].sort();
-  }, [devices, activeDevice, studioDev, archiveRev, chatMessages.length]);
+  }, [devices, activeDevice, studioDev, archiveRev]);
 
-  const threadsByDevice = useMemo(() => {
-    const map = new Map<string, Array<{ sessionId: string; summary: string; lastAt: number }>>();
+  /** 仅从存储与会话 id 构建；刷新依赖 archiveRev / 设备列表，不因每条新消息重扫 */
+  const threadsByDeviceBase = useMemo(() => {
+    const map = new Map<string, ThreadRow[]>();
     for (const devId of deviceBuckets) {
       const rawSids = listStoredStudioSessionIdsForDevice(devId);
       const sidSet = new Set<string>(rawSids);
       if (toChatDeviceId(devId) === studioDev && studioSid) sidSet.add(studioSid);
       const sids = [...sidSet].filter(
         (sessionId) =>
-          sessionId === studioSid && toChatDeviceId(devId) === studioDev
+          (sessionId === studioSid && toChatDeviceId(devId) === studioDev)
           || hasPersistedChatHistoryForSession(devId, sessionId),
       );
       if (sids.length === 0) continue;
-      const rows = sids.map((sessionId) => {
+      const rows: ThreadRow[] = sids.map((sessionId) => {
         const msgs = loadChatHistoryFromStorage(devId, sessionId);
         const lastAt = threadLastActivityMs(msgs);
         const summary = msgs.length ? buildThreadSummaryLine(msgs, t) : '';
@@ -133,18 +147,76 @@ export default function AiChatHubPage() {
       map.set(devId, rows);
     }
     return map;
-  }, [deviceBuckets, studioDev, studioSid, t, archiveRev, chatMessages.length]);
+  }, [deviceBuckets, studioDev, studioSid, t, archiveRev]);
 
-  const visibleDeviceBuckets = useMemo(() => {
-    const ids = deviceBuckets.filter((id) => (threadsByDevice.get(id)?.length ?? 0) > 0);
-    return ids.sort((a, b) => {
-      const rowsA = threadsByDevice.get(a) ?? [];
-      const rowsB = threadsByDevice.get(b) ?? [];
-      const maxA = rowsA.length ? Math.max(...rowsA.map((r) => r.lastAt)) : 0;
-      const maxB = rowsB.length ? Math.max(...rowsB.map((r) => r.lastAt)) : 0;
-      return maxB - maxA;
+  /** 仅当前 studio 会话用内存消息覆盖摘要与时间，避免全表随 chatMessages 重建 */
+  const threadsByDevice = useMemo(() => {
+    const map = new Map(threadsByDeviceBase);
+    const devKey = toChatDeviceId(studioDev);
+    const sid = studioSid?.trim();
+    if (!sid) return map;
+    const rows = map.get(devKey);
+    if (!rows?.length) return map;
+    const idx = rows.findIndex((r) => r.sessionId === sid);
+    if (idx < 0) return map;
+    const base = rows[idx];
+    const liveLast = threadLastActivityMs(chatMessages);
+    const liveSummary = chatMessages.length ? buildThreadSummaryLine(chatMessages, t) : '';
+    const next = [...rows];
+    next[idx] = {
+      ...base,
+      summary: liveSummary || base.summary || t('chat.hub.emptyThread', '（空）'),
+      lastAt: Math.max(base.lastAt, liveLast),
+    };
+    next.sort((a, b) => b.lastAt - a.lastAt);
+    map.set(devKey, next);
+    return map;
+  }, [threadsByDeviceBase, studioDev, studioSid, chatMessages, t]);
+
+  const flatThreads = useMemo(() => {
+    const out: Array<ThreadRow & { devId: string }> = [];
+    for (const [devId, rows] of threadsByDevice) {
+      for (const r of rows) {
+        out.push({ devId, ...r });
+      }
+    }
+    out.sort((a, b) => b.lastAt - a.lastAt);
+    return out;
+  }, [threadsByDevice]);
+
+  const liveThreadKey = useMemo(() => {
+    if (!studioSid) return '';
+    return `${toChatDeviceId(studioDev)}:${studioSid}`;
+  }, [studioDev, studioSid]);
+
+  const filteredThreads = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return flatThreads.filter((row) => {
+      if (deviceFilter !== 'all' && toChatDeviceId(row.devId) !== toChatDeviceId(deviceFilter)) return false;
+      if (viewMode === 'live' && `${toChatDeviceId(row.devId)}:${row.sessionId}` !== liveThreadKey) return false;
+      if (!q) return true;
+      const devLabel = deviceSectionLabel(row.devId, devices, t).toLowerCase();
+      return (
+        row.summary.toLowerCase().includes(q)
+        || devLabel.includes(q)
+        || row.sessionId.toLowerCase().includes(q)
+      );
     });
-  }, [deviceBuckets, threadsByDevice]);
+  }, [searchText, flatThreads, deviceFilter, viewMode, liveThreadKey, devices, t]);
+
+  const statsLabel = useMemo(() => {
+    const total = flatThreads.length;
+    const live = liveThreadKey ? 1 : 0;
+    return {
+      total,
+      live,
+    };
+  }, [flatThreads.length, liveThreadKey]);
+
+  const deviceOptions = useMemo(() => {
+    const ids = new Set<string>(flatThreads.map((row) => toChatDeviceId(row.devId)));
+    return [...ids].sort();
+  }, [flatThreads]);
 
   const isLiveView =
     selected != null
@@ -218,118 +290,167 @@ export default function AiChatHubPage() {
     toChatDeviceId(devId) === studioDev && sessionId === studioSid;
 
   return (
-    <div className="ai-chat-hub-page">
-      <div className="ai-chat-hub-layout">
-        <aside className="ai-chat-hub-sidebar" aria-label={t('chat.hub.sidebarAria', '会话列表')}>
-          <header className="ai-chat-hub-sidebar-header">
-            <div className="ai-chat-hub-sidebar-header-row">
-              <h2 className="ai-chat-hub-sidebar-title">{t('chat.hub.sidebarTitle', '会话')}</h2>
-              <div className="ai-chat-hub-sidebar-header-actions">
-                <button
-                  type="button"
-                  className="ai-chat-hub-header-icon-btn"
-                  onClick={onExport}
-                  title={t('dock.header.exportDebugDesc', '对话快照与 Agent 会话排查包')}
-                  aria-label={t('dock.header.exportDebug', '导出排查包')}
-                >
-                  <Download size={17} strokeWidth={2} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  className="ai-chat-hub-header-new-btn"
-                  onClick={() => void onNewChat()}
-                  title={t('chat.hub.newChatShort', '新对话')}
-                >
-                  <MessageSquarePlus size={17} strokeWidth={2} aria-hidden />
-                  <span>{t('chat.hub.newChatShort', '新对话')}</span>
-                </button>
-              </div>
+    <div className="ai-chat-hub-page ai-chat-hub-page--v2">
+      <div className="ai-chat-hub-v2">
+        <aside className="ai-chat-hub-v2-sidebar" aria-label={t('chat.hub.sidebarAria', '会话列表')}>
+          <header className="ai-chat-hub-v2-toolbar">
+            <div className="ai-chat-hub-v2-toolbar-copy">
+              <h2 className="ai-chat-hub-v2-toolbar-title">{t('chat.hub.sidebarTitle', '会话')}</h2>
+              <p className="ai-chat-hub-v2-toolbar-subtitle">
+                {t('chat.hub.sidebarSubtitle', '从记录里快速恢复上下文，继续执行任务')}
+              </p>
             </div>
-            <p className="ai-chat-hub-sidebar-hint">
-              {t('chat.hub.sidebarHintShort', '点击会话切换；与右侧对话区同步。')}
-            </p>
+            <div className="ai-chat-hub-v2-toolbar-actions">
+              <button
+                type="button"
+                className="ai-chat-hub-v2-icon-btn"
+                onClick={onExport}
+                title={t('dock.header.exportDebugDesc', '对话快照与 Agent 会话排查包')}
+                aria-label={t('dock.header.exportDebug', '导出排查包')}
+              >
+                <Download size={17} strokeWidth={2} aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="ai-chat-hub-v2-new-btn"
+                onClick={() => void onNewChat()}
+                title={t('chat.hub.newChatShort', '新对话')}
+              >
+                <MessageSquarePlus size={16} strokeWidth={2} aria-hidden />
+                <span>{t('chat.hub.newChatShort', '新对话')}</span>
+              </button>
+            </div>
           </header>
 
-          <div className="ai-chat-hub-sidebar-list ai-chat-hub-sidebar-list--devices">
-            {visibleDeviceBuckets.length === 0 ? (
-              <div className="ai-chat-hub-sidebar-empty">
-                {t(
-                  'chat.hub.noArchivedThreads',
-                  '暂无已保存的对话。在工作台或此处发消息后会出现；仅会话指针、未落盘的不列出。',
-                )}
+          <section className="ai-chat-hub-v2-controls" aria-label={t('chat.hub.controlsAria', '会话筛选控制')}>
+            <div className="ai-chat-hub-v2-metrics" role="status">
+              <span className="ai-chat-hub-v2-metric ai-chat-hub-v2-metric--total">
+                <strong>{statsLabel.total}</strong>
+                {t('chat.hub.metric.total', '全部会话')}
+              </span>
+              <span className="ai-chat-hub-v2-metric ai-chat-hub-v2-metric--live">
+                <strong>{statsLabel.live}</strong>
+                {t('chat.hub.metric.live', '进行中会话')}
+              </span>
+            </div>
+
+            <label className="ai-chat-hub-v2-search" htmlFor="ai-chat-hub-search">
+              <Search size={14} strokeWidth={2} aria-hidden />
+              <input
+                id="ai-chat-hub-search"
+                type="search"
+                value={searchText}
+                placeholder={t('chat.hub.searchPh', '搜索会话内容、设备或 ID')}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
+            </label>
+
+            <div className="ai-chat-hub-v2-filter-row">
+              <div className="ai-chat-hub-v2-view-switch" role="tablist" aria-label={t('chat.hub.viewMode', '视图')}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'all'}
+                  className={`ai-chat-hub-v2-view-btn${viewMode === 'all' ? ' is-active' : ''}`}
+                  onClick={() => setViewMode('all')}
+                >
+                  {t('chat.hub.view.all', '全部')}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'live'}
+                  className={`ai-chat-hub-v2-view-btn${viewMode === 'live' ? ' is-active' : ''}`}
+                  onClick={() => setViewMode('live')}
+                >
+                  {t('chat.hub.view.live', '当前')}
+                </button>
+              </div>
+
+              <label className="ai-chat-hub-v2-device-select-wrap" htmlFor="ai-chat-hub-device-filter">
+                <select
+                  id="ai-chat-hub-device-filter"
+                  value={deviceFilter}
+                  aria-label={t('chat.hub.filter.device', '筛选设备')}
+                  onChange={(e) => setDeviceFilter(e.target.value)}
+                >
+                  <option value="all">{t('chat.hub.filter.allDevices', '全部设备')}</option>
+                  {deviceOptions.map((devId) => (
+                    <option key={devId} value={devId}>
+                      {deviceSectionLabel(devId, devices, t)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <div className="ai-chat-hub-v2-list" role="list">
+            {filteredThreads.length === 0 ? (
+              <div className="ai-chat-hub-v2-empty">
+                {flatThreads.length === 0
+                  ? t(
+                    'chat.hub.noArchivedThreads',
+                    '暂无已保存的对话。在工作台或此处发消息后会出现；仅会话指针、未落盘的不列出。',
+                  )
+                  : t('chat.hub.noFilteredThreads', '当前筛选条件下没有匹配会话，试试清空搜索或切换视图。')}
               </div>
             ) : (
-              visibleDeviceBuckets.map((devId) => {
-                const bucketLabel = deviceSectionLabel(devId, devices, t);
-                const threads = threadsByDevice.get(devId) ?? [];
+              filteredThreads.map((row) => {
+                const active = rowActive(row.devId, row.sessionId);
+                const dockDot = isRowDockActive(row.devId, row.sessionId);
+                const timeLabel = row.lastAt ? formatChatHubThreadTime(row.lastAt, t, isEn) : '—';
+                const devShort = deviceRowShortLabel(row.devId, devices, t);
                 return (
-                  <section key={devId} className="ai-chat-hub-device-section">
-                    <div className="ai-chat-hub-device-head">
-                      <button
-                        type="button"
-                        className="ai-chat-hub-device-chip"
-                        onClick={() => {
-                          const dockId = devId === GLOBAL_CHAT_DEVICE_ID ? '' : devId;
-                          setActiveDevice(dockId);
-                        }}
-                      >
-                        <span className="ai-chat-hub-device-chip-dot" aria-hidden />
-                        <span className="ai-chat-hub-device-chip-label">{bucketLabel}</span>
-                        <span className="ai-chat-hub-device-chip-count">{threads.length}</span>
-                      </button>
+                  <div
+                    key={`${row.devId}:${row.sessionId}`}
+                    className={`ai-chat-hub-v2-row${active ? ' is-active' : ''}${dockDot ? ' is-live' : ''}`}
+                    role="listitem"
+                    tabIndex={0}
+                    onClick={() => onSelectThread(row.devId, row.sessionId)}
+                    onKeyDown={(ev) => {
+                      if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        onSelectThread(row.devId, row.sessionId);
+                      }
+                    }}
+                  >
+                    <div className="ai-chat-hub-v2-row-inner">
+                      <div className="ai-chat-hub-v2-row-head">
+                        <span className="ai-chat-hub-v2-chip" title={deviceSectionLabel(row.devId, devices, t)}>
+                          {devShort}
+                        </span>
+                        {dockDot ? (
+                          <span className="ai-chat-hub-v2-live">{t('chat.hub.threadActivePill', '当前')}</span>
+                        ) : null}
+                        <span
+                          className="ai-chat-hub-v2-time"
+                          title={t('chat.hub.timeLocalHint', '按本机时区显示')}
+                        >
+                          {timeLabel}
+                        </span>
+                      </div>
+                      <p className="ai-chat-hub-v2-summary">{row.summary}</p>
                     </div>
-                    <ul className="ai-chat-hub-device-threads">
-                      {threads.map((row) => {
-                        const active = rowActive(devId, row.sessionId);
-                        const dockDot = isRowDockActive(devId, row.sessionId);
-                        const timeLabel = row.lastAt ? formatChatHubThreadTime(row.lastAt, t, isEn) : '—';
-                        return (
-                          <li key={row.sessionId}>
-                            <div
-                              className={`ai-chat-hub-thread-item${active ? ' is-active' : ''}${dockDot ? ' is-dock' : ''}`}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => onSelectThread(devId, row.sessionId)}
-                              onKeyDown={(ev) => {
-                                if (ev.key === 'Enter' || ev.key === ' ') {
-                                  ev.preventDefault();
-                                  onSelectThread(devId, row.sessionId);
-                                }
-                              }}
-                            >
-                              <div className="ai-chat-hub-thread-item-body">
-                                <div className="ai-chat-hub-thread-item-row">
-                                  <span className="ai-chat-hub-thread-item-time">{timeLabel}</span>
-                                  {dockDot ? (
-                                    <span className="ai-chat-hub-thread-pill">{t('chat.hub.threadActivePill', '当前')}</span>
-                                  ) : null}
-                                </div>
-                                <span className="ai-chat-hub-thread-item-title">{row.summary}</span>
-                              </div>
-                              <button
-                                type="button"
-                                className="ai-chat-hub-thread-item-delete"
-                                title={t('chat.hub.deleteThread', '删除此对话')}
-                                aria-label={t('chat.hub.deleteThread', '删除此对话')}
-                                onClick={(e) => onDeleteThread(e, devId, row.sessionId)}
-                              >
-                                <Trash2 size={15} strokeWidth={2} aria-hidden />
-                              </button>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </section>
+                    <button
+                      type="button"
+                      className="ai-chat-hub-v2-row-del"
+                      title={t('chat.hub.deleteThread', '删除此对话')}
+                      aria-label={t('chat.hub.deleteThread', '删除此对话')}
+                      onClick={(e) => onDeleteThread(e, row.devId, row.sessionId)}
+                    >
+                      <Trash2 size={15} strokeWidth={2} aria-hidden />
+                    </button>
+                  </div>
                 );
               })
             )}
           </div>
         </aside>
 
-        <main className="ai-chat-hub-main ai-chat-hub-main--dock-host">
+        <main className="ai-chat-hub-v2-main">
           <div
-            className="ai-chat-hub-dock-anchor"
+            className="ai-chat-hub-v2-anchor"
             ref={setHubAnchorEl}
             aria-label={t('chat.hub.dockMountAria', 'RDKClaw 对话与输入')}
           />

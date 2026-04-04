@@ -112,12 +112,9 @@ export async function listDrives() {
     if (!diskIds.includes(m[1])) diskIds.push(m[1]);
   }
 
-  const results = [];
-  for (const diskId of diskIds) {
-    const info = await getDiskInfo(diskId);
-    if (info) results.push(info);
-  }
-  return results;
+  /** 串行 diskutil info 在多块外接盘时累加明显延迟，改为并行 */
+  const infos = await Promise.all(diskIds.map((id) => getDiskInfo(id)));
+  return infos.filter(Boolean);
 }
 
 function checkIsRoot() {
