@@ -85,6 +85,12 @@ export function buildRdkDocHintForSystemPrompt(): string {
       !e.url.includes('/en/') &&
       !e.url.includes('/rdk_s/'),
   );
+  const segmentation = idx.entries.filter(
+    (e) =>
+      e.url.includes('/Robot_development/boxs/segmentation/') &&
+      !e.url.includes('/en/') &&
+      !e.url.includes('/rdk_s/'),
+  );
   const lines: string[] = [`**rdk_doc 根地址**：\`${idx.root}\``];
   if (idx.rdkSRoot) {
     lines.push(`**S100 独立文档区**：\`${idx.rdkSRoot}\``);
@@ -97,7 +103,11 @@ export function buildRdkDocHintForSystemPrompt(): string {
     ...detection.map((e) => `- **${e.name}**：\`${e.url}\``),
   );
   lines.push(
-    '**其余分类**（分割/跟踪/SLAM/Quick_start/Model_deploy 等）：以维护索引 `rdk-doc-url-index.md` 中的 `##` 章节为准，用 `web_fetch` 拉取对应 URL。',
+    '**图像分割（segmentation，用户说「分割一切」等时优先 MobileSAM / EdgeSAM）**：',
+    ...segmentation.map((e) => `- **${e.name}**：\`${e.url}\``),
+  );
+  lines.push(
+    '**其余分类**（跟踪/SLAM/Quick_start/Model_deploy 等）：以维护索引 `rdk-doc-url-index.md` 中的 `##` 章节为准，用 `web_fetch` 拉取对应 URL。',
   );
   return lines.join('\n');
 }

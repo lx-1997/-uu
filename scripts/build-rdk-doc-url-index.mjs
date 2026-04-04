@@ -23,44 +23,73 @@ const BLOCKLIST_EXACT = new Set([
   '/rdk_doc/en/rdk_s/Robot_development/boxs/detection',
 ]);
 
-const NAME_OVERRIDES = new Map([
-  ['/rdk_doc/Quick_start/hardware_introduction/rdk_x3', '1.1 硬件简介 · RDK X3'],
-  ['/rdk_doc/Quick_start/hardware_introduction/rdk_x5', '1.1 硬件简介 · RDK X5'],
-  ['/rdk_doc/Quick_start/hardware_introduction/rdk_ultra', '1.1 硬件简介 · RDK Ultra'],
-  ['/rdk_doc/Quick_start/install_os/rdk_x3', '1.2 系统烧录 · RDK X3'],
-  ['/rdk_doc/Quick_start/install_os/rdk_x5', '1.2 系统烧录 · RDK X5'],
-  ['/rdk_doc/Quick_start/install_os/rdk_ultra', '1.2 系统烧录 · RDK Ultra'],
+const TITLE_FILE = join(__dirname, '..', 'server', 'rdkclaw', 'rdk-doc-titles.generated.json');
+
+/** 与 rdk-doc-local-cache / extract-rdk-doc-titles 一致 */
+function stripNumericPrefixes(p) {
+  return p
+    .split('/')
+    .map((seg) => seg.replace(/^\d+_/, '').toLowerCase())
+    .join('/');
+}
+
+/**
+ * 手工覆盖（优先于 `rdk-doc-titles.generated.json`）：仅保留生成结果不理想或需统一表述的条目。
+ */
+const MANUAL_NAME_OVERRIDES = new Map([
   ['/rdk_doc/Quick_start/configuration_wizard', '1.3 入门配置向导（X3 / X5 / 等）'],
-  ['/rdk_doc/Quick_start/remote_login', '1.4 远程登录'],
-  ['/rdk_doc/Quick_start/display_use/display_rdkx5', '1.5 显示屏使用 · RDK X5'],
   ['/rdk_doc/Quick_start/classification', '1.6 算法体验（classification）'],
-  ['/rdk_doc/Quick_start/download', '1.7 下载资源汇总'],
-  ['/rdk_doc/Quick_start/accessory', '1.8 配件清单'],
   ['/rdk_doc/rdk_s/Quick_start/hardware_introduction/rdk_s100', 'S100 · 1.1 硬件简介（rdk_s）'],
   ['/rdk_doc/rdk_s/Quick_start/install_os/rdk_s100/FAQ', 'S100 · 系统烧录 FAQ（rdk_s）'],
   ['/rdk_doc/rdk_s/Quick_start/configuration_wizard/configuration_wizard_s100', 'S100 · 入门配置向导（rdk_s）'],
-  ['/rdk_doc/Robot_development/quick_start/preparation', 'TROS / 机器人 · 环境准备'],
-  ['/rdk_doc/Robot_development/quick_start/install_tros', 'TROS / 机器人 · 安装 TROS'],
-  ['/rdk_doc/Robot_development/quick_start/hello_world', 'TROS / 机器人 · Hello World'],
-  ['/rdk_doc/Robot_development/quick_start/cross_compile', 'TROS / 机器人 · 交叉编译'],
-  ['/rdk_doc/Robot_development/quick_start/ros_pkg', 'TROS / 机器人 · ROS 工程包'],
-  ['/rdk_doc/Robot_development/quick_start/changelog', 'TROS / 机器人 · 更新日志'],
-  ['/rdk_doc/Robot_development/tros', 'TROS 总览与开发（机器人）'],
-  ['/rdk_doc/rdk_s/Robot_development/quick_start/preparation', 'TROS / 机器人 · 环境准备（S100 · rdk_s）'],
-  ['/rdk_doc/rdk_s/Robot_development/quick_start/install_tros', 'TROS / 机器人 · 安装 TROS（S100 · rdk_s）'],
-  ['/rdk_doc/rdk_s/Robot_development/quick_start/hello_world', 'TROS / 机器人 · Hello World（S100 · rdk_s）'],
-  ['/rdk_doc/rdk_s/Robot_development/quick_start/cross_compile', 'TROS / 机器人 · 交叉编译（S100 · rdk_s）'],
-  ['/rdk_doc/rdk_s/Robot_development/quick_start/ros_pkg', 'TROS / 机器人 · ROS 工程包（S100 · rdk_s）'],
-  ['/rdk_doc/rdk_s/Robot_development/quick_start/changelog', 'TROS / 机器人 · 更新日志（S100 · rdk_s）'],
-  ['/rdk_doc/rdk_s/Robot_development/tros', 'TROS 总览与开发（S100 · rdk_s）'],
-  ['/rdk_doc/Robot_development/boxs/detection/yolo', '目标检测 YOLO'],
-  ['/rdk_doc/Robot_development/boxs/detection/fcos', '目标检测 FCOS'],
-  ['/rdk_doc/rdk_s/Robot_development/boxs/detection/yolo', '目标检测 YOLO（S100 · rdk_s）'],
-  ['/rdk_doc/rdk_s/Robot_development/boxs/detection/fcos', '目标检测 FCOS（S100 · rdk_s）'],
-  ['/rdk_doc/en/Robot_development/boxs/detection/yolo', '目标检测 YOLO（English）'],
-  ['/rdk_doc/en/Robot_development/boxs/detection/fcos', '目标检测 FCOS（English）'],
-  ['/rdk_doc/en/rdk_s/Robot_development/boxs/detection/fcos', '目标检测 FCOS（English · rdk_s）'],
+  ['/rdk_doc/Robot_development/boxs/segmentation/mobilenet_unet', '语义分割（MobileNet-UNet）'],
+  ['/rdk_doc/rdk_s/Robot_development/boxs/segmentation/mobilenet_unet', '语义分割 MobileNet-UNet（S100 · rdk_s）'],
 ]);
+
+function loadNormToTitle() {
+  try {
+    const j = JSON.parse(readFileSync(TITLE_FILE, 'utf-8'));
+    return j.normToTitle && typeof j.normToTitle === 'object' ? j.normToTitle : {};
+  } catch {
+    return {};
+  }
+}
+
+function resolveTitleFromNormMap(rel, normToTitle) {
+  const r = rel.replace(/^\/+/, '').replace(/\/$/, '');
+  const attempts = new Set();
+  attempts.add(stripNumericPrefixes(r));
+  if (r.startsWith('en/')) attempts.add(stripNumericPrefixes(r.slice(3)));
+  if (r.startsWith('rdk_s/')) attempts.add(stripNumericPrefixes(r.slice(6)));
+  if (r.startsWith('en/rdk_s/')) attempts.add(stripNumericPrefixes(r.slice(9)));
+  for (const k of attempts) {
+    if (normToTitle[k]) return normToTitle[k];
+  }
+  return null;
+}
+
+function localeSuffix(rel) {
+  if (/^en\/rdk_s\//.test(rel)) return '（English · rdk_s）';
+  if (/^en\//.test(rel)) return '（English）';
+  if (/^rdk_s\//.test(rel)) return '（S100 · rdk_s）';
+  return '';
+}
+
+function buildDisplayName(normToTitle) {
+  return function displayName(path) {
+    const norm = path.replace(/\/$/, '');
+    if (MANUAL_NAME_OVERRIDES.has(norm)) return MANUAL_NAME_OVERRIDES.get(norm);
+    const rel = norm.replace(/^\/rdk_doc\/?/, '');
+    if (!rel) return '文档首页';
+    const base = resolveTitleFromNormMap(rel, normToTitle);
+    if (base) {
+      const suf = localeSuffix(rel);
+      return suf ? `${base}${suf}` : base;
+    }
+    const parts = rel.split('/').filter(Boolean);
+    return parts.join(' / ').replace(/_/g, ' ');
+  };
+}
 
 const SECTION_META = [
   { id: 'root', title: '文档根与顶层入口' },
@@ -114,15 +143,6 @@ function groupForPath(path) {
   if (p.startsWith('Release_Note')) return 'Release_Note';
   if (p.startsWith('07_openclaw')) return 'openclaw';
   return 'other_zh';
-}
-
-function displayName(path) {
-  const norm = path.replace(/\/$/, '');
-  if (NAME_OVERRIDES.has(norm)) return NAME_OVERRIDES.get(norm);
-  const rel = norm.replace(/^\/rdk_doc\/?/, '');
-  const parts = rel.split('/').filter(Boolean);
-  if (parts.length === 0) return '文档首页';
-  return parts.join(' / ').replace(/_/g, ' ');
 }
 
 function parsePaths(raw) {
@@ -183,6 +203,13 @@ function sortRobotPaths(paths) {
 }
 
 function main() {
+  const normToTitle = loadNormToTitle();
+  const displayName = buildDisplayName(normToTitle);
+  if (Object.keys(normToTitle).length === 0) {
+    console.error(
+      '[build-rdk-doc-url-index] 警告：未找到或空的 rdk-doc-titles.generated.json — 请先运行 node scripts/extract-rdk-doc-titles.mjs（需本机已拉取 ~/.rdkstudio/rdk-doc-cache）。',
+    );
+  }
   const raw = readFileSync(PATHS_FILE, 'utf-8');
   const paths = parsePaths(raw);
   const byGroup = new Map();
@@ -200,7 +227,7 @@ function main() {
   lines.push('# RDK 官方文档 URL 索引（developer.d-robotics.cc/rdk_doc）');
   lines.push('');
   lines.push(
-    '本文件为 **唯一维护入口**：按站点侧栏可爬取的章节列出 **完整 URL**（由 `scripts/crawl-rdk-doc-paths.mjs` BFS 抓取生成 `_crawl-paths.txt` 后，运行 `node scripts/build-rdk-doc-url-index.mjs` 更新）。Agent 提示词从本文件加载，**请勿**在 TypeScript 中硬编码具体子链接。',
+    '本文件为 **唯一维护入口**：按站点侧栏可爬取的章节列出 **完整 URL**（由 `scripts/crawl-rdk-doc-paths.mjs` BFS 抓取生成 `_crawl-paths.txt` 后，运行 `node scripts/build-rdk-doc-url-index.mjs` 更新）。**每条列表标题**优先来自 GitHub `D-Robotics/rdk_doc` 与官网一致的 MD 首行标题（`node scripts/extract-rdk-doc-titles.mjs` 生成 `rdk-doc-titles.generated.json`），再由 `build-rdk-doc-url-index.mjs` 内 `MANUAL_NAME_OVERRIDES` 微调；`en/`、`rdk_s/` 路径在命中中文标题后追加 **（English）** / **（S100 · rdk_s）** 以区分站点区。无映射时回退为路径 slug。Agent 提示词从本文件加载，**请勿**在 TypeScript 中硬编码具体子链接。',
   );
   lines.push('');
   lines.push(
@@ -211,6 +238,24 @@ function main() {
   );
   lines.push(
     '> 已过滤侧栏中无效的 `.md` 直链；并剔除 OSS 上 **无索引页** 的目录 URL（如 `.../Robot_development/quick_start`、`.../boxs` 本体，子页面仍保留）。',
+  );
+  lines.push('');
+  lines.push('### 排障速查（Agent：重复失败或 `hobot_usb`/V4L2 异常时优先 `web_fetch`）');
+  lines.push('');
+  lines.push(
+    '- **USB 相机 / V4L2 / 官方示例**：见下节 **Basic Application / vision / usb camera**（及 **pydev demo / usb camera sample**）。',
+  );
+  lines.push(
+    '- **视频输入、编解码管线**：见下节 **Advanced development / multimedia / video_input**（及 `video_decode` / `video_processing`）。',
+  );
+  lines.push(
+    '- **人体检测（mono2d）**：文档标题 **人体检测和跟踪**（`.../body/mono2d_body_detection`）；**勿**使用已失效路径 `.../human_recognition/body_detection`（易 404）。',
+  );
+  lines.push(
+    '- **分割一切（MobileSAM / EdgeSAM）**：索引中标题为 **MobileSAM 分割一切**、**EdgeSAM 分割一切**（对应 `.../segmentation/mono_mobilesam`、`mono_edgesam`）；勿只靠英文 slug 检索。',
+  );
+  lines.push(
+    '- **仍无章节可对照**：`web_search` 用 `site:developer.d-robotics.cc` + 包名或节点名（如 `hobot_usb_cam`），再对命中 URL 做 `web_fetch`。',
   );
   lines.push('');
   lines.push('### 官网主导航与产品线（对照侧栏）');

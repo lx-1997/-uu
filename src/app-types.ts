@@ -11,7 +11,9 @@ export type Tab =
   | 'hardware'
   | 'skills'
   /** 桌面端：forum / RoboGo 内嵌 WebContentsView（与 VNC/IDE 同区域） */
-  | 'dr-embed';
+  | 'dr-embed'
+  /** 本地模型 / Ollama（可由 STUDIO_SHOW_LOCAL_OLLAMA_NAV 关闭；旧会话可能仍存此值） */
+  | 'local-models';
 
 export type DrAuthenticatedPortalKind = 'forum' | 'robogo';
 

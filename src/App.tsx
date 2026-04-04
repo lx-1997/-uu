@@ -24,6 +24,7 @@ import { getRdkEmbedPanel, type RdkEmbedPanel } from './utils/embed-mode';
 import type { Tab } from './app-types';
 import { STUDIO_AGENT_WEB_CLOSE, STUDIO_AGENT_WEB_OPEN } from './utils/studio-agent-web';
 import { HubDockAnchorProvider } from './contexts/HubDockAnchorContext';
+import SkillBrowser from './components/SkillBrowser';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const AiChatHubPage = lazy(() => import('./components/AiChatHubPage'));
@@ -34,7 +35,6 @@ const Vnc = lazy(() => import('./components/Vnc'));
 const IDE = lazy(() => import('./components/IDE'));
 const OpenClaw = lazy(() => import('./components/OpenClaw'));
 const Hardware = lazy(() => import('./components/Hardware'));
-const SkillBrowser = lazy(() => import('./components/SkillBrowser'));
 const DroboticsEmbed = lazy(() => import('./components/DroboticsEmbed'));
 /**
  * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：

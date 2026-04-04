@@ -91,6 +91,7 @@ const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   hardware: { nav: '硬件监控', hint: 'CPU/BPU/温度与健康态' },
   flasher: { nav: '烧录与备份', hint: '镜像写盘、校验、备份' },
   'dr-embed': { nav: '生态网页', hint: '论坛与 RoboGo 内嵌' },
+  'local-models': { nav: '本地模型', hint: 'Ollama / 本地推理（可选入口）' },
 };
 
 export default function Sidebar() {
