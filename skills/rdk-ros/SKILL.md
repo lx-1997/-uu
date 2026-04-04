@@ -1,7 +1,7 @@
 ---
 name: RDK ROS
 description: TROS（TogetheROS.Bot，板端 ROS2 兼容栈；不是涂鸦/Tuya IoT 的「TuyaROS2」）话题与节点、rosbag。RDK 默认是 /opt/tros 下的 TROS；未 source 时 which ros2 可能为空——应先 ls /opt/tros 或 source …/setup.bash 再判断。触发：ROS、ROS2、节点、话题、rosbag、rosbridge。
-version: 1.1.0
+version: 1.2.0
 trigger: ros,topic,话题,节点,rosbag,录制,rosbridge,ROS2,扫描话题,TROS,tros,setup.bash,bashrc
 risk: low
 permissions: device_exec
@@ -49,6 +49,14 @@ echo 'source /opt/tros/humble/setup.bash' >> ~/.bashrc
 - 用户问「板上有没有 ROS」——先按上文区分 **TROS 已装未 source** vs **未安装**。
 - 用户想录制或回放 rosbag。
 - 用户想查看 ROS2 节点状态。
+
+## 切换例程或清理节点时：必须带上 USB 摄像头链路
+
+从一类官方演示换到另一类（如 YOLO `dnn_node_example` ↔ 人体检测 `mono2d_body_detection`）、或「停掉上一批再启新 pipeline」时，**只停推理/算法包往往不够**。
+
+- **易遗漏**：`hobot_usb_cam`、`hobot_codec_republish` / `hobot_codec`，以及同链路上的 **websocket / nginx** 等仍存活 → 多实例、`/hbmem_img` 异常、Web 无图或推流缓存堆积。
+- **做法**：清理步骤中**显式纳入** USB 输入链路与推理链（按当次 launch 实际拉起的进程名 `pkill` / `ros2 lifecycle` / `ros2 daemon stop` 等，以现场为准），再启动新例程。
+- **RDKClaw / 板端 OpenClaw**：在 `device_exec` 或 `board_openclaw_delegate` 的 **guidance** 里写清「先停相机与编解码相关节点，再停推理，再起新栈」，避免只写 `pkill -f dnn_node_example` 一类。
 
 ## 执行流程
 1. **获取话题列表**：调用 `GET /api/devices/{deviceId}/ros/topics` 查看当前活跃的 ROS2 话题。

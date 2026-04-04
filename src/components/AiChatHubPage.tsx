@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, MessageSquarePlus, Search, Trash2 } from 'lucide-react';
 import { useHubDockAnchor } from '../contexts/HubDockAnchorContext';
 import { useAppState } from '../hooks/useAppState';
-import { useAIChatStore } from '../hooks/useAIChatStore';
 import { useI18n } from '../i18n/use-i18n';
 import {
   GLOBAL_CHAT_DEVICE_ID,
@@ -86,8 +85,11 @@ export default function AiChatHubPage() {
     getStudioChatSessionId,
     getStudioChatDeviceId,
     exportDebugBundleForThread,
+    chatMessages,
+    resumeStudioThread,
+    deleteStudioThread,
+    clearChatHistory,
   } = useAppState();
-  const { chatMessages, resumeStudioThread, deleteStudioThread, clearChatHistory } = useAIChatStore();
   const { setHubAnchorEl } = useHubDockAnchor();
   const { t, isEn } = useI18n();
 

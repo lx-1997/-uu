@@ -47,6 +47,7 @@
 - **文件传输**: download/upload + 验证
 - **日志分析**: openclaw_logs + exec(journalctl/dmesg)
 - **板端协作**: chat(了解能力) → assess(评估可行性) → delegate(委派执行) → 验证结果
+- **切换/清理板端 ROS 视觉例程**（YOLO、人体检测等）：停旧栈时 **guidance 须含 USB 链路**（`hobot_usb_cam`、`hobot_codec*`、必要时 websocket/nginx），**不要**只停推理节点；见技能 `rdk-ros` 对应节
 - **板端任务**: assess → delegate → 验证结果（确信可行时可跳过 chat）
 - **多板**: `fleet_board_list` → 按算力/角色选板 → `fleet_board_delegate` 或 `fleet_board_broadcast`
 - **长链路**: `create_plan` 拆步 → 执行 → `update_plan` 更新状态

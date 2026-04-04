@@ -21,13 +21,7 @@ import {
   stopFeishuRuntime,
   fetchRDKClawPersona,
   saveRDKClawPersona,
-  fetchRDKClawPolicy,
-  saveRDKClawPolicy,
   type PersonaProfile,
-  type RDKClawPolicy,
-  fetchRDKClawSecurityAudit,
-  clearRDKClawSecurityAudit,
-  type SecurityAuditLogEntry,
   fetchRDKClawForumAuth,
   saveRDKClawForumCredential,
   clearRDKClawForumAuth,
@@ -84,7 +78,6 @@ type SectionId =
   | 'account'
   | 'ai-engine'
   | 'persona'
-  | 'policy'
   | 'feishu'
   | 'weixin'
   | 'connection'
@@ -120,7 +113,6 @@ export default function SettingsPanel() {
       : []),
     { id: 'ai-engine' as const, label: t('settings.sec.ai', 'AI 引擎') },
     { id: 'persona' as const, label: t('settings.sec.persona', '人格与行为') },
-    { id: 'policy' as const, label: t('settings.sec.policy', '执行策略') },
     { id: 'feishu' as const, label: t('settings.sec.feishu', '飞书') },
     { id: 'weixin' as const, label: t('settings.sec.weixin', '微信') },
     { id: 'connection' as const, label: t('settings.sec.connection', '设备连接') },
@@ -331,26 +323,11 @@ export default function SettingsPanel() {
     expireAt: number; createdAt: number;
   }>>([]);
 
-  /* ── RDKClaw Persona & Policy ── */
+  /* ── RDKClaw Persona（执行策略由服务端默认托管，不在设置中展示）── */
   const [persona, setPersona] = useState<PersonaProfile>({
     name: '小地瓜', extraInstructions: '', riskLevel: 'balanced',
     delegationBias: 'balanced', autonomyLevel: 'assisted',
   });
-  const [policy, setPolicy] = useState<RDKClawPolicy>({
-    approval: { mode: 'auto', riskThreshold: 'medium' },
-    permission: {
-      workspaceBoundaryEnabled: true,
-      devicePathBoundaryEnabled: true,
-      hostMutationGuardEnabled: true,
-      commandDangerGuardEnabled: true,
-      auditLogEnabled: true,
-    },
-    memory: { mainSessionReadsMemory: true, sharedSessionBlocksMemory: true, dailyMemoryDays: 2 },
-    network: { enabled: true, maxFetchChars: 16000, requireApproval: false },
-    context: { contextTokens: 128000, maxHistoryShare: 0.5, softTrimRatio: 0.3, hardClearRatio: 0.5, keepLastAssistants: 3 },
-  });
-  const [securityAudit, setSecurityAudit] = useState<SecurityAuditLogEntry[]>([]);
-  const [securityAuditLoading, setSecurityAuditLoading] = useState(false);
   const [rdkclawLoading, setRdkclawLoading] = useState(false);
   const [rdkclawSaving, setRdkclawSaving] = useState(false);
 
@@ -411,38 +388,9 @@ export default function SettingsPanel() {
      ═══════════════════════════════════════════ */
 
   const refreshRdkclawData = async () => {
-    const [personaRes, policyRes, forumAuthRes, auditRes] = await Promise.all([
-      fetchRDKClawPersona(), fetchRDKClawPolicy(), fetchRDKClawForumAuth(), fetchRDKClawSecurityAudit(20),
-    ]);
+    const [personaRes, forumAuthRes] = await Promise.all([fetchRDKClawPersona(), fetchRDKClawForumAuth()]);
     setPersona(personaRes.persona);
-    setPolicy(policyRes.policy);
     setForumAuth(forumAuthRes.auth);
-    setSecurityAudit(auditRes.items || []);
-  };
-
-  const refreshSecurityAudit = async () => {
-    setSecurityAuditLoading(true);
-    try {
-      const res = await fetchRDKClawSecurityAudit(30);
-      setSecurityAudit(res.items || []);
-    } catch {
-      addToast(t('toast.readAuditFail', '读取安全审计失败'), 'error');
-    } finally {
-      setSecurityAuditLoading(false);
-    }
-  };
-
-  const handleClearSecurityAudit = async () => {
-    setSecurityAuditLoading(true);
-    try {
-      await clearRDKClawSecurityAudit();
-      setSecurityAudit([]);
-      addToast(t('toast.auditCleared', '安全审计已清空'), 'success');
-    } catch {
-      addToast(t('toast.auditClearFail', '清空安全审计失败'), 'error');
-    } finally {
-      setSecurityAuditLoading(false);
-    }
   };
 
   const refreshFeishuData = async () => {
@@ -507,25 +455,6 @@ export default function SettingsPanel() {
         timedOut
           ? t('toast.personaSaveTimeout', '保存超时：请确认本机后端已启动且桌面端能连上 API（可重试）')
           : t('toast.personaSaveFail', '保存人格设定失败'),
-        'error',
-      );
-    }
-    finally { setRdkclawSaving(false); }
-  };
-
-  const handleSavePolicy = async () => {
-    setRdkclawSaving(true);
-    try {
-      const res = await saveRDKClawPolicy(policy);
-      setPolicy(res.policy);
-      addToast(t('toast.policySaved', '执行策略已保存'), 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      const timedOut = (e as { name?: string }).name === 'TimeoutError' || /abort|timeout/i.test(msg);
-      addToast(
-        timedOut
-          ? t('toast.policySaveTimeout', '保存超时：请确认本机后端已启动且桌面端能连上 API（可重试）')
-          : t('toast.policySaveFail', '保存执行策略失败'),
         'error',
       );
     }
@@ -2128,119 +2057,7 @@ export default function SettingsPanel() {
 
               <hr className="settings-section-divider" />
 
-              {/* ══ 3. 执行策略 ══ */}
-              <section id="policy" className="settings-section" ref={registerSectionRef('policy')}>
-                <H title={t('settings.policy.title', '执行策略')} desc={t('settings.policy.desc', '约束本机与设备访问、记忆与联网；工具在允许范围内直接执行。')} />
-                <div className="settings-card">
-                  <h4 className="settings-card-title">{t('settings.policy.approvalTitle', '工具执行')}</h4>
-                  <p className="settings-hint" style={{ marginTop: 0 }}>
-                    {t(
-                      'settings.policy.approvalNote',
-                      '在允许范围内由助手直接调用工具，不再逐步确认；涉及本机与设备的访问仍受下方安全约束与本地审计保护。',
-                    )}
-                  </p>
-                </div>
-                <div className="settings-card">
-                  <h4 className="settings-card-title">{t('settings.policy.permissionTitle', '安全与访问约束')}</h4>
-                  <p className="settings-hint" style={{ marginTop: 0 }}>
-                    {t(
-                      'settings.policy.permissionPreamble',
-                      '下列项涉及本机工作区与设备侧访问安全，默认全部开启且保持开启；约束与审计记录仅保存在本机，不会自动对外发送明细。',
-                    )}
-                  </p>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.workspaceBoundary', '限制助手可访问的本机目录')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.workspaceBoundary', '限制助手可访问的本机目录')} aria-label={t('settings.policy.workspaceBoundary', '限制助手可访问的本机目录')} checked />
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.devicePathAllow', '设备 SSH 路径白名单')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.devicePathAllow', '设备 SSH 路径白名单')} aria-label={t('settings.policy.devicePathAllow', '设备 SSH 路径白名单')} checked />
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.hostGuard', '保护 Studio 安装目录')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.hostGuard', '保护 Studio 安装目录')} aria-label={t('settings.policy.hostGuard', '保护 Studio 安装目录')} checked />
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.cmdGuard', '拦截高风险命令')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.cmdGuard', '拦截高风险命令')} aria-label={t('settings.policy.cmdGuard', '拦截高风险命令')} checked />
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.auditLog', '本地安全审计')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.auditLog', '本地安全审计')} aria-label={t('settings.policy.auditLog', '本地安全审计')} checked />
-                    </div>
-                  </div>
-                  <p className="settings-policy-hint">{t('settings.policy.permissionHint', '超出允许范围的操作将被拦截；审计内容仅存本机，请妥善保管设备与账号。')}</p>
-                </div>
-                <div className="settings-card">
-                  <details className="settings-details-block" style={{ border: 'none', background: 'transparent', padding: 0 }}>
-                    <summary className="settings-details-summary">
-                      {t('settings.policy.auditTitle', '安全审计（最近 30 条）')}
-                    </summary>
-                    <div className="settings-details-body">
-                      <div className="settings-actions">
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={refreshSecurityAudit} disabled={securityAuditLoading}>{securityAuditLoading ? t('settings.policy.audit.refreshing', '刷新中...') : t('settings.policy.audit.refresh', '刷新')}</button>
-                        <button type="button" className="btn btn-danger btn-sm" onClick={handleClearSecurityAudit} disabled={securityAuditLoading}>{t('settings.policy.audit.clear', '清空')}</button>
-                      </div>
-                      {securityAudit.length === 0 ? (
-                        <span className="settings-hint">{t('settings.policy.audit.empty', '暂无审计记录')}</span>
-                      ) : securityAudit.map((item) => (
-                        <div className="settings-row settings-row--top" key={item.id}>
-                          <span className="settings-row-label">{new Date(item.timestamp).toLocaleTimeString()}</span>
-                          <div className="settings-row-value settings-row-value--stretch">
-                            <span className="settings-hint settings-audit-line">{`${item.action} · ${item.toolName} · ${item.risk}${item.reason ? ` · ${item.reason}` : ''}`}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-                <div className="settings-card">
-                  <h4 className="settings-card-title">{t('settings.policy.memoryTitle', '记忆')}</h4>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.readMemory', '读取历史记忆')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" title={t('settings.policy.readMemory', '读取历史记忆')} aria-label={t('settings.policy.readMemory', '读取历史记忆')} checked={policy.memory.mainSessionReadsMemory} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, mainSessionReadsMemory: e.target.checked } }))} />
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.retention', '保留天数')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="number" className="input settings-input-narrow" title={t('settings.policy.days', '天数')} aria-label={t('settings.policy.days', '天数')} value={policy.memory.dailyMemoryDays} onChange={e => setPolicy(p => ({ ...p, memory: { ...p.memory, dailyMemoryDays: Number(e.target.value) || 7 } }))} min={1} max={90} />
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.contextBudget', '上下文预算')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="number" className="input settings-input-medium" title={t('settings.policy.tokens', 'tokens')} aria-label={t('settings.policy.tokens', 'tokens')} value={policy.context.contextTokens} onChange={e => setPolicy(p => ({ ...p, context: { ...p.context, contextTokens: Math.max(16000, Number(e.target.value) || 128000) } }))} min={16000} max={256000} />
-                    </div>
-                  </div>
-                </div>
-                <div className="settings-card">
-                  <h4 className="settings-card-title">{t('settings.policy.networkTitle', '联网')}</h4>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.networkAllow', '允许联网')}</span>
-                    <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" title={t('settings.policy.networkAllow', '允许联网')} aria-label={t('settings.policy.networkAllow', '允许联网')} checked={policy.network.enabled} onChange={e => setPolicy(p => ({ ...p, network: { ...p.network, enabled: e.target.checked } }))} />
-                    </div>
-                  </div>
-                  <div className="settings-policy-footer">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePolicy} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : t('settings.policy.savePolicy', '保存策略')}</button>
-                  </div>
-                </div>
-              </section>
-
-              <hr className="settings-section-divider" />
-
-              {/* ══ 4. 飞书 ══ */}
+              {/* ══ 3. 飞书 ══ */}
               <section id="feishu" className="settings-section" ref={registerSectionRef('feishu')}>
                 <H title={t('settings.feishu.title', '消息渠道 · 飞书')} desc={t('settings.feishu.desc', '通过飞书机器人收发消息，让 RDKClaw 成为你的飞书助手。')} />
                 <div className="settings-card">
@@ -2323,7 +2140,7 @@ export default function SettingsPanel() {
 
               <hr className="settings-section-divider" />
 
-              {/* ══ 5. 微信 ══ */}
+              {/* ══ 4. 微信 ══ */}
               <section id="weixin" className="settings-section" ref={registerSectionRef('weixin')}>
                 <H title={t('settings.weixin.title', '消息渠道 · 微信')} desc={t('settings.weixin.desc', '扫码绑定个人微信，随时随地与 RDKClaw 对话。')} />
                 <div className="settings-card settings-card--weixin">
@@ -2403,7 +2220,7 @@ export default function SettingsPanel() {
 
               <hr className="settings-section-divider" />
 
-              {/* ══ 6. 设备连接 ══ */}
+              {/* ══ 5. 设备连接 ══ */}
               <section id="connection" className="settings-section" ref={registerSectionRef('connection')}>
                 <H
                   title={t('settings.conn.title', '设备连接')}
@@ -2492,7 +2309,7 @@ export default function SettingsPanel() {
 
               <hr className="settings-section-divider" />
 
-              {/* ══ 7. 社区论坛 ══ */}
+              {/* ══ 6. 社区论坛 ══ */}
               <section id="forum" className="settings-section" ref={registerSectionRef('forum')}>
                 <H
                   title={t('settings.forum.title', '社区论坛')}

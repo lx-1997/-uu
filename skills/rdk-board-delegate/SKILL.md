@@ -1,7 +1,7 @@
 ---
 name: RDK Board Delegate
 description: 当任务需要板端真实能力（硬件操作、模型推理、TROS pipeline 等软件端无法模拟的动作）时，将任务委派给板端 OpenClaw Agent；对于简单命令执行，可直接使用 device_exec 而无需委派。
-version: 1.1.0
+version: 1.2.0
 trigger: 板端,openclaw,委派,复杂任务,插件,部署,诊断修复
 risk: high
 permissions: device_exec,network
@@ -29,7 +29,7 @@ category: Delegation
 ## 执行流程
 1. **知识准备**（推荐）：调用 `web_search` / `web_fetch` 查官方文档与仓库；结合设备信息与 `board_openclaw_assess` 核对插件、模型、pipeline 是否就绪。此步骤与 SOUL.md「先查后委」原则对齐。**注意**：assess 对常见 RDK 例程可能 **短路由瞬时返回**，可与 `web_fetch` 同轮。
 2. **评估可行性**：调用 `board_openclaw_assess` 确认板端 OpenClaw 在线、目标技能/插件已就绪。
-3. **结构化任务描述**：组装委派输入，guidance 应包含以下结构：
+3. **结构化任务描述**：组装委派输入，guidance 应包含以下结构（**切换或重启 TROS 视觉例程时**，须在 guidance 中写明：**清理范围含 USB 摄像头链路** `hobot_usb_cam`、`hobot_codec*` 及必要时 **websocket/nginx**，勿只停推理包如 `dnn_node_example` / `mono2d_body_detection`——见技能 **RDK ROS**「切换例程或清理节点」）：
    - `intent`：`diagnose` / `deploy` / `repair` / `automation` / `development`
    - `task`：明确目标与验收条件
    - `context`：设备现状、限制条件、日志摘要
