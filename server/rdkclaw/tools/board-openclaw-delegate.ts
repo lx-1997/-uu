@@ -46,11 +46,12 @@ const DELEGATE_RETRY_DELAY_MS = 2000;
 const BOARD_VISIBILITY_CONTRACT = [
   "---",
   "board_visibility_contract (mandatory, zh):",
-  "- 每进入新阶段先输出一行：「[板端] 阶段 · 正在做什么」；执行 shell/ros2 launch 前再一行说明意图。",
+  "- 每进入新阶段先输出一行：「[板端] 阶段 · 正在做什么」；**禁止**单独使用「处理数据/执行脚本」等模糊词，必须带具体对象：包名、*.launch.py、节点名、/dev/video*、topic、端口等。",
+  "- 重要命令结束后紧跟「[板端] 结果 · … → exit 码 | 一句结论」（后台则说明 PID/日志路径）。",
   "- 长日志只保留末尾约 15 行 + 退出码；前面用 […省略…]。",
   "- 若 rdkclaw_guidance 已含「可直接执行」的完整命令：不要重复 dpkg/ros2 pkg 探测同一包，先执行再排错。",
-  "- 标准官方演示目标约 60s 内进入可验收状态（进程/端口/topic）；大 apt 安装前先说明预计耗时。",
-  "- 收尾用 3～6 条 bullet 汇总命令链与验收方式（浏览器用板卡真实 IP）。",
+  "- 标准官方演示目标约 60s 内进入可验收状态（进程/端口/topic）；大 apt 安装前先说明预计耗时；Web 预览 URL 须用板卡真实 IP（ip -br a），禁止文档占位 IP。",
+  "- 收尾用 3～6 条 bullet 汇总 launch 全名、验收命令、预览 URL。",
   "若已安装技能「RDK Board Progress Reporter」请按其全文执行。",
 ].join("\n");
 
