@@ -1133,7 +1133,8 @@ export function addWeixinAccount(accountId: string, token: string, nickname?: st
 }
 
 export function removeWeixinAccount(accountId: string) {
-  return request<{ ok: boolean }>(`/api/rdkclaw/weixin/accounts/${accountId}`, {
+  const id = encodeURIComponent(accountId);
+  return request<{ ok: boolean; message?: string }>(`/api/rdkclaw/weixin/accounts/${id}`, {
     method: 'DELETE',
   });
 }

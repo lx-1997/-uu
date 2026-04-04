@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { loader } from '@monaco-editor/react';
-import { Loader2, RefreshCw, Upload, ArrowLeft } from 'lucide-react';
+import { Loader2, RefreshCw, Upload, ArrowLeft, Home, Search } from 'lucide-react';
 
 // 使用国内极速镜像源，避免因为 unpkg 无法连接导致「代码编辑」模块卡白屏加载不到一直启动不了的问题
 loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
@@ -30,6 +30,11 @@ export default function Files() {
   const [sortBy, setSortBy] = useState<'type' | 'name' | 'date'>('type');
   const [showHidden, setShowHidden] = useState(true);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const ctxMenuRef = useRef<HTMLDivElement | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<
+    | null
+    | { x: number; y: number; target: 'blank' | 'parent' | { name: string; isDir: boolean } }
+  >(null);
 
   const runDownloadRef = useRef<any>(null);
 
@@ -255,6 +260,9 @@ export default function Files() {
   const inHomePath = currentPath === '/root' || currentPath.startsWith('/root/');
   const displayParts = inHomePath ? parts.slice(1) : parts;
 
+  /** 与「主目录 /root」不重复的常用路径（避免再出现 ~/ 重复） */
+  const FILE_QUICK_PATHS: readonly string[] = ['/userdata', '/var/log', '/etc'];
+
   const visibleEntries = useMemo(() => {
     const q = searchText.trim().toLowerCase();
     const base = showHidden ? entries : entries.filter((entry) => !entry.name.startsWith('.'));
@@ -284,6 +292,45 @@ export default function Files() {
 
   const shellSafe = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
 
+  const pathForEntry = useCallback(
+    (name: string) => (currentPath === '/' ? `/${name}` : `${currentPath}/${name}`),
+    [currentPath],
+  );
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  const openCtxMenu = useCallback((e: React.MouseEvent, target: 'blank' | 'parent' | { name: string; isDir: boolean }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pad = 8;
+    const mw = 220;
+    const mh = 320;
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + mw > window.innerWidth - pad) x = window.innerWidth - mw - pad;
+    if (y + mh > window.innerHeight - pad) y = window.innerHeight - mh - pad;
+    if (x < pad) x = pad;
+    if (y < pad) y = pad;
+    setCtxMenu({ x, y, target });
+  }, []);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const onDoc = (ev: MouseEvent) => {
+      if (ctxMenuRef.current?.contains(ev.target as Node)) return;
+      setCtxMenu(null);
+    };
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setCtxMenu(null);
+    };
+    document.addEventListener('mousedown', onDoc);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [ctxMenu]);
+
   const createFolder = async () => {
     if (!ensureDevice() || !currentDevice) return;
     const folderName = window.prompt(t('files.promptFolder', '请输入新文件夹名称'))?.trim();
@@ -296,6 +343,32 @@ export default function Files() {
       refreshList();
     } catch (err) {
       addToast(err instanceof Error ? err.message : t('files.folderFail', '创建文件夹失败'), 'error');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const copyEntryPath = (name: string) => {
+    const p = pathForEntry(name);
+    void navigator.clipboard.writeText(p).then(
+      () => addToast(t('files.pathCopied', '已复制路径'), 'success'),
+      () => addToast(t('files.pathCopied', '已复制路径'), 'info'),
+    );
+  };
+
+  const deleteEntry = async (name: string) => {
+    if (!ensureDevice() || !currentDevice) return;
+    const full = pathForEntry(name);
+    if (!window.confirm(tf('files.deleteConfirm', '确定永久删除「{{path}}」？此操作不可恢复。', { path: full }))) return;
+    setRunning(true);
+    try {
+      await executeDeviceCommand(currentDevice.id, `rm -rf ${shellSafe(full)}`);
+      addToast(t('files.deleteOk', '已删除'), 'success');
+      setSelectedName(null);
+      refreshList();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : t('files.deleteFail', '删除失败'), 'error');
+    } finally {
       setRunning(false);
     }
   };
@@ -313,9 +386,34 @@ export default function Files() {
       refreshList();
     } catch (err) {
       addToast(err instanceof Error ? err.message : t('files.renameFail', '重命名失败'), 'error');
+    } finally {
       setRunning(false);
     }
   };
+
+  const handleTableContextMenu = useCallback(
+    (e: React.MouseEvent<HTMLTableElement>) => {
+      const tr = (e.target as HTMLElement).closest('tbody tr');
+      if (tr) {
+        const key = tr.getAttribute('data-file');
+        if (key === '__parent__') {
+          openCtxMenu(e, 'parent');
+          return;
+        }
+        if (key === '__empty__') {
+          openCtxMenu(e, 'blank');
+          return;
+        }
+        if (key) {
+          const entry = entries.find((en) => en.name === key);
+          if (entry) openCtxMenu(e, { name: entry.name, isDir: entry.isDir });
+        }
+        return;
+      }
+      openCtxMenu(e, 'blank');
+    },
+    [entries, openCtxMenu],
+  );
 
   useEffect(() => {
     if (editorFile) return;
@@ -348,19 +446,29 @@ export default function Files() {
   return (
     <div className="center-stage wide-stage tool-page" style={{ minHeight: '82vh', height: '82vh', display: 'flex', flexDirection: 'column' }}>
       <div className="isolated-widget workflow-widget" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div className="tool-bar" style={{ display: 'flex', alignItems: 'center' }}>
-          <div className="tool-bar-left">📁 {t('files.title', '资源管理器')}</div>
-          <div className="tool-bar-right">
-            <button className="btn btn-ghost btn-sm" onClick={() => refreshList()} disabled={running}>
-              {running ? <Loader2 size={16} className="spinner" /> : <RefreshCw size={16} />}
-              {t('files.refresh', '刷新')}
+        <div className="tool-bar files-page-toolbar">
+          <div className="tool-bar-left">
+            <span className="tool-bar-title">{t('files.title', '资源管理器')}</span>
+          </div>
+          <div className="tool-bar-right files-page-toolbar__actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm files-page-toolbar__icon-btn"
+              onClick={() => refreshList()}
+              disabled={running}
+              title={t('files.refresh', '刷新')}
+              aria-label={t('files.refresh', '刷新')}
+            >
+              {running ? <Loader2 size={16} className="spinner" /> : <RefreshCw size={16} strokeWidth={2} />}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={running}>
-              {running ? <Loader2 size={16} className="spinner" /> : <Upload size={16} />}
-              {t('files.upload', '上传文件')}
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={createFolder} disabled={running}>
-              {t('files.newFolder', '新建文件夹')}
+            <button
+              type="button"
+              className="btn btn-primary btn-sm files-page-toolbar__upload"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={running}
+            >
+              {running ? <Loader2 size={16} className="spinner" /> : <Upload size={16} strokeWidth={2} />}
+              <span>{t('files.upload', '上传文件')}</span>
             </button>
             <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
           </div>
@@ -413,69 +521,111 @@ export default function Files() {
           </div>
         ) : (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div className="tool-bar" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', padding: '12px 16px', gap: 8, flexWrap: 'wrap', background: 'var(--bg-secondary)', border: '1px solid var(--border)', flexShrink: 0 }}>
-              <div className="tool-bar-left" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flex: 1 }}>
-                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/root')} disabled={running}>🏠 {t('files.home', '~/ 主目录')}</button>
-                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => refreshList('/')} disabled={running}>{t('files.root', '/ 根目录')}</button>
-                <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 13 }} onClick={() => setShowHidden((v) => !v)} disabled={running}>{showHidden ? t('files.hideDot', '隐藏 .文件') : t('files.showDot', '显示 .文件')}</button>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  {['/root', '/userdata', '/var/log', '/etc'].map((quickPath) => (
-                    <button key={quickPath} className="btn btn-ghost btn-sm" style={{ padding: '5px 9px', fontSize: 12 }} onClick={() => refreshList(quickPath)} disabled={running}>
-                      {quickPath === '/root' ? '~/' : quickPath}
-                    </button>
-                  ))}
+            <div className="files-explorer-nav">
+              <div className="files-explorer-nav__main">
+                <div className="files-explorer-nav__path">
+                  <div className="file-breadcrumb file-breadcrumb--compact">
+                    <span
+                      className="file-crumb"
+                      onClick={() => refreshList(inHomePath ? '/root' : '/')}
+                    >
+                      {inHomePath ? '~' : '/'}
+                    </span>
+                    {displayParts.map((p, i) => (
+                      <React.Fragment key={i}>
+                        <span className="file-crumb-sep">/</span>
+                        <span className="file-crumb" onClick={() => handleBreadcrumb(inHomePath ? i + 1 : i)}>
+                          {p}
+                        </span>
+                      </React.Fragment>
+                    ))}
+                  </div>
                 </div>
-                <div className="file-breadcrumb" style={{ flex: 1, marginLeft: 10, display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
-                  <span className="file-crumb" style={{ cursor: 'pointer', color: 'var(--accent)', fontWeight: 500 }} onClick={() => refreshList(inHomePath ? '/root' : '/')}>
-                    {inHomePath ? '~' : '/'}
-                  </span>
-                  {displayParts.map((p, i) => (
-                    <React.Fragment key={i}>
-                      <span className="file-crumb-sep" style={{ color: 'var(--text-muted)' }}>/</span>
-                      <span
-                        className="file-crumb"
-                        style={{ cursor: 'pointer', color: 'var(--accent)', fontWeight: 500 }}
-                        onClick={() => handleBreadcrumb(inHomePath ? i + 1 : i)}
-                      >
-                        {p}
-                      </span>
-                    </React.Fragment>
-                  ))}
+                <div className="files-explorer-nav__tools">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm files-explorer-nav__dot-toggle"
+                    onClick={() => setShowHidden((v) => !v)}
+                    disabled={running}
+                    aria-pressed={showHidden}
+                    title={showHidden ? t('files.hideDot', '隐藏 .文件') : t('files.showDot', '显示 .文件')}
+                  >
+                    {showHidden ? t('files.hideDot', '隐藏 .文件') : t('files.showDot', '显示 .文件')}
+                  </button>
+                  <div className="files-explorer-nav__search-wrap">
+                    <Search size={14} className="files-explorer-nav__search-icon" strokeWidth={2} aria-hidden />
+                    <input
+                      className="input files-explorer-nav__search"
+                      ref={searchInputRef}
+                      placeholder={t('files.searchPh', '搜索当前目录...')}
+                      value={searchText}
+                      onChange={(e) => setSearchText(e.target.value)}
+                      aria-label={t('files.searchPh', '搜索当前目录...')}
+                    />
+                  </div>
+                  <select
+                    className="input files-explorer-nav__sort"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as 'type' | 'name' | 'date')}
+                    aria-label={t('files.sort.type', '按类型')}
+                  >
+                    <option value="type">{t('files.sort.type', '按类型')}</option>
+                    <option value="name">{t('files.sort.name', '按名称')}</option>
+                    <option value="date">{t('files.sort.date', '按时间')}</option>
+                  </select>
                 </div>
               </div>
-              <div className="tool-bar-right" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input
-                  className="input tool-bar-search"
-                  ref={searchInputRef}
-                  placeholder={t('files.searchPh', '搜索当前目录...')}
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                />
-                <select className="input" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'type' | 'name' | 'date')}>
-                  <option value="type">{t('files.sort.type', '按类型')}</option>
-                  <option value="name">{t('files.sort.name', '按名称')}</option>
-                  <option value="date">{t('files.sort.date', '按时间')}</option>
-                </select>
+              <div className="files-explorer-nav__shortcuts">
+                <span className="files-explorer-nav__label">{t('files.navPlaces', '快捷')}</span>
+                <button
+                  type="button"
+                  className="files-explorer-chip"
+                  onClick={() => refreshList('/root')}
+                  disabled={running}
+                  title={t('files.home', '~/ 主目录')}
+                >
+                  <Home size={13} strokeWidth={2} aria-hidden />
+                  {t('files.homeShort', '主目录')}
+                </button>
+                <button
+                  type="button"
+                  className="files-explorer-chip"
+                  onClick={() => refreshList('/')}
+                  disabled={running}
+                  title={t('files.root', '/ 根目录')}
+                >
+                  {t('files.rootShort', '根目录')}
+                </button>
+                {FILE_QUICK_PATHS.map((quickPath) => (
+                  <button
+                    key={quickPath}
+                    type="button"
+                    className="files-explorer-chip"
+                    title={quickPath}
+                    onClick={() => refreshList(quickPath)}
+                    disabled={running}
+                  >
+                    {quickPath.startsWith('/') ? quickPath.slice(1) : quickPath}
+                  </button>
+                ))}
               </div>
             </div>
 
             {selectedEntry && (
-              <div className="tool-bar" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', flexShrink: 0 }}>
-                <div className="tool-bar-left">
-                  <span>
-                    {tf('files.selected', '已选择：{{name}} (Enter 打开 / F2 重命名 / Ctrl+F 搜索)', {
-                      name: `${selectedEntry.isDir ? '📁' : '📄'} ${selectedEntry.name}`,
-                    })}
-                  </span>
+              <div className="files-selection-bar">
+                <div className="files-selection-bar__info">
+                  {tf('files.selected', '已选择：{{name}} (Enter 打开 / F2 重命名 / Ctrl+F 搜索)', {
+                    name: `${selectedEntry.isDir ? '📁' : '📄'} ${selectedEntry.name}`,
+                  })}
                 </div>
-                <div className="tool-bar-right" style={{ display: 'flex', gap: 8 }}>
+                <div className="files-selection-bar__actions">
                   {selectedEntry.isDir ? (
-                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => handleNavigate(selectedEntry.name)}>{t('files.openDir', '打开目录')}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleNavigate(selectedEntry.name)}>{t('files.openDir', '打开目录')}</button>
                   ) : (
-                    <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runEdit(selectedEntry.name)}>{t('files.edit', '编辑')}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => runEdit(selectedEntry.name)}>{t('files.edit', '编辑')}</button>
                   )}
-                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => runDownload(selectedEntry.name, selectedEntry.isDir)}>{t('files.download', '下载')}</button>
-                  <button className="btn btn-ghost btn-sm" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => renameEntry(selectedEntry.name)}>{t('files.rename', '重命名')}</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => runDownload(selectedEntry.name, selectedEntry.isDir)}>{t('files.download', '下载')}</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => renameEntry(selectedEntry.name)}>{t('files.rename', '重命名')}</button>
                 </div>
               </div>
             )}
@@ -500,7 +650,11 @@ export default function Files() {
                   {t('files.drop', '松开鼠标以上传文件至此目录')}
                 </div>
               )}
-              <table className="file-table" style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}>
+              <table
+                className="file-table"
+                style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: 14 }}
+                onContextMenu={handleTableContextMenu}
+              >
                 <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-secondary)', zIndex: 5, boxShadow: 'var(--shadow-sm)' }}>
                   <tr>
                     <th className="th" style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--text-secondary)', width: '50%' }}>{t('files.col.name', '文件名称')}</th>
@@ -511,7 +665,7 @@ export default function Files() {
                 </thead>
                 <tbody>
                   {currentPath !== '/' && (
-                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <tr data-file="__parent__" style={{ borderBottom: '1px solid var(--border)' }}>
                       <td className="td" style={{ padding: '14px 16px', cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 500 }} onClick={handleGoUp}>
                         <span style={{ marginRight: 10, fontSize: 18 }}>📂</span>{t('files.parent', '.. (上一级)')}
                       </td>
@@ -521,6 +675,7 @@ export default function Files() {
                   {visibleEntries.map((entry) => (
                     <tr
                       key={entry.name}
+                      data-file={entry.name}
                       className={selectedName === entry.name ? 'selected' : ''}
                       style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.2s', background: 'var(--bg-elevated)' }}
                       onClick={() => setSelectedName(entry.name)}
@@ -551,7 +706,7 @@ export default function Files() {
                     </tr>
                   ))}
                   {visibleEntries.length === 0 && !running && (
-                    <tr>
+                    <tr data-file="__empty__">
                       <td colSpan={4} className="td" style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>
                         {searchText.trim() ? t('files.empty.search', '未找到匹配文件，请调整搜索关键词') : t('files.empty.folder', '此文件夹为空，您可以拖拽文件到此处上传')}
                       </td>
@@ -563,6 +718,136 @@ export default function Files() {
           </div>
         )}
       </div>
+
+      {ctxMenu && (() => {
+        const { x, y, target } = ctxMenu;
+        return (
+          <div
+            ref={ctxMenuRef}
+            className="files-ctx-menu"
+            style={{ left: x, top: y }}
+            role="menu"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {target === 'blank' && (
+              <>
+                <button
+                  type="button"
+                  className="files-ctx-menu__item"
+                  onClick={() => {
+                    closeCtxMenu();
+                    void createFolder();
+                  }}
+                >
+                  {t('files.newFolder', '新建文件夹')}
+                </button>
+                <button
+                  type="button"
+                  className="files-ctx-menu__item"
+                  onClick={() => {
+                    closeCtxMenu();
+                    refreshList();
+                  }}
+                >
+                  {t('files.refresh', '刷新')}
+                </button>
+              </>
+            )}
+            {target === 'parent' && (
+              <>
+                <button
+                  type="button"
+                  className="files-ctx-menu__item"
+                  onClick={() => {
+                    closeCtxMenu();
+                    handleGoUp();
+                  }}
+                >
+                  {t('files.ctx.parent', '返回上一级')}
+                </button>
+                <button
+                  type="button"
+                  className="files-ctx-menu__item"
+                  onClick={() => {
+                    closeCtxMenu();
+                    refreshList();
+                  }}
+                >
+                  {t('files.refresh', '刷新')}
+                </button>
+              </>
+            )}
+            {target !== 'blank' && target !== 'parent' && (
+              <>
+                {target.isDir ? (
+                  <button
+                    type="button"
+                    className="files-ctx-menu__item"
+                    onClick={() => {
+                      closeCtxMenu();
+                      handleNavigate(target.name);
+                    }}
+                  >
+                    {t('files.ctx.open', '打开')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="files-ctx-menu__item"
+                    onClick={() => {
+                      closeCtxMenu();
+                      runEdit(target.name);
+                    }}
+                  >
+                    {t('files.ctx.edit', '编辑')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="files-ctx-menu__item"
+                  onClick={() => {
+                    closeCtxMenu();
+                    runDownload(target.name, target.isDir);
+                  }}
+                >
+                  {t('files.ctx.download', '下载')}
+                </button>
+                <button
+                  type="button"
+                  className="files-ctx-menu__item"
+                  onClick={() => {
+                    closeCtxMenu();
+                    void renameEntry(target.name);
+                  }}
+                >
+                  {t('files.ctx.rename', '重命名')}
+                </button>
+                <button
+                  type="button"
+                  className="files-ctx-menu__item"
+                  onClick={() => {
+                    closeCtxMenu();
+                    copyEntryPath(target.name);
+                  }}
+                >
+                  {t('files.ctx.copyPath', '复制路径')}
+                </button>
+                <div className="files-ctx-menu__sep" role="separator" />
+                <button
+                  type="button"
+                  className="files-ctx-menu__item files-ctx-menu__item--danger"
+                  onClick={() => {
+                    closeCtxMenu();
+                    void deleteEntry(target.name);
+                  }}
+                >
+                  {t('files.ctx.delete', '删除')}
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {searchMatches.length > 0 && (
         <div className="modal-overlay" onClick={() => setSearchMatches([])}>

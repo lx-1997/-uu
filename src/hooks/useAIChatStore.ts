@@ -452,6 +452,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     cardTitle?: string;
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
+  /** 任意工具最近一次 tool_start 的 toolCallId；device_exec 等本地工具进度不能回退到 latestBoardToolRef */
+  const latestAnyToolCallIdRef = useRef<string | null>(null);
   /** 当前轮 assistant 消息里 reasoning 块的 aiBlocks 下标 */
   const reasoningBlockIndexRef = useRef<number | null>(null);
   const reasoningTimelineSentRef = useRef(false);
@@ -1068,6 +1070,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         currentRunIdRef.current = '';
         toolTimelineRef.current = {};
         latestBoardToolRef.current = null;
+        latestAnyToolCallIdRef.current = null;
         reasoningBlockIndexRef.current = null;
         reasoningTimelineSentRef.current = false;
         approvalBlockRef.current = {};
@@ -1470,6 +1473,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   ],
                 });
                 const toolCallId = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
+                latestAnyToolCallIdRef.current = toolCallId;
                 toolTimelineRef.current[toolCallId] = {
                   toolName,
                   executor,
@@ -1518,8 +1522,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (!rawChunk) break;
                 const progressSource = String((event.data as { progressSource?: string }).progressSource || 'board');
                 const rawToolId = resolveToolId(event.data);
-                const fallbackId = latestBoardToolRef.current || '';
-                const toolId = rawToolId && toolTimelineRef.current[rawToolId] ? rawToolId : fallbackId;
+                const toolId =
+                  rawToolId && toolTimelineRef.current[rawToolId]
+                    ? rawToolId
+                    : latestAnyToolCallIdRef.current || latestBoardToolRef.current || '';
                 if (!toolId || !toolTimelineRef.current[toolId]) break;
                 const state = toolTimelineRef.current[toolId];
                 if (state.hiddenQuick) break;

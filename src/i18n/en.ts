@@ -225,7 +225,7 @@ export const EN: Record<string, string> = {
   'settings.ai.laneQuick': 'Quick reply',
   'settings.ai.laneTabs': 'Deep vs quick AI profile',
   'settings.ai.editingLane': 'Editing',
-  'settings.ai.laneSwitchHint': 'Same fields below for both lanes; the dropdown chooses which saved profile you edit or bind.',
+  'settings.ai.laneSwitchHint': 'Deep and quick profiles are saved separately.',
   'settings.ai.currentModel': 'Active model',
   'settings.ai.quickLaneModel': 'Quick reply model',
   'settings.ai.quickLaneHint':
@@ -252,11 +252,14 @@ export const EN: Record<string, string> = {
   'settings.ai.delete': 'Delete',
   'settings.ai.export': 'Export',
   'settings.ai.import': 'Import',
+  'settings.ai.backupTools': 'Config backup',
   'settings.ai.import.title': 'Import',
   'settings.ai.hint': 'Switch models quickly; config is stored locally.',
   'settings.ai.brainAdvanced': 'Reasoning',
+  'settings.ai.advanced': 'Advanced (reasoning & sampling)',
+  'settings.ai.builtin.missingShort': 'No bundled preset detected. Use the official installer or ask an admin.',
   'settings.ai.brainAdvancedHint':
-    'Thinking level = extended reasoning strength; visibility controls whether thinking blocks stream in chat (model must support). Empty = defaults (high + stream).',
+    'Thinking level and reasoning visibility; empty = runtime defaults. Temperature / top_p empty = not sent to the API.',
   'settings.ai.thinkingDefault': 'Thinking level',
   'settings.ai.reasoningVisibility': 'Reasoning visibility',
   'settings.ai.brainInherit': 'Default (high)',
@@ -293,7 +296,7 @@ export const EN: Record<string, string> = {
   'settings.policy.risk.low': 'Low',
   'settings.policy.risk.medium': 'Medium',
   'settings.policy.risk.high': 'High',
-  'settings.policy.permissionTitle': 'Permission boundary (RDKClaw)',
+  'settings.policy.permissionTitle': 'Permission boundary',
   'settings.policy.workspaceBoundary': 'Workspace boundary (host)',
   'settings.policy.devicePathAllow': 'Device path allowlist',
   'settings.policy.hostGuard': 'Host mutation guard',
@@ -360,6 +363,7 @@ export const EN: Record<string, string> = {
   'settings.weixin.confirmInWechat': 'Scanned — confirm in WeChat…',
 
   'settings.conn.title': 'Device & UI',
+  'settings.conn.descWithDevices': 'Manage saved SSH devices, timeout, and auto-connect.',
   'settings.conn.desc': 'SSH options. Switch display language from the bottom of the left sidebar.',
   'settings.conn.lang': 'Display language',
   'settings.conn.lang.saved': 'Language preference saved',
@@ -373,7 +377,8 @@ export const EN: Record<string, string> = {
   'settings.modal.close': 'Close',
 
   'settings.forum.title': 'Community forum',
-  'settings.forum.desc': 'Uses the same D-Robotics account as app sign-in: after you log in, the forum session syncs automatically. If that fails, save username and password here or in chat.',
+  'settings.forum.desc':
+    'Usually syncs with your app account; if not, save your forum username and password here and verify.',
   'settings.forum.user': 'Forum user',
   'settings.forum.notSet': 'Not set',
   'settings.forum.linkedSso': 'Synced with app account',
@@ -387,8 +392,10 @@ export const EN: Record<string, string> = {
   'settings.forum.verify': 'Verifying…',
   'settings.forum.saveVerify': 'Save & verify',
   'settings.forum.clear': 'Clear',
-  'settings.forum.tokenHeldNoCookie': 'Your app login token is saved; if posting still fails, the forum bridge may not accept this token—use Save & verify with your forum password, or sign in again.',
-  'settings.forum.hint': 'Signing out clears the forum cookie that was synced from app login; manually saved username/password stay until you clear them. Manual save runs SSO password verification.',
+  'settings.forum.tokenHeldNoCookie':
+    'If posting fails, use Save & verify with your forum password, or sign in to the app again.',
+  'settings.forum.hint':
+    'Signing out clears the auto-synced forum session; manually saved credentials stay until cleared.',
   'settings.forum.verifyFailDetail': 'Saved; SSO verification failed: {{detail}}',
 
   'settings.feishu.boundCount': 'Bound ({{n}})',
@@ -442,7 +449,9 @@ export const EN: Record<string, string> = {
   'toast.importOk': 'Model config imported',
   'toast.importFail': 'Import failed',
   'toast.weixinRemoved': 'Removed',
+  'toast.weixinRemoveFail': 'Could not remove this account',
   'toast.weixinRestarted': 'Channel restarted',
+  'toast.weixinRestartFail': 'Could not restart the WeChat channel',
   'toast.aiNoKeyWarn': 'This model has no API key; save a key before switching (or set OPENAI_API_KEY)',
   'toast.unknownErr': 'Unknown error',
 
