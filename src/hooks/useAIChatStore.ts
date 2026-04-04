@@ -450,6 +450,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     /** summarizeToolArgs，进度/结束时保留路径等目标信息 */
     argDetail?: string;
     cardTitle?: string;
+    /** 板端长链路兜底提示：最近一次「已告知用户」时间 */
+    watchdogLastNoticeAt?: number;
+    /** 板端长链路兜底提示：最近一次主动探测 OpenClaw 健康时间 */
+    watchdogLastProbeAt?: number;
+    watchdogProbePending?: boolean;
+    watchdogProbeCount?: number;
+    watchdogWaitLine?: string;
+    watchdogHealthLine?: string;
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
   /** 任意工具最近一次 tool_start 的 toolCallId；device_exec 等本地工具进度不能回退到 latestBoardToolRef */
@@ -1178,6 +1186,135 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        const OPENCLAW_IDLE_NOTICE_MS = 45_000;
+        const OPENCLAW_HEALTH_PROBE_MS = 90_000;
+        const OPENCLAW_WATCHDOG_TICK_MS = 5_000;
+        const openclawActiveToolIds = new Set<string>();
+        let openclawWatchdogTimer: number | null = null;
+
+        const upsertOpenClawWatchdogHint = (
+          state: {
+            waitHintCollabIndex?: number;
+            startedAt: number;
+            watchdogWaitLine?: string;
+            watchdogHealthLine?: string;
+          },
+          patch: {
+            waitLine?: string;
+            healthLine?: string;
+          },
+        ) => {
+          if (typeof patch.waitLine === 'string') state.watchdogWaitLine = patch.waitLine.trim();
+          if (typeof patch.healthLine === 'string') state.watchdogHealthLine = patch.healthLine.trim();
+          const lines = [state.watchdogWaitLine, state.watchdogHealthLine]
+            .filter((line): line is string => Boolean(line && line.trim()))
+            .map((line) => line.trim());
+          if (lines.length === 0) return;
+          if (typeof state.waitHintCollabIndex === 'number') {
+            const wb = aiBlocks[state.waitHintCollabIndex];
+            if (wb?.type === 'collab' && wb.side === 'rdkclaw' && wb.collabRole === 'wait_hint') {
+              wb.lines = lines;
+            }
+          } else {
+            state.waitHintCollabIndex = aiBlocks.length;
+            pushAiBlock({
+              type: 'collab',
+              side: 'rdkclaw',
+              collabRole: 'wait_hint',
+              title: t('dock.collab.waitHintTitle', '稍等片刻'),
+              subtitle: t('chat.openclaw.watchdog.subtitle', 'RDKClaw 正在主动跟进板端 OpenClaw 的执行进度'),
+              lines,
+              collapsible: true,
+              previewLines: 6,
+            });
+          }
+          updateAiMessage(aiText, aiBlocks);
+        };
+
+        const stopOpenClawWatchdog = () => {
+          if (openclawWatchdogTimer != null) {
+            window.clearInterval(openclawWatchdogTimer);
+            openclawWatchdogTimer = null;
+          }
+          openclawActiveToolIds.clear();
+        };
+
+        const ensureOpenClawWatchdog = () => {
+          if (openclawWatchdogTimer != null) return;
+          openclawWatchdogTimer = window.setInterval(() => {
+            if (generation !== streamGenerationRef.current) {
+              stopOpenClawWatchdog();
+              return;
+            }
+            const now = Date.now();
+            for (const toolId of [...openclawActiveToolIds]) {
+              const st = toolTimelineRef.current[toolId];
+              if (!st || st.executor !== 'board_openclaw') {
+                openclawActiveToolIds.delete(toolId);
+                continue;
+              }
+
+              const lastNotice = st.watchdogLastNoticeAt ?? st.startedAt;
+              if (now - lastNotice >= OPENCLAW_IDLE_NOTICE_MS) {
+                const waitedSec = Math.max(1, Math.floor((now - st.startedAt) / 1000));
+                upsertOpenClawWatchdogHint(
+                  st,
+                  {
+                    waitLine: tf('chat.openclaw.watchdog.waiting', '已等待 {{sec}} 秒，RDKClaw 正在追问 OpenClaw 当前进展...', {
+                      sec: waitedSec,
+                    }),
+                  },
+                );
+                st.watchdogLastNoticeAt = now;
+              }
+
+              const deviceId = String(currentDevice?.id || '').trim();
+              const lastProbe = st.watchdogLastProbeAt ?? 0;
+              if (!deviceId || st.watchdogProbePending || (st.watchdogProbeCount ?? 0) >= 1 || now - lastProbe < OPENCLAW_HEALTH_PROBE_MS) continue;
+
+              st.watchdogLastProbeAt = now;
+              st.watchdogProbePending = true;
+              void fetchDeviceOpenClawHealth(deviceId)
+                .then((res) => {
+                  if (generation !== streamGenerationRef.current) return;
+                  const statusSummary = String(res.status?.summary || '').trim();
+                  if (!statusSummary) return;
+                  const liveState = res.status.gatewayRunning
+                    ? t('chat.openclaw.watchdog.gatewayUp', '网关在线')
+                    : t('chat.openclaw.watchdog.gatewayDown', '网关离线');
+                  upsertOpenClawWatchdogHint(
+                    st,
+                    {
+                      healthLine: tf('chat.openclaw.watchdog.health', '主动查询结果：{{state}} · {{summary}}', {
+                        state: liveState,
+                        summary: statusSummary,
+                      }),
+                    },
+                  );
+                })
+                .catch(() => {
+                  if (generation !== streamGenerationRef.current) return;
+                  upsertOpenClawWatchdogHint(
+                    st,
+                    {
+                      healthLine: t('chat.openclaw.watchdog.healthFail', '主动查询 OpenClaw 状态失败，将继续等待板端回传。'),
+                    },
+                  );
+                })
+                .finally(() => {
+                  const next = toolTimelineRef.current[toolId];
+                  if (next) {
+                    next.watchdogProbePending = false;
+                    next.watchdogProbeCount = (next.watchdogProbeCount ?? 0) + 1;
+                  }
+                });
+            }
+            if (openclawActiveToolIds.size === 0) {
+              stopOpenClawWatchdog();
+            }
+          }, OPENCLAW_WATCHDOG_TICK_MS);
+        };
+
         let toolStepNo = 0;
 
         const { done, abort } = streamAgentChat(
@@ -1483,6 +1620,15 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   cardTitle,
                   ...(isBoardOpenClawCollabTool(toolName) ? { openclawStreamBuf: '' } : {}),
                 };
+                if (executor === 'board_openclaw') {
+                  const st = toolTimelineRef.current[toolCallId];
+                  st.watchdogLastNoticeAt = st.startedAt;
+                  st.watchdogLastProbeAt = 0;
+                  st.watchdogProbePending = false;
+                  st.watchdogProbeCount = 0;
+                  openclawActiveToolIds.add(toolCallId);
+                  ensureOpenClawWatchdog();
+                }
                 if (isBoardOpenClawCollabTool(toolName)) {
                   latestBoardToolRef.current = toolCallId;
                   const outboundLines = formatBoardOutboundLines(toolName, args);
@@ -1543,12 +1689,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const isBoardOpenClaw =
                   isBoardOpenClawCollabTool(toolName) || state.executor === 'board_openclaw';
                 if (isBoardOpenClaw) {
+                  state.watchdogLastNoticeAt = Date.now();
                   if (toolName === 'board_openclaw_chat' && progressSource === 'studio_wait') {
                     const more = rawChunk.split('\n').map((l) => l.trimEnd()).filter((l) => l.length > 0);
                     if (typeof state.waitHintCollabIndex === 'number') {
                       const wb = aiBlocks[state.waitHintCollabIndex];
                       if (wb?.type === 'collab' && wb.side === 'rdkclaw' && wb.collabRole === 'wait_hint') {
-                        wb.lines = [...wb.lines, ...more];
+                        wb.lines = [...wb.lines, ...more].slice(-24);
                       }
                     } else {
                       state.waitHintCollabIndex = aiBlocks.length;
@@ -1640,6 +1787,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const toolCallId = resolveToolId(event.data);
                 const state = toolTimelineRef.current[toolCallId || ''];
                 const elapsedMs = state ? Date.now() - state.startedAt : 0;
+                if (state?.executor === 'board_openclaw' && toolCallId) {
+                  openclawActiveToolIds.delete(toolCallId);
+                  if (openclawActiveToolIds.size === 0) stopOpenClawWatchdog();
+                }
                 if (state && !state.hiddenQuick && state.statusIndex >= 0) {
                   const statusBlock = aiBlocks[state.statusIndex];
                   if (statusBlock?.type === 'status' && statusBlock.items[0]) {
@@ -2313,6 +2464,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         }
         setAiTyping(false);
       } finally {
+        stopOpenClawWatchdog();
         if (generation === streamGenerationRef.current) {
           streamAbortRef.current = null;
           currentRunIdRef.current = '';

@@ -360,11 +360,12 @@ const DEVICE_EXEC_HEARTBEAT_AFTER_MS = 15_000;
 /** 连续无输出多久发一条「仍在运行」 */
 const DEVICE_EXEC_HEARTBEAT_SILENT_MS = 15_000;
 
-/** 前台跑 ros2 launch 会阻塞整条工具链直到节点退出，易导致会话「卡住/超时」；返回里点明应改用 background */
-const ROS_LONG_RUN_BLOCK_RE = /\bros2\s+launch\b/i;
+/** 前台跑 `ros2 launch` / `ros2 run` 会阻塞整条工具链直到节点退出，易导致会话「卡住/超时」；返回里点明应改用 background */
+const ROS_LONG_RUN_BLOCK_RE = /\bros2\s+(launch|run)\b/i;
 
 /**
  * 模型常在命令里手写 `nohup … ros2 launch` 却漏传 `background: true`，仍走前台 SSH + 心跳，整轮对话卡住。
+ * `ros2 run` 启动的节点同样长驻，故与 launch 一并自动按后台执行（除非显式 background:false）。
  * 显式 `background: false` 时尊重用户（短时只看启动横幅）。
  */
 function inferDeviceExecBackgroundIntent(command: string, explicitBackground?: boolean): boolean {
@@ -380,7 +381,7 @@ function appendRosLongRunForegroundHint(command: string, runBackground: boolean,
   if (result.includes('[编排提示 · 长驻进程]')) return result;
   return (
     `${result}\n\n` +
-    '[编排提示 · 长驻进程] `ros2 launch` 会**持续阻塞**当前 `device_exec`，整条对话需等进程结束才继续，易出现「任务超时」或长时间无下一步。' +
+    '[编排提示 · 长驻进程] `ros2 launch` / `ros2 run` 会**持续阻塞**当前 `device_exec`，整条对话需等进程结束才继续，易出现「任务超时」或长时间无下一步。' +
     ' **要启动后长期跑 demo**：请改用 **device_exec 且 `background: true`**（仅等启动阶段并返回 pid/日志），再用 `device_exec` 执行 `tail` 日志、`ros2 topic list` / `echo`，或 `studio_open_url` 打开可视化；' +
     '仅短时看启动横幅可保持前台。'
   );
@@ -423,9 +424,9 @@ function deviceExecTool(
       '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
       '规则：\n' +
       '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
-      '- **常驻进程（推流、WebSocket 服务、ros2 run 不退出等）**：传 **runDetached: true**。Studio 会以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
+      '- **常驻进程（推流、WebSocket 服务、长驻 ROS2 节点等）**：传 **runDetached: true**。Studio 会以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
       '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
-      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。**每条 device_exec 都是新 shell**，上一条的 `source` **不会**带到下一条；凡需 `ros2` 的排查须在同一条内写 `source /opt/tros/<distro>/setup.bash && ros2 ...`，**勿**单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` 后须 `source && ros2 node list` / `topic list` 或 `tail` 日志验证，勿仅凭「无报错」认定节点已起来\n' +
+      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。**每条 device_exec 都是新 shell**，上一条的 `source` **不会**带到下一条；凡需 `ros2` 的排查须在同一条内写 `source /opt/tros/<distro>/setup.bash && ros2 ...`，**勿**单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `source && ros2 node list` / `topic list` 或 `tail` 日志验证，勿仅凭「无报错」认定节点已起来\n' +
       '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
       '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
@@ -437,8 +438,8 @@ function deviceExecTool(
       '- 涉及**摄像头/视频输入**（如官方例程的 CAM_TYPE）：在 `source`+launch **之前**用短命令探测 **USB 与 MIPI**（如 `ls /dev/video*`、`v4l2-ctl --list-devices`、`lsusb`），与文档参数一致后再启动；勿假设接口类型\n' +
       '- 查看目录用 device_file_list 而不是 ls\n' +
       '- **runDetached=true**：与 **detachedLogPath** 联用，Studio 以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）\n' +
-      '- **background=true**：在板端 **nohup 后台**运行（另一套包装，适合 `ros2 launch` 等）。**`ros2 launch` / 长驻节点几乎总是应加 background 或 runDetached**，否则 SSH 前台会阻塞到节点退出。SSH **只等待启动完成**并返回 **pid、日志路径、日志尾部摘要**；勿对后台任务设过短 timeoutMs（未传时后台固定约 90s 仅用于取尾部）。仅短时看启动横幅可前台执行\n' +
-      '- **漏传 background**：若命令含 **`ros2 launch`** 或 **`nohup`**（且未使用 runDetached），Studio 会**自动按后台模式**执行（与 `background:true` 等价）；若确需前台阻塞到进程结束，请显式传 **`background: false`**',
+      '- **background=true**：在板端 **nohup 后台**运行（另一套包装，适合 `ros2 launch` / `ros2 run` 等）。**`ros2 launch`、`ros2 run` / 长驻节点几乎总是应加 background 或 runDetached**，否则 SSH 前台会阻塞到节点退出。SSH **只等待启动完成**并返回 **pid、日志路径、日志尾部摘要**；勿对后台任务设过短 timeoutMs（未传时后台固定约 90s 仅用于取尾部）。仅短时看启动横幅可前台执行\n' +
+      '- **漏传 background**：若命令含 **`ros2 launch`**、**`ros2 run`** 或 **`nohup`**（且未使用 runDetached），Studio 会**自动按后台模式**执行（与 `background:true` 等价）；若确需前台阻塞到进程结束，请显式传 **`background: false`**',
     inputSchema: {
       type: 'object',
       properties: {
@@ -454,7 +455,7 @@ function deviceExecTool(
         background: {
           type: 'boolean',
           description:
-            '可选。为 true 时在板端后台启动（nohup），适合 ros2 launch 等长驻进程；返回 pid 与日志文件路径及尾部。',
+            '可选。为 true 时在板端后台启动（nohup），适合 ros2 launch / ros2 run 等长驻进程；返回 pid 与日志文件路径及尾部。',
         },
         runDetached: {
           type: 'boolean',
@@ -563,7 +564,7 @@ function deviceExecTool(
           }
           if (autoBackground) {
             return (
-              '(命令执行成功，无输出)\n\n[Studio] 本条已按**后台模式**执行（检测到 ros2 launch / nohup 等，与显式 background:true 等价）。'
+              '(命令执行成功，无输出)\n\n[Studio] 本条已按**后台模式**执行（检测到 ros2 launch / ros2 run / nohup 等，与显式 background:true 等价）。'
             );
           }
           return '(命令执行成功，无输出)';
@@ -610,7 +611,7 @@ function deviceExecTool(
         if (isSshExecTimeoutMessage(msg)) {
           const rosHint =
             ROS_LONG_RUN_BLOCK_RE.test(input.command) && !runBackground && !runDetached
-              ? `\n\n若命令含 \`ros2 launch\` 等**长驻进程**，应使用 **device_exec** 且 **\`background: true\`** 或 **\`runDetached: true\`**（或命令中含 nohup/ros2 launch 时 Studio 会自动按后台执行），再用 \`tail\`/\`ros2 topic\` 验收；前台阻塞易触发工具/网关超时。`
+              ? `\n\n若命令含 \`ros2 launch\` / \`ros2 run\` 等**长驻进程**，应使用 **device_exec** 且 **\`background: true\`** 或 **\`runDetached: true\`**（或命令中含 nohup / ros2 launch / ros2 run 时 Studio 会自动按后台执行），再用 \`tail\`/\`ros2 topic\` 验收；前台阻塞易触发工具/网关超时。`
               : '';
           return (
             `[命令执行失败] ${msg}\n\n` +

@@ -87,9 +87,9 @@ export const deviceExecToolInputZod = z.object({
     z.coerce.number().finite().min(5000).max(7_200_000).optional(),
   ),
   /**
-   * 为 true 时在板端用 nohup 后台启动命令（适合 ros2 launch、长时间节点等），
+   * 为 true 时在板端用 nohup 后台启动命令（适合 ros2 launch / ros2 run、长时间节点等），
    * SSH 仅等待启动与日志尾部；主进程在设备上持续运行。
-   * 未传时若命令含 `ros2 launch` 或 `nohup`，服务端会自动按后台执行；显式 false 可强制前台。
+   * 未传时若命令含 `ros2 launch`、`ros2 run` 或 `nohup`，服务端会自动按后台执行；显式 false 可强制前台。
    */
   background: z.boolean().optional(),
   /**

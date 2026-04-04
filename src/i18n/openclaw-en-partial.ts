@@ -70,7 +70,7 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.test.fail': 'Model test failed',
   'oc.test.failNet': 'Model test failed',
   'oc.test.vendorVsGatewayHint':
-    '“Test API” calls the vendor from this machine (not the board Gateway). “Test gateway” uses WebSocket on the device end-to-end (needs gateway + pairing, etc.).',
+    '“Test API” calls the vendor from this machine (not the board Gateway).',
   'oc.test.vendorMissing': 'Enter Base URL, Model ID, and API Key',
   'oc.test.vendorOk': 'Vendor API OK',
   'oc.test.vendorOkMs': 'Vendor API OK ({{ms}} ms)',

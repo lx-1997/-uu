@@ -250,7 +250,6 @@ export default function OpenClaw() {
   });
   const [selectedPreset, setSelectedPreset] = useState('');
   const [vendorApiTest, setVendorApiTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
-  const [gatewayTest, setGatewayTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
 
   // ─── Feishu Config State ───
   const [feishuConfig, setFeishuConfig] = useState({
@@ -1078,36 +1077,6 @@ export default function OpenClaw() {
     setTimeout(() => setVendorApiTest('idle'), 5000);
   };
 
-  /** 经板端 WebSocket Gateway 的 chat.send 端到端测试 */
-  const testGatewayModelConnection = async () => {
-    if (!currentDevice) return;
-    setGatewayTest('testing');
-    try {
-      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/model-test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
-      const passed = !!data?.ok;
-      setGatewayTest(passed ? 'ok' : 'fail');
-      if (passed) {
-        addToast?.(t('oc.test.ok', '模型调用测试通过'), 'success');
-      } else {
-        const output = String(data?.output || '');
-        if (Boolean(data?.pairingRequired) || /pairing required/i.test(output)) {
-          setAccordion('pairing');
-          addToast?.(t('oc.test.pairing', '模型测试失败：需要先通过配对审批（已展开配对面板）'), 'warning');
-        } else {
-          addToast?.(output || t('oc.test.fail', '模型调用测试失败'), 'warning');
-        }
-      }
-    } catch {
-      setGatewayTest('fail');
-      addToast?.(t('oc.test.failNet', '模型调用测试失败'), 'error');
-    }
-    setTimeout(() => setGatewayTest('idle'), 5000);
-  };
-
   /* ─── Deploy Functions ─── */
 
   const handleOneClickInstall = async () => {
@@ -1860,25 +1829,17 @@ export default function OpenClaw() {
                 <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 6 }}>
                   {t(
                     'oc.test.vendorVsGatewayHint',
-                    '「测试 API」从本机直连厂商接口（不经板端 Gateway）；「测试网关」经 WebSocket 走板端完整链路（依赖网关与配对等）。',
+                    '「测试 API」从本机直连厂商接口（不经板端 Gateway）。',
                   )}
                 </div>
                 <div className="oc-form-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => saveConfig('model')} disabled={loading}>{loading ? t('oc.test.testing', '...') : t('oc.save', '保存')}</button>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { loadConfig(); addToast?.(t('oc.toast.reloaded', '已加载'), 'info'); }}>{t('oc.reload', '重载')}</button>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={testVendorApiConnection} disabled={vendorApiTest === 'testing'}>
                     {vendorApiTest === 'testing'
                       ? t('oc.test.testing', '...')
                       : vendorApiTest === 'ok'
                         ? t('oc.test.vendorOkLabel', 'API 正常')
                         : t('oc.test.vendorRun', '测试 API')}
-                  </button>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={testGatewayModelConnection} disabled={!currentDevice || gatewayTest === 'testing'} title={!currentDevice ? t('oc.test.gatewayNeedDevice', '需先选择设备') : undefined}>
-                    {gatewayTest === 'testing'
-                      ? t('oc.test.testing', '...')
-                      : gatewayTest === 'ok'
-                        ? t('oc.test.gatewayOkLabel', '网关正常')
-                        : t('oc.test.gatewayRun', '测试网关')}
                   </button>
                 </div>
               </div>
