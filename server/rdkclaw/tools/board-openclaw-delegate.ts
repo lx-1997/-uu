@@ -42,6 +42,18 @@ function toBoardDevice(device: SharedDevice) {
 const DELEGATE_MAX_RETRIES = 1;
 const DELEGATE_RETRY_DELAY_MS = 2000;
 
+/** 注入板端消息：强制阶段性反馈，避免「长时间无输出」；与 skills/rdk-board-progress-reporter/SKILL.md 一致 */
+const BOARD_VISIBILITY_CONTRACT = [
+  "---",
+  "board_visibility_contract (mandatory, zh):",
+  "- 每进入新阶段先输出一行：「[板端] 阶段 · 正在做什么」；执行 shell/ros2 launch 前再一行说明意图。",
+  "- 长日志只保留末尾约 15 行 + 退出码；前面用 […省略…]。",
+  "- 若 rdkclaw_guidance 已含「可直接执行」的完整命令：不要重复 dpkg/ros2 pkg 探测同一包，先执行再排错。",
+  "- 标准官方演示目标约 60s 内进入可验收状态（进程/端口/topic）；大 apt 安装前先说明预计耗时。",
+  "- 收尾用 3～6 条 bullet 汇总命令链与验收方式（浏览器用板卡真实 IP）。",
+  "若已安装技能「RDK Board Progress Reporter」请按其全文执行。",
+].join("\n");
+
 const DELEGATE_STALL_CHECK_MS = 10_000;
 const DELEGATE_STALL_FIRST_ALERT_MS = 25_000;
 const DELEGATE_STALL_REPEAT_MS = 30_000;
@@ -139,7 +151,7 @@ export function boardOpenClawDelegateTool(
     description:
       "读者=编排模型。把**一段板端责任**交给板端 OpenClaw 在其会话里执行（多步推理、技能链、迭代排障），不是「多调几次 SSH」的别名。\n" +
       "将任务委派给板端 OpenClaw。RDKClaw 与板端协作的核心执行工具。\n" +
-      "**Studio 可见性**：板端流式输出经 **tool_progress** 推到对话里的「板端 OpenClaw」协作块；请展开该块查看实时日志。若只见「完成」而无过程，检查是否折叠了过程区或会话被精简模式隐藏。\n\n" +
+      "**Studio 可见性**：板端流式输出经 **tool_progress** 推到对话里的「板端 OpenClaw」协作块；请展开该块查看实时日志。委派消息会附带 **board_visibility_contract**，要求板端用「[板端] 阶段 · …」分段说明；技能 **RDK Board Progress Reporter**（仓库 `skills/rdk-board-progress-reporter`）可装到板端强化可见性。若只见「完成」而无过程，检查折叠区或板端是否按契约输出。\n\n" +
       "规则：\n" +
       "- ALWAYS 在委派前先用 board_openclaw_assess；assess 认为可承接后再 delegate（勿跳过 assess）\n" +
       "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
@@ -207,9 +219,10 @@ export function boardOpenClawDelegateTool(
       }
       if (useSkills) {
         msgParts.push(
-          "\nhint: 优先用已装技能；不够则 `find-skills` 再执行，必要时 `clawhub install <owner/slug>`。收尾一句话说明用到的技能/命令链。",
+          "\nhint: 优先用已装技能（含 **RDK Board Progress Reporter** 时须按其对用户可见性输出）；不够则 `find-skills` 再执行，必要时 `clawhub install <owner/slug>`。收尾一句话说明用到的技能/命令链。",
         );
       }
+      msgParts.push(`\n${BOARD_VISIBILITY_CONTRACT}`);
       msgParts.push(
         "\n[NEED_RDKCLAW] 缺联网、文档或生态信息时，在回复中包一层（勿与正文混写）：\n" +
           "[NEED_RDKCLAW]\ntype: web_search|documentation|advisory\nquery: …\nreason: …\n[/NEED_RDKCLAW]\n" +
@@ -244,7 +257,7 @@ export function boardOpenClawDelegateTool(
 
           const flushProgress = (force = false) => {
             const now = Date.now();
-            if (!force && now - lastEmitAt < 200) return;
+            if (!force && now - lastEmitAt < 100) return;
             if (!pending.trim()) return;
             const toSend = pending.length > 1200 ? pending.slice(-1200) : pending;
             pending = "";

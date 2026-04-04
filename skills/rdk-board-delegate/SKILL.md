@@ -21,8 +21,13 @@ category: Delegation
 - 用户明确要求"调用板端 OpenClaw"。
 - **何时直接用 `device_exec`**：目标是单条 shell 命令且不涉及 OpenClaw 技能编排（如 `ls`、`cat`、`systemctl status`），此时无需走委派链路。
 
+## 板端可见性（强烈建议）
+
+- 委派后用户在 Studio 里依赖 **协作块流式输出** 理解进度。板端应遵循服务端注入的 **board_visibility_contract**（「[板端] 阶段 · …」）。
+- 在板端安装技能 **`RDK Board Progress Reporter`**（仓库 `skills/rdk-board-progress-reporter`）可统一话术；也可用 `find-skills` 检索后安装。
+
 ## 执行流程
-1. **知识准备**（推荐）：调用 `web_search` / `web_fetch` 查官方文档与仓库；结合设备信息与 `board_openclaw_assess` 核对插件、模型、pipeline 是否就绪。此步骤与 SOUL.md「先查后委」原则对齐。
+1. **知识准备**（推荐）：调用 `web_search` / `web_fetch` 查官方文档与仓库；结合设备信息与 `board_openclaw_assess` 核对插件、模型、pipeline 是否就绪。此步骤与 SOUL.md「先查后委」原则对齐。**注意**：assess 对常见 RDK 例程可能 **短路由瞬时返回**，可与 `web_fetch` 同轮。
 2. **评估可行性**：调用 `board_openclaw_assess` 确认板端 OpenClaw 在线、目标技能/插件已就绪。
 3. **结构化任务描述**：组装委派输入，guidance 应包含以下结构：
    - `intent`：`diagnose` / `deploy` / `repair` / `automation` / `development`
@@ -43,10 +48,12 @@ category: Delegation
      - verify_command: {一条可复制命令或明确 UI 路径，用于 RDKClaw 独立核对}
      - board_target: {X3/X5/S100 等与模型格式一致}
      ```
-4. **提交委派**：调用 `board_openclaw_delegate` 将结构化任务提交给板端 OpenClaw。
-5. **等待与监控**：等待板端返回结果；若超时主动轮询，若报错提炼可操作原因。
-6. **独立验证**：板端完成后，用 `device_exec` 执行上文的 **verify_command**（或等价检查），**未通过则不得宣称成功**；同一错因重复失败 ≤2 次即换方案或降级。
-7. **汇总报告**：汇报执行结果；如有异常，给出原因分析与修复建议。输出中标注"软件端执行"和"板端执行"各自的结果。
+4. **快路径**：若文档与探测已给出**唯一**可执行 `ros2 launch` 且无需多步 apt/脚本，优先 **`device_exec` background** 直接启动并验收（目标约 60s 内可观测），**不要**为同一命令再 delegate。
+
+5. **提交委派**：调用 `board_openclaw_delegate` 将结构化任务提交给板端 OpenClaw（多步/缺依赖/技能链时）。
+6. **等待与监控**：等待板端返回结果；若超时主动轮询，若报错提炼可操作原因。
+7. **独立验证**：板端完成后，用 `device_exec` 执行上文的 **verify_command**（或等价检查），**未通过则不得宣称成功**；同一错因重复失败 ≤2 次即换方案或降级。
+8. **汇总报告**：汇报执行结果；如有异常，给出原因分析与修复建议。输出中标注"软件端执行"和"板端执行"各自的结果。
 
 > **降级路径**：若步骤 2 判定 OpenClaw 不可达，降级为 `device_exec` 执行简单操作并告知用户。
 

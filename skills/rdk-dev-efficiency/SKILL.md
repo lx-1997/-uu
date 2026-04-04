@@ -38,6 +38,7 @@ category: Meta
 
 ## 3. 并行（原 parallel-ops）
 
+- **RDK 文档单 launch 例程**：`web_fetch`（优先本地 rdk-doc 缓存）+ `board_openclaw_assess`（可能短路由）+ `device_exec` 探测 **同轮发出**；确认命令后优先 **一条** `device_exec` 后台启动，目标 **~1 分钟内** 可验收（进程/端口/topic），勿无谓 delegate。
 - 只读、无依赖的步骤可并行：`device_diagnose` + `board_openclaw_status`（推荐日常）；需 JSON 时再考虑 `health`。
 - 多文件只读可并行 `device_file_read`。
 - **必须串行**：安装→重启→验证；写后读；doctor→重启→health。

@@ -115,6 +115,7 @@ const KNOWN_RDK_EXAMPLE_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /fcos|yolo(?![\w]*\s*world)|mobilenet.*ssd|efficientnet.*det|目标检测|物体检测|检测例程/i, label: "目标检测" },
   { pattern: /yolo.?world|开放词汇.*检测|open.?vocab/i, label: "YOLO-World 开放词汇检测" },
   { pattern: /mono2d.*body|人体检测|人体识别|骨骼|body_detection/i, label: "人体检测" },
+  { pattern: /body_tracking|人体跟踪|人体识别与跟踪/i, label: "人体跟踪" },
   { pattern: /hobot_usb_cam|hobot_mipi_cam|相机节点|usb_cam.*launch/i, label: "相机节点" },
   { pattern: /hobot_codec|图像编解码/i, label: "图像编解码" },
   { pattern: /hobot_stereo|双目|stereo_usb_cam/i, label: "双目相机" },
@@ -161,7 +162,8 @@ export function boardOpenClawAssessTool(
     name: "board_openclaw_assess",
     description:
       "读者=编排模型。与板端 OpenClaw 的**正式能力握手**：只评估不执行，但**不是可跳过的一步**——在可能 delegate 前应先 assess，避免 RDKClaw 用 SSH 把整件事包办。\n" +
-      "向板端 OpenClaw 咨询：某任务是否适合由板端 Agent 承接（canHandle/confidence/reason）。\n\n" +
+      "向板端 OpenClaw 咨询：某任务是否适合由板端 Agent 承接（canHandle/confidence/reason）。\n" +
+      "**短路由**：任务描述命中常见 RDK 官方例程关键词时，可能 **瞬时返回 JSON**（不连接板端 LLM），仍视为有效 assess，可与 `web_fetch` 同轮。\n\n" +
       "选用时机：\n" +
       "- 板端多步/试错/技能链/clawhub 流程；或你已预见要多轮 device_exec 试探\n" +
       "- 不确定该 SSH 硬顶还是交给板端时——先 assess 再决定\n" +
@@ -203,6 +205,7 @@ export function boardOpenClawAssessTool(
         : "";
       const prompt = [
         "[assess] 仅评估是否适合由你在板端承接，不要执行 task 中的操作。",
+        "若 context 中已写明 RDKClaw 已确认完整命令，reason 里注明「可按 guidance 直接执行、无需重复探测包是否安装」。",
         "只输出一个 JSON 对象，禁止 markdown/代码围栏/前后解说。Schema:",
         '{"canHandle":true|false,"confidence":0~1,"reason":"一句","suggestedPath":"board|local"}',
         skillContext,

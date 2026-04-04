@@ -1252,6 +1252,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
         const humanizeBoardToolLine = (line: string) => {
           const trimmed = line.trim();
+          if (/^\[板端\]/i.test(trimmed)) {
+            return trimmed;
+          }
           const m = trimmed.match(/^\[TOOL:(start|update|result|error)\]\s*([^\s]+)(?:\s*×(\d+))?$/i);
           if (m) {
             const phase = m[1].toLowerCase();
