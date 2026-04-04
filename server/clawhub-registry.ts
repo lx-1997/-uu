@@ -192,6 +192,36 @@ export type ClawhubSearchHit = {
 };
 
 /**
+ * SkillHub `/api/v1/search` 常返回「语义/宽泛」命中，短关键词也会出现大量弱相关条目。
+ * 在展示前按用户输入做二次过滤：多词时要求 slug/标题/摘要中**同时**出现各词（忽略大小写）。
+ */
+export function filterClawhubHitsByQuery(query: string, hits: ClawhubSearchHit[]): ClawhubSearchHit[] {
+  const raw = query.trim().toLowerCase();
+  if (!raw || hits.length === 0) return hits;
+  const tokens = raw.split(/[\s\-_/]+/).filter((t) => t.length >= 2);
+
+  const blobFor = (h: ClawhubSearchHit) =>
+    `${h.slug} ${h.displayName ?? ''} ${h.summary ?? ''}`.toLowerCase();
+
+  if (tokens.length === 0) {
+    if (raw.length >= 2) {
+      return hits.filter((h) => blobFor(h).includes(raw));
+    }
+    return hits;
+  }
+
+  if (tokens.length === 1) {
+    const t = tokens[0];
+    return hits.filter((h) => blobFor(h).includes(t));
+  }
+
+  return hits.filter((h) => {
+    const blob = blobFor(h);
+    return tokens.every((t) => blob.includes(t));
+  });
+}
+
+/**
  * 在指定注册表基址上搜索（用于强制走腾讯 SkillHub 等，而不受 `CLAWHUB_REGISTRY` 影响）。
  */
 export async function clawhubSearchAt(
@@ -219,7 +249,8 @@ export async function clawhubSearchAt(
     url.searchParams.set('limit', String(lim));
     const text = await fetchTextWithRetry(url.toString(), {}, { timeoutMs: SEARCH_FETCH_TIMEOUT_MS });
     const data = JSON.parse(text) as { results?: ClawhubSearchHit[] };
-    const results = Array.isArray(data.results) ? data.results : [];
+    const rawList = Array.isArray(data.results) ? data.results : [];
+    const results = filterClawhubHitsByQuery(q, rawList);
     searchCache.set(cacheKey, { at: Date.now(), results });
     return { results };
   })();
