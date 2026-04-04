@@ -37,7 +37,7 @@ export function sshPasswordCandidates(username: string): string[] {
   return Array.from(new Set(candidates));
 }
 
-function sshConnectBase(credentials: SshCredentials): ConnectConfig {
+export function buildSshConnectConfig(credentials: SshCredentials): ConnectConfig {
   const pwd = credentials.password;
   const kb =
     typeof pwd === 'string' && pwd.length > 0
@@ -115,7 +115,7 @@ export function verifySshConnection(credentials: SshCredentials, options?: Verif
         reject(error);
       })
       .connect({
-        ...sshConnectBase(credentials),
+        ...buildSshConnectConfig(credentials),
         readyTimeout,
       });
   });
@@ -277,7 +277,7 @@ export function runRemoteCommands(
         try { client.end(); } catch { /* ignore */ }
         safeReject(error);
       })
-      .connect(sshConnectBase(credentials));
+      .connect(buildSshConnectConfig(credentials));
   });
 }
 
@@ -357,7 +357,8 @@ export function uploadFileSftp(
         
         // Prefer direct write; create parent dir first.
         // Do NOT use interactive sudo here, otherwise it may block waiting for password.
-        client.exec(`bash -lc "mkdir -p \\$(dirname ${safePath}) && base64 -d > ${safePath}"`, { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } }, (err, stream) => {
+        // 非登录 shell，避免与板上其它 SSH 会话并发时 `bash -lc` 读 profile 变慢或占资源
+        client.exec(`bash -c "mkdir -p \\$(dirname ${safePath}) && base64 -d > ${safePath}"`, { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } }, (err, stream) => {
           if (err) return doReject(err);
           
           let stderr = '';
@@ -383,6 +384,6 @@ export function uploadFileSftp(
         });
       })
       .on('error', (err: Error) => doReject(err))
-      .connect(sshConnectBase(credentials));
+      .connect(buildSshConnectConfig(credentials));
   });
 }

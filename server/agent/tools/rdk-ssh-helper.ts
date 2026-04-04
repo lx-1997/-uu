@@ -12,6 +12,11 @@ import {
   uploadFileSftp,
   SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS,
 } from '../../ssh.js';
+import {
+  isPersistentShellEnabled,
+  runPersistentShellCommand,
+  sanitizePersistentShellOutputForDisplay,
+} from '../../device-persistent-shell.js';
 import type { Device } from '../../../shared/types.js';
 import { runInDeviceLane } from '../../device-exec-scheduler.js';
 import { setDevicePasswordCache } from '../../device-password-cache.js';
@@ -72,6 +77,11 @@ export type ExecOnDeviceOptions = {
    * 默认 true。device_exec 传 false：远程命令非零退出不抛错，返回输出 + `[exit code: n]`，避免与 SSH/超时失败混淆。
    */
   rejectOnNonZeroExit?: boolean;
+  /**
+   * 仅 device_exec：为 true 且未设置 RDK_DEVICE_EXEC_PERSISTENT_SHELL=0 时，在同一 SSH 交互 shell 中执行（保留 cd/source）。
+   * 失败时自动回退为单次 `exec`。
+   */
+  persistentShell?: boolean;
 };
 
 export async function getDevice(deviceId: string): Promise<Device | null> {
@@ -113,6 +123,24 @@ export async function execOnDevice(
           ...(options.rejectOnNonZeroExit === false ? { rejectOnNonZeroExit: false as const } : {}),
         }
       : undefined;
+
+  const joined = commands.filter(Boolean).join(' && ');
+  const tryPersistent =
+    options?.persistentShell === true && isPersistentShellEnabled() && joined.length > 0;
+  if (tryPersistent) {
+    try {
+      const raw = await runPersistentShellCommand(deviceId, joined, {
+        timeoutMs: options?.timeoutMs,
+        onStreamChunk: options?.onStreamChunk,
+        abortSignal: options?.abortSignal,
+        rejectOnNonZeroExit: options?.rejectOnNonZeroExit,
+      });
+      return sanitizePersistentShellOutputForDisplay(raw);
+    } catch (err) {
+      console.warn('[SSH] persistent shell failed, fallback to one-shot exec:', err);
+    }
+  }
+
   const pwdList = buildSshPasswordCandidatesForDevice(device);
   if (pwdList.length === 0) {
     throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');

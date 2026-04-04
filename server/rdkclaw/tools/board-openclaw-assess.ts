@@ -169,6 +169,7 @@ export function boardOpenClawAssessTool(
       "- 不确定该 SSH 硬顶还是交给板端时——先 assess 再决定\n" +
       "不适用：纯本机搜索/读文档/知识问答（与板端无关）；单条 shell 就能完成的原子命令（直接 device_exec）\n\n" +
       "规则：\n" +
+      "- **与 delegate 相同**：须 **Studio↔板** 网络可达且板端 **网关可用**；若评估要走板端 LLM 调云端 API，板端还需 **出网**\n" +
       "- ALWAYS 在 board_openclaw_delegate 之前调用（同一复杂任务勿跳过）\n" +
       "- 返回 confidence < 0.5 时：倾向用本地/SSH；若 reason 指缺技能，可先装技能再 assess\n",
     inputSchema: {

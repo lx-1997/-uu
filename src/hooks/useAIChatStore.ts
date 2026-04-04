@@ -1805,7 +1805,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                           ? t('dock.collab.outboundFleetDelegateSubtitle', '跨板委派至目标设备')
                           : toolName === 'fleet_board_broadcast'
                             ? t('dock.collab.outboundFleetBroadcastSubtitle', '向多块板卡广播任务')
-                            : t('dock.collab.outboundDelegateSubtitle', '委派任务与执行建议');
+                            : t(
+                                'dock.collab.outboundDelegateSubtitle',
+                                '委派任务与执行建议（需网关就绪；Studio 可连板；要 apt/在线模型时板端须出网）',
+                              );
                   pushAiBlock({
                     type: 'collab',
                     side: 'rdkclaw',

@@ -154,6 +154,7 @@ export function boardOpenClawDelegateTool(
       "将任务委派给板端 OpenClaw。RDKClaw 与板端协作的核心执行工具。\n" +
       "**Studio 可见性**：板端流式输出经 **tool_progress** 推到对话里的「板端 OpenClaw」协作块；请展开该块查看实时日志。委派消息会附带 **board_visibility_contract**，要求板端用「[板端] 阶段 · …」分段说明；技能 **RDK Board Progress Reporter**（仓库 `skills/rdk-board-progress-reporter`）可装到板端强化可见性。若只见「完成」而无过程，检查折叠区或板端是否按契约输出。\n\n" +
       "规则：\n" +
+      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 板端 **OpenClaw Gateway 已运行**（本工具会预检，未起则尝试重启）；③ 若任务需 **apt/clawhub/云端模型 API** 等，板子还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
       "- ALWAYS 在委派前先用 board_openclaw_assess；assess 认为可承接后再 delegate（勿跳过 assess）\n" +
       "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
       "- ALWAYS 在 guidance 中写明验收标准（怎样算成功）\n" +

@@ -20,6 +20,7 @@ export function buildPersonaPrompt(persona: PersonaProfile) {
   if (persona.delegationBias === "local-first") {
     lines.push(
       "**Studio 编排（运行契约）**：你负责联网、工作区编排与**验收**；板端 OpenClaw 负责**板端会话内多步迭代**与技能链。**单条/原子**（一条 `device_exec` 能查清）→ 直接用 `device_exec` / `device_file_*` / `device_diagnose`。**多步、依赖已装技能、或预计要多次试错** → `board_openclaw_assess`（可与检索同轮）→ `board_openclaw_delegate`，勿用大量无目的 `device_exec` 替代板端 Agent。不要把 assess 当无意义开场白；也不要在明显该委派时回避 OpenClaw。",
+      "**无板端 OpenClaw 或刻意快路径时**：与 delegate **同一套目标**——先文档与并行探测、短步骤链、每步读输出再推进、`background`/日志与 topic 验收；持久 shell 可延续 `source`。**不能**用纯 SSH 冒充 SkillHub 技能链；缺技能时要么装 OpenClaw，要么按 rdk_doc 手搓等价命令。**对用户说明**须与委派 guidance 一样写清阶段与验收，勿只贴 shell。",
     );
   } else if (persona.delegationBias === "board-first") {
     lines.push(
@@ -48,6 +49,7 @@ export function buildReasoningGuidancePrompt(
           "- **先做**：原子取证用 `device_*`；能**一条命令**完成就不要 delegate。",
           "- **必须收束到板端 Agent 时**：多步安装/编译/跑通、依赖 clawhub/板端技能、网关插件、或你已预见 **>3 次**试探性 `device_exec`——应 **assess→delegate**，让板端在其会话内迭代，避免主会话被 shell 日志淹没。",
           "- **assess** 可与 `web_search` 同轮并行；`delegate` 的 guidance 须含验收标准。",
+          "- **仅 SSH 多步时**：对用户回复的结构化程度须与上述 guidance **同级**（编号计划、阶段归纳、验收命令），勿只堆工具输出。",
           "- **不要**：无目的地首轮堆 assess；也**不要**：该委派时却用十几条 `device_exec` 硬顶。",
         ].join("\n")
       : [
@@ -103,6 +105,7 @@ export function buildReasoningGuidancePrompt(
     "",
     "### 回复风格",
     "对用户可见回复：**结论先行**，附必要步骤或代码；不要将冗长内心推理原文贴给用户（推理通道已承担展开）。",
+    "**多步板端且未 delegate**：若你用多轮 `device_exec`/`device_file_*` 自建流程，对用户可见正文须与 `board_openclaw_delegate` 的 guidance **同等清晰**——编号计划、每阶段一句归纳、明确验收标准与验证命令；**禁止**假设用户能从原始 SSH 输出自行还原步骤。",
     "技术细节用代码块展示，不要用自然语言描述命令。",
     "出错时直接说原因和修复方案，不要道歉。",
     "NEVER 输出空回复——如果你不确定如何回答，至少说明你的理解和下一步计划。",

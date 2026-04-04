@@ -46,6 +46,8 @@ import {
 } from '../../managers/OpenClawDeploymentManager.js';
 import * as path from 'node:path';
 import { buildCodeChangeJson } from './code-change-result.js';
+import { abortAwareDelay } from '../../rdkclaw/openclaw-bridge-meta.js';
+import { isPersistentShellEnabled } from '../../device-persistent-shell.js';
 
 export interface RdkToolsCallbacks {
   onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
@@ -163,12 +165,21 @@ function shEscapeUnix(raw: string): string {
 /**
  * 将板端命令经 base64 管道交给内层 bash，避免引号/`&&` 优先级导致的「后台启动」语法坑；
  * 外层仅负责 nohup、脱轨 stdin，并打印 PID 与日志路径。
+ *
+ * `inheritPersistentShellEnv`：为 true 时用 `bash -c` 替代 `bash -lc`，避免登录 shell 重读 profile
+ * 覆盖**同一 SSH 持久会话里**上一条 `source` 已注入的 ROS/TROS 环境（`ros2 launch` 常依赖此前 source）。
  */
-function wrapDetachedDeviceCommand(userCommand: string, remoteLogPath: string): string {
+function wrapDetachedDeviceCommand(
+  userCommand: string,
+  remoteLogPath: string,
+  inheritPersistentShellEnv: boolean,
+): string {
   const b64 = Buffer.from(userCommand, 'utf8').toString('base64');
   const logQ = shEscapeUnix(remoteLogPath);
+  const outer = inheritPersistentShellEnv ? 'bash -c' : 'bash -lc';
+  const inner = inheritPersistentShellEnv ? 'bash -c' : 'bash -lc';
   return (
-    `bash -lc 'LOG=${logQ}; nohup bash -lc '"'"'echo ${b64}|base64 -d|bash'"'"' >>"$LOG" 2>&1 </dev/null & echo RDK_DETACHED_PID=$!; echo RDK_DETACHED_LOG=$LOG'`
+    `${outer} 'LOG=${logQ}; nohup ${inner} '"'"'echo ${b64}|base64 -d|bash'"'"' >>"$LOG" 2>&1 </dev/null & echo RDK_DETACHED_PID=$!; echo RDK_DETACHED_LOG=$LOG'`
   );
 }
 
@@ -387,8 +398,23 @@ function appendRosLongRunForegroundHint(command: string, runBackground: boolean,
   );
 }
 
-/** 板端后台启动：脚本经 base64 落盘后 nohup，避免 `&&` 与 `&` 优先级导致 pid 错乱；返回 pid、日志路径与初始输出 */
-function wrapBackgroundDeviceCommand(userCommand: string): string {
+/** 在已 source 的环境中，对每个 topic 用短超时 `ros2 topic echo | head -1` 判断是否已有数据 */
+function buildRos2TopicVerifyCommand(topics: string[], ros2SetupBash?: string): string {
+  const setup =
+    ros2SetupBash?.trim() ||
+    'for f in /opt/tros/*/setup.bash; do [ -f "$f" ] && . "$f" && break; done';
+  const checks = topics.map((t) => {
+    const q = shEscapeUnix(t);
+    return `echo "=== topic ${q} ==="; if timeout 8s ros2 topic echo ${q} 2>/dev/null | head -n 1 | grep -q .; then echo "RDK_TOPIC_OK:${q}"; else echo "RDK_TOPIC_NO_DATA:${q}"; fi`;
+  });
+  return `${setup}; ${checks.join('; ')}`;
+}
+
+/**
+ * 板端后台启动：脚本经 base64 落盘后 nohup，避免 `&&` 与 `&` 优先级导致 pid 错乱；返回 pid、日志路径与初始输出。
+ * `inheritPersistentShellEnv` 含义见 `wrapDetachedDeviceCommand`。
+ */
+function wrapBackgroundDeviceCommand(userCommand: string, inheritPersistentShellEnv: boolean): string {
   const b64 = Buffer.from(userCommand, 'utf8').toString('base64');
   const script = [
     'set -e',
@@ -403,7 +429,8 @@ function wrapBackgroundDeviceCommand(userCommand: string): string {
     'echo "--- 初始输出（约 2 秒，进程仍在后台） ---"',
     'head -c 12000 "$LOG" 2>/dev/null || true',
   ].join('\n');
-  return `bash -lc ${JSON.stringify(script)}`;
+  const outer = inheritPersistentShellEnv ? 'bash -c' : 'bash -lc';
+  return `${outer} ${JSON.stringify(script)}`;
 }
 
 function deviceExecTool(
@@ -415,6 +442,9 @@ function deviceExecTool(
   background?: boolean;
   runDetached?: boolean;
   detachedLogPath?: string;
+  ros2VerifyTopics?: string[];
+  ros2VerifyTopicsDelayMs?: number;
+  ros2SetupBash?: string;
 }> {
   return {
     name: 'device_exec',
@@ -423,10 +453,10 @@ function deviceExecTool(
       '在 RDK 设备上通过 SSH 执行 shell 命令。\n' +
       '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
       '规则：\n' +
-      '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
+      '- **默认（未设置环境变量 RDK_DEVICE_EXEC_PERSISTENT_SHELL=0）**：同一设备的多次 `device_exec` 在**同一 SSH 交互 shell** 中执行，`cd` / `export` / `source` **可跨调用保留**。若关闭持久 shell 或持久通道失败回退，则行为与旧版一致（每次独立 exec）。\n' +
       '- **常驻进程（推流、WebSocket 服务、长驻 ROS2 节点等）**：传 **runDetached: true**。Studio 会以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
       '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
-      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。**每条 device_exec 都是新 shell**，上一条的 `source` **不会**带到下一条；凡需 `ros2` 的排查须在同一条内写 `source /opt/tros/<distro>/setup.bash && ros2 ...`，**勿**单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `source && ros2 node list` / `topic list` 或 `tail` 日志验证，勿仅凭「无报错」认定节点已起来\n' +
+      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。持久 shell 开启时可在**前一次** `device_exec` 中 `source`，后续 `background`/`runDetached` 的 `ros2 launch` **会继承**该环境（包装层使用非登录 `bash -c`，避免 `bash -lc` 重读 profile 冲掉已 source 的变量）；若关闭持久 shell，须在**同一条**内写 `source ... && ros2 ...`。**勿**在未 source 时单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `ros2 node list` / `topic list` 或 `tail` 日志验证；可选 `ros2VerifyTopics` 在延迟后自动做 topic 收数验收（`ros2 topic echo` 短超时）\n' +
       '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
       '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
@@ -466,6 +496,20 @@ function deviceExecTool(
           type: 'string',
           description: '与 runDetached 联用：板端日志绝对路径；省略则写入 /tmp 下自动命名文件',
         },
+        ros2VerifyTopics: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            '可选。主命令结束后（常用于 background/runDetached 启动节点后）延迟再验收：这些 ROS2 topic 是否能在短超时内收到至少一行数据。须与 `ros2SetupBash` 或板上默认的 `/opt/tros/*/setup.bash` 一致。',
+        },
+        ros2VerifyTopicsDelayMs: {
+          type: 'number',
+          description: '验收前等待毫秒（0～300000），默认 8000，便于节点注册与 topic 出现',
+        },
+        ros2SetupBash: {
+          type: 'string',
+          description: '验收前 `source` 的 setup.bash 绝对路径；省略则自动尝试 /opt/tros/*/setup.bash',
+        },
       },
       required: ['command'],
     },
@@ -480,6 +524,8 @@ function deviceExecTool(
         runBackground && input.background !== true && input.background !== false;
       try {
         let commandToExecute = input.command;
+        /** 与持久 SSH shell 同时开启时，后台包装改用 bash -c，便于继承上一条 source */
+        const inheritRosEnvFromSession = isPersistentShellEnabled();
 
         let execOpts: {
           timeoutMs?: number;
@@ -491,10 +537,10 @@ function deviceExecTool(
           const logPath =
             input.detachedLogPath?.trim() ||
             `/tmp/rdkstudio-detached-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.log`;
-          commandToExecute = wrapDetachedDeviceCommand(input.command, logPath);
+          commandToExecute = wrapDetachedDeviceCommand(input.command, logPath, inheritRosEnvFromSession);
           execOpts.timeoutMs = DEVICE_EXEC_DETACHED_SSH_WAIT_MS;
         } else if (runBackground) {
-          commandToExecute = wrapBackgroundDeviceCommand(input.command);
+          commandToExecute = wrapBackgroundDeviceCommand(input.command, inheritRosEnvFromSession);
           /** 后台模式仅用于抓取启动与 tail，不占用 30min SSH */
           const cap = 90_000;
           const req =
@@ -551,11 +597,30 @@ function deviceExecTool(
         }
 
         // 远程非零退出走 resolve + [exit code]，不抛错，避免与 SSH/超时混淆并误触发下方「勿切设备」提示
-        const output = await execOnDevice(deviceId, [commandToExecute], {
+        let output = await execOnDevice(deviceId, [commandToExecute], {
           ...execOpts,
           rejectOnNonZeroExit: false,
+          persistentShell: true,
         });
         flushProgress(true);
+
+        const verifyTopics = input.ros2VerifyTopics?.filter((t) => String(t).trim().length > 0);
+        if (verifyTopics && verifyTopics.length > 0) {
+          const delayMs = Math.min(
+            300_000,
+            Math.max(0, Number(input.ros2VerifyTopicsDelayMs ?? 8000)),
+          );
+          await abortAwareDelay(delayMs, ctx.abortSignal);
+          const verifyCmd = buildRos2TopicVerifyCommand(verifyTopics, input.ros2SetupBash);
+          const verifyOut = await execOnDevice(deviceId, [verifyCmd], {
+            timeoutMs: 120_000,
+            rejectOnNonZeroExit: false,
+            persistentShell: true,
+            abortSignal: ctx.abortSignal,
+          });
+          output = `${output}\n\n[ROS2 话题验收]\n${verifyOut}`;
+        }
+
         if (!output) {
           if (runDetached) {
             return (
@@ -667,7 +732,8 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
       '- 此工具会完全覆盖目标文件，不是追加\n' +
       '- 典型允许路径：/userdata、/tmp、/home/...、/root/ros2_ws/...、/root/.openclaw/...（勿写到未允许的系统路径）\n' +
       '- 父目录不存在时上传流程会尝试 mkdir -p；若仍失败再用 device_exec 建目录\n' +
-      '- NEVER 用 device_exec + echo/tee/heredoc 替代此工具\n' +
+      '- **若本工具长时间卡在「执行中」**（与同一设备**持久 SSH shell** 并发时，板端第二条 SSH 可能慢/排队）：可改用**单条** `device_exec` 把小脚本落到 `/tmp`（heredoc/tee 均可），或对 Studio 设 `RDK_DEVICE_EXEC_PERSISTENT_SHELL=0` 后再试本工具；大文件仍优先本工具\n' +
+      '- 默认勿用 device_exec 拼大段内容**替代**本工具；**仅**上述卡死排障时例外\n' +
       '- 写入后建议用 device_file_read 验证内容正确',
     inputSchema: {
       type: 'object',
