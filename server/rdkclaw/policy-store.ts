@@ -70,7 +70,8 @@ export class RDKClawPolicyStore {
         ...parsed,
         enginePreset: normalizeEnginePreset(parsed.enginePreset),
         approval: { ...DEFAULT_POLICY.approval, ...(parsed.approval ?? {}), mode: "auto" },
-        permission: { ...DEFAULT_POLICY.permission, ...(parsed.permission ?? {}) },
+        /** 涉密与安全：五项保护始终开启，不读取历史文件中的关闭项 */
+        permission: { ...DEFAULT_POLICY.permission },
         memory: { ...DEFAULT_POLICY.memory, ...(parsed.memory ?? {}) },
         network: { ...DEFAULT_POLICY.network, ...(parsed.network ?? {}) },
         context: {
@@ -90,7 +91,8 @@ export class RDKClawPolicyStore {
       ...patch,
       enginePreset: patch.enginePreset !== undefined ? normalizeEnginePreset(patch.enginePreset) : prev.enginePreset ?? DEFAULT_POLICY.enginePreset,
       approval: { ...prev.approval, ...(patch.approval ?? {}), mode: "auto" },
-      permission: { ...prev.permission, ...(patch.permission ?? {}) },
+      /** 涉密与安全：持久化时始终写入五项全开，忽略客户端传入的关闭项 */
+      permission: { ...DEFAULT_POLICY.permission },
       memory: { ...prev.memory, ...(patch.memory ?? {}) },
       network: { ...prev.network, ...(patch.network ?? {}) },
       context: { ...prev.context, ...(patch.context ?? {}) },

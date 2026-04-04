@@ -2130,49 +2130,55 @@ export default function SettingsPanel() {
 
               {/* ══ 3. 执行策略 ══ */}
               <section id="policy" className="settings-section" ref={registerSectionRef('policy')}>
-                <H title={t('settings.policy.title', '执行策略')} desc={t('settings.policy.desc', '权限边界、记忆与联网；工具执行默认无需确认。')} />
+                <H title={t('settings.policy.title', '执行策略')} desc={t('settings.policy.desc', '约束本机与设备访问、记忆与联网；工具在允许范围内直接执行。')} />
                 <div className="settings-card">
                   <h4 className="settings-card-title">{t('settings.policy.approvalTitle', '工具执行')}</h4>
                   <p className="settings-hint" style={{ marginTop: 0 }}>
                     {t(
                       'settings.policy.approvalNote',
-                      '当前版本默认直接执行已允许范围内的工具，不再弹出逐步确认；敏感操作仍受下方权限边界与安全审计约束。',
+                      '在允许范围内由助手直接调用工具，不再逐步确认；涉及本机与设备的访问仍受下方安全约束与本地审计保护。',
                     )}
                   </p>
                 </div>
                 <div className="settings-card">
-                  <h4 className="settings-card-title">{t('settings.policy.permissionTitle', '权限边界')}</h4>
+                  <h4 className="settings-card-title">{t('settings.policy.permissionTitle', '安全与访问约束')}</h4>
+                  <p className="settings-hint" style={{ marginTop: 0 }}>
+                    {t(
+                      'settings.policy.permissionPreamble',
+                      '下列项涉及本机工作区与设备侧访问安全，默认全部开启且保持开启；约束与审计记录仅保存在本机，不会自动对外发送明细。',
+                    )}
+                  </p>
                   <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.workspaceBoundary', '本机工作区边界')}</span>
+                    <span className="settings-row-label">{t('settings.policy.workspaceBoundary', '限制助手可访问的本机目录')}</span>
                     <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" title={t('settings.policy.workspaceBoundary', '本机工作区边界')} aria-label={t('settings.policy.workspaceBoundary', '本机工作区边界')} checked={policy.permission.workspaceBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, workspaceBoundaryEnabled: e.target.checked } }))} />
+                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.workspaceBoundary', '限制助手可访问的本机目录')} aria-label={t('settings.policy.workspaceBoundary', '限制助手可访问的本机目录')} checked />
                     </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.devicePathAllow', '板端路径白名单')}</span>
+                    <span className="settings-row-label">{t('settings.policy.devicePathAllow', '设备 SSH 路径白名单')}</span>
                     <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" title={t('settings.policy.devicePathAllow', '板端路径白名单')} aria-label={t('settings.policy.devicePathAllow', '板端路径白名单')} checked={policy.permission.devicePathBoundaryEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, devicePathBoundaryEnabled: e.target.checked } }))} />
+                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.devicePathAllow', '设备 SSH 路径白名单')} aria-label={t('settings.policy.devicePathAllow', '设备 SSH 路径白名单')} checked />
                     </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.hostGuard', '宿主机防污染')}</span>
+                    <span className="settings-row-label">{t('settings.policy.hostGuard', '保护 Studio 安装目录')}</span>
                     <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" title={t('settings.policy.hostGuard', '宿主机防污染')} aria-label={t('settings.policy.hostGuard', '宿主机防污染')} checked={policy.permission.hostMutationGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, hostMutationGuardEnabled: e.target.checked } }))} />
+                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.hostGuard', '保护 Studio 安装目录')} aria-label={t('settings.policy.hostGuard', '保护 Studio 安装目录')} checked />
                     </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.cmdGuard', '危险命令拦截')}</span>
+                    <span className="settings-row-label">{t('settings.policy.cmdGuard', '拦截高风险命令')}</span>
                     <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" title={t('settings.policy.cmdGuard', '危险命令拦截')} aria-label={t('settings.policy.cmdGuard', '危险命令拦截')} checked={policy.permission.commandDangerGuardEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, commandDangerGuardEnabled: e.target.checked } }))} />
+                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.cmdGuard', '拦截高风险命令')} aria-label={t('settings.policy.cmdGuard', '拦截高风险命令')} checked />
                     </div>
                   </div>
                   <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.auditLog', '记录安全审计')}</span>
+                    <span className="settings-row-label">{t('settings.policy.auditLog', '本地安全审计')}</span>
                     <div className="settings-row-value settings-row-value--control">
-                      <input type="checkbox" className="settings-checkbox" title={t('settings.policy.auditLog', '记录安全审计')} aria-label={t('settings.policy.auditLog', '记录安全审计')} checked={policy.permission.auditLogEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, auditLogEnabled: e.target.checked } }))} />
+                      <input type="checkbox" className="settings-checkbox" disabled title={t('settings.policy.auditLog', '本地安全审计')} aria-label={t('settings.policy.auditLog', '本地安全审计')} checked />
                     </div>
                   </div>
-                  <p className="settings-policy-hint">{t('settings.policy.permissionHint', '在允许范围内直接执行，超出范围将拦截并记录（若开启审计）。')}</p>
+                  <p className="settings-policy-hint">{t('settings.policy.permissionHint', '超出允许范围的操作将被拦截；审计内容仅存本机，请妥善保管设备与账号。')}</p>
                 </div>
                 <div className="settings-card">
                   <details className="settings-details-block" style={{ border: 'none', background: 'transparent', padding: 0 }}>
