@@ -10,6 +10,7 @@
 
 - **USB 相机 / V4L2 / 官方示例**：见下节 **Basic Application / vision / usb camera**（及 **pydev demo / usb camera sample**）。
 - **视频输入、编解码管线**：见下节 **Advanced development / multimedia / video_input**（及 `video_decode` / `video_processing`）。
+- **人体检测（mono2d）**：**Robot_development / boxs / body / mono2d_body_detection**；**勿**使用已失效路径 `.../human_recognition/body_detection`（易 404）。
 - **仍无章节可对照**：`web_search` 用 `site:developer.d-robotics.cc` + 包名或节点名（如 `hobot_usb_cam`），再对命中 URL 做 `web_fetch`。
 
 ### 官网主导航与产品线（对照侧栏）

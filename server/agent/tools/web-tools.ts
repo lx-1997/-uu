@@ -2,7 +2,7 @@ import type { Tool } from "./types.js";
 import { decodeEntities, normalizeUrl, stripHtml, truncate } from "./web-text-utils.js";
 import type { WebToolOptions } from "./web-tool-options.js";
 import { createBrowserFetchTools } from "./browser-tools.js";
-import { readCachedDoc } from "../../rdkclaw/rdk-doc-local-cache.js";
+import { tryReadRdkDocCachedWithFallback } from "../../rdkclaw/rdk-doc-local-cache.js";
 
 export type { WebToolOptions };
 
@@ -885,13 +885,17 @@ function webFetchTool(options: WebToolOptions): Tool<{ url: string; maxChars?: n
       const url = normalizeUrl(input.url);
       const maxChars = Math.max(2000, Math.min(120_000, Number(input.maxChars || maxFetchChars)));
 
-      // ── rdk_doc 本地缓存快速路径 ──
-      const cachedMd = readCachedDoc(url);
-      if (cachedMd) {
-        const body = truncate(cachedMd, maxChars);
+      // ── rdk_doc 本地缓存（GitHub docs/ Markdown）优先；支持路径模糊命中索引 ──
+      const cached = tryReadRdkDocCachedWithFallback(url);
+      if (cached) {
+        const body = truncate(cached.body, maxChars);
+        const viaLine =
+          cached.via === 'fuzzy_index'
+            ? `cache: local (rdk-doc-cache, fuzzy match → ${cached.resolvedUrl})`
+            : 'cache: local (rdk-doc-cache, GitHub D-Robotics/rdk_doc)';
         return [
           `source: ${url}`,
-          `cache: local (rdk-doc-cache, GitHub D-Robotics/rdk_doc)`,
+          viaLine,
           `content_type: text/markdown`,
           `fetched_at: ${new Date().toISOString()}`,
           '',

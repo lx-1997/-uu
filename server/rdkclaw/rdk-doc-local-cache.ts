@@ -413,6 +413,48 @@ export function readCachedDoc(url: string): string | null {
   catch { return null; }
 }
 
+/**
+ * 先精确命中本地缓存；失败时用语义索引按 URL 路径末段模糊匹配（缓解拼错章节、404 页面无 MD 等情况）。
+ */
+export function tryReadRdkDocCachedWithFallback(url: string): {
+  body: string;
+  resolvedUrl: string;
+  via: 'direct' | 'fuzzy_index';
+} | null {
+  const direct = readCachedDoc(url);
+  if (direct) return { body: direct, resolvedUrl: url.trim(), via: 'direct' };
+
+  const normalized = url.trim();
+  if (!normalized.includes('developer.d-robotics.cc/rdk_doc')) return null;
+
+  const after = normalized.split(/rdk_doc\//i)[1];
+  if (!after) return null;
+  const urlPath = after.replace(/[?#].*$/, '').replace(/\/+$/, '');
+  const segments = urlPath.split('/').filter(Boolean);
+  if (segments.length === 0) return null;
+
+  const queries: string[] = [];
+  for (let i = segments.length - 1; i >= Math.max(0, segments.length - 3); i--) {
+    queries.push(segments.slice(i).join(' '));
+    queries.push(segments[i].replace(/_/g, ' '));
+  }
+  const seen = new Set<string>();
+  for (const q of queries) {
+    const t = q.trim();
+    if (t.length < 2) continue;
+    const lk = t.toLowerCase();
+    if (seen.has(lk)) continue;
+    seen.add(lk);
+    const hits = searchDocIndex(t, 10);
+    for (const h of hits) {
+      const fullUrl = `${RDK_DOC_URL_PREFIX}${h.urlPath.replace(/^\//, '')}`;
+      const body = readCachedDoc(fullUrl);
+      if (body) return { body, resolvedUrl: fullUrl, via: 'fuzzy_index' };
+    }
+  }
+  return null;
+}
+
 /** 获取内存中的文档索引 */
 export function getDocIndex(): DocIndex | null {
   return memIndex;

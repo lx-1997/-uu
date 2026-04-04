@@ -481,7 +481,11 @@ export class SessionManager {
   }
 
   private async persistEntry(state: SessionState, entry: SessionEntry): Promise<void> {
-    if (!state.hasAssistant) {
+    /** 至少有一条用户消息也应落盘，便于导出排查包在「首轮未完成」时仍能拿到 JSONL（旧逻辑仅在有助手回复后才写盘）。 */
+    const hasUserMessage = state.entries.some(
+      (e) => e.type === "message" && e.message.role === "user",
+    );
+    if (!state.hasAssistant && !hasUserMessage) {
       return;
     }
     const lock = await acquireSessionWriteLock({ sessionFile: state.filePath });

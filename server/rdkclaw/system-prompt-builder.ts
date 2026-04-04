@@ -145,6 +145,7 @@ export function buildWebSearchTriggerPrompt(
     assessParallelHint,
     "- **RDK 板端算法/官方例程**（YOLO、检测、跟踪、Box 应用、BPU 部署等）：**必须先**在 **developer.d-robotics.cc/rdk_doc** 找到**当前任务对应章节**（可用 `web_search` 关键词含 `site:developer.d-robotics.cc` + 功能名，或直接 `web_fetch` 已知文档 URL），再按文中命令在板上执行；**禁止**用训练记忆替代官方包名与 launch。**用户已在消息里粘贴具体 rdk_doc 链接时，以该页为执行清单，先 `web_fetch` 该 URL。**",
     "- **重复失败/陷入循环**（同一错误多轮不变）：**必须先 `web_fetch`** 与症状相关的 rdk_doc 页（从 **`rdk-doc-url-index.md`** 选章节，如相机/USB → `vision/usb_camera`），并辅以 `web_search`；**禁止**只重复上一条 shell 而不查文档。",
+    "- **板卡 Web 预览（:8000 等）**：`studio_open_url` 与文案中的 IP **须**与当前会话设备 SSH host 一致；**禁止**使用文档占位 IP（如 192.168.1.100）；服务端会尽量按设备修正，但模型仍应写对或先 `device_exec` 查 `ip -br a`。",
     "- 涉及**具体版本号、发布日期、是否仍维护**或与**当前 OS/板型**的兼容性。",
     "- **官方安装/升级/刷机/弃用路径**、CLI 旗标、**breaking change**、REST/GraphQL 行为变更。",
     "- **第三方库、Model Zoo/Hub、许可证、CVE**、或论坛/issue 里的非常规 workaround。",

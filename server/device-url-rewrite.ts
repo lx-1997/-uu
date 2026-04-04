@@ -16,19 +16,43 @@ function isRfc1918IPv4(host: string): boolean {
   return false;
 }
 
+/** 文档/示例里常见的占位 IP，只要已绑定设备就必须换成真实 SSH host */
+const DOC_PLACEHOLDER_IPV4 = new Set([
+  "192.168.1.100",
+  "192.168.1.1",
+  "192.168.0.1",
+  "10.0.0.1",
+]);
+
+async function resolveDeviceHost(studioDeviceId?: string): Promise<string | undefined> {
+  const devices = await readDevices();
+  const id = studioDeviceId?.trim();
+  if (id) {
+    const d = devices.find((x) => x.id === id);
+    const h = d?.host?.trim();
+    if (h) return h;
+  }
+  /** 会话未注入 deviceId 时：仅一台已登记设备则用于 LAN 预览 URL 修正（常见误打开 192.168.1.100） */
+  if (devices.length === 1 && devices[0].host?.trim()) {
+    return devices[0].host.trim();
+  }
+  return undefined;
+}
+
 export async function rewriteUrlForStudioDevice(url: string, studioDeviceId?: string): Promise<string> {
   const u = url.trim();
   if (!/^https?:\/\//i.test(u)) return u;
-  if (!studioDeviceId?.trim()) return u;
+  const host = await resolveDeviceHost(studioDeviceId);
+  if (!host) return u;
   try {
-    const devices = await readDevices();
-    const d = devices.find((x) => x.id === studioDeviceId.trim());
-    const host = d?.host?.trim();
-    if (!host) return u;
     const parsed = new URL(u);
     const hostname = parsed.hostname;
     if (hostname === host) return u;
     if (/^127\.0\.0\.1$|^localhost$/i.test(hostname)) {
+      parsed.hostname = host;
+      return parsed.toString();
+    }
+    if (DOC_PLACEHOLDER_IPV4.has(hostname)) {
       parsed.hostname = host;
       return parsed.toString();
     }

@@ -17,9 +17,9 @@ export function buildStudioAgentSessionKey(deviceId?: string, sessionId?: string
   return 'local';
 }
 
-/** 与 `SessionManager.persistEntry` 一致：仅有助手消息后才会落盘 JSONL，导出过早会缺席 */
+/** 历史说明：旧版仅在助手回复后才落盘；现已支持首条用户消息即创建 JSONL。导出仍可能因 sessionKey 不一致而缺席。 */
 const AGENT_SESSION_DISK_NOTE =
-  '服务端 RDKClaw 仅在至少持久化过一条助手消息后才创建/追加 JSONL；仅有用户输入、首轮未完成或运行被中断时，磁盘上可能尚无对应文件。这与「任务被判失败」无直接对应关系。';
+  '服务端会话文件：在收到用户消息后即会尝试落盘 JSONL（无需等待助手首 token）。若仍缺失，多为 sessionKey / 工作区目录与导出时不一致，或进程异常退出。';
 
 /** 与 `rdk-tools.ts` 中 board_openclaw_logs 一致，便于在板上解析 openclaw CLI */
 const OPENCLAW_RESOLVE_SNIPPET =
@@ -37,6 +37,12 @@ export type SessionDebugExportInput = {
   includeBoardLogs: boolean;
   uiSnapshot?: unknown;
   securityAudit?: SecurityAuditLogEntry[];
+};
+
+type UiSnapshotShape = {
+  chatMessages?: unknown;
+  rdkClawRunTimeline?: unknown;
+  agentExecution?: unknown;
 };
 
 function decodeJsonlBasename(base: string): string {
@@ -110,13 +116,35 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
     if (otherKeysSample.length > 0) {
       manifest.sessionDirOtherKeysSample = otherKeysSample;
     }
+    const ui = input.uiSnapshot as UiSnapshotShape | undefined;
+    const cm = ui?.chatMessages;
+    const hasUiMessages = Array.isArray(cm) && cm.length > 0;
+    if (hasUiMessages) {
+      zip.file(
+        'agent-session-ui-fallback.json',
+        JSON.stringify(
+          {
+            note: '磁盘上无对应 JSONL 时由前端 Dock 快照提供的会话摘要（不含工具级 JSONL 细节，仅作排障）。',
+            sessionKey: input.sessionKey,
+            exportedAt: new Date().toISOString(),
+            chatMessages: cm,
+            rdkClawRunTimeline: ui?.rdkClawRunTimeline,
+            agentExecution: ui?.agentExecution,
+          },
+          null,
+          2,
+        ),
+      );
+      (manifest.bundleFiles as string[]).push('agent-session-ui-fallback.json');
+    }
     manifest.agentSessionDisk = {
-      status: 'missing',
+      status: hasUiMessages ? 'missing_ui_fallback' : 'missing',
       note: AGENT_SESSION_DISK_NOTE,
       commonCauses: [
-        '本轮尚未产生已持久化的助手回复（例如仍在首 token、被中止或仅用户侧消息）。',
+        '本轮在服务端未找到对应会话文件（可能 sessionKey / 工作区与导出不一致，或后端未写入）。',
         '导出所用的 userId / 工作区配置与发起对话时不一致，JSONL 落在其它 profile 目录。',
         'deviceId 或 Studio sessionId 与对话时不一致，sessionKey 不同（多设备桶 / 多窗口线程）。',
+        ...(hasUiMessages ? ['已附带 agent-session-ui-fallback.json（来自 Dock UI 快照）。'] : []),
       ],
     };
     zip.file(
@@ -127,8 +155,8 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
         AGENT_SESSION_DISK_NOTE,
         '',
         '常见原因：',
-        '  · 尚无已落盘的助手消息（见上）。',
-        '  · 会话目录或 sessionKey 与当前导出参数不一致。',
+        '  · sessionKey 与当前服务端会话不一致，或会话文件尚未写入该目录。',
+        '  · 导出所用的工作区 / userId 与对话时不一致。',
         '',
         `sessionKey: ${input.sessionKey}`,
         `sessionDir: ${input.sessionDir}`,
@@ -139,10 +167,10 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
           ? ['', '同目录下其它会话键示例（供核对是否错桶/错账号）:', ...otherKeysSample.map((k) => `  · ${k}`)]
           : []),
         '',
-        'dock-ui-snapshot.json（若存在）仍包含界面中的对话与时间线，可优先查看。',
+        'dock-ui-snapshot.json 含完整 UI 快照；若存在 agent-session-ui-fallback.json，为同一会话的摘要副本。',
         '',
         '---',
-        'EN: No JSONL on disk for this sessionKey yet. Server creates/appends the file only after at least one assistant message is persisted. This is not the same as "task failed". Check dock-ui-snapshot.json and manifest.sessionDirOtherKeysSample.',
+        'EN: No JSONL for this sessionKey. Check dock-ui-snapshot.json, agent-session-ui-fallback.json (if present), and manifest.sessionDirOtherKeysSample.',
       ].join('\n'),
     );
     (manifest.bundleFiles as string[]).push('agent-session.MISSING.txt');
@@ -162,7 +190,18 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
     const limit = 400;
     const shell = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" logs --limit ${limit} 2>&1 || true; else false; fi) || journalctl --user -u openclaw-gateway --no-pager -n ${limit} 2>&1 || echo no_logs'`;
     try {
-      const logs = await execOnDevice(input.deviceId.trim(), [shell], { timeoutMs: 45_000 });
+      let logs = await execOnDevice(input.deviceId.trim(), [shell], { timeoutMs: 45_000 });
+      if (/pairing required|Gateway not reachable|Is it running/i.test(logs)) {
+        logs =
+          [
+            '【说明】以下为板上 openclaw 命令输出。若出现 pairing required / Gateway not reachable',
+            '表示板上 OpenClaw 网关未配对或未在 127.0.0.1:18789 监听，与 RDKClaw（Studio 侧 SSH）是否成功无关。',
+            '排查：板上执行 `openclaw doctor` 或 `openclaw gateway status`；需配对时按文档完成配对。',
+            '---',
+            '',
+            logs,
+          ].join('\n');
+      }
       zip.file('board-openclaw-logs.txt', logs);
       (manifest.bundleFiles as string[]).push('board-openclaw-logs.txt');
     } catch (err) {
@@ -176,7 +215,7 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
     'RDK Studio — RDKClaw 排查导出包',
     '',
     '- agent-session.jsonl：服务端 Agent 会话（工具调用与结果，含 board_openclaw_* 等）。',
-    '  若仅见 agent-session.MISSING.txt：多为尚未落盘助手消息或 session 目录/键不一致，见其中说明与 manifest.agentSessionDisk。',
+    '  若无：见 agent-session.MISSING.txt；若存在 agent-session-ui-fallback.json，为 Dock 侧摘要。',
     '- dock-ui-snapshot.json：导出时 AI Dock 中的消息与时间线快照。',
     '- board-openclaw-logs.txt：板上 OpenClaw 网关近期日志（若已连接设备且导出时包含）。',
     '- security-audit-recent.json：最近安全审计记录（若存在）。',
