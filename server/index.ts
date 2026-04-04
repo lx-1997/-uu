@@ -5837,7 +5837,7 @@ app.post('/api/rdkclaw/security-audit/clear', (_request, response) => {
   response.json({ ok: true });
 });
 
-/** AI Dock：导出当前会话排查包（zip：Agent JSONL、Dock 快照、可选板端 OpenClaw 日志、安全审计） */
+/** AI Dock：导出运行诊断包（ZIP：本机会话记录、对话界面快照、可选设备 OpenClaw 日志、安全审计） */
 app.post('/api/rdkclaw/export-debug-bundle', async (request, response) => {
   try {
     const body = request.body as {
@@ -5863,7 +5863,7 @@ app.post('/api/rdkclaw/export-debug-bundle', async (request, response) => {
       uiSnapshot: body?.uiSnapshot,
     });
     const safeTs = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `rdkclaw-debug-${safeTs}.zip`;
+    const filename = `rdkstudio-run-diagnostics-${safeTs}.zip`;
     response.setHeader('Content-Type', 'application/zip');
     response.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     response.send(buf);

@@ -337,7 +337,7 @@ export default function SettingsPanel() {
     delegationBias: 'balanced', autonomyLevel: 'assisted',
   });
   const [policy, setPolicy] = useState<RDKClawPolicy>({
-    approval: { mode: 'risk-based', riskThreshold: 'medium' },
+    approval: { mode: 'auto', riskThreshold: 'medium' },
     permission: {
       workspaceBoundaryEnabled: true,
       devicePathBoundaryEnabled: true,
@@ -2130,17 +2130,15 @@ export default function SettingsPanel() {
 
               {/* ══ 3. 执行策略 ══ */}
               <section id="policy" className="settings-section" ref={registerSectionRef('policy')}>
-                <H title={t('settings.policy.title', '执行策略')} desc={t('settings.policy.desc', '审批、记忆和联网行为。')} />
+                <H title={t('settings.policy.title', '执行策略')} desc={t('settings.policy.desc', '权限边界、记忆与联网；工具执行默认无需确认。')} />
                 <div className="settings-card">
-                  <h4 className="settings-card-title">{t('settings.policy.approval', '审批')}</h4>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.mode', '模式')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><select className="select" title={t('settings.policy.mode', '模式')} aria-label={t('settings.policy.mode', '模式')} value={policy.approval.mode} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, mode: e.target.value as RDKClawPolicy['approval']['mode'] } }))}><option value="always">{t('settings.policy.mode.always', '始终审批')}</option><option value="risk-based">{t('settings.policy.mode.risk', '基于风险')}</option><option value="auto">{t('settings.policy.mode.auto', '全自动')}</option></select></div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.policy.riskThreshold', '风险阈值')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><select className="select" title={t('settings.policy.riskThreshold', '风险阈值')} aria-label={t('settings.policy.riskThreshold', '风险阈值')} value={policy.approval.riskThreshold} onChange={e => setPolicy(p => ({ ...p, approval: { ...p.approval, riskThreshold: e.target.value as RDKClawPolicy['approval']['riskThreshold'] } }))}><option value="low">{t('settings.policy.risk.low', '低')}</option><option value="medium">{t('settings.policy.risk.medium', '中')}</option><option value="high">{t('settings.policy.risk.high', '高')}</option></select></div>
-                  </div>
+                  <h4 className="settings-card-title">{t('settings.policy.approvalTitle', '工具执行')}</h4>
+                  <p className="settings-hint" style={{ marginTop: 0 }}>
+                    {t(
+                      'settings.policy.approvalNote',
+                      '当前版本默认直接执行已允许范围内的工具，不再弹出逐步确认；敏感操作仍受下方权限边界与安全审计约束。',
+                    )}
+                  </p>
                 </div>
                 <div className="settings-card">
                   <h4 className="settings-card-title">{t('settings.policy.permissionTitle', '权限边界')}</h4>
@@ -2174,7 +2172,7 @@ export default function SettingsPanel() {
                       <input type="checkbox" className="settings-checkbox" title={t('settings.policy.auditLog', '记录安全审计')} aria-label={t('settings.policy.auditLog', '记录安全审计')} checked={policy.permission.auditLogEnabled} onChange={e => setPolicy(p => ({ ...p, permission: { ...p.permission, auditLogEnabled: e.target.checked } }))} />
                     </div>
                   </div>
-                  <p className="settings-policy-hint">{t('settings.policy.permissionHint', '范围内自动执行，范围外直接拦截；高风险按审批策略处理。')}</p>
+                  <p className="settings-policy-hint">{t('settings.policy.permissionHint', '在允许范围内直接执行，超出范围将拦截并记录（若开启审计）。')}</p>
                 </div>
                 <div className="settings-card">
                   <details className="settings-details-block" style={{ border: 'none', background: 'transparent', padding: 0 }}>

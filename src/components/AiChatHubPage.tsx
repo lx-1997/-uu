@@ -305,8 +305,8 @@ export default function AiChatHubPage() {
                 type="button"
                 className="ai-chat-hub-v2-icon-btn"
                 onClick={onExport}
-                title={t('dock.header.exportDebugDesc', '对话快照与 Agent 会话排查包')}
-                aria-label={t('dock.header.exportDebug', '导出排查包')}
+                title={t('dock.header.exportDebugDesc', '导出运行诊断包（含本机会话与界面信息，可选设备日志）')}
+                aria-label={t('dock.header.exportDebug', '导出运行诊断包')}
               >
                 <Download size={17} strokeWidth={2} aria-hidden />
               </button>

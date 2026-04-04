@@ -30,6 +30,7 @@ import {
 import io from 'socket.io-client';
 import { Copy } from 'lucide-react';
 import { sanitizeTerminalLineForDisplay } from '../utils/strip-ansi';
+import { STUDIO_ENABLE_VOICE_TO_TEXT } from '../constants/studio-features';
 
 import rdkclawAvatarUrl from '../assets/chat/rdkclaw-avatar.png';
 import userAvatarUrl from '../assets/chat/user-avatar.png';
@@ -1634,6 +1635,7 @@ export default function AIDock() {
   }, [addToast, t]);
 
   useEffect(() => {
+    if (!STUDIO_ENABLE_VOICE_TO_TEXT) return;
     let cancelled = false;
     fetchApi('/api/agent/transcribe-capabilities')
       .then(r => r.json())
@@ -1825,6 +1827,7 @@ export default function AIDock() {
   }, []);
 
   const toggleVoiceRecord = useCallback(async () => {
+    if (!STUDIO_ENABLE_VOICE_TO_TEXT) return;
     if (isRecording) {
       /* 必须先清会话标记再 stop，否则 recognition.onend 会误以为仍要录音并误触逻辑 */
       isRecordingRef.current = false;
@@ -2904,7 +2907,7 @@ export default function AIDock() {
           </div>
         )}
 
-        {isRecording && recordingTranscript && (
+        {STUDIO_ENABLE_VOICE_TO_TEXT && isRecording && recordingTranscript && (
           <div className="dock-attachments">
             <div className="dock-att-item">
               <span className="truncate">{t('dock.voice.recognizing', '识别中：')}{recordingTranscript}</span>
@@ -2921,45 +2924,47 @@ export default function AIDock() {
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
               </svg>
             </button>
-            <button
-              type="button"
-              className={`dock-action-btn ${isRecording ? 'recording' : ''}`}
-              disabled={voiceSttLoading}
-              onClick={toggleVoiceRecord}
-              title={
-                (isRecording
-                  ? `${t('dock.tt.stopVoice', '停止录音')} ${recordingElapsed}s / ${VOICE_MAX_SECONDS}s`
-                  : t('dock.tt.voice', '语音输入'))
-                + (isRecording ? '' : `${voiceMicTitleSuffix}${RDK_DISABLE_BROWSER_SPEECH ? ` · ${t('dock.voice.noBrowserSr', '未使用浏览器联网识别')}` : ''}`)
-                + (voiceSttLoading ? ` · ${t('dock.voice.sttPlaceholder', '语音转文字中…')}` : '')
-              }
-            >
-              {isRecording ? (
-                <span className="dock-mic-recording-indicator">
+            {STUDIO_ENABLE_VOICE_TO_TEXT && (
+              <button
+                type="button"
+                className={`dock-action-btn ${isRecording ? 'recording' : ''}`}
+                disabled={voiceSttLoading}
+                onClick={toggleVoiceRecord}
+                title={
+                  (isRecording
+                    ? `${t('dock.tt.stopVoice', '停止录音')} ${recordingElapsed}s / ${VOICE_MAX_SECONDS}s`
+                    : t('dock.tt.voice', '语音输入'))
+                  + (isRecording ? '' : `${voiceMicTitleSuffix}${RDK_DISABLE_BROWSER_SPEECH ? ` · ${t('dock.voice.noBrowserSr', '未使用浏览器联网识别')}` : ''}`)
+                  + (voiceSttLoading ? ` · ${t('dock.voice.sttPlaceholder', '语音转文字中…')}` : '')
+                }
+              >
+                {isRecording ? (
+                  <span className="dock-mic-recording-indicator">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+                    </svg>
+                    <span className="dock-mic-timer">{recordingElapsed}s</span>
+                  </span>
+                ) : (
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
                   </svg>
-                  <span className="dock-mic-timer">{recordingElapsed}s</span>
-                </span>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
-                </svg>
-              )}
-            </button>
+                )}
+              </button>
+            )}
           </div>
 
           <input
             type="text"
             className="dock-cmd-input"
             placeholder={
-              voiceSttLoading
+              STUDIO_ENABLE_VOICE_TO_TEXT && voiceSttLoading
                 ? t('dock.voice.sttPlaceholder', '语音转文字中…')
                 : activeTab === 'openclaw' && dockOcMode && openclawSendMessage
                   ? t('dock.input.openclaw', '向 OpenClaw Agent 发送消息...')
                   : t('dock.input.default', '消息、指令或拖拽文件...')
             }
-            disabled={voiceSttLoading}
+            disabled={STUDIO_ENABLE_VOICE_TO_TEXT && voiceSttLoading}
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}

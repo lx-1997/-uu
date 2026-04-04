@@ -13,8 +13,8 @@ function normalizeEnginePreset(v: unknown): EnginePreset {
 const DEFAULT_POLICY: RDKClawPolicy = {
   enginePreset: "thinking",
   approval: {
-    /** 长任务：多数步骤自动执行；中危及以上仍走审批，比「全自动+高阈值」更稳 */
-    mode: "risk-based",
+    /** 当前产品默认：工具执行不再弹审批，由权限边界与审计兜底 */
+    mode: "auto",
     riskThreshold: "medium",
   },
   permission: {
@@ -69,7 +69,7 @@ export class RDKClawPolicyStore {
         ...DEFAULT_POLICY,
         ...parsed,
         enginePreset: normalizeEnginePreset(parsed.enginePreset),
-        approval: { ...DEFAULT_POLICY.approval, ...(parsed.approval ?? {}) },
+        approval: { ...DEFAULT_POLICY.approval, ...(parsed.approval ?? {}), mode: "auto" },
         permission: { ...DEFAULT_POLICY.permission, ...(parsed.permission ?? {}) },
         memory: { ...DEFAULT_POLICY.memory, ...(parsed.memory ?? {}) },
         network: { ...DEFAULT_POLICY.network, ...(parsed.network ?? {}) },
@@ -89,7 +89,7 @@ export class RDKClawPolicyStore {
       ...prev,
       ...patch,
       enginePreset: patch.enginePreset !== undefined ? normalizeEnginePreset(patch.enginePreset) : prev.enginePreset ?? DEFAULT_POLICY.enginePreset,
-      approval: { ...prev.approval, ...(patch.approval ?? {}) },
+      approval: { ...prev.approval, ...(patch.approval ?? {}), mode: "auto" },
       permission: { ...prev.permission, ...(patch.permission ?? {}) },
       memory: { ...prev.memory, ...(patch.memory ?? {}) },
       network: { ...prev.network, ...(patch.network ?? {}) },

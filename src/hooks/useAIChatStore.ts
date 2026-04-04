@@ -159,10 +159,10 @@ export interface AIChatStoreState {
   studioResponseMode: StudioResponseMode;
   setStudioResponseMode: (v: StudioResponseMode) => void;
 
-  /** 导出排查 zip（服务端 Agent 会话、Dock 快照、可选板端日志） */
+  /** 导出运行诊断 ZIP（本机会话 JSONL、对话界面快照、可选设备日志） */
   exportDebugBundle: (options?: { includeBoardLogs?: boolean }) => Promise<void>;
   /**
-   * 按左侧列表选中的设备桶 + Studio 会话导出排查包（与当前 Dock 线程不一致时也使用对应 sessionKey 拉 agent jsonl）。
+   * 按左侧列表选中的设备桶与 Studio 会话导出运行诊断包（与当前 Dock 线程不一致时也使用对应 sessionKey 拉本会话 JSONL）。
    */
   exportDebugBundleForThread: (opts: {
     archiveDevId: string;
@@ -3532,7 +3532,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           includeBoardLogs: options?.includeBoardLogs !== false,
           uiSnapshot,
         });
-        addToast(translate(isEn, 'dock.export.ok', '排查包已下载'), 'success');
+        addToast(translate(isEn, 'dock.export.ok', '运行诊断包已保存'), 'success');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         addToast(
@@ -3607,7 +3607,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           includeBoardLogs: opts.includeBoardLogs !== false,
           uiSnapshot,
         });
-        addToast(translate(isEn, 'dock.export.ok', '排查包已下载'), 'success');
+        addToast(translate(isEn, 'dock.export.ok', '运行诊断包已保存'), 'success');
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         addToast(

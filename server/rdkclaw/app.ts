@@ -75,7 +75,6 @@ import type {
   RDKClawEvent,
   RDKClawPolicy,
   RDKClawSkillMeta,
-  RiskLevel,
   UserProfile,
 } from "./types.js";
 import {
@@ -447,7 +446,7 @@ export class RDKClawApp {
    * 路径见 rdk-skill-authoring-guide：~/.rdkstudio/rdkclaw-workspaces/&lt;profile&gt;/skills/ 或自定义 workspaceRoot。
    */
   /**
-   * 打包当前 Studio 会话排查材料（Agent JSONL、可选板端日志、UI 快照、安全审计）。
+   * 打包当前对话的运行诊断材料（本机会话 JSONL、可选设备侧日志、界面快照、安全审计）。
    */
   async exportDebugSessionBundle(input: {
     userId?: string;
@@ -581,19 +580,6 @@ export class RDKClawApp {
     };
   }
 
-  private isRiskAtLeast(risk: RiskLevel, threshold: RiskLevel) {
-    const map: Record<RiskLevel, number> = { low: 1, medium: 2, high: 3 };
-    return map[risk] >= map[threshold];
-  }
-
-  private shouldRequireApproval(policy: RDKClawPolicy, risk: RiskLevel, sessionId: string, toolName: string, _channel: ChannelSource): boolean {
-    if (/^web_/i.test(toolName) && !policy.network.requireApproval) return false;
-    if (this.sessionAutoApprove.get(sessionId)) return false;
-    if (policy.approval.mode === "auto") return false;
-    if (policy.approval.mode === "always") return true;
-    return this.isRiskAtLeast(risk, policy.approval.riskThreshold);
-  }
-
   private evaluateRuntimeHealth(workspaceDir: string): RuntimeHealthReport {
     const requiredFiles = ["AGENTS.md", "USER.md", "HEARTBEAT.md"];
     const missingRequiredFiles = requiredFiles.filter((name) => !fs.existsSync(path.join(workspaceDir, name)));
@@ -629,7 +615,6 @@ export class RDKClawApp {
     return {
       ...tool,
       execute: async (input, ctx) => {
-        let forceApprovalByChannel = false;
         if (tool.name.startsWith("web_") && !policy.network.enabled) {
           throw new Error("联网工具已禁用，请在策略面板中开启网络能力。");
         }
@@ -641,7 +626,6 @@ export class RDKClawApp {
           if (chanPolicy === "block") {
             throw new Error(`安全限制：外部通道(${channel})禁止使用工具 ${tool.name}`);
           }
-          forceApprovalByChannel = chanPolicy === "force_approval";
 
           if ((tool.name === "exec" || tool.name === "device_exec") && (input as any)?.command) {
             const cmdCheck = validateExecCommand(String((input as any).command), channel);
@@ -675,94 +659,15 @@ export class RDKClawApp {
           throw new Error(`安全边界拦截：${guardResult.reason || "请求超出允许范围"}`);
         }
         const risk = guardResult.risk;
-        const needApproval = forceApprovalByChannel
-          ? true
-          : this.shouldRequireApproval(policy, risk, base.sessionId, tool.name, channel);
-        if (!needApproval) {
-          if (policy.permission.auditLogEnabled) {
-            appendSecurityAuditLog({
-              channel,
-              toolName: tool.name,
-              risk,
-              action: "auto_allow",
-              runId: base.runId,
-              sessionId: base.sessionId,
-            });
-          }
-          return tool.execute(input, ctx);
-        }
-        const approvalId = `approval-${crypto.randomUUID()}`;
         if (policy.permission.auditLogEnabled) {
           appendSecurityAuditLog({
             channel,
             toolName: tool.name,
             risk,
-            action: "approval_required",
+            action: "auto_allow",
             runId: base.runId,
             sessionId: base.sessionId,
           });
-        }
-        emitEvent({
-          type: "approval_required",
-          data: {
-            ...base,
-            approvalId,
-            toolName: tool.name,
-            args: input as Record<string, unknown>,
-            risk,
-            executor: resolveExecutor(tool.name),
-          },
-        });
-        const decision = await new Promise<ApprovalDecisionMode>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            this.pendingApprovals.delete(approvalId);
-            reject(new Error("审批超时，任务已取消"));
-          }, 300000);
-          this.pendingApprovals.set(approvalId, {
-            runId: base.runId,
-            sessionId: base.sessionId,
-            createdAt: Date.now(),
-            resolve: (nextDecision) => {
-              clearTimeout(timer);
-              resolve(nextDecision);
-            },
-            reject: (err) => {
-              clearTimeout(timer);
-              reject(err);
-            },
-          });
-        });
-        emitEvent({
-          type: "approval_decision",
-          data: {
-            ...base,
-            approvalId,
-            toolName: tool.name,
-            decision,
-          },
-        });
-        if (policy.permission.auditLogEnabled) {
-          appendSecurityAuditLog({
-            channel,
-            toolName: tool.name,
-            risk,
-            action: "approval_decision",
-            decision,
-            runId: base.runId,
-            sessionId: base.sessionId,
-          });
-        }
-        if (decision === "allow_session_auto") {
-          this.sessionAutoApprove.set(base.sessionId, true);
-        } else if (decision === "allow_global_auto") {
-          this.policyStore.savePolicy({
-            approval: {
-              mode: "auto",
-              riskThreshold: policy.approval.riskThreshold,
-            },
-          });
-        } else if (decision === "deny") {
-          throw new Error(`用户拒绝执行工具 ${tool.name}`);
         }
         return tool.execute(input, ctx);
       },

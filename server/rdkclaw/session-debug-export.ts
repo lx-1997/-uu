@@ -1,13 +1,14 @@
 /**
- * 将当前 RDKClaw 会话排查材料打成 zip：Agent JSONL、可选板端 OpenClaw 日志、UI 快照、安全审计摘要。
+ * 将当前对话的运行诊断材料打成 zip：本机会话 JSONL、可选设备 OpenClaw 日志、界面快照、安全审计摘要。
  */
 import * as path from 'node:path';
 import * as fsp from 'node:fs/promises';
 import JSZip from 'jszip';
+import { toAgentStoreSessionKey } from '../agent/session-key.js';
 import { execOnDevice } from '../agent/tools/rdk-ssh-helper.js';
 import type { SecurityAuditLogEntry } from './security-audit-store.js';
 
-/** 与 `RDKClawApp.studioAgentSessionKey`、磁盘 `SessionManager` 文件名规则一致 */
+/** Studio 侧传入的会话键（`device:…:studio:…`）；落盘时由 Agent 归一为 `agent:rdkclaw:…` */
 export function buildStudioAgentSessionKey(deviceId?: string, sessionId?: string): string {
   const sid = sessionId?.trim();
   const did = deviceId?.trim();
@@ -72,6 +73,13 @@ async function sampleOtherSessionKeysInDir(sessionDir: string, excludeKey: strin
 
 export async function createRdkclawDebugExportZip(input: SessionDebugExportInput): Promise<Buffer> {
   const zip = new JSZip();
+  const diskSessionKey = toAgentStoreSessionKey({ agentId: 'rdkclaw', requestKey: input.sessionKey });
+  const encodedDisk = encodeURIComponent(diskSessionKey);
+  const jsonlAgentPath = path.join(input.sessionDir, `${encodedDisk}.jsonl`);
+  const legacyAgentPath = path.join(
+    input.sessionDir,
+    `${diskSessionKey.replace(/[^a-zA-Z0-9_-]/g, '_')}.jsonl`,
+  );
   const encoded = encodeURIComponent(input.sessionKey);
   const jsonlPath = path.join(input.sessionDir, `${encoded}.jsonl`);
   const legacyPath = path.join(
@@ -82,8 +90,9 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
   const manifest: Record<string, unknown> = {
     exportedAt: new Date().toISOString(),
     sessionKey: input.sessionKey,
+    diskSessionKey,
     sessionDir: input.sessionDir,
-    sessionJsonlTried: [jsonlPath, legacyPath],
+    sessionJsonlTried: [jsonlAgentPath, legacyAgentPath, jsonlPath, legacyPath],
     deviceId: input.deviceId?.trim() || null,
     includeBoardLogs: input.includeBoardLogs,
     bundleFiles: [] as string[],
@@ -91,15 +100,20 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
 
   let sessionText = '';
   let sessionSource: string | null = null;
-  try {
-    sessionText = await fsp.readFile(jsonlPath, 'utf-8');
-    sessionSource = jsonlPath;
-  } catch {
+  const tryRead = async (p: string): Promise<boolean> => {
     try {
-      sessionText = await fsp.readFile(legacyPath, 'utf-8');
-      sessionSource = legacyPath;
+      sessionText = await fsp.readFile(p, 'utf-8');
+      sessionSource = p;
+      return true;
     } catch {
-      sessionText = '';
+      return false;
+    }
+  };
+  if (!(await tryRead(jsonlAgentPath))) {
+    if (!(await tryRead(legacyAgentPath))) {
+      if (!(await tryRead(jsonlPath))) {
+        await tryRead(legacyPath);
+      }
     }
   }
 
@@ -112,7 +126,7 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
       resolvedPath: sessionSource,
     };
   } else {
-    const otherKeysSample = await sampleOtherSessionKeysInDir(input.sessionDir, input.sessionKey, 12);
+    const otherKeysSample = await sampleOtherSessionKeysInDir(input.sessionDir, diskSessionKey, 12);
     if (otherKeysSample.length > 0) {
       manifest.sessionDirOtherKeysSample = otherKeysSample;
     }
@@ -124,7 +138,7 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
         'agent-session-ui-fallback.json',
         JSON.stringify(
           {
-            note: '磁盘上无对应 JSONL 时由前端 Dock 快照提供的会话摘要（不含工具级 JSONL 细节，仅作排障）。',
+            note: '未找到本机会话 JSONL 时，由对话界面提供的摘要副本（不含完整工具细节，仅供排障）。',
             sessionKey: input.sessionKey,
             exportedAt: new Date().toISOString(),
             chatMessages: cm,
@@ -161,6 +175,8 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
         `sessionKey: ${input.sessionKey}`,
         `sessionDir: ${input.sessionDir}`,
         '已尝试路径:',
+        `  - ${jsonlAgentPath}`,
+        `  - ${legacyAgentPath}`,
         `  - ${jsonlPath}`,
         `  - ${legacyPath}`,
         ...(otherKeysSample.length > 0
@@ -212,14 +228,14 @@ export async function createRdkclawDebugExportZip(input: SessionDebugExportInput
   }
 
   zip.file('README.txt', [
-    'RDK Studio — RDKClaw 排查导出包',
+    'RDK Studio — 运行诊断导出（ZIP）',
     '',
-    '- agent-session.jsonl：服务端 Agent 会话（工具调用与结果，含 board_openclaw_* 等）。',
-    '  若无：见 agent-session.MISSING.txt；若存在 agent-session-ui-fallback.json，为 Dock 侧摘要。',
-    '- dock-ui-snapshot.json：导出时 AI Dock 中的消息与时间线快照。',
-    '- board-openclaw-logs.txt：板上 OpenClaw 网关近期日志（若已连接设备且导出时包含）。',
-    '- security-audit-recent.json：最近安全审计记录（若存在）。',
-    '- manifest.json：本次打包元数据（含 sessionDir、agentSessionDisk 状态）。',
+    '- agent-session.jsonl：本机助手会话记录（含工具调用与结果等）。',
+    '  若缺失：见 agent-session.MISSING.txt；若有 agent-session-ui-fallback.json，为界面侧摘要。',
+    '- dock-ui-snapshot.json：导出时对话区界面与时间线。',
+    '- board-openclaw-logs.txt：设备上 OpenClaw 网关近期输出（已连接设备且勾选包含时）。',
+    '- security-audit-recent.json：近期安全审计（若存在）。',
+    '- manifest.json：本次导出元数据（含 sessionDir、agentSessionDisk 状态）。',
     '',
     '请勿将含 API Key、密码、配对 token 的压缩包随意分享。',
   ].join('\n'));

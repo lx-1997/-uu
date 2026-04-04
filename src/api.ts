@@ -477,7 +477,7 @@ export interface RdkclawDebugExportPayload {
   uiSnapshot?: unknown;
 }
 
-/** 下载 RDKClaw 排查 zip（Agent JSONL、Dock 快照、可选板端日志、安全审计） */
+/** 下载运行诊断包（ZIP：本机会话 JSONL、对话界面快照、可选设备日志、安全审计） */
 export async function downloadRdkclawDebugBundle(payload: RdkclawDebugExportPayload): Promise<void> {
   const headers = new Headers({ 'Content-Type': 'application/json' });
   applySsoMirrorToHeaders(headers);
