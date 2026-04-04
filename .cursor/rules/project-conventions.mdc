@@ -41,3 +41,21 @@ alwaysApply: true
 - 本仓库已包含：`skills/agent-browser-clawdbot/SKILL.md`（frontmatter 中 `name: agent-browser`；目录名 `agent-browser-clawdbot` 与 skill 名不同属正常）。
 - **RDKClaw / Cursor 助手**在涉及无头浏览器、多步网页自动化、`agent-browser` CLI 时，**应优先 Read 上述 SKILL.md** 再回答或改代码。
 - **勿**向用户重复建议「安装 agent-browser 技能 / 缺少该 skill」；若本机 CLI 未安装，只说明需安装 **`agent-browser` 命令行工具**（与仓库内 SKILL 存在与否无关）。
+
+## Git：拉取 develop、合并、提交一版（助手应遵守）
+
+**做得好的做法**：先 `fetch`、发现工作区不干净时用 stash 或先提交、再合并远端、解决冲突后推送；注意模板字符串里反引号需转义等构建细节。
+
+**应避免的低效路径**：`stash` → 合并远端 → **单独提交一次「仅合并」** → `stash pop` → **同一批文件再解一遍冲突**。合并与本地改动应尽可能在**一次**冲突解决里合完。
+
+**推荐流程（二选一）**：
+
+1. **本地改动可以成提交（首选）**  
+   `git add -A` → `git commit` → `git fetch origin develop` → `git merge origin/develop`（或 `git pull origin develop`）→ **最多一轮**冲突解决 → `git push`。  
+   用户说「提交一版」时，未跟踪文件若属于本版功能，必须纳入（`-A` 或显式 `add`），勿默认忽略 untracked。
+
+2. **暂不能提交、必须先清工作区再合并**  
+   `git stash push -u -m "..."`（**`-u` 纳入未跟踪文件**，除非用户明确不要）→ `git fetch` + `git merge origin/develop`（工作区干净时多为 fast-forward）→ **随即** `git stash pop` → **仅在这一步**处理冲突 → 测试 → `git add` / `git commit` / `git push`。  
+   **不要**在 `merge` 与 `stash pop` 之间插入「只含远端、不含 stash 内容」的提交，以免与 pop 叠加时重复冲突。
+
+**小结**：冲突解决轮数越少越好；需要 stash 时默认 `stash push -u`；合并与本地功能合成**一次**提交再推送，除非用户要求拆分提交。

@@ -1444,10 +1444,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const phase = resolvePhase(event.data.phase);
                 const argStr = summarizeToolArgs(args);
                 const cardTitle = formatToolStatusTitle(toolName, args);
+                /** 整文件写入等场景参数极长，用可折叠卡片默认收起，避免占满对话区 */
+                const contentArg = args?.content;
+                const hasLargeContentArg =
+                  typeof contentArg === 'string' && contentArg.length > 200;
+                const toolArgsHeavy =
+                  argStr.length > 420 || argStr.split(/\n/).length > 6 || hasLargeContentArg;
                 const statusIndex = aiBlocks.length;
                 pushAiBlock({
                   type: 'status',
                   title: cardTitle,
+                  ...(toolArgsHeavy
+                    ? {
+                        collapsible: true,
+                        defaultCollapsed: true,
+                        summary: cardTitle,
+                      }
+                    : {}),
                   items: [
                     {
                       label: executorLabel(executor),
@@ -2381,9 +2394,40 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     currentRunIdRef.current = '';
     commandLockRef.current = false;
     setAiTyping(false);
-    void (runId ? cancelRDKClawRun(runId) : cancelAllRDKClawRuns()).catch(() => {
-      addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
-    });
+    if (runId) {
+      void cancelRDKClawRun(runId)
+        .then((res) => {
+          if (res.alreadyEnded) {
+            setChatMessages((prev) => prev.map((m) => (
+              m.id === stopSentTs
+                ? {
+                    ...m,
+                    text: t(
+                      'chat.stop.sentAlreadyEnded',
+                      '该运行已结束（与 Cursor「停止」类似：无活跃任务时停止为安全空操作）。可继续输入新指令。',
+                    ),
+                    blocks: [{
+                      type: 'task-result',
+                      success: true,
+                      title: t('chat.stop.title', '已请求停止任务'),
+                      detail: t(
+                        'chat.stop.detailAlreadyEnded',
+                        '后端无活跃 run（可能已跑完或已停止）。无需重试。',
+                      ),
+                    }],
+                  }
+                : m
+            )));
+          }
+        })
+        .catch(() => {
+          addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
+        });
+    } else {
+      void cancelAllRDKClawRuns().catch(() => {
+        addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
+      });
+    }
   };
 
   const stopAllRuns = () => {

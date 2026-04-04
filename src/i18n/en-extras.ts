@@ -645,6 +645,9 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.approval.rejectDetail': 'This step will not run',
   'chat.soul.closed': 'SOUL updates are disabled; edit USER.md for preferences.',
   'chat.stop.sent': 'Stop signal sent; task should end shortly.',
+  'chat.stop.sentAlreadyEnded':
+    'This run already finished (like Cursor/IDE: stop is a no-op when nothing is running). You can send a new message.',
+  'chat.stop.detailAlreadyEnded': 'No active run on the server (finished or already stopped). No retry needed.',
   'chat.stop.title': 'Stop requested',
   'chat.stop.detailRun': 'runId: {{id}}',
   'chat.stop.detailAll': 'All running tasks',

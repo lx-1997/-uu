@@ -98,7 +98,28 @@ function isBlockedHostname(hostname: string): boolean {
 }
 
 /**
+ * 供 **studio_open_url**、设备输出中的 URL 自动打开等「仅把 URL 交给宿主 Electron 打开」的路径使用。
+ * 服务端**不会**代为请求该 URL，故不做 RFC1918 拦截；板卡/局域网 `http://192.168.x.x:8000` 等与 SSH 同网段场景应放行。
+ * 仍禁止非 http(s)、带账号密码的 URL。
+ */
+export function assertStudioClientOpenUrlAllowed(urlStr: string): URL {
+  const url = new URL(normalizeUrl(urlStr));
+  if (url.username || url.password) {
+    throw new Error("URL 不允许包含用户名或密码");
+  }
+  const p = url.protocol.toLowerCase();
+  if (p !== "http:" && p !== "https:") {
+    throw new Error("URL 仅支持 http/https 协议");
+  }
+  if (!url.hostname) {
+    throw new Error("URL 缺少主机名");
+  }
+  return url;
+}
+
+/**
  * SSRF：仅 http(s)，禁止明显内网主机名，DNS 解析后校验 IP 段。
+ * 用于 **服务端** Playwright / web_fetch 等代为发起网络请求的场景。
  */
 export async function assertBrowserFetchUrlSafe(urlStr: string): Promise<URL> {
   const url = new URL(normalizeUrl(urlStr));

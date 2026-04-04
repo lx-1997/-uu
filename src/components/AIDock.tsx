@@ -412,12 +412,15 @@ function StatusCollapsible({ block }: { block: Extract<ChatBlock, { type: 'statu
       <button
         type="button"
         className="status-collapsible-trigger"
+        aria-expanded={open}
         onClick={() => setOpen((p) => !p)}
       >
         <svg className="status-collapsible-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="9 18 15 12 9 6" />
         </svg>
-        <span className="status-collapsible-summary">{block.summary || block.items[0]?.label || t('dock.status.fallback', '详情')}</span>
+        <span className="status-collapsible-summary">
+          {block.summary || block.title || block.items[0]?.label || t('dock.status.fallback', '详情')}
+        </span>
       </button>
       {open && (
         <div className="status-collapsible-body">

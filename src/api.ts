@@ -950,7 +950,7 @@ export function sendRecommendationChoice(recommendationId: string, choiceId: str
 }
 
 export function cancelRDKClawRun(runId: string) {
-  return request<{ ok: boolean }>(`/api/rdkclaw/runs/${runId}/cancel`, {
+  return request<{ ok: boolean; alreadyEnded?: boolean }>(`/api/rdkclaw/runs/${runId}/cancel`, {
     method: 'POST',
     body: JSON.stringify({}),
   });

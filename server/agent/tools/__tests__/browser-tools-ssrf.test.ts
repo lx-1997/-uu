@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { assertBrowserFetchUrlSafe } from "../browser-tools.js";
+import { assertBrowserFetchUrlSafe, assertStudioClientOpenUrlAllowed } from "../browser-tools.js";
+
+describe("assertStudioClientOpenUrlAllowed", () => {
+  it("allows RFC1918 IPv4 for Electron client open (board dashboard)", () => {
+    const u = assertStudioClientOpenUrlAllowed("http://192.168.43.164:8000/");
+    expect(u.hostname).toBe("192.168.43.164");
+    const u2 = assertStudioClientOpenUrlAllowed("http://10.0.0.1:8080/x");
+    expect(u2.hostname).toBe("10.0.0.1");
+  });
+
+  it("allows 127.0.0.1 for local preview", () => {
+    const u = assertStudioClientOpenUrlAllowed("http://127.0.0.1:3000/");
+    expect(u.hostname).toBe("127.0.0.1");
+  });
+
+  it("rejects non-http URL", () => {
+    expect(() => assertStudioClientOpenUrlAllowed("ftp://example.com/")).toThrow();
+  });
+});
 
 describe("assertBrowserFetchUrlSafe", () => {
   it("rejects localhost", async () => {

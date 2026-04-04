@@ -398,6 +398,11 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      /** 旧版 cancel 曾返回 404；停止应为幂等，连接旧后端时也不弹红错 */
+      if (status === 404 && /\/api\/rdkclaw\/runs\/[^/]+\/cancel(?:\?|$)/.test(String(detail.url || ''))) {
+        if (/运行不存在|已结束/.test(message)) return;
+      }
+
       if (code === 'FILE_NOT_FOUND') {
         toast.addToast(t('api.err.fileNotFound', '目标文件不存在，请刷新目录后重试'), 'info');
         return;

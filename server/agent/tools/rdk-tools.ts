@@ -112,6 +112,26 @@ export const BOARD_FIND_SKILLS_PACKAGE_ID = 'find-skills';
 const findSkillsEnsureCooldown = new Map<string, number>();
 const FIND_SKILLS_ENSURE_COOLDOWN_MS = 90_000;
 
+/** 一旦确认板端已有 find-skills（或成功安装），在 TTL 内不再跑 SSH 预检，避免每次委派都卡顿 */
+const findSkillsPresenceUntil = new Map<string, number>();
+
+function resolveFindSkillsPresenceTtlMs(): number {
+  const raw = (process.env.RDK_FIND_SKILLS_PRESENCE_TTL_MS || '').trim();
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 60_000) return Math.min(7 * 24 * 60 * 60 * 1000, Math.floor(n));
+  }
+  return 6 * 60 * 60 * 1000;
+}
+
+/** 供 board_openclaw_ensure_find_skills 等强制重检时清空 */
+export function clearFindSkillsEnsureCachesForDevice(deviceId: string): void {
+  const id = String(deviceId || '').trim();
+  if (!id) return;
+  findSkillsEnsureCooldown.delete(id);
+  findSkillsPresenceUntil.delete(id);
+}
+
 /** Agent SSH 更长任务：默认已为 30min，此处再放宽安装类上限 */
 const SSH_LONG_INSTALL_MS = 45 * 60 * 1000;
 const SSH_SKILL_INSTALL_MS = 20 * 60 * 1000;
@@ -163,14 +183,18 @@ function isSshExecTimeoutMessage(msg: string): boolean {
  * 若板端未安装 find-skills，则 clawhub install + plugins.allow + 重启 gateway。
  * 短期冷却内不重复跑 SSH（避免同一会话多次委派刷安装）。
  */
-export async function ensureFindSkillsOnBoard(
-  deviceId: string,
-  onProgress?: (chunk: string) => void,
-): Promise<{ outcome: 'skipped_cooldown' | 'already_present' | 'installed'; output: string }> {
+export async function ensureFindSkillsOnBoard(deviceId: string): Promise<
+  { outcome: 'skipped_cached_present' | 'skipped_cooldown' | 'already_present' | 'installed'; output: string }
+> {
   const id = String(deviceId || '').trim();
   if (!id) return { outcome: 'skipped_cooldown', output: '' };
 
   const now = Date.now();
+  const presenceUntil = findSkillsPresenceUntil.get(id) ?? 0;
+  if (now < presenceUntil) {
+    return { outcome: 'skipped_cached_present', output: '' };
+  }
+
   const last = findSkillsEnsureCooldown.get(id) ?? 0;
   if (now - last < FIND_SKILLS_ENSURE_COOLDOWN_MS) {
     return { outcome: 'skipped_cooldown', output: '' };
@@ -192,10 +216,16 @@ export async function ensureFindSkillsOnBoard(
     'echo RDK_FIND_SKILLS_DONE',
   ].join('; ');
 
-  onProgress?.('\n[板端] 检查 SkillHub 元技能 find-skills …\n');
   const output = await execOnDevice(id, [`bash -lc '${cmds}'`], { timeoutMs: SSH_FIND_SKILLS_MS });
+  const ttl = resolveFindSkillsPresenceTtlMs();
+  const installFailed = /clawhub_install_failed/.test(output);
+
   if (/RDK_FIND_SKILLS_ALREADY/.test(output)) {
+    findSkillsPresenceUntil.set(id, now + ttl);
     return { outcome: 'already_present', output };
+  }
+  if (/RDK_FIND_SKILLS_DONE/.test(output) && !installFailed) {
+    findSkillsPresenceUntil.set(id, now + ttl);
   }
   return { outcome: 'installed', output };
 }
@@ -205,10 +235,10 @@ function boardOpenClawEnsureFindSkillsTool(deviceId: string): Tool<Record<string
     name: 'board_openclaw_ensure_find_skills',
     description:
       '确保板端已安装腾讯 SkillHub 元技能 **find-skills**（板端 `clawhub install find-skills`，用于检索/安装社区技能）。' +
-      '若已安装则跳过。委派前工具链也会自动尝试一次；你可主动调用以排障。',
+      '若已安装则跳过。仅在需要时主动调用以排障（委派流程不再自动执行）。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
-      findSkillsEnsureCooldown.delete(deviceId);
+      clearFindSkillsEnsureCachesForDevice(deviceId);
       const r = await ensureFindSkillsOnBoard(deviceId);
       return JSON.stringify({
         ok: true,
@@ -395,7 +425,7 @@ function deviceExecTool(
       '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
       '- **常驻进程（推流、WebSocket 服务、ros2 run 不退出等）**：传 **runDetached: true**。Studio 会以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
       '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
-      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`\n' +
+      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。**每条 device_exec 都是新 shell**，上一条的 `source` **不会**带到下一条；凡需 `ros2` 的排查须在同一条内写 `source /opt/tros/<distro>/setup.bash && ros2 ...`，**勿**单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` 后须 `source && ros2 node list` / `topic list` 或 `tail` 日志验证，勿仅凭「无报错」认定节点已起来\n' +
       '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
       '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +

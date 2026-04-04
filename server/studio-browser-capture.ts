@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Server as SocketIOServer } from "socket.io";
 import type { Tool } from "./agent/tools/types.js";
-import { assertBrowserFetchUrlSafe } from "./agent/tools/browser-tools.js";
+import { assertStudioClientOpenUrlAllowed } from "./agent/tools/browser-tools.js";
 import { buildStudioOpenLocalPreviewTool } from "./studio-local-preview.js";
 
 /** 用户只说 www.example.com 时补全 https://，便于 studio_open_url 与抓取工具 */
@@ -111,7 +111,7 @@ export async function waitForStudioEmbeddedCapture(
   if (!ioRef) {
     throw new Error("Studio 浏览器捕获未初始化（服务端未挂载 Socket.IO）");
   }
-  const safe = await assertBrowserFetchUrlSafe(coerceHttpUrlInput(urlRaw));
+  const safe = assertStudioClientOpenUrlAllowed(coerceHttpUrlInput(urlRaw));
   const url = safe.toString();
   const cfg = loadStudioBrowserCaptureConfig();
   const rules = (cfg.allowedHostSuffixes || []).map((s) => String(s).trim()).filter(Boolean);
@@ -176,7 +176,7 @@ export async function waitForStudioEmbeddedCapture(
 
 /**
  * 仅打开链接（内嵌 WebView），不进入抓取等待；**不检查** studio-browser-capture.json 的白名单。
- * 仍经 assertBrowserFetchUrlSafe（与无头抓取一致的 SSRF 规则）。
+ * URL 校验用 assertStudioClientOpenUrlAllowed（宿主打开，非服务端代请求，允许局域网/板卡 IP）。
  */
 export function emitStudioOpenUrlToClients(url: string): void {
   ioRef?.emit("studio_open_url_request", { url });
@@ -190,7 +190,7 @@ function studioOpenUrlTool(): Tool<{ url: string }> {
   return {
     name: "studio_open_url",
     description:
-      "【RDK Studio 桌面端】用户说「打开某网页/网站」时**必须调用本工具**（默认可缩放的独立浏览窗口，约为屏幕约六成、系统标题栏可关；失败时回退主窗口内嵌）。不等待抓取。不受 studio-browser-capture.json 白名单限制。失败时回显工具返回值；勿编造「环境限制」。纯 Web 时走新标签。要登录后抓正文给 Agent 用 studio_embedded_browser_capture。",
+      "【RDK Studio 桌面端】用户说「打开某网页/网站」时**必须调用本工具**（默认可缩放的独立浏览窗口，约为屏幕约六成、系统标题栏可关；失败时回退主窗口内嵌）。不等待抓取。不受 studio-browser-capture.json 白名单限制。**允许** `http(s)://` 局域网/板卡 IP（如 192.168.x.x、10.x、与 SSH 同网段），由用户本机浏览器打开，非服务端代请求。失败时回显工具返回值；勿编造「内网禁止」。纯 Web 时走新标签。要登录后抓正文给 Agent 用 studio_embedded_browser_capture。",
     inputSchema: {
       type: "object",
       properties: {
@@ -203,7 +203,7 @@ function studioOpenUrlTool(): Tool<{ url: string }> {
         return "studio_open_url 失败：Socket.IO 未初始化，无法通知界面打开。";
       }
       try {
-        const safe = await assertBrowserFetchUrlSafe(coerceHttpUrlInput(String(input.url || "")));
+        const safe = assertStudioClientOpenUrlAllowed(coerceHttpUrlInput(String(input.url || "")));
         const url = safe.toString();
         emitStudioOpenUrlToClients(url);
         return `studio_open_url_ok: 已请求打开 ${url}（桌面端默认可缩放独立窗口；失败时可能回退内嵌。若未看见请确认已用 RDK Studio 桌面包且前端已连上 Socket）。`;

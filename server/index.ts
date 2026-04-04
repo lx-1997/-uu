@@ -5841,13 +5841,11 @@ app.get('/api/rdkclaw/runs/active', (_request, response) => {
   response.json({ ok: true, runs: ids });
 });
 
+/** 与 Cursor / VS Code 等一致：停止为幂等操作；无活跃 run 时仍 200，避免前端误报「失败」 */
 app.post('/api/rdkclaw/runs/:runId/cancel', (request, response) => {
-  const ok = rdkclaw.cancelRun(request.params.runId);
-  if (!ok) {
-    response.status(404).json({ error: '运行不存在或已结束' });
-    return;
-  }
-  response.json({ ok: true });
+  const runId = String(request.params.runId || '').trim();
+  const stopped = rdkclaw.cancelRun(runId);
+  response.json({ ok: true, alreadyEnded: !stopped });
 });
 
 app.post('/api/rdkclaw/session/active', (request, response) => {

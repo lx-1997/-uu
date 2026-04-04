@@ -5,7 +5,7 @@
 import { ToolHookRegistry, createExecLikeFailureHintHook } from './tool-hooks.js';
 import type { PostToolUseHook } from './tool-hooks.js';
 import type { Tool } from './tools/types.js';
-import { assertBrowserFetchUrlSafe } from './tools/browser-tools.js';
+import { assertStudioClientOpenUrlAllowed } from './tools/browser-tools.js';
 import { emitStudioOpenUrlToClients } from '../studio-browser-capture.js';
 import { readDevices } from '../storage.js';
 import {
@@ -74,11 +74,7 @@ async function rewriteLocalhostUrlForStudio(url: string, studioDeviceId?: string
   }
 }
 
-/** 设备类工具输出里若出现 http(s) URL，在桌面端自动打开（经 SSRF 校验），便于实时看流/仪表盘 */
-/**
- * `exec` / `device_exec` 在命令非零退出时常以**文本**返回（不抛错），PostFailure 钩子不会触发。
- * 此处统一追加「须继续」编排提示，避免模型停在一半。
- */
+/** `exec` / `device_exec` 在命令非零退出时常以**文本**返回（不抛错），PostFailure 钩子不会触发；此处统一追加「须继续」编排提示。 */
 const createShellSoftFailureContinueHintHook = (): PostToolUseHook => ({
   name: 'rdkclaw-shell-soft-failure-continue-hint',
   priority: 42,
@@ -90,6 +86,7 @@ const createShellSoftFailureContinueHintHook = (): PostToolUseHook => ({
   },
 });
 
+/** 设备类工具输出中的 http(s) URL → 桌面端自动打开（与 studio_open_url 同规则，允许局域网/板卡 IP）。 */
 const createAutoOpenDeviceDashboardUrlHook = (): PostToolUseHook => ({
   name: 'rdkclaw-auto-open-dashboard-url',
   priority: 40,
@@ -106,7 +103,7 @@ const createAutoOpenDeviceDashboardUrlHook = (): PostToolUseHook => ({
       if (seen.has(candidate)) continue;
       seen.add(candidate);
       try {
-        const safe = await assertBrowserFetchUrlSafe(candidate);
+        const safe = assertStudioClientOpenUrlAllowed(candidate);
         const url = safe.toString();
         const forStudio = await rewriteLocalhostUrlForStudio(url, ctx.studioDeviceId);
         emitStudioOpenUrlToClients(forStudio);

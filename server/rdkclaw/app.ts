@@ -40,6 +40,7 @@ import { DEFAULT_SSH_PASSWORD } from "../constants.js";
 import { CONVERSATION_SCHEMA, recordConversationTurn } from "../conversation-log.js";
 import type { ConversationOutcome } from "../conversation-types.js";
 import { resolveRdkclawMaxAgentTurns } from "./max-agent-turns.js";
+import { abortable, combineAbortSignals } from "../agent/tools/abort.js";
 
 /** 长任务「仍在处理」心跳间隔。可用 RDKCLAW_RUN_PROGRESS_INTERVAL_MS 覆盖（毫秒，3s–300s）。 */
 function resolveRdkclawRunProgressIntervalMs(): number {
@@ -63,7 +64,7 @@ import type { RdkPlatform } from "../../shared/board-types.js";
 import { PersonaStore } from "./persona-store.js";
 import { SkillRegistry } from "./skills/registry.js";
 import { RDKClawPolicyStore } from "./policy-store.js";
-import { UserWorkspaceStore } from "./workspace-store.js";
+import { UserWorkspaceStore, type ResolvedWorkspace } from "./workspace-store.js";
 import { DeviceQueue } from "./device-queue.js";
 import type {
   ApprovalDecisionMode,
@@ -205,6 +206,11 @@ export class RDKClawApp {
   private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
   private readonly deviceQueue = new DeviceQueue();
   private cancelQueuedBeforeTs = 0;
+  /**
+   * 与「全部停止」联动：合并进每条 stream 的 abortSignal，使排队中 / setup 阶段尚未注册 runAgents 的请求也能被掐断并释放 device lane。
+   * 每次 cancelAllRuns 先 abort 再换新实例，避免波及取消之后新发起的对话。
+   */
+  private cancelAllWave = new AbortController();
   private switchDeviceCallback?: (deviceId: string) => void;
   private pendingMapsCleanupInterval: ReturnType<typeof setInterval> | null = null;
   /** 贯穿 compaction 生命周期的 hooks（RDKClaw 默认可为空注册表，便于后续注入） */
@@ -519,6 +525,8 @@ export class RDKClawApp {
 
   cancelAllRuns(): number {
     this.cancelQueuedBeforeTs = Date.now();
+    this.cancelAllWave.abort();
+    this.cancelAllWave = new AbortController();
     let count = 0;
     for (const [_id, agent] of this.runAgents) {
       try { agent.abort(); count++; } catch { /* ignore */ }
@@ -528,6 +536,43 @@ export class RDKClawApp {
 
   getActiveRunIds(): string[] {
     return Array.from(this.runAgents.keys());
+  }
+
+  /** setup 阶段被「全部停止」等掐断时，统一输出 run_complete 并结束 generator */
+  private *yieldSetupAbortedRun(
+    req: RDKClawChatRequest,
+    runId: string,
+    sessionKey: string,
+    traceChannel: string,
+    runStartedAt: number,
+  ): Generator<RDKClawEvent, void, void> {
+    recordConversationTurnFromReq(req, {
+      outcome: "cancelled",
+      assistantMessage: "",
+      toolsUsed: [],
+      errorDetail: "setup_aborted",
+    });
+    rdkclawRunTrace("run_done", {
+      runId,
+      sessionId: sessionKey,
+      channel: traceChannel,
+      outcome: "cancelled",
+      tool_calls: 0,
+    });
+    const elapsedMs = Date.now() - runStartedAt;
+    yield {
+      type: "run_complete",
+      data: {
+        runId,
+        sessionId: sessionKey,
+        channel: traceChannel,
+        message: "已取消",
+        cancelled: true,
+        elapsed_ms: elapsedMs,
+        elapsed_display: `${Math.max(1, Math.round(elapsedMs / 1000))} 秒`,
+        tool_calls: 0,
+      },
+    };
   }
 
   private isRiskAtLeast(risk: RiskLevel, threshold: RiskLevel) {
@@ -908,6 +953,10 @@ export class RDKClawApp {
   }
 
   async *streamChat(req: RDKClawChatRequest): AsyncGenerator<RDKClawEvent> {
+    const mergedAbort = combineAbortSignals(req.abortSignal, this.cancelAllWave.signal);
+    if (mergedAbort) {
+      req = { ...req, abortSignal: mergedAbort };
+    }
     const externalAbortSignal = req.abortSignal;
     let abortedByClient = Boolean(externalAbortSignal?.aborted);
     if (abortedByClient) {
@@ -1086,16 +1135,38 @@ export class RDKClawApp {
       cacheOnly: studioQuick,
     });
     const attachmentPrepareStartedAt = Date.now();
-    const attachmentState = await prepareSessionAttachments(sessionKey, req.attachments);
-    const attachmentPrepareMs = Date.now() - attachmentPrepareStartedAt;
-    await ensureAudioAttachmentTranscripts(
-      sessionKey,
-      attachmentState.allAttachments,
-      providerConfig,
-      attachmentState.newAttachments.map((item) => item.id),
-    );
-    /** 快照与 workspace 互不依赖：并行等待以压缩 setup 阶段（不改变提示词与决策输入） */
-    const [boardSnapshot, workspace] = await Promise.all([boardSnapshotPromise, workspacePromise]);
+    let attachmentPrepareMs = 0;
+    let attachmentState: Awaited<ReturnType<typeof prepareSessionAttachments>>;
+    let boardSnapshot: BoardSnapshot;
+    let workspace: ResolvedWorkspace;
+    try {
+      attachmentState = await abortable(
+        prepareSessionAttachments(sessionKey, req.attachments),
+        externalAbortSignal,
+      );
+      attachmentPrepareMs = Date.now() - attachmentPrepareStartedAt;
+      await abortable(
+        ensureAudioAttachmentTranscripts(
+          sessionKey,
+          attachmentState.allAttachments,
+          providerConfig,
+          attachmentState.newAttachments.map((item) => item.id),
+        ),
+        externalAbortSignal,
+      );
+      /** 快照与 workspace 互不依赖：并行等待以压缩 setup 阶段（不改变提示词与决策输入） */
+      [boardSnapshot, workspace] = await abortable(
+        Promise.all([boardSnapshotPromise, workspacePromise]),
+        externalAbortSignal,
+      );
+    } catch (e) {
+      if (externalAbortSignal?.aborted || (e instanceof Error && e.message === "操作已中止")) {
+        abortedByClient = true;
+        yield* this.yieldSetupAbortedRun(req, runId, sessionKey, traceChannel, runStartedAt);
+        return;
+      }
+      throw e;
+    }
     const boardSnapshotMs = Date.now() - boardSnapshotStartedAt;
     if (req.deviceId) {
       const devices = await readDevices();
@@ -1380,12 +1451,25 @@ export class RDKClawApp {
     const skipMarkdownMemorySync =
       studioQuick ||
       (attachmentState.allAttachments.length === 0 && isTrivialStudioChatMessage(String(req.message || "").trim()));
-    const markdownMemorySync = skipMarkdownMemorySync
-      ? { imported: 0, projectionPath: "", projectionCount: 0 }
-      : await syncWorkspaceMarkdownMemory({
-          workspaceDir: workspace.workspaceDir,
-          memory: agent.getMemory(),
-        });
+    let markdownMemorySync: { imported: number; projectionPath: string; projectionCount: number };
+    try {
+      markdownMemorySync = skipMarkdownMemorySync
+        ? { imported: 0, projectionPath: "", projectionCount: 0 }
+        : await abortable(
+            syncWorkspaceMarkdownMemory({
+              workspaceDir: workspace.workspaceDir,
+              memory: agent.getMemory(),
+            }),
+            externalAbortSignal,
+          );
+    } catch (e) {
+      if (externalAbortSignal?.aborted || (e instanceof Error && e.message === "操作已中止")) {
+        abortedByClient = true;
+        yield* this.yieldSetupAbortedRun(req, runId, sessionKey, traceChannel, runStartedAt);
+        return;
+      }
+      throw e;
+    }
     /** 每轮同步仍执行（见 syncWorkspaceMarkdownMemory）；不向 UI 推 meta（条数常固定，易成噪声） */
     if (markdownMemorySync.imported > 0) {
       console.debug(
