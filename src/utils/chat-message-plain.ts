@@ -56,6 +56,11 @@ function appendBlockPlainParts(parts: string[], b: ChatBlock, tr: (key: string, 
     case 'progress':
       parts.push(b.steps.map((s) => `${s.label} (${s.status})`).join('\n'));
       break;
+    case 'continue-run': {
+      const head = tr('dock.continueRun.plainTitle', '[继续] 本轮推理已达上限');
+      parts.push(b.hint ? `${head}\n${b.hint}` : head);
+      break;
+    }
     default:
       break;
   }
@@ -82,6 +87,7 @@ const DEFAULT_RETRY_EXCERPT_MAX = 2800;
 
 function appendBlockForRetryPlain(parts: string[], b: ChatBlock, tr: (key: string, zh: string) => string) {
   switch (b.type) {
+    case 'continue-run':
     case 'status':
     case 'progress':
     case 'reasoning':

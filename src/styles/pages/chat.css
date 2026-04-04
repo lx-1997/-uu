@@ -2182,6 +2182,22 @@
   border-bottom-color: color-mix(in srgb, var(--danger) 22%, transparent);
 }
 
+/* 轮次触顶「继续」卡（对齐 Cursor Continue 的显式续跑） */
+.dock-bubble .continue-run-block.dock-agent-card--continue {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated));
+}
+.dock-bubble .continue-run-hint,
+.dock-bubble .continue-run-body {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 8px 0;
+}
+.dock-bubble .continue-run-actions {
+  padding-top: 4px;
+}
+
 .dock-bubble .collab-block-header.dock-agent-card-head {
   margin-bottom: 0;
   align-items: flex-start;

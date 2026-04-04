@@ -176,6 +176,13 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.bubble.copyToastFail': 'Copy failed — try selecting text manually',
   'dock.bubble.copyBtn': 'Copy',
 
+  'dock.continueRun.title': 'Turn limit reached for this run',
+  'dock.continueRun.body':
+    'Like Cursor’s “Continue”: the button sends a follow-up so the agent can finish unfinished work in this chat without redoing successful steps.',
+  'dock.continueRun.cta': 'Continue',
+  'dock.continueRun.busy': 'Wait for the current reply to finish, then try again.',
+  'dock.continueRun.plainTitle': '[Continue] Turn limit reached for this run',
+
   'dock.hide': 'Hide AI Dock',
   'dock.attach.processFail': 'Attachment handling failed. Please try again.',
   'dock.compact.titleOn': 'Compact flow view on — click to show full steps',

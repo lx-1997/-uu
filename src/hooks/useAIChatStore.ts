@@ -2184,6 +2184,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   title: label,
                   detail: detail.length > 0 ? detail.join(' · ') : undefined,
                 });
+                if (stopReason === 'max_turns_reached' || stopReason === 'tool_followup_cap_reached') {
+                  pushAiBlock({
+                    type: 'continue-run',
+                    stopReason: stopReason as 'max_turns_reached' | 'tool_followup_cap_reached',
+                    hint: stopHint || undefined,
+                  });
+                }
                 if (/<client-action\b/i.test(aiText)) {
                   applyClientActionsAcrossMarkdownSlots();
                 }

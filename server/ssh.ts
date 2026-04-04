@@ -80,6 +80,11 @@ export interface RunRemoteCommandOptions {
   onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
   /** Agent / 用户中止时关闭 SSH 与会话，避免「点停止后仍刷 device_exec」 */
   abortSignal?: AbortSignal;
+  /**
+   * 默认 true：远程非零退出码会 reject（与 HTTP 设备 API 一致）。
+   * 传 false 时改为 resolve，在返回文本末尾附带 `[exit code: n]`，供 Agent 区分「命令语义失败」与 SSH 链路失败。
+   */
+  rejectOnNonZeroExit?: boolean;
 }
 
 export interface VerifySshConnectionOptions {
@@ -218,7 +223,18 @@ export function runRemoteCommands(
                   ? '\n[OUTPUT TRUNCATED: stdout/stderr exceeded safe limit; tail retained]'
                   : '';
               if (code && code !== 0) {
-                safeReject(new Error((stderr + truncNote) || `Remote command failed with exit code ${code}`));
+                // 非零退出在 Unix 里很常见（grep 未命中、test 失败等）。HTTP/设备 API 仍 reject；Agent 可选 resolve 以免误判为 SSH 失败。
+                const parts: string[] = [];
+                if (stdout.trim()) parts.push(stdout.trimEnd());
+                if (stderr.trim()) parts.push(`[stderr]\n${stderr.trimEnd()}`);
+                if (stdoutTrunc || stderrTrunc) parts.push(truncNote.trim());
+                parts.push(`[exit code: ${code}]`);
+                const combined = parts.filter(Boolean).join('\n\n') || `Remote command failed with exit code ${code}`;
+                if (options.rejectOnNonZeroExit === false) {
+                  safeResolve(combined);
+                } else {
+                  safeReject(new Error(combined));
+                }
                 return;
               }
 

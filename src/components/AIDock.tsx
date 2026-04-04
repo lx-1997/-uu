@@ -201,6 +201,7 @@ function isResultLikeDockBlock(block: ChatBlock): boolean {
     case 'file':
     case 'code':
     case 'task-result':
+    case 'continue-run':
     case 'approval':
     case 'confirm':
     case 'recommendation':
@@ -568,6 +569,7 @@ function BlockRenderer({
   onApprovalAction,
   onRecommendationChoice,
   onSoulUpdateDecision,
+  onContinueAgent,
 }: {
   block: ChatBlock;
   onConfirm?: (id: string) => void;
@@ -576,6 +578,8 @@ function BlockRenderer({
   onApprovalAction?: (approvalId: string, action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run', runId?: string) => void;
   onRecommendationChoice?: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
   onSoulUpdateDecision?: (proposalId: string, accepted: boolean) => void;
+  /** 轮次触顶后的「继续」（等同 Cursor Continue：新发一条用户消息续跑） */
+  onContinueAgent?: () => void;
 }) {
   const { t } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
@@ -976,6 +980,37 @@ function BlockRenderer({
     );
   }
 
+  if (block.type === 'continue-run') {
+    return (
+      <div className="msg-block continue-run-block dock-agent-card dock-agent-card--continue">
+        <div className="dock-agent-card-head dock-agent-card-head--compact">
+          <span className="dock-agent-card-icon" aria-hidden>↻</span>
+          <span className="dock-agent-card-title">
+            {t('dock.continueRun.title', '本轮推理已达上限')}
+          </span>
+        </div>
+        {block.hint ? (
+          <p className="continue-run-hint">{block.hint}</p>
+        ) : null}
+        <p className="continue-run-body">
+          {t(
+            'dock.continueRun.body',
+            '与 Cursor「Continue」类似：点击下方按钮会发送一条续跑指令，在同一对话中接着处理未完成任务（不重复已成功步骤）。',
+          )}
+        </p>
+        <div className="continue-run-actions">
+          <button
+            type="button"
+            className="btn btn-primary continue-run-cta"
+            onClick={() => onContinueAgent?.()}
+          >
+            {t('dock.continueRun.cta', '继续')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (block.type === 'reasoning') {
     if (block.collapsible !== false) {
       return <ReasoningCollapsible block={block} />;
@@ -1231,6 +1266,21 @@ export default function AIDock() {
     setUnsatisfiedModal(null);
     setUnsatisfiedNote('');
   }, [unsatisfiedModal, unsatisfiedNote, aiTyping, addToast, t, isEn, handleCommand]);
+
+  /** 轮次触顶后显式「继续」：等同 Cursor Continue，发送一条续跑用户消息 */
+  const handleContinueAfterTurnLimit = useCallback(() => {
+    if (aiTyping) {
+      addToast(t('dock.continueRun.busy', '请等待当前回复结束后再试。'), 'warning');
+      return;
+    }
+    handleCommand({ preventDefault() {} } as React.FormEvent, {
+      messageOverride: t(
+        'chat.continueAgent.message',
+        '请接着上一条助手回复继续执行：在未完成的操作、错误排查或上一步未完成处接着推进，不要重复已成功或已确认的步骤。',
+      ),
+      chatPreviewText: t('chat.continueAgent.preview', '继续任务'),
+    });
+  }, [aiTyping, addToast, t, handleCommand]);
 
   useEffect(() => {
     if (!unsatisfiedModal) return;
@@ -2382,6 +2432,7 @@ export default function AIDock() {
                                 onApprovalAction: handleApprovalAction,
                                 onRecommendationChoice: handleRecommendationChoice,
                                 onSoulUpdateDecision: handleSoulUpdateDecision,
+                                onContinueAgent: handleContinueAfterTurnLimit,
                               } as const;
                               if (slot.kind === 'markdown') {
                                 const { cleanText, mediaBlocks } = extractMediaFromText(slot.text || '');
@@ -2443,7 +2494,7 @@ export default function AIDock() {
                               ? (msg.blocks ?? []).filter(isResultLikeDockBlock)
                               : (msg.blocks ?? [])
                             ).map((block, i) => (
-                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} />
+                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} onContinueAgent={handleContinueAfterTurnLimit} />
                             ))}
                             {(msg.text || isStreamingBubble) && (() => {
                               const { cleanText, mediaBlocks } = extractMediaFromText(msg.text || '');
@@ -2459,7 +2510,7 @@ export default function AIDock() {
                                     </div>
                                   )}
                                   {mediaBlocks.map((mb, j) => (
-                                    <BlockRenderer key={`extracted-media-${j}`} block={mb} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} />
+                                    <BlockRenderer key={`extracted-media-${j}`} block={mb} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} onContinueAgent={handleContinueAfterTurnLimit} />
                                   ))}
                                 </>
                               );

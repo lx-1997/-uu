@@ -68,6 +68,10 @@ export type ExecOnDeviceOptions = {
   onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
   /** 与 Agent run 级 abort 对齐，停止时断开 SSH exec */
   abortSignal?: AbortSignal;
+  /**
+   * 默认 true。device_exec 传 false：远程命令非零退出不抛错，返回输出 + `[exit code: n]`，避免与 SSH/超时失败混淆。
+   */
+  rejectOnNonZeroExit?: boolean;
 };
 
 export async function getDevice(deviceId: string): Promise<Device | null> {
@@ -98,11 +102,15 @@ export async function execOnDevice(
   const device = await getDeviceFreshForExec(deviceId);
   if (!device) throw new Error(`设备 ${deviceId} 不存在`);
   const runOpts =
-    options?.timeoutMs != null || options?.onStreamChunk || options?.abortSignal
+    options?.timeoutMs != null ||
+    options?.onStreamChunk ||
+    options?.abortSignal ||
+    options?.rejectOnNonZeroExit === false
       ? {
           ...(options.timeoutMs != null ? { timeoutMs: options.timeoutMs } : {}),
           ...(options.onStreamChunk ? { onStreamChunk: options.onStreamChunk } : {}),
           ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+          ...(options.rejectOnNonZeroExit === false ? { rejectOnNonZeroExit: false as const } : {}),
         }
       : undefined;
   return runInDeviceLane(device.id, async () => {

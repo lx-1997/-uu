@@ -29,6 +29,7 @@ import {
   downloadDeviceFileToLocal,
   uploadLocalFileToDevice,
 } from './rdk-ssh-helper.js';
+import { SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS } from '../../ssh.js';
 import {
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
   OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
@@ -118,6 +119,24 @@ const SSH_OPENCLAW_GATEWAY_PAIR_MS = 180_000;
 const SHERPA_SETUP_TIMEOUT_MS = 45 * 60 * 1000;
 const DEVICE_EXEC_TIMEOUT_MIN_MS = 5_000;
 const DEVICE_EXEC_TIMEOUT_MAX_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * 编排模型常把 60/90/120s 当作「通用超时」；板端 apt/相机/弱网下极易触发 SSH 层误杀。
+ * 这些值自动对齐到与未传 timeoutMs 相同的默认（30min）；若确需更短，应传非常规毫秒（如 45000）。
+ */
+const MODEL_GENERIC_SHORT_TIMEOUTS_MS = new Set([60_000, 90_000, 120_000]);
+
+function resolveDeviceExecTimeoutMs(requested: number): number {
+  const t = Math.min(DEVICE_EXEC_TIMEOUT_MAX_MS, Math.max(DEVICE_EXEC_TIMEOUT_MIN_MS, Math.floor(requested)));
+  if (MODEL_GENERIC_SHORT_TIMEOUTS_MS.has(t)) {
+    return SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS;
+  }
+  return t;
+}
+
+function isSshExecTimeoutMessage(msg: string): boolean {
+  return msg.includes('SSH 命令执行超时（') && msg.includes('ms）');
+}
 
 /**
  * 若板端未安装 find-skills，则 clawhub install + plugins.allow + 重启 gateway。
@@ -299,7 +318,7 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
       '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
       '规则：\n' +
       '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
-      '- 更长命令可传 timeoutMs（毫秒），范围 5000～7200000；不传则与 SSH 层默认一致（30 分钟）\n' +
+      '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
       '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功\n' +
@@ -317,7 +336,7 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
         timeoutMs: {
           type: 'number',
           description:
-            '可选。整段命令的最长等待时间（毫秒），范围 5000～7200000；不传则默认 1800000（30 分钟）。',
+            '可选。整段命令最长等待（毫秒）5000～7200000；不传默认 30 分钟。勿默认填 60000；长任务应省略或给足时间。',
         },
       },
       required: ['command'],
@@ -334,8 +353,7 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
         } = {};
 
         if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
-          const t = Math.floor(Number(input.timeoutMs));
-          execOpts.timeoutMs = Math.min(DEVICE_EXEC_TIMEOUT_MAX_MS, Math.max(DEVICE_EXEC_TIMEOUT_MIN_MS, t));
+          execOpts.timeoutMs = resolveDeviceExecTimeoutMs(Number(input.timeoutMs));
         }
         if (ctx.abortSignal) {
           execOpts.abortSignal = ctx.abortSignal;
@@ -382,11 +400,11 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
           }, 5000);
         }
 
-        const output = await execOnDevice(
-          deviceId,
-          [input.command],
-          Object.keys(execOpts).length > 0 ? execOpts : undefined,
-        );
+        // 远程非零退出走 resolve + [exit code]，不抛错，避免与 SSH/超时混淆并误触发下方「勿切设备」提示
+        const output = await execOnDevice(deviceId, [input.command], {
+          ...execOpts,
+          rejectOnNonZeroExit: false,
+        });
         flushProgress(true);
         if (!output) return '(命令执行成功，无输出)';
 
@@ -411,6 +429,13 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
             `请到 **设备管理** 对该 IP 下 **当前使用的用户** 点「测试连接」并保存；或用本机终端对同一 host/user 试一次 ssh。\n` +
             `**OpenClaw 在板上正常 ≠ Studio 的 SSH 一定成功**（板内进程与宿主机连板的 SSH 是两条链路）。认证未恢复前，反复改 gst/v4l2 命令通常无效。\n` +
             `勿因本条切换设备；先修连接。`
+          );
+        }
+        if (isSshExecTimeoutMessage(msg)) {
+          return (
+            `[命令执行失败] ${msg}\n\n` +
+            `这是 **等待超时**（时限内命令未结束），与设备是否在线无必然关系。\n` +
+            `请**省略 timeoutMs**（默认 30 分钟）或对长任务传入更大毫秒数（最高 7200000）；可拆分命令或重试，不要切换设备。`
           );
         }
         // 关键：明确告诉 LLM 命令失败≠设备离线，防止误判后切换设备
