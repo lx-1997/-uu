@@ -80,14 +80,25 @@ const Icon = {
 
 type PendingAttachment = ChatAttachment & {
   file: File;
+  /** 语音：本机/服务端转写进行中 */
+  sttPending?: boolean;
+  /** 语音：转写失败简要原因（展示在附件旁） */
+  sttError?: string;
 };
+
+/** 设为 true 时不使用浏览器 Web Speech API（Chrome 等会连 Google）；仅录音 + 本机后端转写，需配置 whisper.cpp 或云端 Provider */
+const RDK_DISABLE_BROWSER_SPEECH =
+  import.meta.env.VITE_DISABLE_BROWSER_SPEECH === '1'
+  || import.meta.env.VITE_DISABLE_BROWSER_SPEECH === 'true';
+
+type SpeechRecognitionResultLike = ArrayLike<{ transcript?: string }> & { isFinal?: boolean };
 
 type BrowserSpeechRecognition = {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   onresult: ((event: {
-    results: ArrayLike<ArrayLike<{ transcript?: string }>>;
+    results: ArrayLike<SpeechRecognitionResultLike>;
     resultIndex?: number;
   }) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
@@ -1235,6 +1246,8 @@ export default function AIDock() {
     setShowAddDevice,
     setObStep,
   } = useAppState();
+  const cmdRef = useRef(cmd);
+  cmdRef.current = cmd;
   const { hubAnchorEl, defaultHostNode } = useHubDockAnchor();
   const { t, isEn } = useI18n();
   const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
@@ -1432,8 +1445,13 @@ export default function AIDock() {
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  /** 麦克风按钮提示：是否已配置本机/云端转写 */
+  const [voiceMicTitleSuffix, setVoiceMicTitleSuffix] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTranscript, setRecordingTranscript] = useState('');
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
+  /** 停录后正在把语音转成文字填入输入框（不发音频附件） */
+  const [voiceSttLoading, setVoiceSttLoading] = useState(false);
   const [inputContextMenu, setInputContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [dragOverInput, setDragOverInput] = useState(false);
   const activeDeviceName = currentDevice?.name?.trim() || '';
@@ -1500,6 +1518,8 @@ export default function AIDock() {
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const voiceTranscriptRef = useRef('');
   const isRecordingRef = useRef(false);
+  /** 浏览器 Web Speech `network` 错误易短时连发，压成最多约 45s 一条提示 */
+  const speechNetworkToastAtRef = useRef(0);
 
   useEffect(() => {
     if (rdkEmbedPanel !== 'ai-dock') return;
@@ -1549,7 +1569,7 @@ export default function AIDock() {
     document.execCommand(command);
   }, [setCmd]);
 
-  const addAttachment = useCallback((file: File, extras?: { transcript?: string; textContent?: string }) => {
+  const addAttachment = useCallback((file: File, extras?: { transcript?: string; textContent?: string }): string | undefined => {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
     const isImage = file.type.startsWith('image/') || /^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?)$/.test(ext);
     const isVideo = file.type.startsWith('video/') || /^(mp4|webm|avi|mov|mkv|flv|wmv|m4v|3gp)$/.test(ext);
@@ -1560,11 +1580,12 @@ export default function AIDock() {
         name: file.name,
         mb: Math.floor(sizeLimit / (1024 * 1024)),
       }), 'warning');
-      return;
+      return undefined;
     }
     const url = URL.createObjectURL(file);
+    const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const att: PendingAttachment = {
-      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id,
       type: isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : 'file',
       name: file.name,
       url,
@@ -1575,7 +1596,66 @@ export default function AIDock() {
       file,
     };
     setPendingAttachments(prev => [...prev, att]);
+    return id;
   }, [addToast, t]);
+
+  /** 仅转写：把录音发给本机后端（whisper.cpp / 云端 ASR），不把文件挂成附件 */
+  const transcribeVoiceBlobToText = useCallback(async (file: File): Promise<string | null> => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 180_000);
+    try {
+      const res = await fetchApi('/api/agent/transcribe-audio', {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'audio/webm',
+          'X-Attachment-Name': encodeURIComponent(file.name),
+        },
+        body: await file.arrayBuffer(),
+        signal: controller.signal,
+      });
+      const raw = await res.json().catch(() => ({})) as { error?: string; transcript?: string };
+      if (!res.ok) {
+        addToast(String(raw.error || t('dock.voice.serverSttFail', '服务端语音转写失败')), 'warning');
+        return null;
+      }
+      return String(raw.transcript || '').trim() || null;
+    } catch (e) {
+      const msg =
+        e instanceof Error && e.name === 'AbortError'
+          ? t('dock.voice.serverSttTimeout', '语音转写超时，请重试或检查本机 whisper / 网络')
+          : e instanceof Error
+            ? e.message
+            : t('dock.voice.serverSttFail', '服务端语音转写失败');
+      addToast(msg, 'warning');
+      return null;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }, [addToast, t]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchApi('/api/agent/transcribe-capabilities')
+      .then(r => r.json())
+      .then((d: { localWhisper?: boolean; studioProvider?: boolean; cloudAsrSupported?: boolean }) => {
+        if (cancelled) return;
+        if (d.localWhisper) {
+          setVoiceMicTitleSuffix(` · ${t('dock.voice.cap.local', '本机转写已开')}`);
+        } else if (d.studioProvider && d.cloudAsrSupported) {
+          setVoiceMicTitleSuffix(` · ${t('dock.voice.cap.cloud', '将用云端转写')}`);
+        } else if (d.studioProvider && !d.cloudAsrSupported) {
+          setVoiceMicTitleSuffix(` · ${t('dock.voice.cap.noCloudAsr', '对话渠道无语音 API，请配本机 whisper')}`);
+        } else {
+          setVoiceMicTitleSuffix(` · ${t('dock.voice.cap.none', '未配转写：语音可能无文字')}`);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setVoiceMicTitleSuffix('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   const uploadSessionRef = useRef(`upload-${Date.now()}`);
 
@@ -1710,14 +1790,52 @@ export default function AIDock() {
     });
   }, [addAttachment, setCmd]);
 
-  const toggleVoiceRecord = useCallback(async () => {
-    if (isRecording) {
-      speechRecognitionRef.current?.stop();
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      isRecordingRef.current = false;
+  const VOICE_MAX_SECONDS = 60;
+
+  useEffect(() => {
+    if (!isRecording) {
+      setRecordingElapsed(0);
       return;
     }
+    const t0 = Date.now();
+    const tick = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - t0) / 1000);
+      setRecordingElapsed(elapsed);
+      if (elapsed >= VOICE_MAX_SECONDS) {
+        isRecordingRef.current = false;
+        const rec = speechRecognitionRef.current;
+        speechRecognitionRef.current = null;
+        rec?.stop();
+        mediaRecorderRef.current?.stop();
+        setIsRecording(false);
+      }
+    }, 500);
+    return () => window.clearInterval(tick);
+  }, [isRecording]);
+
+  useEffect(() => {
+    return () => {
+      if (isRecordingRef.current) {
+        isRecordingRef.current = false;
+        try { speechRecognitionRef.current?.stop(); } catch { /* ignore */ }
+        speechRecognitionRef.current = null;
+        try { mediaRecorderRef.current?.stop(); } catch { /* ignore */ }
+      }
+    };
+  }, []);
+
+  const toggleVoiceRecord = useCallback(async () => {
+    if (isRecording) {
+      /* 必须先清会话标记再 stop，否则 recognition.onend 会误以为仍要录音并误触逻辑 */
+      isRecordingRef.current = false;
+      const rec = speechRecognitionRef.current;
+      speechRecognitionRef.current = null;
+      rec?.stop();
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    if (voiceSttLoading) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -1730,36 +1848,82 @@ export default function AIDock() {
         webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
       };
       const SpeechRecognitionCtor = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
-      if (SpeechRecognitionCtor) {
+      if (!RDK_DISABLE_BROWSER_SPEECH && SpeechRecognitionCtor) {
         try {
           const recognition = new SpeechRecognitionCtor();
           recognition.continuous = true;
           recognition.interimResults = true;
           recognition.lang = language === 'en' ? 'en-US' : 'zh-CN';
           recognition.onresult = (event) => {
-            const finalTranscript: string[] = [];
-            for (let i = 0; i < event.results.length; i += 1) {
-              const alt = event.results[i]?.[0];
-              if (alt?.transcript) {
-                finalTranscript.push(String(alt.transcript));
-              }
+            let finalPart = '';
+            let interimPart = '';
+            const { results } = event;
+            for (let i = 0; i < results.length; i += 1) {
+              const row = results[i];
+              const alt = row?.[0];
+              const piece = alt?.transcript ? String(alt.transcript) : '';
+              if (!piece) continue;
+              if (row.isFinal) finalPart += piece;
+              else interimPart += piece;
             }
-            const merged = finalTranscript.join('').trim();
+            const merged = `${finalPart}${interimPart}`.trim();
             voiceTranscriptRef.current = merged;
             setRecordingTranscript(merged);
           };
-          recognition.onerror = () => null;
-          recognition.onend = () => {
-            if (isRecordingRef.current) {
-              setIsRecording(false);
-              isRecordingRef.current = false;
+          recognition.onerror = (ev) => {
+            const code = ev.error || '';
+            if (code === 'aborted' || code === 'no-speech') return;
+            if (code === 'network') {
+              const now = Date.now();
+              if (now - speechNetworkToastAtRef.current < 45_000) return;
+              speechNetworkToastAtRef.current = now;
+              addToast(
+                t(
+                  'dock.voice.err.networkHint',
+                  '浏览器语音识别需联网（多为 Google）。纯离线请设置环境变量 VITE_DISABLE_BROWSER_SPEECH=true 并配置本机 RDK_STUDIO_WHISPER_CPP。',
+                ),
+                'warning',
+              );
+              return;
             }
+            const reason =
+              code === 'not-allowed'
+                ? t('dock.voice.err.notAllowed', '麦克风或语音识别权限被拒绝')
+                : code === 'audio-capture'
+                    ? t('dock.voice.err.audioCapture', '无法捕获音频，请检查麦克风')
+                    : code === 'service-not-allowed'
+                      ? t('dock.voice.err.serviceBlocked', '浏览器阻止了语音服务')
+                      : fillTemplate(t('dock.voice.err.withCode', '语音识别异常（{{code}}）'), { code: code || 'unknown' });
+            addToast(reason, 'warning');
           };
-          recognition.start();
+          /* Chrome 等在停顿后会结束一轮识别并触发 onend；仍在录音时应自动 start 下一轮，否则会一直没有转写 */
+          recognition.onend = () => {
+            if (!isRecordingRef.current) return;
+            if (speechRecognitionRef.current !== recognition) return;
+            window.setTimeout(() => {
+              if (!isRecordingRef.current || speechRecognitionRef.current !== recognition) return;
+              try {
+                recognition.start();
+              } catch {
+                /* InvalidStateError：忽略 */
+              }
+            }, 0);
+          };
           speechRecognitionRef.current = recognition;
+          recognition.start();
         } catch {
           speechRecognitionRef.current = null;
         }
+      } else if (RDK_DISABLE_BROWSER_SPEECH) {
+        /* 避免 Chrome Web Speech 连 Google；依赖停录后 POST /api/agent/transcribe-audio */
+      } else {
+        addToast(
+          t(
+            'dock.voice.noSttApi',
+            '当前环境不支持网页语音转写，将只保存录音。可改用 Chrome / Edge 或在停止录音后使用附件转写。',
+          ),
+          'info',
+        );
       }
 
       recorder.ondataavailable = (e) => {
@@ -1770,14 +1934,36 @@ export default function AIDock() {
         speechRecognitionRef.current?.stop();
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
-        addAttachment(file, {
-          transcript: voiceTranscriptRef.current || undefined,
-        });
-        if (voiceTranscriptRef.current && !cmd.trim()) {
-          setCmd(voiceTranscriptRef.current);
-        }
+        const browserTx = voiceTranscriptRef.current.trim();
         setRecordingTranscript('');
         voiceTranscriptRef.current = '';
+
+        void (async () => {
+          setVoiceSttLoading(true);
+          try {
+            let text = '';
+            if (file.size > 0) {
+              const serverTx = await transcribeVoiceBlobToText(file);
+              if (serverTx) text = serverTx;
+            }
+            if (!text && browserTx) text = browserTx;
+            if (text) {
+              const cur = cmdRef.current.trim();
+              setCmd(cur ? `${cur} ${text}` : text);
+              window.requestAnimationFrame(() => chatInputRef.current?.focus());
+            } else if (file.size > 0 && !browserTx) {
+              addToast(
+                t(
+                  'dock.voice.sttEmpty',
+                  '未得到文字：请配置本机 whisper（RDK_STUDIO_WHISPER_CPP）或 Studio 语音识别，并安装 ffmpeg；也可启用浏览器语音识别。',
+                ),
+                'warning',
+              );
+            }
+          } finally {
+            setVoiceSttLoading(false);
+          }
+        })();
       };
       recorder.start();
       mediaRecorderRef.current = recorder;
@@ -1786,7 +1972,7 @@ export default function AIDock() {
     } catch {
       addToast(t('dock.mic.denied', '无法访问麦克风，请检查浏览器或桌面端权限'), 'warning');
     }
-  }, [isRecording, addAttachment, addToast, cmd, setCmd, language, t]);
+  }, [isRecording, addToast, setCmd, language, t, transcribeVoiceBlobToText, voiceSttLoading]);
 
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
@@ -2694,14 +2880,25 @@ export default function AIDock() {
         {pendingAttachments.length > 0 && (
           <div className="dock-attachments">
             {pendingAttachments.map(att => (
-              <div key={att.id} className="dock-att-item">
-                {att.type === 'image' && att.url && <img src={att.url} alt="" />}
-                {att.type === 'video' && att.url && <video src={att.url} muted preload="metadata" style={{ maxHeight: 48, maxWidth: 80, borderRadius: 4 }} />}
-                {att.type === 'audio' && <span className="dock-att-icon">🎙️</span>}
-                {att.type === 'file' && <span className="dock-att-icon">{getAttachmentIcon(att.name, att.mimeType)}</span>}
-                <span className="truncate">{att.name}</span>
-                {att.size !== undefined && <span className="dock-att-size">{att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${(att.size / 1024).toFixed(0)}KB` : `${(att.size / 1048576).toFixed(1)}MB`}</span>}
-                <button className="dock-att-remove" onClick={() => removeAttachment(att.id)}>{Icon.close}</button>
+              <div key={att.id} className={`dock-att-item${att.type === 'audio' && (att.sttPending || att.sttError || att.transcript) ? ' dock-att-item-col' : ''}`}>
+                <div className="dock-att-item-row">
+                  {att.type === 'image' && att.url && <img src={att.url} alt="" />}
+                  {att.type === 'video' && att.url && <video src={att.url} muted preload="metadata" style={{ maxHeight: 48, maxWidth: 80, borderRadius: 4 }} />}
+                  {att.type === 'audio' && <span className="dock-att-icon">🎙️</span>}
+                  {att.type === 'file' && <span className="dock-att-icon">{getAttachmentIcon(att.name, att.mimeType)}</span>}
+                  <span className="truncate">{att.name}</span>
+                  {att.size !== undefined && <span className="dock-att-size">{att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${(att.size / 1024).toFixed(0)}KB` : `${(att.size / 1048576).toFixed(1)}MB`}</span>}
+                  <button type="button" className="dock-att-remove" onClick={() => removeAttachment(att.id)}>{Icon.close}</button>
+                </div>
+                {att.type === 'audio' && att.sttPending && (
+                  <div className="dock-att-stt dock-att-stt-muted">{t('dock.voice.sttWorking', '正在转写…')}</div>
+                )}
+                {att.type === 'audio' && !att.sttPending && att.sttError && (
+                  <div className="dock-att-stt dock-att-stt-warn" title={att.sttError}>{att.sttError}</div>
+                )}
+                {att.type === 'audio' && !att.sttPending && !att.sttError && att.transcript && (
+                  <div className="dock-att-stt">{t('dock.attach.transcriptPrefix', '转写：')}{att.transcript}</div>
+                )}
               </div>
             ))}
           </div>
@@ -2724,17 +2921,45 @@ export default function AIDock() {
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
               </svg>
             </button>
-            <button type="button" className={`dock-action-btn ${isRecording ? 'recording' : ''}`} onClick={toggleVoiceRecord} title={isRecording ? t('dock.tt.stopVoice', '停止录音') : t('dock.tt.voice', '语音输入')}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
-              </svg>
+            <button
+              type="button"
+              className={`dock-action-btn ${isRecording ? 'recording' : ''}`}
+              disabled={voiceSttLoading}
+              onClick={toggleVoiceRecord}
+              title={
+                (isRecording
+                  ? `${t('dock.tt.stopVoice', '停止录音')} ${recordingElapsed}s / ${VOICE_MAX_SECONDS}s`
+                  : t('dock.tt.voice', '语音输入'))
+                + (isRecording ? '' : `${voiceMicTitleSuffix}${RDK_DISABLE_BROWSER_SPEECH ? ` · ${t('dock.voice.noBrowserSr', '未使用浏览器联网识别')}` : ''}`)
+                + (voiceSttLoading ? ` · ${t('dock.voice.sttPlaceholder', '语音转文字中…')}` : '')
+              }
+            >
+              {isRecording ? (
+                <span className="dock-mic-recording-indicator">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+                  </svg>
+                  <span className="dock-mic-timer">{recordingElapsed}s</span>
+                </span>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+                </svg>
+              )}
             </button>
           </div>
 
           <input
             type="text"
             className="dock-cmd-input"
-            placeholder={activeTab === 'openclaw' && dockOcMode && openclawSendMessage ? t('dock.input.openclaw', '向 OpenClaw Agent 发送消息...') : t('dock.input.default', '消息、指令或拖拽文件...')}
+            placeholder={
+              voiceSttLoading
+                ? t('dock.voice.sttPlaceholder', '语音转文字中…')
+                : activeTab === 'openclaw' && dockOcMode && openclawSendMessage
+                  ? t('dock.input.openclaw', '向 OpenClaw Agent 发送消息...')
+                  : t('dock.input.default', '消息、指令或拖拽文件...')
+            }
+            disabled={voiceSttLoading}
             ref={chatInputRef}
             value={cmd}
             onChange={(e) => setCmd(e.target.value)}

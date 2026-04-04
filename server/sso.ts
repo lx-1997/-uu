@@ -468,10 +468,9 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
    * 未登录或 Electron file:// 下会话头/Cookie 未带上时，不应拦截设置页的读取、保存、导出、导入。
    */
   if (
-    (req.method === 'GET' && (req.path === '/api/agent/config' || req.path === '/api/agent/config/export'))
+    (req.method === 'GET' && req.path === '/api/agent/config')
     || (req.method === 'POST'
       && (req.path === '/api/agent/config'
-        || req.path === '/api/agent/config/import'
         || req.path === '/api/agent/config/vendor-ping'))
   ) {
     next();

@@ -55,6 +55,25 @@ export function mapMiniEvent(
           executor: resolveExecutor(event.toolName),
         },
       };
+    case "tool_execution_progress": {
+      const elapsedMin = Math.floor(event.elapsed_sec / 60);
+      const elapsedDisplay = elapsedMin > 0
+        ? `${elapsedMin}m${event.elapsed_sec % 60}s`
+        : `${event.elapsed_sec}s`;
+      return {
+        type: "tool_progress",
+        data: {
+          ...base,
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          elapsed_sec: event.elapsed_sec,
+          chunk: `[${event.toolName}] 仍在执行中… 已用时 ${elapsedDisplay}`,
+          progressSource: "local_heartbeat",
+          phase: "progress",
+          executor: resolveExecutor(event.toolName),
+        },
+      };
+    }
     case "retry":
       return {
         type: "retry",

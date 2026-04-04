@@ -1415,6 +1415,43 @@
   color: var(--danger);
 }
 
+.dock-att-item.dock-att-item-col {
+  flex-direction: column;
+  align-items: stretch;
+  white-space: normal;
+  max-width: min(320px, 92vw);
+}
+
+.dock-att-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.dock-att-item-col .dock-att-remove {
+  margin-left: auto;
+}
+
+.dock-att-stt {
+  font-size: 0.625rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  white-space: normal;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.dock-att-stt-muted {
+  color: var(--accent, #ff6b00);
+  opacity: 0.9;
+}
+
+.dock-att-stt-warn {
+  color: var(--danger, #c62828);
+}
+
 /* Form row */
 .dock-form {
   display: flex;
@@ -1447,6 +1484,18 @@
 .dock-action-btn.recording {
   color: var(--danger);
   animation: pulse 1s infinite;
+}
+.dock-mic-recording-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dock-mic-timer {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--danger);
+  min-width: 22px;
 }
 
 /** 输入栏「全部停止」：默认与附件按钮一致，悬停提示危险操作 */

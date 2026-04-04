@@ -4,7 +4,11 @@ import { useDeviceStore } from '../hooks/useDeviceStore';
 import { useToastStore } from '../hooks/useToastStore';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
+import { DEVICE_DIAGNOSTICS_POLL_MS, DEVICE_POLL_PHASE_DIAGNOSTICS_MS } from '../constants';
 import { parseMetrics } from '../utils/diagnostics';
+
+/** 与 Dashboard 同理：重新进入页时优先命中服务端诊断缓存，仅上下文变化时 `fresh`。 */
+let lastHardwareDiagnosticsContextKey = '';
 
 /* ── 环形进度条（白底浅色主题） ── */
 function RingGauge({ value, max = 100, color, label, display }: { value: number; max?: number; color: string; label: string; display: string }) {
@@ -39,24 +43,38 @@ export default function Hardware() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showRaw, setShowRaw] = useState(false);
 
-  const refreshDiagnostics = useCallback(() => {
+  const refreshDiagnostics = useCallback((opts?: { fresh?: boolean }) => {
     if (!currentDevice) return;
     setLoading(true);
-    fetchDeviceDiagnostics(currentDevice.id)
+    fetchDeviceDiagnostics(currentDevice.id, { fresh: opts?.fresh === true })
       .then(res => setOutput(res.output || ''))
       .catch(err => addToast(err instanceof Error ? err.message : t('hw.toast.diagFail', '诊断失败'), 'error'))
       .finally(() => setLoading(false));
   }, [currentDevice, addToast, t]);
 
   useEffect(() => {
-    if (currentDevice) refreshDiagnostics();
-  }, [currentDevice?.id]);
+    if (!currentDevice) return;
+    const ctxKey = `${currentDevice.id}:${currentDevice.status}:${currentDevice.sshSessionVerified}`;
+    const needFresh = lastHardwareDiagnosticsContextKey !== ctxKey;
+    if (needFresh) {
+      lastHardwareDiagnosticsContextKey = ctxKey;
+    }
+    refreshDiagnostics({ fresh: needFresh });
+  }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified, refreshDiagnostics]);
 
-  // 自动刷新
+  // 自动刷新（与全局诊断同周期、同相位，避免与其它检测并发）
   useEffect(() => {
     if (!autoRefresh || !currentDevice) return;
-    const timer = setInterval(refreshDiagnostics, 10000);
-    return () => clearInterval(timer);
+    let kick: ReturnType<typeof setTimeout> | null = null;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    kick = setTimeout(() => {
+      refreshDiagnostics();
+      iv = setInterval(() => refreshDiagnostics(), DEVICE_DIAGNOSTICS_POLL_MS);
+    }, DEVICE_POLL_PHASE_DIAGNOSTICS_MS);
+    return () => {
+      if (kick) clearTimeout(kick);
+      if (iv) clearInterval(iv);
+    };
   }, [autoRefresh, currentDevice?.id, refreshDiagnostics]);
 
   const m = useMemo(() => parseMetrics(output), [output]);
@@ -113,7 +131,7 @@ export default function Hardware() {
             <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
             <span>{t('hw.autoRefresh', '自动刷新')}</span>
           </label>
-          <button className="btn btn-ghost btn-sm" onClick={refreshDiagnostics} disabled={loading}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => refreshDiagnostics({ fresh: true })} disabled={loading}>
             {loading ? t('hw.refreshing', '刷新中...') : t('hw.refreshNow', '立即刷新')}
           </button>
         </div>

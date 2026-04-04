@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { prepareWeChatQrPreviewBuffer } from './rdkclaw/ilink-qrcode.js';
 import { getWeixinIlinkCommonHeaders } from './rdkclaw/weixin-ilink-headers.js';
 import { putWeixinQrPreview, getWeixinQrPreview } from './rdkclaw/weixin-qr-preview.js';
@@ -55,6 +56,7 @@ import { shellEscape, isSafeName } from './utils/shell-escape.js';
 import { stripAnsi } from './utils/strip-ansi.js';
 import {
   DEFAULT_SSH_PASSWORD,
+  warnIfUsingDefaultSshPassword,
   DEFAULT_VNC_PORT,
   CODE_SERVER_HTTP_PORT,
   OPENCLAW_GATEWAY_PORT,
@@ -82,6 +84,9 @@ import {
 } from './agent/provider-setup.js';
 import { SshTunnelHttpAgent } from './code-server-tunnel-agent.js';
 import { RDKClawApp } from './rdkclaw/app.js';
+import { getDiagnosticsCache, setDiagnosticsCache } from './rdkclaw/device-diagnostics-cache.js';
+import { runDevicePingProbe } from './rdkclaw/device-ping-probe.js';
+import { invalidateDeviceDerivedCaches, type DeviceDerivedCacheScope } from './rdkclaw/device-state-invalidate.js';
 import { FeishuChannelAdapter } from './rdkclaw/feishu-channel-adapter.js';
 import { FeishuApiClient } from './rdkclaw/feishu-api-client.js';
 import { FeishuAuthStore } from './rdkclaw/feishu-auth-store.js';
@@ -91,6 +96,8 @@ import { WeixinConfigStore } from './rdkclaw/weixin-config-store.js';
 import { WeixinAccountStore } from './rdkclaw/weixin-account-store.js';
 import { ForumAuthStore } from './rdkclaw/forum-auth-store.js';
 import { verifyForumSsoLogin } from './agent/tools/forum-tools.js';
+import { transcribeAudioBuffer, isStudioProviderAsrSupported } from './agent/tools/attachment-tools.js';
+import { isLocalWhisperConfigured } from './local-whisper-stt.js';
 import { WeixinPollingChannel } from './agent/channels/weixin.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
@@ -124,9 +131,27 @@ import { registerFrpRoutes } from './frp-routes.js';
 
 const app = express();
 const httpServer = http.createServer(app);
+
+function resolveAllowedOrigins(): cors.CorsOptions['origin'] {
+  const envOrigins = process.env.RDK_STUDIO_CORS_ORIGINS?.trim();
+  if (envOrigins === '*') return true;
+  if (envOrigins) {
+    return envOrigins.split(',').map((o) => o.trim()).filter(Boolean);
+  }
+  const p = Number(process.env.PORT) || 3000;
+  return [
+    `http://localhost:${p}`,
+    `http://127.0.0.1:${p}`,
+    `http://localhost:5173`,
+    `http://127.0.0.1:5173`,
+    'tauri://localhost',
+    'file://',
+  ];
+}
+const allowedOrigins = resolveAllowedOrigins();
+
 const io = new SocketIOServer(httpServer, {
-  // 与 Express cors({ credentials: true, origin: true }) 对齐，便于浏览器携带 SSO Cookie
-  cors: { origin: true, credentials: true },
+  cors: { origin: allowedOrigins, credentials: true },
 });
 registerStudioBrowserCaptureSocket(io);
 
@@ -241,8 +266,8 @@ const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
 const model = process.env.OPENAI_MODEL ?? 'doubao-seed-2.0-pro';
-/** 与 device_connect_ssh / 设备扫描说明一致：未设置环境变量时回退常见出厂口令 */
-const defaultSshPassword = process.env.RDK_SSH_PASSWORD?.trim() || 'root';
+/** 与 device_connect_ssh / 设备扫描说明一致：统一来自 constants.ts DEFAULT_SSH_PASSWORD */
+const defaultSshPassword = DEFAULT_SSH_PASSWORD;
 const SUPPORTED_OPENCLAW_APIS = new Set([
   'openai-completions',
   'anthropic-messages',
@@ -1802,7 +1827,7 @@ async function runOnDevice(
 app.use(
   cors({
     credentials: true,
-    origin: true,
+    origin: allowedOrigins,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Device-Password', 'X-RDK-Sso-Session', 'X-Requested-With'],
   }),
 );
@@ -1867,6 +1892,33 @@ app.use('/api/devices/:deviceId/code-server-proxy', (req, res, next) => {
 });
 /** 全局 JSON 不宜过大，避免并发大请求 OOM；大文件请走专用上传路由 */
 app.use(express.json({ limit: '10mb' }));
+
+const apiLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '请求过于频繁，请稍后再试' },
+  skip: (req) => req.path === '/api/agent/chat' || req.path.startsWith('/api/rdkclaw/'),
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '认证尝试过多，请 15 分钟后重试' },
+});
+const uploadLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '上传请求过于频繁' },
+});
+app.use('/api/', apiLimiter);
+app.use('/api/devices/connect', authLimiter);
+app.use('/api/sso/', authLimiter);
+app.use('/api/agent/upload-attachment', uploadLimiter);
 
 // SSO auth — register routes first (before middleware blocks unauthenticated requests)
 registerSSORoutes(app);
@@ -2570,6 +2622,7 @@ app.post('/api/devices/connect', async (request, response) => {
     });
 
     setDevicePasswordCache(host, username, normalizedPort, password);
+    invalidateDeviceDerivedCaches(nextDevice!.id);
     response.json({ device: sanitizeDevice(nextDevice!) });
   } catch (error) {
     if (isSshTimeoutError(error)) {
@@ -3053,13 +3106,6 @@ app.post('/api/devices/verify', async (request, response) => {
   }
 });
 
-const devicePingCache = new Map<string, { status: string; expiresAt: number }>();
-/** 仅缓存「不可达」结果，减轻对关机设备的重复 TCP/SSH；成功不缓存，避免关机后仍返回已连接 */
-const PING_FAIL_CACHE_TTL_MS = 4000;
-
-/** UI 轮询用：较短握手超时，关机后尽快失败（verifySshConnection 默认 30s 会导致长时间误判在线） */
-const PING_SSH_READY_TIMEOUT_MS = 8000;
-
 /**
  * 与 UI「设备在线」一致：须能使用当前可用凭据完成 SSH 认证（verifySshConnection）。
  * 凭据来自 x-device-password 头、内存缓存、持久化设备记录或 RDK_SSH_PASSWORD；皆无时无法探测，视为 offline。
@@ -3070,46 +3116,8 @@ app.get('/api/devices/:id/ping', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const cached = devicePingCache.get(id);
-  if (cached && cached.expiresAt > Date.now() && cached.status === 'offline') {
-    response.json({ ok: false, status: 'offline' });
-    return;
-  }
-
-  const candidates = buildSshPasswordCandidatesForDevice(device, {
-    requestHeaderPassword: request.header('x-device-password') ?? '',
-  });
-  if (candidates.length === 0) {
-    devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_FAIL_CACHE_TTL_MS });
-    response.json({ ok: false, status: 'offline' });
-    return;
-  }
-
-  let ok = false;
-  for (const pwd of candidates) {
-    try {
-      await verifySshConnection(
-        {
-          host: device.host,
-          port: device.port ?? 22,
-          username: device.username,
-          password: pwd,
-        },
-        { readyTimeoutMs: PING_SSH_READY_TIMEOUT_MS },
-      );
-      setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
-      ok = true;
-      break;
-    } catch {
-      /* try next candidate */
-    }
-  }
-  if (ok) {
-    response.json({ ok: true, status: 'connected' });
-    return;
-  }
-  devicePingCache.set(id, { status: 'offline', expiresAt: Date.now() + PING_FAIL_CACHE_TTL_MS });
-  response.json({ ok: false, status: 'offline' });
+  const ping = await runDevicePingProbe(id, device, request.header('x-device-password') ?? '');
+  response.json({ ok: ping.ok, status: ping.status });
 });
 
 app.post('/api/openclaw/agent-action', async (request, response) => {
@@ -3240,6 +3248,7 @@ app.delete('/api/devices/:id', async (request, response) => {
       }
 
       deleteDevicePasswordCache(target.host, target.username, target.port ?? 22);
+      invalidateDeviceDerivedCaches(id);
       await writeDevices(devices.filter((device) => device.id !== id));
       const cleanup = purgeDeviceSoftwareState(target);
       if (!response.headersSent) {
@@ -3791,6 +3800,9 @@ app.post('/api/devices/:id/openclaw/config', async (request, response) => {
   const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.updateConfig(deviceObj, config, (chunk) => { output += chunk; }, (success) => {
+    if (success) {
+      invalidateDeviceDerivedCaches(id, ['openclawAiReady']);
+    }
     response.json({ ok: success, output });
   });
 });
@@ -3844,6 +3856,9 @@ app.post('/api/devices/:id/openclaw/restart-gateway', async (request, response) 
   const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.runRestartGateway(deviceObj, (chunk) => { output += chunk; }, (success) => {
+    if (success) {
+      invalidateDeviceDerivedCaches(id, ['openclawAiReady']);
+    }
     response.json({ ok: success, output });
   });
 });
@@ -4232,6 +4247,9 @@ app.post('/api/devices/:id/openclaw/wifi-connect', async (request, response) => 
   const deviceObj = toOpenClawDevice(device, password);
   let output = '';
   openClawManager.setWifiConnection(deviceObj, wifiName, wifiPassword || '', (chunk) => { output += chunk; }, (success) => {
+    if (success) {
+      invalidateDeviceDerivedCaches(id);
+    }
     response.json({ ok: success, output });
   });
 });
@@ -4296,17 +4314,134 @@ app.post('/api/devices/:id/batch-exec', async (request, response) => {
 
 app.get('/api/devices/:id/diagnostics', async (request, response) => {
   const { id } = request.params;
+  const freshRaw = String(request.query.fresh ?? '').toLowerCase();
+  const fresh = freshRaw === '1' || freshRaw === 'true';
+
+  if (!fresh) {
+    const cached = getDiagnosticsCache(id);
+    if (cached !== null) {
+      const device = await resolveDevice(request, response, id);
+      if (!device) return;
+      response.json({
+        ok: true,
+        output: cached,
+        device: sanitizeDevice(device as Device & { password?: string }),
+        cached: true,
+      });
+      return;
+    }
+  }
 
   const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS);
   if (!executed) return;
 
+  setDiagnosticsCache(id, executed.output);
   response.json({
     ok: true,
     output: executed.output,
     device: sanitizeDevice(executed.device as Device & { password?: string }),
+    cached: false,
   });
 });
 
+/** 统一失效分项缓存（诊断 / Agent OpenClaw aiReady 短缓存 / ping 负缓存）。Body 可选 `{ "scope": ["diagnostics", ...] }`，缺省为全部。 */
+app.post('/api/devices/:id/state/invalidate', async (request, response) => {
+  const { id } = request.params;
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const raw = request.body as { scope?: unknown } | undefined;
+  let scope: DeviceDerivedCacheScope[] | 'all' = 'all';
+  if (raw?.scope !== undefined) {
+    if (!Array.isArray(raw.scope)) {
+      sendApiError(response, 400, 'INVALID_INVALIDATE_SCOPE', 'scope 必须为字符串数组', { retryable: false });
+      return;
+    }
+    const allowed: DeviceDerivedCacheScope[] = ['diagnostics', 'openclawAiReady', 'pingFail'];
+    const allowedSet = new Set(allowed);
+    const filtered = raw.scope.filter(
+      (s): s is DeviceDerivedCacheScope => typeof s === 'string' && allowedSet.has(s as DeviceDerivedCacheScope),
+    );
+    scope = filtered.length > 0 ? filtered : 'all';
+  }
+  invalidateDeviceDerivedCaches(id, scope);
+  response.json({ ok: true, scope });
+});
+
+/**
+ * 可选聚合：顺序拉取 ping、诊断（尊重缓存与 `?fresh=1`）、OpenClaw health；`?include=workspace` 时额外跑工作区巡检（较重）。
+ * 分项仍各自维护 TTL；此接口便于单次构建仪表盘或调试，默认不必取代分项轮询。
+ */
+app.get('/api/devices/:id/state-snapshot', async (request, response) => {
+  const { id } = request.params;
+  invalidateDevicesReadCache();
+  const device = await resolveDevice(request, response, id);
+  if (!device) return;
+
+  const freshRaw = String(request.query.fresh ?? '').toLowerCase();
+  const freshDiag = freshRaw === '1' || freshRaw === 'true';
+  const includeWorkspace = String(request.query.include ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .includes('workspace');
+
+  const pwdHeader = request.header('x-device-password') ?? '';
+  const ping = await runDevicePingProbe(id, device, pwdHeader);
+
+  let diagnostics: { ok: boolean; output?: string; cached?: boolean };
+  if (!freshDiag) {
+    const cachedOut = getDiagnosticsCache(id);
+    if (cachedOut !== null) {
+      diagnostics = { ok: true, output: cachedOut, cached: true };
+    }
+  }
+  if (diagnostics === undefined) {
+    const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS);
+    if (!executed) return;
+    setDiagnosticsCache(id, executed.output);
+    diagnostics = { ok: true, output: executed.output, cached: false };
+  }
+
+  type HealthSnap = {
+    ok: boolean;
+    status?: import('./managers/OpenClawDeploymentManager.js').OpenClawHealthStatus;
+    error?: string;
+  };
+  const openclawHealth: HealthSnap = await new Promise((resolve) => {
+    const timeout = setTimeout(
+      () => resolve({ ok: false, error: 'openclaw health timeout' }),
+      35_000,
+    );
+    try {
+      const { password } = resolvePassword(request, device);
+      openClawManager.getHealthStatus(toOpenClawDevice(device, password), (status) => {
+        clearTimeout(timeout);
+        resolve({ ok: true, status });
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      resolve({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  let workspace: { ok: boolean; status?: DeviceWorkspaceHealth } | undefined;
+  if (includeWorkspace) {
+    const executed = await runOnDevice(request, response, id, [WORKSPACE_HEALTH_COMMAND]);
+    if (!executed) return;
+    workspace = { ok: true, status: buildWorkspaceHealth(executed.output) };
+    triggerBackgroundProvision(id, parseWorkspaceHealthPairs(executed.output));
+  }
+
+  response.json({
+    ok: true,
+    at: Date.now(),
+    device: sanitizeDevice(device as Device & { password?: string }),
+    ping,
+    diagnostics,
+    openclawHealth,
+    ...(workspace !== undefined ? { workspace } : {}),
+  });
+});
 
 /** SSH board detect; ?persist=1 writes board* + researchSeeds to devices.json */
 app.post('/api/devices/:id/board/detect', async (request, response) => {
@@ -5520,7 +5655,7 @@ app.post('/api/agent/config', (request, response) => {
 });
 
 app.get('/api/agent/config/export', (request, response) => {
-  const includeSecrets = String(request.query.includeSecrets || '1') !== '0';
+  const includeSecrets = String(request.query.includeSecrets || '0') !== '0';
   const registry = loadProviderRegistry();
   const exported = {
     version: 1,
@@ -6586,6 +6721,48 @@ app.post('/api/agent/upload-attachment', express.raw({ type: '*/*', limit: '50mb
   }
 });
 
+/** Dock：本机 whisper / 云端 ASR 是否就绪（用于麦克风悬停提示） */
+app.get('/api/agent/transcribe-capabilities', (_request, response) => {
+  try {
+    const cfg = loadProviderConfig();
+    const studioProvider = Boolean(cfg?.apiKey?.trim());
+    response.json({
+      localWhisper: isLocalWhisperConfigured(),
+      studioProvider,
+      /** 当前 Provider 是否会走 /audio/transcriptions 或通义 ASR（豆包纯对话等一般为 false） */
+      cloudAsrSupported: isStudioProviderAsrSupported(cfg),
+    });
+  } catch {
+    response.json({ localWhisper: false, studioProvider: false, cloudAsrSupported: false });
+  }
+});
+
+/** Dock 语音：停止录音后立刻用本机 whisper.cpp 或 Studio Provider ASR，不等到发消息 */
+app.post('/api/agent/transcribe-audio', express.raw({ type: '*/*', limit: '12mb' }), async (request, response) => {
+  try {
+    const fileName = decodeURIComponent(String(request.headers['x-attachment-name'] || `voice-${Date.now()}.webm`));
+    const mimeType = String(request.headers['content-type'] || 'audio/webm');
+    const body = request.body as Buffer;
+    if (!body || body.length === 0) {
+      response.status(400).json({ error: '空音频' });
+      return;
+    }
+    const providerConfig = loadProviderConfig();
+    if (!providerConfig && !isLocalWhisperConfigured()) {
+      response.status(503).json({
+        error:
+          '未配置本地 whisper.cpp（RDK_STUDIO_WHISPER_CPP + 模型）或 Whisper Desktop（RDK_STUDIO_WHISPER_MAIN + RDK_STUDIO_WHISPER_MODEL），且未配置 Studio AI Provider，无法转写',
+      });
+      return;
+    }
+    const transcript = await transcribeAudioBuffer(body, fileName, mimeType, providerConfig ?? null);
+    response.json({ ok: true, transcript });
+  } catch (error) {
+    console.error('[transcribe-audio] failed:', error);
+    response.status(500).json({ error: error instanceof Error ? error.message : '转写失败' });
+  }
+});
+
 function parseStudioUiHintsPayload(raw: unknown): StudioUiHints | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const o = raw as Record<string, unknown>;
@@ -6864,8 +7041,16 @@ async function startServer() {
     }
     process.exit(1);
   });
-  httpServer.listen(port, '0.0.0.0', () => {
-    console.log(`RDK Studio server running on http://0.0.0.0:${port}`);
+  const bindHost = process.env.RDK_STUDIO_BIND_HOST?.trim() || '127.0.0.1';
+  httpServer.listen(port, bindHost, () => {
+    console.log(`RDK Studio server running on http://${bindHost}:${port}`);
+    warnIfUsingDefaultSshPassword();
+    if (bindHost === '0.0.0.0') {
+      console.warn(
+        '[security] 服务监听在 0.0.0.0（所有网卡），同一网络的任何设备都可访问。' +
+        '仅限开发/内网使用；生产环境建议设置 RDK_STUDIO_BIND_HOST=127.0.0.1 并启用 SSO。',
+      );
+    }
     const dataDir = resolveDataDir();
     console.log(`[server] 设备数据目录 (RDK_DATA_DIR): ${dataDir}`);
     if (

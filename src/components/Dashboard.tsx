@@ -18,10 +18,75 @@ import {
   DASHBOARD_CHAT_INTRO_PROMPT_ZH,
   DASHBOARD_CHAT_INTRO_PROMPT_EN,
 } from '../i18n/prompts';
+import {
+  DEVICE_DIAGNOSTICS_POLL_MS,
+  DEVICE_POLL_PHASE_BOARD_HEALTH_MS,
+  DEVICE_POLL_PHASE_DIAGNOSTICS_MS,
+  DEVICE_POLL_PHASE_STUDIO_BACKEND_MS,
+} from '../constants';
 import { parseMetrics } from '../utils/diagnostics';
 import { isDeviceShownOnline } from '../utils/device-connection';
-import { persistOpenClawHealthSnapshot, persistBoardSkillBundleHint } from '../studio-ui-hints';
+import {
+  persistOpenClawHealthSnapshot,
+  persistBoardSkillBundleHint,
+  readStudioUiHintsForDevice,
+} from '../studio-ui-hints';
 import OnboardingWizard from './OnboardingWizard';
+
+type WorkspaceModule = {
+  ready: boolean;
+  installed: boolean;
+  running?: boolean;
+  summary: string;
+  recommendedAction: string;
+};
+
+/** 切换 Tab 会卸载页，useRef 会丢；模块级键区分「设备上下文真变」与「只是重新挂载」。 */
+let lastDashboardDiagnosticsContextKey = '';
+
+const dashboardWsHealthKey = (deviceId: string) =>
+  `rdk:dashboard-ws-health:${String(deviceId || '').trim()}`;
+
+function readDashboardWorkspaceHealthCache(deviceId: string): Record<string, WorkspaceModule> | null {
+  if (typeof window === 'undefined' || !String(deviceId || '').trim()) return null;
+  try {
+    const raw = sessionStorage.getItem(dashboardWsHealthKey(deviceId));
+    if (!raw) return null;
+    const o = JSON.parse(raw) as { modules?: Record<string, WorkspaceModule> };
+    return o?.modules && typeof o.modules === 'object' ? o.modules : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDashboardWorkspaceHealthCache(deviceId: string, modules: Record<string, WorkspaceModule>) {
+  if (typeof window === 'undefined' || !String(deviceId || '').trim()) return;
+  try {
+    sessionStorage.setItem(dashboardWsHealthKey(deviceId), JSON.stringify({ at: Date.now(), modules }));
+  } catch {
+    /* quota */
+  }
+}
+
+function openClawFromStudioHints(deviceId: string): OpenClawHealthStatus | null {
+  const h = readStudioUiHintsForDevice(deviceId);
+  if (!h) return null;
+  const o = h.openclaw;
+  const g = h.gateway;
+  if (!o && !g) return null;
+  const installed = Boolean(o?.installed ?? g?.installed ?? false);
+  const gatewayRunning = Boolean(o?.gatewayRunning ?? g?.running ?? false);
+  const version = String(o?.version ?? g?.version ?? '');
+  return {
+    installed,
+    gatewayRunning,
+    version,
+    hasToken: false,
+    tokenStatus: 'unknown',
+    aiReady: Boolean(o?.aiReady ?? false),
+    summary: '',
+  };
+}
 
 /**
  * Throttled canvas gradient animation — renders at ~20 FPS instead of 60 FPS.
@@ -184,21 +249,25 @@ export default function Dashboard() {
     bpuVal: -1,
     diskPct: -1,
   });
-  type WorkspaceModule = { ready: boolean; installed: boolean; running?: boolean; summary: string; recommendedAction: string };
   const [wsHealth, setWsHealth] = useState<Record<string, WorkspaceModule> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let studioKick: ReturnType<typeof setTimeout> | null = null;
+    let studioIv: ReturnType<typeof setInterval> | null = null;
     const poll = () => {
       void fetchStudioHealth().then((r) => {
         if (!cancelled) setStudioBackendOk(r.ok);
       });
     };
-    poll();
-    const st = setInterval(poll, 20000);
+    studioKick = setTimeout(() => {
+      poll();
+      studioIv = setInterval(poll, DEVICE_DIAGNOSTICS_POLL_MS);
+    }, DEVICE_POLL_PHASE_STUDIO_BACKEND_MS);
     return () => {
       cancelled = true;
-      clearInterval(st);
+      if (studioKick) clearTimeout(studioKick);
+      if (studioIv) clearInterval(studioIv);
     };
   }, []);
 
@@ -224,7 +293,13 @@ export default function Dashboard() {
     if (!currentDevice) return;
     const deviceId = currentDevice.id;
     let cancelled = false;
-    const load = () => {
+    const ctxKey = `${deviceId}:${currentDevice.status}:${currentDevice.sshSessionVerified}`;
+    const diagnosticsNeedFresh = lastDashboardDiagnosticsContextKey !== ctxKey;
+    if (diagnosticsNeedFresh) {
+      lastDashboardDiagnosticsContextKey = ctxKey;
+    }
+
+    const load = (fresh: boolean) => {
       if (!isDeviceShownOnline(currentDevice)) {
         if (!cancelled) {
           setMetrics({
@@ -243,7 +318,7 @@ export default function Dashboard() {
         }
         return;
       }
-      fetchDeviceDiagnostics(deviceId)
+      fetchDeviceDiagnostics(deviceId, { fresh })
         .then((r) => {
           if (cancelled) return;
           const m = parseMetrics(r.output);
@@ -283,18 +358,26 @@ export default function Dashboard() {
           }
         });
     };
-    load();
-    const t = setInterval(load, 10000);
+    let diagKick: ReturnType<typeof setTimeout> | null = null;
+    let diagIv: ReturnType<typeof setInterval> | null = null;
+    diagKick = setTimeout(() => {
+      load(diagnosticsNeedFresh);
+      diagIv = setInterval(() => load(false), DEVICE_DIAGNOSTICS_POLL_MS);
+    }, DEVICE_POLL_PHASE_DIAGNOSTICS_MS);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      if (diagKick) clearTimeout(diagKick);
+      if (diagIv) clearInterval(diagIv);
     };
   }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
 
   const partnerSkillSyncedRef = useRef<Set<string>>(new Set());
-  /** 已尝试过同步同伴技能（避免 health 轮询每 30s 重复打 SSH） */
+  /** 已尝试过同步同伴技能（避免 health 轮询重复打 SSH） */
   const partnerSkillAttemptedRef = useRef<Set<string>>(new Set());
   const boardSkillBundleSyncedRef = useRef<Set<string>>(new Set());
+
+  const currentDeviceRef = useRef(currentDevice);
+  currentDeviceRef.current = currentDevice;
 
   useEffect(() => {
     if (!currentDevice) {
@@ -302,58 +385,79 @@ export default function Dashboard() {
       setWsHealth(null);
       return;
     }
+    const id = currentDevice.id;
+    setOpenclawHealth(openClawFromStudioHints(id));
+    setWsHealth(readDashboardWorkspaceHealthCache(id));
+
     let cancelled = false;
-    const load = () => {
-      fetchDeviceOpenClawHealth(currentDevice.id)
-        .then((r) => {
-          if (!cancelled) {
-            setOpenclawHealth(r.status);
-            persistOpenClawHealthSnapshot(currentDevice.id, r.status);
-          }
-          /* OpenClaw 已安装时：先尝试同步「同伴商量」，再按板型同步技能包（成功各记一次，避免轮询打满 SSH） */
-          if (!cancelled && r.ok && r.status.installed) {
-            const id = currentDevice.id;
-            const runBoardBundle = () => {
-              if (boardSkillBundleSyncedRef.current.has(id)) return;
-              void ensureBoardSkillBundle(id)
-                .then((bundleRes) => {
-                  if (!bundleRes?.ok) return;
-                  boardSkillBundleSyncedRef.current.add(id);
-                  persistBoardSkillBundleHint(id, {
-                    platform: bundleRes.platform ?? currentDevice.boardPlatform,
-                    model: currentDevice.boardModel,
-                    synced: true,
-                  });
-                })
-                .catch(() => {});
-            };
-            if (!partnerSkillAttemptedRef.current.has(id)) {
-              partnerSkillAttemptedRef.current.add(id);
-              void ensurePartnerAdvisorySkill(id)
-                .then((res) => {
-                  if (res?.ok && res.verified === true) partnerSkillSyncedRef.current.add(id);
-                })
-                .catch(() => {})
-                .finally(() => {
-                  runBoardBundle();
+    const loadBoardHealth = async () => {
+      const dev = currentDeviceRef.current;
+      if (!dev || dev.id !== id) return;
+      try {
+        const r = await fetchDeviceOpenClawHealth(id);
+        if (cancelled) return;
+        setOpenclawHealth(r.status);
+        persistOpenClawHealthSnapshot(id, r.status);
+        if (!cancelled && r.ok && r.status.installed) {
+          const latestDev = currentDeviceRef.current;
+          const runBoardBundle = () => {
+            if (boardSkillBundleSyncedRef.current.has(id)) return;
+            void ensureBoardSkillBundle(id)
+              .then((bundleRes) => {
+                if (!bundleRes?.ok) return;
+                boardSkillBundleSyncedRef.current.add(id);
+                const freshDev = currentDeviceRef.current;
+                persistBoardSkillBundleHint(id, {
+                  platform: bundleRes.platform ?? freshDev?.boardPlatform,
+                  model: freshDev?.boardModel,
+                  synced: true,
                 });
-            } else {
-              runBoardBundle();
-            }
+              })
+              .catch(() => {});
+          };
+          if (!partnerSkillAttemptedRef.current.has(id)) {
+            partnerSkillAttemptedRef.current.add(id);
+            void ensurePartnerAdvisorySkill(id)
+              .then((res) => {
+                if (res?.ok && res.verified === true) partnerSkillSyncedRef.current.add(id);
+              })
+              .catch(() => {})
+              .finally(() => {
+                runBoardBundle();
+              });
+          } else {
+            runBoardBundle();
           }
-        })
-        .catch(() => {});
-      fetchDeviceWorkspaceHealth(currentDevice.id)
-        .then((r) => {
-          if (!cancelled) setWsHealth(r.status?.modules ?? null);
-        })
-        .catch(() => {});
+        }
+      } catch {
+        /* ignore */
+      }
+      if (cancelled) return;
+      try {
+        const r = await fetchDeviceWorkspaceHealth(id);
+        if (cancelled) return;
+        const mods = r.status?.modules ?? null;
+        setWsHealth(mods);
+        if (mods) {
+          writeDashboardWorkspaceHealthCache(id, mods);
+        }
+      } catch {
+        /* ignore */
+      }
     };
-    load();
-    const t = setInterval(load, 30000);
+
+    let healthKick: ReturnType<typeof setTimeout> | null = null;
+    let healthIv: ReturnType<typeof setInterval> | null = null;
+    healthKick = setTimeout(() => {
+      void loadBoardHealth();
+      healthIv = setInterval(() => {
+        void loadBoardHealth();
+      }, DEVICE_DIAGNOSTICS_POLL_MS);
+    }, DEVICE_POLL_PHASE_BOARD_HEALTH_MS);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      if (healthKick) clearTimeout(healthKick);
+      if (healthIv) clearInterval(healthIv);
     };
   }, [currentDevice?.id]);
 

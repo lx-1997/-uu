@@ -1310,14 +1310,28 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
                       // 工具执行超时保护；须 ≥ SSH 默认（板端长任务），否则 device_exec 会先被掐断
                       const TOOL_TIMEOUT_MS = SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS;
+                      const TOOL_HEARTBEAT_INTERVAL_MS = 30_000;
                       const toolTimeoutPromise = new Promise<never>((_, reject) =>
                         setTimeout(() => reject(new Error(`工具 ${call.name} 执行超时（${TOOL_TIMEOUT_MS / 1000}s）`)), TOOL_TIMEOUT_MS),
                       );
+                      const toolHeartbeat = setInterval(() => {
+                        const elapsed = Math.round((Date.now() - toolStartMs) / 1000);
+                        stream.push({
+                          type: "tool_execution_progress",
+                          toolCallId: call.id,
+                          toolName: call.name,
+                          elapsed_sec: elapsed,
+                        });
+                      }, TOOL_HEARTBEAT_INTERVAL_MS);
                       reachedExecute = true;
-                      result = await Promise.race([
-                        tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
-                        toolTimeoutPromise,
-                      ]);
+                      try {
+                        result = await Promise.race([
+                          tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
+                          toolTimeoutPromise,
+                        ]);
+                      } finally {
+                        clearInterval(toolHeartbeat);
+                      }
                     } catch (err) {
                       result = `执行错误: ${(err as Error).message}`;
                       errFlag = true;

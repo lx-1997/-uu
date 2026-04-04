@@ -14,6 +14,7 @@ import {
   bindRDKClawFeishuCode,
   cancelRDKClawRun,
   cancelAllRDKClawRuns,
+  getActiveRDKClawRuns,
   decideRDKClawApproval,
   sendRecommendationChoice,
   executeDeviceCommand,
@@ -2640,7 +2641,33 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const backgroundCurrentRun = () => {
-    void stopCurrentRun();
+    const runId = currentRunIdRef.current;
+    if (!runId) return;
+    streamGenerationRef.current += 1;
+    streamAbortRef.current?.();
+    streamAbortRef.current = null;
+    currentRunIdRef.current = '';
+    commandLockRef.current = false;
+    setAiTyping(false);
+    setBackgroundRuns((prev) => [
+      ...prev,
+      { runId, status: 'running' as const, detachedAt: Date.now() },
+    ]);
+    const bgTs = Date.now();
+    setChatMessages((prev) => [...prev, {
+      id: bgTs,
+      role: 'ai',
+      text: t('chat.bg.moved', '任务已移至后台继续执行，你可以发新消息。'),
+      blocks: [{
+        type: 'status',
+        items: [{
+          label: t('chat.bg.label', '后台任务'),
+          value: tf('chat.bg.runId', 'runId: {{id}}', { id: runId }),
+          ok: true,
+        }],
+      }],
+      source: 'studio',
+    }]);
   };
 
   const stopBackgroundRun = (runId: string) => {
@@ -2785,8 +2812,24 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   // ── Effects ──
 
   useEffect(() => {
+    let cancelled = false;
     reportActiveSession('init');
     reportActiveDevice('init');
+    getActiveRDKClawRuns()
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.ok && res.runs.length > 0) {
+          setBackgroundRuns((prev) => {
+            const existing = new Set(prev.map((r) => r.runId));
+            const newRuns = res.runs
+              .filter((id) => !existing.has(id))
+              .map((runId) => ({ runId, status: 'running' as const, detachedAt: Date.now() }));
+            return newRuns.length > 0 ? [...prev, ...newRuns] : prev;
+          });
+        }
+      })
+      .catch(() => { /* silent */ });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3203,6 +3246,27 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       taskIntervalsRef.current = {};
     };
   }, []);
+
+  const hasRunningBgRuns = backgroundRuns.some((r) => r.status === 'running');
+  useEffect(() => {
+    if (!hasRunningBgRuns) return;
+    const timer = setInterval(() => {
+      getActiveRDKClawRuns()
+        .then((res) => {
+          if (!res?.ok) return;
+          const activeSet = new Set(res.runs);
+          setBackgroundRuns((prev) =>
+            prev.map((item) =>
+              item.status === 'running' && !activeSet.has(item.runId)
+                ? { ...item, status: 'ended' as const }
+                : item,
+            ),
+          );
+        })
+        .catch(() => { /* silent */ });
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [hasRunningBgRuns]);
 
   // Close chat panel on tab change（副屏常驻展开，不受主导航切换影响）
   useEffect(() => {

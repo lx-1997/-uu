@@ -680,8 +680,8 @@ export function streamAgentChat(
       let lastMeaningfulEventAt = 0;
       let awaitingFirstMeaningfulChunk = true;
       let closedBySseMeaningfulIdle = false;
-      const FIRST_MEANINGFUL_WALL_MS = 900_000;
-      const MEANINGFUL_GAP_MS = 600_000;
+      const FIRST_MEANINGFUL_WALL_MS = 2_400_000;
+      const MEANINGFUL_GAP_MS = 2_100_000;
 
       const emit: AgentEventCallback = (e) => {
         lastMeaningfulEventAt = Date.now();
@@ -742,12 +742,17 @@ export function streamAgentChat(
           value = r.value;
         } catch (e) {
           if (e instanceof SseIdleError) {
+            const elapsedSec = Math.round((Date.now() - streamBodyStartedAt) / 1000);
+            const elapsedMin = Math.floor(elapsedSec / 60);
+            const elapsedHuman = elapsedMin > 0 ? `${elapsedMin}分${elapsedSec % 60}秒` : `${elapsedSec}秒`;
             emit({
               type: 'error',
               data: {
                 error: awaitingFirstMeaningfulChunk
                   ? '等待服务端首包超时（长时间无数据）。请确认本机网络与 RDK Studio 后端未卡住，或稍后重试。'
-                  : '长时间未收到新的流式数据，已断开。若推理时间过长可改用「快捷回答」或缩短问题后重试。',
+                  : `SSE 流断连（已运行 ${elapsedHuman}），后端任务可能仍在执行。` +
+                    '你可以：1）直接重新发送消息继续对话；2）若板端任务仍在运行，Agent 会自动获取其状态。',
+                recoverable: true,
               },
             });
             try {
@@ -1429,9 +1434,63 @@ export function fetchDeviceWifiList(deviceId: string) {
   );
 }
 
-export function fetchDeviceDiagnostics(deviceId: string, password?: string) {
-  return request<{ ok: boolean; output: string }>(`/api/devices/${deviceId}/diagnostics`, {
-    headers: password ? { 'x-device-password': password } : undefined,
+export function fetchDeviceDiagnostics(
+  deviceId: string,
+  init?: { password?: string; fresh?: boolean },
+) {
+  const fresh = init?.fresh === true;
+  const q = fresh ? '?fresh=1' : '';
+  return request<{ ok: boolean; output: string; cached?: boolean }>(
+    `/api/devices/${deviceId}/diagnostics${q}`,
+    {
+      headers: init?.password ? { 'x-device-password': init.password } : undefined,
+    },
+  );
+}
+
+/** 与后端 `invalidateDeviceDerivedCaches` 一致：分项失效诊断 / Agent OpenClaw 短缓存 / ping 负缓存 */
+export type DeviceDerivedCacheScope = 'diagnostics' | 'openclawAiReady' | 'pingFail';
+
+export function invalidateDeviceDerivedStateCaches(
+  deviceId: string,
+  body?: { scope?: DeviceDerivedCacheScope[] },
+  password?: string,
+) {
+  return request<{ ok: boolean; scope: DeviceDerivedCacheScope[] | 'all' }>(
+    `/api/devices/${deviceId}/state/invalidate`,
+    {
+      method: 'POST',
+      headers: password ? { 'x-device-password': password } : undefined,
+      body: JSON.stringify(body ?? {}),
+    },
+  );
+}
+
+/** `GET /state-snapshot` 聚合结果；默认不含工作区巡检，`includeWorkspace` 时加重 */
+export interface DeviceStateSnapshot {
+  ok: boolean;
+  at: number;
+  device: Device;
+  ping: { ok: boolean; status: string; fromFailCache?: boolean };
+  diagnostics: { ok: boolean; output?: string; cached?: boolean };
+  openclawHealth: {
+    ok: boolean;
+    status?: OpenClawHealthStatus;
+    error?: string;
+  };
+  workspace?: { ok: boolean; status?: DeviceWorkspaceHealth };
+}
+
+export function fetchDeviceStateSnapshot(
+  deviceId: string,
+  init?: { password?: string; fresh?: boolean; includeWorkspace?: boolean },
+) {
+  const q = new URLSearchParams();
+  if (init?.fresh) q.set('fresh', '1');
+  if (init?.includeWorkspace) q.set('include', 'workspace');
+  const qs = q.toString();
+  return request<DeviceStateSnapshot>(`/api/devices/${deviceId}/state-snapshot${qs ? `?${qs}` : ''}`, {
+    headers: init?.password ? { 'x-device-password': init.password } : undefined,
   });
 }
 

@@ -98,14 +98,20 @@ export function verifySshConnection(credentials: SshCredentials, options?: Verif
     : SSH_READY_TIMEOUT_MS;
 
   return new Promise<void>((resolve, reject) => {
+    let settled = false;
     const client = new Client();
 
     client
       .on('ready', () => {
+        if (settled) return;
+        settled = true;
         client.end();
         resolve();
       })
       .on('error', (error) => {
+        if (settled) return;
+        settled = true;
+        try { client.end(); } catch { /* ignore */ }
         reject(error);
       })
       .connect({
@@ -268,6 +274,7 @@ export function runRemoteCommands(
         });
       })
       .on('error', (error) => {
+        try { client.end(); } catch { /* ignore */ }
         safeReject(error);
       })
       .connect(sshConnectBase(credentials));
@@ -279,12 +286,41 @@ export interface UploadFileSftpOptions {
   timeoutMs?: number;
 }
 
+const SFTP_UPLOAD_ALLOWED_PREFIXES = [
+  '/userdata', '/tmp', '/home', '/root', '/opt', '/var',
+  '/app', '/workspace',
+];
+
+function validateRemotePath(remotePath: string): void {
+  const normalized = remotePath.replace(/\/+/g, '/');
+  if (!normalized.startsWith('/')) {
+    throw new Error(`远端路径必须是绝对路径：${remotePath}`);
+  }
+  const segments = normalized.split('/');
+  if (segments.includes('..')) {
+    throw new Error(`远端路径禁止包含 ".."：${remotePath}`);
+  }
+  const allowed = SFTP_UPLOAD_ALLOWED_PREFIXES.some((prefix) =>
+    normalized === prefix || normalized.startsWith(prefix + '/'),
+  );
+  if (!allowed) {
+    throw new Error(
+      `远端路径 "${remotePath}" 不在允许的目录白名单内（${SFTP_UPLOAD_ALLOWED_PREFIXES.join(', ')}）。` +
+      '若需写入其他路径，请设置环境变量 RDK_SFTP_ALLOW_ALL=1。',
+    );
+  }
+}
+
 export function uploadFileSftp(
   credentials: SshCredentials,
   remotePath: string,
   buffer: Buffer,
   options: UploadFileSftpOptions = {},
 ) {
+  if (process.env.RDK_SFTP_ALLOW_ALL !== '1') {
+    validateRemotePath(remotePath);
+  }
+
   // Stream base64 over SSH stdin to avoid ARG_MAX limits.
   // Keep command non-interactive to avoid sudo password prompts hanging the stream.
   const uploadTimeoutMs = Math.max(15_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));

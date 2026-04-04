@@ -194,6 +194,15 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
           || devicePasswordCache.get(passKey)
           || defaultSshPassword;
 
+        if (sshStream) {
+          try { sshStream.close(); } catch { /* ignore */ }
+          sshStream = null;
+        }
+        if (sshClient) {
+          try { sshClient.end(); } catch { /* ignore */ }
+          sshClient = null;
+        }
+
         sshClient = new Client();
         sshClient.on('ready', () => {
           sshClient!.shell({ term: 'xterm-256color', cols: cols || 80, rows: rows || 24 }, (err, stream) => {
@@ -211,6 +220,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
           });
         }).on('error', (err) => {
           socket.emit('data', `\r\n\x1b[31m[SSH Error] ${err.message}\x1b[0m\r\n`);
+          try { sshClient?.end(); } catch { /* ignore */ }
         }).connect({
           host: device.host,
           port: device.port ?? 22,

@@ -2,7 +2,19 @@
 
 /** 与 AddDeviceModal、quick-connect 及常见 RDK 镜像出厂配置一致 */
 export const DEFAULT_SSH_USERNAME = 'root';
-export const DEFAULT_SSH_PASSWORD = 'root';
+export const DEFAULT_SSH_PASSWORD = process.env.RDK_SSH_PASSWORD?.trim() || 'root';
+
+let _defaultSshPasswordWarned = false;
+export function warnIfUsingDefaultSshPassword(): void {
+  if (_defaultSshPasswordWarned) return;
+  if (!process.env.RDK_SSH_PASSWORD?.trim()) {
+    _defaultSshPasswordWarned = true;
+    console.warn(
+      '[security] 未设置 RDK_SSH_PASSWORD，使用出厂默认口令。' +
+      '建议：设置环境变量 RDK_SSH_PASSWORD 或在设备管理中为每台设备保存专属密码。',
+    );
+  }
+}
 
 export const DEFAULT_SSH_PORT = 22;
 export const DEFAULT_VNC_PORT = 5900;
@@ -16,6 +28,12 @@ export const PING_SSH_TIMEOUT_MS = 5_000;
 export const FLASH_TMP_IMAGE_XZ = '/tmp/rdk_flash_image.img.xz';
 export const FLASH_TMP_IMAGE_RAW = '/tmp/rdk_flash_image.img';
 export const FLASH_DEFAULT_DEST = '/tmp/rdk_image.img';
+
+/**
+ * 设备诊断输出在内存中复用的最长时间；与前端轮询间隔对齐可减少重复 SSH。
+ * 仅用于 `GET /api/devices/:id/diagnostics`；OpenClaw/工作区 health、ping 等不走此缓存。
+ */
+export const DEVICE_DIAGNOSTICS_CACHE_TTL_MS = 15_000;
 
 export const DIAGNOSTIC_COMMANDS = [
   'echo "###UPTIME###"; uptime',

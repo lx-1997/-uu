@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/useAuth';
 import { executeDeviceCommand } from '../api';
 import { fetchWifiLinkState } from '../utils/wifi-link-probe';
 import WifiConfigModal from './wifi/WifiConfigModal';
+import { DEVICE_POLL_PHASE_TOPBAR_WIFI_MS, TOPBAR_WIFI_LINK_POLL_MS } from '../constants';
 
 function parseIpBrOutput(output: string): { iface: string; ip: string }[] {
   const out: { iface: string; ip: string }[] = [];
@@ -178,8 +179,6 @@ async function copyToClipboard(text: string) {
   }
 }
 
-const WIFI_LINK_POLL_MS = 30_000;
-
 /** 与 SsoLoginScreen 一致：无 OAuth 链接时的门户兜底 */
 const SSO_FALLBACK_PORTAL = 'https://sso.d-robotics.cc/';
 
@@ -249,11 +248,16 @@ export default function TopToolbar() {
         if (!cancelled) setWifiLink(s);
       });
     };
-    run();
-    const id = window.setInterval(run, WIFI_LINK_POLL_MS);
+    let kick: number | null = null;
+    let id: number | null = null;
+    kick = window.setTimeout(() => {
+      run();
+      id = window.setInterval(run, TOPBAR_WIFI_LINK_POLL_MS);
+    }, DEVICE_POLL_PHASE_TOPBAR_WIFI_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      if (kick) window.clearTimeout(kick);
+      if (id) window.clearInterval(id);
     };
   }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
 
