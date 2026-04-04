@@ -447,16 +447,35 @@
   gap: 16px;
 }
 
-/* IDE / 远程桌面：顶栏分段控件（短标签 + 悬浮态底色，与设备芯片区分开） */
+/* 浮窗区：微型标题 + 分段按钮，避免与侧栏「当前标签」语义混淆（竞品多用细条/描边而非整块主色） */
+.topbar-embed-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-right: 2px;
+  padding-right: 6px;
+  border-right: 1px solid var(--border);
+}
+
+.topbar-embed-cluster-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+  white-space: nowrap;
+}
+
 .topbar-embed-float-group {
   display: inline-flex;
   align-items: stretch;
   align-self: center;
   flex-shrink: 0;
-  margin-right: 4px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: var(--bg-inset);
+  background: var(--bg-primary);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
 }
@@ -470,7 +489,7 @@
   min-height: 30px;
   font-size: 0.6875rem;
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   color: var(--text-secondary);
   background: transparent;
   border: none;
@@ -479,11 +498,12 @@
   white-space: nowrap;
   transition:
     background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .topbar-embed-float-group .topbar-embed-float:hover {
-  background: var(--bg-surface);
+  background: var(--bg-inset);
   color: var(--text-primary);
 }
 
@@ -491,9 +511,11 @@
   border-left: 1px solid var(--border);
 }
 
+/* 已浮出：左侧强调条 + 轻底色，不用大块主色（避免像「当前页选中」） */
 .topbar-embed-float-group .topbar-embed-float[aria-pressed='true'] {
-  background: var(--accent-subtle);
-  color: var(--accent);
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .topbar-embed-float-group .topbar-embed-float svg {
@@ -503,6 +525,7 @@
 
 .topbar-embed-float-group .topbar-embed-float[aria-pressed='true'] svg {
   opacity: 1;
+  color: var(--accent);
 }
 
 .topbar-embed-float-group .topbar-embed-float:focus-visible {
@@ -515,6 +538,17 @@
   max-width: 4.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 1100px) {
+  .topbar-embed-cluster-label {
+    display: none;
+  }
+
+  .topbar-embed-cluster {
+    gap: 0;
+    padding-right: 4px;
+  }
 }
 
 /* 进行中任务队列（OpenClaw 部署 / 镜像备份） */

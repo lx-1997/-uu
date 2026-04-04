@@ -106,8 +106,14 @@
   flex-shrink: 0;
 }
 
+/* 与顶栏一致：浮出态用左侧条，避免整块橙色像「选中」 */
 .immersive-float-toggle[aria-pressed='true'] {
-  background: var(--accent-subtle);
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.immersive-float-toggle[aria-pressed='true'] svg {
   color: var(--accent);
 }
 
@@ -481,13 +487,13 @@
   color: var(--text-primary);
 }
 
-/* USB 串口：主行 + 「连接」单独一行右对齐（欢迎区灰框内右下角） */
+/* USB 串口：主行内「连接」靠右，减少独占一行带来的纵向浪费 */
 .immersive-serial-bar {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
-  padding: 8px 16px 10px;
+  gap: 6px;
+  padding: 4px 12px 6px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -497,30 +503,35 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 12px;
+  gap: 6px 8px;
+}
+
+.immersive-serial-bar-main .immersive-serial-connect-btn {
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .immersive-serial-bar-main .immersive-serial-connect-btn {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
 .immersive-serial-bar-hint {
   width: 100%;
-  font-size: 0.75rem;
-  line-height: 1.55;
+  font-size: 0.6875rem;
+  line-height: 1.45;
   color: var(--text-muted);
-  padding: 2px 2px 0;
+  padding: 0 1px;
 }
 
 .immersive-serial-bar-hint p {
   margin: 0;
 }
 
-.immersive-serial-bar-connect {
-  display: flex;
-  justify-content: flex-end;
-  width: 100%;
-}
-
 .immersive-serial-bar--welcome {
   margin-top: 4px;
-  padding: 12px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-inset);
@@ -528,39 +539,57 @@
 }
 
 .immersive-serial-bar-label {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   color: var(--text-secondary);
   flex-shrink: 0;
   white-space: nowrap;
 }
 
+/* 终端页：略压缩沉浸式顶栏，提高 xterm 可视高度 */
+.immersive--terminal .immersive-bar {
+  min-height: 36px;
+  padding: 4px 12px;
+  gap: 8px;
+}
+
+.immersive--terminal .immersive-tab {
+  padding: 3px 8px;
+  font-size: 0.65rem;
+}
+
+.immersive--terminal .immersive-tab-add {
+  width: 22px;
+  height: 22px;
+  font-size: 0.9rem;
+}
+
 select.immersive-serial-port-select.select {
-  min-width: 200px;
-  flex: 1 1 200px;
-  max-width: 100%;
+  min-width: 140px;
+  flex: 1 1 160px;
+  max-width: min(100%, 380px);
   height: auto;
-  min-height: 34px;
-  padding: 6px 28px 6px 10px;
+  min-height: 30px;
+  padding: 4px 26px 4px 8px;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.35;
   color: var(--text-primary);
   background-color: var(--input-bg);
 }
 
 select.immersive-serial-baud-select.select {
   width: auto;
-  min-width: 92px;
-  min-height: 34px;
-  padding: 6px 24px 6px 10px;
+  min-width: 88px;
+  min-height: 30px;
+  padding: 4px 22px 4px 8px;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.35;
   color: var(--text-primary);
   background-color: var(--input-bg);
 }
 
 .terminal-serial-welcome {
-  margin-top: 20px;
+  margin-top: 12px;
   max-width: 560px;
   text-align: left;
 }
