@@ -10,6 +10,7 @@ alwaysApply: false
 
 ## SSH 命令执行
 - 通过 `rdk-ssh-helper.ts` 的 `execOnDevice()` 统一执行
+- Agent 工具 `device_exec`：常驻/不退出进程用参数 **`runDetached`**（`rdk-tools.ts` 内 nohup 包装），勿让 Agent 只拼易错的 `nohup … &` 长命令
 - 长命令加 timeout：`timeout 30 <command>`
 - 避免交互式命令（vim, top, less）
 - 用 `device-exec-scheduler.ts` 保证同设备命令串行

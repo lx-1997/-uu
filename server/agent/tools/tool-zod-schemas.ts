@@ -86,6 +86,17 @@ export const deviceExecToolInputZod = z.object({
     (v) => (v === undefined || v === null || v === "" ? undefined : v),
     z.coerce.number().finite().min(5000).max(7_200_000).optional(),
   ),
+  /**
+   * true：以 nohup 在板端后台启动 `command`，SSH 立即返回 PID 与日志路径（用于推流/WS 服务等常驻进程）。
+   * 此时代入的 timeoutMs 仅影响「启动脚手架」等待，不限制后台进程寿命。
+   */
+  runDetached: z.boolean().optional(),
+  /** 与 runDetached 联用：后台 stdout/stderr 追加写入的绝对路径；省略则使用 /tmp 下自动命名文件（勿含空格） */
+  detachedLogPath: z
+    .string()
+    .min(1)
+    .refine((s) => !/\s/.test(s), { message: "detachedLogPath must not contain whitespace" })
+    .optional(),
 });
 
 export const deviceFileReadToolInputZod = z.object({

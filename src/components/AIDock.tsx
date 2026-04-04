@@ -5,7 +5,7 @@ import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { parseUiLanguageCommand } from '../i18n/language-command';
 import { useStreamRevealSegments } from '../hooks/useStreamReveal';
-import type { AiDockContentSlot, ChatBlock, ChatAttachment, ChatMessage } from '../app-types';
+import type { AiDockContentSlot, ChatBlock, ChatAttachment, ChatMessage, Tab } from '../app-types';
 import type { AgentAttachmentPayload, StudioResponseMode } from '../api';
 import { getCapabilityDisplayLabel } from '../ai';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
@@ -1487,6 +1487,7 @@ export default function AIDock() {
   /** 用户是否在底部附近；为 false 时流式更新不再强行滚到底，避免打断阅读 */
   const streamPinnedToBottomRef = useRef(true);
   const prevChatExpandedRef = useRef(false);
+  const prevTabForWorkbenchScrollRef = useRef<Tab | null>(null);
   const prevChatLenRef = useRef(0);
   const prevAiTypingRef = useRef(false);
   const socketRef = useRef<SocketIOClient.Socket | null>(null);
@@ -1847,12 +1848,20 @@ export default function AIDock() {
 
   /* 展开 Dock、新消息、流式更新：仅在贴底时滚到底；单次赋值，避免每条 token 上双 rAF+多定时器抢主线程 */
   useLayoutEffect(() => {
+    const prevTab = prevTabForWorkbenchScrollRef.current;
+    prevTabForWorkbenchScrollRef.current = activeTab;
+    const returnedToDashboard =
+      chatExpanded
+      && activeTab === 'dashboard'
+      && prevTab !== null
+      && prevTab !== 'dashboard';
+
     const justOpened = chatExpanded && !prevChatExpandedRef.current;
     prevChatExpandedRef.current = chatExpanded;
 
     if (!chatExpanded) return;
 
-    if (justOpened) {
+    if (justOpened || returnedToDashboard) {
       streamPinnedToBottomRef.current = true;
     }
 
@@ -1868,7 +1877,7 @@ export default function AIDock() {
     if (!el) return;
 
     el.scrollTop = el.scrollHeight;
-  }, [chatExpanded, chatMessages, aiTyping, showAllMessages]);
+  }, [activeTab, chatExpanded, chatMessages, aiTyping, showAllMessages]);
 
   /* 图片等异步撑高时，若仍在贴底则跟随到底部 */
   useEffect(() => {

@@ -160,6 +160,15 @@ export interface AIChatStoreState {
 
   /** 导出排查 zip（服务端 Agent 会话、Dock 快照、可选板端日志） */
   exportDebugBundle: (options?: { includeBoardLogs?: boolean }) => Promise<void>;
+  /**
+   * 按左侧列表选中的设备桶 + Studio 会话导出排查包（与当前 Dock 线程不一致时也使用对应 sessionKey 拉 agent jsonl）。
+   */
+  exportDebugBundleForThread: (opts: {
+    archiveDevId: string;
+    sessionId: string;
+    snapshotMessages: ChatMessage[];
+    includeBoardLogs?: boolean;
+  }) => Promise<void>;
   /** 当前窗口 RDKClaw 对话绑定的 Studio 会话 id（与 Dock 一致） */
   getStudioChatSessionId: () => string;
   /** 对话存档所用设备桶（`__global__` 或具体设备 id） */
@@ -3016,6 +3025,82 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
+  const exportDebugBundleForThread = useCallback(
+    async (opts: {
+      archiveDevId: string;
+      sessionId: string;
+      snapshotMessages: ChatMessage[];
+      includeBoardLogs?: boolean;
+    }) => {
+      const sessionId = String(opts.sessionId || '').trim();
+      if (!sessionId) {
+        addToast(translate(isEn, 'dock.export.noSession', '无法导出：缺少会话 ID'), 'warning');
+        return;
+      }
+      const archiveDevNorm = toChatDeviceId(opts.archiveDevId);
+      const apiDeviceId =
+        archiveDevNorm !== GLOBAL_CHAT_DEVICE_ID ? archiveDevNorm : undefined;
+      const isLive =
+        sessionId === String(sessionIdRef.current || '').trim()
+        && archiveDevNorm === chatDeviceIdRef.current;
+
+      try {
+        const devMeta = apiDeviceId ? devices.find((d) => d.id === apiDeviceId) : undefined;
+        const uiSnapshot = isLive
+          ? {
+              exportedAt: new Date().toISOString(),
+              studioSessionId: sessionId,
+              chatDeviceId: chatDeviceIdRef.current,
+              studioResponseMode,
+              device: currentDevice
+                ? { id: currentDevice.id, ip: currentDevice.ip, name: currentDevice.name }
+                : null,
+              chatMessages: stripHeavyDataUrlsForStorage(chatMessages),
+              rdkClawRunTimeline,
+              agentExecution,
+            }
+          : {
+              exportedAt: new Date().toISOString(),
+              studioSessionId: sessionId,
+              chatDeviceId: archiveDevNorm,
+              studioResponseMode,
+              device: devMeta
+                ? { id: devMeta.id, ip: devMeta.ip, name: devMeta.name }
+                : apiDeviceId
+                  ? { id: apiDeviceId }
+                  : null,
+              exportSource: 'ai-chat-hub-archived-thread',
+              chatMessages: stripHeavyDataUrlsForStorage(opts.snapshotMessages),
+            };
+
+        await downloadRdkclawDebugBundle({
+          sessionId,
+          deviceId: apiDeviceId,
+          userId: userIdRef.current,
+          includeBoardLogs: opts.includeBoardLogs !== false,
+          uiSnapshot,
+        });
+        addToast(translate(isEn, 'dock.export.ok', '排查包已下载'), 'success');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        addToast(
+          fillTemplate(translate(isEn, 'dock.export.fail', '导出失败：{{msg}}'), { msg }),
+          'error',
+        );
+      }
+    },
+    [
+      addToast,
+      isEn,
+      studioResponseMode,
+      currentDevice,
+      chatMessages,
+      rdkClawRunTimeline,
+      agentExecution,
+      devices,
+    ],
+  );
+
   const value: AIChatStoreState = {
     cmd, setCmd, showSuggestions, setShowSuggestions, filteredSuggestions,
     chatMessages, setChatMessages, chatExpanded, setChatExpanded,
@@ -3027,6 +3112,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     rdkClawRunTimeline, runTimelinePanelOpen, setRunTimelinePanelOpen,
     studioResponseMode, setStudioResponseMode,
     exportDebugBundle,
+    exportDebugBundleForThread,
     getStudioChatSessionId,
     getStudioChatDeviceId,
   };

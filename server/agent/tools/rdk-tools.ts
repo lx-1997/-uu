@@ -134,6 +134,26 @@ function resolveDeviceExecTimeoutMs(requested: number): number {
   return t;
 }
 
+/** 与 rdk-ssh-helper.shEscape 一致，供 detached 包装在远程 bash -lc 中嵌入路径 */
+function shEscapeUnix(raw: string): string {
+  return `'${raw.replace(/'/g, `'"'"'`)}'`;
+}
+
+/**
+ * 将板端命令经 base64 管道交给内层 bash，避免引号/`&&` 优先级导致的「后台启动」语法坑；
+ * 外层仅负责 nohup、脱轨 stdin，并打印 PID 与日志路径。
+ */
+function wrapDetachedDeviceCommand(userCommand: string, remoteLogPath: string): string {
+  const b64 = Buffer.from(userCommand, 'utf8').toString('base64');
+  const logQ = shEscapeUnix(remoteLogPath);
+  return (
+    `bash -lc 'LOG=${logQ}; nohup bash -lc '"'"'echo ${b64}|base64 -d|bash'"'"' >>"$LOG" 2>&1 </dev/null & echo RDK_DETACHED_PID=$!; echo RDK_DETACHED_LOG=$LOG'`
+  );
+}
+
+/** runDetached 时仅等待「启动脚手架」结束，与后台业务进程寿命解耦 */
+const DEVICE_EXEC_DETACHED_SSH_WAIT_MS = 60_000;
+
 function isSshExecTimeoutMessage(msg: string): boolean {
   return msg.includes('SSH 命令执行超时（') && msg.includes('ms）');
 }
@@ -309,7 +329,10 @@ const DEVICE_EXEC_HEARTBEAT_AFTER_MS = 15_000;
 /** 连续无输出多久发一条「仍在运行」 */
 const DEVICE_EXEC_HEARTBEAT_SILENT_MS = 15_000;
 
-function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{ command: string; timeoutMs?: number }> {
+function deviceExecTool(
+  deviceId: string,
+  callbacks?: RdkToolsCallbacks,
+): Tool<{ command: string; timeoutMs?: number; runDetached?: boolean; detachedLogPath?: string }> {
   return {
     name: 'device_exec',
     description:
@@ -318,13 +341,17 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
       '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
       '规则：\n' +
       '- 每条命令在独立 shell 中执行，状态不跨调用保留（cd 不会影响下次调用）\n' +
-      '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）\n' +
+      '- **常驻进程（推流、WebSocket 服务、ros2 run 不退出等）**：传 **runDetached: true**。Studio 会以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
+      '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
+      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`\n' +
+      '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
+      '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
       '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功\n' +
-      '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步\n' +
+      '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步；**自行拼 nohup 时**注意 `&&` 与 `&` 的 shell 优先级，不确定时优先用 **runDetached**\n' +
       '- 读取设备文件用 device_file_read 而不是 cat\n' +
-      '- 写入设备文件用 device_file_write 而不是 echo/tee\n' +
+      '- 写入设备文件用 device_file_write 而不是 echo/tee（本机 edit/write **不会**改板端文件）\n' +
       '- 查看目录用 device_file_list 而不是 ls',
     inputSchema: {
       type: 'object',
@@ -337,6 +364,15 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
           type: 'number',
           description:
             '可选。整段命令最长等待（毫秒）5000～7200000；不传默认 30 分钟。勿默认填 60000；长任务应省略或给足时间。',
+        },
+        runDetached: {
+          type: 'boolean',
+          description:
+            'true：nohup 后台启动 command，立即返回 PID 与日志路径；用于推流/WS 服务等不退出进程',
+        },
+        detachedLogPath: {
+          type: 'string',
+          description: '与 runDetached 联用：板端日志绝对路径；省略则写入 /tmp 下自动命名文件',
         },
       },
       required: ['command'],
@@ -352,7 +388,15 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
           abortSignal?: AbortSignal;
         } = {};
 
-        if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
+        const runDetached = input.runDetached === true;
+        let commandToExecute = input.command;
+        if (runDetached) {
+          const logPath =
+            input.detachedLogPath?.trim() ||
+            `/tmp/rdkstudio-detached-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.log`;
+          commandToExecute = wrapDetachedDeviceCommand(input.command, logPath);
+          execOpts.timeoutMs = DEVICE_EXEC_DETACHED_SSH_WAIT_MS;
+        } else if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
           execOpts.timeoutMs = resolveDeviceExecTimeoutMs(Number(input.timeoutMs));
         }
         if (ctx.abortSignal) {
@@ -401,23 +445,30 @@ function deviceExecTool(deviceId: string, callbacks?: RdkToolsCallbacks): Tool<{
         }
 
         // 远程非零退出走 resolve + [exit code]，不抛错，避免与 SSH/超时混淆并误触发下方「勿切设备」提示
-        const output = await execOnDevice(deviceId, [input.command], {
+        const output = await execOnDevice(deviceId, [commandToExecute], {
           ...execOpts,
           rejectOnNonZeroExit: false,
         });
         flushProgress(true);
-        if (!output) return '(命令执行成功，无输出)';
+        if (!output) {
+          return runDetached
+            ? '(detached 启动完成，无终端输出；请检查返回中的 RDK_DETACHED_PID / RDK_DETACHED_LOG，并用 device_exec 执行 tail 或 ss 验证)'
+            : '(命令执行成功，无输出)';
+        }
 
         // 命令语义化：从输出中提取结构化信息（如温度、内存使用率）
         const { extractCommandInfo } = await import('../../rdkclaw/command-semantics.js');
         const info = extractCommandInfo(input.command, output);
+        const detachedHint = runDetached
+          ? '\n\n[detached] 后续可用 device_exec 查看日志（如 tail -n 80 日志路径）或监听端口（ss -tlnp）；PID 退出则进程已结束。'
+          : '';
         if (info) {
           const infoStr = Object.entries(info)
             .map(([k, v]) => `${k}: ${v}`)
             .join(', ');
-          return `${output}\n\n[解析] ${infoStr}`;
+          return `${output}\n\n[解析] ${infoStr}${detachedHint}`;
         }
-        return output;
+        return `${output}${detachedHint}`;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (isSshAuthError(err)) {

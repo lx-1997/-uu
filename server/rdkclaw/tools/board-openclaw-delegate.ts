@@ -18,6 +18,8 @@ import {
   logDualAgentEvent,
 } from "../board-dual-agent-orchestration.js";
 import {
+  abortAwareDelay,
+  isRetryableOpenClawBoardSendFailure,
   mentionsOpenClawGatewayPairingRequired,
   openClawBridgeMeta,
   parseOpenClawBoardRpcError,
@@ -38,24 +40,8 @@ function toBoardDevice(device: SharedDevice) {
   };
 }
 
-function isRetryableFailure(output: string): boolean {
-  if (mentionsOpenClawGatewayPairingRequired(output)) return false;
-  const lower = output.toLowerCase();
-  return /__openclaw_ws_failed__/i.test(output)
-    || /ssh error|econnreset|econnrefused|connection reset|socket closed|timed out|timeout|handshake|broken pipe|websocket connect failed|websocket closed unexpectedly/i.test(lower);
-}
-
 const DELEGATE_MAX_RETRIES = 1;
 const DELEGATE_RETRY_DELAY_MS = 2000;
-
-function abortAwareDelay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(new Error("操作已中止")); return; }
-    const timer = setTimeout(resolve, ms);
-    const onAbort = () => { clearTimeout(timer); reject(new Error("操作已中止")); };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
 
 function getBoardHealth(
   manager: OpenClawDeploymentManager,
@@ -333,7 +319,7 @@ export function boardOpenClawDelegateTool(
           }
         }
         const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
-        if (cleanOutput.length > 20 && !isRetryableFailure(output)) {
+        if (cleanOutput.length > 20 && !isRetryableOpenClawBoardSendFailure(output)) {
           const partial = cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
           const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, partial, {
             phase: "delegate",
@@ -341,7 +327,7 @@ export function boardOpenClawDelegateTool(
           });
           return need.text;
         }
-        if (attempt < DELEGATE_MAX_RETRIES && isRetryableFailure(output)) {
+        if (attempt < DELEGATE_MAX_RETRIES && isRetryableOpenClawBoardSendFailure(output)) {
           console.warn(`[board-delegate] retryable failure on attempt ${attempt + 1}, retrying in ${DELEGATE_RETRY_DELAY_MS}ms`);
           onProgress?.("\n[连接中断，正在自动重试...]\n", ctx.toolCallId);
           manager.destroyConnection(sshEndpointKey(boardDevice));

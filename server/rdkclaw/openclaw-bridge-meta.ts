@@ -47,6 +47,36 @@ export function mentionsOpenClawGatewayPairingRequired(raw: string): boolean {
   return /\bpairing\s+required\b/i.test(String(raw || ""));
 }
 
+/**
+ * 板端 sendAgentMessage 失败时是否值得再整轮重试（排除 pairing 等需人工干预的情况）。
+ * 与 board_openclaw_delegate 口径一致，供 chat / assess 等轻量路径复用。
+ */
+export function isRetryableOpenClawBoardSendFailure(output: string): boolean {
+  if (mentionsOpenClawGatewayPairingRequired(output)) return false;
+  const lower = output.toLowerCase();
+  return (
+    /__openclaw_ws_failed__/i.test(output)
+    || /ssh error|econnreset|econnrefused|connection reset|socket closed|timed out|timeout|handshake|broken pipe|websocket connect failed|websocket closed unexpectedly/i.test(
+      lower,
+    )
+  );
+}
+
+export function abortAwareDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("操作已中止"));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("操作已中止"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /** 板端 delegate / assess 等 RPC 失败时统一转给人读文案（含 WS / HTTP 包装）。 */
 export function parseOpenClawBoardRpcError(raw: string): string {
   const text = (raw || "").trim();

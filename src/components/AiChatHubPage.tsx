@@ -13,7 +13,6 @@ import {
   toChatDeviceId,
 } from '../utils/chat-history-storage';
 import { buildThreadSummaryLine } from '../utils/chat-history-thread-label';
-import { buildChatTranscriptTxt, downloadTranscriptTxt } from '../utils/export-chat-transcript';
 import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
 import type { ChatMessage, Device } from '../app-types';
 
@@ -68,7 +67,6 @@ export default function AiChatHubPage() {
   const {
     devices,
     activeDevice,
-    currentDevice,
     setActiveDevice,
     setChatExpanded,
     addToast,
@@ -78,6 +76,7 @@ export default function AiChatHubPage() {
     stopAllRuns,
     getStudioChatSessionId,
     getStudioChatDeviceId,
+    exportDebugBundleForThread,
   } = useAppState();
   const { chatMessages, resumeStudioThread, deleteStudioThread, clearChatHistory } = useAIChatStore();
   const { setHubAnchorEl } = useHubDockAnchor();
@@ -152,10 +151,6 @@ export default function AiChatHubPage() {
     && toChatDeviceId(selected.devId) === studioDev
     && selected.sessionId === studioSid;
 
-  const deviceLabel = currentDevice
-    ? `${currentDevice.name?.trim() || t('dock.device.unnamed', '未命名设备')} · ${currentDevice.ip}:${currentDevice.port ?? 22}`
-    : t('dock.device.unbound', '未绑定设备');
-
   const onSelectThread = useCallback(
     (devId: string, sessionId: string) => {
       const sid = String(sessionId || '').trim();
@@ -178,26 +173,15 @@ export default function AiChatHubPage() {
       addToast(t('chat.hub.pickThread', '请从左侧选择一个会话'), 'info');
       return;
     }
-    const msgs = isLiveView
+    const snapshotMessages = isLiveView
       ? chatMessages
       : loadChatHistoryFromStorage(selected.devId, selected.sessionId);
-    if (!msgs.length) {
-      addToast(t('chat.hub.exportEmpty', '该会话暂无消息可导出'), 'info');
-      return;
-    }
-    try {
-      const sidForName = (isLiveView ? getStudioChatSessionId() : selected.sessionId).replace(/[^\w.-]+/g, '_').slice(0, 24);
-      const body = buildChatTranscriptTxt(msgs, t, {
-        deviceLabel,
-        sessionId: isLiveView ? getStudioChatSessionId() : selected.sessionId,
-      });
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadTranscriptTxt(`rdkclaw-chat-${sidForName || stamp}.txt`, body);
-      addToast(t('chat.export.done', '对话已导出为 TXT'), 'success');
-    } catch (e) {
-      addToast(e instanceof Error ? e.message : t('chat.export.fail', '导出失败'), 'error');
-    }
-  }, [selected, isLiveView, chatMessages, t, deviceLabel, getStudioChatSessionId, addToast]);
+    void exportDebugBundleForThread({
+      archiveDevId: selected.devId,
+      sessionId: selected.sessionId,
+      snapshotMessages,
+    });
+  }, [selected, isLiveView, chatMessages, exportDebugBundleForThread, addToast, t]);
 
   const onDeleteThread = useCallback(
     (e: React.MouseEvent, devId: string, sessionId: string) => {
@@ -245,8 +229,8 @@ export default function AiChatHubPage() {
                   type="button"
                   className="ai-chat-hub-header-icon-btn"
                   onClick={onExport}
-                  title={t('dock.header.exportChat', '导出')}
-                  aria-label={t('dock.header.exportChat', '导出')}
+                  title={t('dock.header.exportDebugDesc', '对话快照与 Agent 会话排查包')}
+                  aria-label={t('dock.header.exportDebug', '导出排查包')}
                 >
                   <Download size={17} strokeWidth={2} aria-hidden />
                 </button>

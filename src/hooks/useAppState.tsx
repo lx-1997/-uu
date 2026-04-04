@@ -262,6 +262,12 @@ export interface AppState {
   studioResponseMode: StudioResponseMode;
   setStudioResponseMode: (v: StudioResponseMode) => void;
   exportDebugBundle: (options?: { includeBoardLogs?: boolean }) => Promise<void>;
+  exportDebugBundleForThread: (opts: {
+    archiveDevId: string;
+    sessionId: string;
+    snapshotMessages: ChatMessage[];
+    includeBoardLogs?: boolean;
+  }) => Promise<void>;
   getStudioChatSessionId: () => string;
   getStudioChatDeviceId: () => string;
 }

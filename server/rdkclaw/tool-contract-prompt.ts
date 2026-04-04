@@ -45,6 +45,7 @@ export function buildToolContractOverviewPrompt(): string {
     "- **延迟工具**：列表里**已经可见** `device_exec` / `device_file_*` 时直接调用即可；**勿**为「加载设备能力」先 `load_tools`。仅当本轮列表缺某项（如 `web_search`、附件工具）再登记。",
     "- 写板端文件：**优先 `device_file_write`**（允许路径见该工具说明）；禁止用 `device_exec` + echo/tee/heredoc **拼大段源码**（易失败、浪费上下文）。",
     "- 读板端文件：**`device_file_read`**，禁止用 `device_exec`+`cat` 代替。",
+    "- 板端**常驻**命令（推流、WebSocket、永不退出的服务）：`device_exec` 使用 **`runDetached: true`**（nohup + 日志路径）；勿在未 detached 时跑无限循环以致占满 SSH 与同设备命令队列。",
     "- 与 OpenClaw 协作：**先 `board_openclaw_assess` 再 `board_openclaw_delegate`**（同一复杂任务不要跳过 assess）；guidance 里写验收标准；`chat` 用于补信息/回传 **[NEED_RDKCLAW]**，不替代 delegate 执行。",
     "",
     "### 典型顺序（软约束，按任务裁剪）",

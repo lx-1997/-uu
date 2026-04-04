@@ -1,8 +1,12 @@
 import type { Tool } from "../../agent/tools/types.js";
 import { readDevices } from "../../storage.js";
-import { OpenClawDeploymentManager } from "../../managers/OpenClawDeploymentManager.js";
+import { OpenClawDeploymentManager, sshEndpointKey } from "../../managers/OpenClawDeploymentManager.js";
 import { applyNeedStreakPolicy } from "../board-dual-agent-orchestration.js";
-import { openClawBridgeMeta } from "../openclaw-bridge-meta.js";
+import {
+  abortAwareDelay,
+  isRetryableOpenClawBoardSendFailure,
+  openClawBridgeMeta,
+} from "../openclaw-bridge-meta.js";
 import type { Device } from "../../../shared/types.js";
 import { resolvePersistedOrDefaultSshPassword } from "../../device-ssh-credentials.js";
 
@@ -33,11 +37,16 @@ function resolveDevicePassword(device: Device) {
 function toBoardDevice(device: Device) {
   return {
     ip: device.host,
+    port: device.port ?? 22,
     userName: device.username,
     id: device.id,
     password: resolveDevicePassword(device),
   };
 }
+
+/** 与 delegate 一致：工具级多轮一次，叠加 sendAgentMessage 内桥路重试 */
+const CHAT_SEND_MAX_RETRIES = 1;
+const CHAT_RETRY_DELAY_MS = 2000;
 
 export type BoardOpenClawChatProgressMeta = { progressSource?: 'studio_wait' | 'board' };
 
@@ -87,52 +96,95 @@ export function boardOpenClawChatTool(
       ].filter(Boolean).join("\n");
 
       const waitMs = boardOpenClawChatTimeoutMs();
-      return await new Promise<string>((resolve) => {
-        let output = "";
-        const blurb = WAITING_BLURBS[Math.floor(Math.random() * WAITING_BLURBS.length)];
-        onProgress?.(blurb, ctx.toolCallId, { progressSource: 'studio_wait' });
+      type ChatTurn = { kind: "done"; text: string } | { kind: "retry" };
 
-        const timeout = setTimeout(() => {
-          const line =
-            output.trim() ||
-            `OpenClaw 未在 ${Math.round(waitMs / 1000)} 秒内回复（板端推理慢或网关未返回时可重试 / 检查 OpenClaw 状态）`;
-          const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, line, {
-            phase: "chat",
-            toolCallId: ctx.toolCallId,
-          });
-          resolve(need.text);
-        }, waitMs);
+      for (let attempt = 0; attempt <= CHAT_SEND_MAX_RETRIES; attempt++) {
+        if (ctx.abortSignal?.aborted) {
+          return "无法与 OpenClaw 交流：操作已中止";
+        }
 
-        manager.sendAgentMessage(
-          prompt,
-          (chunk) => {
-            output += chunk;
-            onProgress?.(chunk, ctx.toolCallId, { progressSource: 'board' });
-          },
-          (success) => {
-            clearTimeout(timeout);
-            if (!success) {
+        const turn = await new Promise<ChatTurn>((resolve) => {
+          let output = "";
+          let handle: { abort: () => void } | null = null;
+
+          if (attempt === 0) {
+            const blurb = WAITING_BLURBS[Math.floor(Math.random() * WAITING_BLURBS.length)];
+            onProgress?.(blurb, ctx.toolCallId, { progressSource: "studio_wait" });
+          } else {
+            onProgress?.(
+              "\n[与板端连接瞬时波动，正在自动重试一次…]\n\n",
+              ctx.toolCallId,
+              { progressSource: "studio_wait" },
+            );
+          }
+
+          const timeout = setTimeout(() => {
+            try {
+              handle?.abort();
+            } catch {
+              /* ignore */
+            }
+            const line =
+              output.trim() ||
+              `OpenClaw 未在 ${Math.round(waitMs / 1000)} 秒内回复（板端推理慢或网关未返回时可重试 / 检查 OpenClaw 状态）`;
+            const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, line, {
+              phase: "chat",
+              toolCallId: ctx.toolCallId,
+            });
+            resolve({ kind: "done", text: need.text });
+          }, waitMs);
+
+          handle = manager.sendAgentMessage(
+            prompt,
+            (chunk) => {
+              output += chunk;
+              onProgress?.(chunk, ctx.toolCallId, { progressSource: "board" });
+            },
+            (success) => {
+              clearTimeout(timeout);
+              if (success) {
+                const trimmed = output.trim() || "OpenClaw 回复为空";
+                const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, trimmed, {
+                  phase: "chat",
+                  toolCallId: ctx.toolCallId,
+                });
+                resolve({ kind: "done", text: need.text });
+                return;
+              }
+              if (attempt < CHAT_SEND_MAX_RETRIES && isRetryableOpenClawBoardSendFailure(output)) {
+                resolve({ kind: "retry" });
+                return;
+              }
               const clean = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
               const line = clean || "与 OpenClaw 的交流中断";
               const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, line, {
                 phase: "chat",
                 toolCallId: ctx.toolCallId,
               });
-              resolve(need.text);
-              return;
-            }
-            const trimmed = output.trim() || "OpenClaw 回复为空";
-            const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, trimmed, {
-              phase: "chat",
-              toolCallId: ctx.toolCallId,
-            });
-            resolve(need.text);
-          },
-          sessionId,
-          boardDevice,
-          openClawBridgeMeta(ctx),
-        );
-      });
+              resolve({ kind: "done", text: need.text });
+            },
+            sessionId,
+            boardDevice,
+            openClawBridgeMeta(ctx),
+          );
+        });
+
+        if (turn.kind === "done") {
+          return turn.text;
+        }
+        try {
+          manager.destroyConnection(sshEndpointKey(boardDevice));
+        } catch {
+          /* ignore */
+        }
+        try {
+          await abortAwareDelay(CHAT_RETRY_DELAY_MS, ctx.abortSignal);
+        } catch {
+          return "无法与 OpenClaw 交流：操作已中止";
+        }
+      }
+
+      return "与 OpenClaw 的交流中断";
     },
   };
 }
