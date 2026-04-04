@@ -88,7 +88,7 @@ interface DeployJob {
   error?: string;
 }
 
-type ConfigTab = 'model' | 'feishu' | 'skills';
+type ConfigTab = 'model' | 'feishu';
 
 type SetupStep = 'gateway' | 'model' | 'feishu';
 interface SetupStatus {
@@ -174,17 +174,6 @@ export default function OpenClaw() {
     [t, language],
   );
 
-  const pluginCatalog = useMemo(
-    () => [
-      { id: 'feishu', name: t('oc.plugin.feishu', '飞书'), emoji: '💬' },
-      { id: 'weixin', name: t('oc.plugin.weixin', '微信'), emoji: '📱' },
-      { id: 'skillhub', name: t('oc.plugin.skillhub', 'SkillHub'), emoji: '🏪' },
-      { id: 'memory', name: t('oc.plugin.memory', '对话记忆'), emoji: '🧠' },
-      { id: 'web_search', name: t('oc.plugin.web_search', '网络搜索'), emoji: '🔍' },
-    ],
-    [t, language],
-  );
-
   const deployStepLabels = useMemo(
     () => [
       t('oc.deploy.step.check', '诊断'),
@@ -266,13 +255,6 @@ export default function OpenClaw() {
   const [pairingCode, setPairingCode] = useState('');
 
   // ─── WeChat Config State (moved to SettingsPanel) ───
-
-  // ─── Skills/Plugins State ───
-  const [skillPluginsAllowText, setSkillPluginsAllowText] = useState('');
-  const [skillInstallName, setSkillInstallName] = useState('');
-  const [skillInstalling, setSkillInstalling] = useState(false);
-  const [boardSkills, setBoardSkills] = useState<string[]>([]);
-  const [boardPlugins, setBoardPlugins] = useState<string[]>([]);
 
   // ─── Operations State ───
   const [activeOp, setActiveOp] = useState<string | null>(null);
@@ -422,7 +404,7 @@ export default function OpenClaw() {
 
   useEffect(() => {
     if (currentDevice && activeTab === 'openclaw') {
-      void Promise.all([loadStatus(), loadConfig(), loadBoardSkills()]);
+      void Promise.all([loadStatus(), loadConfig()]);
     }
   }, [currentDevice, activeTab]);
 
@@ -725,7 +707,6 @@ export default function OpenClaw() {
           encryptKey: data.feishu.encryptKey || '',
         }));
       }
-      if (Array.isArray(data.pluginsAllow)) setSkillPluginsAllowText(data.pluginsAllow.join('\n'));
       return data;
     } catch (e: any) {
       addToast?.(tf('oc.toast.configFail', '加载配置失败: {{msg}}', { msg: e?.message || t('oc.err.network', '网络错误') }), 'error');
@@ -951,11 +932,6 @@ export default function OpenClaw() {
     if (!currentDevice) return;
     const activeTab = tab || configTab;
 
-    const pluginAllowList = skillPluginsAllowText
-      .split(/\r?\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-
     if (activeTab === 'model') {
       const adPartial: Record<string, string> = {};
       if (agentDefaults.thinkingDefault.trim()) adPartial.thinkingDefault = agentDefaults.thinkingDefault.trim();
@@ -988,14 +964,6 @@ export default function OpenClaw() {
         }
       }
     }
-    if (activeTab === 'skills') {
-      const invalid = pluginAllowList.find((id) => !/^[a-zA-Z0-9@/_.-]+$/.test(id));
-      if (invalid) {
-        addToast?.(tf('oc.save.badPlugin', '无效插件 ID: {{id}}', { id: invalid }), 'warning');
-        return;
-      }
-    }
-
     const payload: any = {};
     if (activeTab === 'model') {
       if (modelConfig.baseUrl.trim() && modelConfig.apiKey.trim()) {
@@ -1006,7 +974,6 @@ export default function OpenClaw() {
       if (agentDefaults.reasoning.trim()) ad.reasoning = agentDefaults.reasoning.trim();
       if (Object.keys(ad).length > 0) payload.agentDefaults = ad;
     } else if (activeTab === 'feishu') payload.feishu = feishuConfig;
-    else if (activeTab === 'skills') payload.pluginsAllow = pluginAllowList;
 
     setLoading(true);
     try {
@@ -1291,78 +1258,12 @@ export default function OpenClaw() {
     );
   };
 
-  /* ─── Skill Functions ─── */
-
-  const handleInstallSkill = async (nameOverride?: string) => {
-    const name = nameOverride || skillInstallName.trim();
-    if (!currentDevice || !name) return;
-    setSkillInstalling(true);
-    try {
-      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          installCommand: `export PATH="$HOME/.npm-global/bin:$PATH" && clawhub install ${name} 2>&1 && echo "[Done]"`,
-          configureCommand: '',
-        }),
-      });
-      const data = await res.json();
-      if (data.output?.includes('[Done]')) {
-        addToast?.(tf('oc.skill.installOk', '技能 {{name}} 安装成功', { name }), 'success');
-        if (!nameOverride) setSkillInstallName('');
-      } else {
-        addToast?.(t('oc.skill.installMaybe', '安装可能未成功，请查看输出'), 'warning');
-      }
-      if (data.output) {
-        appendSystemMessage(`\`>>> skill install ${name}\`\n\n\`\`\`\n${data.output}\n\`\`\``);
-      }
-    } catch (err: any) {
-      addToast?.(tf('oc.skill.installFail', '安装失败: {{msg}}', { msg: err.message }), 'error');
-    } finally {
-      setSkillInstalling(false);
-    }
-  };
-
-
-  const loadBoardSkills = async () => {
-    if (!currentDevice) return;
-    try {
-      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/skills`);
-      if (!res.ok) {
-        addToast?.(tf('oc.skills.listFail', '获取技能列表失败: HTTP {{status}}', { status: res.status }), 'error');
-        return;
-      }
-      const data = await res.json();
-      if (data.ok) {
-        setBoardSkills(data.skills || []);
-        setBoardPlugins(data.plugins || []);
-      } else {
-        addToast?.(tf('oc.skills.listFail2', '获取技能列表失败: {{msg}}', { msg: String(data.error || t('common.unknownError', '未知错误')) }), 'error');
-      }
-    } catch (e: any) {
-      addToast?.(tf('oc.skills.listNet', '获取技能列表失败: {{msg}}', { msg: e?.message || t('oc.err.network', '网络错误') }), 'error');
-    }
-  };
-
-  const togglePluginAllow = (pluginId: string) => {
-    setSkillPluginsAllowText((prev) => {
-      const list = prev.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      if (list.includes(pluginId)) return list.filter((id) => id !== pluginId).join('\n');
-      return [...list, pluginId].join('\n');
-    });
-  };
-
   /* ─── Helpers ─── */
 
   const getCurrentModel = () => {
     if (!config?.primaryModel) return t('oc.summary.notConfigured', '未配置');
     const parts = config.primaryModel.split('/');
     return parts.length > 1 ? parts[1] : config.primaryModel;
-  };
-
-  const isPluginEnabled = (id: string) => {
-    const list = skillPluginsAllowText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    return list.includes(id);
   };
 
   const getConfigSummary = () => {
@@ -1451,7 +1352,7 @@ export default function OpenClaw() {
 
   const toggleAccordion = (key: typeof accordion) => {
     setAccordion((prev) => prev === key ? null : key);
-    if (key === 'model' || key === 'feishu' || key === 'skills') {
+    if (key === 'model' || key === 'feishu') {
       setConfigTab(key as ConfigTab);
     }
   };
@@ -1945,74 +1846,6 @@ export default function OpenClaw() {
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => runAction('pairing/reject', { channel: pairingChannel, code: pairingCode.trim() })} disabled={loading || !pairingCode.trim()}>{t('oc.pairing.reject', '拒绝')}</button>
                 </div>
                 <button type="button" className={`chip ${activeOp === 'pairing/list' ? 'active' : ''}`} onClick={() => runAction('pairing/list', { channel: pairingChannel })} disabled={loading} style={{ marginTop: 6, fontSize: '0.6875rem' }}>{t('oc.pairing.listPending', '查看待审批列表')}</button>
-              </div>
-            )}
-          </div>
-
-          {/* ── Skills Config ── */}
-          <div className="oc-accordion-item">
-            <AccTrigger id="skills" icon="extension" label={t('oc.skills.title', '技能 / 插件')} hint={boardSkills.length > 0 ? tf('oc.skills.hintCount', '{{n}} 个技能', { n: boardSkills.length }) : tf('oc.skills.hintPlugins', '{{n}} 个插件', { n: skillPluginsAllowText.split('\n').filter(Boolean).length })} />
-            {accordion === 'skills' && (
-              <div className="oc-accordion-content">
-                {boardSkills.length > 0 && (
-                  <>
-                    <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>{t('oc.skills.boardInstalled', '板端已安装技能')}</span>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={loadBoardSkills} style={{ fontSize: '0.5625rem', padding: '1px 4px' }}>{t('oc.skills.refresh', '刷新')}</button>
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                      {boardSkills.map((s) => {
-                        const parts = s.split('|');
-                        const name = parts[0] || s;
-                        const desc = (parts[2] || '').replace(/^"|"$/g, '').trim();
-                        return (
-                          <span key={s} className="chip active" title={desc || s} style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-                        );
-                      })}
-                    </div>
-                    <div className="divider" style={{ margin: '6px 0' }} />
-                  </>
-                )}
-                {boardPlugins.length > 0 && (
-                  <>
-                    <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>{t('oc.skills.boardPlugins', '板端已启用插件')}</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 6 }}>
-                      {boardPlugins.map((p) => {
-                        const name = p.split('|')[0] || p;
-                        return (
-                          <span key={p} className="chip active" title={p} style={{ fontSize: '0.625rem', padding: '2px 6px', cursor: 'default', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-                        );
-                      })}
-                    </div>
-                    <div className="divider" style={{ margin: '6px 0' }} />
-                  </>
-                )}
-                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>{t('oc.skills.installLabel', '安装技能')}</div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <input className="input" value={skillInstallName} onChange={(e) => setSkillInstallName(e.target.value)} placeholder={t('oc.skills.namePh', '技能名称')} onKeyDown={(e) => e.key === 'Enter' && handleInstallSkill()} style={{ flex: 1, fontSize: '0.75rem', padding: '5px 8px' }} />
-                  <button type="button" className="btn btn-primary btn-sm" onClick={() => { handleInstallSkill(); setTimeout(loadBoardSkills, 3000); }} disabled={skillInstalling || !skillInstallName.trim()} style={{ fontSize: '0.6875rem' }}>{skillInstalling ? t('oc.test.testing', '...') : t('oc.skills.install', '安装')}</button>
-                </div>
-                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {t('oc.skills.installHint', '手动安装会直接执行 clawhub install。复杂技能请用 RDKClaw「技能工坊」或对话生成 SKILL.md 并写入板端。')}
-                </div>
-                <div className="divider" style={{ margin: '8px 0' }} />
-                <div style={{ fontSize: '0.625rem', color: 'var(--text-muted)', marginBottom: 4 }}>{t('oc.skills.pluginToggle', '插件开关')}</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                  {pluginCatalog.map((p) => (
-                    <button key={p.id} className={`chip ${isPluginEnabled(p.id) ? 'active' : ''}`} onClick={() => togglePluginAllow(p.id)} style={{ fontSize: '0.625rem', padding: '2px 6px' }}>
-                      {p.emoji} {p.name} {isPluginEnabled(p.id) && '✓'}
-                    </button>
-                  ))}
-                </div>
-                <div style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', lineHeight: 1.45, marginTop: 6 }}>
-                  {t(
-                    'oc.skills.webSearchPolicy',
-                    '板端联网搜索：全新安装与在 Studio 保存本页配置时，若未指定引擎会自动写入 DuckDuckGo（免 Key）。要更高质量可在 ~/.openclaw/openclaw.json 将 tools.web.search.provider 改为 brave 并配置 BRAVE_API_KEY（及官方文档中的插件项）；中文检索可在对话中说明使用 country=CN、language=zh。',
-                  )}
-                </div>
-                <div className="oc-form-actions">
-                  <button type="button" className="btn btn-primary btn-sm" onClick={() => saveConfig('skills')} disabled={loading}>{loading ? t('oc.test.testing', '...') : t('oc.skills.savePlugins', '保存插件')}</button>
-                </div>
               </div>
             )}
           </div>

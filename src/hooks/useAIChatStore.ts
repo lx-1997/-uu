@@ -459,6 +459,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     watchdogProbeCount?: number;
     watchdogWaitLine?: string;
     watchdogHealthLine?: string;
+    boardStageStatusIndex?: number;
+    boardActiveTool?: string;
+    boardDoneCount?: number;
+    boardLastEventAt?: number;
+    boardLastEventText?: string;
+    boardTaskSummary?: string;
+    boardCollabLastPaintAt?: number;
   }>>({});
   const latestBoardToolRef = useRef<string | null>(null);
   /** 任意工具最近一次 tool_start 的 toolCallId；device_exec 等本地工具进度不能回退到 latestBoardToolRef */
@@ -630,6 +637,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       const generation = ++streamGenerationRef.current;
+      let stopOpenClawWatchdog: (() => void) | null = null;
       try {
         // /settings — quick command to open settings
         if (requestAttachments.length === 0 && userMsg === '/settings') {
@@ -1193,6 +1201,99 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const openclawActiveToolIds = new Set<string>();
         let openclawWatchdogTimer: number | null = null;
 
+        const toBoardPhaseLabel = (phase: string) => {
+          if (phase === 'start') return t('chat.board.phase.start', '开始执行');
+          if (phase === 'update') return t('chat.board.phase.update', '执行中');
+          if (phase === 'result') return t('chat.board.phase.result', '已完成');
+          if (phase === 'error') return t('chat.board.phase.error', '执行失败');
+          return t('chat.board.phase.unknown', '处理中');
+        };
+
+        const toBoardToolLabel = (tool: string) => {
+          const name = String(tool || '').trim().toLowerCase();
+          if (name === 'exec') return t('chat.board.tool.exec', '执行脚本');
+          if (name === 'edit') return t('chat.board.tool.edit', '修改文件');
+          if (name === 'read') return t('chat.board.tool.read', '读取文件');
+          if (name === 'search') return t('chat.board.tool.search', '检索信息');
+          if (name === 'process') return t('chat.board.tool.process', '处理数据');
+          if (name === 'analyze') return t('chat.board.tool.analyze', '分析结果');
+          return tool;
+        };
+
+        const summarizeBoardTask = (toolName: string, args: Record<string, unknown>) => {
+          const pick =
+            toolName === 'board_openclaw_chat'
+              ? String(args.message ?? '').trim()
+              : String(args.task ?? args.context ?? args.message ?? '').trim();
+          if (!pick) return '';
+          const firstLine = pick.split(/\r?\n/).map((x) => x.trim()).find(Boolean) || '';
+          return firstLine.length > 72 ? `${firstLine.slice(0, 70)}...` : firstLine;
+        };
+
+        const parseBoardToolEvents = (raw: string) => {
+          const events: Array<{ phase: 'start' | 'update' | 'result' | 'error'; tool: string }> = [];
+          for (const line of raw.split(/\r?\n/)) {
+            const m = line.trim().match(/^\[TOOL:(start|update|result|error)\]\s*([^\s]+)/i);
+            if (!m) continue;
+            events.push({
+              phase: m[1].toLowerCase() as 'start' | 'update' | 'result' | 'error',
+              tool: m[2],
+            });
+          }
+          return events;
+        };
+
+        const humanizeBoardToolLine = (line: string) => {
+          const m = line.trim().match(/^\[TOOL:(start|update|result|error)\]\s*([^\s]+)(?:\s*×(\d+))?$/i);
+          if (!m) return line;
+          const phase = m[1].toLowerCase();
+          const tool = m[2];
+          const times = m[3] ? ` ×${m[3]}` : '';
+          return tf('chat.board.toolLine', '步骤 {{tool}} · {{phase}}{{times}}', {
+            tool: toBoardToolLabel(tool),
+            phase: toBoardPhaseLabel(phase),
+            times,
+          });
+        };
+
+        const upsertBoardStageStatus = (state: {
+          boardStageStatusIndex?: number;
+          boardActiveTool?: string;
+          boardDoneCount?: number;
+          boardLastEventAt?: number;
+          boardLastEventText?: string;
+          boardTaskSummary?: string;
+        }) => {
+          const now = Date.now();
+          const activeTool = state.boardActiveTool || t('chat.board.active.none', '等待板端返回步骤');
+          const done = state.boardDoneCount ?? 0;
+          const lastAt = state.boardLastEventAt ?? now;
+          const sec = Math.max(0, Math.floor((now - lastAt) / 1000));
+          const recent = state.boardLastEventText || t('chat.board.recent.none', '尚未收到板端步骤事件');
+          const taskSummary = state.boardTaskSummary || t('chat.board.task.none', '按上文目标执行');
+          const block = {
+            type: 'status' as const,
+            collapsible: true,
+            defaultCollapsed: false,
+            summary: t('chat.board.summary', '板端执行看板'),
+            items: [
+              { label: t('chat.board.task', '目标任务'), value: taskSummary, ok: true },
+              { label: t('chat.board.active', '当前步骤'), value: activeTool, ok: true },
+              { label: t('chat.board.done', '已完成步骤'), value: String(done), ok: true },
+              { label: t('chat.board.recent', '最近更新'), value: `${sec}s · ${recent}`, ok: true },
+            ],
+          };
+          if (typeof state.boardStageStatusIndex === 'number') {
+            const existing = aiBlocks[state.boardStageStatusIndex];
+            if (existing?.type === 'status') {
+              aiBlocks[state.boardStageStatusIndex] = block;
+              return;
+            }
+          }
+          state.boardStageStatusIndex = aiBlocks.length;
+          pushAiBlock(block);
+        };
+
         const upsertOpenClawWatchdogHint = (
           state: {
             waitHintCollabIndex?: number;
@@ -1232,7 +1333,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           updateAiMessage(aiText, aiBlocks);
         };
 
-        const stopOpenClawWatchdog = () => {
+        stopOpenClawWatchdog = () => {
           if (openclawWatchdogTimer != null) {
             window.clearInterval(openclawWatchdogTimer);
             openclawWatchdogTimer = null;
@@ -1244,7 +1345,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           if (openclawWatchdogTimer != null) return;
           openclawWatchdogTimer = window.setInterval(() => {
             if (generation !== streamGenerationRef.current) {
-              stopOpenClawWatchdog();
+              stopOpenClawWatchdog?.();
               return;
             }
             const now = Date.now();
@@ -1311,7 +1412,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 });
             }
             if (openclawActiveToolIds.size === 0) {
-              stopOpenClawWatchdog();
+              stopOpenClawWatchdog?.();
             }
           }, OPENCLAW_WATCHDOG_TICK_MS);
         };
@@ -1627,8 +1728,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   st.watchdogLastProbeAt = 0;
                   st.watchdogProbePending = false;
                   st.watchdogProbeCount = 0;
+                  st.boardTaskSummary = summarizeBoardTask(toolName, args);
+                  st.boardDoneCount = 0;
+                  st.boardLastEventAt = st.startedAt;
+                  st.boardLastEventText = t('chat.board.recent.waiting', '已发起任务，等待板端步骤事件');
+                  st.boardCollabLastPaintAt = 0;
                   openclawActiveToolIds.add(toolCallId);
                   ensureOpenClawWatchdog();
+                  upsertBoardStageStatus(st);
                 }
                 if (isBoardOpenClawCollabTool(toolName)) {
                   latestBoardToolRef.current = toolCallId;
@@ -1691,6 +1798,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   isBoardOpenClawCollabTool(toolName) || state.executor === 'board_openclaw';
                 if (isBoardOpenClaw) {
                   state.watchdogLastNoticeAt = Date.now();
+                  const boardEvents = parseBoardToolEvents(rawChunk);
+                  if (boardEvents.length > 0) {
+                    for (const evt of boardEvents) {
+                      if (evt.phase === 'start' || evt.phase === 'update') {
+                        state.boardActiveTool = toBoardToolLabel(evt.tool);
+                      }
+                      if (evt.phase === 'result' || evt.phase === 'error') {
+                        state.boardDoneCount = (state.boardDoneCount ?? 0) + 1;
+                      }
+                      state.boardLastEventAt = Date.now();
+                      state.boardLastEventText = tf('chat.board.recent.event', '{{tool}} · {{phase}}', {
+                        tool: toBoardToolLabel(evt.tool),
+                        phase: toBoardPhaseLabel(evt.phase),
+                      });
+                    }
+                    upsertBoardStageStatus(state);
+                  }
                   if (toolName === 'board_openclaw_chat' && progressSource === 'studio_wait') {
                     const more = rawChunk.split('\n').map((l) => l.trimEnd()).filter((l) => l.length > 0);
                     if (typeof state.waitHintCollabIndex === 'number') {
@@ -1721,14 +1845,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     const collabBlock = aiBlocks[state.collabIndex];
                     if (collabBlock?.type === 'collab' && collabBlock.side === 'openclaw') {
                       state.openclawStreamBuf = (state.openclawStreamBuf ?? '') + rawChunk;
-                      const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));
-                      collabBlock.lines = bufLines.length > 240 ? bufLines.slice(-240) : bufLines;
+                      const now = Date.now();
+                      const shouldRender =
+                        /\[TOOL:(start|result|error)\]/i.test(rawChunk)
+                        || now - (state.boardCollabLastPaintAt ?? 0) > 1200;
+                      if (shouldRender) {
+                        const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));
+                        const readable = bufLines.map(humanizeBoardToolLine);
+                        collabBlock.lines = readable.length > 240 ? readable.slice(-240) : readable;
+                        state.boardCollabLastPaintAt = now;
+                      }
                     }
                   } else {
                     state.collabIndex = aiBlocks.length;
                     state.openclawStreamBuf = rawChunk;
                     const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));
-                    const lines = bufLines.length > 240 ? bufLines.slice(-240) : bufLines;
+                    const readable = bufLines.map(humanizeBoardToolLine);
+                    const lines = readable.length > 240 ? readable.slice(-240) : readable;
                     pushAiBlock({
                       type: 'collab',
                       side: 'openclaw',
@@ -1790,7 +1923,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const elapsedMs = state ? Date.now() - state.startedAt : 0;
                 if (state?.executor === 'board_openclaw' && toolCallId) {
                   openclawActiveToolIds.delete(toolCallId);
-                  if (openclawActiveToolIds.size === 0) stopOpenClawWatchdog();
+                  if (openclawActiveToolIds.size === 0) stopOpenClawWatchdog?.();
                 }
                 if (state && !state.hiddenQuick && state.statusIndex >= 0) {
                   const statusBlock = aiBlocks[state.statusIndex];
@@ -2465,7 +2598,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         }
         setAiTyping(false);
       } finally {
-        stopOpenClawWatchdog();
+        stopOpenClawWatchdog?.();
         if (generation === streamGenerationRef.current) {
           streamAbortRef.current = null;
           currentRunIdRef.current = '';

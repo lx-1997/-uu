@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
@@ -9,12 +9,16 @@ import { fetchApi } from '../utils/apiBase';
 import skillCenterManifestJson from '../skill-center/manifest.json';
 import type { SkillCenterManifest, SkillCenterItem } from '../skill-center/types';
 
+type StudioApiSkillRow = { folder?: string; name?: string; description?: string };
+
 const skillCenterManifest = skillCenterManifestJson as SkillCenterManifest;
+
+/** `/api/skills` 进程内短缓存：避免在「技能中心 ↔ 板端」间反复切换时重复拉列表 */
+let studioSkillsApiCache: { at: number; rows: StudioApiSkillRow[] } | null = null;
+const STUDIO_SKILLS_LIST_TTL_MS = 120_000;
 
 /** 未在 manifest.json 单独分类的 skills/ 条目归入此类（筛选下拉中展示） */
 const STUDIO_BUNDLED_CATEGORY_ID = 'studio-bundled';
-
-type StudioApiSkillRow = { folder?: string; name?: string; description?: string };
 
 interface OpenClawSkillsPayload {
   ok?: boolean;
@@ -401,11 +405,14 @@ export default function SkillBrowser() {
     return () => document.removeEventListener('keydown', onKey);
   }, [confirmAction]);
 
+  const deferredSearch = useDeferredValue(search);
+  const deferredCenterSearch = useDeferredValue(centerSearch);
+
   const filteredBoardSkills = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
     if (!q) return boardSkills;
     return boardSkills.filter((s) => s.toLowerCase().includes(q));
-  }, [boardSkills, search]);
+  }, [boardSkills, deferredSearch]);
 
   const manifestByFolder = useMemo(
     () => new Map(skillCenterManifest.items.map((it) => [it.folder, it])),
@@ -445,16 +452,21 @@ export default function SkillBrowser() {
   }, [centerCatalogItems, t]);
 
   const filteredCenterItems = useMemo(() => {
-    const q = centerSearch.trim().toLowerCase();
+    const q = deferredCenterSearch.trim().toLowerCase();
     return centerCatalogItems.filter((it) => {
       if (centerCategory !== 'all' && it.category !== centerCategory) return false;
       if (!q) return true;
       return it.folder.toLowerCase().includes(q) || it.title.toLowerCase().includes(q);
     });
-  }, [centerSearch, centerCategory, centerCatalogItems]);
+  }, [deferredCenterSearch, centerCategory, centerCatalogItems]);
 
   useEffect(() => {
     if (hubMode !== 'center' || centerSub !== 'catalog') return;
+    const now = Date.now();
+    if (studioSkillsApiCache && now - studioSkillsApiCache.at < STUDIO_SKILLS_LIST_TTL_MS) {
+      setStudioApiSkills(studioSkillsApiCache.rows);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -463,7 +475,9 @@ export default function SkillBrowser() {
         if (!res.ok || cancelled) return;
         const list = data.skills ?? [];
         if (cancelled) return;
-        setStudioApiSkills(Array.isArray(list) ? list : []);
+        const rows = Array.isArray(list) ? list : [];
+        studioSkillsApiCache = { at: Date.now(), rows };
+        setStudioApiSkills(rows);
       } catch {
         if (!cancelled) setStudioApiSkills(null);
       }
