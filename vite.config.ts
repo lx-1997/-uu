@@ -26,6 +26,13 @@ export default defineConfig(({ mode }) => {
     define: {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
       'import.meta.env.VITE_APP_BUILD_DATE': JSON.stringify(buildDate),
+      /**
+       * 开发态 Socket.IO 直连后端（与 PORT/.env 一致），避免经 Vite 代理时 Engine.IO WebSocket 升级反复失败、界面卡在依赖实时通道的步骤。
+       * /api 仍走 server.proxy；仅 socket.io-client 使用此 origin（CORS 与 Cookie 与 fetch 到 localhost:PORT 一致）。
+       */
+      'import.meta.env.VITE_SOCKET_URL': JSON.stringify(
+        mode === 'development' ? `http://localhost:${apiPort}` : '',
+      ),
     },
     plugins: [react()],
     server: {

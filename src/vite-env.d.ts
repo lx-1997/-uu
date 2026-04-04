@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_APP_VERSION: string;
   /** 构建 UTC 日期 YYYY-MM-DD */
   readonly VITE_APP_BUILD_DATE: string;
+  /** 仅 Vite 开发构建注入：Socket.IO 直连后端 origin，空串表示走页面同源 */
+  readonly VITE_SOCKET_URL?: string;
 }
 
 interface ImportMeta {

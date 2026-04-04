@@ -805,13 +805,58 @@ const NPM_UPGRADE_CMD = [
   'echo "[OpenClaw] 升级完成"',
 ].join(' && ');
 
-/** 解析 nmcli WiFi 列表 stdout；排除表头与隐藏网占位「--」 */
-function parseWifiSsidsFromNmcliOutput(output: string): string[] {
+/**
+ * 解析 `nmcli -t -f SSID device wifi list`：每行一个 SSID，或 `SSID:名称`。
+ * 排除表头、隐藏网占位「--」。
+ */
+function parseWifiSsidsTerse(output: string): string[] {
   const names = (output || '')
     .split(/\r?\n/)
-    .map((s) => s.trim())
+    .map((s) => {
+      let t = s.trim();
+      if (t.startsWith('SSID:')) t = t.slice(5).trim();
+      return t;
+    })
     .filter((s) => s && s !== 'SSID' && s !== '--');
   return [...new Set(names)];
+}
+
+/** 匹配 BSSID（MAC），用于在表格行中定位 SSID 列（避免 IN-USE 为空时按列分割错位） */
+const NMCLI_WIFI_MAC_RE = /\b([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b/;
+
+/**
+ * 解析 `nmcli device wifi list` 表格（与终端一致）：在 BSSID 之后、MODE 等之前取 SSID。
+ */
+function parseWifiSsidsFromNmcliTable(output: string): string[] {
+  const lines = (output || '').split(/\r?\n/).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''));
+  const names: string[] = [];
+  let sawHeader = false;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    if (/\bSSID\b/.test(line) && /\bBSSID\b/.test(line)) {
+      sawHeader = true;
+      continue;
+    }
+    if (!sawHeader) continue;
+    const m = line.match(NMCLI_WIFI_MAC_RE);
+    if (!m || m.index === undefined) continue;
+    const afterMac = line.slice(m.index + m[0].length).trim();
+    const parts = afterMac.split(/\s{2,}/);
+    const ssid = parts[0]?.trim();
+    if (ssid && ssid !== '--') names.push(ssid);
+  }
+  return [...new Set(names)];
+}
+
+/**
+ * 含 IN-USE/BSSID/SSID 表头时必须先走表格解析；若先走 terse 会把整行误当成 SSID。
+ */
+function parseWifiSsidsFromNmcliOutput(output: string): string[] {
+  const text = output || '';
+  if (/\bSSID\b/.test(text) && /\bBSSID\b/.test(text)) {
+    return parseWifiSsidsFromNmcliTable(text);
+  }
+  return parseWifiSsidsTerse(text);
 }
 
 export class OpenClawDeploymentManager {
@@ -1862,13 +1907,15 @@ print(json.dumps(result,ensure_ascii=False))`;
     onResult: (wifiNames: string[], success: boolean, errorHint?: string) => void,
   ): void {
     /**
-     * 使用 bash --noprofile --norc 避免用户 ~/.bashrc 里 `set -o pipefail` 导致管道中任一步非零即整体失败，
-     * 进而 SSH exec 退出码非 0、原逻辑丢弃全部 stdout，界面显示「未扫描到网络」。
-     * LANG=C 避免本地化表头与 awk 不匹配；list 与 rescan 均走 sudo，与板端手动 nmcli 权限一致。
+     * 与用户在终端执行的一致：`nmcli device wifi list`（LANG=C 保证表头为 SSID/BSSID，便于解析）。
+     * 不用 awk 管道；优先当前用户 nmcli，失败再 `sudo -n`。
      */
-    const inner =
-      'LANG=C LC_ALL=C sudo nmcli device wifi rescan 2>/dev/null; sleep 2; LANG=C LC_ALL=C sudo nmcli -f SSID device wifi list 2>/dev/null | awk \'NR>1 {gsub(/^[[:space:]]+|[[:space:]]+$/,""); if($0!="" && $0!="--") print $0}\' | sort -u';
-    const cmd = `bash --noprofile --norc -c ${JSON.stringify(inner)}`;
+    const cmd =
+      'bash --noprofile --norc -c ' +
+      JSON.stringify(
+        'LANG=C LC_ALL=C; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 3; ' +
+          'nmcli device wifi list 2>/dev/null || sudo -n nmcli device wifi list 2>/dev/null',
+      );
     let output = '';
     this.execCommand(device, cmd, (chunk) => { output += chunk; }, (success) => {
       const names = parseWifiSsidsFromNmcliOutput(output);
@@ -1880,7 +1927,7 @@ print(json.dumps(result,ensure_ascii=False))`;
         const sshAuthFail = /SSH Error|\[ERROR\]|All configured authentication methods failed/i.test(output);
         const hint = sshAuthFail
           ? `SSH 未连上板端（当前使用端口 ${device.port ?? 22}）。经 frp 时请确认设备档案里 SSH 端口为映射端口（如 6000），并已重启 Studio 后端使修复生效。`
-          : undefined;
+          : '板端 WiFi 扫描失败：请确认已安装 NetworkManager、当前 SSH 用户可执行 nmcli（或已配置免密 sudo），并可在板上手动执行 nmcli device wifi list 对比。';
         onResult([], false, hint);
         return;
       }
@@ -1899,19 +1946,24 @@ print(json.dumps(result,ensure_ascii=False))`;
     const pwdB64 = Buffer.from(wifiPassword || '').toString('base64');
 
     // WIFI_SSID / WIFI_KEY avoid clashing with bash built-in $PWD
-    // Delete ALL matching connections (loop) to prevent "Secrets" reuse bug
-    // Use nmcli connection add with security inline (no separate modify step)
+    // 用 printf 解码 base64，避免 echo 附加换行导致 WIFI_KEY 为空。
+    // 无 TTY 时 nmcli 不能用 --ask；man nmcli「connection up」规定 passwd-file 每行格式为
+    //   setting_name.property_name:密码（冒号分隔，不是 =），见 nmcli(1) passwd-file 说明。
+    // 竞品/无头场景常见做法：profile 写入 PSK + activation 时 passwd-file 再喂一次密钥，避免仅 add 时未落盘导致激活缺 secret。
     const script = [
-      `WIFI_SSID=$(echo '${nameB64}' | base64 -d)`,
-      `WIFI_KEY=$(echo '${pwdB64}' | base64 -d)`,
+      `WIFI_SSID=$(printf '%s' '${nameB64}' | base64 -d)`,
+      `WIFI_KEY=$(printf '%s' '${pwdB64}' | base64 -d)`,
+      `WIFI_IF=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" { print $1; exit }')`,
+      `[ -z "$WIFI_IF" ] && WIFI_IF=wlan0`,
       `echo "[WiFi] 清理所有同名旧连接..."`,
       `while sudo nmcli con delete "$WIFI_SSID" 2>/dev/null; do true; done`,
       `echo "[WiFi] 扫描网络..."`,
       `sudo nmcli device wifi rescan 2>/dev/null; sleep 2`,
-      `echo "[WiFi] 正在连接 $WIFI_SSID ..."`,
-      `if command -v wifi_connect >/dev/null 2>&1; then sudo wifi_connect "$WIFI_SSID" "$WIFI_KEY" 2>&1; else sudo nmcli device wifi connect "$WIFI_SSID" password "$WIFI_KEY" ifname wlan0 2>&1; fi`,
+      `echo "[WiFi] 正在连接 $WIFI_SSID (iface=$WIFI_IF) ..."`,
+      `if [ -n "$WIFI_KEY" ]; then sudo nmcli connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" 802-11-wireless-security.key-mgmt wpa-psk 802-11-wireless-security.psk "$WIFI_KEY" ipv4.method auto ipv6.method auto 2>&1; else sudo nmcli connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" 802-11-wireless-security.key-mgmt none ipv4.method auto ipv6.method auto 2>&1; fi`,
+      `if [ -n "$WIFI_KEY" ]; then NM_PWFILE=$(mktemp /tmp/nm-wifi-XXXXXX.pass); chmod 600 "$NM_PWFILE"; printf '802-11-wireless-security.psk:%s\\n' "$WIFI_KEY" > "$NM_PWFILE"; sudo nmcli connection up "$WIFI_SSID" ifname "$WIFI_IF" passwd-file "$NM_PWFILE" 2>&1; rm -f "$NM_PWFILE"; else sudo nmcli connection up "$WIFI_SSID" ifname "$WIFI_IF" 2>&1; fi`,
       `sleep 3`,
-      `NEW_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP "inet \\\\K[\\\\d.]+" || true)`,
+      `NEW_IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)`,
       `if [ -n "$NEW_IP" ]; then echo "[WiFi] OK IP=$NEW_IP"; else echo "[WiFi] FAIL"; fi`,
     ].join(' ; ');
 
