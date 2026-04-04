@@ -1201,6 +1201,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         const openclawActiveToolIds = new Set<string>();
         let openclawWatchdogTimer: number | null = null;
 
+        const openclawCollabSubtitle =
+          currentDevice?.ip
+            ? tf('dock.collab.openclawSubtitleWithIp', '与 RDKClaw 协作 · 当前设备 {{ip}}（与 SSH 一致）', {
+                ip: currentDevice.ip,
+              })
+            : t('dock.collab.openclawSubtitle', '与 RDKClaw 协作中的回复');
+
         const toBoardPhaseLabel = (phase: string) => {
           if (phase === 'start') return t('chat.board.phase.start', '开始执行');
           if (phase === 'update') return t('chat.board.phase.update', '执行中');
@@ -1244,16 +1251,41 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         };
 
         const humanizeBoardToolLine = (line: string) => {
-          const m = line.trim().match(/^\[TOOL:(start|update|result|error)\]\s*([^\s]+)(?:\s*×(\d+))?$/i);
-          if (!m) return line;
-          const phase = m[1].toLowerCase();
-          const tool = m[2];
-          const times = m[3] ? ` ×${m[3]}` : '';
-          return tf('chat.board.toolLine', '步骤 {{tool}} · {{phase}}{{times}}', {
-            tool: toBoardToolLabel(tool),
-            phase: toBoardPhaseLabel(phase),
-            times,
-          });
+          const trimmed = line.trim();
+          const m = trimmed.match(/^\[TOOL:(start|update|result|error)\]\s*([^\s]+)(?:\s*×(\d+))?$/i);
+          if (m) {
+            const phase = m[1].toLowerCase();
+            const rawTool = m[2];
+            const times = m[3] ? ` ×${m[3]}` : '';
+            const toolLabel = toBoardToolLabel(rawTool);
+            const phaseLabel = toBoardPhaseLabel(phase);
+            const hint =
+              phase === 'result'
+                ? t('chat.board.phaseHint.result', '该子步骤已结束')
+                : phase === 'error'
+                  ? t('chat.board.phaseHint.error', '该子步骤失败')
+                  : phase === 'start'
+                    ? t('chat.board.phaseHint.start', '板端已开始该步骤')
+                    : t('chat.board.phaseHint.update', '进行中');
+            return tf(
+              'chat.board.toolLineDetailed',
+              '「{{toolLabel}}」（{{rawTool}}）· {{phase}}{{times}} — {{hint}}',
+              {
+                toolLabel,
+                rawTool,
+                phase: phaseLabel,
+                times,
+                hint,
+              },
+            );
+          }
+          if (/^https?:\/\//i.test(trimmed)) {
+            return tf('chat.board.lineUrl', '链接：{{url}}', { url: trimmed.slice(0, 220) });
+          }
+          if (trimmed.length > 140) {
+            return tf('chat.board.lineOut', '输出摘录：{{snippet}}', { snippet: trimmed.slice(0, 220) });
+          }
+          return line;
         };
 
         const upsertBoardStageStatus = (state: {
@@ -1866,7 +1898,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       type: 'collab',
                       side: 'openclaw',
                       title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
-                      subtitle: t('dock.collab.openclawSubtitle', '与 RDKClaw 协作中的回复'),
+                      subtitle: openclawCollabSubtitle,
                       lines,
                       collapsible: true,
                       previewLines: 8,
@@ -2213,7 +2245,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       type: 'collab',
                       side: 'openclaw',
                       title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
-                      subtitle: t('dock.collab.openclawSubtitle', '与 RDKClaw 协作中的回复'),
+                      subtitle: openclawCollabSubtitle,
                       lines: cleaned.split('\n').slice(0, 80),
                       collapsible: true,
                       previewLines: 8,

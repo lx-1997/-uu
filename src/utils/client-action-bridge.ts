@@ -5,7 +5,7 @@
  *   <client-action name="openBrowser" payload="https://www.baidu.com" />
  *   <client-action name="closeBrowser" />
  */
-import { dispatchStudioAgentWebClose, dispatchStudioAgentWebOpen } from './studio-agent-web';
+import { dispatchStudioAgentWebClose } from './studio-agent-web';
 
 const CLIENT_ACTION_BLOCK_RE = /<client-action\b([^>]*)\s*(?:\/>|>[\s\S]*?<\/client-action\s*>)/gi;
 
@@ -31,7 +31,7 @@ function coerceHttpPageUrl(raw: string): string | null {
   }
 }
 
-/** 与 studio_open_url 一致：优先独立可缩放窗口，失败再内嵌 */
+/** 与 studio_open_url 一致：优先独立可缩放弹窗；失败则用系统浏览器新标签，不再回退主窗口内嵌（避免顶栏「内嵌网页」占满主界面） */
 async function openBrowserForClientAction(url: string): Promise<void> {
   const rdk =
     typeof window !== 'undefined'
@@ -47,10 +47,10 @@ async function openBrowserForClientAction(url: string): Promise<void> {
     const r = await rdk.openAgentBrowserPopup(url);
     if (r?.ok) return;
   }
-  if (rdk?.openUrl) {
-    rdk.openUrl(url);
-    rdk.setActiveUrl?.(url);
-    dispatchStudioAgentWebOpen(url);
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch {
+    /* ignore */
   }
 }
 

@@ -7,7 +7,8 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Server as SocketIOServer } from "socket.io";
-import type { Tool } from "./agent/tools/types.js";
+import type { Tool, ToolContext } from "./agent/tools/types.js";
+import { rewriteUrlForStudioDevice } from "./device-url-rewrite.js";
 import { assertStudioClientOpenUrlAllowed } from "./agent/tools/browser-tools.js";
 import { buildStudioOpenLocalPreviewTool } from "./studio-local-preview.js";
 
@@ -190,7 +191,7 @@ function studioOpenUrlTool(): Tool<{ url: string }> {
   return {
     name: "studio_open_url",
     description:
-      "【RDK Studio 桌面端】用户说「打开某网页/网站」时**必须调用本工具**（默认可缩放的独立浏览窗口，约为屏幕约六成、系统标题栏可关；失败时回退主窗口内嵌）。不等待抓取。不受 studio-browser-capture.json 白名单限制。**允许** `http(s)://` 局域网/板卡 IP（如 192.168.x.x、10.x、与 SSH 同网段），由用户本机浏览器打开，非服务端代请求。失败时回显工具返回值；勿编造「内网禁止」。纯 Web 时走新标签。要登录后抓正文给 Agent 用 studio_embedded_browser_capture。",
+      "【RDK Studio 桌面端】用户说「打开某网页/网站」时**必须调用本工具**（默认可缩放的独立浏览窗口；失败时用系统浏览器新标签，**不再**塞进主窗口内嵌）。不等待抓取。不受 studio-browser-capture.json 白名单限制。**允许** `http(s)://` 局域网/板卡 IP；若模型写错私网 IP，服务端会尽量按当前会话设备的 SSH host 修正后再打开。要登录后抓正文给 Agent 用 studio_embedded_browser_capture。",
     inputSchema: {
       type: "object",
       properties: {
@@ -198,15 +199,16 @@ function studioOpenUrlTool(): Tool<{ url: string }> {
       },
       required: ["url"],
     },
-    async execute(input) {
+    async execute(input, ctx: ToolContext) {
       if (!ioRef) {
         return "studio_open_url 失败：Socket.IO 未初始化，无法通知界面打开。";
       }
       try {
         const safe = assertStudioClientOpenUrlAllowed(coerceHttpUrlInput(String(input.url || "")));
-        const url = safe.toString();
+        let url = safe.toString();
+        url = await rewriteUrlForStudioDevice(url, ctx.studioDeviceId);
         emitStudioOpenUrlToClients(url);
-        return `studio_open_url_ok: 已请求打开 ${url}（桌面端默认可缩放独立窗口；失败时可能回退内嵌。若未看见请确认已用 RDK Studio 桌面包且前端已连上 Socket）。`;
+        return `studio_open_url_ok: 已请求打开 ${url}（桌面端默认可缩放独立窗口；失败时用系统浏览器新标签。若未看见请确认已用 RDK Studio 桌面包且前端已连上 Socket）。`;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return `studio_open_url 失败：${msg}`;

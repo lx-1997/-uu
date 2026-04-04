@@ -14,7 +14,7 @@ export function buildToolContractQuickOverviewPrompt(): string {
     "工作区开局：按需 `read` **AGENTS.md → USER.md**（及 HEARTBEAT/MEMORY）；**SOUL.md 已由工作区初始化提供**，与系统人格一致，勿编造路径去读不存在的文件。",
     "打开网页：`studio_open_url`（**内置工具，非 Skill**）；勿为开网页先 `find_skills`。",
     "板端多步/技能链用 `board_openclaw_assess`→`delegate`；单条命令勿委派。",
-    "相机/视觉 demo：先探测 USB/MIPI（`/dev/video*`、`v4l2-ctl`、`lsusb`）再设 `CAM_TYPE` 与 launch。",
+    "相机/视觉 demo：先探测 USB/MIPI（`/dev/video*`、`v4l2-ctl`、`lsusb`）再设 `CAM_TYPE` 与 launch；**同一错误重复 2 次**须先 `web_fetch` rdk_doc（见索引 `usb_camera` / `video_input`），勿死循环重试。",
     "回复用户：结论先行、短段落；非必要不落长清单。",
   ].join("\n");
 }
@@ -80,6 +80,11 @@ export function buildToolContractOverviewPrompt(): string {
     "- `device_file_write` 报错：解析路径/权限/前缀；改到允许目录或先建目录；仍禁止 echo 逐行拼长文件。",
     "- SSH 失败：**不等价于设备离线**；可重试或换命令；勿因单次失败切换设备。",
     "- OpenClaw 返回 `[NEED_RDKCLAW]`：按协作节补信息后 `board_openclaw_chat`。",
+    "",
+    "### 陷入循环或重复失败（须查文档 + 释资源）",
+    "- **触发**：同一 stderr/退出码在 **2 轮内重复**，或 `hobot_usb_cam` / `ros2 launch` 连续崩溃（例：`terminate called after throwing`、`exit code -6` / SIGABRT）。**禁止**不读文档、只改同一行命令反复试。",
+    "- **先取证**：**`web_fetch`** `developer.d-robotics.cc/rdk_doc` 中与任务对应的章节（优先从仓库 **`server/rdkclaw/rdk-doc-url-index.md`** 选 URL：USB 相机 → **`Basic_Application/vision/usb_camera`**；视频输入与管线 → **`Advanced_development/multimedia_development/video_input`**）；必要时 **`web_search`** `site:developer.d-robotics.cc` + 包名/节点名/错误片段。",
+    "- **怀疑进程/设备未释放**（上一轮被 kill 后下一跑起不来）：用 `device_exec` 在板上查 `ros2 node list`、`ps aux | grep -E 'hobot_usb|ros2'`、`lsof /dev/video*` 或 `fuser -v /dev/video0`；无残留后再 launch。若仍有占用：按文档或安全地 `pkill -f hobot_usb_cam` / 结束对应 launch，**勿**在 `/dev/video*` 仍被占用时反复启动。",
     "",
     "### 工具说明字段怎么用",
     "各工具的 `description` / `inputSchema` 同样是给你选参用的契约；**以「何时调用、与谁互斥、返回何意」为准**，不是产品宣传语。",

@@ -2,8 +2,6 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import io from 'socket.io-client';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { fetchApi } from '../utils/apiBase';
-import { dispatchStudioAgentWebOpen } from '../utils/studio-agent-web';
-
 function coerceStudioWebUrl(raw: string): string {
   const u = String(raw || '').trim();
   if (!u) return '';
@@ -18,20 +16,15 @@ function openCaptureEmbedInMain(url: string) {
   if (rdk?.openUrl) {
     rdk.openUrl(url);
     rdk.setActiveUrl?.(url);
-    dispatchStudioAgentWebOpen(url);
   }
 }
 
-/** studio_open_url：桌面端优先独立 BrowserWindow（默认可缩放、非全屏、系统关闭）；失败再回退主窗口内嵌或 window.open */
+/** studio_open_url：桌面端优先独立弹窗；失败用新标签打开，不再把页面塞进主窗口（避免顶栏内嵌条与主界面被 WebView 占满） */
 async function openStudioAgentBrowsePopup(url: string) {
   const rdk = window.rdkDesktop;
   if (rdk?.openAgentBrowserPopup) {
     const r = await rdk.openAgentBrowserPopup(url);
     if (r?.ok) return;
-  }
-  if (rdk?.openUrl) {
-    openCaptureEmbedInMain(url);
-    return;
   }
   try {
     window.open(url, '_blank', 'noopener,noreferrer');

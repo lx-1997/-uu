@@ -6,6 +6,12 @@
 > **S100 独立文档区根**：`https://developer.d-robotics.cc/rdk_doc/rdk_s/`  
 > 已过滤侧栏中无效的 `.md` 直链；并剔除 OSS 上 **无索引页** 的目录 URL（如 `.../Robot_development/quick_start`、`.../boxs` 本体，子页面仍保留）。
 
+### 排障速查（Agent：重复失败或 `hobot_usb`/V4L2 异常时优先 `web_fetch`）
+
+- **USB 相机 / V4L2 / 官方示例**：见下节 **Basic Application / vision / usb camera**（及 **pydev demo / usb camera sample**）。
+- **视频输入、编解码管线**：见下节 **Advanced development / multimedia / video_input**（及 `video_decode` / `video_processing`）。
+- **仍无章节可对照**：`web_search` 用 `site:developer.d-robotics.cc` + 包名或节点名（如 `hobot_usb_cam`），再对命中 URL 做 `web_fetch`。
+
 ### 官网主导航与产品线（对照侧栏）
 
 - **1 快速开始** → `Quick_start/`；**RDK X3 / X5 / Ultra** 硬件与烧录见其中 `hardware_introduction`、`install_os`；**RDK S100** 使用独立树 `rdk_s/Quick_start/`、`rdk_s/02_install_os/` 等。

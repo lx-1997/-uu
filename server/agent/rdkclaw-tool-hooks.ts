@@ -7,7 +7,7 @@ import type { PostToolUseHook } from './tool-hooks.js';
 import type { Tool } from './tools/types.js';
 import { assertStudioClientOpenUrlAllowed } from './tools/browser-tools.js';
 import { emitStudioOpenUrlToClients } from '../studio-browser-capture.js';
-import { readDevices } from '../storage.js';
+import { rewriteUrlForStudioDevice } from '../device-url-rewrite.js';
 import {
   SHELL_SOFT_FAILURE_TOOL_NAMES,
   appendShellContinueHint,
@@ -58,22 +58,6 @@ const createMutationSessionEchoHook = (): PostToolUseHook => ({
 
 const URL_IN_TEXT = /https?:\/\/[^\s\)\]\"'<>]+/gi;
 
-async function rewriteLocalhostUrlForStudio(url: string, studioDeviceId?: string): Promise<string> {
-  const u = url.trim();
-  if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(u)) {
-    return u;
-  }
-  if (!studioDeviceId?.trim()) return u;
-  try {
-    const devices = await readDevices();
-    const d = devices.find((x) => x.id === studioDeviceId.trim());
-    if (!d?.host) return u;
-    return u.replace(/127\.0\.0\.1|localhost/i, d.host);
-  } catch {
-    return u;
-  }
-}
-
 /** `exec` / `device_exec` 在命令非零退出时常以**文本**返回（不抛错），PostFailure 钩子不会触发；此处统一追加「须继续」编排提示。 */
 const createShellSoftFailureContinueHintHook = (): PostToolUseHook => ({
   name: 'rdkclaw-shell-soft-failure-continue-hint',
@@ -105,7 +89,7 @@ const createAutoOpenDeviceDashboardUrlHook = (): PostToolUseHook => ({
       try {
         const safe = assertStudioClientOpenUrlAllowed(candidate);
         const url = safe.toString();
-        const forStudio = await rewriteLocalhostUrlForStudio(url, ctx.studioDeviceId);
+        const forStudio = await rewriteUrlForStudioDevice(url, ctx.studioDeviceId);
         emitStudioOpenUrlToClients(forStudio);
         opened.push(forStudio);
         if (opened.length >= 2) break;

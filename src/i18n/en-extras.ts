@@ -24,6 +24,16 @@ export const EN_EXTRAS: Record<string, string> = {
   'api.err.abortedWrap': '{{msg}} · {{hint}}',
   'api.err.abortedHint': 'Request was interrupted; you can retry',
 
+  'dock.collab.openclawSubtitleWithIp': 'Working with RDKClaw · device {{ip}} (same as SSH host)',
+  'chat.board.toolLineDetailed':
+    '「{{toolLabel}}」({{rawTool}}) · {{phase}}{{times}} — {{hint}}',
+  'chat.board.phaseHint.result': 'This sub-step finished',
+  'chat.board.phaseHint.error': 'This sub-step failed',
+  'chat.board.phaseHint.start': 'Board started this step',
+  'chat.board.phaseHint.update': 'In progress',
+  'chat.board.lineUrl': 'Link: {{url}}',
+  'chat.board.lineOut': 'Output excerpt: {{snippet}}',
+
   'deviceGuard.titleFeature': '{{feature}} requires a connected device',
   'deviceGuard.title': 'Connect a device first',
   'deviceGuard.descFeature': 'Connect your RDK board to use {{feature}}. SSH or USB serial is supported.',

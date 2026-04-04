@@ -67,7 +67,7 @@ export function mapMiniEvent(
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           elapsed_sec: event.elapsed_sec,
-          chunk: `[${event.toolName}] 仍在执行中… 已用时 ${elapsedDisplay}`,
+          chunk: `〔板端协作〕${event.toolName} 仍在运行 · 已等待 ${elapsedDisplay}（长任务时正常，未完成前会持续刷新）`,
           progressSource: "local_heartbeat",
           phase: "progress",
           executor: resolveExecutor(event.toolName),
