@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getApiKey, getBaseUrl, type ProviderConfig } from "../provider-setup.js";
+import { transcribeLocalWhisperFromFile } from "../../local-whisper-stt.js";
 import type { Tool } from "./types.js";
 
 let unpdfExtractText: ((data: any, options: any) => Promise<{ text: string; totalPages: number }>) | null = null;
@@ -131,6 +132,33 @@ const AUDIO_MODEL_BY_PROVIDER: Record<string, string> = {
   qwen: "qwen3-asr-flash",
   bailian: "qwen3-asr-flash",
 };
+
+/** 当前 Studio Provider 是否具备可用的云端语音转写链路（避免盲目请求 /audio/transcriptions 得到 404） */
+export function isStudioProviderAsrSupported(cfg: ProviderConfig | null | undefined): boolean {
+  if (!cfg?.apiKey?.trim()) return false;
+  if (cfg.provider === "qwen" || cfg.provider === "bailian") return true;
+  try {
+    const base = getBaseUrl(cfg as ProviderConfig).toLowerCase();
+    /** 火山方舟等「对话」OpenAI 兼容基座通常不提供 Whisper 类 /audio/transcriptions */
+    if (/volces\.com|\.volcengine\.|ark\.cn-/i.test(base)) {
+      return false;
+    }
+  } catch {
+    /* ignore */
+  }
+  return Boolean(AUDIO_MODEL_BY_PROVIDER[cfg.provider]);
+}
+
+function asrUpstreamErrorMessage(status: number, fallbackDetail: string): string {
+  if (status === 404) {
+    return (
+      "云端语音接口返回 404：该 baseUrl 可能不提供 OpenAI 兼容的 /audio/transcriptions。" +
+      "请配置本机 whisper：环境变量 RDK_STUDIO_WHISPER_CPP（whisper-cli）与 RDK_STUDIO_WHISPER_CPP_MODEL，并安装 ffmpeg；" +
+      "或改用支持语音转写的兼容网关（OpenAI/ Groq 等）。"
+    );
+  }
+  return fallbackDetail || `语音转写失败 (${status})`;
+}
 
 function sanitizeSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "attachment";
@@ -452,6 +480,29 @@ async function describeImageViaProvider(
   );
 }
 
+/** 本地 whisper.cpp / WhisperDesktop 优先，失败或未配置时再走云端 ASR */
+async function transcribeWithLocalWhisperOrProvider(
+  attachment: SessionAttachment,
+  providerConfig: ProviderConfig,
+): Promise<string> {
+  if (attachment.storedPath) {
+    try {
+      const local = await transcribeLocalWhisperFromFile(attachment.storedPath);
+      if (local) {
+        const text = normalizeText(local);
+        if (!text) {
+          throw new Error("Whisper 输出归一化后为空");
+        }
+        attachment.transcript = text;
+        return text;
+      }
+    } catch (e) {
+      console.warn("[Attachment] 本地 Whisper 转写失败，尝试云端 Provider", e);
+    }
+  }
+  return transcribeAudioViaProvider(attachment, providerConfig);
+}
+
 async function transcribeAudioViaProvider(
   attachment: SessionAttachment,
   providerConfig: ProviderConfig,
@@ -514,7 +565,9 @@ async function transcribeAudioViaProvider(
       choices?: Array<{ message?: { content?: unknown } }>;
     };
     if (!res.ok) {
-      throw new Error(payload.error?.message || `语音转写失败 (${res.status})`);
+      throw new Error(
+        payload.error?.message || asrUpstreamErrorMessage(res.status, `语音转写失败 (${res.status})`),
+      );
     }
     const text = normalizeText(flattenVisionReply(payload.choices?.[0]?.message?.content));
     if (!text) {
@@ -547,7 +600,9 @@ async function transcribeAudioViaProvider(
     error?: { message?: string };
   };
   if (!res.ok) {
-    throw new Error(payload.error?.message || `语音转写失败 (${res.status})`);
+    throw new Error(
+      payload.error?.message || asrUpstreamErrorMessage(res.status, `语音转写失败 (${res.status})`),
+    );
   }
   const text = normalizeText(String(payload.text || ""));
   if (!text) {
@@ -555,6 +610,60 @@ async function transcribeAudioViaProvider(
   }
   attachment.transcript = text;
   return text;
+}
+
+/** 临时落盘后：优先本地 whisper.cpp / WhisperDesktop，否则 Studio Provider 云端转写（Dock 停录后出字） */
+export async function transcribeAudioBuffer(
+  buffer: Buffer,
+  name: string,
+  mimeType: string | undefined,
+  providerConfig: ProviderConfig | null,
+): Promise<string> {
+  if (buffer.length > MAX_ATTACHMENT_BYTES) {
+    throw new Error(`音频过大，请控制在 ${Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024))}MB 以内`);
+  }
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rdk-stt-"));
+  const safeFilename = sanitizeSegment(name) || "voice.webm";
+  const tmpPath = path.join(tmpRoot, safeFilename);
+  await fs.writeFile(tmpPath, buffer);
+  const attachment: SessionAttachment = {
+    id: `stt-${Date.now()}`,
+    type: "audio",
+    name: normalizeName(name, "audio"),
+    mimeType,
+    size: buffer.length,
+    storedPath: tmpPath,
+    createdAt: Date.now(),
+  };
+  try {
+    try {
+      const local = await transcribeLocalWhisperFromFile(tmpPath);
+      if (local) {
+        const text = normalizeText(local);
+        if (!text) {
+          throw new Error("Whisper 输出归一化后为空");
+        }
+        attachment.transcript = text;
+        return text;
+      }
+    } catch (e) {
+      console.warn("[transcribeAudioBuffer] 本地 Whisper 失败，尝试云端 Provider", e);
+    }
+    if (!providerConfig) {
+      throw new Error(
+        "未配置本地 whisper（RDK_STUDIO_WHISPER_CPP + 模型）或 Whisper Desktop（RDK_STUDIO_WHISPER_MAIN），且未配置 Studio AI Provider，无法转写",
+      );
+    }
+    if (!isStudioProviderAsrSupported(providerConfig)) {
+      throw new Error(
+        "本机 whisper 未成功完成转写，且当前 Studio 对话渠道（如部分豆包路由）不提供语音转写 API。" +
+          "请配置本机 whisper.cpp：设置 RDK_STUDIO_WHISPER_CPP 为 whisper-cli 路径、RDK_STUDIO_WHISPER_CPP_MODEL 为 ggml 模型，并安装 ffmpeg；无需外网。",
+      );
+    }
+    return await transcribeAudioViaProvider(attachment, providerConfig);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 export async function prepareSessionAttachments(
@@ -676,7 +785,7 @@ export async function ensureAudioAttachmentTranscripts(
     if (attachment.type !== "audio" || attachment.transcript || !attachment.storedPath) continue;
     if (allowedIds && !allowedIds.has(attachment.id)) continue;
     try {
-      await transcribeAudioViaProvider(attachment, providerConfig);
+      await transcribeWithLocalWhisperOrProvider(attachment, providerConfig);
       changed = true;
     } catch {
       // 语音转写失败时保持静默降级，由 attachment_get_audio_transcript 工具继续兜底
@@ -838,7 +947,7 @@ export function createAttachmentTools(
       }
       if (!attachment.transcript) {
         try {
-          attachment.transcript = await transcribeAudioViaProvider(attachment, providerConfig);
+          attachment.transcript = await transcribeWithLocalWhisperOrProvider(attachment, providerConfig);
           if (sessionId) {
             await writeManifest(sessionId, attachments);
           }

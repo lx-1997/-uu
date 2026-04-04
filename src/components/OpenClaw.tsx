@@ -16,6 +16,7 @@ import {
 } from '../utils/openclawDeployPoll';
 import { fetchWifiLinkState } from '../utils/wifi-link-probe';
 import { fetchAgentConfig } from '../api';
+import { DEVICE_DIAGNOSTICS_POLL_MS, DEVICE_POLL_PHASE_OPENCLAW_WIFI_TICK_MS } from '../constants';
 import io from 'socket.io-client';
 
 /** sessionStorage：用户取消部署后阻止 Wi‑Fi 触发的自动安装，直至关闭并重新打开工作室（会话级） */
@@ -539,11 +540,16 @@ export default function OpenClaw() {
       }
     };
 
-    void tick();
-    const iv = setInterval(tick, 42_000);
+    let ocKick: ReturnType<typeof setTimeout> | null = null;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    ocKick = setTimeout(() => {
+      void tick();
+      iv = setInterval(tick, DEVICE_DIAGNOSTICS_POLL_MS);
+    }, DEVICE_POLL_PHASE_OPENCLAW_WIFI_TICK_MS);
     return () => {
       cancelled = true;
-      clearInterval(iv);
+      if (ocKick) clearTimeout(ocKick);
+      if (iv) clearInterval(iv);
     };
   }, [currentDevice?.id]);
 

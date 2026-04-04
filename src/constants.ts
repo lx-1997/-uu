@@ -1,5 +1,30 @@
 import type { DashboardCard } from './app-types';
 
+/**
+ * 统一「检测」轮询周期（与 server `DEVICE_DIAGNOSTICS_CACHE_TTL_MS` 对齐）。
+ * 按 `DEVICE_POLL_PHASE_*` 将请求分散到 6 个时间片，避免同一瞬间多路并发 SSH。
+ */
+export const DEVICE_POLL_PERIOD_MS = 15_000;
+
+const DEVICE_POLL_SLOT_MS = DEVICE_POLL_PERIOD_MS / 6;
+
+/** 诊断（MEM/温度/BPU…） */
+export const DEVICE_POLL_PHASE_DIAGNOSTICS_MS = DEVICE_POLL_SLOT_MS * 0;
+/** 设备列表 SSH ping（多机时循环内串行） */
+export const DEVICE_POLL_PHASE_DEVICE_PING_MS = DEVICE_POLL_SLOT_MS * 1;
+/** 板端 OpenClaw health → 工作区 health（串行） */
+export const DEVICE_POLL_PHASE_BOARD_HEALTH_MS = DEVICE_POLL_SLOT_MS * 2;
+/** 本机 RDK Studio `/api/health` */
+export const DEVICE_POLL_PHASE_STUDIO_BACKEND_MS = DEVICE_POLL_SLOT_MS * 3;
+/** 顶栏 Wi‑Fi 链路 */
+export const DEVICE_POLL_PHASE_TOPBAR_WIFI_MS = DEVICE_POLL_SLOT_MS * 4;
+/** OpenClaw 页 Wi‑Fi / 自动装网关 tick */
+export const DEVICE_POLL_PHASE_OPENCLAW_WIFI_TICK_MS = DEVICE_POLL_SLOT_MS * 5;
+
+export const DEVICE_DIAGNOSTICS_POLL_MS = DEVICE_POLL_PERIOD_MS;
+export const DEVICE_SSH_PING_INTERVAL_MS = DEVICE_POLL_PERIOD_MS;
+export const TOPBAR_WIFI_LINK_POLL_MS = DEVICE_POLL_PERIOD_MS;
+
 export const DASHBOARD_CARDS: DashboardCard[] = [
   {
     tab: 'openclaw',
@@ -30,7 +55,7 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
     loading: '正在打开硬件监控面板...',
     statusLabel: '实时监控',
     statusOk: true,
-    miniStats: [{ label: '关键指标', value: 'CPU/BPU/温度' }, { label: '刷新频率', value: '实时' }],
+    miniStats: [{ label: '关键指标', value: 'CPU/BPU/温度' }, { label: '刷新频率', value: '约 15s' }],
     cta: '进入硬件监控',
     quickActions: [{ label: '温度监测', icon: '🌡️' }, { label: '资源诊断', icon: '📊' }],
   },

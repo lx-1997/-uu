@@ -1,0 +1,41 @@
+---
+description: 板端 TROS/ROS2 执行指引 — USB 摄像头（hobot_usb_cam）、hbm 模型路径、pip/只读分区
+alwaysApply: true
+---
+
+# 板端 ROS/TROS 常见坑与处理顺序
+
+助手在指导或生成**板端** `hobot_usb_cam`、`hobot_yolo_world`、`mono2d_body_detection`、YOLO/人体检测等相关命令与 launch 时，应先按本节排查，避免把「摄像头崩」与「模型路径错」混为一谈。
+
+## 1. USB 摄像头与 `hobot_usb_cam`（code -6、Web 8080 无图 / did not receive image data）
+
+- **常见根因**：节点默认 **YUYV**，摄像头只在 **MJPEG** 下稳定；分辨率/格式与 `v4l2` 能力不一致会导致进程 **直接退出（如 code -6）**，表现为服务端口起来但收不到图像。
+- **推荐顺序**：
+  1. 用 `v4l2-ctl -d /dev/video0 --list-formats-ext`（必要时对 `/dev/video1` 重复）确认 **MJPEG** 及**支持的分辨率 + fps**。
+  2. 在 launch/参数中把像素格式设为 **MJPEG**（参数名以官方包为准，如 `pixel_format` / `image_format` 等），**宽高与帧率与列表中某一档完全一致**；先用较低分辨率（如 640×480）验证。
+  3. 若一路设备崩溃，换另一路 `/dev/video*` 再试（部分 UVC 多路分工不同），仍以 `v4l2` 输出为准。
+- **原则**：先保证 **topic 有稳定图像**，再挂推理节点。
+
+## 2. 模型路径（`.hbm` / config 找不到）
+
+- **常见根因**：launch 或节点在**当前目录/相对路径**下找 `config/xxx.hbm`，实际文件在 **`/opt/tros/humble/lib/<包名>/config/`**（或 `share/<包>/config`，以板上 `find` 为准），路径不一致则加载失败。
+- **修法**（择一）：
+  - 在 launch 中改为 **`xxx.hbm` 的绝对路径**；
+  - 或用 `ros2 pkg prefix <包名>` 拼接 `share/.../config/...`（以 `find /opt/tros -name '*.hbm'` 验证）；
+  - 或在可写位置做 **符号链接** 指向真实 hbm（避免依赖错误工作目录）。
+- **原则**：以板上 **`find` / `ros2 pkg`** 结果为准，不要假定相对路径。
+
+## 3. 周边约束（执行任务时遵守）
+
+- **`pip install`（如 ultralytics）板端失败**：默认按 **离线** 处理——在联网机器下载匹配 **Python 版本与架构** 的 whl/源码包，再拷到板子本地安装；或优先使用**厂商自带的 hbm + 官方节点**。
+- **不可写路径（如 `/app`）**：配置、日志、缓存、临时模型放在 **`/tmp`、`/userdata`、`$HOME`、工作区允许路径**；需要固定路径时用 bind mount 或 symlink 指到可写目录。
+- **与 Studio 工具提示一致**：常驻 `ros2 run`/推流等应使用 **detached** 与**可写日志路径**（如 `/tmp`）；参见 `server/agent/tools/rdk-tools.ts` 中的路径与白名单说明。
+
+## 4. 推荐整体顺序
+
+1. `v4l2-ctl` → 定 MJPEG + 分辨率 + fps + 正确 `videoN`。  
+2. 修正相机节点参数 → 确认图像 topic 正常。  
+3. `find` / `pkg prefix` → 定 hbm 绝对路径并修正 launch。  
+4. 最后启动检测/推理节点。
+
+必要时结合官网文档核对 launch 参数：`skills/rdk-ros/SKILL.md` 与 https://developer.d-robotics.cc/rdk_doc 。

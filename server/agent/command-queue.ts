@@ -49,9 +49,7 @@ function getLaneState(lane: string): LaneState {
 function drainLane(lane: string) {
   const state = getLaneState(lane);
 
-  // Mini 改进: 空闲时自动清理 session lane，防止内存泄漏
-  // 注意: OpenClaw 生产版未做此清理（lane 在 Map 中累积），此处为 mini 的增强
-  if (state.active === 0 && state.queue.length === 0 && lane.startsWith("session:")) {
+  if (state.active === 0 && state.queue.length === 0) {
     lanes.delete(lane);
     return;
   }

@@ -53,6 +53,7 @@ export type MiniAgentEvent =
   // 工具执行（对齐 pi-agent-core: tool_execution_start / tool_execution_end）
   | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: string; isError: boolean }
+  | { type: "tool_execution_progress"; toolCallId: string; toolName: string; elapsed_sec: number }
   | { type: "tool_skipped"; toolCallId: string; toolName: string }
 
   // 工具审批（对齐 openclaw: exec-approvals → approval request/resolved 事件）

@@ -1020,7 +1020,7 @@ export class RDKClawApp {
     );
 
     let lastQueuePulse = Date.now();
-    let slot: { release: () => void };
+    let slot: { release: () => void } | null = null;
     for (;;) {
       if (externalAbortSignal?.aborted) {
         abortedByClient = true;
@@ -1051,13 +1051,28 @@ export class RDKClawApp {
         slot = got;
         break;
       }
-      if (Date.now() - lastQueuePulse >= 8000) {
+      if (Date.now() - lastQueuePulse >= 5000) {
         lastQueuePulse = Date.now();
+        const waitSec = Math.round((Date.now() - enqueuedAt) / 1000);
+        const curStatus = this.deviceQueue.getStatus(deviceLane);
+        const curRunInfo = curStatus.running;
+        const curElapsed = curRunInfo ? Math.round((Date.now() - curRunInfo.startedAt) / 1000) : 0;
+        const curElapsedMin = Math.floor(curElapsed / 60);
+        const curElapsedHuman = curElapsedMin > 0 ? `${curElapsedMin}分${curElapsed % 60}秒` : `${curElapsed}秒`;
+        const curSummary = curRunInfo
+          ? `当前任务: "${curRunInfo.messageSummary}" (${curRunInfo.channel}，已运行 ${curElapsedHuman})`
+          : "";
         yield {
           type: "run_progress" as const,
           data: {
             message:
-              "上一任务仍占用设备执行队列，本条消息在排队中，请稍候。若长时间无进展，可点「结束当前」或检查板端命令是否卡住。",
+              `排队等待中 (已等 ${waitSec}s)。${curSummary}` +
+              "\n可选操作：点「结束当前」取消上一任务；或等待其完成后自动执行。",
+            queue_wait: true,
+            queue_wait_sec: waitSec,
+            running_task_elapsed_sec: curElapsed,
+            running_task_channel: curRunInfo?.channel,
+            running_run_id: curRunInfo?.runId,
           },
         };
       }
@@ -1085,9 +1100,9 @@ export class RDKClawApp {
         };
         return;
       }
-      yield* this._executeChat(req, sessionKey, providerConfig, slot, deviceLane);
+      yield* this._executeChat(req, sessionKey, providerConfig, slot!, deviceLane);
     } finally {
-      slot.release();
+      slot?.release();
     }
   }
 

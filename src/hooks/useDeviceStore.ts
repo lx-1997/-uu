@@ -15,6 +15,7 @@ import {
   preferRootOverSunriseOnSameHost,
   shouldDeferSunriseBackgroundPing,
 } from '../utils/device-display-order';
+import { DEVICE_POLL_PHASE_DEVICE_PING_MS, DEVICE_SSH_PING_INTERVAL_MS } from '../constants';
 
 /** 曾成功 SSH 验证过的设备 id（本机持久化，用于「先离线、验证后再显示在线」） */
 const SSH_VERIFIED_IDS_KEY = 'rdk-device-ssh-verified-ids-v1';
@@ -461,6 +462,62 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     if (!authReady) return;
     let cancelled = false;
     let pinging = false;
+    const pingOne = async (dev: Device, snapshot: Device[]): Promise<Device> => {
+      if (shouldDeferSunriseBackgroundPing(dev, snapshot, activeDeviceRef.current)) {
+        return dev;
+      }
+      const verified = dev.sshSessionVerified === true;
+      try {
+        const res = await checkDevicePing(dev.id);
+        if (res.status === 'transient') {
+          return dev;
+        }
+        const pingOk = res.status === 'connected';
+        if (pingOk) {
+          pingFailStreakRef.current[dev.id] = 0;
+          persistVerifiedId(dev.id);
+          return {
+            ...dev,
+            status: 'online' as const,
+            sshSessionVerified: true,
+          };
+        }
+        if (!verified) {
+          return { ...dev, status: 'offline' as const, sshSessionVerified: false };
+        }
+        const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
+        pingFailStreakRef.current[dev.id] = streak;
+        if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
+          return dev;
+        }
+        if (isDeviceSshConnected(dev.status) && streak >= PING_FAILS_BEFORE_OFFLINE) {
+          const unreachable = await confirmDeviceUnreachable(dev.id);
+          if (!unreachable) {
+            pingFailStreakRef.current[dev.id] = 0;
+            return { ...dev, status: 'online' as const, sshSessionVerified: true };
+          }
+        }
+        return { ...dev, status: 'offline' as const };
+      } catch {
+        if (!verified) {
+          return { ...dev, status: 'offline' as const, sshSessionVerified: false };
+        }
+        const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
+        pingFailStreakRef.current[dev.id] = streak;
+        if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
+          return dev;
+        }
+        if (isDeviceSshConnected(dev.status) && streak >= PING_FAILS_BEFORE_OFFLINE) {
+          const unreachable = await confirmDeviceUnreachable(dev.id);
+          if (!unreachable) {
+            pingFailStreakRef.current[dev.id] = 0;
+            return { ...dev, status: 'online' as const, sshSessionVerified: true };
+          }
+        }
+        return { ...dev, status: 'offline' as const };
+      }
+    };
+
     const pingAll = async () => {
       if (cancelled || pinging) return;
       const snapshot = devicesRef.current;
@@ -471,61 +528,11 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       }
       pinging = true;
       try {
-        const newDevices = await Promise.all(snapshot.map(async (dev) => {
-          if (shouldDeferSunriseBackgroundPing(dev, snapshot, activeDeviceRef.current)) {
-            return dev;
-          }
-          const verified = dev.sshSessionVerified === true;
-          try {
-            const res = await checkDevicePing(dev.id);
-            if (res.status === 'transient') {
-              return dev;
-            }
-            const pingOk = res.status === 'connected';
-            if (pingOk) {
-              pingFailStreakRef.current[dev.id] = 0;
-              persistVerifiedId(dev.id);
-              return {
-                ...dev,
-                status: 'online' as const,
-                sshSessionVerified: true,
-              };
-            }
-            if (!verified) {
-              return { ...dev, status: 'offline' as const, sshSessionVerified: false };
-            }
-            const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
-            pingFailStreakRef.current[dev.id] = streak;
-            if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
-              return dev;
-            }
-            if (isDeviceSshConnected(dev.status) && streak >= PING_FAILS_BEFORE_OFFLINE) {
-              const unreachable = await confirmDeviceUnreachable(dev.id);
-              if (!unreachable) {
-                pingFailStreakRef.current[dev.id] = 0;
-                return { ...dev, status: 'online' as const, sshSessionVerified: true };
-              }
-            }
-            return { ...dev, status: 'offline' as const };
-          } catch {
-            if (!verified) {
-              return { ...dev, status: 'offline' as const, sshSessionVerified: false };
-            }
-            const streak = (pingFailStreakRef.current[dev.id] ?? 0) + 1;
-            pingFailStreakRef.current[dev.id] = streak;
-            if (isDeviceSshConnected(dev.status) && streak < PING_FAILS_BEFORE_OFFLINE) {
-              return dev;
-            }
-            if (isDeviceSshConnected(dev.status) && streak >= PING_FAILS_BEFORE_OFFLINE) {
-              const unreachable = await confirmDeviceUnreachable(dev.id);
-              if (!unreachable) {
-                pingFailStreakRef.current[dev.id] = 0;
-                return { ...dev, status: 'online' as const, sshSessionVerified: true };
-              }
-            }
-            return { ...dev, status: 'offline' as const };
-          }
-        }));
+        const newDevices: Device[] = [];
+        for (const dev of snapshot) {
+          if (cancelled) return;
+          newDevices.push(await pingOne(dev, snapshot));
+        }
         if (!cancelled) {
           for (let i = 0; i < snapshot.length; i++) {
             const p = snapshot[i];
@@ -560,12 +567,20 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    const timer = setInterval(() => {
+    let pingKick: ReturnType<typeof setTimeout> | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    pingKick = setTimeout(() => {
       void pingAll();
-    }, 10000);
-    void pingAll();
+      timer = setInterval(() => {
+        void pingAll();
+      }, DEVICE_SSH_PING_INTERVAL_MS);
+    }, DEVICE_POLL_PHASE_DEVICE_PING_MS);
 
-    return () => { cancelled = true; clearInterval(timer); };
+    return () => {
+      cancelled = true;
+      if (pingKick) clearTimeout(pingKick);
+      if (timer) clearInterval(timer);
+    };
   }, [authReady, devices.length, deviceListRevision]);
 
   const value = useMemo<DeviceStoreState>(
