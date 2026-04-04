@@ -35,6 +35,8 @@
   --z-rail: 100;
   --z-topbar: 90;
   --z-dock: 200;
+  /** IDE/VNC 浏览器悬浮 iframe（高于 Dock，低于 Modal/Toast） */
+  --z-floating-embed: 250;
   --z-modal: 300;
   --z-toast: 400;
   --z-tooltip: 500;

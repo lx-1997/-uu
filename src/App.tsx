@@ -206,6 +206,8 @@ function AppShell() {
     activeTab, currentDevice, theme, railExpanded,
     setChatExpanded, setActiveTab, addToast,
     drAuthenticatedPortal,
+    vncEmbedToolbar,
+    ideEmbedToolbar,
   } = useAppState();
   const { t } = useI18n();
   const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
@@ -322,6 +324,53 @@ function AppShell() {
             ) : null}
           </div>
           <div className="topbar-right">
+            {(ideEmbedToolbar?.showIframe || vncEmbedToolbar?.showIframe) && (
+              <div
+                className="topbar-embed-float-group"
+                role="group"
+                aria-label={t('topbar.embedGroup', '嵌入窗口')}
+              >
+                {ideEmbedToolbar?.showIframe && (
+                  <button
+                    type="button"
+                    className="topbar-embed-float topbar-embed-float--ide"
+                    onClick={() => ideEmbedToolbar.toggleEmbedFloat()}
+                    title={
+                      ideEmbedToolbar.embedFloating
+                        ? t('ide.title.floatDock', '贴回主窗口')
+                        : t('ide.title.floatOut', '拖出为悬浮窗；仅作用于代码编辑器')
+                    }
+                    aria-pressed={ideEmbedToolbar.embedFloating}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                    <span className="topbar-embed-float-name">{t('ide.topbar.name', 'IDE')}</span>
+                  </button>
+                )}
+                {vncEmbedToolbar?.showIframe && (
+                  <button
+                    type="button"
+                    className="topbar-embed-float topbar-embed-float--vnc"
+                    onClick={() => vncEmbedToolbar.toggleEmbedFloat()}
+                    title={
+                      vncEmbedToolbar.embedFloating
+                        ? t('vnc.title.floatDock', '贴回主窗口')
+                        : t('vnc.title.floatOut', '拖出为悬浮窗，可拖到副屏；切换标签后仍可见')
+                    }
+                    aria-pressed={vncEmbedToolbar.embedFloating}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <rect x="2" y="3" width="20" height="14" rx="2" />
+                      <line x1="8" y1="21" x2="16" y2="21" />
+                      <line x1="12" y1="17" x2="12" y2="21" />
+                    </svg>
+                    <span className="topbar-embed-float-name">{t('vnc.topbar.name', '桌面')}</span>
+                  </button>
+                )}
+              </div>
+            )}
             {currentDevice && (
               <div className="topbar-device-chip">
                 <span className={`status-dot ${deviceOnline ? 'online' : 'offline'}`} />

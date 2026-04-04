@@ -27,6 +27,7 @@ import { UIProvider, useUIStore, type ThemeMode } from './useUIStore';
 import { TerminalProvider, useTerminalStore } from './useTerminalStore';
 import { AIChatProvider, useAIChatStore, type RdkClawTimelineEntry } from './useAIChatStore';
 import { getRdkEmbedPanel } from '../utils/embed-mode';
+import type { EmbedToolbarApi } from './useUIStore';
 
 // ---- State shape (unchanged — backward compatible) ----
 export type { ThemeMode };
@@ -113,6 +114,10 @@ export interface AppState {
   vncProgress: number;
   vncPhase: string;
   startVncSession: () => void;
+  vncEmbedToolbar: EmbedToolbarApi | null;
+  setVncEmbedToolbar: (v: EmbedToolbarApi | null) => void;
+  ideEmbedToolbar: EmbedToolbarApi | null;
+  setIdeEmbedToolbar: (v: EmbedToolbarApi | null) => void;
 
   // Lowcode
   flowTemplate: string;

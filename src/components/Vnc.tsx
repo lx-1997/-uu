@@ -10,7 +10,7 @@ import FloatingEmbedPanel from './FloatingEmbedPanel';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
-  const { currentDevice, vncConnected, startVncSession, addToast } = useAppState();
+  const { currentDevice, vncConnected, startVncSession, addToast, setVncEmbedToolbar } = useAppState();
   const { t } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
 
@@ -19,6 +19,8 @@ export default function Vnc() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showIframe, setShowIframe] = useState(false);
   const [quality, setQuality] = useState<'auto' | 'high' | 'low'>('auto');
+  /** remote：服务端分辨率随窗口变（需设备端支持）；scale：本地缩放铺满视口，默认更易「占满」 */
+  const [resizeMode, setResizeMode] = useState<'remote' | 'scale'>('scale');
   const [showLogs, setShowLogs] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -57,17 +59,33 @@ export default function Vnc() {
     };
   }, []);
 
-  const toggleEmbedFloat = () => {
+  const toggleEmbedFloat = useCallback(() => {
     if (!isDesktop()) {
       setEmbedFloating((v) => !v);
       return;
     }
     const url = activeUrlRef.current;
     if (!url) return;
-    const next = !embedFloating;
-    (window as any).rdkDesktop?.setEmbedFloatMode?.(url, next, t('vnc.title', '远程桌面'));
-    setEmbedFloating(next);
-  };
+    setEmbedFloating((prev) => {
+      const next = !prev;
+      (window as any).rdkDesktop?.setEmbedFloatMode?.(url, next, t('vnc.title', '远程桌面'));
+      return next;
+    });
+  }, [t]);
+
+  /** 供全局顶栏显示「悬浮窗」，避免用户只在第一行顶栏找按钮而找不到 */
+  useEffect(() => {
+    if (!showIframe) {
+      setVncEmbedToolbar(null);
+      return;
+    }
+    setVncEmbedToolbar({
+      showIframe: true,
+      embedFloating,
+      toggleEmbedFloat,
+    });
+    return () => setVncEmbedToolbar(null);
+  }, [showIframe, embedFloating, toggleEmbedFloat, setVncEmbedToolbar]);
 
   // 监听 WebContentsView 加载事件
   useEffect(() => {
@@ -102,8 +120,23 @@ export default function Vnc() {
     const wsPath = shouldUseSshTunnelForDevice(currentDevice)
       ? `websockify?deviceId=${encodeURIComponent(currentDevice.id)}&remotePort=5900`
       : `websockify?target=${hostOrIp}:5900`;
-    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
-  }, [currentDevice, quality, urlVersion]);
+    const resizeParam = resizeMode === 'remote' ? 'remote' : 'scale';
+    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=${resizeParam}&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
+  }, [currentDevice, quality, urlVersion, resizeMode]);
+
+  const handleResizeModeChange = (mode: 'remote' | 'scale') => {
+    if (mode === resizeMode) return;
+    setResizeMode(mode);
+    if (showIframe) {
+      setUrlVersion((v) => v + 1);
+      addToast(
+        mode === 'remote'
+          ? t('vnc.resize.toastRemote', '已切换为「填满窗口」：将请求设备按窗口大小调整分辨率（若仍有灰边可试「等比」）')
+          : t('vnc.resize.toastScale', '已切换为「等比缩放」：保持宽高比，两侧或上下可能有边距'),
+        'info',
+      );
+    }
+  };
 
   // 画质切换时强制刷新 iframe
   const handleQualityChange = (q: 'auto' | 'high' | 'low') => {
@@ -199,15 +232,15 @@ export default function Vnc() {
     setLoadError(null);
   };
 
-  // ── 全屏切换 ──
-  const toggleFullscreen = () => {
+  // ── 全屏切换（整块远程桌面区域含工具条） ──
+  const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
       containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
     } else {
       document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
     }
-  };
+  }, []);
 
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
@@ -225,7 +258,7 @@ export default function Vnc() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [showIframe]);
+  }, [showIframe, toggleFullscreen]);
 
   if (!currentDevice) return <DeviceGuard feature={t('vnc.guardFeature', '远程桌面')} />;
 
@@ -261,19 +294,41 @@ export default function Vnc() {
             <>
               <button
                 type="button"
-                className="btn-icon"
+                className="btn btn-ghost btn-sm immersive-float-toggle"
                 onClick={toggleEmbedFloat}
                 title={
                   embedFloating
                     ? t('vnc.title.floatDock', '贴回主窗口')
-                    : t('vnc.title.floatOut', '悬浮窗（可拖副屏）')
+                    : t('vnc.title.floatOut', '拖出为悬浮窗，可拖到副屏；切换标签后仍可见')
                 }
+                aria-pressed={embedFloating}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <rect x="2" y="4" width="10" height="12" rx="1.5" />
-                  <rect x="14" y="6" width="8" height="14" rx="1.5" opacity="0.9" />
+                  <rect x="2" y="3" width="20" height="14" rx="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
                 </svg>
+                <span>{embedFloating ? t('vnc.floatBtn.dock', '贴回') : t('vnc.floatBtn.floatOut', '浮出')}</span>
               </button>
+              <div className="immersive-bar-sep" />
+              <div className="immersive-vnc-resize" role="group" aria-label={t('vnc.resize.group', '缩放方式')}>
+                <button
+                  type="button"
+                  className={resizeMode === 'remote' ? 'active' : ''}
+                  onClick={() => handleResizeModeChange('remote')}
+                  title={t('vnc.resize.remoteTip', '远程调整分辨率以适配窗口，画面更大（需设备端支持）')}
+                >
+                  {t('vnc.resize.remote', '填满')}
+                </button>
+                <button
+                  type="button"
+                  className={resizeMode === 'scale' ? 'active' : ''}
+                  onClick={() => handleResizeModeChange('scale')}
+                  title={t('vnc.resize.scaleTip', '本地等比缩放，保持比例，可能有黑边')}
+                >
+                  {t('vnc.resize.scale', '等比')}
+                </button>
+              </div>
               <div className="immersive-bar-sep" />
               {/* 画质选择 */}
               <div className="immersive-quality">
@@ -297,14 +352,21 @@ export default function Vnc() {
                 </svg>
               </button>
 
-              <button className="btn-icon" onClick={toggleFullscreen} title={t('vnc.title.fullscreen', '全屏 (F11)')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm immersive-float-toggle"
+                onClick={toggleFullscreen}
+                title={t('vnc.title.fullscreen', '全屏显示远程桌面区域（含本工具条），快捷键 F11')}
+                aria-pressed={isFullscreen}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   {isFullscreen ? (
                     <><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></>
                   ) : (
                     <><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></>
                   )}
                 </svg>
+                <span>{isFullscreen ? t('vnc.fullscreen.exit', '退出全屏') : t('vnc.fullscreen.enter', '全屏')}</span>
               </button>
 
               <button className="btn-icon" onClick={() => setShowLogs(!showLogs)} title={t('vnc.title.logs', '日志')}>
@@ -325,7 +387,7 @@ export default function Vnc() {
       </div>
 
       {/* ── 主视口 ── */}
-      <div className="immersive-viewport">
+      <div className={`immersive-viewport${showIframe ? ' immersive-viewport--vnc' : ''}`}>
         {showIframe ? (
           <>
             {isDesktop() ? (
@@ -349,6 +411,13 @@ export default function Vnc() {
                 dockLabel={t('vnc.title.floatDock', '贴回')}
                 floating={embedFloating}
                 onFloatingChange={setEmbedFloating}
+                storageKey="vnc"
+                backfill={<span className="floating-embed-backfill-default">{t('vnc.floatBackfill', '远程桌面在悬浮窗中，可切换到 AI 对话或其它页面，窗口保持置顶可见。')}</span>}
+                dragbarExtra={
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={handleDisconnect}>
+                    {t('vnc.disconnect', '断开')}
+                  </button>
+                }
               >
                 <iframe
                   ref={iframeRef}
@@ -436,6 +505,12 @@ export default function Vnc() {
             )}
 
             <div className="vnc-welcome-hints">
+              {!isDesktop() && (
+                <div className="vnc-hint-item">
+                  <span className="status-dot" />
+                  <span>{t('vnc.hint.float', '连接后可用工具栏「悬浮窗」与 AI 对话并排对照')}</span>
+                </div>
+              )}
               <div className="vnc-hint-item">
                 <kbd>F11</kbd>
                 <span>{t('vnc.hint.fullscreen', '全屏模式')}</span>

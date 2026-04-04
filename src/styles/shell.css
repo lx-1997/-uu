@@ -447,6 +447,76 @@
   gap: 16px;
 }
 
+/* IDE / 远程桌面：顶栏分段控件（短标签 + 悬浮态底色，与设备芯片区分开） */
+.topbar-embed-float-group {
+  display: inline-flex;
+  align-items: stretch;
+  align-self: center;
+  flex-shrink: 0;
+  margin-right: 4px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.topbar-embed-float-group .topbar-embed-float {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 5px 11px;
+  min-height: 30px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.topbar-embed-float-group .topbar-embed-float:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.topbar-embed-float-group .topbar-embed-float + .topbar-embed-float {
+  border-left: 1px solid var(--border);
+}
+
+.topbar-embed-float-group .topbar-embed-float[aria-pressed='true'] {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.topbar-embed-float-group .topbar-embed-float svg {
+  flex-shrink: 0;
+  opacity: 0.88;
+}
+
+.topbar-embed-float-group .topbar-embed-float[aria-pressed='true'] svg {
+  opacity: 1;
+}
+
+.topbar-embed-float-group .topbar-embed-float:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.topbar-embed-float-name {
+  max-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 进行中任务队列（OpenClaw 部署 / 镜像备份） */
 .runtime-task-queue {
   flex-shrink: 0;

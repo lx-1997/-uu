@@ -1,4 +1,13 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
+
+/** 由 IDE / Vnc 挂载时注册，供全局顶栏显示「悬浮窗」（两者独立，勿共用一条） */
+export type EmbedToolbarApi = {
+  showIframe: boolean;
+  embedFloating: boolean;
+  toggleEmbedFloat: () => void;
+};
+/** @deprecated 请使用 EmbedToolbarApi */
+export type VncEmbedToolbarApi = EmbedToolbarApi;
 import type { Tab, ConfirmDialogState, TransferItem, DrAuthenticatedPortal, DrAuthenticatedPortalKind } from '../app-types';
 import { getFlashImageLabel } from '../constants';
 import { fillTemplate } from '../i18n/en-extras';
@@ -69,6 +78,12 @@ export interface UIStoreState {
   vncProgress: number;
   vncPhase: string;
   startVncSession: () => void;
+  /** 远程桌面已连接时由 Vnc 写入 */
+  vncEmbedToolbar: EmbedToolbarApi | null;
+  setVncEmbedToolbar: (v: EmbedToolbarApi | null) => void;
+  /** code-server 已连接时由 IDE 写入 */
+  ideEmbedToolbar: EmbedToolbarApi | null;
+  setIdeEmbedToolbar: (v: EmbedToolbarApi | null) => void;
 
   // Lowcode
   flowTemplate: string;
@@ -321,6 +336,9 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   const [vncProgress, setVncProgress] = useState(0);
   const [vncPhase, setVncPhase] = useState(() => t('ui.vnc.phase.wait', '等待连接'));
 
+  const [vncEmbedToolbar, setVncEmbedToolbar] = useState<EmbedToolbarApi | null>(null);
+  const [ideEmbedToolbar, setIdeEmbedToolbar] = useState<EmbedToolbarApi | null>(null);
+
   const startVncSession = () => {
     if (!currentDevice) {
       addToast(t('ui.needDevice', '请先连接真实设备'), 'warning');
@@ -471,6 +489,8 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     transferProtocol, fileAction, setFileAction, transferQueue, appendTransferTask,
     vncQuality, setVncQuality, vncLayout, setVncLayout, vncOverlay,
     vncConnected, vncProgress, vncPhase, startVncSession,
+    vncEmbedToolbar, setVncEmbedToolbar,
+    ideEmbedToolbar, setIdeEmbedToolbar,
     flowTemplate, setFlowTemplate, flowMode, setFlowMode,
     flowCheckProgress, isFlowChecking, runFlowValidation,
     openclawMode, setOpenclawMode, openclawThreshold,

@@ -43,7 +43,7 @@ const buildLaunchCmd = (port: number) =>
   `'`;
 
 export default function IDE() {
-  const { currentDevice, addToast, activeTab } = useAppState();
+  const { currentDevice, addToast, activeTab, setIdeEmbedToolbar } = useAppState();
   const { t, isEn } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const vscodeWebUrl = isEn ? 'https://vscode.dev/?vscode-lang=en' : 'https://vscode.dev/?vscode-lang=zh-cn';
@@ -229,18 +229,33 @@ export default function IDE() {
     };
   }, []);
 
-  const toggleEmbedFloat = () => {
-    const d = isDesktop();
-    if (!d) {
+  const toggleEmbedFloat = useCallback(() => {
+    if (!isDesktop()) {
       setEmbedFloating((v) => !v);
       return;
     }
     const url = activeUrlRef.current;
     if (!url) return;
-    const next = !embedFloating;
-    (window as any).rdkDesktop?.setEmbedFloatMode?.(url, next, t('ide.title', '代码编辑器'));
-    setEmbedFloating(next);
-  };
+    setEmbedFloating((prev) => {
+      const next = !prev;
+      (window as any).rdkDesktop?.setEmbedFloatMode?.(url, next, t('ide.title', '代码编辑器'));
+      return next;
+    });
+  }, [t]);
+
+  /** 与 VNC 分离：顶栏「IDE 悬浮窗」只控制 code-server 嵌入 */
+  useEffect(() => {
+    if (!showIframe) {
+      setIdeEmbedToolbar(null);
+      return;
+    }
+    setIdeEmbedToolbar({
+      showIframe: true,
+      embedFloating,
+      toggleEmbedFloat,
+    });
+    return () => setIdeEmbedToolbar(null);
+  }, [showIframe, embedFloating, toggleEmbedFloat, setIdeEmbedToolbar]);
 
   if (!currentDevice) return <DeviceGuard feature={t('ide.guardFeature', '代码编辑器')} />;
 
@@ -296,18 +311,20 @@ export default function IDE() {
             <>
               <button
                 type="button"
-                className="btn-icon"
+                className="btn btn-ghost btn-sm immersive-float-toggle"
                 onClick={toggleEmbedFloat}
                 title={
                   embedFloating
                     ? t('ide.title.floatDock', '贴回主窗口')
-                    : t('ide.title.floatOut', '悬浮窗（可拖副屏）')
+                    : t('ide.title.floatOut', '拖出为悬浮窗，可拖到副屏；切换标签后仍可见')
                 }
+                aria-pressed={embedFloating}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <rect x="2" y="4" width="10" height="12" rx="1.5" />
-                  <rect x="14" y="6" width="8" height="14" rx="1.5" opacity="0.9" />
+                  <polyline points="16 18 22 12 16 6" />
+                  <polyline points="8 6 2 12 8 18" />
                 </svg>
+                <span>{embedFloating ? t('ide.floatBtn.dock', '贴回') : t('ide.floatBtn.floatOut', '浮出')}</span>
               </button>
               {/* 非桌面端才显示刷新按钮 */}
               {!desktop && (
@@ -389,6 +406,13 @@ export default function IDE() {
                 dockLabel={t('ide.title.floatDock', '贴回')}
                 floating={embedFloating}
                 onFloatingChange={setEmbedFloating}
+                storageKey="ide"
+                backfill={<span className="floating-embed-backfill-default">{t('ide.floatBackfill', '编辑器在悬浮窗中，可切换到 AI 对话或其它页面，窗口保持置顶可见。')}</span>}
+                dragbarExtra={
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={handleDisconnect}>
+                    {t('ide.close', '关闭')}
+                  </button>
+                }
               >
                 <iframe
                   ref={iframeRef}
@@ -441,6 +465,12 @@ export default function IDE() {
                 <div className="ros-hint-item">
                   <kbd>F11</kbd>
                   <span>{t('ide.hint.fullscreen', '全屏模式')}</span>
+                </div>
+              )}
+              {!desktop && (
+                <div className="ros-hint-item">
+                  <span className="ros-hint-dot" />
+                  <span>{t('ide.hint.float', '连接后可用工具栏「悬浮窗」与 AI 对话并排对照')}</span>
                 </div>
               )}
               <div className="ros-hint-item">
