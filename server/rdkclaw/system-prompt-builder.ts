@@ -19,7 +19,7 @@ export function buildPersonaPrompt(persona: PersonaProfile) {
   ];
   if (persona.delegationBias === "local-first") {
     lines.push(
-      "**Studio 优先（运行契约）**：默认用 `device_exec` / `device_file_*` / `device_diagnose` 等在板端完成；不要把 `board_openclaw_assess` / `delegate` 当作例行第一步。仅在 Skill 要求板端 OpenClaw、用户明确要求、或本地多轮仍失败且任务确实依赖板端技能链时，再 assess→delegate。",
+      "**Studio 编排（运行契约）**：你负责联网、工作区编排与**验收**；板端 OpenClaw 负责**板端会话内多步迭代**与技能链。**单条/原子**（一条 `device_exec` 能查清）→ 直接用 `device_exec` / `device_file_*` / `device_diagnose`。**多步、依赖已装技能、或预计要多次试错** → `board_openclaw_assess`（可与检索同轮）→ `board_openclaw_delegate`，勿用大量无目的 `device_exec` 替代板端 Agent。不要把 assess 当无意义开场白；也不要在明显该委派时回避 OpenClaw。",
     );
   } else if (persona.delegationBias === "board-first") {
     lines.push(
@@ -43,11 +43,12 @@ export function buildReasoningGuidancePrompt(
   const openClawCollaborationSection =
     delegationBias === "local-first"
       ? [
-          "### 与板端 OpenClaw（Studio 优先）",
-          "板端工具仍在列表中，但**默认不启用**多轮 OpenClaw 对话链。",
-          "- **先做**：`device_*` 取证与执行；需要板端事实时优先一条或少量 `device_exec`，而非 chat/delegate。",
-          "- **再上 OpenClaw**：仅当 Skill `requires_board`、用户点名板端 Agent、或本地已证明需要板端技能链/会话延续时，再用 `board_openclaw_assess`；`delegate` 须有明确验收标准。",
-          "- **不要**为「看起来复杂」就首轮并行 assess；能 SSH 解决就不要再耗板端 LLM。",
+          "### 与板端 OpenClaw（Studio 优先 · 仍须协同）",
+          "板端 **chat / assess / delegate** 仍在工具列表中；「优先」指 **编排顺序**，不是 **禁用 OpenClaw**。",
+          "- **先做**：原子取证用 `device_*`；能**一条命令**完成就不要 delegate。",
+          "- **必须收束到板端 Agent 时**：多步安装/编译/跑通、依赖 clawhub/板端技能、网关插件、或你已预见 **>3 次**试探性 `device_exec`——应 **assess→delegate**，让板端在其会话内迭代，避免主会话被 shell 日志淹没。",
+          "- **assess** 可与 `web_search` 同轮并行；`delegate` 的 guidance 须含验收标准。",
+          "- **不要**：无目的地首轮堆 assess；也**不要**：该委派时却用十几条 `device_exec` 硬顶。",
         ].join("\n")
       : [
           "### 与板端 OpenClaw 协作",
@@ -137,13 +138,14 @@ export function buildWebSearchTriggerPrompt(
   return [
     "## 何时必须 web_search / web_fetch",
     assessParallelHint,
+    "- **RDK 板端算法/官方例程**（YOLO、检测、跟踪、Box 应用、BPU 部署等）：**必须先**在 **developer.d-robotics.cc/rdk_doc** 找到**当前任务对应章节**（可用 `web_search` 关键词含 `site:developer.d-robotics.cc` + 功能名，或直接 `web_fetch` 已知文档 URL），再按文中命令在板上执行；**禁止**用训练记忆替代官方包名与 launch。**用户已在消息里粘贴具体 rdk_doc 链接时，以该页为执行清单，先 `web_fetch` 该 URL。**",
     "- 涉及**具体版本号、发布日期、是否仍维护**或与**当前 OS/板型**的兼容性。",
     "- **官方安装/升级/刷机/弃用路径**、CLI 旗标、**breaking change**、REST/GraphQL 行为变更。",
     "- **第三方库、Model Zoo/Hub、许可证、CVE**、或论坛/issue 里的非常规 workaround。",
     "- 用户问「最新」「文档怎么说」「和某某能不能一起用」而你手头无当日可信摘录。",
     "**联网搜索首选 Multi-Search-Engine（多引擎顺序）**：`web_search` 按仓库 `skills/multi-search-engine` 的策略依次尝试多引擎（细节见工具 `description`）。向用户描述检索路径时可沿用此话术。",
     "**对用户说明来源（避免误解）**：工具结果里的 `engine:` 是**本轮实际返回条目的站点**（命中即停，前面引擎无有效结果才会继续）。该顺序下**第一站多为百度**，故出现「百度」仍属于 Multi-Search-Engine 策略，不是「只接了单一商业搜索引擎」。回复用户时建议写：**按 Multi-Search-Engine（多引擎顺序）检索，本轮由 {与 engine 一致的站点名} 返回结果**；不要只答「我用的是百度搜索」而让人以为未走多引擎链路。",
-    "**通常不必为搜索而搜索**：纯板端**当前**状态（`device_exec`/diagnose 更直接）；本工具契约或 SKILL 已写清且不涉上游改名；用户给出的单条命令无可疑版本依赖。",
+    "**通常不必为搜索而搜索**：纯板端**当前**状态（`device_exec`/diagnose 更直接）；本工具契约或 SKILL 已写清且不涉上游改名；用户给出的单条命令无可疑版本依赖。**例外**：任务属于 **RDK 官方文档中的标准演示/算法流程**时，仍必须先 **web_fetch 文档**（见工具契约「RDK 官方文档优先」），再执行命令。",
     "**web_search 与推理一致**：调用时的 `query` **必须与你在推理里决定要搜的关键词逐字一致**（含品牌/机构/产品全名）。禁止为「省事」把专名截成前缀导致歧义（例：用户问「泡泡玛特」却传「泡泡」；英文「Pop Mart」不得只传 `pop`——会与流行音乐、软件栈等混淆）。港股公司等宜带 **股份代号**（如泡泡玛特 `09992.HK`）与 **全称** 同搜，勿依赖过短 token。工具结果里会并列 `tool_argument` 与 `search_query`：`tool_argument` 即模型传入；若两者不同多为服务端加了中文短语引号以降低分词跑偏。",
     "**输出**：引用联网结论时附**来源标题 + URL**；若检索无结果，说明已搜过并给出下一步（本机命令验证或请用户提供文档）。",
   ].join("\n");
@@ -230,9 +232,9 @@ export function buildStudioUiHintsPrompt(
     if (delegationBias === "local-first") {
       lines.push(
         "",
-        "**OpenClaw 已安装（Studio 优先 — 软约束）**",
-        "- 默认仍用 `device_*` 完成板端操作；长串 shell 若**可确定**为机械步骤可继续用 SSH，但若已预见需要多轮试错且依赖板端已装技能链，可再用 `board_openclaw_assess` → `delegate`。",
-        "- 若上表已记录「板型与技能包」：板端 `~/.openclaw/workspace/skills/` 有预置 SKILL；需要读流程时用 `find_skills` / `read`，**不必**为读文档就先 delegate。",
+        "**OpenClaw 已安装（Studio 优先 — 仍须善用板端 Agent）**",
+        "- **原子**板端操作 → `device_*`。**多步 / 技能链 / 多轮试错** → `board_openclaw_assess` → `board_openclaw_delegate`，勿用长串 `device_exec` 替代板端会话内迭代。",
+        "- 板端 `~/.openclaw/workspace/skills/` 有预置 SKILL：需要读流程时 `find_skills` / `read`；**执行**仍可按上条规则委派。",
       );
     } else {
       lines.push(
@@ -256,28 +258,32 @@ function buildCollaborationPromptLocalFirst(boardSnapshot: BoardSnapshot, tier: 
     return [
       "## 协作（简版 · Studio 优先）",
       "（工具契约总纲仍适用。）",
-      "- **默认路径**：`device_exec` / `device_file_*` / `device_diagnose`；能一条命令查清就不要开板端对话。",
-      "- **OpenClaw**（chat / assess / delegate）：仅当 Skill 强制板端、用户要求、或本地多次失败且任务依赖板端技能会话时再上。",
-      "- assess 不是开场白；delegate 须有验收标准与 guidance。",
+      "- **原子**：一条 `device_exec` 能完成 → 直接跑。",
+      "- **多步/技能**：assess→delegate；勿用大量 shell 硬顶。",
+      "- assess 非每轮必发；delegate 须有 guidance 与验收。",
       skillsLine,
       "常用: WiFi→nmcli | 摄像头→ls /dev/video* | 版本→rdkos_info | 温度→thermal_zone0",
     ].join("\n");
   }
   return [
-    "## 双 Agent 协作（Studio 优先）",
+    "## 双 Agent 协作（Studio 优先 · OpenClaw 深度参与）",
     "",
-    "### 默认",
-    "- **先做** Studio 侧：`device_*`、联网检索、`find_skills`、工作区 `read`/`exec`。",
-    "- **再做** OpenClaw：**不要**把 `board_openclaw_assess` 当成每轮必发；仅当已判断需要板端技能链/会话延续、或 Skill `requires_board`、或用户指定用板端 Agent 时再 assess；`delegate` 前须有明确验收标准。",
+    "### 分工（须内化）",
+    "- **RDKClaw（你）**：联网、文档、工作区代码、**编排与验收**、必要时 `studio_open_url` 打开可视化。",
+    "- **板端 OpenClaw**：板载环境内**多步推理**、技能链、与硬件/本地服务强绑定的迭代；**不是**「多调几次 SSH」的别名。",
     "",
-    "### 何时仍应用 OpenClaw",
-    "- 多轮本地尝试失败，且错误栈表明需要板端已装技能或 OpenClaw 插件能力。",
-    "- 用户明确要求「让板端 OpenClaw 做」或对话里须与板端 Agent 对齐状态（可用 **chat**，少用无目的闲聊）。",
-    "- **NEVER** 用 delegate 代替单条 `device_exec` 能完成的动作。",
+    "### 路径选择",
+    "- **仅 SSH**：单条或少量 `&&`、无技能依赖、不需要板端会话里多轮改错。",
+    "- **必须引入 OpenClaw**（assess→delegate）：多步装依赖/编译/跑通；依赖 **clawhub / 板端已装技能**；OpenClaw **插件/网关**；或你预见同一子目标要 **>3 次**试探 `device_exec`。",
+    "- **并行**：复杂任务首轮即可 `web_search` + `board_openclaw_assess`（勿无故串成「搜完再 assess」）。",
     "",
-    "### 与均衡模式的差异",
-    "- 不要求「复杂任务首轮就 web_search + assess 并行」；检索可以单独发起，assess 留到确需板端承接时。",
-    "- 板端返回 [NEED_RDKCLAW] 时仍按原流程补给，但避免与同一轮无必要的 assess 堆叠。",
+    "### 禁止",
+    "- **NEVER** 用 delegate 包装**单条**能完成的 `device_exec`。",
+    "- **NEVER** 用**十几条**串联 `device_exec` 替代本可 **assess→delegate** 的板端多步任务。",
+    "",
+    "### 触发 OpenClaw 的实用清单",
+    "- Skill `requires_board`、用户点名「板端 Agent」、或 **[NEED_RDKCLAW]**。",
+    "- 同一错误模式在 SSH 上**重复 >2 次**仍无进展 → 收束到 assess。",
     "",
     skillsLine,
     "",
@@ -379,10 +385,12 @@ export function buildCollaborationPrompt(
     "",
     "### 你的本地能力速查",
     "打开公网网页→**studio_open_url** | 工作区图片→**studio_open_local_preview**；图在 **数据目录 `agent-downloads`**、工作区 **`downloads/`**、**`workspace/downloads/`** 时气泡内可 **`![alt](/api/local-files/仅文件名)`** 预览（勿写整段 `/Users/...` 或 `file://` 作 src）。勿声称「不能显示」。| 述用户上传附件→attachment_describe_image | 联网→web_search/web_fetch | 设备→device_exec | 文件→device_file_* | 诊断→device_diagnose",
+    "**RDK/ROS2 实时数据与可视化**：Foxglove、Webviz、Rviz Web、话题/点云/图像流、板端自启的 http Dashboard——只要**已启动服务**或你能从 `device_exec`/文档/launch 文件推断出 **`http(s)://板卡 IP 或 localhost:端口`**，**应同时**调用 **studio_open_url** 让用户在 Studio 内看到实时界面；勿只回复「已在后台启动」而不代开浏览器。长驻阻塞命令（如 **ros2 launch**、持续推流）用 **device_exec 且 `background: true`**，返回 pid/日志摘要即可。",
+    "**会话与变更可见性**：对本机 `write`/`edit`、板端 `device_file_*`、记忆写入等，工具结果会附带 **`[会话变更]`** 行；`device_exec`/`device_diagnose` 等输出里若出现可放行的 **http(s)** 地址，Studio 桌面端可能**已自动弹出浏览器**（localhost 会尝试换成当前设备 IP）。同设备多路 shell **可并行**，勿人为串行。",
     "",
     "### 用户常见问题快答（无需搜索，直接用 device_exec 执行）",
     "- WiFi: `nmcli dev wifi list` → `nmcli dev wifi connect \"SSID\" password \"密码\"`",
-    "- 摄像头: `ls /dev/video*` + `v4l2-ctl --list-devices`",
+    "- 摄像头（跑视觉/YOLO 等 demo 前必做）: `ls -l /dev/video*` + `v4l2-ctl --list-devices`（若有）+ `lsusb`；区分 **USB / MIPI** 后再设文档中的 `CAM_TYPE` 等再 `ros2 launch`",
     "- 系统版本: `rdkos_info` 或 `cat /etc/version`",
     "- 进程停止: `pkill -f \"关键字\"` 或 `kill -9 <PID>`",
     "- 端口占用: `ss -tlnp | grep :端口号`",
@@ -499,7 +507,7 @@ export function buildRdkclawDynamicSystemSections(args: {
   const deviceProfile = platform ? getDeviceProfile(platform) : null;
   const deviceRosTail =
     delegationBias === "local-first"
-      ? "确认命令后再 device_exec；**Studio 优先**：默认 SSH 工具链完成；确需板端 OpenClaw 技能链/多轮迭代时再 `board_openclaw_assess` / `delegate`。"
+      ? "确认命令后再 device_exec；**Studio 优先**：原子用 SSH；多步/技能收束到 assess→delegate。"
       : "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。";
   return [
     deviceProfile
@@ -516,6 +524,7 @@ export function buildRdkclawDynamicSystemSections(args: {
           "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
           "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
           "ROS/节点/话题类任务可 `read` 工作区 skills 中的 RDK ROS（rdk-ros）与 RDK Board Knowledge（rdk-board-knowledge）的 SKILL.md。",
+          "**launch 与可视化**：`ros2 launch` 等长驻、阻塞式进程请用 **device_exec + background:true**；若 launch 或节点会起 Web 可视化（常见端口或文档中的 URL），在可行时 **studio_open_url** 打开给用户。",
           deviceRosTail,
         ].join("\n")
       : "",

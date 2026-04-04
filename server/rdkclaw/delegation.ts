@@ -22,6 +22,34 @@ export function resolveDelegationExpectationText(decision: DelegateDecision) {
   return "由 RDKClaw 本地工具链直接完成，不依赖板端委派";
 }
 
+/**
+ * 注入 system 动态段：让模型每轮看到「本轮编排期望」，避免只跑 SSH 而忽略板端 OpenClaw。
+ */
+export function buildDelegationRuntimePrompt(decision: DelegateDecision, boardSkillCount: number): string {
+  const mode = resolveDelegationModeText(decision);
+  const exp = resolveDelegationExpectationText(decision);
+  const skillHint =
+    boardSkillCount > 0
+      ? `板端已登记 **${boardSkillCount}** 个技能：多步/技能相关任务应认真考虑 **assess→delegate**，勿用大量试探性 \`device_exec\` 替代板端 Agent。`
+      : "板端技能快照为空或未定：可先 SSH 探底或 \`find_skills\`，再评估是否需 OpenClaw。";
+
+  const ocLine = decision.needsBoardCollaboration
+    ? [
+        "**板端 OpenClaw 参与**：本回合系统期望中**包含**与板端协同；在任务符合「多步 / 技能链 / 板端会话延续」时，应 **\`board_openclaw_assess\`**（可与 \`web_search\` 同轮并行），可行则 **\`board_openclaw_delegate\`**，并在 guidance 中写清验收标准。",
+        skillHint,
+      ].join("\n")
+    : "**板端 OpenClaw 参与**：本回合以 SSH/本地工具为主；若任务明显需要板端多步或技能，仍应主动 assess，勿机械回避。";
+
+  return [
+    "## 本轮编排期望（系统自动计算 · 须对齐）",
+    `- **模式**：${mode}`,
+    `- **期望**：${exp}`,
+    `- **来源**：${decision.source}（置信度 ${decision.confidence.toFixed(2)}）`,
+    ocLine,
+    `- **策略说明**：${decision.reason}`,
+  ].join("\n");
+}
+
 export function selectDelegateDecision(
   req: RDKClawChatRequest,
   matchedSkills: RDKClawSkillMeta[],
@@ -85,14 +113,25 @@ export function selectDelegateDecision(
   const hasBoardSkills = boardSnapshot.skills.length > 0;
 
   if (delegationBias === "local-first") {
+    /** Studio 优先 ≠ 禁用 OpenClaw：板端有技能时仍标为可协同，避免模型与元数据「完全不需要板端」 */
+    if (hasBoardSkills) {
+      return {
+        path: "collaborative",
+        canLocalComplete: true,
+        needsBoardCollaboration: true,
+        source: "persona",
+        reason:
+          "委派倾向为 Studio 优先：单条/原子操作用 device_*；多步、技能链、或预计需多轮试错的板端任务应 assess→delegate，由板端 OpenClaw 迭代，避免主会话被长串 shell 淹没",
+        confidence: 0.88,
+      };
+    }
     return {
       path: "local_only",
       canLocalComplete: true,
       needsBoardCollaboration: false,
       source: "persona",
-      reason: hasBoardSkills
-        ? `委派倾向为 Studio 优先：默认用 device_* / 本地工具链；仅在技能强制、用户指定 board 模式或本地多次失败且确需板端技能链时再使用 OpenClaw（assess/delegate）`
-        : "委派倾向为 Studio 优先：默认本地与 SSH 工具链完成；确需板端 OpenClaw 时再评估",
+      reason:
+        "委派倾向为 Studio 优先且板端暂无已登记技能：默认 SSH/本地完成；装技能后或任务明显需板端 Agent 时再 assess",
       confidence: 0.88,
     };
   }

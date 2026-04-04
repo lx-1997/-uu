@@ -476,6 +476,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     persistStudioChatSessionId(chatDeviceIdRef.current, next);
   };
   const feishuMirrorSeenRef = useRef<Set<string>>(new Set());
+  /** 微信会话过期等：短时窗口内合并重复推送（多路 socket / 重连），不阻塞日后再次过期提示 */
+  const channelErrorMirrorAtRef = useRef<Map<string, number>>(new Map());
   const feishuToolMessageRef = useRef<Record<string, number>>({});
   const feishuLastToolKeyRef = useRef('');
   const showDebugTurnsRef = useRef<boolean>((() => {
@@ -571,7 +573,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     e.preventDefault();
     const regen = options?.regenerate;
     if (regen) {
-      setChatMessages((prev) => prev.filter((m) => m.id !== regen.removeAiMessageId));
+      setChatMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === regen.removeAiMessageId);
+        if (idx >= 0) return prev.slice(0, idx);
+        return prev.filter((m) => m.id !== regen.removeAiMessageId);
+      });
     }
     const userMsg = String(regen ? regen.message : options?.messageOverride ?? cmd).trim();
     const requestAttachments = regen?.attachments ?? options?.attachments ?? [];
@@ -1176,7 +1182,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           currentDevice?.id,
           sessionIdRef.current,
           userIdRef.current,
-          { attachments: requestAttachments, studioResponseMode },
+          {
+            attachments: requestAttachments,
+            studioResponseMode,
+            ...(regen ? { studioRegenerate: true } : {}),
+          },
           (event: AgentSSEEvent) => {
             if (generation !== streamGenerationRef.current) return;
             const eventRunId = String(event.data.runId || '').trim();
@@ -1285,6 +1295,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     detail: subSummary.slice(0, 400),
                   });
                   updateAiMessage(aiText, aiBlocks, true);
+                  break;
+                }
+
+                /** phase=end 且无 run_metrics/subagent：旧版或占位 meta，勿再叠一张与「执行路径」雷同的状态卡 */
+                if (phase === 'end') {
                   break;
                 }
 
@@ -1723,7 +1738,37 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 if (!isError && result.startsWith('{')) {
                   try {
                     const parsed = JSON.parse(result) as Record<string, unknown>;
-                    if (parsed.__type === 'image_download') {
+                    if (parsed.__type === 'code_change') {
+                      const scopeLabel =
+                        parsed.scope === 'device'
+                          ? t('chat.codeChange.device', '板端')
+                          : t('chat.codeChange.workspace', '工作区');
+                      const p = typeof parsed.path === 'string' ? parsed.path : '';
+                      const summary = typeof parsed.summary === 'string' ? parsed.summary : '';
+                      pushAiBlock({
+                        type: 'status',
+                        title: tf('chat.codeChange.title', '{{scope}} · 代码变更', { scope: scopeLabel }),
+                        summary: summary || p,
+                        items: [
+                          {
+                            label: p || tf('chat.codeChange.path', '路径', {}),
+                            value: summary || '—',
+                            ok: !isError,
+                          },
+                        ],
+                        collapsible: true,
+                        defaultCollapsed: false,
+                      });
+                      const preview = typeof parsed.preview === 'string' ? parsed.preview : '';
+                      if (preview.trim()) {
+                        pushAiBlock({
+                          type: 'code',
+                          lang: 'diff',
+                          content: preview,
+                        });
+                      }
+                      mediaHandled = true;
+                    } else if (parsed.__type === 'image_download') {
                       const fileName =
                         typeof parsed.fileName === 'string' && String(parsed.fileName).trim()
                           ? String(parsed.fileName).trim()
@@ -2641,6 +2686,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         ts?: number;
         payload?: {
           channel?: string;
+          accountId?: string;
+          errorKind?: string;
           direction?: 'inbound' | 'ack' | 'outbound' | 'error';
           openIdMasked?: string;
           chatId?: string;
@@ -2886,6 +2933,21 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           },
         ]);
         return;
+      }
+      if (
+        detail.type === 'channel_message_error'
+        && payload.channel === 'weixin'
+        && (payload.errorKind === 'session_expired' || /会话已过期|会话过期/.test(message))
+      ) {
+        const dedupeKey = `weixin:session_expired:${String(payload.accountId || '').trim() || message}`;
+        const now = Date.now();
+        const windowMs = 20_000;
+        const prev = channelErrorMirrorAtRef.current.get(dedupeKey);
+        if (prev !== undefined && now - prev < windowMs) return;
+        channelErrorMirrorAtRef.current.set(dedupeKey, now);
+        for (const [k, t] of channelErrorMirrorAtRef.current) {
+          if (now - t > 120_000) channelErrorMirrorAtRef.current.delete(k);
+        }
       }
       setChatExpanded(true);
       setChatMessages((prev) => [

@@ -45,6 +45,7 @@ import {
   type OpenClawDeploymentManager,
 } from '../../managers/OpenClawDeploymentManager.js';
 import * as path from 'node:path';
+import { buildCodeChangeJson } from './code-change-result.js';
 
 export interface RdkToolsCallbacks {
   onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
@@ -329,10 +330,61 @@ const DEVICE_EXEC_HEARTBEAT_AFTER_MS = 15_000;
 /** 连续无输出多久发一条「仍在运行」 */
 const DEVICE_EXEC_HEARTBEAT_SILENT_MS = 15_000;
 
+/** 前台跑 ros2 launch 会阻塞整条工具链直到节点退出，易导致会话「卡住/超时」；返回里点明应改用 background */
+const ROS_LONG_RUN_BLOCK_RE = /\bros2\s+launch\b/i;
+
+/**
+ * 模型常在命令里手写 `nohup … ros2 launch` 却漏传 `background: true`，仍走前台 SSH + 心跳，整轮对话卡住。
+ * 显式 `background: false` 时尊重用户（短时只看启动横幅）。
+ */
+function inferDeviceExecBackgroundIntent(command: string, explicitBackground?: boolean): boolean {
+  if (explicitBackground === false) return false;
+  if (explicitBackground === true) return true;
+  if (ROS_LONG_RUN_BLOCK_RE.test(command)) return true;
+  if (/\bnohup\b/i.test(command)) return true;
+  return false;
+}
+
+function appendRosLongRunForegroundHint(command: string, runBackground: boolean, result: string): string {
+  if (runBackground || !ROS_LONG_RUN_BLOCK_RE.test(command)) return result;
+  if (result.includes('[编排提示 · 长驻进程]')) return result;
+  return (
+    `${result}\n\n` +
+    '[编排提示 · 长驻进程] `ros2 launch` 会**持续阻塞**当前 `device_exec`，整条对话需等进程结束才继续，易出现「任务超时」或长时间无下一步。' +
+    ' **要启动后长期跑 demo**：请改用 **device_exec 且 `background: true`**（仅等启动阶段并返回 pid/日志），再用 `device_exec` 执行 `tail` 日志、`ros2 topic list` / `echo`，或 `studio_open_url` 打开可视化；' +
+    '仅短时看启动横幅可保持前台。'
+  );
+}
+
+/** 板端后台启动：脚本经 base64 落盘后 nohup，避免 `&&` 与 `&` 优先级导致 pid 错乱；返回 pid、日志路径与初始输出 */
+function wrapBackgroundDeviceCommand(userCommand: string): string {
+  const b64 = Buffer.from(userCommand, 'utf8').toString('base64');
+  const script = [
+    'set -e',
+    'LOG=/tmp/rdkstudio-bg-$$.log',
+    'SH=/tmp/rdkstudio-sh-$$.sh',
+    `printf '%s' '${b64}' | base64 -d > "$SH"`,
+    /** 无 shebang 时不可直接 exec 脚本文件，须由 bash 解释 */
+    'nohup bash "$SH" >"$LOG" 2>&1 &',
+    'pid=$!',
+    'echo "[RDK 后台任务] PID=$pid LOG=$LOG"',
+    'sleep 2',
+    'echo "--- 初始输出（约 2 秒，进程仍在后台） ---"',
+    'head -c 12000 "$LOG" 2>/dev/null || true',
+  ].join('\n');
+  return `bash -lc ${JSON.stringify(script)}`;
+}
+
 function deviceExecTool(
   deviceId: string,
   callbacks?: RdkToolsCallbacks,
-): Tool<{ command: string; timeoutMs?: number; runDetached?: boolean; detachedLogPath?: string }> {
+): Tool<{
+  command: string;
+  timeoutMs?: number;
+  background?: boolean;
+  runDetached?: boolean;
+  detachedLogPath?: string;
+}> {
   return {
     name: 'device_exec',
     description:
@@ -348,11 +400,15 @@ function deviceExecTool(
       '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
-      '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功\n' +
-      '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步；**自行拼 nohup 时**注意 `&&` 与 `&` 的 shell 优先级，不确定时优先用 **runDetached**\n' +
+      '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功；板端失败见末尾 `[exit code: n]`（n≠0）或 stderr；本机 `exec` 见 `[EXIT CODE]`。须**再调用**工具继续排查，勿仅输出错误就结束回合\n' +
+      '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步；**自行拼 nohup 时**注意 `&&` 与 `&` 的 shell 优先级，不确定时优先用 **runDetached** 或 **background:true**\n' +
       '- 读取设备文件用 device_file_read 而不是 cat\n' +
       '- 写入设备文件用 device_file_write 而不是 echo/tee（本机 edit/write **不会**改板端文件）\n' +
-      '- 查看目录用 device_file_list 而不是 ls',
+      '- 涉及**摄像头/视频输入**（如官方例程的 CAM_TYPE）：在 `source`+launch **之前**用短命令探测 **USB 与 MIPI**（如 `ls /dev/video*`、`v4l2-ctl --list-devices`、`lsusb`），与文档参数一致后再启动；勿假设接口类型\n' +
+      '- 查看目录用 device_file_list 而不是 ls\n' +
+      '- **runDetached=true**：与 **detachedLogPath** 联用，Studio 以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）\n' +
+      '- **background=true**：在板端 **nohup 后台**运行（另一套包装，适合 `ros2 launch` 等）。**`ros2 launch` / 长驻节点几乎总是应加 background 或 runDetached**，否则 SSH 前台会阻塞到节点退出。SSH **只等待启动完成**并返回 **pid、日志路径、日志尾部摘要**；勿对后台任务设过短 timeoutMs（未传时后台固定约 90s 仅用于取尾部）。仅短时看启动横幅可前台执行\n' +
+      '- **漏传 background**：若命令含 **`ros2 launch`** 或 **`nohup`**（且未使用 runDetached），Studio 会**自动按后台模式**执行（与 `background:true` 等价）；若确需前台阻塞到进程结束，请显式传 **`background: false`**',
     inputSchema: {
       type: 'object',
       properties: {
@@ -363,7 +419,12 @@ function deviceExecTool(
         timeoutMs: {
           type: 'number',
           description:
-            '可选。整段命令最长等待（毫秒）5000～7200000；不传默认 30 分钟。勿默认填 60000；长任务应省略或给足时间。',
+            '可选。整段命令最长等待（毫秒）5000～7200000；不传默认 30 分钟。勿默认填 60000；长任务应省略或给足时间。background=true 时该时限仅约束「启动阶段」SSH 等待。',
+        },
+        background: {
+          type: 'boolean',
+          description:
+            '可选。为 true 时在板端后台启动（nohup），适合 ros2 launch 等长驻进程；返回 pid 与日志文件路径及尾部。',
         },
         runDetached: {
           type: 'boolean',
@@ -381,21 +442,35 @@ function deviceExecTool(
     async execute(input, ctx) {
       const report = callbacks?.onDeviceExecProgress;
       let hb: ReturnType<typeof setInterval> | null = null;
+      const runDetached = input.runDetached === true;
+      const runBackground =
+        !runDetached && inferDeviceExecBackgroundIntent(input.command, input.background);
+      const autoBackground =
+        runBackground && input.background !== true && input.background !== false;
       try {
+        let commandToExecute = input.command;
+
         let execOpts: {
           timeoutMs?: number;
           onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
           abortSignal?: AbortSignal;
         } = {};
 
-        const runDetached = input.runDetached === true;
-        let commandToExecute = input.command;
         if (runDetached) {
           const logPath =
             input.detachedLogPath?.trim() ||
             `/tmp/rdkstudio-detached-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.log`;
           commandToExecute = wrapDetachedDeviceCommand(input.command, logPath);
           execOpts.timeoutMs = DEVICE_EXEC_DETACHED_SSH_WAIT_MS;
+        } else if (runBackground) {
+          commandToExecute = wrapBackgroundDeviceCommand(input.command);
+          /** 后台模式仅用于抓取启动与 tail，不占用 30min SSH */
+          const cap = 90_000;
+          const req =
+            input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))
+              ? resolveDeviceExecTimeoutMs(Number(input.timeoutMs))
+              : cap;
+          execOpts.timeoutMs = Math.min(Math.max(req, 15_000), cap);
         } else if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
           execOpts.timeoutMs = resolveDeviceExecTimeoutMs(Number(input.timeoutMs));
         }
@@ -424,7 +499,7 @@ function deviceExecTool(
         const startAt = Date.now();
         let lastChunkAt = Date.now();
 
-        if (report) {
+        if (report && !runBackground && !runDetached) {
           const onStreamChunk = (text: string, stream: 'stdout' | 'stderr') => {
             lastChunkAt = Date.now();
             if (!text) return;
@@ -451,24 +526,44 @@ function deviceExecTool(
         });
         flushProgress(true);
         if (!output) {
-          return runDetached
-            ? '(detached 启动完成，无终端输出；请检查返回中的 RDK_DETACHED_PID / RDK_DETACHED_LOG，并用 device_exec 执行 tail 或 ss 验证)'
-            : '(命令执行成功，无输出)';
+          if (runDetached) {
+            return (
+              '(detached 启动完成，无终端输出；请检查返回中的 RDK_DETACHED_PID / RDK_DETACHED_LOG，并用 device_exec 执行 tail 或 ss 验证)'
+            );
+          }
+          if (autoBackground) {
+            return (
+              '(命令执行成功，无输出)\n\n[Studio] 本条已按**后台模式**执行（检测到 ros2 launch / nohup 等，与显式 background:true 等价）。'
+            );
+          }
+          return '(命令执行成功，无输出)';
         }
 
         // 命令语义化：从输出中提取结构化信息（如温度、内存使用率）
         const { extractCommandInfo } = await import('../../rdkclaw/command-semantics.js');
-        const info = extractCommandInfo(input.command, output);
+        const info = runBackground ? null : extractCommandInfo(input.command, output);
         const detachedHint = runDetached
           ? '\n\n[detached] 后续可用 device_exec 查看日志（如 tail -n 80 日志路径）或监听端口（ss -tlnp）；PID 退出则进程已结束。'
           : '';
+        const autoNote = autoBackground
+          ? '\n\n[Studio] 本条已按**后台模式**执行（检测到长驻命令特征；若确需前台阻塞请传 background:false）。'
+          : '';
+        const treatAsBackgroundForHint = runBackground || runDetached;
         if (info) {
           const infoStr = Object.entries(info)
             .map(([k, v]) => `${k}: ${v}`)
             .join(', ');
-          return `${output}\n\n[解析] ${infoStr}${detachedHint}`;
+          return appendRosLongRunForegroundHint(
+            input.command,
+            treatAsBackgroundForHint,
+            `${output}\n\n[解析] ${infoStr}${detachedHint}${autoNote}`,
+          );
         }
-        return `${output}${detachedHint}`;
+        return appendRosLongRunForegroundHint(
+          input.command,
+          treatAsBackgroundForHint,
+          `${output}${detachedHint}${autoNote}`,
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (isSshAuthError(err)) {
@@ -483,10 +578,15 @@ function deviceExecTool(
           );
         }
         if (isSshExecTimeoutMessage(msg)) {
+          const rosHint =
+            ROS_LONG_RUN_BLOCK_RE.test(input.command) && !runBackground && !runDetached
+              ? `\n\n若命令含 \`ros2 launch\` 等**长驻进程**，应使用 **device_exec** 且 **\`background: true\`** 或 **\`runDetached: true\`**（或命令中含 nohup/ros2 launch 时 Studio 会自动按后台执行），再用 \`tail\`/\`ros2 topic\` 验收；前台阻塞易触发工具/网关超时。`
+              : '';
           return (
             `[命令执行失败] ${msg}\n\n` +
             `这是 **等待超时**（时限内命令未结束），与设备是否在线无必然关系。\n` +
-            `请**省略 timeoutMs**（默认 30 分钟）或对长任务传入更大毫秒数（最高 7200000）；可拆分命令或重试，不要切换设备。`
+            `请**省略 timeoutMs**（默认 30 分钟）或对长任务传入更大毫秒数（最高 7200000）；可拆分命令或重试，不要切换设备。` +
+            rosHint
           );
         }
         // 关键：明确告诉 LLM 命令失败≠设备离线，防止误判后切换设备
@@ -548,8 +648,20 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
     },
     inputZodSchema: deviceFileWriteToolInputZod,
     async execute(input) {
+      let before = '';
+      try {
+        before = await readDeviceFile(deviceId, input.path);
+      } catch {
+        /* 新文件 */
+      }
       await writeDeviceFile(deviceId, input.path, input.content);
-      return `文件已写入: ${input.path} (${input.content.length} 字符)`;
+      return buildCodeChangeJson({
+        scope: 'device',
+        path: input.path,
+        op: before ? 'overwrite' : 'write',
+        before,
+        after: input.content,
+      });
     },
   };
 }

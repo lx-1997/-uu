@@ -87,6 +87,12 @@ export const deviceExecToolInputZod = z.object({
     z.coerce.number().finite().min(5000).max(7_200_000).optional(),
   ),
   /**
+   * 为 true 时在板端用 nohup 后台启动命令（适合 ros2 launch、长时间节点等），
+   * SSH 仅等待启动与日志尾部；主进程在设备上持续运行。
+   * 未传时若命令含 `ros2 launch` 或 `nohup`，服务端会自动按后台执行；显式 false 可强制前台。
+   */
+  background: z.boolean().optional(),
+  /**
    * true：以 nohup 在板端后台启动 `command`，SSH 立即返回 PID 与日志路径（用于推流/WS 服务等常驻进程）。
    * 此时代入的 timeoutMs 仅影响「启动脚手架」等待，不限制后台进程寿命。
    */

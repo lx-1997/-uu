@@ -2581,7 +2581,10 @@ export default function AIDock() {
                                 title={
                                   aiTyping
                                     ? t('dock.tt.waitReply', '请等待当前回复结束')
-                                    : t('dock.tt.regenerate', '用同一条消息重新生成')
+                                    : t(
+                                        'dock.tt.regenerate',
+                                        '用同一条用户消息重试：移除本则助手回复及之后的对话气泡，并同步服务端会话（类似 Gemini 重新生成）',
+                                      )
                                 }
                                 onClick={() => void runRegenerate(msg.id)}
                               >

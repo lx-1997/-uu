@@ -6647,6 +6647,7 @@ app.post('/api/agent/chat', async (request, response) => {
     attachments,
     studioUiHints: studioUiHintsRaw,
     studioResponseMode: studioResponseModeRaw,
+    studioRegenerate: studioRegenerateRaw,
   } = request.body as {
   message?: string;
   deviceId?: string;
@@ -6654,8 +6655,9 @@ app.post('/api/agent/chat', async (request, response) => {
   userId?: string;
   mode?: RDKClawExecutionMode;
   studioResponseMode?: string;
-  studioUiHints?: unknown;
-  attachments?: Array<{
+    studioUiHints?: unknown;
+    studioRegenerate?: boolean;
+    attachments?: Array<{
       id: string;
       type: 'image' | 'file' | 'audio' | 'video';
       name: string;
@@ -6742,6 +6744,7 @@ app.post('/api/agent/chat', async (request, response) => {
         trainingDataOptIn: false,
         studioUiHints,
         studioResponseMode,
+        studioRegenerate: Boolean(studioRegenerateRaw),
         abortSignal: requestAbortController.signal,
       })) {
         sendEvent(event.type, event.data);

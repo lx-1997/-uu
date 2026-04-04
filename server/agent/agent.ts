@@ -843,6 +843,7 @@ export class Agent {
   async run(
     sessionIdOrKey: string,
     userMessage: string,
+    options?: { studioRegenerate?: boolean },
   ): Promise<RunResult> {
     const sessionKey = resolveSessionKey({
       agentId: this.agentId,
@@ -897,6 +898,29 @@ export class Agent {
             );
           }
 
+          const studioRegenerate = Boolean(options?.studioRegenerate);
+
+          let processedMessage = userMessage;
+          let skillTriggered: string | undefined;
+
+          // 技能匹配（对应 OpenClaw: auto-reply/skill-commands.ts → model dispatch 路径）
+          // /command args → 改写消息，引导模型读取对应 SKILL.md
+          if (this.enableSkills) {
+            const match = await this.skills.match(userMessage);
+            if (match) {
+              skillTriggered = match.command.skillName;
+              // 对齐 OpenClaw: 改写消息告诉模型使用哪个技能
+              // 模型收到后扫描 <available_skills>，找到对应 skill，
+              // 通过 read 工具加载 SKILL.md 并遵循其指令
+              const userInput = match.args ?? "";
+              processedMessage = `Use the "${match.command.skillName}" skill for this request.\n\nUser input:\n${userInput}`;
+            }
+          }
+
+          if (studioRegenerate) {
+            await this.sessions.truncateForStudioRegenerate(sessionKey, processedMessage);
+          }
+
           // 加载历史
           const history = await this.sessions.load(sessionKey);
 
@@ -926,26 +950,15 @@ export class Agent {
               this.studioDeviceIdResolver?.() ?? this.toolContextExtras?.studioDeviceId,
           };
 
-          let processedMessage = userMessage;
-          let skillTriggered: string | undefined;
-
-          // 技能匹配（对应 OpenClaw: auto-reply/skill-commands.ts → model dispatch 路径）
-          // /command args → 改写消息，引导模型读取对应 SKILL.md
-          if (this.enableSkills) {
-            const match = await this.skills.match(userMessage);
-            if (match) {
-              skillTriggered = match.command.skillName;
-              // 对齐 OpenClaw: 改写消息告诉模型使用哪个技能
-              // 模型收到后扫描 <available_skills>，找到对应 skill，
-              // 通过 read 工具加载 SKILL.md 并遵循其指令
-              const userInput = match.args ?? "";
-              processedMessage = `Use the "${match.command.skillName}" skill for this request.\n\nUser input:\n${userInput}`;
-            }
-          }
-
           // Heartbeat: 不在此注入任务到消息
           // 对齐 openclaw: heartbeat 是独立的主动通知系统，
           // 读取 HEARTBEAT.md 并传递给 LLM，不会注入到用户消息中
+
+          const messageContentToString = (m: Message): string => {
+            const c = m.content;
+            if (typeof c === "string") return c;
+            return JSON.stringify(c);
+          };
 
           // 添加用户消息
           const userMsg: Message = {
@@ -953,9 +966,21 @@ export class Agent {
             content: processedMessage,
             timestamp: Date.now(),
           };
-          await this.sessions.append(sessionKey, userMsg);
+          let skipAppendUser = false;
+          if (studioRegenerate && history.length > 0) {
+            const last = history[history.length - 1];
+            if (last.role === "user") {
+              if (messageContentToString(last).trim() === messageContentToString(userMsg).trim()) {
+                skipAppendUser = true;
+              }
+            }
+          }
 
-          const currentMessages = [...history, userMsg];
+          if (!skipAppendUser) {
+            await this.sessions.append(sessionKey, userMsg);
+          }
+
+          const currentMessages = skipAppendUser ? history : [...history, userMsg];
 
           // Compaction: run 开始前做一次
           const prep = await this.prepareMessagesForRun({

@@ -35,7 +35,7 @@ export function isSshAuthError(error: unknown): boolean {
 }
 
 const TRANSIENT_RETRY_DELAY_MS = 1500;
-/** 弱网下多给一次重试（仍保持串行 lane，不放大并发） */
+/** 弱网下多给一次重试（仍经 device lane 调度；lane 支持有限并发） */
 const MAX_TRANSIENT_RETRIES = 3;
 /**
  * 握手/链路抖动时 ssh2 偶发报「authentication methods failed」，与真·错口令不易区分。
@@ -113,47 +113,45 @@ export async function execOnDevice(
           ...(options.rejectOnNonZeroExit === false ? { rejectOnNonZeroExit: false as const } : {}),
         }
       : undefined;
-  return runInDeviceLane(device.id, async () => {
-    const pwdList = buildSshPasswordCandidatesForDevice(device);
-    if (pwdList.length === 0) {
-      throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
-    }
-    let lastError: unknown = null;
-    for (const pwd of pwdList) {
-      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
-        try {
-          const output = await runRemoteCommands(
-            { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-            commands,
-            runOpts,
-          );
-          setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
-          return output;
-        } catch (err) {
-          lastError = err;
-          if (isSshAuthError(err)) {
-            if (attempt < AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD) {
-              console.warn(
-                `[SSH] auth-shaped error on ${device.host}, retry same password (${attempt + 1}/${AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD + 1}): ${err instanceof Error ? err.message : err}`,
-              );
-              await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
-              continue;
-            }
-            break;
-          }
-          if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+  const pwdList = buildSshPasswordCandidatesForDevice(device);
+  if (pwdList.length === 0) {
+    throw new Error('设备 SSH 密码未配置：请在设备管理中重新连接并保存密码，或设置环境变量 RDK_SSH_PASSWORD');
+  }
+  let lastError: unknown = null;
+  for (const pwd of pwdList) {
+    for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+      try {
+        const output = await runRemoteCommands(
+          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+          commands,
+          runOpts,
+        );
+        setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
+        return output;
+      } catch (err) {
+        lastError = err;
+        if (isSshAuthError(err)) {
+          if (attempt < AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD) {
             console.warn(
-              `[SSH] transient error on ${device.host}, retry ${attempt + 1}/${MAX_TRANSIENT_RETRIES}: ${err instanceof Error ? err.message : err}`,
+              `[SSH] auth-shaped error on ${device.host}, retry same password (${attempt + 1}/${AUTH_SHAPED_EXTRA_ATTEMPTS_PER_PASSWORD + 1}): ${err instanceof Error ? err.message : err}`,
             );
             await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
             continue;
           }
           break;
         }
+        if (attempt < MAX_TRANSIENT_RETRIES && isTransientSshError(err)) {
+          console.warn(
+            `[SSH] transient error on ${device.host}, retry ${attempt + 1}/${MAX_TRANSIENT_RETRIES}: ${err instanceof Error ? err.message : err}`,
+          );
+          await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_DELAY_MS * (attempt + 1)));
+          continue;
+        }
+        break;
       }
     }
-    throw augmentAuthFailureError(lastError ?? new Error('SSH 命令执行失败'));
-  });
+  }
+  throw augmentAuthFailureError(lastError ?? new Error('SSH 命令执行失败'));
 }
 
 /**

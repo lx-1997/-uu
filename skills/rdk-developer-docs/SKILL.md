@@ -33,6 +33,8 @@ category: Knowledge
 
 基础 URL: `https://developer.d-robotics.cc/rdk_doc`
 
+**Studio 维护的完整章节 URL 索引（按分类、与官网目录对齐）**：`server/rdkclaw/rdk-doc-url-index.md`（Agent 动态提示从该文件加载，请勿在代码中重复硬编码子链接）。
+
 ### 1. 快速开始 (Quick_start)
 
 | 主题 | URL 路径 | 适用场景 |
@@ -86,8 +88,9 @@ category: Knowledge
 
 | 主题 | URL 路径 | 适用场景 |
 |------|----------|----------|
-| TROS 安装 | `/Robot_development/quick_start/` | 用户问 TROS/ROS2 安装 |
+| TROS 入门 | `/Robot_development/quick_start/preparation/` 等子页（**不要**只用 `.../quick_start` 目录，易 404） | 用户问 TROS/ROS2 安装与环境 |
 | 目标检测 (YOLO) | `/Robot_development/boxs/detection/yolo/` | 用户问 YOLO 检测部署 |
+| YOLO-World（开放词汇） | `/Robot_development/boxs/detection/hobot_yolo_world/`（包名 `hobot_yolo_world`；**勿**拼成 `yolo_world`） | 用户问 YOLO-World / 开放词汇检测 |
 | FCOS 检测 | `/Robot_development/boxs/detection/fcos/` | 用户问 FCOS 检测 |
 | 语义分割 | `/Robot_development/boxs/segmentation/` | 用户问语义分割 |
 | 人体关键点 | `/Robot_development/boxs/body_keypoint/` | 用户问人体姿态估计 |

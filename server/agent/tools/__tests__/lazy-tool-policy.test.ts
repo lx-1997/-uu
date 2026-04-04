@@ -22,6 +22,7 @@ describe("lazy-tool-policy", () => {
     expect(shouldPreloadDeferrableWithStudioDevice("board_openclaw_health")).toBe(true);
     expect(shouldPreloadDeferrableWithStudioDevice("fleet_board_list")).toBe(true);
     expect(shouldPreloadDeferrableWithStudioDevice("switch_device")).toBe(true);
-    expect(shouldPreloadDeferrableWithStudioDevice("web_search")).toBe(false);
+    expect(shouldPreloadDeferrableWithStudioDevice("web_search")).toBe(true);
+    expect(shouldPreloadDeferrableWithStudioDevice("web_fetch")).toBe(true);
   });
 });

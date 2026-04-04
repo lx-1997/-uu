@@ -220,6 +220,93 @@ export class SessionManager {
   }
 
   /**
+   * Studio「重试」：从链尾删除连续 assistant 消息，使会话叶回到上一条 user（与 Gemini 类 UI 一致）。
+   * 不处理 compaction 叶（极少见）；若叶非 message 则 noop。
+   */
+  async truncateTrailingAssistant(sessionKey: string): Promise<boolean> {
+    const state = await this.ensureState(sessionKey);
+    if (state.leafId === null) return false;
+    let changed = false;
+    while (true) {
+      const at = state.leafId;
+      if (at === null) break;
+      const leaf = state.byId.get(at);
+      if (!leaf || leaf.type !== "message") break;
+      if (leaf.message.role !== "assistant") break;
+      const parentId = leaf.parentId;
+      state.entries = state.entries.filter((e) => e.id !== leaf.id);
+      state.byId.delete(leaf.id);
+      state.leafId = parentId;
+      changed = true;
+    }
+    if (!changed) return false;
+    state.hasAssistant = state.entries.some(
+      (e) => e.type === "message" && e.message.role === "assistant",
+    );
+    await rewriteSessionFile(state, this.baseDir);
+    state.flushed = true;
+    return true;
+  }
+
+  /**
+   * Studio「重试」完整语义：从叶向根删除，直到叶为「与本轮锚点 user 内容一致」的 user 消息。
+   * 锚点内容为 Agent 侧 skill 改写后的 processed user（与 append 时一致）。
+   * 若链上找不到该 user，则退化为仅 `truncateTrailingAssistant`（最后一轮失败）。
+   */
+  async truncateForStudioRegenerate(sessionKey: string, anchorProcessedUserContent: string): Promise<boolean> {
+    const anchor = anchorProcessedUserContent.trim();
+    if (!anchor) {
+      return this.truncateTrailingAssistant(sessionKey);
+    }
+    const msgStr = (m: Message): string => {
+      const c = m.content;
+      if (typeof c === "string") return c;
+      return JSON.stringify(c);
+    };
+    const state = await this.ensureState(sessionKey);
+    if (state.leafId === null) return false;
+
+    let foundAnchor = false;
+    {
+      let cur: SessionEntry | undefined = state.byId.get(state.leafId);
+      while (cur) {
+        if (cur.type === "message" && cur.message.role === "user" && msgStr(cur.message).trim() === anchor) {
+          foundAnchor = true;
+          break;
+        }
+        cur = cur.parentId ? state.byId.get(cur.parentId) : undefined;
+      }
+    }
+    if (!foundAnchor) {
+      return this.truncateTrailingAssistant(sessionKey);
+    }
+
+    let changed = false;
+    let guard = 0;
+    const maxGuard = 4096;
+    while (state.leafId !== null && guard++ < maxGuard) {
+      const at = state.leafId;
+      const leaf = state.byId.get(at);
+      if (!leaf || leaf.type !== "message") break;
+      if (leaf.message.role === "user" && msgStr(leaf.message).trim() === anchor) {
+        break;
+      }
+      const parentId = leaf.parentId;
+      state.entries = state.entries.filter((e) => e.id !== leaf.id);
+      state.byId.delete(leaf.id);
+      state.leafId = parentId;
+      changed = true;
+    }
+    if (!changed) return false;
+    state.hasAssistant = state.entries.some(
+      (e) => e.type === "message" && e.message.role === "assistant",
+    );
+    await rewriteSessionFile(state, this.baseDir);
+    state.flushed = true;
+    return true;
+  }
+
+  /**
    * 追加 compaction 记录（对齐 OpenClaw）
    */
   async appendCompaction(

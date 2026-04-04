@@ -580,6 +580,8 @@ export type StudioResponseMode = 'quick' | 'thinking';
 export interface StreamAgentChatOptions {
   attachments?: AgentAttachmentPayload[];
   studioResponseMode?: StudioResponseMode;
+  /** 与 Dock「重试」对齐：服务端截断尾部 assistant 并复用同一条 user */
+  studioRegenerate?: boolean;
 }
 
 /** 等待 HTTP 响应头（含网关排队） */
@@ -626,6 +628,7 @@ export function streamAgentChat(
   const controller = new AbortController();
   const attachments = options?.attachments;
   const studioResponseMode = options?.studioResponseMode;
+  const studioRegenerate = Boolean(options?.studioRegenerate);
   let abortKind: 'user' | 'headers' | 'sse_meaningful_idle' | null = null;
 
   const done = (async () => {
@@ -648,6 +651,7 @@ export function streamAgentChat(
           userId,
           studioResponseMode,
           attachments,
+          ...(studioRegenerate ? { studioRegenerate: true } : {}),
           ...(studioUiHints ? { studioUiHints } : {}),
         }),
         signal: controller.signal,

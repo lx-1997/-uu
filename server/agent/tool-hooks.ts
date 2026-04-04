@@ -239,7 +239,7 @@ export function createReadOnlyHook(
   };
 }
 
-/** 对 exec / device_exec 等 shell 类工具在失败时追加简短恢复提示（不修改成功结果） */
+/** 对 exec / device_exec 在**抛错**时追加恢复建议。非零退出但未抛错见 `shell-soft-failure-hint` 与 RDKClaw PostToolUse 钩子。 */
 export function createExecLikeFailureHintHook(
   isExecLike: (toolName: string) => boolean = (name) => name === "exec" || name === "device_exec",
 ): PostToolUseFailureHook {
@@ -251,6 +251,7 @@ export function createExecLikeFailureHintHook(
     async process({ tool, result }) {
       if (!isExecLike(tool.name)) return null;
       if (result.includes("[恢复建议]")) return null;
+      if (result.includes("[编排提示 · 须继续]")) return null;
       return { result: result + hint };
     },
   };

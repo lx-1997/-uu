@@ -146,7 +146,8 @@ export function boardOpenClawDelegateTool(
     name: "board_openclaw_delegate",
     description:
       "读者=编排模型。把**一段板端责任**交给板端 OpenClaw 在其会话里执行（多步推理、技能链、迭代排障），不是「多调几次 SSH」的别名。\n" +
-      "将任务委派给板端 OpenClaw。RDKClaw 与板端协作的核心执行工具。\n\n" +
+      "将任务委派给板端 OpenClaw。RDKClaw 与板端协作的核心执行工具。\n" +
+      "**Studio 可见性**：板端流式输出经 **tool_progress** 推到对话里的「板端 OpenClaw」协作块；请展开该块查看实时日志。若只见「完成」而无过程，检查是否折叠了过程区或会话被精简模式隐藏。\n\n" +
       "规则：\n" +
       "- ALWAYS 在委派前先用 board_openclaw_assess；assess 认为可承接后再 delegate（勿跳过 assess）\n" +
       "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +

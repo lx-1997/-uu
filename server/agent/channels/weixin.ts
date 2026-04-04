@@ -133,6 +133,9 @@ export class WeixinPollingChannel {
   private pollers = new Map<string, AccountPoller>();
   private started = false;
 
+  /** 同一账号在重新绑定前只镜像一次「会话过期」，避免重连/多路轮询重复推送 */
+  private sessionExpiredMirrorSent = new Set<string>();
+
   private pendingApprovals = new Map<string, PendingChannelApproval>();
   private recentUsers = new Map<string, WeixinRecentUser>();
   private static readonly MAX_RECENT_USERS = 50;
@@ -234,6 +237,7 @@ export class WeixinPollingChannel {
   }
 
   addAccount(account: WeixinAccount) {
+    this.sessionExpiredMirrorSent.delete(account.accountId);
     if (this.pollers.has(account.accountId)) {
       const existing = this.pollers.get(account.accountId)!;
       existing.running = false;
@@ -246,6 +250,7 @@ export class WeixinPollingChannel {
   }
 
   removeAccount(accountId: string) {
+    this.sessionExpiredMirrorSent.delete(accountId);
     const poller = this.pollers.get(accountId);
     if (poller) {
       poller.running = false;
@@ -283,8 +288,18 @@ export class WeixinPollingChannel {
         if (res.errcode === -14) {
           poller.lastError = "会话超时，需要重新登录";
           console.warn(`${tag} session expired (errcode -14)`);
-          this.publishMirror("channel_message_error", "微信会话过期",
-            `微信账号 ${poller.account.nickname || poller.account.accountId} 会话已过期，请重新扫码绑定。`);
+          const accountId = poller.account.accountId;
+          const payload = {
+            channel: "weixin",
+            accountId,
+            errorKind: "session_expired" as const,
+          };
+          if (!this.sessionExpiredMirrorSent.has(accountId)) {
+            this.sessionExpiredMirrorSent.add(accountId);
+            this.publishMirror("channel_message_error", "微信会话过期",
+              `微信账号 ${poller.account.nickname || accountId} 会话已过期，请重新扫码绑定。`,
+              payload);
+          }
           poller.running = false;
           break;
         }
@@ -712,7 +727,17 @@ export class WeixinPollingChannel {
   ): void {
     if (!this.notificationHub) return;
     const cfg = this.getConfig();
+    const isSessionExpired =
+      type === "channel_message_error" && payload?.errorKind === "session_expired";
     if (!cfg.mirrorToStudioChat && type !== "channel_message_error") return;
+    if (!cfg.mirrorToStudioChat && type === "channel_message_error" && isSessionExpired) return;
+    const envMirror = process.env.RDK_WEIXIN_MIRROR_SESSION_EXPIRED;
+    if (
+      isSessionExpired &&
+      (envMirror === "0" || envMirror === "false" || envMirror === "off")
+    ) {
+      return;
+    }
     this.notificationHub.publish({
       type,
       title,

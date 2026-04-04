@@ -293,7 +293,10 @@ const PARALLEL_SAFE_TOOLS = new Set([
   "studio_get_agent_config",
   "rdkclaw_token_usage_report",
   "forum_drobotics_latest", "forum_drobotics_topic", "forum_drobotics_auth_status",
-  "web_search", "web_extract",
+  /** 可与 web_search 同轮并行拉文档+检索 */
+  "web_search",
+  "web_fetch",
+  "web_extract",
   "ros_topics", "ros_nodes",
   "vnc_status",
   "flash_check",
@@ -1224,6 +1227,9 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
             } else {
               // ── 串行执行（审批检查 + 逐个 steering 检查） ──
               for (let gi = 0; gi < group.calls.length; gi++) {
+                if (getToolsForRun) {
+                  toolsForRun = getToolsForRun();
+                }
                 const call = group.calls[gi];
                 const tool = toolsForRun.find((t) => t.name === call.name);
                 let result = "";

@@ -24,6 +24,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { buildCodeChangeJson, buildEditCodeChangeJson } from "./code-change-result.js";
 import type { SpawnToolScope } from "../spawn-profile.js";
 import type { Tool, ToolContext } from "./types.js";
 import {
@@ -187,9 +188,21 @@ export const writeTool: Tool<{ file_path: string; content: string }> = {
     }
 
     try {
+      let previous = "";
+      try {
+        previous = await fs.readFile(filePath, "utf-8");
+      } catch {
+        /* 新文件 */
+      }
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, input.content, "utf-8");
-      return `成功写入 ${input.file_path}`;
+      return buildCodeChangeJson({
+        scope: "workspace",
+        path: input.file_path,
+        op: previous ? "overwrite" : "write",
+        before: previous,
+        after: input.content,
+      });
     } catch (err) {
       return `错误: ${(err as Error).message}`;
     }
@@ -263,7 +276,12 @@ export const editTool: Tool<{
       // 只替换第一个匹配
       const newContent = content.replace(input.old_string, input.new_string);
       await fs.writeFile(filePath, newContent, "utf-8");
-      return `成功编辑 ${input.file_path}`;
+      return buildEditCodeChangeJson({
+        scope: "workspace",
+        path: input.file_path,
+        oldString: input.old_string,
+        newString: input.new_string,
+      });
     } catch (err) {
       return `错误: ${(err as Error).message}`;
     }
@@ -310,6 +328,7 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
     "- NEVER 把本工具输出说成板端或 SSH 在设备上的结果\n" +
     "- 默认超时 30 秒，可通过 timeout 参数调整\n" +
     "- NEVER 使用交互式命令（vim、top、less）\n" +
+    "- 若返回含 `[EXIT CODE]` 非 0 或 `[STDERR]` 明显报错：命令未成功，须继续用工具排查，勿仅输出错误就结束回合\n" +
     "- 用途：运行本地脚本、安装 npm 包、git 操作、文件处理等",
   inputSchema: {
     type: "object",

@@ -322,7 +322,7 @@ export default function SettingsPanel() {
   /* ── RDKClaw Persona & Policy ── */
   const [persona, setPersona] = useState<PersonaProfile>({
     name: '小地瓜', extraInstructions: '', riskLevel: 'balanced',
-    delegationBias: 'local-first', autonomyLevel: 'assisted',
+    delegationBias: 'balanced', autonomyLevel: 'assisted',
   });
   const [policy, setPolicy] = useState<RDKClawPolicy>({
     approval: { mode: 'risk-based', riskThreshold: 'medium' },
@@ -2083,7 +2083,7 @@ export default function SettingsPanel() {
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.persona.delegation', '委派倾向')}</span>
-                    <div className="settings-row-value"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation.hint', '委派倾向；Studio 优先为推荐默认，适合 OpenClaw 在开发板、主推理在 Studio 的架构')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先（推荐）')}</option><option value="balanced">{t('settings.persona.delegation.balanced', '均衡')}</option><option value="board-first">{t('settings.persona.delegation.board', '板端优先')}</option></select></div>
+                    <div className="settings-row-value"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation.hint', '委派倾向：均衡为默认，RDKClaw 与板端 OpenClaw 协同；Studio 优先偏重 SSH，板端优先偏重 assess→delegate')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="balanced">{t('settings.persona.delegation.balancedRec', '均衡（推荐）')}</option><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先')}</option><option value="board-first">{t('settings.persona.delegation.board', '板端优先')}</option></select></div>
                   </div>
                   <div className="settings-actions">
                     <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePersona} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : t('settings.persona.save', '保存')}</button>

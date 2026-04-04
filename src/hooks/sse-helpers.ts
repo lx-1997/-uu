@@ -175,19 +175,200 @@ export function resolveDecisionSourceLabel(source: string) {
   return '默认策略';
 }
 
+/**
+ * RDKClaw / 本机 write / OpenClaw delegate·chat 等：对话区须能看到完整入参（长脚本、task、message），
+ * 勿只显示 <N chars> 或 [object]。
+ */
+const TOOL_ARG_CONTENT_PREVIEW_MAX = 48 * 1024;
+
+/** 通常为短标量/ID，单行展示即可；若值异常长仍走全文块 */
+const TOOL_ARG_SHORT_KEYS = new Set([
+  'sessionId',
+  'session_id',
+  'targetDeviceId',
+  'target_device_id',
+  'deviceId',
+  'device_id',
+  'screen',
+  'port',
+  'timeout',
+  'timeoutMs',
+  'limit',
+  'encourageSkills',
+  'cleanup',
+  'collectMode',
+  'collect_mode',
+  'mode',
+  'role',
+  'op',
+  'page',
+  'size',
+  'offset',
+  'width',
+  'height',
+  'count',
+  'index',
+  'version',
+  'revision',
+  'phase',
+  'status',
+  'state',
+  'dryRun',
+  'force',
+  'skip',
+]);
+
+/** 明确按「长文本」展示（与 RDKClaw / OpenClaw / 本机编辑 等工具字段对齐） */
+const TOOL_ARG_FULL_TEXT_KEYS = new Set([
+  'content',
+  'old_string',
+  'new_string',
+  'message',
+  'task',
+  'context',
+  'guidance',
+  'intent',
+  'prompt',
+  'query',
+  'body',
+  'text',
+  'html',
+  'description',
+  'markdown',
+  'instructions',
+  'notes',
+  'feedback',
+  'reason',
+  'explanation',
+  'summary',
+  'input',
+  'output',
+  'stdin',
+  'stdout',
+  'stderr',
+  'payload',
+  'answer',
+  'transcript',
+  'speech',
+  'search',
+  'filter',
+  'pattern',
+  'command',
+  'shell',
+  'shell_command',
+  'bash',
+  'line',
+  'diff',
+  'patch',
+  'snippet',
+  'code',
+  'script',
+  'email',
+  'letter',
+  'report',
+  'xml',
+  'json',
+  'source',
+  'data',
+  'variables',
+  'env',
+  'extra',
+  'metadata',
+  'comment',
+  'subtitle',
+  'title',
+  'caption',
+  'hint',
+  'details',
+  'help',
+  'error',
+  'suggestion',
+  'label',
+]);
+
+function argKeySortOrder(key: string): number {
+  if (key === 'path' || key === 'file_path' || key === 'target_path' || key === 'filePath') return 0;
+  if (key === 'command' || key === 'shell' || key === 'shell_command' || key === 'uri' || key === 'url') {
+    return 1;
+  }
+  if (TOOL_ARG_SHORT_KEYS.has(key)) return 2;
+  if (
+    TOOL_ARG_FULL_TEXT_KEYS.has(key)
+    || key === 'content'
+    || key === 'old_string'
+    || key === 'new_string'
+    || key === 'message'
+    || key === 'task'
+    || key === 'context'
+    || key === 'guidance'
+  ) {
+    return 5;
+  }
+  return 3;
+}
+
+const PATH_LIKE_KEYS = new Set([
+  'path',
+  'file_path',
+  'target_path',
+  'filePath',
+  'uri',
+  'url',
+]);
+
+function formatFullTextBlock(key: string, v: string): string {
+  if (v.length <= TOOL_ARG_CONTENT_PREVIEW_MAX) {
+    return `${key}:\n${v}`;
+  }
+  return `${key}:\n${v.slice(0, TOOL_ARG_CONTENT_PREVIEW_MAX)}\n\n…（共 ${v.length} 字符，已截断；完整内容以工具执行结果为准）`;
+}
+
+function shouldShowFullString(key: string, v: string): boolean {
+  if (PATH_LIKE_KEYS.has(key)) return false;
+  if (TOOL_ARG_SHORT_KEYS.has(key) && v.length <= 400) return false;
+  if (TOOL_ARG_FULL_TEXT_KEYS.has(key)) return true;
+  if (key === 'command' || key === 'shell' || key === 'shell_command') return true;
+  return v.length >= 180;
+}
+
+function formatStringArgForToolSummary(key: string, v: string): string {
+  if (PATH_LIKE_KEYS.has(key)) {
+    return `${key}: ${v.replace(/\s+/g, ' ').trim()}`;
+  }
+  if (shouldShowFullString(key, v)) {
+    return formatFullTextBlock(key, v);
+  }
+  const compact = v.replace(/\s+/g, ' ').trim();
+  return `${key}: ${compact.slice(0, 200)}${compact.length > 200 ? '...' : ''}`;
+}
+
+function formatNonStringArgForToolSummary(key: string, v: unknown): string {
+  if (v == null) return `${key}: ${String(v)}`;
+  if (typeof v === 'boolean' || typeof v === 'number') return `${key}: ${String(v)}`;
+  try {
+    const s = JSON.stringify(v, null, 2);
+    if (s.length <= TOOL_ARG_CONTENT_PREVIEW_MAX) {
+      return `${key}:\n${s}`;
+    }
+    return `${key}:\n${s.slice(0, TOOL_ARG_CONTENT_PREVIEW_MAX)}\n\n…（JSON 已截断，共约 ${s.length} 字符）`;
+  } catch {
+    return `${key}: ${String(v)}`;
+  }
+}
+
 export function summarizeToolArgs(args: Record<string, unknown>) {
   const entries = Object.entries(args || {});
   if (entries.length === 0) return '无参数';
+  entries.sort((a, b) => {
+    const d = argKeySortOrder(a[0]) - argKeySortOrder(b[0]);
+    return d !== 0 ? d : a[0].localeCompare(b[0]);
+  });
   return entries.map(([k, v]) => {
     if (typeof v === 'string') {
-      if (k === 'content') return `${k}: <${v.length} chars>`;
-      const compact = v.replace(/\s+/g, ' ').trim();
-      const limit = k === 'command' ? 120 : 80;
-      return `${k}: ${compact.slice(0, limit)}${compact.length > limit ? '...' : ''}`;
+      return formatStringArgForToolSummary(k, v);
     }
-    if (v && typeof v === 'object') return `${k}: [object]`;
-    return `${k}: ${String(v)}`;
-  }).join(' | ');
+    return formatNonStringArgForToolSummary(k, v);
+  }).join('\n\n');
 }
 
 /** 用于状态卡片标题：优先文件路径、命令等，避免只显示工具名 */

@@ -41,6 +41,11 @@ export interface RDKClawChatRequest {
   studioUiHints?: StudioUiHints;
   /** Studio 工作台：快速 / 思考（影响本轮模型采样与思考档位，默认 thinking） */
   studioResponseMode?: StudioResponseMode;
+  /**
+   * Studio Dock「重试」：先截断会话尾部 assistant，再复用同一条 user（不重复 append），对齐 Gemini 类「重新生成」语义。
+   * 仅应在 channel=studio 且用户显式重试时置 true。
+   */
+  studioRegenerate?: boolean;
   // 服务端内部字段：用于在 SSE 断连时中止当前 run
   abortSignal?: AbortSignal;
 }

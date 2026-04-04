@@ -97,6 +97,7 @@ import {
 import { buildRdkclawSystemPromptBundle } from "./system-prompt-layers.js";
 import { hashSystemPromptLayers, hashStableDynamicSystemPrompt } from "./system-prompt-telemetry.js";
 import { CompactHookRegistry } from "../agent/compact-hooks.js";
+import { buildRdkClawToolHookRegistry } from "../agent/rdkclaw-tool-hooks.js";
 import {
   selectDelegateDecision,
   resolveDelegationModeText,
@@ -1132,6 +1133,7 @@ export class RDKClawApp {
       policy,
       studioQuickAnswer: studioQuick,
       latestUserMessage: effectiveMessage,
+      delegateDecision: decision,
     });
     const promptTelemetry = hashSystemPromptLayers(promptBundle.combined, promptBundle.layers);
     const promptStableDynamic = hashStableDynamicSystemPrompt(promptBundle.stablePrefix, promptBundle.dynamicSuffix);
@@ -1333,6 +1335,7 @@ export class RDKClawApp {
         layerCount: promptBundle.layers.length,
       },
       compactHooks: this.rdkCompactHooks,
+      toolHooks: buildRdkClawToolHookRegistry(),
       tools: buildSessionTools(),
       studioDeviceIdResolver: () => sessionDeviceIdRef.current,
       toolContextExtras: {
@@ -1525,7 +1528,10 @@ export class RDKClawApp {
     });
 
     const runPromise = agent
-      .run(sessionKey, effectiveMessage || "请结合当前附件继续处理。")
+      .run(sessionKey, effectiveMessage || "请结合当前附件继续处理。", {
+        studioRegenerate:
+          Boolean(req.studioRegenerate) && (req.channel || "studio") === "studio",
+      })
       .then((result) => {
         runResult = result;
       })

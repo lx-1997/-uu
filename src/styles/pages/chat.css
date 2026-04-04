@@ -2497,6 +2497,9 @@
   flex-direction: column;
   gap: 3px;
   padding: 0 10px 8px 22px;
+  /* 工具参数含整段脚本/配置时可能很长，限制高度便于在气泡内滚动阅读 */
+  max-height: min(72vh, 1400px);
+  overflow-y: auto;
 }
 
 /* Extended reasoning / thinking stream (thinking_delta) */

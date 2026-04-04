@@ -29,7 +29,7 @@ export function createLoadToolsTool(params: {
   return {
     name: LOAD_TOOLS_META_NAME,
     description:
-      "将**当前回合工具列表里还没有**的「延迟工具」登记进会话，**下一轮请求起**可调用（非本轮同一条 assistant 内即刻可用）。\n" +
+      "将**当前回合工具列表里还没有**的「延迟工具」登记进会话；**登记后同一条 assistant 内、下一串行工具步起**即可调用（agent-loop 每步会刷新列表）。若仍报未知工具，说明策略未包含该工具或须开启联网。\n" +
       "**RDK Studio 已选设备时**：`device_*`、`board_openclaw_*` 等常在首轮已预载——若你**已经能看到** `device_exec`，拍照/摄像头/Shell 探活等**直接** `device_exec`，**不要**先调用本工具。\n" +
       "**需要再 load 的典型场景**：列表里还缺 `web_search`、`web_fetch`、附件类、飞书/微信配置等你见不到的工具时，用 `names` / `query` / `load_all`。\n" +
       "用法：\n" +

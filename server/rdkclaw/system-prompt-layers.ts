@@ -32,10 +32,15 @@ import {
   buildToolContractQuickOverviewPrompt,
 } from "./tool-contract-prompt.js";
 import { buildOpenWebRouteHintBlock, detectOpenWebUserIntent } from "./open-web-intent.js";
+import { buildRdkDocFirstUserMessageHintBlock, detectRdkDocFirstIntent } from "./rdk-doc-first-intent.js";
+import type { DelegateDecision } from "./delegation.js";
+import { buildDelegationRuntimePrompt } from "./delegation.js";
 
 /** 动态段 layer id（勿并入 stable；修改此列表需谨慎） */
 export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
   "open_web_route",
+  "rdk_doc_route",
+  "delegation_runtime",
   "studio_ui_hints",
   "attachments",
   "collaboration",
@@ -51,6 +56,8 @@ export type SystemPromptLayerId =
   | "no_device_guard"
   | "board_plugins"
   | "open_web_route"
+  | "rdk_doc_route"
+  | "delegation_runtime"
   | "studio_ui_hints"
   | "attachments"
   | "collaboration"
@@ -94,6 +101,8 @@ export interface SystemPromptLayerBuildInput {
   studioQuickAnswer?: boolean;
   /** 本轮用户消息（节选）；用于「打开网页」路由提示等动态层 */
   latestUserMessage?: string;
+  /** 与 meta 事件一致的委派决策，注入「本轮编排期望」避免模型只跑 SSH */
+  delegateDecision?: DelegateDecision;
 }
 
 function appendOpenWebRouteDynamic(
@@ -103,6 +112,17 @@ function appendOpenWebRouteDynamic(
   const msg = String(input.latestUserMessage ?? "").trim();
   if (msg && detectOpenWebUserIntent(msg)) {
     pushDynamic("open_web_route", buildOpenWebRouteHintBlock());
+  }
+}
+
+/** 用户消息像 RDK 官方例程/算法任务时，强制先读 rdk_doc 再盲试 shell */
+function appendRdkDocFirstDynamic(
+  input: SystemPromptLayerBuildInput,
+  pushDynamic: (id: SystemPromptLayerId, content: string) => void,
+): void {
+  const msg = String(input.latestUserMessage ?? "").trim();
+  if (msg && detectRdkDocFirstIntent(msg)) {
+    pushDynamic("rdk_doc_route", buildRdkDocFirstUserMessageHintBlock(msg));
   }
 }
 
@@ -170,6 +190,12 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   }
 
   appendOpenWebRouteDynamic(input, pushDynamic);
+  appendRdkDocFirstDynamic(input, pushDynamic);
+
+  if (input.deviceId && input.delegateDecision) {
+    const dr = buildDelegationRuntimePrompt(input.delegateDecision, input.boardSnapshot.skills.length);
+    pushDynamic("delegation_runtime", dr.length > 1600 ? `${dr.slice(0, 1600)}\n\n…(速览已截断)` : dr);
+  }
 
   if (input.deviceId) {
     const hintsBlock = buildStudioUiHintsPrompt(input.studioUiHints, input.persona.delegationBias);
@@ -275,7 +301,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   if (input.deviceId) {
     const deviceRosCloseLine =
       input.persona.delegationBias === "local-first"
-        ? "确认命令后再 device_exec；**Studio 优先**：默认 SSH 工具链完成；确需板端 OpenClaw 技能链/多轮迭代时再 `board_openclaw_assess` / `delegate`。"
+        ? "确认命令后再 device_exec；**Studio 优先**：原子问题用 SSH；多步/技能/多轮试错应收束到 `board_openclaw_assess` → `delegate`，勿长串 shell 包办。"
         : "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。";
     pushStable(
       "device_research_ros",
@@ -309,6 +335,14 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   }
 
   appendOpenWebRouteDynamic(input, pushDynamic);
+  appendRdkDocFirstDynamic(input, pushDynamic);
+
+  if (input.deviceId && input.delegateDecision) {
+    pushDynamic(
+      "delegation_runtime",
+      buildDelegationRuntimePrompt(input.delegateDecision, input.boardSnapshot.skills.length),
+    );
+  }
 
   if (input.deviceId) {
     pushDynamic(

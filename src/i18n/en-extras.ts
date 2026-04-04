@@ -244,7 +244,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.tt.closePanel': 'Close',
   'dock.tt.copyMessage': 'Copy text',
   'dock.tt.waitReply': 'Wait for reply to finish',
-  'dock.tt.regenerate': 'Regenerate from same message',
+  'dock.tt.regenerate':
+    'Retry with the same user message: removes this assistant reply and any messages after it, and resets server session context (like Gemini regenerate)',
   'dock.tt.feedbackBadReply': 'Give feedback',
   'dock.tt.addFiles': 'Add files',
   'dock.tt.attach': 'Attach file',
