@@ -1985,7 +1985,8 @@ export default function AIDock() {
 
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
-  const shouldHideDock = isSubpageTab && hideDockInSubpage;
+  /** 「子页隐藏 Dock」不应用于 AI 对话 Hub：右侧主区仅靠 portal 挂载对话，隐藏后只剩空锚点，用户会误以为会话丢失 */
+  const shouldHideDock = isSubpageTab && hideDockInSubpage && activeTab !== 'ai-chat-hub';
   const hubDockEmbedded =
     !rdkEmbedPanel
     && activeTab === 'ai-chat-hub'
