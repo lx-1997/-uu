@@ -109,10 +109,22 @@
   justify-content: flex-end;
 }
 
+.modal-footer.version-about-modal-footer {
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
 .version-modal-build {
   margin: 0 0 10px;
   font-size: 0.875rem;
   color: var(--text-primary);
+}
+
+.version-modal-build--footer {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
 }
 
 .version-modal-sub {
@@ -125,19 +137,13 @@
 }
 
 .version-modal-list {
-  margin: 0 0 16px;
+  margin: 0;
   padding-left: 1.1rem;
   color: var(--text-secondary);
 }
 
 .version-modal-list li {
   margin-bottom: 4px;
-}
-
-.version-modal-legal-line {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--text-muted);
 }
 
 .link-btn {
@@ -195,4 +201,8 @@
   font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.02em;
+}
+
+.rail-version-btn .rail-version-text.mono {
+  font-variant-numeric: tabular-nums;
 }

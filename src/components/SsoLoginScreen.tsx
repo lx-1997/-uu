@@ -327,7 +327,7 @@ export default function SsoLoginScreen() {
       <div className="sso-login-legal" role="note">
         <span>{t('login.legal.prefix', '登录即表示您已阅读并同意')}</span>{' '}
         <button type="button" className="sso-login-legal-link" onClick={() => setLegalKind('terms')}>
-          {t('legal.terms', '服务条款')}
+          {t('legal.terms', '用户协议')}
         </button>
         <span>{t('login.legal.mid', '与')}</span>{' '}
         <button type="button" className="sso-login-legal-link" onClick={() => setLegalKind('privacy')}>

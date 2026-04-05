@@ -125,7 +125,6 @@ export default function IconRail() {
         </div>
 
         <div className="rail-footer">
-          <StudioVersionFooter railExpanded={railExpanded} />
           {obReturnStep && (
             <button
               className="rail-btn rail-return-guide"
@@ -220,6 +219,8 @@ export default function IconRail() {
               <span className="rail-label">{t('sidebar.footer.robogo', 'RoboGo 云平台')}</span>
             )}
           </button>
+
+          <StudioVersionFooter railExpanded={railExpanded} />
 
           <button
             className="rail-expand-btn"

@@ -1,15 +1,13 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { getAppVersionLabel, RELEASE_NOTES_EN, RELEASE_NOTES_ZH } from '../release-notes';
+import { getAppVersionShort, RELEASE_NOTES_EN, RELEASE_NOTES_ZH } from '../release-notes';
 import { useI18n } from '../i18n/use-i18n';
-import LegalDocumentModal, { type LegalDocKind } from './LegalDocumentModal';
 
 /** 与 WiFi 配置等一致：遮罩 + 居中 modal-content，Portal 到 body，避免受侧栏布局影响 */
 export default function StudioVersionFooter({ railExpanded }: { railExpanded: boolean }) {
   const { t, isEn } = useI18n();
   const [open, setOpen] = useState(false);
-  const [legal, setLegal] = useState<LegalDocKind | null>(null);
-  const label = getAppVersionLabel();
+  const versionShort = getAppVersionShort();
 
   const aboutModal =
     open &&
@@ -31,26 +29,17 @@ export default function StudioVersionFooter({ railExpanded }: { railExpanded: bo
             </button>
           </div>
           <div className="modal-body">
-            <p className="version-modal-build mono" translate="no">
-              {label}
-            </p>
             <p className="version-modal-sub">{t('version.modal.features', '产品功能')}</p>
             <ul className="version-modal-list">
               {(isEn ? RELEASE_NOTES_EN : RELEASE_NOTES_ZH).map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>
-            <p className="version-modal-legal-line">
-              <button type="button" className="link-btn" onClick={() => setLegal('terms')}>
-                {t('legal.terms', '服务条款')}
-              </button>
-              {' · '}
-              <button type="button" className="link-btn" onClick={() => setLegal('privacy')}>
-                {t('legal.privacy', '隐私政策')}
-              </button>
-            </p>
           </div>
-          <div className="modal-footer">
+          <div className="modal-footer version-about-modal-footer">
+            <span className="version-modal-build version-modal-build--footer mono" translate="no">
+              {versionShort}
+            </span>
             <button type="button" className="btn btn-primary btn-sm" onClick={() => setOpen(false)}>
               {isEn ? 'OK' : '关闭'}
             </button>
@@ -65,19 +54,16 @@ export default function StudioVersionFooter({ railExpanded }: { railExpanded: bo
       <button
         type="button"
         className="rail-version-btn"
-        data-tooltip={!railExpanded ? t('rail.version.tooltip', '版本与更新说明') : undefined}
+        data-tooltip={!railExpanded ? t('rail.version.tooltip', '关于 RDK Studio') : undefined}
         onClick={() => setOpen(true)}
       >
-        <span className="rail-version-icon" aria-hidden>
-          ℹ
+        <span className="rail-version-text mono" translate="no">
+          {versionShort}
         </span>
-        {railExpanded && <span className="rail-version-text">{t('rail.version.label', '版本')}</span>}
-        {!railExpanded && <span className="sr-only">{t('rail.version.open', '打开版本信息')}</span>}
+        {!railExpanded && <span className="sr-only">{t('rail.version.open', '打开关于')}</span>}
       </button>
 
       {aboutModal}
-
-      {legal && <LegalDocumentModal kind={legal} elevated onClose={() => setLegal(null)} />}
     </>
   );
 }
