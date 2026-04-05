@@ -203,7 +203,12 @@
   animation: cozyBreathe 4s var(--ease-in-out) infinite;
 }
 
-/* Page transition — slightly bouncier */
+/* Page transition — slightly bouncier（仅工作台首页槽位） */
+[data-theme="cozy"] .page-slot.page-slot--home {
+  animation: softPop var(--duration-normal) var(--ease-out);
+}
+
+/* 兼容仍带 .page-enter 的嵌入页等 */
 [data-theme="cozy"] .page-enter {
   animation: softPop var(--duration-normal) var(--ease-out);
 }

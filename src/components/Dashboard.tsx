@@ -503,16 +503,16 @@ export default function Dashboard() {
         <FlowingGradientBg accent={false} />
         <div className="dash-morph-halo" />
         <div className="dash-morph-halo secondary" />
-        <div className="dash-empty-hero dash-enter">
-          <div className="dash-brand">RDK Studio</div>
-          <p className="dash-tagline">{t('dashboard.tagline', '连接你的 RDK 开发板，开始构建')}</p>
-          <button className="dash-action primary" onClick={() => setShowAddDevice(true)}>
+        <div className="dash-empty-hero">
+          <div className="dash-brand dash-enter">RDK Studio</div>
+          <p className="dash-tagline dash-enter dash-enter-d1">{t('dashboard.tagline', '连接你的 RDK 开发板，开始构建')}</p>
+          <button type="button" className="dash-action primary dash-enter dash-enter-d2" onClick={() => setShowAddDevice(true)}>
             <span className="dash-action-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
             </span>
             {t('dashboard.addDevice', '添加设备')}
           </button>
-          <div className="dash-nodevice-actions">
+          <div className="dash-nodevice-actions dash-enter dash-enter-d3">
             <button className="btn btn-ghost" onClick={() => prompt(isEn ? DASHBOARD_CHAT_INTRO_PROMPT_EN : DASHBOARD_CHAT_INTRO_PROMPT_ZH)}>
               {t('dashboard.chatFirst', '先聊聊')}
             </button>

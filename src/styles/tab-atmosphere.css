@@ -1,0 +1,126 @@
+/* ═══════════════════════════════════════════════════════
+   Tab atmosphere — 品牌橙色系柔光背景（各 Tab 仅光斑位置/强弱略异）
+   Parent: .content-area[data-studio-tab="…"]
+   ═══════════════════════════════════════════════════════ */
+
+.content-area {
+  background-color: var(--bg-primary);
+  background-image: var(--studio-tab-bg-layers, none);
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-attachment: fixed;
+  transition: background-color var(--duration-normal) var(--ease-out);
+}
+
+/* 仅使用 --accent / --accent-hover / accent-glow，保持 Aurora 橙品牌一致 */
+.content-area[data-studio-tab='dashboard'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 90% 55% at 12% 8%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 52%),
+    radial-gradient(ellipse 85% 50% at 92% 96%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 48%);
+}
+
+.content-area[data-studio-tab='files'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 100% 62% at 8% 14%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 54%),
+    radial-gradient(ellipse 82% 48% at 94% 88%, color-mix(in srgb, var(--accent-hover) 9%, transparent) 0%, transparent 50%);
+}
+
+.content-area[data-studio-tab='skills'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 96% 58% at 10% 18%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 52%),
+    radial-gradient(ellipse 78% 50% at 88% 84%, color-mix(in srgb, var(--accent-hover) 11%, transparent) 0%, transparent 48%);
+}
+
+.content-area[data-studio-tab='openclaw'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 100% 58% at 16% 10%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 54%),
+    radial-gradient(ellipse 86% 48% at 90% 90%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 50%);
+}
+
+.content-area[data-studio-tab='flasher'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 100% 62% at 12% 8%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 55%),
+    radial-gradient(ellipse 80% 50% at 92% 90%, color-mix(in srgb, var(--accent-hover) 11%, transparent) 0%, transparent 48%);
+}
+
+.content-area[data-studio-tab='terminal'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 110% 55% at 50% 0%, color-mix(in srgb, var(--accent) 11%, transparent) 0%, transparent 46%),
+    radial-gradient(ellipse 72% 46% at 6% 94%, color-mix(in srgb, var(--accent-hover) 9%, transparent) 0%, transparent 50%);
+}
+
+.content-area[data-studio-tab='vnc'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 96% 58% at 18% 12%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 52%),
+    radial-gradient(ellipse 86% 48% at 86% 88%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 50%);
+}
+
+.content-area[data-studio-tab='ide'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 100% 60% at 8% 15%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 54%),
+    radial-gradient(ellipse 78% 50% at 92% 86%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 48%);
+}
+
+.content-area[data-studio-tab='dr-embed'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 95% 55% at 20% 10%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 52%),
+    radial-gradient(ellipse 90% 52% at 80% 90%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 50%);
+}
+
+.content-area[data-studio-tab='ai-chat-hub'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 100% 58% at 50% 0%, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 48%),
+    radial-gradient(ellipse 85% 50% at 12% 95%, color-mix(in srgb, var(--accent-hover) 9%, transparent) 0%, transparent 52%);
+}
+
+.content-area[data-studio-tab='local-models'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 95% 56% at 15% 12%, color-mix(in srgb, var(--accent) 11%, transparent) 0%, transparent 52%),
+    radial-gradient(ellipse 80% 48% at 88% 88%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 50%);
+}
+
+/* Cyber：仍用品牌橙，略加强顶光与 glow */
+[data-theme='cyber'] .content-area[data-studio-tab='dashboard'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 90% 55% at 10% 6%, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 52%),
+    radial-gradient(ellipse 85% 50% at 94% 94%, color-mix(in srgb, var(--accent-hover) 12%, transparent) 0%, transparent 48%);
+}
+
+[data-theme='cyber'] .content-area[data-studio-tab='terminal'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 110% 55% at 50% 0%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, transparent 45%),
+    radial-gradient(ellipse 70% 45% at 4% 96%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 50%);
+}
+
+[data-theme='cyber'] .content-area[data-studio-tab='openclaw'] {
+  --studio-tab-bg-layers:
+    radial-gradient(ellipse 100% 58% at 14% 8%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 54%),
+    radial-gradient(ellipse 88% 50% at 90% 90%, color-mix(in srgb, var(--accent-hover) 12%, transparent) 0%, transparent 50%);
+}
+
+/* 沉浸式页：壳层顶光同为橙色，不抢终端/画布 */
+.content-area[data-studio-tab='terminal'] .immersive,
+.content-area[data-studio-tab='vnc'] .immersive,
+.content-area[data-studio-tab='ide'] .immersive {
+  background-image:
+    radial-gradient(ellipse 120% 70% at 50% 0%, color-mix(in srgb, var(--accent) 8%, transparent) 0%, transparent 52%),
+    linear-gradient(var(--bg-primary), var(--bg-primary));
+}
+
+.content-area[data-studio-tab='flasher'] .flasher-page.tool-page {
+  background-image: radial-gradient(ellipse 100% 55% at 50% 0%, color-mix(in srgb, var(--accent) 11%, transparent) 0%, transparent 48%);
+}
+
+[data-theme='cyber'] .content-area[data-studio-tab='terminal'] .immersive,
+[data-theme='cyber'] .content-area[data-studio-tab='vnc'] .immersive,
+[data-theme='cyber'] .content-area[data-studio-tab='ide'] .immersive {
+  background-image:
+    radial-gradient(ellipse 120% 70% at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 52%),
+    linear-gradient(var(--bg-primary), var(--bg-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-area {
+    background-attachment: scroll;
+  }
+}

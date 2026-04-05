@@ -11,7 +11,7 @@ export default function DroboticsEmbed() {
 
   if (!drAuthenticatedPortal) {
     return (
-      <div className="page-slot page-enter" style={{ padding: 24, color: 'var(--text-muted)' }}>
+      <div className="page-slot" style={{ padding: 24, color: 'var(--text-muted)' }}>
         {t('drPortal.empty', '正在准备页面…')}
       </div>
     );
@@ -24,7 +24,7 @@ export default function DroboticsEmbed() {
 
   return (
     <div
-      className="page-slot page-enter drobotics-embed-host"
+      className="page-slot drobotics-embed-host"
       style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
     >
       <div

@@ -931,11 +931,14 @@
   padding: 0;
 }
 
-/* Page slot — standard (non-persistent) views */
+/* Page slot — standard (non-persistent) views；入场动效仅首页，见 .page-slot--home */
 .page-slot {
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+.page-slot.page-slot--home {
   animation: fadeUp var(--duration-normal) var(--ease-out);
 }
 

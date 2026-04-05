@@ -92,7 +92,7 @@ function MainContent() {
     <>
       {standardViews[activeTab] && (
         <Suspense fallback={<RouteFallback />}>
-          <div className="page-slot page-enter">
+          <div className={activeTab === 'dashboard' ? 'page-slot page-slot--home' : 'page-slot'}>
             {standardViews[activeTab]}
           </div>
         </Suspense>
@@ -392,7 +392,7 @@ function AppShell() {
         </header>
         <RuntimeActiveTaskQueue />
 
-        <main className="content-area">
+        <main className="content-area" data-studio-tab={activeTab}>
           <HubDockAnchorProvider>
             <ErrorBoundary>
               <MainContent />
@@ -541,11 +541,14 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
           </div>
         </header>
 
-        <main className="content-area rdk-embed-main">
+        <main
+          className="content-area rdk-embed-main"
+          data-studio-tab={panel === 'openclaw' ? 'openclaw' : 'dashboard'}
+        >
           <ErrorBoundary>
             {panel === 'openclaw' ? (
               <Suspense fallback={<RouteFallback />}>
-                <div className="page-slot page-enter rdk-embed-openclaw-slot">
+                <div className="page-slot rdk-embed-openclaw-slot">
                   <OpenClaw />
                 </div>
               </Suspense>
