@@ -8,7 +8,10 @@ import { resolveApiUrlForEmbed } from '../utils/apiBase';
 import { shouldUseSshTunnelForDevice } from '../utils/device-tunnel';
 import DeviceGuard from './DeviceGuard';
 import FloatingEmbedPanel from './FloatingEmbedPanel';
-import { registerIdeRemoteConnect } from '../utils/studio-embed-connect-bridge';
+import {
+  consumeIdeConnectPreferFloat,
+  registerIdeRemoteConnect,
+} from '../utils/studio-embed-connect-bridge';
 
 /* ── code-server 默认端口（设备侧） ── */
 const CODE_SERVER_PORT = 9888;
@@ -117,6 +120,7 @@ export default function IDE() {
   /* ── 打开编辑器 ── */
   const handleConnect = async () => {
     if (!currentDevice) {
+      consumeIdeConnectPreferFloat();
       addToast(t('ide.toast.connectDevice', '请先连接设备'), 'warning');
       return;
     }
@@ -132,6 +136,7 @@ export default function IDE() {
         return;
       }
       if (!loadError) {
+        consumeIdeConnectPreferFloat();
         addToast(
           t(
             'ide.toast.singleSessionOnly',
@@ -156,6 +161,7 @@ export default function IDE() {
       const output = res.output ?? '';
 
       if (output.includes('CS_NOT_FOUND')) {
+        consumeIdeConnectPreferFloat();
         setIframeLoading(false);
         setLoadError(t('ide.err.notInstalled', '设备上未安装 code-server'));
         addToast(t('ide.toast.notDetected', '设备上未检测到 code-server，请先安装'), 'warning');
@@ -163,6 +169,7 @@ export default function IDE() {
         return;
       }
       if (output.includes('NOT_READY')) {
+        consumeIdeConnectPreferFloat();
         setIframeLoading(false);
         setLoadError(t('ide.err.timeout', 'code-server 启动超时，请检查设备日志 /tmp/code-server.log'));
         addToast(t('ide.toast.notReady', 'code-server 未能在 15 秒内就绪'), 'warning');
@@ -170,6 +177,7 @@ export default function IDE() {
         return;
       }
     } catch (err) {
+      consumeIdeConnectPreferFloat();
       setIframeLoading(false);
       const msg = err instanceof Error ? err.message : t('ide.err.deviceConn', '设备连接失败');
       setLoadError(msg);
@@ -178,13 +186,14 @@ export default function IDE() {
       return;
     }
 
-    /** 默认贴入当前 IDE 页（非悬浮窗）；对话「打开 IDE」由 useAppState.tryFloatWhenReady 或下方 runRemoteConnectIntent 再浮出 */
-    setEmbedFloating(false);
+    /** 对话「打开 IDE」：consumeIdeConnectPreferFloat 为 true 时直接浮出；页面内点「连接」默认贴入 */
+    const preferFloatFromIntent = consumeIdeConnectPreferFloat();
+    setEmbedFloating(preferFloatFromIntent);
     if (isDesktop()) {
       activeUrlRef.current = url;
       const rdk = (window as any).rdkDesktop;
       rdk.openUrl(url);
-      rdk.setEmbedFloatMode?.(url, false, t('ide.title', '代码编辑器'));
+      rdk.setEmbedFloatMode?.(url, preferFloatFromIntent, t('ide.title', '代码编辑器'));
     }
     loadingTimerRef.current = setTimeout(() => setIframeLoading(false), 10000);
   };
@@ -300,9 +309,11 @@ export default function IDE() {
       }
       if (showIframe && !loadError) {
         if (!embedFloating) {
+          consumeIdeConnectPreferFloat();
           toggleEmbedFloat();
           return;
         }
+        consumeIdeConnectPreferFloat();
         addToast(
           t(
             'ide.toast.alreadyOpenSingle',

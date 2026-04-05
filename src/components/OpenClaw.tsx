@@ -19,8 +19,6 @@ import { fetchWifiLinkState } from '../utils/wifi-link-probe';
 import { fetchAgentConfig } from '../api';
 import { DEVICE_DIAGNOSTICS_POLL_MS, DEVICE_POLL_PHASE_OPENCLAW_WIFI_TICK_MS } from '../constants';
 import io from 'socket.io-client';
-import type { OpenClawStudioModelSyncMode } from '../../shared/types';
-
 /** sessionStorage：用户取消部署后阻止 Wi‑Fi 触发的自动安装，直至关闭并重新打开工作室（会话级） */
 const openclawWifiAutoUserBlockKey = (deviceId: string) => `oc-wifi-auto-user-block-${deviceId}`;
 
@@ -498,7 +496,10 @@ export default function OpenClaw() {
   const [configTab, setConfigTab] = useState<ConfigTab>('model');
   const [modelGatewayApiKeyVisible, setModelGatewayApiKeyVisible] = useState(false);
   const [deployApiKeyVisible, setDeployApiKeyVisible] = useState(false);
-  const [studioSyncSaving, setStudioSyncSaving] = useState(false);
+  /** Studio agent-config 中的模型条目，供板端委派预选 */
+  const [studioDelegateModels, setStudioDelegateModels] = useState<Array<{ id: string; label: string; model: string }>>([]);
+  const [delegateEntryId, setDelegateEntryId] = useState('');
+  const [delegatePresetSaving, setDelegatePresetSaving] = useState(false);
 
   // ─── Refs ───
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
@@ -615,9 +616,13 @@ export default function OpenClaw() {
 
   useEffect(() => {
     if (currentDevice && activeTab === 'openclaw') {
-      void Promise.all([loadStatus(), loadConfig()]);
+      void loadStatus();
+      /** 「模型」页由专用 effect 顺序执行 loadConfig + 预选填充，避免覆盖 */
+      if (dashboardTab !== 'model') {
+        void loadConfig();
+      }
     }
-  }, [currentDevice, activeTab]);
+  }, [currentDevice, activeTab, dashboardTab]);
 
   useEffect(() => {
     if (!currentDevice || activeTab !== 'openclaw') return;
@@ -927,6 +932,65 @@ export default function OpenClaw() {
     }
   };
 
+  /** 将 Studio agent-config 中某条目的字段写入本页大模型表单（用于「预选模型」） */
+  const applyStudioEntryToModelForm = (entry: {
+    provider: string;
+    model: string;
+    baseUrl?: string;
+    apiKey?: string;
+    label?: string;
+  }) => {
+    const prov = String(entry.provider || '').trim();
+    const api =
+      prov === 'anthropic' || prov === 'anthropic-compatible' ? 'anthropic-messages' : 'openai-completions';
+    const baseUrl = (entry.baseUrl || '').trim();
+    const modelId = (entry.model || '').trim();
+    const key = String(entry.apiKey || '');
+    setModelConfig({
+      baseUrl,
+      modelId,
+      apiKey: key,
+      api,
+      modelName: (entry.label || '').trim() || modelId,
+    });
+    setSelectedPreset(inferPresetFromGateway({ baseUrl, modelId }));
+  };
+
+  /**
+   * 进入「模型」页：拉取 Studio 预选列表；先 loadConfig 再应用预选条目，避免板端配置覆盖预选填充。
+   */
+  useEffect(() => {
+    if (activeTab !== 'openclaw' || dashboardTab !== 'model' || !currentDevice) return;
+    let cancelled = false;
+    (async () => {
+      const cfg = await fetchAgentConfig().catch(() => null);
+      if (cancelled || !cfg) return;
+      const models = cfg.models ?? [];
+      setStudioDelegateModels(models.map((m) => ({ id: m.id, label: m.label, model: m.model })));
+      const presetId = cfg.openclawDelegateProviderId?.trim() || '';
+      setDelegateEntryId(presetId);
+
+      await loadConfig();
+      if (cancelled) return;
+
+      if (presetId) {
+        try {
+          const res = await fetchApi(`/api/agent/config/entry/${encodeURIComponent(presetId)}`);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || cancelled) return;
+          if (data?.entry) {
+            applyStudioEntryToModelForm(data.entry);
+          }
+        } catch {
+          /* 预拉失败不拦截；用户仍可手动选预选 */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, dashboardTab, currentDevice?.id]);
+
   /* WeChat functions moved to SettingsPanel */
 
   const appendSystemMessage = (text: string) => {
@@ -1210,12 +1274,17 @@ export default function OpenClaw() {
       if (Object.keys(ad).length > 0) payload.agentDefaults = ad;
     } else if (activeTab === 'feishu') payload.feishu = feishuConfig;
 
+    const requestBody: { config: typeof payload; persistOpenclawDelegatePreset?: string | null } = { config: payload };
+    if (activeTab === 'model') {
+      requestBody.persistOpenclawDelegatePreset = delegateEntryId.trim() || null;
+    }
+
     setConfigBusy(true);
     try {
       const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: payload }),
+        body: JSON.stringify(requestBody),
       });
       const result = await res.json();
       if (!res.ok || result.ok === false) {
@@ -1242,38 +1311,6 @@ export default function OpenClaw() {
         modelId: preset.models[0] || prev.modelId,
         modelName: providerDisplayLabel(key, preset),
       }));
-    }
-  };
-
-  /** 本机直连厂商 HTTP（与板端 Gateway 无关），使用当前表单中的 Base URL / Key / 模型 / 协议 */
-  const handleStudioModelSyncPolicyChange = async (v: OpenClawStudioModelSyncMode) => {
-    if (!currentDevice) return;
-    setStudioSyncSaving(true);
-    try {
-      const res = await fetchApi(`/api/devices/${currentDevice.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ openclawStudioModelSync: v }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.ok === false) {
-        addToast?.(
-          tf('oc.studioSync.saveFail', '保存失败: {{msg}}', { msg: String(data?.error || res.status) }),
-          'error',
-        );
-        return;
-      }
-      setDevices((prev) =>
-        prev.map((d) => (d.id === currentDevice.id ? { ...d, openclawStudioModelSync: v } : d)),
-      );
-      addToast?.(t('oc.studioSync.saved', '已保存：RDKClaw 与板端模型同步策略'), 'success');
-    } catch (e: unknown) {
-      addToast?.(
-        tf('oc.studioSync.saveFail', '保存失败: {{msg}}', { msg: e instanceof Error ? e.message : String(e) }),
-        'error',
-      );
-    } finally {
-      setStudioSyncSaving(false);
     }
   };
 
@@ -1568,10 +1605,49 @@ export default function OpenClaw() {
 
   /* ─── Helpers ─── */
 
-  const getCurrentModel = () => {
-    if (!config?.primaryModel) return t('oc.summary.notConfigured', '未配置');
-    const parts = config.primaryModel.split('/');
-    return parts.length > 1 ? parts[1] : config.primaryModel;
+  /** 板端 OpenClaw 当前主模型（来自设备上的配置） */
+  const getBoardModelNameForDisplay = () => {
+    if (!config) return t('oc.summary.notConfigured', '未配置');
+    if (config.primaryModel) {
+      const parts = config.primaryModel.split('/');
+      return parts.length > 1 ? parts[1] : config.primaryModel;
+    }
+    if (config.modelGateway?.modelId?.trim()) return config.modelGateway.modelId.trim();
+    return t('oc.summary.notConfigured', '未配置');
+  };
+
+  const getCurrentModel = () => getBoardModelNameForDisplay();
+
+  /**
+   * 顶栏「模型」：默认等于板端当前模型。
+   * 若已选「委派预选」且与板端不一致，则显示「预选模型 · 板:板端模型」，避免误以为预选未保存。
+   */
+  const getStatusBarModelDisplay = () => {
+    const board = getBoardModelNameForDisplay();
+    const id = delegateEntryId.trim();
+    if (!id) return board;
+    const entry = studioDelegateModels.find((m) => m.id === id);
+    const d = entry?.model?.trim();
+    if (!d) return board;
+    if (d.toLowerCase() === board.toLowerCase()) return board;
+    return `${d} · ${t('oc.status.boardShort', '板')}:${board}`;
+  };
+
+  const getStatusBarModelTitle = () => {
+    const board = getBoardModelNameForDisplay();
+    const id = delegateEntryId.trim();
+    if (!id) {
+      return t('oc.status.modelTitleBoardOnly', '此为板端 OpenClaw 当前使用的模型（设备上的配置）。');
+    }
+    const entry = studioDelegateModels.find((m) => m.id === id);
+    if (!entry) {
+      return t('oc.status.modelTitleBoardOnly', '此为板端 OpenClaw 当前使用的模型（设备上的配置）。');
+    }
+    return tf(
+      'oc.status.modelTitleDelegate',
+      '板端当前：{{board}}。委派预检将写入 Studio 条目「{{label}}」（{{model}}）。若希望板端对话也使用该模型，请在本页「大模型」保存相同配置并重启网关。',
+      { board, label: entry.label, model: entry.model },
+    );
   };
 
   const getConfigSummary = () => {
@@ -2062,27 +2138,60 @@ export default function OpenClaw() {
               </select>
             </div>
             <div className="divider oc-divider-spaced" />
-            <span className="oc-section-title">{t('oc.studioSync.section', '与 RDKClaw 协作（Studio 模型 → 板端）')}</span>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+            <span className="oc-section-title">{t('oc.boardDelegate.section', '板端委派：Studio 模型')}</span>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8 }}>
               {t(
-                'oc.studioSync.hint',
-                '委派板端 OpenClaw 时，可按策略把 Studio「深度思考」模型写入板端。选「仅建议」时写入独立条目 rdk-studio-default，不自动改主模型，需在板端自行切换启用。',
+                'oc.boardDelegate.hint',
+                '选择预选后会自动填充上方大模型表单（与在「设置 → AI 模型」中保存的条目一致）。请核对后点击「保存」，配置将写入板端并重启网关；同时会记住该预选供 RDKClaw 委派使用。',
               )}
             </div>
             <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.studioSync.label', '同步策略')}</span>
+              <span className="oc-form-label">{t('oc.boardDelegate.preset', '预选模型')}</span>
               <select
                 className="select"
-                value={currentDevice?.openclawStudioModelSync ?? 'when_unhealthy'}
-                onChange={(e) => void handleStudioModelSyncPolicyChange(e.target.value as OpenClawStudioModelSyncMode)}
-                disabled={studioSyncSaving || boardDeployBusy || !currentDevice}
-                aria-label={t('oc.studioSync.label', '同步策略')}
+                value={delegateEntryId}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setDelegateEntryId(v);
+                  if (!v) {
+                    void loadConfig();
+                    return;
+                  }
+                  setDelegatePresetSaving(true);
+                  void fetchApi(`/api/agent/config/entry/${encodeURIComponent(v)}`)
+                    .then(async (res) => {
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) {
+                        addToast?.(
+                          tf('oc.boardDelegate.loadEntryFail', '无法加载该模型条目: {{msg}}', {
+                            msg: String(data?.message || data?.error || res.status),
+                          }),
+                          'error',
+                        );
+                        return;
+                      }
+                      const ent = data?.entry;
+                      if (ent) applyStudioEntryToModelForm(ent);
+                    })
+                    .catch((err: unknown) => {
+                      addToast?.(
+                        tf('oc.boardDelegate.loadEntryFail', '无法加载该模型条目: {{msg}}', {
+                          msg: err instanceof Error ? err.message : String(err),
+                        }),
+                        'error',
+                      );
+                    })
+                    .finally(() => setDelegatePresetSaving(false));
+                }}
+                disabled={delegatePresetSaving || boardDeployBusy}
+                aria-label={t('oc.boardDelegate.preset', '预选模型')}
               >
-                <option value="off">{t('oc.studioSync.off', '关闭（不同步）')}</option>
-                <option value="when_empty">{t('oc.studioSync.whenEmpty', '仅当板端未填网关')}</option>
-                <option value="when_unhealthy">{t('oc.studioSync.whenUnhealthy', '未填或健康检测未就绪（推荐）')}</option>
-                <option value="always">{t('oc.studioSync.always', '总是用 Studio 覆盖 custom-gateway')}</option>
-                <option value="preset_only">{t('oc.studioSync.presetOnly', '仅建议：写入 rdk-studio-default，自行启用')}</option>
+                <option value="">{t('oc.boardDelegate.followDock', '与深度思考主模型相同（默认）')}</option>
+                {studioDelegateModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label} — {m.model}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="divider oc-divider-spaced" />
@@ -2175,8 +2284,12 @@ export default function OpenClaw() {
               </div>
               <div className="oc-status-item">
                 <span className="oc-status-label">{t('oc.status.model', '模型')}</span>
-                <span className="oc-status-value" style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getCurrentModel()}>
-                  {getCurrentModel()}
+                <span
+                  className="oc-status-value"
+                  style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={getStatusBarModelTitle()}
+                >
+                  {getStatusBarModelDisplay()}
                 </span>
               </div>
               <div className="oc-status-bar-actions">

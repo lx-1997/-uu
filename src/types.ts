@@ -3,6 +3,5 @@ export type {
   Device,
   DevicePayload,
   OpenClawPayload,
-  OpenClawStudioModelSyncMode,
   Role,
 } from '../shared/types';

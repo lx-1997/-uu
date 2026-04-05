@@ -11,7 +11,7 @@ import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import iconv from 'iconv-lite';
-import type { ChatMessage, Device, OpenClawStudioModelSyncMode, StudioUiHints } from '../shared/types.js';
+import type { ChatMessage, Device, StudioUiHints } from '../shared/types.js';
 import {
   readDevices,
   writeDevices,
@@ -76,6 +76,7 @@ import {
   duplicateProviderEntryForQuickLane,
   applyQuickLaneDefaultIfUnset,
   deleteProviderConfigEntry,
+  setOpenclawDelegateProviderConfig,
   getBootstrapStudioDefaultPresetsMeta,
   getActiveProviderEntry,
   restoreStudioDefaultPresetFromBootstrap,
@@ -2599,50 +2600,6 @@ app.get('/api/devices', async (_request, response) => {
   response.json({ devices: devices.map((item) => sanitizeDevice(item as Device & { password?: string })) });
 });
 
-/** 部分更新设备元数据（如板端 OpenClaw 与 Studio 模型同步策略） */
-app.patch('/api/devices/:id', async (request, response) => {
-  const { id } = request.params;
-  try {
-    const body = request.body as { openclawStudioModelSync?: OpenClawStudioModelSyncMode };
-    if (body.openclawStudioModelSync === undefined) {
-      sendApiError(response, 400, 'INVALID_BODY', '缺少可更新字段（如 openclawStudioModelSync）', { retryable: false });
-      return;
-    }
-    const v = body.openclawStudioModelSync;
-    const allowed = new Set<OpenClawStudioModelSyncMode>(['off', 'when_empty', 'when_unhealthy', 'always', 'preset_only']);
-    if (!allowed.has(v)) {
-      sendApiError(response, 400, 'INVALID_SYNC_MODE', 'openclawStudioModelSync 值无效', { retryable: false });
-      return;
-    }
-    let updated: Device | null = null;
-    await serializedWriteDevices(async () => {
-      const devices = await readDevices();
-      const idx = devices.findIndex((d) => d.id === id);
-      if (idx < 0) return;
-      const next = { ...devices[idx], openclawStudioModelSync: v };
-      const nextDevices = [...devices];
-      nextDevices[idx] = next;
-      await writeDevices(nextDevices);
-      updated = next;
-    });
-    if (!updated) {
-      sendApiError(response, 404, 'DEVICE_NOT_FOUND', '设备不存在', { retryable: false });
-      return;
-    }
-    invalidateDeviceDerivedCaches(updated.id);
-    response.json({ ok: true, device: sanitizeDevice(updated as Device & { password?: string }) });
-  } catch (err) {
-    console.error('[devices] PATCH /api/devices/:id failed', err);
-    sendApiError(
-      response,
-      500,
-      'DEVICE_PATCH_FAILED',
-      err instanceof Error ? err.message : '设备元数据更新失败',
-      { retryable: true },
-    );
-  }
-});
-
 app.post('/api/devices/connect', async (request, response) => {
   const { host, port, username, password } = request.body as {
     host?: string;
@@ -3844,7 +3801,8 @@ app.post('/api/devices/:id/openclaw/onboard', async (request, response) => {
 
 app.post('/api/devices/:id/openclaw/config', async (request, response) => {
   const { id } = request.params;
-  const { config } = request.body as { config?: any };
+  const raw = request.body as { config?: any; persistOpenclawDelegatePreset?: string | null };
+  const { config } = raw;
 
   if (!config) {
     sendApiError(response, 400, 'INVALID_OPENCLAW_CONFIG', '缺少配置数据', { retryable: false });
@@ -3852,6 +3810,12 @@ app.post('/api/devices/:id/openclaw/config', async (request, response) => {
   }
   if (config?.modelGateway) {
     config.modelGateway.api = normalizeOpenClawApi(config.modelGateway.api);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(raw, 'persistOpenclawDelegatePreset')) {
+    const v = raw.persistOpenclawDelegatePreset;
+    const presetId = typeof v === 'string' && v.trim() ? v.trim() : null;
+    setOpenclawDelegateProviderConfig(presetId);
   }
 
   const device = await resolveDevice(request, response, id);
@@ -5442,6 +5406,7 @@ app.get('/api/agent/config', (_request, response) => {
       }
     : null;
   const quickAid = registry.quickActiveId?.trim() || null;
+  const openclawDelegateProviderId = registry.openclawDelegateProviderId?.trim() || null;
   const models = registry.entries.map((entry) => ({
     id: entry.id,
     label: entry.label,
@@ -5462,6 +5427,7 @@ app.get('/api/agent/config', (_request, response) => {
       models,
       activeModelId: registry.activeId || null,
       quickActiveModelId: quickAid,
+      openclawDelegateProviderId,
       envApiKeyAvailable,
       studioDefaultPreset,
       studioQuickDefaultPreset,
@@ -5481,9 +5447,37 @@ app.get('/api/agent/config', (_request, response) => {
     models,
     activeModelId: registry.activeId || null,
     quickActiveModelId: quickAid,
+    openclawDelegateProviderId,
     envApiKeyAvailable,
     studioDefaultPreset,
     studioQuickDefaultPreset,
+  });
+});
+
+/** 供 OpenClaw 页「预选模型」拉取 Studio 已保存条目的完整字段（含 Key），用于填充大模型表单后与本机保存一致 */
+app.get('/api/agent/config/entry/:entryId', (request, response) => {
+  response.setHeader('Cache-Control', 'no-store');
+  const entryId = String(request.params.entryId || '').trim();
+  if (!entryId) {
+    sendApiError(response, 400, 'INVALID_ENTRY_ID', '缺少条目 id', { retryable: false });
+    return;
+  }
+  const registry = loadProviderRegistry();
+  const entry = registry.entries.find((e) => e.id === entryId);
+  if (!entry) {
+    sendApiError(response, 404, 'NOT_FOUND', '模型条目不存在', { retryable: false });
+    return;
+  }
+  response.json({
+    ok: true,
+    entry: {
+      id: entry.id,
+      label: entry.label,
+      provider: entry.provider,
+      model: entry.model,
+      baseUrl: entry.baseUrl,
+      apiKey: entry.apiKey,
+    },
   });
 });
 
@@ -5553,7 +5547,7 @@ app.post('/api/agent/config/vendor-ping', async (request, response) => {
 
 app.post('/api/agent/config', (request, response) => {
   const body = (request.body ?? {}) as {
-    action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset';
+    action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset' | 'set_openclaw_delegate';
     /** duplicate_for_quick：源条目 id，缺省为当前 active */
     sourceId?: string;
     id?: string;
@@ -5628,6 +5622,22 @@ app.post('/api/agent/config', (request, response) => {
           }
         : { id, provider: entry.provider, model: entry.model, baseUrl: entry.baseUrl, hasApiKey: Boolean(effectiveKey) },
     });
+    return;
+  }
+
+  if (action === 'set_openclaw_delegate') {
+    const rawId = body.id !== undefined && body.id !== null ? String(body.id).trim() : '';
+    const id = rawId || null;
+    if (id && !loadProviderRegistry().entries.some((e) => e.id === id)) {
+      response.status(404).json({ error: '模型不存在' });
+      return;
+    }
+    if (!setOpenclawDelegateProviderConfig(id)) {
+      response.status(400).json({ error: '设置板端委派模型失败' });
+      return;
+    }
+    const regAfter = loadProviderRegistry();
+    response.json({ ok: true, openclawDelegateProviderId: regAfter.openclawDelegateProviderId?.trim() || null });
     return;
   }
 
@@ -5737,6 +5747,7 @@ app.get('/api/agent/config/export', (request, response) => {
     exportedAt: Date.now(),
     activeId: registry.activeId || null,
     quickActiveId: registry.quickActiveId ?? null,
+    openclawDelegateProviderId: registry.openclawDelegateProviderId ?? null,
     entries: registry.entries.map((entry) => ({
       id: entry.id,
       label: entry.label,
@@ -5762,6 +5773,7 @@ app.post('/api/agent/config/import', (request, response) => {
       version?: number;
       activeId?: string | null;
       quickActiveId?: string | null;
+      openclawDelegateProviderId?: string | null;
       entries?: Array<{
         id?: string;
         label?: string;
@@ -5835,6 +5847,18 @@ app.post('/api/agent/config/import', (request, response) => {
   const activeId = entries.some((entry) => entry.id === desiredActiveId)
     ? desiredActiveId
     : (entries[0]?.id || null);
+  const incomingOcid =
+    incoming.openclawDelegateProviderId !== undefined && incoming.openclawDelegateProviderId !== null
+      ? String(incoming.openclawDelegateProviderId).trim()
+      : '';
+  const mergedOcid =
+    incoming.openclawDelegateProviderId !== undefined
+      ? incomingOcid && entries.some((e) => e.id === incomingOcid)
+        ? incomingOcid
+        : null
+      : merge
+        ? current.openclawDelegateProviderId ?? null
+        : null;
   const nextRegistry: ProviderConfigRegistry = {
     activeId,
     quickActiveId:
@@ -5845,10 +5869,14 @@ app.post('/api/agent/config/import', (request, response) => {
         : merge
           ? current.quickActiveId ?? null
           : null,
+    openclawDelegateProviderId: mergedOcid,
     entries,
   };
   if (nextRegistry.quickActiveId && !entries.some((e) => e.id === nextRegistry.quickActiveId)) {
     nextRegistry.quickActiveId = null;
+  }
+  if (nextRegistry.openclawDelegateProviderId && !entries.some((e) => e.id === nextRegistry.openclawDelegateProviderId)) {
+    nextRegistry.openclawDelegateProviderId = null;
   }
   const finalizedRegistry = applyQuickLaneDefaultIfUnset(nextRegistry);
   saveProviderRegistry(finalizedRegistry);

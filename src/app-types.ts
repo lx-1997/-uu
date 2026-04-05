@@ -46,8 +46,6 @@ export interface Device {
   lanSshPort?: number;
   frpRemotePort?: number;
   sshReachability?: 'direct' | 'tunnel';
-  /** 与 shared/types Device 一致：RDKClaw 委派预检时是否将 Studio 模型同步到板端 */
-  openclawStudioModelSync?: import('../shared/types').OpenClawStudioModelSyncMode;
 }
 
 export interface Toast {

@@ -71,7 +71,6 @@ export function mapDevicesFromApiResponse(res: {
     lanSshPort?: number;
     frpRemotePort?: number;
     sshReachability?: 'direct' | 'tunnel';
-    openclawStudioModelSync?: import('../../shared/types').OpenClawStudioModelSyncMode;
   }>;
 }): Device[] {
   const verifiedIds = loadVerifiedIdSet();
@@ -90,7 +89,6 @@ export function mapDevicesFromApiResponse(res: {
     lanSshPort: device.lanSshPort,
     frpRemotePort: device.frpRemotePort,
     sshReachability: device.sshReachability,
-    openclawStudioModelSync: device.openclawStudioModelSync,
   }));
   return orderDevicesForStudio(mapped);
 }

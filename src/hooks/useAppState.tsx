@@ -29,7 +29,11 @@ import { AIChatProvider, useAIChatStore, type RdkClawTimelineEntry } from './use
 import { getRdkEmbedPanel } from '../utils/embed-mode';
 import type { EmbedToolbarApi } from './useUIStore';
 import { persistStudioNavigationUiHints } from '../studio-ui-hints';
-import { requestIdeRemoteConnect, requestVncRemoteConnect } from '../utils/studio-embed-connect-bridge';
+import {
+  requestIdeRemoteConnect,
+  requestVncRemoteConnect,
+  setIdeConnectPreferFloatOnNext,
+} from '../utils/studio-embed-connect-bridge';
 
 // ---- State shape (unchanged — backward compatible) ----
 export type { ThemeMode };
@@ -379,8 +383,9 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
   vncToolbarRef.current = ui.vncEmbedToolbar;
 
   /**
-   * 用户说「打开 VNC / 远程桌面」「打开 IDE」时：**不切换 Tab**，后台执行与对应页面「连接」按钮相同逻辑；
-   * 连接成功后默认贴入该 Tab，就绪后再**自动浮出悬浮窗**（与在页面内手动点「连接」默认贴入不同）。
+   * 用户说「打开 VNC / 远程桌面」「打开 IDE」时：**不切换 Tab**，后台执行与对应页面「连接」按钮相同逻辑。
+   * IDE：对话意图在 IDE.handleConnect 成功路径上 consumeIdeConnectPreferFloat 并直接浮出（不依赖 toolbar 轮询）。
+   * VNC：就绪后轮询 toggleEmbedFloat（与页面内手动点「连接」默认贴入、意图再浮出一致）。
    */
   useEffect(() => {
     let cancelled = false;
@@ -392,11 +397,11 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       pendingTimeouts.push(id);
     };
 
-    const tryFloatWhenReady = (which: 'ide' | 'vnc', startedAt: number) => {
+    const tryFloatWhenReady = (which: 'vnc', startedAt: number) => {
       const maxMs = 22_000;
       const tick = () => {
         if (cancelled) return;
-        const api = which === 'ide' ? ideToolbarRef.current : vncToolbarRef.current;
+        const api = vncToolbarRef.current;
         if (api?.showIframe && !api.embedFloating) {
           api.toggleEmbedFloat();
           return;
@@ -416,8 +421,8 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         return;
       }
       if (kind === 'open-ide-float') {
+        setIdeConnectPreferFloatOnNext(true);
         requestIdeRemoteConnect();
-        tryFloatWhenReady('ide', Date.now());
       }
     };
 

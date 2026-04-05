@@ -308,17 +308,18 @@ export const OPENCLAW_EN: Record<string, string> = {
   'oc.form.baseUrl': 'Base URL',
   'oc.form.apiKey': 'API Key',
 
-  'oc.studioSync.section': 'RDKClaw: Studio model → board',
-  'oc.studioSync.hint':
-    'When delegating to on-device OpenClaw, Studio can push your “thinking” model using the policy below. “Preset only” writes a separate provider `rdk-studio-default` and does not switch the primary model — enable it in OpenClaw settings when ready.',
-  'oc.studioSync.label': 'Sync policy',
-  'oc.studioSync.off': 'Off',
-  'oc.studioSync.whenEmpty': 'Only when board gateway is empty',
-  'oc.studioSync.whenUnhealthy': 'When empty or health says not ready (recommended)',
-  'oc.studioSync.always': 'Always overwrite custom-gateway from Studio',
-  'oc.studioSync.presetOnly': 'Preset only: write rdk-studio-default, enable manually',
-  'oc.studioSync.saved': 'Saved: Studio → board model sync policy',
-  'oc.studioSync.saveFail': 'Save failed: {{msg}}',
+  'oc.status.boardShort': 'board',
+  'oc.status.modelTitleBoardOnly': 'The model currently used by on-device OpenClaw (from the device config).',
+  'oc.status.modelTitleDelegate':
+    'Board now: {{board}}. Delegate preflight will use Studio entry "{{label}}" ({{model}}). To chat on the board with that model too, save the same settings on this page and restart the gateway.',
+  'oc.boardDelegate.section': 'Board delegate: Studio model',
+  'oc.boardDelegate.hint':
+    'Choosing a preset fills the LLM form above (from Settings → AI). Click Save to write it to the board and restart the gateway; the preset is also remembered for RDKClaw delegation.',
+  'oc.boardDelegate.loadEntryFail': 'Could not load that model entry: {{msg}}',
+  'oc.boardDelegate.preset': 'Preset model',
+  'oc.boardDelegate.followDock': 'Same as deep-thinking primary (default)',
+  'oc.boardDelegate.saved': 'Saved board-delegate model',
+  'oc.boardDelegate.saveFail': 'Save failed: {{msg}}',
 
   'oc.composer.hint.statusLoading': 'Syncing gateway status…',
   'oc.composer.hint.connecting': 'Establishing session with the device…',

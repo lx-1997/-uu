@@ -843,6 +843,8 @@ export function fetchAgentConfig() {
     activeModelId?: string | null;
     /** Dock「快速回答」绑定的模型条目 id（加载配置时会尽量补全为内置快速条目） */
     quickActiveModelId?: string | null;
+    /** 板端 OpenClaw 委派预检写入网关时使用的 Studio 模型条目 id；未设置时与 Dock 深度思考主模型一致 */
+    openclawDelegateProviderId?: string | null;
     envApiKeyAvailable?: boolean;
     /** 安装包内置默认模型（bootstrap），用于「恢复默认」 */
     studioDefaultPreset?: {
@@ -1166,7 +1168,7 @@ export function restartWeixinChannel() {
 }
 
 export function saveAgentConfig(config: {
-  action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset';
+  action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset' | 'set_openclaw_delegate';
   /** duplicate_for_quick：源配置 id，省略则用当前深度思考 active */
   sourceId?: string;
   id?: string;
@@ -1186,6 +1188,7 @@ export function saveAgentConfig(config: {
     /** action 为 upsert 时返回的条目 id（新建或更新后） */
     savedId?: string;
     quickActiveModelId?: string | null;
+    openclawDelegateProviderId?: string | null;
     createdId?: string;
     active?: {
       id: string;
@@ -1205,6 +1208,7 @@ export interface AgentConfigExportPayload {
   exportedAt: number;
   activeId: string | null;
   quickActiveId?: string | null;
+  openclawDelegateProviderId?: string | null;
   entries: Array<{
     id: string;
     label: string;

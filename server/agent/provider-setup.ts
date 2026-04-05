@@ -79,6 +79,11 @@ export interface ProviderConfigRegistry {
   activeId: string | null;
   /** Dock「快速回答」专用条目；应与深度条目区分（安装包内置快速 id 会在加载配置时自动补全） */
   quickActiveId?: string | null;
+  /**
+   * 板端 OpenClaw 委派预检在「板端未配置网关」时写入所用的 Studio 模型条目。
+   * 未设置或与条目无效时，回退为当前「深度思考」主模型（activeId）。
+   */
+  openclawDelegateProviderId?: string | null;
   entries: ProviderConfigEntry[];
 }
 
@@ -243,7 +248,48 @@ export function loadProviderConfig(): ProviderConfig | null {
 }
 
 /**
- * 将 Studio「深度思考」链路当前 Provider 转为 OpenClaw `custom-gateway` 所需字段，
+ * 将指定 Studio 已保存模型条目转为 OpenClaw `custom-gateway` 字段（写入板端 openclaw 配置）。
+ */
+export function buildOpenClawModelGatewayFromStudioEntryId(entryId: string): {
+  baseUrl: string;
+  apiKey: string;
+  modelId: string;
+  modelName: string;
+  api: string;
+} | null {
+  const registry = loadProviderRegistry();
+  const id = entryId.trim();
+  if (!id || !registry.entries.some((e) => e.id === id)) return null;
+  const entry = registry.entries.find((e) => e.id === id)!;
+  const cfg: ProviderConfig = {
+    provider: entry.provider,
+    model: entry.model,
+    apiKey: entry.apiKey,
+    baseUrl: entry.baseUrl,
+    thinkingDefault: entry.thinkingDefault,
+    reasoningVisibility: entry.reasoningVisibility,
+    samplingTemperature: effectiveSamplingTemperature(entry.samplingTemperature),
+    samplingTopP: effectiveSamplingTopP(entry.samplingTopP),
+  };
+  if (!cfg?.model?.trim()) return null;
+  const apiKey = cfg.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
+  if (!apiKey) return null;
+  const merged: ProviderConfig = { ...cfg, apiKey };
+  const baseUrl = resolveProviderBaseUrl(merged);
+  const protocol = resolveProtocol(merged);
+  const api = protocol === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
+  const modelId = cfg.model.trim();
+  return {
+    baseUrl,
+    apiKey,
+    modelId,
+    modelName: (entry.label || '').trim() || modelId,
+    api,
+  };
+}
+
+/**
+ * 将 Studio 中**为板端委派预选**的模型条目（或回退为「深度思考」主模型）转为 OpenClaw `custom-gateway` 所需字段，
  * 供板端缺少模型网关时由 RDKClaw 写入 `openclaw.json`。
  * 无有效模型名或 API Key（含 `OPENAI_API_KEY` 环境变量兜底）时返回 null。
  */
@@ -254,7 +300,12 @@ export function buildOpenClawModelGatewayFromStudioThinking(): {
   modelName: string;
   api: string;
 } | null {
-  const cfg = loadProviderConfig();
+  const registry = loadProviderRegistry();
+  const delegateId = registry.openclawDelegateProviderId?.trim();
+  if (delegateId && registry.entries.some((e) => e.id === delegateId)) {
+    return buildOpenClawModelGatewayFromStudioEntryId(delegateId);
+  }
+  const cfg = loadProviderConfigForStudioLane("thinking");
   if (!cfg?.model?.trim()) return null;
   const apiKey = cfg.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
   if (!apiKey) return null;
@@ -379,7 +430,7 @@ function resolveBootstrapProviderConfigPath(): string | null {
 
 function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
   if (!input || typeof input !== 'object') {
-    return { activeId: null, entries: [] };
+    return { activeId: null, quickActiveId: null, openclawDelegateProviderId: null, entries: [] };
   }
   const maybe = input as Partial<ProviderConfigRegistry>;
   const entriesRaw = Array.isArray(maybe.entries) ? maybe.entries : [];
@@ -417,9 +468,13 @@ function ensureRegistryShape(input: unknown): ProviderConfigRegistry {
   const quickRaw = normalizeText((maybe as { quickActiveId?: unknown }).quickActiveId as string | undefined);
   const quickActiveId =
     quickRaw && entries.some((e) => e.id === quickRaw) ? quickRaw : null;
+  const ocidRaw = normalizeText((maybe as { openclawDelegateProviderId?: unknown }).openclawDelegateProviderId);
+  const openclawDelegateProviderId =
+    ocidRaw && entries.some((e) => e.id === ocidRaw) ? ocidRaw : null;
   return {
     activeId: resolvedActive,
     quickActiveId,
+    openclawDelegateProviderId,
     entries,
   };
 }
@@ -450,7 +505,10 @@ function loadBootstrapProviderRegistry(): ProviderConfigRegistry | null {
       normalized.quickActiveId && entries.some((e) => e.id === normalized.quickActiveId)
         ? normalized.quickActiveId
         : null;
-    return { activeId, quickActiveId, entries };
+    const ocid = normalized.openclawDelegateProviderId?.trim();
+    const openclawDelegateProviderId =
+      ocid && entries.some((e) => e.id === ocid) ? ocid : null;
+    return { activeId, quickActiveId, openclawDelegateProviderId, entries };
   } catch {
     return null;
   }
@@ -517,6 +575,7 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
       const legacyReg: ProviderConfigRegistry = {
         activeId: DEFAULT_ENTRY_ID,
         quickActiveId: null,
+        openclawDelegateProviderId: null,
         entries: [{
           id: DEFAULT_ENTRY_ID,
           label: `${provider}/${model}`,
@@ -553,7 +612,7 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
         saveProviderRegistry(recovered);
         return recovered;
       }
-      return { activeId: null, quickActiveId: null, entries: [] };
+      return { activeId: null, quickActiveId: null, openclawDelegateProviderId: null, entries: [] };
     }
     const next = applyQuickLaneDefaultIfUnset(regM);
     if (presetMigrated || next.quickActiveId !== regM.quickActiveId) {
@@ -563,7 +622,7 @@ export function loadProviderRegistry(): ProviderConfigRegistry {
     return regM;
   } catch {
     const boot = loadBootstrapProviderRegistry();
-    if (!boot) return { activeId: null, quickActiveId: null, entries: [] };
+    if (!boot) return { activeId: null, quickActiveId: null, openclawDelegateProviderId: null, entries: [] };
     return applyQuickLaneDefaultIfUnset(boot);
   }
 }
@@ -741,9 +800,22 @@ export function deleteProviderConfigEntry(id: string): boolean {
   const activeId = registry.activeId === id ? (entries[0]?.id || null) : registry.activeId;
   let quickActiveId = registry.quickActiveId ?? null;
   if (quickActiveId === id) quickActiveId = null;
-  let next: ProviderConfigRegistry = { ...registry, activeId, entries, quickActiveId };
+  let openclawDelegateProviderId = registry.openclawDelegateProviderId ?? null;
+  if (openclawDelegateProviderId === id) openclawDelegateProviderId = null;
+  let next: ProviderConfigRegistry = { ...registry, activeId, entries, quickActiveId, openclawDelegateProviderId };
   next = applyQuickLaneDefaultIfUnset(next);
   saveProviderRegistry(next);
+  return true;
+}
+
+/** 设置板端 OpenClaw 委派预检使用的模型条目；传空则与当前「深度思考」主模型一致 */
+export function setOpenclawDelegateProviderConfig(id: string | null | undefined): boolean {
+  const registry = loadProviderRegistry();
+  const next = id?.trim() || null;
+  if (next && !registry.entries.some((e) => e.id === next)) {
+    return false;
+  }
+  saveProviderRegistry({ ...registry, openclawDelegateProviderId: next });
   return true;
 }
 

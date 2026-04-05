@@ -7,7 +7,7 @@ import {
   type OpenClawHealthStatus,
 } from "../../managers/OpenClawDeploymentManager.js";
 import { buildOpenClawModelGatewayFromStudioThinking } from "../../agent/provider-setup.js";
-import type { Device as SharedDevice, OpenClawStudioModelSyncMode } from "../../../shared/types.js";
+import type { Device as SharedDevice } from "../../../shared/types.js";
 import {
   getCachedOpenClawAiReady,
   invalidateOpenClawHealthCache,
@@ -141,13 +141,6 @@ function updateConfigModelGateway(
   });
 }
 
-function normalizeOpenclawStudioSyncMode(raw: SharedDevice["openclawStudioModelSync"] | undefined): OpenClawStudioModelSyncMode {
-  if (raw === "off" || raw === "when_empty" || raw === "when_unhealthy" || raw === "always" || raw === "preset_only") {
-    return raw;
-  }
-  return "when_unhealthy";
-}
-
 /**
  * updateConfig 会合并配置并走网关重启脚本；重启后端口/token 可能短暂不可用。
  * 在此窗口内轮询 health，避免委派刚一开始就失败。
@@ -186,34 +179,6 @@ async function waitForHealthAfterConfigSync(
     health = await getBoardHealth(manager, boardDevice);
   }
   return health;
-}
-
-function resolveStudioModelSyncDecision(
-  mode: OpenClawStudioModelSyncMode,
-  cfg: ConfigData | null,
-  health: OpenClawHealthStatus,
-  mg: NonNullable<ReturnType<typeof buildOpenClawModelGatewayFromStudioThinking>>,
-): { placement: "replace_primary" | "preset_only" } | null {
-  if (mode === "off") return null;
-  const unset = boardModelGatewayIsUnset(cfg);
-  const unhealthy = !health.aiReady;
-
-  if (mode === "when_empty") {
-    if (!unset) return null;
-    return { placement: "replace_primary" };
-  }
-  if (mode === "when_unhealthy") {
-    if (unset || unhealthy) return { placement: "replace_primary" };
-    return null;
-  }
-  if (mode === "always") {
-    return { placement: "replace_primary" };
-  }
-  if (mode === "preset_only") {
-    if (unset) return { placement: "replace_primary" };
-    return { placement: "preset_only" };
-  }
-  return null;
 }
 
 function restartGateway(
@@ -277,56 +242,41 @@ async function ensureBoardGatewayReady(
   if (signal?.aborted) throw new Error("操作已中止");
   const boardDevice = toBoardDevice(device);
   const deviceId = String(boardDevice.id || "").trim();
-  const syncMode = normalizeOpenclawStudioSyncMode(device.openclawStudioModelSync);
-  if (deviceId && getCachedOpenClawAiReady(deviceId) === true && syncMode !== "always" && syncMode !== "preset_only") {
+  if (deviceId && getCachedOpenClawAiReady(deviceId) === true) {
     onProgress?.("\n[预检] 近期已确认板端 OpenClaw 就绪，跳过重复健康检测。\n");
     return;
   }
 
   let health = await getBoardHealth(manager, boardDevice);
-  if (health.aiReady && syncMode !== "always" && syncMode !== "preset_only") {
+  if (health.aiReady) {
     if (deviceId) setCachedOpenClawAiReady(deviceId, true);
     return;
   }
 
   const skipStudioSync = process.env.RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC === "1";
-  if (skipStudioSync && syncMode !== "off") {
+  if (skipStudioSync) {
     onProgress?.(
       "\n[预检] 已设置 RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC=1，跳过自动下发 Studio 模型（避免预检触发网关重启）；请先在 OpenClaw 大模型页保存或由你确认配置已稳定。\n",
     );
   }
 
-  if (health.installed && syncMode !== "off" && !skipStudioSync) {
+  if (health.installed && !skipStudioSync) {
     const mg = buildOpenClawModelGatewayFromStudioThinking();
     const cfg = await getCurrentConfigPromise(manager, boardDevice);
-    const decision = mg ? resolveStudioModelSyncDecision(syncMode, cfg, health, mg) : null;
-    if (decision && mg) {
-      const label =
-        decision.placement === "preset_only"
-          ? "将 Studio「深度思考」写入板端建议模型 rdk-studio-default（不改当前主模型，可在 OpenClaw 设置中切换启用）"
-          : "用 Studio 当前「深度思考」模型更新板端网关（custom-gateway）";
-      onProgress?.(`\n[预检] ${label}…\n`);
+    const boardUnset = boardModelGatewayIsUnset(cfg);
+    if (mg && boardUnset) {
+      onProgress?.("\n[预检] 板端未配置大模型网关，将 Studio 为委派预选的模型写入 custom-gateway 并合并/重启网关…\n");
       if (signal?.aborted) throw new Error("操作已中止");
       const synced = await updateConfigModelGateway(
         manager,
         boardDevice,
-        { ...mg, placement: decision.placement },
+        { ...mg, placement: "replace_primary" },
         onProgress,
       );
       if (deviceId) invalidateOpenClawHealthCache(deviceId);
       if (synced) {
         health = await waitForHealthAfterConfigSync(manager, boardDevice, onProgress, signal);
-        if (decision.placement === "preset_only") {
-          onProgress?.(
-            "\n[预检] Studio 建议模型已合并到板端；若需使用，请在板端 OpenClaw 将主模型切换为 rdk-studio-default/" +
-              mg.modelId +
-              "。\n",
-          );
-          if (health.aiReady) {
-            if (deviceId) setCachedOpenClawAiReady(deviceId, true);
-            return;
-          }
-        } else if (health.aiReady) {
+        if (health.aiReady) {
           if (deviceId) setCachedOpenClawAiReady(deviceId, true);
           onProgress?.("\n[预检] 模型网关已写入并生效，板端 OpenClaw 就绪。\n");
           return;
@@ -334,9 +284,9 @@ async function ensureBoardGatewayReady(
       } else {
         onProgress?.("\n[预检] 自动同步 Studio 模型到板端失败，请在本机 OpenClaw 面板手动配置大模型网关。\n");
       }
-    } else if (!mg && (boardModelGatewayIsUnset(cfg) || !health.aiReady)) {
+    } else if (!mg && boardUnset) {
       onProgress?.(
-        "\n[预检] 需要下发 Studio 模型，但 Studio 也未配置有效 API Key（或模型名）；请在 Studio 模型设置或板端手动配置。\n",
+        "\n[预检] 板端未配置网关，但 Studio 也未配置有效 API Key（或模型名）；请在 Studio 模型设置或板端手动配置。\n",
       );
     }
   }
@@ -393,7 +343,7 @@ export function boardOpenClawDelegateTool(
       "将任务交给板端 OpenClaw 与 RDKClaw 协同推进。不是把 OpenClaw 当纯执行器，而是共享上下文并共同决策路径。\n" +
       "**Studio 可见性**：板端流式输出经 **tool_progress** 推到对话里的「板端 OpenClaw」协作块；请展开该块查看实时日志。委派消息会附带 **board_visibility_contract**，要求板端用「[板端] 阶段 · …」分段说明；技能 **RDK Board Progress Reporter**（仓库 `skills/rdk-board-progress-reporter`）可装到板端强化可见性。若只见「完成」而无过程，检查折叠区或板端是否按契约输出。\n\n" +
       "规则：\n" +
-      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 板端 **OpenClaw Gateway 已运行**（本工具会预检；按设备「Studio→板端模型同步策略」可把当前「深度思考」写入板端 `custom-gateway` 或建议项 `rdk-studio-default`；写入会触发与面板保存相同的合并/网关重启流程，预检会**轮询等待**就绪，避免刚重启就失败）；③ 若任务需 **apt/clawhub/云端模型 API** 等，板子还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
+      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 板端 **OpenClaw Gateway 已运行**（本工具会预检；若板端**未配置**大模型网关，会按 OpenClaw 页「板端委派预选」的 Studio 模型条目（未选时与 Dock 深度思考一致）写入 `custom-gateway` 并合并/网关重启；预检会**轮询等待**就绪，避免刚重启就失败）；③ 若任务需 **apt/clawhub/云端模型 API** 等，板子还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
       "- **避免预检反复动网关**：若你希望委派前**不要**自动下发 Studio 模型（减少重启），可在工作室服务端环境变量设 `RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC=1`，改在 OpenClaw 页手动保存大模型后再委派。\n" +
       "- ALWAYS 在消息里提供协作上下文包（目标、约束、已验证证据、失败模式、验收标准），让双方先对齐再推进（共探，不是单方面派活）\n" +
       "- assess 通过不等于必须 delegate：比较的是**谁更快办成**——你已确认可直跑时常先 SSH；板端在技能链/现场迭代上更快时再委派；本地进入多轮试错时倾向并线到板端会话\n" +
