@@ -526,16 +526,18 @@ export default function Vnc() {
         ) : (
           /* ── 欢迎/连接界面 ── */
           <div className="immersive-welcome">
-            <div className="immersive-welcome-icon">
-              <div className="vnc-welcome-screen">
-                <div className="vnc-screen-titlebar" />
-                <div className="vnc-screen-sidebar" />
-                <div className="vnc-screen-content">
-                  <div className="vnc-screen-block a" />
-                  <div className="vnc-screen-block b" />
+            <div className="immersive-welcome-visual">
+              <div className="immersive-welcome-icon">
+                <div className="vnc-welcome-screen">
+                  <div className="vnc-screen-titlebar" />
+                  <div className="vnc-screen-sidebar" />
+                  <div className="vnc-screen-content">
+                    <div className="vnc-screen-block a" />
+                    <div className="vnc-screen-block b" />
+                  </div>
                 </div>
               </div>
-              <div className="vnc-welcome-glow" />
+              <div className="immersive-welcome-glow" />
             </div>
 
             <h2 className="immersive-welcome-title">{t('vnc.welcome.title', 'Web 远程桌面')}</h2>
@@ -581,23 +583,23 @@ export default function Vnc() {
               <p className="vnc-no-device">{t('vnc.pickDeviceLeft', '请先在左侧选择一个设备')}</p>
             )}
 
-            <div className="vnc-welcome-hints">
+            <div className="immersive-feature-hints">
               {!isDesktop() && (
-                <div className="vnc-hint-item">
-                  <span className="status-dot" />
+                <div className="immersive-feature-hint">
+                  <span className="immersive-hint-dot" />
                   <span>{t('vnc.hint.float', '连接后可用工具栏「悬浮窗」与 AI 对话并排对照')}</span>
                 </div>
               )}
-              <div className="vnc-hint-item">
+              <div className="immersive-feature-hint">
                 <kbd>F11</kbd>
                 <span>{t('vnc.hint.fullscreen', '全屏模式')}</span>
               </div>
-              <div className="vnc-hint-item">
-                <span className="status-dot" />
+              <div className="immersive-feature-hint">
+                <span className="immersive-hint-dot" />
                 <span>{t('vnc.hint.clipboard', '支持剪贴板同步')}</span>
               </div>
-              <div className="vnc-hint-item">
-                <span className="status-dot" />
+              <div className="immersive-feature-hint">
+                <span className="immersive-hint-dot" />
                 <span>{t('vnc.hint.quality', '自适应画质')}</span>
               </div>
             </div>

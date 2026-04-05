@@ -45,9 +45,7 @@ const CONNECT_ITEMS: NavItemDef[] = [
 ];
 
 const CAPABILITY_ITEMS: NavItemDef[] = [
-  { tab: 'hardware', labelKey: 'nav.hardware.label', descKey: 'nav.hardware.desc', zhLabel: '硬件', zhDesc: 'GPIO / 传感器管理',
-    paths: ['M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z'] },
-  { tab: 'flasher', labelKey: 'nav.flasher.label', descKey: 'nav.flasher.desc', zhLabel: '烧录/备份', zhDesc: '系统镜像烧录与备份',
+  { tab: 'flasher', labelKey: 'nav.flasher.label', descKey: 'nav.flasher.desc', zhLabel: '烧录', zhDesc: '系统镜像烧录',
     paths: ['M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3'] },
 ];
 

@@ -75,7 +75,7 @@ const Icons: Record<string, React.ReactNode> = {
 const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> = [
   { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'ai-chat-hub', 'openclaw', 'skills'] },
   { titleKey: 'sidebar.group.connect', titleZh: '连接控制', tabs: ['terminal', 'files', 'vnc', 'ide'] },
-  { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['hardware', 'flasher'] },
+  { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['flasher'] },
 ];
 
 /** 中文默认文案（英文走 en-extras sidebar.nav.* / sidebar.hint.*） */
@@ -88,8 +88,7 @@ const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   files: { nav: '文件', hint: '上传、编辑、同步设备文件' },
   vnc: { nav: '远程桌面', hint: '图形界面访问与调试' },
   ide: { nav: '代码编辑', hint: '远程 code-server 工作区' },
-  hardware: { nav: '硬件监控', hint: 'CPU/BPU/温度与健康态' },
-  flasher: { nav: '烧录与备份', hint: '镜像写盘、校验、备份' },
+  flasher: { nav: '镜像烧录', hint: '镜像写盘与校验' },
   'dr-embed': { nav: '生态网页', hint: '论坛与 RoboGo 内嵌' },
   'local-models': { nav: '本地模型', hint: 'Ollama / 本地推理（可选入口）' },
 };

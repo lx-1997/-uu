@@ -96,7 +96,7 @@ export const CAPABILITIES: Capability[] = [
     description: '检测BPU、温度、内存、网络等硬件状态',
     phase: 'background',
     keywords: ['硬件', 'bpu', '温度', 'cpu', '体检', '诊断', '检查', '散热'],
-    tab: 'hardware',
+    tab: 'dashboard',
   },
   {
     id: 'ros_scan',

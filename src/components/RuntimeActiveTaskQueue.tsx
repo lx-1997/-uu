@@ -217,8 +217,8 @@ export default function RuntimeActiveTaskQueue() {
               <button
                 type="button"
                 className="runtime-task-chip"
-                onClick={() => setActiveTab('hardware')}
-                title={t('runtimeTasks.openHardware', '打开硬件监控')}
+                onClick={() => setActiveTab('dashboard')}
+                title={t('runtimeTasks.openDashboard', '打开工作台')}
               >
                 <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
                   fiber_manual_record

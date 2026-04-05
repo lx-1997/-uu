@@ -34,7 +34,6 @@ const Files = lazy(() => import('./components/Files'));
 const Vnc = lazy(() => import('./components/Vnc'));
 const IDE = lazy(() => import('./components/IDE'));
 const OpenClaw = lazy(() => import('./components/OpenClaw'));
-const Hardware = lazy(() => import('./components/Hardware'));
 const DroboticsEmbed = lazy(() => import('./components/DroboticsEmbed'));
 /**
  * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：
@@ -87,7 +86,6 @@ function MainContent() {
     dashboard: <Dashboard />,
     'ai-chat-hub': <AiChatHubPage />,
     files: <Files />,
-    hardware: <Hardware />,
     skills: <SkillBrowser />,
   };
 
@@ -216,6 +214,13 @@ function AppShell() {
     agentWebPreviewUrlRef.current = agentWebPreviewUrl;
   }, [agentWebPreviewUrl]);
 
+  useEffect(() => {
+    // Legacy compatibility: old sessions/actions may still target "hardware".
+    if (activeTab === 'hardware') {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, setActiveTab]);
+
   const closeAgentWebPreview = useCallback(() => {
     const u = agentWebPreviewUrlRef.current;
     if (u && window.rdkDesktop?.closeUrl) {
@@ -290,7 +295,6 @@ function AppShell() {
       files: t('tabs.files', '文件'),
       vnc: t('tabs.vnc', '远程桌面'),
       ide: t('tabs.ide', 'IDE'),
-      hardware: t('tabs.hardware', '硬件监控'),
       flasher: t('tabs.flasher', '烧录工具'),
       'dr-embed': t('tabs.drEmbed', '地瓜生态'),
     };

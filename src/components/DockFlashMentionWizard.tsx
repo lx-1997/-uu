@@ -8,11 +8,9 @@ import {
 type WizardStep = 0 | 1 | 2;
 
 const DEVICE_CHOICES: Array<{ key: string; nameZh: string; nameEn: string }> = [
-  { key: 'x3', nameZh: 'RDK X3', nameEn: 'RDK X3' },
+  { key: 'x3', nameZh: 'RDK X3/ X3 Module', nameEn: 'RDK X3/ X3 Module' },
   { key: 'x5', nameZh: 'RDK X5', nameEn: 'RDK X5' },
   { key: 's100', nameZh: 'RDK S100(P)', nameEn: 'RDK S100(P)' },
-  { key: 'x3-module', nameZh: 'RDK X3 Module (TF)', nameEn: 'RDK X3 Module (TF)' },
-  { key: 'x5-module', nameZh: 'RDK X5 Module (TF)', nameEn: 'RDK X5 Module (TF)' },
 ];
 
 type Props = {

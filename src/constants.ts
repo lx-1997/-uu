@@ -48,17 +48,6 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
     cta: '打开终端',
     quickActions: [{ label: '快速巡检', icon: '🔍' }, { label: '环境检查', icon: '🧪' }],
   },
-  {
-    tab: 'hardware',
-    title: '硬件监控',
-    description: '持续观察 CPU/BPU/温度与系统资源，快速定位性能瓶颈',
-    loading: '正在打开硬件监控面板...',
-    statusLabel: '实时监控',
-    statusOk: true,
-    miniStats: [{ label: '关键指标', value: 'CPU/BPU/温度' }, { label: '刷新频率', value: '约 15s' }],
-    cta: '进入硬件监控',
-    quickActions: [{ label: '温度监测', icon: '🌡️' }, { label: '资源诊断', icon: '📊' }],
-  },
 ];
 
 export const FLASH_IMAGES = [

@@ -30,7 +30,7 @@
 | `studio_open_local_preview` | **桌面端**用系统默认应用打开**工作区内图片**（相对路径或允许根下绝对路径） | 仅常见图片扩展名；路径须落在 workspace/bootstrap/extraAllowedRoots；**本地文件勿用** `studio_open_url` |
 | `ros_topics` / `ros_nodes` | ROS2 操作 | 设备可能未装 ROS2 |
 | `vnc_start/stop/status` | 远程桌面 | |
-| `navigate:{tab}` | 页面跳转 | dashboard/flasher/terminal/files/vnc/ide/openclaw/hardware 等 |
+| `navigate:{tab}` | 页面跳转 | dashboard/flasher/terminal/files/vnc/ide/openclaw/skills 等 |
 | `fleet_board_list` | 列出已注册板卡与能力画像 | 多设备前先调用；含同 IP 重复注册告警 |
 | `fleet_board_delegate` | 向指定板卡的 OpenClaw 委派任务 | 跨板协作；需 `targetDeviceId`； busy 板卡避免并行冲突 |
 | `fleet_board_broadcast` | 向多块板广播任务并汇总 | 多板同任务场景 |

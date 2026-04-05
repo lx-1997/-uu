@@ -481,13 +481,13 @@ export default function IDE() {
           </>
         ) : (
           <div className="immersive-welcome">
-            <div className="ros-welcome-visual">
+            <div className="immersive-welcome-visual">
               <div className="immersive-welcome-icon">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
                 </svg>
               </div>
-              <div className="ros-welcome-glow" />
+              <div className="immersive-welcome-glow" />
             </div>
 
             <h2 className="immersive-welcome-title">
@@ -515,25 +515,25 @@ export default function IDE() {
               {currentDevice ? t('ide.openCs', '打开 code-server') : t('ide.openVscode', '打开 VS Code')}
             </button>
 
-            <div className="ros-welcome-hints">
+            <div className="immersive-feature-hints">
               {!desktop && (
-                <div className="ros-hint-item">
+                <div className="immersive-feature-hint">
                   <kbd>F11</kbd>
                   <span>{t('ide.hint.fullscreen', '全屏模式')}</span>
                 </div>
               )}
               {!desktop && (
-                <div className="ros-hint-item">
-                  <span className="ros-hint-dot" />
+                <div className="immersive-feature-hint">
+                  <span className="immersive-hint-dot" />
                   <span>{t('ide.hint.float', '连接后可用工具栏「悬浮窗」与 AI 对话并排对照')}</span>
                 </div>
               )}
-              <div className="ros-hint-item">
-                <span className="ros-hint-dot" />
+              <div className="immersive-feature-hint">
+                <span className="immersive-hint-dot" />
                 <span>{currentDevice ? tf('ide.hint.port', '设备端口 {{port}}', { port: CODE_SERVER_PORT }) : t('ide.hint.ssh', '支持 Remote SSH 连接设备')}</span>
               </div>
-              <div className="ros-hint-item">
-                <span className="ros-hint-dot" />
+              <div className="immersive-feature-hint">
+                <span className="immersive-hint-dot" />
                 <span>{t('ide.hint.ui', '中文界面 · 插件生态')}</span>
               </div>
             </div>

@@ -30,7 +30,7 @@ export const EN: Record<string, string> = {
   'runtimeTasks.flowChecking': 'Flow check',
   'runtimeTasks.flowCheckingDetail': 'Node-RED / ROS validation…',
   'runtimeTasks.workspaceLoading': 'Loading',
-  'runtimeTasks.openHardware': 'Open hardware monitor',
+  'runtimeTasks.openDashboard': 'Open workspace',
   'runtimeTasks.rosRecording': 'ROS recording',
   'runtimeTasks.rosRecordingDetail': 'Recording topics',
   'runtimeTasks.rdkclawExecuting': 'RDKClaw run',
@@ -91,8 +91,8 @@ export const EN: Record<string, string> = {
   // capability
   'nav.hardware.label': 'Hardware',
   'nav.hardware.desc': 'GPIO / sensors',
-  'nav.flasher.label': 'Flash / Backup',
-  'nav.flasher.desc': 'Image flashing and backup',
+  'nav.flasher.label': 'Flasher',
+  'nav.flasher.desc': 'Image flashing',
   'nav.ros.label': 'ROS',
   'nav.ros.desc': 'ROS 2 topics and nodes',
 

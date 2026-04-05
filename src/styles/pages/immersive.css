@@ -621,6 +621,37 @@ select.immersive-serial-baud-select.select {
 }
 
 /* ── Welcome visual decorations ── */
+.immersive-welcome-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+}
+
+.immersive-welcome-glow {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  opacity: 0.5;
+  animation: breathe 4s var(--ease-in-out) infinite;
+  pointer-events: none;
+}
+
+.immersive-welcome-visual .immersive-welcome-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-xl);
+  z-index: 1;
+}
+
+.immersive-welcome-visual .immersive-welcome-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
 .ros-welcome-visual,
 .vnc-welcome-visual {
   position: relative;
@@ -758,6 +789,14 @@ select.immersive-serial-baud-select.select {
 
 .ros-hint-dot,
 .vnc-hint-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.immersive-hint-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;

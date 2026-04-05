@@ -72,7 +72,7 @@ interface WifiConfig {
    Device & Image Data  (aligned with rdkstudio-front-main)
    ═══════════════════════════════════════════════════════════ */
 const DEVICE_LIST: DeviceItem[] = [
-  { key: 'x3', name: 'RDK X3', infoUrl: 'https://developer.d-robotics.cc/rdkx3' },
+  { key: 'x3', name: 'RDK X3/ X3 Module', infoUrl: 'https://developer.d-robotics.cc/rdkx3' },
   { key: 'x5', name: 'RDK X5', infoUrl: 'https://developer.d-robotics.cc/rdkx5' },
   {
     key: 's100',
@@ -83,8 +83,6 @@ const DEVICE_LIST: DeviceItem[] = [
     toolDmgUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_universal.dmg',
     toolWinUrl: 'https://archive.d-robotics.cc/downloads/software_tools/download_tools/xburn-gui_1.1.9/xburn-gui_1.1.9_x64-setup.exe',
   },
-  { key: 'x3-module', name: 'RDK X3 Module (TF Card)', infoUrl: 'https://developer.d-robotics.cc/rdkx3' },
-  { key: 'x5-module', name: 'RDK X5 Module (TF Card)', infoUrl: 'https://developer.d-robotics.cc/rdkx5' },
 ];
 
 const IMAGE_LIST: Record<string, ImageItem[]> = {
@@ -132,8 +130,6 @@ function resolveXburnToolUrl(dev: DeviceItem, plat: string): string | undefined 
    Helpers
    ═══════════════════════════════════════════════════════════ */
 function resolveImageKey(deviceKey: string): string {
-  if (deviceKey === 'x3-module') return 'x3';
-  if (deviceKey === 'x5-module') return 'x5';
   if (deviceKey.startsWith('x3')) return 'x3';
   if (deviceKey.startsWith('x5')) return 'x5';
   if (deviceKey === 's100') return 's100';
@@ -280,11 +276,6 @@ export default function Flasher() {
   /** Windows + 支持 S100 CLI：存在「驱动 / adb」前置链，步骤条与文案单独展示 */
   const isWinS100OneClick =
     isS100Device && platform === 'win32' && Boolean(caps.supportsS100XburnCli);
-
-  /** 桌面端 TF 直写需提升权限（与 electron/win 适配器 isAdmin 一致） */
-  const showDirectWriteAdminHint = Boolean(
-    isDesktop && !capsLoading && caps.supportsDirectWrite && !needsXburn,
-  );
 
   const refreshS100XburnGuiPath = useCallback(async () => {
     const api = window.rdkDesktop?.flashGetS100XburnGui;
@@ -1055,36 +1046,8 @@ export default function Flasher() {
         <section className="card card-compact">
           <div className="section-label">{t('flasher.header.badge', 'RDK 镜像烧录')}</div>
           <h1>{t('flasher.title', '镜像烧录向导')}</h1>
-          <p className="config-card-desc">{t('flasher.subtitle', '支持 RDK X3 / X5 / S100 全系列，TF 卡直写或 xburn 工具烧录。')}</p>
+          <p className="config-card-desc">{t('flasher.subtitle', '支持 RDK X3 / X5 / S100 全系列镜像烧录。')}</p>
         </section>
-
-        {showDirectWriteAdminHint && (
-          <section
-            className="card card-compact"
-            style={{
-              marginTop: 8,
-              borderColor: 'var(--accent)',
-              background: 'var(--accent-subtle)',
-            }}
-          >
-            <p className="config-card-desc" style={{ margin: 0, fontWeight: 500 }}>
-              {platform === 'win32'
-                ? t(
-                  'flasher.hint.adminWin',
-                  'Windows：直接写盘需管理员权限。请右键桌面端快捷方式 →「以管理员身份运行」后，再执行烧录。',
-                )
-                : platform === 'darwin'
-                  ? t(
-                    'flasher.hint.adminMac',
-                    'macOS：直接写盘需管理员权限。请使用管理员账户，或在系统提示时输入密码授权（sudo）后再烧录。',
-                  )
-                  : t(
-                    'flasher.hint.adminGeneric',
-                    '直接写盘需管理员权限：请以提升权限的方式启动桌面端后再烧录。',
-                  )}
-            </p>
-          </section>
-        )}
 
         {/* ── Step Indicator ── */}
         <section className="flash-steps">
@@ -1561,7 +1524,6 @@ export default function Flasher() {
                     type="button"
                     className="btn btn-primary"
                     disabled={!canProceedFromDrive || loading || (!capsLoading && !caps.supportsDirectWrite)}
-                    title={showDirectWriteAdminHint ? t('flasher.hint.adminTitle', '需管理员权限运行桌面端') : undefined}
                     onClick={() => startFlashWorkflow()}
                   >
                     {loading ? t('flasher.btn.writing', '执行中...') : t('flasher.btn.startWrite', '开始写盘')}
@@ -1776,9 +1738,9 @@ export default function Flasher() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => { setActiveTab('hardware'); addToast(t('flasher.toast.tabHardware', '已切换到硬件监控'), 'info'); }}
+                onClick={() => { setActiveTab('dashboard'); addToast(t('flasher.toast.tabDashboard', '已切换到工作台'), 'info'); }}
               >
-                {t('flasher.btn.hardware', '硬件状态')}
+                {t('flasher.btn.dashboard', '查看工作台状态')}
               </button>
               <button
                 type="button"
