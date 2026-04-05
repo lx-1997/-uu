@@ -112,6 +112,8 @@ interface AuthState {
   user: SSOUser | null;
   loginUrl: string | null;
   refresh: () => Promise<void>;
+  /** 桌面环回 /api/sso/bootstrap 成功后立即写入，避免紧随其后的 refresh 因 Cookie/镜像时序误清会话 */
+  adoptBootstrapSession: (user: SSOUser, sessionId: string) => void;
   logout: () => Promise<void>;
 }
 
@@ -167,6 +169,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [logoutUiPhase, setLogoutUiPhase] = useState<LogoutUiPhase>(null);
   /** 上次由 /api/sso/me 确认的用户；用于避免瞬时网络/丢 Cookie 导致误清登录态（内存 + 冷启动时从 snapshot 回补） */
   const lastConfirmedUserRef = useRef<SSOUser | null>(null);
+
+  const adoptBootstrapSession = useCallback((nextUser: SSOUser, sessionId: string) => {
+    lastConfirmedUserRef.current = nextUser;
+    writeUserSnapshot(nextUser);
+    setSsoSessionMirror(sessionId);
+    setUser(nextUser);
+    setSsoEnabled(true);
+    setSsoRequired(true);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!lastConfirmedUserRef.current) {
@@ -293,6 +304,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    if (lastConfirmedUserRef.current) {
+      writeUserSnapshot(lastConfirmedUserRef.current);
+      setUser(lastConfirmedUserRef.current);
+      return;
+    }
+
     lastConfirmedUserRef.current = null;
     clearUserSnapshot();
     setUser(null);
@@ -386,9 +403,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       loginUrl,
       refresh,
+      adoptBootstrapSession,
       logout,
     }),
-    [loading, ssoEnabled, ssoRequired, ssoConfigured, user, loginUrl, refresh, logout],
+    [loading, ssoEnabled, ssoRequired, ssoConfigured, user, loginUrl, refresh, adoptBootstrapSession, logout],
   );
 
   return (

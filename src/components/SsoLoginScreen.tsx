@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth, type SSOUser } from '../hooks/useAuth';
 import { useToastStore } from '../hooks/useToastStore';
 import { useI18n } from '../i18n/use-i18n';
 import { ssoTranslate as st } from '../i18n/sso-translate';
@@ -12,7 +12,7 @@ const READY_DELAY_MS = 220;
 const FALLBACK_SSO = 'https://sso.d-robotics.cc/';
 
 export default function SsoLoginScreen() {
-  const { ssoConfigured, loginUrl, refresh } = useAuth();
+  const { ssoConfigured, loginUrl, refresh, adoptBootstrapSession } = useAuth();
   const { t } = useI18n();
   const [legalKind, setLegalKind] = useState<LegalDocKind | null>(null);
 
@@ -134,6 +134,7 @@ export default function SsoLoginScreen() {
           error?: string;
           code?: string;
           sessionId?: string;
+          user?: SSOUser;
         };
         if (!r.ok || !data?.ok) {
           if (data?.code === 'SSO_CLIENT_NOT_CONFIGURED') {
@@ -149,7 +150,12 @@ export default function SsoLoginScreen() {
           }
           return;
         }
-        if (data.sessionId) setSsoSessionMirror(data.sessionId);
+        const sid = String(data.sessionId || '').trim();
+        if (data.user && sid) {
+          adoptBootstrapSession(data.user, sid);
+        } else if (sid) {
+          setSsoSessionMirror(sid);
+        }
         addToast(st('sso.loginSuccess', '登录成功'), 'success');
         void window.rdkDesktop?.stopSsoEmbedded?.();
         await refresh();
