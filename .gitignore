@@ -18,6 +18,9 @@ openclaw-main/
 # 本地下载/测试资源（勿提交）
 downloads/
 
+# i18n audit script output (regenerate locally)
+scripts/audit-out.txt
+
 # Logs & temp
 error.log
 *.log

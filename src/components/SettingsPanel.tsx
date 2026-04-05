@@ -1014,15 +1014,22 @@ export default function SettingsPanel() {
     const res = await fetchApi(pathOrUrl, { credentials: 'include' });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status} ${text.slice(0, 160)}`);
+      throw new Error(
+        tf('settings.weixin.qrHttpErr', '加载二维码失败：HTTP {{status}} {{detail}}', {
+          status: res.status,
+          detail: text.slice(0, 160),
+        }),
+      );
     }
     const ct = (res.headers.get('content-type') || '').toLowerCase();
     if (!ct.startsWith('image/')) {
-      throw new Error(`无效响应类型: ${ct || '(空)'}`);
+      throw new Error(
+        tf('settings.weixin.qrInvalidType', '无效的响应类型（非图片）: {{ct}}', { ct: ct || '(empty)' }),
+      );
     }
     const blob = await res.blob();
     if (blob.size < 32) {
-      throw new Error('图片数据过短');
+      throw new Error(t('settings.weixin.qrDataTooShort', '图片数据过短'));
     }
     return URL.createObjectURL(blob);
   };

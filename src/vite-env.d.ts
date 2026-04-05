@@ -19,6 +19,11 @@ interface ImportMetaEnv {
   readonly VITE_RDK_STUDIO_DOC_URL?: string;
   /** 覆盖默认 RDK 开发者手册 / 官网文档 URL（与 RDK_DEVELOPER_DOC_URL 对齐） */
   readonly VITE_RDK_DEVELOPER_DOC_URL?: string;
+  /**
+   * 是否允许未登录访客进入工作台（默认不允许；dev/prod 一致）。
+   * 仅内网/自动化等场景设为 `true`，且常与后端 SSO_REQUIRED=0 同用。
+   */
+  readonly VITE_ALLOW_ANONYMOUS?: string;
 }
 
 interface ImportMeta {

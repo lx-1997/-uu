@@ -131,6 +131,9 @@ export const EN: Record<string, string> = {
   'drPortal.err.bundle': 'Could not get SSO handoff — sign in to Studio first.',
   'drPortal.err.open': 'Failed to open',
 
+  /** Route / shell：无 AppStateContext 时用 translate+readStoredLocale */
+  'route.fallbackLoading': 'Loading page…',
+
   'version.modal.title': 'About RDK Studio',
   'version.modal.subtitle': 'Version & product',
   'version.modal.features': 'Features',
@@ -328,6 +331,12 @@ export const EN: Record<string, string> = {
   'settings.weixin.fetchQr': 'Fetching QR code…',
   'settings.weixin.scanBelow': 'Scan the QR code below with WeChat',
   'settings.weixin.confirmInWechat': 'Scanned — confirm in WeChat…',
+  'settings.weixin.qrLoadFail':
+    'Could not show the QR image. Close and try again; if it persists, update RDK Studio.',
+  'settings.weixin.qrLoadFailHint': 'Image decode failed. Close the dialog and try “Scan to connect RDKClaw” again.',
+  'settings.weixin.qrHttpErr': 'Could not load QR code: HTTP {{status}} {{detail}}',
+  'settings.weixin.qrInvalidType': 'Unexpected response type (not an image): {{ct}}',
+  'settings.weixin.qrDataTooShort': 'QR image data was too short',
 
   'settings.conn.title': 'Device & UI',
   'settings.conn.descWithDevices': 'Manage saved SSH devices, timeout, and auto-connect.',

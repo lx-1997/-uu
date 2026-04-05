@@ -10,6 +10,7 @@ import React, {
 import { flushSync } from 'react-dom';
 import { useSessionDailyActivePing, useGuestDailyActivePing } from '../analytics/useDailyActivePing';
 import { ssoTranslate as st } from '../i18n/sso-translate';
+import { isStudioLoginRequired } from '../utils/studio-auth-gate';
 import { fetchApi, getSsoSessionMirrorId, setSsoSessionMirror } from '../utils/apiBase';
 
 type LogoutUiPhase = null | 'redirect' | 'reload';
@@ -306,7 +307,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         if (!cancelled) {
           setSsoEnabled(false);
-          setSsoRequired(false);
+          /* 拉取失败时勿「放行」：否则未登录也能进主界面，仅接口 401（与产品门禁一致） */
+          setSsoRequired(true);
           setSsoConfigured(false);
           setUser(null);
           setLoginUrl(null);
@@ -398,11 +400,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** 身份就绪后上报日活（SSO：登录展示名；非强制 SSO 且无用户：匿名） */
+/** 身份就绪后上报日活（SSO：登录展示名；仅 VITE_ALLOW_ANONYMOUS 时匿名 PV） */
 function AuthDailyActiveHost() {
   const { loading, user, ssoRequired } = useAuth();
+  const loginRequired = isStudioLoginRequired(ssoRequired);
   useSessionDailyActivePing(loading, user);
-  useGuestDailyActivePing(loading, ssoRequired, user);
+  useGuestDailyActivePing(loading, loginRequired, user);
   return null;
 }
 

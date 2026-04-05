@@ -78,20 +78,21 @@ export function useSessionDailyActivePing(loading: boolean, user: { id: string }
 }
 
 /**
- * 未强制 SSO、且未登录时：访客每次整页加载一条 PV。
+ * 允许访客进入主界面且未登录时：匿名每次整页加载一条 PV。
+ * `loginRequired` 为 true（默认 dev/prod 均须登录）时不发访客 PV。
  */
 export function useGuestDailyActivePing(
   loading: boolean,
-  ssoRequired: boolean,
+  loginRequired: boolean,
   user: { id: string } | null,
 ) {
   useEffect(() => {
-    if (loading || ssoRequired || user) return;
+    if (loading || loginRequired || user) return;
     if (!tryMarkPvOnceThisDocument('guest')) return;
     const anonymousId = getOrCreateAnonymousId();
     const appVersion = import.meta.env.VITE_APP_VERSION || '';
     void postDailyActive({ anonymousId, appVersion });
-  }, [loading, ssoRequired, user]);
+  }, [loading, loginRequired, user]);
 }
 
 /**

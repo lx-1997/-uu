@@ -43,8 +43,20 @@ function removeVerifiedId(id: string) {
   localStorage.setItem(SSH_VERIFIED_IDS_KEY, JSON.stringify([...s]));
 }
 
+import { fillTemplate } from '../i18n/en-extras';
+import { translate } from '../i18n/translate';
+import { readStoredLocale } from '../utils/locale';
+import { isStudioLoginRequired } from '../utils/studio-auth-gate';
 import { useToastStore } from './useToastStore';
 import { useAuth } from './useAuth';
+
+function tUi(key: string, zh: string): string {
+  return translate(readStoredLocale() === 'en', key, zh);
+}
+
+function tfUi(key: string, zh: string, vars: Record<string, string | number>): string {
+  return fillTemplate(tUi(key, zh), vars);
+}
 
 /** 与下方 GET /api/devices 的 effect 使用同一映射，避免多处漂移 */
 export function mapDevicesFromApiResponse(res: {
@@ -182,10 +194,10 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const { addToast, addActivity } = useToastStore();
   const { user, ssoRequired, loading: authLoading } = useAuth();
   /**
-   * 与后端 ssoAuthMiddleware 一致：仅 SSO_REQUIRED=1 时 API 才强制会话。
-   * 若用 (ssoEnabled || ssoRequired) 会把「已配置 OAuth 但未强制」的访客永远挡在设备拉取之外。
+   * 与 SSOGate / isStudioLoginRequired 一致：默认需登录后才拉设备列表；仅 VITE_ALLOW_ANONYMOUS 时访客可拉取。
    */
-  const authReady = !authLoading && (!ssoRequired || !!user);
+  const loginGate = isStudioLoginRequired(ssoRequired);
+  const authReady = !authLoading && (!loginGate || !!user);
 
   const bootstrapRef = React.useRef<{ devices: Device[]; activeDevice: string } | null>(null);
   const [devices, setDevices] = useState<Device[]>(() => {
@@ -245,7 +257,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
   const scanForDevices = useCallback(() => {
     setShowAddDevice(true);
-    addToast('请填写设备 IP 与 SSH 凭据', 'info');
+    addToast(tUi('device.toast.scanNeedIpCreds', '请填写设备 IP 与 SSH 凭据'), 'info');
   }, [addToast, setShowAddDevice]);
 
   const registerDeviceAfterVerify = useCallback((payload: { host: string; port?: number; username: string; password: string; name?: string }) => {
@@ -256,7 +268,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     const alias = payload.name?.trim() ?? '';
 
     if (!host.trim() || !username.trim() || !password.trim()) {
-      addToast('请填写设备 IP、用户名和密码', 'warning');
+      addToast(tUi('device.toast.fillRequiredFields', '请填写设备 IP、用户名和密码'), 'warning');
       return Promise.resolve(null);
     }
 
@@ -279,14 +291,17 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         setDevices((prev) => orderDevicesForStudio([device, ...prev.filter((item) => item.id !== device.id)]));
         setActiveDevice(device.id);
         setDeviceListRevision((n) => n + 1);
-        addToast(`设备 "${device.name}" 已加入工作区`, 'success');
+        addToast(tfUi('device.toast.addedWorkspace', '设备 "{{name}}" 已加入工作区', { name: device.name }), 'success');
         addActivity(`连接设备: ${device.name} (${device.ip})`);
         return device;
       })
       .catch((error) => {
-        const raw = error instanceof Error ? error.message : '设备连接失败';
+        const raw = error instanceof Error ? error.message : tUi('device.err.connectFailed', '设备连接失败');
         const msg = /timed out while waiting for handshake/i.test(raw)
-          ? 'SSH 握手超时：请确认设备已开机且网络可达；若正在本机烧录大镜像，可稍后再试或结束写盘后再连接。'
+          ? tUi(
+              'device.err.sshHandshakeHint',
+              'SSH 握手超时：请确认设备已开机且网络可达；若正在本机烧录大镜像，可稍后再试或结束写盘后再连接。',
+            )
           : raw;
         addToast(msg, 'error');
         return null;
@@ -301,7 +316,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     const alias = payload?.name?.trim() || newDeviceName.trim();
 
     if (!host.trim() || !username.trim() || !password.trim()) {
-      addToast('请填写设备 IP、用户名和密码', 'warning');
+      addToast(tUi('device.toast.fillRequiredFields', '请填写设备 IP、用户名和密码'), 'warning');
       return;
     }
 
@@ -326,13 +341,16 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         setShowAddDevice(false);
         setNewDeviceName('');
         setNewDeviceIp('');
-        addToast(`设备 "${device.name}" 已连接`, 'success');
+        addToast(tfUi('device.toast.connected', '设备 "{{name}}" 已连接', { name: device.name }), 'success');
         addActivity(`连接设备: ${device.name} (${device.ip})`);
       })
       .catch((error) => {
-        const raw = error instanceof Error ? error.message : '设备连接失败';
+        const raw = error instanceof Error ? error.message : tUi('device.err.connectFailed', '设备连接失败');
         const msg = /timed out while waiting for handshake/i.test(raw)
-          ? 'SSH 握手超时：请确认设备已开机且网络可达；若正在本机烧录大镜像，可稍后再试或结束写盘后再连接。'
+          ? tUi(
+              'device.err.sshHandshakeHint',
+              'SSH 握手超时：请确认设备已开机且网络可达；若正在本机烧录大镜像，可稍后再试或结束写盘后再连接。',
+            )
           : raw;
         addToast(msg, 'error');
       });
@@ -340,14 +358,14 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
 
   const removeDevice = useCallback((id: string) => {
     if (!id.trim()) {
-      addToast('无效的设备 ID', 'warning');
+      addToast(tUi('device.toast.invalidId', '无效的设备 ID'), 'warning');
       return;
     }
     const prevDevices = [...devicesRef.current];
     const prevActive = activeDeviceRef.current;
     const removed = prevDevices.find((d) => d.id === id);
     if (!removed) {
-      addToast('设备已从列表移除', 'info');
+      addToast(tUi('device.toast.removedFromList', '设备已从列表移除'), 'info');
       return;
     }
     const name = removed.name;
@@ -388,7 +406,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         forgetDevicePassword(id);
         delete pingFailStreakRef.current[id];
         removeVerifiedId(id);
-        addToast(`设备 "${name}" 已删除`, 'info');
+        addToast(tfUi('device.toast.deleted', '设备 "{{name}}" 已删除', { name }), 'info');
         addActivity(`删除设备: ${name}`);
         /** 再拉一次服务端列表，避免与「正在飞行」的 GET /api/devices 竞态把已删项又写回 UI */
         resyncFromServer();
@@ -400,7 +418,14 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           forgetDevicePassword(id);
           delete pingFailStreakRef.current[id];
           removeVerifiedId(id);
-          addToast(`「${name}」已从列表移除（服务端无此记录，已同步本地）`, 'info');
+          addToast(
+            tfUi(
+              'device.toast.removedNotOnServer',
+              '「{{name}}」已从列表移除（服务端无此记录，已同步本地）',
+              { name },
+            ),
+            'info',
+          );
           resyncFromServer();
           return;
         }
@@ -409,17 +434,14 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           setDevices(prevDevices);
           setActiveDevice(prevActive);
           setDeviceListRevision((n) => n + 1);
-          addToast(
-            '删除失败：当前未登录或登录已过期，请重新登录后再试。（与是否 SSH 连接设备无关）',
-            'error',
-          );
+          addToast(tUi('device.err.deleteNeedAuth', '删除失败：当前未登录或登录已过期，请重新登录后再试。（与是否 SSH 连接设备无关）'), 'error');
           return;
         }
         devicesListFetchGenRef.current += 1;
         setDevices(prevDevices);
         setActiveDevice(prevActive);
         setDeviceListRevision((n) => n + 1);
-        addToast(msg || '删除设备失败', 'error');
+        addToast(msg || tUi('device.err.deleteFailed', '删除设备失败'), 'error');
       });
   }, [addToast, addActivity]);
 
@@ -466,10 +488,10 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
             }
             return list[0]?.id ?? '';
           });
-          addToast('已从本机恢复设备列表（服务端暂不可用或未携带登录态）', 'info');
+          addToast(tUi('device.toast.restoredFromCache', '已从本机恢复设备列表（服务端暂不可用或未携带登录态）'), 'info');
           setDeviceListRevision((n) => n + 1);
         } else {
-          addToast('设备列表读取失败，请检查后端服务', 'warning');
+          addToast(tUi('device.toast.listFetchFailed', '设备列表读取失败，请检查后端服务'), 'warning');
         }
       }
     })();

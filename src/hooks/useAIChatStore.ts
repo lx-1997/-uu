@@ -171,9 +171,10 @@ export interface AIChatStoreState {
   stopCurrentRun: () => void;
   stopAllRuns: () => void;
   backgroundCurrentRun: () => void;
+  /** 仅跟踪仍活跃的后台 run；已结束项会立即移除，避免长期堆积 */
   backgroundRuns: Array<{
     runId: string;
-    status: 'running' | 'ended';
+    status: 'running';
     detachedAt: number;
   }>;
   stopBackgroundRun: (runId: string) => void;
@@ -590,7 +591,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const agentAbortRef = useRef(false);
   const [backgroundRuns, setBackgroundRuns] = useState<Array<{
     runId: string;
-    status: 'running' | 'ended';
+    status: 'running';
     detachedAt: number;
   }>>([]);
 
@@ -3203,7 +3204,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const stopCurrentRun = () => {
     const runId = currentRunIdRef.current;
     abortInFlightRun(false);
-    setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
+    setBackgroundRuns([]);
     const stopSentTs = Date.now();
     setChatMessages((prev) => [...prev, {
       id: stopSentTs,
@@ -3282,7 +3283,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       }],
       source: 'studio',
     }]);
-    setBackgroundRuns((prev) => prev.map((item) => ({ ...item, status: 'ended' as const })));
+    setBackgroundRuns([]);
     void cancelAllRDKClawRuns()
       .then((res) => {
         const count = res.cancelled ?? 0;
@@ -3349,9 +3350,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const stopBackgroundRun = (runId: string) => {
     if (!runId) return;
     cancelRDKClawRun(runId).catch(() => null);
-    setBackgroundRuns((prev) => prev.map((item) => (
-      item.runId === runId ? { ...item, status: 'ended' as const } : item
-    )));
+    setBackgroundRuns((prev) => prev.filter((item) => item.runId !== runId));
     const bgEndTs = Date.now();
     setChatMessages((prev) => [...prev, {
       id: bgEndTs,
@@ -3925,7 +3924,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const hasRunningBgRuns = backgroundRuns.some((r) => r.status === 'running');
+  const hasRunningBgRuns = backgroundRuns.length > 0;
   useEffect(() => {
     if (!hasRunningBgRuns) return;
     const timer = setInterval(() => {
@@ -3933,13 +3932,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         .then((res) => {
           if (!res?.ok) return;
           const activeSet = new Set(res.runs);
-          setBackgroundRuns((prev) =>
-            prev.map((item) =>
-              item.status === 'running' && !activeSet.has(item.runId)
-                ? { ...item, status: 'ended' as const }
-                : item,
-            ),
-          );
+          setBackgroundRuns((prev) => prev.filter((item) => activeSet.has(item.runId)));
         })
         .catch(() => { /* silent */ });
     }, 10_000);

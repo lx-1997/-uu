@@ -25,5 +25,7 @@ export function normalizeTabForFeatures(tab: Tab): Tab {
   if (!STUDIO_SHOW_LOCAL_OLLAMA_NAV && tab === 'local-models') return 'dashboard';
   /** 独立「AI 对话」页已移除；入口为 Dock / 轨道「会话」 */
   if (tab === 'ai-chat-hub') return 'dashboard';
+  /** 旧独立「硬件监控」Tab 已并入总览（Dashboard）；旧会话/动作仍可能传 `hardware` */
+  if (tab === 'hardware') return 'dashboard';
   return tab;
 }

@@ -163,7 +163,8 @@ function createAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{
     name: 'rdkclaw_task_create',
     description:
       '创建 RDKClaw 定时任务。支持秒级、分钟级或 cron。用于无需用户触发的自治消息与巡检任务。'
-      + '可选 notifyWeixinUserId / notifyFeishuChatId：任务每次执行结束后将摘要推送到对应微信用户或飞书会话（需先用 weixin_list_recent_users / feishu_list_recent_chats 取得 id）。',
+      + '可选 notifyWeixinUserId / notifyFeishuChatId：任务每次执行结束后将摘要推送到对应微信用户或飞书会话。'
+      + '微信 userId 须近期有会话（见 weixin_list_recent_users）。飞书 chat_id 可为任意已保存 id；主动推送依赖飞书 WebSocket 通道已连接。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -176,7 +177,10 @@ function createAutonomyTaskTool(runtime: StudioAutonomyRuntime): Tool<{
         mode: { type: 'string', description: 'auto/local/board/board-preferred' },
         requiresApproval: { type: 'boolean', description: '是否需要审批' },
         notifyWeixinUserId: { type: 'string', description: '可选，完整微信 userId；执行结束后向其推送摘要（须近期有会话，见 weixin_list_recent_users）' },
-        notifyFeishuChatId: { type: 'string', description: '可选，飞书 chat_id；执行结束后推送摘要' },
+        notifyFeishuChatId: {
+          type: 'string',
+          description: '可选，飞书 chat_id；执行结束后推送摘要（需飞书 WebSocket 模式且通道已启动）',
+        },
       },
       required: ['name'],
     },

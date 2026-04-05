@@ -25,6 +25,9 @@ import type { Tab } from './app-types';
 import { STUDIO_AGENT_WEB_CLOSE, STUDIO_AGENT_WEB_OPEN } from './utils/studio-agent-web';
 import { HubDockAnchorProvider } from './contexts/HubDockAnchorContext';
 import SkillBrowser from './components/SkillBrowser';
+import { translate } from './i18n/translate';
+import { readStoredLocale } from './utils/locale';
+import { isStudioLoginRequired } from './utils/studio-auth-gate';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Flasher = lazy(() => import('./components/Flasher'));
@@ -64,7 +67,7 @@ function RouteFallback() {
           animation: 'rdk-boot-spin 0.75s linear infinite',
         }}
       />
-      <span>加载页面…</span>
+      <span>{translate(readStoredLocale() === 'en', 'route.fallbackLoading', '加载页面…')}</span>
     </div>
   );
 }
@@ -211,13 +214,6 @@ function AppShell() {
   useEffect(() => {
     agentWebPreviewUrlRef.current = agentWebPreviewUrl;
   }, [agentWebPreviewUrl]);
-
-  useEffect(() => {
-    // Legacy compatibility: old sessions/actions may still target "hardware".
-    if (activeTab === 'hardware') {
-      setActiveTab('dashboard');
-    }
-  }, [activeTab, setActiveTab]);
 
   const closeAgentWebPreview = useCallback(() => {
     const u = agentWebPreviewUrlRef.current;
@@ -609,8 +605,8 @@ function SSOGate({ children }: { children: ReactNode }) {
     );
   }
 
-  /** 仅「强制 SSO」时拦截；与 server ssoAuthMiddleware（!isSSORequired 则放行）一致 */
-  if (ssoRequired && !user) {
+  /** dev / prod 均须登录（与 isStudioLoginRequired 一致；仅 VITE_ALLOW_ANONYMOUS 可豁免） */
+  if (isStudioLoginRequired(ssoRequired) && !user) {
     return <SsoLoginScreen />;
   }
 

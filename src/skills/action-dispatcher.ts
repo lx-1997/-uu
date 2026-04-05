@@ -34,7 +34,8 @@ const TAB_ALIASES: Record<string, Tab> = {
   vnc: 'vnc',
   ide: 'ide',
   openclaw: 'openclaw',
-  hardware: 'hardware',
+  /** 硬件监控已并入工作台（Dashboard），与 `normalizeTabForFeatures` 一致 */
+  hardware: 'dashboard',
   skills: 'skills',
   /** 已移除独立页：旧技能/文档中的 navigate 仍映射到可用 Tab，避免静默失败 */
   examples: 'dashboard',
@@ -52,7 +53,7 @@ const TAB_ALIASES: Record<string, Tab> = {
   '文件': 'files',
   '桌面': 'vnc',
   '编辑': 'ide',
-  '硬件': 'hardware',
+  '硬件': 'dashboard',
   '技能': 'skills',
   '技能工坊': 'skills',
   '示例': 'dashboard',

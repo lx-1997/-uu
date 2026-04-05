@@ -35,6 +35,69 @@ const AUDIT_FILE = path.join(CONFIG_DIR, "rdkclaw-autonomy-audit.jsonl");
 
 let dirEnsured = false;
 
+/**
+ * Cron 匹配用的日历分量。weekday 为 JS 惯例 0=周日 … 6=周六。
+ * timezone 为 `local` / 空时使用运行环境本地时区；否则为 IANA 名（如 Asia/Shanghai、UTC）。
+ */
+function getCronCalendarParts(date: Date, timezone?: string): {
+  minute: number;
+  hour: number;
+  day: number;
+  month: number;
+  weekday: number;
+} {
+  const tz = timezone?.trim();
+  if (!tz || tz === "local") {
+    return {
+      minute: date.getMinutes(),
+      hour: date.getHours(),
+      day: date.getDate(),
+      month: date.getMonth() + 1,
+      weekday: date.getDay(),
+    };
+  }
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "numeric",
+      minute: "numeric",
+      day: "numeric",
+      month: "numeric",
+      weekday: "short",
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(date);
+    const pick = (type: Intl.DateTimeFormatPart["type"]) =>
+      Number(parts.find((p) => p.type === type)?.value);
+    const wd = parts.find((p) => p.type === "weekday")?.value;
+    const weekdayMap: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    const weekday = wd !== undefined && wd in weekdayMap ? weekdayMap[wd] : date.getDay();
+    return {
+      minute: pick("minute"),
+      hour: pick("hour"),
+      day: pick("day"),
+      month: pick("month"),
+      weekday,
+    };
+  } catch {
+    return {
+      minute: date.getMinutes(),
+      hour: date.getHours(),
+      day: date.getDate(),
+      month: date.getMonth() + 1,
+      weekday: date.getDay(),
+    };
+  }
+}
+
 async function ensureDir() {
   if (dirEnsured) return;
   await fsp.mkdir(CONFIG_DIR, { recursive: true });
@@ -106,9 +169,13 @@ export class AutonomyScheduler {
     const hasCron = !!input.cron?.trim();
     const rawIntervalSeconds = Number(input.intervalSeconds ?? 0);
     const rawIntervalMinutes = Number(input.intervalMinutes ?? 0);
-    const intervalSeconds = rawIntervalSeconds > 0 ? Math.max(1, Math.floor(rawIntervalSeconds)) : 0;
-    const intervalMinutes = rawIntervalMinutes > 0 ? Math.max(1, Math.floor(rawIntervalMinutes)) : 0;
+    let intervalSeconds = rawIntervalSeconds > 0 ? Math.max(1, Math.floor(rawIntervalSeconds)) : 0;
+    let intervalMinutes = rawIntervalMinutes > 0 ? Math.max(1, Math.floor(rawIntervalMinutes)) : 0;
     const scheduleType: "interval" | "cron" = hasCron ? "cron" : "interval";
+    /** 未指定 cron 且间隔均为 0 时，工具仅必填 name 会造出「立即到期」任务，每 10s 重复触发 */
+    if (scheduleType === "interval" && intervalSeconds === 0 && intervalMinutes === 0) {
+      intervalMinutes = 1;
+    }
     const task: AutonomyTask = {
       id: `task-${now}-${Math.random().toString(36).slice(2, 7)}`,
       name: input.name,
@@ -222,12 +289,13 @@ export class AutonomyScheduler {
     const parts = task.cron.trim().split(/\s+/);
     if (parts.length !== 5) return false;
     const [min, hour, day, month, week] = parts;
+    const z = getCronCalendarParts(now, task.timezone);
     const matches =
-      this.cronFieldMatch(min, now.getMinutes()) &&
-      this.cronFieldMatch(hour, now.getHours()) &&
-      this.cronFieldMatch(day, now.getDate()) &&
-      this.cronFieldMatch(month, now.getMonth() + 1) &&
-      this.cronFieldMatch(week, now.getDay());
+      this.cronFieldMatch(min, z.minute) &&
+      this.cronFieldMatch(hour, z.hour) &&
+      this.cronFieldMatch(day, z.day) &&
+      this.cronFieldMatch(month, z.month) &&
+      this.cronFieldMatch(week, z.weekday);
     if (!matches) return false;
     return !task.lastRunAt || now.getTime() - task.lastRunAt >= 55000;
   }

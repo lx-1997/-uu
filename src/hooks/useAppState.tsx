@@ -260,7 +260,7 @@ export interface AppState {
   backgroundCurrentRun: () => void;
   backgroundRuns: Array<{
     runId: string;
-    status: 'running' | 'ended';
+    status: 'running';
     detachedAt: number;
   }>;
   stopBackgroundRun: (runId: string) => void;
@@ -302,6 +302,20 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
   const terminal = useTerminalStore();
   const chat = useAIChatStore();
   const apiErrorSeenRef = useRef<Record<string, number>>({});
+
+  const pruneApiErrorSeenIfNeeded = () => {
+    const raw = apiErrorSeenRef.current;
+    const keys = Object.keys(raw);
+    const maxKeys = 64;
+    const maxAgeMs = 60 * 60 * 1000;
+    if (keys.length <= maxKeys) return;
+    const now = Date.now();
+    const next = Object.entries(raw)
+      .filter(([, t]) => now - t < maxAgeMs)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxKeys);
+    apiErrorSeenRef.current = Object.fromEntries(next);
+  };
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -368,18 +382,28 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
    * 用户说「打开 VNC / 远程桌面」「打开 IDE」时：**不切换 Tab**，后台执行与对应页面「连接」按钮相同逻辑，就绪后再自动浮窗。
    */
   useEffect(() => {
+    let cancelled = false;
+    const pendingTimeouts: number[] = [];
+    const safeTimeout = (fn: () => void, ms: number) => {
+      const id = window.setTimeout(() => {
+        if (!cancelled) fn();
+      }, ms);
+      pendingTimeouts.push(id);
+    };
+
     const tryFloatWhenReady = (which: 'ide' | 'vnc', startedAt: number) => {
       const maxMs = 22_000;
       const tick = () => {
+        if (cancelled) return;
         const api = which === 'ide' ? ideToolbarRef.current : vncToolbarRef.current;
         if (api?.showIframe && !api.embedFloating) {
           api.toggleEmbedFloat();
           return;
         }
         if (Date.now() - startedAt > maxMs) return;
-        window.setTimeout(tick, 280);
+        safeTimeout(tick, 280);
       };
-      window.setTimeout(tick, 420);
+      safeTimeout(tick, 420);
     };
 
     const onIntent = (ev: Event) => {
@@ -397,7 +421,11 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
     };
 
     window.addEventListener('rdk-studio-user-intent', onIntent as EventListener);
-    return () => window.removeEventListener('rdk-studio-user-intent', onIntent as EventListener);
+    return () => {
+      cancelled = true;
+      for (const id of pendingTimeouts) clearTimeout(id);
+      window.removeEventListener('rdk-studio-user-intent', onIntent as EventListener);
+    };
   }, []);
 
   // Global API error routing: convert raw backend failures into
@@ -440,6 +468,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       const lastSeen = apiErrorSeenRef.current[key] ?? 0;
       if (now - lastSeen < 2200) return;
       apiErrorSeenRef.current[key] = now;
+      pruneApiErrorSeenIfNeeded();
 
       if (code === 'DEVICE_AUTH_REQUIRED') {
         toast.addToast(t('api.err.deviceAuth', '设备认证失效，请重新填写账号密码'), 'warning');
@@ -490,7 +519,10 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         if (/\/api\/devices\/[^/]+\/ping$/.test(url)) {
           return;
         }
-        toast.addToast('服务端没有该设备的记录，请打开设置 → 设备连接核对列表，或重新添加设备。', 'warning');
+        toast.addToast(
+          t('api.err.deviceNotOnServer', '服务端没有该设备的记录，请打开设置 → 设备连接核对列表，或重新添加设备。'),
+          'warning',
+        );
         return;
       }
 
