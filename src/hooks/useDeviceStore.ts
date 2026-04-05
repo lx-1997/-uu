@@ -200,7 +200,32 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const [deviceListRevision, setDeviceListRevision] = useState(0);
   /** 丢弃「启动时仍在飞行」的 GET /api/devices：避免与 DELETE 竞态导致旧列表覆盖刚删掉的项 */
   const devicesListFetchGenRef = React.useRef(0);
-  const currentDevice = devices.find((d) => d.id === activeDevice);
+  /**
+   * 与工作台一致：有设备列表时始终有「当前设备」——active 为空或失效时回退为列表首项（经 preferRoot）。
+   * 用户仍可点击切换；无需先手动点选才能用终端/文件。
+   */
+  const currentDevice = useMemo(() => {
+    if (devices.length === 0) return undefined;
+    const valid = Boolean(activeDevice && devices.some((d) => d.id === activeDevice));
+    if (valid) {
+      return devices.find((d) => d.id === activeDevice)!;
+    }
+    const fallbackId = preferRootOverSunriseOnSameHost(devices, devices[0].id);
+    return devices.find((d) => d.id === fallbackId) ?? devices[0];
+  }, [devices, activeDevice]);
+
+  /** 将侧栏选中 id 与推导出的当前设备对齐，避免 active 为空时列表无高亮 */
+  useEffect(() => {
+    if (devices.length === 0) {
+      if (activeDevice) setActiveDevice('');
+      return;
+    }
+    const valid = Boolean(activeDevice && devices.some((d) => d.id === activeDevice));
+    if (!valid) {
+      const pick = preferRootOverSunriseOnSameHost(devices, devices[0].id);
+      setActiveDevice(pick);
+    }
+  }, [devices, activeDevice]);
 
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [addDeviceInitialMethod, setAddDeviceInitialMethod] = useState<'manual' | 'usb' | 'typec' | null>(null);

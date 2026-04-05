@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Cloud, MessagesSquare } from 'lucide-react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
@@ -76,7 +76,12 @@ export default function IconRail() {
   const [showDevicePanel, setShowDevicePanel] = useState(false);
   const [railLogoFailed, setRailLogoFailed] = useState(false);
   const onRailLogoError = useCallback(() => setRailLogoFailed(true), []);
-  const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
+  /** 与工作台一致：未选中「当前设备」时仍可有列表首台，圆点应对其在线状态而非恒红 */
+  const railFocusDevice = useMemo(
+    () => currentDevice ?? (devices.length > 0 ? devices[0] : undefined),
+    [currentDevice, devices],
+  );
+  const deviceOnline = !!railFocusDevice && isDeviceShownOnline(railFocusDevice);
 
   const renderGroup = (items: NavItemDef[]) =>
     items.map((item) => {
@@ -135,11 +140,11 @@ export default function IconRail() {
           )}
           <button
             className="rail-btn"
-            data-tooltip={!railExpanded ? (currentDevice ? currentDevice.name : t('rail.pickDevice', '选择设备')) : undefined}
+            data-tooltip={!railExpanded ? (railFocusDevice ? railFocusDevice.name : t('rail.pickDevice', '选择设备')) : undefined}
             onClick={() => setShowDevicePanel(!showDevicePanel)}
           >
             <span className={`rail-device-dot ${deviceOnline ? 'online' : 'offline'}`} />
-            {railExpanded && <span className="rail-label">{currentDevice ? currentDevice.name : t('rail.device', '设备')}</span>}
+            {railExpanded && <span className="rail-label">{railFocusDevice ? railFocusDevice.name : t('rail.device', '设备')}</span>}
           </button>
 
           {railExpanded ? (

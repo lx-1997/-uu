@@ -3385,7 +3385,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
       persistStudioChatSessionId(nextDeviceId, sid);
 
-      const dockDeviceId = nextDeviceId === GLOBAL_CHAT_DEVICE_ID ? '' : nextDeviceId;
       /**
        * 必须先对齐 chatDeviceIdRef，再 setActiveDevice。
        * 否则设备切换 effect 会看到「ref 仍是旧设备、state 已是新设备」，
@@ -3401,8 +3400,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         setCmd('');
       }
 
-      if (toChatDeviceId(currentDevice?.id) !== nextDeviceId) {
-        setActiveDevice(dockDeviceId);
+      /** 全局会话不取消当前设备选中，与工作台/终端/文件共用「当前设备」 */
+      if (nextDeviceId !== GLOBAL_CHAT_DEVICE_ID && toChatDeviceId(currentDevice?.id) !== nextDeviceId) {
+        setActiveDevice(nextDeviceId);
       }
 
       reportActiveSession('resume-thread');

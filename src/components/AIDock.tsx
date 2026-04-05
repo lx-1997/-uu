@@ -2487,7 +2487,11 @@ export default function AIDock() {
     if (effectiveTab === 'dashboard') return [];
     return promptsByTab[effectiveTab] ?? defaultPrompts;
   }, [effectiveTab, promptsByTab, defaultPrompts]);
-  const deviceOnline = Boolean(currentDevice && isDeviceShownOnline(currentDevice));
+  const dockFocusDevice = useMemo(
+    () => currentDevice ?? (devices.length > 0 ? devices[0] : undefined),
+    [currentDevice, devices],
+  );
+  const deviceOnline = Boolean(dockFocusDevice && isDeviceShownOnline(dockFocusDevice));
 
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';

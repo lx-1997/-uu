@@ -76,9 +76,14 @@ export default function RuntimeActiveTaskQueue() {
     loadingMsg,
     rosRecording,
     currentDevice,
+    devices,
   } = useAppState();
 
-  const deviceOnline = Boolean(currentDevice && isDeviceShownOnline(currentDevice));
+  const taskQueueFocusDevice = useMemo(
+    () => currentDevice ?? (devices.length > 0 ? devices[0] : undefined),
+    [currentDevice, devices],
+  );
+  const deviceOnline = Boolean(taskQueueFocusDevice && isDeviceShownOnline(taskQueueFocusDevice));
 
   const activeOrchestratorTasks = useMemo(() => {
     const list = taskHistory.filter((x) => ACTIVE_ORCHESTRATOR.has(x.status));

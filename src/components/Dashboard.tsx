@@ -233,6 +233,9 @@ export default function Dashboard() {
   } = useAppState();
   const { t, isEn } = useI18n();
 
+  /** 与 useDeviceStore 中「当前设备」一致（有列表时默认首台，可点击切换） */
+  const effectiveDevice = currentDevice;
+
   const [openclawHealth, setOpenclawHealth] = useState<OpenClawHealthStatus | null>(null);
   /** RDK Studio 本机服务（/api/health），与板端 OpenClaw 无关 */
   const [studioBackendOk, setStudioBackendOk] = useState<boolean | null>(null);
@@ -273,7 +276,7 @@ export default function Dashboard() {
 
   /** 设备已判定离线时立即清空指标，避免关机后仍显示上一次的 MEM/TEMP/uptime */
   useEffect(() => {
-    if (!currentDevice || isDeviceShownOnline(currentDevice)) return;
+    if (!effectiveDevice || isDeviceShownOnline(effectiveDevice)) return;
     setMetrics({
       memory: '--',
       temp: '--',
@@ -287,20 +290,20 @@ export default function Dashboard() {
       bpuVal: -1,
       diskPct: -1,
     });
-  }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
+  }, [effectiveDevice?.id, effectiveDevice?.status, effectiveDevice?.sshSessionVerified]);
 
   useEffect(() => {
-    if (!currentDevice) return;
-    const deviceId = currentDevice.id;
+    if (!effectiveDevice) return;
+    const deviceId = effectiveDevice.id;
     let cancelled = false;
-    const ctxKey = `${deviceId}:${currentDevice.status}:${currentDevice.sshSessionVerified}`;
+    const ctxKey = `${deviceId}:${effectiveDevice.status}:${effectiveDevice.sshSessionVerified}`;
     const diagnosticsNeedFresh = lastDashboardDiagnosticsContextKey !== ctxKey;
     if (diagnosticsNeedFresh) {
       lastDashboardDiagnosticsContextKey = ctxKey;
     }
 
     const load = (fresh: boolean) => {
-      if (!isDeviceShownOnline(currentDevice)) {
+      if (!isDeviceShownOnline(effectiveDevice)) {
         if (!cancelled) {
           setMetrics({
             memory: '--',
@@ -369,29 +372,29 @@ export default function Dashboard() {
       if (diagKick) clearTimeout(diagKick);
       if (diagIv) clearInterval(diagIv);
     };
-  }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
+  }, [effectiveDevice?.id, effectiveDevice?.status, effectiveDevice?.sshSessionVerified]);
 
   const partnerSkillSyncedRef = useRef<Set<string>>(new Set());
   /** 已尝试过同步同伴技能（避免 health 轮询重复打 SSH） */
   const partnerSkillAttemptedRef = useRef<Set<string>>(new Set());
   const boardSkillBundleSyncedRef = useRef<Set<string>>(new Set());
 
-  const currentDeviceRef = useRef(currentDevice);
-  currentDeviceRef.current = currentDevice;
+  const effectiveDeviceRef = useRef(effectiveDevice);
+  effectiveDeviceRef.current = effectiveDevice;
 
   useEffect(() => {
-    if (!currentDevice) {
+    if (!effectiveDevice) {
       setOpenclawHealth(null);
       setWsHealth(null);
       return;
     }
-    const id = currentDevice.id;
+    const id = effectiveDevice.id;
     setOpenclawHealth(openClawFromStudioHints(id));
     setWsHealth(readDashboardWorkspaceHealthCache(id));
 
     let cancelled = false;
     const loadBoardHealth = async () => {
-      const dev = currentDeviceRef.current;
+      const dev = effectiveDeviceRef.current;
       if (!dev || dev.id !== id) return;
       try {
         const r = await fetchDeviceOpenClawHealth(id);
@@ -399,14 +402,14 @@ export default function Dashboard() {
         setOpenclawHealth(r.status);
         persistOpenClawHealthSnapshot(id, r.status);
         if (!cancelled && r.ok && r.status.installed) {
-          const latestDev = currentDeviceRef.current;
+          const latestDev = effectiveDeviceRef.current;
           const runBoardBundle = () => {
             if (boardSkillBundleSyncedRef.current.has(id)) return;
             void ensureBoardSkillBundle(id)
               .then((bundleRes) => {
                 if (!bundleRes?.ok) return;
                 boardSkillBundleSyncedRef.current.add(id);
-                const freshDev = currentDeviceRef.current;
+                const freshDev = effectiveDeviceRef.current;
                 persistBoardSkillBundleHint(id, {
                   platform: bundleRes.platform ?? freshDev?.boardPlatform,
                   model: freshDev?.boardModel,
@@ -459,7 +462,7 @@ export default function Dashboard() {
       if (healthKick) clearTimeout(healthKick);
       if (healthIv) clearInterval(healthIv);
     };
-  }, [currentDevice?.id]);
+  }, [effectiveDevice?.id]);
 
   const prompt = useCallback((text: string, autoSubmit = true) => {
     setChatExpanded(true);
@@ -480,13 +483,13 @@ export default function Dashboard() {
 
   const onboardingInProgress = obStep !== 'done';
   const postConnectSteps = obStep === 'model' || obStep === 'openclaw' || obStep === 'rdkclaw';
-  const connectJustCompleted = obStep === 'connect' && !!currentDevice;
+  const connectJustCompleted = obStep === 'connect' && !!effectiveDevice;
   const showOnboarding = onboardingInProgress && (!currentDevice || postConnectSteps || connectJustCompleted);
 
   if (showOnboarding) {
     return (
       <div className="dash">
-        <FlowingGradientBg accent={!!currentDevice} />
+        <FlowingGradientBg accent={!!effectiveDevice} />
         <div className="dash-morph-halo" />
         <div className="dash-morph-halo secondary" />
         <OnboardingWizard />
@@ -494,7 +497,7 @@ export default function Dashboard() {
     );
   }
 
-  if (!currentDevice) {
+  if (!effectiveDevice) {
     return (
       <div className="dash">
         <FlowingGradientBg accent={false} />
@@ -537,7 +540,7 @@ export default function Dashboard() {
   ];
 
   /** 与顶栏同源：须本机已验证过 SSH 且当前 ping 为在线 */
-  const deviceChannelOk = !!currentDevice && isDeviceShownOnline(currentDevice);
+  const deviceChannelOk = !!effectiveDevice && isDeviceShownOnline(effectiveDevice);
 
   return (
     <div className="dash" onMouseMove={parallax.onMove} onMouseLeave={parallax.onLeave}>
@@ -577,8 +580,8 @@ export default function Dashboard() {
               : t('dashboard.deviceOffline', '设备离线')}
           </span>
         </div>
-        <h1 className="lp-device-name">{currentDevice.name}</h1>
-        <p className="lp-device-ip">{currentDevice.ip}</p>
+        <h1 className="lp-device-name">{effectiveDevice.name}</h1>
+        <p className="lp-device-ip">{effectiveDevice.ip}</p>
       </div>
 
       {/* ── Live metrics strip ── */}
