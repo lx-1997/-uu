@@ -23,6 +23,7 @@ export const STUDIO_ENABLE_DOCK_TTS = false;
 
 export function normalizeTabForFeatures(tab: Tab): Tab {
   if (!STUDIO_SHOW_LOCAL_OLLAMA_NAV && tab === 'local-models') return 'dashboard';
-  if (!STUDIO_SHOW_AI_CHAT_DOCK && tab === 'ai-chat-hub') return 'dashboard';
+  /** 独立「AI 对话」页已移除；入口为 Dock / 轨道「会话」 */
+  if (tab === 'ai-chat-hub') return 'dashboard';
   return tab;
 }

@@ -1,5 +1,9 @@
 import type { ChatMessage } from '../app-types';
-import { chatMessageToPlainText } from './chat-message-plain';
+import {
+  assistantMessageForThreadTitle,
+  chatMessageToPlainText,
+  userMessageForThreadTitle,
+} from './chat-message-plain';
 
 /** 会话列表 / Dock 顶栏用：单行标题，略长于旧版拼接式摘要以便展示首问 */
 const HISTORY_THREAD_SUMMARY_MAX = 78;
@@ -17,6 +21,13 @@ function truncateSummary(s: string, maxChars: number): string {
 
 function msgPlain(m: ChatMessage, tr: (key: string, zh: string) => string): string {
   return collapseWhitespace(chatMessageToPlainText(m, tr));
+}
+
+/** 会话标题用：用户气泡取首问，不把遥测块拼进标题 */
+function msgPlainForTitle(m: ChatMessage, tr: (key: string, zh: string) => string): string {
+  if (m.role === 'user') return userMessageForThreadTitle(m, tr);
+  if (m.role === 'ai') return assistantMessageForThreadTitle(m, tr);
+  return msgPlain(m, tr);
 }
 
 function isGenericGreeting(text: string): boolean {
@@ -38,20 +49,20 @@ function dropLeadingGreetingSnippets(snippets: string[]): string[] {
  */
 export function buildThreadSummaryLine(messages: ChatMessage[], tr: (key: string, zh: string) => string): string {
   const userMsgs = messages.filter((m) => m.role === 'user');
-  const userSnippets = userMsgs.map((m) => msgPlain(m, tr)).filter((s) => s.length > 0);
+  const userSnippets = userMsgs.map((m) => msgPlainForTitle(m, tr)).filter((s) => s.length > 0);
   const snippets = dropLeadingGreetingSnippets(userSnippets);
 
   if (snippets.length === 0) {
     const firstAi = messages.find((m) => m.role === 'ai');
     const any = firstAi ?? messages[0];
-    return truncateSummary(msgPlain(any, tr), HISTORY_THREAD_SUMMARY_MAX);
+    return truncateSummary(msgPlainForTitle(any, tr), HISTORY_THREAD_SUMMARY_MAX);
   }
 
   const firstSubstantive = snippets[0];
   if (snippets.length === 1 && isGenericGreeting(firstSubstantive)) {
     const firstAi = messages.find((m) => m.role === 'ai');
     if (firstAi) {
-      const hint = msgPlain(firstAi, tr);
+      const hint = assistantMessageForThreadTitle(firstAi, tr);
       if (hint) return truncateSummary(hint, HISTORY_THREAD_SUMMARY_MAX);
     }
   }

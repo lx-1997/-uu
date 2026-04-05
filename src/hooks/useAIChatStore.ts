@@ -520,9 +520,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const chatDeviceIdRef = useRef(initialChatDeviceId);
   const sessionIdRef = useRef(initialStudioSessionId);
   const chatPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 用于主导航 tab 切换时判断是否为「AI 对话 → 工作台」（双击历史跳转时勿收起 Dock） */
-  const prevNavTabRef = useRef<string | null>(null);
-
   // ── State ──
   const [cmd, setCmd] = useState('');
   const [studioResponseMode, setStudioResponseModeState] = useState<StudioResponseMode>(() => parseStoredStudioResponseMode());
@@ -543,6 +540,35 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   /** 每轮渲染与 state 同步，供 debounce 持久化避免闭包 stale */
   const chatMessagesRef = useRef<ChatMessage[]>([]);
   chatMessagesRef.current = chatMessages;
+  const cmdRef = useRef('');
+  cmdRef.current = cmd;
+
+  /** 将当前 ref 指向的线程写入 localStorage（含全局设备的 legacy 键）；切换会话/设备前必须调用 */
+  const flushChatPersistToStorage = useCallback(() => {
+    try {
+      const toSave = stripHeavyDataUrlsForStorage(chatMessagesRef.current.slice(-50));
+      localStorage.setItem(
+        chatHistoryStorageKey(chatDeviceIdRef.current, sessionIdRef.current),
+        JSON.stringify(toSave),
+      );
+      localStorage.setItem(chatDraftStorageKey(chatDeviceIdRef.current), cmdRef.current);
+      if (toChatDeviceId(chatDeviceIdRef.current) === GLOBAL_CHAT_DEVICE_ID) {
+        localStorage.setItem(CHAT_HISTORY_LEGACY_KEY, JSON.stringify(toSave));
+      }
+    } catch {
+      /* quota exceeded */
+    }
+  }, []);
+
+  /** 新消息入列时立即落盘，避免仅依赖 300ms 防抖时用户立刻点「新对话」导致上一会话未写入 */
+  const prevChatMsgLenRef = useRef(-1);
+  useEffect(() => {
+    const n = chatMessages.length;
+    if (n > prevChatMsgLenRef.current && prevChatMsgLenRef.current >= 0) {
+      flushChatPersistToStorage();
+    }
+    prevChatMsgLenRef.current = n;
+  }, [chatMessages.length, flushChatPersistToStorage]);
 
   useEffect(() => {
     if (chatMessages.length <= MAX_CHAT_MESSAGES_IN_MEMORY) return;
@@ -625,16 +651,19 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const clearChatHistory = () => {
     /** 必须先结束进行中的流式请求：否则旧 SSE 仍按已删消息 id 更新，且可能与新一轮竞态导致「发消息无回复」 */
     abortInFlightRun(false);
-    setChatMessages([]);
+    if (chatPersistTimerRef.current) {
+      clearTimeout(chatPersistTimerRef.current);
+      chatPersistTimerRef.current = null;
+    }
+    /**
+     * 先同步落盘当前线程，再换新 session。
+     * 切勿 remove 旧会话分片：旧逻辑会删掉 rdk-chat-history:…:旧 sid，历史列表里对应日期会整段消失；
+     * 若此时防抖尚未写入，连存档都没有。
+     */
+    flushChatPersistToStorage();
     try {
       const deviceId = chatDeviceIdRef.current;
-      const sid = sessionIdRef.current;
-      localStorage.removeItem(chatHistoryStorageKey(deviceId, sid));
-      localStorage.removeItem(chatHistoryLegacyDeviceKey(deviceId));
       localStorage.removeItem(chatDraftStorageKey(deviceId));
-      if (toChatDeviceId(deviceId) === GLOBAL_CHAT_DEVICE_ID) {
-        localStorage.removeItem(CHAT_HISTORY_LEGACY_KEY);
-      }
       const nextSid = `ui-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       sessionIdRef.current = nextSid;
       persistStudioChatSessionId(deviceId, nextSid);
@@ -642,11 +671,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
+    setChatMessages([]);
     setRdkClawRunTimeline([]);
     addToast(
       t(
         'chat.store.historyCleared',
-        '已在本窗口开启新对话线程，长期记忆与工作区档案仍保留。',
+        '已开启新对话；上一会话已保存到本地，可在「会话」列表中查看。',
       ),
       'info',
     );
@@ -3350,16 +3380,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       abortInFlightRun(false);
       setRdkClawRunTimeline([]);
 
-      try {
-        const prevToSave = stripHeavyDataUrlsForStorage(chatMessagesRef.current.slice(-50));
-        localStorage.setItem(
-          chatHistoryStorageKey(chatDeviceIdRef.current, sessionIdRef.current),
-          JSON.stringify(prevToSave),
-        );
-        localStorage.setItem(chatDraftStorageKey(chatDeviceIdRef.current), cmd);
-      } catch {
-        /* ignore */
-      }
+      /** 与 debounce flush 完全一致（含 cmdRef、全局 legacy），避免切换后「今日线程」未落盘而从列表消失 */
+      flushChatPersistToStorage();
 
       persistStudioChatSessionId(nextDeviceId, sid);
 
@@ -3393,8 +3415,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     },
     [
       abortInFlightRun,
-      cmd,
       currentDevice?.id,
+      flushChatPersistToStorage,
       setActiveDevice,
       setChatExpanded,
       setChatMessages,
@@ -3484,13 +3506,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     const prevDeviceId = chatDeviceIdRef.current;
     if (nextDeviceId === prevDeviceId) return;
 
-    try {
-      const prevToSave = stripHeavyDataUrlsForStorage(chatMessages.slice(-50));
-      localStorage.setItem(chatHistoryStorageKey(prevDeviceId, sessionIdRef.current), JSON.stringify(prevToSave));
-      localStorage.setItem(chatDraftStorageKey(prevDeviceId), cmd);
-    } catch {
-      // ignore
-    }
+    /** 与防抖 flush 一致，避免仅用闭包 chatMessages/cmd 漏写或漏 legacy */
+    flushChatPersistToStorage();
 
     chatDeviceIdRef.current = nextDeviceId;
     sessionIdRef.current = getOrCreateStudioChatSessionId(nextDeviceId);
@@ -3500,10 +3517,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       const merged = mergeChatMessagesById(chatMessages, loadedForDevice);
       setChatMessages(merged);
       try {
+        const mergedSave = stripHeavyDataUrlsForStorage(merged.slice(-50));
         localStorage.setItem(
           chatHistoryStorageKey(nextDeviceId, sessionIdRef.current),
-          JSON.stringify(stripHeavyDataUrlsForStorage(merged.slice(-50))),
+          JSON.stringify(mergedSave),
         );
+        if (nextDeviceId === GLOBAL_CHAT_DEVICE_ID) {
+          localStorage.setItem(CHAT_HISTORY_LEGACY_KEY, JSON.stringify(mergedSave));
+        }
       } catch {
         /* ignore */
       }
@@ -3526,8 +3547,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     reportActiveSession('device-switch');
+  // chatMessages 仅用于 global→device 合并；故意不加入 deps，避免每条消息触发切设备
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDevice?.id]);
+  }, [currentDevice?.id, flushChatPersistToStorage]);
 
   useEffect(() => {
     if (!currentDevice?.id) return;
@@ -3863,27 +3885,37 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
   // Persist chat history (debounced to avoid blocking main thread during streaming)
   useEffect(() => {
-    if (chatPersistTimerRef.current) clearTimeout(chatPersistTimerRef.current);
     chatPersistTimerRef.current = setTimeout(() => {
-      try {
-        const toSave = stripHeavyDataUrlsForStorage(chatMessagesRef.current.slice(-50));
-        localStorage.setItem(
-          chatHistoryStorageKey(chatDeviceIdRef.current, sessionIdRef.current),
-          JSON.stringify(toSave),
-        );
-        localStorage.setItem(chatDraftStorageKey(chatDeviceIdRef.current), cmd);
-        if (toChatDeviceId(chatDeviceIdRef.current) === GLOBAL_CHAT_DEVICE_ID) {
-          localStorage.setItem(CHAT_HISTORY_LEGACY_KEY, JSON.stringify(toSave));
-        }
-      } catch { /* quota exceeded */ }
+      chatPersistTimerRef.current = null;
+      flushChatPersistToStorage();
     }, aiTyping ? 2000 : 300);
     return () => {
-      if (chatPersistTimerRef.current) {
-        clearTimeout(chatPersistTimerRef.current);
+      const pending = chatPersistTimerRef.current;
+      if (pending) {
+        clearTimeout(pending);
         chatPersistTimerRef.current = null;
+        flushChatPersistToStorage();
       }
     };
-  }, [chatMessages, aiTyping, cmd]); /* chatMessages 参与调度；正文用 ref 避免闭包与 sessionId 不同步 */
+  }, [chatMessages, aiTyping, cmd, flushChatPersistToStorage]); /* chatMessages 参与调度；正文用 ref 避免闭包与 sessionId 不同步 */
+
+  useEffect(() => {
+    const onFlush = () => {
+      flushChatPersistToStorage();
+    };
+    window.addEventListener('beforeunload', onFlush);
+    /** Electron / 移动 WebView 等关页时 beforeunload 不可靠 */
+    window.addEventListener('pagehide', onFlush);
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') onFlush();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('beforeunload', onFlush);
+      window.removeEventListener('pagehide', onFlush);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [flushChatPersistToStorage]);
 
   // Cleanup task intervals on unmount
   useEffect(() => {
@@ -3917,14 +3949,6 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
   // Close chat panel on tab change（副屏常驻展开，不受主导航切换影响）
   useEffect(() => {
     if (getRdkEmbedPanel()) return;
-    const prev = prevNavTabRef.current;
-    prevNavTabRef.current = activeTab;
-
-    if (activeTab === 'ai-chat-hub') return;
-
-    /** 从「AI 对话」进入工作台：保留展开态，避免刚恢复的历史消息被立刻收起而看似「没还原」 */
-    if (prev === 'ai-chat-hub' && activeTab === 'dashboard') return;
-
     if (chatExpanded) setChatExpanded(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
@@ -4043,7 +4067,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 : apiDeviceId
                   ? { id: apiDeviceId }
                   : null,
-              exportSource: 'ai-chat-hub-archived-thread',
+              exportSource: 'dock-chat-sessions-archived-thread',
               chatMessages: stripHeavyDataUrlsForStorage(opts.snapshotMessages),
             };
 

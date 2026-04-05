@@ -128,11 +128,21 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.history.you': 'You',
   'dock.history.global': 'No device / global',
   'dock.history.summaryTurns': '{{n}} user messages',
-  'rail.chatSessions.tooltipHub': 'AI chat: switch past threads on the left, same store as the Dock',
+  'rail.chatSessions.tooltipHub': 'Open session list (same as Dock). Switch threads without leaving the workspace.',
+  'dock.header.sessions': 'Session list',
+  'dock.header.sessionsShort': 'Sessions',
   'chat.hub.title': 'Chat & history',
   'chat.hub.desc':
     'Same conversation as the RDKClaw Dock below. Use Export or New chat in the header; type messages in the Dock input bar.',
   'chat.hub.sidebarTitle': 'Chats',
+  'chat.hub.sidebarSubtitle':
+    'Switch threads here; continue in the bottom Dock or the workspace.',
+  'chat.hub.sidebarSubtitleDock':
+    'Tap a thread to load it in the Dock below. Only conversations with saved messages are listed.',
+  'chat.hub.filtersToggle': 'Filters',
+  'chat.hub.filtersPanelAria': 'Device and scope',
+  'chat.hub.liveOnly': 'Current session only',
+  'chat.hub.searchPh': 'Search conversations…',
   'chat.hub.sidebarHintShort': 'Tap to switch · synced with the chat panel',
   'chat.hub.threadActivePill': 'Live',
   'chat.hub.time.yesterday': 'Yesterday',
@@ -173,9 +183,14 @@ export const EN_EXTRAS: Record<string, string> = {
     'Delete this conversation? Saved messages on this device will be permanently removed.',
   'chat.hub.threadDeletedToast': 'Local archive for this conversation has been removed.',
   'chat.hub.noArchivedThreads':
-    'No saved conversations yet. They appear here after you send messages in the workspace; empty session placeholders are not listed.',
+    'No saved conversations yet. Send a message from the Dock below and it will show up here.',
+  'dock.newChat.busyTitle': 'Stop current reply?',
   'dock.newChat.busyConfirm':
     'A reply or task is still running. Stop everything and start a new chat? Any in-progress reply will be interrupted.',
+  'chat.switch.threadBusyTitle': 'Switch conversation?',
+  'chat.switch.threadBusyConfirm':
+    'A reply or task is still running (including background runs). Switching sessions will stop and cancel these tasks to free board resources; only one long-lived agent session window is kept per device at a time.\n\nSwitch anyway?',
+  'chat.hub.exportSessionShort': 'Download diagnostics',
   'dock.header.exportChat': 'Export',
   'dock.header.exportChatTitle': 'Export this chat as a formatted .txt file',
   'chat.export.bannerTitle': 'RDKClaw chat export',
@@ -1549,6 +1564,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'errorBoundary.title': 'Something went wrong',
   'errorBoundary.retry': 'Try again',
   'confirm.cancel': 'Cancel',
+  'confirm.ok': 'OK',
   'confirm.run': 'Confirm',
   'confirm.close': 'Close',
   'confirm.remove': 'Remove',

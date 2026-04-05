@@ -443,7 +443,7 @@ export const EN: Record<string, string> = {
   'chat.store.cancelled': 'Cancelled',
   'chat.store.cancelledDetail': 'Action cancelled',
   'chat.store.historyCleared':
-    'Started a new chat thread in this window. Long-term memory and workspace files are kept.',
+    'New chat started. The previous conversation was saved locally and appears in the Sessions list.',
   'chat.store.taskCancelled': 'Task cancelled',
 
   'err.importNoEntries': 'No valid entries in import file',

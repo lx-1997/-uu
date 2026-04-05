@@ -27,7 +27,6 @@ import { HubDockAnchorProvider } from './contexts/HubDockAnchorContext';
 import SkillBrowser from './components/SkillBrowser';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
-const AiChatHubPage = lazy(() => import('./components/AiChatHubPage'));
 const Flasher = lazy(() => import('./components/Flasher'));
 const Terminal = lazy(() => import('./components/Terminal'));
 const Files = lazy(() => import('./components/Files'));
@@ -84,7 +83,6 @@ function MainContent() {
 
   const standardViews: Record<string, ReactNode> = {
     dashboard: <Dashboard />,
-    'ai-chat-hub': <AiChatHubPage />,
     files: <Files />,
     skills: <SkillBrowser />,
   };

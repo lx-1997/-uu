@@ -190,3 +190,66 @@ export function chatMessageToPlainText(
   }
   return parts.join('\n\n').trim();
 }
+
+const THREAD_TITLE_SKIP_BLOCK_TYPES = new Set<string>(['status', 'reasoning', 'progress', 'continue-run']);
+
+function collapseTitleWhitespace(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 会话列表标题：用户首条提问——仅用顶层输入与正文 markdown，
+ * 不把同气泡内的「命中能力/模型/推理过程」等遥测块拼进标题。
+ */
+export function userMessageForThreadTitle(
+  msg: ChatMessage,
+  tr: (key: string, zh: string) => string,
+): string {
+  if (msg.role !== 'user') return '';
+  const plain = msg.text?.trim();
+  if (plain) return collapseTitleWhitespace(plain);
+
+  if (msg.contentSlots?.length && msg.blocks?.length) {
+    const mdParts: string[] = [];
+    for (const slot of msg.contentSlots) {
+      if (slot.kind === 'markdown' && slot.text.trim()) mdParts.push(slot.text.trim());
+    }
+    if (mdParts.length) return collapseTitleWhitespace(mdParts.join(' '));
+  }
+
+  const parts: string[] = [];
+  if (msg.blocks?.length) {
+    for (const b of msg.blocks) {
+      if (THREAD_TITLE_SKIP_BLOCK_TYPES.has(b.type)) continue;
+      appendBlockPlainParts(parts, b, tr);
+    }
+  }
+  return collapseTitleWhitespace(parts.join('\n\n'));
+}
+
+/** 无用户气泡时的兜底：优先助手正文，同样排除遥测块 */
+export function assistantMessageForThreadTitle(
+  msg: ChatMessage,
+  tr: (key: string, zh: string) => string,
+): string {
+  if (msg.role !== 'ai') return chatMessageToPlainText(msg, tr);
+  const plain = msg.text?.trim();
+  if (plain) return collapseTitleWhitespace(plain);
+
+  if (msg.contentSlots?.length && msg.blocks?.length) {
+    const mdParts: string[] = [];
+    for (const slot of msg.contentSlots) {
+      if (slot.kind === 'markdown' && slot.text.trim()) mdParts.push(slot.text.trim());
+    }
+    if (mdParts.length) return collapseTitleWhitespace(mdParts.join(' '));
+  }
+
+  const parts: string[] = [];
+  if (msg.blocks?.length) {
+    for (const b of msg.blocks) {
+      if (THREAD_TITLE_SKIP_BLOCK_TYPES.has(b.type)) continue;
+      appendBlockPlainParts(parts, b, tr);
+    }
+  }
+  return collapseTitleWhitespace(parts.join('\n\n'));
+}

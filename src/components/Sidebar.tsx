@@ -73,7 +73,7 @@ const Icons: Record<string, React.ReactNode> = {
 };
 
 const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> = [
-  { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'ai-chat-hub', 'openclaw', 'skills'] },
+  { titleKey: 'sidebar.group.workspace', titleZh: '工作台', tabs: ['dashboard', 'openclaw', 'skills'] },
   { titleKey: 'sidebar.group.connect', titleZh: '连接控制', tabs: ['terminal', 'files', 'vnc', 'ide'] },
   { titleKey: 'sidebar.group.capabilities', titleZh: '能力与交付', tabs: ['flasher'] },
 ];
@@ -81,13 +81,14 @@ const NAV_GROUP_DEFS: Array<{ titleKey: string; titleZh: string; tabs: Tab[] }> 
 /** 中文默认文案（英文走 en-extras sidebar.nav.* / sidebar.hint.*） */
 const SIDEBAR_TAB_ZH: Record<Tab, { nav: string; hint: string }> = {
   dashboard: { nav: '总览', hint: '新手流程与设备主控台' },
-  'ai-chat-hub': { nav: 'AI 对话', hint: '左侧切换本机已存会话，右侧与 Dock 同步继续聊' },
+  'ai-chat-hub': { nav: '会话', hint: '已并入 Dock 会话按钮与左侧轨道；不再单独占一页' },
   openclaw: { nav: 'OpenClaw', hint: 'AI 网关、渠道与技能中心' },
   skills: { nav: '技能工坊', hint: '生成 OpenClaw 技能并部署到板端' },
   terminal: { nav: '终端', hint: '直接执行命令与排障' },
   files: { nav: '文件', hint: '上传、编辑、同步设备文件' },
   vnc: { nav: '远程桌面', hint: '图形界面访问与调试' },
   ide: { nav: '代码编辑', hint: '远程 code-server 工作区' },
+  hardware: { nav: '硬件监控', hint: '设备传感器与资源占用' },
   flasher: { nav: '镜像烧录', hint: '镜像写盘与校验' },
   'dr-embed': { nav: '生态网页', hint: '论坛与 RoboGo 内嵌' },
   'local-models': { nav: '本地模型', hint: 'Ollama / 本地推理（可选入口）' },

@@ -188,7 +188,7 @@ export interface AppState {
     title: string,
     message: string,
     onConfirm: () => void,
-    options?: { variant?: 'default' | 'danger'; confirmLabel?: string },
+    options?: { variant?: 'default' | 'danger'; confirmLabel?: string; onDismiss?: () => void },
   ) => void;
 
   // AI Chat
@@ -239,6 +239,9 @@ export interface AppState {
   // Rail
   railExpanded: boolean;
   setRailExpanded: (v: boolean) => void;
+
+  chatSessionsOpen: boolean;
+  setChatSessionsOpen: (v: boolean) => void;
 
   // Task tracking
   taskHistory: Task[];
@@ -315,7 +318,8 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         input?.focus();
       }
       if (e.key === 'Escape') {
-        if (chat.chatExpanded && !getRdkEmbedPanel()) chat.setChatExpanded(false);
+        if (ui.chatSessionsOpen) ui.setChatSessionsOpen(false);
+        else if (chat.chatExpanded && !getRdkEmbedPanel()) chat.setChatExpanded(false);
         if (ui.showSettings) ui.setShowSettings(false);
         if (device.showAddDevice) device.setShowAddDevice(false);
         if (ui.diagnosticOpen) ui.setDiagnosticOpen(false);

@@ -9,6 +9,7 @@ export type EmbedToolbarApi = {
 /** @deprecated 请使用 EmbedToolbarApi */
 export type VncEmbedToolbarApi = EmbedToolbarApi;
 import type { Tab, ConfirmDialogState, TransferItem, DrAuthenticatedPortal, DrAuthenticatedPortalKind } from '../app-types';
+import { normalizeTabForFeatures } from '../constants/studio-features';
 import { getFlashImageLabel } from '../constants';
 import { fillTemplate } from '../i18n/en-extras';
 import { translate } from '../i18n/translate';
@@ -109,6 +110,10 @@ export interface UIStoreState {
   railExpanded: boolean;
   setRailExpanded: (v: boolean) => void;
 
+  /** Dock 会话列表浮层（替代原独立 AI 对话页） */
+  chatSessionsOpen: boolean;
+  setChatSessionsOpen: (v: boolean) => void;
+
   // Hardware
   hardwareRange: 'realtime' | '10m' | '1h';
   setHardwareRange: (v: 'realtime' | '10m' | '1h') => void;
@@ -146,7 +151,7 @@ export interface UIStoreState {
     title: string,
     message: string,
     onConfirm: () => void,
-    options?: { variant?: 'default' | 'danger'; confirmLabel?: string },
+    options?: { variant?: 'default' | 'danger'; confirmLabel?: string; onDismiss?: () => void },
   ) => void;
 }
 
@@ -187,6 +192,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
 
   // ── Navigation ──
   const [activeTab, setActiveTabState] = useState<Tab>('dashboard');
+  const [chatSessionsOpen, setChatSessionsOpen] = useState(false);
   const [drAuthenticatedPortal, setDrAuthenticatedPortal] = useState<DrAuthenticatedPortal | null>(null);
 
   const closeDrAuthenticatedPortal = useCallback(() => {
@@ -236,7 +242,10 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setActiveTab = useCallback((tab: Tab) => {
-    setActiveTabState(tab);
+    if (tab === 'ai-chat-hub') {
+      setChatSessionsOpen(true);
+    }
+    setActiveTabState(normalizeTabForFeatures(tab));
   }, []);
 
   /** 离开内嵌门户 tab 时隐藏 WebContentsView（不切页则保留实例，便于再次打开） */
@@ -461,7 +470,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     title: string,
     message: string,
     onConfirm: () => void,
-    options?: { variant?: 'default' | 'danger'; confirmLabel?: string },
+    options?: { variant?: 'default' | 'danger'; confirmLabel?: string; onDismiss?: () => void },
   ) => {
     setConfirmDialog({
       show: true,
@@ -470,6 +479,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
       onConfirm,
       variant: options?.variant ?? 'default',
       confirmLabel: options?.confirmLabel,
+      onDismiss: options?.onDismiss,
     });
   };
 
@@ -497,6 +507,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     openclawChatMode, setOpenclawChatMode, openclawConnected, setOpenclawConnected,
     openclawSendMessage: openclawSendRef.current, registerOpenclawSend,
     railExpanded: railExpandedState, setRailExpanded,
+    chatSessionsOpen, setChatSessionsOpen,
     hardwareRange, setHardwareRange,
     examplePreset, setExamplePreset,
     rosTopic, setRosTopic, rosRecording, setRosRecording,

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppState } from '../hooks/useAppState';
 import { fillTemplate } from '../i18n/en-extras';
@@ -20,6 +20,7 @@ import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-message-plain';
 import { buildThreadSummaryLine } from '../utils/chat-history-thread-label';
 import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
+import ChatSessionsPanel from './ChatSessionsPanel';
 import { DockFlashMentionWizard } from './DockFlashMentionWizard';
 import {
   DOCK_MENTION_CAPABILITIES,
@@ -1465,19 +1466,22 @@ export default function AIDock() {
     handleCommand, setActiveTab, activeTab,
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
-    taskHistory, showTaskPanel, setShowTaskPanel, cancelRunningTask,
+    taskHistory, backgroundRuns, showTaskPanel, setShowTaskPanel, cancelRunningTask,
     handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
     currentDevice, addToast, language, setLanguage,
     studioResponseMode, setStudioResponseMode,
     getStudioChatSessionId,
+    showConfirm,
     setShowAddDevice,
     setObStep,
+    chatSessionsOpen,
+    setChatSessionsOpen,
   } = useAppState();
   const cmdRef = useRef(cmd);
   cmdRef.current = cmd;
-  const { hubAnchorEl, defaultHostNode } = useHubDockAnchor();
+  const { defaultHostNode } = useHubDockAnchor();
   const { t, isEn } = useI18n();
   const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
   const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
@@ -1485,6 +1489,61 @@ export default function AIDock() {
   const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
   const [unsatisfiedModal, setUnsatisfiedModal] = useState<{ msgId: number; preview: string } | null>(null);
   const [unsatisfiedNote, setUnsatisfiedNote] = useState('');
+  const sessionsBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [sessionsPopoverStyle, setSessionsPopoverStyle] = useState<CSSProperties>({});
+
+  const SESSIONS_POPOVER_W = 380;
+  const SESSIONS_POPOVER_GAP = 8;
+  const SESSIONS_POPOVER_MARGIN = 10;
+  const SESSIONS_POPOVER_MAX_H = 400;
+  const updateSessionsPopoverPosition = useCallback(() => {
+    if (!chatSessionsOpen || !sessionsBtnRef.current) return;
+    const r = sessionsBtnRef.current.getBoundingClientRect();
+    const gap = SESSIONS_POPOVER_GAP;
+    const m = SESSIONS_POPOVER_MARGIN;
+    const spaceAbove = r.top - gap - m;
+    const spaceBelow = window.innerHeight - r.bottom - gap - m;
+    /** 上方空间不足时改在按钮下方展开，避免 fixed + bottom 锚定时整块被顶出视口顶部 */
+    const preferBelow =
+      spaceBelow > spaceAbove
+      || spaceAbove < 120;
+    let left = r.right - SESSIONS_POPOVER_W;
+    left = Math.max(m, Math.min(left, window.innerWidth - SESSIONS_POPOVER_W - m));
+
+    if (preferBelow) {
+      const maxH = Math.min(SESSIONS_POPOVER_MAX_H, Math.max(0, spaceBelow));
+      setSessionsPopoverStyle({
+        position: 'fixed',
+        left,
+        top: r.bottom + gap,
+        bottom: 'auto',
+        width: SESSIONS_POPOVER_W,
+        maxHeight: maxH,
+      });
+    } else {
+      const maxH = Math.min(SESSIONS_POPOVER_MAX_H, Math.max(0, spaceAbove));
+      setSessionsPopoverStyle({
+        position: 'fixed',
+        left,
+        top: 'auto',
+        bottom: window.innerHeight - r.top + gap,
+        width: SESSIONS_POPOVER_W,
+        maxHeight: maxH,
+      });
+    }
+  }, [chatSessionsOpen]);
+
+  useLayoutEffect(() => {
+    if (!chatSessionsOpen) return;
+    updateSessionsPopoverPosition();
+    const onMove = () => updateSessionsPopoverPosition();
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+    };
+  }, [chatSessionsOpen, updateSessionsPopoverPosition]);
 
   const submitUnsatisfiedRetry = useCallback(() => {
     if (!unsatisfiedModal) return;
@@ -1685,8 +1744,16 @@ export default function AIDock() {
   );
 
   const beginNewChat = useCallback(async () => {
-    await confirmAndBeginNewChat({ aiTyping, taskHistory, t, stopAllRuns, clearChatHistory });
-  }, [aiTyping, taskHistory, stopAllRuns, clearChatHistory, t]);
+    await confirmAndBeginNewChat({
+      aiTyping,
+      taskHistory,
+      backgroundRuns,
+      t,
+      showConfirm,
+      stopAllRuns,
+      clearChatHistory,
+    });
+  }, [aiTyping, taskHistory, backgroundRuns, showConfirm, stopAllRuns, clearChatHistory, t]);
 
   const channelStats = useMemo(() => {
     let feishuInbound = 0;
@@ -2424,16 +2491,9 @@ export default function AIDock() {
 
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
-  /** 「子页隐藏 Dock」不应用于 AI 对话 Hub：右侧主区仅靠 portal 挂载对话，隐藏后只剩空锚点，用户会误以为会话丢失 */
-  const shouldHideDock = isSubpageTab && hideDockInSubpage && activeTab !== 'ai-chat-hub';
-  const hubDockEmbedded =
-    !rdkEmbedPanel
-    && activeTab === 'ai-chat-hub'
-    && chatExpanded
-    && !workspaceMode
-    && hubAnchorEl != null;
-  const useAgentColumnFlow = agentTurnLayout && !hubDockEmbedded;
-  const useSubpageCompact = chatExpanded && isSubpageTab && !workspaceMode && !hubDockEmbedded;
+  const shouldHideDock = isSubpageTab && hideDockInSubpage;
+  const useAgentColumnFlow = agentTurnLayout;
+  const useSubpageCompact = chatExpanded && isSubpageTab && !workspaceMode;
 
   const submitQuickPrompt = (text: string, placeholder?: string, forceRdkclaw?: boolean) => {
     if (!text && placeholder) {
@@ -2828,7 +2888,7 @@ export default function AIDock() {
 
   const dockInner = (
     <div
-      className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''} ${useSubpageCompact ? 'subpage-compact' : ''} ${hubDockEmbedded ? 'dock--hub-embedded' : ''}`}
+      className={`dock ${chatExpanded ? 'expanded' : ''} ${workspaceMode ? 'workspace' : ''} ${useSubpageCompact ? 'subpage-compact' : ''}`}
     >
       {/* ── Chat panel (expanded) ── */}
       {chatExpanded && (
@@ -2862,6 +2922,20 @@ export default function AIDock() {
                 aria-label={t('dock.header.toolbarAria', '对话与运行工具')}
               >
                 <div className="dock-header-tool-cluster">
+                  <button
+                    ref={sessionsBtnRef}
+                    type="button"
+                    className={`dock-header-toolbtn${chatSessionsOpen ? ' is-active' : ''}`}
+                    onClick={() => setChatSessionsOpen(!chatSessionsOpen)}
+                    title={t('dock.header.sessions', '会话列表')}
+                    aria-label={t('dock.header.sessions', '会话列表')}
+                    aria-expanded={chatSessionsOpen}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                      <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
+                    </svg>
+                    <span className="dock-header-toolbtn-label">{t('dock.header.sessionsShort', '会话')}</span>
+                  </button>
                   {taskHistory.length > 0 && (
                     <button
                       type="button"
@@ -2895,7 +2969,7 @@ export default function AIDock() {
                       <span className="dock-header-toolbtn-label">{t('dock.header.popoutShort', '弹窗')}</span>
                     </button>
                   )}
-                  {isSubpageTab && !hubDockEmbedded && (
+                  {isSubpageTab && (
                     <button
                       type="button"
                       className="dock-header-toolbtn"
@@ -2913,20 +2987,18 @@ export default function AIDock() {
                   )}
                 </div>
 
-                {!hubDockEmbedded && (
-                  <button
-                    type="button"
-                    className="dock-header-newchat"
-                    onClick={() => void beginNewChat()}
-                    title={t('dock.tt.newChat', '新对话')}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
-                      <line x1="12" y1="5" x2="12" y2="19" />
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                    </svg>
-                    <span>{t('dock.header.newChat', '新对话')}</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="dock-header-newchat"
+                  onClick={() => void beginNewChat()}
+                  title={t('dock.tt.newChat', '新对话')}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  <span>{t('dock.header.newChat', '新对话')}</span>
+                </button>
               </div>
 
               <button
@@ -3471,9 +3543,43 @@ export default function AIDock() {
       </div>
     </div>
   );
-  const portalHost = hubDockEmbedded ? hubAnchorEl : defaultHostNode;
+  const portalHost = defaultHostNode;
   return (
     <>
+    {chatSessionsOpen
+      ? createPortal(
+        <>
+          <div
+            className="dock-chat-sessions-backdrop"
+            role="presentation"
+            aria-hidden
+            onClick={() => setChatSessionsOpen(false)}
+          />
+          <div
+            className="dock-chat-sessions-popover"
+            style={sessionsPopoverStyle}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('chat.hub.sidebarAria', '会话列表')}
+          >
+            <button
+              type="button"
+              className="dock-chat-sessions-close btn-icon"
+              onClick={() => setChatSessionsOpen(false)}
+              aria-label={t('dock.task.closeTitle', '关闭')}
+            >
+              ×
+            </button>
+            <ChatSessionsPanel
+              layout="dock"
+              onRequestClose={() => setChatSessionsOpen(false)}
+              idPrefix="dock-sessions"
+            />
+          </div>
+        </>,
+        document.body,
+      )
+      : null}
     {portalHost ? createPortal(dockInner, portalHost) : dockInner}
     {unsatisfiedModal ? (
       <div

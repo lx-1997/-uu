@@ -26,8 +26,13 @@ export default function ConfirmDialog() {
   const confirmText = confirmDialog.confirmLabel?.trim()
     || t('confirm.run', '确认执行');
 
+  const dismissWithoutConfirm = () => {
+    confirmDialog.onDismiss?.();
+    setConfirmDialog(null);
+  };
+
   return (
-    <div className="modal-overlay" role="presentation" onClick={() => setConfirmDialog(null)}>
+    <div className="modal-overlay" role="presentation" onClick={dismissWithoutConfirm}>
       <div
         className={`modal-content confirm-dialog ${isDanger ? 'confirm-dialog--danger' : ''}`}
         role="alertdialog"
@@ -40,7 +45,7 @@ export default function ConfirmDialog() {
           type="button"
           className="confirm-dialog-close"
           aria-label={t('confirm.close', '关闭')}
-          onClick={() => setConfirmDialog(null)}
+          onClick={dismissWithoutConfirm}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <line x1="18" y1="6" x2="6" y2="18" />
@@ -69,7 +74,7 @@ export default function ConfirmDialog() {
           style={confirmDialog.hideCancel ? { justifyContent: 'flex-end' } : undefined}
         >
           {!confirmDialog.hideCancel && (
-            <button type="button" className="btn btn-ghost" onClick={() => setConfirmDialog(null)}>
+            <button type="button" className="btn btn-ghost" onClick={dismissWithoutConfirm}>
               {t('confirm.cancel', '取消')}
             </button>
           )}

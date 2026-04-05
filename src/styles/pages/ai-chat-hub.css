@@ -29,21 +29,21 @@
 }
 
 .ai-chat-hub-page--v2::before {
-  width: 520px;
-  height: 520px;
-  right: -160px;
-  top: -220px;
+  width: 420px;
+  height: 420px;
+  right: -120px;
+  top: -180px;
   border-radius: 50%;
-  background: radial-gradient(circle at center, color-mix(in srgb, var(--accent) 22%, transparent) 0%, transparent 68%);
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 70%);
 }
 
 .ai-chat-hub-page--v2::after {
-  width: 440px;
-  height: 440px;
-  left: -180px;
-  bottom: -260px;
+  width: 360px;
+  height: 360px;
+  left: -140px;
+  bottom: -200px;
   border-radius: 50%;
-  background: radial-gradient(circle at center, color-mix(in srgb, #0ea5e9 16%, transparent) 0%, transparent 72%);
+  background: radial-gradient(circle at center, color-mix(in srgb, #0ea5e9 8%, transparent) 0%, transparent 72%);
 }
 
 .ai-chat-hub-v2 {
@@ -55,6 +55,16 @@
   grid-template-columns: minmax(290px, min(32vw, 380px)) 1fr;
   gap: 0;
   align-items: stretch;
+}
+
+/* 仅会话列表：单栏居中，不内嵌聊天区 */
+.ai-chat-hub-v2--list-only {
+  grid-template-columns: 1fr;
+  max-width: min(720px, 100%);
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 12px;
 }
 
 .ai-chat-hub-v2-sidebar {
@@ -69,6 +79,11 @@
   box-shadow:
     inset -1px 0 0 color-mix(in srgb, var(--border) 60%, transparent),
     24px 0 40px -34px color-mix(in srgb, var(--shadow-md) 28%, transparent);
+}
+
+.ai-chat-hub-v2--list-only .ai-chat-hub-v2-sidebar {
+  border-right: none;
+  box-shadow: none;
 }
 
 .ai-chat-hub-v2-sidebar::before {
@@ -110,6 +125,19 @@
   line-height: 1.45;
   letter-spacing: 0.01em;
   color: var(--text-muted);
+}
+
+.ai-chat-hub-v2-toolbar-subtitle--dock {
+  margin: 2px 0 0;
+  max-width: 52ch;
+  font-size: 0.68rem;
+  line-height: 1.38;
+}
+
+.ai-chat-hub-v2-toolbar--dock-popover .ai-chat-hub-v2-toolbar-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .ai-chat-hub-v2-toolbar-actions {
@@ -175,11 +203,99 @@
 
 .ai-chat-hub-v2-controls {
   flex-shrink: 0;
-  padding: 12px 14px;
+  padding: 10px 14px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   display: flex;
   flex-direction: column;
+  gap: 0;
+}
+
+.ai-chat-hub-v2-search-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.ai-chat-hub-v2-search-row .ai-chat-hub-v2-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-chat-hub-v2-filter-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.ai-chat-hub-v2-filter-btn:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.ai-chat-hub-v2-filter-btn.is-active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-subtle) 88%, var(--bg-elevated));
+  color: var(--text-primary);
+}
+
+.ai-chat-hub-v2-filters-panel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 72%, transparent);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+}
+
+.ai-chat-hub-v2-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-chat-hub-v2-filter-label {
+  font-size: 0.65rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ai-chat-hub-v2-filter-field select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+}
+
+.ai-chat-hub-v2-live-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ai-chat-hub-v2-live-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
 }
 
 .ai-chat-hub-v2-metrics {
@@ -410,21 +526,19 @@
   display: flex;
   align-items: stretch;
   gap: 4px;
-  border-radius: 12px;
-  border: 1px solid transparent;
-  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 36%, transparent);
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  box-shadow: none;
   cursor: pointer;
   outline: none;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
   animation: hub-row-enter 0.22s var(--ease-out);
 }
 
 .ai-chat-hub-v2-row:hover {
-  border-color: color-mix(in srgb, var(--border-strong) 66%, var(--border));
-  background: color-mix(in srgb, var(--bg-elevated) 95%, transparent);
-  box-shadow: 0 10px 20px -16px color-mix(in srgb, black 40%, transparent);
-  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--border-strong) 55%, var(--border));
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
 }
 
 .ai-chat-hub-v2-row:focus-visible {
@@ -433,11 +547,9 @@
 }
 
 .ai-chat-hub-v2-row.is-active {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
-  background: color-mix(in srgb, var(--accent-subtle) 82%, var(--bg-elevated));
-  box-shadow:
-    inset 3px 0 0 0 var(--accent),
-    0 10px 18px -16px color-mix(in srgb, var(--accent) 56%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent-subtle) 78%, var(--bg-elevated));
+  box-shadow: inset 3px 0 0 0 var(--accent);
 }
 
 .ai-chat-hub-v2-row-inner {
@@ -538,6 +650,145 @@
   background: var(--danger-subtle);
 }
 
+/* ── 会话列表：日期分组 + 左图标 + 主次行（参考简洁列表）── */
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-list {
+  padding: 4px 8px 12px;
+  gap: 0;
+}
+
+.ai-chat-hub-v2-section {
+  margin-bottom: 2px;
+}
+
+.ai-chat-hub-v2-section:last-child {
+  margin-bottom: 0;
+}
+
+.ai-chat-hub-v2-section-label {
+  margin: 0 0 6px 6px;
+  padding-top: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.ai-chat-hub-v2-section:first-child .ai-chat-hub-v2-section-label {
+  padding-top: 2px;
+}
+
+.ai-chat-hub-v2-section-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row {
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+  align-items: center;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row:hover {
+  background: color-mix(in srgb, var(--text-muted) 7%, transparent);
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row.is-active {
+  background: color-mix(in srgb, var(--text-muted) 11%, transparent);
+  border: none;
+  box-shadow: none;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row.is-live.is-active {
+  background: color-mix(in srgb, var(--accent-subtle) 80%, var(--bg-elevated));
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row-inner {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 4px 9px 8px;
+}
+
+.ai-chat-hub-v2-row-glyph {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--text-muted) 88%, transparent);
+}
+
+.ai-chat-hub-v2-row-glyph svg.is-on {
+  color: var(--accent);
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row.is-live .ai-chat-hub-v2-row-glyph {
+  color: color-mix(in srgb, var(--ok) 75%, var(--text-muted));
+}
+
+.ai-chat-hub-v2-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-chat-hub-v2-row-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row:not(.is-active) .ai-chat-hub-v2-row-title {
+  color: color-mix(in srgb, var(--text-primary) 88%, var(--text-muted));
+}
+
+.ai-chat-hub-v2-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-live {
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 1px 6px;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-time {
+  margin-left: 0;
+  font-size: 0.6875rem;
+  font-weight: 450;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 1px;
+}
+
+.ai-chat-hub-v2-sidebar--sessions-refined .ai-chat-hub-v2-row-del {
+  align-self: center;
+  margin: 0 2px 0 0;
+}
+
 .ai-chat-hub-v2-main {
   flex: 1;
   min-width: 0;
@@ -570,7 +821,7 @@
 }
 
 @media (max-width: 980px) {
-  .ai-chat-hub-v2 {
+  .ai-chat-hub-v2:not(.ai-chat-hub-v2--list-only) {
     grid-template-columns: minmax(272px, 44vw) 1fr;
   }
 
@@ -590,15 +841,19 @@
 }
 
 @media (max-width: 720px) {
-  .ai-chat-hub-v2 {
+  .ai-chat-hub-v2:not(.ai-chat-hub-v2--list-only) {
     grid-template-columns: 1fr;
   }
 
-  .ai-chat-hub-v2-sidebar {
+  .ai-chat-hub-v2:not(.ai-chat-hub-v2--list-only) .ai-chat-hub-v2-sidebar {
     max-height: 50vh;
     border-right: none;
     border-bottom: 1px solid var(--border);
     box-shadow: none;
+  }
+
+  .ai-chat-hub-v2--list-only .ai-chat-hub-v2-sidebar {
+    max-height: none;
   }
 
   .ai-chat-hub-v2-toolbar {
@@ -612,4 +867,86 @@
   .ai-chat-hub-v2-main {
     padding: 0;
   }
+}
+
+/* ── Dock 会话：锚定在「会话」按钮上方的弹出层（非全屏底栏）── */
+.dock-chat-sessions-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12049;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.dock-chat-sessions-popover {
+  z-index: 12050;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: var(--bg-elevated);
+  box-shadow:
+    0 12px 40px -16px color-mix(in srgb, black 45%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--border) 40%, transparent) inset;
+}
+
+.dock-chat-sessions-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.dock-chat-sessions-close:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+.dock-chat-sessions-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ai-chat-hub-v2-toolbar--dock-popover {
+  padding: 10px 36px 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+}
+
+.ai-chat-hub-v2-toolbar--dock-popover .ai-chat-hub-v2-toolbar-title {
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.ai-chat-hub-v2-sidebar--dock {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  max-height: inherit;
+  min-height: 0;
+}
+
+.ai-chat-hub-v2-sidebar--dock .ai-chat-hub-v2-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 4px 8px;
+  gap: 0;
+}
+
+.ai-chat-hub-v2-sidebar--dock .ai-chat-hub-v2-toolbar {
+  padding-top: 28px;
+  padding-bottom: 10px;
 }

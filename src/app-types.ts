@@ -164,6 +164,8 @@ export interface ConfirmDialogState {
   confirmLabel?: string;
   /** 仅展示主按钮（用于提示类弹窗，避免「取消」语义不当） */
   hideCancel?: boolean;
+  /** 取消、点遮罩或关闭时调用（不随确认执行） */
+  onDismiss?: () => void;
 }
 
 export interface AgentPlanStep {

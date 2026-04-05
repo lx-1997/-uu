@@ -27,3 +27,23 @@ export function threadLastActivityMs(msgs: ChatMessage[]): number {
   }
   return max;
 }
+
+/**
+ * 会话 id 形如 `ui-<Date.now>-<random>`（clearChatHistory / 新会话），
+ * 当消息内无可用时间戳时用于排序与按日分组，避免旧会话被归到「今天」。
+ */
+export function parseUiSessionIdMs(sessionId: string): number {
+  const s = String(sessionId || '').trim();
+  const m = /^ui-(\d+)-/.exec(s);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return normalizeTimestampMs(n);
+}
+
+/** 列表排序/分组用：优先消息时间，否则用会话 id 内嵌时间戳 */
+export function effectiveThreadActivityMs(msgs: ChatMessage[], sessionId: string): number {
+  const fromMsgs = threadLastActivityMs(msgs);
+  if (fromMsgs > 0) return fromMsgs;
+  return parseUiSessionIdMs(sessionId);
+}
