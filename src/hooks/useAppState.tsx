@@ -28,6 +28,8 @@ import { TerminalProvider, useTerminalStore } from './useTerminalStore';
 import { AIChatProvider, useAIChatStore, type RdkClawTimelineEntry } from './useAIChatStore';
 import { getRdkEmbedPanel } from '../utils/embed-mode';
 import type { EmbedToolbarApi } from './useUIStore';
+import { persistStudioNavigationUiHints } from '../studio-ui-hints';
+import { requestIdeRemoteConnect, requestVncRemoteConnect } from '../utils/studio-embed-connect-bridge';
 
 // ---- State shape (unchanged — backward compatible) ----
 export type { ThemeMode };
@@ -341,6 +343,58 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
     const viewport = document.querySelector('.content-area');
     if (viewport) viewport.scrollTo({ top: 0, behavior: 'smooth' });
   }, [ui.activeTab]);
+
+  /** 随 RDKClaw 请求上报：当前 Tab + IDE/VNC 嵌入浮窗状态 */
+  useEffect(() => {
+    persistStudioNavigationUiHints(device.currentDevice?.id, {
+      activeTab: ui.activeTab,
+      ideEmbedFloating: ui.ideEmbedToolbar?.embedFloating,
+      vncEmbedFloating: ui.vncEmbedToolbar?.embedFloating,
+      ideShowIframe: ui.ideEmbedToolbar?.showIframe,
+      vncShowIframe: ui.vncEmbedToolbar?.showIframe,
+    });
+  }, [device.currentDevice?.id, ui.activeTab, ui.ideEmbedToolbar, ui.vncEmbedToolbar]);
+
+  const ideToolbarRef = useRef(ui.ideEmbedToolbar);
+  const vncToolbarRef = useRef(ui.vncEmbedToolbar);
+  ideToolbarRef.current = ui.ideEmbedToolbar;
+  vncToolbarRef.current = ui.vncEmbedToolbar;
+
+  /**
+   * 用户说「打开 VNC / 远程桌面」「打开 IDE」时：**不切换 Tab**，后台执行与对应页面「连接」按钮相同逻辑，就绪后再自动浮窗。
+   */
+  useEffect(() => {
+    const tryFloatWhenReady = (which: 'ide' | 'vnc', startedAt: number) => {
+      const maxMs = 22_000;
+      const tick = () => {
+        const api = which === 'ide' ? ideToolbarRef.current : vncToolbarRef.current;
+        if (api?.showIframe && !api.embedFloating) {
+          api.toggleEmbedFloat();
+          return;
+        }
+        if (Date.now() - startedAt > maxMs) return;
+        window.setTimeout(tick, 280);
+      };
+      window.setTimeout(tick, 420);
+    };
+
+    const onIntent = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ kind?: string }>).detail;
+      const kind = String(detail?.kind || '').trim();
+      if (kind === 'open-vnc-float') {
+        requestVncRemoteConnect();
+        tryFloatWhenReady('vnc', Date.now());
+        return;
+      }
+      if (kind === 'open-ide-float') {
+        requestIdeRemoteConnect();
+        tryFloatWhenReady('ide', Date.now());
+      }
+    };
+
+    window.addEventListener('rdk-studio-user-intent', onIntent as EventListener);
+    return () => window.removeEventListener('rdk-studio-user-intent', onIntent as EventListener);
+  }, []);
 
   // Global API error routing: convert raw backend failures into
   // user-actionable guidance without changing page structure.

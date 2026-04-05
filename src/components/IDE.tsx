@@ -6,9 +6,9 @@ import { useI18n } from '../i18n/use-i18n';
 import { isDesktop } from '../utils/env';
 import { resolveApiUrlForEmbed } from '../utils/apiBase';
 import { shouldUseSshTunnelForDevice } from '../utils/device-tunnel';
-import { openOpenClawPopout, openRdkClawChatPopout } from '../utils/embed-mode';
 import DeviceGuard from './DeviceGuard';
 import FloatingEmbedPanel from './FloatingEmbedPanel';
+import { registerIdeRemoteConnect } from '../utils/studio-embed-connect-bridge';
 
 /* ── code-server 默认端口（设备侧） ── */
 const CODE_SERVER_PORT = 9888;
@@ -120,6 +120,28 @@ export default function IDE() {
       addToast(t('ide.toast.connectDevice', '请先连接设备'), 'warning');
       return;
     }
+    if (showIframe) {
+      if (iframeLoading) {
+        addToast(
+          t(
+            'ide.toast.connectingWait',
+            '正在连接代码编辑器（同类型仅 1 个）；可与远程桌面同时各开 1 个',
+          ),
+          'info',
+        );
+        return;
+      }
+      if (!loadError) {
+        addToast(
+          t(
+            'ide.toast.singleSessionOnly',
+            '代码编辑器同类型仅支持 1 个；可与远程桌面同时各开 1 个。请先关闭当前会话后再开新的',
+          ),
+          'info',
+        );
+        return;
+      }
+    }
     const url = getCodeServerUrl();
     setIframeLoading(true);
     setLoadError(null);
@@ -158,7 +180,13 @@ export default function IDE() {
 
     if (isDesktop()) {
       activeUrlRef.current = url;
-      (window as any).rdkDesktop.openUrl(url);
+      const rdk = (window as any).rdkDesktop;
+      rdk.openUrl(url);
+      /** 默认以悬浮窗展示，避免 code-server 占满 IDE 页挡住侧栏对话等 */
+      rdk.setEmbedFloatMode?.(url, true, t('ide.title', '代码编辑器'));
+      setEmbedFloating(true);
+    } else {
+      setEmbedFloating(true);
     }
     loadingTimerRef.current = setTimeout(() => setIframeLoading(false), 10000);
   };
@@ -211,12 +239,27 @@ export default function IDE() {
   useEffect(() => {
     if (!isDesktop() || !activeUrlRef.current) return;
     const rdk = (window as any).rdkDesktop;
-    if (activeTab === 'ide') {
-      rdk.setActiveUrl?.(activeUrlRef.current);
-    } else {
-      rdk.hideUrl?.(activeUrlRef.current);
-    }
-  }, [activeTab]);
+    const url = activeUrlRef.current;
+    const run = () => {
+      if (activeTab === 'ide') {
+        if (embedFloating) {
+          rdk.hideUrl?.(url);
+        } else {
+          rdk.setActiveUrl?.(url);
+        }
+      } else {
+        rdk.hideUrl?.(url);
+      }
+    };
+    run();
+    const t =
+      !embedFloating && activeTab !== 'ide'
+        ? window.setTimeout(() => rdk.hideUrl?.(url), 0)
+        : undefined;
+    return () => {
+      if (t !== undefined) window.clearTimeout(t);
+    };
+  }, [activeTab, embedFloating]);
 
   useEffect(() => {
     if (!isDesktop()) return;
@@ -242,6 +285,42 @@ export default function IDE() {
       return next;
     });
   }, [t]);
+
+  /** 对话「打开 IDE」：与「打开 code-server」同源；已就绪则只补浮窗 */
+  const runRemoteConnectIntentRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    runRemoteConnectIntentRef.current = () => {
+      if (iframeLoading) {
+        addToast(
+          t(
+            'ide.toast.connectingWait',
+            '正在连接代码编辑器（同类型仅 1 个）；可与远程桌面同时各开 1 个',
+          ),
+          'info',
+        );
+        return;
+      }
+      if (showIframe && !loadError) {
+        if (!embedFloating) {
+          toggleEmbedFloat();
+          return;
+        }
+        addToast(
+          t(
+            'ide.toast.alreadyOpenSingle',
+            '代码编辑器已打开（同类型仅 1 个）；可与远程桌面同时各浮 1 个',
+          ),
+          'info',
+        );
+        return;
+      }
+      void handleConnect();
+    };
+  });
+  useEffect(() => {
+    registerIdeRemoteConnect(() => runRemoteConnectIntentRef.current());
+    return () => registerIdeRemoteConnect(null);
+  }, []);
 
   /** 与 VNC 分离：顶栏「IDE 悬浮窗」只控制 code-server 嵌入 */
   useEffect(() => {
@@ -284,89 +363,65 @@ export default function IDE() {
           )}
         </div>
 
-        <div className="immersive-bar-right">
-          <button
-            type="button"
-            className="btn-icon"
-            onClick={() => openRdkClawChatPopout({ dockCtx: 'ide' })}
-            title={t('ide.popout.claw', '新窗口打开 RDKClaw 对话（可拖到侧屏与编辑器并排）')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="btn-icon"
-            onClick={() => openOpenClawPopout()}
-            title={t('ide.popout.openclaw', '新窗口打开 OpenClaw（查看板端 Agent 效果）')}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <path d="M7 9h10M7 13h6" />
-            </svg>
-          </button>
-          <div className="immersive-bar-sep" />
-          {showIframe && (
-            <>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm immersive-float-toggle"
-                onClick={toggleEmbedFloat}
-                title={
-                  embedFloating
-                    ? t('ide.title.floatDock', '贴回主窗口')
-                    : t('ide.title.floatOut', '拖出为悬浮窗，可拖到副屏；切换标签后仍可见')
-                }
-                aria-pressed={embedFloating}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <polyline points="16 18 22 12 16 6" />
-                  <polyline points="8 6 2 12 8 18" />
-                </svg>
-                <span>{embedFloating ? t('ide.floatBtn.dock', '贴回') : t('ide.floatBtn.floatOut', '浮出')}</span>
-              </button>
-              {/* 非桌面端才显示刷新按钮 */}
-              {!desktop && (
-                <button className="btn-icon" onClick={handleReload} title={t('ide.title.refresh', '刷新')}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
-                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-                  </svg>
-                </button>
-              )}
-
-              <button
-                className="btn-icon"
-                onClick={() => window.open(getCodeServerUrl(), '_blank')}
-                title={t('ide.title.openNew', '新窗口打开')}
-              >
+        {showIframe ? (
+          <div className="immersive-bar-right">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm immersive-float-toggle"
+              onClick={toggleEmbedFloat}
+              title={
+                embedFloating
+                  ? t('ide.title.floatDock', '贴回主窗口')
+                  : t('ide.title.floatOut', '拖出为悬浮窗，可拖到副屏；切换标签后仍可见')
+              }
+              aria-pressed={embedFloating}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+              <span>{embedFloating ? t('ide.floatBtn.dock', '贴回') : t('ide.floatBtn.floatOut', '浮出')}</span>
+            </button>
+            {/* 非桌面端才显示刷新按钮 */}
+            {!desktop && (
+              <button className="btn-icon" onClick={handleReload} title={t('ide.title.refresh', '刷新')}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                  <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                  <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
                 </svg>
               </button>
+            )}
 
-              {!desktop && (
-                <button className="btn-icon" onClick={toggleFullscreen} title={t('ide.title.fullscreen', '全屏 (F11)')}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    {isFullscreen ? (
-                      <><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></>
-                    ) : (
-                      <><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></>
-                    )}
-                  </svg>
-                </button>
-              )}
+            <button
+              className="btn-icon"
+              onClick={() => window.open(getCodeServerUrl(), '_blank')}
+              title={t('ide.title.openNew', '新窗口打开')}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+            </button>
 
-              <div className="immersive-bar-sep" />
-
-              <button className="btn btn-ghost" onClick={handleDisconnect}>
-                {t('ide.close', '关闭')}
+            {!desktop && (
+              <button className="btn-icon" onClick={toggleFullscreen} title={t('ide.title.fullscreen', '全屏 (F11)')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {isFullscreen ? (
+                    <><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></>
+                  ) : (
+                    <><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></>
+                  )}
+                </svg>
               </button>
-            </>
-          )}
-        </div>
+            )}
+
+            <div className="immersive-bar-sep" />
+
+            <button className="btn btn-ghost" onClick={handleDisconnect}>
+              {t('ide.close', '关闭')}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* ── 主视口 ── */}

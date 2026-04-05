@@ -325,7 +325,10 @@ function AppShell() {
           </div>
           <div className="topbar-right">
             {(ideEmbedToolbar?.showIframe || vncEmbedToolbar?.showIframe) && (
-              <div className="topbar-embed-cluster" title={t('topbar.embedCluster.hint', '与左侧标签无关：控制已连接的 IDE / 远程桌面是否单独浮出')}>
+              <div className="topbar-embed-cluster" title={t(
+                'topbar.embedCluster.hint',
+                '与左侧标签无关：已连接的 IDE / 远程桌面可分别浮出；同类各 1 个，二者可同时浮窗',
+              )}>
                 <span className="topbar-embed-cluster-label">{t('topbar.embedFloat.label', '浮窗')}</span>
                 <div
                   className="topbar-embed-float-group"

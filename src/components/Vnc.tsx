@@ -7,6 +7,7 @@ import { isDesktop } from '../utils/env';
 import { shouldUseSshTunnelForDevice } from '../utils/device-tunnel';
 import DeviceGuard from './DeviceGuard';
 import FloatingEmbedPanel from './FloatingEmbedPanel';
+import { registerVncRemoteConnect } from '../utils/studio-embed-connect-bridge';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
@@ -35,18 +36,33 @@ export default function Vnc() {
   // 当前打开的 VNC URL（桌面端用于 close/hide）
   const activeUrlRef = useRef<string>('');
 
-  // 桌面端：tab 切换时同步 WebContentsView 可见性
-  // 由于 Vnc 是持久化组件（不卸载），需要监听 activeTab 变化
+  // 桌面端：tab + 浮窗态 同步 WebContentsView；浮窗关闭时若当前不在「远程桌面」Tab，必须再次 hide，否则会嵌到工作台等页面
   const { activeTab } = useAppState();
   useEffect(() => {
     if (!isDesktop() || !activeUrlRef.current) return;
     const rdk = (window as any).rdkDesktop;
-    if (activeTab === 'vnc') {
-      rdk.setActiveUrl?.(activeUrlRef.current);
-    } else {
-      rdk.hideUrl?.(activeUrlRef.current);
-    }
-  }, [activeTab]);
+    const url = activeUrlRef.current;
+    const run = () => {
+      if (activeTab === 'vnc') {
+        if (embedFloating) {
+          rdk.hideUrl?.(url);
+        } else {
+          rdk.setActiveUrl?.(url);
+        }
+      } else {
+        rdk.hideUrl?.(url);
+      }
+    };
+    run();
+    /** 贴回主窗口瞬间宿主可能晚一帧把视图挂到当前 Tab，再补一次 hide */
+    const t =
+      !embedFloating && activeTab !== 'vnc'
+        ? window.setTimeout(() => rdk.hideUrl?.(url), 0)
+        : undefined;
+    return () => {
+      if (t !== undefined) window.clearTimeout(t);
+    };
+  }, [activeTab, embedFloating]);
 
   useEffect(() => {
     if (!isDesktop()) return;
@@ -185,6 +201,26 @@ export default function Vnc() {
       addToast(t('vnc.toast.connectDevice', '请先连接设备'), 'warning');
       return;
     }
+    if (phase === 'connecting') {
+      addToast(
+        t(
+          'vnc.toast.connectingWait',
+          '正在连接远程桌面（同类型仅 1 个）；可与代码编辑器同时各开 1 个',
+        ),
+        'info',
+      );
+      return;
+    }
+    if (showIframe && phase === 'connected') {
+      addToast(
+        t(
+          'vnc.toast.singleSessionOnly',
+          '远程桌面同类型仅支持 1 个；可与代码编辑器同时各开 1 个。请先关闭当前会话后再开新的',
+        ),
+        'info',
+      );
+      return;
+    }
     setPhase('connecting');
     addToast(t('vnc.toast.starting', '正在检查并启动 VNC 服务...'), 'info');
 
@@ -201,11 +237,16 @@ export default function Vnc() {
         setShowIframe(true);
         addToast(t('vnc.toast.ok', 'VNC 连接成功'), 'success');
         startVncSession();
-        // 桌面端用 WebContentsView 嵌入 noVNC
+        // 桌面端：默认悬浮窗，避免占满远程桌面 Tab 主区
         if (isDesktop()) {
           activeUrlRef.current = vncUrl;
           setLoadError(null);
-          (window as any).rdkDesktop.openUrl(vncUrl);
+          const rdk = (window as any).rdkDesktop;
+          rdk.openUrl(vncUrl);
+          rdk.setEmbedFloatMode?.(vncUrl, true, t('vnc.title', '远程桌面'));
+          setEmbedFloating(true);
+        } else {
+          setEmbedFloating(true);
         }
       } else {
         setPhase('error');
@@ -218,6 +259,42 @@ export default function Vnc() {
       addToast(err.message || t('vnc.toast.opFail', '操作失败'), 'error');
     });
   };
+
+  /** 对话「打开 VNC」：与按钮同源；已连接则只补浮窗 */
+  const runRemoteConnectIntentRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    runRemoteConnectIntentRef.current = () => {
+      if (phase === 'connecting') {
+        addToast(
+          t(
+            'vnc.toast.connectingWait',
+            '正在连接远程桌面（同类型仅 1 个）；可与代码编辑器同时各开 1 个',
+          ),
+          'info',
+        );
+        return;
+      }
+      if (showIframe && phase === 'connected') {
+        if (!embedFloating) {
+          toggleEmbedFloat();
+          return;
+        }
+        addToast(
+          t(
+            'vnc.toast.alreadyOpenSingle',
+            '远程桌面已打开（同类型仅 1 个）；可与代码编辑器同时各浮 1 个',
+          ),
+          'info',
+        );
+        return;
+      }
+      handleConnect();
+    };
+  });
+  useEffect(() => {
+    registerVncRemoteConnect(() => runRemoteConnectIntentRef.current());
+    return () => registerVncRemoteConnect(null);
+  }, []);
 
   // ── 断开连接 ──
   const handleDisconnect = () => {

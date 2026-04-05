@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import io from 'socket.io-client';
 import { resolveSocketUrl, socketIoClientOptions } from '../utils/socket';
 import { fetchApi } from '../utils/apiBase';
+import { tryConsumeStudioOpenSlot } from '../utils/studio-open-url-dedup';
 function coerceStudioWebUrl(raw: string): string {
   const u = String(raw || '').trim();
   if (!u) return '';
@@ -21,6 +22,7 @@ function openCaptureEmbedInMain(url: string) {
 
 /** studio_open_url：桌面端优先独立弹窗；失败用新标签打开，不再把页面塞进主窗口（避免顶栏内嵌条与主界面被 WebView 占满） */
 async function openStudioAgentBrowsePopup(url: string) {
+  if (!tryConsumeStudioOpenSlot(url)) return;
   const rdk = window.rdkDesktop;
   if (rdk?.openAgentBrowserPopup) {
     const r = await rdk.openAgentBrowserPopup(url);

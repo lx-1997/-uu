@@ -26,6 +26,7 @@ function writeMerged(deviceId: string, patch: Partial<StudioUiHints>) {
       openclaw: { ...prev.openclaw, ...patch.openclaw },
       gateway: { ...prev.gateway, ...patch.gateway },
       board: { ...prev.board, ...patch.board },
+      ui: { ...prev.ui, ...patch.ui },
     };
     sessionStorage.setItem(key(deviceId), JSON.stringify(next));
   } catch {
@@ -88,5 +89,17 @@ export function persistBoardSkillBundleHint(
       model: payload.model,
       skillBundleSyncedAt: payload.synced ? Date.now() : undefined,
     },
+  });
+}
+
+/** 主导航 Tab + IDE/VNC 嵌入浮窗状态，供 RDKClaw 感知当前界面 */
+export function persistStudioNavigationUiHints(
+  deviceId: string | undefined,
+  ui: NonNullable<StudioUiHints['ui']>,
+) {
+  if (!deviceId?.trim()) return;
+  writeMerged(deviceId.trim(), {
+    source: 'studio-nav',
+    ui,
   });
 }

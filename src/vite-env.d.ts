@@ -13,6 +13,12 @@ interface ImportMetaEnv {
   readonly VITE_APP_BUILD_DATE: string;
   /** 仅 Vite 开发构建注入：Socket.IO 直连后端 origin，空串表示走页面同源 */
   readonly VITE_SOCKET_URL?: string;
+  /** 覆盖默认 RoboGo 飞书介绍页 URL（与 RDK_STUDIO_ROBOGO_DOC_URL 对齐） */
+  readonly VITE_ROBOGO_DOC_URL?: string;
+  /** 覆盖默认 RDK Studio 飞书介绍页 URL（与 RDK_STUDIO_DOC_URL 对齐） */
+  readonly VITE_RDK_STUDIO_DOC_URL?: string;
+  /** 覆盖默认 RDK 开发者手册 / 官网文档 URL（与 RDK_DEVELOPER_DOC_URL 对齐） */
+  readonly VITE_RDK_DEVELOPER_DOC_URL?: string;
 }
 
 interface ImportMeta {

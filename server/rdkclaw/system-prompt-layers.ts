@@ -27,6 +27,7 @@ import {
   type ModelTier,
 } from "./system-prompt-builder.js";
 import { buildForumAuthContextPrompt } from "./forum-context-prompt.js";
+import { buildProductEcosystemPrompt, buildProductEcosystemPromptQuick } from "./product-ecosystem-prompt.js";
 import {
   buildToolContractOverviewPrompt,
   buildToolContractQuickOverviewPrompt,
@@ -66,6 +67,7 @@ export type SystemPromptLayerId =
   | "memory_hint"
   | "find_skills_policy"
   | "forum"
+  | "product_ecosystem"
   | "web_search_triggers";
 
 export type SystemPromptLayerStability = "stable" | "dynamic";
@@ -170,6 +172,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
     "偏好与结论可用 memory_save；需要时用 memory_search。",
   );
   pushStable("persona", buildPersonaPrompt(input.persona));
+  pushStable("product_ecosystem", buildProductEcosystemPromptQuick());
 
   if (input.policy.network.enabled) {
     pushStable(
@@ -276,6 +279,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
 
   pushStable("tool_contracts", buildToolContractOverviewPrompt());
   pushStable("forum", buildForumAuthContextPrompt());
+  pushStable("product_ecosystem", buildProductEcosystemPrompt());
 
   if (input.policy.network.enabled) {
     pushStable(

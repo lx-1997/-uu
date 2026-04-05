@@ -569,6 +569,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.abort.detailStream': 'Stream response stopped',
   'chat.attach.continue': 'Please continue with the attachments I just uploaded.',
   'chat.cmd.settingsOpened': 'Settings panel opened.',
+  'chat.productDoc.opened': 'Opened the documentation page.',
   'chat.oneShot.validationPending': 'Not run',
   'chat.oneShot.validationPass': 'Passed',
   'chat.oneShot.validationFail': 'Failed',
@@ -762,7 +763,13 @@ export const EN_EXTRAS: Record<string, string> = {
   'topbar.embedGroup': 'Embedded windows',
   'topbar.embedFloat.label': 'Detach',
   'topbar.embedCluster.hint':
-    'Independent of the sidebar tab: detach connected IDE or remote desktop to a separate window.',
+    'Detach IDE or remote desktop to separate windows. One session each; both can float at the same time.',
+  'studio.embed.clientAction.needIde':
+    'Connect code-server in the IDE tab first (one editor session; you can still open one remote desktop).',
+  'studio.embed.clientAction.needVnc':
+    'Connect remote desktop in the VNC tab first (one VNC session; you can still open one editor).',
+  'studio.embed.singleSessionOnly':
+    'Already in that state for this panel. One session per type; editor and remote desktop can be open together.',
   'topbar.ip.copied': 'Copied {{ip}}',
   'topbar.ip.copyFail': 'Copy failed; select text manually',
   'topbar.wifi.title': 'Configure Wi‑Fi',
@@ -1227,6 +1234,12 @@ export const EN_EXTRAS: Record<string, string> = {
   'vnc.status.notRunning': 'VNC service not running',
   'vnc.status.unknown': 'Could not get status',
   'vnc.toast.connectDevice': 'Connect a device first',
+  'vnc.toast.connectingWait':
+    'Connecting remote desktop (one VNC session at a time). You can still open one editor alongside it.',
+  'vnc.toast.singleSessionOnly':
+    'Only one remote desktop session at a time. Close it first to open another. The editor does not share this limit.',
+  'vnc.toast.alreadyOpenSingle':
+    'Remote desktop is already open (one per type). You can still float the editor separately.',
   'vnc.toast.starting': 'Checking and starting VNC…',
   'vnc.toast.ok': 'VNC connected',
   'vnc.err.port': 'Port 5900 not ready',
@@ -1390,6 +1403,12 @@ export const EN_EXTRAS: Record<string, string> = {
   'ide.toast.installMaybe': 'Install may be incomplete; check device network',
   'ide.toast.installFail': 'Install failed; check device connection and network',
   'ide.toast.connectDevice': 'Connect a device first',
+  'ide.toast.connectingWait':
+    'Connecting editor (one editor session at a time). You can still open one remote desktop alongside it.',
+  'ide.toast.singleSessionOnly':
+    'Only one editor session at a time. Close it first to open another. Remote desktop does not share this limit.',
+  'ide.toast.alreadyOpenSingle':
+    'Editor is already open (one per type). You can still float remote desktop separately.',
   'ide.toast.starting': 'Starting code-server…',
   'ide.err.notInstalled': 'code-server is not installed on the device',
   'ide.toast.notDetected': 'code-server not detected; install first',

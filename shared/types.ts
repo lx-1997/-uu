@@ -71,4 +71,14 @@ export interface StudioUiHints {
     model?: string | null;
     skillBundleSyncedAt?: number;
   };
+  /**
+   * 当前客户端主导航与嵌入页浮窗状态（前端随轮次写入，与 OpenClaw 快照独立）。
+   */
+  ui?: {
+    activeTab?: string;
+    ideEmbedFloating?: boolean;
+    vncEmbedFloating?: boolean;
+    ideShowIframe?: boolean;
+    vncShowIframe?: boolean;
+  };
 }

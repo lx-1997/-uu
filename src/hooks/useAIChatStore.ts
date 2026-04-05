@@ -69,7 +69,14 @@ import {
   collapseRepeatedBoardToolNotifyLines,
   formatToolStatusTitle,
 } from './sse-helpers';
-import { applyClientActionsFromAssistantText } from '../utils/client-action-bridge';
+import {
+  applyClientActionsFromAssistantText,
+  registerStudioClientActionHandlers,
+} from '../utils/client-action-bridge';
+import {
+  dispatchOpenEmbedIntentFromUserMessage,
+  tryOpenProductDocFromUserMessage,
+} from '../utils/studio-user-intent';
 
 /** 编排 meta 摘要行：技能名过长时截断，避免标题栏铺满 */
 function formatMatchedSkillsShort(skills: string[], maxItems = 2, maxEach = 28): string {
@@ -347,22 +354,38 @@ function stripInternalDraftMonologue(input: string): string {
 /**
  * 模型既流式 thinking_delta（reasoning 块）又把同一段写进 message_delta（主文）时，去掉主文重复部分。
  * 与 message_end 中空主文分支配合：非空时仍可能全文或前缀与 reasoning 一致。
+ * 正文与 reasoning 均经 sanitizeReasoningDisplayText，并处理「整段思考被夹在中间」的重复。
  */
 function stripVisibleAssistantDuplicateOfReasoning(visible: string, reasoningChunksSorted: string[]): string {
   if (!reasoningChunksSorted.length) return visible;
-  const vNorm = sanitizeReasoningDisplayText(visible.replace(/\r\n/g, '\n')).replace(/\r\n/g, '\n').trim();
+  let vNorm = sanitizeReasoningDisplayText(visible.replace(/\r\n/g, '\n')).replace(/\r\n/g, '\n').trim();
   if (!vNorm) return visible;
   for (const r of reasoningChunksSorted) {
-    const rTrim = r.trim();
-    if (!rTrim) continue;
-    if (vNorm === rTrim) return '';
-    if (vNorm.startsWith(rTrim)) {
-      const rest = vNorm.slice(rTrim.length).trimStart();
-      return rest;
+    const rNorm = sanitizeReasoningDisplayText(r.replace(/\r\n/g, '\n')).trim();
+    if (!rNorm) continue;
+    if (vNorm === rNorm) {
+      vNorm = '';
+      break;
     }
-    if (rTrim.startsWith(vNorm)) return '';
+    if (vNorm.startsWith(rNorm)) {
+      vNorm = vNorm.slice(rNorm.length).trimStart();
+      continue;
+    }
+    if (rNorm.startsWith(vNorm)) {
+      vNorm = '';
+      break;
+    }
+    /** 模型把与思考块完全相同的段落又写进主文中间时，indexOf 去掉首段匹配（长片段优先已排序） */
+    if (rNorm.length >= 32) {
+      const idx = vNorm.indexOf(rNorm);
+      if (idx >= 0) {
+        const before = vNorm.slice(0, idx).trimEnd();
+        const after = vNorm.slice(idx + rNorm.length).trimStart();
+        vNorm = [before, after].filter(Boolean).join('\n\n').trim();
+      }
+    }
   }
-  return visible;
+  return vNorm;
 }
 
 function parseStoredStudioResponseMode(): StudioResponseMode {
@@ -438,11 +461,59 @@ export function useAIChatStore(): AIChatStoreState {
 export function AIChatProvider({ children }: { children: React.ReactNode }) {
   const { addToast } = useToastStore();
   const { currentDevice, setActiveDevice, setDevices, devices } = useDeviceStore();
-  const { activeTab, setShowSettings, language } = useUIStore();
+  const {
+    activeTab,
+    setShowSettings,
+    language,
+    setActiveTab,
+    ideEmbedToolbar,
+    vncEmbedToolbar,
+  } = useUIStore();
+  const ideToolbarRef = React.useRef(ideEmbedToolbar);
+  const vncToolbarRef = React.useRef(vncEmbedToolbar);
+  ideToolbarRef.current = ideEmbedToolbar;
+  vncToolbarRef.current = vncEmbedToolbar;
+
   const isEn = language === 'en';
   const t = (key: string, zh: string) => translate(isEn, key, zh);
   const tf = (key: string, zh: string, vars: Record<string, string | number>) =>
     fillTemplate(t(key, zh), vars);
+
+  React.useEffect(() => {
+    const loc = language === 'en';
+    const tr = (key: string, zh: string) => translate(loc, key, zh);
+    registerStudioClientActionHandlers({
+      navigateTab: (tab) => {
+        setActiveTab(tab);
+      },
+      setEmbedFloat: (target, enabled) => {
+        const api = target === 'ide' ? ideToolbarRef.current : vncToolbarRef.current;
+        if (!api?.showIframe) {
+          addToast(
+            tr(
+              target === 'ide' ? 'studio.embed.clientAction.needIde' : 'studio.embed.clientAction.needVnc',
+              target === 'ide'
+                ? '请先在代码编辑器中连接 code-server（编辑器同类型仅 1 个，可与远程桌面同时各 1 个）'
+                : '请先在远程桌面中连接（远程桌面同类型仅 1 个，可与代码编辑器同时各 1 个）',
+            ),
+            'info',
+          );
+          return;
+        }
+        if (enabled === api.embedFloating) {
+          addToast(
+            tr(
+              'studio.embed.singleSessionOnly',
+              '当前已是该状态；同类嵌入仅 1 个，IDE 与远程桌面可同时各 1 个',
+            ),
+            'info',
+          );
+          return;
+        }
+        api.toggleEmbedFloat();
+      },
+    });
+  }, [setActiveTab, addToast, language]);
   const initialChatDeviceId = toChatDeviceId(currentDevice?.id);
   const initialStudioSessionId =
     typeof window !== 'undefined' ? getOrCreateStudioChatSessionId(initialChatDeviceId) : `ui-${Date.now()}`;
@@ -789,6 +860,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
       abortInFlightRun(false);
     }
     const requestMessage = userMsg || t('chat.attach.continue', '请结合我刚上传的附件继续处理当前请求。');
+    dispatchOpenEmbedIntentFromUserMessage(requestMessage);
+    void tryOpenProductDocFromUserMessage(requestMessage).then((opened) => {
+      if (opened) addToast(t('chat.productDoc.opened', '已打开文档页面'), 'info');
+    });
     const transcriptText = displayAttachments
       .map((attachment) => attachment.transcript?.trim())
       .filter(Boolean)
@@ -2631,7 +2706,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     (b): b is Extract<ChatBlock, { type: 'reasoning' }> =>
                       b.type === 'reasoning' && Boolean((b as Extract<ChatBlock, { type: 'reasoning' }>).text?.trim()),
                   )
-                  .map((b) => b.text.replace(/\r\n/g, '\n').trim())
+                  .map((b) => sanitizeReasoningDisplayText(b.text.replace(/\r\n/g, '\n')).trim())
+                  .filter(Boolean)
                   .sort((a, b) => b.length - a.length);
 
                 if (!aiText.trim()) {
@@ -2869,12 +2945,32 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         if (rafHandle) { cancelAnimationFrame(rafHandle); flushAiMessage(); }
         if (generation !== streamGenerationRef.current) return;
         const streamCompletedAt = Date.now();
-        const cleanedMonologueText = stripInternalDraftMonologue(pendingText || aiText);
-        if (cleanedMonologueText !== (pendingText || aiText)) {
+        const blocksAfterStream = pendingBlocks.length > 0 ? pendingBlocks : aiBlocks;
+        const reasoningChunksFinal = blocksAfterStream
+          .filter(
+            (b): b is Extract<ChatBlock, { type: 'reasoning' }> =>
+              b.type === 'reasoning' && Boolean((b as Extract<ChatBlock, { type: 'reasoning' }>).text?.trim()),
+          )
+          .map((b) => sanitizeReasoningDisplayText(b.text.replace(/\r\n/g, '\n')).trim())
+          .filter(Boolean)
+          .sort((a, b) => b.length - a.length);
+        let combinedAfterDedupe = pendingText || aiText;
+        if (reasoningChunksFinal.length) {
+          const stripped = stripVisibleAssistantDuplicateOfReasoning(combinedAfterDedupe, reasoningChunksFinal);
+          if (stripped !== combinedAfterDedupe) {
+            combinedAfterDedupe = stripped;
+            aiText = stripped;
+            pendingText = stripped;
+            rebuildContentSlotsFromBlocksAndText(blocksAfterStream, stripped);
+            updateAiMessage(aiText, blocksAfterStream, true);
+          }
+        }
+        const cleanedMonologueText = stripInternalDraftMonologue(combinedAfterDedupe);
+        if (cleanedMonologueText !== combinedAfterDedupe) {
           aiText = cleanedMonologueText;
           pendingText = cleanedMonologueText;
-          rebuildContentSlotsFromBlocksAndText(pendingBlocks.length > 0 ? pendingBlocks : aiBlocks, cleanedMonologueText);
-          updateAiMessage(aiText, pendingBlocks.length > 0 ? pendingBlocks : aiBlocks, true);
+          rebuildContentSlotsFromBlocksAndText(blocksAfterStream, cleanedMonologueText);
+          updateAiMessage(aiText, blocksAfterStream, true);
         }
         let bodyTrim = (pendingText || aiText).trim();
         if (/<client-action\b/i.test(bodyTrim)) {

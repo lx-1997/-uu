@@ -6798,6 +6798,54 @@ function parseStudioUiHintsPayload(raw: unknown): StudioUiHints | undefined {
               : undefined,
         }
       : undefined;
+  const bdRaw = o.board;
+  const board =
+    bdRaw && typeof bdRaw === 'object'
+      ? {
+          platform:
+            typeof (bdRaw as { platform?: unknown }).platform === 'string'
+              ? String((bdRaw as { platform: string }).platform).slice(0, 64)
+              : (bdRaw as { platform?: unknown }).platform === null
+                ? null
+                : undefined,
+          model:
+            typeof (bdRaw as { model?: unknown }).model === 'string'
+              ? String((bdRaw as { model: string }).model).slice(0, 64)
+              : (bdRaw as { model?: unknown }).model === null
+                ? null
+                : undefined,
+          skillBundleSyncedAt:
+            typeof (bdRaw as { skillBundleSyncedAt?: unknown }).skillBundleSyncedAt === 'number'
+              ? (bdRaw as { skillBundleSyncedAt: number }).skillBundleSyncedAt
+              : undefined,
+        }
+      : undefined;
+  const uiRaw = o.ui;
+  const ui =
+    uiRaw && typeof uiRaw === 'object'
+      ? {
+          activeTab:
+            typeof (uiRaw as { activeTab?: unknown }).activeTab === 'string'
+              ? (uiRaw as { activeTab: string }).activeTab.slice(0, 32)
+              : undefined,
+          ideEmbedFloating:
+            typeof (uiRaw as { ideEmbedFloating?: unknown }).ideEmbedFloating === 'boolean'
+              ? (uiRaw as { ideEmbedFloating: boolean }).ideEmbedFloating
+              : undefined,
+          vncEmbedFloating:
+            typeof (uiRaw as { vncEmbedFloating?: unknown }).vncEmbedFloating === 'boolean'
+              ? (uiRaw as { vncEmbedFloating: boolean }).vncEmbedFloating
+              : undefined,
+          ideShowIframe:
+            typeof (uiRaw as { ideShowIframe?: unknown }).ideShowIframe === 'boolean'
+              ? (uiRaw as { ideShowIframe: boolean }).ideShowIframe
+              : undefined,
+          vncShowIframe:
+            typeof (uiRaw as { vncShowIframe?: unknown }).vncShowIframe === 'boolean'
+              ? (uiRaw as { vncShowIframe: boolean }).vncShowIframe
+              : undefined,
+        }
+      : undefined;
   const hints: StudioUiHints = {
     capturedAt: o.capturedAt,
     source: typeof o.source === 'string' ? o.source.slice(0, 64) : undefined,
@@ -6805,6 +6853,8 @@ function parseStudioUiHintsPayload(raw: unknown): StudioUiHints | undefined {
     gateway: gateway && Object.values(gateway).some((v) => v !== undefined) ? gateway : undefined,
     feishuConnected:
       typeof o.feishuConnected === 'boolean' ? o.feishuConnected : undefined,
+    board: board && Object.values(board).some((v) => v !== undefined) ? board : undefined,
+    ui: ui && Object.values(ui).some((v) => v !== undefined) ? ui : undefined,
   };
   return hints;
 }

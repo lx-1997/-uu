@@ -228,6 +228,18 @@ export function buildStudioUiHintsPrompt(
     );
   }
 
+  const u = hints.ui;
+  if (u && Object.values(u).some((v) => v !== undefined)) {
+    const yn3 = (v: boolean | undefined, yes: string, no: string) => {
+      if (v === true) return yes;
+      if (v === false) return no;
+      return "未知";
+    };
+    lines.push(
+      `- 客户端界面: 当前 Tab=${u.activeTab ?? "未知"} · IDE 已嵌入=${yn3(u.ideShowIframe, "是", "否")} · IDE 浮窗=${yn3(u.ideEmbedFloating, "是", "否")} · VNC 已嵌入=${yn3(u.vncShowIframe, "是", "否")} · VNC 浮窗=${yn3(u.vncEmbedFloating, "是", "否")}`,
+    );
+  }
+
   lines.push(
     "",
     "**约束**",
