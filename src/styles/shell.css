@@ -235,6 +235,8 @@
   width: 20px;
   height: 20px;
   flex-shrink: 0;
+  /* 侧栏小图标在部分 DPI 下描边更易糊，几何精度略优于默认 */
+  shape-rendering: geometricPrecision;
 }
 
 /* Tooltip for all rail items */

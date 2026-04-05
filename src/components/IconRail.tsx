@@ -1,11 +1,18 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Cloud, MessagesSquare } from 'lucide-react';
+import { Cloud, MessagesSquare, Puzzle, Shrimp } from 'lucide-react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import StudioVersionFooter from './StudioVersionFooter';
 import { isDeviceShownOnline } from '../utils/device-connection';
 import { useConfirmRemoveDevice } from '../hooks/useConfirmRemoveDevice';
+
+/** 侧栏 20px：Lucide 矢量；OpenClaw 用小龙虾(虾)；技能工坊用拼图表「技能拼装」 */
+const RAIL_LUCIDE_ICONS = {
+  shrimp: Shrimp,
+  puzzle: Puzzle,
+} as const;
+type RailLucideKey = keyof typeof RAIL_LUCIDE_ICONS;
 
 interface NavItemDef {
   tab: Tab;
@@ -14,22 +21,16 @@ interface NavItemDef {
   zhLabel: string;
   zhDesc: string;
   paths: string[];
+  lucide?: RailLucideKey;
 }
 
 const NAV_ITEMS: NavItemDef[] = [
   { tab: 'dashboard', labelKey: 'nav.dashboard.label', descKey: 'nav.dashboard.desc', zhLabel: '工作台', zhDesc: '设备总览与快捷操作',
     paths: ['M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4'] },
   { tab: 'openclaw', labelKey: 'nav.openclaw.label', descKey: 'nav.openclaw.desc', zhLabel: 'OpenClaw', zhDesc: '板端 AI Agent 管理',
-    paths: [
-      'M8 5c0-1.5 1.8-3 4-3s4 1.5 4 3',
-      'M7 8c-2-1-4 0-4 2s1 3 2 3',
-      'M17 8c2-1 4 0 4 2s-1 3-2 3',
-      'M5 13l3 2 4 6 4-6 3-2',
-      'M9.5 7a1 1 0 100-2 1 1 0 000 2z',
-      'M14.5 7a1 1 0 100-2 1 1 0 000 2z',
-    ] },
+    paths: [], lucide: 'shrimp' },
   { tab: 'skills', labelKey: 'nav.skills.label', descKey: 'nav.skills.desc', zhLabel: '技能工坊', zhDesc: 'OpenClaw 技能生成与部署',
-    paths: ['M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z'] },
+    paths: [], lucide: 'puzzle' },
 ];
 
 const CONNECT_ITEMS: NavItemDef[] = [
@@ -57,6 +58,14 @@ function NavIcon({ paths }: { paths: string[] }) {
       {paths.map((d, i) => <path key={i} d={d} />)}
     </svg>
   );
+}
+
+function RailTabIcon({ item }: { item: NavItemDef }) {
+  if (item.lucide) {
+    const Icon = RAIL_LUCIDE_ICONS[item.lucide];
+    return <Icon size={20} strokeWidth={1.5} aria-hidden />;
+  }
+  return <NavIcon paths={item.paths} />;
 }
 
 export default function IconRail() {
@@ -94,7 +103,7 @@ export default function IconRail() {
           data-tooltip={!railExpanded ? `${label} · ${desc}` : undefined}
           onClick={() => setActiveTab(item.tab)}
         >
-          <NavIcon paths={item.paths} />
+          <RailTabIcon item={item} />
           {railExpanded && <span className="rail-label">{label}</span>}
         </button>
       );
