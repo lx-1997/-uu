@@ -3,6 +3,7 @@
  * 移植自 rdkstudio_frontend-master
  */
 import { Client } from 'ssh2';
+import { createHash } from 'crypto';
 import { SSH_READY_TIMEOUT_MS, SSH_KEEPALIVE_INTERVAL_MS, SSH_KEEPALIVE_COUNT_MAX } from '../ssh.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -51,6 +52,18 @@ export interface Device {
   id?: string;
   name?: string;
   deviceType?: string;
+  /** Normalized platform from board detect, e.g. rdk-x5 */
+  boardPlatform?: string | null;
+}
+
+function isBoardRdkX5(device: Device): boolean {
+  const platform = String(device.boardPlatform || '').toLowerCase();
+  if (platform === 'rdk-x5' || platform === 'x5') return true;
+  const type = String(device.deviceType || '').toLowerCase();
+  if (/\brdk\s*-?\s*x5\b|\bx5\b/.test(type)) return true;
+  const name = String(device.name || '').toLowerCase();
+  if (/\brdk\s*-?\s*x5\b|\bx5\b/.test(name)) return true;
+  return false;
 }
 
 /** SSH 连接池 / oc-bridge 缓存 key；同一公网 IP 下不同映射端口必须区分 */
@@ -886,6 +899,8 @@ export class OpenClawDeploymentManager {
 
   /** 板端 ~/.rdk-studio/oc-bridge.mjs 已同步（按 IP 缓存） */
   private ocBridgeScriptOk = new Set<string>();
+  /** 已同步脚本内容签名（按 endpoint 缓存），本地脚本变更时自动重新下发 */
+  private ocBridgeScriptSigByIp = new Map<string, string>();
   /** 常驻 NDJSON 桥（每设备一条 exec 流） */
   private ocBridgeTransportByIp = new Map<string, OcBridgeTransport>();
   /** 同一设备串行发送，避免交错 reqId */
@@ -960,12 +975,15 @@ export class OpenClawDeploymentManager {
 
   private ensureOcBridgeScriptOnDevice(device: Device): Promise<boolean> {
     const key = sshEndpointKey(device);
-    if (this.ocBridgeScriptOk.has(key)) return Promise.resolve(true);
     let src: string;
     try {
       src = fs.readFileSync(this.getOcBridgeSourcePath(), 'utf8');
     } catch {
       return Promise.resolve(false);
+    }
+    const localSig = createHash('sha256').update(src).digest('hex');
+    if (this.ocBridgeScriptOk.has(key) && this.ocBridgeScriptSigByIp.get(key) === localSig) {
+      return Promise.resolve(true);
     }
     const b64 = Buffer.from(src, 'utf8').toString('base64');
     const cmd = [
@@ -980,7 +998,10 @@ export class OpenClawDeploymentManager {
         cmd,
         () => {},
         (ok) => {
-          if (ok) this.ocBridgeScriptOk.add(key);
+          if (ok) {
+            this.ocBridgeScriptOk.add(key);
+            this.ocBridgeScriptSigByIp.set(key, localSig);
+          }
           resolve(ok);
         },
         { timeout: 120000 },
@@ -1100,6 +1121,8 @@ export class OpenClawDeploymentManager {
       this.ocBridgeTransportByIp.delete(endpointKey);
     }
     this.ocBridgeSendChain.delete(endpointKey);
+    this.ocBridgeScriptOk.delete(endpointKey);
+    this.ocBridgeScriptSigByIp.delete(endpointKey);
     const p = this.sshPool.get(endpointKey);
     if (!p) return;
     this.sshPool.delete(endpointKey);
@@ -1294,7 +1317,13 @@ export class OpenClawDeploymentManager {
     try {
       const client = await this.getClient(device);
       const remote = boardOpenclawRemoteSkillsDir(device.userName);
-      const r = await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput);
+      const includeRdkx5Skills = isBoardRdkX5(device);
+      onOutput(
+        `[Studio] 板型判定：${includeRdkx5Skills ? 'RDK X5（同步 rdkx5_skills）' : '非 RDK X5（跳过 rdkx5_skills）'}\n`,
+      );
+      const r = await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput, {
+        includeRdkx5Skills,
+      });
       return r.ok;
     } catch (e) {
       onOutput(`[Studio] WARN 内置 skill 同步异常: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -1310,7 +1339,13 @@ export class OpenClawDeploymentManager {
     try {
       const client = await this.getClient(device);
       const remote = boardOpenclawRemoteSkillsDir(device.userName);
-      await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput);
+      const includeRdkx5Skills = isBoardRdkX5(device);
+      onOutput(
+        `[Studio] 板型判定：${includeRdkx5Skills ? 'RDK X5（同步 rdkx5_skills）' : '非 RDK X5（跳过 rdkx5_skills）'}\n`,
+      );
+      await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput, {
+        includeRdkx5Skills,
+      });
     } catch (e) {
       onOutput(
         `[Studio] WARN 内置 skill 同步失败（OpenClaw 已安装，可稍后重试或调 API ensure-board-skill-bundle）: ` +
@@ -2105,7 +2140,7 @@ print(json.dumps(result,ensure_ascii=False))`;
               receivedAnyOutput = true;
               const tn = String(line.name || '');
               const tp = String(line.phase || '');
-              const det = String(line.detail || '').slice(0, 200);
+              const det = String(line.detail || '').slice(0, 600);
               onChunk(`\n[TOOL:${tp}] ${tn}${det ? ` -> ${det}` : ''}\n`);
             }
             if (line.type === 'error' && (!rid || rid === activeReqId)) {
@@ -2274,7 +2309,20 @@ onFrame = (frame) => {
   if (stream === 'tool') {
     const tn = d.name || d.tool || '';
     const tp = d.phase || d.status || 'call';
-    const tr = d.result ? (typeof d.result === 'string' ? d.result.slice(0, 200) : JSON.stringify(d.result).slice(0, 200)) : '';
+    const pickText = (v) => {
+      if (v == null) return '';
+      if (typeof v === 'string') return v;
+      try { return JSON.stringify(v); } catch { return String(v); }
+    };
+    const compact = (s, max = 400) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
+    const tr = compact(
+      pickText(d.result)
+      || pickText(d.detail)
+      || pickText(d.message)
+      || pickText(d.args)
+      || pickText(d.input)
+      || pickText(d.params)
+    );
     process.stdout.write('\\n[TOOL:' + tp + '] ' + tn + (tr ? ' -> ' + tr : '') + '\\n');
     return;
   }

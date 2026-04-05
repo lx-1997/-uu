@@ -22,8 +22,8 @@ export const ONE_SHOT_DEV_WORKFLOW_PROMPT_EN = [
   '7) Execute only after I confirm.',
 ].join('\n');
 
-export const DASHBOARD_HEALTH_CHECK_PROMPT_ZH = '帮我全面检查设备健康状态';
+export const DASHBOARD_HEALTH_CHECK_PROMPT_ZH = '帮我做一次设备体检，并按风险从高到低给出处理建议。';
 export const DASHBOARD_HEALTH_CHECK_PROMPT_EN = 'Run a full health check on this device';
 
-export const DASHBOARD_CHAT_INTRO_PROMPT_ZH = 'RDK Studio 和 RDKClaw 能做什么？请简要介绍你的能力。';
+export const DASHBOARD_CHAT_INTRO_PROMPT_ZH = '介绍一下 RDK Studio 和 RDKClaw 能做什么，并给我 3 个上手建议。';
 export const DASHBOARD_CHAT_INTRO_PROMPT_EN = 'What can RDK Studio and RDKClaw do? Briefly describe your capabilities.';

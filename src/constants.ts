@@ -123,14 +123,10 @@ export function getTerminalProfileLabel(profileId: string, isEn: boolean): strin
 
 /** 命令建议：中英双语，筛选时同时匹配 zh/en/keyword */
 export const CMD_SUGGESTIONS: Array<{ icon: string; textZh: string; textEn: string; keyword: string }> = [
-  { icon: '', textZh: '基于当前设备状态，给我一份可执行应用计划', textEn: 'Based on the current device, give me an executable app plan', keyword: '计划' },
-  { icon: '', textZh: '汇总当前设备可用能力并生成执行建议', textEn: 'Summarize device capabilities and suggest next actions', keyword: '同步' },
-  { icon: '', textZh: '帮我烧录最新系统镜像并给出验证步骤', textEn: 'Flash the latest system image and list verification steps', keyword: '烧录' },
-  { icon: '', textZh: '打开 SSH 终端并检查 ROS2 与 BPU 环境', textEn: 'Open SSH terminal and check ROS2 and BPU environment', keyword: '终端' },
-  { icon: '', textZh: '连接 VNC 并优化远程调试体验', textEn: 'Connect VNC and tune remote debugging', keyword: 'vnc' },
-  { icon: '', textZh: '查看 ROS 话题异常并给出修复命令', textEn: 'Inspect ROS topic issues and suggest fix commands', keyword: 'ros' },
-  { icon: '', textZh: '部署一个可运行的视觉应用并回显结果', textEn: 'Deploy a runnable vision app and show results', keyword: '示例' },
-  { icon: '', textZh: '生成 OpenClaw 工作流模板并执行', textEn: 'Generate an OpenClaw workflow template and run it', keyword: 'openclaw' },
+  { icon: '', textZh: '介绍一下 RDK Studio 和 RDKClaw 的核心能力', textEn: 'Give me a quick intro to RDK Studio and RDKClaw capabilities', keyword: '介绍' },
+  { icon: '', textZh: '帮我做一次设备体检并给出风险项', textEn: 'Run a device health check and list risk items', keyword: '体检' },
+  { icon: '', textZh: '在当前设备上运行一个 YOLO 示例并返回结果', textEn: 'Run a YOLO demo on this device and report the result', keyword: 'yolo' },
+  { icon: '', textZh: '分析终端最近输出并给出修复步骤', textEn: 'Analyze recent terminal output and provide fix steps', keyword: '日志' },
 ];
 
 export type CmdSuggestion = { icon: string; text: string; keyword: string; textZh: string; textEn: string };

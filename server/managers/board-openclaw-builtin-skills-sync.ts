@@ -35,13 +35,19 @@ function listSkillSubdirsWithSkillMd(rootAbs: string): string[] {
 }
 
 /** 合并 skills/ 与 rdkx5_skills/：同名目录以 skills/ 为准 */
-export function collectBuiltinSkillSyncTargets(studioCwd: string): Array<{ skillId: string; localRoot: string }> {
+export function collectBuiltinSkillSyncTargets(
+  studioCwd: string,
+  options?: { includeRdkx5Skills?: boolean },
+): Array<{ skillId: string; localRoot: string }> {
   const cwd = path.resolve(studioCwd);
   const mainSkills = path.join(cwd, 'skills');
   const x5Skills = path.join(cwd, 'rdkx5_skills');
+  const includeRdkx5Skills = options?.includeRdkx5Skills !== false;
   const byId = new Map<string, string>();
-  for (const id of listSkillSubdirsWithSkillMd(x5Skills)) {
-    byId.set(id, path.join(x5Skills, id));
+  if (includeRdkx5Skills) {
+    for (const id of listSkillSubdirsWithSkillMd(x5Skills)) {
+      byId.set(id, path.join(x5Skills, id));
+    }
   }
   for (const id of listSkillSubdirsWithSkillMd(mainSkills)) {
     byId.set(id, path.join(mainSkills, id));
@@ -118,14 +124,20 @@ export async function syncBuiltinStudioSkillsOverSftp(
   remoteSkillsBase: string,
   studioCwd: string,
   onLog: (msg: string) => void,
+  options?: { includeRdkx5Skills?: boolean },
 ): Promise<{ ok: boolean; skillCount: number; fileCount: number; error?: string }> {
-  const targets = collectBuiltinSkillSyncTargets(studioCwd);
+  const includeRdkx5Skills = options?.includeRdkx5Skills !== false;
+  const targets = collectBuiltinSkillSyncTargets(studioCwd, { includeRdkx5Skills });
   if (targets.length === 0) {
     onLog('[Studio] 未找到本地 skills/ 目录，跳过同步\n');
     return { ok: true, skillCount: 0, fileCount: 0 };
   }
 
-  onLog(`[Studio] 正在同步内置 skills（${targets.length} 个目录）→ ${remoteSkillsBase}\n`);
+  onLog(
+    `[Studio] 正在同步内置 skills（${targets.length} 个目录，${
+      includeRdkx5Skills ? '包含' : '不包含'
+    } rdkx5_skills）→ ${remoteSkillsBase}\n`,
+  );
 
   let fileCount = 0;
   try {

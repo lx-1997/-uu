@@ -1538,23 +1538,15 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             const times = m[3] ? ` ×${m[3]}` : '';
             const toolLabel = toBoardToolLabel(rawTool);
             const phaseLabel = toBoardPhaseLabel(phase);
-            const hint =
-              phase === 'result'
-                ? t('chat.board.phaseHint.result', '该子步骤已结束')
-                : phase === 'error'
-                  ? t('chat.board.phaseHint.error', '该子步骤失败')
-                  : phase === 'start'
-                    ? t('chat.board.phaseHint.start', '板端已开始该步骤')
-                    : t('chat.board.phaseHint.update', '进行中');
             return tf(
-              'chat.board.toolLineDetailed',
-              '「{{toolLabel}}」（{{rawTool}}）· {{phase}}{{times}} — {{hint}}',
+              'chat.board.toolLineTransparent',
+              '[TOOL:{{phaseRaw}}] {{rawTool}}{{times}} · {{toolLabel}} · {{phase}}',
               {
-                toolLabel,
+                phaseRaw: phase,
                 rawTool,
-                phase: phaseLabel,
                 times,
-                hint,
+                toolLabel,
+                phase: phaseLabel,
               },
             );
           }
@@ -2077,13 +2069,13 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                             ? t('dock.collab.outboundFleetBroadcastSubtitle', '向多块板卡广播任务')
                             : t(
                                 'dock.collab.outboundDelegateSubtitle',
-                                '委派任务与执行建议（需网关就绪；Studio 可连板；要 apt/在线模型时板端须出网）',
+                                '协作上下文包（目标/约束/证据/验收；先对齐再执行，必要时回切本地快路径）',
                               );
                   pushAiBlock({
                     type: 'collab',
                     side: 'rdkclaw',
                     collabRole: 'outbound',
-                    title: t('dock.collab.outboundTitle', '发给板端 OpenClaw'),
+                    title: t('dock.collab.outboundTitle', '与板端 OpenClaw 协作上下文'),
                     subtitle: outboundSubtitle,
                     lines: linesOut,
                     collapsible: true,
@@ -2724,9 +2716,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                    */
                   stripMarkdownSlotsKeepBlocks();
                   if (reasoningWithText) {
-                    const rNorm = reasoningWithText.text.replace(/\r\n/g, '\n').trim();
-                    const sNorm = serverTrim.replace(/\r\n/g, '\n');
-                    aiText = !serverTrim || sNorm === rNorm ? '' : stripInternalDraftMonologue(serverFill);
+                    // 用所有 reasoning chunks 做去重，避免单块比较遗漏
+                    const deduped = reasoningChunksForDedupe.length
+                      ? stripVisibleAssistantDuplicateOfReasoning(serverTrim, reasoningChunksForDedupe)
+                      : serverTrim;
+                    aiText = !serverTrim || !deduped ? '' : stripInternalDraftMonologue(deduped);
                   } else {
                     aiText = stripInternalDraftMonologue(serverFill);
                   }
@@ -3072,6 +3066,110 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     addToast(t('chat.soul.closed', 'SOUL 更新入口已关闭：请通过 USER.md 调整偏好'), 'info');
   };
 
+  const watchSingleRunStop = (runId: string, markerMsgId: number) => {
+    const maxAttempts = 10;
+    const intervalMs = 1500;
+    let attempts = 0;
+    const tick = () => {
+      getActiveRDKClawRuns()
+        .then((res) => {
+          if (!res?.ok) return;
+          const stillRunning = res.runs.includes(runId);
+          if (!stillRunning) {
+            setChatMessages((prev) => prev.map((m) => (
+              m.id === markerMsgId
+                ? {
+                    ...m,
+                    blocks: [{
+                      type: 'task-result',
+                      success: true,
+                      title: t('chat.stop.title', '已请求停止任务'),
+                      detail: tf('chat.stop.confirmed', 'runId: {{id}}（已确认停止）', { id: runId }),
+                    }],
+                  }
+                : m
+            )));
+            return;
+          }
+          attempts += 1;
+          if (attempts >= maxAttempts) {
+            setChatMessages((prev) => [...prev, {
+              id: Date.now(),
+              role: 'ai',
+              text: '',
+              blocks: [{
+                type: 'status',
+                items: [{
+                  label: t('chat.stop.watchdog', '停止跟踪'),
+                  value: tf('chat.stop.watchdogHint', '停止请求已发送，但 run 仍在执行（runId: {{id}}）。建议点「全部停止」或检查后端日志。', { id: runId }),
+                  ok: false,
+                }],
+              }],
+            }]);
+            return;
+          }
+          window.setTimeout(tick, intervalMs);
+        })
+        .catch(() => {
+          attempts += 1;
+          if (attempts < maxAttempts) window.setTimeout(tick, intervalMs);
+        });
+    };
+    window.setTimeout(tick, intervalMs);
+  };
+
+  const watchAllRunsStop = (markerMsgId: number) => {
+    const maxAttempts = 10;
+    const intervalMs = 1500;
+    let attempts = 0;
+    const tick = () => {
+      getActiveRDKClawRuns()
+        .then((res) => {
+          if (!res?.ok) return;
+          const runningCount = res.runs.length;
+          if (runningCount === 0) {
+            setChatMessages((prev) => prev.map((m) => (
+              m.id === markerMsgId
+                ? {
+                    ...m,
+                    blocks: [{
+                      type: 'task-result',
+                      success: true,
+                      title: t('chat.stopAll.done', '已确认全部停止'),
+                      detail: t('chat.stopAll.doneHint', '当前无运行中的任务。'),
+                    }],
+                  }
+                : m
+            )));
+            return;
+          }
+          attempts += 1;
+          if (attempts >= maxAttempts) {
+            setChatMessages((prev) => [...prev, {
+              id: Date.now(),
+              role: 'ai',
+              text: '',
+              blocks: [{
+                type: 'status',
+                items: [{
+                  label: t('chat.stopAll.watchdog', '停止跟踪'),
+                  value: tf('chat.stopAll.watchdogHint', '仍有 {{n}} 个任务未停止，建议检查后端终端日志或再次执行「全部停止」。', { n: runningCount }),
+                  ok: false,
+                }],
+              }],
+            }]);
+            return;
+          }
+          window.setTimeout(tick, intervalMs);
+        })
+        .catch(() => {
+          attempts += 1;
+          if (attempts < maxAttempts) window.setTimeout(tick, intervalMs);
+        });
+    };
+    window.setTimeout(tick, intervalMs);
+  };
+
   const stopCurrentRun = () => {
     const runId = currentRunIdRef.current;
     abortInFlightRun(false);
@@ -3118,15 +3216,21 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   }
                 : m
             )));
+          } else {
+            watchSingleRunStop(runId, stopSentTs);
           }
         })
         .catch(() => {
           addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
         });
     } else {
-      void cancelAllRDKClawRuns().catch(() => {
-        addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
-      });
+      void cancelAllRDKClawRuns()
+        .then(() => {
+          watchAllRunsStop(stopSentTs);
+        })
+        .catch(() => {
+          addToast(t('chat.stop.failRetry', '停止任务失败，请重试“全部停止”'), 'error');
+        });
     }
   };
 
@@ -3174,6 +3278,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               }
             : m
         )));
+        watchAllRunsStop(stopAllTs);
         addToast(tf('chat.stopAll.toast', '已停止 {{n}} 个运行中的任务', { n: count }), 'info');
       })
       .catch(() => {

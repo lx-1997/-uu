@@ -18,6 +18,7 @@ import { DASHBOARD_CHAT_INTRO_PROMPT_EN, DASHBOARD_CHAT_INTRO_PROMPT_ZH } from '
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
 import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-message-plain';
+import { buildThreadSummaryLine } from '../utils/chat-history-thread-label';
 import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
 import { DockFlashMentionWizard } from './DockFlashMentionWizard';
 import {
@@ -406,6 +407,54 @@ async function fileToBase64(file: File) {
   return btoa(binary);
 }
 
+function renderSummaryWithEmphasis(text: string): React.ReactNode {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return text;
+  const chunks = trimmed.split(/(\s*[·|]\s*)/);
+  const keyTokenRe = /(运行中|处理中|已完成|完成|失败|成功|warning|error|done|running|\b\d+\/\d+\b|\b\d+(?:\.\d+)?(?:ms|s|m)\b)/i;
+  return chunks.map((chunk, idx) => {
+    if (/^(\s*[·|]\s*)$/.test(chunk)) {
+      return <span key={`sep-${idx}`} className="dock-summary-sep">{chunk}</span>;
+    }
+    const c = chunk.trim();
+    if (!c) return <span key={`plain-${idx}`}>{chunk}</span>;
+    const prefix = c.split(':')[0];
+    const shouldStrongPrefix = c.includes(':') && prefix.length > 0 && prefix.length <= 18;
+    if (shouldStrongPrefix) {
+      return (
+        <span key={`strong-prefix-${idx}`}>
+          <strong className="dock-summary-strong">{prefix}</strong>
+          {c.slice(prefix.length)}
+        </span>
+      );
+    }
+    if (keyTokenRe.test(c)) {
+      return <strong key={`strong-${idx}`} className="dock-summary-strong">{chunk}</strong>;
+    }
+    return <span key={`text-${idx}`}>{chunk}</span>;
+  });
+}
+
+function summarizeInline(text: string, maxChars = 52): string {
+  const oneLine = String(text || "").replace(/\s+/g, " ").trim();
+  if (!oneLine) return "";
+  return oneLine.length > maxChars ? `${oneLine.slice(0, Math.max(0, maxChars - 1))}…` : oneLine;
+}
+
+function summarizeLines(lines: string[], maxChars = 52): string {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const s = summarizeInline(sanitizeTerminalLineForDisplay(lines[i] || ""), maxChars);
+    if (s) return s;
+  }
+  return "";
+}
+
+function composeCollapsedSummary(base: string, preview: string, open: boolean): string {
+  const b = summarizeInline(base, 40) || base;
+  if (open || !preview) return b;
+  return `${b} | ${preview}`;
+}
+
 function ReasoningCollapsible({
   block,
   presentation = 'default',
@@ -414,12 +463,14 @@ function ReasoningCollapsible({
   presentation?: 'default' | 'agent-footprint';
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(!block.defaultCollapsed);
+  const [open, setOpen] = useState(false);
+  const preview = summarizeInline(block.text, 56);
   const summary =
     block.summary
     || (block.text.trim().length > 0
       ? t('dock.reasoning.summaryHasContent', '思考过程')
       : t('dock.reasoning.summaryEmpty', '思考过程'));
+  const collapsedSummary = composeCollapsedSummary(summary, preview, open);
   return (
     <div
       className={`msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking ${open ? 'open' : ''}${
@@ -430,12 +481,11 @@ function ReasoningCollapsible({
         <button
           type="button"
           className="reasoning-collapsible-trigger"
+          aria-expanded={open}
           onClick={() => setOpen((p) => !p)}
         >
-          <svg className="reasoning-collapsible-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          <span className="reasoning-collapsible-summary">{summary}</span>
+          <span className="reasoning-collapsible-summary">{renderSummaryWithEmphasis(collapsedSummary)}</span>
+          <span className="reasoning-collapsible-toggle">{open ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}</span>
         </button>
         {block.text.trim().length > 0 ? (
           <div className="reasoning-collapsible-actions">
@@ -461,7 +511,10 @@ function StatusCollapsible({
   presentation?: 'default' | 'agent-footprint';
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(!block.defaultCollapsed);
+  const [open, setOpen] = useState(false);
+  const summaryText = block.summary || block.title || block.items[0]?.label || t('dock.status.fallback', '详情');
+  const preview = summarizeInline(block.items.map((item) => `${item.label}: ${item.value}`).join(' | '), 64);
+  const collapsedSummary = composeCollapsedSummary(summaryText, preview, open);
   return (
     <div
       className={`msg-block status-collapsible dock-agent-card dock-agent-card--meta ${open ? 'open' : ''}${
@@ -474,12 +527,10 @@ function StatusCollapsible({
         aria-expanded={open}
         onClick={() => setOpen((p) => !p)}
       >
-        <svg className="status-collapsible-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
         <span className="status-collapsible-summary">
-          {block.summary || block.title || block.items[0]?.label || t('dock.status.fallback', '详情')}
+          {renderSummaryWithEmphasis(collapsedSummary)}
         </span>
+        <span className="status-collapsible-toggle">{open ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}</span>
       </button>
       {open && (
         <div className="status-collapsible-body">
@@ -649,8 +700,11 @@ function BlockRenderer({
   const { t } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const [rosFrame, setRosFrame] = useState(0);
-  const [expandedTerminal, setExpandedTerminal] = useState(false);
-  const [expandedCollab, setExpandedCollab] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [collabOpen, setCollabOpen] = useState(false);
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [resultOpen, setResultOpen] = useState(false);
 
   const needsRosAnimation = block.type === 'image' && !block.src;
   useEffect(() => {
@@ -660,20 +714,30 @@ function BlockRenderer({
   }, [needsRosAnimation]);
 
   if (block.type === 'terminal') {
-    const previewLines = Math.max(3, block.previewLines ?? 10);
-    const collapsible = !!block.collapsible && block.lines.length > previewLines;
-    const visibleLines = collapsible && !expandedTerminal
-      ? block.lines.slice(-previewLines)
-      : block.lines;
+    const hasLines = block.lines.length > 0;
+    const terminalPreview = hasLines ? summarizeLines(block.lines, 56) : '';
+    const terminalTitle = composeCollapsedSummary(block.label || t('dock.agent.shell', '终端输出'), terminalPreview, terminalOpen);
     return (
       <div
         className={`msg-block terminal-block dock-agent-card dock-agent-card--terminal${
           presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
         }`}
       >
-        <div className="dock-agent-card-head">
+        <div
+          className={`dock-agent-card-head${hasLines ? ' dock-agent-card-head--clickable' : ''}`}
+          role={hasLines ? 'button' : undefined}
+          aria-expanded={hasLines ? terminalOpen : undefined}
+          tabIndex={hasLines ? 0 : -1}
+          onClick={hasLines ? () => setTerminalOpen((prev) => !prev) : undefined}
+          onKeyDown={hasLines ? (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setTerminalOpen((prev) => !prev);
+            }
+          } : undefined}
+        >
           <span className="dock-agent-card-icon" aria-hidden>▸</span>
-          <span className="dock-agent-card-title">{block.label || t('dock.agent.shell', '终端输出')}</span>
+          <span className="dock-agent-card-title">{renderSummaryWithEmphasis(terminalTitle)}</span>
           <div className="dock-agent-card-actions">
             <DockCopyIconButton
               label={t('dock.terminal.copyOut', '复制输出')}
@@ -681,35 +745,38 @@ function BlockRenderer({
                 void copyDockPlainText(block.lines.map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n'));
               }}
             />
-            {collapsible ? (
+            {hasLines ? (
               <button
                 type="button"
                 className="dock-card-aux-btn"
-                onClick={() => setExpandedTerminal((prev) => !prev)}
-                title={expandedTerminal ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setTerminalOpen((prev) => !prev);
+                }}
+                title={terminalOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
               >
-                {expandedTerminal
-                  ? t('dock.terminal.collapse', '收起')
+                {terminalOpen
+                  ? t('dock.tt.collapse', '收起')
                   : tf('dock.terminal.expandLines', '展开 ({{n}} 行)', { n: block.lines.length })}
               </button>
             ) : null}
           </div>
         </div>
-        <div className="dock-agent-shell dock-agent-shell--sanitized" role="log">
-          {visibleLines.map((line, i) => (
-            <div key={i} className="dock-agent-shell-line">{sanitizeTerminalLineForDisplay(line)}</div>
-          ))}
-        </div>
+        {terminalOpen ? (
+          <div className="dock-agent-shell dock-agent-shell--sanitized" role="log">
+            {block.lines.map((line, i) => (
+              <div key={i} className="dock-agent-shell-line">{sanitizeTerminalLineForDisplay(line)}</div>
+            ))}
+          </div>
+        ) : null}
       </div>
     );
   }
 
   if (block.type === 'collab') {
-    const previewLines = Math.max(3, block.previewLines ?? 8);
-    const collapsible = !!block.collapsible && block.lines.length > previewLines;
-    const visibleLines = collapsible && !expandedCollab
-      ? block.lines.slice(-previewLines)
-      : block.lines;
+    const hasLines = block.lines.length > 0;
+    const collabPreview = hasLines ? summarizeLines(block.lines, 56) : '';
     const role = block.collabRole;
     const sideClass = block.side === 'openclaw'
       ? 'collab-block--openclaw'
@@ -731,16 +798,56 @@ function BlockRenderer({
           : role === 'wait_hint'
             ? t('dock.collab.badgeWaitHint', 'RDKClaw · 等板端')
             : 'RDKClaw';
+    const renderCollabLine = (line: string, idx: number) => {
+      const safe = sanitizeTerminalLineForDisplay(line);
+      if (role === 'outbound') {
+        const mMulti = safe.match(/^([a-zA-Z][\w\s().\-→]+):\s*\n([\s\S]*)$/);
+        if (mMulti) {
+          return (
+            <div key={idx} className="collab-block-line collab-block-line--kv">
+              <span className="collab-kv-key">{mMulti[1]}:</span>
+              <pre className="collab-kv-value">{mMulti[2]}</pre>
+            </div>
+          );
+        }
+        const mSingle = safe.match(/^([a-zA-Z][\w\s().\-→]+):\s*(.+)$/);
+        if (mSingle) {
+          return (
+            <div key={idx} className="collab-block-line collab-block-line--kv collab-block-line--kv-single">
+              <span className="collab-kv-key">{mSingle[1]}:</span>
+              <span className="collab-kv-value-inline">{mSingle[2]}</span>
+            </div>
+          );
+        }
+      }
+      return (
+        <div key={idx} className="collab-block-line dock-agent-shell-line">
+          {safe}
+        </div>
+      );
+    };
     return (
       <div
         className={`msg-block collab-block dock-agent-card dock-agent-card--collab ${sideClass}${
           presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
         }`}
       >
-        <div className="collab-block-header dock-agent-card-head">
+        <div
+          className={`collab-block-header dock-agent-card-head${hasLines ? ' dock-agent-card-head--clickable' : ''}`}
+          role={hasLines ? 'button' : undefined}
+          aria-expanded={hasLines ? collabOpen : undefined}
+          tabIndex={hasLines ? 0 : -1}
+          onClick={hasLines ? () => setCollabOpen((prev) => !prev) : undefined}
+          onKeyDown={hasLines ? (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setCollabOpen((prev) => !prev);
+            }
+          } : undefined}
+        >
           <span className={`collab-block-badge ${sideClass}`}>{badge}</span>
           <div className="collab-block-titles">
-            {block.title && <div className="collab-block-title">{block.title}</div>}
+            {block.title && <div className="collab-block-title">{renderSummaryWithEmphasis(composeCollapsedSummary(block.title, collabPreview, collabOpen))}</div>}
             {block.subtitle && <div className="collab-block-subtitle">{block.subtitle}</div>}
           </div>
           <div className="dock-agent-card-actions">
@@ -750,49 +857,77 @@ function BlockRenderer({
                 void copyDockPlainText(block.lines.map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n'));
               }}
             />
-            {collapsible ? (
+            {hasLines ? (
               <button
                 type="button"
                 className="dock-card-aux-btn"
-                onClick={() => setExpandedCollab((prev) => !prev)}
-                title={expandedCollab ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCollabOpen((prev) => !prev);
+                }}
+                title={collabOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
               >
-                {expandedCollab
-                  ? t('dock.terminal.collapse', '收起')
+                {collabOpen
+                  ? t('dock.tt.collapse', '收起')
                   : tf('dock.terminal.expandLines', '展开 ({{n}} 行)', { n: block.lines.length })}
               </button>
             ) : null}
           </div>
         </div>
-        <div className="collab-block-body dock-agent-shell dock-agent-shell--sanitized">
-          {visibleLines.map((line, i) => (
-            <div key={i} className="collab-block-line dock-agent-shell-line">
-              {sanitizeTerminalLineForDisplay(line)}
-            </div>
-          ))}
-        </div>
+        {collabOpen ? (
+          <div className="collab-block-body dock-agent-shell dock-agent-shell--sanitized">
+            {block.lines.map((line, i) => renderCollabLine(line, i))}
+          </div>
+        ) : null}
       </div>
     );
   }
 
   if (block.type === 'code') {
+    const codePreview = summarizeInline(block.content.split('\n').find((ln) => ln.trim()) || '', 52);
+    const codeTitle = composeCollapsedSummary(block.lang || 'text', codePreview, codeOpen);
     return (
       <div
         className={`msg-block code-block dock-agent-card dock-agent-card--code${
           presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
         }`}
       >
-        <div className="code-block-header dock-agent-card-head">
+        <div
+          className="code-block-header dock-agent-card-head dock-agent-card-head--clickable"
+          role="button"
+          aria-expanded={codeOpen}
+          tabIndex={0}
+          onClick={() => setCodeOpen((prev) => !prev)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setCodeOpen((prev) => !prev);
+            }
+          }}
+        >
           <span className="dock-agent-card-icon" aria-hidden>#</span>
-          <span className="dock-agent-card-title dock-agent-card-title--mono">{block.lang || 'text'}</span>
+          <span className="dock-agent-card-title dock-agent-card-title--mono">{codeTitle}</span>
           <div className="dock-agent-card-actions">
             <DockCopyIconButton
               label={t('dock.code.copy', '复制代码')}
               onCopy={() => { void copyDockPlainText(block.content); }}
             />
+            <button
+              type="button"
+              className="dock-card-aux-btn"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setCodeOpen((prev) => !prev);
+              }}
+              title={codeOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+            >
+              {codeOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+            </button>
           </div>
         </div>
-        <pre className="code-block-body dock-agent-code-body"><code>{block.content}</code></pre>
+        {codeOpen ? <pre className="code-block-body dock-agent-code-body"><code>{block.content}</code></pre> : null}
       </div>
     );
   }
@@ -801,53 +936,11 @@ function BlockRenderer({
     if (!block.items || block.items.length === 0) {
       return null;
     }
-    if (block.collapsible) {
-      return (
-        <StatusCollapsible
-          block={block}
-          presentation={presentation}
-        />
-      );
-    }
-    const headTitle = block.title ?? t('dock.agent.status', '运行状态');
-    if (presentation === 'agent-footprint') {
-      const fullDetail = block.items
-        .map((it) => `${it.label}: ${it.value}`)
-        .join(' · ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const meta =
-        fullDetail && fullDetail !== headTitle && !fullDetail.startsWith(headTitle)
-          ? (fullDetail.length > 120 ? `${fullDetail.slice(0, 117)}…` : fullDetail)
-          : '';
-      return (
-        <div className="dock-tool-footprint" role="status">
-          <span className="dock-tool-footprint-main">{headTitle}</span>
-          {meta ? (
-            <>
-              <span className="dock-tool-footprint-sep" aria-hidden> · </span>
-              <span className="dock-tool-footprint-meta" title={fullDetail}>{meta}</span>
-            </>
-          ) : null}
-        </div>
-      );
-    }
     return (
-      <div className={`msg-block status-block dock-agent-card dock-agent-card--status${block.title ? ' dock-agent-card--tool-step' : ''}`}>
-        <div className="dock-agent-card-head dock-agent-card-head--compact">
-          <span className="dock-agent-card-icon" aria-hidden>{block.title ? '▸' : '≡'}</span>
-          <span className="dock-agent-card-title">{headTitle}</span>
-        </div>
-        <div className="dock-agent-status-body">
-          {block.items.map((item) => (
-            <div key={item.label} className="status-block-item">
-              <span className={`status-block-dot ${item.ok ? 'ok' : 'warn'}`} />
-              <span className="status-block-label">{item.label}</span>
-              <span className="status-block-value">{item.value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <StatusCollapsible
+        block={block}
+        presentation={presentation}
+      />
     );
   }
 
@@ -1027,34 +1120,66 @@ function BlockRenderer({
 
   if (block.type === 'progress') {
     const hasRunning = block.steps.some(s => s.status === 'running');
+    const activeStep = block.steps.find((s) => s.status === 'running')?.label || block.steps[0]?.label || '';
+    const progressTitle = composeCollapsedSummary(t('dock.agent.steps', '执行步骤'), summarizeInline(activeStep, 48), progressOpen);
     return (
       <div
         className={`msg-block progress-block dock-agent-card dock-agent-card--progress${
           presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
         }`}
       >
-        <div className="dock-agent-card-head dock-agent-card-head--compact">
+        <div
+          className="dock-agent-card-head dock-agent-card-head--compact dock-agent-card-head--clickable"
+          role="button"
+          aria-expanded={progressOpen}
+          tabIndex={0}
+          onClick={() => setProgressOpen((prev) => !prev)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setProgressOpen((prev) => !prev);
+            }
+          }}
+        >
           <span className="dock-agent-card-icon" aria-hidden>↳</span>
-          <span className="dock-agent-card-title">{t('dock.agent.steps', '执行步骤')}</span>
+          <span className="dock-agent-card-title">{renderSummaryWithEmphasis(progressTitle)}</span>
+          <div className="dock-agent-card-actions">
+            <button
+              type="button"
+              className="dock-card-aux-btn"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setProgressOpen((prev) => !prev);
+              }}
+              title={progressOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+            >
+              {progressOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+            </button>
+          </div>
         </div>
-        <ul className="dock-agent-step-list">
-          {block.steps.map((step, i) => (
-            <li key={i} className={`dock-agent-step-line dock-agent-step-line--${step.status}`}>
-              <span className="dock-agent-step-mark" aria-hidden>
-                {step.status === 'done' ? '·' : step.status === 'running' ? '›' : '○'}
-              </span>
-              <span className="dock-agent-step-label">{step.label}</span>
-            </li>
-          ))}
-        </ul>
-        {hasRunning && block.taskId && onCancelTask && (
-          <button className="task-cancel-btn" onClick={() => onCancelTask(block.taskId!)}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-            {t('dock.progress.cancelTask', '取消任务')}
-          </button>
-        )}
+        {progressOpen ? (
+          <>
+            <ul className="dock-agent-step-list">
+              {block.steps.map((step, i) => (
+                <li key={i} className={`dock-agent-step-line dock-agent-step-line--${step.status}`}>
+                  <span className="dock-agent-step-mark" aria-hidden>
+                    {step.status === 'done' ? '·' : step.status === 'running' ? '›' : '○'}
+                  </span>
+                  <span className="dock-agent-step-label">{step.label}</span>
+                </li>
+              ))}
+            </ul>
+            {hasRunning && block.taskId && onCancelTask && (
+              <button className="task-cancel-btn" onClick={() => onCancelTask(block.taskId!)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+                {t('dock.progress.cancelTask', '取消任务')}
+              </button>
+            )}
+          </>
+        ) : null}
       </div>
     );
   }
@@ -1063,25 +1188,51 @@ function BlockRenderer({
     const detailClean = block.detail
       ? block.detail.split('\n').map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n')
       : '';
+    const resultPreview = summarizeInline(detailClean, 56);
+    const resultTitle = composeCollapsedSummary(block.title, resultPreview, resultOpen);
     return (
       <div
         className={`msg-block task-result-block dock-agent-card dock-agent-card--result ${block.success ? 'success' : 'fail'}${
           presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
         }`}
       >
-        <div className="task-result-header dock-agent-card-head">
+        <div
+          className={`task-result-header dock-agent-card-head${block.detail?.trim() ? ' dock-agent-card-head--clickable' : ''}`}
+          role={block.detail?.trim() ? 'button' : undefined}
+          aria-expanded={block.detail?.trim() ? resultOpen : undefined}
+          tabIndex={block.detail?.trim() ? 0 : -1}
+          onClick={block.detail?.trim() ? () => setResultOpen((prev) => !prev) : undefined}
+          onKeyDown={block.detail?.trim() ? (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setResultOpen((prev) => !prev);
+            }
+          } : undefined}
+        >
           <span className="dock-agent-card-icon" aria-hidden>{block.success ? '✓' : '✗'}</span>
-          <span className="dock-agent-card-title">{block.title}</span>
+          <span className="dock-agent-card-title">{renderSummaryWithEmphasis(resultTitle)}</span>
           {block.detail?.trim() ? (
             <div className="dock-agent-card-actions">
               <DockCopyIconButton
                 label={t('dock.taskResult.copyDetail', '复制结果详情')}
                 onCopy={() => { void copyDockPlainText(detailClean); }}
               />
+              <button
+                type="button"
+                className="dock-card-aux-btn"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setResultOpen((prev) => !prev);
+                }}
+                title={resultOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+              >
+                {resultOpen ? t('dock.tt.collapse', '收起') : t('dock.tt.expand', '展开')}
+              </button>
             </div>
           ) : null}
         </div>
-        {block.detail ? (
+        {block.detail && resultOpen ? (
           <pre className="task-result-detail dock-agent-result-body">{detailClean}</pre>
         ) : null}
       </div>
@@ -1124,31 +1275,7 @@ function BlockRenderer({
   }
 
   if (block.type === 'reasoning') {
-    if (block.collapsible !== false) {
-      return <ReasoningCollapsible block={block} presentation={presentation} />;
-    }
-    return (
-      <div
-        className={`msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking open${
-          presentation === 'agent-footprint' ? ' dock-agent-footprint' : ''
-        }`}
-      >
-        <div className="reasoning-collapsible-toolbar">
-          <span className="reasoning-collapsible-summary reasoning-collapsible-summary--static">
-            {t('dock.reasoning.title', '思考过程')}
-          </span>
-          {block.text.trim().length > 0 ? (
-            <div className="reasoning-collapsible-actions">
-              <DockCopyIconButton
-                label={t('dock.reasoning.copy', '复制思考过程')}
-                onCopy={() => { void copyDockPlainText(block.text); }}
-              />
-            </div>
-          ) : null}
-        </div>
-        <pre className="reasoning-collapsible-body">{block.text}</pre>
-      </div>
-    );
+    return <ReasoningCollapsible block={block} presentation={presentation} />;
   }
 
   return null;
@@ -1550,6 +1677,12 @@ export default function AIDock() {
     if (!currentDevice) return t('dock.device.unbound', '未绑定设备');
     return `${activeDeviceName || t('dock.device.unnamed', '未命名设备')} · ${activeDeviceEndpoint}`;
   }, [activeDeviceName, activeDeviceEndpoint, currentDevice, t]);
+
+  /** 与会话列表一致：首问摘要，便于顶栏与侧栏对齐认知 */
+  const dockThreadTitleLine = useMemo(
+    () => (chatMessages.length ? buildThreadSummaryLine(chatMessages, t) : ''),
+    [chatMessages, t],
+  );
 
   const beginNewChat = useCallback(async () => {
     await confirmAndBeginNewChat({ aiTyping, taskHistory, t, stopAllRuns, clearChatHistory });
@@ -2268,33 +2401,16 @@ export default function AIDock() {
   ], [t]);
   /** 工作台底栏：全部快捷指令平铺，横向滚动（不再使用「更多」下拉） */
   const dashboardDockChips = useMemo((): QuickPrompt[] => {
-    const appgenZh = [
-      '我要在板端部署一个应用，请按通用流程执行，并在执行前给我确认：',
-      '1) 先判断当前设备硬件是否匹配（板卡型号、相机/传感器/麦克风等连接状态）；',
-      '2) 以板卡探测与板端 assess 做实时可用性核验，不要依赖过时的静态注册表；',
-      '3) 联网检索官网文档/开源仓库，确认可行方案；',
-      '4) 给出 skill/流程草案、依赖与风险；',
-      '5) 明确征求我确认“是否执行”；',
-      '6) 我确认后再部署或执行。',
-    ].join('\n');
     return [
-      { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '一键体检'), text: t('dock.quick.dash.diag.text', '帮我全面检查设备健康状态，包括温度、负载和网络') },
-      { id: 'stat', icon: '📊', label: t('dock.quick.dash.stat.label', '能力盘点'), text: t('dock.quick.dash.stat.text', '汇总当前设备上应用、模型与 OpenClaw 技能等可编排能力') },
+      { id: 'intro', icon: '🧭', label: t('dock.quick.dash.intro.label', '介绍 RDK Studio'), text: t('dock.quick.dash.intro.text', '介绍一下 RDK Studio 和 RDKClaw 能做什么，先给我一个快速上手路径。'), forceRdkclaw: true },
+      { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '设备体检'), text: t('dock.quick.dash.diag.text', '帮我做一次设备体检：温度、CPU/BPU、内存、磁盘、网络和关键服务状态。') },
       {
-        id: 'appgen',
-        icon: '✨',
-        label: t('dock.quick.dash.appgen.label', '快速部署应用'),
-        text: t('dock.quick.dash.appgen.text', appgenZh),
+        id: 'yolo',
+        icon: '🎯',
+        label: t('dock.quick.dash.yolo.label', '运行 YOLO 示例'),
+        text: t('dock.quick.dash.yolo.text', '在当前设备上跑一个 YOLO 示例，给出步骤、命令和预期输出。'),
         forceRdkclaw: true,
       },
-      {
-        id: 'cap-report',
-        icon: '🧭',
-        label: t('dock.quick.dash.cap.label', '能力汇报'),
-        text: t('dock.quick.dash.cap.text', '请分别汇报 RDKClaw 和 OpenClaw 当前能做什么：各列 5 条能力，并给每条配一个可立即执行的一句话示例。'),
-        forceRdkclaw: true,
-      },
-      { id: 'new-device', icon: '🔌', label: t('dock.quick.dash.newdev.label', '新设备接管'), text: t('dock.quick.dash.newdev.text', '把当前设备当成一台全新设备，检查连接、OpenClaw 与可开发环境是否就绪') },
     ];
   }, [t]);
   const effectiveTab = embedDockCtxTab
@@ -2666,9 +2782,7 @@ export default function AIDock() {
             {(() => {
               if (isStreamingBubble || msg.channelMeta) return null;
               const prevUserForRetry = findPreviousStudioUserMessage(chatMessages, msg.id);
-              const plainRetry = chatMessageRetryExcerpt(msg, t).trim();
-              const showUnsatisfied = Boolean(plainRetry);
-              if (!prevUserForRetry && !showUnsatisfied) return null;
+              if (!prevUserForRetry) return null;
               return (
                 <div className="dock-msg-footer-actions">
                   {prevUserForRetry && (
@@ -2687,27 +2801,6 @@ export default function AIDock() {
                       onClick={() => void runRegenerate(msg.id)}
                     >
                       {t('dock.msg.retry', '重试')}
-                    </button>
-                  )}
-                  {showUnsatisfied && (
-                    <button
-                      type="button"
-                      className="dock-bubble-retry"
-                      disabled={aiTyping}
-                      title={
-                        aiTyping
-                          ? t('dock.tt.waitReply', '请等待当前回复结束')
-                          : t('dock.tt.feedbackBadReply', '反馈不满意，请改进回复')
-                      }
-                      onClick={() => {
-                        setUnsatisfiedNote('');
-                        setUnsatisfiedModal({
-                          msgId: msg.id,
-                          preview: chatMessageRetryExcerpt(msg, t),
-                        });
-                      }}
-                    >
-                      {t('dock.msg.unsatisfied', '不满意此回复')}
                     </button>
                   )}
                 </div>
@@ -2744,6 +2837,11 @@ export default function AIDock() {
             <div className="dock-header-left">
               <div className="dock-header-title-wrap">
                 <span className="dock-header-title">RDKClaw</span>
+                {dockThreadTitleLine ? (
+                  <span className="dock-header-threadline" title={dockThreadTitleLine}>
+                    {dockThreadTitleLine}
+                  </span>
+                ) : null}
                 <span className="dock-header-subtitle" title={activeRdkclawDeviceLabel}>
                   {t('dock.device.current', '当前设备')}: {activeRdkclawDeviceLabel}
                 </span>
@@ -2943,7 +3041,7 @@ export default function AIDock() {
       {/* Suggestions (idle) */}
       {showSuggestions && !chatExpanded && !mentionMenuActive && filteredSuggestions.length > 0 && (
         <div className="dock-suggestions" style={{ position: 'relative' }}>
-          {filteredSuggestions.slice(0, 6).map((s, i) => (
+          {filteredSuggestions.slice(0, 3).map((s, i) => (
             <div key={i} className="dock-suggestion-item" onMouseDown={() => { setCmd(s.text); setShowSuggestions(false); }}>
               {s.text}
             </div>

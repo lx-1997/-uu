@@ -1,8 +1,8 @@
 import type { ChatMessage } from '../app-types';
-import { fillTemplate } from '../i18n/en-extras';
 import { chatMessageToPlainText } from './chat-message-plain';
 
-const HISTORY_THREAD_SUMMARY_MAX = 60;
+/** 会话列表 / Dock 顶栏用：单行标题，略长于旧版拼接式摘要以便展示首问 */
+const HISTORY_THREAD_SUMMARY_MAX = 78;
 
 function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
@@ -34,6 +34,7 @@ function dropLeadingGreetingSnippets(snippets: string[]): string[] {
 
 /**
  * 从整段对话抽取标题概要（与对话历史下拉的规则一致；纯本地、不调模型）。
+ * 规则：以「开场首条实质性用户消息」为一行标题，避免多轮拼接与「共 N 问」等噪声。
  */
 export function buildThreadSummaryLine(messages: ChatMessage[], tr: (key: string, zh: string) => string): string {
   const userMsgs = messages.filter((m) => m.role === 'user');
@@ -46,30 +47,14 @@ export function buildThreadSummaryLine(messages: ChatMessage[], tr: (key: string
     return truncateSummary(msgPlain(any, tr), HISTORY_THREAD_SUMMARY_MAX);
   }
 
-  if (snippets.length === 1) {
-    const only = snippets[0];
-    if (isGenericGreeting(only)) {
-      const firstAi = messages.find((m) => m.role === 'ai');
-      if (firstAi) {
-        const hint = msgPlain(firstAi, tr);
-        if (hint) return truncateSummary(hint, HISTORY_THREAD_SUMMARY_MAX);
-      }
+  const firstSubstantive = snippets[0];
+  if (snippets.length === 1 && isGenericGreeting(firstSubstantive)) {
+    const firstAi = messages.find((m) => m.role === 'ai');
+    if (firstAi) {
+      const hint = msgPlain(firstAi, tr);
+      if (hint) return truncateSummary(hint, HISTORY_THREAD_SUMMARY_MAX);
     }
-    return truncateSummary(only, HISTORY_THREAD_SUMMARY_MAX);
   }
 
-  if (snippets.length === 2) {
-    const a = truncateSummary(snippets[0], 26);
-    const b = truncateSummary(snippets[1], 26);
-    return truncateSummary(`${a} · ${b}`, HISTORY_THREAD_SUMMARY_MAX);
-  }
-
-  const head = truncateSummary(snippets[0], 22);
-  const tailRaw = snippets[snippets.length - 1];
-  const tail = truncateSummary(tailRaw, 18);
-  const turnsHint = fillTemplate(tr('dock.history.summaryTurns', '共 {{n}} 问'), { n: userMsgs.length });
-  if (tailRaw === snippets[0]) {
-    return truncateSummary(`${head} · ${turnsHint}`, HISTORY_THREAD_SUMMARY_MAX);
-  }
-  return truncateSummary(`${head} · … · ${tail} · ${turnsHint}`, HISTORY_THREAD_SUMMARY_MAX + 8);
+  return truncateSummary(firstSubstantive, HISTORY_THREAD_SUMMARY_MAX);
 }

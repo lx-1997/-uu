@@ -85,29 +85,58 @@ export class DeviceQueue {
     >();
 
     pendingCounts.set(deviceLane, (pendingCounts.get(deviceLane) ?? 0) + 1);
+    let pendingConsumed = false;
+    let leased = false;
+    let settled = false;
+
+    const consumePending = () => {
+      if (pendingConsumed) return;
+      pendingConsumed = true;
+      pendingCounts.set(
+        deviceLane,
+        Math.max(0, (pendingCounts.get(deviceLane) ?? 1) - 1),
+      );
+      if ((pendingCounts.get(deviceLane) ?? 0) <= 0 && !activeRuns.has(deviceLane)) {
+        pendingCounts.delete(deviceLane);
+      }
+    };
+
+    const settleCancelled = () => {
+      if (settled) return;
+      settled = true;
+      slotOutcome.resolve({ kind: "cancelled" });
+    };
+
+    const onAbort = () => {
+      if (leased) return;
+      consumePending();
+      settleCancelled();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     void enqueueInLane<void>(
       deviceLane,
       async () => {
-        pendingCounts.set(
-          deviceLane,
-          Math.max(0, (pendingCounts.get(deviceLane) ?? 1) - 1),
-        );
-        if (signal?.aborted) {
-          slotOutcome.resolve({ kind: "cancelled" });
+        consumePending();
+        if (signal?.aborted || settled) {
+          settleCancelled();
           return;
         }
+        leased = true;
         activeRuns.set(deviceLane, {
           channel: meta.channel,
           messageSummary: summarize(meta.messageSummary),
           startedAt: Date.now(),
         });
-        slotOutcome.resolve({
-          kind: "leased",
-          release: () => {
-            slotReleased.resolve();
-          },
-        });
+        if (!settled) {
+          settled = true;
+          slotOutcome.resolve({
+            kind: "leased",
+            release: () => {
+              slotReleased.resolve();
+            },
+          });
+        }
         await slotReleased.promise;
         activeRuns.delete(deviceLane);
         if ((pendingCounts.get(deviceLane) ?? 0) <= 0) {
@@ -115,10 +144,11 @@ export class DeviceQueue {
         }
       },
     ).catch(() => {
-      slotOutcome.resolve({ kind: "cancelled" });
+      settleCancelled();
     });
 
     const outcome = await slotOutcome.promise;
+    signal?.removeEventListener("abort", onAbort);
     if (outcome.kind === "cancelled") {
       return { release: () => {} };
     }

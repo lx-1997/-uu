@@ -1,0 +1,104 @@
+/* ═══════════════════════════════════════════════════════
+   Chat UI — Codex / Cursor 风格覆盖
+   色调：与 Aurora 白底融合，去橙色气泡，IDE 文档流
+   ═══════════════════════════════════════════════════════ */
+
+/* ── AI 消息：去气泡，全宽文档流 ── */
+.dock-msg.ai .dock-avatar {
+  display: none;
+}
+
+.dock-msg.ai .dock-bubble {
+  max-width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 4px 20px;
+}
+
+/* 悬停时极轻背景（与 --bg-secondary 同色系） */
+.dock-msg.ai:hover .dock-bubble {
+  background: rgba(15, 23, 42, 0.025);
+  border-radius: 8px;
+}
+
+/* ── 用户消息：浅冷灰气泡，不用橙色 ── */
+.dock-msg.user .dock-avatar {
+  display: none;
+}
+
+.dock-msg.user .dock-bubble {
+  max-width: 75%;
+  background: #EEF2F6;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px 14px 3px 14px;
+  color: #0F172A;
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  box-shadow: none;
+}
+
+/* dark 主题下用户气泡 */
+[data-theme="cyber"] .dock-msg.user .dock-bubble {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+}
+
+/* ── 代码块：更 IDE 感 ── */
+.dock-bubble .msg-text .md-code-block {
+  background: #F6F8FA;
+  border-color: rgba(15, 23, 42, 0.09);
+  border-radius: 8px;
+  margin: 10px 0;
+}
+
+.dock-bubble .msg-text .md-code-header {
+  background: rgba(15, 23, 42, 0.04);
+  border-bottom-color: rgba(15, 23, 42, 0.07);
+  min-height: 32px;
+}
+
+/* ── 输入框 focus ring 与整体色调一致 ── */
+.dock-input-wrap:focus-within {
+  border-color: rgba(15, 23, 42, 0.3);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06);
+}
+
+/* ── hub 嵌入：AI 消息左侧细线（Cursor 风格） ── */
+.dock--hub-embedded .dock-msg.ai .dock-bubble {
+  border-left: 2px solid transparent;
+  padding-left: 18px;
+  transition: border-left-color 0.15s ease;
+}
+
+.dock--hub-embedded .dock-msg.ai:hover .dock-bubble {
+  border-left-color: rgba(255, 107, 0, 0.35);
+}
+
+/* ── 消息间距更紧凑 ── */
+.dock-msg {
+  padding: 2px 0;
+}
+
+/* ── 流式光标更细 ── */
+.dock-bubble .md-stream-caret,
+.dock-bubble .md-stream-caret--inline {
+  width: 1.5px;
+  background: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* ── 工作台全屏：减弱顶部橙色光晕，偏文档画布感 ── */
+.dock.workspace.expanded .dock-stream {
+  background:
+    radial-gradient(ellipse 80% 42% at 50% -8%, rgba(15, 23, 42, 0.04), transparent 55%),
+    #f4f6f9;
+}
+
+[data-theme="cyber"] .dock.workspace.expanded .dock-stream {
+  background:
+    radial-gradient(ellipse 80% 42% at 50% -8%, rgba(255, 255, 255, 0.04), transparent 55%),
+    var(--bg-primary);
+}

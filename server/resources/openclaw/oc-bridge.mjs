@@ -320,11 +320,24 @@ function startTurn(cmd) {
     if (stream === 'tool') {
       const tn = d.name || d.tool || '';
       const tp = d.phase || d.status || 'call';
-      const tr = d.result
-        ? typeof d.result === 'string'
-          ? d.result.slice(0, 400)
-          : JSON.stringify(d.result).slice(0, 400)
-        : '';
+      const pickText = (v) => {
+        if (v == null) return '';
+        if (typeof v === 'string') return v;
+        try {
+          return JSON.stringify(v);
+        } catch {
+          return String(v);
+        }
+      };
+      const compact = (s, max = 400) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
+      const tr = compact(
+        pickText(d.result)
+        || pickText(d.detail)
+        || pickText(d.message)
+        || pickText(d.args)
+        || pickText(d.input)
+        || pickText(d.params),
+      );
       emit({
         v: 1,
         type: 'tool',
