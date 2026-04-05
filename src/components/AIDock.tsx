@@ -115,6 +115,34 @@ const MAX_PENDING_VIDEO_BYTES = 50 * 1024 * 1024;
 
 const RESPONSE_MODE_ORDER: StudioResponseMode[] = ['quick', 'thinking'];
 
+/** Agent 单列顺行：user + ai 成对，用于「问题吸顶 + 下方全宽回答」 */
+type DockTurnEntry =
+  | { kind: 'pair'; user: ChatMessage; ai: ChatMessage }
+  | { kind: 'user-only'; user: ChatMessage }
+  | { kind: 'orphan-ai'; ai: ChatMessage };
+
+function buildDockTurns(msgs: ChatMessage[]): DockTurnEntry[] {
+  const out: DockTurnEntry[] = [];
+  let i = 0;
+  while (i < msgs.length) {
+    const m = msgs[i];
+    if (m.role === 'user') {
+      const next = msgs[i + 1];
+      if (next?.role === 'ai') {
+        out.push({ kind: 'pair', user: m, ai: next });
+        i += 2;
+      } else {
+        out.push({ kind: 'user-only', user: m });
+        i += 1;
+      }
+    } else {
+      out.push({ kind: 'orphan-ai', ai: m });
+      i += 1;
+    }
+  }
+  return out;
+}
+
 const OFFICE_DOC_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -378,16 +406,26 @@ async function fileToBase64(file: File) {
   return btoa(binary);
 }
 
-function ReasoningCollapsible({ block }: { block: Extract<ChatBlock, { type: 'reasoning' }> }) {
+function ReasoningCollapsible({
+  block,
+  presentation = 'default',
+}: {
+  block: Extract<ChatBlock, { type: 'reasoning' }>;
+  presentation?: 'default' | 'agent-footprint';
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(!block.defaultCollapsed);
   const summary =
     block.summary
     || (block.text.trim().length > 0
-      ? t('dock.reasoning.summaryHasContent', '思考过程（点击展开）')
+      ? t('dock.reasoning.summaryHasContent', '思考过程')
       : t('dock.reasoning.summaryEmpty', '思考过程'));
   return (
-    <div className={`msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking ${open ? 'open' : ''}`}>
+    <div
+      className={`msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking ${open ? 'open' : ''}${
+        presentation === 'agent-footprint' ? ' dock-agent-footprint' : ''
+      }`}
+    >
       <div className="reasoning-collapsible-toolbar">
         <button
           type="button"
@@ -415,11 +453,21 @@ function ReasoningCollapsible({ block }: { block: Extract<ChatBlock, { type: 're
   );
 }
 
-function StatusCollapsible({ block }: { block: Extract<ChatBlock, { type: 'status' }> }) {
+function StatusCollapsible({
+  block,
+  presentation = 'default',
+}: {
+  block: Extract<ChatBlock, { type: 'status' }>;
+  presentation?: 'default' | 'agent-footprint';
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(!block.defaultCollapsed);
   return (
-    <div className={`msg-block status-collapsible dock-agent-card dock-agent-card--meta ${open ? 'open' : ''}`}>
+    <div
+      className={`msg-block status-collapsible dock-agent-card dock-agent-card--meta ${open ? 'open' : ''}${
+        presentation === 'agent-footprint' ? ' dock-agent-footprint' : ''
+      }`}
+    >
       <button
         type="button"
         className="status-collapsible-trigger"
@@ -584,6 +632,7 @@ function BlockRenderer({
   onRecommendationChoice,
   onSoulUpdateDecision,
   onContinueAgent,
+  presentation = 'default',
 }: {
   block: ChatBlock;
   onConfirm?: (id: string) => void;
@@ -592,8 +641,10 @@ function BlockRenderer({
   onApprovalAction?: (approvalId: string, action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run', runId?: string) => void;
   onRecommendationChoice?: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
   onSoulUpdateDecision?: (proposalId: string, accepted: boolean) => void;
-  /** 轮次触顶后的「继续」（等同 Cursor Continue：新发一条用户消息续跑） */
+  /** 轮次触顶后的「继续」：新发一条用户消息续跑 */
   onContinueAgent?: () => void;
+  /** 顺行 Agent：轻量足迹（单行灰字 + 可展开详情） */
+  presentation?: 'default' | 'agent-footprint';
 }) {
   const { t } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
@@ -615,7 +666,11 @@ function BlockRenderer({
       ? block.lines.slice(-previewLines)
       : block.lines;
     return (
-      <div className="msg-block terminal-block dock-agent-card dock-agent-card--terminal">
+      <div
+        className={`msg-block terminal-block dock-agent-card dock-agent-card--terminal${
+          presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
+        }`}
+      >
         <div className="dock-agent-card-head">
           <span className="dock-agent-card-icon" aria-hidden>▸</span>
           <span className="dock-agent-card-title">{block.label || t('dock.agent.shell', '终端输出')}</span>
@@ -677,7 +732,11 @@ function BlockRenderer({
             ? t('dock.collab.badgeWaitHint', 'RDKClaw · 等板端')
             : 'RDKClaw';
     return (
-      <div className={`msg-block collab-block dock-agent-card dock-agent-card--collab ${sideClass}`}>
+      <div
+        className={`msg-block collab-block dock-agent-card dock-agent-card--collab ${sideClass}${
+          presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
+        }`}
+      >
         <div className="collab-block-header dock-agent-card-head">
           <span className={`collab-block-badge ${sideClass}`}>{badge}</span>
           <div className="collab-block-titles">
@@ -718,7 +777,11 @@ function BlockRenderer({
 
   if (block.type === 'code') {
     return (
-      <div className="msg-block code-block dock-agent-card dock-agent-card--code">
+      <div
+        className={`msg-block code-block dock-agent-card dock-agent-card--code${
+          presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
+        }`}
+      >
         <div className="code-block-header dock-agent-card-head">
           <span className="dock-agent-card-icon" aria-hidden>#</span>
           <span className="dock-agent-card-title dock-agent-card-title--mono">{block.lang || 'text'}</span>
@@ -742,10 +805,33 @@ function BlockRenderer({
       return (
         <StatusCollapsible
           block={block}
+          presentation={presentation}
         />
       );
     }
     const headTitle = block.title ?? t('dock.agent.status', '运行状态');
+    if (presentation === 'agent-footprint') {
+      const fullDetail = block.items
+        .map((it) => `${it.label}: ${it.value}`)
+        .join(' · ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const meta =
+        fullDetail && fullDetail !== headTitle && !fullDetail.startsWith(headTitle)
+          ? (fullDetail.length > 120 ? `${fullDetail.slice(0, 117)}…` : fullDetail)
+          : '';
+      return (
+        <div className="dock-tool-footprint" role="status">
+          <span className="dock-tool-footprint-main">{headTitle}</span>
+          {meta ? (
+            <>
+              <span className="dock-tool-footprint-sep" aria-hidden> · </span>
+              <span className="dock-tool-footprint-meta" title={fullDetail}>{meta}</span>
+            </>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div className={`msg-block status-block dock-agent-card dock-agent-card--status${block.title ? ' dock-agent-card--tool-step' : ''}`}>
         <div className="dock-agent-card-head dock-agent-card-head--compact">
@@ -942,7 +1028,11 @@ function BlockRenderer({
   if (block.type === 'progress') {
     const hasRunning = block.steps.some(s => s.status === 'running');
     return (
-      <div className="msg-block progress-block dock-agent-card dock-agent-card--progress">
+      <div
+        className={`msg-block progress-block dock-agent-card dock-agent-card--progress${
+          presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
+        }`}
+      >
         <div className="dock-agent-card-head dock-agent-card-head--compact">
           <span className="dock-agent-card-icon" aria-hidden>↳</span>
           <span className="dock-agent-card-title">{t('dock.agent.steps', '执行步骤')}</span>
@@ -974,7 +1064,11 @@ function BlockRenderer({
       ? block.detail.split('\n').map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n')
       : '';
     return (
-      <div className={`msg-block task-result-block dock-agent-card dock-agent-card--result ${block.success ? 'success' : 'fail'}`}>
+      <div
+        className={`msg-block task-result-block dock-agent-card dock-agent-card--result ${block.success ? 'success' : 'fail'}${
+          presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
+        }`}
+      >
         <div className="task-result-header dock-agent-card-head">
           <span className="dock-agent-card-icon" aria-hidden>{block.success ? '✓' : '✗'}</span>
           <span className="dock-agent-card-title">{block.title}</span>
@@ -996,7 +1090,11 @@ function BlockRenderer({
 
   if (block.type === 'continue-run') {
     return (
-      <div className="msg-block continue-run-block dock-agent-card dock-agent-card--continue">
+      <div
+        className={`msg-block continue-run-block dock-agent-card dock-agent-card--continue${
+          presentation === 'agent-footprint' ? ' dock-agent-card--footprint' : ''
+        }`}
+      >
         <div className="dock-agent-card-head dock-agent-card-head--compact">
           <span className="dock-agent-card-icon" aria-hidden>↻</span>
           <span className="dock-agent-card-title">
@@ -1009,7 +1107,7 @@ function BlockRenderer({
         <p className="continue-run-body">
           {t(
             'dock.continueRun.body',
-            '与 Cursor「Continue」类似：点击下方按钮会发送一条续跑指令，在同一对话中接着处理未完成任务（不重复已成功步骤）。',
+            '点击下方按钮会发送一条续跑指令，在同一对话中接着处理未完成任务（不重复已成功步骤）。',
           )}
         </p>
         <div className="continue-run-actions">
@@ -1027,10 +1125,14 @@ function BlockRenderer({
 
   if (block.type === 'reasoning') {
     if (block.collapsible !== false) {
-      return <ReasoningCollapsible block={block} />;
+      return <ReasoningCollapsible block={block} presentation={presentation} />;
     }
     return (
-      <div className="msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking open">
+      <div
+        className={`msg-block reasoning-collapsible dock-agent-card dock-agent-card--thinking open${
+          presentation === 'agent-footprint' ? ' dock-agent-footprint' : ''
+        }`}
+      >
         <div className="reasoning-collapsible-toolbar">
           <span className="reasoning-collapsible-summary reasoning-collapsible-summary--static">
             {t('dock.reasoning.title', '思考过程')}
@@ -1283,7 +1385,7 @@ export default function AIDock() {
     setUnsatisfiedNote('');
   }, [unsatisfiedModal, unsatisfiedNote, aiTyping, addToast, t, isEn, handleCommand]);
 
-  /** 轮次触顶后显式「继续」：等同 Cursor Continue，发送一条续跑用户消息 */
+  /** 轮次触顶后显式「继续」：发送一条续跑用户消息 */
   const handleContinueAfterTurnLimit = useCallback(() => {
     if (aiTyping) {
       addToast(t('dock.continueRun.busy', '请等待当前回复结束后再试。'), 'warning');
@@ -1427,21 +1529,9 @@ export default function AIDock() {
       return false;
     }
   });
-  /** false = 完整（过程+结果）；true = 极简（仅结果型块+正文，回复完成后生效；流式中仍显示过程以免空白） */
-  const [minimalResultMode, setMinimalResultMode] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('rdk:dock:minimal-result') === '1';
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem('rdk:dock:minimal-result', minimalResultMode ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-  }, [minimalResultMode]);
+  /** 产品固定：完整展示 + 单列顺行；顶栏不再展示模式标签 */
+  const minimalResultMode = false;
+  const agentTurnLayout = true;
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -1464,12 +1554,6 @@ export default function AIDock() {
   const beginNewChat = useCallback(async () => {
     await confirmAndBeginNewChat({ aiTyping, taskHistory, t, stopAllRuns, clearChatHistory });
   }, [aiTyping, taskHistory, stopAllRuns, clearChatHistory, t]);
-
-  const beginNewChatAndOpenPage = useCallback(async () => {
-    await beginNewChat();
-    setActiveTab('ai-chat-hub');
-    setChatExpanded(true);
-  }, [beginNewChat, setActiveTab, setChatExpanded]);
 
   const channelStats = useMemo(() => {
     let feishuInbound = 0;
@@ -1967,6 +2051,7 @@ export default function AIDock() {
   const maxVisibleMessages = 40;
   const visibleMessages = showAllMessages ? chatMessages : chatMessages.slice(-maxVisibleMessages);
   const hiddenCount = Math.max(0, chatMessages.length - visibleMessages.length);
+  const dockTurnEntries = useMemo(() => buildDockTurns(visibleMessages), [visibleMessages]);
   /** 流式一轮会先追加一条 ai 占位消息，此时不再单独画底部「第二行头像」打字条 */
   const lastVisibleMsg = visibleMessages[visibleMessages.length - 1];
   const streamMergedIntoLastAiBubble =
@@ -2231,6 +2316,7 @@ export default function AIDock() {
     && chatExpanded
     && !workspaceMode
     && hubAnchorEl != null;
+  const useAgentColumnFlow = agentTurnLayout && !hubDockEmbedded;
   const useSubpageCompact = chatExpanded && isSubpageTab && !workspaceMode && !hubDockEmbedded;
 
   const submitQuickPrompt = (text: string, placeholder?: string, forceRdkclaw?: boolean) => {
@@ -2331,6 +2417,309 @@ export default function AIDock() {
     });
   };
 
+  const renderDockStreamMessageBubble = (
+    msg: ChatMessage,
+    msgIndex: number,
+    variant: 'classic' | 'agent-user' | 'agent-ai',
+  ) => {
+    const channelClass = msg.channelMeta?.channel ? ` ch-${msg.channelMeta.channel}` : '';
+    const directionClass = msg.channelMeta?.direction ? ` dir-${msg.channelMeta.direction}` : '';
+    const isStreamingBubble =
+      aiTyping
+      && msg.role === 'ai'
+      && msgIndex === visibleMessages.length - 1;
+    const useSlotLayout = Boolean(msg.contentSlots?.length && msg.blocks?.length);
+    const stripProcessForMinimal = minimalResultMode && !isStreamingBubble;
+    const slotsToRender =
+      useSlotLayout && msg.blocks && stripProcessForMinimal
+        ? filterContentSlotsMinimal(msg.contentSlots!, msg.blocks)
+        : msg.contentSlots;
+    const variantClass =
+      variant === 'agent-user' ? ' dock-msg--agent-query' :
+      variant === 'agent-ai' ? ' dock-msg--agent-ai' : '';
+    const blockPresentation: 'default' | 'agent-footprint' =
+      variant === 'agent-ai' ? 'agent-footprint' : 'default';
+    return (
+    <div className={`dock-msg ${msg.role}${channelClass}${directionClass}${variantClass}`}>
+      <div className={`dock-avatar ${msg.role}`}>
+        {msg.role === 'ai'
+          ? <img src={rdkclawAvatarUrl} alt="" className="dock-avatar-img" />
+          : msg.channelMeta?.channel === 'feishu'
+            ? t('dock.channel.short.feishu', '飞')
+            : msg.channelMeta?.channel === 'weixin'
+              ? t('dock.channel.short.weixin', '微')
+              : <img src={userAvatarUrl} alt="" className="dock-avatar-img" />}
+      </div>
+      <div
+        className={`dock-bubble ${msg.role}`}
+        lang={msg.role === 'ai' ? (isEn ? 'en' : 'zh-CN') : undefined}
+      >
+        {msg.channelMeta && (
+          <div className="dock-channel-badge">
+            {msg.channelMeta.channel === 'feishu'
+              ? t('dock.channel.feishu', '飞书')
+              : msg.channelMeta.channel === 'weixin'
+                ? t('dock.channel.weixin', '微信')
+                : msg.channelMeta.channel}
+            {msg.channelMeta.direction === 'inbound'
+              ? t('dock.channel.inbound', ' · 来信')
+              : msg.channelMeta.direction === 'outbound'
+                ? t('dock.channel.outbound', ' · 回复')
+                : ''}
+          </div>
+        )}
+        {(() => {
+          const plain = chatMessageToPlainText(msg, t);
+          if (!plain) return null;
+          return (
+            <div className="dock-bubble-toolbar">
+              <button
+                type="button"
+                className="dock-bubble-copy"
+                title={t('dock.tt.copyMessage', '复制文字')}
+                aria-label={t('dock.tt.copyMessage', '复制文字')}
+                onClick={() => {
+                  void copyDockPlainText(plain).then((ok) => {
+                    addToast(
+                      ok ? t('dock.bubble.copyToastOk', '已复制到剪贴板') : t('dock.bubble.copyToastFail', '复制失败，可尝试用鼠标拖选文字'),
+                      ok ? 'success' : 'warning',
+                    );
+                  });
+                }}
+              >
+                <Copy size={14} strokeWidth={2} aria-hidden />
+              </button>
+            </div>
+          );
+        })()}
+        {msg.attachments && msg.attachments.length > 0 && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+            {msg.attachments.map(att => (
+              <AttachmentRenderer key={att.id} attachment={att} />
+            ))}
+          </div>
+        )}
+        {msg.role === 'user' && msg.text && (
+          <p className="msg-text">{msg.text}</p>
+        )}
+        {msg.role === 'ai' && (
+          <>
+            {slotsToRender && slotsToRender.length > 0 && msg.blocks
+              ? (
+                <>
+                  {slotsToRender.map((slot, i) => {
+                    const lastSlot = i === slotsToRender.length - 1;
+                    const blockProps = {
+                      onConfirm: executeConfirm,
+                      onDismiss: dismissConfirm,
+                      onCancelTask: cancelRunningTask,
+                      onApprovalAction: handleApprovalAction,
+                      onRecommendationChoice: handleRecommendationChoice,
+                      onSoulUpdateDecision: handleSoulUpdateDecision,
+                      onContinueAgent: handleContinueAfterTurnLimit,
+                      presentation: blockPresentation,
+                    };
+                    if (slot.kind === 'markdown') {
+                      const { cleanText, mediaBlocks } = extractMediaFromText(slot.text || '');
+                      const streamHere = Boolean(isStreamingBubble && lastSlot);
+                      if (!cleanText && !streamHere && mediaBlocks.length === 0) return null;
+                      return (
+                        <Fragment key={`slot-md-${msg.id}-${i}`}>
+                          {(streamHere || cleanText) && (
+                            <div className={`msg-text${streamHere ? ' msg-text--streaming' : ''}`}>
+                              {streamHere ? (
+                                <DockStreamingPlainBody key={msg.id} text={cleanText} />
+                              ) : cleanText ? (
+                                renderMarkdown(cleanText, t('markdown.copy', '复制'))
+                              ) : null}
+                            </div>
+                          )}
+                          {mediaBlocks.map((mb, j) => (
+                            <BlockRenderer key={`slot-md-${msg.id}-${i}-m-${j}`} block={mb} {...blockProps} />
+                          ))}
+                        </Fragment>
+                      );
+                    }
+                    const block = (msg.blocks ?? [])[slot.index];
+                    if (!block) return null;
+                    return (
+                      <BlockRenderer
+                        key={`slot-b-${msg.id}-${i}-${slot.index}`}
+                        block={block}
+                        {...blockProps}
+                      />
+                    );
+                  })}
+                  {isStreamingBubble && (
+                    <div
+                      className={`dock-typing dock-typing--in-bubble${
+                        msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
+                      }`}
+                    >
+                      {msg.text?.trim() ? (
+                        <div className="typing-dots" aria-hidden>
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                        </div>
+                      ) : null}
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
+                        {t('dock.typing.stopCurrent', '结束当前')}
+                      </button>
+                      <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
+                        {t('dock.typing.stopAll', '全部停止')}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )
+              : (
+                <>
+                  {(stripProcessForMinimal
+                    ? (msg.blocks ?? []).filter(isResultLikeDockBlock)
+                    : (msg.blocks ?? [])
+                  ).map((block, i) => (
+                    <BlockRenderer
+                      key={i}
+                      block={block}
+                      onConfirm={executeConfirm}
+                      onDismiss={dismissConfirm}
+                      onCancelTask={cancelRunningTask}
+                      onApprovalAction={handleApprovalAction}
+                      onRecommendationChoice={handleRecommendationChoice}
+                      onSoulUpdateDecision={handleSoulUpdateDecision}
+                      onContinueAgent={handleContinueAfterTurnLimit}
+                      presentation={blockPresentation}
+                    />
+                  ))}
+                  {(msg.text || isStreamingBubble) && (() => {
+                    const { cleanText, mediaBlocks } = extractMediaFromText(msg.text || '');
+                    return (
+                      <>
+                        {(isStreamingBubble || cleanText) && (
+                          <div className={`msg-text${isStreamingBubble ? ' msg-text--streaming' : ''}`}>
+                            {isStreamingBubble ? (
+                              <DockStreamingPlainBody key={msg.id} text={cleanText} />
+                            ) : cleanText ? (
+                              renderMarkdown(cleanText, t('markdown.copy', '复制'))
+                            ) : null}
+                          </div>
+                        )}
+                        {mediaBlocks.map((mb, j) => (
+                          <BlockRenderer
+                            key={`extracted-media-${j}`}
+                            block={mb}
+                            onConfirm={executeConfirm}
+                            onDismiss={dismissConfirm}
+                            onCancelTask={cancelRunningTask}
+                            onApprovalAction={handleApprovalAction}
+                            onRecommendationChoice={handleRecommendationChoice}
+                            onSoulUpdateDecision={handleSoulUpdateDecision}
+                            onContinueAgent={handleContinueAfterTurnLimit}
+                            presentation={blockPresentation}
+                          />
+                        ))}
+                      </>
+                    );
+                  })()}
+                  {isStreamingBubble && (
+                    <div
+                      className={`dock-typing dock-typing--in-bubble${
+                        msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
+                      }`}
+                    >
+                      {msg.text?.trim() ? (
+                        <div className="typing-dots" aria-hidden>
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                          <span className="typing-dot" />
+                        </div>
+                      ) : null}
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
+                        {t('dock.typing.stopCurrent', '结束当前')}
+                      </button>
+                      <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
+                        {t('dock.typing.stopAll', '全部停止')}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+          </>
+        )}
+        {msg.action && (
+          <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
+            {msg.action.label} →
+          </button>
+        )}
+        {msg.role === 'ai' && (
+          <div className="dock-msg-footer">
+            {(!minimalResultMode || isStreamingBubble) && (
+            <span className="dock-msg-time">
+              {isStreamingBubble
+                ? t('dock.msg.replying', '回复中…')
+                : msg.durationMs != null
+                  ? `${t('dock.msg.took', '用时')} ${formatDockDurationMs(msg.durationMs)}`
+                  : t('dock.msg.durationUnknown', '—')}
+            </span>
+            )}
+            {(() => {
+              if (isStreamingBubble || msg.channelMeta) return null;
+              const prevUserForRetry = findPreviousStudioUserMessage(chatMessages, msg.id);
+              const plainRetry = chatMessageRetryExcerpt(msg, t).trim();
+              const showUnsatisfied = Boolean(plainRetry);
+              if (!prevUserForRetry && !showUnsatisfied) return null;
+              return (
+                <div className="dock-msg-footer-actions">
+                  {prevUserForRetry && (
+                    <button
+                      type="button"
+                      className="dock-bubble-retry dock-bubble-retry--primary"
+                      disabled={aiTyping}
+                      title={
+                        aiTyping
+                          ? t('dock.tt.waitReply', '请等待当前回复结束')
+                          : t(
+                              'dock.tt.regenerate',
+                              '用同一条用户消息重试：移除本则助手回复及之后的对话气泡，并同步服务端会话（类似 Gemini 重新生成）',
+                            )
+                      }
+                      onClick={() => void runRegenerate(msg.id)}
+                    >
+                      {t('dock.msg.retry', '重试')}
+                    </button>
+                  )}
+                  {showUnsatisfied && (
+                    <button
+                      type="button"
+                      className="dock-bubble-retry"
+                      disabled={aiTyping}
+                      title={
+                        aiTyping
+                          ? t('dock.tt.waitReply', '请等待当前回复结束')
+                          : t('dock.tt.feedbackBadReply', '反馈不满意，请改进回复')
+                      }
+                      onClick={() => {
+                        setUnsatisfiedNote('');
+                        setUnsatisfiedModal({
+                          msgId: msg.id,
+                          preview: chatMessageRetryExcerpt(msg, t),
+                        });
+                      }}
+                    >
+                      {t('dock.msg.unsatisfied', '不满意此回复')}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    </div>
+    );
+  };
+
   if (shouldHideDock) {
     return (
       <button
@@ -2374,33 +2763,6 @@ export default function AIDock() {
                 role="toolbar"
                 aria-label={t('dock.header.toolbarAria', '对话与运行工具')}
               >
-                <div
-                  className="dock-header-segmented"
-                  role="radiogroup"
-                  aria-label={t('dock.displayMode.aria', '对话展示')}
-                >
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={!minimalResultMode}
-                    className={`dock-header-seg${!minimalResultMode ? ' is-active' : ''}`}
-                    title={t('dock.displayMode.fullTitle', '展示工具调用、上下文与过程输出')}
-                    onClick={() => setMinimalResultMode(false)}
-                  >
-                    {t('dock.displayMode.full', '完整')}
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={minimalResultMode}
-                    className={`dock-header-seg${minimalResultMode ? ' is-active' : ''}`}
-                    title={t('dock.displayMode.minimalTitle', '仅保留正文与图片等结果')}
-                    onClick={() => setMinimalResultMode(true)}
-                  >
-                    {t('dock.displayMode.minimal', '极简')}
-                  </button>
-                </div>
-
                 <div className="dock-header-tool-cluster">
                   {taskHistory.length > 0 && (
                     <button
@@ -2454,34 +2816,18 @@ export default function AIDock() {
                 </div>
 
                 {!hubDockEmbedded && (
-                  <>
-                    <button
-                      type="button"
-                      className="dock-header-export"
-                      onClick={() => void beginNewChatAndOpenPage()}
-                      title={t('dock.tt.newChatOpen', '新建并打开对话页')}
-                      aria-label={t('dock.header.newChatOpen', '新建并打开')}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <line x1="12" y1="5" x2="12" y2="19" />
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                      <span className="dock-header-export-label">{t('dock.header.newChatOpen', '新建并打开')}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="dock-header-newchat"
-                      onClick={() => void beginNewChat()}
-                      title={t('dock.tt.newChat', '新对话')}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
-                        <line x1="12" y1="5" x2="12" y2="19" />
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                      <span>{t('dock.header.newChat', '新对话')}</span>
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    className="dock-header-newchat"
+                    onClick={() => void beginNewChat()}
+                    title={t('dock.tt.newChat', '新对话')}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    <span>{t('dock.header.newChat', '新对话')}</span>
+                  </button>
                 )}
               </div>
 
@@ -2522,7 +2868,11 @@ export default function AIDock() {
           )}
 
           {/* Chat stream */}
-          <div className="dock-stream dock-stream--cursor-flow" ref={streamScrollRef} onScroll={handleStreamScroll}>
+          <div
+            className={`dock-stream dock-stream--stream-flow${useAgentColumnFlow ? ' dock-stream--agent-flow' : ''}`}
+            ref={streamScrollRef}
+            onScroll={handleStreamScroll}
+          >
             {chatMessages.length === 0 && !aiTyping && (
               <div className="dock-empty-hint">{t('dock.empty.cleared', '聊天已清空，输入新消息即可继续。')}</div>
             )}
@@ -2532,279 +2882,48 @@ export default function AIDock() {
               </button>
             )}
 
-            {visibleMessages.map((msg, msgIndex) => {
-              const channelClass = msg.channelMeta?.channel ? ` ch-${msg.channelMeta.channel}` : '';
-              const directionClass = msg.channelMeta?.direction ? ` dir-${msg.channelMeta.direction}` : '';
-              const isStreamingBubble =
-                aiTyping
-                && msg.role === 'ai'
-                && msgIndex === visibleMessages.length - 1;
-              const useSlotLayout = Boolean(msg.contentSlots?.length && msg.blocks?.length);
-              const stripProcessForMinimal = minimalResultMode && !isStreamingBubble;
-              const slotsToRender =
-                useSlotLayout && msg.blocks && stripProcessForMinimal
-                  ? filterContentSlotsMinimal(msg.contentSlots!, msg.blocks)
-                  : msg.contentSlots;
-              return (
-              <div key={msg.id} className={`dock-msg ${msg.role}${channelClass}${directionClass}`}>
-                <div className={`dock-avatar ${msg.role}`}>
-                  {msg.role === 'ai'
-                    ? <img src={rdkclawAvatarUrl} alt="" className="dock-avatar-img" />
-                    : msg.channelMeta?.channel === 'feishu'
-                      ? t('dock.channel.short.feishu', '飞')
-                      : msg.channelMeta?.channel === 'weixin'
-                        ? t('dock.channel.short.weixin', '微')
-                        : <img src={userAvatarUrl} alt="" className="dock-avatar-img" />}
-                </div>
-                <div
-                  className={`dock-bubble ${msg.role}`}
-                  lang={msg.role === 'ai' ? (isEn ? 'en' : 'zh-CN') : undefined}
-                >
-                  {msg.channelMeta && (
-                    <div className="dock-channel-badge">
-                      {msg.channelMeta.channel === 'feishu'
-                        ? t('dock.channel.feishu', '飞书')
-                        : msg.channelMeta.channel === 'weixin'
-                          ? t('dock.channel.weixin', '微信')
-                          : msg.channelMeta.channel}
-                      {msg.channelMeta.direction === 'inbound'
-                        ? t('dock.channel.inbound', ' · 来信')
-                        : msg.channelMeta.direction === 'outbound'
-                          ? t('dock.channel.outbound', ' · 回复')
-                          : ''}
-                    </div>
-                  )}
-                  {(() => {
-                    const plain = chatMessageToPlainText(msg, t);
-                    if (!plain) return null;
-                    return (
-                      <div className="dock-bubble-toolbar">
-                        <button
-                          type="button"
-                          className="dock-bubble-copy"
-                          title={t('dock.tt.copyMessage', '复制文字')}
-                          aria-label={t('dock.tt.copyMessage', '复制文字')}
-                          onClick={() => {
-                            void copyDockPlainText(plain).then((ok) => {
-                              addToast(
-                                ok ? t('dock.bubble.copyToastOk', '已复制到剪贴板') : t('dock.bubble.copyToastFail', '复制失败，可尝试用鼠标拖选文字'),
-                                ok ? 'success' : 'warning',
-                              );
-                            });
-                          }}
-                        >
-                          <Copy size={14} strokeWidth={2} aria-hidden />
-                        </button>
+            {useAgentColumnFlow
+              ? dockTurnEntries.map((turn) => {
+                if (turn.kind === 'pair') {
+                  const userIdx = visibleMessages.indexOf(turn.user);
+                  const aiIdx = visibleMessages.indexOf(turn.ai);
+                  return (
+                    <div key={`turn-${turn.user.id}`} className="dock-turn dock-turn--agent">
+                      <div className="dock-turn-query dock-turn-query--sticky">
+                        {renderDockStreamMessageBubble(turn.user, userIdx, 'agent-user')}
                       </div>
-                    );
-                  })()}
-                  {msg.attachments && msg.attachments.length > 0 && (
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
-                      {msg.attachments.map(att => (
-                        <AttachmentRenderer key={att.id} attachment={att} />
-                      ))}
+                      <div className="dock-turn-answer">
+                        {renderDockStreamMessageBubble(turn.ai, aiIdx, 'agent-ai')}
+                      </div>
                     </div>
-                  )}
-                  {msg.role === 'user' && msg.text && (
-                    <p className="msg-text">{msg.text}</p>
-                  )}
-                  {msg.role === 'ai' && (
-                    <>
-                      {slotsToRender && slotsToRender.length > 0 && msg.blocks
-                        ? (
-                          <>
-                            {slotsToRender.map((slot, i) => {
-                              const lastSlot = i === slotsToRender.length - 1;
-                              const blockProps = {
-                                onConfirm: executeConfirm,
-                                onDismiss: dismissConfirm,
-                                onCancelTask: cancelRunningTask,
-                                onApprovalAction: handleApprovalAction,
-                                onRecommendationChoice: handleRecommendationChoice,
-                                onSoulUpdateDecision: handleSoulUpdateDecision,
-                                onContinueAgent: handleContinueAfterTurnLimit,
-                              } as const;
-                              if (slot.kind === 'markdown') {
-                                const { cleanText, mediaBlocks } = extractMediaFromText(slot.text || '');
-                                const streamHere = Boolean(isStreamingBubble && lastSlot);
-                                if (!cleanText && !streamHere && mediaBlocks.length === 0) return null;
-                                return (
-                                  <Fragment key={`slot-md-${msg.id}-${i}`}>
-                                    {(streamHere || cleanText) && (
-                                      <div className={`msg-text${streamHere ? ' msg-text--streaming' : ''}`}>
-                                        {streamHere ? (
-                                          <DockStreamingPlainBody key={msg.id} text={cleanText} />
-                                        ) : cleanText ? (
-                                          renderMarkdown(cleanText, t('markdown.copy', '复制'))
-                                        ) : null}
-                                      </div>
-                                    )}
-                                    {mediaBlocks.map((mb, j) => (
-                                      <BlockRenderer key={`slot-md-${msg.id}-${i}-m-${j}`} block={mb} {...blockProps} />
-                                    ))}
-                                  </Fragment>
-                                );
-                              }
-                              const block = (msg.blocks ?? [])[slot.index];
-                              if (!block) return null;
-                              return (
-                                <BlockRenderer
-                                  key={`slot-b-${msg.id}-${i}-${slot.index}`}
-                                  block={block}
-                                  {...blockProps}
-                                />
-                              );
-                            })}
-                            {isStreamingBubble && (
-                              <div
-                                className={`dock-typing dock-typing--in-bubble${
-                                  msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
-                                }`}
-                              >
-                                {msg.text?.trim() ? (
-                                  <div className="typing-dots" aria-hidden>
-                                    <span className="typing-dot" />
-                                    <span className="typing-dot" />
-                                    <span className="typing-dot" />
-                                  </div>
-                                ) : null}
-                                <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
-                                  {t('dock.typing.stopCurrent', '结束当前')}
-                                </button>
-                                <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
-                                  {t('dock.typing.stopAll', '全部停止')}
-                                </button>
-                              </div>
-                            )}
-                          </>
-                        )
-                        : (
-                          <>
-                            {(stripProcessForMinimal
-                              ? (msg.blocks ?? []).filter(isResultLikeDockBlock)
-                              : (msg.blocks ?? [])
-                            ).map((block, i) => (
-                              <BlockRenderer key={i} block={block} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} onContinueAgent={handleContinueAfterTurnLimit} />
-                            ))}
-                            {(msg.text || isStreamingBubble) && (() => {
-                              const { cleanText, mediaBlocks } = extractMediaFromText(msg.text || '');
-                              return (
-                                <>
-                                  {(isStreamingBubble || cleanText) && (
-                                    <div className={`msg-text${isStreamingBubble ? ' msg-text--streaming' : ''}`}>
-                                      {isStreamingBubble ? (
-                                        <DockStreamingPlainBody key={msg.id} text={cleanText} />
-                                      ) : cleanText ? (
-                                        renderMarkdown(cleanText, t('markdown.copy', '复制'))
-                                      ) : null}
-                                    </div>
-                                  )}
-                                  {mediaBlocks.map((mb, j) => (
-                                    <BlockRenderer key={`extracted-media-${j}`} block={mb} onConfirm={executeConfirm} onDismiss={dismissConfirm} onCancelTask={cancelRunningTask} onApprovalAction={handleApprovalAction} onRecommendationChoice={handleRecommendationChoice} onSoulUpdateDecision={handleSoulUpdateDecision} onContinueAgent={handleContinueAfterTurnLimit} />
-                                  ))}
-                                </>
-                              );
-                            })()}
-                            {isStreamingBubble && (
-                              <div
-                                className={`dock-typing dock-typing--in-bubble${
-                                  msg.text?.trim() ? ' dock-typing--after-stream-text' : ''
-                                }`}
-                              >
-                                {msg.text?.trim() ? (
-                                  <div className="typing-dots" aria-hidden>
-                                    <span className="typing-dot" />
-                                    <span className="typing-dot" />
-                                    <span className="typing-dot" />
-                                  </div>
-                                ) : null}
-                                <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
-                                  {t('dock.typing.stopCurrent', '结束当前')}
-                                </button>
-                                <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>
-                                  {t('dock.typing.stopAll', '全部停止')}
-                                </button>
-                              </div>
-                            )}
-                          </>
-                        )}
-                    </>
-                  )}
-                  {msg.action && (
-                    <button className="chat-action-btn" onClick={() => setActiveTab(msg.action!.tab)}>
-                      {msg.action.label} →
-                    </button>
-                  )}
-                  {msg.role === 'ai' && (
-                    <div className="dock-msg-footer">
-                      {(!minimalResultMode || isStreamingBubble) && (
-                      <span className="dock-msg-time">
-                        {isStreamingBubble
-                          ? t('dock.msg.replying', '回复中…')
-                          : msg.durationMs != null
-                            ? `${t('dock.msg.took', '用时')} ${formatDockDurationMs(msg.durationMs)}`
-                            : t('dock.msg.durationUnknown', '—')}
-                      </span>
-                      )}
-                      {(() => {
-                        if (isStreamingBubble || msg.channelMeta) return null;
-                        const prevUserForRetry = findPreviousStudioUserMessage(chatMessages, msg.id);
-                        const plainRetry = chatMessageRetryExcerpt(msg, t).trim();
-                        const showUnsatisfied = Boolean(plainRetry);
-                        if (!prevUserForRetry && !showUnsatisfied) return null;
-                        return (
-                          <div className="dock-msg-footer-actions">
-                            {prevUserForRetry && (
-                              <button
-                                type="button"
-                                className="dock-bubble-retry dock-bubble-retry--primary"
-                                disabled={aiTyping}
-                                title={
-                                  aiTyping
-                                    ? t('dock.tt.waitReply', '请等待当前回复结束')
-                                    : t(
-                                        'dock.tt.regenerate',
-                                        '用同一条用户消息重试：移除本则助手回复及之后的对话气泡，并同步服务端会话（类似 Gemini 重新生成）',
-                                      )
-                                }
-                                onClick={() => void runRegenerate(msg.id)}
-                              >
-                                {t('dock.msg.retry', '重试')}
-                              </button>
-                            )}
-                            {showUnsatisfied && (
-                              <button
-                                type="button"
-                                className="dock-bubble-retry"
-                                disabled={aiTyping}
-                                title={
-                                  aiTyping
-                                    ? t('dock.tt.waitReply', '请等待当前回复结束')
-                                    : t('dock.tt.feedbackBadReply', '反馈不满意，请改进回复')
-                                }
-                                onClick={() => {
-                                  setUnsatisfiedNote('');
-                                  setUnsatisfiedModal({
-                                    msgId: msg.id,
-                                    preview: chatMessageRetryExcerpt(msg, t),
-                                  });
-                                }}
-                              >
-                                {t('dock.msg.unsatisfied', '不满意此回复')}
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })()}
+                  );
+                }
+                if (turn.kind === 'user-only') {
+                  const userIdx = visibleMessages.indexOf(turn.user);
+                  return (
+                    <div key={`turn-${turn.user.id}`} className="dock-turn dock-turn--agent">
+                      <div className="dock-turn-query dock-turn-query--sticky">
+                        {renderDockStreamMessageBubble(turn.user, userIdx, 'agent-user')}
+                      </div>
+                      <div className="dock-turn-answer dock-turn-answer--pending" aria-hidden />
                     </div>
-                  )}
-                </div>
-              </div>
-              );
-            })}
+                  );
+                }
+                const aiIdx = visibleMessages.indexOf(turn.ai);
+                return (
+                  <div key={`orphan-ai-${turn.ai.id}`} className="dock-turn dock-turn--agent">
+                    {renderDockStreamMessageBubble(turn.ai, aiIdx, 'agent-ai')}
+                  </div>
+                );
+              })
+              : visibleMessages.map((msg, msgIndex) => (
+                <Fragment key={msg.id}>
+                  {renderDockStreamMessageBubble(msg, msgIndex, 'classic')}
+                </Fragment>
+              ))}
 
             {aiTyping && !streamMergedIntoLastAiBubble && (
-              <div className="dock-msg ai">
+              <div className={`dock-msg ai${useAgentColumnFlow ? ' dock-msg--agent-ai' : ''}`}>
                 <div className="dock-avatar ai">
                   <img src={rdkclawAvatarUrl} alt="" className="dock-avatar-img" />
                 </div>
@@ -3013,28 +3132,14 @@ export default function AIDock() {
             </div>
           )}
           {!chatExpanded && (
-            <>
-              <button
-                type="button"
-                className="dock-action-btn"
-                onClick={() => void beginNewChatAndOpenPage()}
-                title={t('dock.tt.newChatOpen', '新建并打开对话页')}
-                aria-label={t('dock.header.newChatOpen', '新建并打开')}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className="dock-action-btn"
-                onClick={() => setChatExpanded(true)}
-                title={t('dock.tt.expandChat', '展开对话')}
-              >
-                {Icon.expand}
-              </button>
-            </>
+            <button
+              type="button"
+              className="dock-action-btn"
+              onClick={() => setChatExpanded(true)}
+              title={t('dock.tt.expandChat', '展开对话')}
+            >
+              {Icon.expand}
+            </button>
           )}
           {isSubpageTab && (
             <button

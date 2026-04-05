@@ -213,7 +213,7 @@ export const EN_EXTRAS: Record<string, string> = {
 
   'dock.continueRun.title': 'Turn limit reached for this run',
   'dock.continueRun.body':
-    'Like Cursor’s “Continue”: the button sends a follow-up so the agent can finish unfinished work in this chat without redoing successful steps.',
+    'The button sends a follow-up so the agent can finish unfinished work in this chat without redoing successful steps.',
   'dock.continueRun.cta': 'Continue',
   'dock.continueRun.busy': 'Wait for the current reply to finish, then try again.',
   'dock.continueRun.plainTitle': '[Continue] Turn limit reached for this run',
@@ -261,6 +261,13 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.displayMode.fullTitle': 'Show tool calls, context, and intermediate output in order',
   'dock.displayMode.minimalTitle': 'Show only the answer text and result media',
 
+  'dock.layoutFlow.aria': 'Conversation layout',
+  'dock.layoutFlow.agent': 'Flow',
+  'dock.layoutFlow.classic': 'Bubbles',
+  'dock.layoutFlow.agentTitle':
+    'Single-column flow: the current question sticks to the top; answers scroll below in full width',
+  'dock.layoutFlow.classicTitle': 'Classic left/right chat bubbles',
+
   'dock.tt.copy': 'Copy',
   'dock.tt.collapse': 'Collapse',
   'dock.tt.expand': 'Expand',
@@ -276,6 +283,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.tt.hideDock': 'Hide chat panel',
   'dock.tt.exportChat': 'Export as text',
   'dock.tt.newChat': 'New chat',
+  'dock.tt.newChatOpen': 'New chat and expand the chat panel',
   'dock.tt.closePanel': 'Close',
   'dock.tt.copyMessage': 'Copy text',
   'dock.tt.waitReply': 'Wait for reply to finish',
@@ -305,6 +313,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.terminal.collapse': 'Collapse',
   'dock.terminal.expandLines': 'Expand ({{n}} lines)',
   'dock.code.copy': 'Copy code',
+  'dock.reasoning.summaryHasContent': 'Thought',
+  'dock.reasoning.summaryEmpty': 'Thinking',
   'dock.reasoning.copy': 'Copy thinking',
   'dock.image.alt': 'Device image',
   'dock.video.download': 'Download video',
@@ -633,6 +643,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.tool.running': 'Running · {{exec}} · live output',
   'chat.tool.runningVal': 'Running · {{exec}} · live output',
   'chat.tool.rawLabel': '{{tool}} · raw output',
+  'chat.tool.shellStreamingLabel': '{{tool}} · {{cmd}} · streaming',
+  'chat.tool.shellOutputLabel': '{{tool}} · {{cmd}} · output',
   'chat.tool.resultLabel': '{{tool}} · {{exec}}',
   'chat.tool.finalLabel': '{{tool}} · final result',
   'chat.tool.errLine': '{{tool}} failed: {{msg}}',
@@ -703,7 +715,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.soul.closed': 'SOUL updates are disabled; edit USER.md for preferences.',
   'chat.stop.sent': 'Stop signal sent; task should end shortly.',
   'chat.stop.sentAlreadyEnded':
-    'This run already finished (like Cursor/IDE: stop is a no-op when nothing is running). You can send a new message.',
+    'This run already finished (stop is a no-op when nothing is running). You can send a new message.',
   'chat.stop.detailAlreadyEnded': 'No active run on the server (finished or already stopped). No retry needed.',
   'chat.stop.title': 'Stop requested',
   'chat.stop.detailRun': 'runId: {{id}}',

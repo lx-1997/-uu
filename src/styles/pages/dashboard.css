@@ -879,13 +879,13 @@ button.ob-connect-card--disabled:hover {
   border-radius: 4px;
 }
 
-.ob-install-cursor {
-  animation: ob-cursor-blink 1s step-end infinite;
+.ob-install-blink {
+  animation: ob-install-blink-anim 1s step-end infinite;
   color: #28c840;
   font-weight: bold;
 }
 
-@keyframes ob-cursor-blink {
+@keyframes ob-install-blink-anim {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }

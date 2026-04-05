@@ -5,9 +5,11 @@
 import { ToolHookRegistry, createExecLikeFailureHintHook } from './tool-hooks.js';
 import type { PostToolUseHook } from './tool-hooks.js';
 import type { Tool } from './tools/types.js';
-import { assertStudioClientOpenUrlAllowed } from './tools/browser-tools.js';
-import { emitStudioOpenUrlToClients } from '../studio-browser-capture.js';
-import { rewriteUrlForStudioDevice } from '../device-url-rewrite.js';
+import {
+  DEVICE_DASHBOARD_AUTO_OPEN_NOTE_PREFIX,
+  emitDeviceDashboardUrlsFromText,
+  formatDeviceDashboardAutoOpenNote,
+} from '../device-dashboard-auto-open.js';
 import {
   SHELL_SOFT_FAILURE_TOOL_NAMES,
   appendShellContinueHint,
@@ -56,8 +58,6 @@ const createMutationSessionEchoHook = (): PostToolUseHook => ({
   },
 });
 
-const URL_IN_TEXT = /https?:\/\/[^\s\)\]\"'<>]+/gi;
-
 /** `exec` / `device_exec` 在命令非零退出时常以**文本**返回（不抛错），PostFailure 钩子不会触发；此处统一追加「须继续」编排提示。 */
 const createShellSoftFailureContinueHintHook = (): PostToolUseHook => ({
   name: 'rdkclaw-shell-soft-failure-continue-hint',
@@ -78,27 +78,11 @@ const createAutoOpenDeviceDashboardUrlHook = (): PostToolUseHook => ({
     if (isError) return null;
     const names = new Set(['device_exec', 'device_diagnose', 'board_openclaw_health', 'board_openclaw_logs']);
     if (!names.has(tool.name)) return null;
-    const matches = result.match(URL_IN_TEXT);
-    if (!matches?.length) return null;
-    const seen = new Set<string>();
-    const opened: string[] = [];
-    for (const raw of matches) {
-      const candidate = raw.replace(/[.,;]+$/, '');
-      if (seen.has(candidate)) continue;
-      seen.add(candidate);
-      try {
-        const safe = assertStudioClientOpenUrlAllowed(candidate);
-        const url = safe.toString();
-        const forStudio = await rewriteUrlForStudioDevice(url, ctx.studioDeviceId);
-        emitStudioOpenUrlToClients(forStudio);
-        opened.push(forStudio);
-        if (opened.length >= 2) break;
-      } catch {
-        /* 跳过不可放行 URL */
-      }
-    }
+    /** device_exec 已在主命令返回后、ros2VerifyTopics 之前打开过，避免重复弹窗 */
+    if (result.includes(DEVICE_DASHBOARD_AUTO_OPEN_NOTE_PREFIX)) return null;
+    const opened = await emitDeviceDashboardUrlsFromText(result, ctx.studioDeviceId);
     if (opened.length === 0) return null;
-    const note = `[会话 · 已为你打开监控/页面] ${opened.join(' ｜ ')}`;
+    const note = formatDeviceDashboardAutoOpenNote(opened);
     if (result.includes(note)) return null;
     return { result: `${result}\n\n${note}` };
   },

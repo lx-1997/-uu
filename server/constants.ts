@@ -4,18 +4,6 @@
 export const DEFAULT_SSH_USERNAME = 'root';
 export const DEFAULT_SSH_PASSWORD = process.env.RDK_SSH_PASSWORD?.trim() || 'root';
 
-let _defaultSshPasswordWarned = false;
-export function warnIfUsingDefaultSshPassword(): void {
-  if (_defaultSshPasswordWarned) return;
-  if (!process.env.RDK_SSH_PASSWORD?.trim()) {
-    _defaultSshPasswordWarned = true;
-    console.warn(
-      '[security] 未设置 RDK_SSH_PASSWORD，使用出厂默认口令。' +
-      '建议：设置环境变量 RDK_SSH_PASSWORD 或在设备管理中为每台设备保存专属密码。',
-    );
-  }
-}
-
 export const DEFAULT_SSH_PORT = 22;
 export const DEFAULT_VNC_PORT = 5900;
 /** 与 `src/components/IDE.tsx` code-server 启动端口一致 */

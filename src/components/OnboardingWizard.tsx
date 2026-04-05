@@ -915,7 +915,7 @@ export default function OnboardingWizard() {
                 </div>
                 <pre className="ob-install-terminal-body" ref={!ocInstalling ? logContainerRef : undefined}>
                   {ocGwLog || `${t('onboard.oc.prepareGw', '准备启动网关...')}\n`}
-                  {ocStartingGw && <span className="ob-install-cursor">_</span>}
+                  {ocStartingGw && <span className="ob-install-blink">_</span>}
                   <div ref={!ocInstalling ? logEndRef : undefined} />
                 </pre>
               </div>
@@ -939,7 +939,7 @@ export default function OnboardingWizard() {
                 </div>
                 <pre className="ob-install-terminal-body" ref={logContainerRef}>
                   {ocInstallLog || `${t('onboard.oc.prepareDeploy', '正在连接设备，准备部署...')}\n`}
-                  {ocInstalling && <span className="ob-install-cursor">_</span>}
+                  {ocInstalling && <span className="ob-install-blink">_</span>}
                   <div ref={logEndRef} />
                 </pre>
               </div>

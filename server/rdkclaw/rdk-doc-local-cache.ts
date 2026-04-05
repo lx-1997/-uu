@@ -2,6 +2,7 @@
  * RDK 官方文档本地缓存 — 从 GitHub D-Robotics/rdk_doc 仓库的 docs/ 目录
  * 下载原始 Markdown 文件到 ~/.rdkstudio/rdk-doc-cache/，供 web_fetch 命中时
  * 直接读本地（<10 ms），而非每次 HTTP GET 官网 HTML（~20 s）。
+ * 刷新时写入 docs.staging 再与 docs 原子替换，避免刷新过程中清空 docs 导致长时间只能走 HTTP。
  *
  * 下载方式：GitHub Git Trees API（递归），一次 API 调用拿到整棵 docs/ 的
  * SHA + path 列表，再批量 Blob GET 下载 .md/.mdx 文件。无外部依赖。
@@ -25,6 +26,9 @@ const GITHUB_API_BASE = 'https://api.github.com';
 
 const CACHE_DIR_NAME = 'rdk-doc-cache';
 const DOCS_SUBDIR = 'docs';
+/** 下载到临时目录，完成后与 docs 原子替换，避免刷新过程中清空缓存导致 web_fetch 长时间走慢速 HTTP */
+const DOCS_STAGING_SUBDIR = 'docs.staging';
+const DOCS_BACKUP_SUBDIR = 'docs.backup';
 const META_FILENAME = 'meta.json';
 const INDEX_FILENAME = 'index.json';
 
@@ -36,8 +40,10 @@ const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
 /** 单文件大小限制（base64 解码前） */
 const MAX_BLOB_SIZE = 2 * 1024 * 1024;
-/** 并发下载数（控制 GitHub API 速率） */
-const DOWNLOAD_CONCURRENCY = 10;
+/** 并发下载数（raw.githubusercontent.com 可承受略高于 API 限制） */
+const DOWNLOAD_CONCURRENCY = 24;
+/** 构建索引时并行读取 MD 文件批大小 */
+const INDEX_READ_CONCURRENCY = 40;
 
 const RDK_DOC_URL_PREFIX = 'https://developer.d-robotics.cc/rdk_doc/';
 
@@ -94,6 +100,21 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let refreshInProgress = false;
 let initialized = false;
 let memIndex: DocIndex | null = null;
+/** stripNumericPrefixes(urlPath) → 条目，加速 resolveLocalDocPath */
+let memIndexByNormPath: Map<string, DocIndexEntry> | null = null;
+
+function rebuildNormPathLookup(idx: DocIndex | null): void {
+  if (!idx) {
+    memIndexByNormPath = null;
+    return;
+  }
+  const m = new Map<string, DocIndexEntry>();
+  for (const e of idx.entries) {
+    const k = stripNumericPrefixes(e.urlPath);
+    if (!m.has(k)) m.set(k, e);
+  }
+  memIndexByNormPath = m;
+}
 
 // ─── 路径工具 ──────────────────────────────────────────────────────────────────
 
@@ -107,6 +128,8 @@ function resolveCacheDir(): string {
 function metaPath(): string { return path.join(resolveCacheDir(), META_FILENAME); }
 function indexPath(): string { return path.join(resolveCacheDir(), INDEX_FILENAME); }
 function docsDir(): string { return path.join(resolveCacheDir(), DOCS_SUBDIR); }
+function docsStagingDir(): string { return path.join(resolveCacheDir(), DOCS_STAGING_SUBDIR); }
+function docsBackupDir(): string { return path.join(resolveCacheDir(), DOCS_BACKUP_SUBDIR); }
 
 // ─── Meta 读写 ─────────────────────────────────────────────────────────────────
 
@@ -158,10 +181,8 @@ function extractKeywords(filePath: string, title: string): string[] {
   return [...kw];
 }
 
-async function buildIndex(): Promise<DocIndex> {
-  const root = docsDir();
-  const entries: DocIndexEntry[] = [];
-
+async function collectMdPathsUnder(root: string): Promise<string[]> {
+  const out: string[] = [];
   async function walk(dir: string): Promise<void> {
     let items: string[];
     try { items = await fsp.readdir(dir); } catch { return; }
@@ -172,21 +193,37 @@ async function buildIndex(): Promise<DocIndex> {
       if (stat.isDirectory()) {
         await walk(full);
       } else if (/\.mdx?$/i.test(item)) {
+        out.push(full);
+      }
+    }
+  }
+  await walk(root);
+  return out;
+}
+
+async function buildIndexFromRoot(root: string): Promise<DocIndex> {
+  const paths = await collectMdPathsUnder(root);
+  const entries: DocIndexEntry[] = [];
+
+  for (let i = 0; i < paths.length; i += INDEX_READ_CONCURRENCY) {
+    const chunk = paths.slice(i, i + INDEX_READ_CONCURRENCY);
+    const parts = await Promise.all(
+      chunk.map(async (full) => {
         const rel = path.relative(root, full);
         let content = '';
         try { content = await fsp.readFile(full, 'utf-8'); } catch { /* skip */ }
         const title = extractTitle(content);
-        entries.push({
+        return {
           urlPath: localPathToUrlPath(rel),
           localPath: rel,
           title,
           keywords: extractKeywords(rel, title),
-        });
-      }
-    }
+        } as DocIndexEntry;
+      }),
+    );
+    entries.push(...parts);
   }
 
-  await walk(root);
   return { builtAt: Date.now(), entries };
 }
 
@@ -219,73 +256,98 @@ async function githubFetch(urlPath: string): Promise<any> {
 /**
  * 用 Git Trees API（recursive）获取 docs/ 下所有 blob 的 path + sha 列表。
  * 然后批量用 Raw URL 下载内容（比 Blob API 更快，不经过 base64）。
+ * 下载到 docs.staging，索引构建完成后与 docs 原子替换，刷新期间旧 docs 仍可被 web_fetch 命中。
  */
-async function downloadAllDocs(): Promise<{ treeSha: string; fileCount: number }> {
-  // 1. 获取最新 commit 的 tree SHA
-  const branch = await githubFetch(`/repos/${GITHUB_REPO}/branches/${GITHUB_BRANCH}`);
-  const commitSha: string = branch.commit.sha;
-  const rootTreeSha: string = branch.commit.commit.tree.sha;
+async function downloadAllDocs(): Promise<{ treeSha: string; fileCount: number; docIndex: DocIndex }> {
+  const stagingDir = docsStagingDir();
+  const finalDir = docsDir();
+  const backupDir = docsBackupDir();
 
-  // 2. 获取递归 tree
-  const treeData = await githubFetch(`/repos/${GITHUB_REPO}/git/trees/${rootTreeSha}?recursive=1`);
-  const allItems: GitTreeItem[] = treeData.tree;
+  try {
+    // 1. 获取最新 commit 的 tree SHA
+    const branch = await githubFetch(`/repos/${GITHUB_REPO}/branches/${GITHUB_BRANCH}`);
+    const commitSha: string = branch.commit.sha;
+    const rootTreeSha: string = branch.commit.commit.tree.sha;
 
-  // 3. 筛选 docs/ 下的 .md/.mdx 文件
-  const docBlobs = allItems.filter(
-    (item) =>
-      item.type === 'blob' &&
-      item.path.startsWith('docs/') &&
-      /\.mdx?$/i.test(item.path) &&
-      (item.size ?? 0) <= MAX_BLOB_SIZE,
-  );
+    // 2. 获取递归 tree
+    const treeData = await githubFetch(`/repos/${GITHUB_REPO}/git/trees/${rootTreeSha}?recursive=1`);
+    const allItems: GitTreeItem[] = treeData.tree;
 
-  if (docBlobs.length === 0) {
-    throw new Error('Git tree 中未找到 docs/*.md 文件');
-  }
+    // 3. 筛选 docs/ 下的 .md/.mdx 文件
+    const docBlobs = allItems.filter(
+      (item) =>
+        item.type === 'blob' &&
+        item.path.startsWith('docs/') &&
+        /\.mdx?$/i.test(item.path) &&
+        (item.size ?? 0) <= MAX_BLOB_SIZE,
+    );
 
-  // 4. 清空旧文档
-  const targetDir = docsDir();
-  await fsp.rm(targetDir, { recursive: true, force: true });
-  await fsp.mkdir(targetDir, { recursive: true });
-
-  // 5. 并发下载（用 raw.githubusercontent.com，绕过 API rate limit）
-  let fileCount = 0;
-  const rawBase = `https://raw.githubusercontent.com/${GITHUB_REPO}/${commitSha}`;
-
-  async function downloadOne(item: GitTreeItem): Promise<void> {
-    // item.path 形如 "docs/Robot_development/boxs/detection/fcos.md"
-    const relPath = item.path.slice('docs/'.length);
-    const outPath = path.join(targetDir, relPath);
-
-    // 路径穿越防护
-    if (!outPath.startsWith(targetDir + path.sep) && outPath !== targetDir) return;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${rawBase}/${item.path}`, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'RDKStudio-DocCache/1.0' },
-      });
-      if (!res.ok) return;
-      const text = await res.text();
-      await fsp.mkdir(path.dirname(outPath), { recursive: true });
-      await fsp.writeFile(outPath, text, 'utf-8');
-      fileCount++;
-    } catch {
-      /* 单文件失败不中断整体 */
-    } finally {
-      clearTimeout(timer);
+    if (docBlobs.length === 0) {
+      throw new Error('Git tree 中未找到 docs/*.md 文件');
     }
-  }
 
-  // 分批并发
-  for (let i = 0; i < docBlobs.length; i += DOWNLOAD_CONCURRENCY) {
-    const batch = docBlobs.slice(i, i + DOWNLOAD_CONCURRENCY);
-    await Promise.allSettled(batch.map(downloadOne));
-  }
+    // 4. 清空 staging（不动当前 docs/，保证刷新过程中仍可读本地缓存）
+    await fsp.rm(stagingDir, { recursive: true, force: true });
+    await fsp.mkdir(stagingDir, { recursive: true });
 
-  return { treeSha: rootTreeSha, fileCount };
+    // 5. 并发下载到 staging
+    let fileCount = 0;
+    const rawBase = `https://raw.githubusercontent.com/${GITHUB_REPO}/${commitSha}`;
+
+    async function downloadOne(item: GitTreeItem): Promise<void> {
+      const relPath = item.path.slice('docs/'.length);
+      const outPath = path.join(stagingDir, relPath);
+
+      if (!outPath.startsWith(stagingDir + path.sep) && outPath !== stagingDir) return;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${rawBase}/${item.path}`, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'RDKStudio-DocCache/1.0' },
+        });
+        if (!res.ok) return;
+        const text = await res.text();
+        await fsp.mkdir(path.dirname(outPath), { recursive: true });
+        await fsp.writeFile(outPath, text, 'utf-8');
+        fileCount++;
+      } catch {
+        /* 单文件失败不中断整体 */
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    for (let i = 0; i < docBlobs.length; i += DOWNLOAD_CONCURRENCY) {
+      const batch = docBlobs.slice(i, i + DOWNLOAD_CONCURRENCY);
+      await Promise.allSettled(batch.map(downloadOne));
+    }
+
+    if (fileCount === 0) {
+      await fsp.rm(stagingDir, { recursive: true, force: true });
+      throw new Error('未下载到任何文档文件');
+    }
+
+    const docIndex = await buildIndexFromRoot(stagingDir);
+
+    // 6. 原子替换：final → backup → staging → final，再删 backup
+    await fsp.rm(backupDir, { recursive: true, force: true });
+    if (fs.existsSync(finalDir)) {
+      await fsp.rename(finalDir, backupDir);
+    }
+    await fsp.rename(stagingDir, finalDir);
+    await fsp.rm(backupDir, { recursive: true, force: true }).catch(() => {});
+
+    return { treeSha: rootTreeSha, fileCount, docIndex };
+  } catch (err) {
+    await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    // 若已将 docs 挪到 backup 但 staging→docs 失败，恢复旧缓存目录
+    if (!fs.existsSync(finalDir) && fs.existsSync(backupDir)) {
+      await fsp.rename(backupDir, finalDir).catch(() => {});
+    }
+    throw err;
+  }
 }
 
 // ─── 刷新逻辑 ──────────────────────────────────────────────────────────────────
@@ -301,7 +363,7 @@ async function doRefresh(force = false): Promise<boolean> {
   refreshInProgress = true;
   try {
     console.log('[rdk-doc-cache] 开始从 GitHub 拉取 rdk_doc 文档...');
-    const { treeSha, fileCount } = await downloadAllDocs();
+    const { treeSha, fileCount, docIndex } = await downloadAllDocs();
     console.log(`[rdk-doc-cache] 下载完成: ${fileCount} 个文件, tree ${treeSha.slice(0, 10)}`);
 
     if (fileCount === 0) {
@@ -316,10 +378,10 @@ async function doRefresh(force = false): Promise<boolean> {
       version: META_VERSION,
     });
 
-    const idx = await buildIndex();
-    await saveIndex(idx);
-    memIndex = idx;
-    console.log(`[rdk-doc-cache] 索引构建完成: ${idx.entries.length} 条`);
+    await saveIndex(docIndex);
+    memIndex = docIndex;
+    rebuildNormPathLookup(docIndex);
+    console.log(`[rdk-doc-cache] 索引构建完成: ${docIndex.entries.length} 条`);
     return true;
   } catch (err) {
     console.error('[rdk-doc-cache] 刷新失败:', err instanceof Error ? err.message : err);
@@ -345,7 +407,10 @@ export async function initRdkDocCache(): Promise<void> {
   const meta = await readMeta();
   if (meta) {
     const idx = await loadIndex();
-    if (idx) memIndex = idx;
+    if (idx) {
+      memIndex = idx;
+      rebuildNormPathLookup(idx);
+    }
   }
 
   const isStale = !meta || Date.now() - meta.lastUpdatedAt >= STALE_THRESHOLD_MS;
@@ -388,14 +453,12 @@ export function resolveLocalDocPath(url: string): string | null {
 
   // 索引模糊匹配：GitHub 文件路径带数字编号前缀（如 05_Robot_development/03_boxs），
   // 而官网 URL 不带（Robot_development/boxs），需要去除编号后比较。
-  if (memIndex) {
+  if (memIndexByNormPath) {
     const norm = stripNumericPrefixes(urlPath);
-    for (const entry of memIndex.entries) {
-      const entryNorm = stripNumericPrefixes(entry.urlPath);
-      if (entryNorm === norm) {
-        const full = path.join(root, entry.localPath);
-        if (fs.existsSync(full)) return full;
-      }
+    const hit = memIndexByNormPath.get(norm);
+    if (hit) {
+      const full = path.join(root, hit.localPath);
+      if (fs.existsSync(full)) return full;
     }
   }
 
@@ -466,15 +529,28 @@ export function searchDocIndex(query: string, limit = 10): DocIndexEntry[] {
   const terms = query.toLowerCase().split(/[\s_\-./]+/).filter((t) => t.length >= 2);
   if (terms.length === 0) return [];
 
-  const scored = memIndex.entries.map((entry) => {
-    let score = 0;
+  const pool = memIndex.entries.filter((entry) => {
+    const lp = entry.urlPath.toLowerCase();
+    const tl = entry.title.toLowerCase();
     for (const term of terms) {
-      if (entry.keywords.some((k) => k.includes(term))) score += 2;
-      if (entry.urlPath.toLowerCase().includes(term)) score += 1;
-      if (entry.title.toLowerCase().includes(term)) score += 1;
+      if (lp.includes(term) || tl.includes(term)) return true;
+      if (entry.keywords.some((k) => k.includes(term))) return true;
     }
-    return { entry, score };
-  }).filter((s) => s.score > 0);
+    return false;
+  });
+  const candidates = pool.length > 0 ? pool : memIndex.entries;
+
+  const scored = candidates
+    .map((entry) => {
+      let score = 0;
+      for (const term of terms) {
+        if (entry.keywords.some((k) => k.includes(term))) score += 2;
+        if (entry.urlPath.toLowerCase().includes(term)) score += 1;
+        if (entry.title.toLowerCase().includes(term)) score += 1;
+      }
+      return { entry, score };
+    })
+    .filter((s) => s.score > 0);
 
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).map((s) => s.entry);

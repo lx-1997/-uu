@@ -106,7 +106,7 @@ export interface ChatMessage {
   /** 部分场景（如飞书工具流）用于计算耗时：本条 AI 气泡开始展示时的时间戳 */
   startedAt?: number;
   text: string;
-  /** 存在时 AI Dock 按此顺序渲染（与 Cursor 类似自上而下）；缺省时回退为 blocks 再 text */
+  /** 存在时 AI Dock 按此顺序自上而下渲染；缺省时回退为 blocks 再 text */
   contentSlots?: AiDockContentSlot[];
   source?: 'studio' | 'feishu';
   channelMeta?: {
@@ -136,7 +136,7 @@ export type ChatBlock =
   | { type: 'approval'; text: string; approvalId: string; runId?: string; risk?: 'low' | 'medium' | 'high'; executor?: string }
   | { type: 'progress'; steps: Array<{ label: string; status: 'done' | 'running' | 'pending' }>; taskId?: string }
   | { type: 'task-result'; success: boolean; title: string; detail: string }
-  /** 单条消息内推理触顶（与 Cursor Continue 类似）：提供显式按钮发送续跑指令 */
+  /** 单条消息内推理触顶：提供显式按钮发送续跑指令 */
   | { type: 'continue-run'; stopReason: 'max_turns_reached' | 'tool_followup_cap_reached'; hint?: string }
   | { type: 'recommendation'; recommendationId: string; runId?: string; question: string; options: Array<{ id: string; label: string; description: string; recommended?: boolean }>; allowAutoExecute?: boolean; chosen?: string }
   | { type: 'soul-update'; proposalId: string; section: string; action: 'add' | 'modify' | 'remove'; content: string; reason: string; currentSnippet?: string; accepted?: boolean | null };

@@ -175,6 +175,29 @@ function isTrivialStudioChatMessage(message: string): boolean {
   return /^(你好|您好|嗨|hi|hello|hey|在吗|在么|早上好|晚上好|谢谢|多谢|哈喽|hallo)(?:[!！。.?？~～\s]*)$/i.test(t);
 }
 
+/**
+ * 板端公网探测脚本（与常见 `curl -sI http(s)://…` 手测一致）：
+ * 1) 依次 HTTP(S) HEAD：百度 HTTP/HTTPS、npm registry（任一成功即 READY）
+ * 2) wget spider 兜底
+ * 3) ICMP ping 仅作补充（避免「仅 ICMP 被拦」误判为不可达）
+ * 输出须含 NETWORK_READY 或 NETWORK_OFFLINE 之一。
+ */
+const DEVICE_PUBLIC_NETWORK_PROBE_SCRIPT = [
+  'net_ok=0',
+  'for u in http://www.baidu.com https://www.baidu.com https://registry.npmjs.org; do',
+  '  if curl -sI --connect-timeout 3 --max-time 8 "$u" >/dev/null 2>&1; then net_ok=1; break; fi',
+  'done',
+  'if [ "$net_ok" != "1" ]; then',
+  '  for u in http://www.baidu.com https://www.baidu.com; do',
+  '    if wget -q --spider --timeout=8 "$u" 2>/dev/null; then net_ok=1; break; fi',
+  '  done',
+  'fi',
+  'if [ "$net_ok" != "1" ]; then',
+  '  if ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then net_ok=1; fi',
+  'fi',
+  'if [ "$net_ok" = "1" ]; then echo NETWORK_READY; else echo NETWORK_OFFLINE; fi',
+].join('\n');
+
 type RuntimeHealthReport = {
   safeMode: boolean;
   reasons: string[];
@@ -220,7 +243,8 @@ export class RDKClawApp {
   }>();
   private modelCapWarmedUp = new Set<string>();
   private static readonly BOARD_SNAPSHOT_TTL_MS = 60_000;
-  private static readonly DEVICE_PUBLIC_NETWORK_TTL_MS = 20_000;
+  /** 公网探测成功后的短缓存；探测策略已与 HTTP 手测对齐，仅减轻同轮连发时的 SSH 压力 */
+  private static readonly DEVICE_PUBLIC_NETWORK_TTL_MS = 12_000;
   private readonly deviceQueue = new DeviceQueue();
   private cancelQueuedBeforeTs = 0;
   /**
@@ -702,7 +726,8 @@ export class RDKClawApp {
     safeMode: boolean,
     boardSnapshot: BoardSnapshot | undefined,
     deviceReachable: boolean,
-    devicePublicNetworkReady: boolean,
+    /** true=探测到公网可用；false=明确不可达；null=未知（勿按「不可达」拦截仅 SSH 可执行的命令） */
+    devicePublicNetworkReady: boolean | null,
     sandbox: SandboxGuardContext,
     isPackagedDesktop: boolean,
   ): Tool[] {
@@ -759,7 +784,7 @@ export class RDKClawApp {
         },
       });
       const gatedDeviceTools = deviceTools.map((tool) => {
-        if (tool.name !== "device_exec" || devicePublicNetworkReady) return tool;
+        if (tool.name !== "device_exec" || devicePublicNetworkReady !== false) return tool;
         return {
           ...tool,
           execute: async (input, ctx) => {
@@ -888,41 +913,40 @@ export class RDKClawApp {
 
   private async probeDevicePublicNetwork(
     deviceId: string,
-  ): Promise<{ ready: boolean; detail: string; fromCache: boolean }> {
+  ): Promise<{ ready: boolean | null; detail: string; fromCache: boolean }> {
     const cached = this.devicePublicNetworkCache.get(deviceId);
     if (cached && cached.expiresAt > Date.now()) {
       return { ready: cached.value.ready, detail: cached.value.detail, fromCache: true };
     }
-    const probeCmd = [
-      'bash -lc "net_ok=0; ',
-      'if ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then net_ok=1; fi; ',
-      'if [ \"$net_ok\" != \"1\" ]; then if curl -sI --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1 || wget -q --spider --timeout=6 https://registry.npmjs.org >/dev/null 2>&1; then net_ok=1; fi; fi; ',
-      'if [ \"$net_ok\" = \"1\" ]; then echo NETWORK_READY; else echo NETWORK_OFFLINE; fi"',
-    ].join('');
+
+    const probeCmd = `bash -lc ${JSON.stringify(DEVICE_PUBLIC_NETWORK_PROBE_SCRIPT)}`;
 
     try {
       const output = await execOnDevice(
         deviceId,
         [probeCmd],
         {
-          timeoutMs: 20_000,
+          timeoutMs: 22_000,
           rejectOnNonZeroExit: false,
         },
       );
-      const ready = String(output || '').toUpperCase().includes('NETWORK_READY');
-      const detail = ready ? '公网可达' : '公网不可达';
+      const upper = String(output || '').toUpperCase();
+      let ready: boolean | null = null;
+      if (upper.includes('NETWORK_READY')) {
+        ready = true;
+      } else if (upper.includes('NETWORK_OFFLINE')) {
+        ready = false;
+      } else {
+        return { ready: null, detail: '公网探测结果无法解析', fromCache: false };
+      }
+      const detail = ready ? '公网可达（HTTP/HTTPS 探测）' : '公网不可达';
       this.devicePublicNetworkCache.set(deviceId, {
         expiresAt: Date.now() + RDKClawApp.DEVICE_PUBLIC_NETWORK_TTL_MS,
         value: { ready, detail },
       });
       return { ready, detail, fromCache: false };
     } catch {
-      const detail = '公网探测异常';
-      this.devicePublicNetworkCache.set(deviceId, {
-        expiresAt: Date.now() + RDKClawApp.DEVICE_PUBLIC_NETWORK_TTL_MS,
-        value: { ready: false, detail },
-      });
-      return { ready: false, detail, fromCache: false };
+      return { ready: null, detail: '公网探测异常', fromCache: false };
     }
   }
 
@@ -1469,7 +1493,7 @@ export class RDKClawApp {
         health.safeMode,
         boardSnapshot,
         deviceConnectivity.reachable,
-        deviceConnectivity.publicNetworkReady === true,
+        deviceConnectivity.publicNetworkReady,
         sandboxForGuard,
         isPackagedDesktop,
       );

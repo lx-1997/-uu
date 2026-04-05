@@ -105,7 +105,7 @@ export const deviceExecToolInputZod = z.object({
     .optional(),
   /** 主命令结束后（常用于 background/runDetached 启动节点后）延迟再验收下列话题是否有数据 */
   ros2VerifyTopics: z.array(z.string().min(1)).max(24).optional(),
-  /** 验收前等待毫秒（0～300000），默认 8000，便于节点与 topic 注册 */
+  /** 验收前等待毫秒（0～300000），默认 4500；冷启动慢可显式加大 */
   ros2VerifyTopicsDelayMs: z.preprocess(
     (v) => (v === undefined || v === null || v === "" ? undefined : v),
     z.coerce.number().finite().min(0).max(300_000).optional(),

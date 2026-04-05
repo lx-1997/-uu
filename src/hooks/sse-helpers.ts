@@ -390,9 +390,215 @@ export function primaryToolArgSummary(args: Record<string, unknown>) {
   return full.slice(0, 200);
 }
 
-/** 卡片主标题：工具名 + 主要目标（路径/命令等） */
+/** 展示用短路径：尾部路径 + 省略前缀 */
+function shortDisplayPath(p: string, max = 56): string {
+  const t = p.replace(/\\/g, '/').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  if (t.length <= max) return t;
+  return `…${t.slice(-(max - 1))}`;
+}
+
+function shortCommand(cmd: string, max = 72): string {
+  const t = cmd.replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
+}
+
+/** 板端协作类：从参数里取一句人话，避免标题只有动词 */
+function boardIntentLine(args: Record<string, unknown>): string {
+  const task = typeof args.task === 'string' ? args.task.replace(/\s+/g, ' ').trim() : '';
+  if (task) return task.length > 96 ? `${task.slice(0, 93)}…` : task;
+  const message = typeof args.message === 'string' ? args.message.replace(/\s+/g, ' ').trim() : '';
+  if (message) return message.length > 96 ? `${message.slice(0, 93)}…` : message;
+  const intent = typeof args.intent === 'string' ? args.intent.replace(/\s+/g, ' ').trim() : '';
+  if (intent) return intent.length > 96 ? `${intent.slice(0, 93)}…` : intent;
+  return '';
+}
+
+/** 无映射工具：只展示目标摘要，绝不拼接内部工具名 */
+function footprintFallback(args: Record<string, unknown>): string {
+  const t = primaryToolArgSummary(args);
+  if (!t) return 'Working…';
+  return t.length > 88 ? `${t.slice(0, 85)}…` : t;
+}
+
+/**
+ * 单行工具标题：仅「简单动词 + 目标」，不暴露内部工具名（与对话区轻量足迹一致）。
+ */
+export function formatToolFootprintTitle(toolName: string, args: Record<string, unknown>): string {
+  const n = (toolName || '').trim();
+  const a = args || {};
+  const rawPath =
+    typeof a.file_path === 'string' ? a.file_path
+    : typeof a.path === 'string' ? a.path
+    : typeof a.target_path === 'string' ? a.target_path
+    : typeof (a as { filePath?: string }).filePath === 'string' ? (a as { filePath: string }).filePath
+    : '';
+  const pathShort = rawPath ? shortDisplayPath(rawPath) : '';
+
+  if (n === 'read' || n === 'read_file' || n === 'attachment_read') {
+    return pathShort ? `Read ${pathShort}` : 'Read';
+  }
+  if (n === 'write' || n === 'write_file') {
+    return pathShort ? `Write ${pathShort}` : 'Write';
+  }
+  if (n === 'edit' || n === 'search_replace' || n === 'edit_file') {
+    return pathShort ? `Edit ${pathShort}` : 'Edit';
+  }
+  if (n === 'list' || n === 'list_dir' || n === 'glob' || n === 'glob_file_search') {
+    return pathShort ? `Explored ${pathShort}` : 'Explored';
+  }
+  if (n === 'grep' || n === 'ripgrep' || n === 'rg' || n === 'grep_search') {
+    const pat = typeof a.pattern === 'string' ? a.pattern.replace(/\s+/g, ' ').trim().slice(0, 36) : '';
+    if (pathShort && pat) return `Grepped "${pat}" · ${pathShort}`;
+    if (pat) return `Grepped "${pat}"`;
+    if (pathShort) return `Grepped ${pathShort}`;
+    return 'Grepped';
+  }
+  if (n === 'exec') {
+    const cmd = typeof a.command === 'string' ? shortCommand(a.command, 80) : '';
+    return cmd ? `Ran ${cmd}` : 'Ran command';
+  }
+  if (n === 'device_exec' || n === 'device_shell' || n === 'ssh_exec') {
+    const cmd = typeof a.command === 'string' ? shortCommand(a.command, 80) : '';
+    return cmd ? `Ran on device · ${cmd}` : 'Ran on device';
+  }
+  if (n === 'device_file_read') {
+    const dp = pathShort || (typeof a.path === 'string' ? shortDisplayPath(a.path) : '');
+    return dp ? `Read ${dp}` : 'Read on device';
+  }
+  if (n === 'device_file_write') {
+    const dp = pathShort || (typeof a.path === 'string' ? shortDisplayPath(a.path) : '');
+    return dp ? `Write ${dp}` : 'Write on device';
+  }
+  if (n === 'device_file_list') {
+    const dp = pathShort || (typeof a.path === 'string' ? shortDisplayPath(a.path) : '');
+    return dp ? `Explored ${dp}` : 'Explored on device';
+  }
+  if (n === 'device_file_download_to_local') {
+    const dp = typeof a.path === 'string' ? shortDisplayPath(a.path) : pathShort;
+    return dp ? `Pulled ${dp}` : 'Pulled from device';
+  }
+  if (n === 'device_file_upload_from_local') {
+    const dp = typeof a.path === 'string' ? shortDisplayPath(a.path) : pathShort;
+    return dp ? `Pushed ${dp}` : 'Pushed to device';
+  }
+  if (n === 'device_diagnose') {
+    return 'Diagnosed device';
+  }
+  if (n === 'memory_search') {
+    return 'Searched memory';
+  }
+  if (n === 'memory_get') {
+    return 'Opened memory';
+  }
+  if (n === 'memory_save') {
+    return 'Saved memory';
+  }
+  if (n === 'attachment_list') {
+    return 'Listed attachments';
+  }
+  if (n === 'attachment_describe_image' || n === 'attachment_get_audio_transcript') {
+    return 'Read attachment';
+  }
+  if (n === 'web_search') {
+    const q = typeof a.query === 'string' ? a.query.replace(/\s+/g, ' ').trim().slice(0, 64) : '';
+    return q ? `Searched "${q}"` : 'Searched web';
+  }
+  if (n === 'web_fetch' || n === 'fetch_url' || n === 'mcp_web_fetch' || n === 'web_extract') {
+    const u = typeof a.url === 'string' ? a.url.replace(/\s+/g, ' ').trim().slice(0, 64) : '';
+    return u ? `Fetched ${u}` : 'Fetched page';
+  }
+  if (n === 'web_browser_fetch') {
+    return 'Opened in browser';
+  }
+  if (n === 'create_plan' || n === 'update_plan') {
+    return 'Updated plan';
+  }
+  if (n === 'sessions_spawn') {
+    return 'Started session';
+  }
+  if (n === 'ros_topics') {
+    return 'Listed ROS topics';
+  }
+  if (n === 'ros_nodes') {
+    return 'Listed ROS nodes';
+  }
+  if (n === 'vnc_start') {
+    return 'Started VNC';
+  }
+  if (n === 'vnc_stop') {
+    return 'Stopped VNC';
+  }
+  if (n === 'vnc_status') {
+    return 'Checked VNC';
+  }
+  if (n === 'flash_check') {
+    return 'Checked flash';
+  }
+  if (n === 'text_to_speech' || n === 'sherpa_tts') {
+    return 'Spoke text';
+  }
+  if (n === 'speech_to_text' || n === 'sherpa_stt') {
+    return 'Transcribed audio';
+  }
+  if (n === 'sherpa_setup') {
+    return 'Voice setup';
+  }
+  if (n.startsWith('sherpa_')) {
+    return 'Voice tool';
+  }
+  if (n === 'device_list_all') {
+    return 'Listed devices';
+  }
+  if (n === 'device_scan_network') {
+    return 'Scanned network';
+  }
+  if (n === 'device_connect_ssh' || n === 'device_quick_connect_qr') {
+    return 'Connected device';
+  }
+  if (n === 'device_remove' || n === 'switch_device') {
+    return 'Switched device';
+  }
+  if (n === 'weixin_bind_qrcode') {
+    return 'WeChat setup';
+  }
+  if (n.startsWith('forum_')) {
+    return 'Forum';
+  }
+
+  if (n.startsWith('board_openclaw') || n.startsWith('fleet_board')) {
+    const sub = n.replace(/^board_openclaw_/, '').replace(/^fleet_board_/, '');
+    const intent = boardIntentLine(a);
+    const withIntent = (label: string) => (intent ? `${label} · ${intent}` : label);
+
+    if (n.startsWith('fleet_board')) {
+      if (sub === 'delegate') return withIntent('Delegated');
+      if (sub === 'broadcast') return withIntent('Broadcast');
+    }
+    if (sub === 'delegate') return withIntent('Delegated to device');
+    if (sub === 'chat') return withIntent('Messaged device');
+    if (sub === 'assess') return withIntent('Assessed on device');
+    if (sub === 'status' || sub === 'health' || sub === 'check') return 'Checked device';
+    if (sub === 'doctor' || sub === 'model_test') return 'Checked device';
+    if (sub === 'logs') return 'Fetched device logs';
+    if (sub === 'install' || sub === 'upgrade' || sub === 'uninstall') return 'Updated device gateway';
+    if (sub === 'restart_gateway') return 'Restarted gateway';
+    if (sub === 'read_config') return 'Opened device config';
+    if (sub === 'skills_list' || sub === 'skill_install' || sub === 'write_skill' || sub === 'ensure_find_skills') {
+      return 'Managed device skills';
+    }
+    if (sub.startsWith('pairing') || sub === 'gateway_pair') return 'Managed pairing';
+    if (sub === 'feishu_config' || sub === 'weixin_config') return 'Updated channel config';
+    if (sub === 'model_switch') return 'Switched device model';
+    if (intent) return `Device · ${intent}`;
+    return 'Device';
+  }
+
+  return footprintFallback(a);
+}
+
+/** 卡片主标题（与足迹一致，避免「工具名 · 长参数」割裂感） */
 export function formatToolStatusTitle(toolName: string, args: Record<string, unknown>) {
-  const target = primaryToolArgSummary(args);
-  if (target) return `${toolName} · ${target}`;
-  return toolName;
+  return formatToolFootprintTitle(toolName, args);
 }

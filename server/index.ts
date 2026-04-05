@@ -56,7 +56,6 @@ import { shellEscape, isSafeName } from './utils/shell-escape.js';
 import { stripAnsi } from './utils/strip-ansi.js';
 import {
   DEFAULT_SSH_PASSWORD,
-  warnIfUsingDefaultSshPassword,
   DEFAULT_VNC_PORT,
   CODE_SERVER_HTTP_PORT,
   OPENCLAW_GATEWAY_PORT,
@@ -5976,7 +5975,7 @@ app.get('/api/rdkclaw/runs/active', (_request, response) => {
   response.json({ ok: true, runs: ids });
 });
 
-/** 与 Cursor / VS Code 等一致：停止为幂等操作；无活跃 run 时仍 200，避免前端误报「失败」 */
+/** 与常见 IDE 一致：停止为幂等操作；无活跃 run 时仍 200，避免前端误报「失败」 */
 app.post('/api/rdkclaw/runs/:runId/cancel', (request, response) => {
   const runId = String(request.params.runId || '').trim();
   const stopped = rdkclaw.cancelRun(runId);
@@ -7045,7 +7044,6 @@ async function startServer() {
   const bindHost = process.env.RDK_STUDIO_BIND_HOST?.trim() || '127.0.0.1';
   httpServer.listen(port, bindHost, () => {
     console.log(`RDK Studio server running on http://${bindHost}:${port}`);
-    warnIfUsingDefaultSshPassword();
     if (bindHost === '0.0.0.0') {
       console.warn(
         '[security] 服务监听在 0.0.0.0（所有网卡），同一网络的任何设备都可访问。' +

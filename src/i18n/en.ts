@@ -51,6 +51,7 @@ export const EN: Record<string, string> = {
   'dock.header.tasks': 'Tasks',
   'dock.header.sessions': 'Threads',
   'dock.header.newChat': 'New chat',
+  'dock.header.newChatOpen': 'New chat · expand panel',
   'dock.header.more': 'More',
   'dock.header.moreAria': 'More and diagnostics',
   'dock.header.moreMenuAria': 'More menu',

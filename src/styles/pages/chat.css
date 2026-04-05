@@ -511,26 +511,159 @@
   gap: 12px;
 }
 
-/* 单一流式：主回复占满宽度，工具块外框更轻，接近 Cursor 对话节奏 */
-.dock-stream--cursor-flow {
+/* 单一流式：主回复占满宽度，工具块外框更轻 */
+.dock-stream--stream-flow {
   gap: 10px;
 }
 
-.dock-stream--cursor-flow .dock-msg.ai .dock-bubble {
+.dock-stream--stream-flow .dock-msg.ai .dock-bubble {
   max-width: 100%;
 }
 
-.dock-stream--cursor-flow .dock-bubble.ai .msg-block.dock-agent-card {
+.dock-stream--stream-flow .dock-bubble.ai .msg-block.dock-agent-card {
   box-shadow: none;
   border-color: color-mix(in srgb, var(--border) 60%, transparent);
   margin-top: 8px;
   margin-bottom: 6px;
 }
 
-.dock-stream--cursor-flow .dock-bubble.ai .dock-agent-card-head {
+.dock-stream--stream-flow .dock-bubble.ai .dock-agent-card-head {
   background: color-mix(in srgb, var(--bg-elevated) 50%, transparent);
   border-bottom-color: color-mix(in srgb, var(--border) 35%, transparent);
   min-height: 34px;
+}
+
+/* Agent 顺行：一问一答成段，问题在滚动容器内吸顶 */
+.dock-stream--agent-flow {
+  gap: 0;
+}
+
+.dock-stream--agent-flow .dock-turn--agent {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+
+.dock-stream--agent-flow .dock-turn--agent:last-child {
+  margin-bottom: 0;
+}
+
+.dock-stream--agent-flow .dock-turn-query--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding-bottom: 8px;
+  margin-bottom: 2px;
+  background: linear-gradient(
+    to bottom,
+    var(--bg, var(--card-bg)) 0%,
+    var(--bg, var(--card-bg)) 78%,
+    color-mix(in srgb, var(--bg, var(--card-bg)) 0%, transparent) 100%
+  );
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.dock-stream--agent-flow .dock-turn-answer {
+  min-width: 0;
+}
+
+.dock-stream--agent-flow .dock-turn-answer--pending {
+  min-height: 4px;
+}
+
+/* 顺行：去掉左右分栏感，问题与回答全宽 */
+.dock-stream--agent-flow .dock-msg--agent-query {
+  flex-direction: row;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-query .dock-avatar {
+  display: none;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-query .dock-bubble {
+  max-width: 100%;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai {
+  flex-direction: row;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-avatar {
+  display: none;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-bubble {
+  max-width: 100%;
+}
+
+/* 顺行 Agent：轻量工具足迹（单行灰字 + 左侧细条） */
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-tool-footprint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+  margin: 4px 0 6px;
+  padding: 2px 0 2px 8px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  border-left: 2px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-tool-footprint-main {
+  color: color-mix(in srgb, var(--text-secondary) 88%, var(--text-muted));
+  font-weight: 500;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-tool-footprint-sep {
+  opacity: 0.55;
+  user-select: none;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-tool-footprint-meta {
+  font-weight: 400;
+  opacity: 0.9;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 顺行：可折叠 meta / 思考块视觉更轻 */
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-footprint.dock-agent-card {
+  box-shadow: none;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-footprint .status-collapsible-trigger,
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-footprint .reasoning-collapsible-trigger {
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-footprint .dock-agent-card-head {
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+/* 顺行：终端 / 代码 / 协作块略压高度，保留展开能力 */
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-card--footprint {
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-card--footprint .dock-agent-card-head {
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-card--footprint.dock-agent-card--terminal .dock-agent-shell {
+  max-height: 180px;
+}
+
+.dock-stream--agent-flow .dock-msg--agent-ai .dock-agent-card--footprint.dock-agent-card--code .dock-agent-code-body {
+  max-height: 320px;
+  overflow: auto;
 }
 
 .dock-empty-hint {
@@ -2013,7 +2146,7 @@
   font-size: 0.75rem;
 }
 
-/* Cursor 式：思考 / 终端 / 代码 / 步骤 — 卡片头 + 灰底等宽正文 */
+/* 思考 / 终端 / 代码 / 步骤 — 卡片头 + 灰底等宽正文 */
 .dock-bubble .msg-block.dock-agent-card {
   margin: 10px 0;
   padding: 0;
@@ -2145,6 +2278,12 @@
 /* 连续工具卡：略收紧垂直节奏 */
 .dock-bubble .msg-block.dock-agent-card + .msg-block.dock-agent-card {
   margin-top: 8px;
+}
+
+/* 思考块与工具卡顺行交错：再略收紧，接近一条连续日志 */
+.dock-bubble .msg-block.reasoning-collapsible.dock-agent-card + .msg-block.dock-agent-card,
+.dock-bubble .msg-block.dock-agent-card + .msg-block.reasoning-collapsible.dock-agent-card {
+  margin-top: 6px;
 }
 
 .dock-bubble .dock-agent-shell {
@@ -2309,7 +2448,7 @@
   border-bottom-color: color-mix(in srgb, var(--danger) 22%, transparent);
 }
 
-/* 轮次触顶「继续」卡（对齐 Cursor Continue 的显式续跑） */
+/* 轮次触顶「继续」卡（显式续跑） */
 .dock-bubble .continue-run-block.dock-agent-card--continue {
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated));

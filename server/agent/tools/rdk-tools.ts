@@ -48,6 +48,7 @@ import * as path from 'node:path';
 import { buildCodeChangeJson } from './code-change-result.js';
 import { abortAwareDelay } from '../../rdkclaw/openclaw-bridge-meta.js';
 import { isPersistentShellEnabled } from '../../device-persistent-shell.js';
+import { emitDeviceDashboardUrlsFromText, formatDeviceDashboardAutoOpenNote } from '../../device-dashboard-auto-open.js';
 
 export interface RdkToolsCallbacks {
   onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
@@ -409,28 +410,37 @@ function unwrapOuterBashDashC(command: string): string {
   return m[2].trim() || command;
 }
 
+/** 单 topic `ros2 topic echo` 超时（秒）。过大会明显拖慢验收；过慢节点可改用更长 ros2VerifyTopicsDelayMs 或人工再验 */
+const ROS2_TOPIC_VERIFY_ECHO_TIMEOUT_SEC = 5;
+/** 主命令结束后、开始 topic 验收前的默认等待（ms），可被 ros2VerifyTopicsDelayMs 覆盖 */
+const ROS2_VERIFY_DEFAULT_DELAY_MS = 4500;
+/** background/runDetached 返回后，再隔多久做快速 topic 探测（ms） */
+const ROS2_VERIFY_AFTER_BG_LAUNCH_MS = 600;
+
 /** 在已 source 的环境中，对每个 topic 用短超时 `ros2 topic echo | head -1` 判断是否已有数据 */
 function buildRos2TopicVerifyCommand(topics: string[], ros2SetupBash?: string): string {
   const setup =
     ros2SetupBash?.trim() ||
     'for f in /opt/tros/*/setup.bash; do [ -f "$f" ] && . "$f" && break; done';
+  const to = ROS2_TOPIC_VERIFY_ECHO_TIMEOUT_SEC;
   const checks = topics.map((t) => {
     const q = shEscapeUnix(t);
-    return `echo "=== topic ${q} ==="; if timeout 8s ros2 topic echo ${q} 2>/dev/null | head -n 1 | grep -q .; then echo "RDK_TOPIC_OK:${q}"; exit 0; else echo "RDK_TOPIC_NO_DATA:${q}"; fi`;
+    return `echo "=== topic ${q} ==="; if timeout ${to}s ros2 topic echo ${q} 2>/dev/null | head -n 1 | grep -q .; then echo "RDK_TOPIC_OK:${q}"; exit 0; else echo "RDK_TOPIC_NO_DATA:${q}"; fi`;
   });
   return `${setup}; ${checks.join('; ')}; exit 0`;
 }
 
 function resolveRos2VerifyExecTimeoutMs(topicCount: number): number {
   const n = Math.max(1, Math.floor(topicCount));
-  // 3s setup margin + 8s per topic + 5s tail margin, capped to 45s for responsiveness.
-  return Math.min(45_000, 8_000 * n + 8_000);
+  const per = ROS2_TOPIC_VERIFY_ECHO_TIMEOUT_SEC * 1000;
+  // setup + 每 topic 最坏约 per ms + 余量，上限略收紧以免验收拖太久
+  return Math.min(36_000, per * n + 6_000);
 }
 
 function resolveRos2VerifyQuickTimeoutMs(topicCount: number): number {
   const n = Math.max(1, Math.floor(topicCount));
-  // 后台模式仅做「快速命中」探测：总等待控制在 6~12s。
-  return Math.min(12_000, Math.max(6_000, 4_000 + n * 2_000));
+  // 后台模式「快速命中」：总 SSH 等待约 4.5～9s，避免与首轮启动抢时间过久
+  return Math.min(9_000, Math.max(4_500, 2_500 + n * 1_500));
 }
 
 /**
@@ -485,7 +495,7 @@ function deviceExecTool(
       '- **默认（未设置环境变量 RDK_DEVICE_EXEC_PERSISTENT_SHELL=0）**：同一设备的多次 `device_exec` 在**同一 SSH 交互 shell** 中执行，`cd` / `export` / `source` **可跨调用保留**。若关闭持久 shell 或持久通道失败回退，则行为与旧版一致（每次独立 exec）。\n' +
       '- **常驻进程（推流、WebSocket 服务、长驻 ROS2 节点等）**：传 **runDetached: true**。Studio 会以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
       '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
-      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。持久 shell 开启时可在**前一次** `device_exec` 中 `source`，后续 `background`/`runDetached` 的 `ros2 launch` **会继承**该环境（包装层使用非登录 `bash -c`，避免 `bash -lc` 重读 profile 冲掉已 source 的变量）；若关闭持久 shell，须在**同一条**内写 `source ... && ros2 ...`。**勿**在未 source 时单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `ros2 node list` / `topic list` 或 `tail` 日志验证；可选 `ros2VerifyTopics` 在延迟后自动做 topic 收数验收（`ros2 topic echo` 短超时）\n' +
+      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。持久 shell 开启时可在**前一次** `device_exec` 中 `source`，后续 `background`/`runDetached` 的 `ros2 launch` **会继承**该环境（包装层使用非登录 `bash -c`，避免 `bash -lc` 重读 profile 冲掉已 source 的变量）；若关闭持久 shell，须在**同一条**内写 `source ... && ros2 ...`。**勿**在未 source 时单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `ros2 node list` / `topic list` 或 `tail` 日志验证；可选 `ros2VerifyTopics` 在延迟后自动做 topic 收数验收（`ros2 topic echo` 短超时）。**主命令 stdout/stderr 中含可放行 `http(s)://` 时，Studio 会在 topic 验收与长延迟之前尽早代开浏览器**，便于页面先加载、验收后再刷新即可\n' +
       '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
       '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
@@ -533,7 +543,8 @@ function deviceExecTool(
         },
         ros2VerifyTopicsDelayMs: {
           type: 'number',
-          description: '验收前等待毫秒（0～300000），默认 8000，便于节点注册与 topic 出现',
+          description:
+            `验收前等待毫秒（0～300000），默认 ${ROS2_VERIFY_DEFAULT_DELAY_MS}；冷启动慢可加大到 12000～20000`,
         },
         ros2SetupBash: {
           type: 'string',
@@ -636,13 +647,21 @@ function deviceExecTool(
         });
         flushProgress(true);
 
+        /** 在 ros2VerifyTopics 延迟/SSH 验收之前打开预览，避免整段工具返回后才弹窗 */
+        if (output) {
+          const openedPreview = await emitDeviceDashboardUrlsFromText(output, ctx.studioDeviceId);
+          if (openedPreview.length > 0) {
+            output = `${output}\n\n${formatDeviceDashboardAutoOpenNote(openedPreview)}`;
+          }
+        }
+
         const verifyTopics = input.ros2VerifyTopics?.filter((t) => String(t).trim().length > 0);
         if (verifyTopics && verifyTopics.length > 0) {
           const verifyCmd = buildRos2TopicVerifyCommand(verifyTopics, input.ros2SetupBash);
           if (runBackground || runDetached) {
             let verifyOut = '';
             try {
-              await abortAwareDelay(1_500, ctx.abortSignal);
+              await abortAwareDelay(ROS2_VERIFY_AFTER_BG_LAUNCH_MS, ctx.abortSignal);
               verifyOut = await execOnDevice(deviceId, [verifyCmd], {
                 timeoutMs: resolveRos2VerifyQuickTimeoutMs(verifyTopics.length),
                 rejectOnNonZeroExit: false,
@@ -661,7 +680,7 @@ function deviceExecTool(
           } else {
             const delayMs = Math.min(
               300_000,
-              Math.max(0, Number(input.ros2VerifyTopicsDelayMs ?? 8000)),
+              Math.max(0, Number(input.ros2VerifyTopicsDelayMs ?? ROS2_VERIFY_DEFAULT_DELAY_MS)),
             );
             await abortAwareDelay(delayMs, ctx.abortSignal);
             const verifyOut = await execOnDevice(deviceId, [verifyCmd], {

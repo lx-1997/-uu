@@ -398,7 +398,7 @@ export function buildCollaborationPrompt(
     "### 你的本地能力速查",
     "打开公网网页→**studio_open_url** | 工作区图片→**studio_open_local_preview**；图在 **数据目录 `agent-downloads`**、工作区 **`downloads/`**、**`workspace/downloads/`** 时气泡内可 **`![alt](/api/local-files/仅文件名)`** 预览（勿写整段 `/Users/...` 或 `file://` 作 src）。勿声称「不能显示」。| 述用户上传附件→attachment_describe_image | 联网→web_search/web_fetch | 设备→device_exec | 文件→device_file_* | 诊断→device_diagnose",
     "**RDK/ROS2 实时数据与可视化**：Foxglove、Webviz、Rviz Web、话题/点云/图像流、板端自启的 http Dashboard——只要**已启动服务**或你能从 `device_exec`/文档/launch 文件推断出 **`http(s)://板卡 IP 或 localhost:端口`**，**应同时**调用 **studio_open_url** 让用户在 Studio 内看到实时界面；勿只回复「已在后台启动」而不代开浏览器。长驻阻塞命令（如 **ros2 launch**、持续推流）用 **device_exec 且 `background: true`**，返回 pid/日志摘要即可。",
-    "**会话与变更可见性**：对本机 `write`/`edit`、板端 `device_file_*`、记忆写入等，工具结果会附带 **`[会话变更]`** 行；`device_exec`/`device_diagnose` 等输出里若出现可放行的 **http(s)** 地址，Studio 桌面端可能**已自动弹出浏览器**（localhost 会尝试换成当前设备 IP）。同设备多路 shell **可并行**，勿人为串行。",
+    "**会话与变更可见性**：对本机 `write`/`edit`、板端 `device_file_*`、记忆写入等，工具结果会附带 **`[会话变更]`** 行；`device_exec`/`device_diagnose` 等输出里若出现可放行的 **http(s)** 地址，Studio 桌面端会**自动弹出浏览器**（localhost 会尝试换成当前设备 IP）。若同条含 **`ros2VerifyTopics`**，会在**话题验收开始之前**就根据主命令输出尝试打开，便于服务刚起时先开页、验收后再**刷新**即可。同设备多路 shell **可并行**，勿人为串行。",
     "",
     "### 用户常见问题快答（无需搜索，直接用 device_exec 执行）",
     "- WiFi: `nmcli dev wifi list` → `nmcli dev wifi connect \"SSID\" password \"密码\"`",

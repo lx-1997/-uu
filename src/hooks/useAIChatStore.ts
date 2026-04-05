@@ -71,6 +71,27 @@ import {
 } from './sse-helpers';
 import { applyClientActionsFromAssistantText } from '../utils/client-action-bridge';
 
+/** 编排 meta 摘要行：技能名过长时截断，避免标题栏铺满 */
+function formatMatchedSkillsShort(skills: string[], maxItems = 2, maxEach = 28): string {
+  if (skills.length === 0) return '';
+  const trim = (s: string) => {
+    const t = String(s || '').trim();
+    if (t.length <= maxEach) return t;
+    return `${t.slice(0, Math.max(0, maxEach - 1))}…`;
+  };
+  const parts = skills.slice(0, maxItems).map(trim);
+  if (skills.length > maxItems) {
+    return `${parts.join(' / ')} 等${skills.length}项`;
+  }
+  return parts.join(' / ');
+}
+
+function capMetaSummaryLine(parts: string[], maxChars: number): string {
+  const j = parts.filter(Boolean).join(' · ');
+  if (j.length <= maxChars) return j;
+  return `${j.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
 /** RDKClaw 当前轮次运行时间线（AI Dock 侧栏展示） */
 export type RdkClawTimelineKind =
   | 'setup'
@@ -233,6 +254,74 @@ function sanitizeTerminalDisplayText(input: string): string {
   return sanitizeCipherLikeText(sanitizeTerminalLineForDisplay(stripRdkShellProtocolNoise(input)));
 }
 
+/** device_exec / exec 等：用参数摘要作终端块标题，便于多段输出与命令对应 */
+function toolShellCmdHintForLabel(argDetail: string | undefined): string {
+  const d = String(argDetail || '').trim();
+  if (!d || d === '无参数') return '';
+  return d.length > 96 ? `${d.slice(0, 93)}…` : d;
+}
+
+/** device_exec 长任务时服务端注入的静默心跳行，不应参与「与最终结果是否重复」的比较 */
+function isDeviceExecHeartbeatLine(line: string): boolean {
+  const t = line.trim();
+  if (!t.startsWith('·')) return false;
+  return /命令仍在运行|暂无新输出|still running|no new output/i.test(t);
+}
+
+/** 与 tool_progress 中逐行处理一致，且与「仅对全文做 reasoning 净化」解耦，便于流式/最终去重对齐 */
+function normalizeToolTerminalLinesFromRaw(raw: string): string[] {
+  return String(raw || '')
+    .split(/\r?\n/)
+    .map((ln) => sanitizeTerminalDisplayText(ln.trim()))
+    .filter(Boolean);
+}
+
+/** 持久 shell 等偶发「整段输出连续重复两遍」时折叠为一段 */
+function collapseTerminalLinesIfDuplicateHalf(lines: string[]): string[] {
+  if (lines.length < 2 || lines.length % 2 !== 0) return lines;
+  const half = lines.length / 2;
+  const a = lines.slice(0, half);
+  const b = lines.slice(half);
+  if (a.every((line, i) => line === b[i])) return a;
+  return lines;
+}
+
+/** 合并流式 chunk：跳过与已有尾部完全相同的整段（避免结束再刷一遍全文导致重复） */
+function mergeTerminalProgressLines(existing: string[], incoming: string[]): string[] {
+  if (incoming.length === 0) return existing;
+  if (existing.length === 0) return incoming;
+  if (incoming.length === existing.length && incoming.every((l, i) => l === existing[i])) {
+    return existing;
+  }
+  const inJoin = incoming.join('\n');
+  const exJoin = existing.join('\n');
+  if (inJoin === exJoin) return existing;
+  if (existing.length >= incoming.length) {
+    const tail = existing.slice(-incoming.length);
+    if (tail.every((l, i) => l === incoming[i])) return existing;
+  }
+  return [...existing, ...incoming];
+}
+
+/**
+ * 流式块已包含「最终结果」将展示的内容时，不再追加第二块（与 tool_progress 行规范化一致）。
+ */
+function streamCoversFinalTerminalBlock(streamedLines: string[], rawResult: string): boolean {
+  const finalLines = collapseTerminalLinesIfDuplicateHalf(
+    normalizeToolTerminalLinesFromRaw(rawResult).slice(0, 60),
+  );
+  const n = finalLines.length;
+  if (n === 0) return false;
+  const streamedFiltered = collapseTerminalLinesIfDuplicateHalf(
+    streamedLines.filter((l) => !isDeviceExecHeartbeatLine(l)),
+  );
+  if (streamedFiltered.length < n) return false;
+  for (let i = 0; i < n; i++) {
+    if (streamedFiltered[i] !== finalLines[i]) return false;
+  }
+  return true;
+}
+
 function sanitizeReasoningDisplayText(input: string): string {
   return sanitizeCipherLikeText(stripRdkShellProtocolNoise(input));
 }
@@ -253,6 +342,27 @@ function stripInternalDraftMonologue(input: string): string {
     return !(INTERNAL_DRAFT_TOOL_RE.test(trimmed) && INTERNAL_DRAFT_TONE_RE.test(trimmed));
   });
   return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * 模型既流式 thinking_delta（reasoning 块）又把同一段写进 message_delta（主文）时，去掉主文重复部分。
+ * 与 message_end 中空主文分支配合：非空时仍可能全文或前缀与 reasoning 一致。
+ */
+function stripVisibleAssistantDuplicateOfReasoning(visible: string, reasoningChunksSorted: string[]): string {
+  if (!reasoningChunksSorted.length) return visible;
+  const vNorm = sanitizeReasoningDisplayText(visible.replace(/\r\n/g, '\n')).replace(/\r\n/g, '\n').trim();
+  if (!vNorm) return visible;
+  for (const r of reasoningChunksSorted) {
+    const rTrim = r.trim();
+    if (!rTrim) continue;
+    if (vNorm === rTrim) return '';
+    if (vNorm.startsWith(rTrim)) {
+      const rest = vNorm.slice(rTrim.length).trimStart();
+      return rest;
+    }
+    if (rTrim.startsWith(vNorm)) return '';
+  }
+  return visible;
 }
 
 function parseStoredStudioResponseMode(): StudioResponseMode {
@@ -1629,14 +1739,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   const runIdx = aiBlocks.findIndex(
                     (b) => b.type === 'status' && (b as { _rdkMetaRunning?: boolean })._rdkMetaRunning,
                   );
-                  const runBlock = {
-                    type: 'status' as const,
-                    _rdkMetaRunning: true as const,
-                    collapsible: true,
-                    defaultCollapsed: false,
-                    summary: message.slice(0, 120),
-                    items: [{ label: t('chat.stream.runtimeNote', '运行说明'), value: message, ok: true }],
-                  };
+                  /** 短文案不再用可折叠卡，避免标题与「运行说明」正文完全重复 */
+                  const shortRuntimeNote = message.length <= 200;
+                  const runBlock = shortRuntimeNote
+                    ? {
+                        type: 'status' as const,
+                        _rdkMetaRunning: true as const,
+                        collapsible: false,
+                        items: [{ label: t('chat.stream.runtimeNote', '运行说明'), value: message, ok: true }],
+                      }
+                    : {
+                        type: 'status' as const,
+                        _rdkMetaRunning: true as const,
+                        collapsible: true,
+                        defaultCollapsed: false,
+                        summary: message.slice(0, 120),
+                        items: [{ label: t('chat.stream.runtimeNote', '运行说明'), value: message, ok: true }],
+                      };
                   if (runIdx >= 0) aiBlocks[runIdx] = runBlock;
                   else pushAiBlock(runBlock);
                   appendRunTimelineEntry(generation, {
@@ -1704,33 +1823,32 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   tier?: string;
                 } | undefined;
 
+                const skillsShort = formatMatchedSkillsShort(matchedSkills);
                 const summaryParts = [executorLabel(executor), delegationMode];
-                if (matchedSkills.length > 0) {
-                  summaryParts.push(tf('chat.stream.skillsVal', '技能: {{list}}', { list: matchedSkills.join('/') }));
+                if (skillsShort) {
+                  summaryParts.push(tf('chat.stream.skillsVal', '技能: {{list}}', { list: skillsShort }));
                 }
                 if (networkEnabled) summaryParts.push(t('chat.stream.network', '联网'));
                 if (needsBoardCollaboration) summaryParts.push(t('chat.stream.board', '板端协同'));
+                const summaryLine = capMetaSummaryLine(summaryParts, 100);
 
+                /** 详情区：去掉与摘要重复的「执行路径」行；模型只展示名称（上下文/输出属排障信息，默认收起） */
                 const metaItems: Array<{ label: string; value: string; ok: boolean }> = [
-                  { label: t('chat.stream.path', '执行路径'), value: `${delegationMode} · ${String(event.data.decision_reason || '')}`, ok: true },
                   {
                     label: t('chat.stream.hit', '命中能力'),
-                    value: matchedSkills.length > 0 ? matchedSkills.join(' / ') : t('chat.stream.generic', '通用流程'),
+                    value:
+                      matchedSkills.length > 0
+                        ? formatMatchedSkillsShort(matchedSkills, 4, 40)
+                        : t('chat.stream.generic', '通用流程'),
                     ok: matchedSkills.length > 0,
                   },
                 ];
                 if (modelCaps?.model) {
-                  const ctxK = modelCaps.contextWindow ? `${Math.round(modelCaps.contextWindow / 1024)}K` : '?';
-                  const outK = modelCaps.maxOutputTokens ? `${Math.round(modelCaps.maxOutputTokens / 1024)}K` : '?';
-                  const tierLabel = modelCaps.tier === 'small' ? t('chat.stream.tierSmall', ' (精简模式)') : modelCaps.tier === 'large' ? '' : '';
+                  const tierLabel =
+                    modelCaps.tier === 'small' ? t('chat.stream.tierSmall', ' (精简模式)') : '';
                   metaItems.push({
                     label: t('chat.stream.model', '模型'),
-                    value: tf('chat.stream.modelVal', '{{model}} · 上下文 {{ctx}} · 输出 {{out}}{{tier}}', {
-                      model: modelCaps.model,
-                      ctx: ctxK,
-                      out: outK,
-                      tier: tierLabel,
-                    }),
+                    value: `${modelCaps.model}${tierLabel}`,
                     ok: true,
                   });
                 }
@@ -1743,23 +1861,23 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   aiBlocks[existingSetupIdx] = {
                     type: 'status',
                     collapsible: true,
-                    defaultCollapsed: false,
-                    summary: summaryParts.join(' · '),
+                    defaultCollapsed: true,
+                    summary: summaryLine,
                     items: metaItems,
                   };
                 } else {
                   pushAiBlock({
                     type: 'status',
                     collapsible: true,
-                    defaultCollapsed: false,
-                    summary: summaryParts.join(' · '),
+                    defaultCollapsed: true,
+                    summary: summaryLine,
                     items: metaItems,
                   });
                 }
                 appendRunTimelineEntry(generation, {
                   kind: 'context',
                   title: t('chat.timeline.context', '运行上下文'),
-                  detail: summaryParts.join(' · '),
+                  detail: summaryLine,
                 });
                 updateAiMessage(aiText, aiBlocks, true);
                 break;
@@ -1785,6 +1903,10 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     type: 'reasoning',
                     text: sanitizeReasoningDisplayText(delta),
                     collapsible: true,
+                    /**
+                     * 与「工具调用」顺行交错：上一段在 tool_start 时已封口，本段在工具之后继续流式。
+                     * 分段后单段较短，默认展开便于自上而下阅读。
+                     */
                     defaultCollapsed: false,
                   });
                 }
@@ -1800,6 +1922,8 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'tool_start': {
+                /** 结束当前思考块引用，使后续 thinking_delta 落在本工具卡片之后，形成「思考→工具→思考」顺行 */
+                reasoningBlockIndexRef.current = null;
                 toolStepNo += 1;
                 const toolName = resolveToolName(event.data);
                 const args = event.data.args as Record<string, unknown>;
@@ -2038,14 +2162,21 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   if (typeof state.rawIndex === 'number') {
                     const rawBlock = aiBlocks[state.rawIndex];
                     if (rawBlock?.type === 'terminal') {
-                      rawBlock.lines = [...rawBlock.lines, ...progressLines].slice(-240);
+                      const merged = mergeTerminalProgressLines(rawBlock.lines, progressLines);
+                      rawBlock.lines = collapseTerminalLinesIfDuplicateHalf(merged).slice(-240);
                     }
                   } else {
                     state.rawIndex = aiBlocks.length;
+                    const cmdHint = toolShellCmdHintForLabel(state.argDetail);
                     pushAiBlock({
                       type: 'terminal',
-                      label: tf('chat.tool.rawLabel', '{{tool}} · 原始中间输出', { tool: state.toolName }),
-                      lines: progressLines,
+                      label: cmdHint
+                        ? tf('chat.tool.shellStreamingLabel', '{{tool}} · {{cmd}} · 运行中', {
+                            tool: state.toolName,
+                            cmd: cmdHint,
+                          })
+                        : tf('chat.tool.rawLabel', '{{tool}} · 原始中间输出', { tool: state.toolName }),
+                      lines: collapseTerminalLinesIfDuplicateHalf(progressLines),
                       collapsible: true,
                       previewLines: 10,
                     });
@@ -2391,16 +2522,34 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       }
                     }
                   } else if (displayResult.includes('\n') || displayResult.length > 100) {
-                    pushAiBlock({
-                      type: 'terminal',
-                      lines: displayResult
-                        .split(/\r?\n/)
-                        .slice(0, 60)
-                        .map((ln) => sanitizeTerminalDisplayText(ln)),
-                      label: tf('chat.tool.finalLabel', '{{tool}} · 最终结果', { tool: toolName }),
-                      collapsible: true,
-                      previewLines: 10,
-                    });
+                    const finalLines = collapseTerminalLinesIfDuplicateHalf(
+                      normalizeToolTerminalLinesFromRaw(result).slice(0, 60),
+                    );
+                    const cmdHint = toolShellCmdHintForLabel(state?.argDetail);
+                    const unifiedLabel = cmdHint
+                      ? tf('chat.tool.shellOutputLabel', '{{tool}} · {{cmd}} · 输出', {
+                          tool: toolName,
+                          cmd: cmdHint,
+                        })
+                      : tf('chat.tool.finalLabel', '{{tool}} · 最终结果', { tool: toolName });
+                    let skipDuplicateFinal = false;
+                    if (state && typeof state.rawIndex === 'number') {
+                      const rawBlock = aiBlocks[state.rawIndex];
+                      if (rawBlock?.type === 'terminal' && streamCoversFinalTerminalBlock(rawBlock.lines, result)) {
+                        rawBlock.label = unifiedLabel;
+                        rawBlock.lines = finalLines;
+                        skipDuplicateFinal = true;
+                      }
+                    }
+                    if (!skipDuplicateFinal) {
+                      pushAiBlock({
+                        type: 'terminal',
+                        lines: finalLines,
+                        label: unifiedLabel,
+                        collapsible: true,
+                        previewLines: 10,
+                      });
+                    }
                   } else if (!state) {
                     const execFallback = String(
                       (event.data as { executor?: string }).executor || 'rdkclaw_local',
@@ -2477,6 +2626,14 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 break;
               }
               case 'message_end': {
+                const reasoningChunksForDedupe = aiBlocks
+                  .filter(
+                    (b): b is Extract<ChatBlock, { type: 'reasoning' }> =>
+                      b.type === 'reasoning' && Boolean((b as Extract<ChatBlock, { type: 'reasoning' }>).text?.trim()),
+                  )
+                  .map((b) => b.text.replace(/\r\n/g, '\n').trim())
+                  .sort((a, b) => b.length - a.length);
+
                 if (!aiText.trim()) {
                   const serverFill = String(event.data.text || '');
                   const serverTrim = serverFill.trim();
@@ -2499,6 +2656,12 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   }
                   if (aiText.trim()) {
                     contentSlots.push({ kind: 'markdown', text: aiText });
+                  }
+                } else if (reasoningChunksForDedupe.length) {
+                  const next = stripVisibleAssistantDuplicateOfReasoning(aiText, reasoningChunksForDedupe);
+                  if (next !== aiText) {
+                    aiText = next;
+                    rebuildContentSlotsFromBlocksAndText(aiBlocks, aiText);
                   }
                 }
                 if (/<client-action\b/i.test(aiText)) {
@@ -2845,7 +3008,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     ...m,
                     text: t(
                       'chat.stop.sentAlreadyEnded',
-                      '该运行已结束（与 Cursor「停止」类似：无活跃任务时停止为安全空操作）。可继续输入新指令。',
+                      '该运行已结束（无活跃任务时「停止」为安全空操作）。可继续输入新指令。',
                     ),
                     blocks: [{
                       type: 'task-result',

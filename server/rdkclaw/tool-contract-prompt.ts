@@ -48,7 +48,7 @@ export function buildToolContractOverviewPrompt(): string {
     "### 若板端 OpenClaw 未装/不可用，或你主动走 RDKClaw 快路径（与 delegate **同等目标**）",
     "- **目标一致**：板端 delegate 做的是「多步、可试错、有验收」。仅 SSH 时你要**主动对齐**：先 `web_fetch` rdk_doc（与走 OpenClaw 时同等严肃），再并行 `device_exec` 探测；**有计划的**短步骤链，**禁止**无目的堆大量 `device_exec` 把上下文打爆。",
     "- **环境延续**：Studio 默认在同一设备上 **持久 SSH shell**（未设 `RDK_DEVICE_EXEC_PERSISTENT_SHELL=0` 时），`source`/`cd` 可跨调用保留；`ros2 launch`/`runDetached` 的包装已避免 `bash -lc` 冲掉上一步 source。**仍建议**在单条命令内写 `source … && ros2 …` 以防持久通道回退。",
-    "- **长驻与验收**：`background`/`runDetached` 启动后，用 `tail`/日志、`ros2 topic list`/`echo`，或 `ros2VerifyTopics` 做「有数据」验收；宣称跑通前须满足工具契约里的可观测标准（日志/topic/端口）。",
+    "- **长驻与验收**：`background`/`runDetached` 启动后，用 `tail`/日志、`ros2 topic list`/`echo`，或 `ros2VerifyTopics` 做「有数据」验收；宣称跑通前须满足工具契约里的可观测标准（日志/topic/端口）。**同条** `device_exec` 若带 `ros2VerifyTopics`：主命令输出里已有 `http(s)://` 预览地址时，Studio 会在**话题验收与长延迟之前**代开浏览器，可先看到白屏/加载再刷新，不必等验收结束。",
     "- **技能链缺口**：依赖 **SkillHub/clawhub 板端技能** 的流程，纯 SSH **无法** 1:1 复刻；须 **安装 OpenClaw 并 delegate**，或改用官方文档 + `device_file_write`/`device_exec` 在板上复现等价步骤，勿假装已执行技能。",
     "- **用户可见说明（硬约束，与 delegate 的 guidance 信息量对齐）**：凡**未**调用 `board_openclaw_delegate`、由你**自行**用 `device_exec`/`device_file_*` 完成**多步**板端任务时，对用户回复**禁止**只堆砌原始 shell 输出而不交代过程。**必须**包含：",
     "  - **计划**：编号步骤（2～10 步即可），每步目标与依赖上一步的何种结果；",
