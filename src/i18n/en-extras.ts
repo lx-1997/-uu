@@ -246,13 +246,13 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.ocMode.titleOpenClaw': 'OpenClaw Agent mode — click to use RDKClaw',
   'dock.ocMode.titleRdk': 'RDKClaw mode — click for OpenClaw Agent',
   'dock.responseMode.thinking': 'Thinking',
-  'dock.responseMode.thinkingSub': 'Complex tasks',
+  'dock.responseMode.thinkingSub': 'Deep lane · complex work',
   'dock.responseMode.quick': 'Quick',
-  'dock.responseMode.quickSub': 'Quick lane model',
+  'dock.responseMode.quickSub': 'Fast lane · lower latency',
   'dock.responseMode.panelTitle': 'Response mode',
   'dock.responseMode.triggerAria': 'Response mode menu',
   'dock.responseMode.hint':
-    'Quick vs thinking chooses the model profile; both show tools, context, and steps in the thread.',
+    'Quick and Thinking map to two model lanes—configure each under AI settings. Quick favors shorter waits for everyday questions; Thinking favors depth and heavier tasks.',
   'dock.responseMode.hintOpenClaw': 'Applies to RDKClaw chat; you are on OpenClaw Agent direct mode now.',
 
   'dock.displayMode.aria': 'Conversation display',
@@ -300,7 +300,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.tt.send': 'Send',
   'dock.tt.feishuInbox': 'Feishu inbox',
   'dock.tt.weixinInbox': 'WeChat inbox',
-  'dock.tt.responseMode': 'Quick or thinking mode',
+  'dock.tt.responseMode': 'Quick vs Thinking (two model lanes)',
   'dock.tt.useRdkDock': 'Switch to RDKClaw',
   'dock.tt.useOpenclaw': 'Switch to OpenClaw',
 

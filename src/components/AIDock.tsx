@@ -3222,7 +3222,7 @@ export default function AIDock() {
                 className={`dock-response-mode-trigger ${responseModeMenuOpen ? 'is-open' : ''} ${studioResponseMode === 'thinking' ? 'is-thinking' : 'is-quick'}`}
                 aria-expanded={responseModeMenuOpen}
                 aria-haspopup="listbox"
-                title={t('dock.tt.responseMode', '切换快速或深度思考')}
+                title={t('dock.tt.responseMode', '切换快速 / 思考（两套模型通道）')}
                 aria-label={t('dock.responseMode.triggerAria', '回复模式菜单')}
                 onClick={() => setResponseModeMenuOpen((o) => !o)}
               >
@@ -3234,8 +3234,8 @@ export default function AIDock() {
                   </span>
                   <span className="dock-response-mode-desc">
                     {studioResponseMode === 'quick'
-                      ? t('dock.responseMode.quickSub', '快捷模型通道')
-                      : t('dock.responseMode.thinkingSub', '解决复杂任务')}
+                      ? t('dock.responseMode.quickSub', '首包更快 · 日常问答')
+                      : t('dock.responseMode.thinkingSub', '深度通道 · 复杂任务')}
                   </span>
                 </span>
                 <span className="dock-response-mode-chevron" aria-hidden>
@@ -3256,7 +3256,7 @@ export default function AIDock() {
                   <p className="dock-response-mode-panel-hint">
                     {t(
                       'dock.responseMode.hint',
-                      '「快速」与「思考」主要区别在模型配置；对话里都会展示运行上下文、工具调用与步骤，最后才是总结与结果。',
+                      '「快速」与「思考」对应后台两套模型通道，可在 AI 设置里分别为两路指定模型与参数。快速侧重更短等待、适合日常追问；思考侧重深度与复杂编排。',
                     )}
                   </p>
                   {RESPONSE_MODE_ORDER.map((id) => {
@@ -3282,8 +3282,8 @@ export default function AIDock() {
                           </span>
                           <span className="dock-response-mode-option-desc">
                             {id === 'quick'
-                              ? t('dock.responseMode.quickSub', '快捷模型通道')
-                              : t('dock.responseMode.thinkingSub', '解决复杂任务')}
+                              ? t('dock.responseMode.quickSub', '首包更快 · 日常问答')
+                              : t('dock.responseMode.thinkingSub', '深度通道 · 复杂任务')}
                           </span>
                         </span>
                         {selected && (
