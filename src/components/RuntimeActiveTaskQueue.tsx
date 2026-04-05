@@ -1,4 +1,13 @@
 import { useMemo } from 'react';
+import {
+  CircleDot,
+  Cloud,
+  GitBranch,
+  Hourglass,
+  ListChecks,
+  ListTodo,
+  Loader2,
+} from 'lucide-react';
 import { getCapabilityDisplayLabel } from '../ai';
 import type { Task } from '../ai';
 import type { RdkClawTimelineEntry } from '../hooks/useAIChatStore';
@@ -137,9 +146,7 @@ export default function RuntimeActiveTaskQueue() {
     >
       <div className="runtime-task-queue-inner">
         <span className="runtime-task-queue-label">
-          <span className="material-symbols-outlined runtime-task-queue-label-icon" aria-hidden>
-            pending_actions
-          </span>
+          <ListTodo size={14} strokeWidth={2} className="runtime-task-queue-label-lucide" aria-hidden />
           {t('runtimeTasks.titleWorkspaceExec', '工作台执行')}
         </span>
 
@@ -148,11 +155,11 @@ export default function RuntimeActiveTaskQueue() {
             {deviceOnline
               ? t(
                   'runtimeTasks.emptyWorkspaceExec',
-                  '当前无进行中的任务。可在工作台发起「一句话开发」、设备体检，或在对话中下达指令，进度将显示于此。',
+                  '当前无进行中的任务。在底部对话里向 RDKClaw 描述问题或目标（排障、方案、烧录前检查等），进度会显示在这里。',
                 )
               : t(
                   'runtimeTasks.emptyWorkspaceExecNoDevice',
-                  '当前无进行中的任务。请先添加并连接开发板以使用完整能力；若想循序渐进了解平台，可在工作台点击「重新开始引导」进入新手引导。有任务执行时，进度将显示于此。',
+                  '当前无进行中的任务。添加并连接开发板后，RDKClaw 才能完整调度设备与工具；也可在工作台「重新开始引导」熟悉流程。有任务执行时，进度将显示于此。',
                 )}
           </span>
         )}
@@ -166,9 +173,7 @@ export default function RuntimeActiveTaskQueue() {
                 onClick={() => setActiveTab('flasher')}
                 title={t('runtimeTasks.openFlasher', '打开烧录工具')}
               >
-                <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
-                  progress_activity
-                </span>
+                <Loader2 className="runtime-task-chip-spin runtime-task-chip-spin--lucide" size={14} strokeWidth={2} aria-hidden />
                 <span className="runtime-task-chip-text">
                   <span className="runtime-task-chip-kind">
                     {t('runtimeTasks.flashInProgress', '镜像烧录')}
@@ -190,9 +195,7 @@ export default function RuntimeActiveTaskQueue() {
                 onClick={() => setActiveTab('dashboard')}
                 title={t('runtimeTasks.flowCheckHint', '流程编排检查进行中')}
               >
-                <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
-                  account_tree
-                </span>
+                <GitBranch className="runtime-task-chip-icon" size={14} strokeWidth={2} aria-hidden />
                 <span className="runtime-task-chip-text">
                   <span className="runtime-task-chip-kind">
                     {t('runtimeTasks.flowChecking', '流程检查')}
@@ -206,9 +209,7 @@ export default function RuntimeActiveTaskQueue() {
 
             {loadingChipActive && (
               <div className="runtime-task-chip runtime-task-chip--static">
-                <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
-                  hourglass_top
-                </span>
+                <Hourglass className="runtime-task-chip-icon" size={14} strokeWidth={2} aria-hidden />
                 <span className="runtime-task-chip-text">
                   <span className="runtime-task-chip-kind">
                     {t('runtimeTasks.workspaceLoading', '加载中')}
@@ -225,9 +226,7 @@ export default function RuntimeActiveTaskQueue() {
                 onClick={() => setActiveTab('dashboard')}
                 title={t('runtimeTasks.openDashboard', '打开工作台')}
               >
-                <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
-                  fiber_manual_record
-                </span>
+                <CircleDot className="runtime-task-chip-icon runtime-task-chip-icon--rec" size={14} strokeWidth={2} aria-hidden />
                 <span className="runtime-task-chip-text">
                   <span className="runtime-task-chip-kind">
                     {t('runtimeTasks.rosRecording', 'ROS 录制')}
@@ -246,9 +245,7 @@ export default function RuntimeActiveTaskQueue() {
                 onClick={openDockChat}
                 title={t('runtimeTasks.openRdkDock', '打开 RDKClaw 对话')}
               >
-                <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
-                  smart_toy
-                </span>
+                <Loader2 className="runtime-task-chip-spin runtime-task-chip-spin--lucide" size={14} strokeWidth={2} aria-hidden />
                 <span className="runtime-task-chip-text">
                   <span className="runtime-task-chip-kind">
                     {t('runtimeTasks.rdkclawExecuting', 'RDKClaw 执行')}
@@ -280,9 +277,7 @@ export default function RuntimeActiveTaskQueue() {
                 onClick={openDockChat}
                 title={t('runtimeTasks.openBackgroundRun', '打开对话查看后台任务')}
               >
-                <span className="material-symbols-outlined runtime-task-chip-spin" aria-hidden>
-                  clouds
-                </span>
+                <Cloud className="runtime-task-chip-icon" size={14} strokeWidth={2} aria-hidden />
                 <span className="runtime-task-chip-text">
                   <span className="runtime-task-chip-kind">
                     {t('runtimeTasks.backgroundRun', '后台对话')}
@@ -302,12 +297,11 @@ export default function RuntimeActiveTaskQueue() {
                     onClick={openDockTasks}
                     title={t('runtimeTasks.openTaskDock', '打开对话与任务面板')}
                   >
-                    <span
-                      className={`material-symbols-outlined ${task.status === 'running' ? 'runtime-task-chip-spin' : ''}`}
-                      aria-hidden
-                    >
-                      {task.status === 'running' ? 'progress_activity' : 'task_alt'}
-                    </span>
+                    {task.status === 'running' ? (
+                      <Loader2 className="runtime-task-chip-spin runtime-task-chip-spin--lucide" size={14} strokeWidth={2} aria-hidden />
+                    ) : (
+                      <ListChecks className="runtime-task-chip-icon" size={14} strokeWidth={2} aria-hidden />
+                    )}
                     <span className="runtime-task-chip-text">
                       <span className="runtime-task-chip-kind">
                         {getCapabilityDisplayLabel(task.capabilityId, isEn)}

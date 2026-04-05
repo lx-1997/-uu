@@ -113,7 +113,10 @@ function parseTopCpuUsage(lines: string[]): { display: string; val: number } {
 }
 
 export function parseMetrics(output: string): DeviceMetrics {
-  const lines = output.split(/\r?\n/).map(l => l.trim());
+  const rawLines = output.split(/\r?\n/).map((l) => l.trim());
+  /** SSH 非零退出时尾部可能带 `[stderr]` / `[exit code: …]`，避免污染 somstatus/top 解析 */
+  const cutIdx = rawLines.findIndex((l) => /^\[(stderr|exit code:)/i.test(l));
+  const lines = cutIdx >= 0 ? rawLines.slice(0, cutIdx) : rawLines;
 
   const findAfter = (marker: string) => {
     const idx = lines.findIndex(l => l === marker);
@@ -124,8 +127,15 @@ export function parseMetrics(output: string): DeviceMetrics {
   // ── Temperature ──
   const tempRaw = findAfter('###TEMP###');
   const tempNum = Number(tempRaw);
-  let tempC = Number.isFinite(tempNum) && tempNum > 0 ? tempNum / 1000 : -1;
+  /** millidegree（常见 45000+）与少数驱动直接输出摄氏度整数（~20–105） */
+  let tempC = -1;
+  if (Number.isFinite(tempNum) && tempNum > 0) {
+    if (tempNum >= 1000) tempC = tempNum / 1000;
+    else if (tempNum <= 200) tempC = tempNum;
+    else tempC = tempNum / 1000;
+  }
   let temp = tempC > 0 ? `${tempC.toFixed(1)}°C` : (tempRaw || '--');
+  const thermalZoneLooksValid = tempC > 0 && tempC <= 120 && String(tempRaw).trim() !== 'N/A';
 
   // ── Memory & swap (`free -h`) ──
   const memIdx = lines.findIndex(l => l === '###MEM###');
@@ -177,12 +187,27 @@ export function parseMetrics(output: string): DeviceMetrics {
   if (somIdx >= 0) {
     const somLines = lines.slice(somIdx + 1);
 
-    const cpuTempLine = somLines.find(l => /CPU\s*:\s*[\d.]+/.test(l));
-    if (cpuTempLine) {
-      const tm = cpuTempLine.match(/CPU\s*:\s*([\d.]+)/);
-      if (tm) {
-        const value = parseFloat(tm[1]);
-        if (value > 0) { tempC = value; temp = `${value.toFixed(1)}°C`; }
+    /**
+     * 仅当 sysfs 温度无效时，才用 somstatus 补温度；且行内须像「温度」而非 CPU 频率（S100/X5 上
+     * `CPU: 1.8` 类字段曾误覆盖为 1.8°C）。
+     */
+    if (!thermalZoneLooksValid) {
+      const cpuTempLine = somLines.find(
+        (l) =>
+          /(?:CPU|GPU|Soc|A55|BPU).*(?:[Tt]emp|温度|°\s*C|°C)/i.test(l) ||
+          (/(?:CPU|GPU)\s*:\s*[\d.]+/.test(l) && /(?:°C|℃|[Tt]emp)/.test(l)),
+      );
+      if (cpuTempLine) {
+        const tm =
+          cpuTempLine.match(/(?:[Tt]emp|温度)\s*[:：]?\s*([\d.]+)/) ||
+          cpuTempLine.match(/([\d.]+)\s*°?\s*[Cc]/);
+        if (tm) {
+          const value = parseFloat(tm[1]);
+          if (value > 0 && value <= 120) {
+            tempC = value;
+            temp = `${value.toFixed(1)}°C`;
+          }
+        }
       }
     }
 
@@ -202,7 +227,7 @@ export function parseMetrics(output: string): DeviceMetrics {
       if (freqCandidate && ratio >= 0) {
         bpu = `${ratio}% · ${(freqCandidate / 1e9).toFixed(1)}GHz`;
         bpuValue = ratio;
-      } else if (ratio >= 0) {
+      } else if (ratio >= 0 && ratio <= 100) {
         bpu = `${ratio}%`; bpuValue = ratio;
       } else if (freqCandidate) {
         bpu = `${(freqCandidate / 1e9).toFixed(1)}GHz`;
@@ -210,13 +235,34 @@ export function parseMetrics(output: string): DeviceMetrics {
     }
   }
 
+  if (bpuValue > 100) {
+    bpu = '--';
+    bpuValue = -1;
+  }
+
   if (bpu === '--') {
     const bpuIdx = lines.findIndex(l => l === '###BPU###');
     if (bpuIdx >= 0) {
-      const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 8).join(' ');
-      const m = bpuLines.match(/(\d{1,3})\s*%/);
-      if (m) { bpu = `${m[1]}%`; bpuValue = Number(m[1]); }
-      else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
+      const bpuSlice = lines.slice(bpuIdx + 1, bpuIdx + 12).join('\n');
+      const sysfs = bpuSlice.match(/SYSFS_BPU_RATIO:\s*(\d{1,3})\b/);
+      if (sysfs) {
+        const v = Number(sysfs[1]);
+        if (v >= 0 && v <= 100) {
+          bpu = `${v}%`;
+          bpuValue = v;
+        }
+      }
+      if (bpu === '--') {
+        const bpuLines = lines.slice(bpuIdx + 1, bpuIdx + 8).join(' ');
+        const m = bpuLines.match(/(\d{1,3})\s*%/);
+        if (m) {
+          const v = Number(m[1]);
+          if (v <= 100) {
+            bpu = `${m[1]}%`;
+            bpuValue = v;
+          }
+        } else if (/unavailable/i.test(bpuLines)) bpu = '不可用';
+      }
     }
   }
 

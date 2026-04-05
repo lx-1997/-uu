@@ -8,7 +8,9 @@ export interface RDKClawNotification {
     | "channel_message_inbound"
     | "channel_message_ack"
     | "channel_message_outbound"
-    | "channel_message_error";
+    | "channel_message_error"
+    /** Studio 服务端：OpenClaw 已安装但网关异常时的后台诊断/修复摘要 */
+    | "openclaw_gateway_watchdog";
   title: string;
   message: string;
   taskId?: string;
@@ -48,7 +50,8 @@ export class NotificationHub {
     const isHighPriority =
       notification.level === 'error' ||
       notification.level === 'success' ||
-      notification.type === 'autonomy_error';
+      notification.type === 'autonomy_error' ||
+      notification.type === 'openclaw_gateway_watchdog';
 
     if (!isHighPriority && this.windowCount > MAX_PER_WINDOW) {
       return;

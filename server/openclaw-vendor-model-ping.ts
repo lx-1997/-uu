@@ -119,8 +119,8 @@ export async function pingVendorModel(body: VendorModelPingBody): Promise<Vendor
         },
         body: JSON.stringify({
           model: modelId,
-          max_tokens: 32,
-          messages: [{ role: 'user', content: 'Reply with one word: OK' }],
+          max_tokens: 1,
+          messages: [{ role: 'user', content: 'OK' }],     
         }),
       });
       const latencyMs = Date.now() - t0;
@@ -140,9 +140,6 @@ export async function pingVendorModel(body: VendorModelPingBody): Promise<Vendor
         };
       }
       const out = extractAnthropicAssistantText(data);
-      if (!out.trim()) {
-        return { ok: false, error: 'EMPTY_RESPONSE', detail: '响应中无 assistant 文本', status: res.status };
-      }
       return { ok: true, latencyMs };
     }
 
@@ -164,9 +161,9 @@ export async function pingVendorModel(body: VendorModelPingBody): Promise<Vendor
       },
       body: JSON.stringify({
         model: modelId,
-        messages: [{ role: 'user', content: 'Reply with one word: OK' }],
-        max_tokens: 32,
-        temperature: 0.2,
+        messages: [{ role: 'user', content: 'OK' }],       
+        max_tokens: 2,
+        temperature: 0.1,
         stream: false,
       }),
     });
@@ -185,10 +182,6 @@ export async function pingVendorModel(body: VendorModelPingBody): Promise<Vendor
         status: res.status,
         detail: extractProviderErrorMessage(data, text),
       };
-    }
-    const out = extractOpenAiAssistantText(data);
-    if (!out.trim()) {
-      return { ok: false, error: 'EMPTY_RESPONSE', detail: '响应无有效文本（检查模型与兼容接口路径）', status: res.status };
     }
     return { ok: true, latencyMs };
   } catch (e: unknown) {

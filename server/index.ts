@@ -11,7 +11,7 @@ import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import iconv from 'iconv-lite';
-import type { ChatMessage, Device, StudioUiHints } from '../shared/types.js';
+import type { ChatMessage, Device, OpenClawStudioModelSyncMode, StudioUiHints } from '../shared/types.js';
 import {
   readDevices,
   writeDevices,
@@ -35,6 +35,7 @@ import {
   SSH_KEEPALIVE_INTERVAL_MS,
   SSH_KEEPALIVE_COUNT_MAX,
   SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS,
+  type RemoteCommandJoiner,
 } from './ssh.js';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -47,6 +48,7 @@ import * as path from 'path';
 import { ensureAgentMediaDownloadDir, getLocalFilesServeDirs } from './local-files-roots.js';
 import {
   buildBoardDetectionCommand,
+  buildWorkspaceHealthBpuReadyPythonInline,
   parseBoardDetection,
   getDeviceProfile,
   getResearchSeeds,
@@ -99,6 +101,7 @@ import { transcribeAudioBuffer, isStudioProviderAsrSupported } from './agent/too
 import { isLocalWhisperConfigured } from './local-whisper-stt.js';
 import { WeixinPollingChannel } from './agent/channels/weixin.js';
 import { AutonomyScheduler } from './rdkclaw/autonomy-scheduler.js';
+import { startOpenClawGatewayWatchdog } from './rdkclaw/openclaw-gateway-watchdog.js';
 import { NotificationHub } from './rdkclaw/notification-hub.js';
 import type { ApprovalDecisionMode, RDKClawExecutionMode, StudioResponseMode } from './rdkclaw/types.js';
 import { clearSecurityAuditLogs, listSecurityAuditLogs } from './rdkclaw/security-audit-store.js';
@@ -385,7 +388,7 @@ const WORKSPACE_HEALTH_SCRIPT = [
   'ros_distro=$(printenv ROS_DISTRO 2>/dev/null || ls -1 /opt/tros/ 2>/dev/null | head -1 || ls -1 /opt/ros/ 2>/dev/null | head -1 || echo humble)',
   'modelzoo_dir=$(test -d /opt/rdk_model_zoo && echo 1 || echo 0)',
   'hrt_ready=$(command -v hrt_model_exec >/dev/null 2>&1 && echo 1 || echo 0)',
-  'bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "import importlib.util; mods=(\'hobot_dnn\',\'hobot_dnn_rdkx5\',\'bpu_infer_lib_x5\',\'bpu_infer_lib_x3\'); print(1 if any(importlib.util.find_spec(name) is not None for name in mods) else 0)" 2>/dev/null || echo 0; else echo 0; fi)',
+  `bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "${buildWorkspaceHealthBpuReadyPythonInline()}" 2>/dev/null || echo 0; else echo 0; fi)`,
   'printf "checked_at=%s\\n" "$(date +%s)"',
   'printf "python_ready=%s\\n" "$python_ready"',
   'printf "git_ready=%s\\n" "$git_ready"',
@@ -838,6 +841,13 @@ registerSocketIoHandlers(io, {
   devicePasswordCache,
   toOpenClawDevice,
   openClawManager,
+});
+
+startOpenClawGatewayWatchdog({
+  openClawManager,
+  readDevices,
+  toOpenClawDevice: (d) => toOpenClawDevice(d),
+  notificationHub,
 });
 
 /** 默认口令候选见 `./ssh.js` 的 sshPasswordCandidates */
@@ -1722,7 +1732,13 @@ async function runOnDevice(
   response: express.Response,
   id: string,
   commands: string[],
-  options?: { timeoutMs?: number },
+  options?: {
+    timeoutMs?: number;
+    /** 与 `ssh.runRemoteCommands` 一致：诊断链等场景用 `;` 避免前段失败导致后段不执行 */
+    joinWith?: RemoteCommandJoiner;
+    /** 非零退出时仍返回 stdout（并可能含 stderr 摘要），供仪表盘解析部分指标 */
+    rejectOnNonZeroExit?: boolean;
+  },
 ) {
   invalidateDevicesReadCache();
   const device = await resolveDevice(request, response, id);
@@ -1744,6 +1760,8 @@ async function runOnDevice(
     return null;
   }
   const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
+  const joinWith = options?.joinWith;
+  const rejectOnNonZeroExit = options?.rejectOnNonZeroExit;
   let lastError: unknown = null;
   const output = await runInDeviceLane(device.id, async () => {
     for (const pwd of candidates) {
@@ -1757,7 +1775,7 @@ async function runOnDevice(
               password: pwd,
             },
             commands,
-            { timeoutMs },
+            { timeoutMs, joinWith, rejectOnNonZeroExit },
           );
           setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
           return result;
@@ -2579,6 +2597,50 @@ app.post('/api/token-usage/reset', (_request, response) => {
 app.get('/api/devices', async (_request, response) => {
   const devices = await readDevices();
   response.json({ devices: devices.map((item) => sanitizeDevice(item as Device & { password?: string })) });
+});
+
+/** 部分更新设备元数据（如板端 OpenClaw 与 Studio 模型同步策略） */
+app.patch('/api/devices/:id', async (request, response) => {
+  const { id } = request.params;
+  try {
+    const body = request.body as { openclawStudioModelSync?: OpenClawStudioModelSyncMode };
+    if (body.openclawStudioModelSync === undefined) {
+      sendApiError(response, 400, 'INVALID_BODY', '缺少可更新字段（如 openclawStudioModelSync）', { retryable: false });
+      return;
+    }
+    const v = body.openclawStudioModelSync;
+    const allowed = new Set<OpenClawStudioModelSyncMode>(['off', 'when_empty', 'when_unhealthy', 'always', 'preset_only']);
+    if (!allowed.has(v)) {
+      sendApiError(response, 400, 'INVALID_SYNC_MODE', 'openclawStudioModelSync 值无效', { retryable: false });
+      return;
+    }
+    let updated: Device | null = null;
+    await serializedWriteDevices(async () => {
+      const devices = await readDevices();
+      const idx = devices.findIndex((d) => d.id === id);
+      if (idx < 0) return;
+      const next = { ...devices[idx], openclawStudioModelSync: v };
+      const nextDevices = [...devices];
+      nextDevices[idx] = next;
+      await writeDevices(nextDevices);
+      updated = next;
+    });
+    if (!updated) {
+      sendApiError(response, 404, 'DEVICE_NOT_FOUND', '设备不存在', { retryable: false });
+      return;
+    }
+    invalidateDeviceDerivedCaches(updated.id);
+    response.json({ ok: true, device: sanitizeDevice(updated as Device & { password?: string }) });
+  } catch (err) {
+    console.error('[devices] PATCH /api/devices/:id failed', err);
+    sendApiError(
+      response,
+      500,
+      'DEVICE_PATCH_FAILED',
+      err instanceof Error ? err.message : '设备元数据更新失败',
+      { retryable: true },
+    );
+  }
 });
 
 app.post('/api/devices/connect', async (request, response) => {
@@ -3797,13 +3859,19 @@ app.post('/api/devices/:id/openclaw/config', async (request, response) => {
 
   const { password } = resolvePassword(request, device);
   const deviceObj = toOpenClawDevice(device, password);
-  let output = '';
-  openClawManager.updateConfig(deviceObj, config, (chunk) => { output += chunk; }, (success) => {
-    if (success) {
-      invalidateDeviceDerivedCaches(id, ['openclawAiReady']);
+  openClawManager.updateConfig(
+    deviceObj,
+    config,
+    (chunk) => {
+      // background
+    },
+    (success) => {
+      if (success) {
+        invalidateDeviceDerivedCaches(id, ['openclawAiReady']);
+      }
     }
-    response.json({ ok: success, output });
-  });
+  );
+  response.json({ ok: true, output: '配置任务已分发至后台执行...' });
 });
 
 app.get('/api/devices/:id/openclaw/status', async (request, response) => {
@@ -4331,7 +4399,10 @@ app.get('/api/devices/:id/diagnostics', async (request, response) => {
     }
   }
 
-  const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS);
+  const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS, {
+    joinWith: ';',
+    rejectOnNonZeroExit: false,
+  });
   if (!executed) return;
 
   setDiagnosticsCache(id, executed.output);
@@ -4395,7 +4466,10 @@ app.get('/api/devices/:id/state-snapshot', async (request, response) => {
     }
   }
   if (diagnostics === undefined) {
-    const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS);
+    const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS, {
+      joinWith: ';',
+      rejectOnNonZeroExit: false,
+    });
     if (!executed) return;
     setDiagnosticsCache(id, executed.output);
     diagnostics = { ok: true, output: executed.output, cached: false };
@@ -5115,6 +5189,7 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
           { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
           targetPath,
           Buffer.from(content ?? '', 'utf-8'),
+          { skipRemotePathValidation: true },
         );
       });
       response.json({ ok: true, output: '写入完成', path: targetPath });
@@ -5173,6 +5248,7 @@ app.post('/api/devices/:id/files/upload', async (request, response) => {
         { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
         targetPath,
         buffer,
+        { skipRemotePathValidation: true },
       );
     });
     response.json({ ok: true, path: targetPath });

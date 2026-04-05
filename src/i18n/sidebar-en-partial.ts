@@ -1,6 +1,6 @@
 /** Left sidebar (full layout) — merged into EN via en-extras */
 export const SIDEBAR_EN: Record<string, string> = {
-  'sidebar.brand.tagline': 'Desktop workspace',
+  'sidebar.brand.tagline': 'Local device workspace',
   'sidebar.settingsOpen': 'Open settings',
 
   'sidebar.summary.kicker': 'Current workspace',
@@ -25,11 +25,11 @@ export const SIDEBAR_EN: Record<string, string> = {
   'sidebar.group.capabilities': 'Tools & delivery',
 
   'sidebar.nav.dashboard': 'Overview',
-  'sidebar.hint.dashboard': 'Onboarding and device home',
+  'sidebar.hint.dashboard': 'Device status and shortcuts',
   'sidebar.nav.openclaw': 'OpenClaw',
-  'sidebar.hint.openclaw': 'AI gateway, channels, skills',
+  'sidebar.hint.openclaw': 'Gateway, channels, skills',
   'sidebar.nav.skills': 'Skill studio',
-  'sidebar.hint.skills': 'Create OpenClaw skills and deploy',
+  'sidebar.hint.skills': 'Author skills and deploy to the board',
 
   'sidebar.nav.terminal': 'Terminal',
   'sidebar.hint.terminal': 'SSH commands and troubleshooting',
@@ -50,5 +50,5 @@ export const SIDEBAR_EN: Record<string, string> = {
   'sidebar.footer.robogo': 'RoboGo cloud',
   'sidebar.footer.robogoHint': 'Cloud robotics & workflows',
   'sidebar.footer.settings': 'Client settings',
-  'sidebar.footer.settingsHint': 'AI, Feishu, connection, UX',
+  'sidebar.footer.settingsHint': 'Models, Feishu, connection, UX',
 };

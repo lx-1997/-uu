@@ -31,6 +31,7 @@ import {
   persistBoardSkillBundleHint,
   readStudioUiHintsForDevice,
 } from '../studio-ui-hints';
+import { BadgeCheck, Shrimp } from 'lucide-react';
 import OnboardingWizard from './OnboardingWizard';
 
 type WorkspaceModule = {
@@ -505,7 +506,7 @@ export default function Dashboard() {
         <div className="dash-morph-halo secondary" />
         <div className="dash-empty-hero">
           <div className="dash-brand dash-enter">RDK Studio</div>
-          <p className="dash-tagline dash-enter dash-enter-d1">{t('dashboard.tagline', '连接你的 RDK 开发板，开始构建')}</p>
+          <p className="dash-tagline dash-enter dash-enter-d1">{t('dashboard.tagline', '连接设备后即可开始')}</p>
           <button type="button" className="dash-action primary dash-enter dash-enter-d2" onClick={() => setShowAddDevice(true)}>
             <span className="dash-action-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -514,7 +515,7 @@ export default function Dashboard() {
           </button>
           <div className="dash-nodevice-actions dash-enter dash-enter-d3">
             <button className="btn btn-ghost" onClick={() => prompt(isEn ? DASHBOARD_CHAT_INTRO_PROMPT_EN : DASHBOARD_CHAT_INTRO_PROMPT_ZH)}>
-              {t('dashboard.chatFirst', '先聊聊')}
+              {t('dashboard.chatFirst', '打开对话')}
             </button>
             <button className="btn btn-ghost" onClick={() => setObStep('board')}>
               {t('dashboard.restartOnboarding', '重新开始引导')}
@@ -557,6 +558,7 @@ export default function Dashboard() {
                 studioBackendOk === null ? 'warn' : studioBackendOk ? 'online' : 'offline'
               }`}
             />
+            <BadgeCheck size={14} strokeWidth={2.25} className="lp-pill-mark" aria-hidden />
             RDKClaw
           </span>
           <span
@@ -571,6 +573,7 @@ export default function Dashboard() {
                     : 'offline'
               }`}
             />
+            <Shrimp size={14} strokeWidth={2.25} className="lp-pill-mark" aria-hidden />
             OpenClaw
           </span>
           <span className={`lp-pill ${deviceChannelOk ? 'online' : ''}`}>
@@ -598,7 +601,7 @@ export default function Dashboard() {
       <div className="lp-cta lp-enter lp-d2">
         <button className="lp-cta-btn primary" onClick={() => prompt(isEn ? ONE_SHOT_DEV_WORKFLOW_PROMPT_EN : ONE_SHOT_DEV_WORKFLOW_PROMPT_ZH)}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
-          {t('dashboard.oneShotDev', '一句话开发')}
+          {t('dashboard.oneShotDev', '快捷开发')}
         </button>
         <button className="lp-cta-btn" onClick={() => setActiveTab('terminal')}>Terminal</button>
         <button className="lp-cta-btn" onClick={() => setActiveTab('openclaw')}>OpenClaw</button>

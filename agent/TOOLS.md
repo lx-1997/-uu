@@ -14,9 +14,9 @@
 | `device_file_download_to_local` | 设备→本机下载 | 图片/视频/文档自动识别 |
 | `device_file_upload_from_local` | 本机→设备上传 | localPath 相对 workspace |
 | `device_diagnose` | 硬件全检 | 温度/BPU/内存/磁盘一次查完 |
-| `board_openclaw_chat` | 和板端 OpenClaw 交流 | 了解能力、讨论方案、共享分析，不执行任务 |
+| `board_openclaw_chat` | 和板端 OpenClaw 交流 | 了解能力、讨论方案、共享分析；**delegate 在 `alignment_gate: strict` 时**用于**对齐放行**（同意/补充后再执行），不替代 delegate 跑任务 |
 | `board_openclaw_assess` | 评估板端是否能干 | delegate 之前先 assess |
-| `board_openclaw_delegate` | 委派复杂任务给板端 | 适用于模型部署、pipeline、深度诊断 |
+| `board_openclaw_delegate` | 委派复杂任务给板端 | 适用于模型部署、pipeline、深度诊断；板端带 `alignment_gate`：**strict** 时须先 [板端·对齐] 再经 **chat 回应**后执行；guidance 含「对齐完成·可直接执行」或「已由 RDKClaw 确认」时为 bypass |
 | `board_openclaw_status` | 轻量看进程/服务摘要 | **日常优先**；界面已显示 OpenClaw 正常时不要为聊天重复查 |
 | `board_openclaw_gateway_pair` | 板端网关设备信任（新版 `openclaw devices approve --latest`，旧版回退 `pair`） | **pairing required** 时优先于渠道 `pairing approve`；先 `force`，不行再 `full` |
 | `board_openclaw_health` | 结构化 JSON 健康（慢） | **非例行**：仅报障、装/升/重启后验收、或 delegate 失败再调 |
@@ -46,9 +46,9 @@
 - **OpenClaw 修复**: 若错误含 **pairing required** → `board_openclaw_gateway_pair` → `model_test` 或 health 验收；其它问题：doctor → restart_gateway → health
 - **文件传输**: download/upload + 验证
 - **日志分析**: openclaw_logs + exec(journalctl/dmesg)
-- **板端协作**: chat(了解能力) → assess(评估可行性) → delegate(委派执行) → 验证结果
+- **板端协作**: assess(评估可行性) → delegate(板端先 [板端·对齐]；**strict** 时 **chat 放行**后再执行) → 验证结果；需要闲聊能力时再 chat
 - **切换/清理板端 ROS 视觉例程**（YOLO、人体检测等）：停旧栈时 **guidance 须含 USB 链路**（`hobot_usb_cam`、`hobot_codec*`、必要时 websocket/nginx），**不要**只停推理节点；见技能 `rdk-ros` 对应节
-- **板端任务**: assess → delegate → 验证结果（确信可行时可跳过 chat）
+- **板端任务**: assess → delegate →（若仅对齐）**chat 放行** → 验证结果；guidance 已写「对齐完成·可直接执行」时可同轮 bypass
 - **多板**: `fleet_board_list` → 按算力/角色选板 → `fleet_board_delegate` 或 `fleet_board_broadcast`
 - **长链路**: `create_plan` 拆步 → 执行 → `update_plan` 更新状态
 - **板端单张拍照**（用户「拍张照」「抓拍一张」等，非整段视觉 pipeline）：**优先本流程**，不必为拍照先 `board_openclaw_delegate`。
@@ -67,6 +67,7 @@
 - 优先复用板端已有能力，不重造轮子
 - 用户上传附件时用 `attachment_*` 工具处理
 - delegate 返回含 `[NEED_RDKCLAW]` 时，提取请求 → 本地工具获取 → chat 回传 → 让 OpenClaw 继续
+- delegate 在 **strict** 下若**仅** [板端·对齐]、未执行：下一轮 **必须** `board_openclaw_chat` 明确同意/补充后再期待执行结果
 
 ## 微流程与自检（RDKClaw 系统层已注入，此处为速查）
 
@@ -83,6 +84,7 @@
 | 用 `exec`（本机）以为在操作设备 | 用 `device_exec`（设备） |
 | 每轮对话都调 `board_openclaw_health` | UI 快照显示正常就不调 |
 | 不 assess 直接 delegate | ALWAYS 先 assess |
+| strict 门禁下只对齐不 chat | 见 [板端·对齐] 后须 `board_openclaw_chat` 放行再执行 |
 | delegate 失败后反复重试同一任务 | 换方案或用本地工具兜底 |
 | 用 `vim`/`top`/`htop` 等交互式命令 | 用非交互替代（`cat`/`ps`/`free`） |
 | 假设命令执行成功不检查输出 | ALWAYS 检查输出确认结果 |

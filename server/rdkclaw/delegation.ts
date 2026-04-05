@@ -25,9 +25,11 @@ export function resolveDelegationModeText(decision: DelegateDecision) {
 }
 
 export function resolveDelegationExpectationText(decision: DelegateDecision) {
-  if (decision.path === "board_primary") return "先由 RDKClaw 做本地速度/复杂度评估；仅在板端明显更优或强依赖板端技能时再委派";
-  if (decision.path === "collaborative") return "本地负责编排，涉及板端能力时并行调用 OpenClaw";
-  return "由 RDKClaw 本地工具链直接完成，不依赖板端委派";
+  if (decision.path === "board_primary")
+    return "双伙伴共探：RDKClaw 与板端 OpenClaw **一起摸路**，谁在当前约束下更快收敛谁牵头；不是「一方专职规划、一方专职执行」";
+  if (decision.path === "collaborative")
+    return "共同探索同一目标：联网/文档/SSH 与板端会话并行试探，按速度与成功率动态换道，而非固定主从分工";
+  return "本轮以 RDKClaw 本地工具链为主；若后续出现多步板端或技能依赖，再与 OpenClaw 并线";
 }
 
 /**
@@ -39,8 +41,8 @@ export function buildDelegationRuntimePrompt(decision: DelegateDecision, boardSk
   const forcedBoardByUser = decision.source === "user_mode" && decision.path === "board_primary";
   const skillHint =
     boardSkillCount > 0
-      ? `板端已登记 **${boardSkillCount}** 个技能：先做 RDKClaw 快速自评（本地是否 1-2 步可收敛、是否已确认命令可直跑）。仅当存在板端技能依赖、板端会话延续价值，或本地预计会进入多轮试错，再走 **assess→delegate**。`
-      : "板端技能快照为空或未定：可先 SSH 探底或 \`find_skills\`，再评估是否需 OpenClaw。";
+      ? `板端已登记 **${boardSkillCount}** 个技能：与 OpenClaw **对齐谁更适合先动手**（你已确认的可直跑命令 vs 板端技能链/多轮试错）。**assess→delegate** 是共探里的「换道」手段，不是「Studio 下工单、板端照单演」。`
+      : "板端技能快照为空或未定：可先 SSH 探底或 \`find_skills\`，再与 OpenClaw 并线评估。";
 
   const ocLine = decision.needsBoardCollaboration
     ? forcedBoardByUser
@@ -50,8 +52,8 @@ export function buildDelegationRuntimePrompt(decision: DelegateDecision, boardSk
           skillHint,
         ].join("\n")
       : [
-          "**板端 OpenClaw 参与**：本回合允许协同，但**assess 通过不等于必须 delegate**。先由 RDKClaw 判断本地是否更快完成（例如已确认命令、1-2 步可闭环）；仅在板端明显更优时再 delegate。",
-          "若走 delegate：guidance 必须给出上下文包（用户目标、已执行命令与结果、失败模式、验收标准、限制条件），避免板端重复探测。",
+          "**板端 OpenClaw 参与**：本回合是**双伙伴共探**。**assess 通过不等于必须 delegate**——比较的是「谁更快把事办成」，不是谁有排程权。RDKClaw 已握有可直跑证据时可先 SSH；板端在技能链/现场迭代上更快时再 delegate。",
+          "若走 delegate：guidance 仍是**共享上下文包**（用户目标、已执行命令与结果、失败模式、验收标准、限制条件），方便双方对齐与换道，而非单方面派活。",
           skillHint,
         ].join("\n")
     : "**板端 OpenClaw 参与**：本回合以 SSH/本地工具为主；若任务明显需要板端多步或技能，仍应主动 assess，勿机械回避。";

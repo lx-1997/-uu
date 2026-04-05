@@ -74,6 +74,8 @@ export interface SshCredentials {
   port?: number;
 }
 
+export type RemoteCommandJoiner = '&&' | ';';
+
 export interface RunRemoteCommandOptions {
   timeoutMs?: number;
   /** 每收到一段远程 stdout/stderr 即回调（用于长命令 UI 进度，不做截断） */
@@ -85,6 +87,8 @@ export interface RunRemoteCommandOptions {
    * 传 false 时改为 resolve，在返回文本末尾附带 `[exit code: n]`，供 Agent 区分「命令语义失败」与 SSH 链路失败。
    */
   rejectOnNonZeroExit?: boolean;
+  /** 默认 `&&`：前一条失败则后续不执行。批量诊断等场景可用 `;` 保证各段独立跑完。 */
+  joinWith?: RemoteCommandJoiner;
 }
 
 export interface VerifySshConnectionOptions {
@@ -206,8 +210,16 @@ export function runRemoteCommands(
 
     client
       .on('ready', () => {
-        const fullCommand = commands.filter(Boolean).join(' && ');
-        client.exec(fullCommand, { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } }, (error, stream) => {
+        const joiner = ` ${options.joinWith ?? '&&'} `;
+        const fullCommand = commands.filter(Boolean).join(joiner);
+        client.exec(fullCommand, {
+          env: {
+            TERM: 'xterm',
+            DEBIAN_FRONTEND: 'noninteractive',
+            LANG: 'C',
+            LC_ALL: 'C',
+          },
+        }, (error, stream) => {
           if (error) {
             client.end();
             safeReject(error);
@@ -284,6 +296,11 @@ export function runRemoteCommands(
 export interface UploadFileSftpOptions {
   /** 默认与 SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS 一致；大文件 base64 解码写盘可能较慢 */
   timeoutMs?: number;
+  /**
+   * 跳过 SFTP 目录白名单，仅校验绝对路径与禁止 `..`。
+   * 用于 Studio 内「设备文件管理」面板直连写盘；Agent 的 `device_file_write` 仍走白名单与权限守卫。
+   */
+  skipRemotePathValidation?: boolean;
 }
 
 const SFTP_UPLOAD_ALLOWED_PREFIXES = [
@@ -291,8 +308,13 @@ const SFTP_UPLOAD_ALLOWED_PREFIXES = [
   '/app', '/workspace',
 ];
 
-function validateRemotePath(remotePath: string): void {
-  const normalized = remotePath.replace(/\/+/g, '/');
+function normalizeRemotePathForUpload(remotePath: string): string {
+  return remotePath.replace(/\/+/g, '/');
+}
+
+/** 任意写盘路径均需满足：绝对路径、不含 `..` */
+function assertRemotePathBasicSafety(remotePath: string): void {
+  const normalized = normalizeRemotePathForUpload(remotePath);
   if (!normalized.startsWith('/')) {
     throw new Error(`远端路径必须是绝对路径：${remotePath}`);
   }
@@ -300,6 +322,11 @@ function validateRemotePath(remotePath: string): void {
   if (segments.includes('..')) {
     throw new Error(`远端路径禁止包含 ".."：${remotePath}`);
   }
+}
+
+function validateRemotePath(remotePath: string): void {
+  assertRemotePathBasicSafety(remotePath);
+  const normalized = normalizeRemotePathForUpload(remotePath);
   const allowed = SFTP_UPLOAD_ALLOWED_PREFIXES.some((prefix) =>
     normalized === prefix || normalized.startsWith(prefix + '/'),
   );
@@ -317,7 +344,11 @@ export function uploadFileSftp(
   buffer: Buffer,
   options: UploadFileSftpOptions = {},
 ) {
-  if (process.env.RDK_SFTP_ALLOW_ALL !== '1') {
+  if (process.env.RDK_SFTP_ALLOW_ALL === '1') {
+    /* 与历史行为一致：全局放行时不校验 */
+  } else if (options.skipRemotePathValidation) {
+    assertRemotePathBasicSafety(remotePath);
+  } else {
     validateRemotePath(remotePath);
   }
 

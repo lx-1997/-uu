@@ -295,6 +295,21 @@
   text-align: center;
 }
 
+.immersive-error--inline {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  max-width: min(100%, 420px);
+}
+
+.immersive-error-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--danger);
+}
+
 /* ── Log drawer ── */
 .immersive-logs {
   position: absolute;

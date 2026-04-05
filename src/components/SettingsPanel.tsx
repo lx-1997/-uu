@@ -1287,9 +1287,15 @@ export default function SettingsPanel() {
                 </>
               )}
 
-              {/* ══ 1. AI 引擎 ══ */}
+              {/* ══ AI 引擎 ══ */}
               <section id="ai-engine" className="settings-section" ref={registerSectionRef('ai-engine')}>
-                <H title={t('settings.ai.title', 'AI 引擎')} desc={t('settings.ai.desc', 'RDKClaw 的思考核心。选择服务商、填入 API Key 即可启用。')} />
+                <H
+                  title={t('settings.ai.title', 'AI 引擎')}
+                  desc={t(
+                    'settings.ai.desc',
+                    '驱动 RDKClaw 的模型与工具链：面向真实板端联调、排障与自动化。请在此选择服务商并配置 API Key。',
+                  )}
+                />
                 <div className="settings-card settings-card--ai">
                   <div className="settings-row" style={{ borderTop: 'none', paddingTop: 0 }}>
                     <span className="settings-row-label">{t('settings.ai.editingLane', '编辑')}</span>

@@ -309,11 +309,35 @@ const CLAWHUB_AUTO_LOGIN_CMD = [
 ].join(' && ');
 /** NO_COLOR/FORCE_COLOR：减少安装脚本与 npm 的 ANSI，Web 端日志仍经 strip-ansi 兜底 */
 const BOARD_ENV_EXPORT = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global" && export PATH="$HOME/.npm-global/bin:$PATH" && export NO_COLOR=1 FORCE_COLOR=0';
-const RESTART_GATEWAY_FALLBACK =
-  '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart 2>/dev/null || "$OPENCLAW_CMD" restart 2>/dev/null; else false; fi) || (command -v clawctl >/dev/null 2>&1 && clawctl gateway restart) || true)';
+/**
+ * SSH 非登录会话下常见：未设置 XDG_RUNTIME_DIR → systemctl --user 报 “Failed to connect to bus”。
+ * 在 Linux 上尽量补全用户态 systemd 与 dbus 套接字（与 openclaw 上游 systemd 探测一致）。
+ */
+export const GATEWAY_SSH_USER_SYSTEMD_ENV = [
+  'if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then export XDG_RUNTIME_DIR="/run/user/$(id -u)"; fi',
+  'if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "${XDG_RUNTIME_DIR}/bus" ]; then export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"; fi',
+].join(' && ');
+/** systemd 优先；restart 失败时再 try start（避免服务已停时 restart 无进程可重启） */
+export const RESTART_GATEWAY_FALLBACK =
+  '(' +
+  GATEWAY_SSH_USER_SYSTEMD_ENV +
+  '; systemctl --user restart openclaw-gateway 2>/dev/null || systemctl --user start openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart 2>/dev/null || "$OPENCLAW_CMD" daemon restart 2>/dev/null || "$OPENCLAW_CMD" restart 2>/dev/null; else false; fi) || (command -v clawctl >/dev/null 2>&1 && (clawctl gateway restart 2>/dev/null || clawctl restart 2>/dev/null || clawctl gateway start 2>/dev/null || clawctl start 2>/dev/null)) || true)';
+/** 嵌入 `bash -lc "..."` 双引号参数时，对子 shell 内双引号转义 */
+export const RESTART_GATEWAY_FALLBACK_BASH_LC_DQ = RESTART_GATEWAY_FALLBACK.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 /** 与 RESTART_GATEWAY_FALLBACK 一致：单重 ( ) 子 shell，禁止 (( ))——否则 bash 按算术解析会失败 */
-const START_GATEWAY_FALLBACK =
-  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway start 2>&1 || "$OPENCLAW_CMD" start 2>&1; else false; fi) || (command -v clawctl >/dev/null 2>&1 && clawctl start) || true';
+export const START_GATEWAY_FALLBACK =
+  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway start 2>&1 || "$OPENCLAW_CMD" daemon start 2>&1 || "$OPENCLAW_CMD" start 2>&1; else false; fi) || (command -v clawctl >/dev/null 2>&1 && (clawctl gateway start 2>&1 || clawctl start 2>&1)) || true';
+/**
+ * 当 user systemd 与 gateway install 守护进程均不可用（常见于无 linger 的 SSH）时，
+ * 后台启动 openclaw gateway run（foreground 进程），使 127.0.0.1:18789 仍可探活。
+ */
+export const NOHUP_GATEWAY_RUN_FALLBACK =
+  '(if [ -n "$OPENCLAW_CMD" ]; then ' +
+  'echo "[OpenClaw] 尝试 nohup 后台: gateway run --port 18789 --bind loopback --force（见 /tmp/openclaw-gateway-studio.log）" >&2; ' +
+  'nohup "$OPENCLAW_CMD" gateway run --port 18789 --bind loopback --force >> /tmp/openclaw-gateway-studio.log 2>&1 & ' +
+  'disown 2>/dev/null || true; ' +
+  'sleep 2; ' +
+  'else echo "[OpenClaw] 无 OPENCLAW_CMD，跳过 nohup gateway run" >&2; fi) || true';
 const ENSURE_GATEWAY_LOCAL_MODE_SCRIPT_B64 = Buffer.from(`
 import json
 import os
@@ -779,16 +803,18 @@ export function buildBoardOpenClawGatewayPairRemoteShell(mode: 'force' | 'full')
     'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] gateway pair 失败：未找到 openclaw CLI"; exit 1; fi',
     'echo "[OpenClaw] 停止 Gateway..."',
     '"$OPENCLAW_CMD" gateway stop 2>/dev/null || true',
-    '(systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+    `(${GATEWAY_SSH_USER_SYSTEMD_ENV}; systemctl --user stop openclaw-gateway 2>/dev/null || true)`,
     'echo "[OpenClaw] 清理待处理设备配对请求..."',
     '("$OPENCLAW_CMD" devices clear --yes --pending 2>&1) || true',
     'echo "[OpenClaw] 旧版 CLI: pair --reset（若不存在则跳过）..."',
     '("$OPENCLAW_CMD" pair --reset 2>&1) || true',
     'echo "[OpenClaw] 启动 Gateway..."',
     ENSURE_GATEWAY_LOCAL_MODE,
-    START_GATEWAY_FALLBACK,
+    `${GATEWAY_SSH_USER_SYSTEMD_ENV} && ${START_GATEWAY_FALLBACK}`,
     'echo "[OpenClaw] 等待 127.0.0.1:18789..."',
     `ok=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
+    `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试 nohup gateway run..."; ${NOHUP_GATEWAY_RUN_FALLBACK}; fi`,
+    `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
     `if [ "$ok" != "1" ]; then echo "[OpenClaw] Gateway 端口未就绪"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
     'echo "[OpenClaw] Gateway 已就绪 127.0.0.1:18789"',
     RDK_OC_GATEWAY_PAIR_APPROVE_SNIPPET,
@@ -1319,7 +1345,11 @@ export class OpenClawDeploymentManager {
       const remote = boardOpenclawRemoteSkillsDir(device.userName);
       const includeRdkx5Skills = isBoardRdkX5(device);
       onOutput(
-        `[Studio] 板型判定：${includeRdkx5Skills ? 'RDK X5（同步 rdkx5_skills）' : '非 RDK X5（跳过 rdkx5_skills）'}\n`,
+        `[Studio] 板型判定：${
+          includeRdkx5Skills
+            ? 'RDK X5（同步 rdkx5_skills 全量）'
+            : '非 X5（不同步 rdkx5_skills；S100/Ultra/X3 走文档类 skills，板端能力包见 ensure-board-skill-bundle）'
+        }\n`,
       );
       const r = await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput, {
         includeRdkx5Skills,
@@ -1341,7 +1371,11 @@ export class OpenClawDeploymentManager {
       const remote = boardOpenclawRemoteSkillsDir(device.userName);
       const includeRdkx5Skills = isBoardRdkX5(device);
       onOutput(
-        `[Studio] 板型判定：${includeRdkx5Skills ? 'RDK X5（同步 rdkx5_skills）' : '非 RDK X5（跳过 rdkx5_skills）'}\n`,
+        `[Studio] 板型判定：${
+          includeRdkx5Skills
+            ? 'RDK X5（同步 rdkx5_skills 全量）'
+            : '非 X5（不同步 rdkx5_skills；S100/Ultra/X3 走文档类 skills，板端能力包见 ensure-board-skill-bundle）'
+        }\n`,
       );
       await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput, {
         includeRdkx5Skills,
@@ -1409,7 +1443,7 @@ except:
     pass
 try:
     env = os.environ.copy()
-    env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + env.get("PATH", "")
+    env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + os.path.expanduser("~/.local/bin") + ":" + env.get("PATH", "")
     out = subprocess.check_output(["openclaw", "--version"], env=env, stderr=subprocess.DEVNULL, timeout=5).decode().strip()
     result["version"] = out
     result["installed"] = bool(out)
@@ -1467,7 +1501,7 @@ def check_port(host, port):
 
 try:
   env = os.environ.copy()
-  env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + env.get("PATH", "")
+  env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + os.path.expanduser("~/.local/bin") + ":" + env.get("PATH", "")
   out = subprocess.check_output(["openclaw", "--version"], env=env, stderr=subprocess.DEVNULL, timeout=6).decode().strip()
   result["installed"] = True
   result["version"] = out
@@ -1560,7 +1594,7 @@ print(json.dumps(result, ensure_ascii=False))`;
   getCurrentConfig(device: Device, onResult: (config: ConfigData | null, success: boolean) => void): void {
     const pyScript = `import json,os
 p=os.path.expanduser('~/.openclaw/openclaw.json')
-result={"modelGateway":{"baseUrl":"","apiKey":"","api":"openai-completions","modelId":"qwen-plus","modelName":"Custom Model"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{},"agentDefaults":{"thinkingDefault":"","reasoning":""}}
+result={"modelGateway":{"baseUrl":"","apiKey":"","api":"openai-completions","modelId":"doubao-1.5-pro-256k","modelName":"豆包 (Doubao)"},"feishu":{"appId":"","appSecret":"","connectionMode":"websocket","domain":"feishu","dmPolicy":"pairing","verificationToken":"","encryptKey":""},"runtimeModel":{"provider":"","modelId":"","apiKey":""},"primaryModel":"","configuredProviders":[],"pluginsAllow":[],"allProviders":{},"agentDefaults":{"thinkingDefault":"","reasoning":""}}
 if os.path.exists(p):
   d=json.load(open(p))
   provider=((d.get('models') or {}).get('providers') or {}).get('custom-gateway') or {}
@@ -1581,7 +1615,7 @@ if os.path.exists(p):
     api_value='openai-completions'
   elif api_value=='google-genai':
     api_value='google-generative-ai'
-  result["modelGateway"].update({"baseUrl":provider.get('baseUrl','') or '',"apiKey":provider.get('apiKey','') or '',"api":api_value,"modelId":model.get('id','qwen-plus') or 'qwen-plus',"modelName":model.get('name','Custom Model') or 'Custom Model'})
+  result["modelGateway"].update({"baseUrl":provider.get('baseUrl','') or '',"apiKey":provider.get('apiKey','') or '',"api":api_value,"modelId":model.get('id','doubao-1.5-pro-256k') or 'doubao-1.5-pro-256k',"modelName":model.get('name','豆包 (Doubao)') or '豆包 (Doubao)'})
   result["feishu"].update({
     "appId":feishu.get('appId','') or '',
     "appSecret":feishu.get('appSecret','') or '',
@@ -1653,7 +1687,18 @@ print(json.dumps(result,ensure_ascii=False))`;
   updateConfig(
     device: Device,
     config: {
-      modelGateway?: any;
+      modelGateway?: {
+        baseUrl?: string;
+        apiKey?: string;
+        modelId?: string;
+        modelName?: string;
+        api?: string;
+        /**
+         * `replace_primary`：写入 `custom-gateway` 并设为主模型（默认）。
+         * `preset_only`：写入独立 `rdk-studio-default`，不修改主模型，供用户在板端设置中自行切换启用。
+         */
+        placement?: 'replace_primary' | 'preset_only';
+      };
       feishu?: any;
       pluginsAllow?: string[];
       agentDefaults?: { thinkingDefault?: string; reasoning?: string };
@@ -1665,10 +1710,12 @@ print(json.dumps(result,ensure_ascii=False))`;
     if (config.modelGateway?.baseUrl && config.modelGateway?.apiKey) {
       const modelId = config.modelGateway.modelId || 'default-model';
       const modelName = config.modelGateway.modelName || modelId;
+      const placement = config.modelGateway.placement === 'preset_only' ? 'preset_only' : 'replace_primary';
+      const providerKey = placement === 'preset_only' ? 'rdk-studio-default' : 'custom-gateway';
       // 勿写 models.mode：磁盘 schema 通常不包含该键，严格校验时可能导致网关无法启动；深度合并由 oc_merge.py 完成
       patch.models = {
         providers: {
-          'custom-gateway': {
+          [providerKey]: {
             baseUrl: config.modelGateway.baseUrl,
             apiKey: config.modelGateway.apiKey,
             api: normalizeOpenClawApi(config.modelGateway.api),
@@ -1679,7 +1726,15 @@ print(json.dumps(result,ensure_ascii=False))`;
           },
         },
       };
-      patch.agents = { defaults: { model: { primary: 'custom-gateway/' + modelId } } };
+      if (placement === 'replace_primary') {
+        patch.agents = { defaults: { model: { primary: `${providerKey}/${modelId}` } } };
+      } else {
+        onOutput(
+          '[OpenClaw] 已写入 Studio 建议模型到 models.providers.rdk-studio-default（未改主模型）；可在板端 OpenClaw 设置中将主模型切换为 rdk-studio-default/' +
+            modelId +
+            ' 以启用。\n',
+        );
+      }
     }
     if (config.feishu?.appId && config.feishu?.appSecret) {
       const feishuPatch: Record<string, any> = {
@@ -1799,16 +1854,20 @@ print(json.dumps(result,ensure_ascii=False))`;
       'export PATH="$HOME/.npm-global/bin:$PATH"',
       RESOLVE_OPENCLAW_CMD,
       ENSURE_GATEWAY_LOCAL_MODE,
+      ENSURE_GATEWAY_AUTH_TOKEN,
       RESTART_GATEWAY_FALLBACK,
       'echo "[OpenClaw] Gateway 重启命令已执行，等待端口就绪..."',
-      `ok=0; for i in 1 2 3 4 5 6; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
-      `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${START_GATEWAY_FALLBACK}; fi`,
-      `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
+      `ok=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
+      `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${GATEWAY_SSH_USER_SYSTEMD_ENV} && ${START_GATEWAY_FALLBACK}; fi`,
+      `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
+      `if [ "$ok" != "1" ]; then echo "[OpenClaw] 仍无监听，尝试 nohup gateway run（SSH 无 user systemd 时）..."; ${NOHUP_GATEWAY_RUN_FALLBACK}; fi`,
+      `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
       `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; ` +
-        `if [ -n "$OPENCLAW_CMD" ]; then export RDK_OC_PAIR_LENIENT=1; echo "[OpenClaw] 建立 CLI↔Gateway 信任（devices approve / pair）..."; ${RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL}; else true; fi; ` +
+        // 配对失败不得让整段 SSH 以非零退出：否则 Studio 显示「重启失败」而网关实际已起来
+        `if [ -n "$OPENCLAW_CMD" ]; then export RDK_OC_PAIR_LENIENT=1; echo "[OpenClaw] 建立 CLI↔Gateway 信任（devices approve / pair）..."; ${RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL} || true; else true; fi; ` +
         `else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
+    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000 });
   }
 
   runGetVersion(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {

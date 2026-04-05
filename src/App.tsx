@@ -25,9 +25,8 @@ import type { Tab } from './app-types';
 import { STUDIO_AGENT_WEB_CLOSE, STUDIO_AGENT_WEB_OPEN } from './utils/studio-agent-web';
 import { HubDockAnchorProvider } from './contexts/HubDockAnchorContext';
 import SkillBrowser from './components/SkillBrowser';
-import { translate } from './i18n/translate';
-import { readStoredLocale } from './utils/locale';
 import { isStudioLoginRequired } from './utils/studio-auth-gate';
+import LazyRouteFallback from './components/LazyRouteFallback';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Flasher = lazy(() => import('./components/Flasher'));
@@ -38,40 +37,8 @@ const IDE = lazy(() => import('./components/IDE'));
 const OpenClaw = lazy(() => import('./components/OpenClaw'));
 const DroboticsEmbed = lazy(() => import('./components/DroboticsEmbed'));
 /**
- * 路由分包加载占位。不得使用 useAppState/useI18n 等依赖 AppStateContext 的 hook：
- * Suspense fallback 在部分并发渲染路径下可能拿不到上层 Context，会触发
- * 「useAppState must be used within AppProvider」。
  * lazy() 子组件（含 Flasher）必须由 Suspense 包裹，否则懒加载解析时可能异常。
  */
-function RouteFallback() {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '52vh',
-        gap: 12,
-        color: '#64748b',
-        fontSize: 13,
-      }}
-    >
-      <div
-        style={{
-          width: 28,
-          height: 28,
-          border: '3px solid #e2e8f0',
-          borderTopColor: '#ff6b00',
-          borderRadius: '50%',
-          animation: 'rdk-boot-spin 0.75s linear infinite',
-        }}
-      />
-      <span>{translate(readStoredLocale() === 'en', 'route.fallbackLoading', '加载页面…')}</span>
-    </div>
-  );
-}
-
 function MainContent() {
   const { isLoading, loadingMsg, activeTab } = useAppState();
 
@@ -94,39 +61,39 @@ function MainContent() {
   return (
     <>
       {standardViews[activeTab] && (
-        <Suspense fallback={<RouteFallback />}>
+        <Suspense fallback={<LazyRouteFallback />}>
           <div className={activeTab === 'dashboard' ? 'page-slot page-slot--home' : 'page-slot'}>
             {standardViews[activeTab]}
           </div>
         </Suspense>
       )}
       <div className={`persistent-pane ${activeTab === 'openclaw' ? 'is-active' : 'is-hidden'}`}>
-        <Suspense fallback={null}>
+        <Suspense fallback={<LazyRouteFallback />}>
           <OpenClaw />
         </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'flasher' ? 'is-active' : 'is-hidden'}`}>
-        <Suspense fallback={null}>
+        <Suspense fallback={<LazyRouteFallback />}>
           <Flasher />
         </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'terminal' ? 'is-active' : 'is-hidden'}`}>
-        <Suspense fallback={null}>
+        <Suspense fallback={<LazyRouteFallback />}>
           <Terminal />
         </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'vnc' ? 'is-active' : 'is-hidden'}`}>
-        <Suspense fallback={null}>
+        <Suspense fallback={<LazyRouteFallback />}>
           <Vnc />
         </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'ide' ? 'is-active' : 'is-hidden'}`}>
-        <Suspense fallback={null}>
+        <Suspense fallback={<LazyRouteFallback />}>
           <IDE />
         </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'dr-embed' ? 'is-active' : 'is-hidden'}`}>
-        <Suspense fallback={<RouteFallback />}>
+        <Suspense fallback={<LazyRouteFallback />}>
           <DroboticsEmbed />
         </Suspense>
       </div>
@@ -207,6 +174,8 @@ function AppShell() {
     drAuthenticatedPortal,
     vncEmbedToolbar,
     ideEmbedToolbar,
+    chatSessionsOpen,
+    chatExpanded,
   } = useAppState();
   const { t } = useI18n();
   const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
@@ -292,8 +261,17 @@ function AppShell() {
       flasher: t('tabs.flasher', '烧录工具'),
       'dr-embed': t('tabs.drEmbed', '地瓜生态'),
     };
-    return names[activeTab] ?? activeTab;
-  }, [activeTab, t]);
+    let title = names[activeTab] ?? activeTab;
+    /** 独立「AI 对话」Tab 已并入工作台 + Dock；顶栏与「会话 / 对话」状态对齐 */
+    if (activeTab === 'dashboard') {
+      if (chatSessionsOpen) {
+        title = t('topbar.subtitle.dashboardSessions', '工作台 · 会话');
+      } else if (chatExpanded) {
+        title = t('topbar.subtitle.dashboardChat', '工作台 · 对话');
+      }
+    }
+    return title;
+  }, [activeTab, chatSessionsOpen, chatExpanded, t]);
 
   const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
 
@@ -480,7 +458,7 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
 
   const deviceOnline = !!currentDevice && isDeviceShownOnline(currentDevice);
   const embedTitle = panel === 'ai-dock'
-    ? t('embed.clawChat.title', 'RDKClaw 对话副屏')
+    ? t('embed.clawChat.title', 'RDKClaw · 对话与工具')
     : t('embed.openclaw.title', 'OpenClaw 副屏');
 
   const focusMain = () => {
@@ -543,14 +521,14 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
         >
           <ErrorBoundary>
             {panel === 'openclaw' ? (
-              <Suspense fallback={<RouteFallback />}>
+              <Suspense fallback={<LazyRouteFallback />}>
                 <div className="page-slot rdk-embed-openclaw-slot">
                   <OpenClaw />
                 </div>
               </Suspense>
             ) : (
               <div className="rdk-embed-ai-dock-placeholder" aria-hidden>
-                <p>{t('embed.aiDock.placeholder', '下方为 RDKClaw 对话区，可与主窗口的 IDE / OpenClaw 并排使用。')}</p>
+                <p>{t('embed.aiDock.placeholder', '下方为对话区，可与主窗口的 IDE / OpenClaw 并排使用。')}</p>
               </div>
             )}
           </ErrorBoundary>

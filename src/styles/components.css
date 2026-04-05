@@ -67,6 +67,14 @@
   border-color: #DC2626;
 }
 
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.48;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none !important;
+}
+
 .btn-sm {
   padding: 5px 10px;
   font-size: 0.75rem;
@@ -123,6 +131,12 @@
   box-shadow: var(--input-focus-ring);
 }
 
+.input:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--input-bg) 75%, var(--bg-inset));
+}
+
 .select {
   padding: 10px 14px;
   font-size: 0.8125rem;
@@ -137,6 +151,12 @@
   outline: none;
   border-color: var(--border-focus);
   box-shadow: var(--input-focus-ring);
+}
+
+.select:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--input-bg) 75%, var(--bg-inset));
 }
 
 .textarea {
@@ -265,6 +285,29 @@
   background: var(--chip-bg-active);
   color: var(--chip-text-active);
   border-color: var(--accent-border);
+}
+
+.chip:disabled,
+.chip[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.12);
+  box-shadow: none;
+}
+
+.chip:disabled:hover,
+.chip[disabled]:hover {
+  background: var(--chip-bg);
+  border-color: transparent;
+}
+
+.chip.active:disabled,
+.chip.active[disabled] {
+  opacity: 0.45;
+  background: var(--chip-bg);
+  color: var(--text-muted);
+  border-color: var(--border);
 }
 
 /* ══════════════════════════
@@ -582,6 +625,72 @@
 .toast-warning .toast-icon { color: var(--warn); }
 .toast-error .toast-icon   { color: var(--danger); }
 .toast-info .toast-icon    { color: var(--accent); }
+
+/* ══════════════════════════
+   Error boundary（随主题；避免浅色写死）
+   ══════════════════════════ */
+.error-boundary {
+  box-sizing: border-box;
+  max-width: 520px;
+  margin: 2rem auto;
+  padding: 1.75rem 1.5rem;
+  text-align: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-lg);
+}
+
+.error-boundary-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.error-boundary-lead {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.error-boundary-details {
+  margin: 0 0 1.25rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.error-boundary-summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+  list-style: none;
+}
+
+.error-boundary-summary::-webkit-details-marker {
+  display: none;
+}
+
+.error-boundary-pre {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.error-boundary-retry {
+  min-width: 120px;
+}
 
 /* ══════════════════════════
    Status Dot
@@ -1485,4 +1594,24 @@ a.add-device-external-link:hover {
   font-size: 0.6875rem;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+/* 文件管理器：Lucide 行内图标与选中条对齐 */
+.files-selection-bar__info--with-icon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-row-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* 侧栏页脚 / 品牌区：与 IconRail 一致的 Lucide 尺寸 */
+.sidebar-lucide-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
 }

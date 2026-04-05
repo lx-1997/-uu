@@ -89,6 +89,8 @@ fi
 echo ""
 echo "=== 步骤 4: 安装 OpenClaw Gateway ==="
 echo "正在安装 @openclaw/gateway..."
+export npm_config_sharp_binary_host=https://npmmirror.com/mirrors/sharp
+export npm_config_sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-libvips
 npm install -g @openclaw/gateway --registry=https://registry.npmjs.org 2>&1 || {
     echo "主镜像安装失败，尝试备用镜像..."
     npm install -g @openclaw/gateway --registry=https://registry.npmmirror.com

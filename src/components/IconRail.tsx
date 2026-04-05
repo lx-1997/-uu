@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Cloud, MessagesSquare, Puzzle, Shrimp } from 'lucide-react';
+import { Cloud, MessagesSquare, Shrimp, Wrench } from 'lucide-react';
 import type { Tab } from '../app-types';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
@@ -7,10 +7,14 @@ import StudioVersionFooter from './StudioVersionFooter';
 import { isDeviceShownOnline } from '../utils/device-connection';
 import { useConfirmRemoveDevice } from '../hooks/useConfirmRemoveDevice';
 
-/** 侧栏 20px：Lucide 矢量；OpenClaw 用小龙虾(虾)；技能工坊用拼图表「技能拼装」 */
+/**
+ * 侧栏 20px Lucide 矢量；按用户心智/品牌联想选标（非架构术语）：
+ * - OpenClaw：社区「小龙虾」梗 + 名字里的 Claw → 有钳的小龙虾意象 → Shrimp
+ * - 技能工坊：用户对「工坊」的直觉是动手打造、拧螺丝装配 → Wrench
+ */
 const RAIL_LUCIDE_ICONS = {
-  shrimp: Shrimp,
-  puzzle: Puzzle,
+  openclaw: Shrimp,
+  skills: Wrench,
 } as const;
 type RailLucideKey = keyof typeof RAIL_LUCIDE_ICONS;
 
@@ -25,12 +29,12 @@ interface NavItemDef {
 }
 
 const NAV_ITEMS: NavItemDef[] = [
-  { tab: 'dashboard', labelKey: 'nav.dashboard.label', descKey: 'nav.dashboard.desc', zhLabel: '工作台', zhDesc: '设备总览与快捷操作',
+  { tab: 'dashboard', labelKey: 'nav.dashboard.label', descKey: 'nav.dashboard.desc', zhLabel: '工作台', zhDesc: '设备与快捷操作',
     paths: ['M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4'] },
-  { tab: 'openclaw', labelKey: 'nav.openclaw.label', descKey: 'nav.openclaw.desc', zhLabel: 'OpenClaw', zhDesc: '板端 AI Agent 管理',
-    paths: [], lucide: 'shrimp' },
-  { tab: 'skills', labelKey: 'nav.skills.label', descKey: 'nav.skills.desc', zhLabel: '技能工坊', zhDesc: 'OpenClaw 技能生成与部署',
-    paths: [], lucide: 'puzzle' },
+  { tab: 'openclaw', labelKey: 'nav.openclaw.label', descKey: 'nav.openclaw.desc', zhLabel: 'OpenClaw', zhDesc: '板端网关与配置',
+    paths: [], lucide: 'openclaw' },
+  { tab: 'skills', labelKey: 'nav.skills.label', descKey: 'nav.skills.desc', zhLabel: '技能工坊', zhDesc: '技能包与部署',
+    paths: [], lucide: 'skills' },
 ];
 
 const CONNECT_ITEMS: NavItemDef[] = [

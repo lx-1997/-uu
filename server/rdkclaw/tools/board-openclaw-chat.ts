@@ -69,6 +69,7 @@ export function boardOpenClawChatTool(
       "- 与 delegate 共享会话上下文，交流过的内容在后续委派时 OpenClaw 仍记得\n" +
       "- 板端回复可能需数十秒（本地模型推理慢），先对用户说一两句轻松话再调用\n" +
       "- 当 delegate 返回 [NEED_RDKCLAW] 块时，用你的工具获取信息后通过此工具发回给 OpenClaw\n" +
+      "- **对齐放行（重要）**：当 delegate 首次返回仅有 **[板端·对齐]**、且 `alignment_gate` 为 strict 时，**必须**用本工具发送明确回应（同意执行、补充约束、或修订方案），OpenClaw 收到后才应进入执行阶段\n" +
       "- NEVER 用此工具替代 delegate 来执行任务——chat 只交流不执行",
     inputSchema: {
       type: "object",

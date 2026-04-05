@@ -161,8 +161,8 @@ export function boardOpenClawAssessTool(
   return {
     name: "board_openclaw_assess",
     description:
-      "读者=编排模型。与板端 OpenClaw 的**正式能力握手**：只评估不执行，但**不是可跳过的一步**——在可能 delegate 前应先 assess，避免 RDKClaw 用 SSH 把整件事包办。\n" +
-      "向板端 OpenClaw 咨询：某任务是否适合由板端 Agent 承接（canHandle/confidence/reason）。\n" +
+      "读者=编排模型。与板端 OpenClaw 的**正式能力握手**：只评估不执行，但**不是可跳过的一步**——在可能 delegate 前应先 assess，与「SSH 快探」并行对齐**谁更适合牵头**（共探，不是一方包办、一方旁观）。\n" +
+      "向板端 OpenClaw 咨询：某任务是否适合由板端 Agent 牵头或并线承接（canHandle/confidence/reason）。\n" +
       "**短路由**：任务描述命中常见 RDK 官方例程关键词时，可能 **瞬时返回 JSON**（不连接板端 LLM），仍视为有效 assess，可与 `web_fetch` 同轮。\n\n" +
       "选用时机：\n" +
       "- 板端多步/试错/技能链/clawhub 流程；或你已预见要多轮 device_exec 试探\n" +

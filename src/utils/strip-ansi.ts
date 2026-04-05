@@ -19,5 +19,7 @@ const LOOSE_SGR_FRAGMENT = /\[(?:\d{1,4};)*\d{1,4}m/g;
 export function sanitizeTerminalLineForDisplay(line: string): string {
   let s = stripAnsi(line).replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\uFFFD/g, '');
   s = s.replace(LOOSE_SGR_FRAGMENT, '');
+  // 终端里常见的 C0 控制符（除 \t）在浏览器中常显示为「豆腐块」
+  s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
   return s;
 }

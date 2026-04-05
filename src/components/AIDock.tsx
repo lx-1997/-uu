@@ -29,19 +29,36 @@ import {
   type DockMentionCapabilityId,
 } from '../constants/dock-mention-capabilities';
 import io from 'socket.io-client';
-import { Copy } from 'lucide-react';
+import {
+  Archive,
+  Copy,
+  File as FileIcon,
+  FileCode,
+  FileText,
+  FileVideo,
+  Image,
+  Mic,
+  Music,
+  Paperclip,
+  Presentation,
+  Settings,
+  Table,
+} from 'lucide-react';
 import { sanitizeTerminalLineForDisplay } from '../utils/strip-ansi';
 import { STUDIO_ENABLE_VOICE_TO_TEXT } from '../constants/studio-features';
 
 import rdkclawAvatarUrl from '../assets/chat/rdkclaw-avatar.png';
 import userAvatarUrl from '../assets/chat/user-avatar.png';
 
-/* ─── Inline SVG icons (avoid emoji, keep crisp) ─── */
+/* ─── Inline SVG icons (avoid emoji / “AI 火花”装饰，保持工具型视觉) ─── */
 const Icon = {
-  spark: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3v1m0 16v1m-7.07-2.93l.71-.71M4.22 4.22l.71.71M3 12h1m16 0h1m-2.93 7.07l-.71-.71M19.78 4.22l-.71.71"/>
-      <circle cx="12" cy="12" r="4"/>
+  /** 通用 @ 能力占位（非烧写类能力扩展时） */
+  mentionDefault: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
     </svg>
   ),
   send: (
@@ -170,20 +187,34 @@ function isDocumentFile(file: File) {
   return /\.(docx?|pptx?|xlsx?|pdf)$/i.test(file.name);
 }
 
-function getAttachmentIcon(name: string, mimeType?: string): string {
+const ATT_ICON_PROPS = { size: 16, strokeWidth: 2, className: 'dock-att-file-icon', 'aria-hidden': true as const };
+
+function AttachmentFileIcon({ name, mimeType }: { name: string; mimeType?: string }) {
   const ext = name.split('.').pop()?.toLowerCase() || '';
-  if (/^(mp4|webm|avi|mov|mkv|flv|wmv|m4v)$/.test(ext) || mimeType?.startsWith('video/')) return '🎬';
-  if (/^(mp3|wav|ogg|flac|aac|wma|m4a|webm)$/.test(ext) || mimeType?.startsWith('audio/')) return '🎵';
-  if (/^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?)$/.test(ext) || mimeType?.startsWith('image/')) return '🖼️';
-  if (/^docx?$/.test(ext) || mimeType?.includes('word')) return '📄';
-  if (/^pptx?$/.test(ext) || mimeType?.includes('presentation') || mimeType?.includes('powerpoint')) return '📊';
-  if (/^xlsx?$/.test(ext) || mimeType?.includes('spreadsheet') || mimeType?.includes('excel')) return '📋';
-  if (ext === 'pdf' || mimeType === 'application/pdf') return '📕';
-  if (ext === 'md') return '📝';
-  if (/^(zip|tar|gz|rar|7z|bz2|xz|zst)$/.test(ext)) return '📦';
-  if (/^(exe|msi|deb|rpm|dmg|appimage|bin)$/.test(ext)) return '⚙️';
-  if (/^(py|js|ts|jsx|tsx|c|cpp|h|java|go|rs|rb|php|sh|lua|swift|kt|scala|dart|sql|r)$/.test(ext)) return '💻';
-  return '📎';
+  if (/^(mp4|webm|avi|mov|mkv|flv|wmv|m4v)$/.test(ext) || mimeType?.startsWith('video/')) {
+    return <FileVideo {...ATT_ICON_PROPS} />;
+  }
+  if (/^(mp3|wav|ogg|flac|aac|wma|m4a)$/.test(ext) || mimeType?.startsWith('audio/')) {
+    return <Music {...ATT_ICON_PROPS} />;
+  }
+  if (/^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?)$/.test(ext) || mimeType?.startsWith('image/')) {
+    return <Image {...ATT_ICON_PROPS} />;
+  }
+  if (/^docx?$/.test(ext) || mimeType?.includes('word')) return <FileText {...ATT_ICON_PROPS} />;
+  if (/^pptx?$/.test(ext) || mimeType?.includes('presentation') || mimeType?.includes('powerpoint')) {
+    return <Presentation {...ATT_ICON_PROPS} />;
+  }
+  if (/^xlsx?$/.test(ext) || mimeType?.includes('spreadsheet') || mimeType?.includes('excel')) {
+    return <Table {...ATT_ICON_PROPS} />;
+  }
+  if (ext === 'pdf' || mimeType === 'application/pdf') return <FileIcon {...ATT_ICON_PROPS} />;
+  if (ext === 'md') return <FileText {...ATT_ICON_PROPS} />;
+  if (/^(zip|tar|gz|rar|7z|bz2|xz|zst)$/.test(ext)) return <Archive {...ATT_ICON_PROPS} />;
+  if (/^(exe|msi|deb|rpm|dmg|appimage|bin)$/.test(ext)) return <Settings {...ATT_ICON_PROPS} />;
+  if (/^(py|js|ts|jsx|tsx|c|cpp|h|java|go|rs|rb|php|sh|lua|swift|kt|scala|dart|sql|r)$/.test(ext)) {
+    return <FileCode {...ATT_ICON_PROPS} />;
+  }
+  return <Paperclip {...ATT_ICON_PROPS} />;
 }
 
 const MEDIA_VIDEO_RE = /\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|3gp)$/i;
@@ -989,7 +1020,7 @@ function BlockRenderer({
           target="_blank"
           rel="noopener noreferrer"
         >
-          <span className="file-block-icon">📄</span>
+          <span className="file-block-icon" aria-hidden><FileText size={16} strokeWidth={2} /></span>
           <span className="file-block-name">{block.fileName}</span>
         </a>
         {block.caption && <div className="image-block-caption">{block.caption}</div>}
@@ -2416,64 +2447,62 @@ export default function AIDock() {
     };
   }, [activeTab, chatExpanded, currentDevice, dockOcMode, setOpenclawConnected]);
 
-  type QuickPrompt = { id: string; icon: string; label: string; text: string; placeholder?: string; forceRdkclaw?: boolean };
+  type QuickPrompt = { id: string; label: string; text: string; placeholder?: string; forceRdkclaw?: boolean };
   const promptsByTab = useMemo((): Record<string, QuickPrompt[]> => {
     return {
     /** 工作台快捷条在组件内单独渲染（主操作 +「更多」+ 未连接时的引导） */
     dashboard: [],
     terminal: [
-      { id: 'cmd', icon: '⌨️', label: t('dock.quick.term.cmd.label', '帮我写命令'), text: t('dock.quick.term.cmd.text', '我想做什么操作，帮我生成终端命令') },
-      { id: 'err', icon: '🔍', label: t('dock.quick.term.err.label', '分析输出'), text: t('dock.quick.term.err.text', '帮我分析终端最近的输出，定位问题并给修复建议') },
-      { id: 'nl', icon: '💬', label: t('dock.quick.term.nl.label', '自然语言执行'), text: t('dock.quick.term.nl.text', '查看当前设备温度和BPU负载') },
+      { id: 'cmd', label: t('dock.quick.term.cmd.label', '帮我写命令'), text: t('dock.quick.term.cmd.text', '我想做什么操作，帮我生成终端命令') },
+      { id: 'err', label: t('dock.quick.term.err.label', '分析输出'), text: t('dock.quick.term.err.text', '帮我分析终端最近的输出，定位问题并给修复建议') },
+      { id: 'nl', label: t('dock.quick.term.nl.label', '自然语言执行'), text: t('dock.quick.term.nl.text', '查看当前设备温度和BPU负载') },
     ],
     flasher: [
-      { id: 'pick', icon: '💿', label: t('dock.quick.flash.pick.label', '选镜像'), text: t('dock.quick.flash.pick.text', '帮我推荐适合当前开发板的系统镜像版本') },
-      { id: 'check', icon: '✅', label: t('dock.quick.flash.check.label', '烧录前检查'), text: t('dock.quick.flash.check.text', '帮我确认烧录前的准备工作是否就绪') },
+      { id: 'pick', label: t('dock.quick.flash.pick.label', '选镜像'), text: t('dock.quick.flash.pick.text', '帮我推荐适合当前开发板的系统镜像版本') },
+      { id: 'check', label: t('dock.quick.flash.check.label', '烧录前检查'), text: t('dock.quick.flash.check.text', '帮我确认烧录前的准备工作是否就绪') },
     ],
     files: [
-      { id: 'sync', icon: '📁', label: t('dock.quick.files.sync.label', '同步文件'), text: t('dock.quick.files.sync.text', '帮我把本地模型文件同步到设备 /userdata/models') },
-      { id: 'log', icon: '📋', label: t('dock.quick.files.log.label', '拉取日志'), text: t('dock.quick.files.log.text', '从设备下载最新的系统日志到本地') },
+      { id: 'sync', label: t('dock.quick.files.sync.label', '同步文件'), text: t('dock.quick.files.sync.text', '帮我把本地模型文件同步到设备 /userdata/models') },
+      { id: 'log', label: t('dock.quick.files.log.label', '拉取日志'), text: t('dock.quick.files.log.text', '从设备下载最新的系统日志到本地') },
     ],
     ide: [
-      { id: 'edit', icon: '✏️', label: t('dock.quick.ide.edit.label', '代码补全'), text: t('dock.quick.ide.edit.text', '帮我分析当前打开的文件，给出优化建议') },
-      { id: 'run', icon: '▶️', label: t('dock.quick.ide.run.label', '运行脚本'), text: t('dock.quick.ide.run.text', '在终端中运行当前编辑的脚本文件') },
-      { id: 'fmt', icon: '🧹', label: t('dock.quick.ide.fmt.label', '格式化'), text: t('dock.quick.ide.fmt.text', '帮我格式化当前文件并检查语法错误') },
+      { id: 'edit', label: t('dock.quick.ide.edit.label', '代码补全'), text: t('dock.quick.ide.edit.text', '帮我分析当前打开的文件，给出优化建议') },
+      { id: 'run', label: t('dock.quick.ide.run.label', '运行脚本'), text: t('dock.quick.ide.run.text', '在终端中运行当前编辑的脚本文件') },
+      { id: 'fmt', label: t('dock.quick.ide.fmt.label', '格式化'), text: t('dock.quick.ide.fmt.text', '帮我格式化当前文件并检查语法错误') },
     ],
     vnc: [
-      { id: 'opt', icon: '🖥️', label: t('dock.quick.vnc.opt.label', '优化画质'), text: t('dock.quick.vnc.opt.text', '根据当前网络状况帮我调整VNC画质参数') },
-      { id: 'vnc-start', icon: '🔌', label: t('dock.quick.vnc.start.label', '启动VNC'), text: t('dock.quick.vnc.start.text', '帮我在设备上启动VNC服务并连接') },
+      { id: 'opt', label: t('dock.quick.vnc.opt.label', '优化画质'), text: t('dock.quick.vnc.opt.text', '根据当前网络状况帮我调整VNC画质参数') },
+      { id: 'vnc-start', label: t('dock.quick.vnc.start.label', '启动VNC'), text: t('dock.quick.vnc.start.text', '帮我在设备上启动VNC服务并连接') },
     ],
     hardware: [
-      { id: 'hot', icon: '🌡️', label: t('dock.quick.hw.hot.label', '散热建议'), text: t('dock.quick.hw.hot.text', '芯片温度偏高，帮我分析原因并给出降温方案') },
-      { id: 'perf', icon: '⚡', label: t('dock.quick.hw.perf.label', '性能优化'), text: t('dock.quick.hw.perf.text', '帮我分析当前 BPU/CPU 使用情况，给出优化建议') },
+      { id: 'hot', label: t('dock.quick.hw.hot.label', '散热建议'), text: t('dock.quick.hw.hot.text', '芯片温度偏高，帮我分析原因并给出降温方案') },
+      { id: 'perf', label: t('dock.quick.hw.perf.label', '性能优化'), text: t('dock.quick.hw.perf.text', '帮我分析当前 BPU/CPU 使用情况，给出优化建议') },
     ],
     openclaw: [
       {
         id: 'oc-vs-rdk',
-        icon: '🧭',
         label: t('dock.quick.oc.vs.label', '双引擎能力'),
         text: t('dock.quick.oc.vs.text', '请分别汇报 RDKClaw 与 OpenClaw 各自适合做什么，并给我一个建议：当前任务更该用哪一个，为什么。'),
         forceRdkclaw: true,
       },
-      { id: 'oc-health', icon: '🩺', label: t('dock.quick.oc.health.label', '网关健康检查'), text: t('dock.quick.oc.health.text', '请先检查当前网关状态并给出一条结论') },
-      { id: 'oc-cap', icon: '🧩', label: t('dock.quick.oc.cap.label', '能力总览'), text: t('dock.quick.oc.cap.text', '帮我总结当前设备可用的 OpenClaw 能力') },
-      { id: 'oc-diag', icon: '🔧', label: t('dock.quick.oc.diag.label', '诊断修复'), text: t('dock.quick.oc.diag.text', '帮我诊断为什么会连接失败，并给修复命令') },
+      { id: 'oc-health', label: t('dock.quick.oc.health.label', '网关健康检查'), text: t('dock.quick.oc.health.text', '请先检查当前网关状态并给出一条结论') },
+      { id: 'oc-cap', label: t('dock.quick.oc.cap.label', '能力总览'), text: t('dock.quick.oc.cap.text', '帮我总结当前设备可用的 OpenClaw 能力') },
+      { id: 'oc-diag', label: t('dock.quick.oc.diag.label', '诊断修复'), text: t('dock.quick.oc.diag.text', '帮我诊断为什么会连接失败，并给修复命令') },
     ],
     };
   }, [t]);
   const defaultPrompts = useMemo<QuickPrompt[]>(() => [
-    { id: 'diag', icon: '🔍', label: t('dock.quick.def.diag.label', '分析异常日志'), text: t('dock.quick.def.diag.text', '请结合终端最近输出，帮我定位异常并给出修复步骤') },
-    { id: 'hw', icon: '🌡️', label: t('dock.quick.def.hw.label', '硬件状态'), text: t('dock.quick.def.hw.text', '检查当前设备的 BPU 负载和芯片温度') },
-    { id: 'plan', icon: '📋', label: t('dock.quick.def.plan.label', '执行计划'), text: t('dock.quick.def.plan.text', '把当前需求拆成 3 步并立即开始执行第一步') },
+    { id: 'diag', label: t('dock.quick.def.diag.label', '分析异常日志'), text: t('dock.quick.def.diag.text', '请结合终端最近输出，帮我定位异常并给出修复步骤') },
+    { id: 'hw', label: t('dock.quick.def.hw.label', '硬件状态'), text: t('dock.quick.def.hw.text', '检查当前设备的 BPU 负载和芯片温度') },
+    { id: 'plan', label: t('dock.quick.def.plan.label', '执行计划'), text: t('dock.quick.def.plan.text', '把当前需求拆成 3 步并立即开始执行第一步') },
   ], [t]);
   /** 工作台底栏：全部快捷指令平铺，横向滚动（不再使用「更多」下拉） */
   const dashboardDockChips = useMemo((): QuickPrompt[] => {
     return [
-      { id: 'intro', icon: '🧭', label: t('dock.quick.dash.intro.label', '介绍 RDK Studio'), text: t('dock.quick.dash.intro.text', '介绍一下 RDK Studio 和 RDKClaw 能做什么，先给我一个快速上手路径。'), forceRdkclaw: true },
-      { id: 'diag', icon: '🩺', label: t('dock.quick.dash.diag.label', '设备体检'), text: t('dock.quick.dash.diag.text', '帮我做一次设备体检：温度、CPU/BPU、内存、磁盘、网络和关键服务状态。') },
+      { id: 'intro', label: t('dock.quick.dash.intro.label', '介绍 RDK Studio'), text: t('dock.quick.dash.intro.text', '介绍一下 RDK Studio 和 RDKClaw 能做什么，先给我一个快速上手路径。'), forceRdkclaw: true },
+      { id: 'diag', label: t('dock.quick.dash.diag.label', '设备体检'), text: t('dock.quick.dash.diag.text', '帮我做一次设备体检：温度、CPU/BPU、内存、磁盘、网络和关键服务状态。') },
       {
         id: 'yolo',
-        icon: '🎯',
         label: t('dock.quick.dash.yolo.label', '运行 YOLO 示例'),
         text: t('dock.quick.dash.yolo.text', '在当前设备上跑一个 YOLO 示例，给出步骤、命令和预期输出。'),
         forceRdkclaw: true,
@@ -2885,7 +2914,7 @@ export default function AIDock() {
         title={t('dock.tt.restoreDock', '显示对话栏')}
         onClick={() => setHideDockInSubpage(false)}
       >
-        {t('dock.restore', '显示 AI Dock')}
+        {t('dock.restore', '显示对话区')}
       </button>
     );
   }
@@ -2901,6 +2930,9 @@ export default function AIDock() {
             <div className="dock-header-left">
               <div className="dock-header-title-wrap">
                 <span className="dock-header-title">RDKClaw</span>
+                <span className="dock-header-tagline" title={t('dock.tagline', '编排助手 · 贯穿 Studio、设备与 OpenClaw 协同')}>
+                  {t('dock.tagline', '编排助手 · 贯穿 Studio、设备与 OpenClaw 协同')}
+                </span>
                 {dockThreadTitleLine ? (
                   <span className="dock-header-threadline" title={dockThreadTitleLine}>
                     {dockThreadTitleLine}
@@ -2979,7 +3011,7 @@ export default function AIDock() {
                       className="dock-header-toolbtn"
                       onClick={toggleSubpageDockVisibility}
                       title={t('dock.tt.hideDock', '隐藏对话栏')}
-                      aria-label={t('dock.header.hideDock', '隐藏 AI Dock')}
+                      aria-label={t('dock.header.hideDock', '隐藏对话区')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32" />
@@ -3150,7 +3182,7 @@ export default function AIDock() {
                   }}
                   onMouseEnter={() => setMentionHighlightIdx(i)}
                 >
-                  <span className="dock-mention-icon">{cap.id === 'flash' ? Icon.flash : Icon.spark}</span>
+                  <span className="dock-mention-icon">{cap.id === 'flash' ? Icon.flash : Icon.mentionDefault}</span>
                   <span className="dock-mention-label">{isEn ? cap.labelEn : cap.labelZh}</span>
                 </div>
               ))
@@ -3165,8 +3197,16 @@ export default function AIDock() {
                 <div className="dock-att-item-row">
                   {att.type === 'image' && att.url && <img src={att.url} alt="" />}
                   {att.type === 'video' && att.url && <video src={att.url} muted preload="metadata" style={{ maxHeight: 48, maxWidth: 80, borderRadius: 4 }} />}
-                  {att.type === 'audio' && <span className="dock-att-icon">🎙️</span>}
-                  {att.type === 'file' && <span className="dock-att-icon">{getAttachmentIcon(att.name, att.mimeType)}</span>}
+                  {att.type === 'audio' && (
+                    <span className="dock-att-icon dock-att-icon--mic" aria-hidden>
+                      <Mic size={16} strokeWidth={2} />
+                    </span>
+                  )}
+                  {att.type === 'file' && (
+                    <span className="dock-att-icon dock-att-icon--file">
+                      <AttachmentFileIcon name={att.name} mimeType={att.mimeType} />
+                    </span>
+                  )}
                   <span className="truncate">{att.name}</span>
                   {att.size !== undefined && <span className="dock-att-size">{att.size < 1024 ? `${att.size}B` : att.size < 1048576 ? `${(att.size / 1024).toFixed(0)}KB` : `${(att.size / 1048576).toFixed(1)}MB`}</span>}
                   <button type="button" className="dock-att-remove" onClick={() => removeAttachment(att.id)}>{Icon.close}</button>
@@ -3240,7 +3280,7 @@ export default function AIDock() {
                 ? t('dock.voice.sttPlaceholder', '语音转文字中…')
                 : activeTab === 'openclaw' && dockOcMode && openclawSendMessage
                   ? t('dock.input.openclaw', '向 OpenClaw Agent 发送消息...')
-                  : t('dock.input.default', '消息、指令或拖拽文件...')
+                  : t('dock.input.default', '向 RDKClaw 描述问题或目标（排障、方案、设备操作）— 或拖拽文件…')
             }
             disabled={STUDIO_ENABLE_VOICE_TO_TEXT && voiceSttLoading}
             ref={chatInputRef}
@@ -3350,7 +3390,7 @@ export default function AIDock() {
         {(devices.length > 1 || channelStats.feishuTotal > 0 || channelStats.weixinTotal > 0) && (
           <div className="dock-status-strip">
             {devices.length > 1 && (
-              <div className="dock-device-strip" role="tablist" aria-label={t('dock.strip.aria.devices', 'AI 设备窗口')}>
+              <div className="dock-device-strip" role="tablist" aria-label={t('dock.strip.aria.devices', '设备窗口')}>
                 {devices.map((device) => (
                   <button
                     key={device.id}
@@ -3487,7 +3527,7 @@ export default function AIDock() {
                 title={dockOcMode ? t('dock.tt.useRdkDock', '切到 RDKClaw 对话') : t('dock.tt.useOpenclaw', '切到 OpenClaw 直连')}
                 style={{ fontWeight: 600 }}
               >
-                {dockOcMode ? '🤖 OpenClaw ↔' : '🔧 RDKClaw ↔'}
+                {dockOcMode ? 'OpenClaw ↔' : 'RDKClaw ↔'}
               </button>
             )}
           </div>

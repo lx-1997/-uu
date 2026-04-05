@@ -16,6 +16,7 @@ import {
   subscribeOpenClawDeployJob,
   syncOpenClawDeployPollFromStorage,
 } from '../utils/openclawDeployPoll';
+import { BadgeCheck } from 'lucide-react';
 
 type Step = 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
 
@@ -59,6 +60,7 @@ const IMAGE_RECOMMENDATIONS: Record<string, { name: string; tag: string; url: st
 };
 
 const MODEL_PRESETS: Record<string, { model: string; baseUrl: string }> = {
+  doubao: { model: 'doubao-1.5-pro-256k', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' },
   qwen: { model: 'qwen-plus', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
   deepseek: { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com/v1' },
   openai: { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
@@ -107,16 +109,16 @@ export default function OnboardingWizard() {
       { key: 'board' as const, label: t('onboard.step.board', '选择硬件') },
       { key: 'flash' as const, label: t('onboard.step.flash', '烧录系统') },
       { key: 'connect' as const, label: t('onboard.step.connect', '连接设备') },
-      { key: 'rdkclaw' as const, label: t('onboard.step.rdkclaw', '试用 AI') },
+      { key: 'rdkclaw' as const, label: t('onboard.step.rdkclaw', '试用 RDKClaw') },
     ],
     [t, language],
   );
 
   const skipRisks = useMemo(
     () => [
-      t('onboard.skipRisk.1', '板端 AI Agent 能力不可用（智能对话、自动化执行）'),
+      t('onboard.skipRisk.1', '板端对话与自动化任务不可用'),
       t('onboard.skipRisk.2', '无法通过飞书等消息渠道远程控制设备'),
-      t('onboard.skipRisk.3', '板端技能（摄像头、推理、GPIO 等）无法被 AI 调用'),
+      t('onboard.skipRisk.3', '板端技能（摄像头、推理、GPIO 等）无法在对话中调用'),
     ],
     [t, language],
   );
@@ -146,9 +148,9 @@ export default function OnboardingWizard() {
   const [showSkipWarning, setShowSkipWarning] = useState(false);
   const [deployJobId, setDeployJobId] = useState('');
   const [autoVerifying, setAutoVerifying] = useState(false);
-  const [modelProvider, setModelProvider] = useState('qwen');
-  const [modelName, setModelName] = useState(MODEL_PRESETS.qwen.model);
-  const [modelBaseUrl, setModelBaseUrl] = useState(MODEL_PRESETS.qwen.baseUrl);
+  const [modelProvider, setModelProvider] = useState('doubao');
+  const [modelName, setModelName] = useState(MODEL_PRESETS.doubao.model);
+  const [modelBaseUrl, setModelBaseUrl] = useState(MODEL_PRESETS.doubao.baseUrl);
   const [modelApiKey, setModelApiKey] = useState('');
   const [modelSaving, setModelSaving] = useState(false);
   const [modelConfigured, setModelConfigured] = useState(false);
@@ -568,7 +570,7 @@ export default function OnboardingWizard() {
     <div className="ob-wizard">
       <div className="ob-header">
         <div className="ob-brand">RDK Studio</div>
-        <p className="ob-subtitle">{t('onboard.subtitle', '欢迎使用，让我们一步步配置你的开发环境')}</p>
+        <p className="ob-subtitle">{t('onboard.subtitle', '按步骤完成环境与设备配置')}</p>
       </div>
 
       <StepIndicator current={obStep} steps={obSteps} />
@@ -739,6 +741,7 @@ export default function OnboardingWizard() {
                     if (shouldReplaceBaseUrl) setModelBaseUrl(preset.baseUrl);
                   }}
                 >
+                  <option value="doubao">{t('onboard.model.optDoubao', '火山引擎 / 豆包')}</option>
                   <option value="qwen">{t('onboard.model.optQwen', '通义千问')}</option>
                   <option value="deepseek">{t('onboard.model.optDeepseek', 'DeepSeek')}</option>
                   <option value="openai">{t('onboard.model.optOpenai', 'OpenAI')}</option>
@@ -753,7 +756,7 @@ export default function OnboardingWizard() {
                   className="input"
                   value={modelName}
                   onChange={(e) => setModelName(e.target.value)}
-                  placeholder={t('onboard.model.namePh', '如 qwen-plus / deepseek-chat')}
+                  placeholder={t('onboard.model.namePh', '如 doubao-1.5-pro-256k / deepseek-chat')}
                 />
               </div>
             </div>
@@ -822,7 +825,7 @@ export default function OnboardingWizard() {
               <span>{t('onboard.oc.needModel', '部署前需要先提交模型配置，请返回上一步完成必填项。')}</span>
             </div>
           )}
-          <p className="ob-desc">{t('onboard.oc.intro', 'OpenClaw 是 RDK 板端 AI Agent 运行环境。点击一键部署后将自动执行安装、配置并做验通：')}</p>
+          <p className="ob-desc">{t('onboard.oc.intro', 'OpenClaw 在板端运行。一键部署将自动安装、配置并验通：')}</p>
           {deployJobId && (
             <p className="ob-desc">{t('onboard.oc.job', '当前部署任务：')}{deployJobId}</p>
           )}
@@ -1004,11 +1007,14 @@ export default function OnboardingWizard() {
       {obStep === 'rdkclaw' && (
         <div className="ob-content">
           <p className="ob-desc">
-            {t('onboard.rdk.intro', 'RDKClaw 是 RDK Studio 内置的 AI 智能体，可以用自然语言操控设备、开发应用、诊断问题。下一步')}
+            {t(
+              'onboard.rdk.intro',
+              'RDKClaw 是 Studio 的编排主线：贯穿对话、设备与 OpenClaw 协同；懂你的板子、能查文档、能下命令，把「想法」落成可执行的排障与开发步骤。下一步',
+            )}
           </p>
           <div className="ob-try-card">
             <div className="ob-try-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+              <BadgeCheck size={24} strokeWidth={1.75} style={{ color: 'var(--accent)' }} aria-hidden />
             </div>
             <div className="ob-try-body">
               <strong>{t('onboard.rdk.tryTitle', '打个招呼')}</strong>
@@ -1031,7 +1037,10 @@ export default function OnboardingWizard() {
             </div>
           </div>
           <p className="ob-desc ob-try-hint">
-            {t('onboard.rdk.hint', '你也可以在底部对话框中随时输入任何任务，RDKClaw 会自动规划并执行。')}
+            {t(
+              'onboard.rdk.hint',
+              '底部对话框里随时描述问题或目标即可，RDKClaw 会拆解步骤并在需要时调用工具与板端能力，帮你把事办完。',
+            )}
           </p>
           <div className="ob-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setObStep('connect')}>{t('onboard.btn.back', '上一步')}</button>

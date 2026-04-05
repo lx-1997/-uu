@@ -136,7 +136,7 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     }
 
     const prepend = nlHit
-      ? [tf('terminal.nl.translate', '✨ AI 翻译: "{{in}}" → {{out}}', { in: commandText, out: actualCommand })]
+      ? [tf('terminal.nl.translate', 'AI 翻译: "{{in}}" → {{out}}', { in: commandText, out: actualCommand })]
       : [];
     setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId
       ? { ...s, status: 'running', lines: [...s.lines, ...prepend, `root@rdk:~# ${actualCommand}`] }
@@ -174,24 +174,26 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
   }, [currentDevice, activeTab, activeSessionId, addToast, setShowAddDevice, t, tf]);
 
   const runTerminalAIAnalysis = useCallback(() => {
-    const lastLines = currentSession.lines.slice(-8).filter((l) => !l.startsWith('root@') && !l.startsWith('🤖'));
+    const lastLines = currentSession.lines.slice(-8).filter(
+      (l) => !l.startsWith('root@') && !l.includes('─── AI'),
+    );
     const hasError = lastLines.some((l) => /error|fail|denied|not found/i.test(l));
     const analysis = hasError
       ? [
-          t('terminal.ai.err.title', '🔍 检测到异常输出，可能原因:'),
+          t('terminal.ai.err.title', '检测到异常输出 — 可能原因:'),
           t('terminal.ai.err.sudo', '   • 权限不足（sudo）'),
           t('terminal.ai.err.deps', '   • 依赖缺失（安装对应软件包）'),
           t('terminal.ai.err.typo', '   • 路径或命令拼写错误'),
-          t('terminal.ai.err.hint', '💡 建议: 根据上方真实报错逐条排查'),
+          t('terminal.ai.err.hint', '建议: 根据上方真实报错逐条排查'),
         ]
       : [
-          t('terminal.ai.ok.title', '🔍 终端输出分析:'),
+          t('terminal.ai.ok.title', '终端输出摘要:'),
           tf('terminal.ai.ok.lines', '   • 共 {{n}} 行历史输出', { n: currentSession.lines.length }),
           t('terminal.ai.ok.noKw', '   • 当前片段未检测到明显错误关键字'),
           t('terminal.ai.ok.more', '   • 如需精确结论，请继续执行诊断命令（如 hrut_smi/free -h/df -h）'),
         ];
-    const allLines = [t('terminal.ai.header', '🤖 ─── AI 分析 ───'), ...analysis, '────────────', 'root@rdk:~#'];
-    setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: [...s.lines, t('terminal.ai.running', '🤖 ─── AI 分析中... ───')] } : s));
+    const allLines = [t('terminal.ai.header', '─── AI 分析 ───'), ...analysis, '────────────', 'root@rdk:~#'];
+    setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: [...s.lines, t('terminal.ai.running', '─── AI 分析中… ───')] } : s));
     allLines.forEach((line, i) => {
       setTimeout(() => {
         setTerminalSessions((prev) => prev.map((s) => s.id === activeSessionId ? { ...s, lines: i === 0 ? [...s.lines.slice(0, -1), line] : [...s.lines, line] } : s));

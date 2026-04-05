@@ -379,7 +379,8 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
   vncToolbarRef.current = ui.vncEmbedToolbar;
 
   /**
-   * 用户说「打开 VNC / 远程桌面」「打开 IDE」时：**不切换 Tab**，后台执行与对应页面「连接」按钮相同逻辑，就绪后再自动浮窗。
+   * 用户说「打开 VNC / 远程桌面」「打开 IDE」时：**不切换 Tab**，后台执行与对应页面「连接」按钮相同逻辑；
+   * 连接成功后默认贴入该 Tab，就绪后再**自动浮出悬浮窗**（与在页面内手动点「连接」默认贴入不同）。
    */
   useEffect(() => {
     let cancelled = false;

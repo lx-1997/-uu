@@ -10,6 +10,7 @@ export type EmbedToolbarApi = {
 export type VncEmbedToolbarApi = EmbedToolbarApi;
 import type { Tab, ConfirmDialogState, TransferItem, DrAuthenticatedPortal, DrAuthenticatedPortalKind } from '../app-types';
 import { normalizeTabForFeatures } from '../constants/studio-features';
+import { persistActiveTab, readStoredActiveTab } from '../utils/studio-active-tab';
 import { getFlashImageLabel } from '../constants';
 import { fillTemplate } from '../i18n/en-extras';
 import { translate } from '../i18n/translate';
@@ -191,7 +192,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   }, [language]);
 
   // ── Navigation ──
-  const [activeTab, setActiveTabState] = useState<Tab>('dashboard');
+  const [activeTab, setActiveTabState] = useState<Tab>(() => readStoredActiveTab());
   const [chatSessionsOpen, setChatSessionsOpen] = useState(false);
   const [drAuthenticatedPortal, setDrAuthenticatedPortal] = useState<DrAuthenticatedPortal | null>(null);
 
@@ -247,6 +248,10 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     }
     setActiveTabState(normalizeTabForFeatures(tab));
   }, []);
+
+  useEffect(() => {
+    persistActiveTab(activeTab);
+  }, [activeTab]);
 
   /** 离开内嵌门户 tab 时隐藏 WebContentsView（不切页则保留实例，便于再次打开） */
   useEffect(() => {

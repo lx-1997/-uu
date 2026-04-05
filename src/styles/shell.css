@@ -603,6 +603,12 @@
   opacity: 0.85;
 }
 
+.runtime-task-queue-label-lucide {
+  flex-shrink: 0;
+  opacity: 0.85;
+  color: var(--text-secondary);
+}
+
 .runtime-task-queue-chips {
   display: flex;
   flex-wrap: wrap;
@@ -671,6 +677,23 @@
   color: var(--accent, #ff6b00);
   animation: rdk-boot-spin 0.85s linear infinite;
   flex-shrink: 0;
+}
+
+.runtime-task-chip-spin--lucide {
+  font-size: unset;
+  width: 14px;
+  height: 14px;
+}
+
+.runtime-task-chip-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--accent, #ff6b00);
+}
+
+.runtime-task-chip-icon--rec {
+  color: var(--danger, #ef4444);
 }
 
 .runtime-task-chip-text {

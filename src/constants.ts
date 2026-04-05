@@ -28,25 +28,25 @@ export const TOPBAR_WIFI_LINK_POLL_MS = DEVICE_POLL_PERIOD_MS;
 export const DASHBOARD_CARDS: DashboardCard[] = [
   {
     tab: 'openclaw',
-    title: 'OpenClaw 网关',
-    description: '统一接入模型与机器人能力，快速进入对话式编排与执行',
-    loading: '正在打开 OpenClaw 网关与编排面板...',
-    statusLabel: '板端网关联动',
+    title: 'OpenClaw',
+    description: '板端网关：模型、渠道与设备侧任务',
+    loading: '正在打开 OpenClaw…',
+    statusLabel: '板端状态',
     statusOk: true,
-    miniStats: [{ label: '可编排能力', value: '--' }, { label: '网关状态', value: '--' }],
-    cta: '进入网关工作台',
-    quickActions: [{ label: '状态联动', icon: '🔄' }, { label: '应用方案', icon: '✨' }],
+    miniStats: [{ label: '技能与任务', value: '--' }, { label: '网关', value: '--' }],
+    cta: '打开 OpenClaw',
+    quickActions: [{ label: '刷新状态', icon: '↻' }, { label: '部署', icon: '⊕' }],
   },
   {
     tab: 'terminal',
-    title: '终端环境',
-    description: '直接进入设备命令行，执行诊断、部署与日常运维命令',
-    loading: '正在打开终端环境...',
-    statusLabel: '实时连接',
+    title: '终端',
+    description: 'SSH 进入设备，执行命令与排障',
+    loading: '正在打开终端…',
+    statusLabel: '连接',
     statusOk: true,
-    miniStats: [{ label: '连接方式', value: 'SSH' }, { label: '执行模式', value: '实时' }],
+    miniStats: [{ label: '连接方式', value: 'SSH' }, { label: '会话', value: '实时' }],
     cta: '打开终端',
-    quickActions: [{ label: '快速巡检', icon: '🔍' }, { label: '环境检查', icon: '🧪' }],
+    quickActions: [{ label: '巡检', icon: '⌕' }, { label: '环境', icon: '≡' }],
   },
 ];
 
@@ -112,7 +112,12 @@ export function getTerminalProfileLabel(profileId: string, isEn: boolean): strin
 
 /** 命令建议：中英双语，筛选时同时匹配 zh/en/keyword */
 export const CMD_SUGGESTIONS: Array<{ icon: string; textZh: string; textEn: string; keyword: string }> = [
-  { icon: '', textZh: '介绍一下 RDK Studio 和 RDKClaw 的核心能力', textEn: 'Give me a quick intro to RDK Studio and RDKClaw capabilities', keyword: '介绍' },
+  {
+    icon: '',
+    textZh: '用几句话说明 RDK Studio 与 RDKClaw 如何帮我解决板端实际问题',
+    textEn: 'Explain how RDK Studio and RDKClaw help me solve real on-board problems',
+    keyword: '介绍',
+  },
   { icon: '', textZh: '帮我做一次设备体检并给出风险项', textEn: 'Run a device health check and list risk items', keyword: '体检' },
   { icon: '', textZh: '在当前设备上运行一个 YOLO 示例并返回结果', textEn: 'Run a YOLO demo on this device and report the result', keyword: 'yolo' },
   { icon: '', textZh: '分析终端最近输出并给出修复步骤', textEn: 'Analyze recent terminal output and provide fix steps', keyword: '日志' },

@@ -154,6 +154,24 @@ const DEFAULT_RESEARCH_SEEDS = [
 ];
 
 /** URLs to prioritize for web_fetch / web_search on RDK tasks. */
+/**
+ * 工作区健康脚本 `bpu_ready`：在板端用 `importlib.util.find_spec` 探测，**任一条**命中即视为 BPU Python 栈可用。
+ * 须覆盖 X3 / X5 / Ultra（Bayes）与 S100（Nash）等不同 `bpu_infer_lib_*` 包名。
+ */
+const WORKSPACE_HEALTH_BPU_IMPORTLIB_SPECS = [
+  'hobot_dnn',
+  'hobot_dnn_rdkx5',
+  'bpu_infer_lib_x5',
+  'bpu_infer_lib_x3',
+  'bpu_infer_lib_s100',
+] as const;
+
+/** 供 `bash` 中 `python3 -c "..."` 内联（不含外层引号） */
+export function buildWorkspaceHealthBpuReadyPythonInline(): string {
+  const tuple = WORKSPACE_HEALTH_BPU_IMPORTLIB_SPECS.join("','");
+  return `import importlib.util; mods=('${tuple}'); print(1 if any(importlib.util.find_spec(name) is not None for name in mods) else 0)`;
+}
+
 export function getResearchSeeds(platform: RdkPlatform | null): string[] {
   if (!platform) return [...DEFAULT_RESEARCH_SEEDS];
   const p = DEVICE_PROFILES[platform];

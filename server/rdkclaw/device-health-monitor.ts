@@ -6,6 +6,8 @@
  */
 
 import { execOnDevice, getDevice } from '../agent/tools/rdk-ssh-helper.js';
+import { RESTART_GATEWAY_FALLBACK } from '../managers/OpenClawDeploymentManager.js';
+import { OPENCLAW_RESOLVE_CLI_SNIPPET } from '../managers/openclaw-board-install-sh.js';
 
 export interface HealthCheckResult {
   deviceId: string;
@@ -194,9 +196,9 @@ export class DeviceHealthMonitor {
 
       try {
         await execOnDevice(deviceId, [
-          'bash -lc "(systemctl --user restart openclaw-gateway 2>/dev/null || openclaw gateway restart 2>/dev/null || true)"',
+          `bash -lc 'export PATH="$HOME/.npm-global/bin:$PATH" && ${OPENCLAW_RESOLVE_CLI_SNIPPET} && ${RESTART_GATEWAY_FALLBACK}'`,
         ]);
-        result.selfHealed.push('已尝试重启 OpenClaw gateway');
+        result.selfHealed.push('已尝试重启 OpenClaw gateway（与面板「重启网关」同一路径）');
       } catch {
         result.anomalies.push({
           type: 'gateway',

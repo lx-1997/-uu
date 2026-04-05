@@ -299,6 +299,16 @@
   color: var(--text-primary);
 }
 
+.dock-header-tagline {
+  margin-top: 1px;
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  line-height: 1.3;
+  max-width: min(420px, 70vw);
+}
+
 .dock-header-threadline {
   margin-top: 2px;
   font-size: 0.72rem;
@@ -1540,6 +1550,18 @@
 .dock-att-icon {
   font-size: 1rem;
   line-height: 1;
+  flex-shrink: 0;
+}
+
+.dock-att-icon--mic,
+.dock-att-icon--file {
+  display: inline-flex;
+  color: var(--text-secondary);
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-att-file-icon {
   flex-shrink: 0;
 }
 
@@ -3318,7 +3340,11 @@
 }
 
 .dock-bubble .file-block-icon {
-  font-size: 1.3em;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .dock-bubble .file-block-name {

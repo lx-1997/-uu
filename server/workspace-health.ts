@@ -1,3 +1,4 @@
+import { buildWorkspaceHealthBpuReadyPythonInline } from './board/device-profiles.js';
 import { shellEscape } from './utils/shell-escape.js';
 
 export type WorkspaceModuleHealth = {
@@ -43,7 +44,7 @@ const WORKSPACE_HEALTH_SCRIPT = [
   'ros_distro=$(printenv ROS_DISTRO 2>/dev/null || ls -1 /opt/tros/ 2>/dev/null | head -1 || ls -1 /opt/ros/ 2>/dev/null | head -1 || echo humble)',
   'modelzoo_dir=$(test -d /opt/rdk_model_zoo && echo 1 || echo 0)',
   'hrt_ready=$(command -v hrt_model_exec >/dev/null 2>&1 && echo 1 || echo 0)',
-  'bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "import importlib.util; mods=(\'hobot_dnn\',\'hobot_dnn_rdkx5\',\'bpu_infer_lib_x5\',\'bpu_infer_lib_x3\'); print(1 if any(importlib.util.find_spec(name) is not None for name in mods) else 0)" 2>/dev/null || echo 0; else echo 0; fi)',
+  `bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "${buildWorkspaceHealthBpuReadyPythonInline()}" 2>/dev/null || echo 0; else echo 0; fi)`,
   'printf "checked_at=%s\\n" "$(date +%s)"',
   'printf "python_ready=%s\\n" "$python_ready"',
   'printf "git_ready=%s\\n" "$git_ready"',

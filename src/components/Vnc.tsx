@@ -237,16 +237,14 @@ export default function Vnc() {
         setShowIframe(true);
         addToast(t('vnc.toast.ok', 'VNC 连接成功'), 'success');
         startVncSession();
-        // 桌面端：默认悬浮窗，避免占满远程桌面 Tab 主区
+        /** 默认贴入当前远程桌面页；对话「打开 VNC」由 useAppState.tryFloatWhenReady / runRemoteConnectIntent 再浮出 */
+        setEmbedFloating(false);
         if (isDesktop()) {
           activeUrlRef.current = vncUrl;
           setLoadError(null);
           const rdk = (window as any).rdkDesktop;
           rdk.openUrl(vncUrl);
-          rdk.setEmbedFloatMode?.(vncUrl, true, t('vnc.title', '远程桌面'));
-          setEmbedFloating(true);
-        } else {
-          setEmbedFloating(true);
+          rdk.setEmbedFloatMode?.(vncUrl, false, t('vnc.title', '远程桌面'));
         }
       } else {
         setPhase('error');
@@ -471,7 +469,14 @@ export default function Vnc() {
               <div className="immersive-desktop-placeholder">
                 {loadError ? (
                   <>
-                    <span className="immersive-error">⚠️ {loadError}</span>
+                    <span className="immersive-error immersive-error--inline" role="alert">
+                      <svg className="immersive-error-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <span>{loadError}</span>
+                    </span>
                     <button className="btn btn-primary" onClick={() => { handleDisconnect(); }}>{t('vnc.backRetry', '返回重试')}</button>
                   </>
                 ) : (
@@ -489,7 +494,7 @@ export default function Vnc() {
                 floating={embedFloating}
                 onFloatingChange={setEmbedFloating}
                 storageKey="vnc"
-                backfill={<span className="floating-embed-backfill-default">{t('vnc.floatBackfill', '远程桌面在悬浮窗中，可切换到 AI 对话或其它页面，窗口保持置顶可见。')}</span>}
+                backfill={<span className="floating-embed-backfill-default">{t('vnc.floatBackfill', '远程桌面在悬浮窗中，可切换到对话或其它页面，窗口保持置顶可见。')}</span>}
                 dragbarExtra={
                   <button type="button" className="btn btn-ghost btn-sm" onClick={handleDisconnect}>
                     {t('vnc.disconnect', '断开')}
@@ -560,8 +565,15 @@ export default function Vnc() {
             )}
 
             {phase === 'error' && (
-              <div className="immersive-error">
-                <span>⚠️ {statusText}</span>
+              <div className="immersive-error" role="alert">
+                <span className="immersive-error--inline">
+                  <svg className="immersive-error-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>{statusText}</span>
+                </span>
                 <button className="btn btn-ghost" onClick={handleConnect}>{t('vnc.retry', '重试')}</button>
               </div>
             )}
@@ -587,7 +599,7 @@ export default function Vnc() {
               {!isDesktop() && (
                 <div className="immersive-feature-hint">
                   <span className="immersive-hint-dot" />
-                  <span>{t('vnc.hint.float', '连接后可用工具栏「悬浮窗」与 AI 对话并排对照')}</span>
+                  <span>{t('vnc.hint.float', '连接后可用工具栏「悬浮窗」与对话区并排对照')}</span>
                 </div>
               )}
               <div className="immersive-feature-hint">

@@ -8,6 +8,14 @@ export const OPENCLAW_BOARD_NPM_SPEC =
   process.env.OPENCLAW_NPM_VERSION?.trim() || 'latest';
 
 /**
+ * npm 并发连接（默认 32，大依赖树时更易吃满带宽）。
+ * 环境变量（均在 **Studio 服务端进程** 上设置，下发到板端脚本前已展开）：
+ * - `OPENCLAW_NPM_MAXSOCKETS`：覆盖默认 maxsockets。
+ * - `OPENCLAW_REGISTRY_PRIORITY=china`：跳过 npmmirror 探测，固定先国内源再官方源（国内网络推荐）。
+ */
+const OPENCLAW_NPM_MAXSOCKETS = process.env.OPENCLAW_NPM_MAXSOCKETS?.trim() || '32';
+
+/**
  * 板端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
  * 供 OpenClawDeploymentManager 与 Agent `board_openclaw_install` 共用，避免分叉。
  *
@@ -18,14 +26,25 @@ export const OPENCLAW_BOARD_NPM_SPEC =
 /**
  * 探测 npmmirror 是否可达，设置 NPM_FAST_REG / ALT_REG（优先国内源）。
  * 末尾不要带 `;`：在 OpenClawDeploymentManager 里与其它片段用 ` && ` 拼接，避免出现非法的 `; &&`（bash 会报 syntax error near `&&`）。
+ *
+ * 提速：若 Studio 进程设 `OPENCLAW_REGISTRY_PRIORITY=china`（或 `npmmirror`），**跳过 ping**，固定先走 npmmirror 再回退官方源，
+ * 避免「探测偶发失败 → 先连 registry.npmjs.org」在国内极慢。
  */
+const OPENCLAW_FAST_REGISTRY_SNIPPET_AUTO =
+  'if curl -fsS --connect-timeout 2 --max-time 5 https://registry.npmmirror.com/-/ping >/dev/null 2>&1; then NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org; else NPM_FAST_REG=https://registry.npmjs.org; ALT_REG=https://registry.npmmirror.com; fi';
+
+const OPENCLAW_FAST_REGISTRY_SNIPPET_CN =
+  'NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org';
+
 export const OPENCLAW_FAST_REGISTRY_SNIPPET =
-  'if curl -fsS --connect-timeout 2 --max-time 3 https://registry.npmmirror.com/-/ping >/dev/null 2>&1; then NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org; else NPM_FAST_REG=https://registry.npmjs.org; ALT_REG=https://registry.npmmirror.com; fi';
+  process.env.OPENCLAW_REGISTRY_PRIORITY === 'china' || process.env.OPENCLAW_REGISTRY_PRIORITY === 'npmmirror'
+    ? OPENCLAW_FAST_REGISTRY_SNIPPET_CN
+    : OPENCLAW_FAST_REGISTRY_SNIPPET_AUTO;
 
 /**
  * 让官方 install.sh 及其内部的 npm 优先走上面探测到的源（子进程继承）。不用引号包裹变量，避免嵌入 bash -lc 时转义复杂。
  */
-export const OPENCLAW_EXPORT_NPM_REGISTRY = 'export NPM_CONFIG_REGISTRY=$NPM_FAST_REG';
+export const OPENCLAW_EXPORT_NPM_REGISTRY = 'export NPM_CONFIG_REGISTRY=$NPM_FAST_REG && export npm_config_sharp_binary_host=https://npmmirror.com/mirrors/sharp && export npm_config_sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-libvips';
 
 /**
  * 若 npmmirror 的 Node 索引可访问，为 nvm/部分安装脚本设置国内 Node 二进制镜像，减轻 NodeSource 直连卡顿。
@@ -55,15 +74,20 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
   'for i in 1 2 3; do',
   // 勿用 --loglevel error：成功路径近乎静默，前端只能看到 Studio 心跳误以为无日志。info 会输出解析/下载/解压等进度（体积仍可控）。
   // CI= 清空 CI：避免 npm 在 CI=1 时关闭 progress 且进一步减少输出。
+  // prefer-offline=true：本地已有缓存时优先用缓存，重试/升级场景明显提速；无缓存时仍会走网络。
   // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认 latest；可 OPENCLAW_NPM_VERSION 钉版本）。
   'if CI= npm install -g openclaw@' +
     OPENCLAW_BOARD_NPM_SPEC +
-    ' --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+    ' --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=' +
+    OPENCLAW_NPM_MAXSOCKETS +
+    ' 2>&1; then break; fi;',
   'if CI= npm install -g openclaw@' +
     OPENCLAW_BOARD_NPM_SPEC +
-    ' --no-audit --no-fund --loglevel info --registry="${ALT_REG}" --prefer-offline=false --fetch-timeout=300000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=20 2>&1; then break; fi;',
+    ' --no-audit --no-fund --loglevel info --registry="${ALT_REG}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=' +
+    OPENCLAW_NPM_MAXSOCKETS +
+    ' 2>&1; then break; fi;',
   '[ "${i}" = 3 ] && exit 1;',
-  'sleep 3;',
+  'sleep 2;',
   'done',
   ')',
 ].join(' ');
@@ -75,7 +99,9 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
 export const OPENCLAW_PREPARE_NPM_SPEED =
   'if command -v npm >/dev/null 2>&1; then ' +
   OPENCLAW_FAST_REGISTRY_SNIPPET +
-  '; npm config set registry "$NPM_FAST_REG" 2>/dev/null; npm config set maxsockets 20 2>/dev/null; npm config set fetch-retries 5 2>/dev/null; else true; fi';
+  '; npm config set registry "$NPM_FAST_REG" 2>/dev/null; npm config set maxsockets ' +
+  OPENCLAW_NPM_MAXSOCKETS +
+  ' 2>/dev/null; npm config set fetch-retries 5 2>/dev/null; else true; fi';
 
 /**
  * openclaw CLI 使用现代 JS（可选链 ?. 等），过旧 Node 会在启动时报 SyntaxError。

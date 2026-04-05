@@ -241,6 +241,11 @@
   color: var(--text-muted);
 }
 
+.lp-pill .lp-pill-mark {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
 .lp-pill.online { border-color: var(--ok); color: var(--ok); }
 .lp-pill.ok { border-color: var(--ok); color: var(--ok); }
 

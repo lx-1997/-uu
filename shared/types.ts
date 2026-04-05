@@ -7,6 +7,21 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+/** Studio「深度思考」模型同步到板端 OpenClaw 的策略（board_openclaw_delegate 预检等） */
+export type OpenClawStudioModelSyncMode =
+  | 'off'
+  /** 仅当板端未配置 baseUrl/apiKey 时写入并设为主模型 */
+  | 'when_empty'
+  /** 未配置或健康检测 AI 未就绪时，用 Studio 模型覆盖 custom-gateway（推荐） */
+  | 'when_unhealthy'
+  /** 只要 Studio 有有效模型配置就覆盖板端 custom-gateway */
+  | 'always'
+  /**
+   * 将 Studio 模型写入独立 provider `rdk-studio-default`，不改动当前主模型；
+   * 板端可在 OpenClaw 设置里把主模型切到该条目后启用。若板端完全未配置，仍会直接写入并设为主模型以便可用。
+   */
+  | 'preset_only';
+
 export interface Device {
   id: string;
   host: string;
@@ -28,6 +43,8 @@ export interface Device {
   frpRemotePort?: number;
   /** direct=直连当前 host；tunnel=经 frp 公网映射 */
   sshReachability?: 'direct' | 'tunnel';
+  /** 未设置时服务端按 `when_unhealthy` 处理 */
+  openclawStudioModelSync?: OpenClawStudioModelSyncMode;
 }
 
 export interface DevicePayload {

@@ -42,6 +42,9 @@ import {
 import {
   buildBoardOpenClawGatewayPairRemoteShell,
   buildBoardOpenClawModelTestRemoteShell,
+  GATEWAY_SSH_USER_SYSTEMD_ENV,
+  RESTART_GATEWAY_FALLBACK,
+  RESTART_GATEWAY_FALLBACK_BASH_LC_DQ,
   type OpenClawDeploymentManager,
 } from '../../managers/OpenClawDeploymentManager.js';
 import * as path from 'node:path';
@@ -224,7 +227,7 @@ export async function ensureFindSkillsOnBoard(deviceId: string): Promise<
     'echo RDK_FIND_SKILLS_INSTALLING',
     `(clawhub install ${BOARD_FIND_SKILLS_PACKAGE_ID} 2>&1 || echo clawhub_install_failed)`,
     `python3 -c "${pyAllow}" 2>&1`,
-    '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true)',
+    RESTART_GATEWAY_FALLBACK,
     'echo RDK_FIND_SKILLS_DONE',
   ].join('; ');
 
@@ -376,14 +379,42 @@ const DEVICE_EXEC_HEARTBEAT_SILENT_MS = 15_000;
 const ROS_LONG_RUN_BLOCK_RE = /\bros2\s+(launch|run)\b/i;
 
 /**
+ * 未传 timeoutMs 时，对「典型短日志探测」收紧 SSH 等待，避免 tail|grep 在超大行、慢盘或异常 I/O 下卡住整会话 30 分钟。
+ * 仍可在命令前自行加 `timeout 20s`，或显式传 timeoutMs。
+ */
+const DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS = 60_000;
+
+/**
+ * 供测试与工具契约：对 `sleep && tail … | grep`、`tail -n … | grep` 等返回约 60s 默认上限；否则 undefined（沿用 SSH 默认 30min）。
+ */
+export function inferShortLogPeekDefaultTimeoutMs(command: string): number | undefined {
+  const c = String(command || '').trim();
+  if (c.length > 8000) return undefined;
+  if (/^\s*timeout\s+\d/i.test(c)) return undefined;
+  if (/\bwhile\s+read\b|\bfor\s+[a-z]/i.test(c)) return undefined;
+  if (/\bros2\s+(launch|run)\b/i.test(c)) return undefined;
+  if (/\btail\s+(-f|--follow)\b|\btail\b[^\n|]*\s-f\b/i.test(c)) return undefined;
+  if (/\btail\b/i.test(c) && /\|\s*grep\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
+  if (/\bhead\b/i.test(c) && /\|\s*grep\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
+  if (/sleep\s+\d+\s+&&\s*tail\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
+  if (/\btail\s+-\d+n?\b/i.test(c) || /\btail\s+-n\s+\d+/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
+  return undefined;
+}
+
+/**
  * 模型常在命令里手写 `nohup … ros2 launch` 却漏传 `background: true`，仍走前台 SSH + 心跳，整轮对话卡住。
  * `ros2 run` 启动的节点同样长驻，故与 launch 一并自动按后台执行（除非显式 background:false）。
  * 显式 `background: false` 时尊重用户（短时只看启动横幅）。
  */
-function inferDeviceExecBackgroundIntent(command: string, explicitBackground?: boolean): boolean {
+export function inferDeviceExecBackgroundIntent(command: string, explicitBackground?: boolean): boolean {
   if (explicitBackground === false) return false;
   if (explicitBackground === true) return true;
-  if (ROS_LONG_RUN_BLOCK_RE.test(command)) return true;
+  if (ROS_LONG_RUN_BLOCK_RE.test(command)) {
+    /** `timeout 5 ros2 launch` 等短时诊断：勿改为 nohup 后台包装 */
+    const tm = command.match(/\btimeout\s+(\d+)/i);
+    if (tm && Number(tm[1]) <= 120) return false;
+    return true;
+  }
   if (/\bnohup\b/i.test(command)) return true;
   return false;
 }
@@ -497,7 +528,7 @@ function deviceExecTool(
       '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
       '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。持久 shell 开启时可在**前一次** `device_exec` 中 `source`，后续 `background`/`runDetached` 的 `ros2 launch` **会继承**该环境（包装层使用非登录 `bash -c`，避免 `bash -lc` 重读 profile 冲掉已 source 的变量）；若关闭持久 shell，须在**同一条**内写 `source ... && ros2 ...`。**勿**在未 source 时单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `ros2 node list` / `topic list` 或 `tail` 日志验证；可选 `ros2VerifyTopics` 在延迟后自动做 topic 收数验收（`ros2 topic echo` 短超时）。**主命令 stdout/stderr 中含可放行 `http(s)://` 时，Studio 会在 topic 验收与长延迟之前尽早代开浏览器**，便于页面先加载、验收后再刷新即可\n' +
       '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
-      '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
+      '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**短日志验收**（如 `tail … | grep`、`sleep … && tail -n`）：未传 timeoutMs 时 Studio 可能对这类命令**自动**约 **60 秒** SSH 上限，避免异常大日志行或 I/O 长时间无响应；仍可在命令前加 `timeout 20s …` 或显式 timeoutMs。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
       '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功；板端失败见末尾 `[exit code: n]`（n≠0）或 stderr；本机 `exec` 见 `[EXIT CODE]`。须**再调用**工具继续排查，勿仅输出错误就结束回合\n' +
@@ -593,6 +624,9 @@ function deviceExecTool(
           execOpts.timeoutMs = Math.min(Math.max(req, 15_000), cap);
         } else if (input.timeoutMs != null && Number.isFinite(Number(input.timeoutMs))) {
           execOpts.timeoutMs = resolveDeviceExecTimeoutMs(Number(input.timeoutMs));
+        } else {
+          const peek = inferShortLogPeekDefaultTimeoutMs(unwrapOuterBashDashC(input.command));
+          if (peek != null) execOpts.timeoutMs = peek;
         }
         if (ctx.abortSignal) {
           execOpts.abortSignal = ctx.abortSignal;
@@ -797,6 +831,7 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
     name: 'device_file_write',
     description:
       '读者=编排模型。整文件覆盖写入；路径须落在策略允许前缀内，否则守卫会拒，你从错误里改参而非改绕路 echo。\n' +
+      '（说明：用户在 Studio「设备文件管理」里直连上传/保存时不受本工具白名单限制；**本工具**仍受守卫约束。）\n' +
       '写入文件到 RDK 设备。\n' +
       '选用时机：创建/覆盖脚本、配置、源码；**禁止**用 device_exec+heredoc/echo 拼大段内容代替。\n\n' +
       '规则：\n' +
@@ -941,7 +976,7 @@ function boardOpenClawInstallTool(deviceId: string, callbacks?: RdkToolsCallback
         OPENCLAW_RESOLVE_CLI_SNIPPET,
         ';',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
-        '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
+        `${RESTART_GATEWAY_FALLBACK_BASH_LC_DQ};`,
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
       ].join(' ');
       const out = await execOnDevice(deviceId, [cmd], { timeoutMs: SSH_LONG_INSTALL_MS });
@@ -995,7 +1030,7 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
           OPENCLAW_ENSURE_SHELL_PATH_SNIPPET +
         ';',
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" doctor --yes 2>&1 || \\\"$OPENCLAW_CMD\\\" doctor 2>&1 || true; else true; fi);',
-        '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway restart || true; else false; fi) || true);',
+        `${RESTART_GATEWAY_FALLBACK_BASH_LC_DQ};`,
         '(if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" health --json 2>&1 || \\\"$OPENCLAW_CMD\\\" status --all 2>&1 || \\\"$OPENCLAW_CMD\\\" status 2>&1 || true; else true; fi)"',
       ].join(' ');
       return execOnDevice(deviceId, [cmd], { timeoutMs: SSH_LONG_INSTALL_MS });
@@ -1012,7 +1047,7 @@ function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never
       const steps = [
         'export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\"; export PATH=\\"$HOME/.npm-global/bin:$PATH\\"',
         'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -n \\\"$OPENCLAW_CMD\\\" ] && [ ! -x \\\"$OPENCLAW_CMD\\\" ]; then OPENCLAW_CMD=\\\"\\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.npm-global/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.npm-global/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && command -v npm >/dev/null 2>&1; then _UU=\\\"$(npm prefix -g 2>/dev/null)\\\"; if [ -n \\\"$_UU\\\" ] && [ -x \\\"$_UU/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\\"$_UU/bin/openclaw\\\"; fi; fi; if [ -n \\\"$OPENCLAW_CMD\\\" ] && [ ! -x \\\"$OPENCLAW_CMD\\\" ]; then OPENCLAW_CMD=\\\"\\\"; fi',
-        'echo \\"[1/6] 停止 gateway...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway stop 2>/dev/null || true; fi); (systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+        `echo \\"[1/6] 停止 gateway...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway stop 2>/dev/null || true; fi); (${GATEWAY_SSH_USER_SYSTEMD_ENV}; systemctl --user stop openclaw-gateway 2>/dev/null || true)`,
         'echo \\"[2/6] 官方卸载...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" uninstall --all --yes --non-interactive 2>&1 || true; else echo \\\"[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续兜底清理）\\\"; fi)',
         'echo \\"[3/6] 清理 systemd...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway uninstall 2>/dev/null || true; fi); (systemctl --user disable openclaw-gateway 2>/dev/null || true); (rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true); (systemctl --user daemon-reload 2>/dev/null || true)',
         'echo \\"[4/6] 清除 ClawHub 登录态...\\"; (clawhub logout 2>/dev/null || true)',
@@ -1060,7 +1095,7 @@ model["primary"]=f"{args['provider']}/{args['modelId']}"
 json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
 print(model["primary"])`;
       const pyB64 = Buffer.from(py, 'utf8').toString('base64');
-      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_switch_model.py && python3 /tmp/rdk_oc_switch_model.py ${payload} && (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true) && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status 2>&1 || true; fi) || true'`;
+      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_switch_model.py && python3 /tmp/rdk_oc_switch_model.py ${payload} && ${RESTART_GATEWAY_FALLBACK} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status 2>&1 || true; fi) || true'`;
       return execOnDevice(deviceId, [cmd]);
     },
   };
@@ -1129,7 +1164,7 @@ if cfg["connectionMode"]=="webhook":
 json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
 print(json.dumps({"ok":True,"mode":feishu["connectionMode"],"domain":feishu["domain"],"dmPolicy":feishu["dmPolicy"]},ensure_ascii=False))`;
       const pyB64 = Buffer.from(py, 'utf8').toString('base64');
-      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_feishu_cfg.py && python3 /tmp/rdk_oc_feishu_cfg.py ${payload} && (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true) && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway status 2>&1 || "$OPENCLAW_CMD" status 2>&1 || true; fi) || true'`;
+      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_feishu_cfg.py && python3 /tmp/rdk_oc_feishu_cfg.py ${payload} && ${RESTART_GATEWAY_FALLBACK} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway status 2>&1 || "$OPENCLAW_CMD" status 2>&1 || true; fi) || true'`;
       return execOnDevice(deviceId, [cmd]);
     },
   };
@@ -1164,7 +1199,7 @@ entries["openclaw-weixin"]={"enabled":${enabled ? 'True' : 'False'}}
 json.dump(d,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
 print(json.dumps({"ok":True,"enabled":${enabled ? 'true' : 'false'}},ensure_ascii=False))`;
       const pyB64 = Buffer.from(py, 'utf8').toString('base64');
-      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_wx_cfg.py && python3 /tmp/rdk_oc_wx_cfg.py && (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true) && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway status 2>&1 || "$OPENCLAW_CMD" status 2>&1 || true; fi) || true'`;
+      const cmd = `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; echo ${pyB64} | base64 -d >/tmp/rdk_oc_wx_cfg.py && python3 /tmp/rdk_oc_wx_cfg.py && ${RESTART_GATEWAY_FALLBACK} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway status 2>&1 || "$OPENCLAW_CMD" status 2>&1 || true; fi) || true'`;
       return execOnDevice(deviceId, [cmd]);
     },
   };
@@ -1283,7 +1318,7 @@ function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, 
     },
     async execute() {
       return execOnDevice(deviceId, [
-        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || clawctl gateway restart || true) && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status; else false; fi) || clawctl status || echo restarted'`,
+        `bash -lc '${OPENCLAW_RESOLVE_SNIPPET}; (${RESTART_GATEWAY_FALLBACK}) && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status; else false; fi) || clawctl status || echo restarted'`,
       ]);
     },
   };
@@ -1406,7 +1441,7 @@ function boardOpenClawSkillInstallTool(deviceId: string): Tool<{ skillId: string
         `(clawhub install ${id} 2>&1 || echo install_failed)`,
         'echo "[OpenClaw] 添加到 plugins.allow..."',
         `python3 -c "${pyAdd}" 2>&1`,
-        '(systemctl --user restart openclaw-gateway 2>/dev/null || (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway restart || "$OPENCLAW_CMD" restart || true; else false; fi) || true)',
+        RESTART_GATEWAY_FALLBACK,
         'echo "[OpenClaw] 技能安装完成"',
       ].join('; ');
       return execOnDevice(deviceId, [`bash -lc '${cmds}'`], { timeoutMs: SSH_SKILL_INSTALL_MS });

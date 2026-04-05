@@ -177,8 +177,22 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
           await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
           continue;
         }
-        const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload;
         const url = typeof input === 'string' ? input : input.url;
+        const text = await response.text();
+        let payload: ApiErrorPayload = {};
+        if (text) {
+          try {
+            payload = JSON.parse(text) as ApiErrorPayload;
+          } catch {
+            const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 240);
+            payload = {
+              message:
+                snippet && !snippet.startsWith('<')
+                  ? snippet
+                  : `服务端返回 ${response.status}（非 JSON 响应，多为未捕获异常；请查看工作室后端终端日志）`,
+            };
+          }
+        }
         const message = payload.message ?? payload.error ?? 'Request failed';
         const code = payload.code ?? '';
         const retryable = Boolean(payload.retryable);

@@ -7,7 +7,7 @@ import { EN_EXTRAS } from './en-extras';
 export const EN: Record<string, string> = {
   // Top bar tab titles
   'tabs.dashboard': 'Workspace',
-  'tabs.ai-chat-hub': 'AI Chat',
+  'tabs.ai-chat-hub': 'Chat',
   'tabs.skills': 'Skill Studio',
   'tabs.terminal': 'Terminal',
   'tabs.files': 'Files',
@@ -17,13 +17,16 @@ export const EN: Record<string, string> = {
   'tabs.flasher': 'Flasher',
   'tabs.openclaw': 'OpenClaw',
 
+  'topbar.subtitle.dashboardSessions': 'Workspace · Threads',
+  'topbar.subtitle.dashboardChat': 'Workspace · Chat expanded',
+
   /** 顶栏工作台任务（RDKClaw 编排 / 智能体 / 后台对话） */
   'runtimeTasks.regionWorkspace': 'Workspace tasks in progress',
   'runtimeTasks.titleWorkspaceExec': 'Workspace execution',
   'runtimeTasks.emptyWorkspaceExec':
-    'No tasks in progress. Start one-shot dev or a health check here, or send a command in chat — progress will appear here.',
+    'No tasks in progress. Ask RDKClaw in chat to debug, plan, or run something on the board — one-shot workflows and health checks will show progress here.',
   'runtimeTasks.emptyWorkspaceExecNoDevice':
-    'No tasks in progress. Add and connect your board first for full features; use “Restart onboarding” on the workspace to learn the platform step by step. Progress will show here when something runs.',
+    'No tasks in progress. Add a device to unlock RDKClaw fully, or use “Restart onboarding” on the workspace. When RDKClaw runs something, progress appears here.',
   'runtimeTasks.openFlasher': 'Open flasher',
   'runtimeTasks.flashInProgress': 'Image flash',
   'runtimeTasks.flowCheckHint': 'Flow validation in progress',
@@ -43,7 +46,7 @@ export const EN: Record<string, string> = {
   'dock.quick.more': 'More',
   'dock.quick.morePanel': 'More shortcuts',
   'dock.quick.dash.onboarding': 'Guided tour',
-  'dock.quick.dash.capIntro': 'What can you do?',
+  'dock.quick.dash.capIntro': 'What’s on this page',
 
   'dock.header.toolbarAria': 'Chat and run tools',
   'dock.header.viewModeAria': 'Reply density',
@@ -59,7 +62,7 @@ export const EN: Record<string, string> = {
   'dock.header.exportDebugDesc': 'ZIP with local session, chat UI state, optional device logs',
   'dock.header.popoutOpenclaw': 'Open OpenClaw in new window',
   'dock.header.popoutOpenclawDesc': 'OpenClaw page only',
-  'dock.header.hideDock': 'Hide AI Dock',
+  'dock.header.hideDock': 'Hide chat panel',
   'dock.header.hideDockDesc': 'Collapse the chat panel on this page',
   'dock.header.diagnose': 'Diagnose',
   'dock.header.popoutShort': 'Pop out',
@@ -74,9 +77,9 @@ export const EN: Record<string, string> = {
 
   // Icon rail — primary
   'nav.dashboard.label': 'Workspace',
-  'nav.dashboard.desc': 'Device overview and shortcuts',
+  'nav.dashboard.desc': 'Device status and shortcuts',
   'nav.openclaw.label': 'OpenClaw',
-  'nav.openclaw.desc': 'On-device AI Agent',
+  'nav.openclaw.desc': 'Gateway & device config',
   'nav.skills.label': 'Skill Studio',
   'nav.skills.desc': 'OpenClaw skills: create and deploy',
   // connect
@@ -112,9 +115,9 @@ export const EN: Record<string, string> = {
   'rail.version.label': 'About',
   'rail.version.open': 'Open version and release notes',
 
-  'rail.chatSessions.short': 'AI Chat',
-  'rail.chatSessions.tooltip': 'AI chat (switch by device)',
-  'rail.chatSessions.title': 'AI Chat',
+  'rail.chatSessions.short': 'Chat',
+  'rail.chatSessions.tooltip': 'Chat (per device)',
+  'rail.chatSessions.title': 'Chat',
   'rail.chatSessions.hint': 'One chat window per device; adding a device adds another chat.',
   'rail.chatSessions.global': 'Unbound / Global',
   'rail.chatSessions.globalDesc': 'Conversation when no device is selected',
@@ -153,12 +156,12 @@ export const EN: Record<string, string> = {
 
   'chat.lang.switched': 'Language updated',
 
-  'dock.restore': 'Show AI Dock',
+  'dock.restore': 'Show chat panel',
   'dock.device.unbound': 'No device bound',
   'dock.device.unnamed': 'Unnamed device',
   'dock.device.current': 'Device',
   'dock.input.openclaw': 'Message OpenClaw Agent…',
-  'dock.input.default': 'Message, command, or drop files…',
+  'dock.input.default': 'Ask RDKClaw to debug, plan, or run on the device — or drop files…',
   'dock.send': 'Send',
   'dock.ctx.cut': 'Cut',
   'dock.ctx.copy': 'Copy',
@@ -223,7 +226,8 @@ export const EN: Record<string, string> = {
   'settings.sec.forum': 'Community forum',
 
   'settings.ai.title': 'AI engine',
-  'settings.ai.desc': 'Core brain for RDKClaw. Pick a provider and API key to enable.',
+  'settings.ai.desc':
+    'Model and tools behind RDKClaw: tuned for real bring-up, debugging, and automation on your boards. Choose a provider and API key here.',
   'settings.ai.laneThinking': 'Deep (thinking)',
   'settings.ai.laneQuick': 'Quick reply',
   'settings.ai.laneTabs': 'Deep vs quick AI profile',
@@ -425,14 +429,14 @@ export const EN: Record<string, string> = {
   'toast.unknownErr': 'Unknown error',
 
   // Dashboard
-  'dashboard.tagline': 'Connect your RDK board and start building',
+  'dashboard.tagline': 'Connect a board to get started',
   'dashboard.addDevice': 'Add device',
-  'dashboard.chatFirst': 'Chat first',
+  'dashboard.chatFirst': 'Open chat',
   'dashboard.restartOnboarding': 'Restart onboarding',
   'dashboard.deviceOnline': 'Device online',
   'dashboard.devicePillHint':
     '“Online” means the backend successfully authenticated over SSH with the saved credentials for this device. Without a stored password or if auth fails, it shows offline—reconnect the device to save credentials.',
-  'dashboard.oneShotDev': 'Prompt-to-dev',
+  'dashboard.oneShotDev': 'Quick build',
   'dashboard.healthCheck': 'Health check',
   'dashboard.metric.mem': 'MEM',
   'dashboard.metric.temp': 'TEMP',

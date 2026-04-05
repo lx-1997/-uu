@@ -1191,7 +1191,7 @@ export default function SkillBrowser() {
               type="button"
               className={`btn btn-sm ${hubMode === 'board' ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setHubMode('board')}
-              style={{ fontSize: '0.6875rem' }}
+              style={{ fontSize: '0.75rem' }}
             >
               {t('skillBrowser.hub.board', '板端')}
             </button>
@@ -1199,7 +1199,7 @@ export default function SkillBrowser() {
               type="button"
               className={`btn btn-sm ${hubMode === 'center' ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setHubMode('center')}
-              style={{ fontSize: '0.6875rem' }}
+              style={{ fontSize: '0.75rem' }}
             >
               {t('skillBrowser.hub.center', 'Skill 中心')}
             </button>
@@ -1245,7 +1245,7 @@ export default function SkillBrowser() {
             <>
               <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <input className="input" value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('skillBrowser.searchPh', '搜索技能...')} style={{ fontSize: '0.8125rem' }} />
-                <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
                   {t(
                     'skillBrowser.sidebarHint',
                     '点击名称在右侧查看；点「编辑」修改。垃圾桶会尝试删除工作区与 /opt/openclaw/skills 下同名片段。',
@@ -1309,7 +1309,7 @@ export default function SkillBrowser() {
                 <button
                   type="button"
                   className={`btn btn-sm ${centerSub === 'clawhub' ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ flex: 1, fontSize: '0.625rem' }}
+                  style={{ flex: 1, fontSize: '0.75rem' }}
                   onClick={() => setCenterSub('clawhub')}
                 >
                   {t('skillBrowser.clawhub.tab', 'SkillHub')}
@@ -1317,7 +1317,7 @@ export default function SkillBrowser() {
                 <button
                   type="button"
                   className={`btn btn-sm ${centerSub === 'catalog' ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ flex: 1, fontSize: '0.625rem' }}
+                  style={{ flex: 1, fontSize: '0.75rem' }}
                   onClick={() => setCenterSub('catalog')}
                 >
                   {t('skillBrowser.center.catalogTab', '本地清单')}
@@ -1350,7 +1350,7 @@ export default function SkillBrowser() {
                         alignItems: 'center',
                         flexWrap: 'wrap',
                         gap: 6,
-                        fontSize: '0.625rem',
+                        fontSize: '0.75rem',
                       }}
                     >
                       <span style={{ color: 'var(--text-muted)' }}>
@@ -1359,7 +1359,7 @@ export default function SkillBrowser() {
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                        style={{ fontSize: '0.75rem', padding: '2px 8px' }}
                         onClick={() => setCenterBatchSelected(new Set(filteredCenterItems.map((x) => x.folder)))}
                         disabled={filteredCenterItems.length === 0 || batchActionBusy}
                       >
@@ -1368,7 +1368,7 @@ export default function SkillBrowser() {
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                        style={{ fontSize: '0.75rem', padding: '2px 8px' }}
                         onClick={() => setCenterBatchSelected(new Set())}
                         disabled={centerBatchSelected.size === 0}
                       >
@@ -1430,7 +1430,7 @@ export default function SkillBrowser() {
                           }}
                         >
                           <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</strong>
-                          <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{it.folder}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{it.folder}</span>
                         </button>
                       </div>
                     ))}
@@ -1459,7 +1459,7 @@ export default function SkillBrowser() {
                         : t('skillBrowser.clawhub.search', '搜索')}
                     </button>
                     {clawhubSearchLoading && (
-                      <p style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
                         {t(
                           'skillBrowser.clawhub.searchColdHint',
                           '首次连接技能源可能需几秒，请稍候；完成后再次搜索会更快。',
@@ -1467,7 +1467,7 @@ export default function SkillBrowser() {
                       </p>
                     )}
                     {clawhubSearchErr && (
-                      <p style={{ fontSize: '0.625rem', color: 'var(--text-muted)', margin: 0 }}>{clawhubSearchErr}</p>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>{clawhubSearchErr}</p>
                     )}
                     {clawhubResults.length > 0 && (
                       <div
@@ -1476,7 +1476,7 @@ export default function SkillBrowser() {
                           alignItems: 'center',
                           flexWrap: 'wrap',
                           gap: 6,
-                          fontSize: '0.625rem',
+                          fontSize: '0.75rem',
                         }}
                       >
                         <span style={{ color: 'var(--text-muted)' }}>
@@ -1485,7 +1485,7 @@ export default function SkillBrowser() {
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
-                          style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
                           onClick={() => setClawhubBatchSelected(new Set(clawhubResults.map((r) => r.slug)))}
                           disabled={batchActionBusy}
                         >
@@ -1494,7 +1494,7 @@ export default function SkillBrowser() {
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
-                          style={{ fontSize: '0.625rem', padding: '2px 8px' }}
+                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
                           onClick={() => setClawhubBatchSelected(new Set())}
                           disabled={clawhubBatchSelected.size === 0}
                         >
@@ -1552,9 +1552,9 @@ export default function SkillBrowser() {
                           }}
                         >
                           <strong style={{ fontSize: '0.75rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.displayName || r.slug}</strong>
-                          <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{r.slug}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{r.slug}</span>
                           {r.summary && (
-                            <span style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', display: 'block', marginTop: 4, lineHeight: 1.35, maxHeight: '4.2em', overflow: 'hidden' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: 4, lineHeight: 1.35, maxHeight: '4.2em', overflow: 'hidden' }}>
                               {r.summary}
                             </span>
                           )}
@@ -1584,7 +1584,7 @@ export default function SkillBrowser() {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                         <div>
                           <strong style={{ fontSize: '0.875rem' }}>{filteredCenterItems.find((x) => x.folder === selectedCenterFolder)?.title ?? selectedCenterFolder}</strong>
-                          <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.625rem', fontFamily: 'monospace' }}>{selectedCenterFolder}</span>
+                          <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.75rem', fontFamily: 'monospace' }}>{selectedCenterFolder}</span>
                         </div>
                         <button
                           type="button"
@@ -1597,7 +1597,7 @@ export default function SkillBrowser() {
                       </div>
                       {centerBatchSelected.size > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                          <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             {tf('skillBrowser.batch.barHint', '已勾选 {{n}} 项，可批量操作（与当前预览无关）', { n: centerBatchSelected.size })}
                           </span>
                           <button
@@ -1619,7 +1619,7 @@ export default function SkillBrowser() {
                         </div>
                       )}
                       {!currentDevice && (
-                        <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
                       )}
                       <div className="config-terminal" style={{ maxHeight: 'none', flex: 1, minHeight: 280 }}>
                         <pre style={{ margin: 0, fontSize: '0.75rem' }}>
@@ -1633,7 +1633,7 @@ export default function SkillBrowser() {
                 <>
                   <div>
                     <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.clawhub.previewTitle', 'SkillHub 技能预览')}</strong>
-                    <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '6px 0 0' }}>
                       <a href="https://skillhub.tencent.com/" target="_blank" rel="noreferrer">
                         skillhub.tencent.com
                       </a>
@@ -1646,9 +1646,9 @@ export default function SkillBrowser() {
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                         <div>
                           <strong style={{ fontSize: '0.875rem' }}>{clawhubResults.find((x) => x.slug === selectedClawhubSlug)?.displayName || selectedClawhubSlug}</strong>
-                          <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.625rem', fontFamily: 'monospace' }}>{selectedClawhubSlug}</span>
+                          <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.75rem', fontFamily: 'monospace' }}>{selectedClawhubSlug}</span>
                           {clawhubResolvedVersion && (
-                            <span className="badge badge-muted" style={{ marginLeft: 6, fontSize: '0.625rem' }}>v{clawhubResolvedVersion}</span>
+                            <span className="badge badge-muted" style={{ marginLeft: 6, fontSize: '0.75rem' }}>v{clawhubResolvedVersion}</span>
                           )}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
@@ -1676,7 +1676,7 @@ export default function SkillBrowser() {
                               {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到板端')}
                             </button>
                           </div>
-                          <span style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', maxWidth: 300, textAlign: 'right', lineHeight: 1.35 }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: 300, textAlign: 'right', lineHeight: 1.35 }}>
                             {t(
                               'skillBrowser.clawhub.deployVsLocal',
                               '「写入本地 RDKClaw」：本机对话侧技能目录；「部署到板端」：SSH 到设备写入 OpenClaw 技能目录。',
@@ -1686,7 +1686,7 @@ export default function SkillBrowser() {
                       </div>
                       {clawhubBatchSelected.size > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                          <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             {tf('skillBrowser.batch.barHint', '已勾选 {{n}} 项，可批量操作（与当前预览无关）', { n: clawhubBatchSelected.size })}
                           </span>
                           <button
@@ -1708,7 +1708,7 @@ export default function SkillBrowser() {
                         </div>
                       )}
                       {!currentDevice && (
-                        <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>
                       )}
                       <div className="config-terminal" style={{ maxHeight: 'none', flex: 1, minHeight: 280 }}>
                         <pre style={{ margin: 0, fontSize: '0.75rem' }}>
@@ -1743,7 +1743,7 @@ export default function SkillBrowser() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div>
                         <strong style={{ fontSize: '0.875rem' }}>{selectedBoardSkill.split('|')[0]}</strong>
-                        {skillContentPath && <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.625rem' }}>{skillContentPath}</span>}
+                        {skillContentPath && <span className="badge badge-muted" style={{ marginLeft: 8, fontSize: '0.75rem' }}>{skillContentPath}</span>}
                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         {!editing && (
@@ -1795,7 +1795,7 @@ export default function SkillBrowser() {
                     placeholder={t('skillBrowser.idPh', '例如: my-custom-skill')}
                     style={{ fontSize: '0.8125rem' }}
                   />
-                  <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     {t('skillBrowser.idHint', '留空则自动从 SKILL.md 的 name 字段提取。部署路径: ~/.openclaw/workspace/skills/{skillId}/SKILL.md')}
                   </span>
                 </div>
@@ -1814,7 +1814,7 @@ export default function SkillBrowser() {
                     {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.deploy', '部署到板端')}
                   </button>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNewSkillContent(t('skillBrowser.template', SKILL_TEMPLATE_ZH))}>{t('skillBrowser.resetTemplate', '重置模板')}</button>
-                  {!currentDevice && <span style={{ fontSize: '0.625rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>}
+                  {!currentDevice && <span style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>}
                 </div>
               </div>
             )}
@@ -1823,9 +1823,9 @@ export default function SkillBrowser() {
             {rightTab === 'link' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div>
-                  <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.linkTitle', '链接转技能（AI 辅助）')}</strong>
+                  <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.linkTitle', '链接生成技能')}</strong>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                    {t('skillBrowser.linkDesc', '输入 GitHub / NodeHub / 文档链接，AI 将分析内容并生成可部署的 OpenClaw 技能。')}
+                    {t('skillBrowser.linkDesc', '输入 GitHub / NodeHub / 文档链接，由对话区根据内容起草可部署的 OpenClaw 技能。')}
                   </p>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1836,10 +1836,10 @@ export default function SkillBrowser() {
                   <textarea className="input" value={skillGoal} onChange={(e) => setSkillGoal(e.target.value)} rows={2} placeholder={t('skillBrowser.goalPh', '可选：补充目标说明（如：提取 YOLO 推理相关命令）')} style={{ resize: 'vertical', minHeight: 56 }} />
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button type="button" className="btn btn-primary btn-sm" onClick={startUrlBasedSkillCreate} disabled={!sourceUrl.trim()}>
-                      {t('skillBrowser.aiRun', '发送到 AI 生成')}
+                      {t('skillBrowser.aiRun', '发送到会话')}
                     </button>
                   </div>
-                  <div style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                     {t(
                       'skillBrowser.linkHint',
                       '流程说明：点击后将把指令发送到 AI 对话；AI 应先给出完整 SKILL.md 并说明来源与缺失项，仅在你在对话中明确确认写入后，才应调用写入工具。你也可以复制 SKILL 到「创建技能」标签页，用界面上的「部署到板端」自行确认部署。',

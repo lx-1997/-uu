@@ -9,6 +9,9 @@ export const DEFAULT_VNC_PORT = 5900;
 /** 与 `src/components/IDE.tsx` code-server 启动端口一致 */
 export const CODE_SERVER_HTTP_PORT = 9888;
 export const OPENCLAW_GATEWAY_PORT = 18789;
+/** 委派预检在写入 openclaw.json 并触发网关重启后，轮询 health 的间隔与上限（避免重启窗口内单次检测误判） */
+export const OPENCLAW_POST_SYNC_HEALTH_POLL_MS = 2_000;
+export const OPENCLAW_POST_SYNC_HEALTH_MAX_WAIT_MS = 90_000;
 export const AI_REQUEST_TIMEOUT_MS = 30_000;
 export const AGENT_PLAN_TIMEOUT_MS = 60_000;
 export const PING_SSH_TIMEOUT_MS = 5_000;
@@ -23,14 +26,19 @@ export const FLASH_DEFAULT_DEST = '/tmp/rdk_image.img';
  */
 export const DEVICE_DIAGNOSTICS_CACHE_TTL_MS = 15_000;
 
+/**
+ * 工作台 / GET diagnostics 批量采集。各段须相对独立：S100 等机型上 `ip`/`top`/`hrut_*` 任一条失败
+ * 不应阻断后续 BPU/SOMSTATUS（历史上用 `&&` 串联会导致整段 SSH 失败、指标全空）。
+ * 执行时由 `runOnDevice(..., { joinWith: ';' })` 串联。
+ */
 export const DIAGNOSTIC_COMMANDS = [
   'echo "###UPTIME###"; uptime',
   'echo "###TEMP###"; cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo "N/A"',
   'echo "###MEM###"; free -h',
   'echo "###DISK###"; df -h',
-  'echo "###IP###"; ip -o -4 addr show',
-  'echo "###TOP###"; top -bn1 | head -20',
-  'echo "###BPU###"; (hrut_smi || bputop || echo "bpu command unavailable")',
+  'echo "###IP###"; ip -o -4 addr show 2>/dev/null || echo "N/A"',
+  'echo "###TOP###"; (top -bn1 2>/dev/null || busybox top -bn1 2>/dev/null || echo "") | head -20',
+  'echo "###BPU###"; (hrut_smi 2>/dev/null || bputop 2>/dev/null || (echo -n "SYSFS_BPU_RATIO:" && cat /sys/devices/system/bpu/bpu0/ratio 2>/dev/null) || echo "bpu command unavailable")',
   'echo "###SOMSTATUS###"; (hrut_somstatus 2>/dev/null || sudo hrut_somstatus 2>/dev/null || echo "somstatus unavailable")',
 ];
 

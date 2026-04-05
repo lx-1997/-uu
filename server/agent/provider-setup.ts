@@ -242,6 +242,36 @@ export function loadProviderConfig(): ProviderConfig | null {
   return loadProviderConfigForStudioLane("thinking");
 }
 
+/**
+ * 将 Studio「深度思考」链路当前 Provider 转为 OpenClaw `custom-gateway` 所需字段，
+ * 供板端缺少模型网关时由 RDKClaw 写入 `openclaw.json`。
+ * 无有效模型名或 API Key（含 `OPENAI_API_KEY` 环境变量兜底）时返回 null。
+ */
+export function buildOpenClawModelGatewayFromStudioThinking(): {
+  baseUrl: string;
+  apiKey: string;
+  modelId: string;
+  modelName: string;
+  api: string;
+} | null {
+  const cfg = loadProviderConfig();
+  if (!cfg?.model?.trim()) return null;
+  const apiKey = cfg.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
+  if (!apiKey) return null;
+  const merged: ProviderConfig = { ...cfg, apiKey };
+  const baseUrl = resolveProviderBaseUrl(merged);
+  const protocol = resolveProtocol(merged);
+  const api = protocol === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
+  const modelId = cfg.model.trim();
+  return {
+    baseUrl,
+    apiKey,
+    modelId,
+    modelName: modelId,
+    api,
+  };
+}
+
 function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }

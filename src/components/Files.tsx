@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { loader } from '@monaco-editor/react';
-import { Loader2, RefreshCw, Upload, ArrowLeft, Home, Search } from 'lucide-react';
+import { Loader2, RefreshCw, Upload, ArrowLeft, Home, Search, Folder, FileText, FolderOpen, Save } from 'lucide-react';
 
 // 使用国内极速镜像源，避免因为 unpkg 无法连接导致「代码编辑」模块卡白屏加载不到一直启动不了的问题
 loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
@@ -66,10 +66,10 @@ export default function Files() {
           if (lines.length === 1) {
             const isDir = lines[0].startsWith('DIR:');
             const foundPath = lines[0].substring(lines[0].indexOf('/'));
-            addToast(tf('files.searchAutoPick', '🔍 自动获取匹配项：{{path}}', { path: foundPath }), 'success');
+            addToast(tf('files.searchAutoPick', '已定位匹配项：{{path}}', { path: foundPath }), 'success');
             runDownloadRef.current?.(foundPath, isDir);
           } else if (lines.length > 1) {
-            addToast(tf('files.searchMulti', '🔍 找到 {{n}} 个结果，请手动选择', { n: lines.length }), 'info');
+            addToast(tf('files.searchMulti', '找到 {{n}} 个结果，请手动选择', { n: lines.length }), 'info');
             setSearchMatches(lines.map(l => ({
                path: l.substring(l.indexOf('/')),
                isDir: l.startsWith('DIR:')
@@ -514,7 +514,14 @@ export default function Files() {
             <div className="tool-bar" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
               <div className="tool-bar-right">
                 <button className="btn btn-primary btn-sm" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: 'var(--accent)', color: 'var(--text-on-accent)', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
-                  {running ? t('files.saving', '保存中...') : `💾 ${t('files.save', '保存修改')}`}
+                  {running ? (
+                    t('files.saving', '保存中...')
+                  ) : (
+                    <>
+                      <Save size={16} strokeWidth={2} aria-hidden style={{ marginRight: 6 }} />
+                      {t('files.save', '保存修改')}
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -613,9 +620,12 @@ export default function Files() {
 
             {selectedEntry && (
               <div className="files-selection-bar">
-                <div className="files-selection-bar__info">
+                <div className="files-selection-bar__info files-selection-bar__info--with-icon">
+                  <span className="files-row-icon" aria-hidden>
+                    {selectedEntry.isDir ? <Folder size={16} strokeWidth={2} /> : <FileText size={16} strokeWidth={2} />}
+                  </span>
                   {tf('files.selected', '已选择：{{name}} (Enter 打开 / F2 重命名 / Ctrl+F 搜索)', {
-                    name: `${selectedEntry.isDir ? '📁' : '📄'} ${selectedEntry.name}`,
+                    name: selectedEntry.name,
                   })}
                 </div>
                 <div className="files-selection-bar__actions">
@@ -667,7 +677,10 @@ export default function Files() {
                   {currentPath !== '/' && (
                     <tr data-file="__parent__" style={{ borderBottom: '1px solid var(--border)' }}>
                       <td className="td" style={{ padding: '14px 16px', cursor: 'pointer', color: 'var(--text-primary)', fontWeight: 500 }} onClick={handleGoUp}>
-                        <span style={{ marginRight: 10, fontSize: 18 }}>📂</span>{t('files.parent', '.. (上一级)')}
+                        <span className="files-row-icon" style={{ marginRight: 10 }} aria-hidden>
+                          <FolderOpen size={18} strokeWidth={2} />
+                        </span>
+                        {t('files.parent', '.. (上一级)')}
                       </td>
                       <td className="td"></td><td className="td"></td><td className="td"></td>
                     </tr>
@@ -689,7 +702,9 @@ export default function Files() {
                         onClick={() => entry.isDir && handleNavigate(entry.name)}
                         title={entry.name}
                       >
-                        <span style={{ marginRight: 10, fontSize: 18 }}>{entry.isDir ? '📁' : '📄'}</span>
+                        <span className="files-row-icon" style={{ marginRight: 10 }} aria-hidden>
+                          {entry.isDir ? <Folder size={18} strokeWidth={2} /> : <FileText size={18} strokeWidth={2} />}
+                        </span>
                         {entry.name}
                       </td>
                       <td className="td mono" style={{ padding: '14px 16px', color: 'var(--text-muted)', fontSize: 13 }}>{entry.isDir ? '-' : entry.size}</td>
@@ -865,7 +880,12 @@ export default function Files() {
                      runDownloadRef.current?.(m.path, m.isDir);
                   }}
                 >
-                  <span style={{ wordBreak: 'break-all' }}>📄 {m.path}</span>
+                  <span style={{ wordBreak: 'break-all', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <span className="files-row-icon" aria-hidden>
+                      {m.isDir ? <Folder size={16} strokeWidth={2} /> : <FileText size={16} strokeWidth={2} />}
+                    </span>
+                    {m.path}
+                  </span>
                   <span style={{ fontSize: 12, color: '#64748b', flexShrink: 0 }}>{m.isDir ? t('files.type.dir', '文件夹') : t('files.type.file', '文件')}</span>
                 </button>
               ))}

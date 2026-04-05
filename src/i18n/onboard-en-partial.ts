@@ -3,7 +3,7 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.step.board': 'Choose hardware',
   'onboard.step.flash': 'Flash OS',
   'onboard.step.connect': 'Connect device',
-  'onboard.step.rdkclaw': 'Try AI',
+  'onboard.step.rdkclaw': 'Try RDKClaw',
 
   'onboard.board.x3.chip': 'Sunrise 3',
   'onboard.board.x3.desc': 'Entry robot dev kit, 200+ open algorithms',
@@ -19,16 +19,16 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.image.x5.tag': 'ubuntu22.04 / desktop GUI',
   'onboard.image.s100.tag': 'ubuntu22.04',
 
-  'onboard.skipRisk.1': 'On-device AI Agent unavailable (chat, automation)',
+  'onboard.skipRisk.1': 'On-device chat and automation unavailable',
   'onboard.skipRisk.2': 'Cannot remote-control via Feishu and similar channels',
-  'onboard.skipRisk.3': 'Skills (camera, inference, GPIO, etc.) cannot be invoked by AI',
+  'onboard.skipRisk.3': 'Skills (camera, inference, GPIO, etc.) cannot be used from chat',
 
   'onboard.deployErr.invalidConfig': 'Model config incomplete: save provider / model / API Key in the previous step.',
   'onboard.deployErr.jobNotFound': 'Deploy job expired or missing; start one-click deploy again.',
   'onboard.deployErr.deviceNotFound': 'Device not found; go back to connection step.',
   'onboard.deployErr.generic': 'Deploy failed; check logs and retry.',
 
-  'onboard.subtitle': 'Welcome — let’s set up your environment step by step',
+  'onboard.subtitle': 'Set up your environment in a few steps',
   'onboard.board.pick': 'Pick your RDK board:',
   'onboard.board.learnMore': 'Learn more',
   'onboard.btn.next': 'Next',
@@ -55,11 +55,12 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.model.descNeed': 'Configure the model (required) before OpenClaw one-click deploy. Used as default gateway on the board.',
   'onboard.model.providerTitle': 'Model provider',
   'onboard.model.nameLabel': 'Model name',
-  'onboard.model.namePh': 'e.g. qwen-plus / deepseek-chat',
+  'onboard.model.namePh': 'e.g. doubao-1.5-pro-256k / deepseek-chat',
   'onboard.model.keyPhSaved': 'Key on file — leave blank to keep',
   'onboard.model.keyPh': 'Enter API Key',
-  'onboard.model.basePh': 'e.g. https://api.deepseek.com/v1',
+  'onboard.model.basePh': 'e.g. https://ark.cn-beijing.volces.com/api/v3',
   'onboard.model.readyBanner': 'Model ready — continue OpenClaw deploy',
+  'onboard.model.optDoubao': 'Volcengine / Doubao',
   'onboard.model.optQwen': 'Qwen',
   'onboard.model.optDeepseek': 'DeepSeek',
   'onboard.model.optOpenai': 'OpenAI',
@@ -71,7 +72,7 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.skipDirect': 'Skip wizard',
 
   'onboard.oc.needModel': 'Submit model config first — go back to fill required fields.',
-  'onboard.oc.intro': 'OpenClaw is the on-device AI Agent runtime. One-click deploy installs, configures, and verifies.',
+  'onboard.oc.intro': 'OpenClaw runs on the board. One-click deploy installs, configures, and verifies.',
   'onboard.oc.job': 'Current job:',
   'onboard.oc.checking': 'Checking OpenClaw…',
   'onboard.oc.offline': 'Device unreachable — check network, IP, and SSH from this PC before installing OpenClaw.',
@@ -110,7 +111,8 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.oc.nextInstalled': 'Continue',
   'onboard.toast.skipWizard': 'Wizard skipped — reopen anytime in Settings',
 
-  'onboard.rdk.intro': 'RDKClaw is the built-in agent: natural language for device control, apps, and diagnostics. Next step',
+  'onboard.rdk.intro':
+    'RDKClaw is the through-line of Studio: orchestration across chat, your board, and OpenClaw — it understands your board, reads docs, runs commands, and turns goals into concrete steps. Next step',
   'onboard.rdk.tryTitle': 'Say hello',
   'onboard.rdk.tryQuote': '“Hello, RDKClaw!”',
   'onboard.rdk.send': 'Send',
@@ -118,7 +120,8 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.rdk.ocCardBadge': 'Smarter when configured',
   'onboard.rdk.ocCardDesc': 'After one-click deploy, on-device AI is more capable and stable.',
   'onboard.rdk.goOc': 'Go to OpenClaw',
-  'onboard.rdk.hint': 'You can type any task in the dock anytime — RDKClaw will plan and run.',
+  'onboard.rdk.hint':
+    'In the dock, describe a problem or goal anytime — RDKClaw breaks it into steps and uses tools and the board when needed to get it done.',
   'onboard.rdk.finish': 'Finish',
 
   'onboard.toast.ocReadySkip': 'OpenClaw ready — skipped deploy step',

@@ -24,19 +24,29 @@ export default class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       const isEn = uiIsEn();
+      const err = this.state.error;
       return (
-        <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>
-          <h2 style={{ color: '#ef4444', marginBottom: 12 }}>
+        <div className="error-boundary">
+          <h2 className="error-boundary-title">
             {translate(isEn, 'errorBoundary.title', '页面出现异常')}
           </h2>
-          <p style={{ fontSize: 14, marginBottom: 16 }}>{this.state.error.message}</p>
+          <p className="error-boundary-lead">
+            {translate(
+              isEn,
+              'errorBoundary.lead',
+              '当前区域渲染失败。可点击下方重试；若多次出现，请把「技术详情」一并反馈。',
+            )}
+          </p>
+          <details className="error-boundary-details">
+            <summary className="error-boundary-summary">
+              {translate(isEn, 'errorBoundary.details', '技术详情')}
+            </summary>
+            <pre className="error-boundary-pre">{err.message}</pre>
+          </details>
           <button
             type="button"
+            className="btn btn-primary error-boundary-retry"
             onClick={() => this.setState({ error: null })}
-            style={{
-              padding: '8px 20px', borderRadius: 8, border: '1px solid #e2e8f0',
-              background: '#fff', cursor: 'pointer', fontSize: 14,
-            }}
           >
             {translate(isEn, 'errorBoundary.retry', '重试')}
           </button>

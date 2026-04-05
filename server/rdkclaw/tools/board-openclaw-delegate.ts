@@ -3,9 +3,11 @@ import { readDevices } from "../../storage.js";
 import {
   OpenClawDeploymentManager,
   sshEndpointKey,
+  type ConfigData,
   type OpenClawHealthStatus,
 } from "../../managers/OpenClawDeploymentManager.js";
-import type { Device as SharedDevice } from "../../../shared/types.js";
+import { buildOpenClawModelGatewayFromStudioThinking } from "../../agent/provider-setup.js";
+import type { Device as SharedDevice, OpenClawStudioModelSyncMode } from "../../../shared/types.js";
 import {
   getCachedOpenClawAiReady,
   invalidateOpenClawHealthCache,
@@ -24,6 +26,10 @@ import {
   parseOpenClawBoardRpcError,
 } from "../openclaw-bridge-meta.js";
 import { resolvePersistedOrDefaultSshPassword } from "../../device-ssh-credentials.js";
+import {
+  OPENCLAW_POST_SYNC_HEALTH_MAX_WAIT_MS,
+  OPENCLAW_POST_SYNC_HEALTH_POLL_MS,
+} from "../../constants.js";
 
 function resolveDevicePassword(device: SharedDevice) {
   return resolvePersistedOrDefaultSshPassword(device);
@@ -65,14 +71,18 @@ const BOARD_LEARNING_CONTRACT = [
   "- 在有写权限且路径可用时，将复盘摘要落盘到 `~/.openclaw/workspace/memory/`（可按日期追加到 daily 文件）；若无法写入，需在结果中明确说明原因。",
 ].join("\n");
 
-/** 注入协作优先契约：先对齐再执行，避免把 OpenClaw 当成纯执行器 */
+/** 注入协作优先契约：先对齐 → 待 RDKClaw 回应 → 再执行（见下方 alignment_gate） */
 const BOARD_COLLAB_CONTRACT = [
   "---",
   "board_collaboration_contract (mandatory, zh):",
-  "- 本次是 **RDKClaw ↔ OpenClaw 协作**，不是单向派单。先给出 **[板端·对齐]**：你对目标/约束/验收的理解、主要风险、推荐路径（A/B 或取舍理由）。",
-  "- 若信息不足，先在 **[板端·对齐]** 里点名缺口并请求补充；需要联网/文档/策略判断时，优先用 [NEED_RDKCLAW] 请求 RDKClaw 支援。",
-  "- 执行阶段保持可见：对每个关键步骤输出「做什么→得到什么→下一步为什么」。",
-  "- 若你判断 RDKClaw 本地更快闭环（已给出可直跑命令、仅 1-2 步），请明确建议回切本地快路径，不要机械继续板端承接。",
+  "0) **执行门禁（硬）**：OpenClaw **必须先**输出 **[板端·对齐]**（目标/约束/验收理解、主要风险、拟定步骤或缺口）。在 **收到 RDKClaw 侧明确回应之前**，**禁止**执行会改变板端状态的操作：`apt`/`pip`、写文件或配置、`ros2 launch`、编译、后台常驻等。",
+  "1) **对齐闭环**：请同时阅读本消息中的 **`alignment_gate`** 行：",
+  "   - **`strict`**：本回合在**破坏性操作**前**仅**完成 [板端·对齐]（及必要的 [NEED_RDKCLAW]）；**须待 RDKClaw 通过 `board_openclaw_chat` 发来「同意执行 / 补充 / 修订」** 后，在**后续会话轮**再进入 **[板端·执行]**。不要把 delegate 当成「收到就一口气跑完」。",
+  "   - **`bypassed`**：`rdkclaw_guidance` 已含「对齐完成·可直接执行」或「已由 RDKClaw 确认」的可直跑命令时，仍须**先**写简短 [板端·对齐] 复述「理解一致」，**然后**可在**同一回复**中进入执行。",
+  "2) **只读例外（仅 strict 时）**：为完成对齐所必需的 **只读** 探测（`ls`、`ros2 pkg list`、`topic echo` 等）允许；**不得**借机安装、写盘或启动长驻服务。",
+  "3) 信息不足时：在 [板端·对齐] 点名缺口；需文档/联网/策略时用 [NEED_RDKCLAW]。",
+  "4) 若判断 RDKClaw 本地更快闭环，在 [板端·对齐] 中明确建议回切，勿闷头执行。",
+  "5) 执行阶段（门禁放行后）保持可见：每步「做什么→得到什么→下一步为什么」。",
 ].join("\n");
 
 const DELEGATE_STALL_CHECK_MS = 10_000;
@@ -87,6 +97,123 @@ function getBoardHealth(
   return new Promise((resolve) => {
     manager.getHealthStatus(boardDevice, (status) => resolve(status));
   });
+}
+
+function getCurrentConfigPromise(
+  manager: OpenClawDeploymentManager,
+  boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
+): Promise<ConfigData | null> {
+  return new Promise((resolve) => {
+    manager.getCurrentConfig(boardDevice, (config, success) => {
+      resolve(success ? config : null);
+    });
+  });
+}
+
+function boardModelGatewayIsUnset(config: ConfigData | null): boolean {
+  if (!config?.modelGateway) return true;
+  const mg = config.modelGateway;
+  const bu = String(mg.baseUrl || '').trim();
+  const key = String(mg.apiKey || '').trim();
+  return !bu || !key;
+}
+
+function updateConfigModelGateway(
+  manager: OpenClawDeploymentManager,
+  boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
+  modelGateway: {
+    baseUrl: string;
+    apiKey: string;
+    modelId: string;
+    modelName: string;
+    api: string;
+    placement?: "replace_primary" | "preset_only";
+  },
+  onProgress?: (chunk: string) => void,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    manager.updateConfig(
+      boardDevice,
+      { modelGateway },
+      (chunk) => onProgress?.(chunk),
+      (success) => resolve(success),
+    );
+  });
+}
+
+function normalizeOpenclawStudioSyncMode(raw: SharedDevice["openclawStudioModelSync"] | undefined): OpenClawStudioModelSyncMode {
+  if (raw === "off" || raw === "when_empty" || raw === "when_unhealthy" || raw === "always" || raw === "preset_only") {
+    return raw;
+  }
+  return "when_unhealthy";
+}
+
+/**
+ * updateConfig 会合并配置并走网关重启脚本；重启后端口/token 可能短暂不可用。
+ * 在此窗口内轮询 health，避免委派刚一开始就失败。
+ */
+async function waitForHealthAfterConfigSync(
+  manager: OpenClawDeploymentManager,
+  boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
+  onProgress?: (chunk: string) => void,
+  signal?: AbortSignal,
+): Promise<OpenClawHealthStatus> {
+  const pollMs = Math.max(
+    1_000,
+    Number(process.env.RDK_OPENCLAW_POST_SYNC_POLL_MS || OPENCLAW_POST_SYNC_HEALTH_POLL_MS) || OPENCLAW_POST_SYNC_HEALTH_POLL_MS,
+  );
+  const maxMs = Math.max(
+    pollMs * 2,
+    Number(process.env.RDK_OPENCLAW_POST_SYNC_MAX_WAIT_MS || OPENCLAW_POST_SYNC_HEALTH_MAX_WAIT_MS) ||
+      OPENCLAW_POST_SYNC_HEALTH_MAX_WAIT_MS,
+  );
+  const deadline = Date.now() + maxMs;
+  let health = await getBoardHealth(manager, boardDevice);
+  let lastHintAt = 0;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error("操作已中止");
+    if (health.aiReady) return health;
+    const now = Date.now();
+    if (now - lastHintAt > 10_000) {
+      onProgress?.(
+        "\n[预检] 网关刚完成配置合并/重启，等待板端 OpenClaw 恢复就绪（若长时间卡住，可在 OpenClaw 页手动「重启网关」后再委派）…\n",
+      );
+      lastHintAt = now;
+    }
+    const remain = deadline - now;
+    if (remain <= 0) break;
+    await abortAwareDelay(Math.min(pollMs, remain), signal);
+    health = await getBoardHealth(manager, boardDevice);
+  }
+  return health;
+}
+
+function resolveStudioModelSyncDecision(
+  mode: OpenClawStudioModelSyncMode,
+  cfg: ConfigData | null,
+  health: OpenClawHealthStatus,
+  mg: NonNullable<ReturnType<typeof buildOpenClawModelGatewayFromStudioThinking>>,
+): { placement: "replace_primary" | "preset_only" } | null {
+  if (mode === "off") return null;
+  const unset = boardModelGatewayIsUnset(cfg);
+  const unhealthy = !health.aiReady;
+
+  if (mode === "when_empty") {
+    if (!unset) return null;
+    return { placement: "replace_primary" };
+  }
+  if (mode === "when_unhealthy") {
+    if (unset || unhealthy) return { placement: "replace_primary" };
+    return null;
+  }
+  if (mode === "always") {
+    return { placement: "replace_primary" };
+  }
+  if (mode === "preset_only") {
+    if (unset) return { placement: "replace_primary" };
+    return { placement: "preset_only" };
+  }
+  return null;
 }
 
 function restartGateway(
@@ -143,21 +270,75 @@ function hasBoardAlignmentSection(text: string): boolean {
 
 async function ensureBoardGatewayReady(
   manager: OpenClawDeploymentManager,
-  boardDevice: { ip: string; port?: number; userName: string; id?: string; password?: string },
+  device: SharedDevice,
   onProgress?: (chunk: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   if (signal?.aborted) throw new Error("操作已中止");
+  const boardDevice = toBoardDevice(device);
   const deviceId = String(boardDevice.id || "").trim();
-  if (deviceId && getCachedOpenClawAiReady(deviceId) === true) {
+  const syncMode = normalizeOpenclawStudioSyncMode(device.openclawStudioModelSync);
+  if (deviceId && getCachedOpenClawAiReady(deviceId) === true && syncMode !== "always" && syncMode !== "preset_only") {
     onProgress?.("\n[预检] 近期已确认板端 OpenClaw 就绪，跳过重复健康检测。\n");
     return;
   }
 
   let health = await getBoardHealth(manager, boardDevice);
-  if (health.aiReady) {
+  if (health.aiReady && syncMode !== "always" && syncMode !== "preset_only") {
     if (deviceId) setCachedOpenClawAiReady(deviceId, true);
     return;
+  }
+
+  const skipStudioSync = process.env.RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC === "1";
+  if (skipStudioSync && syncMode !== "off") {
+    onProgress?.(
+      "\n[预检] 已设置 RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC=1，跳过自动下发 Studio 模型（避免预检触发网关重启）；请先在 OpenClaw 大模型页保存或由你确认配置已稳定。\n",
+    );
+  }
+
+  if (health.installed && syncMode !== "off" && !skipStudioSync) {
+    const mg = buildOpenClawModelGatewayFromStudioThinking();
+    const cfg = await getCurrentConfigPromise(manager, boardDevice);
+    const decision = mg ? resolveStudioModelSyncDecision(syncMode, cfg, health, mg) : null;
+    if (decision && mg) {
+      const label =
+        decision.placement === "preset_only"
+          ? "将 Studio「深度思考」写入板端建议模型 rdk-studio-default（不改当前主模型，可在 OpenClaw 设置中切换启用）"
+          : "用 Studio 当前「深度思考」模型更新板端网关（custom-gateway）";
+      onProgress?.(`\n[预检] ${label}…\n`);
+      if (signal?.aborted) throw new Error("操作已中止");
+      const synced = await updateConfigModelGateway(
+        manager,
+        boardDevice,
+        { ...mg, placement: decision.placement },
+        onProgress,
+      );
+      if (deviceId) invalidateOpenClawHealthCache(deviceId);
+      if (synced) {
+        health = await waitForHealthAfterConfigSync(manager, boardDevice, onProgress, signal);
+        if (decision.placement === "preset_only") {
+          onProgress?.(
+            "\n[预检] Studio 建议模型已合并到板端；若需使用，请在板端 OpenClaw 将主模型切换为 rdk-studio-default/" +
+              mg.modelId +
+              "。\n",
+          );
+          if (health.aiReady) {
+            if (deviceId) setCachedOpenClawAiReady(deviceId, true);
+            return;
+          }
+        } else if (health.aiReady) {
+          if (deviceId) setCachedOpenClawAiReady(deviceId, true);
+          onProgress?.("\n[预检] 模型网关已写入并生效，板端 OpenClaw 就绪。\n");
+          return;
+        }
+      } else {
+        onProgress?.("\n[预检] 自动同步 Studio 模型到板端失败，请在本机 OpenClaw 面板手动配置大模型网关。\n");
+      }
+    } else if (!mg && (boardModelGatewayIsUnset(cfg) || !health.aiReady)) {
+      onProgress?.(
+        "\n[预检] 需要下发 Studio 模型，但 Studio 也未配置有效 API Key（或模型名）；请在 Studio 模型设置或板端手动配置。\n",
+      );
+    }
   }
 
   if (health.installed && !health.gatewayRunning) {
@@ -212,9 +393,11 @@ export function boardOpenClawDelegateTool(
       "将任务交给板端 OpenClaw 与 RDKClaw 协同推进。不是把 OpenClaw 当纯执行器，而是共享上下文并共同决策路径。\n" +
       "**Studio 可见性**：板端流式输出经 **tool_progress** 推到对话里的「板端 OpenClaw」协作块；请展开该块查看实时日志。委派消息会附带 **board_visibility_contract**，要求板端用「[板端] 阶段 · …」分段说明；技能 **RDK Board Progress Reporter**（仓库 `skills/rdk-board-progress-reporter`）可装到板端强化可见性。若只见「完成」而无过程，检查折叠区或板端是否按契约输出。\n\n" +
       "规则：\n" +
-      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 板端 **OpenClaw Gateway 已运行**（本工具会预检，未起则尝试重启）；③ 若任务需 **apt/clawhub/云端模型 API** 等，板子还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
-      "- ALWAYS 在消息里提供协作上下文包（目标、约束、已验证证据、失败模式、验收标准），让 OpenClaw 先对齐再执行\n" +
-      "- ALWAYS 先做 RDKClaw 本地速度评估；assess 通过不等于必须 delegate。仅当板端明显更优、强依赖板端技能/会话、或本地进入多轮试错时再委派\n" +
+      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 板端 **OpenClaw Gateway 已运行**（本工具会预检；按设备「Studio→板端模型同步策略」可把当前「深度思考」写入板端 `custom-gateway` 或建议项 `rdk-studio-default`；写入会触发与面板保存相同的合并/网关重启流程，预检会**轮询等待**就绪，避免刚重启就失败）；③ 若任务需 **apt/clawhub/云端模型 API** 等，板子还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
+      "- **避免预检反复动网关**：若你希望委派前**不要**自动下发 Studio 模型（减少重启），可在工作室服务端环境变量设 `RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC=1`，改在 OpenClaw 页手动保存大模型后再委派。\n" +
+      "- ALWAYS 在消息里提供协作上下文包（目标、约束、已验证证据、失败模式、验收标准），让双方先对齐再推进（共探，不是单方面派活）\n" +
+      "- assess 通过不等于必须 delegate：比较的是**谁更快办成**——你已确认可直跑时常先 SSH；板端在技能链/现场迭代上更快时再委派；本地进入多轮试错时倾向并线到板端会话\n" +
+      "- **对齐门禁**：板端会收到 `alignment_gate`。`strict` 时 OpenClaw **先只出 [板端·对齐]**，须 **你**用 `board_openclaw_chat` 明确回应（同意/补充/修订）后它才应执行破坏性步骤；若 delegate **首次返回**仅有对齐而无执行，**下一轮必须** `board_openclaw_chat` 放行。已在 guidance 写清「对齐完成·可直接执行」或「已由 RDKClaw 确认」命令时走 `bypassed`，仍须先简短对齐复述。\n" +
       "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
       "- ALWAYS 在 guidance/context 中写明：验收标准、已执行命令与关键输出、失败模式、约束条件（网络/权限/板型）\n" +
       "- ALWAYS 要求 OpenClaw 在完成后输出可复用复盘（命令链/失败信号/验收）并尽量落盘到板端 memory，帮助后续同类任务提速\n" +
@@ -229,7 +412,11 @@ export function boardOpenClawDelegateTool(
         task: { type: "string", description: "要交给板端执行的完整任务描述" },
         intent: { type: "string", description: "可选意图标签，如 diagnose/deploy/repair" },
         context: { type: "string", description: "可选补充上下文（设备状态、约束条件）" },
-        guidance: { type: "string", description: "RDKClaw 对 OpenClaw 的执行建议：推荐方案、注意事项、参考文档链接等。帮助 OpenClaw 更高效地完成任务" },
+        guidance: {
+          type: "string",
+          description:
+            "RDKClaw 对 OpenClaw 的建议与上下文。若本回合在 Studio 侧**已完成对齐**、可让板端同轮执行，须含 **「对齐完成·可直接执行」**（或「已由 RDKClaw 确认」的可直跑命令）；否则留空或不含上述短语时板端为 **strict** 门禁，须待你用 board_openclaw_chat 回应后再执行。",
+        },
         encourageSkills: { type: "boolean", description: "是否鼓励 OpenClaw 优先使用自身已安装的技能来完成任务（默认 true）" },
         sessionId: { type: "string", description: "可选会话ID，用于连续对话" },
       },
@@ -241,12 +428,7 @@ export function boardOpenClawDelegateTool(
       if (!device) throw new Error("设备不存在，无法委派板端 OpenClaw");
 
       const boardDevice = toBoardDevice(device);
-      await ensureBoardGatewayReady(
-        manager,
-        boardDevice,
-        (chunk) => onProgress?.(chunk, ctx.toolCallId),
-        ctx.abortSignal,
-      );
+      await ensureBoardGatewayReady(manager, device, (chunk) => onProgress?.(chunk, ctx.toolCallId), ctx.abortSignal);
       const health = await getBoardHealth(manager, boardDevice);
       const net = await probeBoardConnectivity(manager, boardDevice);
       const strictAlignmentGate = Boolean(health.aiReady && net.wifiConnected);
@@ -273,7 +455,7 @@ export function boardOpenClawDelegateTool(
         `task: ${input.task}`,
       ];
       msgParts.push(
-        "\ncollaboration_mode: RDKClaw 与 OpenClaw 协作共解（先对齐，再执行；必要时回切本地快路径）",
+        "\ncollaboration_mode: RDKClaw 与 OpenClaw 双伙伴共探（先对齐再推进；谁快谁牵头；必要时换道/回切本地快路径）",
       );
       if (assessInject) {
         msgParts.push(`\n${assessInject}`);
@@ -286,6 +468,23 @@ export function boardOpenClawDelegateTool(
             ? `\nrdkclaw_guidance (含已确认命令，可直接执行无需重复探测): ${g}`
             : `\nrdkclaw_guidance: ${g}`,
         );
+      }
+      {
+        const g = input.guidance?.trim() ?? "";
+        const hasConfirmedCmd = /RDKClaw\s*已确认|已由\s*RDKClaw\s*确认|已确认.*可直接执行/i.test(g);
+        const alignmentCompleted =
+          /对齐完成[·•]?\s*可直接执行|ALIGNMENT_COMPLETE|对齐\s*[:：]\s*完成/i.test(g);
+        const bypassAlignmentGate = hasConfirmedCmd || alignmentCompleted;
+        msgParts.push(
+          bypassAlignmentGate
+            ? "\nalignment_gate: bypassed（guidance 已含「对齐完成」或「已确认命令」；须先简短 [板端·对齐] 复述一致，再在同一回复中执行）"
+            : "\nalignment_gate: strict（须先仅输出 [板端·对齐]；待 RDKClaw 经 board_openclaw_chat 明确回应后再执行 apt/写盘/launch/长驻等）",
+        );
+        if (!strictAlignmentGate) {
+          msgParts.push(
+            "\nalignment_gate_relaxed: 网关/网络门槛未满足时已放宽「须先 chat」的硬性（避免卡死）；仍应先 [板端·对齐] 并尽量与 RDKClaw 同步后再动破坏性步骤。",
+          );
+        }
       }
       if (boardSkills && boardSkills.length > 0) {
         const installed = boardSkills.map((s) =>

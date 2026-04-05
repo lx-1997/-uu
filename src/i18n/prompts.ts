@@ -25,5 +25,7 @@ export const ONE_SHOT_DEV_WORKFLOW_PROMPT_EN = [
 export const DASHBOARD_HEALTH_CHECK_PROMPT_ZH = '帮我做一次设备体检，并按风险从高到低给出处理建议。';
 export const DASHBOARD_HEALTH_CHECK_PROMPT_EN = 'Run a full health check on this device';
 
-export const DASHBOARD_CHAT_INTRO_PROMPT_ZH = '介绍一下 RDK Studio 和 RDKClaw 能做什么，并给我 3 个上手建议。';
-export const DASHBOARD_CHAT_INTRO_PROMPT_EN = 'What can RDK Studio and RDKClaw do? Briefly describe your capabilities.';
+export const DASHBOARD_CHAT_INTRO_PROMPT_ZH =
+  '介绍一下 RDK Studio 与 RDKClaw：各自擅长什么、如何帮我快速解决板端开发与排障问题，并给 3 条可立刻执行的上手建议。';
+export const DASHBOARD_CHAT_INTRO_PROMPT_EN =
+  'Introduce RDK Studio and RDKClaw: what each is best at, how you help solve real board bring-up and debugging, and give 3 actionable getting-started tips.';

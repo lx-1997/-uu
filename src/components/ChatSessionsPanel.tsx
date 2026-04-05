@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, MessageCircle, MessageSquarePlus, Trash2 } from 'lucide-react';
+import { Download, MessageSquare, MessageSquarePlus, Trash2 } from 'lucide-react';
 import { useAppState } from '../hooks/useAppState';
 import { useI18n } from '../i18n/use-i18n';
 import {
@@ -446,7 +446,7 @@ export default function ChatSessionsPanel({
                     >
                       <div className="ai-chat-hub-v2-row-inner">
                         <span className="ai-chat-hub-v2-row-glyph" aria-hidden>
-                          <MessageCircle
+                          <MessageSquare
                             size={18}
                             strokeWidth={active ? 2.25 : 1.75}
                             className={active ? 'is-on' : undefined}

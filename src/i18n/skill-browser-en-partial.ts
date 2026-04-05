@@ -100,15 +100,15 @@ category: Custom
   'skillBrowser.deploy': 'Deploy to board',
   'skillBrowser.resetTemplate': 'Reset template',
   'skillBrowser.connectFirst': 'Connect a device first',
-  'skillBrowser.linkTitle': 'Link to skill (AI)',
+  'skillBrowser.linkTitle': 'Link to skill',
   'skillBrowser.linkDesc':
-    'Paste a GitHub / NodeHub / doc URL; AI will analyze and generate a deployable OpenClaw skill.',
+    'Paste a GitHub / NodeHub / doc URL; chat will draft a deployable OpenClaw skill from the content.',
   'skillBrowser.urlPh': 'Paste URL (GitHub / NodeHub / docs)',
   'skillBrowser.kindLabel': 'Detected type:',
   'skillBrowser.goalPh': 'Optional: extra goal (e.g. extract YOLO inference commands)',
-  'skillBrowser.aiRun': 'Send to AI to generate',
+  'skillBrowser.aiRun': 'Send to chat',
   'skillBrowser.linkHint':
-    'Sends instructions to AI chat: it should output a full SKILL.md and note sources/gaps first, and only call write tools after you clearly confirm in chat. You can also copy SKILL to the Create tab and deploy with the UI confirmation.',
+    'Sends instructions to chat: output a full SKILL.md and note sources/gaps first; write tools only after you confirm. Or copy SKILL to the Create tab and deploy from the UI.',
 
   'skillBrowser.confirm.cancel': 'Cancel',
   'skillBrowser.confirm.deploy': 'Deploy',

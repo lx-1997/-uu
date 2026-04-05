@@ -279,7 +279,11 @@
   color: var(--text-primary);
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  max-width: 85%;
+  max-width: min(85%, 100%);
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .config-chat-msg.user {
@@ -292,6 +296,40 @@
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   align-self: flex-start;
+}
+
+/* OpenClaw 对话区 Markdown：超长 npm URL 等必须折断，禁止撑出主列 */
+.config-chat-msg .md-code-block {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.config-chat-msg .md-code-body {
+  margin: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.config-chat-msg .md-code-body code {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.config-chat-msg .md-inline-code {
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.config-chat-msg a {
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 /* 与 Dock 共用 MarkdownRenderer：表格 / 分隔线 / 引用 */
@@ -530,28 +568,245 @@
 
 /* ═══════════════════════════════════════════════════════
    OpenClaw — Split Layout (Chat left, Panel right)
+   产品级子页面：层次、间距、动效、可访问焦点统一在本节维护
    ═══════════════════════════════════════════════════════ */
 
 .oc-layout {
+  --oc-space-1: 4px;
+  --oc-space-2: 8px;
+  --oc-space-3: 12px;
+  --oc-space-4: 16px;
+  --oc-space-5: 20px;
+  --oc-space-6: 24px;
+  --oc-chat-bubble-radius: 14px;
+  --oc-transition: color 0.18s var(--ease-out), background 0.18s var(--ease-out),
+    border-color 0.18s var(--ease-out), box-shadow 0.2s var(--ease-out);
   display: grid;
-  grid-template-columns: 1fr 380px;
+  /* minmax(0,1fr) 避免长不可断行撑开整列，侵入右侧栏 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
   gap: 0;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.oc-layout--deploying .oc-setup-item-action[aria-busy='true'],
+.oc-layout--deploying .oc-setup-item-action:disabled {
+  cursor: not-allowed;
 }
 
 .oc-layout.panel-collapsed {
-  grid-template-columns: 1fr 0;
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+
+/* 仅「一键部署」向导：单列全宽，避免右侧空一列导致整体偏左 */
+.oc-layout.oc-layout--wizard {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ── OpenClaw：一键部署向导（居中卡片 + 克制配色，与 Dashboard 层次一致） ── */
+.oc-setup-wizard {
+  width: 100%;
+  min-height: 0;
+  align-self: stretch;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(20px, 4vh, 40px) clamp(16px, 3vw, 28px) 32px;
+  box-sizing: border-box;
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary)) 0%,
+    var(--bg-primary) 42%,
+    var(--bg-secondary) 100%
+  );
+}
+
+.oc-setup-wizard-card {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 2rem 1.75rem 2.25rem;
+  background: color-mix(in srgb, var(--bg-elevated) 97%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--border) 92%, var(--accent) 8%);
+  border-radius: calc(var(--radius-lg) + 2px);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--text-primary) 5%, transparent),
+    0 12px 40px color-mix(in srgb, var(--text-primary) 8%, transparent),
+    var(--shadow-md);
+  box-sizing: border-box;
+}
+
+.oc-setup-wizard-hero {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.oc-setup-wizard-icon-wrap {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 1rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    circle at 30% 25%,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    color-mix(in srgb, var(--text-primary) 6%, transparent)
+  );
+  color: var(--accent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 25%, transparent);
+}
+
+.oc-setup-wizard-icon-wrap .material-symbols-outlined {
+  font-size: 1.75rem !important;
+}
+
+.oc-setup-wizard-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.oc-setup-wizard-lead {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+  max-width: 42em;
+  margin-inline: auto;
+}
+
+.oc-deploy-wifi-prereq {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  margin: 0 0 1.5rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--text-secondary) 55%, var(--border));
+  text-align: left;
+}
+
+.oc-deploy-wifi-prereq-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  opacity: 0.9;
+}
+
+.oc-deploy-wifi-prereq-icon .material-symbols-outlined {
+  font-size: 1.125rem !important;
+}
+
+.oc-deploy-wifi-prereq-text {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.oc-setup-wizard-section {
+  text-align: center;
+}
+
+.oc-setup-wizard-section-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.oc-setup-wizard-micro {
+  margin: 0 0 0.75rem;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.oc-setup-wizard-studio-sync {
+  margin: 0 0 1rem;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border));
+}
+
+.oc-deploy-provider-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin: 0 auto 1rem;
+  max-width: 100%;
+}
+
+.oc-deploy-provider-chip.chip {
+  font-size: 0.6875rem;
+  padding: 6px 11px;
+  border-radius: var(--radius-sm);
+}
+
+.oc-setup-wizard-fields {
+  text-align: left;
+  margin-top: 0.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.oc-setup-wizard-cta {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.oc-setup-wizard-submit.btn-primary {
+  min-width: min(100%, 300px);
+  padding: 10px 1.5rem;
+  font-weight: 600;
+}
+
+.oc-setup-wizard .oc-setup-deploy-block {
+  margin-top: 1.5rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+[data-theme='cyber'] .oc-setup-wizard {
+  background: linear-gradient(165deg, color-mix(in srgb, var(--bg-primary) 70%, #0f172a) 0%, var(--bg-primary) 50%);
+}
+
+[data-theme='cyber'] .oc-setup-wizard-card {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 
 /* ── Left: Chat column ── */
 .oc-main {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-secondary) 55%, var(--bg-primary)) 0%,
+    var(--bg-primary) 28%,
+    var(--bg-primary) 100%
+  );
   /* 条带贴底；略留缝避免与系统 Dock / 手势条重叠 */
   padding-bottom: max(6px, env(safe-area-inset-bottom, 0px));
 }
@@ -559,49 +814,114 @@
 .oc-status-bar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--border);
+  gap: var(--oc-space-3);
+  padding: var(--oc-space-3) var(--oc-space-5);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
   flex-shrink: 0;
   flex-wrap: wrap;
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--accent) 4%);
+  backdrop-filter: blur(8px);
 }
 
 .oc-status-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--oc-space-2);
   font-size: 0.75rem;
   white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  transition: var(--oc-transition);
+}
+
+.oc-status-item:hover {
+  border-color: color-mix(in srgb, var(--border) 100%, var(--accent) 8%);
 }
 
 .oc-status-label {
   color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .oc-status-value {
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.oc-status-bar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--oc-space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* 顶栏 / 对话工具条：统一小号按钮字号，避免散落 inline style */
+.oc-layout .oc-toolbar-btn.btn-sm {
+  font-size: 0.6875rem;
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.oc-pairing-trust-chip {
+  margin-top: 10px;
 }
 
 .oc-chat-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--border);
+  gap: var(--oc-space-3);
+  padding: var(--oc-space-2) var(--oc-space-5);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
   font-size: 0.75rem;
   flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
+}
+
+.oc-chat-header-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .oc-chat-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  overflow-x: hidden;
+  padding: var(--oc-space-4) var(--oc-space-5);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--oc-space-3);
+  min-width: 0;
   min-height: 0;
+  scroll-behavior: smooth;
+}
+
+/* OpenClaw 主列对话气泡：与 Dock 解耦，单独做产品级圆角与阴影 */
+.oc-chat-body .config-chat-msg {
+  max-width: min(92%, 720px);
+  line-height: 1.58;
+  transition: var(--oc-transition);
+}
+
+.oc-chat-body .config-chat-msg.ai {
+  border-radius: var(--oc-chat-bubble-radius) var(--oc-chat-bubble-radius) var(--oc-chat-bubble-radius) 4px;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--text-primary) 6%, transparent),
+    0 8px 24px color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--border) 90%, var(--accent) 10%);
+}
+
+.oc-chat-body .config-chat-msg.user {
+  border-radius: var(--oc-chat-bubble-radius) var(--oc-chat-bubble-radius) 4px var(--oc-chat-bubble-radius);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .oc-chat-empty {
@@ -609,21 +929,39 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: var(--oc-space-3);
   flex: 1;
-  padding: 40px 20px;
+  padding: var(--oc-space-6) var(--oc-space-5);
   text-align: center;
+  min-height: min(40vh, 280px);
 }
 
 .oc-chat-empty-icon {
-  font-size: 2.5rem;
+  font-size: 2.75rem;
   color: var(--text-muted);
-  opacity: 0.5;
+  opacity: 0.45;
+  filter: grayscale(0.2);
 }
 
 .oc-chat-empty strong {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.oc-chat-empty::after {
+  content: '';
+  display: block;
+  max-width: 200px;
+  height: 1px;
+  margin-top: var(--oc-space-2);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--border) 80%, transparent),
+    transparent
+  );
 }
 
 .oc-quick-prompts {
@@ -715,13 +1053,126 @@
   cursor: not-allowed;
 }
 
+/* OpenClaw 页底输入：说明条 + 可编辑/可发送分离，避免「全灰」无反馈 */
+.oc-composer-wrap {
+  padding: 0 20px 24px;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.oc-composer-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 auto;
+  max-width: min(720px, 100%);
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+  border-radius: var(--radius-md);
+}
+
+.oc-composer-hint-icon {
+  font-size: 1rem !important;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+.oc-composer-shell {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  margin: 0 auto;
+  max-width: min(720px, 100%);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.oc-composer-textarea {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  resize: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding: 8px 0;
+  min-height: 24px;
+  max-height: 120px;
+  font-family: inherit;
+}
+
+.oc-composer-textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.oc-composer-send {
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border: none;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: not-allowed;
+  transition: background 0.2s, color 0.2s;
+  margin-bottom: 4px;
+}
+
+.oc-composer-send.is-active {
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.oc-composer-send:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: var(--bg-secondary) !important;
+  color: var(--text-muted) !important;
+  box-shadow: none;
+}
+
+.oc-composer-send.is-active:disabled {
+  background: var(--bg-secondary) !important;
+  color: var(--text-muted) !important;
+}
+
 /* ── Right: Panel column ── */
 .oc-panel {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg-primary);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-secondary) 40%, var(--bg-primary)) 0%,
+    var(--bg-primary) 18%
+  );
+  border-left: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   transition: width var(--duration-normal) var(--ease-out);
 }
 
@@ -729,24 +1180,151 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: var(--oc-space-3) var(--oc-space-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
   flex-shrink: 0;
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--bg-elevated) 97%, var(--accent) 3%);
 }
 
 .oc-panel-header strong {
   font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
 .oc-panel-body {
   flex: 1 1 0;
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 0;
   min-height: 0;
+}
+
+/* 控制面板：顶栏 Tab（替代内联 style，统一焦点环与动效） */
+.oc-panel-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 0 var(--oc-space-5);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 65%, var(--bg-primary));
+  flex-shrink: 0;
+}
+
+.oc-tab-btn {
+  position: relative;
+  padding: var(--oc-space-3) 0;
+  margin-right: var(--oc-space-5);
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: var(--oc-transition);
+}
+
+.oc-tab-btn:hover {
+  color: var(--text-secondary);
+}
+
+.oc-tab-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.oc-tab-btn.active {
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.oc-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 85%, transparent),
+    var(--accent)
+  );
+}
+
+.oc-panel-tab-scroll {
+  padding: var(--oc-space-5);
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.oc-tab-content {
+  animation: oc-tab-fade 0.22s var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-tab-content {
+    animation: none;
+  }
+}
+
+@keyframes oc-tab-fade {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.oc-deploy-inline-actions {
+  display: flex;
+  gap: var(--oc-space-2);
+  margin-top: var(--oc-space-2);
+  align-items: center;
+}
+
+.oc-deploy-inline-actions .btn-primary {
+  flex: 1;
+  min-width: 0;
+}
+
+.oc-section-title {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+  margin: 0 0 var(--oc-space-3);
+}
+
+.oc-section-lead {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 var(--oc-space-3);
+}
+
+.oc-divider-spaced {
+  margin: var(--oc-space-4) 0 !important;
+}
+
+.oc-chip-danger {
+  color: var(--danger) !important;
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border)) !important;
+}
+
+.oc-chip-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-secondary)) !important;
 }
 
 .oc-panel-section {
@@ -853,7 +1431,9 @@
 
 .oc-actions-grid .chip {
   font-size: 0.6875rem;
-  padding: 5px 10px;
+  min-height: 36px;
+  padding: 8px 12px;
+  touch-action: manipulation;
 }
 
 /* ── Deploy compact ── */
@@ -1026,37 +1606,60 @@
 /* ── OpenClaw：一键部署进度 + 日志（主列，紧贴 Agent 状态行下方） ── */
 .oc-deploy-main-strip {
   flex-shrink: 0;
-  padding: 10px 20px 12px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--accent) 7%, var(--bg-surface));
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--oc-space-3) var(--oc-space-5) var(--oc-space-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background:
+    radial-gradient(
+      120% 180% at 50% 0%,
+      color-mix(in srgb, var(--accent) 14%, transparent) 0%,
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--bg-elevated) 88%, var(--bg-secondary));
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .oc-deploy-main-strip-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--oc-space-3);
   flex-wrap: wrap;
 }
 
 .oc-deploy-main-strip-title {
   font-size: 0.8125rem;
   font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text-primary);
 }
 
 .oc-deploy-main-strip-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--oc-space-2);
   flex-wrap: wrap;
   margin-left: auto;
 }
 
+/* 四步进度：在条带内水平居中，避免「整块贴左、右侧空洞」 */
 .oc-deploy-main-strip .oc-install-progress {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
+  margin-top: var(--oc-space-3);
+  padding-top: var(--oc-space-3);
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.oc-deploy-main-strip .oc-install-steps-track {
+  width: 100%;
+  max-width: 440px;
+  margin-inline: auto;
+  justify-content: space-between;
 }
 
 .oc-deploy-main-hint {
@@ -1078,12 +1681,53 @@
   border: 1px solid var(--warn);
 }
 
+.oc-deploy-main-hint--error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--text-primary);
+  background: var(--danger-subtle);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+.oc-deploy-main-hint--error .oc-deploy-main-hint-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 1.125rem !important;
+  color: var(--danger);
+}
+
+.oc-deploy-main-hint--error .oc-deploy-main-hint-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.oc-deploy-main-hint--error .oc-deploy-main-hint-body strong {
+  display: block;
+  font-size: 0.75rem;
+  margin-bottom: 4px;
+}
+
+.oc-deploy-main-hint--error .oc-deploy-main-hint-body p {
+  margin: 0 0 10px;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.oc-deploy-main-strip.oc-deploy-main-strip--failed .oc-deploy-main-strip-title {
+  color: var(--danger);
+}
+
 .oc-deploy-main-log {
   margin: 10px 0 0;
   display: block;
+  max-width: 100%;
+  min-width: 0;
   max-height: min(42vh, 360px);
   min-height: 120px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 10px 12px;
   font-family: var(--font-mono);
   font-size: 0.7rem;
@@ -1094,6 +1738,259 @@
   border-radius: var(--radius-md);
   white-space: pre-wrap;
   word-break: break-all;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+/* ── OpenClaw：一键部署「终端」日志（CI/GitHub Actions 风格） ── */
+.oc-setup-deploy-block {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.oc-setup-deploy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.oc-deploy-log-panel {
+  border-radius: calc(var(--radius-md) + 2px);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 85%, var(--accent) 15%);
+  background: var(--bg-elevated);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--text-primary) 5%, transparent),
+    0 10px 36px color-mix(in srgb, #0f172a 12%, transparent);
+  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.oc-deploy-log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oc-space-3);
+  flex-wrap: wrap;
+  padding: var(--oc-space-3) var(--oc-space-4);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 8%, var(--bg-elevated)) 0%,
+    color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-elevated)) 100%
+  );
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.oc-deploy-log-toolbar-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.oc-deploy-log-toolbar-icon {
+  font-size: 1.25rem !important;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.oc-deploy-log-toolbar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.oc-deploy-log-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.oc-deploy-log-subtitle {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.oc-deploy-log-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.oc-deploy-log-copy {
+  font-size: 0.6875rem !important;
+}
+
+.oc-deploy-log-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--ok);
+  text-transform: uppercase;
+}
+
+.oc-deploy-log-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 35%, transparent);
+  animation: oc-deploy-live-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes oc-deploy-live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(0.92);
+  }
+}
+
+.oc-deploy-log-truncated {
+  padding: 6px 14px;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--warn);
+  background: var(--warn-subtle);
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border));
+}
+
+.oc-deploy-log-body {
+  min-height: 220px;
+  max-height: min(48vh, 440px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-width: 100%;
+  padding: var(--oc-space-3) 0 var(--oc-space-4);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.58;
+  tab-size: 2;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent) 0%, transparent 32px),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, #0f172a) 0%, #0f172a 12px),
+    color-mix(in srgb, var(--bg-inset) 35%, #0c1222);
+  color: #cbd5e1;
+  box-sizing: border-box;
+  scroll-behavior: smooth;
+}
+
+.oc-deploy-log-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.oc-deploy-log-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, #94a3b8 35%, transparent);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+[data-theme='cyber'] .oc-deploy-log-body {
+  background: color-mix(in srgb, var(--bg-primary) 55%, #020617);
+}
+
+.oc-deploy-log-placeholder {
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: color-mix(in srgb, #cbd5e1 55%, transparent);
+  font-family: var(--font-sans);
+}
+
+.oc-deploy-log-line {
+  display: grid;
+  grid-template-columns: minmax(2.25rem, auto) minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  padding: 1px 14px 1px 10px;
+  border-left: 2px solid transparent;
+  min-width: 0;
+}
+
+.oc-deploy-log-gutter {
+  text-align: right;
+  color: color-mix(in srgb, #94a3b8 65%, transparent);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.oc-deploy-log-text {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  font-variant-ligatures: none;
+}
+
+.oc-deploy-log-line--blank {
+  min-height: 0.35em;
+}
+
+.oc-deploy-log-line--default .oc-deploy-log-text {
+  color: #e2e8f0;
+}
+
+.oc-deploy-log-line--http .oc-deploy-log-text {
+  color: #93c5fd;
+}
+
+.oc-deploy-log-line--cache {
+  border-left-color: color-mix(in srgb, var(--ok) 80%, #fff);
+}
+
+.oc-deploy-log-line--cache .oc-deploy-log-text {
+  color: #86efac;
+}
+
+.oc-deploy-log-line--info .oc-deploy-log-text {
+  color: #a5b4fc;
+}
+
+.oc-deploy-log-line--summary .oc-deploy-log-text {
+  color: #fde68a;
+  font-weight: 600;
+}
+
+.oc-deploy-log-line--tree .oc-deploy-log-text {
+  color: #cbd5e1;
+}
+
+.oc-deploy-log-line--warn {
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+.oc-deploy-log-line--warn .oc-deploy-log-text {
+  color: #fcd34d;
+}
+
+.oc-deploy-log-line--err {
+  border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.oc-deploy-log-line--err .oc-deploy-log-text {
+  color: #fecaca;
+  font-weight: 600;
 }
 
 .oc-deploy-panel-log-hint {
@@ -1112,17 +2009,22 @@
   line-height: 1.6;
   color: var(--text-secondary);
   overflow-y: auto;
+  overflow-x: hidden;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   flex-shrink: 0;
   height: 200px;
   padding: 10px 14px;
+  box-sizing: border-box;
 }
 
 .oc-log-terminal pre {
   margin: 0;
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 
 .oc-log-header {
@@ -1234,6 +2136,12 @@
   background: var(--surface-hover, color-mix(in srgb, var(--text-primary) 6%, transparent));
 }
 
+.oc-secret-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .oc-secret-toggle-icon {
   font-size: 1.125rem;
   line-height: 1;
@@ -1259,34 +2167,47 @@
 
 /* ── Setup Checklist ── */
 .oc-setup-checklist {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--border) 90%, var(--accent) 6%);
   border-radius: var(--radius-md);
-  margin-bottom: 10px;
+  margin-bottom: var(--oc-space-3);
   overflow: hidden;
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--text-primary) 5%, transparent);
 }
 
 .oc-setup-checklist-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  padding: var(--oc-space-3) var(--oc-space-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent) 4%);
+}
+
+.oc-setup-checklist-header-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oc-space-2);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
 }
 
 .oc-setup-icon {
-  font-size: 1rem;
+  font-size: 1.0625rem;
   color: var(--accent);
 }
 
 .oc-setup-progress {
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: var(--accent);
-  background: var(--accent-bg, rgba(var(--accent-rgb, 99, 102, 241), 0.1));
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .oc-setup-checklist-body {
@@ -1298,13 +2219,19 @@
 .oc-setup-item {
   display: flex;
   align-items: center;
-  padding: 6px 10px;
+  padding: var(--oc-space-3) var(--oc-space-3);
   font-size: 0.75rem;
-  transition: background var(--duration-fast);
+  gap: var(--oc-space-2);
+  transition: background 0.16s var(--ease-out);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.oc-setup-item:last-child {
+  border-bottom: none;
 }
 
 .oc-setup-item:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
 }
 
 .oc-setup-item.highlight {
@@ -1320,6 +2247,12 @@
 .oc-setup-item-label {
   font-weight: 500;
   white-space: nowrap;
+}
+
+.oc-setup-item-action {
+  position: relative;
+  z-index: 2;
+  cursor: pointer;
 }
 
 .oc-setup-guide-hint {
@@ -1404,6 +2337,17 @@
   .oc-form-grid,
   .oc-form-grid-3 {
     grid-template-columns: 1fr;
+  }
+
+  .oc-panel-nav {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    flex-wrap: nowrap;
+  }
+
+  .oc-tab-btn {
+    flex-shrink: 0;
   }
 }
 

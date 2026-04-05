@@ -178,15 +178,13 @@ export default function IDE() {
       return;
     }
 
+    /** 默认贴入当前 IDE 页（非悬浮窗）；对话「打开 IDE」由 useAppState.tryFloatWhenReady 或下方 runRemoteConnectIntent 再浮出 */
+    setEmbedFloating(false);
     if (isDesktop()) {
       activeUrlRef.current = url;
       const rdk = (window as any).rdkDesktop;
       rdk.openUrl(url);
-      /** 默认以悬浮窗展示，避免 code-server 占满 IDE 页挡住侧栏对话等 */
-      rdk.setEmbedFloatMode?.(url, true, t('ide.title', '代码编辑器'));
-      setEmbedFloating(true);
-    } else {
-      setEmbedFloating(true);
+      rdk.setEmbedFloatMode?.(url, false, t('ide.title', '代码编辑器'));
     }
     loadingTimerRef.current = setTimeout(() => setIframeLoading(false), 10000);
   };
@@ -439,7 +437,14 @@ export default function IDE() {
               <div className="immersive-desktop-placeholder">
                 {loadError ? (
                   <>
-                    <span className="immersive-error">⚠️ {loadError}</span>
+                    <span className="immersive-error immersive-error--inline" role="alert">
+                      <svg className="immersive-error-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <span>{loadError}</span>
+                    </span>
                     {loadError.includes(t('ide.marker.notInstalled', '未安装')) && currentDevice && (
                       <button className="btn btn-primary" disabled={installing} onClick={handleInstall}>
                         {installing ? t('ide.installing', '正在安装...') : t('ide.installBtn', '一键安装 code-server')}

@@ -45,6 +45,7 @@ describe("buildDelegationRuntimePrompt", () => {
       2,
     );
     expect(text).toContain("本地 + 板端协同");
-    expect(text).toContain("board_openclaw_assess");
+    expect(text).toContain("双伙伴共探");
+    expect(text).toContain("assess→delegate");
   });
 });
