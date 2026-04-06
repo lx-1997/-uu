@@ -81,7 +81,7 @@ export async function confirmAndBeginNewChat(opts: {
 }
 
 /**
- * 切换会话前：若有任务/回复，提示将取消并释放板端资源（单设备单长会话窗口）。
+ * 切换会话前：若有任务/回复，提示将取消并释放套件端资源（单设备单长会话窗口）。
  * 确认后调用 stopAllRuns，再交由 resumeStudioThread。
  */
 export async function confirmSwitchStudioThread(opts: {
@@ -111,7 +111,7 @@ export async function confirmSwitchStudioThread(opts: {
       opts.t('chat.switch.threadBusyTitle', '切换会话？'),
       opts.t(
         'chat.switch.threadBusyConfirm',
-        '当前仍有回复或任务在运行（含后台任务）。切换会话将停止并取消这些任务，以便释放板端资源；同一设备同一时刻只保留一个长会话窗口。\n\n确定切换吗？',
+        '当前仍有回复或任务在运行（含后台任务）。切换会话将停止并取消这些任务，以便释放套件端资源；同一设备同一时刻只保留一个长会话窗口。\n\n确定切换吗？',
       ),
       () => {
         void (async () => {

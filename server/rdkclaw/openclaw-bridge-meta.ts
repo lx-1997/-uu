@@ -1,7 +1,7 @@
 import type { ToolContext } from "../agent/tools/types.js";
 import type { Device } from "../../shared/types.js";
 
-/** Studio 侧桥接元数据：abort / 错误 payload 关联；板端 chat.send 不再附带 clientMeta（严格网关会拒收）。 */
+/** Studio 侧桥接元数据：abort / 错误 payload 关联；套件端 chat.send 不再附带 clientMeta（严格网关会拒收）。 */
 export function openClawBridgeMeta(ctx: ToolContext): {
   correlationId?: string;
   studioRunId?: string;
@@ -30,7 +30,7 @@ export function normalizeOpenClawWsFailureText(raw: string): string {
   } catch {
     /* plain text */
   }
-  return inner || "板端 OpenClaw WebSocket 调用失败";
+  return inner || "套件端 OpenClaw WebSocket 调用失败";
 }
 
 /**
@@ -48,7 +48,7 @@ export function mentionsOpenClawGatewayPairingRequired(raw: string): boolean {
 }
 
 /**
- * 板端 sendAgentMessage 失败时是否值得再整轮重试（排除 pairing 等需人工干预的情况）。
+ * 套件端 sendAgentMessage 失败时是否值得再整轮重试（排除 pairing 等需人工干预的情况）。
  * 与 board_openclaw_delegate 口径一致，供 chat / assess 等轻量路径复用。
  */
 export function isRetryableOpenClawBoardSendFailure(output: string): boolean {
@@ -77,10 +77,10 @@ export function abortAwareDelay(ms: number, signal?: AbortSignal): Promise<void>
   });
 }
 
-/** 板端 delegate / assess 等 RPC 失败时统一转给人读文案（含 WS / HTTP 包装）。 */
+/** 套件端 delegate / assess 等 RPC 失败时统一转给人读文案（含 WS / HTTP 包装）。 */
 export function parseOpenClawBoardRpcError(raw: string): string {
   const text = (raw || "").trim();
-  if (!text) return "板端 OpenClaw 未返回结果";
+  if (!text) return "套件端 OpenClaw 未返回结果";
 
   if (/__OPENCLAW_WS_FAILED__/i.test(text)) {
     const normalized = normalizeOpenClawWsFailureText(text);
@@ -96,7 +96,7 @@ export function parseOpenClawBoardRpcError(raw: string): string {
 
   if (/missing\s+scope|operator\.(read|write|admin)/i.test(text)) {
     return (
-      "板端网关鉴权范围不足（scope，例如 operator.read）。"
+      "套件端网关鉴权范围不足（scope，例如 operator.read）。"
       + "请检查 Gateway token 与本机 gateway pair 状态；"
       + "若健康检查显示网关在跑，多为鉴权/配对问题而非进程宕机。"
     );
@@ -110,11 +110,11 @@ export function parseOpenClawBoardRpcError(raw: string): string {
     if (mentionsOpenClawGatewayPairingRequired(inner)) {
       return parseOpenClawBoardRpcError(inner);
     }
-    return inner || "板端 OpenClaw 网关调用失败";
+    return inner || "套件端 OpenClaw 网关调用失败";
   }
 
   if (/plugins\.allow is empty/i.test(text)) {
-    return "板端 OpenClaw 插件策略阻止执行（plugins.allow 为空），请先在板端配置受信任插件。";
+    return "套件端 OpenClaw 插件策略阻止执行（plugins.allow 为空），请先在套件端配置受信任插件。";
   }
 
   return text;

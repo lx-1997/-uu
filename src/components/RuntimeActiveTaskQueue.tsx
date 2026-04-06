@@ -159,7 +159,7 @@ export default function RuntimeActiveTaskQueue() {
                 )
               : t(
                   'runtimeTasks.emptyWorkspaceExecNoDevice',
-                  '当前无进行中的任务。添加并连接开发板后，RDKClaw 才能完整调度设备与工具；也可在工作台「重新开始引导」熟悉流程。有任务执行时，进度将显示于此。',
+                  '当前无进行中的任务。添加并连接开发者套件后，RDKClaw 才能完整调度设备与工具；也可在工作台「重新开始引导」熟悉流程。有任务执行时，进度将显示于此。',
                 )}
           </span>
         )}

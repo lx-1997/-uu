@@ -161,7 +161,7 @@ const DEVICE_CACHE_TTL_MS = 3000;
 
 /**
  * 下一轮 `readDevices()` 强制读盘，不返回 TTL 内的内存快照。
- * 供板端 SSH/SFTP 前使用，避免刚写入的密码等字段仍被短 TTL 挡住。
+ * 供套件端 SSH/SFTP 前使用，避免刚写入的密码等字段仍被短 TTL 挡住。
  */
 export function invalidateDevicesReadCache(): void {
   _deviceCache = null;

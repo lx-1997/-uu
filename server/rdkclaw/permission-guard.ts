@@ -380,10 +380,10 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
   if (toolName === 'device_file_write' && permission.devicePathBoundaryEnabled) {
     const targetPath = extractString(args, 'path');
     if (targetPath && isBlockedDevicePath(targetPath)) {
-      return { blocked: true, reason: '禁止写入板端敏感系统路径', risk: 'high' };
+      return { blocked: true, reason: '禁止写入套件端敏感系统路径', risk: 'high' };
     }
     if (targetPath && !isAllowedDeviceWritePath(targetPath)) {
-      return { blocked: true, reason: '仅允许写入板端开发目录（/userdata,/tmp,/home,/root/.openclaw 等）', risk: 'high' };
+      return { blocked: true, reason: '仅允许写入套件端开发目录（/userdata,/tmp,/home,/root/.openclaw 等）', risk: 'high' };
     }
   }
 
@@ -392,7 +392,7 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
       const shellOnly = stripShellPrefixBeforeHeredoc(command);
       for (const pat of DEVICE_DANGEROUS_DELETE_PATTERNS) {
         if (pat.test(shellOnly)) {
-          return { blocked: true, reason: '禁止在板端破坏 OpenClaw 核心文件或服务', risk: 'high' };
+          return { blocked: true, reason: '禁止在套件端破坏 OpenClaw 核心文件或服务', risk: 'high' };
         }
       }
     }
@@ -401,10 +401,10 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
   if (toolName === 'device_file_upload_from_local' && permission.devicePathBoundaryEnabled) {
     const remotePath = extractString(args, 'remotePath');
     if (remotePath && isBlockedDevicePath(remotePath)) {
-      return { blocked: true, reason: '禁止上传到板端敏感系统路径', risk: 'high' };
+      return { blocked: true, reason: '禁止上传到套件端敏感系统路径', risk: 'high' };
     }
     if (remotePath && !isAllowedDeviceWritePath(remotePath)) {
-      return { blocked: true, reason: '上传目标必须位于板端开发目录', risk: 'high' };
+      return { blocked: true, reason: '上传目标必须位于套件端开发目录', risk: 'high' };
     }
   }
 

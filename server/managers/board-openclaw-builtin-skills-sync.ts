@@ -1,5 +1,5 @@
 /**
- * 将 Studio 仓库内 skills/ 与 rdkx5_skills/ 同步到板端 OpenClaw 工作区
+ * 将 Studio 仓库内 skills/ 与 rdkx5_skills/ 同步到套件端 OpenClaw 工作区
  * ~/.openclaw/workspace/skills/<skillId>/（与 OpenClaw 默认技能目录一致）
  */
 import type { Client, SFTPWrapper } from 'ssh2';

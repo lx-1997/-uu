@@ -12,7 +12,7 @@ const DEFAULT_PERSONA: PersonaProfile = {
   name: "小地瓜",
   extraInstructions: "",
   riskLevel: "balanced",
-  /** 默认均衡：RDKClaw 编排 + 板端 OpenClaw 在合适任务中参与；需纯 SSH 可在设置改「Studio 优先」 */
+  /** 默认均衡：RDKClaw 编排 + 套件端 OpenClaw 在合适任务中参与；需纯 SSH 可在设置改「Studio 优先」 */
   delegationBias: "balanced",
   autonomyLevel: "assisted",
 };

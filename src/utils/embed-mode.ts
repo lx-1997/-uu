@@ -59,7 +59,7 @@ export function openRdkClawChatPopout(opts?: { dockCtx?: Tab }) {
   window.open(url, 'rdkstudio-rdkclaw-chat', feats);
 }
 
-/** OpenClaw 整页副屏（可与主窗口并排查看板端效果） */
+/** OpenClaw 整页副屏（可与主窗口并排查看套件端效果） */
 export function openOpenClawPopout() {
   const url = buildRdkEmbedUrl('openclaw');
   const w = Math.min(900, typeof window !== 'undefined' ? window.screen.availWidth - 48 : 900);

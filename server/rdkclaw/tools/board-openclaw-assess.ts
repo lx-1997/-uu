@@ -83,7 +83,7 @@ function normalizeAssessment(raw: string, fallbackReason?: string) {
     (typeof obj?.reason === "string" && obj.reason.trim()) ||
     (typeof obj?.summary === "string" && obj.summary.trim()) ||
     (fallbackReason?.trim() || "") ||
-    (canHandle ? "板端可执行该任务" : "板端不建议执行该任务");
+    (canHandle ? "套件端可执行该任务" : "套件端不建议执行该任务");
   const confidenceRaw =
     typeof obj?.confidence === "number"
       ? obj.confidence
@@ -141,7 +141,7 @@ function tryShortCircuitAssess(task: string): string | null {
   return JSON.stringify({
     canHandle: true,
     confidence: 0.95,
-    reason: `任务匹配 RDK 官方标准例程（${hit.label}），板端 OpenClaw 可承接`,
+    reason: `任务匹配 RDK 官方标准例程（${hit.label}），套件端 OpenClaw 可承接`,
     suggestedPath: "board",
     shortCircuit: true,
   }, null, 2);
@@ -161,15 +161,15 @@ export function boardOpenClawAssessTool(
   return {
     name: "board_openclaw_assess",
     description:
-      "读者=编排模型。与板端 OpenClaw 的**正式能力握手**：只评估不执行，但**不是可跳过的一步**——在可能 delegate 前应先 assess，与「SSH 快探」并行对齐**谁更适合牵头**（共探，不是一方包办、一方旁观）。\n" +
-      "向板端 OpenClaw 咨询：某任务是否适合由板端 Agent 牵头或并线承接（canHandle/confidence/reason）。\n" +
-      "**短路由**：任务描述命中常见 RDK 官方例程关键词时，可能 **瞬时返回 JSON**（不连接板端 LLM），仍视为有效 assess，可与 `web_fetch` 同轮。\n\n" +
+      "读者=编排模型。与套件端 OpenClaw 的**正式能力握手**：只评估不执行，但**不是可跳过的一步**——在可能 delegate 前应先 assess，与「SSH 快探」并行对齐**谁更适合牵头**（共探，不是一方包办、一方旁观）。\n" +
+      "向套件端 OpenClaw 咨询：某任务是否适合由套件端 Agent 牵头或并线承接（canHandle/confidence/reason）。\n" +
+      "**短路由**：任务描述命中常见 RDK 官方例程关键词时，可能 **瞬时返回 JSON**（不连接套件端 LLM），仍视为有效 assess，可与 `web_fetch` 同轮。\n\n" +
       "选用时机：\n" +
-      "- 板端多步/试错/技能链/clawhub 流程；或你已预见要多轮 device_exec 试探\n" +
-      "- 不确定该 SSH 硬顶还是交给板端时——先 assess 再决定\n" +
-      "不适用：纯本机搜索/读文档/知识问答（与板端无关）；单条 shell 就能完成的原子命令（直接 device_exec）\n\n" +
+      "- 套件端多步/试错/技能链/clawhub 流程；或你已预见要多轮 device_exec 试探\n" +
+      "- 不确定该 SSH 硬顶还是交给套件端时——先 assess 再决定\n" +
+      "不适用：纯本机搜索/读文档/知识问答（与套件端无关）；单条 shell 就能完成的原子命令（直接 device_exec）\n\n" +
       "规则：\n" +
-      "- **与 delegate 相同**：须 **Studio↔板** 网络可达且板端 **网关可用**；若评估要走板端 LLM 调云端 API，板端还需 **出网**\n" +
+      "- **与 delegate 相同**：须 **Studio↔板** 网络可达且套件端 **网关可用**；若评估要走套件端 LLM 调云端 API，套件端还需 **出网**\n" +
       "- ALWAYS 在 board_openclaw_delegate 之前调用（同一复杂任务勿跳过）\n" +
       "- 返回 confidence < 0.5 时：倾向用本地/SSH；若 reason 指缺技能，可先装技能再 assess\n",
     inputSchema: {
@@ -188,7 +188,7 @@ export function boardOpenClawAssessTool(
         return JSON.stringify({
           canHandle: false,
           confidence: 0,
-          reason: "设备不存在，无法进行板端能力评估",
+          reason: "设备不存在，无法进行套件端能力评估",
         }, null, 2);
       }
 
@@ -205,7 +205,7 @@ export function boardOpenClawAssessTool(
           boardSkills.map((s) => `- ${s.name}: ${s.description || "无描述"} [${s.path}]`).join("\n")
         : "";
       const prompt = [
-        "[assess] 仅评估是否适合由你在板端承接，不要执行 task 中的操作。",
+        "[assess] 仅评估是否适合由你在套件端承接，不要执行 task 中的操作。",
         "若 context 中已写明 RDKClaw 已确认完整命令，reason 里注明「可按 guidance 直接执行、无需重复探测包是否安装」。",
         "只输出一个 JSON 对象，禁止 markdown/代码围栏/前后解说。Schema:",
         '{"canHandle":true|false,"confidence":0~1,"reason":"一句","suggestedPath":"board|local"}',
@@ -227,7 +227,7 @@ export function boardOpenClawAssessTool(
             if (!success) {
               const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
               if (cleanOutput.length > 10) {
-                const normalized = normalizeAssessment(cleanOutput, "板端连接中断，基于部分输出评估");
+                const normalized = normalizeAssessment(cleanOutput, "套件端连接中断，基于部分输出评估");
                 recordAssessSnapshot(ctx.sessionKey, deviceId, normalized, input.task);
                 resolve(JSON.stringify(normalized, null, 2));
               } else {

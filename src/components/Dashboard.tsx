@@ -239,7 +239,7 @@ export default function Dashboard() {
   const effectiveDevice = currentDevice;
 
   const [openclawHealth, setOpenclawHealth] = useState<OpenClawHealthStatus | null>(null);
-  /** RDK Studio 本机服务（/api/health），与板端 OpenClaw 无关 */
+  /** RDK Studio 本机服务（/api/health），与套件端 OpenClaw 无关 */
   const [studioBackendOk, setStudioBackendOk] = useState<boolean | null>(null);
   const [metrics, setMetrics] = useState({
     memory: '--',
@@ -262,7 +262,7 @@ export default function Dashboard() {
     let cancelled = false;
     const probe = async () => {
       const s = await fetchWifiLinkState(id);
-      if (!cancelled) setDeviceNetUp(s === 'up');
+      if (!cancelled) setDeviceNetUp(s.state === 'up');
     };
     void probe();
     const iv = setInterval(probe, DEVICE_DIAGNOSTICS_POLL_MS);
@@ -520,7 +520,7 @@ export default function Dashboard() {
         <div className="dash-morph-halo secondary" />
         <div className="dash-empty-hero">
           <div className="dash-brand dash-enter">RDK Studio</div>
-          <p className="dash-tagline dash-enter dash-enter-d1">{t('dashboard.tagline', '连接开发板后即可开始')}</p>
+          <p className="dash-tagline dash-enter dash-enter-d1">{t('dashboard.tagline', '连接开发者套件后即可开始')}</p>
           <button type="button" className="dash-action primary dash-enter dash-enter-d2" onClick={() => setShowAddDevice(true)}>
             <span className="dash-action-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -587,7 +587,7 @@ export default function Dashboard() {
                 : !openclawHealth.installed
                   ? t('dashboard.oc.notInstalled', 'OpenClaw 未安装，请进入 OpenClaw 页面部署')
                   : deviceNetUp === false
-                    ? t('dashboard.oc.noNetwork', 'OpenClaw 已安装但开发板未联网，无法访问云端模型')
+                    ? t('dashboard.oc.noNetwork', 'OpenClaw 已安装但开发者套件未联网，无法访问云端模型')
                     : openclawHealth.gatewayRunning
                       ? t('dashboard.oc.ready', 'OpenClaw 已就绪')
                       : t('dashboard.oc.gwDown', 'OpenClaw 已安装但网关未运行')
@@ -617,7 +617,7 @@ export default function Dashboard() {
         {deviceNetUp === false && deviceChannelOk && (
           <p className="lp-network-warn" style={{ color: 'var(--color-accent, #e67e22)', fontSize: '0.82rem', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            {t('dashboard.networkWarn', '开发板已连接但未联网 — AI 对话、软件安装等依赖网络的功能暂不可用')}
+            {t('dashboard.networkWarn', '开发者套件已连接但未联网 — AI 对话、软件安装等依赖网络的功能暂不可用')}
           </p>
         )}
       </div>

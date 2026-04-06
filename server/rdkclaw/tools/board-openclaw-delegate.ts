@@ -48,25 +48,25 @@ function toBoardDevice(device: SharedDevice) {
 const DELEGATE_MAX_RETRIES = 1;
 const DELEGATE_RETRY_DELAY_MS = 2000;
 
-/** 注入板端消息：强制阶段性反馈，避免「长时间无输出」；与 skills/rdk-board-progress-reporter/SKILL.md 一致 */
+/** 注入套件端消息：强制阶段性反馈，避免「长时间无输出」；与 skills/rdk-board-progress-reporter/SKILL.md 一致 */
 const BOARD_VISIBILITY_CONTRACT = [
   "---",
   "board_visibility_contract (mandatory, zh):",
-  "- 每个主要步骤必须成对传递：**[板端·进行]**（要做什么、对象是谁）+ **[板端·结果]**（exit/端口/节点/成败一句）；有终端输出时中间加 **[板端·过程]**（关键输出 3～12 行，过长尾部截断）。",
+  "- 每个主要步骤必须成对传递：**[套件端·进行]**（要做什么、对象是谁）+ **[套件端·结果]**（exit/端口/节点/成败一句）；有终端输出时中间加 **[套件端·过程]**（关键输出 3～12 行，过长尾部截断）。",
   "- **禁止**只有「进行」没有「结果」；禁止单独使用「处理数据/执行脚本」等模糊词，必须带包名、*.launch.py、/dev/video*、topic、端口等具体标识。",
-  "- 长日志在 [板端·过程] 只保留末尾约 12 行 + 省略标记；stderr 在结果或过程中摘要。",
+  "- 长日志在 [套件端·过程] 只保留末尾约 12 行 + 省略标记；stderr 在结果或过程中摘要。",
   "- 若 rdkclaw_guidance 已含可直接执行命令：勿重复 dpkg/ros2 pkg 探测，先执行再排错。",
   "- Web 预览 URL 须板卡真实 IP（ip -br a），禁止文档占位 IP；标准演示目标约 60s 内可验收。",
   "- 收尾列出 launch 全名、验收命令与现象、预览 URL。",
   "若已安装技能「RDK Board Progress Reporter」请按其全文执行。",
 ].join("\n");
 
-/** 注入板端学习闭环：让 OpenClaw 把可复用方法沉淀到板端 memory，减少同类问题反复试探 */
+/** 注入套件端学习闭环：让 OpenClaw 把可复用方法沉淀到套件端 memory，减少同类问题反复试探 */
 const BOARD_LEARNING_CONTRACT = [
   "---",
   "board_learning_contract (mandatory, zh):",
-  "- 任务成功或形成明确结论后，追加 **[板端·复盘]** 段，至少包含：关键命令链(<=5条)、失败信号、最终验收命令、风险注意点。",
-  "- 若流程可复用，给出 **[板端·可沉淀]**：skill_name 建议、触发条件、最小输入。",
+  "- 任务成功或形成明确结论后，追加 **[套件端·复盘]** 段，至少包含：关键命令链(<=5条)、失败信号、最终验收命令、风险注意点。",
+  "- 若流程可复用，给出 **[套件端·可沉淀]**：skill_name 建议、触发条件、最小输入。",
   "- 若本次采用了 rdkclaw_guidance 中已确认命令，复盘里标注“已由 RDKClaw 确认”并说明哪些探测可省略。",
   "- 在有写权限且路径可用时，将复盘摘要落盘到 `~/.openclaw/workspace/memory/`（可按日期追加到 daily 文件）；若无法写入，需在结果中明确说明原因。",
 ].join("\n");
@@ -75,13 +75,13 @@ const BOARD_LEARNING_CONTRACT = [
 const BOARD_COLLAB_CONTRACT = [
   "---",
   "board_collaboration_contract (mandatory, zh):",
-  "0) **执行门禁（硬）**：OpenClaw **必须先**输出 **[板端·对齐]**（目标/约束/验收理解、主要风险、拟定步骤或缺口）。在 **收到 RDKClaw 侧明确回应之前**，**禁止**执行会改变板端状态的操作：`apt`/`pip`、写文件或配置、`ros2 launch`、编译、后台常驻等。",
+  "0) **执行门禁（硬）**：OpenClaw **必须先**输出 **[套件端·对齐]**（目标/约束/验收理解、主要风险、拟定步骤或缺口）。在 **收到 RDKClaw 侧明确回应之前**，**禁止**执行会改变套件端状态的操作：`apt`/`pip`、写文件或配置、`ros2 launch`、编译、后台常驻等。",
   "1) **对齐闭环**：请同时阅读本消息中的 **`alignment_gate`** 行：",
-  "   - **`strict`**：本回合在**破坏性操作**前**仅**完成 [板端·对齐]（及必要的 [NEED_RDKCLAW]）；**须待 RDKClaw 通过 `board_openclaw_chat` 发来「同意执行 / 补充 / 修订」** 后，在**后续会话轮**再进入 **[板端·执行]**。不要把 delegate 当成「收到就一口气跑完」。",
-  "   - **`bypassed`**：`rdkclaw_guidance` 已含「对齐完成·可直接执行」或「已由 RDKClaw 确认」的可直跑命令时，仍须**先**写简短 [板端·对齐] 复述「理解一致」，**然后**可在**同一回复**中进入执行。",
+  "   - **`strict`**：本回合在**破坏性操作**前**仅**完成 [套件端·对齐]（及必要的 [NEED_RDKCLAW]）；**须待 RDKClaw 通过 `board_openclaw_chat` 发来「同意执行 / 补充 / 修订」** 后，在**后续会话轮**再进入 **[套件端·执行]**。不要把 delegate 当成「收到就一口气跑完」。",
+  "   - **`bypassed`**：`rdkclaw_guidance` 已含「对齐完成·可直接执行」或「已由 RDKClaw 确认」的可直跑命令时，仍须**先**写简短 [套件端·对齐] 复述「理解一致」，**然后**可在**同一回复**中进入执行。",
   "2) **只读例外（仅 strict 时）**：为完成对齐所必需的 **只读** 探测（`ls`、`ros2 pkg list`、`topic echo` 等）允许；**不得**借机安装、写盘或启动长驻服务。",
-  "3) 信息不足时：在 [板端·对齐] 点名缺口；需文档/联网/策略时用 [NEED_RDKCLAW]。",
-  "4) 若判断 RDKClaw 本地更快闭环，在 [板端·对齐] 中明确建议回切，勿闷头执行。",
+  "3) 信息不足时：在 [套件端·对齐] 点名缺口；需文档/联网/策略时用 [NEED_RDKCLAW]。",
+  "4) 若判断 RDKClaw 本地更快闭环，在 [套件端·对齐] 中明确建议回切，勿闷头执行。",
   "5) 执行阶段（门禁放行后）保持可见：每步「做什么→得到什么→下一步为什么」。",
 ].join("\n");
 
@@ -169,7 +169,7 @@ async function waitForHealthAfterConfigSync(
     const now = Date.now();
     if (now - lastHintAt > 10_000) {
       onProgress?.(
-        "\n[预检] 网关刚完成配置合并/重启，等待板端 OpenClaw 恢复就绪（若长时间卡住，可在 OpenClaw 页手动「重启网关」后再委派）…\n",
+        "\n[预检] 网关刚完成配置合并/重启，等待套件端 OpenClaw 恢复就绪（若长时间卡住，可在 OpenClaw 页手动「重启网关」后再委派）…\n",
       );
       lastHintAt = now;
     }
@@ -230,7 +230,7 @@ function probeBoardConnectivity(
 }
 
 function hasBoardAlignmentSection(text: string): boolean {
-  return /\[板端[·.]?对齐\]/i.test(String(text || ""));
+  return /\[(?:板端|套件端)[·.]?对齐\]/i.test(String(text || ""));
 }
 
 async function ensureBoardGatewayReady(
@@ -243,7 +243,7 @@ async function ensureBoardGatewayReady(
   const boardDevice = toBoardDevice(device);
   const deviceId = String(boardDevice.id || "").trim();
   if (deviceId && getCachedOpenClawAiReady(deviceId) === true) {
-    onProgress?.("\n[预检] 近期已确认板端 OpenClaw 就绪，跳过重复健康检测。\n");
+    onProgress?.("\n[预检] 近期已确认套件端 OpenClaw 就绪，跳过重复健康检测。\n");
     return;
   }
 
@@ -265,7 +265,7 @@ async function ensureBoardGatewayReady(
     const cfg = await getCurrentConfigPromise(manager, boardDevice);
     const boardUnset = boardModelGatewayIsUnset(cfg);
     if (mg && boardUnset) {
-      onProgress?.("\n[预检] 板端未配置大模型网关，将 Studio 为委派预选的模型写入 custom-gateway 并合并/重启网关…\n");
+      onProgress?.("\n[预检] 套件端未配置大模型网关，将 Studio 为委派预选的模型写入 custom-gateway 并合并/重启网关…\n");
       if (signal?.aborted) throw new Error("操作已中止");
       const synced = await updateConfigModelGateway(
         manager,
@@ -278,21 +278,21 @@ async function ensureBoardGatewayReady(
         health = await waitForHealthAfterConfigSync(manager, boardDevice, onProgress, signal);
         if (health.aiReady) {
           if (deviceId) setCachedOpenClawAiReady(deviceId, true);
-          onProgress?.("\n[预检] 模型网关已写入并生效，板端 OpenClaw 就绪。\n");
+          onProgress?.("\n[预检] 模型网关已写入并生效，套件端 OpenClaw 就绪。\n");
           return;
         }
       } else {
-        onProgress?.("\n[预检] 自动同步 Studio 模型到板端失败，请在本机 OpenClaw 面板手动配置大模型网关。\n");
+        onProgress?.("\n[预检] 自动同步 Studio 模型到套件端失败，请在本机 OpenClaw 面板手动配置大模型网关。\n");
       }
     } else if (!mg && boardUnset) {
       onProgress?.(
-        "\n[预检] 板端未配置网关，但 Studio 也未配置有效 API Key（或模型名）；请在 Studio 模型设置或板端手动配置。\n",
+        "\n[预检] 套件端未配置网关，但 Studio 也未配置有效 API Key（或模型名）；请在 Studio 模型设置或套件端手动配置。\n",
       );
     }
   }
 
   if (health.installed && !health.gatewayRunning) {
-    onProgress?.("\n[预检] 板端网关未就绪，尝试自动重启...\n");
+    onProgress?.("\n[预检] 套件端网关未就绪，尝试自动重启...\n");
     await restartGateway(manager, boardDevice, onProgress);
     if (signal?.aborted) throw new Error("操作已中止");
     health = await getBoardHealth(manager, boardDevice);
@@ -303,11 +303,11 @@ async function ensureBoardGatewayReady(
   }
 
   if (deviceId) invalidateOpenClawHealthCache(deviceId);
-  const reason = health.summary?.trim() || "板端 OpenClaw 未就绪";
+  const reason = health.summary?.trim() || "套件端 OpenClaw 未就绪";
   const advice = !health.installed
     ? "请先安装 OpenClaw 并完成初始化。"
     : !health.gatewayRunning
-      ? "请先启动或修复板端 Gateway。"
+      ? "请先启动或修复套件端 Gateway。"
       : health.tokenStatus === "missing"
         ? "请先生成并配置 Gateway token。"
         : health.tokenStatus === "invalid"
@@ -339,33 +339,33 @@ export function boardOpenClawDelegateTool(
   return {
     name: "board_openclaw_delegate",
     description:
-      "读者=编排模型。把**一段板端责任**交给板端 OpenClaw 在其会话里执行（多步推理、技能链、迭代排障），不是「多调几次 SSH」的别名。\n" +
-      "将任务交给板端 OpenClaw 与 RDKClaw 协同推进。不是把 OpenClaw 当纯执行器，而是共享上下文并共同决策路径。\n" +
-      "**Studio 可见性**：板端流式输出经 **tool_progress** 推到对话里的「板端 OpenClaw」协作块；请展开该块查看实时日志。委派消息会附带 **board_visibility_contract**，要求板端用「[板端] 阶段 · …」分段说明；技能 **RDK Board Progress Reporter**（仓库 `skills/rdk-board-progress-reporter`）可装到板端强化可见性。若只见「完成」而无过程，检查折叠区或板端是否按契约输出。\n\n" +
+      "读者=编排模型。把**一段套件端责任**交给套件端 OpenClaw 在其会话里执行（多步推理、技能链、迭代排障），不是「多调几次 SSH」的别名。\n" +
+      "将任务交给套件端 OpenClaw 与 RDKClaw 协同推进。不是把 OpenClaw 当纯执行器，而是共享上下文并共同决策路径。\n" +
+      "**Studio 可见性**：套件端流式输出经 **tool_progress** 推到对话里的「套件端 OpenClaw」协作块；请展开该块查看实时日志。委派消息会附带 **board_visibility_contract**，要求套件端用「[套件端] 阶段 · …」分段说明；技能 **RDK Board Progress Reporter**（仓库 `skills/rdk-board-progress-reporter`）可装到套件端强化可见性。若只见「完成」而无过程，检查折叠区或套件端是否按契约输出。\n\n" +
       "规则：\n" +
-      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 板端 **OpenClaw Gateway 已运行**（本工具会预检；若板端**未配置**大模型网关，会按 OpenClaw 页「板端委派预选」的 Studio 模型条目（未选时与 Dock 深度思考一致）写入 `custom-gateway` 并合并/网关重启；预检会**轮询等待**就绪，避免刚重启就失败）；③ 若任务需 **apt/clawhub/云端模型 API** 等，板子还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
+      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 套件端 **OpenClaw Gateway 已运行**（本工具会预检；若套件端**未配置**大模型网关，会按 OpenClaw 页「套件端委派预选」的 Studio 模型条目（未选时与 Dock 深度思考一致）写入 `custom-gateway` 并合并/网关重启；预检会**轮询等待**就绪，避免刚重启就失败）；③ 若任务需 **apt/clawhub/云端模型 API** 等，开发者套件还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
       "- **避免预检反复动网关**：若你希望委派前**不要**自动下发 Studio 模型（减少重启），可在工作室服务端环境变量设 `RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC=1`，改在 OpenClaw 页手动保存大模型后再委派。\n" +
       "- ALWAYS 在消息里提供协作上下文包（目标、约束、已验证证据、失败模式、验收标准），让双方先对齐再推进（共探，不是单方面派活）\n" +
-      "- assess 通过不等于必须 delegate：比较的是**谁更快办成**——你已确认可直跑时常先 SSH；板端在技能链/现场迭代上更快时再委派；本地进入多轮试错时倾向并线到板端会话\n" +
-      "- **对齐门禁**：板端会收到 `alignment_gate`。`strict` 时 OpenClaw **先只出 [板端·对齐]**，须 **你**用 `board_openclaw_chat` 明确回应（同意/补充/修订）后它才应执行破坏性步骤；若 delegate **首次返回**仅有对齐而无执行，**下一轮必须** `board_openclaw_chat` 放行。已在 guidance 写清「对齐完成·可直接执行」或「已由 RDKClaw 确认」命令时走 `bypassed`，仍须先简短对齐复述。\n" +
-      "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解板端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
+      "- assess 通过不等于必须 delegate：比较的是**谁更快办成**——你已确认可直跑时常先 SSH；套件端在技能链/现场迭代上更快时再委派；本地进入多轮试错时倾向并线到套件端会话\n" +
+      "- **对齐门禁**：套件端会收到 `alignment_gate`。`strict` 时 OpenClaw **先只出 [套件端·对齐]**，须 **你**用 `board_openclaw_chat` 明确回应（同意/补充/修订）后它才应执行破坏性步骤；若 delegate **首次返回**仅有对齐而无执行，**下一轮必须** `board_openclaw_chat` 放行。已在 guidance 写清「对齐完成·可直接执行」或「已由 RDKClaw 确认」命令时走 `bypassed`，仍须先简短对齐复述。\n" +
+      "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解套件端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
       "- ALWAYS 在 guidance/context 中写明：验收标准、已执行命令与关键输出、失败模式、约束条件（网络/权限/板型）\n" +
-      "- ALWAYS 要求 OpenClaw 在完成后输出可复用复盘（命令链/失败信号/验收）并尽量落盘到板端 memory，帮助后续同类任务提速\n" +
-      "- 若任务可能超出板端当前技能，在 guidance 中提示：可先用 find-skills（SkillHub）检索/安装再执行\n" +
+      "- ALWAYS 要求 OpenClaw 在完成后输出可复用复盘（命令链/失败信号/验收）并尽量落盘到套件端 memory，帮助后续同类任务提速\n" +
+      "- 若任务可能超出套件端当前技能，在 guidance 中提示：可先用 find-skills（SkillHub）检索/安装再执行\n" +
       "- 委派后 ALWAYS 评估返回结果的质量，失败时用本地工具兜底\n" +
       "- 若 OpenClaw 回复含 [NEED_RDKCLAW] 块，提取 type/query/reason 后用你的工具获取信息，再通过 board_openclaw_chat 发回\n" +
-      "- 同一对话内自动复用会话，板端保留上下文\n" +
+      "- 同一对话内自动复用会话，套件端保留上下文\n" +
       "- NEVER 在未连接设备时调用此工具",
     inputSchema: {
       type: "object",
       properties: {
-        task: { type: "string", description: "要交给板端执行的完整任务描述" },
+        task: { type: "string", description: "要交给套件端执行的完整任务描述" },
         intent: { type: "string", description: "可选意图标签，如 diagnose/deploy/repair" },
         context: { type: "string", description: "可选补充上下文（设备状态、约束条件）" },
         guidance: {
           type: "string",
           description:
-            "RDKClaw 对 OpenClaw 的建议与上下文。若本回合在 Studio 侧**已完成对齐**、可让板端同轮执行，须含 **「对齐完成·可直接执行」**（或「已由 RDKClaw 确认」的可直跑命令）；否则留空或不含上述短语时板端为 **strict** 门禁，须待你用 board_openclaw_chat 回应后再执行。",
+            "RDKClaw 对 OpenClaw 的建议与上下文。若本回合在 Studio 侧**已完成对齐**、可让套件端同轮执行，须含 **「对齐完成·可直接执行」**（或「已由 RDKClaw 确认」的可直跑命令）；否则留空或不含上述短语时套件端为 **strict** 门禁，须待你用 board_openclaw_chat 回应后再执行。",
         },
         encourageSkills: { type: "boolean", description: "是否鼓励 OpenClaw 优先使用自身已安装的技能来完成任务（默认 true）" },
         sessionId: { type: "string", description: "可选会话ID，用于连续对话" },
@@ -375,7 +375,7 @@ export function boardOpenClawDelegateTool(
     async execute(input, ctx) {
       const devices = await readDevices();
       const device = devices.find((d) => d.id === deviceId);
-      if (!device) throw new Error("设备不存在，无法委派板端 OpenClaw");
+      if (!device) throw new Error("设备不存在，无法委派套件端 OpenClaw");
 
       const boardDevice = toBoardDevice(device);
       await ensureBoardGatewayReady(manager, device, (chunk) => onProgress?.(chunk, ctx.toolCallId), ctx.abortSignal);
@@ -386,9 +386,9 @@ export function boardOpenClawDelegateTool(
         const reason = !health.aiReady
           ? "OpenClaw 网关未稳定就绪"
           : !net.wifiConnected
-            ? "板端 WiFi 未连接"
+            ? "套件端 WiFi 未连接"
             : "网络状态未满足";
-        onProgress?.(`\n[协作门槛降级] ${reason}：本轮不强制 [板端·对齐] 成功门槛，避免任务卡死。\n`, ctx.toolCallId);
+        onProgress?.(`\n[协作门槛降级] ${reason}：本轮不强制 [套件端·对齐] 成功门槛，避免任务卡死。\n`, ctx.toolCallId);
       }
       const useSkills = input.encourageSkills !== false;
       const assessInject = formatAssessInjectBlock(ctx.sessionKey, deviceId);
@@ -427,12 +427,12 @@ export function boardOpenClawDelegateTool(
         const bypassAlignmentGate = hasConfirmedCmd || alignmentCompleted;
         msgParts.push(
           bypassAlignmentGate
-            ? "\nalignment_gate: bypassed（guidance 已含「对齐完成」或「已确认命令」；须先简短 [板端·对齐] 复述一致，再在同一回复中执行）"
-            : "\nalignment_gate: strict（须先仅输出 [板端·对齐]；待 RDKClaw 经 board_openclaw_chat 明确回应后再执行 apt/写盘/launch/长驻等）",
+            ? "\nalignment_gate: bypassed（guidance 已含「对齐完成」或「已确认命令」；须先简短 [套件端·对齐] 复述一致，再在同一回复中执行）"
+            : "\nalignment_gate: strict（须先仅输出 [套件端·对齐]；待 RDKClaw 经 board_openclaw_chat 明确回应后再执行 apt/写盘/launch/长驻等）",
         );
         if (!strictAlignmentGate) {
           msgParts.push(
-            "\nalignment_gate_relaxed: 网关/网络门槛未满足时已放宽「须先 chat」的硬性（避免卡死）；仍应先 [板端·对齐] 并尽量与 RDKClaw 同步后再动破坏性步骤。",
+            "\nalignment_gate_relaxed: 网关/网络门槛未满足时已放宽「须先 chat」的硬性（避免卡死）；仍应先 [套件端·对齐] 并尽量与 RDKClaw 同步后再动破坏性步骤。",
           );
         }
       }
@@ -502,7 +502,7 @@ export function boardOpenClawDelegateTool(
               if (silent < threshold) return;
               firstAlertDone = true;
               lastChunkAt = Date.now();
-              onProgress?.(`\n[板端 OpenClaw 正在推理中… 总计 ${total}s]\n`, ctx.toolCallId);
+              onProgress?.(`\n[套件端 OpenClaw 正在推理中… 总计 ${total}s]\n`, ctx.toolCallId);
             }, DELEGATE_STALL_CHECK_MS);
           }
 
@@ -511,8 +511,8 @@ export function boardOpenClawDelegateTool(
             try { handle?.abort(); } catch { /* ignore */ }
             const partial = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
             const fallback = partial.length > 20
-              ? partial + "\n\n[RDKClaw：板端执行超时（5 分钟），以上为已收集的部分结果。建议用 device_exec 直接执行已确认命令。]"
-              : "板端 OpenClaw 执行超时（5 分钟），未收到有效结果。建议用 device_exec 直接执行已确认命令，或拆分为更小的步骤。";
+              ? partial + "\n\n[RDKClaw：套件端执行超时（5 分钟），以上为已收集的部分结果。建议用 device_exec 直接执行已确认命令。]"
+              : "套件端 OpenClaw 执行超时（5 分钟），未收到有效结果。建议用 device_exec 直接执行已确认命令，或拆分为更小的步骤。";
             settle(() => resolve({ output: fallback, success: partial.length > 20 }));
           }, DELEGATE_MAX_EXECUTION_MS);
 
@@ -548,19 +548,19 @@ export function boardOpenClawDelegateTool(
       for (let attempt = 0; attempt <= DELEGATE_MAX_RETRIES; attempt++) {
         const { output, success } = await runOnce();
         if (success) {
-          let result = output.trim() || "板端 OpenClaw 执行完成（无文本输出）";
+          let result = output.trim() || "套件端 OpenClaw 执行完成（无文本输出）";
           if (strictAlignmentGate && !hasBoardAlignmentSection(result)) {
-            onProgress?.("\n[协作门槛] 未收到 [板端·对齐]，正在要求板端先补齐对齐信息...\n", ctx.toolCallId);
+            onProgress?.("\n[协作门槛] 未收到 [套件端·对齐]，正在要求套件端先补齐对齐信息...\n", ctx.toolCallId);
             const alignPrompt = [
-              "请先补齐 [板端·对齐] 段后再继续：",
+              "请先补齐 [套件端·对齐] 段后再继续：",
               "1) 你对目标/约束/验收的理解；",
               "2) 主要风险与备选路径；",
-              "3) 当前建议：继续板端执行，还是回切 RDKClaw 本地快路径（给理由）。",
+              "3) 当前建议：继续套件端执行，还是回切 RDKClaw 本地快路径（给理由）。",
             ].join("\n");
             const alignTry = await runOnce(alignPrompt);
             const merged = [result, String(alignTry.output || "").trim()].filter(Boolean).join("\n\n");
             if (!(alignTry.success && hasBoardAlignmentSection(merged))) {
-              throw new Error("未收到 [板端·对齐]，本轮不判定成功。请先确认 OpenClaw 在线且板端 WiFi 已连接后重试。");
+              throw new Error("未收到 [套件端·对齐]，本轮不判定成功。请先确认 OpenClaw 在线且套件端 WiFi 已连接后重试。");
             }
             result = merged;
           }
@@ -580,7 +580,7 @@ export function boardOpenClawDelegateTool(
             : "\n\n---\n[RDKClaw 提示：请评估 OpenClaw 的执行结果。" +
               "如果它用了好的技能或方案，记在记忆中以备推荐；" +
               "如果有可改进之处，下次委派时在 guidance 中补充。" +
-              "如果发现可复用的板端经验，建议创建为 OpenClaw 技能。]";
+              "如果发现可复用的套件端经验，建议创建为 OpenClaw 技能。]";
           return body + suffix;
         }
         lastOutput = output;
@@ -590,7 +590,7 @@ export function boardOpenClawDelegateTool(
         ) {
           gatewayPairRecoveryDone = true;
           onProgress?.(
-            "\n[板端 pairing required：正自动建立 CLI↔Gateway 信任（devices approve / pair）...]\n",
+            "\n[套件端 pairing required：正自动建立 CLI↔Gateway 信任（devices approve / pair）...]\n",
             ctx.toolCallId,
           );
           if (deviceId) invalidateOpenClawHealthCache(deviceId);
@@ -611,7 +611,7 @@ export function boardOpenClawDelegateTool(
         }
         const cleanOutput = output.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
         if (cleanOutput.length > 20 && !isRetryableOpenClawBoardSendFailure(output)) {
-          const partial = cleanOutput + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+          const partial = cleanOutput + "\n\n[注意：套件端连接中途断开，以上为已收集的部分结果]";
           const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, partial, {
             phase: "delegate",
             toolCallId: ctx.toolCallId,
@@ -629,7 +629,7 @@ export function boardOpenClawDelegateTool(
       }
       const finalClean = lastOutput.replace(/__OPENCLAW_WS_FAILED__/g, "").trim();
       if (finalClean.length > 20) {
-        const partial = finalClean + "\n\n[注意：板端连接中途断开，以上为已收集的部分结果]";
+        const partial = finalClean + "\n\n[注意：套件端连接中途断开，以上为已收集的部分结果]";
         const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, partial, {
           phase: "delegate",
           toolCallId: ctx.toolCallId,

@@ -27,8 +27,8 @@ export default function DeviceOfflineListener() {
 
       setConfirmDialog({
         show: true,
-        title: t('device.offlineModal.title', '当前开发板已离线'),
-        message: tf('device.offlineModal.body', '已对连接进行多次检测，当前开发板「{{name}}」无法建立 SSH 会话。请检查电源、网线或 TypeC 连接后，在侧栏重新连接开发板。', {
+        title: t('device.offlineModal.title', '当前开发者套件已离线'),
+        message: tf('device.offlineModal.body', '已对连接进行多次检测，当前开发者套件「{{name}}」无法建立 SSH 会话。请检查电源、网线或 TypeC 连接后，在侧栏重新连接开发者套件。', {
           name: deviceName,
         }),
         hideCancel: true,

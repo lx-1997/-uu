@@ -283,7 +283,7 @@ type SkillMetaJson = {
   skill?: { slug?: string };
 };
 
-/** 供板端 `clawhub install` 使用：owner/slug（与注册表一致） */
+/** 供套件端 `clawhub install` 使用：owner/slug（与注册表一致） */
 export async function clawhubResolveInstallRef(slug: string): Promise<{ installRef: string; version: string }> {
   const safe = assertSafeSlug(slug);
   const base = getClawhubRegistryBase();

@@ -504,7 +504,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      /* 板端命令/SSH 超时（含 Dashboard 轮询 diagnostics 等）：离线即显示为离线即可，勿反复弹窗 */
+      /* 套件端命令/SSH 超时（含 Dashboard 轮询 diagnostics 等）：离线即显示为离线即可，勿反复弹窗 */
       if (code === 'DEVICE_COMMAND_TIMEOUT') {
         return;
       }

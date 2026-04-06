@@ -127,7 +127,7 @@ export type ChatBlock =
   | { type: 'video'; src: string; caption?: string }
   | { type: 'file'; src: string; fileName: string; caption?: string }
   | { type: 'terminal'; lines: string[]; label?: string; collapsible?: boolean; previewLines?: number }
-  /** RDKClaw ↔ 板端 OpenClaw 协作：区分双方输出；outbound=发给板端，hint=结果中的 RDKClaw 说明 */
+  /** RDKClaw ↔ 套件端 OpenClaw 协作：区分双方输出；outbound=发给套件端，hint=结果中的 RDKClaw 说明 */
   | { type: 'collab'; side: 'openclaw' | 'rdkclaw'; collabRole?: 'outbound' | 'hint' | 'reverse' | 'wait_hint'; title?: string; subtitle?: string; lines: string[]; collapsible?: boolean; previewLines?: number }
   | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }>; title?: string; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }
   /** 模型扩展思考（reasoning / thinking_delta 流式合并） */

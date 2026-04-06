@@ -76,7 +76,7 @@ export function readStudioUiHintsForDevice(deviceId: string | undefined): Studio
   return h;
 }
 
-/** 板型技能包同步后写入，供 Agent 系统提示强调 RDKClaw↔OpenClaw 与板端技能使用 */
+/** 板型技能包同步后写入，供 Agent 系统提示强调 RDKClaw↔OpenClaw 与套件端技能使用 */
 export function persistBoardSkillBundleHint(
   deviceId: string | undefined,
   payload: { platform?: string | null; model?: string | null; synced: boolean },

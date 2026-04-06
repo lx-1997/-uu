@@ -1,5 +1,5 @@
 /**
- * Studio 侧：通过 SSH exec 与板端 oc-bridge.mjs 的 NDJSON 双工通道。
+ * Studio 侧：通过 SSH exec 与套件端 oc-bridge.mjs 的 NDJSON 双工通道。
  */
 import type { Readable, Writable } from 'node:stream';
 import type { Client } from 'ssh2';

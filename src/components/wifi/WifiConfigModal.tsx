@@ -121,7 +121,7 @@ export default function WifiConfigModal({
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={ssid === name ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="2">
                         <path d="M5 12.55a11 11 0 0114.08 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/>
                       </svg>
-                      <span>{name}</span>
+                      <span className="wifi-list-item-name">{name}</span>
                       {ssid === name && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
                     </button>
                   ))}

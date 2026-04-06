@@ -3,8 +3,8 @@
  *
  * - **stablePrefix**：宜作为 API 前缀缓存候选——在同一会话、同一设备与策略下尽量保持稳定；
  *   顺序：工具契约 → 论坛上下文 → find_skills 策略 → 记忆提示 → 人格 → 推理规范 → 设备平台
- *   → 设备研究/无设备守卫 → 板端插件列表。
- * - **dynamicSuffix**：高波动会话态——Studio UI 快照、附件列表、协作/板端技能枚举等；置于末尾，
+ *   → 设备研究/无设备守卫 → 套件端插件列表。
+ * - **dynamicSuffix**：高波动会话态——Studio UI 快照、附件列表、协作/套件端技能枚举等；置于末尾，
  *   避免稀释前缀缓存命中（pi-ai 仍用单段 systemPrompt 时，稳定字节前置仍有利于未来扩展多段 system）。
  *
  * `combined ===` stablePrefix 与 dynamicSuffix 的非空拼接（双换行分隔）。
@@ -181,7 +181,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   if (input.policy.network.enabled) {
     pushStable(
       "find_skills_policy",
-      "非必要不检索技能；用户明确要跑板端流程或缺步骤时再 `find_skills`。",
+      "非必要不检索技能；用户明确要跑套件端流程或缺步骤时再 `find_skills`。",
     );
   } else {
     pushStable("find_skills_policy", "联网关：非必要不 `find_skills`；简短直接答。");
@@ -203,7 +203,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   }
 
   if (input.deviceId && input.boardSnapshot.plugins.length > 0) {
-    pushStable("board_plugins", `板端插件: ${input.boardSnapshot.plugins.slice(0, 12).join(", ")}`);
+    pushStable("board_plugins", `套件端插件: ${input.boardSnapshot.plugins.slice(0, 12).join(", ")}`);
   }
 
   appendOpenWebRouteDynamic(input, pushDynamic);
@@ -225,7 +225,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
     pushDynamic(
       "device_connectivity",
       !c.reachable
-        ? `## 设备连通性（本轮实时）\n当前设备 SSH 不可达（${c.status}：${c.detail}）。本轮**禁止**直接执行 board_openclaw_*、device_exec、update/install 等板端命令；先引导用户恢复连接（检查电源/网线/Wi-Fi、重新连接设备、校验密码）再继续。`
+        ? `## 设备连通性（本轮实时）\n当前设备 SSH 不可达（${c.status}：${c.detail}）。本轮**禁止**直接执行 board_openclaw_*、device_exec、update/install 等套件端命令；先引导用户恢复连接（检查电源/网线/Wi-Fi、重新连接设备、校验密码）再继续。`
         : netReady === false
           ? `## 设备连通性（本轮实时）\n当前设备 SSH 可达，但公网不可达（${c.detail}）。本轮**禁止** openclaw、update/install、在线拉包；优先离线命令与本地方案。`
           : `## 设备连通性（本轮实时）\n当前设备 SSH 可达且公网可达（${c.status}）。可按需执行 board_openclaw_* / device_exec。`,
@@ -257,8 +257,8 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
     const names = input.boardSnapshot.skillDetails.map((s) => s.name).slice(0, 24);
     const skillLine =
       names.length > 0
-        ? `板端技能(最多列24): ${names.join(", ")}`
-        : "板端技能快照空（快速模式未 SSH 拉取时可忽略）。";
+        ? `套件端技能(最多列24): ${names.join(", ")}`
+        : "套件端技能快照空（快速模式未 SSH 拉取时可忽略）。";
     pushDynamic("collaboration", `## 协作（速览）\n${skillLine}\nOpenClaw 多步再 assess→delegate；否则 SSH。`);
   }
 
@@ -296,7 +296,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
       [
         "## 内置 find-skills（腾讯 SkillHub）",
         "RDK Studio **默认内置** `find_skills`：优先腾讯 SkillHub，零命中或失败再兜底 **官方 ClawHub**（默认 https://clawhub.ai）。`find_skills` **仅写审计** `.rdkstudio/find-skills-log.jsonl`，**不**因「搜过」就写入长期记忆。" +
-          "若本轮**实际采用**了某 SkillHub 技能且任务**验收成功**，再调用 **`skill_mark_validated`**（填 `skill_slugs` + `task_summary`）：**下载** SKILL.md 到本机 `skills/<id>/`，已连接设备时**同步**到板端 `~/.openclaw/workspace/skills/<id>/`，并写记忆与 `.rdkstudio/validated-skills.jsonl`；纯本地采用填 `local_skill_refs`（不拉远端、不推板端）。失败、仅浏览、未采用则**禁止**调用。",
+          "若本轮**实际采用**了某 SkillHub 技能且任务**验收成功**，再调用 **`skill_mark_validated`**（填 `skill_slugs` + `task_summary`）：**下载** SKILL.md 到本机 `skills/<id>/`，已连接设备时**同步**到套件端 `~/.openclaw/workspace/skills/<id>/`，并写记忆与 `.rdkstudio/validated-skills.jsonl`；纯本地采用填 `local_skill_refs`（不拉远端、不推套件端）。失败、仅浏览、未采用则**禁止**调用。",
         "**强制**：能力缺口时**必须先 `find_skills`**，再 `read` / 安装 / 执行；不得未检索可复用技能就宣称无法完成（用户明确禁止联网且本地无命中除外）。",
         "**例外（勿检索技能）**：仅「打开 URL / 在用户桌面显示网页」→ 只用 **`studio_open_url`**；需登录态正文 → **`studio_embedded_browser_capture`**。这是宿主工具，**不要**为此 `find_skills` 或装远端「浏览器」技能。",
         "仅需与 `CLAWHUB_REGISTRY` 换源一致时，再用 `skillhub_search`。",
@@ -307,7 +307,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
       "find_skills_policy",
       [
         "## 内置 find-skills（仅本地）",
-        "联网关闭时无远程 SkillHub；缺流程时用 `find_skills` 匹配本地并 `read` SKILL.md。仅**任务成功**且采用了本地/板端技能后，可用 `skill_mark_validated`（local_skill_refs）内化，勿仅因检索而调用。",
+        "联网关闭时无远程 SkillHub；缺流程时用 `find_skills` 匹配本地并 `read` SKILL.md。仅**任务成功**且采用了本地/套件端技能后，可用 `skill_mark_validated`（local_skill_refs）内化，勿仅因检索而调用。",
       ].join("\n"),
     );
   }
@@ -347,7 +347,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
     const deviceRosCloseLine =
       input.persona.delegationBias === "local-first"
         ? "确认命令后再 device_exec；**Studio 优先**：原子问题用 SSH；多步/技能/多轮试错应收束到 `board_openclaw_assess` → `delegate`，勿长串 shell 包办。"
-        : "确认命令后再 device_exec；板端多步编排用 board_openclaw_assess / delegate。";
+        : "确认命令后再 device_exec；套件端多步编排用 board_openclaw_assess / delegate。";
     pushStable(
       "device_research_ros",
       [
@@ -356,11 +356,11 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
         input.platform
           ? "当前板型已识别，建议 web_fetch 入口：" + getResearchSeeds(input.platform).join(" | ")
           : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。",
-        "## RDK 板端 ROS 环境（易误判）",
+        "## RDK 套件端 ROS 环境（易误判）",
         "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
         "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
         "## ROS2 工程习惯（主动读盘 · 路径怀疑）",
-        "板端文件系统**区分大小写**；`package.xml`、launch 文件名、`share/<pkg>/` 路径须以 **`ls` / `find` / `ros2 pkg prefix <pkg>`** 实测为准，勿凭记忆拼写。",
+        "套件端文件系统**区分大小写**；`package.xml`、launch 文件名、`share/<pkg>/` 路径须以 **`ls` / `find` / `ros2 pkg prefix <pkg>`** 实测为准，勿凭记忆拼写。",
         "在改 launch、设 remap、指模型路径**之前**：优先 `device_file_read` 或 `grep` 看现有内容；断言「包不存在」前应先 `ros2 pkg list` / `dpkg -l | grep` 交叉验证。",
         "## AI / 机器人链路",
         "视觉与推理任务：明确 **相机/传感器节点 → 预处理 → 推理 → 后处理** 各步 topic 与帧率；模型与配置以板上 `find` + 文档为准，忌混用占位路径。",
@@ -373,16 +373,16 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
     pushStable(
       "no_device_guard",
       [
-        "当前请求未携带 Studio 初始选中的设备 ID：在调用 device_connect_ssh / switch_device **成功之前**，可能没有 device_exec、device_diagnose、device_file_list 等板端工具。",
-        "exec 与 list 仅在 **RDK Studio 服务端工作区**（代码目录，常见含 server/、src/、skills/）执行，**不是**开发板上的文件系统；禁止把它们的输出描述为「在设备上」「板端 /root」或 SSH 在板子上的结果。",
-        "在 Studio 主会话中：连接或切换设备成功后会刷新**后续 LLM 回合**的工具列表；同一回合内若已出现 device_exec 等工具，即可在板端执行。若仍看不到板端工具，请再发一条短消息。",
-        "若仅有 exec/list 的输出却声称已检查板端硬件或设备目录，属于错误回复。",
+        "当前请求未携带 Studio 初始选中的设备 ID：在调用 device_connect_ssh / switch_device **成功之前**，可能没有 device_exec、device_diagnose、device_file_list 等套件端工具。",
+        "exec 与 list 仅在 **RDK Studio 服务端工作区**（代码目录，常见含 server/、src/、skills/）执行，**不是**开发者套件上的文件系统；禁止把它们的输出描述为「在设备上」「套件端 /root」或 SSH 在开发者套件上的结果。",
+        "在 Studio 主会话中：连接或切换设备成功后会刷新**后续 LLM 回合**的工具列表；同一回合内若已出现 device_exec 等工具，即可在套件端执行。若仍看不到套件端工具，请再发一条短消息。",
+        "若仅有 exec/list 的输出却声称已检查套件端硬件或设备目录，属于错误回复。",
       ].join("\n"),
     );
   }
 
   if (input.deviceId && input.boardSnapshot.plugins.length > 0) {
-    pushStable("board_plugins", `当前板端允许插件: ${input.boardSnapshot.plugins.join(", ")}`);
+    pushStable("board_plugins", `当前套件端允许插件: ${input.boardSnapshot.plugins.join(", ")}`);
   }
 
   appendOpenWebRouteDynamic(input, pushDynamic);
@@ -406,7 +406,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
     pushDynamic(
       "device_connectivity",
       !c.reachable
-        ? `## 设备连通性（本轮实时）\n当前设备 SSH 不可达（${c.status}：${c.detail}）。本轮**禁止**直接执行 board_openclaw_*、device_exec、update/install 等板端命令；先引导用户恢复连接（检查电源/网线/Wi-Fi、重新连接设备、校验密码）再继续。`
+        ? `## 设备连通性（本轮实时）\n当前设备 SSH 不可达（${c.status}：${c.detail}）。本轮**禁止**直接执行 board_openclaw_*、device_exec、update/install 等套件端命令；先引导用户恢复连接（检查电源/网线/Wi-Fi、重新连接设备、校验密码）再继续。`
         : netReady === false
           ? `## 设备连通性（本轮实时）\n当前设备 SSH 可达，但公网不可达（${c.detail}）。本轮**禁止** openclaw、update/install、在线拉包；优先离线命令与本地方案。`
           : `## 设备连通性（本轮实时）\n当前设备 SSH 可达且公网可达（${c.status}）。可按需执行 board_openclaw_* / device_exec。`,

@@ -212,7 +212,7 @@ export default function Vnc() {
   // ── 启动 VNC 并连接 ──
   const handleConnect = () => {
     if (!currentDevice) {
-      addToast(t('vnc.toast.connectDevice', '请先连接开发板'), 'warning');
+      addToast(t('vnc.toast.connectDevice', '请先连接开发者套件'), 'warning');
       return;
     }
     if (phase === 'connecting') {
@@ -263,7 +263,7 @@ export default function Vnc() {
       } else {
         setPhase('error');
         setStatusText(t('vnc.err.port', '端口 5900 未就绪'));
-        addToast(t('vnc.toast.port', 'VNC 端口未就绪。请尝试：(1) 在终端运行 sudo systemctl restart x11vnc，(2) 确认开发板已安装桌面环境'), 'warning');
+        addToast(t('vnc.toast.port', 'VNC 端口未就绪。请尝试：(1) 在终端运行 sudo systemctl restart x11vnc，(2) 确认开发者套件已安装桌面环境'), 'warning');
       }
     }).catch(err => {
       setPhase('error');
@@ -568,7 +568,7 @@ export default function Vnc() {
 
             <h2 className="immersive-welcome-title">{t('vnc.welcome.title', 'Web 远程桌面')}</h2>
             <p className="immersive-welcome-desc">
-              {t('vnc.welcome.desc', '通过 WebSocket 代理直连开发板桌面，零安装、低延迟')}
+              {t('vnc.welcome.desc', '通过 WebSocket 代理直连开发者套件桌面，零安装、低延迟')}
             </p>
 
             {phase === 'checking' && (
@@ -596,7 +596,7 @@ export default function Vnc() {
                   <span>{statusText}</span>
                 </span>
                 <p style={{ fontSize: '0.8125rem', color: '#94a3b8', maxWidth: 360, lineHeight: 1.55, margin: '4px 0 8px' }}>
-                  {t('vnc.err.troubleshoot', '排查建议：(1) 确认开发板已安装桌面环境, (2) 在终端运行 sudo systemctl status x11vnc 查看服务状态, (3) 检查端口 5900 是否被占用')}
+                  {t('vnc.err.troubleshoot', '排查建议：(1) 确认开发者套件已安装桌面环境, (2) 在终端运行 sudo systemctl status x11vnc 查看服务状态, (3) 检查端口 5900 是否被占用')}
                 </p>
                 <button className="btn btn-ghost" onClick={handleConnect}>{t('vnc.retry', '重试')}</button>
               </div>
@@ -616,7 +616,7 @@ export default function Vnc() {
             )}
 
             {!currentDevice && (
-              <p className="vnc-no-device">{t('vnc.pickDeviceLeft', '请先在左侧选择一个开发板')}</p>
+              <p className="vnc-no-device">{t('vnc.pickDeviceLeft', '请先在左侧选择一个开发者套件')}</p>
             )}
 
             <div className="immersive-feature-hints">

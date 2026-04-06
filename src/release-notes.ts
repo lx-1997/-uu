@@ -3,10 +3,10 @@
  * 展示用版本号来自 Vite 注入的 package.json version（不含构建日期）。
  */
 export const RELEASE_NOTES_ZH: string[] = [
-  '工作台：连接 RDK 开发板，查看内存/温度/运行时间等状态，快捷进入终端、OpenClaw 与设备体检',
-  'AI 与技能：RDKClaw 对话编排，OpenClaw 板端 Agent、技能工坊创建与部署',
+  '工作台：连接 RDK 开发者套件，查看内存/温度/运行时间等状态，快捷进入终端、OpenClaw 与设备体检',
+  'AI 与技能：RDKClaw 对话编排，OpenClaw 套件端 Agent、技能工坊创建与部署',
   '远程开发：SSH、设备文件、远程桌面（noVNC）、在线 IDE，集中完成日常开发',
-  '板端能力：ROS2、硬件监控、镜像烧录、NodeHub/ModelZoo 等扩展入口'
+  '套件端能力：ROS2、硬件监控、镜像烧录、NodeHub/ModelZoo 等扩展入口'
 ];
 
 /** 与 RELEASE_NOTES_ZH 一一对应 */

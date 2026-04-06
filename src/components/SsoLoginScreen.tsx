@@ -8,7 +8,8 @@ import { fetchApi, setSsoSessionMirror } from '../utils/apiBase';
 
 type Phase = 'preparing' | 'ready' | 'error';
 
-const READY_DELAY_MS = 220;
+/** 内嵌页就绪前的极短过渡，过长会拖慢「可点登录」的体感 */
+const READY_DELAY_MS = 80;
 const FALLBACK_SSO = 'https://sso.d-robotics.cc/';
 
 export default function SsoLoginScreen() {
@@ -158,7 +159,8 @@ export default function SsoLoginScreen() {
         }
         addToast(st('sso.loginSuccess', '登录成功'), 'success');
         void window.rdkDesktop?.stopSsoEmbedded?.();
-        await refresh();
+        /** adoptBootstrapSession 已写入 user；勿 await refresh，避免与 /api/sso/me 粘滞重试叠加阻塞首帧进入主界面 */
+        void refresh();
       } catch {
         addToast(st('sso.bootstrapFail', '会话建立失败'), 'error');
       }

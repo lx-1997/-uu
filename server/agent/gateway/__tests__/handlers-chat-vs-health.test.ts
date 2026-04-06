@@ -1,6 +1,6 @@
 /**
  * 实证：网关 `health` 与 `chat.send` 参数校验独立——服务可 healthy，
- * 但缺少 message 的 chat.send 仍会 INVALID_REQUEST（与板端 CLI health 正交）。
+ * 但缺少 message 的 chat.send 仍会 INVALID_REQUEST（与套件端 CLI health 正交）。
  */
 import { describe, it, expect, vi } from 'vitest';
 import { handlers } from '../handlers.js';

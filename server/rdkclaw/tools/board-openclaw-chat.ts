@@ -10,7 +10,7 @@ import {
 import type { Device } from "../../../shared/types.js";
 import { resolvePersistedOrDefaultSshPassword } from "../../device-ssh-credentials.js";
 
-/** 板端推理可能较慢；默认 120s，可用 RDK_BOARD_OPENCLAW_CHAT_TIMEOUT_MS 覆盖（5000–600000） */
+/** 套件端推理可能较慢；默认 120s，可用 RDK_BOARD_OPENCLAW_CHAT_TIMEOUT_MS 覆盖（5000–600000） */
 function boardOpenClawChatTimeoutMs(): number {
   const raw = process.env.RDK_BOARD_OPENCLAW_CHAT_TIMEOUT_MS;
   if (raw && /^\d+$/.test(String(raw).trim())) {
@@ -20,14 +20,14 @@ function boardOpenClawChatTimeoutMs(): number {
   return 120_000;
 }
 
-/** 等待板端首包时推给用户看的短句，减轻「卡住」感（随机一条） */
+/** 等待套件端首包时推给用户看的短句，减轻「卡住」感（随机一条） */
 const WAITING_BLURBS = [
-  "…正在等板端 OpenClaw 回话。先听句闲话：据说最早的调试器是 printf，治百病。\n\n",
-  "…OpenClaw 在板子上琢磨呢。等的时候最适合倒杯水——反正比盯着白屏强。\n\n",
-  "…和板端通个话要过网关，稍等片刻。小趣闻：第一个 bug 真的是只飞蛾。\n\n",
-  "…消息已发给板端，它可能在想长上下文。你先歇两秒，急也没用。\n\n",
+  "…正在等套件端 OpenClaw 回话。先听句闲话：据说最早的调试器是 printf，治百病。\n\n",
+  "…OpenClaw 在开发者套件上琢磨呢。等的时候最适合倒杯水——反正比盯着白屏强。\n\n",
+  "…和套件端通个话要过网关，稍等片刻。小趣闻：第一个 bug 真的是只飞蛾。\n\n",
+  "…消息已发给套件端，它可能在想长上下文。你先歇两秒，急也没用。\n\n",
   "…等 OpenClaw 的时候，CPU 可能在跑推理。你可以深呼吸一下，算免费冥想。\n\n",
-  "…板端若在用本地模型，首 token 有时会慢。下面开始是 OpenClaw 的回复：\n\n",
+  "…套件端若在用本地模型，首 token 有时会慢。下面开始是 OpenClaw 的回复：\n\n",
 ];
 
 function resolveDevicePassword(device: Device) {
@@ -62,14 +62,14 @@ export function boardOpenClawChatTool(
   return {
     name: "board_openclaw_chat",
     description:
-      "与板端 OpenClaw 自由交流——交换信息、讨论方案、了解板端能力和状态。\n\n" +
+      "与套件端 OpenClaw 自由交流——交换信息、讨论方案、了解套件端能力和状态。\n\n" +
       "IMPORTANT 使用规则：\n" +
       "- 不同于 board_openclaw_assess（评估可行性）和 board_openclaw_delegate（委派执行），这是轻量级的伙伴对话\n" +
-      "- 典型用途：了解 OpenClaw 配置的模型和能力、分享你的分析发现、讨论执行方案、获取板端实时状态\n" +
+      "- 典型用途：了解 OpenClaw 配置的模型和能力、分享你的分析发现、讨论执行方案、获取套件端实时状态\n" +
       "- 与 delegate 共享会话上下文，交流过的内容在后续委派时 OpenClaw 仍记得\n" +
-      "- 板端回复可能需数十秒（本地模型推理慢），先对用户说一两句轻松话再调用\n" +
+      "- 套件端回复可能需数十秒（本地模型推理慢），先对用户说一两句轻松话再调用\n" +
       "- 当 delegate 返回 [NEED_RDKCLAW] 块时，用你的工具获取信息后通过此工具发回给 OpenClaw\n" +
-      "- **对齐放行（重要）**：当 delegate 首次返回仅有 **[板端·对齐]**、且 `alignment_gate` 为 strict 时，**必须**用本工具发送明确回应（同意执行、补充约束、或修订方案），OpenClaw 收到后才应进入执行阶段\n" +
+      "- **对齐放行（重要）**：当 delegate 首次返回仅有 **[套件端·对齐]**、且 `alignment_gate` 为 strict 时，**必须**用本工具发送明确回应（同意执行、补充约束、或修订方案），OpenClaw 收到后才应进入执行阶段\n" +
       "- NEVER 用此工具替代 delegate 来执行任务——chat 只交流不执行",
     inputSchema: {
       type: "object",
@@ -87,10 +87,10 @@ export function boardOpenClawChatTool(
       }
 
       const boardDevice = toBoardDevice(device);
-      /** 板端收到的用户消息前缀：短契约，与 delegate 的 NEED 块口径一致 */
+      /** 套件端收到的用户消息前缀：短契约，与 delegate 的 NEED 块口径一致 */
       const prompt = [
         "[RDKClaw↔OpenClaw] Studio 侧主智能体与你对话（本 turn 以交流与对齐为主，复杂长任务用 delegate 已在其它消息中下达）。",
-        "依据板端实况答复：设备状态、技能、文件与模型能力据实说；不确定写明「不确定」勿编造。",
+        "依据套件端实况答复：设备状态、技能、文件与模型能力据实说；不确定写明「不确定」勿编造。",
         "缺联网/上游文档才能结论时：可在回复中使用与 delegate 相同的 [NEED_RDKCLAW]…[/NEED_RDKCLAW] 块（type/query/reason）。",
         input.context ? `背景: ${input.context}` : "",
         `—\nRDKClaw: ${input.message}`,
@@ -113,7 +113,7 @@ export function boardOpenClawChatTool(
             onProgress?.(blurb, ctx.toolCallId, { progressSource: "studio_wait" });
           } else {
             onProgress?.(
-              "\n[与板端连接瞬时波动，正在自动重试一次…]\n\n",
+              "\n[与套件端连接瞬时波动，正在自动重试一次…]\n\n",
               ctx.toolCallId,
               { progressSource: "studio_wait" },
             );
@@ -127,7 +127,7 @@ export function boardOpenClawChatTool(
             }
             const line =
               output.trim() ||
-              `OpenClaw 未在 ${Math.round(waitMs / 1000)} 秒内回复（板端推理慢或网关未返回时可重试 / 检查 OpenClaw 状态）`;
+              `OpenClaw 未在 ${Math.round(waitMs / 1000)} 秒内回复（套件端推理慢或网关未返回时可重试 / 检查 OpenClaw 状态）`;
             const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, line, {
               phase: "chat",
               toolCallId: ctx.toolCallId,

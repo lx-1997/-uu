@@ -182,7 +182,7 @@ function isTrivialStudioChatMessage(message: string): boolean {
 }
 
 /**
- * 板端公网探测脚本（与常见 `curl -sI http(s)://…` 手测一致）：
+ * 套件端公网探测脚本（与常见 `curl -sI http(s)://…` 手测一致）：
  * 1) 依次 HTTP(S) HEAD：百度 HTTP/HTTPS、npm registry（任一成功即 READY）
  * 2) wget spider 兜底
  * 3) ICMP ping 仅作补充（避免「仅 ICMP 被拦」误判为不可达）
@@ -1612,7 +1612,7 @@ export class RDKClawApp {
           ...base,
           executor: "rdkclaw_local",
           phase: "running",
-          message: `当前设备离线（${deviceConnectivity.detail}），先执行连通性恢复，再进行 OpenClaw/更新等板端动作。`,
+          message: `当前设备离线（${deviceConnectivity.detail}），先执行连通性恢复，再进行 OpenClaw/更新等套件端动作。`,
           device_reachability_status: deviceConnectivity.status,
         },
       });
@@ -1771,7 +1771,7 @@ export class RDKClawApp {
           latest_tools: latestTools,
           message:
             `${head}，已运行 ${elapsedHuman}，累计 ${totalCalls} 个工具步骤${toolHint}` +
-            `（约每 ${runProgressIntervalSec}s 推送一次进度；板端协作工具会额外流式输出）`,
+            `（约每 ${runProgressIntervalSec}s 推送一次进度；套件端协作工具会额外流式输出）`,
         },
       });
     };

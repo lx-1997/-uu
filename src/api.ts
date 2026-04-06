@@ -486,7 +486,7 @@ export interface RdkclawDebugExportPayload {
   sessionId: string;
   deviceId?: string;
   userId?: string;
-  /** 默认 true；为 false 时跳过 SSH 拉取板端 openclaw logs */
+  /** 默认 true；为 false 时跳过 SSH 拉取套件端 openclaw logs */
   includeBoardLogs?: boolean;
   uiSnapshot?: unknown;
 }
@@ -732,7 +732,7 @@ export function streamAgentChat(
             type: 'error',
             data: {
               error:
-                '长时间未收到新的有效流式事件。若板端仍在执行可再等待；否则请点「结束当前」或稍后重试。',
+                '长时间未收到新的有效流式事件。若套件端仍在执行可再等待；否则请点「结束当前」或稍后重试。',
             },
           });
           controller.abort();
@@ -771,7 +771,7 @@ export function streamAgentChat(
                 error: awaitingFirstMeaningfulChunk
                   ? '等待服务端首包超时（长时间无数据）。请确认本机网络与 RDK Studio 后端未卡住，或稍后重试。'
                   : `SSE 流断连（已运行 ${elapsedHuman}），后端任务可能仍在执行。` +
-                    '你可以：1）直接重新发送消息继续对话；2）若板端任务仍在运行，Agent 会自动获取其状态。',
+                    '你可以：1）直接重新发送消息继续对话；2）若套件端任务仍在运行，Agent 会自动获取其状态。',
                 recoverable: true,
               },
             });
@@ -849,7 +849,7 @@ export function fetchAgentConfig() {
     activeModelId?: string | null;
     /** Dock「快速回答」绑定的模型条目 id（加载配置时会尽量补全为内置快速条目） */
     quickActiveModelId?: string | null;
-    /** 板端 OpenClaw 委派预检写入网关时使用的 Studio 模型条目 id；未设置时与 Dock 深度思考主模型一致 */
+    /** 套件端 OpenClaw 委派预检写入网关时使用的 Studio 模型条目 id；未设置时与 Dock 深度思考主模型一致 */
     openclawDelegateProviderId?: string | null;
     envApiKeyAvailable?: boolean;
     /** 安装包内置默认模型（bootstrap），用于「恢复默认」 */
@@ -1343,7 +1343,7 @@ export function fetchDeviceWorkspaceHealth(deviceId: string, password?: string) 
   });
 }
 
-/** 将内置「同伴商量」技能同步到板端 ~/.openclaw/workspace/skills/（已一致则跳过） */
+/** 将内置「同伴商量」技能同步到套件端 ~/.openclaw/workspace/skills/（已一致则跳过） */
 export interface EnsurePartnerAdvisorySkillResult {
   ok: boolean;
   action?: 'skipped' | 'deployed' | 'error';
@@ -1364,7 +1364,7 @@ export function ensurePartnerAdvisorySkill(deviceId: string, password?: string) 
   });
 }
 
-/** 按板型将内置技能包同步到板端（X5→rdkx5_skills；X3/S100/Ultra→文档与指南类 skills） */
+/** 按板型将内置技能包同步到套件端（X5→rdkx5_skills；X3/S100/Ultra→文档与指南类 skills） */
 export interface EnsureBoardSkillBundleResult {
   ok: boolean;
   platform?: string;

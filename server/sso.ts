@@ -428,7 +428,7 @@ export function ssoAuthMiddleware(req: Request, res: Response, next: NextFunctio
   }
 
   /**
-   * noVNC 静态资源（/vnc/*）：与 Studio 账号无关；RFB 由板端 VNC 口令与 websockify 私网目标校验约束。
+   * noVNC 静态资源（/vnc/*）：与 Studio 账号无关；RFB 由套件端 VNC 口令与 websockify 私网目标校验约束。
    * 若要求 SSO，内嵌 WebView 常不携带 Cookie，会误跳统一认证页。
    */
   if (

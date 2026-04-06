@@ -53,7 +53,7 @@ const skillhubSearchTool: Tool<{ query: string; limit?: number }> = {
           count: slim.length,
           results: slim,
           hint:
-            '安装：板端可用 board_openclaw_skill_install（owner/slug）；本机可在 Studio「技能工坊 → SkillHub」浏览。',
+            '安装：套件端可用 board_openclaw_skill_install（owner/slug）；本机可在 Studio「技能工坊 → SkillHub」浏览。',
         },
         null,
         2,

@@ -622,7 +622,7 @@ function xburnDiagnoseDeviceConnectionFromLog(logText) {
     return '';
   }
   return (
-    '\n\n【设备】未识别到可烧录设备。请检查数据线/接口、驱动、板子是否处于下载或 fastboot；可在终端执行 adb devices / fastboot devices 自检。'
+    '\n\n【设备】未识别到可烧录设备。请检查数据线/接口、驱动、开发者套件是否处于下载或 fastboot；可在终端执行 adb devices / fastboot devices 自检。'
   );
 }
 
@@ -754,10 +754,10 @@ function emitXburnCliFinishedProgress(outcome) {
   const strong = outcome.completedBurnEvidence === true;
   const looseEnv = process.env.RDK_STUDIO_S100_LOOSE_XBURN === '1';
   const message = strong
-    ? 'xburn 已结束（退出码 0）：日志已满足强完成条件（100%、Status SUCCESS、fastboot_all，且 Process terminated 或 check_burn_result 完成）。请稍候再在板端验证；设备可能仍在重启。'
+    ? 'xburn 已结束（退出码 0）：日志已满足强完成条件（100%、Status SUCCESS、fastboot_all，且 Process terminated 或 check_burn_result 完成）。请稍候再在套件端验证；设备可能仍在重启。'
     : looseEnv
-      ? 'xburn 已结束（退出码 0，宽松模式）：未校验完成尾日志，请务必在板端确认是否刷写成功。'
-      : 'xburn 已结束（退出码 0）：日志未匹配到固定「完成」句式，但进程已正常退出。**请勿仅凭此处判定已成功**，请在板端确认刷写结果。';
+      ? 'xburn 已结束（退出码 0，宽松模式）：未校验完成尾日志，请务必在套件端确认是否刷写成功。'
+      : 'xburn 已结束（退出码 0）：日志未匹配到固定「完成」句式，但进程已正常退出。**请勿仅凭此处判定已成功**，请在套件端确认刷写结果。';
   emitFlashProgress({ stage: 'done', message, percent: 100 });
 }
 

@@ -121,7 +121,7 @@ export default function IDE() {
   const handleConnect = async () => {
     if (!currentDevice) {
       consumeIdeConnectPreferFloat();
-      addToast(t('ide.toast.connectDevice', '请先连接开发板'), 'warning');
+      addToast(t('ide.toast.connectDevice', '请先连接开发者套件'), 'warning');
       return;
     }
     if (showIframe) {
@@ -163,8 +163,8 @@ export default function IDE() {
       if (output.includes('CS_NOT_FOUND')) {
         consumeIdeConnectPreferFloat();
         setIframeLoading(false);
-        setLoadError(t('ide.err.notInstalled', '开发板上未安装 code-server'));
-        addToast(t('ide.toast.notDetected', '开发板上未检测到 code-server。请点击下方「安装」按钮自动安装，或手动在终端运行安装命令'), 'warning');
+        setLoadError(t('ide.err.notInstalled', '开发者套件上未安装 code-server'));
+        addToast(t('ide.toast.notDetected', '开发者套件上未检测到 code-server。请点击下方「安装」按钮自动安装，或手动在终端运行安装命令'), 'warning');
         setShowIframe(false);
         return;
       }
@@ -179,9 +179,9 @@ export default function IDE() {
     } catch (err) {
       consumeIdeConnectPreferFloat();
       setIframeLoading(false);
-      const msg = err instanceof Error ? err.message : t('ide.err.deviceConn', '开发板连接失败');
+      const msg = err instanceof Error ? err.message : t('ide.err.deviceConn', '开发者套件连接失败');
       setLoadError(msg);
-      addToast(tf('ide.toast.connFail', '连接开发板失败: {{msg}}', { msg }), 'error');
+      addToast(tf('ide.toast.connFail', '连接开发者套件失败: {{msg}}', { msg }), 'error');
       setShowIframe(false);
       return;
     }
@@ -524,8 +524,8 @@ export default function IDE() {
             </h2>
             <p className="immersive-welcome-desc">
               {currentDevice
-                ? tf('ide.welcome.descCs', '连接开发板 {{ip}} 上的 code-server，直接编辑 /root 目录代码', { ip: currentDevice.ip })
-                : t('ide.welcome.descWeb', '基于 vscode.dev 的在线代码编辑器，支持中文界面，可通过 Remote SSH 连接到开发板')}
+                ? tf('ide.welcome.descCs', '连接开发者套件 {{ip}} 上的 code-server，直接编辑 /root 目录代码', { ip: currentDevice.ip })
+                : t('ide.welcome.descWeb', '基于 vscode.dev 的在线代码编辑器，支持中文界面，可通过 Remote SSH 连接到开发者套件')}
             </p>
 
             {loadError?.includes(t('ide.marker.notInstalled', '未安装')) && currentDevice && (

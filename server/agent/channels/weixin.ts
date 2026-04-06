@@ -465,7 +465,7 @@ export class WeixinPollingChannel {
     if (!deviceId) {
       console.log(`${tag} no connected device, proceeding without deviceId`);
       await poller.client.sendText(fromUserId, contextToken,
-        "当前无 RDK 设备连接，板端操作暂不可用，其他功能正常。").catch(() => {});
+        "当前无 RDK 设备连接，套件端操作暂不可用，其他功能正常。").catch(() => {});
     }
 
     const chunks: string[] = [];

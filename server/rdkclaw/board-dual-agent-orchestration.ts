@@ -1,12 +1,12 @@
 /**
- * RDKClaw ↔ 板端 OpenClaw：会话内编排状态（无需改板端协议）。
+ * RDKClaw ↔ 套件端 OpenClaw：会话内编排状态（无需改套件端协议）。
  * - assess 结果注入后续 delegate
  * - NEED_RDKCLAW 连续出现次数上限与降级说明
  * - 结构化单行 JSON 日志（可用 RDK_DUAL_AGENT_LOG=0 关闭）
  */
 
 const ASSESS_INJECT_STALE_MS = 15 * 60 * 1000;
-/** 连续多少次板端回复含 NEED 后附加降级提示（第 3 次起）*/
+/** 连续多少次套件端回复含 NEED 后附加降级提示（第 3 次起）*/
 const MAX_NEED_STREAK_BEFORE_DEGRADE = 2;
 
 export type NormalizedAssess = {
@@ -18,7 +18,7 @@ export type NormalizedAssess = {
 
 type SessionBoardState = {
   lastAssess?: NormalizedAssess & { taskSnippet: string; recordedAt: number };
-  /** 连续含 [NEED_RDKCLAW] 的板端消息次数；无 NEED 时清零；新 assess 时清零 */
+  /** 连续含 [NEED_RDKCLAW] 的套件端消息次数；无 NEED 时清零；新 assess 时清零 */
   needStreak: number;
   touchedAt: number;
 };
@@ -103,7 +103,7 @@ export function formatAssessInjectBlock(sessionKey: string, deviceId: string): s
     la.suggestedPath === "local"
       ? "（assess 倾向 local：请优先 device_exec/本机工具，避免无理由大块 delegate。）"
       : la.suggestedPath === "board"
-        ? "（assess 倾向 board：适合板端承接时再用 delegate；若 canHandle=false 勿硬顶。）"
+        ? "（assess 倾向 board：适合套件端承接时再用 delegate；若 canHandle=false 勿硬顶。）"
         : "";
 
   return [
@@ -120,11 +120,11 @@ export function formatAssessInjectBlock(sessionKey: string, deviceId: string): s
 
 const NEED_DEGRADE_ZH =
   "\n\n---\n[Studio 策略] 已连续多轮出现 [NEED_RDKCLAW]，补给次数已达上限。\n" +
-  "请在本机用 web_search / web_fetch（若策略允许）自行补全结论，**用 board_openclaw_chat 一次性写清依据与建议**发给板端；\n" +
-  "勿再期待板端继续发 NEED 块。若仍无法闭环，向用户说明卡点与所需材料。\n";
+  "请在本机用 web_search / web_fetch（若策略允许）自行补全结论，**用 board_openclaw_chat 一次性写清依据与建议**发给套件端；\n" +
+  "勿再期待套件端继续发 NEED 块。若仍无法闭环，向用户说明卡点与所需材料。\n";
 
 /**
- * 板端 delegate/chat 返回正文：维护 NEED 连续计数，超限则附加降级说明。
+ * 套件端 delegate/chat 返回正文：维护 NEED 连续计数，超限则附加降级说明。
  * 正文中不含 NEED 时重置 streak。
  */
 export function applyNeedStreakPolicy(

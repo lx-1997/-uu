@@ -440,7 +440,7 @@ export default function OpenClaw() {
   // ─── Data State ───
   const [status, setStatus] = useState<GatewayStatus | null>(null);
   const [config, setConfig] = useState<ConfigData | null>(null);
-  /** 仅用于保存配置 / 测试厂商 API，避免与板端长任务 `activeOp` 混用导致整页按钮被锁死 */
+  /** 仅用于保存配置 / 测试厂商 API，避免与套件端长任务 `activeOp` 混用导致整页按钮被锁死 */
   const [configBusy, setConfigBusy] = useState(false);
   const [statusLoading, setStatusLoading] = useState(false);
 
@@ -478,7 +478,7 @@ export default function OpenClaw() {
     [chatConnected, statusLoading, ocInstalled, status?.running],
   );
 
-  // ─── Model Config State（未拉取板端配置前与产品默认「豆包 / 火山引擎」对齐）───
+  // ─── Model Config State（未拉取套件端配置前与产品默认「豆包 / 火山引擎」对齐）───
   const [modelConfig, setModelConfig] = useState(() => {
     const v = PROVIDER_PRESETS.volcengine;
     return {
@@ -489,7 +489,7 @@ export default function OpenClaw() {
       modelName: v.label,
     };
   });
-  /** 写入板端 `agents.defaults`（OpenClaw）；空字符串表示不覆盖该项 */
+  /** 写入套件端 `agents.defaults`（OpenClaw）；空字符串表示不覆盖该项 */
   const [agentDefaults, setAgentDefaults] = useState({
     thinkingDefault: '',
     reasoning: '',
@@ -550,7 +550,7 @@ export default function OpenClaw() {
   });
   const [deployStepEtaSec, setDeployStepEtaSec] = useState<number | null>(null);
   const [deployStepElapsedSec, setDeployStepElapsedSec] = useState<number>(0);
-  /** 一键部署或取消部署请求进行中：与板端 SSH/安装冲突，需锁定网关类操作 */
+  /** 一键部署或取消部署请求进行中：与套件端 SSH/安装冲突，需锁定网关类操作 */
   const boardDeployBusy = deployRunning || deployCancelLoading;
 
   // ─── Device network (WiFi/Ethernet) link state ───
@@ -561,7 +561,7 @@ export default function OpenClaw() {
     let cancelled = false;
     const probe = async () => {
       const s = await fetchWifiLinkState(id);
-      if (!cancelled) setDeviceNetUp(s === 'up');
+      if (!cancelled) setDeviceNetUp(s.state === 'up');
     };
     void probe();
     const iv = setInterval(probe, DEVICE_POLL_PHASE_OPENCLAW_WIFI_TICK_MS);
@@ -661,16 +661,16 @@ export default function OpenClaw() {
 
   const getChatPhaseHint = useCallback((phase: OpenClawChatPhase) => {
     switch (phase) {
-      case 'thinking': return t('oc.chat.phaseHint.thinking', '板端 Agent 正在整理上下文与计划，请稍候。');
-      case 'responding': return t('oc.chat.phaseHint.responding', '板端 Agent 已开始回传结果。');
-      case 'waiting_rdkclaw': return t('oc.chat.phaseHint.waitingRdkclaw', '板端正在做对齐确认，等待 RDKClaw 补充或放行后再继续执行。');
-      case 'need_rdkclaw': return t('oc.chat.phaseHint.needRdkclaw', '板端缺少联网文档或上游信息，正在请求 RDKClaw 补充。');
-      case 'executing': return t('oc.chat.phaseHint.executing', '板端已进入执行阶段，正在落地命令或技能链。');
+      case 'thinking': return t('oc.chat.phaseHint.thinking', '套件端 Agent 正在整理上下文与计划，请稍候。');
+      case 'responding': return t('oc.chat.phaseHint.responding', '套件端 Agent 已开始回传结果。');
+      case 'waiting_rdkclaw': return t('oc.chat.phaseHint.waitingRdkclaw', '套件端正在做对齐确认，等待 RDKClaw 补充或放行后再继续执行。');
+      case 'need_rdkclaw': return t('oc.chat.phaseHint.needRdkclaw', '套件端缺少联网文档或上游信息，正在请求 RDKClaw 补充。');
+      case 'executing': return t('oc.chat.phaseHint.executing', '套件端已进入执行阶段，正在落地命令或技能链。');
       case 'error': return t('oc.chat.phaseHint.error', '本轮对话出现异常，可查看最后一条错误信息。');
       case 'disconnected': return t('oc.chat.phaseHint.disconnected', '设备会话已断开，系统会在需要时自动重连。');
       case 'completed': return t('oc.chat.phaseHint.completed', '本轮已完成，可以继续下一轮。');
-      case 'ready': return t('oc.chat.phaseHint.ready', '板端会话已就绪，可以开始对话。');
-      default: return t('oc.chat.phaseHint.connecting', '正在建立与板端的协作会话。');
+      case 'ready': return t('oc.chat.phaseHint.ready', '套件端会话已就绪，可以开始对话。');
+      default: return t('oc.chat.phaseHint.connecting', '正在建立与套件端的协作会话。');
     }
   }, [t]);
 
@@ -699,12 +699,12 @@ export default function OpenClaw() {
     if (!chatConnected) return t('oc.composer.hint.connecting', '正在建立与设备的会话，请稍候…');
     if (chatStreaming) return getChatPhaseHint(chatPhase);
     if (!status?.running) return t('oc.composer.hint.gatewayDown', '网关未运行：请先点击「重启网关」或等待自动恢复后再发送。');
-    if (deviceNetUp === false) return t('oc.composer.hint.networkOffline', '开发板未联网：对话需要访问云端模型 API，请先为开发板连接 Wi‑Fi 或网线。');
+    if (deviceNetUp === false) return t('oc.composer.hint.networkOffline', '开发者套件未联网：对话需要访问云端模型 API，请先为开发者套件连接 Wi‑Fi 或网线。');
     if (!hasBoardModelSelection()) return t('oc.composer.hint.modelMissing', '尚未配置模型：请先在右侧面板保存模型配置后再发送。');
     if (!hasBoardModelCredentials()) return t('oc.composer.hint.modelCredentialMissing', '已选择模型，但未检测到可用 API Key；请在右侧补全凭据后再发送。');
     if (modelApiReachable === 'fail') {
       return localVendorApiVerifiedForCurrentConfig
-        ? t('oc.composer.hint.modelApiBoardFailAfterVendorOk', '厂商 API 已验证可用，但板端实际链路仍失败：请检查是否已保存到板端、网关信任、板端网络或运行时密钥。')
+        ? t('oc.composer.hint.modelApiBoardFailAfterVendorOk', '厂商 API 已验证可用，但套件端实际链路仍失败：请检查是否已保存到套件端、网关信任、套件端网络或运行时密钥。')
         : t('oc.composer.hint.modelApiFail', '模型连通检查失败：请检查 API Key、Base URL、网关信任状态或网络后重试。');
     }
     return '';
@@ -721,7 +721,7 @@ export default function OpenClaw() {
   const [configTab, setConfigTab] = useState<ConfigTab>('model');
   const [modelGatewayApiKeyVisible, setModelGatewayApiKeyVisible] = useState(false);
   const [deployApiKeyVisible, setDeployApiKeyVisible] = useState(false);
-  /** Studio agent-config 中的模型条目，供板端委派预选 */
+  /** Studio agent-config 中的模型条目，供套件端委派预选 */
   const [studioDelegateModels, setStudioDelegateModels] = useState<Array<{ id: string; label: string; model: string }>>([]);
   const [delegateEntryId, setDelegateEntryId] = useState('');
   const [delegatePresetSaving, setDelegatePresetSaving] = useState(false);
@@ -969,7 +969,7 @@ export default function OpenClaw() {
     }
   }, [activeTab, currentDevice, ocDeployPanelHintKey, status?.installed, status?.version, statusLoading, deployRunning]);
 
-  /** 板端已连 Wi‑Fi 且未安装 OpenClaw 时，使用工作室侧已保存的模型配置自动发起部署（与 POST /deploy/start 服务端逻辑一致） */
+  /** 套件端已连 Wi‑Fi 且未安装 OpenClaw 时，使用工作室侧已保存的模型配置自动发起部署（与 POST /deploy/start 服务端逻辑一致） */
   useEffect(() => {
     if (!currentDevice) return;
     const id = currentDevice.id;
@@ -988,7 +988,7 @@ export default function OpenClaw() {
       } catch { /* ignore */ }
 
       const wifi = await fetchWifiLinkState(id);
-      if (cancelled || wifi !== 'up') return;
+      if (cancelled || wifi.state !== 'up') return;
 
       let installed = false;
       try {
@@ -1024,7 +1024,7 @@ export default function OpenClaw() {
             addToast?.(
               tRef.current(
                 'oc.deploy.autoNeedStudioModel',
-                '板端已连接 Wi‑Fi，但工作室未保存模型凭据，无法自动安装 OpenClaw。请在设置中配置模型，或使用一键部署手动填写。',
+                '套件端已连接 Wi‑Fi，但工作室未保存模型凭据，无法自动安装 OpenClaw。请在设置中配置模型，或使用一键部署手动填写。',
               ),
               'info',
             );
@@ -1281,7 +1281,7 @@ export default function OpenClaw() {
   };
 
   /**
-   * 进入「模型」页：拉取 Studio 预选列表；先 loadConfig 再应用预选条目，避免板端配置覆盖预选填充。
+   * 进入「模型」页：拉取 Studio 预选列表；先 loadConfig 再应用预选条目，避免套件端配置覆盖预选填充。
    */
   useEffect(() => {
     if (activeTab !== 'openclaw' || dashboardTab !== 'model' || !currentDevice) return;
@@ -1400,7 +1400,7 @@ export default function OpenClaw() {
       job.error === 'oc.deployPoll.interrupted'
         ? tRef.current(
             'oc.deployPoll.interrupted',
-            '长时间无法拉取部署进度（烧录或本机繁忙时常见）；板端可能仍在安装。请查看下方日志或稍后重试。',
+            '长时间无法拉取部署进度（烧录或本机繁忙时常见）；套件端可能仍在安装。请查看下方日志或稍后重试。',
           )
         : job.error || tRef.current('oc.deploy.fail', '部署失败，请查看日志输出');
     setDeployLastError(err);
@@ -1428,7 +1428,7 @@ export default function OpenClaw() {
     if (isSlow) {
       progressTimer = setInterval(() => {
         const elapsed = Math.round((Date.now() - startTime) / 1000);
-        updateLastAssistant(`**任务: ${actionLabel}**\n\n执行中 (${elapsed}s)\n\n_${action === 'install' || action === 'upgrade' || action === 'uninstall' ? '终端后台守护可能需要几分钟，若无新行请耐心等待执行完毕...' : '正在向板端代理下发系统指令...' }_`);
+        updateLastAssistant(`**任务: ${actionLabel}**\n\n执行中 (${elapsed}s)\n\n_${action === 'install' || action === 'upgrade' || action === 'uninstall' ? '终端后台守护可能需要几分钟，若无新行请耐心等待执行完毕...' : '正在向套件端代理下发系统指令...' }_`);
       }, 5000);
     }
 
@@ -1478,7 +1478,7 @@ export default function OpenClaw() {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const path = `/api/devices/${currentDevice.id}/openclaw/${action}`;
       const msg = err.name === 'AbortError'
-        ? tf('oc.run.timeout', '操作超时 ({{s}}s)，命令可能仍在板端运行', { s: Math.round(fetchTimeout / 1000) })
+        ? tf('oc.run.timeout', '操作超时 ({{s}}s)，命令可能仍在套件端运行', { s: Math.round(fetchTimeout / 1000) })
         : err.message;
       updateLastAssistant(`\`>>> ${action}\` _(${elapsed}s)_\n\n${t('oc.chat.errorPrefix', '**错误：**')} ${msg}`);
       if (err.name === 'AbortError') {
@@ -1938,7 +1938,7 @@ export default function OpenClaw() {
 
   /* ─── Helpers ─── */
 
-  /** 板端 OpenClaw 当前主模型（来自设备上的配置） */
+  /** 套件端 OpenClaw 当前主模型（来自设备上的配置） */
   const getBoardModelNameForDisplay = () => {
     if (!config) return t('oc.summary.notConfigured', '未配置');
     if (config.primaryModel) {
@@ -1960,8 +1960,8 @@ export default function OpenClaw() {
   const getCurrentModel = () => getBoardModelNameForDisplay();
 
   /**
-   * 顶栏「模型」：默认等于板端当前模型。
-   * 若已选「委派预选」且与板端不一致，则显示「预选模型 · 板:板端模型」，避免误以为预选未保存。
+   * 顶栏「模型」：默认等于套件端当前模型。
+   * 若已选「委派预选」且与套件端不一致，则显示「预选模型 · 板:套件端模型」，避免误以为预选未保存。
    */
   const getStatusBarModelDisplay = () => {
     const board = getBoardModelNameForDisplay();
@@ -1978,15 +1978,15 @@ export default function OpenClaw() {
     const board = getBoardModelNameForDisplay();
     const id = delegateEntryId.trim();
     if (!id) {
-      return t('oc.status.modelTitleBoardOnly', '此为板端 OpenClaw 当前使用的模型（设备上的配置）。');
+      return t('oc.status.modelTitleBoardOnly', '此为套件端 OpenClaw 当前使用的模型（设备上的配置）。');
     }
     const entry = studioDelegateModels.find((m) => m.id === id);
     if (!entry) {
-      return t('oc.status.modelTitleBoardOnly', '此为板端 OpenClaw 当前使用的模型（设备上的配置）。');
+      return t('oc.status.modelTitleBoardOnly', '此为套件端 OpenClaw 当前使用的模型（设备上的配置）。');
     }
     return tf(
       'oc.status.modelTitleDelegate',
-      '板端当前：{{board}}。委派预检将写入 Studio 条目「{{label}}」（{{model}}）。若希望板端对话也使用该模型，请在本页「大模型」保存相同配置并重启网关。',
+      '套件端当前：{{board}}。委派预检将写入 Studio 条目「{{label}}」（{{model}}）。若希望套件端对话也使用该模型，请在本页「大模型」保存相同配置并重启网关。',
       { board, label: entry.label, model: entry.model },
     );
   };
@@ -1997,7 +1997,7 @@ export default function OpenClaw() {
     }
     if (modelApiReachable === 'fail') {
       if (localVendorApiVerifiedForCurrentConfig) {
-        return t('oc.status.modelReachabilityBoardFailAfterVendorOk', '本机直连厂商 API 已通过，但板端实际链路仍不可达；请检查是否已保存到板端、网关信任、板端网络或运行时密钥。');
+        return t('oc.status.modelReachabilityBoardFailAfterVendorOk', '本机直连厂商 API 已通过，但套件端实际链路仍不可达；请检查是否已保存到套件端、网关信任、套件端网络或运行时密钥。');
       }
       return t('oc.status.modelReachabilityFail', '模型连通检查失败 — 请检查 API Key、Base URL、网关信任或网络。');
     }
@@ -2064,7 +2064,7 @@ export default function OpenClaw() {
   const modelStatusBadgeText =
     modelApiReachable === 'fail'
       ? (localVendorApiVerifiedForCurrentConfig
-        ? t('oc.status.modelBoardOnlyFailShort', '板端不可达')
+        ? t('oc.status.modelBoardOnlyFailShort', '套件端不可达')
         : t('oc.status.modelApiFailShort', 'API 不可达'))
       : '';
 
@@ -2130,7 +2130,7 @@ export default function OpenClaw() {
         <div className="empty-state">
           <div className="empty-state-icon">{MI('hub')}</div>
           <h3 className="empty-state-title">{t('oc.empty.title', '连接设备后管理 OpenClaw')}</h3>
-          <p className="empty-state-desc">{t('oc.empty.desc', '先添加并选择一台 RDK 开发板，即可部署与配置 OpenClaw。')}</p>
+          <p className="empty-state-desc">{t('oc.empty.desc', '先添加并选择一台 RDK 开发者套件，即可部署与配置 OpenClaw。')}</p>
           <button type="button" className="btn btn-primary" onClick={() => setShowAddDevice(true)}>
             {t('oc.empty.addDevice', '添加设备')}
           </button>
@@ -2243,7 +2243,7 @@ export default function OpenClaw() {
         </div>
         {deviceNetUp === false && setupStatus.gateway === 'ok' && (
           <div className="oc-setup-guide-hint" style={{ borderColor: 'var(--color-accent, #e67e22)' }}>
-            {t('oc.setup.hint.networkOffline', '开发板当前未联网，网关虽在运行但无法访问云端模型。请先通过右上角 WiFi 图标为开发板配网。')}
+            {t('oc.setup.hint.networkOffline', '开发者套件当前未联网，网关虽在运行但无法访问云端模型。请先通过右上角 WiFi 图标为开发者套件配网。')}
           </div>
         )}
         {showSetupGuide && needsSetup() && (
@@ -2260,14 +2260,14 @@ export default function OpenClaw() {
     );
   };
 
-  /** 一键部署前：板端需能访问外网（信息提示，避免与主 CTA 抢同一套橙色） */
+  /** 一键部署前：套件端需能访问外网（信息提示，避免与主 CTA 抢同一套橙色） */
   const deployWifiPrereqNotice = (
     <div role="note" className="oc-deploy-wifi-prereq">
       <span className="oc-deploy-wifi-prereq-icon" aria-hidden>{MI('wifi')}</span>
       <p className="oc-deploy-wifi-prereq-text">
         {t(
           'oc.deploy.wifiPrereq',
-          '一键部署需要从板端下载依赖，请先为开发板连接 Wi‑Fi（或网线）并确保能访问互联网。若尚未配网，可点击界面右上角的 Wi‑Fi 图标进行配网，完成后再开始部署。',
+          '一键部署需要从套件端下载依赖，请先为开发者套件连接 Wi‑Fi（或网线）并确保能访问互联网。若尚未配网，可点击界面右上角的 Wi‑Fi 图标进行配网，完成后再开始部署。',
         )}
       </p>
     </div>
@@ -2283,7 +2283,7 @@ export default function OpenClaw() {
           </div>
           <h1 className="oc-setup-wizard-title">{t('oc.deploy.title', '一键部署 OpenClaw')}</h1>
           <p className="oc-setup-wizard-lead">
-            {t('oc.chat.needInstall', '尚未检测到 OpenClaw CLI。请使用「一键部署」安装运行时与依赖，再在板端配置模型。')}
+            {t('oc.chat.needInstall', '尚未检测到 OpenClaw CLI。请使用「一键部署」安装运行时与依赖，再在套件端配置模型。')}
           </p>
         </header>
 
@@ -2383,7 +2383,7 @@ export default function OpenClaw() {
               addToast={addToast}
               copyOk={t('oc.deploy.copyOk', '日志已复制到剪贴板')}
               copyFail={t('oc.deploy.copyFail', '复制失败，请手动选择日志')}
-              title={t('oc.deploy.logPanelTitle', '板端安装日志')}
+              title={t('oc.deploy.logPanelTitle', '套件端安装日志')}
               subtitle={t('oc.deploy.logPanelSubtitle', 'SSH 实时输出 · npm 下载与安装可能持续数分钟')}
               truncatedHint={tf('oc.deploy.logTruncated', '日志过长，仅显示最后 {{n}} 行', { n: DEPLOY_LOG_MAX_LINES })}
               copyLabel={t('oc.deploy.copyLog', '复制全部')}
@@ -2495,7 +2495,7 @@ export default function OpenClaw() {
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8 }}>
               {t(
                 'oc.boardDelegate.hint.compact',
-                '默认使用 RDKClaw 当前模型。你可在此选择一个已保存条目并自动填充下方字段，再保存写入板端。',
+                '默认使用 RDKClaw 当前模型。你可在此选择一个已保存条目并自动填充下方字段，再保存写入套件端。',
               )}
             </div>
             <div className="oc-form-row">
@@ -2735,7 +2735,7 @@ export default function OpenClaw() {
                   <div className="oc-chat-empty-icon">{MI('hub')}</div>
                   <strong>
                     {deviceNetUp === false
-                      ? t('oc.chat.emptyOffline', '开发板未联网，暂时无法对话')
+                      ? t('oc.chat.emptyOffline', '开发者套件未联网，暂时无法对话')
                       : !status?.running
                         ? t('oc.chat.emptyGwDown', '网关未运行')
                         : !hasBoardModelSelection()
@@ -2744,12 +2744,12 @@ export default function OpenClaw() {
                             ? t('oc.chat.emptyModelCredentialMissing', '模型凭据未就绪')
                         : modelApiReachable === 'fail'
                           ? (localVendorApiVerifiedForCurrentConfig
-                            ? t('oc.chat.emptyBoardModelFail', '板端模型链路不可达')
+                            ? t('oc.chat.emptyBoardModelFail', '套件端模型链路不可达')
                             : t('oc.chat.emptyModelFail', '模型 API 不可达'))
                           : t('oc.chat.readyTitle', '可以开始对话')}
                   </strong>
                   {deviceNetUp === false && (
-                    <p className="oc-chat-empty-sub">{t('oc.chat.emptyOfflineSub', '对话需要通过网络访问云端大模型。请先点击右上角 WiFi 图标为开发板配网。')}</p>
+                    <p className="oc-chat-empty-sub">{t('oc.chat.emptyOfflineSub', '对话需要通过网络访问云端大模型。请先点击右上角 WiFi 图标为开发者套件配网。')}</p>
                   )}
                   {deviceNetUp !== false && !status?.running && ocInstalled && (
                     <p className="oc-chat-empty-sub">{t('oc.chat.emptyGwDownSub', '请点击上方「重启网关」恢复后再试。')}</p>
@@ -2763,7 +2763,7 @@ export default function OpenClaw() {
                   {deviceNetUp !== false && status?.running && modelApiReachable === 'fail' && (
                     <p className="oc-chat-empty-sub">{
                       localVendorApiVerifiedForCurrentConfig
-                        ? t('oc.chat.emptyBoardModelFailSub', '厂商 API 已通过；当前问题在板端链路。请检查是否已保存到板端、网关信任、板端网络或运行时密钥。')
+                        ? t('oc.chat.emptyBoardModelFailSub', '厂商 API 已通过；当前问题在套件端链路。请检查是否已保存到套件端、网关信任、套件端网络或运行时密钥。')
                         : t('oc.chat.emptyModelFailSub', '请在右侧面板检查模型 API Key、Base URL、网关信任状态，或点击「测试厂商 API」排查。')
                     }</p>
                   )}
@@ -2804,7 +2804,7 @@ export default function OpenClaw() {
                     disabled={!currentDevice || !openclawAgentReady || chatStreaming || !ocComposerText.trim()}
                     title={
                       !openclawAgentReady && ocComposerText.trim()
-                        ? ocComposerBlockHint || t('oc.composer.sendDisabledTitle', '当前无法发送到板端 Agent')
+                        ? ocComposerBlockHint || t('oc.composer.sendDisabledTitle', '当前无法发送到套件端 Agent')
                         : t('dock.send', '发送')
                     }
                   >

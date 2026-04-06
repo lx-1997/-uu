@@ -61,7 +61,7 @@ export function buildProductEcosystemPrompt(): string {
     '### Studio 界面操控（本机客户端）',
     '用户在**对话输入框**用自然语言说「打开 VNC / 远程桌面」「打开 IDE」时：RDK Studio **客户端会直接在后台**执行与对应页面「连接」按钮相同的逻辑（**不强制切换 Tab**），就绪后再**自动浮出悬浮窗**；无需模型额外输出标签。',
     '若仍需**仅切 Tab、不启动服务**：可在回复末行输出 `[[action:navigate|ide]]` 等（tab 可为 ide、vnc、terminal、files、dashboard、openclaw、skills、flasher、ai-chat-hub、dr-embed）。',
-    '浮出/贴回嵌入区：`[[action:embedFloat|ide]]` / `[[action:embedFloat|vnc]]`；贴回：`[[action:embedFloat|ide:false]]`。板端启动服务也可用 **device_exec**；与「仅切 Tab」区分。',
+    '浮出/贴回嵌入区：`[[action:embedFloat|ide]]` / `[[action:embedFloat|vnc]]`；贴回：`[[action:embedFloat|ide:false]]`。套件端启动服务也可用 **device_exec**；与「仅切 Tab」区分。',
     '**嵌入会话数量**：**代码编辑器与远程桌面各限 1 个会话**（同类不可重复开）；**二者可同时连接并各自浮窗**（即 IDE 悬浮 + 远程桌面悬浮可同时存在）。',
   ].join('\n');
 }

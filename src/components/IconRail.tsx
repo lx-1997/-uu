@@ -31,7 +31,7 @@ interface NavItemDef {
 const NAV_ITEMS: NavItemDef[] = [
   { tab: 'dashboard', labelKey: 'nav.dashboard.label', descKey: 'nav.dashboard.desc', zhLabel: '工作台', zhDesc: '设备与快捷操作',
     paths: ['M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4'] },
-  { tab: 'openclaw', labelKey: 'nav.openclaw.label', descKey: 'nav.openclaw.desc', zhLabel: 'OpenClaw', zhDesc: '板端网关与配置',
+  { tab: 'openclaw', labelKey: 'nav.openclaw.label', descKey: 'nav.openclaw.desc', zhLabel: 'OpenClaw', zhDesc: '套件端网关与配置',
     paths: [], lucide: 'openclaw' },
   { tab: 'skills', labelKey: 'nav.skills.label', descKey: 'nav.skills.desc', zhLabel: '技能工坊', zhDesc: '技能包与部署',
     paths: [], lucide: 'skills' },
@@ -255,7 +255,7 @@ export default function IconRail() {
             <div className="device-panel-title">{t('device.listTitle', '设备列表')}</div>
             {devices.length === 0 && (
               <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', padding: '12px 0' }}>
-                {t('device.empty', '还没有设备，请先添加一台 RDK 开发板。')}
+                {t('device.empty', '还没有设备，请先添加一台 RDK 开发者套件。')}
               </div>
             )}
             {devices.map((dev) => (

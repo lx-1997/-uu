@@ -1,11 +1,11 @@
 /**
- * 工具结果 JSON：供前端在会话中展示「改了什么」（本机 write/edit 与板端 device_file_write）。
+ * 工具结果 JSON：供前端在会话中展示「改了什么」（本机 write/edit 与套件端 device_file_write）。
  * 与 useAIChatStore 中 __type === 'code_change' 分支对齐。
  */
 
 export type CodeChangePayload = {
   __type: 'code_change';
-  /** 本机工作区或板端设备 */
+  /** 本机工作区或套件端设备 */
   scope: 'workspace' | 'device';
   /** 展示用路径（相对 workspace 或设备绝对路径） */
   path: string;

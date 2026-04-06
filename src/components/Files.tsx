@@ -56,7 +56,7 @@ export default function Files() {
         runDownloadRef.current?.(target.name, target.isDir);
       } else {
         if (!deviceRef.current) {
-          addToast(t('files.connectFirst', '请先连接开发板获取文件'), 'warning');
+          addToast(t('files.connectFirst', '请先连接开发者套件获取文件'), 'warning');
           return;
         }
         addToast(tf('files.searchDeep', '当前目录未找到，正在全盘深入搜索 {{name}}...', { name: fileName }), 'info');
@@ -96,7 +96,7 @@ export default function Files() {
 
   const ensureDevice = () => {
     if (!currentDevice) {
-      addToast(t('files.needDevice', '请先连接开发板'), 'warning');
+      addToast(t('files.needDevice', '请先连接开发者套件'), 'warning');
       return false;
     }
     return true;
@@ -454,8 +454,8 @@ export default function Files() {
               <span
                 className="immersive-bar-status"
                 title={isDeviceShownOnline(currentDevice)
-                  ? t('files.status.connected', '已通过 SSH 连接到开发板')
-                  : t('files.status.offline', '开发板连接已断开，文件操作可能失败')}
+                  ? t('files.status.connected', '已通过 SSH 连接到开发者套件')
+                  : t('files.status.offline', '开发者套件连接已断开，文件操作可能失败')}
               >
                 <span className={`status-dot ${isDeviceShownOnline(currentDevice) ? 'online' : 'warn'}`} />
                 {isDeviceShownOnline(currentDevice)

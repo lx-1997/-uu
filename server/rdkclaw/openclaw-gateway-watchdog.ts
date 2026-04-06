@@ -4,7 +4,7 @@
  * 周期性检查已注册设备：若 OpenClaw 已安装但网关未监听 18789，则触发与 UI「重启网关」一致的
  * runRestartGateway 智能链路（systemd user / CLI / nohup 兜底），并区分：
  * - Studio↔板 SSH 不可用 → 归类为连接/网络问题，不盲目重启进程
- * - 板端可连但网关停 → 自动修复并短时复检
+ * - 套件端可连但网关停 → 自动修复并短时复检
  *
  * 环境变量：
  * - RDK_OC_GATEWAY_WATCHDOG=0 — 关闭看门狗
@@ -183,7 +183,7 @@ export function startOpenClawGatewayWatchdog(opts: OpenClawGatewayWatchdogOption
       const detail =
         repairOk === false
           ? '重启命令未成功完成，请在本机 OpenClaw 面板查看日志或手动「诊断并修复」。'
-          : '重启后端口仍不可用：可能是板端配置错误、资源不足或需执行 openclaw doctor --fix。';
+          : '重启后端口仍不可用：可能是套件端配置错误、资源不足或需执行 openclaw doctor --fix。';
 
       if (opts.notificationHub && n <= 3) {
         opts.notificationHub.publish({

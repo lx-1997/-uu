@@ -24,7 +24,7 @@ import {
   syncBuiltinStudioSkillsOverSftp,
 } from './board-openclaw-builtin-skills-sync.js';
 
-/** 板端一键安装/升级 SSH 超时（毫秒）。默认 30 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式 npm 全局装包常超过 10 分钟。 */
+/** 套件端一键安装/升级 SSH 超时（毫秒）。默认 30 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式 npm 全局装包常超过 10 分钟。 */
 export const OPENCLAW_INSTALL_TIMEOUT_MS = (() => {
   const raw = process.env.OPENCLAW_INSTALL_TIMEOUT_MS;
   const n = raw ? Number(raw) : NaN;
@@ -136,11 +136,11 @@ export interface ConfigData {
   allProviders?: Record<string, any>;
   /**
    * 对齐 OpenClaw `agents.defaults`：思考档位与推理可见性。
-   * 保存时按板端 `openclaw --version` 写入 `reasoningDefault`（新）或 `reasoning`（旧），并迁移另一侧键以免启动失败。
+   * 保存时按套件端 `openclaw --version` 写入 `reasoningDefault`（新）或 `reasoning`（旧），并迁移另一侧键以免启动失败。
    */
   agentDefaults?: {
     thinkingDefault?: string;
-    /** 推理可见性（UI）；落盘键名由服务端根据板端版本决定 */
+    /** 推理可见性（UI）；落盘键名由服务端根据套件端版本决定 */
     reasoning?: string;
   };
 }
@@ -188,7 +188,7 @@ function versionTupleAtLeast(a: number[], b: number[]): boolean {
  *
  * - `OPENCLAW_FORCE_LEGACY_AGENT_REASONING=1`：强制旧键
  * - `OPENCLAW_FORCE_REASONING_DEFAULT_KEY=1`：强制新键
- * - `OPENCLAW_REASONING_DEFAULT_MIN_VERSION`：日历版本年(≥2026)时与板端版本比较；默认 2026.1.0
+ * - `OPENCLAW_REASONING_DEFAULT_MIN_VERSION`：日历版本年(≥2026)时与套件端版本比较；默认 2026.1.0
  * - 非日历主版本号（如 1.x）且主版本小于 2026：视为 semver≥1.0.0 即使用新键（可与 MIN_VERSION 并用调参）
  * - 探测失败：保守走旧键，避免再写入新键导致启动失败
  */
@@ -213,7 +213,7 @@ function openclawShouldUseReasoningDefaultKey(versionStdout: string, versionCmdO
   return versionTupleAtLeast(parts, [1, 0, 0]);
 }
 
-/** 板端合并 openclaw.json：argv1=patch b64，argv2=1 使用 reasoningDefault / 0 使用 reasoning 并自愈旧配置 */
+/** 套件端合并 openclaw.json：argv1=patch b64，argv2=1 使用 reasoningDefault / 0 使用 reasoning 并自愈旧配置 */
 const OPENCLAW_MERGE_PY =
   `import json,os,sys,base64,traceback
 def _strip(v):
@@ -582,7 +582,7 @@ ws = connectWs();
 `;
 
 /**
- * 板端一次性 shell：通过 127.0.0.1:18789 WebSocket + `chat.send` 验证模型链路。
+ * 套件端一次性 shell：通过 127.0.0.1:18789 WebSocket + `chat.send` 验证模型链路。
  * 新版 OpenClaw CLI 的 `openclaw message` 为渠道子命令（send/poll/…），不再用于网关对话；
  * Agent 工具 board_openclaw_model_test 必须走此路径，与 UI 一键「模型测试」一致。
  */
@@ -680,7 +680,7 @@ const RDK_OC_GATEWAY_PAIR_APPROVE_BENIGN_RE =
   'no pending|nothing to approve|no[[:space:]]+pending|no .*requests to approve|already paired|already approved|nothing pending|not pending|no devices?[[:space:]]+to approve';
 
 /**
- * 板端 shell：与本机 Gateway 建立设备信任（与 UI gateway-pair 一致）。
+ * 套件端 shell：与本机 Gateway 建立设备信任（与 UI gateway-pair 一致）。
  * - 新版 OpenClaw：`openclaw devices approve --latest`（`pair` 子命令已移除）
  * - 旧版：回退 `openclaw pair --force` / `pair --reset`
  * - 对 “no pending” 类输出：最多重试 3 次（网关刚就绪时的竞态），仍失败则视为可继续。
@@ -707,7 +707,7 @@ const RDK_OC_GATEWAY_PAIR_APPROVE_SNIPPET = RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL
 
 /**
  * 安装 / 升级 / 重启 Gateway 之后：等待 127.0.0.1:18789 再建立 CLI↔Gateway 信任。
- * 默认宽容：端口暂不可用、`devices approve` 失败等不阻断整段安装（板端设 `OPENCLAW_STRICT_GATEWAY_TRUST=1` 可恢复遇错即停）。
+ * 默认宽容：端口暂不可用、`devices approve` 失败等不阻断整段安装（套件端设 `OPENCLAW_STRICT_GATEWAY_TRUST=1` 可恢复遇错即停）。
  * 面板「一键配对 / 重置并配对」走 `buildBoardOpenClawGatewayPairRemoteShell`，不设置 RDK_OC_PAIR_LENIENT。
  */
 const ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART = [
@@ -733,7 +733,7 @@ const GATEWAY_RESTART_CMD =
  * ClawHub CLI：`clawhub install <技能短名>`（文档示例：`clawhub install summarize`）；与 `clawhub clone owner/skill` 不同。
  * `RDK_SKIP_BOARD_FIND_SKILLS=1` 可跳过。
  *
- * 安装完成后由 TypeScript 侧将 Studio 仓库 `skills/` + `rdkx5_skills/` SFTP 到板端 `~/.openclaw/workspace/skills/`（见 syncBuiltinStudioSkills / RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC）。
+ * 安装完成后由 TypeScript 侧将 Studio 仓库 `skills/` + `rdkx5_skills/` SFTP 到套件端 `~/.openclaw/workspace/skills/`（见 syncBuiltinStudioSkills / RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC）。
  */
 const BOARD_FIND_SKILLS_INSTALL =
   process.env.RDK_SKIP_BOARD_FIND_SKILLS === '1' || process.env.RDK_SKIP_BOARD_FIND_SKILLS === 'true'
@@ -923,7 +923,7 @@ export class OpenClawDeploymentManager {
   private sshPool: Map<string, Promise<Client>> = new Map();
   private resourcesPath: string;
 
-  /** 板端 ~/.rdk-studio/oc-bridge.mjs 已同步（按 IP 缓存） */
+  /** 套件端 ~/.rdk-studio/oc-bridge.mjs 已同步（按 IP 缓存） */
   private ocBridgeScriptOk = new Set<string>();
   /** 已同步脚本内容签名（按 endpoint 缓存），本地脚本变更时自动重新下发 */
   private ocBridgeScriptSigByIp = new Map<string, string>();
@@ -1063,7 +1063,7 @@ export class OpenClawDeploymentManager {
     return transport;
   }
 
-  /** 同一设备上 oc-bridge 对话串行（板端桥内部也有队列，Studio 侧再串行避免 reqId 乱序） */
+  /** 同一设备上 oc-bridge 对话串行（套件端桥内部也有队列，Studio 侧再串行避免 reqId 乱序） */
   private runOcBridgeSerial<T>(endpointKey: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.ocBridgeSendChain.get(endpointKey) ?? Promise.resolve();
     const p = prev.then(() => fn());
@@ -1071,7 +1071,7 @@ export class OpenClawDeploymentManager {
     return p;
   }
 
-  /** noVNC / IDE 等经 SSH 隧道访问板端服务时复用与 OpenClaw 相同的连接池与端口配置 */
+  /** noVNC / IDE 等经 SSH 隧道访问套件端服务时复用与 OpenClaw 相同的连接池与端口配置 */
   getSshClientForDevice(device: Device): Promise<Client> {
     return this.getClient(device);
   }
@@ -1121,7 +1121,7 @@ export class OpenClawDeploymentManager {
     return promise;
   }
 
-  /** 关掉板端桥 SSH 流并从缓存移除；下次 getOrCreate 会新建（用于断线后安全重试） */
+  /** 关掉套件端桥 SSH 流并从缓存移除；下次 getOrCreate 会新建（用于断线后安全重试） */
   private invalidateOcBridgeTransport(device: Device): void {
     const key = sshEndpointKey(device);
     const br = this.ocBridgeTransportByIp.get(key);
@@ -1331,7 +1331,7 @@ export class OpenClawDeploymentManager {
   }
 
   /**
-   * 将 Studio 当前工作目录下内置的 `skills/`、`rdkx5_skills/` 同步到板端 OpenClaw workspace（SFTP）。
+   * 将 Studio 当前工作目录下内置的 `skills/`、`rdkx5_skills/` 同步到套件端 OpenClaw workspace（SFTP）。
    * 安装流程结束后会自动调用；亦可被 Agent `board_openclaw_install` 或手工补救使用。
    * 设 `RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC=1` 可跳过。
    */
@@ -1348,7 +1348,7 @@ export class OpenClawDeploymentManager {
         `[Studio] 板型判定：${
           includeRdkx5Skills
             ? 'RDK X5（同步 rdkx5_skills 全量）'
-            : '非 X5（不同步 rdkx5_skills；S100/Ultra/X3 走文档类 skills，板端能力包见 ensure-board-skill-bundle）'
+            : '非 X5（不同步 rdkx5_skills；S100/Ultra/X3 走文档类 skills，套件端能力包见 ensure-board-skill-bundle）'
         }\n`,
       );
       const r = await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput, {
@@ -1374,7 +1374,7 @@ export class OpenClawDeploymentManager {
         `[Studio] 板型判定：${
           includeRdkx5Skills
             ? 'RDK X5（同步 rdkx5_skills 全量）'
-            : '非 X5（不同步 rdkx5_skills；S100/Ultra/X3 走文档类 skills，板端能力包见 ensure-board-skill-bundle）'
+            : '非 X5（不同步 rdkx5_skills；S100/Ultra/X3 走文档类 skills，套件端能力包见 ensure-board-skill-bundle）'
         }\n`,
       );
       await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput, {
@@ -1675,7 +1675,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       'echo "[OpenClaw] 开始初始化配置..."',
       `openclaw onboard --non-interactive ${acceptRisk} ${skipHealth} ${gatewayBind} --auth-choice ${provider} --${provider} '${escapedKey}' --install-daemon 2>&1`,
       'echo "[OpenClaw] 初始化完成"',
-      'echo "[RDK Studio] 板端默认关闭 memorySearch（无 embedding 时避免 memory_search 失败；记忆请用桌面或读文件）"',
+      'echo "[RDK Studio] 套件端默认关闭 memorySearch（无 embedding 时避免 memory_search 失败；记忆请用桌面或读文件）"',
       OPENCLAW_MERGE_EMPTY_LENIENT_SHELL,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
@@ -1695,7 +1695,7 @@ print(json.dumps(result,ensure_ascii=False))`;
         api?: string;
         /**
          * `replace_primary`：写入 `custom-gateway` 并设为主模型（默认）。
-         * `preset_only`：写入独立 `rdk-studio-default`，不修改主模型，供用户在板端设置中自行切换启用。
+         * `preset_only`：写入独立 `rdk-studio-default`，不修改主模型，供用户在套件端设置中自行切换启用。
          */
         placement?: 'replace_primary' | 'preset_only';
       };
@@ -1730,7 +1730,7 @@ print(json.dumps(result,ensure_ascii=False))`;
         patch.agents = { defaults: { model: { primary: `${providerKey}/${modelId}` } } };
       } else {
         onOutput(
-          '[OpenClaw] 已写入 Studio 建议模型到 models.providers.rdk-studio-default（未改主模型）；可在板端 OpenClaw 设置中将主模型切换为 rdk-studio-default/' +
+          '[OpenClaw] 已写入 Studio 建议模型到 models.providers.rdk-studio-default（未改主模型）；可在套件端 OpenClaw 设置中将主模型切换为 rdk-studio-default/' +
             modelId +
             ' 以启用。\n',
         );
@@ -1777,7 +1777,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       if (pendingReasoningVisibility) {
         if (!OPENCLAW_REASONING_DEFAULT_KNOWN.has(pendingReasoningVisibility)) {
           onOutput(
-            `[OpenClaw] 提示: 推理可见性="${pendingReasoningVisibility}" 不在常见列表 off/on/stream 内，仍将按板端兼容键写入\n`,
+            `[OpenClaw] 提示: 推理可见性="${pendingReasoningVisibility}" 不在常见列表 off/on/stream 内，仍将按套件端兼容键写入\n`,
           );
         }
       }
@@ -1893,7 +1893,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       OPENCLAW_INSTALL_OPENCLAW_STEP,
       OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
       BOARD_FIND_SKILLS_INSTALL,
-      'echo "[RDK Studio] 板端默认关闭 memorySearch（避免未配置 embedding 时失败）"',
+      'echo "[RDK Studio] 套件端默认关闭 memorySearch（避免未配置 embedding 时失败）"',
       OPENCLAW_MERGE_EMPTY_LENIENT_SHELL,
       ENSURE_GATEWAY_LOCAL_MODE,
       RESTART_GATEWAY_FALLBACK,
@@ -1983,7 +1983,7 @@ print(json.dumps(result,ensure_ascii=False))`;
   }
 
   /**
-   * 板端建立本机 CLI ↔ Gateway 设备信任（与飞书 `pairing approve` 不同）。
+   * 套件端建立本机 CLI ↔ Gateway 设备信任（与飞书 `pairing approve` 不同）。
    * 新版：`devices approve --latest`；旧版回退 `pair --force`；full：停网关 → clear pending → 旧版 `pair --reset`（可缺省）→ 重启等待 18789。
    */
   runGatewayPair(
@@ -2020,8 +2020,8 @@ print(json.dumps(result,ensure_ascii=False))`;
       if (!success) {
         const sshAuthFail = /SSH Error|\[ERROR\]|All configured authentication methods failed/i.test(output);
         const hint = sshAuthFail
-          ? `SSH 未连上板端（当前使用端口 ${device.port ?? 22}）。经 frp 时请确认设备档案里 SSH 端口为映射端口（如 6000），并已重启 Studio 后端使修复生效。`
-          : '板端 WiFi 扫描失败：请确认已安装 NetworkManager、当前 SSH 用户可执行 nmcli（或已配置免密 sudo），并可在板上手动执行 nmcli device wifi list 对比。';
+          ? `SSH 未连上套件端（当前使用端口 ${device.port ?? 22}）。经 frp 时请确认设备档案里 SSH 端口为映射端口（如 6000），并已重启 Studio 后端使修复生效。`
+          : '套件端 WiFi 扫描失败：请确认已安装 NetworkManager、当前 SSH 用户可执行 nmcli（或已配置免密 sudo），并可在板上手动执行 nmcli device wifi list 对比。';
         onResult([], false, hint);
         return;
       }
@@ -2067,7 +2067,7 @@ print(json.dumps(result,ensure_ascii=False))`;
     this.execCommand(device, script, collectOutput, wrapComplete, { timeout: 90000 });
   }
 
-  // OpenClaw 对话方法（仅建立 SSH 客户端；成功与否应与板端 openclaw/status 结合展示，勿单独当作「Agent 已连接」）
+  // OpenClaw 对话方法（仅建立 SSH 客户端；成功与否应与套件端 openclaw/status 结合展示，勿单独当作「Agent 已连接」）
   startInteractiveChat(
     device: Device,
     onData: (data: any, err?: string) => void,
@@ -2085,7 +2085,7 @@ print(json.dumps(result,ensure_ascii=False))`;
   }
 
   /**
-   * 优先走板端常驻 oc-bridge（单 WS + 多轮 chat），失败或未启用时回退到单次 /tmp/oc_chat_ws.js。
+   * 优先走套件端常驻 oc-bridge（单 WS + 多轮 chat），失败或未启用时回退到单次 /tmp/oc_chat_ws.js。
    * 环境变量 RDK_OPENCLAW_BRIDGE=0 可强制仅用旧路径（排障）。
    */
   sendAgentMessage(

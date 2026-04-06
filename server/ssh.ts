@@ -15,7 +15,7 @@ export const SSH_KEEPALIVE_COUNT_MAX = 3;
 
 /**
  * 单条 `exec` 管道默认最长等待（未传 `timeoutMs`）。
- * 板端 pip/npm/wget 常超过数分钟；120s 易误判为「不稳定」。
+ * 套件端 pip/npm/wget 常超过数分钟；120s 易误判为「不稳定」。
  */
 export const SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -23,7 +23,7 @@ export const SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 const BUILTIN_DEFAULT_PASSWORDS = ['root'];
 
 /**
- * 板端常见默认口令候选（与 index 中设备发现逻辑一致）。
+ * 套件端常见默认口令候选（与 index 中设备发现逻辑一致）。
  * 用于 Agent 侧在已保存密码失效时尝试，避免 RDKClaw 与 HTTP 链路表现不一致。
  */
 export function sshPasswordCandidates(username: string): string[] {
@@ -126,7 +126,7 @@ export function verifySshConnection(credentials: SshCredentials, options?: Verif
 }
 
 /**
- * 经已建立的 SSH 会话在板端打开 TCP（direct-tcpip），用于 noVNC / code-server 等「非 22 端口映射」场景。
+ * 经已建立的 SSH 会话在套件端打开 TCP（direct-tcpip），用于 noVNC / code-server 等「非 22 端口映射」场景。
  */
 export function forwardOutRemoteTcp(
   client: Client,

@@ -276,6 +276,37 @@ function isDeviceExecHeartbeatLine(line: string): boolean {
   return /命令仍在运行|暂无新输出|still running|no new output/i.test(t);
 }
 
+/** agent-loop 对非 device_exec 工具注入的 30s 进度行（前端合并为单条「粘性」提示，避免刷屏） */
+function isLocalAgentHeartbeatLine(line: string): boolean {
+  const t = line.trim();
+  return /〔套件端协作〕/.test(t) || /（长任务时正常|（进行中）/.test(t);
+}
+
+function isAnyHeartbeatLine(line: string): boolean {
+  return isDeviceExecHeartbeatLine(line) || isLocalAgentHeartbeatLine(line);
+}
+
+/**
+ * 长任务心跳：同类行只保留最后一条（类似 IDE 底部状态栏更新，而非日志里追加多行）。
+ * 一旦出现真实输出，则先移除尾部心跳再追加，避免「仍在运行」夹在正文中间。
+ */
+function mergeStickyTerminalLines(existing: string[], incoming: string[]): string[] {
+  if (incoming.length === 0) return existing;
+  const allIncomingHb = incoming.every((l) => isAnyHeartbeatLine(l));
+  if (allIncomingHb) {
+    const base = [...existing];
+    while (base.length > 0 && isAnyHeartbeatLine(base[base.length - 1]!)) {
+      base.pop();
+    }
+    return [...base, ...incoming];
+  }
+  const base = [...existing];
+  while (base.length > 0 && isAnyHeartbeatLine(base[base.length - 1]!)) {
+    base.pop();
+  }
+  return mergeTerminalProgressLines(base, incoming);
+}
+
 /** 与 tool_progress 中逐行处理一致，且与「仅对全文做 reasoning 净化」解耦，便于流式/最终去重对齐 */
 function normalizeToolTerminalLinesFromRaw(raw: string): string[] {
   return String(raw || '')
@@ -321,7 +352,7 @@ function streamCoversFinalTerminalBlock(streamedLines: string[], rawResult: stri
   const n = finalLines.length;
   if (n === 0) return false;
   const streamedFiltered = collapseTerminalLinesIfDuplicateHalf(
-    streamedLines.filter((l) => !isDeviceExecHeartbeatLine(l)),
+    streamedLines.filter((l) => !isAnyHeartbeatLine(l)),
   );
   if (streamedFiltered.length < n) return false;
   for (let i = 0; i < n; i++) {
@@ -725,18 +756,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
     /** 快速回答：本地工具隐藏；凡 board_openclaw_* / 跨板调度仍展示 */
     hiddenQuick?: boolean;
     rawIndex?: number;
-    /** 板端 OpenClaw 协作流式块（与 terminal 二选一） */
+    /** 套件端 OpenClaw 协作流式块（与 terminal 二选一） */
     collabIndex?: number;
-    /** board_openclaw_chat：Studio 插入的等待提示块（非板端输出） */
+    /** board_openclaw_chat：Studio 插入的等待提示块（非套件端输出） */
     waitHintCollabIndex?: number;
     /** 合并逐字/逐块 SSE，避免每个 chunk 被当成一行导致竖排假换行 */
     openclawStreamBuf?: string;
     /** summarizeToolArgs，进度/结束时保留路径等目标信息 */
     argDetail?: string;
     cardTitle?: string;
-    /** 板端长链路兜底提示：最近一次「已告知用户」时间 */
+    /** 套件端长链路兜底提示：最近一次「已告知用户」时间 */
     watchdogLastNoticeAt?: number;
-    /** 板端长链路兜底提示：最近一次主动探测 OpenClaw 健康时间 */
+    /** 套件端长链路兜底提示：最近一次主动探测 OpenClaw 健康时间 */
     watchdogLastProbeAt?: number;
     watchdogProbePending?: boolean;
     watchdogProbeCount?: number;
@@ -1466,7 +1497,24 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        function assistantTextHasClientActions(s: string): boolean {
+          return /<client-action\b/i.test(s) || /\[\[action:/i.test(s);
+        }
+        function assistantPayloadHasClientActions(): boolean {
+          if (assistantTextHasClientActions(aiText)) return true;
+          for (const b of aiBlocks) {
+            if (b.type === 'reasoning' && assistantTextHasClientActions(b.text)) return true;
+          }
+          return false;
+        }
         function applyClientActionsAcrossMarkdownSlots() {
+          for (let bi = 0; bi < aiBlocks.length; bi++) {
+            const b = aiBlocks[bi];
+            if (b.type === 'reasoning' && assistantTextHasClientActions(b.text)) {
+              const next = applyClientActionsFromAssistantText(b.text);
+              aiBlocks[bi] = { ...b, text: next };
+            }
+          }
           if (contentSlots.some((s) => s.kind === 'markdown')) {
             for (const s of contentSlots) {
               if (s.kind === 'markdown') {
@@ -1477,7 +1525,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               .filter((s): s is Extract<AiDockContentSlot, { kind: 'markdown' }> => s.kind === 'markdown')
               .map((s) => s.text)
               .join('');
-          } else if (/<client-action\b/i.test(aiText)) {
+          }
+          /** `[[action:…]]` 旧式协议不在 <client-action> 内；须与 assistantPayloadHasClientActions 一致 */
+          if (assistantTextHasClientActions(aiText)) {
             aiText = applyClientActionsFromAssistantText(aiText);
           }
         }
@@ -1537,7 +1587,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           return events;
         };
 
-        /** 无 [TOOL:…] 时仍可能含「[板端…]」契约行，用于更新看板「最近更新」；优先展示「结果」再「过程/进行」 */
+        /** 无 [TOOL:…] 时仍可能含「[套件端…]」（旧版 [板端…]）契约行，用于更新看板「最近更新」；优先展示「结果」再「过程/进行」 */
         const extractBoardVisibilityLine = (raw: string): string | null => {
           const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
           const pick = (re: RegExp) => {
@@ -1548,18 +1598,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
             return null;
           };
           return (
-            pick(/^\[板端·结果\]/i)
-            || pick(/^\[板端·过程\]/i)
-            || pick(/^\[板端·进行\]/i)
-            || pick(/^\[板端\]/i)
+            pick(/^\[(?:板端|套件端)·结果\]/i)
+            || pick(/^\[(?:板端|套件端)·过程\]/i)
+            || pick(/^\[(?:板端|套件端)·进行\]/i)
+            || pick(/^\[(?:板端|套件端)\]/i)
             || pick(/^\[预检\]/i)
-            || pick(/^\[板端 OpenClaw 正在推理/i)
+            || pick(/^\[(?:板端|套件端) OpenClaw 正在推理/i)
           );
         };
 
         const humanizeBoardToolLine = (line: string) => {
           const trimmed = line.trim();
-          if (/^\[板端[·.]/i.test(trimmed) || /^\[板端\]/i.test(trimmed)) {
+          if (/^\[(?:板端|套件端)[·.]/i.test(trimmed) || /^\[(?:板端|套件端)\]/i.test(trimmed)) {
             return trimmed;
           }
           const m = trimmed.match(/^\[TOOL:(start|update|result|error)\]\s*([^\s]+)(?:\s*×(\d+))?$/i);
@@ -1599,17 +1649,17 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           boardTaskSummary?: string;
         }) => {
           const now = Date.now();
-          const activeTool = state.boardActiveTool || t('chat.board.active.none', '等待板端返回步骤');
+          const activeTool = state.boardActiveTool || t('chat.board.active.none', '等待套件端返回步骤');
           const done = state.boardDoneCount ?? 0;
           const lastAt = state.boardLastEventAt ?? now;
           const sec = Math.max(0, Math.floor((now - lastAt) / 1000));
-          const recent = state.boardLastEventText || t('chat.board.recent.none', '尚未收到板端步骤事件');
+          const recent = state.boardLastEventText || t('chat.board.recent.none', '尚未收到套件端步骤事件');
           const taskSummary = state.boardTaskSummary || t('chat.board.task.none', '按上文目标执行');
           const block = {
             type: 'status' as const,
             collapsible: true,
             defaultCollapsed: false,
-            summary: t('chat.board.summary', '板端执行看板'),
+            summary: t('chat.board.summary', '套件端执行看板'),
             items: [
               { label: t('chat.board.task', '目标任务'), value: taskSummary, ok: true },
               { label: t('chat.board.active', '当前步骤'), value: activeTool, ok: true },
@@ -1658,7 +1708,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               side: 'rdkclaw',
               collabRole: 'wait_hint',
               title: t('dock.collab.waitHintTitle', '稍等片刻'),
-              subtitle: t('chat.openclaw.watchdog.subtitle', 'RDKClaw 正在主动跟进板端 OpenClaw 的执行进度'),
+              subtitle: t('chat.openclaw.watchdog.subtitle', 'RDKClaw 正在主动跟进套件端 OpenClaw 的执行进度'),
               lines,
               collapsible: true,
               previewLines: 6,
@@ -1733,7 +1783,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   upsertOpenClawWatchdogHint(
                     st,
                     {
-                      healthLine: t('chat.openclaw.watchdog.healthFail', '主动查询 OpenClaw 状态失败，将继续等待板端回传。'),
+                      healthLine: t('chat.openclaw.watchdog.healthFail', '主动查询 OpenClaw 状态失败，将继续等待套件端回传。'),
                     },
                   );
                 })
@@ -1927,7 +1977,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   summaryParts.push(tf('chat.stream.skillsVal', '技能: {{list}}', { list: skillsShort }));
                 }
                 if (networkEnabled) summaryParts.push(t('chat.stream.network', '联网'));
-                if (needsBoardCollaboration) summaryParts.push(t('chat.stream.board', '板端协同'));
+                if (needsBoardCollaboration) summaryParts.push(t('chat.stream.board', '套件端协同'));
                 const summaryLine = capMetaSummaryLine(summaryParts, 100);
 
                 /** 详情区：去掉与摘要重复的「执行路径」行；模型只展示名称（上下文/输出属排障信息，默认收起） */
@@ -2079,7 +2129,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   st.boardTaskSummary = summarizeBoardTask(toolName, args);
                   st.boardDoneCount = 0;
                   st.boardLastEventAt = st.startedAt;
-                  st.boardLastEventText = t('chat.board.recent.waiting', '已发起任务，等待板端步骤事件');
+                  st.boardLastEventText = t('chat.board.recent.waiting', '已发起任务，等待套件端步骤事件');
                   st.boardCollabLastPaintAt = 0;
                   openclawActiveToolIds.add(toolCallId);
                   ensureOpenClawWatchdog();
@@ -2093,7 +2143,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     toolName === 'board_openclaw_chat'
                       ? t('dock.collab.outboundChatSubtitle', 'RDKClaw 发出的交流内容')
                       : toolName === 'board_openclaw_assess'
-                        ? t('dock.collab.outboundAssessSubtitle', '向板端咨询任务可行性（仅评估）')
+                        ? t('dock.collab.outboundAssessSubtitle', '向套件端咨询任务可行性（仅评估）')
                         : toolName === 'fleet_board_delegate'
                           ? t('dock.collab.outboundFleetDelegateSubtitle', '跨板委派至目标设备')
                           : toolName === 'fleet_board_broadcast'
@@ -2106,7 +2156,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     type: 'collab',
                     side: 'rdkclaw',
                     collabRole: 'outbound',
-                    title: t('dock.collab.outboundTitle', '与板端 OpenClaw 协作上下文'),
+                    title: t('dock.collab.outboundTitle', '与套件端 OpenClaw 协作上下文'),
                     subtitle: outboundSubtitle,
                     lines: linesOut,
                     collapsible: true,
@@ -2170,7 +2220,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     if (vis) {
                       state.boardLastEventAt = Date.now();
                       state.boardLastEventText = vis;
-                      state.boardActiveTool = t('chat.board.active.streaming', '板端执行中');
+                      state.boardActiveTool = t('chat.board.active.streaming', '套件端执行中');
                       upsertBoardStageStatus(state);
                     }
                   }
@@ -2190,7 +2240,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         title: t('dock.collab.waitHintTitle', '稍等片刻'),
                         subtitle: t(
                           'dock.collab.waitHintSubtitle',
-                          '等板端 OpenClaw 时的提示（由 Studio 插入，非板端模型生成）',
+                          '等套件端 OpenClaw 时的提示（由 Studio 插入，非套件端模型生成）',
                         ),
                         lines: more,
                         collapsible: true,
@@ -2207,9 +2257,9 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       const now = Date.now();
                       const shouldRender =
                         /\[TOOL:(start|result|error)\]/i.test(rawChunk)
-                        || /\[板端[·.]?/i.test(rawChunk)
+                        || /\[(?:板端|套件端)[·.]?/i.test(rawChunk)
                         || /\[预检\]/i.test(rawChunk)
-                        || /\[板端 OpenClaw 正在推理/i.test(rawChunk)
+                        || /\[(?:板端|套件端) OpenClaw 正在推理/i.test(rawChunk)
                         || now - (state.boardCollabLastPaintAt ?? 0) > 1200;
                       if (shouldRender) {
                         const bufLines = collapseRepeatedBoardToolNotifyLines(state.openclawStreamBuf.split('\n'));
@@ -2227,7 +2277,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     pushAiBlock({
                       type: 'collab',
                       side: 'openclaw',
-                      title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
+                      title: t('dock.collab.openclawTitle', '套件端 OpenClaw'),
                       subtitle: openclawCollabSubtitle,
                       lines,
                       collapsible: true,
@@ -2244,7 +2294,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         boardToolTimelineSigRef.current = sig;
                         appendRunTimelineEntry(generation, {
                           kind: 'board_tool',
-                          title: t('chat.timeline.boardTool', '板端工具'),
+                          title: t('chat.timeline.boardTool', '套件端工具'),
                           detail: sig,
                         });
                       }
@@ -2260,7 +2310,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   if (typeof state.rawIndex === 'number') {
                     const rawBlock = aiBlocks[state.rawIndex];
                     if (rawBlock?.type === 'terminal') {
-                      const merged = mergeTerminalProgressLines(rawBlock.lines, progressLines);
+                      const merged = mergeStickyTerminalLines(rawBlock.lines, progressLines);
                       rawBlock.lines = collapseTerminalLinesIfDuplicateHalf(merged).slice(-240);
                     }
                   } else {
@@ -2415,7 +2465,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     if (parsed.__type === 'code_change') {
                       const scopeLabel =
                         parsed.scope === 'device'
-                          ? t('chat.codeChange.device', '板端')
+                          ? t('chat.codeChange.device', '套件端')
                           : t('chat.codeChange.workspace', '工作区');
                       const p = typeof parsed.path === 'string' ? parsed.path : '';
                       const summary = typeof parsed.summary === 'string' ? parsed.summary : '';
@@ -2556,7 +2606,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                         title: t('dock.collab.reverseTitle', '向 RDKClaw 求助'),
                         subtitle: t(
                           'dock.collab.reverseSubtitle',
-                          '板端在回复中请求本机能力（联网检索、文档等）；接下来由 RDKClaw 调用工具并再发回板端',
+                          '套件端在回复中请求本机能力（联网检索、文档等）；接下来由 RDKClaw 调用工具并再发回套件端',
                         ),
                         lines: ex.split('\n').slice(0, 40),
                         collapsible: true,
@@ -2582,7 +2632,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     pushAiBlock({
                       type: 'collab',
                       side: 'openclaw',
-                      title: t('dock.collab.openclawTitle', '板端 OpenClaw'),
+                      title: t('dock.collab.openclawTitle', '套件端 OpenClaw'),
                       subtitle: openclawCollabSubtitle,
                       lines: cleaned.split('\n').slice(0, 80),
                       collapsible: true,
@@ -2765,7 +2815,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     rebuildContentSlotsFromBlocksAndText(aiBlocks, aiText);
                   }
                 }
-                if (/<client-action\b/i.test(aiText)) {
+                if (assistantPayloadHasClientActions()) {
                   applyClientActionsAcrossMarkdownSlots();
                 }
                 updateAiMessage(aiText, aiBlocks, true);
@@ -2889,7 +2939,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
               }
               case 'done':
                 /** 不在气泡内展示 Token/耗时等遥测卡，仅刷新正文与 client-action */
-                if (/<client-action\b/i.test(aiText)) {
+                if (assistantPayloadHasClientActions()) {
                   applyClientActionsAcrossMarkdownSlots();
                 }
                 updateAiMessage(aiText, aiBlocks, true);
@@ -2955,7 +3005,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     hint: stopHint || undefined,
                   });
                 }
-                if (/<client-action\b/i.test(aiText)) {
+                if (assistantPayloadHasClientActions()) {
                   applyClientActionsAcrossMarkdownSlots();
                 }
                 updateAiMessage(aiText, aiBlocks, true);
@@ -2998,7 +3048,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
           updateAiMessage(aiText, blocksAfterStream, true);
         }
         let bodyTrim = (pendingText || aiText).trim();
-        if (/<client-action\b/i.test(bodyTrim)) {
+        if (assistantTextHasClientActions(bodyTrim) || assistantPayloadHasClientActions()) {
           applyClientActionsAcrossMarkdownSlots();
           bodyTrim = aiText.trim();
         }
@@ -3659,7 +3709,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         if (dedupKey !== '::') feishuMirrorSeenRef.current.add(dedupKey);
         setChatExpanded(true);
         const feishuExec = payload.executor === 'board_openclaw'
-          ? t('chat.feishu.exec.board', '板端 OpenClaw')
+          ? t('chat.feishu.exec.board', '套件端 OpenClaw')
           : payload.executor
             ? String(payload.executor)
             : 'RDKClaw';

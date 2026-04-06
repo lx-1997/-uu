@@ -1,5 +1,5 @@
 /**
- * 委派 board_openclaw_* 前的健康检测较重（SSH + 板端 Python）。
+ * 委派 board_openclaw_* 前的健康检测较重（SSH + 套件端 Python）。
  * 在短时间内若已确认 aiReady，可跳过重复检测以加速协作回合。
  * 失败或超时后应 invalidate，避免误判。
  */

@@ -1,22 +1,22 @@
 /**
- * 板端 `npm install -g openclaw@...` 的版本。
+ * 套件端 `npm install -g openclaw@...` 的版本。
  * 默认 `latest`（每次安装/回退重装取 registry 当前最新）；需要固定版本做验收或回滚时设环境变量 `OPENCLAW_NPM_VERSION`（如 `2026.4.1`）。
  * 注意：npm 包使用日历版本（2026.x.y），勿误用旧约定如 `3.24`（registry 上不存在）。
- * 板端安装即标准：`CI= npm install -g openclaw@<本常量> ...`（无额外魔法）。
+ * 套件端安装即标准：`CI= npm install -g openclaw@<本常量> ...`（无额外魔法）。
  */
 export const OPENCLAW_BOARD_NPM_SPEC =
   process.env.OPENCLAW_NPM_VERSION?.trim() || 'latest';
 
 /**
  * npm 并发连接（默认 32，大依赖树时更易吃满带宽）。
- * 环境变量（均在 **Studio 服务端进程** 上设置，下发到板端脚本前已展开）：
+ * 环境变量（均在 **Studio 服务端进程** 上设置，下发到套件端脚本前已展开）：
  * - `OPENCLAW_NPM_MAXSOCKETS`：覆盖默认 maxsockets。
  * - `OPENCLAW_REGISTRY_PRIORITY=china`：跳过 npmmirror 探测，固定先国内源再官方源（国内网络推荐）。
  */
 const OPENCLAW_NPM_MAXSOCKETS = process.env.OPENCLAW_NPM_MAXSOCKETS?.trim() || '32';
 
 /**
- * 板端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
+ * 套件端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
  * 供 OpenClawDeploymentManager 与 Agent `board_openclaw_install` 共用，避免分叉。
  *
  * 注意：npm 回退片段必须用单引号 JS 字符串定义，禁止用反引号模板——否则 `$NPM_FAST_REG` 可能被误当作 JS 插值，
@@ -53,7 +53,7 @@ export const OPENCLAW_NODE_MIRROR_EXPORT =
   'if curl -fsS --connect-timeout 2 --max-time 5 https://npmmirror.com/mirrors/node/releases/index.json >/dev/null 2>&1; then export NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node; fi';
 
 /**
- * 板端安装前环境：探测 registry + export NPM_CONFIG_REGISTRY + Node 镜像。
+ * 套件端安装前环境：探测 registry + export NPM_CONFIG_REGISTRY + Node 镜像。
  * 用分号串联（末尾无分号），可与 `BOARD_ENV_EXPORT && prelude && curl...` 安全拼接，避免出现 `; &&`。
  */
 export const OPENCLAW_BOARD_INSTALL_ENV_PRELUDE =
@@ -105,12 +105,12 @@ export const OPENCLAW_PREPARE_NPM_SPEED =
 
 /**
  * openclaw CLI 使用现代 JS（可选链 ?. 等），过旧 Node 会在启动时报 SyntaxError。
- * 板端常见「apt 自带老 node」会跳过官方 install.sh 直接 npm -g，装完即崩；此处统一要求主版本 ≥ 24（Node 24 LTS，可环境变量覆盖）。
+ * 套件端常见「apt 自带老 node」会跳过官方 install.sh 直接 npm -g，装完即崩；此处统一要求主版本 ≥ 24（Node 24 LTS，可环境变量覆盖）。
  * 环境变量：
  * - OPENCLAW_MIN_NODE_MAJOR（默认与 OPENCLAW_BOARD_NODE_MIN_MAJOR 一致）
  * - OPENCLAW_SKIP_NODE_UPGRADE=1 时：版本不足则直接失败并提示手动升级，不跑 NodeSource apt
  * 自动升级仅在有 apt-get + curl 且具备 root/sudo 时走 NodeSource（见 OPENCLAW_NODESOURCE_SETUP）。
- * 板端可设 OPENCLAW_NODESOURCE_BASE（默认 https://deb.nodesource.com）以防需镜像；下载脚本失败会中止，避免误装旧源里的 nodejs。
+ * 套件端可设 OPENCLAW_NODESOURCE_BASE（默认 https://deb.nodesource.com）以防需镜像；下载脚本失败会中止，避免误装旧源里的 nodejs。
  */
 export const OPENCLAW_BOARD_NODE_MIN_MAJOR = 24;
 

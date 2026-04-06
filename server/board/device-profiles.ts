@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Device Profiles — Hardware capability matrix for each RDK board variant.
  *
  * Used by RDKClaw and the board detect API to understand device capabilities.
@@ -155,7 +155,7 @@ const DEFAULT_RESEARCH_SEEDS = [
 
 /** URLs to prioritize for web_fetch / web_search on RDK tasks. */
 /**
- * 工作区健康脚本 `bpu_ready`：在板端用 `importlib.util.find_spec` 探测，**任一条**命中即视为 BPU Python 栈可用。
+ * 工作区健康脚本 `bpu_ready`：在套件端用 `importlib.util.find_spec` 探测，**任一条**命中即视为 BPU Python 栈可用。
  * 须覆盖 X3 / X5 / Ultra（Bayes）与 S100（Nash）等不同 `bpu_infer_lib_*` 包名。
  */
 const WORKSPACE_HEALTH_BPU_IMPORTLIB_SPECS = [

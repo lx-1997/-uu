@@ -62,7 +62,7 @@ function buildFindSkillsTool(opts: SkillDiscoveryToolOptions): Tool<{ query: str
       '用户**仅要打开/浏览网页**时用 **`studio_open_url`**（宿主工具），**不要**用本工具搜「浏览器」类技能。' +
       '**内置检索**：优先 **腾讯 SkillHub** API；若**零命中**或请求**失败**，自动再查 **官方 ClawHub**（默认 https://clawhub.ai，可用 `CLAWHUB_OFFICIAL_FALLBACK_BASE` 改）。合并本地 `SKILL.md`。' +
       '能力缺口时**必须**调用；关键词 1～5 个词。' +
-      '安装：板端/CLI 一般为 `clawhub install <技能短名>`（如 `find-skills`）；注册表返回的 `slug` 常为 `owner/skill` 亦可用于 install；`clawhub clone owner/skill` 用于克隆仓库。' +
+      '安装：套件端/CLI 一般为 `clawhub install <技能短名>`（如 `find-skills`）；注册表返回的 `slug` 常为 `owner/skill` 亦可用于 install；`clawhub clone owner/skill` 用于克隆仓库。' +
       '未联网仅本地。需与 `CLAWHUB_REGISTRY` 单源一致时用 `skillhub_search`。**检索只记审计日志**；某技能**实际采用且任务验收成功**后再调用 `skill_mark_validated`：**拉取** SKILL.md 写入工作区 `skills/<id>/`，并写入记忆与 validated JSONL。',
     inputSchema: {
       type: 'object',
@@ -106,7 +106,7 @@ function buildFindSkillsTool(opts: SkillDiscoveryToolOptions): Tool<{ query: str
         audit_only:
           '本次检索仅追加 `.rdkstudio/find-skills-log.jsonl`（审计，**不**写入长期记忆）。若本回合中**实际使用**某 SkillHub 技能且任务**明确成功**，再调用 `skill_mark_validated`（填 slug）以**落盘** SKILL.md 并内化记忆。',
         hint:
-          '优先采用腾讯结果；仅腾讯无命中或失败时采用官方兜底列表。安装：`clawhub install <slug或短名>`；板端可用 `board_openclaw_skill_install`。本地命中：`read` SKILL.md。',
+          '优先采用腾讯结果；仅腾讯无命中或失败时采用官方兜底列表。安装：`clawhub install <slug或短名>`；套件端可用 `board_openclaw_skill_install`。本地命中：`read` SKILL.md。',
       };
 
       let tencentSlugs: string[] = [];
@@ -204,9 +204,9 @@ function buildSkillMarkValidatedTool(opts: SkillDiscoveryToolOptions): Tool<{
   return {
     name: 'skill_mark_validated',
     description:
-      '**仅在任务已验收成功且你确实采用了某次检索/安装的技能后调用**：从 SkillHub/ClawHub **下载**对应 `skill_slugs` 的 SKILL.md，写入 RDKClaw 工作区 `skills/<目录名>/SKILL.md`；**若当前会话已连接设备**，同时写入板端 `/root/.openclaw/workspace/skills/<目录名>/SKILL.md`；并写记忆与 `.rdkstudio/validated-skills.jsonl`。' +
+      '**仅在任务已验收成功且你确实采用了某次检索/安装的技能后调用**：从 SkillHub/ClawHub **下载**对应 `skill_slugs` 的 SKILL.md，写入 RDKClaw 工作区 `skills/<目录名>/SKILL.md`；**若当前会话已连接设备**，同时写入套件端 `/root/.openclaw/workspace/skills/<目录名>/SKILL.md`；并写记忆与 `.rdkstudio/validated-skills.jsonl`。' +
       '**禁止**在：仅 `find_skills` 未实际采用、任务失败、半途放弃、尚未确认成功时调用。' +
-      '本机目录下已有非空 SKILL.md 时**不覆盖**本机文件（仍会尝试同步到板端）。纯本地技能填 `local_skill_refs`（**不**从远端拉取、也**不**自动推板端）。' +
+      '本机目录下已有非空 SKILL.md 时**不覆盖**本机文件（仍会尝试同步到套件端）。纯本地技能填 `local_skill_refs`（**不**从远端拉取、也**不**自动推套件端）。' +
       '`skill_slugs` 为 SkillHub/registry slug（如 owner/skill 或短名）。',
     inputSchema: {
       type: 'object',
@@ -277,7 +277,7 @@ function buildSkillMarkValidatedTool(opts: SkillDiscoveryToolOptions): Tool<{
           ok: false,
           error:
             persist.root
-              ? '内化写入失败（磁盘、注册表拉取、板端 SSH 或路径异常），请检查工作区与设备'
+              ? '内化写入失败（磁盘、注册表拉取、套件端 SSH 或路径异常），请检查工作区与设备'
               : '无法解析工作区路径（bootstrapDir/workspaceDir），内化未写入',
         });
       }
@@ -302,7 +302,7 @@ function buildSkillMarkValidatedTool(opts: SkillDiscoveryToolOptions): Tool<{
           (persist.materialized.length
             ? `已内化 ${persist.materialized.length} 个 SkillHub 技能到本机 skills/；`
             : '') +
-          (boardOk ? `已同步 ${boardOk} 个到板端 ~/.openclaw/workspace/skills/；` : '') +
+          (boardOk ? `已同步 ${boardOk} 个到套件端 ~/.openclaw/workspace/skills/；` : '') +
           (persist.wroteLongTermMemory
             ? '已写入 validated-skills.jsonl、当日 memory/*.md 与长期记忆索引'
             : '已写入 validated-skills.jsonl 与当日 memory（当前会话未注入 MemoryManager 时无长期记忆索引）'),

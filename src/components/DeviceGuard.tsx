@@ -21,13 +21,13 @@ export default function DeviceGuard({ children, feature }: { children?: React.Re
         </div>
         <h3 className="device-guard-title">
           {feature
-            ? tf('deviceGuard.titleFeature', '{{feature}} 需要连接开发板', { feature })
-            : t('deviceGuard.title', '请先连接开发板')}
+            ? tf('deviceGuard.titleFeature', '{{feature}} 需要连接开发者套件', { feature })
+            : t('deviceGuard.title', '请先连接开发者套件')}
         </h3>
         <p className="device-guard-desc">
           {feature
-            ? tf('deviceGuard.descFeature', '连接 RDK 开发板后即可使用 {{feature}} 功能。支持 SSH 网络和 USB 串口两种连接方式。', { feature })
-            : t('deviceGuard.desc', '连接 RDK 开发板后即可使用此功能。支持 SSH 网络和 USB 串口两种连接方式。')}
+            ? tf('deviceGuard.descFeature', '连接 RDK 开发者套件后即可使用 {{feature}} 功能。支持 SSH 网络和 USB 串口两种连接方式。', { feature })
+            : t('deviceGuard.desc', '连接 RDK 开发者套件后即可使用此功能。支持 SSH 网络和 USB 串口两种连接方式。')}
         </p>
         <button className="btn btn-primary" onClick={() => setShowAddDevice(true)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

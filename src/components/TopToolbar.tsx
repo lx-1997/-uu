@@ -44,7 +44,7 @@ function parseHostnameI(output: string): { iface: string; ip: string }[] {
 }
 
 /**
- * 解析 net-tools / BusyBox 等 `ifconfig -a` 文本输出（板端常见）。
+ * 解析 net-tools / BusyBox 等 `ifconfig -a` 文本输出（套件端常见）。
  * 支持：「inet addr:」「inet 192.168.x.x」「inet 192.168.x.x/24」等 IPv4 行。
  */
 function parseIfconfigOutput(output: string): { iface: string; ip: string }[] {
@@ -201,6 +201,7 @@ export default function TopToolbar() {
   const [showWifiModal, setShowWifiModal] = useState(false);
   /** WiFi 链路状态：仅作顶栏颜色提示；未知时不染色 */
   const [wifiLink, setWifiLink] = useState<'up' | 'down' | null>(null);
+  const [wifiConnectedSsid, setWifiConnectedSsid] = useState<string | undefined>();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showIpMenu, setShowIpMenu] = useState(false);
   const [ipRows, setIpRows] = useState<{ iface: string; ip: string }[]>([]);
@@ -240,12 +241,16 @@ export default function TopToolbar() {
   useEffect(() => {
     if (!currentDevice || !isDeviceShownOnline(currentDevice)) {
       setWifiLink(null);
+      setWifiConnectedSsid(undefined);
       return;
     }
     let cancelled = false;
     const run = () => {
-      void fetchWifiLinkState(currentDevice.id).then((s) => {
-        if (!cancelled) setWifiLink(s);
+      void fetchWifiLinkState(currentDevice.id).then((r) => {
+        if (!cancelled) {
+          setWifiLink(r.state);
+          setWifiConnectedSsid(r.connectedSsid);
+        }
       });
     };
     let kick: number | null = null;
@@ -320,13 +325,13 @@ export default function TopToolbar() {
             <div className="topbar-ip-menu-hint">
               {t(
                 'topbar.ip.hint',
-                '列表由板端 `ip -br` 与 `ifconfig -a` 解析 IPv4（wlan0 / eth0 等），必要时回退 `hostname -I`。点击「复制」写入剪贴板。',
+                '列表由套件端 `ip -br` 与 `ifconfig -a` 解析 IPv4（wlan0 / eth0 等），必要时回退 `hostname -I`。点击「复制」写入剪贴板。',
               )}
             </div>
             {ipListWarn && (
               <div className="topbar-ip-warn" role="status">
                 {ipListWarn === 'studio'
-                  ? t('topbar.ip.warnStudio', '无法从板端解析 IPv4 地址，已仅显示当前连接 IP（可点刷新重试）')
+                  ? t('topbar.ip.warnStudio', '无法从套件端解析 IPv4 地址，已仅显示当前连接 IP（可点刷新重试）')
                   : t('topbar.ip.warnNone', '无法获取设备 IP 地址')}
               </div>
             )}
@@ -366,9 +371,11 @@ export default function TopToolbar() {
         className={`btn-icon topbar-wifi-btn${wifiLink === 'up' ? ' topbar-wifi-btn--up' : ''}${wifiLink === 'down' ? ' topbar-wifi-btn--down topbar-wifi-btn--alert' : ''}`}
         title={
           wifiLink === 'up'
-            ? t('topbar.wifi.titleConnected', 'WiFi 已连接（点击配置）')
+            ? (wifiConnectedSsid
+                ? tf('topbar.wifi.titleConnectedSsid', 'WiFi 已连接：{{ssid}}（点击配置）', { ssid: wifiConnectedSsid })
+                : t('topbar.wifi.titleConnected', 'WiFi 已连接（点击配置）'))
             : wifiLink === 'down'
-              ? t('topbar.wifi.titleDisconnected', '⚠ 开发板未联网 — AI 对话等功能不可用，点击配置 WiFi')
+              ? t('topbar.wifi.titleDisconnected', '⚠ 开发者套件未联网 — AI 对话等功能不可用，点击配置 WiFi')
               : t('topbar.wifi.title', '配置 WiFi')
         }
         onClick={() => setShowWifiModal(true)}
@@ -473,7 +480,12 @@ export default function TopToolbar() {
         <WifiConfigModal
           onClose={() => setShowWifiModal(false)}
           onConnected={() => {
-            if (currentDevice) void fetchWifiLinkState(currentDevice.id).then(setWifiLink);
+            if (currentDevice) {
+              void fetchWifiLinkState(currentDevice.id).then((r) => {
+                setWifiLink(r.state);
+                setWifiConnectedSsid(r.connectedSsid);
+              });
+            }
           }}
         />,
         document.body,

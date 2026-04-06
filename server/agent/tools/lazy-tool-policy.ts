@@ -7,7 +7,7 @@ export const LOAD_TOOLS_META_NAME = "load_tools";
 
 /**
  * 始终下发给模型的工具（覆盖常见本机读写与编排）
- * 板端 / 联网 / Studio 任务类等默认延迟，减少首轮 tool schema token
+ * 套件端 / 联网 / Studio 任务类等默认延迟，减少首轮 tool schema token
  */
 export const LAZY_LOAD_CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "read",

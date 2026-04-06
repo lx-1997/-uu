@@ -29,7 +29,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [activities, setActivities] = useState<Activity[]>([
     { id: 1, text: '系统就绪，RDK Studio 启动完成', time: '刚刚' },
     { id: 2, text: '等待连接真实设备', time: '1 分钟前' },
-    { id: 3, text: '可通过设备管理添加 RDK 开发板', time: '2 分钟前' },
+    { id: 3, text: '可通过设备管理添加 RDK 开发者套件', time: '2 分钟前' },
   ]);
 
   const addActivity = useCallback((text: string) => {

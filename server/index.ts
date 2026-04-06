@@ -415,7 +415,7 @@ const WORKSPACE_HEALTH_COMMAND = `bash -lc ${shellEscape(WORKSPACE_HEALTH_SCRIPT
 const resourcesPath = path.join(process.cwd(), 'build-resources');
 const openClawManager = new OpenClawDeploymentManager(resourcesPath);
 
-/** noVNC：局域网直连 target=私网:5900；经 frp 时用 deviceId + SSH forwardOut 到板端 127.0.0.1:5900 */
+/** noVNC：局域网直连 target=私网:5900；经 frp 时用 deviceId + SSH forwardOut 到套件端 127.0.0.1:5900 */
 (function registerNovncWebsockify() {
   const NOVNC_PROXY_IDLE_MS = 30 * 60 * 1000;
 
@@ -563,7 +563,7 @@ const openClawManager = new OpenClawDeploymentManager(resourcesPath);
   });
 })();
 
-/** code-server 代理路径：/api/devices/:id/code-server-proxy/... → 板端 127.0.0.1:CODE_SERVER_HTTP_PORT/... */
+/** code-server 代理路径：/api/devices/:id/code-server-proxy/... → 套件端 127.0.0.1:CODE_SERVER_HTTP_PORT/... */
 const CODE_SERVER_PROXY_PATH = /^\/api\/devices\/([^/]+)\/code-server-proxy(\/.*)?$/;
 
 function matchCodeServerProxyPath(pathname: string): { deviceId: string; remainder: string } | null {
@@ -592,7 +592,7 @@ function buildRawHttpRequestForCodeServerUpstream(req: http.IncomingMessage, ups
 }
 
 /**
- * code-server 依赖 WebSocket；仅 Express pipe HTTP 不够。经 SSH forwardOut 把升级请求与双向数据转到板端。
+ * code-server 依赖 WebSocket；仅 Express pipe HTTP 不够。经 SSH forwardOut 把升级请求与双向数据转到套件端。
  */
 function registerCodeServerProxyUpgradeHandler() {
   httpServer.prependListener('upgrade', (request, socket, head) => {
@@ -1671,7 +1671,7 @@ function buildWorkspaceHealth(output: string): DeviceWorkspaceHealth {
     ros2Ready && trosCount > 0,
     trosCount > 0,
     ros2Ready && trosCount > 0 ? `已检测到 ${trosCount} 个 tros / hobot 组件` : `缺少 ${nodeHubMissing.join(' / ')}`,
-    ros2Ready && trosCount > 0 ? '打开 NodeHub 同步板端能力' : '先补齐 RDK 官方生态包，再同步 NodeHub',
+    ros2Ready && trosCount > 0 ? '打开 NodeHub 同步套件端能力' : '先补齐 RDK 官方生态包，再同步 NodeHub',
     nodeHubMissing,
   );
 
@@ -1851,7 +1851,7 @@ app.use(
   }),
 );
 /**
- * 经 frp 时浏览器无法直连板端 code-server；通过 SSH forwardOut 到 127.0.0.1:CODE_SERVER_HTTP_PORT。
+ * 经 frp 时浏览器无法直连套件端 code-server；通过 SSH forwardOut 到 127.0.0.1:CODE_SERVER_HTTP_PORT。
  * 必须挂在 express.json 之前，否则 POST/PUT 等请求体会被解析，无法 pipe 到上游。
  * SSO：本路由在 ssoAuthMiddleware 之前，内部自行校验会话（与 rosbridge 等一致）。
  */
@@ -2113,7 +2113,7 @@ app.get('/api/skills', (_request, response) => {
     message:
       'Studio skills/ 扫描结果；技能工坊「本地清单」与 /md 预览均按 folder（目录名）索引。',
     skills: loadedSkills.map((s) => ({
-      /** skills/<folder>/SKILL.md，与 getRawSkillMd、板端 skills 目录一致 */
+      /** skills/<folder>/SKILL.md，与 getRawSkillMd、套件端 skills 目录一致 */
       folder: path.basename(path.dirname(s.filePath)),
       name: s.name,
       description: s.description,
@@ -2670,10 +2670,37 @@ app.post('/api/devices/connect', async (request, response) => {
 // 安全要点：configure 入口对 interfaceName / pcIp 做格式校验；Windows 网卡名禁止 shell 元字符；
 // 实际改 IP 使用 netsh / ifconfig / ip 参数化调用，勿拼接未校验的用户输入。
 
-/** 中文等本地化 Windows 下 netsh/cmd 多为系统 ANSI（GBK）；按 UTF-8 读取会乱码且解析失败 */
+/**
+ * Windows 控制台编码因系统版本与「使用 Unicode UTF-8」设置而异：
+ * - 传统 cmd 常为系统 ANSI（简体中文多为 GBK）
+ * - Win10 1903+ / Win11 在 UTF-8 控制台或 netsh 管道下常为 UTF-8
+ * 若将 UTF-8 字节按 GBK 解码，会出现「以太网」→「浠ュお缃」类乱码。
+ */
 function decodeWindowsConsoleBytes(buf: Buffer): string {
   if (buf.length === 0) return '';
+  const asUtf8 = buf.toString('utf8');
+  if (!asUtf8.includes('\uFFFD')) {
+    return asUtf8;
+  }
   return iconv.decode(buf, 'gbk');
+}
+
+/** netsh 解析出的名称与 Node os.networkInterfaces() 键名在个别环境下有 NFC 差异，对齐后再查 IP */
+function resolveOsNetworkInterfaceKey(
+  parsedName: string,
+  osIfaces: ReturnType<typeof os.networkInterfaces>,
+): string {
+  if (osIfaces[parsedName]) return parsedName;
+  const keys = Object.keys(osIfaces);
+  const nfcParsed = parsedName.normalize('NFC');
+  for (const k of keys) {
+    if (k.normalize('NFC') === nfcParsed) return k;
+  }
+  const lower = parsedName.toLowerCase();
+  for (const k of keys) {
+    if (k.toLowerCase() === lower) return k;
+  }
+  return parsedName;
 }
 
 function isWindowsNetshInterfaceConnected(state: string): boolean {
@@ -2866,7 +2893,7 @@ async function execFileWithTimeout(
  *
  * 与 Windows netsh 逻辑对齐：若 pcIp 已挂在**其它**网卡上（例如先前选过 en9 再改选 en10），
  * 会先从那些接口 `inet <addr> delete`，再在所选接口上设置 IP。否则本机可能把去往 192.168.128.0/24
- * 的流量从未接板子的接口发出，导致 ping / SSH 全失败。
+ * 的流量从未接开发者套件的接口发出，导致 ping / SSH 全失败。
  */
 async function configureDarwinTypecNic(
   interfaceName: string,
@@ -2904,7 +2931,7 @@ async function configureDarwinTypecNic(
 
 /**
  * Linux 闪连：与 Windows netsh / macOS ifconfig 一致，先从**其它**网卡删除与 pcIp 相同的地址，
- * 避免多接口同 IP 导致去往板子网段的流量走错 dev（ip 命令需与本机 `ifconfig up` 同源权限）。
+ * 避免多接口同 IP 导致去往开发者套件所在网段的流量走错 dev（ip 命令需与本机 `ifconfig up` 同源权限）。
  */
 async function configureLinuxTypecNic(
   interfaceName: string,
@@ -2956,10 +2983,11 @@ app.get('/api/typec/interfaces', async (_request, response) => {
     // 补充 IP 和 MAC 信息（从 os.networkInterfaces 获取，可能为空）
     const osIfaces = os.networkInterfaces();
     const result = nics.map(nic => {
-      const addrs = osIfaces[nic.name];
+      const key = resolveOsNetworkInterfaceKey(nic.name, osIfaces);
+      const addrs = osIfaces[key];
       const ipv4 = addrs?.filter(a => a.family === 'IPv4').map(a => a.address) ?? [];
       const mac = addrs?.find(a => a.mac && a.mac !== '00:00:00:00:00:00')?.mac ?? '';
-      return { name: nic.name, mac, addresses: ipv4, portType: nic.portType ?? '' };
+      return { name: key, mac, addresses: ipv4, portType: nic.portType ?? '' };
     });
     response.json({ ok: true, interfaces: result });
   } catch (error) {
@@ -3468,7 +3496,7 @@ async function executeOpenClawDeployJob(
           setInterval(() => {
             appendDeployOutput(
               job,
-              '\n[Studio] 约 2 分钟无新终端输出：apt/下载大包时板端可能长时间不刷行（属常见）。npm 安装已用 --loglevel info，正常应陆续有解析/下载日志；若仍仅有本提示，请检查板端网络与磁盘。超时请在「启动 Studio 后端」的环境变量中增大 OPENCLAW_INSTALL_TIMEOUT_MS（毫秒，默认 1800000≈30 分钟）。\n',
+              '\n[Studio] 约 2 分钟无新终端输出：apt/下载大包时套件端可能长时间不刷行（属常见）。npm 安装已用 --loglevel info，正常应陆续有解析/下载日志；若仍仅有本提示，请检查套件端网络与磁盘。超时请在「启动 Studio 后端」的环境变量中增大 OPENCLAW_INSTALL_TIMEOUT_MS（毫秒，默认 1800000≈30 分钟）。\n',
             );
           }, heartbeatMs),
         stop: (h: ReturnType<typeof setInterval>) => clearInterval(h),
@@ -3741,7 +3769,7 @@ app.post('/api/devices/:id/openclaw/deploy/cancel', async (request, response) =>
   if (!device) return;
 
   openClawDeployUserCancelled.add(jobId);
-  appendDeployOutput(job, '\n[Studio] 用户取消部署：正在中断板端 SSH 会话…\n');
+  appendDeployOutput(job, '\n[Studio] 用户取消部署：正在中断套件端 SSH 会话…\n');
   broadcastDeployJobToSse(job);
   schedulePersistRuntimeJobs();
 
@@ -3940,7 +3968,7 @@ app.post('/api/devices/:id/openclaw/model-test', async (request, response) => {
   });
 });
 
-/** 从 Studio 服务端直连厂商 HTTP API（不经板端 Gateway） */
+/** 从 Studio 服务端直连厂商 HTTP API（不经套件端 Gateway） */
 app.post('/api/openclaw/vendor-model-ping', async (request, response) => {
   const body = request.body as {
     baseUrl?: string;
@@ -4092,14 +4120,14 @@ app.post('/api/devices/:id/openclaw/skill-write', async (request, response) => {
   if (!run) return;
   const ok = String(run.output || '').trim().endsWith('OK');
   if (ok) {
-    response.json({ ok: true, path: `${skillDir}/SKILL.md`, message: `技能 ${name} 已写入板端` });
+    response.json({ ok: true, path: `${skillDir}/SKILL.md`, message: `技能 ${name} 已写入套件端` });
   } else {
     sendApiError(response, 500, 'SKILL_WRITE_FAILED', '写入失败', { retryable: true, details: { output: run.output } });
   }
 });
 
 /**
- * 删除板端技能目录：同时尝试
+ * 删除套件端技能目录：同时尝试
  * - ~/.openclaw/workspace/skills、~/skills、/root 下同名路径、/opt/openclaw/skills
  * 与列表 API 扫描范围一致，避免「能读到、删不掉」。
  */
@@ -4123,7 +4151,7 @@ app.post('/api/devices/:id/openclaw/skill-delete', async (request, response) => 
   if (out.endsWith('OK')) {
     response.json({
       ok: true,
-      message: `已删除板端技能 ${name}（上述扫描路径中存在的目录均已移除）`,
+      message: `已删除套件端技能 ${name}（上述扫描路径中存在的目录均已移除）`,
     });
     return;
   }
@@ -4132,7 +4160,7 @@ app.post('/api/devices/:id/openclaw/skill-delete', async (request, response) => 
       response,
       404,
       'SKILL_NOT_FOUND_ON_DEVICE',
-      '板端未找到该技能目录（已检查 ~/.openclaw/workspace/skills、~/skills、/opt/openclaw/skills 等）。请刷新列表后重试，或在设备上确认路径。',
+      '套件端未找到该技能目录（已检查 ~/.openclaw/workspace/skills、~/skills、/opt/openclaw/skills 等）。请刷新列表后重试，或在设备上确认路径。',
       { retryable: false },
     );
     return;
@@ -4140,7 +4168,7 @@ app.post('/api/devices/:id/openclaw/skill-delete', async (request, response) => 
   sendApiError(response, 500, 'SKILL_DELETE_FAILED', '删除失败', { retryable: true, details: { output: run.output } });
 });
 
-/** 若板端尚无或版本/内容与 Studio 内置不一致，则部署 rdk-rdkclaw-partner-advisory 并校验 sha256 */
+/** 若套件端尚无或版本/内容与 Studio 内置不一致，则部署 rdk-rdkclaw-partner-advisory 并校验 sha256 */
 app.post('/api/devices/:id/openclaw/ensure-partner-advisory-skill', async (request, response) => {
   const { id } = request.params;
   try {
@@ -4240,7 +4268,7 @@ app.post('/api/devices/:id/openclaw/pairing/reject', async (request, response) =
   });
 });
 
-/** 板端网关设备信任：`devices approve --latest`（新版）或 `pair --force`（旧版）；非飞书渠道 pairing */
+/** 套件端网关设备信任：`devices approve --latest`（新版）或 `pair --force`（旧版）；非飞书渠道 pairing */
 app.post('/api/devices/:id/openclaw/gateway-pair', async (request, response) => {
   const { id } = request.params;
   const { mode } = request.body as { mode?: string };
@@ -5303,7 +5331,7 @@ app.post('/api/agent/plan', async (request, response) => {
 4) param 仅在 terminal_cmd / openclaw_switch / nav / file_download 场景填写。下载文件时填写需要下载的具体文件名。
 5) 如果用户目标不需要实际操作，使用 general。
 6) 不要使用 markdown，不要代码块，只返回 JSON。
-7) 当目标涉及“板端 OpenClaw + 软件内能力联动”时，steps 必须同时包含 openclaw_* 与软件能力（如 hardware_check/terminal/model_* 等）步骤。`;
+7) 当目标涉及“套件端 OpenClaw + 软件内能力联动”时，steps 必须同时包含 openclaw_* 与软件能力（如 hardware_check/terminal/model_* 等）步骤。`;
 
   try {
     const controller = new AbortController();
@@ -5638,7 +5666,7 @@ app.post('/api/agent/config', (request, response) => {
       return;
     }
     if (!setOpenclawDelegateProviderConfig(id)) {
-      response.status(400).json({ error: '设置板端委派模型失败' });
+      response.status(400).json({ error: '设置套件端委派模型失败' });
       return;
     }
     const regAfter = loadProviderRegistry();

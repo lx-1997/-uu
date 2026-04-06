@@ -778,7 +778,7 @@ export default function SettingsPanel() {
     setQuickAiApiKey('');
   };
 
-  /** 与 OpenClaw「测试 API」一致：本机直连厂商，不经板端 Gateway */
+  /** 与 OpenClaw「测试 API」一致：本机直连厂商，不经套件端 Gateway */
   const handleTestVendorApi = useCallback(
     async (lane: 'thinking' | 'quick') => {
       const setVendorTest = lane === 'thinking' ? setThinkingVendorTest : setQuickVendorTest;
@@ -1293,7 +1293,7 @@ export default function SettingsPanel() {
                   title={t('settings.ai.title', 'AI 引擎')}
                   desc={t(
                     'settings.ai.desc',
-                    '驱动 RDKClaw 的模型与工具链：面向真实板端联调、排障与自动化。请在此选择服务商并配置 API Key。',
+                    '驱动 RDKClaw 的模型与工具链：面向真实套件端联调、排障与自动化。请在此选择服务商并配置 API Key。',
                   )}
                 />
                 <div className="settings-card settings-card--ai">
@@ -2060,7 +2060,7 @@ export default function SettingsPanel() {
                   </div>
                   <div className="settings-row">
                     <span className="settings-row-label">{t('settings.persona.delegation', '委派倾向')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation.hint', '委派倾向：均衡为默认，RDKClaw 与板端 OpenClaw 协同；Studio 优先偏重 SSH，板端优先偏重 assess→delegate')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="balanced">{t('settings.persona.delegation.balancedRec', '均衡（推荐）')}</option><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先')}</option><option value="board-first">{t('settings.persona.delegation.board', '板端优先')}</option></select></div>
+                    <div className="settings-row-value settings-row-value--stretch"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation.hint', '委派倾向：均衡为默认，RDKClaw 与套件端 OpenClaw 协同；Studio 优先偏重 SSH，套件端优先偏重 assess→delegate')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="balanced">{t('settings.persona.delegation.balancedRec', '均衡（推荐）')}</option><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先')}</option><option value="board-first">{t('settings.persona.delegation.board', '套件端优先')}</option></select></div>
                   </div>
                   <div className="settings-policy-footer">
                     <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePersona} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : t('settings.persona.save', '保存')}</button>

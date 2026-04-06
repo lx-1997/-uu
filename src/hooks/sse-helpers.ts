@@ -1,5 +1,5 @@
 export function executorLabel(executor: string) {
-  return executor === 'board_openclaw' ? '板端 OpenClaw' : 'RDK Studio Claw';
+  return executor === 'board_openclaw' ? '套件端 OpenClaw' : 'RDK Studio Claw';
 }
 
 /** 委派/对话工具返回中，分隔 OpenClaw 正文与 RDKClaw 追加说明（\n---\n[RDKClaw 提示…） */
@@ -15,7 +15,7 @@ export function splitOpenClawCollaborationResult(result: string): { body: string
   return { body: result, rdkHint: null };
 }
 
-/** 从 OpenClaw 正文中拆出 [NEED_RDKCLAW]…[/NEED_RDKCLAW]，用于单独展示「板端向本机求助」 */
+/** 从 OpenClaw 正文中拆出 [NEED_RDKCLAW]…[/NEED_RDKCLAW]，用于单独展示「套件端向本机求助」 */
 export function extractNeedRdkclawBlocks(text: string): { cleaned: string; extracts: string[] } {
   const extracts: string[] = [];
   const re = /\[\s*NEED_RDKCLAW\s*\]([\s\S]*?)\[\s*\/\s*NEED_RDKCLAW\s*\]/gi;
@@ -32,7 +32,7 @@ export function extractNeedRdkclawBlocks(text: string): { cleaned: string; extra
   return { cleaned, extracts };
 }
 
-/** 需要在对话区展示 Studio ↔ 板端 OpenClaw 协作气泡的工具 */
+/** 需要在对话区展示 Studio ↔ 套件端 OpenClaw 协作气泡的工具 */
 export function isBoardOpenClawCollabTool(toolName: string): boolean {
   return (
     toolName === 'board_openclaw_delegate'
@@ -44,7 +44,7 @@ export function isBoardOpenClawCollabTool(toolName: string): boolean {
 }
 
 /**
- * 凡经板端 OpenClaw 网关的工具（与 server/rdkclaw/event-mapper resolveExecutor 对齐）。
+ * 凡经套件端 OpenClaw 网关的工具（与 server/rdkclaw/event-mapper resolveExecutor 对齐）。
  * 快速回答模式下也要在对话区展示这些步骤与输出，不能只显示 delegate/chat/assess。
  */
 export function isBoardOpenClawExecutorTool(toolName: string): boolean {
@@ -57,7 +57,7 @@ export function isBoardOpenClawExecutorTool(toolName: string): boolean {
 }
 
 /**
- * 板端桥接对每条工具事件都打 `[TOOL:phase] name`（见 OpenClawDeploymentManager onLine）；
+ * 套件端桥接对每条工具事件都打 `[TOOL:phase] name`（见 OpenClawDeploymentManager onLine）；
  * 长 `exec` 往往无 detail，流式会刷成百条相同行。折叠连续重复，保留 ×N。
  */
 export function collapseRepeatedBoardToolNotifyLines(lines: string[]): string[] {
@@ -94,7 +94,7 @@ export function collapseRepeatedBoardToolNotifyLines(lines: string[]): string[] 
   return out;
 }
 
-/** 从 tool_start 参数生成「发给板端 OpenClaw」的展示行（LLM 填写的委派/对话内容） */
+/** 从 tool_start 参数生成「发给套件端 OpenClaw」的展示行（LLM 填写的委派/对话内容） */
 export function formatBoardOutboundLines(toolName: string, args: Record<string, unknown> | undefined): string[] {
   if (!args) return [];
   const lines: string[] = [];
@@ -404,7 +404,7 @@ function shortCommand(cmd: string, max = 72): string {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
-/** 板端协作类：从参数里取一句人话，避免标题只有动词 */
+/** 套件端协作类：从参数里取一句人话，避免标题只有动词 */
 function boardIntentLine(args: Record<string, unknown>): string {
   const task = typeof args.task === 'string' ? args.task.replace(/\s+/g, ' ').trim() : '';
   if (task) return task.length > 96 ? `${task.slice(0, 93)}…` : task;

@@ -413,7 +413,7 @@ function tokenUsageReportTool(): Tool<{
 }> {
   return {
     name: 'rdkclaw_token_usage_report',
-    description: '查看底层大模型 token 消耗统计（支持 RDKClaw、本地与板端 OpenClaw）。返回窗口期汇总与最近记录。',
+    description: '查看底层大模型 token 消耗统计（支持 RDKClaw、本地与套件端 OpenClaw）。返回窗口期汇总与最近记录。',
     inputSchema: {
       type: 'object',
       properties: {

@@ -915,7 +915,7 @@ function webFetchTool(options: WebToolOptions): Tool<{ url: string; maxChars?: n
   return {
     name: "web_fetch",
     description:
-      "抓取指定 URL 的响应体并转为可读文本（GET，跟随重定向）。HTML 会剥标签。**RDK 官方文档**：对 **developer.d-robotics.cc/rdk_doc/** 下页面（含 YOLO/检测等 Robot_development 章节）在跑板子命令前应优先 `web_fetch` 拉正文，再按文档步骤执行。对 developer.d-robotics.cc 的 NodeHub 详情页，若首屏无正文且已配置 TAVILY_API_KEY，会自动追加 Tavily Extract（advanced）结果。非 2xx 仍会返回状态码与部分正文。",
+      "抓取指定 URL 的响应体并转为可读文本（GET，跟随重定向）。HTML 会剥标签。**RDK 官方文档**：对 **developer.d-robotics.cc/rdk_doc/** 下页面（含 YOLO/检测等 Robot_development 章节）在开发者套件上跑命令前应优先 `web_fetch` 拉正文，再按文档步骤执行。对 developer.d-robotics.cc 的 NodeHub 详情页，若首屏无正文且已配置 TAVILY_API_KEY，会自动追加 Tavily Extract（advanced）结果。非 2xx 仍会返回状态码与部分正文。",
     inputSchema: {
       type: "object",
       properties: {

@@ -234,7 +234,7 @@ export function fleetBoardDelegateTool(
       properties: {
         targetDeviceId: { type: 'string', description: '目标板卡的设备 ID' },
         task: { type: 'string', description: '要委派的任务描述' },
-        guidance: { type: 'string', description: '给板端 OpenClaw 的执行建议和协作上下文' },
+        guidance: { type: 'string', description: '给套件端 OpenClaw 的执行建议和协作上下文' },
         role: {
           type: 'string',
           description: '板卡在本次协作中的角色：executor（执行者）、reviewer（审查者）、advisor（建议者）',
@@ -342,7 +342,7 @@ export function fleetBoardDelegateTool(
               markFleetTaskDone(input.targetDeviceId, 'done', trimmed.slice(0, 80));
               resolve(
                 `[板卡 ${deviceLabel} (${input.targetDeviceId}) | role: ${role}]\n\n` +
-                (trimmed || '板端执行完成（无文本输出）'),
+                (trimmed || '套件端执行完成（无文本输出）'),
               );
             } else if (trimmed.length > 20) {
               markFleetTaskDone(input.targetDeviceId, 'failed', 'connection lost');
@@ -351,7 +351,7 @@ export function fleetBoardDelegateTool(
               markFleetTaskDone(input.targetDeviceId, 'failed', trimmed || 'no response');
               resolve(
                 `[板卡 ${deviceLabel} 执行失败]\n` +
-                (trimmed || '板端 OpenClaw 未返回结果，可能未安装或网关未运行。'),
+                (trimmed || '套件端 OpenClaw 未返回结果，可能未安装或网关未运行。'),
               );
             }
           },
@@ -392,7 +392,7 @@ export function fleetBoardBroadcastTool(
       type: 'object',
       properties: {
         task: { type: 'string', description: '要广播的任务描述' },
-        guidance: { type: 'string', description: '给各板端 OpenClaw 的执行建议' },
+        guidance: { type: 'string', description: '给各套件端 OpenClaw 的执行建议' },
         targetDeviceIds: {
           type: 'array',
           items: { type: 'string' },
@@ -437,7 +437,7 @@ export function fleetBoardBroadcastTool(
           `task: ${input.task}`,
           input.guidance?.trim() ? `\nguidance: ${input.guidance.trim()}` : '',
           `\n[collaboration hint] 你是多板卡协作中的一员（共 ${targets.length} 个板卡参与）。` +
-          '请基于你的板端实际环境给出回答。如果某些任务更适合其他板卡，请说明原因。',
+          '请基于你的套件端实际环境给出回答。如果某些任务更适合其他板卡，请说明原因。',
         ].filter(Boolean).join('\n');
         const sessionId = `fleet-broadcast-${device.id}-${Date.now()}`;
 

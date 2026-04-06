@@ -256,7 +256,7 @@ export function registerFrpRoutes(app: express.Application, deps: FrpRoutesDeps)
         token,
         serverAddr: sshHost,
         hint:
-          '请在云厂商安全组放行 TCP 7000（frp 控制）及用于 SSH 映射的端口段（如 6000–6100）。板端部署时会自动分配 remotePort。',
+          '请在云厂商安全组放行 TCP 7000（frp 控制）及用于 SSH 映射的端口段（如 6000–6100）。套件端部署时会自动分配 remotePort。',
       });
     } catch (e) {
       sendApiError(
@@ -284,7 +284,7 @@ export function registerFrpRoutes(app: express.Application, deps: FrpRoutesDeps)
         res,
         400,
         'FRP_SETTINGS_INCOMPLETE',
-        '请先在「全局设置」中保存 frp token，或执行「一键部署 frps」后再部署板端。',
+        '请先在「全局设置」中保存 frp token，或执行「一键部署 frps」后再部署套件端。',
         { retryable: false },
       );
       return;
@@ -440,7 +440,7 @@ export function registerFrpRoutes(app: express.Application, deps: FrpRoutesDeps)
         } else {
           const rh = settings.publicSshHost || settings.serverAddr;
           if (!d.frpRemotePort || !rh) {
-            throw new Error('未部署 frpc 或未配置公网地址。请先完成板端一键部署。');
+            throw new Error('未部署 frpc 或未配置公网地址。请先完成套件端一键部署。');
           }
           if (!d.lanSshHost) {
             d.lanSshHost = d.host;

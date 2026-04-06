@@ -5,7 +5,7 @@
 
 const MARKER = '[编排提示 · 须继续]';
 
-/** 参与软失败检测的工具名（与本机 exec / 板端 device_exec 的返回格式对齐） */
+/** 参与软失败检测的工具名（与本机 exec / 套件端 device_exec 的返回格式对齐） */
 export const SHELL_SOFT_FAILURE_TOOL_NAMES = new Set(['exec', 'device_exec']);
 
 export function shouldAppendShellContinueHint(result: string): boolean {
@@ -32,7 +32,7 @@ export function appendShellContinueHint(toolName: string, result: string): strin
   if (!shouldAppendShellContinueHint(result)) return result;
   const hint =
     toolName === 'device_exec'
-      ? `\n\n${MARKER} 上条板端命令**未成功**（非零退出或 stderr 报错）。你**必须**再调用工具：例如 \`ros2 pkg prefix <包名>\`、\`dpkg -L <包名>\`、\`device_file_list\` 查真实路径，或先 \`web_fetch\` rdk_doc 对应例程；直到定位资源或明确告知缺什么。**禁止**仅复述上述错误就结束回合。`
+      ? `\n\n${MARKER} 上条套件端命令**未成功**（非零退出或 stderr 报错）。你**必须**再调用工具：例如 \`ros2 pkg prefix <包名>\`、\`dpkg -L <包名>\`、\`device_file_list\` 查真实路径，或先 \`web_fetch\` rdk_doc 对应例程；直到定位资源或明确告知缺什么。**禁止**仅复述上述错误就结束回合。`
       : `\n\n${MARKER} 上条**本机**命令**未成功**（非零退出或 stderr 报错）。你**必须**再调用工具：核对 \`cwd\` 与工作区路径、依赖是否已装、命令是否适用于当前系统；可拆分步骤、\`read\`/\`list\` 相关文件、重试或换命令；直到有明确结论。**禁止**仅复述错误就结束回合。`;
   return result + hint;
 }

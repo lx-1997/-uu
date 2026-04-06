@@ -1,7 +1,7 @@
 /**
  * Per-device execution scheduler（可并发）.
  *
- * 每个 SSH `runRemoteCommands` 使用独立 ssh2 Client，板端通常可并行多条 exec；
+ * 每个 SSH `runRemoteCommands` 使用独立 ssh2 Client，套件端通常可并行多条 exec；
  * 旧版为彻底串行，易使长任务阻塞同设备其它探测。现支持每设备 **多路并发**（默认 8，
  * 可用环境变量 `RDK_DEVICE_EXEC_MAX_CONCURRENT` 覆盖，至少为 1）。
  */

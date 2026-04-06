@@ -10,6 +10,7 @@ describe("detectRdkDocFirstIntent", () => {
   it("matches YOLO / 目标检测 style tasks", () => {
     expect(detectRdkDocFirstIntent("启动一个yolo目标检测任务")).toBe(true);
     expect(detectRdkDocFirstIntent("在板子上跑目标检测")).toBe(true);
+    expect(detectRdkDocFirstIntent("在开发者套件上跑目标检测")).toBe(true);
   });
 
   it("matches when user pastes official rdk_doc URL", () => {

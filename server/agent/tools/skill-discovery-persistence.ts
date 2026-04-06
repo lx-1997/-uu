@@ -55,7 +55,7 @@ function appendInternalizeFooter(markdown: string, hubSlug: string, taskSummary:
 
 /**
  * 从 SkillHub/ClawHub 拉取 SKILL.md，写入 `bootstrapDir/skills/<localId>/SKILL.md`；
- * 若已绑定板端（studioDeviceId），同步写入 `/root/.openclaw/workspace/skills/<localId>/SKILL.md`。
+ * 若已绑定套件端（studioDeviceId），同步写入 `/root/.openclaw/workspace/skills/<localId>/SKILL.md`。
  */
 export async function materializeHubSlugsToWorkspaceSkills(
   bootstrapDir: string,

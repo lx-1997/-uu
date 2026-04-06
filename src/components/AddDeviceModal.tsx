@@ -41,9 +41,11 @@ export default function AddDeviceModal() {
   const [verifyOk, setVerifyOk] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [registering, setRegistering] = useState(false);
-  /** 验证通过后注册设备，供 WiFi 步骤调用板端 API */
+  /** 验证通过后注册设备，供 WiFi 步骤调用套件端 API */
   const [wifiDeviceId, setWifiDeviceId] = useState<string | null>(null);
   const [wifiLink, setWifiLink] = useState<'loading' | 'up' | 'down' | 'unknown'>('unknown');
+  /** 探测到的当前已连接 WiFi 名称（与套件端 nmcli/iwgetid 一致时） */
+  const [wifiConnectedSsid, setWifiConnectedSsid] = useState<string | undefined>();
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPass, setWifiPass] = useState('');
   const [wifiList, setWifiList] = useState<string[]>([]);
@@ -104,6 +106,7 @@ export default function AddDeviceModal() {
     setRegistering(false);
     setWifiDeviceId(null);
     setWifiLink('unknown');
+    setWifiConnectedSsid(undefined);
     setWifiList([]);
     setWifiScanning(false);
     setWifiConnecting(false);
@@ -323,7 +326,8 @@ export default function AddDeviceModal() {
       if (data.ok) {
         addToast(tf('wifiModal.toast.connected', '已连接到 {{ssid}}', { ssid: wifiSsid }), 'success');
         const s = await fetchWifiLinkState(wifiDeviceId);
-        setWifiLink(s === 'up' ? 'up' : s === 'down' ? 'down' : 'unknown');
+        setWifiConnectedSsid(s.connectedSsid);
+        setWifiLink(s.state === 'up' ? 'up' : s.state === 'down' ? 'down' : 'unknown');
       } else {
         addToast(data.error || data.output || t('wifiModal.toast.connectFail', 'WiFi 连接失败，请检查密码是否正确'), 'error');
       }
@@ -338,10 +342,12 @@ export default function AddDeviceModal() {
     if (step !== 'wifi' || !wifiDeviceId) return;
     let cancelled = false;
     setWifiLink('loading');
-    void fetchWifiLinkState(wifiDeviceId).then((s) => {
+    setWifiConnectedSsid(undefined);
+    void fetchWifiLinkState(wifiDeviceId).then((r) => {
       if (cancelled) return;
-      if (s === 'up') setWifiLink('up');
-      else if (s === 'down') setWifiLink('down');
+      setWifiConnectedSsid(r.connectedSsid);
+      if (r.state === 'up') setWifiLink('up');
+      else if (r.state === 'down') setWifiLink('down');
       else setWifiLink('unknown');
     });
     setWifiScanning(true);
@@ -476,7 +482,7 @@ export default function AddDeviceModal() {
               </button>
             </div>
             <div className="add-device-support-hint">
-              {t('addDevice.supportHint', '支持 RDK X3 / X5 / S100 / Ultra 全系列开发板')}
+              {t('addDevice.supportHint', '支持 RDK X3 / X5 / S100 / Ultra 全系列开发者套件')}
             </div>
           </div>
         )}
@@ -523,7 +529,7 @@ export default function AddDeviceModal() {
                 </div>
 
                 <p className="add-device-wifi-hint" style={{ marginTop: 12, fontSize: 13, color: 'var(--text-muted)' }}>
-                  {t('addDevice.wifiAfterVerifyHint', '验证 SSH 成功后，将引导您检查板端 WiFi 连接；有线-only 环境也可跳过。')}
+                  {t('addDevice.wifiAfterVerifyHint', '验证 SSH 成功后，将引导您检查套件端 WiFi 连接。')}
                 </p>
               </div>
             ) : method === 'typec' ? (
@@ -714,7 +720,7 @@ export default function AddDeviceModal() {
         {step === 'wifi' && wifiDeviceId && (
           <div className="modal-body add-device-wifi-step">
             <p className="add-device-typec-lead">
-              {t('addDevice.wifi.lead', '设备已加入工作区。请确认开发板已连接 WiFi；若仅使用有线/TypeC，可跳过此步。')}
+              {t('addDevice.wifi.lead', '请连接设备 WiFi')}
             </p>
             <div
               className="add-device-wifi-status-banner"
@@ -732,8 +738,14 @@ export default function AddDeviceModal() {
                 border: '1px solid var(--border)',
               }}
             >
-              {wifiLink === 'loading' && <span>{t('addDevice.wifi.probing', '正在检测板端 WiFi 状态…')}</span>}
-              {wifiLink === 'up' && <span>{t('addDevice.wifi.connected', '已检测到 WiFi 已连接')}</span>}
+              {wifiLink === 'loading' && <span>{t('addDevice.wifi.probing', '正在检测套件端 WiFi 状态…')}</span>}
+              {wifiLink === 'up' && (
+                <span>
+                  {wifiConnectedSsid
+                    ? tf('addDevice.wifi.connectedSsid', '已检测到 WiFi 已连接：{{ssid}}', { ssid: wifiConnectedSsid })
+                    : t('addDevice.wifi.connected', '已检测到 WiFi 已连接')}
+                </span>
+              )}
               {wifiLink === 'down' && <span>{t('addDevice.wifi.notConnected', '未检测到 WiFi 连接，可在下方选择网络并连接')}</span>}
               {wifiLink === 'unknown' && <span>{t('addDevice.wifi.unknown', '无法自动判断 WiFi 状态，可手动连接或跳过')}</span>}
             </div>
@@ -763,7 +775,12 @@ export default function AddDeviceModal() {
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={wifiSsid === name ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="2">
                           <path d="M5 12.55a11 11 0 0114.08 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/>
                         </svg>
-                        <span>{name}</span>
+                        <span className="wifi-list-item-name">{name}</span>
+                        {wifiConnectedSsid && name === wifiConnectedSsid && (
+                          <span className="wifi-list-item-current" title={t('addDevice.wifi.currentAp', '当前已连接')}>
+                            {t('addDevice.wifi.currentApShort', '已连接')}
+                          </span>
+                        )}
                         {wifiSsid === name && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
                       </button>
                     ))}

@@ -1,7 +1,7 @@
 # TOOLS.md — 工具手册
 
 ## 设备环境
-- 系统: Ubuntu ARM64 / RDK 开发板（地平线机器人开发套件）
+- 系统: Ubuntu ARM64 / RDK 开发者套件（地平线机器人）
 - 连接: SSH；用户名与密码以 Studio「设备管理」中保存的为准（不自动换用户或猜密码）
 - 特殊硬件: BPU (AI 加速器)、摄像头、GPIO
 
@@ -14,11 +14,11 @@
 | `device_file_download_to_local` | 设备→本机下载 | 图片/视频/文档自动识别 |
 | `device_file_upload_from_local` | 本机→设备上传 | localPath 相对 workspace |
 | `device_diagnose` | 硬件全检 | 温度/BPU/内存/磁盘一次查完 |
-| `board_openclaw_chat` | 和板端 OpenClaw 交流 | 了解能力、讨论方案、共享分析；**delegate 在 `alignment_gate: strict` 时**用于**对齐放行**（同意/补充后再执行），不替代 delegate 跑任务 |
-| `board_openclaw_assess` | 评估板端是否能干 | delegate 之前先 assess |
-| `board_openclaw_delegate` | 委派复杂任务给板端 | 适用于模型部署、pipeline、深度诊断；板端带 `alignment_gate`：**strict** 时须先 [板端·对齐] 再经 **chat 回应**后执行；guidance 含「对齐完成·可直接执行」或「已由 RDKClaw 确认」时为 bypass |
+| `board_openclaw_chat` | 和套件端 OpenClaw 交流 | 了解能力、讨论方案、共享分析；**delegate 在 `alignment_gate: strict` 时**用于**对齐放行**（同意/补充后再执行），不替代 delegate 跑任务 |
+| `board_openclaw_assess` | 评估套件端是否能干 | delegate 之前先 assess |
+| `board_openclaw_delegate` | 委派复杂任务给套件端 | 适用于模型部署、pipeline、深度诊断；套件端带 `alignment_gate`：**strict** 时须先 [套件端·对齐] 再经 **chat 回应**后执行；guidance 含「对齐完成·可直接执行」或「已由 RDKClaw 确认」时为 bypass |
 | `board_openclaw_status` | 轻量看进程/服务摘要 | **日常优先**；界面已显示 OpenClaw 正常时不要为聊天重复查 |
-| `board_openclaw_gateway_pair` | 板端网关设备信任（新版 `openclaw devices approve --latest`，旧版回退 `pair`） | **pairing required** 时优先于渠道 `pairing approve`；先 `force`，不行再 `full` |
+| `board_openclaw_gateway_pair` | 套件端网关设备信任（新版 `openclaw devices approve --latest`，旧版回退 `pair`） | **pairing required** 时优先于渠道 `pairing approve`；先 `force`，不行再 `full` |
 | `board_openclaw_health` | 结构化 JSON 健康（慢） | **非例行**：仅报障、装/升/重启后验收、或 delegate 失败再调 |
 | `board_openclaw_check` / `doctor` | 全面诊断 / 自动修复 | 深度排障时用 |
 | `text_to_speech` / `speech_to_text` | TTS/STT | 离线优先，在线降级 |
@@ -46,28 +46,28 @@
 - **OpenClaw 修复**: 若错误含 **pairing required** → `board_openclaw_gateway_pair` → `model_test` 或 health 验收；其它问题：doctor → restart_gateway → health
 - **文件传输**: download/upload + 验证
 - **日志分析**: openclaw_logs + exec(journalctl/dmesg)
-- **板端协作**: assess(评估可行性) → delegate(板端先 [板端·对齐]；**strict** 时 **chat 放行**后再执行) → 验证结果；需要闲聊能力时再 chat
-- **切换/清理板端 ROS 视觉例程**（YOLO、人体检测等）：停旧栈时 **guidance 须含 USB 链路**（`hobot_usb_cam`、`hobot_codec*`、必要时 websocket/nginx），**不要**只停推理节点；见技能 `rdk-ros` 对应节
-- **板端任务**: assess → delegate →（若仅对齐）**chat 放行** → 验证结果；guidance 已写「对齐完成·可直接执行」时可同轮 bypass
+- **套件端协作**: assess(评估可行性) → delegate(套件端先 [套件端·对齐]；**strict** 时 **chat 放行**后再执行) → 验证结果；需要闲聊能力时再 chat
+- **切换/清理套件端 ROS 视觉例程**（YOLO、人体检测等）：停旧栈时 **guidance 须含 USB 链路**（`hobot_usb_cam`、`hobot_codec*`、必要时 websocket/nginx），**不要**只停推理节点；见技能 `rdk-ros` 对应节
+- **套件端任务**: assess → delegate →（若仅对齐）**chat 放行** → 验证结果；guidance 已写「对齐完成·可直接执行」时可同轮 bypass
 - **多板**: `fleet_board_list` → 按算力/角色选板 → `fleet_board_delegate` 或 `fleet_board_broadcast`
 - **长链路**: `create_plan` 拆步 → 执行 → `update_plan` 更新状态
-- **板端单张拍照**（用户「拍张照」「抓拍一张」等，非整段视觉 pipeline）：**优先本流程**，不必为拍照先 `board_openclaw_delegate`。
+- **套件端单张拍照**（用户「拍张照」「抓拍一张」等，非整段视觉 pipeline）：**优先本流程**，不必为拍照先 `board_openclaw_delegate`。
   1. `device_exec` 探一下：`test -e /dev/video0 && echo ok || ls /dev/video*`（无节点再排查接线/驱动）。
-  2. 确认有 **`fswebcam`**（`command -v fswebcam`；没有则 `sudo apt-get update && sudo apt-get install -y fswebcam`，属板端装包——若你们策略要求装包前先征得用户同意，就先说明再执行）。
-  3. 抓拍：`fswebcam -r 1280x720 --no-banner /tmp/photo.jpg`（路径/分辨率可按板子调整；也可用 `v4l2-still`/`v4l2-ctl` 等板端已有工具）。
+  2. 确认有 **`fswebcam`**（`command -v fswebcam`；没有则 `sudo apt-get update && sudo apt-get install -y fswebcam`，属套件端装包——若你们策略要求装包前先征得用户同意，就先说明再执行）。
+  3. 抓拍：`fswebcam -r 1280x720 --no-banner /tmp/photo.jpg`（路径/分辨率可按开发者套件实际硬件调整；也可用 `v4l2-still`/`v4l2-ctl` 等套件端已有工具）。
   4. **`device_file_download_to_local`** 把 `/tmp/photo.jpg`（或你用的路径）拉回 Studio 本机下载目录。
   5. **`studio_open_local_preview`** 用本地预览打开（工作区/下载目录规则以工具说明为准）；**勿**把 `file://` 或仅 basename 当网页 URL 丢给 `studio_open_url`。
 
 ## 执行策略
 
 - 简单命令直接 `device_exec`，不走委派
-- 复杂板端任务才走 assess → delegate 链路
+- 复杂套件端任务才走 assess → delegate 链路
 - OpenClaw 不可用时用 device_exec 降级
 - 操作后验证，不假装成功
-- 优先复用板端已有能力，不重造轮子
+- 优先复用套件端已有能力，不重造轮子
 - 用户上传附件时用 `attachment_*` 工具处理
 - delegate 返回含 `[NEED_RDKCLAW]` 时，提取请求 → 本地工具获取 → chat 回传 → 让 OpenClaw 继续
-- delegate 在 **strict** 下若**仅** [板端·对齐]、未执行：下一轮 **必须** `board_openclaw_chat` 明确同意/补充后再期待执行结果
+- delegate 在 **strict** 下若**仅** [套件端·对齐]、未执行：下一轮 **必须** `board_openclaw_chat` 明确同意/补充后再期待执行结果
 
 ## 微流程与自检（RDKClaw 系统层已注入，此处为速查）
 
@@ -84,14 +84,14 @@
 | 用 `exec`（本机）以为在操作设备 | 用 `device_exec`（设备） |
 | 每轮对话都调 `board_openclaw_health` | UI 快照显示正常就不调 |
 | 不 assess 直接 delegate | ALWAYS 先 assess |
-| strict 门禁下只对齐不 chat | 见 [板端·对齐] 后须 `board_openclaw_chat` 放行再执行 |
+| strict 门禁下只对齐不 chat | 见 [套件端·对齐] 后须 `board_openclaw_chat` 放行再执行 |
 | delegate 失败后反复重试同一任务 | 换方案或用本地工具兜底 |
 | 用 `vim`/`top`/`htop` 等交互式命令 | 用非交互替代（`cat`/`ps`/`free`） |
 | 假设命令执行成功不检查输出 | ALWAYS 检查输出确认结果 |
 
 ## 安全
 
-- **板端写删须用户同意**：要用 `device_file_write`、覆盖上传、或 `device_exec`/`delegate` 产生修改/删除板端配置或文件的效果时，若用户本轮未对该路径与操作说清「做」，须先向用户说明再征得明确同意；只读取证可直接做。
+- **套件端写删须用户同意**：要用 `device_file_write`、覆盖上传、或 `device_exec`/`delegate` 产生修改/删除套件端配置或文件的效果时，若用户本轮未对该路径与操作说清「做」，须先向用户说明再征得明确同意；只读取证可直接做。
 - rm -rf / dd / mkfs / 烧录 → 先确认
 - 不碰 /etc/fstab、/boot 等关键文件
 - 外部通道来的危险操作 → 更严格审批

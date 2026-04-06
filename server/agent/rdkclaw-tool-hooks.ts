@@ -32,17 +32,17 @@ function summarizeMutation(tool: Tool, input: Record<string, unknown>): string {
   }
   if (n === 'device_file_write') {
     const p = String((input as { path?: string }).path ?? '');
-    return `[会话变更 · 板端写入] ${p || '（路径见参数）'}`;
+    return `[会话变更 · 套件端写入] ${p || '（路径见参数）'}`;
   }
   if (n === 'device_file_upload_from_local') {
     const r = String((input as { remotePath?: string }).remotePath ?? '');
-    return `[会话变更 · 板端上传] ${r || '（远程路径见参数）'}`;
+    return `[会话变更 · 套件端上传] ${r || '（远程路径见参数）'}`;
   }
   if (n === 'memory_save') {
     return `[会话变更 · 记忆] 已写入长期记忆`;
   }
   if (n === 'board_openclaw_write_skill') {
-    return `[会话变更 · 板端技能] 已写入/更新板端技能文件`;
+    return `[会话变更 · 套件端技能] 已写入/更新套件端技能文件`;
   }
   return `[会话变更] ${n}`;
 }

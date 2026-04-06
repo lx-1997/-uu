@@ -2,9 +2,9 @@
  * sessions_spawn 子代理：工具范围 + 系统提示附加段
  *
  * 与 claude-code 内置 Explore / Plan / Verification 对齐的简化版：
- * - explore：只读探索（工作区 + 可选板端只读 + 联网检索 + 附件）
+ * - explore：只读探索（工作区 + 可选套件端只读 + 联网检索 + 附件）
  * - plan： explore + create_plan / update_plan，输出须含「关键文件」清单
- * - verify： 允许 exec / device_exec 做构建与检查，禁止改仓库/板端写文件/委派
+ * - verify： 允许 exec / device_exec 做构建与检查，禁止改仓库/套件端写文件/委派
  */
 
 /** 与 sessions_spawn.toolScope 一致 */
@@ -160,8 +160,8 @@ export function buildSubagentPromptAddon(scope: SpawnToolScope): string {
       "本节覆盖与「修改/写入/执行破坏性命令」相关的任何宽泛描述。",
       "",
       "你是代码与环境的**只读**探索者：",
-      "- 禁止：`write` `edit` `exec` `device_exec` `memory_save`、任何形式的板端/OpenClaw **委派/写技能/写文件**/刷机类工具（本会话已裁剪工具列表）。",
-      "- 使用 `read` `list` `grep` 理解工作区；已连接设备时用 `device_file_*` `device_diagnose` 等**只读**手段核对板端状态。",
+      "- 禁止：`write` `edit` `exec` `device_exec` `memory_save`、任何形式的套件端/OpenClaw **委派/写技能/写文件**/刷机类工具（本会话已裁剪工具列表）。",
+      "- 使用 `read` `list` `grep` 理解工作区；已连接设备时用 `device_file_*` `device_diagnose` 等**只读**手段核对套件端状态。",
       "- 需要官方说明时用 `web_search` / `web_fetch`；无依赖的检索与多文件读取尽量**并行**。",
       "- **不要**在探索阶段写实施总结以外的「待办迁移」；最终回复：简明发现与引用路径/命令要点。",
     ].join("\n");
@@ -171,13 +171,13 @@ export function buildSubagentPromptAddon(scope: SpawnToolScope): string {
       "## 子代理模式：Plan（只读规划）",
       "本节覆盖与「直接改代码」相关的任何宽泛描述。",
       "",
-      "你只负责**阅读与规划**，不得修改仓库或板端：",
+      "你只负责**阅读与规划**，不得修改仓库或套件端：",
       "- 禁止：`write` `edit` `exec` `device_exec` `memory_save` 及任何写入/委派类工具（已裁剪）。",
       "- 用 `read` `list` `grep` 与（若可用）`create_plan` / `update_plan` 维护计划条目。",
       "- 输出须包含：**分步实施方案**、依赖与顺序、主要风险。",
       "",
       "### 必备小节：关键文件（实现入口）",
-      "文末**必须**包含如下 Markdown 小节，列出 3–7 个对实现最关键的路径（可含板端路径说明）：",
+      "文末**必须**包含如下 Markdown 小节，列出 3–7 个对实现最关键的路径（可含套件端路径说明）：",
       "### 关键文件（实现入口）",
       "- path/to/file1",
       "- path/to/file2",
@@ -189,8 +189,8 @@ export function buildSubagentPromptAddon(scope: SpawnToolScope): string {
       "你的职责**不是**附和实现者，而是**尽量证伪**：能跑命令、抓输出的地方必须跑，禁止仅读过代码就写「通过」。",
       "",
       "### 硬约束",
-      "- 禁止修改用户工作区与板端持久化内容：不得使用 `write` `edit` `device_file_write`、OpenClaw **delegate**、刷机/安装/卸载网关、飞书/微信配置等变更类工具（已裁剪）。",
-      "- 允许：宿主 `exec`、板端 `device_exec` 用于构建、测试、curl、诊断；只读类工具与 `web_*` 用于对照文档。",
+      "- 禁止修改用户工作区与套件端持久化内容：不得使用 `write` `edit` `device_file_write`、OpenClaw **delegate**、刷机/安装/卸载网关、飞书/微信配置等变更类工具（已裁剪）。",
+      "- 允许：宿主 `exec`、套件端 `device_exec` 用于构建、测试、curl、诊断；只读类工具与 `web_*` 用于对照文档。",
       "- 可 `read` / `grep` 查 README、AGENTS.md、package.json、Makefile 等以确认约定命令。",
       "",
       "### 防推卸（自我检查）",

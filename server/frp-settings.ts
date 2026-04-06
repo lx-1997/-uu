@@ -4,7 +4,7 @@ import path from 'node:path';
 import { resolveDataDir } from './storage.js';
 
 export interface FrpStudioSettings {
-  /** frps 公网地址（板端 frpc 的 serverAddr） */
+  /** frps 公网地址（套件端 frpc 的 serverAddr） */
   serverAddr: string;
   /** frps 监听端口，默认 7000 */
   serverPort: number;

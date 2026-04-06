@@ -2587,7 +2587,7 @@
   word-break: break-word;
 }
 
-/* RDKClaw ↔ 板端 OpenClaw 协作块 */
+/* RDKClaw ↔ 套件端 OpenClaw 协作块 */
 .dock-bubble .collab-block {
   border-left: none;
 }
@@ -2616,7 +2616,7 @@
   background: transparent;
 }
 
-/* 等板端时 Studio 插入的闲句（非 OpenClaw 输出） */
+/* 等套件端时 Studio 插入的闲句（非 OpenClaw 输出） */
 .dock-bubble .collab-block--wait-hint {
   border-left-color: color-mix(in srgb, var(--border) 84%, transparent);
 }

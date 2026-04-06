@@ -187,7 +187,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const SSO_FETCH_MS = 12_000;
     const PAIR_RETRIES = 3;
-    const ME_NULL_RETRIES = 4;
     const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
     const fetchSso = (path: string) => {
@@ -280,8 +279,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       || !!getSsoSessionMirrorId();
 
     if (stickySession) {
-      for (let r = 1; r < ME_NULL_RETRIES; r++) {
-        await wait(320 * r);
+      /** 首次与 /api/sso/me 并发返回空常见（Cookie 刚写入）；先立即重试，避免固定 320ms 起步等待 */
+      const stickyDelaysMs = [0, 120, 280, 450];
+      for (let i = 0; i < stickyDelaysMs.length; i++) {
+        if (stickyDelaysMs[i] > 0) await wait(stickyDelaysMs[i]);
         try {
           const meRes = await fetchSso('/api/sso/me');
           const md = (await meRes.json()) as {

@@ -32,8 +32,9 @@ const VALID_TABS = new Set<string>([
   'local-models',
 ]);
 
-const LEGACY_NAV_RE = /\[\[action:navigate\|([^\]]+)\]\]/gi;
-const LEGACY_EMBED_RE = /\[\[action:embedFloat\|([^\]]+)\]\]/gi;
+/** 兼容模型偶发全角竖线 ｜ */
+const LEGACY_NAV_RE = /\[\[action:navigate[|｜]([^\]]+)\]\]/gi;
+const LEGACY_EMBED_RE = /\[\[action:embedFloat[|｜]([^\]]+)\]\]/gi;
 
 export type StudioClientActionHandlers = {
   /** 切换主导航 Tab（与左侧栏一致） */

@@ -1556,8 +1556,20 @@ a.add-device-external-link:hover {
   font-weight: 600;
 }
 
-.wifi-list-item span {
+.wifi-list-item-name {
   flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.wifi-list-item-current {
+  flex: 0 0 auto;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-subtle);
 }
 
 .wifi-list-empty {

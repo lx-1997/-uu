@@ -47,7 +47,7 @@ export function extractRdkDocUrls(text: string): string[] {
 }
 
 /**
- * 用户消息是否像「地平线官方文档里已有标准流程」的板端算法/应用任务。
+ * 用户消息是否像「地平线官方文档里已有标准流程」的套件端算法/应用任务。
  */
 export function detectRdkDocFirstIntent(text: string): boolean {
   const t = String(text || "");
@@ -62,7 +62,7 @@ export function detectRdkDocFirstIntent(text: string): boolean {
     );
 
   const rdkEcosystem =
-    /rdk|tros|ros2|地平线|d-robotics|drobotics|旭日|开发板|板端|板子|板上|在板|盒子|boxs|robot_development/i.test(
+    /rdk|tros|ros2|地平线|d-robotics|drobotics|旭日|开发者套件|开发板|套件端|板子|板上|在板|盒子|boxs|robot_development/i.test(
       lower,
     );
 
@@ -86,7 +86,7 @@ function buildRdkDocUrlAnchoredSection(urls: string[]): string {
     "2. **再**按文档顺序在板上执行；文档写死的包名/路径 **不得**用训练记忆擅自替换。",
     "3. 若文档涉及 **摄像头 / `CAM_TYPE` / 视频输入**：在 launch **之前**用 `device_exec` 做**短探测**（如 `ls /dev/video*`、`v4l2-ctl --list-devices`、`lsusb`），区分 **USB 与 MIPI** 等与文档是否一致，再设环境变量与启动命令。",
     "4. 文档若为长驻 `ros2 launch`：**`device_exec` + `background: true`** 启动，再用文档中的验收方式（`tail`、topic、Web 等）确认。",
-    "5. 若正文与板端实测不一致，说明差异并**以文档为纲、以探测为辅**调整，勿盲扫 `/opt` 替代读文档。",
+    "5. 若正文与套件端实测不一致，说明差异并**以文档为纲、以探测为辅**调整，勿盲扫 `/opt` 替代读文档。",
     "---",
   ].join("\n");
 }

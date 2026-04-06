@@ -79,7 +79,7 @@ async function waitForApiServer() {
     console.log(`[desktop] Waiting for API server :${API_PORT}... (${i + 1}/${API_MAX_RETRIES})`);
     if (i === 9 || i === 29) {
       console.warn(
-        '[desktop] 与是否连接开发板无关：需本机 API 先启动。请使用 npm run desktop（同时拉起 dev:server），或另开终端执行 npm run dev:server',
+        '[desktop] 与是否连接开发者套件无关：需本机 API 先启动。请使用 npm run desktop（同时拉起 dev:server），或另开终端执行 npm run dev:server',
       );
     }
     await new Promise((r) => setTimeout(r, RETRY_INTERVAL));

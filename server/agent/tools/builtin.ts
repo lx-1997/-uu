@@ -325,7 +325,7 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
     "在 RDK Studio 服务端本机执行 shell 命令。\n\n" +
     "IMPORTANT 使用规则：\n" +
     "- 这是本机命令，不是 RDK 设备。在设备上执行命令 ALWAYS 用 device_exec\n" +
-    "- NEVER 把本工具输出说成板端或 SSH 在设备上的结果\n" +
+    "- NEVER 把本工具输出说成套件端或 SSH 在设备上的结果\n" +
     "- 默认超时 30 秒，可通过 timeout 参数调整\n" +
     "- NEVER 使用交互式命令（vim、top、less）\n" +
     "- 若返回含 `[EXIT CODE]` 非 0 或 `[STDERR]` 明显报错：命令未成功，须继续用工具排查，勿仅输出错误就结束回合\n" +
@@ -414,7 +414,7 @@ export const execTool: Tool<{ command: string; timeout?: number }> = {
         result += `\n[OUTPUT TRUNCATED: exceeded ${MAX_OUTPUT_CHARS} chars, kept tail]`;
       }
 
-      const prefix = "[LOCAL_WORKSPACE 本机工作区，非 RDK 板端]\n";
+      const prefix = "[LOCAL_WORKSPACE 本机工作区，非 RDK 套件端]\n";
       return (prefix + result).slice(0, 30000);
     } catch (err) {
       return `错误: ${(err as Error).message}`;
@@ -482,7 +482,7 @@ export const listTool: Tool<{ path?: string; limit?: number }> = {
       }
 
       const body = lines.join("\n") || "目录为空";
-      return `[LOCAL_WORKSPACE 本机工作区，非 RDK 板端]\n${body}`;
+      return `[LOCAL_WORKSPACE 本机工作区，非 RDK 套件端]\n${body}`;
     } catch (err) {
       return `错误: ${(err as Error).message}`;
     }
@@ -799,7 +799,7 @@ export const sessionsSpawnTool: Tool<{
     "使用规则：\n" +
     "- 适用场景：委派 OpenClaw 后做验证/监控、长时间 web 研究、并行信息收集；NEVER 用子代理替代你能直接完成的简单任务\n" +
     "- 子代理完成后自动将摘要写入当前会话\n" +
-    "- toolScope：read-only（仅工作区读/搜）、device-read（加板端只读_diag）、explore（只读探索+联网+附件）、plan（explore+计划工具，须输出关键文件清单）、verify（exec/device_exec 验收，禁止写仓库；报告须含命令与输出，末行 VERDICT: PASS|FAIL|PARTIAL）、full（默认全量）",
+    "- toolScope：read-only（仅工作区读/搜）、device-read（加套件端只读_diag）、explore（只读探索+联网+附件）、plan（explore+计划工具，须输出关键文件清单）、verify（exec/device_exec 验收，禁止写仓库；报告须含命令与输出，末行 VERDICT: PASS|FAIL|PARTIAL）、full（默认全量）",
   inputSchema: {
     type: "object",
     properties: {

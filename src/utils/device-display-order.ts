@@ -19,7 +19,7 @@ function usernameSortRank(username: string): number {
 
 /**
  * 同一 IP/端口多账号时：列表与默认选中优先 root，sunrise 排在同类账号最后，
- * 避免 AI 条与后台探测默认落到板端普通用户账号。
+ * 避免 AI 条与后台探测默认落到套件端普通用户账号。
  */
 export function orderDevicesForStudio(devices: Device[]): Device[] {
   return [...devices].sort((a, b) => {

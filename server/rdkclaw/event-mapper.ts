@@ -8,7 +8,7 @@ export type RdkclawEventBase = { runId: string; sessionId: string; channel?: str
 export function resolveExecutor(toolName?: string) {
   if (!toolName) return "rdkclaw_local";
   if (toolName.startsWith("board_openclaw_")) return "board_openclaw";
-  // 跨板调度同样走板端 OpenClaw 网关，与 Studio 侧协作展示一致
+  // 跨板调度同样走套件端 OpenClaw 网关，与 Studio 侧协作展示一致
   if (toolName === "fleet_board_delegate" || toolName === "fleet_board_broadcast") return "board_openclaw";
   return "rdkclaw_local";
 }
@@ -67,7 +67,7 @@ export function mapMiniEvent(
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           elapsed_sec: event.elapsed_sec,
-          chunk: `〔板端协作〕${event.toolName} 仍在运行 · 已等待 ${elapsedDisplay}（长任务时正常，未完成前会持续刷新）`,
+          chunk: `〔套件端协作〕${event.toolName} · 已等待 ${elapsedDisplay}（进行中）`,
           progressSource: "local_heartbeat",
           phase: "progress",
           executor: resolveExecutor(event.toolName),

@@ -12,7 +12,7 @@ const DEVICE_POLL_SLOT_MS = DEVICE_POLL_PERIOD_MS / 6;
 export const DEVICE_POLL_PHASE_DIAGNOSTICS_MS = DEVICE_POLL_SLOT_MS * 0;
 /** 设备列表 SSH ping（多机时循环内串行） */
 export const DEVICE_POLL_PHASE_DEVICE_PING_MS = DEVICE_POLL_SLOT_MS * 1;
-/** 板端 OpenClaw health → 工作区 health（串行） */
+/** 套件端 OpenClaw health → 工作区 health（串行） */
 export const DEVICE_POLL_PHASE_BOARD_HEALTH_MS = DEVICE_POLL_SLOT_MS * 2;
 /** 本机 RDK Studio `/api/health` */
 export const DEVICE_POLL_PHASE_STUDIO_BACKEND_MS = DEVICE_POLL_SLOT_MS * 3;
@@ -29,9 +29,9 @@ export const DASHBOARD_CARDS: DashboardCard[] = [
   {
     tab: 'openclaw',
     title: 'OpenClaw',
-    description: '板端网关：模型、渠道与设备侧任务',
+    description: '套件端网关：模型、渠道与设备侧任务',
     loading: '正在打开 OpenClaw…',
-    statusLabel: '板端状态',
+    statusLabel: '套件端状态',
     statusOk: true,
     miniStats: [{ label: '技能与任务', value: '--' }, { label: '网关', value: '--' }],
     cta: '打开 OpenClaw',
@@ -114,7 +114,7 @@ export function getTerminalProfileLabel(profileId: string, isEn: boolean): strin
 export const CMD_SUGGESTIONS: Array<{ icon: string; textZh: string; textEn: string; keyword: string }> = [
   {
     icon: '',
-    textZh: '用几句话说明 RDK Studio 与 RDKClaw 如何帮我解决板端实际问题',
+    textZh: '用几句话说明 RDK Studio 与 RDKClaw 如何帮我解决套件端实际问题',
     textEn: 'Explain how RDK Studio and RDKClaw help me solve real on-board problems',
     keyword: '介绍',
   },

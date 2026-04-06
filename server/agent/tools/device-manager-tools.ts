@@ -110,7 +110,7 @@ export const deviceListTool: Tool<Record<string, never>> = {
 
 export const deviceScanTool: Tool<{ subnet?: string }> = {
   name: "device_scan_network",
-  description: "扫描局域网中开放 SSH(22) 端口的设备，通常是 RDK 开发板。可选指定子网前缀（如 192.168.1），不填则自动检测本机子网。",
+  description: "扫描局域网中开放 SSH(22) 端口的设备，通常是 RDK 开发者套件。可选指定子网前缀（如 192.168.1），不填则自动检测本机子网。",
   inputSchema: {
     type: "object",
     properties: {
@@ -165,7 +165,7 @@ export const deviceConnectTool: Tool<{
 }> = {
   name: "device_connect_ssh",
   description:
-    "通过 SSH 连接一台新的 RDK 设备并添加到 Studio。必填 host；username 默认 root。password 与设备一致；若省略 password，则依次尝试 RDK_SSH_PASSWORD（若设置）与默认口令 root（产品默认）。连接成功后会刷新本会话的板端工具列表。",
+    "通过 SSH 连接一台新的 RDK 设备并添加到 Studio。必填 host；username 默认 root。password 与设备一致；若省略 password，则依次尝试 RDK_SSH_PASSWORD（若设置）与默认口令 root（产品默认）。连接成功后会刷新本会话的套件端工具列表。",
   inputSchema: {
     type: "object",
     properties: {
@@ -244,7 +244,7 @@ export const deviceConnectTool: Tool<{
     setDevicePasswordCache(host, username, port, connectedPassword);
     ctx.onStudioDeviceBound?.(device!.id);
 
-    return `设备连接成功!\n• IP: ${host}:${port}\n• 用户: ${username}\n• 设备ID: ${device!.id}\n• 状态: connected\n\n说明：已保存凭据并尝试刷新本会话工具列表（含板端工具）。若模型仍看不到 device_exec，请再发一条短消息。`;
+    return `设备连接成功!\n• IP: ${host}:${port}\n• 用户: ${username}\n• 设备ID: ${device!.id}\n• 状态: connected\n\n说明：已保存凭据并尝试刷新本会话工具列表（含套件端工具）。若模型仍看不到 device_exec，请再发一条短消息。`;
   },
 };
 

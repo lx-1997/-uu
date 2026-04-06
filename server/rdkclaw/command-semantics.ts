@@ -1,8 +1,8 @@
 /**
- * RDK 板端命令语义化
+ * RDK 套件端命令语义化
  *
  * 借鉴 claude-code BashTool 的设计：不只是执行命令，还要理解命令的语义。
- * 对 RDK 板端常用命令的退出码、输出模式进行映射，帮助 Agent 更准确地判断执行结果。
+ * 对 RDK 套件端常用命令的退出码、输出模式进行映射，帮助 Agent 更准确地判断执行结果。
  *
  * 设计原则：
  * 1. 退出码 0 不一定成功（如 grep 无匹配返回 1 但不是错误）
@@ -26,7 +26,7 @@ export interface CommandSemantics {
 }
 
 /**
- * RDK 板端常用命令的语义映射表
+ * RDK 套件端常用命令的语义映射表
  */
 export const RDK_COMMAND_SEMANTICS: CommandSemantics[] = [
   // ── 系统信息类（只读） ──

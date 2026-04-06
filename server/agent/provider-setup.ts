@@ -80,7 +80,7 @@ export interface ProviderConfigRegistry {
   /** Dock「快速回答」专用条目；应与深度条目区分（安装包内置快速 id 会在加载配置时自动补全） */
   quickActiveId?: string | null;
   /**
-   * 板端 OpenClaw 委派预检在「板端未配置网关」时写入所用的 Studio 模型条目。
+   * 套件端 OpenClaw 委派预检在「套件端未配置网关」时写入所用的 Studio 模型条目。
    * 未设置或与条目无效时，回退为当前「深度思考」主模型（activeId）。
    */
   openclawDelegateProviderId?: string | null;
@@ -248,7 +248,7 @@ export function loadProviderConfig(): ProviderConfig | null {
 }
 
 /**
- * 将指定 Studio 已保存模型条目转为 OpenClaw `custom-gateway` 字段（写入板端 openclaw 配置）。
+ * 将指定 Studio 已保存模型条目转为 OpenClaw `custom-gateway` 字段（写入套件端 openclaw 配置）。
  */
 export function buildOpenClawModelGatewayFromStudioEntryId(entryId: string): {
   baseUrl: string;
@@ -289,8 +289,8 @@ export function buildOpenClawModelGatewayFromStudioEntryId(entryId: string): {
 }
 
 /**
- * 将 Studio 中**为板端委派预选**的模型条目（或回退为「深度思考」主模型）转为 OpenClaw `custom-gateway` 所需字段，
- * 供板端缺少模型网关时由 RDKClaw 写入 `openclaw.json`。
+ * 将 Studio 中**为套件端委派预选**的模型条目（或回退为「深度思考」主模型）转为 OpenClaw `custom-gateway` 所需字段，
+ * 供套件端缺少模型网关时由 RDKClaw 写入 `openclaw.json`。
  * 无有效模型名或 API Key（含 `OPENAI_API_KEY` 环境变量兜底）时返回 null。
  */
 export function buildOpenClawModelGatewayFromStudioThinking(): {
@@ -808,7 +808,7 @@ export function deleteProviderConfigEntry(id: string): boolean {
   return true;
 }
 
-/** 设置板端 OpenClaw 委派预检使用的模型条目；传空则与当前「深度思考」主模型一致 */
+/** 设置套件端 OpenClaw 委派预检使用的模型条目；传空则与当前「深度思考」主模型一致 */
 export function setOpenclawDelegateProviderConfig(id: string | null | undefined): boolean {
   const registry = loadProviderRegistry();
   const next = id?.trim() || null;

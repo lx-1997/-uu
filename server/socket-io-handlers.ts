@@ -26,8 +26,8 @@ function inferOpenClawPhase(text: string): OpenClawSocketPhase | null {
   const normalized = String(text || '');
   if (!normalized.trim()) return null;
   if (/\[NEED_RDKCLAW\]/i.test(normalized)) return 'need_rdkclaw';
-  if (/\[板端·执行\]|执行中|正在执行|开始执行/i.test(normalized)) return 'executing';
-  if (/\[板端·对齐\]|alignment_gate: strict|等待 RDKClaw|待 RDKClaw/i.test(normalized)) {
+  if (/\[(?:板端|套件端)·执行\]|执行中|正在执行|开始执行/i.test(normalized)) return 'executing';
+  if (/\[(?:板端|套件端)·对齐\]|alignment_gate: strict|等待 RDKClaw|待 RDKClaw/i.test(normalized)) {
     return 'waiting_rdkclaw';
   }
   return 'responding';

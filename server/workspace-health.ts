@@ -186,7 +186,7 @@ export function buildWorkspaceHealth(output: string): DeviceWorkspaceHealth {
     ros2Ready && trosCount > 0,
     trosCount > 0,
     ros2Ready && trosCount > 0 ? `已检测到 ${trosCount} 个 tros / hobot 组件` : `缺少 ${nodeHubMissing.join(' / ')}`,
-    ros2Ready && trosCount > 0 ? '打开 NodeHub 同步板端能力' : '先补齐 RDK 官方生态包，再同步 NodeHub',
+    ros2Ready && trosCount > 0 ? '打开 NodeHub 同步套件端能力' : '先补齐 RDK 官方生态包，再同步 NodeHub',
     nodeHubMissing,
   );
 

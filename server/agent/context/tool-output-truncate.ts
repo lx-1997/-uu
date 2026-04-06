@@ -10,7 +10,7 @@
 
 /** 不同工具类型的截断阈值 */
 const TOOL_OUTPUT_LIMITS: Record<string, number> = {
-  // 板端命令输出可能很长（编译日志、apt 安装等）
+  // 套件端命令输出可能很长（编译日志、apt 安装等）
   device_exec: 24_000,
   // 文件内容
   device_file_read: 40_000,

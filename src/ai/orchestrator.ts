@@ -670,7 +670,7 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
       startTaskAnimation(
         task,
         t('orc.oc.startTitle', 'OpenClaw 启动流程完成'),
-        t('orc.oc.startDetail', '请以板端 openclaw/clawctl 输出为准'),
+        t('orc.oc.startDetail', '请以套件端 openclaw/clawctl 输出为准'),
       );
       void actions.openClawStartOnBoard();
     },
@@ -787,7 +787,7 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
       text: '',
       blocks: [
         { type: 'status', items: [
-          { label: t('orc.model.deployLabel', '模型部署'), value: t('orc.model.deployValue', '将执行板端真实命令'), ok: true },
+          { label: t('orc.model.deployLabel', '模型部署'), value: t('orc.model.deployValue', '将执行套件端真实命令'), ok: true },
         ]},
         { type: 'confirm', text: t('orc.model.confirmDeploy', '确认执行当前模型部署命令？'), confirmId: cid },
       ],
@@ -798,7 +798,7 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
     text: '',
     blocks: [
       { type: 'status', items: [
-        { label: t('orc.model.listLabel', '模型列表'), value: t('orc.model.listValue', '请在终端执行板端模型目录查询命令'), ok: true },
+        { label: t('orc.model.listLabel', '模型列表'), value: t('orc.model.listValue', '请在终端执行套件端模型目录查询命令'), ok: true },
       ]},
     ],
   }),

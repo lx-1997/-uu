@@ -112,7 +112,7 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
     sessionKey?: string;
     message?: string;
     idempotencyKey?: string;
-    /** 来源渠道：板端网关可传 openclaw / studio，用于 delta 节奏 */
+    /** 来源渠道：套件端网关可传 openclaw / studio，用于 delta 节奏 */
     channel?: string;
     clientMeta?: {
       correlationId?: string;
@@ -150,7 +150,7 @@ const handleChatSend: Handler = async (params, _client, ctx) => {
     const eventRunId = "runId" in event ? (event as { runId: string }).runId : undefined;
     if (eventRunId && eventRunId !== agentRunId) return;
 
-    // 桥接 agent 事件 → gateway 广播（附带 trace 便于板端/VPN 弱网下排障）
+    // 桥接 agent 事件 → gateway 广播（附带 trace 便于套件端/VPN 弱网下排障）
     ctx.broadcast("agent", {
       ...event,
       sessionKey,

@@ -1,5 +1,5 @@
 /**
- * 按板型将 Studio 内置技能同步到板端 ~/.openclaw/workspace/skills/
+ * 按板型将 Studio 内置技能同步到套件端 ~/.openclaw/workspace/skills/
  * - RDK X5: rdkx5_skills/ 下全部子目录（含 SKILL.md）+ 通用 skills/（文档库、agent-browser 等）
  * - RDK X3 / S100 / Ultra: skills/ 下文档与指南类技能组合（板型专章已并入 rdk-board-knowledge，不再单独同步 rdk-x3-guide / rdk-s100-guide）
  */
@@ -202,7 +202,7 @@ export async function handleEnsureBoardSkillBundle(
     errors,
     message:
       deployed.length > 0
-        ? `已同步 ${deployed.length} 个技能到板端（${platform}）`
+        ? `已同步 ${deployed.length} 个技能到套件端（${platform}）`
         : '未写入任何技能（请检查本机 skills / rdkx5_skills 目录）',
   });
 }

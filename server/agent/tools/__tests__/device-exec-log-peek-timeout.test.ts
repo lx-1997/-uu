@@ -41,4 +41,14 @@ describe("inferShortLogPeekDefaultTimeoutMs", () => {
   it("does not shorten source + ros2 launch combo", () => {
     expect(inferShortLogPeekDefaultTimeoutMs("source /opt/tros/humble/setup.bash && ros2 launch pkg a.launch.py")).toBeUndefined();
   });
+
+  it("shortens pkill / ps probe chains (kill stuck sessions vs 30min default)", () => {
+    expect(
+      inferShortLogPeekDefaultTimeoutMs(
+        'pkill -f dnn_node_example && sleep 2 && ps aux | grep -E "dnn_node_example|websocket|hobot_codec" | grep -v grep',
+      ),
+    ).toBe(60_000);
+    expect(inferShortLogPeekDefaultTimeoutMs("ps aux | grep node")).toBe(60_000);
+    expect(inferShortLogPeekDefaultTimeoutMs("pgrep -af python")).toBe(60_000);
+  });
 });

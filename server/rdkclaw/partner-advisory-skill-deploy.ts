@@ -1,5 +1,5 @@
 /**
- * 将内置技能 rdk-rdkclaw-partner-advisory 同步到板端 ~/.openclaw/workspace/skills/
+ * 将内置技能 rdk-rdkclaw-partner-advisory 同步到套件端 ~/.openclaw/workspace/skills/
  * — 若已存在且版本与校验一致则跳过；否则写入并校验 sha256。
  */
 import * as crypto from 'crypto';
@@ -115,7 +115,7 @@ export async function handleEnsurePartnerAdvisorySkill(
       ok: false,
       action: 'error',
       reason: 'remote_parse_failed',
-      message: '无法解析板端技能检查输出',
+      message: '无法解析套件端技能检查输出',
       details: String(first.output || '').slice(0, 800),
     });
     return;
@@ -152,7 +152,7 @@ export async function handleEnsurePartnerAdvisorySkill(
       ok: false,
       action: 'error',
       reason: 'write_failed',
-      message: '写入板端 SKILL.md 未确认成功',
+      message: '写入套件端 SKILL.md 未确认成功',
       details: String(second.output || '').slice(0, 1200),
     });
     return;

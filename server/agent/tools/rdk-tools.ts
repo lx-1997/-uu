@@ -57,7 +57,7 @@ export interface RdkToolsCallbacks {
   onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
   /** device_exec SSH 长任务：流式/心跳进度（经 SSE tool_progress 到前端） */
   onDeviceExecProgress?: (payload: { chunk: string; toolCallId?: string }) => void;
-  /** 安装完成后同步内置 skills 到板端（与 UI 一键安装一致） */
+  /** 安装完成后同步内置 skills 到套件端（与 UI 一键安装一致） */
   openClawManager?: OpenClawDeploymentManager;
 }
 
@@ -112,13 +112,13 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.avi', '.mov', '.mkv']);
 const DOC_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.pdf', '.csv', '.txt', '.md', '.zip', '.rar', '.7z']);
 const OPENCLAW_RESOLVE_SNIPPET = 'export NPM_CONFIG_PREFIX="$HOME/.npm-global"; export PATH="$HOME/.npm-global/bin:$PATH"; OPENCLAW_CMD="$(command -v openclaw 2>/dev/null || true)"; if [ -z "$OPENCLAW_CMD" ] && [ -x "$HOME/.local/bin/openclaw" ]; then OPENCLAW_CMD="$HOME/.local/bin/openclaw"; fi; if [ -z "$OPENCLAW_CMD" ] && [ -x "$(npm prefix -g 2>/dev/null)/bin/openclaw" ]; then OPENCLAW_CMD="$(npm prefix -g 2>/dev/null)/bin/openclaw"; fi; if [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi';
 
-/** SkillHub 元技能：`clawhub install` 短名，供板端 find-skills 检索 */
+/** SkillHub 元技能：`clawhub install` 短名，供套件端 find-skills 检索 */
 export const BOARD_FIND_SKILLS_PACKAGE_ID = 'find-skills';
 
 const findSkillsEnsureCooldown = new Map<string, number>();
 const FIND_SKILLS_ENSURE_COOLDOWN_MS = 90_000;
 
-/** 一旦确认板端已有 find-skills（或成功安装），在 TTL 内不再跑 SSH 预检，避免每次委派都卡顿 */
+/** 一旦确认套件端已有 find-skills（或成功安装），在 TTL 内不再跑 SSH 预检，避免每次委派都卡顿 */
 const findSkillsPresenceUntil = new Map<string, number>();
 
 function resolveFindSkillsPresenceTtlMs(): number {
@@ -148,7 +148,7 @@ const DEVICE_EXEC_TIMEOUT_MIN_MS = 5_000;
 const DEVICE_EXEC_TIMEOUT_MAX_MS = 2 * 60 * 60 * 1000;
 
 /**
- * 编排模型常把 60/90/120s 当作「通用超时」；板端 apt/相机/弱网下极易触发 SSH 层误杀。
+ * 编排模型常把 60/90/120s 当作「通用超时」；套件端 apt/相机/弱网下极易触发 SSH 层误杀。
  * 这些值自动对齐到与未传 timeoutMs 相同的默认（30min）；若确需更短，应传非常规毫秒（如 45000）。
  */
 const MODEL_GENERIC_SHORT_TIMEOUTS_MS = new Set([60_000, 90_000, 120_000]);
@@ -167,7 +167,7 @@ function shEscapeUnix(raw: string): string {
 }
 
 /**
- * 将板端命令经 base64 管道交给内层 bash，避免引号/`&&` 优先级导致的「后台启动」语法坑；
+ * 将套件端命令经 base64 管道交给内层 bash，避免引号/`&&` 优先级导致的「后台启动」语法坑；
  * 外层仅负责 nohup、脱轨 stdin，并打印 PID 与日志路径。
  *
  * `inheritPersistentShellEnv`：为 true 时用 `bash -c` 替代 `bash -lc`，避免登录 shell 重读 profile
@@ -195,7 +195,7 @@ function isSshExecTimeoutMessage(msg: string): boolean {
 }
 
 /**
- * 若板端未安装 find-skills，则 clawhub install + plugins.allow + 重启 gateway。
+ * 若套件端未安装 find-skills，则 clawhub install + plugins.allow + 重启 gateway。
  * 短期冷却内不重复跑 SSH（避免同一会话多次委派刷安装）。
  */
 export async function ensureFindSkillsOnBoard(deviceId: string): Promise<
@@ -249,7 +249,7 @@ function boardOpenClawEnsureFindSkillsTool(deviceId: string): Tool<Record<string
   return {
     name: 'board_openclaw_ensure_find_skills',
     description:
-      '确保板端已安装腾讯 SkillHub 元技能 **find-skills**（板端 `clawhub install find-skills`，用于检索/安装社区技能）。' +
+      '确保套件端已安装腾讯 SkillHub 元技能 **find-skills**（套件端 `clawhub install find-skills`，用于检索/安装社区技能）。' +
       '若已安装则跳过。仅在需要时主动调用以排障（委派流程不再自动执行）。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
@@ -370,10 +370,10 @@ function deviceFileUploadFromLocalTool(deviceId: string): Tool<{ localPath: stri
 const DEVICE_EXEC_PROGRESS_THROTTLE_MS = 200;
 /** 待发进度缓冲上限；超出时压缩为「标记 + 尾部」再整段上报，避免旧逻辑只 slice 尾部导致大量行从未下发、顺序错乱 */
 const DEVICE_EXEC_PROGRESS_BUFFER_CAP = 96_000;
-/** 至少运行多久后，在无输出时开始发心跳 */
-const DEVICE_EXEC_HEARTBEAT_AFTER_MS = 15_000;
-/** 连续无输出多久发一条「仍在运行」 */
-const DEVICE_EXEC_HEARTBEAT_SILENT_MS = 15_000;
+/** 至少运行多久后，在无输出时开始发心跳（略拉长，减少与真实输出交错时的噪声） */
+const DEVICE_EXEC_HEARTBEAT_AFTER_MS = 20_000;
+/** 连续无输出多久更新一条「仍在运行」（与常见 IDE 长任务提示节奏接近，避免 15s 刷屏） */
+const DEVICE_EXEC_HEARTBEAT_SILENT_MS = 30_000;
 
 /** 前台跑 `ros2 launch` / `ros2 run` 会阻塞整条工具链直到节点退出，易导致会话「卡住/超时」；返回里点明应改用 background */
 const ROS_LONG_RUN_BLOCK_RE = /\bros2\s+(launch|run)\b/i;
@@ -390,6 +390,7 @@ const DEVICE_EXEC_SOURCE_DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
  * 供测试与工具契约：对 `sleep && tail … | grep`、`tail -n … | grep` 等返回约 60s 默认上限；
+ * 对 `pkill` / `ps` / `pgrep` 等进程探测与清理返回约 60s；
  * 对以 `source` 为主的命令（如 `source /opt/tros/humble/setup.bash`）返回约 120s；否则 undefined（沿用 SSH 默认 30min）。
  */
 export function inferShortLogPeekDefaultTimeoutMs(command: string): number | undefined {
@@ -398,12 +399,19 @@ export function inferShortLogPeekDefaultTimeoutMs(command: string): number | und
   if (/^\s*timeout\s+\d/i.test(c)) return undefined;
   if (/\bwhile\s+read\b|\bfor\s+[a-z]/i.test(c)) return undefined;
   if (/\bros2\s+(launch|run)\b/i.test(c)) return undefined;
+  /**
+   * 进程查看/清理（pkill、ps|grep、pgrep）：正常秒级；若套件端 D 状态或巨页输出偶发卡顿，
+   * 仍不应占用整条会话的 SSH 默认 30min。显式 `timeout` 或更长需求请传 timeoutMs。
+   */
+  if (/\b(pkill|killall|pgrep)\b/i.test(c) || /\bps\s+(aux|ef|-ef|a)\b/i.test(c)) {
+    return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
+  }
   if (/\btail\s+(-f|--follow)\b|\btail\b[^\n|]*\s-f\b/i.test(c)) return undefined;
   if (/\btail\b/i.test(c) && /\|\s*grep\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
   if (/\bhead\b/i.test(c) && /\|\s*grep\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
   if (/sleep\s+\d+\s+&&\s*tail\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
   if (/\btail\s+-\d+n?\b/i.test(c) || /\btail\s+-n\s+\d+/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
-  // source setup.bash（含可选 sleep 前缀）：板端加载 ROS overlay 无 stdout，不该等 30min
+  // source setup.bash（含可选 sleep 前缀）：套件端加载 ROS overlay 无 stdout，不该等 30min
   if (/^\s*(?:sleep\s+\d+\s*&&\s*)?(?:\.|source)\s+\S+setup\.bash/i.test(c)) return DEVICE_EXEC_SOURCE_DEFAULT_TIMEOUT_MS;
   if (/^\s*(?:sleep\s+\d+\s*&&\s*)?(?:\.|source)\s+/i.test(c) && !/[|&;]/.test(c.replace(/&&/g, ''))) return DEVICE_EXEC_SOURCE_DEFAULT_TIMEOUT_MS;
   return undefined;
@@ -483,7 +491,7 @@ function resolveRos2VerifyQuickTimeoutMs(topicCount: number): number {
 }
 
 /**
- * 板端后台启动：脚本经 base64 落盘后 nohup，避免 `&&` 与 `&` 优先级导致 pid 错乱；返回 pid、日志路径与初始输出。
+ * 套件端后台启动：脚本经 base64 落盘后 nohup，避免 `&&` 与 `&` 优先级导致 pid 错乱；返回 pid、日志路径与初始输出。
  * `inheritPersistentShellEnv` 含义见 `wrapDetachedDeviceCommand`。
  */
 function wrapBackgroundDeviceCommand(userCommand: string, inheritPersistentShellEnv: boolean): string {
@@ -532,21 +540,21 @@ function deviceExecTool(
       '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
       '规则：\n' +
       '- **默认（未设置环境变量 RDK_DEVICE_EXEC_PERSISTENT_SHELL=0）**：同一设备的多次 `device_exec` 在**同一 SSH 交互 shell** 中执行，`cd` / `export` / `source` **可跨调用保留**。若关闭持久 shell 或持久通道失败回退，则行为与旧版一致（每次独立 exec）。\n' +
-      '- **常驻进程（推流、WebSocket 服务、长驻 ROS2 节点等）**：传 **runDetached: true**。Studio 会以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
+      '- **常驻进程（推流、WebSocket 服务、长驻 ROS2 节点等）**：传 **runDetached: true**。Studio 会以 nohup 在套件端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
       '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
       '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。持久 shell 开启时可在**前一次** `device_exec` 中 `source`，后续 `background`/`runDetached` 的 `ros2 launch` **会继承**该环境（包装层使用非登录 `bash -c`，避免 `bash -lc` 重读 profile 冲掉已 source 的变量）；若关闭持久 shell，须在**同一条**内写 `source ... && ros2 ...`。**勿**在未 source 时单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `ros2 node list` / `topic list` 或 `tail` 日志验证；可选 `ros2VerifyTopics` 在延迟后自动做 topic 收数验收（`ros2 topic echo` 短超时）。**主命令 stdout/stderr 中含可放行 `http(s)://` 时，Studio 会在 topic 验收与长延迟之前尽早代开浏览器**，便于页面先加载、验收后再刷新即可\n' +
       '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
-      '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在板端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**短日志验收**（如 `tail … | grep`、`sleep … && tail -n`）：未传 timeoutMs 时 Studio 可能对这类命令**自动**约 **60 秒** SSH 上限，避免异常大日志行或 I/O 长时间无响应；仍可在命令前加 `timeout 20s …` 或显式 timeoutMs。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
+      '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在套件端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**短日志验收**（如 `tail … | grep`、`sleep … && tail -n`）与**进程查看/清理**（如 `pkill`、`ps … | grep`、`pgrep`）：未传 timeoutMs 时 Studio 可能对这类命令**自动**约 **60 秒** SSH 上限，避免误占满 30 分钟；仍可在命令前加 `timeout 20s …` 或显式 timeoutMs。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
-      '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功；板端失败见末尾 `[exit code: n]`（n≠0）或 stderr；本机 `exec` 见 `[EXIT CODE]`。须**再调用**工具继续排查，勿仅输出错误就结束回合\n' +
+      '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功；套件端失败见末尾 `[exit code: n]`（n≠0）或 stderr；本机 `exec` 见 `[EXIT CODE]`。须**再调用**工具继续排查，勿仅输出错误就结束回合\n' +
       '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步；**自行拼 nohup 时**注意 `&&` 与 `&` 的 shell 优先级，不确定时优先用 **runDetached** 或 **background:true**\n' +
       '- 读取设备文件用 device_file_read 而不是 cat\n' +
-      '- 写入设备文件用 device_file_write 而不是 echo/tee（本机 edit/write **不会**改板端文件）\n' +
+      '- 写入设备文件用 device_file_write 而不是 echo/tee（本机 edit/write **不会**改套件端文件）\n' +
       '- 涉及**摄像头/视频输入**（如官方例程的 CAM_TYPE）：在 `source`+launch **之前**用短命令探测 **USB 与 MIPI**（如 `ls /dev/video*`、`v4l2-ctl --list-devices`、`lsusb`），与文档参数一致后再启动；勿假设接口类型\n' +
       '- 查看目录用 device_file_list 而不是 ls\n' +
-      '- **runDetached=true**：与 **detachedLogPath** 联用，Studio 以 nohup 在板端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）\n' +
-      '- **background=true**：在板端 **nohup 后台**运行（另一套包装，适合 `ros2 launch` / `ros2 run` 等）。**`ros2 launch`、`ros2 run` / 长驻节点几乎总是应加 background 或 runDetached**，否则 SSH 前台会阻塞到节点退出。SSH **只等待启动完成**并返回 **pid、日志路径、日志尾部摘要**；勿对后台任务设过短 timeoutMs（未传时后台固定约 90s 仅用于取尾部）。仅短时看启动横幅可前台执行\n' +
+      '- **runDetached=true**：与 **detachedLogPath** 联用，Studio 以 nohup 在套件端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）\n' +
+      '- **background=true**：在套件端 **nohup 后台**运行（另一套包装，适合 `ros2 launch` / `ros2 run` 等）。**`ros2 launch`、`ros2 run` / 长驻节点几乎总是应加 background 或 runDetached**，否则 SSH 前台会阻塞到节点退出。SSH **只等待启动完成**并返回 **pid、日志路径、日志尾部摘要**；勿对后台任务设过短 timeoutMs（未传时后台固定约 90s 仅用于取尾部）。仅短时看启动横幅可前台执行\n' +
       '- **漏传 background**：若命令含 **`ros2 launch`**、**`ros2 run`** 或 **`nohup`**（且未使用 runDetached），Studio 会**自动按后台模式**执行（与 `background:true` 等价）；若确需前台阻塞到进程结束，请显式传 **`background: false`**',
     inputSchema: {
       type: 'object',
@@ -563,7 +571,7 @@ function deviceExecTool(
         background: {
           type: 'boolean',
           description:
-            '可选。为 true 时在板端后台启动（nohup），适合 ros2 launch / ros2 run 等长驻进程；返回 pid 与日志文件路径及尾部。',
+            '可选。为 true 时在套件端后台启动（nohup），适合 ros2 launch / ros2 run 等长驻进程；返回 pid 与日志文件路径及尾部。',
         },
         runDetached: {
           type: 'boolean',
@@ -572,7 +580,7 @@ function deviceExecTool(
         },
         detachedLogPath: {
           type: 'string',
-          description: '与 runDetached 联用：板端日志绝对路径；省略则写入 /tmp 下自动命名文件',
+          description: '与 runDetached 联用：套件端日志绝对路径；省略则写入 /tmp 下自动命名文件',
         },
         ros2VerifyTopics: {
           type: 'array',
@@ -783,9 +791,9 @@ function deviceExecTool(
         if (isSshAuthError(err)) {
           return (
             `[命令执行失败] ${msg}\n\n` +
-            `这是 **SSH 登录/认证阶段**失败（尚未在板端执行你拼的命令），不是拍照命令本身的输出错误。\n` +
+            `这是 **SSH 登录/认证阶段**失败（尚未在套件端执行你拼的命令），不是拍照命令本身的输出错误。\n` +
             `本工具当前绑定的设备 ID：\`${deviceId}\`。若你刚用 device_connect_ssh 换过账号，请先在 Studio **侧栏选中对应设备**再发消息，或再发一条以刷新会话工具绑定。\n` +
-            `常见原因：Studio 里该 **deviceId** 对应条目密码/用户名与板端不一致；sshd 仅允许密钥；网络切换后仍用旧配置。\n` +
+            `常见原因：Studio 里该 **deviceId** 对应条目密码/用户名与套件端不一致；sshd 仅允许密钥；网络切换后仍用旧配置。\n` +
             `请到 **设备管理** 对该 IP 下 **当前使用的用户** 点「测试连接」并保存；或用本机终端对同一 host/user 试一次 ssh。\n` +
             `**OpenClaw 在板上正常 ≠ Studio 的 SSH 一定成功**（板内进程与宿主机连板的 SSH 是两条链路）。认证未恢复前，反复改 gst/v4l2 命令通常无效。\n` +
             `勿因本条切换设备；先修连接。`
@@ -851,7 +859,7 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
       '- 此工具会完全覆盖目标文件，不是追加\n' +
       '- 典型允许路径：/userdata、/tmp、/home/...、/root/ros2_ws/...、/root/.openclaw/...（勿写到未允许的系统路径）\n' +
       '- 父目录不存在时上传流程会尝试 mkdir -p；若仍失败再用 device_exec 建目录\n' +
-      '- **若本工具长时间卡在「执行中」**（与同一设备**持久 SSH shell** 并发时，板端第二条 SSH 可能慢/排队）：可改用**单条** `device_exec` 把小脚本落到 `/tmp`（heredoc/tee 均可），或对 Studio 设 `RDK_DEVICE_EXEC_PERSISTENT_SHELL=0` 后再试本工具；大文件仍优先本工具\n' +
+      '- **若本工具长时间卡在「执行中」**（与同一设备**持久 SSH shell** 并发时，套件端第二条 SSH 可能慢/排队）：可改用**单条** `device_exec` 把小脚本落到 `/tmp`（heredoc/tee 均可），或对 Studio 设 `RDK_DEVICE_EXEC_PERSISTENT_SHELL=0` 后再试本工具；大文件仍优先本工具\n' +
       '- 默认勿用 device_exec 拼大段内容**替代**本工具；**仅**上述卡死排障时例外\n' +
       '- 写入后建议用 device_file_read 验证内容正确',
     inputSchema: {
@@ -911,7 +919,7 @@ function deviceDiagnoseTool(deviceId: string): Tool<Record<string, never>> {
       '读者=编排模型。结构化拉取板载指标，供你判断环境是否健康。\n' +
       '获取 RDK 设备硬件诊断信息：CPU 温度、BPU 负载、内存使用、磁盘空间、运行时间。\n\n' +
       '规则：\n' +
-      '- 任务需要板子状态/温度/内存/磁盘时 ALWAYS 使用此工具（不必等「用户口头问到」才用）\n' +
+      '- 任务需要开发者套件状态/温度/内存/磁盘时 ALWAYS 使用此工具（不必等「用户口头问到」才用）\n' +
       '- 温度值需除以 1000 转为摄氏度（如 65000 → 65°C）\n' +
       '- BPU ratio 值 0-100 表示负载百分比\n' +
       '- 可与 board_openclaw_assess 并行调用',
@@ -935,7 +943,7 @@ function deviceDiagnoseTool(deviceId: string): Tool<Record<string, never>> {
 function boardOpenClawStatusTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_status',
-    description: '快速查看板端 OpenClaw 运行状态（进程/服务/版本摘要）。普通对话优先用这个；Studio UI 已显示 OpenClaw 正常时不要为闲聊重复 SSH 检查。' +
+    description: '快速查看套件端 OpenClaw 运行状态（进程/服务/版本摘要）。普通对话优先用这个；Studio UI 已显示 OpenClaw 正常时不要为闲聊重复 SSH 检查。' +
       '需要结构化 JSON 或排障、装/升/重启后验收时再用 board_openclaw_health；全面体检用 board_openclaw_check。',
     inputSchema: {
       type: 'object',
@@ -952,7 +960,7 @@ function boardOpenClawStatusTool(deviceId: string): Tool<Record<string, never>> 
 function boardOpenClawReadConfigTool(deviceId: string): Tool<{ path?: string }> {
   return {
     name: 'board_openclaw_read_config',
-    description: '读取板端 OpenClaw 配置文件（默认 ~/.openclaw/openclaw.json）。',
+    description: '读取套件端 OpenClaw 配置文件（默认 ~/.openclaw/openclaw.json）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -970,7 +978,7 @@ function boardOpenClawInstallTool(deviceId: string, callbacks?: RdkToolsCallback
   return {
     name: 'board_openclaw_install',
     description:
-      '一键安装板端 OpenClaw（npm 安装 openclaw@与 Studio 默认规格一致，含 doctor + 网关重启 + health）。成功后若本机可访问 Studio 仓库 skills 目录，会将内置 skills 同步到板端 ~/.openclaw/workspace/skills/（与 UI 安装一致）。',
+      '一键安装套件端 OpenClaw（npm 安装 openclaw@与 Studio 默认规格一致，含 doctor + 网关重启 + health）。成功后若本机可访问 Studio 仓库 skills 目录，会将内置 skills 同步到套件端 ~/.openclaw/workspace/skills/（与 UI 安装一致）。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmd = [
@@ -1019,7 +1027,7 @@ function boardOpenClawInstallTool(deviceId: string, callbacks?: RdkToolsCallback
 function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_upgrade',
-    description: '升级板端 OpenClaw（优先 openclaw update，失败回退 npm 重装与 Studio 默认规格一致），并执行健康检查。',
+    description: '升级套件端 OpenClaw（优先 openclaw update，失败回退 npm 重装与 Studio 默认规格一致），并执行健康检查。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmd = [
@@ -1053,7 +1061,7 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
 function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_uninstall',
-    description: '彻底卸载板端 OpenClaw：停止服务 → 官方卸载 → 清理 systemd → 清除 ClawHub 登录态 → 删除配置/日志/缓存/临时文件 → 移除 npm 包。高风险操作，建议先确认。',
+    description: '彻底卸载套件端 OpenClaw：停止服务 → 官方卸载 → 清理 systemd → 清除 ClawHub 登录态 → 删除配置/日志/缓存/临时文件 → 移除 npm 包。高风险操作，建议先确认。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const steps = [
@@ -1076,7 +1084,7 @@ function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never
 function boardOpenClawModelSwitchTool(deviceId: string): Tool<{ provider?: string; modelId: string }> {
   return {
     name: 'board_openclaw_model_switch',
-    description: '切换板端 OpenClaw 主模型（修改 openclaw.json 并重启 gateway）。',
+    description: '切换套件端 OpenClaw 主模型（修改 openclaw.json 并重启 gateway）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1124,7 +1132,7 @@ function boardOpenClawFeishuConfigTool(deviceId: string): Tool<{
 }> {
   return {
     name: 'board_openclaw_feishu_config',
-    description: '配置板端 OpenClaw 的 Feishu 通道参数，并重启 gateway。',
+    description: '配置套件端 OpenClaw 的 Feishu 通道参数，并重启 gateway。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1187,7 +1195,7 @@ function boardOpenClawWeixinConfigTool(deviceId: string): Tool<{
 }> {
   return {
     name: 'board_openclaw_weixin_config',
-    description: '在板端 OpenClaw 启用微信 ClawBot 插件并重启 gateway。用户需要通过 openclaw channels login --channel openclaw-weixin 在板端完成扫码绑定。',
+    description: '在套件端 OpenClaw 启用微信 ClawBot 插件并重启 gateway。用户需要通过 openclaw channels login --channel openclaw-weixin 在套件端完成扫码绑定。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1221,7 +1229,7 @@ function boardOpenClawPairingListTool(deviceId: string): Tool<{ channel?: string
   return {
     name: 'board_openclaw_pairing_list',
     description:
-      '列出板端 **即时通讯渠道**（如 feishu）的待配对请求。' +
+      '列出套件端 **即时通讯渠道**（如 feishu）的待配对请求。' +
       '若问题是 WS 报 pairing required（本机 CLI ↔ 127.0.0.1:18789 网关），应改用 `board_openclaw_gateway_pair`，不是本工具。',
     inputSchema: {
       type: 'object',
@@ -1240,7 +1248,7 @@ function boardOpenClawPairingApproveTool(deviceId: string): Tool<{ code: string;
   return {
     name: 'board_openclaw_pairing_approve',
     description:
-      '批准板端 **渠道**配对码（默认 feishu）。' +
+      '批准套件端 **渠道**配对码（默认 feishu）。' +
       '与 `board_openclaw_gateway_pair`（本机网关信任）无关；后者才是消除 gateway pairing required 的正解。',
     inputSchema: {
       type: 'object',
@@ -1261,7 +1269,7 @@ function boardOpenClawPairingApproveTool(deviceId: string): Tool<{ code: string;
 function boardOpenClawPairingRejectTool(deviceId: string): Tool<{ code: string; channel?: string }> {
   return {
     name: 'board_openclaw_pairing_reject',
-    description: '拒绝板端 **渠道**配对码（默认 feishu）。不处理 gateway pairing required。',
+    description: '拒绝套件端 **渠道**配对码（默认 feishu）。不处理 gateway pairing required。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1282,7 +1290,7 @@ function boardOpenClawGatewayPairTool(deviceId: string): Tool<{ mode?: 'force' |
   return {
     name: 'board_openclaw_gateway_pair',
     description:
-      '在板端完成与本机 Gateway（127.0.0.1:18789）的设备信任：**新版** `openclaw devices approve --latest`，**旧版**回退 `openclaw pair --force`（面板「一键配对」与此一致）。' +
+      '在套件端完成与本机 Gateway（127.0.0.1:18789）的设备信任：**新版** `openclaw devices approve --latest`，**旧版**回退 `openclaw pair --force`（面板「一键配对」与此一致）。' +
       '用于解决 delegate/model-test 的 **pairing required**（不是飞书 `pairing approve`）。' +
       '默认 mode=force；full：停网关→`devices clear --pending`→再拉起（无待审批时先触发「测试网关」）。完成后请 `board_openclaw_model_test` 或 health。',
     inputSchema: {
@@ -1306,7 +1314,7 @@ function boardOpenClawGatewayPairTool(deviceId: string): Tool<{ mode?: 'force' |
 function boardOpenClawLogsTool(deviceId: string): Tool<{ limit?: number }> {
   return {
     name: 'board_openclaw_logs',
-    description: '查看板端 OpenClaw 网关日志（非跟随模式），默认最近 200 行。',
+    description: '查看套件端 OpenClaw 网关日志（非跟随模式），默认最近 200 行。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1323,7 +1331,7 @@ function boardOpenClawLogsTool(deviceId: string): Tool<{ limit?: number }> {
 function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_restart_gateway',
-    description: '重启板端 OpenClaw gateway 服务。重启后应调用 board_openclaw_health 验证服务是否恢复正常。',
+    description: '重启套件端 OpenClaw gateway 服务。重启后应调用 board_openclaw_health 验证服务是否恢复正常。',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -1339,7 +1347,7 @@ function boardOpenClawRestartGatewayTool(deviceId: string): Tool<Record<string, 
 function boardOpenClawDoctorTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_doctor',
-    description: '在板端执行 openclaw doctor --fix，自动诊断并修复常见问题（配置、权限、daemon 等）。修复后应调用 board_openclaw_restart_gateway + board_openclaw_health 完成验证闭环。',
+    description: '在套件端执行 openclaw doctor --fix，自动诊断并修复常见问题（配置、权限、daemon 等）。修复后应调用 board_openclaw_restart_gateway + board_openclaw_health 完成验证闭环。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       return execOnDevice(deviceId, [
@@ -1353,7 +1361,7 @@ function boardOpenClawModelTestTool(deviceId: string): Tool<Record<string, never
   return {
     name: 'board_openclaw_model_test',
     description:
-      '测试板端 OpenClaw 当前配置的模型是否可用：在板端本机连 ws://127.0.0.1:18789 并发送 chat.send（与设置里「模型测试」一致）。' +
+      '测试套件端 OpenClaw 当前配置的模型是否可用：在套件端本机连 ws://127.0.0.1:18789 并发送 chat.send（与设置里「模型测试」一致）。' +
       '不调用 openclaw message（新版 CLI 中为即时通讯渠道子命令，非网关对话）。若 pairing required / token 不符，输出会含 MODEL_TEST_FAIL：优先 `board_openclaw_gateway_pair`（网关信任），渠道配对仍用 board_openclaw_pairing_*，或 doctor。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
@@ -1369,7 +1377,7 @@ function boardOpenClawModelTestTool(deviceId: string): Tool<Record<string, never
 function boardOpenClawCheckTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_check',
-    description: '完整诊断板端 OpenClaw 环境：Node/npm 版本、安装状态、网关端口、配置（敏感字段已脱敏）、health。适合首次排查或全面体检；轻量检查用 board_openclaw_health。',
+    description: '完整诊断套件端 OpenClaw 环境：Node/npm 版本、安装状态、网关端口、配置（敏感字段已脱敏）、health。适合首次排查或全面体检；轻量检查用 board_openclaw_health。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const maskPy = `import json,os,sys;p=os.path.expanduser("~/.openclaw/openclaw.json");d=json.load(open(p));
@@ -1397,9 +1405,9 @@ function boardOpenClawHealthTool(deviceId: string): Tool<Record<string, never>> 
   return {
     name: 'board_openclaw_health',
     description:
-      '获取板端 OpenClaw 结构化健康状态（JSON：installed、gatewayRunning、version、hasToken、aiReady 等）。\n\n' +
+      '获取套件端 OpenClaw 结构化健康状态（JSON：installed、gatewayRunning、version、hasToken、aiReady 等）。\n\n' +
       'IMPORTANT 使用约束：\n' +
-      '- 此工具较慢（SSH + 板端 CLI），NEVER 在每轮对话中例行调用\n' +
+      '- 此工具较慢（SSH + 套件端 CLI），NEVER 在每轮对话中例行调用\n' +
       '- 若 Studio UI 快照已显示 OpenClaw 在线，ALWAYS 优先采信快照，不要重复调用\n' +
       '- 仅在以下场景调用：用户报障、安装/升级/重启后需验收、delegate/chat 失败、UI 显示异常\n' +
       '- 轻量状态查询用 board_openclaw_status 替代\n' +
@@ -1416,7 +1424,7 @@ function boardOpenClawHealthTool(deviceId: string): Tool<Record<string, never>> 
 function boardOpenClawSkillsListTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_skills_list',
-    description: '列出板端 OpenClaw 已安装的技能（clawhub list）和 plugins.allow 配置。',
+    description: '列出套件端 OpenClaw 已安装的技能（clawhub list）和 plugins.allow 配置。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmds = [
@@ -1432,7 +1440,7 @@ function boardOpenClawSkillsListTool(deviceId: string): Tool<Record<string, neve
 function boardOpenClawSkillInstallTool(deviceId: string): Tool<{ skillId: string }> {
   return {
     name: 'board_openclaw_skill_install',
-    description: '在板端安装 OpenClaw 技能/插件（通过 clawhub install）。安装后自动添加到 plugins.allow 并重启 gateway。',
+    description: '在套件端安装 OpenClaw 技能/插件（通过 clawhub install）。安装后自动添加到 plugins.allow 并重启 gateway。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1466,8 +1474,8 @@ function boardOpenClawWriteSkillTool(deviceId: string): Tool<{ skillId: string; 
   return {
     name: 'board_openclaw_write_skill',
     description:
-      '将自定义 SKILL.md 写入板端 OpenClaw 工作区（/root/.openclaw/workspace/skills/<skillId>/SKILL.md），与 RDK Studio「技能工坊」写入 API 一致。' +
-      '仅在用户已明确确认要部署到板端后调用；skillId 为目录名（kebab-case），只能包含字母、数字、下划线、横线。',
+      '将自定义 SKILL.md 写入套件端 OpenClaw 工作区（/root/.openclaw/workspace/skills/<skillId>/SKILL.md），与 RDK Studio「技能工坊」写入 API 一致。' +
+      '仅在用户已明确确认要部署到套件端后调用；skillId 为目录名（kebab-case），只能包含字母、数字、下划线、横线。',
     inputSchema: {
       type: 'object',
       properties: {

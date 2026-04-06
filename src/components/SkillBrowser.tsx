@@ -13,7 +13,7 @@ type StudioApiSkillRow = { folder?: string; name?: string; description?: string 
 
 const skillCenterManifest = skillCenterManifestJson as SkillCenterManifest;
 
-/** `/api/skills` 进程内短缓存：避免在「技能中心 ↔ 板端」间反复切换时重复拉列表 */
+/** `/api/skills` 进程内短缓存：避免在「技能中心 ↔ 套件端」间反复切换时重复拉列表 */
 let studioSkillsApiCache: { at: number; rows: StudioApiSkillRow[] } | null = null;
 const STUDIO_SKILLS_LIST_TTL_MS = 120_000;
 
@@ -100,7 +100,7 @@ function buildQualityPromptBySource(
   const common = [
     t(
       'skillBrowser.prompt.mustWrite',
-      '【部署约束】先完整输出 A/B 结构（含 SKILL.md 全文）。未经用户在对话中明确确认写入板端（例如回复「确认写入板端」），不得调用 board_openclaw_write_skill 或向该路径执行 device_file_write。用户确认后，优先使用 board_openclaw_write_skill；若工具不可用，可用 device_file_write 写入 /root/.openclaw/workspace/skills/<skillId>/SKILL.md。禁止未实际调用工具却声称已部署。',
+      '【部署约束】先完整输出 A/B 结构（含 SKILL.md 全文）。未经用户在对话中明确确认写入套件端（例如回复「确认写入套件端」），不得调用 board_openclaw_write_skill 或向该路径执行 device_file_write。用户确认后，优先使用 board_openclaw_write_skill；若工具不可用，可用 device_file_write 写入 /root/.openclaw/workspace/skills/<skillId>/SKILL.md。禁止未实际调用工具却声称已部署。',
     ),
     t(
       'skillBrowser.prompt.noTool',
@@ -118,7 +118,7 @@ function buildQualityPromptBySource(
 
   if (kind === 'github') {
     return [
-      t('skillBrowser.prompt.githubIntro', '请将以下 GitHub 仓库转化为 OpenClaw 技能（可部署到板端；写入前须用户确认）。'),
+      t('skillBrowser.prompt.githubIntro', '请将以下 GitHub 仓库转化为 OpenClaw 技能（可部署到套件端；写入前须用户确认）。'),
       tf('skillBrowser.prompt.linkLine', '链接: {{url}}', { url }),
       tf('skillBrowser.prompt.goalLine', '目标: {{goal}}', { goal }),
       t('skillBrowser.prompt.githubExtra', 'GitHub 专项：分析 README、依赖文件，提取构建与运行命令，锁定版本。'),
@@ -127,7 +127,7 @@ function buildQualityPromptBySource(
   }
   if (kind === 'nodehub') {
     return [
-      t('skillBrowser.prompt.nodehubIntro', '请将以下 NodeHub 应用转化为 OpenClaw 技能（可部署到板端；写入前须用户确认）。'),
+      t('skillBrowser.prompt.nodehubIntro', '请将以下 NodeHub 应用转化为 OpenClaw 技能（可部署到套件端；写入前须用户确认）。'),
       tf('skillBrowser.prompt.linkLine', '链接: {{url}}', { url }),
       tf('skillBrowser.prompt.goalLine', '目标: {{goal}}', { goal }),
       t('skillBrowser.prompt.nodehubExtra', 'NodeHub 专项：提取应用 ID、安装/运行/停止命令、配置项、资源占用。'),
@@ -139,7 +139,7 @@ function buildQualityPromptBySource(
     ].join('\n');
   }
   return [
-    t('skillBrowser.prompt.webIntro', '请将以下网页内容转化为 OpenClaw 技能（可部署到板端；写入前须用户确认）。'),
+    t('skillBrowser.prompt.webIntro', '请将以下网页内容转化为 OpenClaw 技能（可部署到套件端；写入前须用户确认）。'),
     tf('skillBrowser.prompt.linkLine', '链接: {{url}}', { url }),
     tf('skillBrowser.prompt.goalLine', '目标: {{goal}}', { goal }),
     t('skillBrowser.prompt.webExtra', '网页专项：抓取正文要点，提取可执行的操作步骤。'),
@@ -199,7 +199,7 @@ async function postLocalRdkclawSkill(
   return { ok: !!data.ok, path: data.path, message: data.message };
 }
 
-/** SkillHub slug → 板端 / 本地 skills 目录名（与单条部署一致） */
+/** SkillHub slug → 套件端 / 本地 skills 目录名（与单条部署一致） */
 function clawhubSlugToBoardSkillId(slug: string): string {
   return (
     slug
@@ -677,7 +677,7 @@ export default function SkillBrowser() {
     try {
       const result = await writeSkillToBoard(currentDevice.id, id, content.trim());
       if (result.ok) {
-        addToast?.(tf('skillBrowser.toast.deployOk', '技能 {{id}} 已部署到板端: {{path}}', { id, path: result.path || '' }), 'success');
+        addToast?.(tf('skillBrowser.toast.deployOk', '技能 {{id}} 已部署到套件端: {{path}}', { id, path: result.path || '' }), 'success');
         await loadBoardSkills();
         setRightTab('view');
       } else {
@@ -701,7 +701,7 @@ export default function SkillBrowser() {
     }
     const id = selectedCenterFolder;
     setConfirmAction({
-      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到板端？', { id }),
+      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到套件端？', { id }),
       detail: tf('skillBrowser.center.deployDetail', '将写入 ~/.openclaw/workspace/skills/{{id}}/SKILL.md（内置 SKILL.md 原文）', { id }),
       confirmLabel: t('skillBrowser.confirm.deploy', '确认部署'),
       onConfirm: () => {
@@ -722,7 +722,7 @@ export default function SkillBrowser() {
     }
     const id = clawhubSlugToBoardSkillId(selectedClawhubSlug);
     setConfirmAction({
-      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到板端？', { id }),
+      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到套件端？', { id }),
       detail: tf('skillBrowser.clawhub.deployDetail', '将 SkillHub 技能「{{slug}}」写入 ~/.openclaw/workspace/skills/{{id}}/SKILL.md', {
         slug: selectedClawhubSlug,
         id,
@@ -780,10 +780,10 @@ export default function SkillBrowser() {
         }
         await loadBoardSkills();
         if (fails.length === 0) {
-          addToast?.(tf('skillBrowser.batch.deployAllOk', '已全部部署到板端（{{n}} 项）', { n: ok }), 'success');
+          addToast?.(tf('skillBrowser.batch.deployAllOk', '已全部部署到套件端（{{n}} 项）', { n: ok }), 'success');
         } else {
           addToast?.(
-            tf('skillBrowser.batch.deployPartial', '板端部署：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
+            tf('skillBrowser.batch.deployPartial', '套件端部署：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
               ok,
               fail: fails.length,
               first: fails[0] || '',
@@ -872,10 +872,10 @@ export default function SkillBrowser() {
         }
         await loadBoardSkills();
         if (fails.length === 0) {
-          addToast?.(tf('skillBrowser.batch.deployAllOk', '已全部部署到板端（{{n}} 项）', { n: ok }), 'success');
+          addToast?.(tf('skillBrowser.batch.deployAllOk', '已全部部署到套件端（{{n}} 项）', { n: ok }), 'success');
         } else {
           addToast?.(
-            tf('skillBrowser.batch.deployPartial', '板端部署：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
+            tf('skillBrowser.batch.deployPartial', '套件端部署：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
               ok,
               fail: fails.length,
               first: fails[0] || '',
@@ -979,7 +979,7 @@ export default function SkillBrowser() {
       return;
     }
     setConfirmAction({
-      title: tf('skillBrowser.batch.confirmDeployTitle', '批量将 {{n}} 项内置技能部署到板端？', { n: folders.length }),
+      title: tf('skillBrowser.batch.confirmDeployTitle', '批量将 {{n}} 项内置技能部署到套件端？', { n: folders.length }),
       detail: tf(
         'skillBrowser.batch.confirmDeployCenterDetail',
         '将逐项从技能中心拉取 SKILL.md 并写入设备。包含：{{preview}}',
@@ -1025,7 +1025,7 @@ export default function SkillBrowser() {
       return;
     }
     setConfirmAction({
-      title: tf('skillBrowser.batch.confirmDeployClawhubTitle', '批量将 {{n}} 项 SkillHub 技能部署到板端？', { n: slugs.length }),
+      title: tf('skillBrowser.batch.confirmDeployClawhubTitle', '批量将 {{n}} 项 SkillHub 技能部署到套件端？', { n: slugs.length }),
       detail: tf(
         'skillBrowser.batch.confirmDeployClawhubDetail',
         '将逐项拉取远端 SKILL.md 并写入设备（目录名规则与单条部署相同）。包含：{{preview}}',
@@ -1068,7 +1068,7 @@ export default function SkillBrowser() {
     if (!newSkillContent.trim()) return addToast?.(t('skillBrowser.toast.emptyContent', 'SKILL.md 内容不能为空'), 'warning');
 
     setConfirmAction({
-      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到板端？', { id }),
+      title: tf('skillBrowser.confirm.deployTitle', '部署技能「{{id}}」到套件端？', { id }),
       detail: tf('skillBrowser.confirm.deployDetail', '将写入 ~/.openclaw/workspace/skills/{{id}}/SKILL.md（{{lines}} 行）', {
         id,
         lines: newSkillContent.trim().split('\n').length,
@@ -1105,8 +1105,8 @@ export default function SkillBrowser() {
     const id = selectedBoardSkill.split('|')[0];
     if (!id) return;
     setConfirmAction({
-      title: tf('skillBrowser.confirm.saveTitle', '保存修改到板端技能「{{id}}」？', { id }),
-      detail: t('skillBrowser.confirm.saveDetail', '此操作将覆盖板端已有的 SKILL.md 文件。'),
+      title: tf('skillBrowser.confirm.saveTitle', '保存修改到套件端技能「{{id}}」？', { id }),
+      detail: t('skillBrowser.confirm.saveDetail', '此操作将覆盖套件端已有的 SKILL.md 文件。'),
       confirmLabel: t('skillBrowser.confirm.save', '确认保存'),
       onConfirm: () => { setConfirmAction(null); void executeSaveEdit(); },
     });
@@ -1137,7 +1137,7 @@ export default function SkillBrowser() {
       try {
         const result = await deleteSkillFromBoard(currentDevice.id, skillId);
         if (result.ok) {
-          addToast?.(tf('skillBrowser.toast.deleted', '已删除板端技能「{{id}}」', { id: skillId }), 'success');
+          addToast?.(tf('skillBrowser.toast.deleted', '已删除套件端技能「{{id}}」', { id: skillId }), 'success');
           if (selectedBoardSkill?.split('|')[0] === skillId) {
             setSelectedBoardSkill(null);
             setSkillContent('');
@@ -1163,7 +1163,7 @@ export default function SkillBrowser() {
   const requestDeleteSkill = (skillId: string) => {
     if (!currentDevice) return addToast?.(t('skillBrowser.toast.needDevice', '请先连接设备'), 'warning');
     setConfirmAction({
-      title: tf('skillBrowser.confirm.deleteTitle', '删除板端技能「{{id}}」？', { id: skillId }),
+      title: tf('skillBrowser.confirm.deleteTitle', '删除套件端技能「{{id}}」？', { id: skillId }),
       detail: t(
         'skillBrowser.confirm.deleteDetail',
         '将尝试删除 ~/.openclaw/workspace/skills 与 /opt/openclaw/skills 下同名片段（若存在）。若两处均不存在或权限不足，请刷新列表或在设备上手动处理。',
@@ -1193,7 +1193,7 @@ export default function SkillBrowser() {
               onClick={() => setHubMode('board')}
               style={{ fontSize: '0.75rem' }}
             >
-              {t('skillBrowser.hub.board', '板端')}
+              {t('skillBrowser.hub.board', '套件端')}
             </button>
             <button
               type="button"
@@ -1205,7 +1205,7 @@ export default function SkillBrowser() {
             </button>
           </div>
           {hubMode === 'board' && (
-            <span className="badge badge-muted">{tf('skillBrowser.count', '{{n}} 个板端技能', { n: boardSkills.length })}</span>
+            <span className="badge badge-muted">{tf('skillBrowser.count', '{{n}} 个套件端技能', { n: boardSkills.length })}</span>
           )}
           {hubMode === 'center' && (
             <span className="badge badge-muted">
@@ -1286,7 +1286,7 @@ export default function SkillBrowser() {
                         type="button"
                         className="btn btn-ghost btn-sm"
                         style={{ padding: 4, flexShrink: 0, color: 'var(--danger, #c44)' }}
-                        title={t('skillBrowser.deleteSkill', '删除板端技能')}
+                        title={t('skillBrowser.deleteSkill', '删除套件端技能')}
                         onClick={(e) => {
                           e.stopPropagation();
                           requestDeleteSkill(name);
@@ -1592,7 +1592,7 @@ export default function SkillBrowser() {
                           onClick={handleDeployBuiltin}
                           disabled={batchActionBusy || !currentDevice || centerMdLoading || !centerMd.trim()}
                         >
-                          {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到板端')}
+                          {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到套件端')}
                         </button>
                       </div>
                       {centerBatchSelected.size > 0 && (
@@ -1606,7 +1606,7 @@ export default function SkillBrowser() {
                             onClick={handleBatchDeployCenterClick}
                             disabled={batchActionBusy || !currentDevice}
                           >
-                            {tf('skillBrowser.batch.deployBoardN', '批量部署到板端 ({{n}})', { n: centerBatchSelected.size })}
+                            {tf('skillBrowser.batch.deployBoardN', '批量部署到套件端 ({{n}})', { n: centerBatchSelected.size })}
                           </button>
                           <button
                             type="button"
@@ -1673,13 +1673,13 @@ export default function SkillBrowser() {
                               onClick={handleDeployClawhub}
                               disabled={batchActionBusy || !currentDevice || clawhubMdLoading || !clawhubMd.trim()}
                             >
-                              {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到板端')}
+                              {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.center.deploy', '部署到套件端')}
                             </button>
                           </div>
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: 300, textAlign: 'right', lineHeight: 1.35 }}>
                             {t(
                               'skillBrowser.clawhub.deployVsLocal',
-                              '「写入本地 RDKClaw」：本机对话侧技能目录；「部署到板端」：SSH 到设备写入 OpenClaw 技能目录。',
+                              '「写入本地 RDKClaw」：本机对话侧技能目录；「部署到套件端」：SSH 到设备写入 OpenClaw 技能目录。',
                             )}
                           </span>
                         </div>
@@ -1695,7 +1695,7 @@ export default function SkillBrowser() {
                             onClick={handleBatchDeployClawhubClick}
                             disabled={batchActionBusy || !currentDevice}
                           >
-                            {tf('skillBrowser.batch.deployBoardN', '批量部署到板端 ({{n}})', { n: clawhubBatchSelected.size })}
+                            {tf('skillBrowser.batch.deployBoardN', '批量部署到套件端 ({{n}})', { n: clawhubBatchSelected.size })}
                           </button>
                           <button
                             type="button"
@@ -1737,7 +1737,7 @@ export default function SkillBrowser() {
                 {rightTab === 'view' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {!selectedBoardSkill ? (
-                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{t('skillBrowser.view.pick', '请在左侧选择一个板端技能查看内容。')}</p>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{t('skillBrowser.view.pick', '请在左侧选择一个套件端技能查看内容。')}</p>
                 ) : (
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1752,7 +1752,7 @@ export default function SkillBrowser() {
                         {editing && (
                           <>
                             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>{t('skillBrowser.cancel', '取消')}</button>
-                            <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>{saving ? t('skillBrowser.saving', '保存中...') : t('skillBrowser.saveToBoard', '保存到板端')}</button>
+                            <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={saving}>{saving ? t('skillBrowser.saving', '保存中...') : t('skillBrowser.saveToBoard', '保存到套件端')}</button>
                           </>
                         )}
                       </div>
@@ -1768,7 +1768,7 @@ export default function SkillBrowser() {
                     ) : (
                       <div className="config-terminal" style={{ maxHeight: 'none' }}>
                         <pre style={{ margin: 0, fontSize: '0.75rem' }}>
-                          {skillContentLoading ? t('skillBrowser.loading', '正在读取板端 SKILL.md ...') : (skillContent || t('skillBrowser.noContent', '未读取到内容'))}
+                          {skillContentLoading ? t('skillBrowser.loading', '正在读取套件端 SKILL.md ...') : (skillContent || t('skillBrowser.noContent', '未读取到内容'))}
                         </pre>
                       </div>
                     )}
@@ -1783,7 +1783,7 @@ export default function SkillBrowser() {
                 <div>
                   <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.createTitle', '创建自定义技能')}</strong>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                    {t('skillBrowser.createDesc', '编写 SKILL.md 内容，一键部署到板端 OpenClaw 技能目录。')}
+                    {t('skillBrowser.createDesc', '编写 SKILL.md 内容，一键部署到套件端 OpenClaw 技能目录。')}
                   </p>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1811,7 +1811,7 @@ export default function SkillBrowser() {
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <button type="button" className="btn btn-primary btn-sm" onClick={handleDeploy} disabled={deploying || !currentDevice}>
-                    {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.deploy', '部署到板端')}
+                    {deploying ? t('skillBrowser.deploying', '部署中...') : t('skillBrowser.deploy', '部署到套件端')}
                   </button>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNewSkillContent(t('skillBrowser.template', SKILL_TEMPLATE_ZH))}>{t('skillBrowser.resetTemplate', '重置模板')}</button>
                   {!currentDevice && <span style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>{t('skillBrowser.connectFirst', '请先连接设备')}</span>}
@@ -1842,7 +1842,7 @@ export default function SkillBrowser() {
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'var(--bg-muted)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
                     {t(
                       'skillBrowser.linkHint',
-                      '流程说明：点击后将把指令发送到 AI 对话；AI 应先给出完整 SKILL.md 并说明来源与缺失项，仅在你在对话中明确确认写入后，才应调用写入工具。你也可以复制 SKILL 到「创建技能」标签页，用界面上的「部署到板端」自行确认部署。',
+                      '流程说明：点击后将把指令发送到 AI 对话；AI 应先给出完整 SKILL.md 并说明来源与缺失项，仅在你在对话中明确确认写入后，才应调用写入工具。你也可以复制 SKILL 到「创建技能」标签页，用界面上的「部署到套件端」自行确认部署。',
                     )}
                   </div>
                 </div>

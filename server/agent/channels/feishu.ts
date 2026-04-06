@@ -759,7 +759,7 @@ export class FeishuWebSocketChannel {
     }
 
     if (!latestUiDeviceId) {
-      await this.sendText(chatId, "当前无 RDK 设备连接，板端操作暂不可用，其他功能正常。");
+      await this.sendText(chatId, "当前无 RDK 设备连接，套件端操作暂不可用，其他功能正常。");
     }
 
     if (cfg.ackOnReceive && cfg.ackStyle !== "off") {

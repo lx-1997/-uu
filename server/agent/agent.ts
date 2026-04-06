@@ -188,7 +188,7 @@ export interface AgentConfig {
   extraAllowedRoots?: string[];
   /** 合并进每次工具执行的 ToolContext（如 RDK Studio 的设备绑定回调） */
   toolContextExtras?: Partial<ToolContext>;
-  /** RDK Studio：每轮解析当前绑定设备 ID，写入 ToolContext.studioDeviceId（供板端技能内化等） */
+  /** RDK Studio：每轮解析当前绑定设备 ID，写入 ToolContext.studioDeviceId（供套件端技能内化等） */
   studioDeviceIdResolver?: () => string | undefined;
   /**
    * 运行级策略参数（替代 process.env.RDKCLAW_* 写入）
@@ -504,7 +504,7 @@ export class Agent {
     }
   }
 
-  /** 运行时替换工具列表（如 RDK Studio 在对话中连接设备后注入板端工具） */
+  /** 运行时替换工具列表（如 RDK Studio 在对话中连接设备后注入套件端工具） */
   setTools(tools: Tool[]) {
     this.tools = tools;
   }
@@ -831,7 +831,7 @@ export class Agent {
     if (this.toolLazyLoadEnabled) {
       prompt +=
         "\n\n## 工具加载（延迟加载）\n" +
-        "首轮请求通常只挂载**常用本机工具**。若需 **设备 SSH、联网检索、飞书/微信、板端 OpenClaw、浏览器截图、附件处理、SkillHub** 等，请先调用 **load_tools**：传入 `names`（精确工具名数组）、或 `query`（名称/描述关键词）、或 `load_all: true`（大批量）。登记后**下一轮**模型请求即可调用这些工具。";
+        "首轮请求通常只挂载**常用本机工具**。若需 **设备 SSH、联网检索、飞书/微信、套件端 OpenClaw、浏览器截图、附件处理、SkillHub** 等，请先调用 **load_tools**：传入 `names`（精确工具名数组）、或 `query`（名称/描述关键词）、或 `load_all: true`（大批量）。登记后**下一轮**模型请求即可调用这些工具。";
     }
 
     return prompt;

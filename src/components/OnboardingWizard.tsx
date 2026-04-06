@@ -116,9 +116,9 @@ export default function OnboardingWizard() {
 
   const skipRisks = useMemo(
     () => [
-      t('onboard.skipRisk.1', '板端对话与自动化任务不可用'),
+      t('onboard.skipRisk.1', '套件端对话与自动化任务不可用'),
       t('onboard.skipRisk.2', '无法通过飞书等消息渠道远程控制设备'),
-      t('onboard.skipRisk.3', '板端技能（摄像头、推理、GPIO 等）无法在对话中调用'),
+      t('onboard.skipRisk.3', '套件端技能（摄像头、推理、GPIO 等）无法在对话中调用'),
     ],
     [t, language],
   );
@@ -277,7 +277,7 @@ export default function OnboardingWizard() {
           job.error === 'oc.deployPoll.interrupted'
             ? tRef.current(
                 'oc.deployPoll.interrupted',
-                '长时间无法从本机拉取部署进度（烧录中或网络繁忙时常见）；板端任务可能仍在进行。请稍后打开「OpenClaw」页查看日志，或网络稳定后重试同步。',
+                '长时间无法从本机拉取部署进度（烧录中或网络繁忙时常见）；套件端任务可能仍在进行。请稍后打开「OpenClaw」页查看日志，或网络稳定后重试同步。',
               )
             : job.error || tRef.current('onboard.deploy.failShort', '部署失败，请查看日志');
         setOcInstallLog((prev) => `${prev}\n[错误] ${msg}\n`);
@@ -556,6 +556,9 @@ export default function OnboardingWizard() {
 
   const stepIdx = obSteps.findIndex((s) => s.key === obStep);
 
+  /** 仅 RDK X5 / S100 支持 Type-C 闪联（与添加设备里 typec 一致） */
+  const supportsFlashLink = selectedBoard === 'x5' || selectedBoard === 's100';
+
   const boardsI18n = useMemo(
     () =>
       BOARDS.map((b) => ({
@@ -580,7 +583,7 @@ export default function OnboardingWizard() {
       {/* ── Step 1: 选择硬件 ── */}
       {obStep === 'board' && (
         <div className="ob-content">
-          <p className="ob-desc">{t('onboard.board.pick', '选择你手上的 RDK 开发板型号：')}</p>
+          <p className="ob-desc">{t('onboard.board.pick', '选择你手上的 RDK 开发者套件型号：')}</p>
           <div className="ob-board-grid">
             {boardsI18n.map((b) => (
               <button
@@ -656,7 +659,16 @@ export default function OnboardingWizard() {
       {/* ── Step 3: 连接设备 ── */}
       {obStep === 'connect' && (
         <div className="ob-content">
-          <p className="ob-desc">{t('onboard.connect.desc', '将开发板通电并通过网线或 WiFi 连接到与本机同一局域网，然后添加设备。')}</p>
+          <p className="ob-desc">{t(
+            'onboard.connect.desc',
+            '请先为开发者套件通电，用网线或 Wi-Fi 接入与本机相同的局域网，再在下方选择一种方式添加设备。',
+          )}</p>
+          {supportsFlashLink ? (
+            <p className="ob-desc">{t(
+              'onboard.connect.flashLinkIntro',
+              '若开发者套件暂时无法接入局域网，可使用「闪联」通过 USB Type-C 线连接电脑与开发者套件。',
+            )}</p>
+          ) : null}
           <div className="ob-connect-methods">
             <button
               type="button"
@@ -669,9 +681,33 @@ export default function OnboardingWizard() {
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5"><path d="M5 12.55a11 11 0 0114 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg>
               <div>
                 <strong>{t('onboard.connect.sshTitle', 'SSH 网络')}</strong>
-                <span>{t('onboard.connect.sshSub', '输入 IP 地址，远程连接')}</span>
+                <span>{t('onboard.connect.sshSub', '填写设备 IP 与账号，建立 SSH 连接')}</span>
               </div>
             </button>
+            {supportsFlashLink ? (
+              <button
+                type="button"
+                className="ob-connect-card"
+                onClick={() => {
+                  setAddDeviceInitialMethod('typec');
+                  setShowAddDevice(true);
+                }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2v6" />
+                  <path d="M9 8h6" />
+                  <rect x="7" y="8" width="10" height="4" rx="2" />
+                  <path d="M12 12v2" />
+                  <path d="M8 14h8v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4z" />
+                  <circle cx="10" cy="17" r="0.5" fill="var(--accent)" />
+                  <circle cx="14" cy="17" r="0.5" fill="var(--accent)" />
+                </svg>
+                <div>
+                  <strong>{t('onboard.connect.flashLinkTitle', '闪联')}</strong>
+                  <span>{t('onboard.connect.flashLinkSub', 'Type-C 连接电脑，经 SSH 访问套件端')}</span>
+                </div>
+              </button>
+            ) : null}
             <button
               type="button"
               className={`ob-connect-card${isDesktopMac() ? ' ob-connect-card--disabled' : ''}`}
@@ -691,7 +727,7 @@ export default function OnboardingWizard() {
                     <span className="badge badge-muted">{t('onboard.connect.serialMacBadge', 'Mac 暂不支持')}</span>
                   )}
                 </div>
-                <span>{t('onboard.connect.serialSub', '本机 Web Serial 调试，与 SSH 无关')}</span>
+                <span>{t('onboard.connect.serialSub', '浏览器串口调试，仅本机，与网络 SSH 无关')}</span>
               </div>
             </button>
           </div>
@@ -709,7 +745,7 @@ export default function OnboardingWizard() {
             </button>
           </div>
           <p className="ob-desc ob-connect-sidebar-hint">
-            {t('onboard.connect.sidebarHint', '也可在左侧导航栏点击「设备」进行设备连接。')}
+            {t('onboard.connect.sidebarHint', '也可稍后在左侧导航栏「设备」中连接。')}
           </p>
         </div>
       )}
@@ -720,7 +756,7 @@ export default function OnboardingWizard() {
           <p className="ob-desc">
             {modelConfigured
               ? t('onboard.model.descDone', '模型已配置完成。如需修改可在下方更新，否则直接点击「下一步」继续。')
-              : t('onboard.model.descNeed', '先完成模型配置（必填），然后再执行 OpenClaw 一键部署。该配置会作为板端模型网关的默认参数。')}
+              : t('onboard.model.descNeed', '先完成模型配置（必填），然后再执行 OpenClaw 一键部署。该配置会作为套件端模型网关的默认参数。')}
           </p>
           <div className="ob-oc-status">
             <div className="config-row">
@@ -825,7 +861,7 @@ export default function OnboardingWizard() {
               <span>{t('onboard.oc.needModel', '部署前需要先提交模型配置，请返回上一步完成必填项。')}</span>
             </div>
           )}
-          <p className="ob-desc">{t('onboard.oc.intro', 'OpenClaw 在板端运行。一键部署将自动安装、配置并验通：')}</p>
+          <p className="ob-desc">{t('onboard.oc.intro', 'OpenClaw 在套件端运行。一键部署将自动安装、配置并验通：')}</p>
           {deployJobId && (
             <p className="ob-desc">{t('onboard.oc.job', '当前部署任务：')}{deployJobId}</p>
           )}
@@ -838,7 +874,7 @@ export default function OnboardingWizard() {
                 <span>
                   {t('onboard.oc.offlinePrefix', '设备当前')}
                   <strong>{t('onboard.oc.offlineStrong', '无法连通')}</strong>
-                  {t('onboard.oc.offlineSuffix', '，请先确认开发板已联网、IP 正确且本机能 SSH，再安装 OpenClaw。')}
+                  {t('onboard.oc.offlineSuffix', '，请先确认开发者套件已联网、IP 正确且本机能 SSH，再安装 OpenClaw。')}
                 </span>
               </div>
             )}
@@ -1009,7 +1045,7 @@ export default function OnboardingWizard() {
           <p className="ob-desc">
             {t(
               'onboard.rdk.intro',
-              'RDKClaw 是 Studio 的编排主线：贯穿对话、设备与 OpenClaw 协同；懂你的板子、能查文档、能下命令，把「想法」落成可执行的排障与开发步骤。下一步',
+              'RDKClaw 是 Studio 的编排主线：贯穿对话、设备与 OpenClaw 协同；懂你的开发者套件、能查文档、能下命令，把「想法」落成可执行的排障与开发步骤。下一步',
             )}
           </p>
           <div className="ob-try-card">
@@ -1026,20 +1062,25 @@ export default function OnboardingWizard() {
           </div>
           <div className="ob-flash-card" style={{ marginTop: 12 }}>
             <div className="ob-flash-info">
-              <strong>{t('onboard.rdk.ocCardTitle', '配置 OpenClaw（推荐）')}</strong>
-              <span className="badge badge-muted">{t('onboard.rdk.ocCardBadge', '配置后会更聪明')}</span>
+              <strong>{t('onboard.rdk.ocCardTitle', 'OpenClaw 与模型（推荐）')}</strong>
+              <span className="badge badge-muted">{t('onboard.rdk.ocCardBadge', '配好模型更聪明')}</span>
             </div>
-            <p className="ob-desc">{t('onboard.rdk.ocCardDesc', '完成 OpenClaw 一键部署后，板端 AI 能力更完整，任务执行更稳定。')}</p>
+            <p className="ob-desc">
+              {t(
+                'onboard.rdk.ocCardDesc',
+                'Studio 会在后台自动安装 OpenClaw；完成后在 OpenClaw 页面配置模型，套件端 AI 能力更完整、任务执行更稳定。',
+              )}
+            </p>
             <div className="ob-flash-actions">
               <button type="button" className="btn btn-ghost btn-sm" onClick={goOpenClaw}>
-                {t('onboard.rdk.goOc', '前往 OpenClaw 配置')}
+                {t('onboard.rdk.goOc', '打开 OpenClaw 页面')}
               </button>
             </div>
           </div>
           <p className="ob-desc ob-try-hint">
             {t(
               'onboard.rdk.hint',
-              '底部对话框里随时描述问题或目标即可，RDKClaw 会拆解步骤并在需要时调用工具与板端能力，帮你把事办完。',
+              '底部对话框里随时描述问题或目标即可，RDKClaw 会拆解步骤并在需要时调用工具与套件端能力，帮你把事办完。',
             )}
           </p>
           <div className="ob-actions">

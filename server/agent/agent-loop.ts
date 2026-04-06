@@ -194,7 +194,7 @@ export interface AgentLoopParams {
    */
   systemPromptParts?: { stable: string; dynamic: string };
   toolsForRun: Tool[];
-  /** 若提供，则每个 LLM 回合前重新获取工具列表（支持对话中连接设备后注入板端工具） */
+  /** 若提供，则每个 LLM 回合前重新获取工具列表（支持对话中连接设备后注入套件端工具） */
   getToolsForRun?: () => Tool[];
   toolCtx: ToolContext;
   modelDef: Model<any>;
@@ -1309,21 +1309,25 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                         }
                       }
 
-                      // 工具执行超时保护；须 ≥ SSH 默认（板端长任务），否则 device_exec 会先被掐断
+                      // 工具执行超时保护；须 ≥ SSH 默认（套件端长任务），否则 device_exec 会先被掐断
                       const TOOL_TIMEOUT_MS = SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS;
                       const TOOL_HEARTBEAT_INTERVAL_MS = 30_000;
                       const toolTimeoutPromise = new Promise<never>((_, reject) =>
                         setTimeout(() => reject(new Error(`工具 ${call.name} 执行超时（${TOOL_TIMEOUT_MS / 1000}s）`)), TOOL_TIMEOUT_MS),
                       );
-                      const toolHeartbeat = setInterval(() => {
-                        const elapsed = Math.round((Date.now() - toolStartMs) / 1000);
-                        stream.push({
-                          type: "tool_execution_progress",
-                          toolCallId: call.id,
-                          toolName: call.name,
-                          elapsed_sec: elapsed,
-                        });
-                      }, TOOL_HEARTBEAT_INTERVAL_MS);
+                      /** device_exec 已有 SSH 流式静默心跳，勿再每 30s 注入「套件端协作」行，避免与终端内计时重复刷屏 */
+                      const skipAgentHeartbeat = call.name === 'device_exec';
+                      const toolHeartbeat = skipAgentHeartbeat
+                        ? null
+                        : setInterval(() => {
+                            const elapsed = Math.round((Date.now() - toolStartMs) / 1000);
+                            stream.push({
+                              type: "tool_execution_progress",
+                              toolCallId: call.id,
+                              toolName: call.name,
+                              elapsed_sec: elapsed,
+                            });
+                          }, TOOL_HEARTBEAT_INTERVAL_MS);
                       reachedExecute = true;
                       try {
                         result = await Promise.race([
@@ -1331,7 +1335,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                           toolTimeoutPromise,
                         ]);
                       } finally {
-                        clearInterval(toolHeartbeat);
+                        if (toolHeartbeat) clearInterval(toolHeartbeat);
                       }
                     } catch (err) {
                       result = `执行错误: ${(err as Error).message}`;

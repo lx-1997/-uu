@@ -806,7 +806,7 @@ function BlockRenderer({
         : role === 'outbound'
           ? t('dock.collab.badgeOutbound', 'RDKClaw → OpenClaw')
           : role === 'wait_hint'
-            ? t('dock.collab.badgeWaitHint', 'RDKClaw · 等板端')
+            ? t('dock.collab.badgeWaitHint', 'RDKClaw · 等套件端')
             : 'RDKClaw';
     const renderCollabLine = (line: string, idx: number) => {
       const safe = sanitizeTerminalLineForDisplay(line);
@@ -2366,7 +2366,7 @@ export default function AIDock() {
       setOpenclawConnected(true);
     });
 
-    // 板端 OpenClaw 状态仅用于能力可用性展示，不直接写入聊天消息
+    // 套件端 OpenClaw 状态仅用于能力可用性展示，不直接写入聊天消息
     socket.on('openclaw:data', () => {});
     socket.on('openclaw:complete', () => {});
     socket.on('openclaw:error', (data: { error: string }) => {
@@ -2411,7 +2411,7 @@ export default function AIDock() {
       { id: 'nl', label: t('dock.quick.term.nl.label', '自然语言执行'), text: t('dock.quick.term.nl.text', '查看当前设备温度和BPU负载') },
     ],
     flasher: [
-      { id: 'pick', label: t('dock.quick.flash.pick.label', '选镜像'), text: t('dock.quick.flash.pick.text', '帮我推荐适合当前开发板的系统镜像版本') },
+      { id: 'pick', label: t('dock.quick.flash.pick.label', '选镜像'), text: t('dock.quick.flash.pick.text', '帮我推荐适合当前开发者套件的系统镜像版本') },
       { id: 'check', label: t('dock.quick.flash.check.label', '烧录前检查'), text: t('dock.quick.flash.check.text', '帮我确认烧录前的准备工作是否就绪') },
     ],
     files: [
@@ -2506,7 +2506,7 @@ export default function AIDock() {
   };
 
   // 说明：用户输入统一走 RDK Studio Claw 主链路（/api/agent/chat）
-  // 板端 OpenClaw 仅作为 RDK Studio Claw 在服务端可调用的能力，不在前端直连对话
+  // 套件端 OpenClaw 仅作为 RDK Studio Claw 在服务端可调用的能力，不在前端直连对话
 
   const handleUnifiedCommand = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2907,8 +2907,8 @@ export default function AIDock() {
                     <span
                       className={`badge ${openclawConnected ? 'badge-ok' : 'badge-muted'}`}
                       title={openclawConnected
-                        ? t('dock.badge.ocConnected', '已连接开发板上的 OpenClaw 网关')
-                        : t('dock.badge.ocOffline', 'OpenClaw 未连接 — 请确认网关已运行且开发板已联网')}
+                        ? t('dock.badge.ocConnected', '已连接开发者套件上的 OpenClaw 网关')
+                        : t('dock.badge.ocOffline', 'OpenClaw 未连接 — 请确认网关已运行且开发者套件已联网')}
                     >
                       {openclawConnected ? 'OpenClaw' : 'Offline'}
                     </span>

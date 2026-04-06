@@ -13,7 +13,7 @@ const WEB_NOUN_RE = /网页|网站|链接|网址|url|主页|搜索引擎/i;
 const KNOWN_SITE_RE = /打开\s*(百度|谷歌|必应|淘宝|京东|github|bilibili|哔哩)/i;
 
 /**
- * 用户整段消息是否更像「打开网页」而非板端/工作区任务。
+ * 用户整段消息是否更像「打开网页」而非套件端/工作区任务。
  */
 export function detectOpenWebUserIntent(text: string): boolean {
   const t = String(text || '').trim();

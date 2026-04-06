@@ -822,16 +822,16 @@ export default function Flasher() {
           uncertain
             ? t(
                 'flasher.log.s100CliDoneUncertain',
-                'xburn 命令行已退出（退出码 0），但未从日志识别到固定「写盘完成」依据。请勿视为已成功，请在板端自行验证；若未写入请先让设备稳定进入 fastboot 再重试。',
+                'xburn 命令行已退出（退出码 0），但未从日志识别到固定「写盘完成」依据。请勿视为已成功，请在套件端自行验证；若未写入请先让设备稳定进入 fastboot 再重试。',
               )
             : t(
                 'flasher.log.s100CliDone',
-                'xburn 命令行已正常结束（退出码 0）；设备可能仍在重启，请稍候再在板端验证',
+                'xburn 命令行已正常结束（退出码 0）；设备可能仍在重启，请稍候再在套件端验证',
               ),
         );
         addToast(
           uncertain
-            ? t('flasher.toast.s100FlashUncertain', 'xburn 已退出，请在板端确认是否刷写成功')
+            ? t('flasher.toast.s100FlashUncertain', 'xburn 已退出，请在套件端确认是否刷写成功')
             : t('flasher.toast.s100FlashDone', 'S100 烧录已完成'),
           uncertain ? 'warning' : 'success',
         );
@@ -1078,7 +1078,7 @@ export default function Flasher() {
             {selectedDeviceKey === 's100' && (
               <div className="card card-compact" style={{ marginTop: 12, borderColor: 'var(--accent)', background: 'var(--accent-subtle)' }}>
                 <p className="config-card-desc" style={{ margin: 0 }}>
-                  {t('flasher.s100.typecHint', 'S100 烧录请使用 USB Type-C 连接开发板，并在 xburn 中按提示进入烧录模式。')}
+                  {t('flasher.s100.typecHint', 'S100 烧录请使用 USB Type-C 连接开发者套件，并在 xburn 中按提示进入烧录模式。')}
                 </p>
               </div>
             )}
@@ -1290,7 +1290,7 @@ export default function Flasher() {
                       </p>
                       <ol className="flasher-xburn-step-list">
                         <li>{t('flasher.xburn.step1', '确认已安装 xburn-gui')}</li>
-                        <li>{t('flasher.xburn.step2', '通过 USB Type-C 连接开发板')}</li>
+                        <li>{t('flasher.xburn.step2', '通过 USB Type-C 连接开发者套件')}</li>
                         <li>{t('flasher.xburn.step3', '在左栏底部点击「启动 xburn 工具」，随后在 xburn 中选择镜像')}</li>
                       </ol>
                     </div>
