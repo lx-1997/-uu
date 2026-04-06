@@ -97,7 +97,7 @@ export default function SettingsPanel() {
   const confirmRemoveDevice = useConfirmRemoveDevice();
   const { user, ssoEnabled, ssoRequired, logout } = useAuth();
   const showAccountSection = ssoEnabled || ssoRequired;
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const tf = useCallback(
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
     [t],
@@ -1055,15 +1055,17 @@ export default function SettingsPanel() {
     let settled = false;
     const loginUrl = resolveApiUrlAbsolute(
       (() => {
-        const base = resolveApiUrl('/api/rdkclaw/weixin/login');
+        let u = resolveApiUrl('/api/rdkclaw/weixin/login');
         try {
           const sid = window.localStorage.getItem(RDK_SSO_SESSION_MIRROR_KEY)?.trim();
           if (sid && /^[a-f0-9]{64}$/i.test(sid)) {
-            const sep = base.includes('?') ? '&' : '?';
-            return `${base}${sep}rdk_sso_session=${encodeURIComponent(sid)}`;
+            const sep = u.includes('?') ? '&' : '?';
+            u = `${u}${sep}rdk_sso_session=${encodeURIComponent(sid)}`;
           }
         } catch { /* ignore */ }
-        return base;
+        const loc = language === 'en' ? 'en' : 'zh-CN';
+        const sepLoc = u.includes('?') ? '&' : '?';
+        return `${u}${sepLoc}locale=${encodeURIComponent(loc)}`;
       })(),
     );
     const es = new EventSource(loginUrl);

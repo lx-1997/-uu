@@ -5,6 +5,22 @@ import rateLimit from 'express-rate-limit';
 import { prepareWeChatQrPreviewBuffer } from './rdkclaw/ilink-qrcode.js';
 import { getWeixinIlinkCommonHeaders } from './rdkclaw/weixin-ilink-headers.js';
 import { putWeixinQrPreview, getWeixinQrPreview } from './rdkclaw/weixin-qr-preview.js';
+import {
+  isWeixinLoginSseEnglish,
+  wxLoginFetchingQr,
+  wxLoginQrHttpFail,
+  wxLoginQrMissingField,
+  wxLoginScanHint,
+  wxLoginPollHttpErr,
+  wxLoginRedirectNode,
+  wxLoginQrExpired,
+  wxLoginQrRefreshed,
+  wxLoginRefreshFail,
+  wxLoginRefreshFailDetail,
+  wxLoginPollErr,
+  wxLoginTimeout,
+  wxLoginStartFail,
+} from './rdkclaw/weixin-login-sse-text.js';
 import { v4 as uuid } from 'uuid';
 import crypto from 'node:crypto';
 import { promises as fs, existsSync } from 'node:fs';
@@ -6295,20 +6311,21 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
   const BOT_TYPE = '3';
   const QR_POLL_TIMEOUT = 35_000;
   const MAX_WAIT_MS = 5 * 60_000;
+  const en = isWeixinLoginSseEnglish(request);
 
   try {
-    sendSSE('log', { message: '正在获取二维码...' });
+    sendSSE('log', { message: wxLoginFetchingQr(en) });
     const qrRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`, {
       headers: getWeixinIlinkCommonHeaders(),
     });
     if (!qrRes.ok) {
-      sendSSE('weixin_login_fail', { message: `获取二维码失败: HTTP ${qrRes.status}` });
+      sendSSE('weixin_login_fail', { message: wxLoginQrHttpFail(en, qrRes.status) });
       response.end();
       return;
     }
     const qrData = await qrRes.json() as { qrcode?: string; qrcode_img_content?: string };
     if (!qrData.qrcode?.trim()) {
-      sendSSE('weixin_login_fail', { message: '获取二维码失败: 响应中缺少 qrcode' });
+      sendSSE('weixin_login_fail', { message: wxLoginQrMissingField(en) });
       response.end();
       return;
     }
@@ -6321,7 +6338,7 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
     /** 相对路径：由前端 resolveApiUrl 拼到当前页 / Electron apiBase，避免 Host/HTTPS 与 publicApiBaseUrl 不一致导致 img 404 或非图片响应 */
     const qrPreviewUrl = `/api/rdkclaw/weixin/qr-preview?id=${encodeURIComponent(previewId)}`;
     sendSSE('qrcode', { qrcode: qrPreviewUrl });
-    sendSSE('log', { message: '请用微信扫描二维码' });
+    sendSSE('log', { message: wxLoginScanHint(en) });
 
     const deadline = Date.now() + MAX_WAIT_MS;
     let qrcode = qrData.qrcode;
@@ -6338,7 +6355,7 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
         );
         clearTimeout(timer);
         if (!statusRes.ok) {
-          sendSSE('log', { message: `轮询状态异常: HTTP ${statusRes.status}` });
+          sendSSE('log', { message: wxLoginPollHttpErr(en, statusRes.status) });
           await new Promise(r => setTimeout(r, 2000));
           continue;
         }
@@ -6356,7 +6373,7 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
           if (host) {
             const hostClean = host.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
             pollBaseUrl = `https://${hostClean}`;
-            sendSSE('log', { message: '正在切换至就近节点…' });
+            sendSSE('log', { message: wxLoginRedirectNode(en) });
           }
           continue;
         }
@@ -6378,7 +6395,7 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
           response.end();
           return;
         } else if (status.status === 'expired') {
-          sendSSE('log', { message: '二维码已过期，正在刷新...' });
+          sendSSE('log', { message: wxLoginQrExpired(en) });
           try {
             const refreshRes = await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${BOT_TYPE}`, {
               headers: getWeixinIlinkCommonHeaders(),
@@ -6393,14 +6410,14 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
               const rId = putWeixinQrPreview(rBuf.buf, rBuf.mime);
               const refreshPreviewUrl = `/api/rdkclaw/weixin/qr-preview?id=${encodeURIComponent(rId)}`;
               sendSSE('qrcode', { qrcode: refreshPreviewUrl });
-              sendSSE('log', { message: '新二维码已生成，请重新扫描' });
+              sendSSE('log', { message: wxLoginQrRefreshed(en) });
             } else {
-              sendSSE('weixin_login_fail', { message: '刷新二维码失败' });
+              sendSSE('weixin_login_fail', { message: wxLoginRefreshFail(en) });
               response.end();
               return;
             }
           } catch (refreshErr: any) {
-            sendSSE('weixin_login_fail', { message: `刷新二维码失败: ${refreshErr.message || ''}` });
+            sendSSE('weixin_login_fail', { message: wxLoginRefreshFailDetail(en, refreshErr.message || '') });
             response.end();
             return;
           }
@@ -6408,17 +6425,17 @@ app.get('/api/rdkclaw/weixin/login', async (request, response) => {
       } catch (pollErr: any) {
         clearTimeout(timer);
         if (pollErr.name === 'AbortError') continue;
-        sendSSE('log', { message: `轮询出错: ${pollErr.message || ''}` });
+        sendSSE('log', { message: wxLoginPollErr(en, pollErr.message || '') });
         await new Promise(r => setTimeout(r, 2000));
       }
     }
 
     if (!aborted) {
-      sendSSE('weixin_login_fail', { message: '登录超时，请重试' });
+      sendSSE('weixin_login_fail', { message: wxLoginTimeout(en) });
       response.end();
     }
   } catch (err: any) {
-    sendSSE('weixin_login_fail', { message: err.message || '启动登录流程失败' });
+    sendSSE('weixin_login_fail', { message: wxLoginStartFail(en, err.message || '') });
     response.end();
   }
 });

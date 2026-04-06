@@ -36,15 +36,30 @@ function parseContentObject(content: unknown): Record<string, unknown> {
 }
 
 function extractTextFromPost(parsed: Record<string, unknown>): string {
-  const post = parsed.post as { zh_cn?: { content?: Array<Array<{ text?: string }>> } } | undefined;
-  const rows = post?.zh_cn?.content ?? [];
-  const tokens: string[] = [];
-  for (const row of rows) {
-    for (const node of row) {
-      if (node?.text) tokens.push(String(node.text));
+  const post = parsed.post as Record<string, { content?: Array<Array<{ text?: string }>> }> | undefined;
+  if (!post || typeof post !== "object") return "";
+  const prefer = ["zh_cn", "en_us", "ja_jp", "zh_tw", "zh_hk"] as const;
+  const tried = new Set<string>();
+  const collect = (rows: Array<Array<{ text?: string }>> | undefined) => {
+    const tokens: string[] = [];
+    for (const row of rows ?? []) {
+      for (const node of row) {
+        if (node?.text) tokens.push(String(node.text));
+      }
     }
+    return tokens.join(" ").trim();
+  };
+  for (const loc of prefer) {
+    tried.add(loc);
+    const text = collect(post[loc]?.content);
+    if (text) return text;
   }
-  return tokens.join(" ").trim();
+  for (const key of Object.keys(post)) {
+    if (tried.has(key)) continue;
+    const text = collect(post[key]?.content);
+    if (text) return text;
+  }
+  return "";
 }
 
 function parseText(content: unknown): string {
