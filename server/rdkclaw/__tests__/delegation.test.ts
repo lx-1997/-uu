@@ -16,11 +16,11 @@ const boardWithSkills: BoardSnapshot = {
 };
 
 describe("selectDelegateDecision", () => {
-  it("local-first + board skills → collaborative + needsBoardCollaboration", () => {
+  it("local-first + board skills + generic request → local_only", () => {
     const req = { deviceId: "dev-1", message: "hi" } as RDKClawChatRequest;
     const d = selectDelegateDecision(req, [], boardWithSkills, "local-first");
-    expect(d.path).toBe("collaborative");
-    expect(d.needsBoardCollaboration).toBe(true);
+    expect(d.path).toBe("local_only");
+    expect(d.needsBoardCollaboration).toBe(false);
   });
 
   it("local-first + no board skills → local_only", () => {
@@ -28,6 +28,48 @@ describe("selectDelegateDecision", () => {
     const d = selectDelegateDecision(req, [], emptyBoard, "local-first");
     expect(d.path).toBe("local_only");
     expect(d.needsBoardCollaboration).toBe(false);
+  });
+
+  it("local-first + no board skills + ROS2 execution task → local_only", () => {
+    const req = {
+      deviceId: "dev-1",
+      message: "帮我在板子上跑 ros2 launch 并把相机检测结果发布出来",
+    } as RDKClawChatRequest;
+    const d = selectDelegateDecision(req, [], emptyBoard, "local-first");
+    expect(d.path).toBe("local_only");
+    expect(d.needsBoardCollaboration).toBe(false);
+  });
+
+  it("docs-only task still keeps local_only", () => {
+    const req = {
+      deviceId: "dev-1",
+      message: "请帮我查 RDK 的 API 文档并整理主要参数",
+    } as RDKClawChatRequest;
+    const d = selectDelegateDecision(req, [], emptyBoard, "local-first");
+    expect(d.path).toBe("local_only");
+    expect(d.needsBoardCollaboration).toBe(false);
+  });
+
+  it("local-first + consultative task → collaborative", () => {
+    const req = {
+      deviceId: "dev-1",
+      message: "先帮我评估一下这个机器人方案可行性和风险",
+    } as RDKClawChatRequest;
+    const d = selectDelegateDecision(req, [], emptyBoard, "local-first");
+    expect(d.path).toBe("collaborative");
+    expect(d.needsBoardCollaboration).toBe(true);
+    expect(d.source).toBe("task_analysis");
+  });
+
+  it("local-first + long-running task → collaborative", () => {
+    const req = {
+      deviceId: "dev-1",
+      message: "做一个7x24持续监控并自动恢复的守护任务",
+    } as RDKClawChatRequest;
+    const d = selectDelegateDecision(req, [], emptyBoard, "local-first");
+    expect(d.path).toBe("collaborative");
+    expect(d.needsBoardCollaboration).toBe(true);
+    expect(d.source).toBe("task_analysis");
   });
 });
 

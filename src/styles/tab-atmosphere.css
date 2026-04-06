@@ -37,10 +37,10 @@
     radial-gradient(ellipse 86% 48% at 90% 90%, color-mix(in srgb, var(--accent-hover) 10%, transparent) 0%, transparent 50%);
 }
 
+/* 烧录：偏本地工具，避免大面积柔光渐变（减轻「AI 生成落地页」感） */
 .content-area[data-studio-tab='flasher'] {
-  --studio-tab-bg-layers:
-    radial-gradient(ellipse 100% 62% at 12% 8%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, transparent 55%),
-    radial-gradient(ellipse 80% 50% at 92% 90%, color-mix(in srgb, var(--accent-hover) 11%, transparent) 0%, transparent 48%);
+  --studio-tab-bg-layers: none;
+  background-color: var(--bg-secondary);
 }
 
 .content-area[data-studio-tab='terminal'] {
@@ -108,7 +108,7 @@
 }
 
 .content-area[data-studio-tab='flasher'] .flasher-page.tool-page {
-  background-image: radial-gradient(ellipse 100% 55% at 50% 0%, color-mix(in srgb, var(--accent) 11%, transparent) 0%, transparent 48%);
+  background-image: none;
 }
 
 [data-theme='cyber'] .content-area[data-studio-tab='terminal'] .immersive,
