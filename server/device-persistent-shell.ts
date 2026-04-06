@@ -294,9 +294,9 @@ async function runWithPassword(
   const exitId = randomBytes(16).toString('hex');
   const b64 = Buffer.from(command.replace(/\r\n/g, '\n'), 'utf8').toString('base64');
   const b64Esc = b64.replace(/'/g, `'"'"'`);
-  /** 先关回显再 eval，减少 PTY 把整行 eval+base64 回灌到捕获缓冲区 */
+  /** 先关回显再 eval，减少 PTY 把整行 eval+base64 回灌到捕获缓冲区；eval 后清 PROMPT_COMMAND 防止 source 重设后污染 exit marker */
   const line =
-    `stty -echo 2>/dev/null; eval "$(printf '%s' '${b64Esc}' | base64 -d)" 2>&1; EC=$?; stty echo 2>/dev/null; printf '\\n__RDK_EXIT__${exitId}__%s\\n' "$EC"\n`;
+    `stty -echo 2>/dev/null; eval "$(printf '%s' '${b64Esc}' | base64 -d)" 2>&1; EC=$?; unset PROMPT_COMMAND 2>/dev/null; PS1=''; stty echo 2>/dev/null; printf '\\n__RDK_EXIT__${exitId}__%s\\n' "$EC"\n`;
 
   s.stream.write(line);
 

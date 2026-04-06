@@ -97,6 +97,12 @@ function isBlockedHostname(hostname: string): boolean {
   return false;
 }
 
+export const browserFetchDns = {
+  lookup(host: string) {
+    return dns.lookup(host, { all: true, verbatim: true });
+  },
+};
+
 /**
  * 供 **studio_open_url**、设备输出中的 URL 自动打开等「仅把 URL 交给宿主 Electron 打开」的路径使用。
  * 服务端**不会**代为请求该 URL，故不做 RFC1918 拦截；板卡/局域网 `http://192.168.x.x:8000` 等与 SSH 同网段场景应放行。
@@ -145,7 +151,7 @@ export async function assertBrowserFetchUrlSafe(urlStr: string): Promise<URL> {
   }
 
   try {
-    const addrs = await dns.lookup(host, { all: true, verbatim: true });
+    const addrs = await browserFetchDns.lookup(host);
     const list = Array.isArray(addrs) ? addrs : [addrs];
     if (!list.length) {
       throw new Error("DNS 未返回地址");

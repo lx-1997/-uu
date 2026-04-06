@@ -21,6 +21,12 @@ downloads/
 # i18n audit script output (regenerate locally)
 scripts/audit-out.txt
 
+# E2E / Playwright generated artifacts
+e2e-report/
+e2e-results/
+playwright-report/
+test-results/
+
 # Logs & temp
 error.log
 *.log

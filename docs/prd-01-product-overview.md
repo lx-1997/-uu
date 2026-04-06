@@ -62,7 +62,7 @@ RDK Studio 是面向 **D-Robotics（地平线）RDK 系列机器人开发板** �
 
 1. **AI Native**：AI Agent 不是附加功能，而是产品的核心交互方式。用户的每一个操作都可以通过自然语言完成，Agent 负责编排、执行、验证。
 
-2. **双 Agent 协作**：Studio 侧的 RDKClaw（"小地瓜"）负责全局调度与知识整合，板端的 OpenClaw 负责硬件层操作执行。两者互补而非主从。
+2. **双 Agent 协作**：Studio 侧的 RDKClaw（"小地瓜"）和板端的 OpenClaw 都是具备独立规划与执行能力的全栈 Agent。一般任务由 RDKClaw 独立完成；复杂任务时 RDKClaw 精编上下文（soul.md、guidance、搜索结果等），交给 OpenClaw 独立规划执行，双方协同迭代。两者互补而非主从，合力产生远超单 Agent 的工程能力。
 
 3. **降低门槛**：通过新手引导向导、AI 辅助、一键操作，让入门用户也能完成从烧录到模型部署的全流程。
 

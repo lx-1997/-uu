@@ -35,6 +35,9 @@ export function buildPersonaPrompt(persona: PersonaProfile) {
   if (persona.extraInstructions?.trim()) {
     lines.push(`额外指令: ${persona.extraInstructions.trim()}`);
   }
+  if (persona.systemPromptOverride?.trim()) {
+    lines.push(`Bot 覆盖指令: ${persona.systemPromptOverride.trim()}`);
+  }
   return lines.join("\n");
 }
 
@@ -154,10 +157,12 @@ export function buildWebSearchTriggerPrompt(
       ? "下列**任一条**成立时，应先检索，再下结论或写安装命令（**勿**为凑并行而首轮例行 `board_openclaw_assess`）："
       : "下列**任一条**成立时，应先检索（可与 `board_openclaw_assess` 等**同轮并行**），再下结论或写安装命令：";
   return [
-    "## 何时必须 web_search / web_fetch",
+    "## 何时必须 rdk_doc_search_local / web_search / web_fetch",
     assessParallelHint,
-    "- **RDK 板端算法/官方例程**（YOLO、检测、跟踪、Box 应用、BPU 部署等）：**必须先**在 **developer.d-robotics.cc/rdk_doc** 找到**当前任务对应章节**（可用 `web_search` 关键词含 `site:developer.d-robotics.cc` + 功能名，或直接 `web_fetch` 已知文档 URL），再按文中命令在板上执行；**禁止**用训练记忆替代官方包名与 launch。**用户已在消息里粘贴具体 rdk_doc 链接时，以该页为执行清单，先 `web_fetch` 该 URL。**",
+    "- **RDK 文档/API/章节定位类问题**：**先调用 `rdk_doc_search_local`** 用完整问题或完整专名在本地 RDK 文档缓存里找标题、URL 与章节；命中后优先对返回 URL 调 `web_fetch`（通常直读本地缓存，不必先外网搜索）。只有本地未命中，或问题明确要求最新站外资料时，再 `web_search`。",
+    "- **RDK 板端算法/官方例程**（YOLO、检测、跟踪、Box 应用、BPU 部署等）：**必须先**在 **developer.d-robotics.cc/rdk_doc** 找到**当前任务对应章节**；优先 `rdk_doc_search_local` → `web_fetch`，也可在用户已粘贴具体 rdk_doc 链接时直接 `web_fetch` 该 URL。**禁止**用训练记忆替代官方包名与 launch。",
     "- **重复失败/陷入循环**（同一错误多轮不变）：**必须先 `web_fetch`** 与症状相关的 rdk_doc 页（从 **`rdk-doc-url-index.md`** 选章节，如相机/USB → `vision/usb_camera`），并辅以 `web_search`；**禁止**只重复上一条 shell 而不查文档。",
+    "- **官方文档不够、用户要案例/踩坑/经验帖**：优先地瓜开发者社区。先 `forum_drobotics_search` 按问题、包名或错误片段搜主题；已知主题 ID 再用 `forum_drobotics_topic` 读全文；只想扫近期动态时才用 `forum_drobotics_latest`。论坛未配置、权限不足或仍无命中时，再 `web_search` 补 `site:forum.d-robotics.cc`。",
     "- **板卡 Web 预览（:8000 等）**：`studio_open_url` 与文案中的 IP **须**与当前会话设备 SSH host 一致；**禁止**使用文档占位 IP（如 192.168.1.100）；服务端会尽量按设备修正，但模型仍应写对或先 `device_exec` 查 `ip -br a`。",
     "- 涉及**具体版本号、发布日期、是否仍维护**或与**当前 OS/板型**的兼容性。",
     "- **官方安装/升级/刷机/弃用路径**、CLI 旗标、**breaking change**、REST/GraphQL 行为变更。",
@@ -165,9 +170,9 @@ export function buildWebSearchTriggerPrompt(
     "- 用户问「最新」「文档怎么说」「和某某能不能一起用」而你手头无当日可信摘录。",
     "**联网搜索首选 Multi-Search-Engine（多引擎顺序）**：`web_search` 按仓库 `skills/multi-search-engine` 的策略依次尝试多引擎（细节见工具 `description`）。向用户描述检索路径时可沿用此话术。",
     "**对用户说明来源（避免误解）**：工具结果里的 `engine:` 是**本轮实际返回条目的站点**（命中即停，前面引擎无有效结果才会继续）。该顺序下**第一站多为百度**，故出现「百度」仍属于 Multi-Search-Engine 策略，不是「只接了单一商业搜索引擎」。回复用户时建议写：**按 Multi-Search-Engine（多引擎顺序）检索，本轮由 {与 engine 一致的站点名} 返回结果**；不要只答「我用的是百度搜索」而让人以为未走多引擎链路。",
-    "**通常不必为搜索而搜索**：纯板端**当前**状态（`device_exec`/diagnose 更直接）；本工具契约或 SKILL 已写清且不涉上游改名；用户给出的单条命令无可疑版本依赖。**例外**：任务属于 **RDK 官方文档中的标准演示/算法流程**时，仍必须先 **web_fetch 文档**（见工具契约「RDK 官方文档优先」），再执行命令。",
+    "**通常不必为搜索而搜索**：纯板端**当前**状态（`device_exec`/diagnose 更直接）；本工具契约或 SKILL 已写清且不涉上游改名；用户给出的单条命令无可疑版本依赖。**例外**：任务属于 **RDK 官方文档中的标准演示/算法流程**时，仍必须先 **`rdk_doc_search_local` → `web_fetch`**（或直接 `web_fetch` 用户给的 URL），再执行命令。",
     "**web_search 与推理一致**：调用时的 `query` **必须与你在推理里决定要搜的关键词逐字一致**（含品牌/机构/产品全名）。禁止为「省事」把专名截成前缀导致歧义（例：用户问「泡泡玛特」却传「泡泡」；英文「Pop Mart」不得只传 `pop`——会与流行音乐、软件栈等混淆）。港股公司等宜带 **股份代号**（如泡泡玛特 `09992.HK`）与 **全称** 同搜，勿依赖过短 token。工具结果里会并列 `tool_argument` 与 `search_query`：`tool_argument` 即模型传入；若两者不同多为服务端加了中文短语引号以降低分词跑偏。",
-    "**输出**：引用联网结论时附**来源标题 + URL**；若检索无结果，说明已搜过并给出下一步（本机命令验证或请用户提供文档）。",
+    "**输出**：引用本地文档、社区或联网结论时，附**来源标题 + URL**；若有章节/主题号，再附**章节名或 topicId**。若检索无结果，说明已查过哪些入口（本地文档/社区/外网）以及下一步。",
   ].join("\n");
 }
 
@@ -557,7 +562,7 @@ export function buildRdkclawDynamicSystemSections(args: {
     hasDevice
       ? [
           "## 资料与命令来源（无本地生态注册表）",
-          "需要官方安装步骤、示例或硬件说明时：用 web_search / web_fetch，优先 D-Robotics 文档与 GitHub（developer.d-robotics.cc/rdk_doc、github.com/D-Robotics），可检索 rdk_dock 等关键词。",
+          "需要官方安装步骤、示例或硬件说明时：优先 `rdk_doc_search_local` 查本地 RDK 文档缓存；命中后对返回 URL 用 `web_fetch`。仅当本地未命中、或需 GitHub/社区最新信息时，再 `web_search` / `forum_drobotics_*`。",
           platform
             ? "当前板型已识别，建议 web_fetch 入口：" + getResearchSeeds(platform).join(" | ")
             : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。",

@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { assertBrowserFetchUrlSafe, assertStudioClientOpenUrlAllowed } from "../browser-tools.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { assertBrowserFetchUrlSafe, assertStudioClientOpenUrlAllowed, browserFetchDns } from "../browser-tools.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("assertStudioClientOpenUrlAllowed", () => {
   it("allows RFC1918 IPv4 for Electron client open (board dashboard)", () => {
@@ -33,6 +37,7 @@ describe("assertBrowserFetchUrlSafe", () => {
   });
 
   it("allows public https URL after DNS check", async () => {
+    vi.spyOn(browserFetchDns, "lookup").mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const u = await assertBrowserFetchUrlSafe("https://example.com/");
     expect(u.hostname).toBe("example.com");
   });

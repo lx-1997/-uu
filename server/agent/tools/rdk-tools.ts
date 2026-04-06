@@ -383,9 +383,14 @@ const ROS_LONG_RUN_BLOCK_RE = /\bros2\s+(launch|run)\b/i;
  * 仍可在命令前自行加 `timeout 20s`，或显式传 timeoutMs。
  */
 const DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * `source setup.bash` 在嵌入式板上加载 100+ ROS overlay，I/O 慢时顶多 60-90s；给 120s 上限，不需要 30min。
+ */
+const DEVICE_EXEC_SOURCE_DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
- * 供测试与工具契约：对 `sleep && tail … | grep`、`tail -n … | grep` 等返回约 60s 默认上限；否则 undefined（沿用 SSH 默认 30min）。
+ * 供测试与工具契约：对 `sleep && tail … | grep`、`tail -n … | grep` 等返回约 60s 默认上限；
+ * 对以 `source` 为主的命令（如 `source /opt/tros/humble/setup.bash`）返回约 120s；否则 undefined（沿用 SSH 默认 30min）。
  */
 export function inferShortLogPeekDefaultTimeoutMs(command: string): number | undefined {
   const c = String(command || '').trim();
@@ -398,6 +403,9 @@ export function inferShortLogPeekDefaultTimeoutMs(command: string): number | und
   if (/\bhead\b/i.test(c) && /\|\s*grep\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
   if (/sleep\s+\d+\s+&&\s*tail\b/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
   if (/\btail\s+-\d+n?\b/i.test(c) || /\btail\s+-n\s+\d+/i.test(c)) return DEVICE_EXEC_LOG_PEEK_DEFAULT_TIMEOUT_MS;
+  // source setup.bash（含可选 sleep 前缀）：板端加载 ROS overlay 无 stdout，不该等 30min
+  if (/^\s*(?:sleep\s+\d+\s*&&\s*)?(?:\.|source)\s+\S+setup\.bash/i.test(c)) return DEVICE_EXEC_SOURCE_DEFAULT_TIMEOUT_MS;
+  if (/^\s*(?:sleep\s+\d+\s*&&\s*)?(?:\.|source)\s+/i.test(c) && !/[|&;]/.test(c.replace(/&&/g, ''))) return DEVICE_EXEC_SOURCE_DEFAULT_TIMEOUT_MS;
   return undefined;
 }
 
@@ -661,11 +669,15 @@ function deviceExecTool(
             flushProgress(false);
           };
           execOpts.onStreamChunk = onStreamChunk;
+          const isSourceCommand = /^\s*(?:sleep\s+\d+\s*&&\s*)?(?:\.|source)\s+/i.test(normalizedCommand);
           hb = setInterval(() => {
             const total = Date.now() - startAt;
             const silent = Date.now() - lastChunkAt;
             if (total < DEVICE_EXEC_HEARTBEAT_AFTER_MS || silent < DEVICE_EXEC_HEARTBEAT_SILENT_MS) return;
-            const line = `\n· ${Math.floor(total / 1000)}s · 命令仍在运行（暂无新输出）…\n`;
+            const hint = isSourceCommand
+              ? '正在加载 ROS/TROS 环境，source 无输出属正常'
+              : '暂无新输出';
+            const line = `\n· ${Math.floor(total / 1000)}s · 命令仍在运行（${hint}）…\n`;
             lastChunkAt = Date.now();
             flushProgress(true);
             lastEmitAt = Date.now();

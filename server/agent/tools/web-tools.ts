@@ -2,7 +2,7 @@ import type { Tool } from "./types.js";
 import { decodeEntities, normalizeUrl, stripHtml, truncate } from "./web-text-utils.js";
 import type { WebToolOptions } from "./web-tool-options.js";
 import { createBrowserFetchTools } from "./browser-tools.js";
-import { tryReadRdkDocCachedWithFallback } from "../../rdkclaw/rdk-doc-local-cache.js";
+import { searchRdkDocLocal, tryReadRdkDocCachedWithFallback } from "../../rdkclaw/rdk-doc-local-cache.js";
 
 export type { WebToolOptions };
 
@@ -866,6 +866,49 @@ function webSearchTool(options: WebToolOptions): Tool<{ query: string; limit?: n
   };
 }
 
+function rdkDocLocalSearchTool(): Tool<{ query: string; limit?: number }> {
+  return {
+    name: "rdk_doc_search_local",
+    description:
+      "在本机已同步的地瓜 RDK 官方文档缓存中搜索标题、章节和正文片段，返回最相关的文档标题、URL、章节名与摘要。**RDK 文档/API/示例/章节定位类问题优先用它**；命中后再对返回 URL 调 `web_fetch`，通常会直接走本地缓存而不出网。仅当本地未命中，或问题明确要求最新社区/站外信息时，再使用 `web_search` / `forum_drobotics_*`。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "要在本地 RDK 文档缓存中检索的完整问题或关键词" },
+        limit: { type: "number", description: "最大返回条数，默认 5，最大 10" },
+      },
+      required: ["query"],
+    },
+    async execute(input) {
+      const query = String(input.query || "").trim();
+      if (!query) throw new Error("query 不能为空");
+      const limit = Math.min(10, Math.max(1, Number(input.limit || 5) || 5));
+      const hits = searchRdkDocLocal(query, limit);
+      if (hits.length === 0) {
+        return [
+          `query: ${query}`,
+          "cache: local (rdk-doc-cache)",
+          "hits: 0",
+          "next_step: 本地 RDK 文档缓存未命中；若仍需官方资料，可改用 web_search 精确定位 developer.d-robotics.cc，或在缺官方案例/经验帖时使用 forum_drobotics_search / forum_drobotics_topic。",
+        ].join("\n");
+      }
+      return [
+        `query: ${query}`,
+        "cache: local (rdk-doc-cache)",
+        "note: 对下列 URL 再调用 web_fetch 时，通常会优先命中本地缓存。",
+        "hits:",
+        ...hits.map((hit, index) => [
+          `${index + 1}. ${hit.title}`,
+          `   url: ${hit.url}`,
+          hit.section ? `   section: ${hit.section}` : "",
+          hit.snippet ? `   snippet: ${hit.snippet}` : "",
+          `   score: ${hit.score}`,
+        ].filter(Boolean).join("\n")),
+      ].join("\n");
+    },
+  };
+}
+
 function webFetchTool(options: WebToolOptions): Tool<{ url: string; maxChars?: number }> {
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxFetchChars = Math.max(2000, options.maxFetchChars ?? DEFAULT_MAX_FETCH_CHARS);
@@ -1017,6 +1060,7 @@ function webExtractTool(options: WebToolOptions): Tool<{ content: string; questi
 
 export function createWebTools(options: WebToolOptions = {}): Tool[] {
   return [
+    rdkDocLocalSearchTool(),
     webSearchTool(options),
     webFetchTool(options),
     webExtractTool(options),

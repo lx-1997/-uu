@@ -40,6 +40,16 @@ function parsePermissions(raw?: string): SkillPermission {
   };
 }
 
+function getSkillAliases(meta: RDKClawSkillMeta): string[] {
+  const dirName = path.basename(path.dirname(meta.sourcePath));
+  return [...new Set([
+    meta.name,
+    dirName,
+    ...meta.tags,
+    ...meta.trigger,
+  ].map((item) => item.trim().toLowerCase()).filter(Boolean))];
+}
+
 function collectSkillFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   const out: string[] = [];
@@ -154,6 +164,17 @@ export class SkillRegistry {
         if (asciiWords.every((t) => nameHay.includes(t) || descHay.includes(t))) return true;
       }
       return s.trigger.some((t) => q.includes(t.toLowerCase()));
+    });
+  }
+
+  rankByPreferredRefs(skills: RDKClawSkillMeta[], preferredRefs: string[] = []): RDKClawSkillMeta[] {
+    if (preferredRefs.length === 0 || skills.length <= 1) return skills;
+    const preferred = new Set(preferredRefs.map((item) => item.trim().toLowerCase()).filter(Boolean));
+    return [...skills].sort((left, right) => {
+      const leftPreferred = getSkillAliases(left).some((alias) => preferred.has(alias));
+      const rightPreferred = getSkillAliases(right).some((alias) => preferred.has(alias));
+      if (leftPreferred === rightPreferred) return 0;
+      return leftPreferred ? -1 : 1;
     });
   }
 }

@@ -10,6 +10,29 @@ import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from './utils
 /** Socket 侧为 token 统计累积的 assistant 文本上限（不影响已向浏览器 emit 的 chunk，只限制本地字符串） */
 const OPENCLAW_SOCKET_METRICS_CAP = Math.min(256_000, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
 
+type OpenClawSocketPhase =
+  | 'connecting'
+  | 'ready'
+  | 'thinking'
+  | 'responding'
+  | 'waiting_rdkclaw'
+  | 'need_rdkclaw'
+  | 'executing'
+  | 'completed'
+  | 'error'
+  | 'disconnected';
+
+function inferOpenClawPhase(text: string): OpenClawSocketPhase | null {
+  const normalized = String(text || '');
+  if (!normalized.trim()) return null;
+  if (/\[NEED_RDKCLAW\]/i.test(normalized)) return 'need_rdkclaw';
+  if (/\[板端·执行\]|执行中|正在执行|开始执行/i.test(normalized)) return 'executing';
+  if (/\[板端·对齐\]|alignment_gate: strict|等待 RDKClaw|待 RDKClaw/i.test(normalized)) {
+    return 'waiting_rdkclaw';
+  }
+  return 'responding';
+}
+
 export type SocketIoHandlerDeps = {
   readDevices: () => Promise<Device[]>;
   credentialCacheKey: (host: string, username: string, port?: number) => string;
@@ -52,13 +75,21 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
       }
       openclawLeasedIps.clear();
     };
+    let lastOpenClawPhase: OpenClawSocketPhase | null = null;
+    const emitOpenClawPhase = (phase: OpenClawSocketPhase, detail?: string) => {
+      if (lastOpenClawPhase === phase && !detail) return;
+      lastOpenClawPhase = phase;
+      socket.emit('openclaw:phase', { phase, detail });
+    };
 
     socket.on('openclaw:start', async (config) => {
       const { deviceId } = config;
+      emitOpenClawPhase('connecting');
       try {
         const devices = await readDevices();
         const device = devices.find(d => d.id === deviceId);
         if (!device) {
+          emitOpenClawPhase('error', 'Device not found');
           socket.emit('openclaw:error', { error: 'Device not found' });
           return;
         }
@@ -70,18 +101,22 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
           deviceObj,
           (data, err) => {
             if (err) {
+              emitOpenClawPhase('error', String(err));
               socket.emit('openclaw:error', { error: err });
               return;
             }
+            emitOpenClawPhase('ready');
             socket.emit('openclaw:ready', { status: 'connected' });
           },
           () => {
+            emitOpenClawPhase('disconnected');
             socket.emit('openclaw:disconnected', {});
             openclawChatSession = null;
           },
           `session-${socket.id}`,
         );
       } catch (e: any) {
+        emitOpenClawPhase('error', e.message);
         socket.emit('openclaw:error', { error: e.message });
       }
     });
@@ -89,11 +124,13 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
     socket.on('openclaw:send', async (data) => {
       const { deviceId, message } = data;
       if (!message?.trim()) return;
+      emitOpenClawPhase('thinking');
 
       try {
         const devices = await readDevices();
         const device = devices.find(d => d.id === deviceId);
         if (!device) {
+          emitOpenClawPhase('error', 'Device not found');
           socket.emit('openclaw:error', { error: 'Device not found' });
           return;
         }
@@ -109,6 +146,8 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
             const r = appendUtf8WithTailCap(streamed, chunk, OPENCLAW_SOCKET_METRICS_CAP);
             streamed = r.value;
             if (r.truncated) streamedMetricsTruncated = true;
+            const inferredPhase = inferOpenClawPhase(streamed);
+            if (inferredPhase) emitOpenClawPhase(inferredPhase);
             socket.emit('openclaw:data', { chunk });
           },
           (success) => {
@@ -142,7 +181,10 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
               if (/plugins\.allow is empty/i.test(raw)) {
                 msg = 'OpenClaw 插件安全策略阻止加载本地插件（plugins.allow 为空）。请在 openclaw.json 中显式配置受信任插件 IDs，或移除未受信插件后重试。';
               }
+              emitOpenClawPhase('error', msg);
               socket.emit('openclaw:error', { error: msg });
+            } else {
+              emitOpenClawPhase('completed');
             }
             socket.emit('openclaw:complete', { success });
             openclawChatSession = null;
@@ -151,6 +193,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
           deviceObj,
         );
       } catch (e: any) {
+        emitOpenClawPhase('error', e.message);
         socket.emit('openclaw:error', { error: e.message });
       }
     });
@@ -173,6 +216,7 @@ export function registerSocketIoHandlers(io: SocketIOServer, deps: SocketIoHandl
         // Ignore errors on stop
       }
 
+      emitOpenClawPhase('disconnected');
       socket.emit('openclaw:stopped', {});
     });
 

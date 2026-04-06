@@ -508,6 +508,91 @@ function forumLatestTool(options: ForumToolOptions): Tool<{ page?: number; limit
   };
 }
 
+function forumSearchTool(options: ForumToolOptions): Tool<{ query: string; limit?: number }> {
+  const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const maxFetchChars = Math.max(2000, options.maxFetchChars ?? DEFAULT_MAX_FETCH_CHARS);
+  return {
+    name: "forum_drobotics_search",
+    description: "按关键词搜索地瓜机器人开发者社区主题，适合在官方文档不足时查案例、踩坑经验和社区 workaround。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "论坛搜索关键词，应尽量使用完整问题、完整包名或错误片段" },
+        limit: { type: "number", description: "最大返回条数，默认 10，最大 20" },
+      },
+      required: ["query"],
+    },
+    async execute(input) {
+      const base = sanitizeBaseUrl(process.env.FORUM_BASE_URL);
+      const auth = await resolveForumAuth(base, timeoutMs);
+      const query = String(input.query || "").trim();
+      if (!query) throw new Error("query 不能为空");
+      const limit = Math.min(20, Math.max(1, Number(input.limit || 10) || 10));
+      const timeout = withTimeout(timeoutMs);
+      try {
+        const url = `${base}/search.json?q=${encodeURIComponent(query)}`;
+        const res = await fetch(url, {
+          method: "GET",
+          signal: timeout.signal,
+          headers: {
+            Accept: "application/json",
+            "User-Agent": "RDKClaw/1.0 (+forum-tool)",
+            ...auth.headers,
+          },
+        });
+        if (!res.ok) {
+          const bodyText = await res.text();
+          const parsed = decodeForumErrorBody(bodyText);
+          if (res.status === 403 && parsed.errorType === "not_logged_in") {
+            return authHint(base, auth.detail);
+          }
+          throw new Error(`请求失败: HTTP ${res.status} · ${bodyText.slice(0, 300)}`);
+        }
+        const data = (await res.json()) as {
+          topics?: Array<Record<string, unknown>>;
+          posts?: Array<Record<string, unknown>>;
+          grouped_search_result?: { more_full_page_results?: boolean };
+        };
+        const topics = (data.topics || []).slice(0, limit);
+        const posts = data.posts || [];
+        const lines = topics.map((topic, idx) => {
+          const id = Number(topic.id || 0);
+          const title = String(topic.title || "(无标题)");
+          const slug = String(topic.slug || "");
+          const topicUrl = slug ? `${base}/t/${slug}/${id}` : `${base}/t/${id}`;
+          const excerpt = posts.find((post) => Number(post.topic_id || 0) === id)?.blurb;
+          const tagList = Array.isArray(topic.tags) ? topic.tags.join(", ") : "";
+          return [
+            `${idx + 1}. [${id}] ${title}`,
+            `   url: ${topicUrl}`,
+            tagList ? `   tags: ${tagList}` : "",
+            excerpt ? `   excerpt: ${String(excerpt).replace(/\s+/g, " ").trim()}` : "",
+          ].filter(Boolean).join("\n");
+        });
+        if (lines.length === 0) {
+          return [
+            `forum: ${base}`,
+            `query: ${query}`,
+            "results: 0",
+            "next_step: 社区搜索无命中，可改写关键词后重试，或退回官方文档/外网搜索。",
+          ].join("\n");
+        }
+        const output = [
+          `forum: ${base}`,
+          `query: ${query}`,
+          `results: ${lines.length}`,
+          data.grouped_search_result?.more_full_page_results ? "more_results: true" : "",
+          "topics:",
+          ...lines,
+        ].filter(Boolean).join("\n");
+        return truncate(output, maxFetchChars);
+      } finally {
+        timeout.clear();
+      }
+    },
+  };
+}
+
 function forumTopicTool(options: ForumToolOptions): Tool<{ topicId: number; maxPosts?: number; includeRaw?: boolean }> {
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const maxFetchChars = Math.max(2000, options.maxFetchChars ?? DEFAULT_MAX_FETCH_CHARS);
@@ -880,6 +965,7 @@ export function createForumTools(options: ForumToolOptions = {}): Tool[] {
   return [
     forumSetCredentialsTool(options),
     forumAuthStatusTool(options),
+    forumSearchTool(options),
     forumLatestTool(options),
     forumTopicTool(options),
     forumCreatePostTool(options),

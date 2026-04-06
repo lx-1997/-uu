@@ -20,6 +20,7 @@ export type IntentId =
   | 'file_upload'
   | 'file_download'
   | 'vnc'
+  | 'ide'
   | 'openclaw_start'
   | 'openclaw_status'
   | 'openclaw_switch'

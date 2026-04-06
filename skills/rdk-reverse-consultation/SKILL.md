@@ -16,7 +16,7 @@ category: Collaboration
 
 ## 背景
 
-RDKClaw 和 OpenClaw 是互补关系：RDKClaw 有联网搜索、文档分析、生态知识库等能力，OpenClaw 有板端执行、硬件操控、本地技能等能力。当 OpenClaw 在执行板端任务时发现需要 RDKClaw 才有的信息（如网上的安装命令、官方文档链接、最佳实践），它无法自己获取。
+RDKClaw 和 OpenClaw 都是规划 + 执行的全栈 Agent，各有优势域：RDKClaw 有联网搜索、文档分析、生态知识库、上下文精编等能力，OpenClaw 有板端规划决策、硬件操控、本地技能、实时异常处理等能力。当 OpenClaw 在执行板端任务时发现需要 RDKClaw 才有的信息（如网上的安装命令、官方文档链接、最佳实践），它无法自己获取。
 
 本技能定义了 OpenClaw 向 RDKClaw 发出结构化求助的协议，使得 RDKClaw 能自动检测并补充所需信息。
 

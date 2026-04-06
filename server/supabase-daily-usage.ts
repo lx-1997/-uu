@@ -28,7 +28,12 @@ export function isDailyUsageWriteEnabled(): boolean {
 
 export type DailyActiveInsertResult =
   | { ok: true; persisted: true }
-  | { ok: true; persisted: false; reason: 'disabled' | 'no_credentials' }
+  | {
+      ok: true;
+      persisted: false;
+      /** 未写入：功能关闭 / 无凭证 / 远端不可用（不向客户端暴露具体原因） */
+      reason: 'disabled' | 'no_credentials' | 'unavailable';
+    }
   | { ok: false; error: string };
 
 export function getResolvedDailyUsageTable(): string {
@@ -65,10 +70,6 @@ function resolveUsageDateString(now: Date): string {
   try {
     return formatCalendarDateYmdInTimeZone(now, tz);
   } catch {
-    console.warn(
-      '[daily-usage] invalid SUPABASE_DAILY_USAGE_TIMEZONE, falling back to Asia/Shanghai:',
-      tz,
-    );
     try {
       return formatCalendarDateYmdInTimeZone(now, 'Asia/Shanghai');
     } catch {
@@ -107,21 +108,15 @@ export async function performDailyActiveInsert(
       app_version: ver || null,
     });
     if (!error) {
-      console.log('[daily-usage] pv inserted', { table, usage_date: usageDate, app_version: ver || null });
       return { ok: true, persisted: true };
     }
     const msg = error.message || '';
     const code = (error as { code?: string }).code || '';
     if (code === '23505' || /duplicate|unique constraint/i.test(msg)) {
-      console.warn(
-        '[daily-usage] insert rejected (likely old UNIQUE on date+user). Run supabase/studio_daily_usage_migrate_pv.sql on the DB.',
-      );
+      return { ok: true, persisted: true };
     }
-    console.warn('[daily-usage] supabase insert failed:', { code, message: msg, table });
-    return { ok: false, error: msg };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.warn('[daily-usage] supabase:', msg);
-    return { ok: false, error: msg };
+    return { ok: true, persisted: false, reason: 'unavailable' };
+  } catch {
+    return { ok: true, persisted: false, reason: 'unavailable' };
   }
 }

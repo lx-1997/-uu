@@ -5,6 +5,7 @@ import {
   Agent,
   builtinTools,
   type Tool,
+  type ToolContext,
 } from "../agent/openclaw-index.js";
 import {
   buildModelDef,
@@ -97,6 +98,10 @@ import {
 } from "./system-prompt-builder.js";
 import { buildRdkclawSystemPromptBundle } from "./system-prompt-layers.js";
 import { hashSystemPromptLayers, hashStableDynamicSystemPrompt } from "./system-prompt-telemetry.js";
+import { parseAtRefs, hasAtRefs } from "./at-ref-parser.js";
+import { BotStore } from "./bot-store.js";
+import { KnowledgeSpaceStore } from "./knowledge-space-store.js";
+import { KnowledgeRouter } from "./knowledge-router.js";
 import { CompactHookRegistry } from "../agent/compact-hooks.js";
 import { buildRdkClawToolHookRegistry } from "../agent/rdkclaw-tool-hooks.js";
 import {
@@ -112,6 +117,7 @@ import { syncWorkspaceMarkdownMemory } from "./memory-markdown-sync.js";
 import { runDevicePingProbe } from "./device-ping-probe.js";
 import type { Device } from "../../shared/types.js";
 import { execOnDevice } from "../agent/tools/rdk-ssh-helper.js";
+import { normalizeUrl, stripHtml, truncate } from "../agent/tools/web-text-utils.js";
 
 function recordConversationTurnFromReq(
   req: RDKClawChatRequest,
@@ -215,6 +221,62 @@ type DeviceConnectivitySnapshot = {
   fromFailCache?: boolean;
 };
 
+type InstantUrlContent = {
+  url: string;
+  title?: string;
+  content: string;
+};
+
+function resolveRuntimePersona(
+  base: PersonaProfile,
+  override?: import("./bot-store.js").RoboBot["persona"],
+): PersonaProfile {
+  if (!override) return base;
+  return {
+    ...base,
+    systemPromptOverride: override.systemPromptOverride?.trim() || base.systemPromptOverride,
+    extraInstructions: [base.extraInstructions, override.extraInstructions].filter(Boolean).join("\n"),
+    delegationBias: override.delegationBias || base.delegationBias,
+    autonomyLevel: override.autonomyLevel || base.autonomyLevel,
+    riskLevel: override.riskLevel || base.riskLevel,
+  };
+}
+
+async function fetchInstantUrlContents(
+  urls: string[],
+  signal?: AbortSignal,
+): Promise<InstantUrlContent[]> {
+  const uniqueUrls = [...new Set(urls.map((item) => item.trim()).filter(Boolean))].slice(0, 3);
+  const outputs = await Promise.all(uniqueUrls.map(async (rawUrl) => {
+    try {
+      const url = normalizeUrl(rawUrl);
+      const res = await fetch(url, {
+        method: "GET",
+        signal,
+        redirect: "follow",
+        headers: {
+          "User-Agent": "RDKStudio/1.0 (+knowledge-router)",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+        },
+      });
+      if (!res.ok) return null;
+      const text = await res.text();
+      const titleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const content = truncate(stripHtml(text), 12_000);
+      if (!content.trim()) return null;
+      const result: InstantUrlContent = {
+        url,
+        title: titleMatch?.[1]?.replace(/\s+/g, " ").trim() || undefined,
+        content,
+      };
+      return result;
+    } catch {
+      return null;
+    }
+  }));
+  return outputs.filter((item): item is InstantUrlContent => item !== null);
+}
+
 export class RDKClawApp {
   private readonly workspaceDir: string;
   private readonly openClawManager: OpenClawDeploymentManager;
@@ -222,6 +284,9 @@ export class RDKClawApp {
   private readonly skills: SkillRegistry;
   private readonly policyStore: RDKClawPolicyStore;
   private readonly workspaceStore: UserWorkspaceStore;
+  private readonly botStore: BotStore;
+  private readonly knowledgeSpaceStore: KnowledgeSpaceStore;
+  private readonly knowledgeRouter: KnowledgeRouter;
   private autonomyRuntime?: StudioAutonomyRuntime;
   private pendingApprovals = new Map<string, {
     resolve: (decision: ApprovalDecisionMode) => void;
@@ -373,6 +438,9 @@ export class RDKClawApp {
     this.skills = new SkillRegistry({ workspaceDir });
     this.policyStore = new RDKClawPolicyStore();
     this.workspaceStore = new UserWorkspaceStore(workspaceDir);
+    this.botStore = new BotStore();
+    this.knowledgeSpaceStore = new KnowledgeSpaceStore();
+    this.knowledgeRouter = new KnowledgeRouter(this.knowledgeSpaceStore);
     this.pendingMapsCleanupInterval = setInterval(() => this.cleanupStalePendingMaps(), 60_000);
 
     initRdkDocCache().catch((err) => {
@@ -787,7 +855,7 @@ export class RDKClawApp {
         if (tool.name !== "device_exec" || devicePublicNetworkReady !== false) return tool;
         return {
           ...tool,
-          execute: async (input, ctx) => {
+          execute: async (input: unknown, ctx: ToolContext) => {
             const cmd = String((input as { command?: unknown })?.command ?? "").trim();
             const needsInternet = /\b(apt(?:-get)?\s+(?:update|upgrade|install)|pip(?:3)?\s+install|npm\s+(?:install|update)|pnpm\s+(?:add|install|update)|yarn\s+add|uv\s+pip\s+install|git\s+clone|curl\s+https?:\/\/|wget\s+https?:\/\/)/i.test(cmd);
             if (needsInternet) {
@@ -1270,17 +1338,55 @@ export class RDKClawApp {
     const health = this.evaluateRuntimeHealth(workspace.workspaceDir);
     const attachmentPrompt = buildAttachmentPrompt(attachmentState.newAttachments);
     const effectiveMessage = [String(req.message || "").trim(), attachmentPrompt].filter(Boolean).join("\n\n");
+
+    // ---- @引用解析 & 知识路由 ----
+    const atRefs = hasAtRefs(effectiveMessage) ? parseAtRefs(effectiveMessage) : undefined;
+    // 确定激活的 Bot：@bot > 请求体 > 存储
+    let activeBot: import("./bot-store.js").RoboBot | undefined;
+    if (atRefs?.hasReset) {
+      this.botStore.setActiveBot(undefined);
+    } else if (atRefs?.botName) {
+      activeBot = this.botStore.getBotByName(atRefs.botName);
+      if (activeBot) this.botStore.setActiveBot(activeBot.id);
+    } else {
+      const storedBotId = req.activeBotId ?? this.botStore.getActiveBotId();
+      if (storedBotId) activeBot = this.botStore.getBot(storedBotId);
+    }
+    const knowledgeSpaceIds = [
+      ...(atRefs?.docNames ?? []),
+      ...(req.activeKnowledgeSpaceIds ?? []),
+      ...(activeBot?.knowledgeSpaceIds ?? []),
+    ];
     const persona = this.personaStore.getPersona();
     const policy = this.policyStore.getPolicy();
-    const matchedSkills = this.skills.matchByText(effectiveMessage || req.message).slice(0, 5);
+    const runtimePersona = resolveRuntimePersona(persona, activeBot?.persona);
+    const instantUrlContents = policy.network.enabled && atRefs?.urls?.length
+      ? await fetchInstantUrlContents(atRefs.urls, externalAbortSignal)
+      : [];
+    const knowledgeResult = this.knowledgeRouter.route({
+      userMessage: atRefs?.cleanMessage ?? effectiveMessage,
+      activeBot,
+      activeKnowledgeSpaceIds: knowledgeSpaceIds,
+      instantUrlContents,
+      includeRdkOfficialDocs: activeBot?.includeRdkOfficialDocs ?? true,
+      docPriority: activeBot?.docPriority ?? "merged",
+    });
+    const userMessageForPrompt = atRefs?.cleanMessage ?? effectiveMessage;
+
+    const matchedSkills = this.skills
+      .rankByPreferredRefs(
+        this.skills.matchByText(userMessageForPrompt || req.message),
+        activeBot?.skillIds ?? [],
+      )
+      .slice(0, 5);
     const setupElapsedMs = Date.now() - runStartedAt;
-    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot, persona.delegationBias);
+    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot, runtimePersona.delegationBias);
     const detectedPlatform = (req as { platform?: RdkPlatform }).platform as RdkPlatform | undefined;
     const deviceProfile = detectedPlatform ? getDeviceProfile(detectedPlatform) : null;
     const modelCaps = lookupModelCapabilities(providerConfig.provider, providerConfig.model);
     const modelTier = classifyModelTier(modelCaps.contextWindow, modelCaps.maxOutputTokens);
     const promptBundle = buildRdkclawSystemPromptBundle({
-      persona,
+      persona: runtimePersona,
       modelTier,
       deviceProfile,
       deviceId: req.deviceId?.trim() || undefined,
@@ -1290,8 +1396,9 @@ export class RDKClawApp {
       allAttachments: attachmentState.allAttachments,
       policy,
       studioQuickAnswer: studioQuick,
-      latestUserMessage: effectiveMessage,
+      latestUserMessage: userMessageForPrompt,
       delegateDecision: decision,
+      knowledgeContextBlock: knowledgeResult.knowledgeContextBlock || undefined,
       deviceConnectivity: req.deviceId
         ? {
             reachable: deviceConnectivity.reachable,
@@ -1743,7 +1850,7 @@ export class RDKClawApp {
     });
 
     const runPromise = agent
-      .run(sessionKey, effectiveMessage || "请结合当前附件继续处理。", {
+      .run(sessionKey, userMessageForPrompt || "请结合当前附件继续处理。", {
         studioRegenerate:
           Boolean(req.studioRegenerate) && (req.channel || "studio") === "studio",
       })
@@ -1835,7 +1942,7 @@ export class RDKClawApp {
       throw failed;
     }
     const completionText = String((runResult as any)?.text || "");
-    const promptText = [String(systemPrompt || ""), String(effectiveMessage || "")]
+    const promptText = [String(systemPrompt || ""), String(userMessageForPrompt || "")]
       .filter(Boolean)
       .join("\n\n");
     const promptTokens = estimateTextTokens(promptText);

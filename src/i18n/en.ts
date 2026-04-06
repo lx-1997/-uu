@@ -7,6 +7,7 @@ import { EN_EXTRAS } from './en-extras';
 export const EN: Record<string, string> = {
   // Top bar tab titles
   'tabs.dashboard': 'Workspace',
+  'tabs.bot-center': 'Bot Center',
   'tabs.ai-chat-hub': 'Chat',
   'tabs.skills': 'Skill Studio',
   'tabs.terminal': 'Terminal',
@@ -78,6 +79,8 @@ export const EN: Record<string, string> = {
   // Icon rail — primary
   'nav.dashboard.label': 'Workspace',
   'nav.dashboard.desc': 'Device status and shortcuts',
+  'nav.bot-center.label': 'Bot Center',
+  'nav.bot-center.desc': 'Product knowledge and robot setup',
   'nav.openclaw.label': 'OpenClaw',
   'nav.openclaw.desc': 'Gateway & device config',
   'nav.skills.label': 'Skill Studio',
@@ -167,27 +170,6 @@ export const EN: Record<string, string> = {
   'dock.ctx.copy': 'Copy',
   'dock.ctx.paste': 'Paste',
   'dock.ctx.selectAll': 'Select all',
-  'dock.mention.aria': 'Invoke capability',
-  'dock.mention.empty': 'No matching capabilities',
-  'dock.mention.flash.title': 'Flash wizard',
-  'dock.mention.flash.stepDevice': 'Device',
-  'dock.mention.flash.stepSource': 'Image source',
-  'dock.mention.flash.stepConfirm': 'Confirm',
-  'dock.mention.flash.hintDevice': 'Pick your board model (same as the flash page).',
-  'dock.mention.flash.hintSource': 'How you will supply the image; you can still change it on the flash page.',
-  'dock.mention.flash.hintConfirm': 'Opens the Image flash tab with these choices applied.',
-  'dock.mention.flash.optOfficial': 'Official catalog',
-  'dock.mention.flash.optOfficialDesc': 'Choose a version from the list on the flash page (S100 often uses product.zip / xburn).',
-  'dock.mention.flash.optLocal': 'Local image',
-  'dock.mention.flash.optLocalDesc': 'Browse or enter a local .img / .xz / .gz / .zip path on the flash page.',
-  'dock.mention.flash.next': 'Next',
-  'dock.mention.flash.openFlasher': 'Open flash page',
-  'dock.mention.flash.summaryDevice': 'Device',
-  'dock.mention.flash.summarySource': 'Image',
-  'dock.mention.flash.srcLocal': 'Local image file',
-  'dock.mention.flash.srcOfficial': 'Official image (pick version on the flash page)',
-  'dock.mention.flash.toastOpened': 'Opened image flash',
-  'dock.mention.flash.applied': 'Applied choices from @ flash',
   'dock.msg.took': 'Took',
   'dock.msg.replying': 'Replying…',
   'dock.stream.organizing': 'Organizing answer',
@@ -434,8 +416,20 @@ export const EN: Record<string, string> = {
   'dashboard.chatFirst': 'Open chat',
   'dashboard.restartOnboarding': 'Restart onboarding',
   'dashboard.deviceOnline': 'Device online',
+  'dashboard.deviceOffline': 'Device offline',
   'dashboard.devicePillHint':
-    '“Online” means the backend successfully authenticated over SSH with the saved credentials for this device. Without a stored password or if auth fails, it shows offline—reconnect the device to save credentials.',
+    '"Online" means the backend successfully authenticated over SSH with the saved credentials for this device. Without a stored password or if auth fails, it shows offline—reconnect the device to save credentials.',
+  'dashboard.rdkclaw.ok': 'RDKClaw service is running normally',
+  'dashboard.rdkclaw.checking': 'Checking RDKClaw status…',
+  'dashboard.rdkclaw.down': 'RDKClaw service is unavailable',
+  'dashboard.oc.checking': 'Checking OpenClaw status…',
+  'dashboard.oc.notInstalled': 'OpenClaw is not installed — go to the OpenClaw page to deploy',
+  'dashboard.oc.noNetwork': 'OpenClaw installed but board is offline — cannot reach cloud models',
+  'dashboard.oc.ready': 'OpenClaw is ready',
+  'dashboard.oc.gwDown': 'OpenClaw installed but gateway is not running',
+  'dashboard.device.onlineDetail': 'Device SSH connected — communication OK',
+  'dashboard.device.offlineDetail': 'Device not connected — check USB / Ethernet cable',
+  'dashboard.networkWarn': 'Board is connected but offline — AI chat, software install, and other network-dependent features are unavailable',
   'dashboard.oneShotDev': 'Quick build',
   'dashboard.healthCheck': 'Health check',
   'dashboard.metric.mem': 'MEM',
@@ -482,6 +476,68 @@ export const EN: Record<string, string> = {
   'sso.iframeTitle': 'D-Robotics SSO',
   'sso.bootstrapFail': 'Could not establish session; check the token or try again.',
   'sso.loginSuccess': 'Signed in successfully',
+
+  // IDE status (load timeout / error)
+  'ide.status.loadFail': 'Load error',
+  'ide.err.loadTimeout': 'Editor load timed out — try refreshing',
+
+  // VNC status enhancements
+  'vnc.toast.started': 'VNC service started, loading remote desktop…',
+  'vnc.toast.iframeOk': 'Remote desktop loaded',
+  'vnc.status.loadError': 'Load error',
+
+  // Flasher done phase
+  'flasher.phase.done': 'Flashing complete — eject media and power-on to verify boot',
+
+  // AIDock badge tooltips
+  'dock.badge.agentError': 'Last execution errored — retry or check logs',
+  'dock.badge.agentOk': 'RDKClaw agent ready',
+  'dock.badge.ocConnected': 'Connected to OpenClaw gateway on the board',
+  'dock.badge.ocOffline': 'OpenClaw not connected — ensure gateway is running and board is online',
+
+  // VNC iframe load timeout
+  'vnc.err.iframeTimeout': 'Remote desktop timed out — check network or retry',
+
+  // Files status
+  'files.status.connected': 'Connected to board via SSH',
+  'files.status.offline': 'Board disconnected — file operations may fail',
+  'files.status.offlineShort': 'Disconnected',
+
+  // IDE wording (board)
+  'ide.toast.connectDevice': 'Connect a board first',
+  'ide.err.deviceConn': 'Board connection failed',
+  'ide.toast.connFail': 'Failed to connect board: {{msg}}',
+
+  // DeviceGuard wording (board)
+  'deviceGuard.titleFeature': '{{feature}} requires a connected board',
+  'deviceGuard.title': 'Connect a board first',
+
+  // Device offline modal (board)
+  'device.offlineModal.title': 'Board offline',
+  'device.offlineModal.body': 'We rechecked the connection several times. The board «{{name}}» is not reachable over SSH. Check power, Ethernet, or TypeC, then reconnect from the sidebar.',
+
+  // IDE enhanced toasts
+  'ide.toast.notDetected': 'code-server not found on the board. Click "Install" below to auto-install, or install manually from the terminal.',
+  'ide.toast.notReady': 'code-server startup timed out. Try: (1) Click "Connect" to retry, (2) Check logs: cat /tmp/code-server.log in the terminal.',
+  'ide.loading.hint': 'First load may take 5–10 seconds',
+  'ide.welcome.descCs': 'Connect to code-server on {{ip}} to edit /root directly',
+  'ide.welcome.descWeb': 'Web-based VS Code editor with Chinese UI; connect to a board via Remote SSH',
+
+  // VNC enhanced toasts & error guidance
+  'vnc.toast.port': 'VNC port not ready. Try: (1) Run sudo systemctl restart x11vnc in the terminal, (2) Confirm a desktop environment is installed on the board.',
+  'vnc.err.troubleshoot': 'Troubleshooting: (1) Confirm a desktop environment is installed, (2) Run sudo systemctl status x11vnc in the terminal, (3) Check if port 5900 is already in use.',
+
+  // Files empty state
+  'files.empty.folder': 'This folder is empty',
+  'files.empty.uploadCta': 'Upload files here',
+  'files.empty.dragHint': 'You can also drag & drop files onto this page',
+
+  // OpenClaw deploy ETA exceeded
+  'oc.deploy.eta.exceeded': 'Step running for {{elapsed}}s (exceeded estimate of {{eta}}s) — still in progress, please wait…',
+
+  // Orchestrator IDE intent
+  'orc.ide.opening': 'Opening code editor…',
+  'orc.fallback.ide': 'Opening the code editor on {{device}}.',
 
   ...EN_EXTRAS,
 };

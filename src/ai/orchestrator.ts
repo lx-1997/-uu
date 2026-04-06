@@ -651,6 +651,13 @@ function createHandlers(ot: OrchI18n): Record<IntentId, HandlerFn> {
     },
   }),
 
+  ide: (_p, actions) => ({
+    text: '',
+    sideEffect: () => {
+      actions.openWorkspace('ide', t('orc.ide.opening', '正在打开代码编辑器…'));
+    },
+  }),
+
   openclaw_start: (_p, actions, _rc, startTaskAnimation) => ({
     text: '',
     sideEffect: () => {
@@ -873,6 +880,7 @@ function getFallbackText(intent: IntentId, deviceName: string, ot: OrchI18n): st
     file_upload: tf('orc.fallback.file_upload', '正在同步文件到 {{device}}。', { device: deviceName }),
     file_download: tf('orc.fallback.file_download', '正在从 {{device}} 下载文件。', { device: deviceName }),
     vnc: tf('orc.fallback.vnc', '正在连接 {{device}} 远程桌面。', { device: deviceName }),
+    ide: tf('orc.fallback.ide', '正在打开 {{device}} 代码编辑器。', { device: deviceName }),
     openclaw_start: t('orc.fallback.openclaw_start', '正在启动 OpenClaw 网关。'),
     openclaw_status: t('orc.fallback.openclaw_status', 'OpenClaw 网关当前状态：'),
     openclaw_switch: t('orc.fallback.openclaw_switch', '正在切换模型...'),

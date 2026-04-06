@@ -26,6 +26,7 @@ import {
 } from '../constants';
 import { parseMetrics } from '../utils/diagnostics';
 import { isDeviceShownOnline } from '../utils/device-connection';
+import { fetchWifiLinkState } from '../utils/wifi-link-probe';
 import {
   persistOpenClawHealthSnapshot,
   persistBoardSkillBundleHint,
@@ -254,6 +255,19 @@ export default function Dashboard() {
     diskPct: -1,
   });
   const [wsHealth, setWsHealth] = useState<Record<string, WorkspaceModule> | null>(null);
+  const [deviceNetUp, setDeviceNetUp] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!effectiveDevice) { setDeviceNetUp(null); return; }
+    const id = effectiveDevice.id;
+    let cancelled = false;
+    const probe = async () => {
+      const s = await fetchWifiLinkState(id);
+      if (!cancelled) setDeviceNetUp(s === 'up');
+    };
+    void probe();
+    const iv = setInterval(probe, DEVICE_DIAGNOSTICS_POLL_MS);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [effectiveDevice?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -506,7 +520,7 @@ export default function Dashboard() {
         <div className="dash-morph-halo secondary" />
         <div className="dash-empty-hero">
           <div className="dash-brand dash-enter">RDK Studio</div>
-          <p className="dash-tagline dash-enter dash-enter-d1">{t('dashboard.tagline', '连接设备后即可开始')}</p>
+          <p className="dash-tagline dash-enter dash-enter-d1">{t('dashboard.tagline', '连接开发板后即可开始')}</p>
           <button type="button" className="dash-action primary dash-enter dash-enter-d2" onClick={() => setShowAddDevice(true)}>
             <span className="dash-action-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -552,7 +566,7 @@ export default function Dashboard() {
       {/* ── Hero: device name as the centerpiece ── */}
       <div className="lp-hero lp-enter">
         <div className="lp-status-row">
-          <span className={`lp-pill ${studioBackendOk ? 'ok' : ''}`}>
+          <span className={`lp-pill ${studioBackendOk ? 'ok' : ''}`} title={studioBackendOk ? t('dashboard.rdkclaw.ok', 'RDKClaw 工作站服务正常') : studioBackendOk === null ? t('dashboard.rdkclaw.checking', 'RDKClaw 状态检测中…') : t('dashboard.rdkclaw.down', 'RDKClaw 工作站服务异常')}>
             <span
               className={`status-dot ${
                 studioBackendOk === null ? 'warn' : studioBackendOk ? 'online' : 'offline'
@@ -562,21 +576,36 @@ export default function Dashboard() {
             RDKClaw
           </span>
           <span
-            className={`lp-pill ${openclawHealth?.installed || openclawHealth?.gatewayRunning ? 'ok' : ''}`}
+            className={`lp-pill ${
+              openclawHealth?.installed || openclawHealth?.gatewayRunning
+                ? (deviceNetUp === false ? '' : 'ok')
+                : ''
+            }`}
+            title={
+              openclawHealth == null
+                ? t('dashboard.oc.checking', 'OpenClaw 状态检测中…')
+                : !openclawHealth.installed
+                  ? t('dashboard.oc.notInstalled', 'OpenClaw 未安装，请进入 OpenClaw 页面部署')
+                  : deviceNetUp === false
+                    ? t('dashboard.oc.noNetwork', 'OpenClaw 已安装但开发板未联网，无法访问云端模型')
+                    : openclawHealth.gatewayRunning
+                      ? t('dashboard.oc.ready', 'OpenClaw 已就绪')
+                      : t('dashboard.oc.gwDown', 'OpenClaw 已安装但网关未运行')
+            }
           >
             <span
               className={`status-dot ${
                 openclawHealth == null
                   ? 'warn'
                   : openclawHealth.installed || openclawHealth.gatewayRunning
-                    ? 'online'
+                    ? (deviceNetUp === false ? 'warn' : 'online')
                     : 'offline'
               }`}
             />
             <Shrimp size={14} strokeWidth={2.25} className="lp-pill-mark" aria-hidden />
             OpenClaw
           </span>
-          <span className={`lp-pill ${deviceChannelOk ? 'online' : ''}`}>
+          <span className={`lp-pill ${deviceChannelOk ? 'online' : ''}`} title={deviceChannelOk ? t('dashboard.device.onlineDetail', '设备 SSH 已连接，可正常通信') : t('dashboard.device.offlineDetail', '设备未连接，请检查 USB/ 网线连接')}>
             <span className={`status-dot ${deviceChannelOk ? 'online' : 'offline'}`} />
             {deviceChannelOk
               ? t('dashboard.deviceOnline', '设备在线')
@@ -585,6 +614,12 @@ export default function Dashboard() {
         </div>
         <h1 className="lp-device-name">{effectiveDevice.name}</h1>
         <p className="lp-device-ip">{effectiveDevice.ip}</p>
+        {deviceNetUp === false && deviceChannelOk && (
+          <p className="lp-network-warn" style={{ color: 'var(--color-accent, #e67e22)', fontSize: '0.82rem', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {t('dashboard.networkWarn', '开发板已连接但未联网 — AI 对话、软件安装等依赖网络的功能暂不可用')}
+          </p>
+        )}
       </div>
 
       {/* ── Live metrics strip ── */}

@@ -943,6 +943,15 @@
   background: var(--danger-subtle);
 }
 
+.btn-icon.topbar-wifi-btn--alert {
+  animation: wifi-alert-pulse 2s ease-in-out infinite;
+}
+
+@keyframes wifi-alert-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* ══════════════════════════
    Content Area
    ══════════════════════════ */

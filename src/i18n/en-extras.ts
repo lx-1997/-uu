@@ -56,8 +56,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'chat.board.lineUrl': 'Link: {{url}}',
   'chat.board.lineOut': 'Output excerpt: {{snippet}}',
 
-  'deviceGuard.titleFeature': '{{feature}} requires a connected device',
-  'deviceGuard.title': 'Connect a device first',
+  'deviceGuard.titleFeature': '{{feature}} requires a connected board',
+  'deviceGuard.title': 'Connect a board first',
   'deviceGuard.descFeature': 'Connect your RDK board to use {{feature}}. SSH or USB serial is supported.',
   'deviceGuard.desc': 'Connect your RDK board to use this feature. SSH or USB serial is supported.',
   'deviceGuard.addDevice': 'Add device',
@@ -70,7 +70,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'files.searchMulti': 'Found {{n}} matches; pick one',
   'files.searchNotFound': 'Not found: {{name}}',
   'files.searchError': 'Search failed',
-  'files.needDevice': 'Connect a real device first',
+  'files.needDevice': 'Connect a board first',
   'files.refreshFail': 'Failed to refresh directory',
   'files.downloadZip': 'Preparing archive…',
   'files.downloadStart': 'Downloading…',
@@ -813,7 +813,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'topbar.ip.copyFail': 'Copy failed; select text manually',
   'topbar.wifi.title': 'Configure Wi‑Fi',
   'topbar.wifi.titleConnected': 'Wi‑Fi connected (click to configure)',
-  'topbar.wifi.titleDisconnected': 'Wi‑Fi not connected (click to configure)',
+  'topbar.wifi.titleDisconnected': '⚠ Board is offline — AI chat and other features unavailable. Click to configure WiFi',
   'topbar.user.logout': 'Log out',
   'topbar.user.accountTitle': 'Account',
   'topbar.user.ssoDisabledHint':
@@ -1246,12 +1246,12 @@ export const EN_EXTRAS: Record<string, string> = {
   'vnc.log.waiting': 'Waiting for output…',
   'vnc.desktop.loaded': 'noVNC is open in a separate view',
   'vnc.welcome.title': 'Web remote desktop',
-  'vnc.welcome.desc': 'Connect to the device desktop over WebSocket — no install, low latency',
+  'vnc.welcome.desc': 'Connect to the board desktop over WebSocket — no install, low latency',
   'vnc.phase.checking': 'Checking VNC service…',
   'vnc.phase.connecting': 'Starting and connecting…',
   'vnc.retry': 'Retry',
   'vnc.connect': 'Start and connect',
-  'vnc.pickDeviceLeft': 'Select a device in the sidebar first',
+  'vnc.pickDeviceLeft': 'Select a board in the sidebar first',
   'vnc.hint.fullscreen':
     'Fullscreen: expands the remote desktop area; use Fill / Fit if the picture is small or has gray borders.',
   'vnc.hint.clipboard': 'Clipboard sync',
@@ -1266,7 +1266,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'vnc.status.ready': 'VNC service ready',
   'vnc.status.notRunning': 'VNC service not running',
   'vnc.status.unknown': 'Could not get status',
-  'vnc.toast.connectDevice': 'Connect a device first',
+  'vnc.toast.connectDevice': 'Connect a board first',
   'vnc.toast.connectingWait':
     'Connecting remote desktop (one VNC session at a time). You can still open one editor alongside it.',
   'vnc.toast.singleSessionOnly':

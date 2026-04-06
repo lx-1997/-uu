@@ -72,11 +72,31 @@ interface ConfigData {
   };
 }
 
+interface ModelHealthSnapshot {
+  signature: string;
+  lastSuccessAt: number;
+  lastFailureAt: number;
+  consecutiveFailures: number;
+  source: 'manual' | 'chat';
+}
+
 interface ChatMessage {
   id: number;
   role: 'user' | 'assistant';
   text: string;
 }
+
+type OpenClawChatPhase =
+  | 'connecting'
+  | 'ready'
+  | 'thinking'
+  | 'responding'
+  | 'waiting_rdkclaw'
+  | 'need_rdkclaw'
+  | 'executing'
+  | 'completed'
+  | 'error'
+  | 'disconnected';
 
 type DeployStepState = 'pending' | 'running' | 'done' | 'error';
 type DeployStepName = 'check' | 'prepare' | 'install' | 'config';
@@ -95,6 +115,14 @@ interface SetupStatus {
   gateway: 'ok' | 'warn' | 'error';
   model: 'ok' | 'warn' | 'unconfigured';
   feishu: 'ok' | 'warn' | 'unconfigured';
+}
+
+interface DeployPrecheck {
+  network: 'checking' | 'ok' | 'fail' | 'skip';
+  deps: 'checking' | 'ok' | 'fail' | 'skip';
+  npm: 'checking' | 'ok' | 'fail' | 'skip';
+  overall: 'idle' | 'checking' | 'ok' | 'warn' | 'fail';
+  detail: string;
 }
 
 /* ═══════════════════════════════════════════
@@ -174,7 +202,46 @@ function inferPresetFromGateway(mg: { baseUrl?: string; modelId?: string }): str
   return '';
 }
 
+function getVendorProbeFingerprint(input: {
+  baseUrl?: string;
+  apiKey?: string;
+  modelId?: string;
+  api?: string;
+}): string {
+  return JSON.stringify({
+    baseUrl: String(input.baseUrl || '').trim(),
+    apiKey: String(input.apiKey || '').trim(),
+    modelId: String(input.modelId || '').trim(),
+    api: String(input.api || '').trim(),
+  });
+}
+
+function getModelHealthSignature(input: {
+  baseUrl?: string;
+  modelId?: string;
+  api?: string;
+  primaryModel?: string;
+  runtimeProvider?: string;
+}): string {
+  return JSON.stringify({
+    baseUrl: String(input.baseUrl || '').trim(),
+    modelId: String(input.modelId || '').trim(),
+    api: String(input.api || '').trim(),
+    primaryModel: String(input.primaryModel || '').trim(),
+    runtimeProvider: String(input.runtimeProvider || '').trim(),
+  });
+}
+
+const MODEL_HEALTH_STORAGE_PREFIX = 'oc-model-health';
+const MODEL_HEALTH_CONSECUTIVE_FAILS = 2;
+
 const DEPLOY_LOG_MAX_LINES = 2500;
+const DEPLOY_STEP_ETA_SECONDS: Record<DeployStepName, number> = {
+  check: 15,
+  prepare: 45,
+  install: 600,
+  config: 20,
+};
 
 function sanitizeDeployLogLine(line: string): string {
   return sanitizeTerminalLineForDisplay(line)
@@ -370,8 +437,6 @@ export default function OpenClaw() {
     [t, language],
   );
 
-  const providerDisplayLabel = useCallback((key: string, preset: ProviderPreset) => t(`oc.provider.${key}`, preset.label), [t]);
-
   // ─── Data State ───
   const [status, setStatus] = useState<GatewayStatus | null>(null);
   const [config, setConfig] = useState<ConfigData | null>(null);
@@ -404,6 +469,7 @@ export default function OpenClaw() {
   };
   const [chatConnected, setChatConnected] = useState(false);
   const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatPhase, setChatPhase] = useState<OpenClawChatPhase>('connecting');
   /** 页面内对话输入（快捷 chip 下方） */
   const [ocComposerText, setOcComposerText] = useState('');
   /** `openclaw:ready` 仅保证 SSH 会话就绪，需结合状态接口判断 Agent 是否真可用 */
@@ -428,8 +494,14 @@ export default function OpenClaw() {
     thinkingDefault: '',
     reasoning: '',
   });
-  const [selectedPreset, setSelectedPreset] = useState('volcengine');
   const [vendorApiTest, setVendorApiTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [vendorApiProbe, setVendorApiProbe] = useState<{ status: 'unknown' | 'ok' | 'fail'; fingerprint: string }>({
+    status: 'unknown',
+    fingerprint: '',
+  });
+  const [modelHealthSnapshot, setModelHealthSnapshot] = useState<ModelHealthSnapshot | null>(null);
+  /** Background model API reachability status (auto-checked when gateway running + config loaded) */
+  const [modelApiReachable, setModelApiReachable] = useState<'unknown' | 'checking' | 'ok' | 'fail'>('unknown');
 
   // ─── Feishu Config State ───
   const [feishuConfig, setFeishuConfig] = useState({
@@ -456,6 +528,7 @@ export default function OpenClaw() {
   const [deployApiKey, setDeployApiKey] = useState('');
   const [deployModelId, setDeployModelId] = useState(() => PROVIDER_PRESETS.volcengine.models[0] || '');
   const [deployApi, setDeployApi] = useState('openai-completions');
+  const [deployNpmRegistry, setDeployNpmRegistry] = useState('');
   const [deployFeishuAppId, setDeployFeishuAppId] = useState('');
   const [deployFeishuAppSecret, setDeployFeishuAppSecret] = useState('');
   /** 与 RDKClaw 设置中当前模型一致：已在服务端保存 API Key（或环境变量 OPENAI_API_KEY） */
@@ -468,8 +541,32 @@ export default function OpenClaw() {
   const [deployLastError, setDeployLastError] = useState('');
   /** 安装阶段长时间无新日志时提示（非错误） */
   const [deployCancelLoading, setDeployCancelLoading] = useState(false);
+  const [deployPrecheck, setDeployPrecheck] = useState<DeployPrecheck>({
+    network: 'skip',
+    deps: 'skip',
+    npm: 'skip',
+    overall: 'idle',
+    detail: '',
+  });
+  const [deployStepEtaSec, setDeployStepEtaSec] = useState<number | null>(null);
+  const [deployStepElapsedSec, setDeployStepElapsedSec] = useState<number>(0);
   /** 一键部署或取消部署请求进行中：与板端 SSH/安装冲突，需锁定网关类操作 */
   const boardDeployBusy = deployRunning || deployCancelLoading;
+
+  // ─── Device network (WiFi/Ethernet) link state ───
+  const [deviceNetUp, setDeviceNetUp] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!currentDevice) { setDeviceNetUp(null); return; }
+    const id = currentDevice.id;
+    let cancelled = false;
+    const probe = async () => {
+      const s = await fetchWifiLinkState(id);
+      if (!cancelled) setDeviceNetUp(s === 'up');
+    };
+    void probe();
+    const iv = setInterval(probe, DEVICE_POLL_PHASE_OPENCLAW_WIFI_TICK_MS);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [currentDevice?.id]);
 
   /** 输入框可编辑（仅发送受 `openclawAgentReady` 约束），避免「全灰无说明」 */
   const ocComposerEditable = useMemo(
@@ -477,13 +574,141 @@ export default function OpenClaw() {
     [currentDevice, ocInstalled, statusLoading, deployRunning, chatStreaming],
   );
 
+  const currentVendorProbeFingerprint = useMemo(
+    () => getVendorProbeFingerprint(modelConfig),
+    [modelConfig.baseUrl, modelConfig.apiKey, modelConfig.modelId, modelConfig.api],
+  );
+
+  const currentBoardModelHealthSignature = useMemo(
+    () => getModelHealthSignature({
+      baseUrl: config?.modelGateway?.baseUrl,
+      modelId: config?.modelGateway?.modelId,
+      api: config?.modelGateway?.api,
+      primaryModel: config?.primaryModel,
+      runtimeProvider: config?.runtimeModel?.provider,
+    }),
+    [config?.modelGateway?.baseUrl, config?.modelGateway?.modelId, config?.modelGateway?.api, config?.primaryModel, config?.runtimeModel?.provider],
+  );
+
+  const localVendorApiVerifiedForCurrentConfig = useMemo(
+    () => vendorApiProbe.status === 'ok' && vendorApiProbe.fingerprint === currentVendorProbeFingerprint,
+    [vendorApiProbe, currentVendorProbeFingerprint],
+  );
+
+  const modelHealthStorageKey = currentDevice ? `${MODEL_HEALTH_STORAGE_PREFIX}-${currentDevice.id}` : '';
+
+  const writeModelHealthSnapshot = useCallback((next: ModelHealthSnapshot | null) => {
+    setModelHealthSnapshot(next);
+    if (!modelHealthStorageKey) return;
+    try {
+      if (next) localStorage.setItem(modelHealthStorageKey, JSON.stringify(next));
+      else localStorage.removeItem(modelHealthStorageKey);
+    } catch { /* ignore */ }
+  }, [modelHealthStorageKey]);
+
+  const markModelHealthy = useCallback((source: 'manual' | 'chat', signatureOverride?: string) => {
+    const signature = signatureOverride || currentBoardModelHealthSignature;
+    if (!signature) return;
+    const now = Date.now();
+    writeModelHealthSnapshot({
+      signature,
+      lastSuccessAt: now,
+      lastFailureAt: 0,
+      consecutiveFailures: 0,
+      source,
+    });
+  }, [currentBoardModelHealthSignature, writeModelHealthSnapshot]);
+
+  const markModelFailure = useCallback((source: 'manual' | 'chat', signatureOverride?: string, hard = false) => {
+    const signature = signatureOverride || currentBoardModelHealthSignature;
+    if (!signature) return;
+    const now = Date.now();
+    const prev = modelHealthSnapshot && modelHealthSnapshot.signature === signature ? modelHealthSnapshot : null;
+    writeModelHealthSnapshot({
+      signature,
+      lastSuccessAt: prev?.lastSuccessAt || 0,
+      lastFailureAt: now,
+      consecutiveFailures: hard ? MODEL_HEALTH_CONSECUTIVE_FAILS : Math.max(1, (prev?.consecutiveFailures || 0) + 1),
+      source,
+    });
+  }, [currentBoardModelHealthSignature, modelHealthSnapshot, writeModelHealthSnapshot]);
+
+  const hasHardModelFailureForCurrentConfig = useMemo(
+    () => !!(
+      currentBoardModelHealthSignature
+      && modelHealthSnapshot?.signature === currentBoardModelHealthSignature
+      && modelHealthSnapshot.consecutiveFailures >= MODEL_HEALTH_CONSECUTIVE_FAILS
+      && modelHealthSnapshot.lastFailureAt >= modelHealthSnapshot.lastSuccessAt
+    ),
+    [currentBoardModelHealthSignature, modelHealthSnapshot],
+  );
+
+  const getChatPhaseLabel = useCallback((phase: OpenClawChatPhase) => {
+    switch (phase) {
+      case 'connecting': return t('oc.chat.phase.connecting', '连接中');
+      case 'ready': return t('oc.chat.phase.ready', '已就绪');
+      case 'thinking': return t('oc.chat.phase.thinking', '思考中');
+      case 'responding': return t('oc.chat.phase.responding', '回复中');
+      case 'waiting_rdkclaw': return t('oc.chat.phase.waitingRdkclaw', '等待 RDKClaw 放行');
+      case 'need_rdkclaw': return t('oc.chat.phase.needRdkclaw', '需要 RDKClaw 补充信息');
+      case 'executing': return t('oc.chat.phase.executing', '执行中');
+      case 'completed': return t('oc.chat.phase.completed', '已完成');
+      case 'error': return t('oc.chat.phase.error', '异常');
+      case 'disconnected': return t('oc.chat.phase.disconnected', '已断开');
+      default: return t('oc.chat.phase.connecting', '连接中');
+    }
+  }, [t]);
+
+  const getChatPhaseHint = useCallback((phase: OpenClawChatPhase) => {
+    switch (phase) {
+      case 'thinking': return t('oc.chat.phaseHint.thinking', '板端 Agent 正在整理上下文与计划，请稍候。');
+      case 'responding': return t('oc.chat.phaseHint.responding', '板端 Agent 已开始回传结果。');
+      case 'waiting_rdkclaw': return t('oc.chat.phaseHint.waitingRdkclaw', '板端正在做对齐确认，等待 RDKClaw 补充或放行后再继续执行。');
+      case 'need_rdkclaw': return t('oc.chat.phaseHint.needRdkclaw', '板端缺少联网文档或上游信息，正在请求 RDKClaw 补充。');
+      case 'executing': return t('oc.chat.phaseHint.executing', '板端已进入执行阶段，正在落地命令或技能链。');
+      case 'error': return t('oc.chat.phaseHint.error', '本轮对话出现异常，可查看最后一条错误信息。');
+      case 'disconnected': return t('oc.chat.phaseHint.disconnected', '设备会话已断开，系统会在需要时自动重连。');
+      case 'completed': return t('oc.chat.phaseHint.completed', '本轮已完成，可以继续下一轮。');
+      case 'ready': return t('oc.chat.phaseHint.ready', '板端会话已就绪，可以开始对话。');
+      default: return t('oc.chat.phaseHint.connecting', '正在建立与板端的协作会话。');
+    }
+  }, [t]);
+
+  const chatPhaseToneClass = useMemo(() => {
+    switch (chatPhase) {
+      case 'completed':
+      case 'ready':
+        return 'is-ok';
+      case 'error':
+      case 'disconnected':
+        return 'is-error';
+      case 'waiting_rdkclaw':
+      case 'need_rdkclaw':
+      case 'thinking':
+      case 'executing':
+      case 'responding':
+        return 'is-warn';
+      default:
+        return '';
+    }
+  }, [chatPhase]);
+
   const ocComposerBlockHint = useMemo(() => {
     if (!currentDevice || !ocInstalled || deployRunning) return '';
     if (statusLoading) return t('oc.composer.hint.statusLoading', '正在同步网关状态…');
     if (!chatConnected) return t('oc.composer.hint.connecting', '正在建立与设备的会话，请稍候…');
+    if (chatStreaming) return getChatPhaseHint(chatPhase);
     if (!status?.running) return t('oc.composer.hint.gatewayDown', '网关未运行：请先点击「重启网关」或等待自动恢复后再发送。');
+    if (deviceNetUp === false) return t('oc.composer.hint.networkOffline', '开发板未联网：对话需要访问云端模型 API，请先为开发板连接 Wi‑Fi 或网线。');
+    if (!hasBoardModelSelection()) return t('oc.composer.hint.modelMissing', '尚未配置模型：请先在右侧面板保存模型配置后再发送。');
+    if (!hasBoardModelCredentials()) return t('oc.composer.hint.modelCredentialMissing', '已选择模型，但未检测到可用 API Key；请在右侧补全凭据后再发送。');
+    if (modelApiReachable === 'fail') {
+      return localVendorApiVerifiedForCurrentConfig
+        ? t('oc.composer.hint.modelApiBoardFailAfterVendorOk', '厂商 API 已验证可用，但板端实际链路仍失败：请检查是否已保存到板端、网关信任、板端网络或运行时密钥。')
+        : t('oc.composer.hint.modelApiFail', '模型连通检查失败：请检查 API Key、Base URL、网关信任状态或网络后重试。');
+    }
     return '';
-  }, [currentDevice, ocInstalled, deployRunning, statusLoading, chatConnected, status?.running, t]);
+  }, [currentDevice, ocInstalled, deployRunning, statusLoading, chatConnected, chatStreaming, chatPhase, status?.running, deviceNetUp, modelApiReachable, config?.primaryModel, config?.modelGateway?.modelId, config?.modelGateway?.apiKey, config?.runtimeModel?.apiKey, localVendorApiVerifiedForCurrentConfig, t, getChatPhaseHint]);
 
   // ─── Post-install Guide State ───
   const [showSetupGuide, setShowSetupGuide] = useState(false);
@@ -511,9 +736,32 @@ export default function OpenClaw() {
   const deployRunningRef = useRef(false);
   /** 与 `>>> uninstall` 等同一条助手消息流：首轮 append，后续 updateLastAssistant */
   const deployLogBubbleInitializedRef = useRef(false);
+  const deployStepStartedAtRef = useRef<number>(0);
   useEffect(() => {
     deployRunningRef.current = deployRunning;
   }, [deployRunning]);
+
+  useEffect(() => {
+    if (!deployRunning || deploySteps.length === 0) {
+      setDeployStepEtaSec(null);
+      setDeployStepElapsedSec(0);
+      deployStepStartedAtRef.current = 0;
+      return;
+    }
+    const idx = deploySteps.findIndex((s) => s === 'running');
+    if (idx < 0) return;
+    const order: DeployStepName[] = ['check', 'prepare', 'install', 'config'];
+    const step = order[idx];
+    const eta = DEPLOY_STEP_ETA_SECONDS[step] || null;
+    setDeployStepEtaSec(eta);
+    deployStepStartedAtRef.current = Date.now();
+    setDeployStepElapsedSec(0);
+    const iv = setInterval(() => {
+      const elapsed = Math.round((Date.now() - deployStepStartedAtRef.current) / 1000);
+      setDeployStepElapsedSec(elapsed);
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [deployRunning, deploySteps]);
   const nextChatMessageId = useCallback(() => {
     const now = Date.now();
     if (now <= messageIdRef.current) {
@@ -526,6 +774,42 @@ export default function OpenClaw() {
 
   const stopDeployPolling = () => {
     stopOpenClawDeployPoll();
+  };
+
+  const runDeployPrecheck = async () => {
+    if (!currentDevice || deployRunning) return;
+    setDeployPrecheck({ network: 'checking', deps: 'checking', npm: 'checking', overall: 'checking', detail: '' });
+    try {
+      const statusRes = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/status`);
+      if (!statusRes.ok) {
+        setDeployPrecheck({ network: 'fail', deps: 'skip', npm: 'skip', overall: 'fail', detail: `HTTP ${statusRes.status}` });
+        return;
+      }
+      const checkRes = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await checkRes.json().catch(() => ({} as { output?: string; error?: string }));
+      const out = String(data?.output || data?.error || '').toLowerCase();
+      const hasNpmErr = /npm err|eai_again|etimedout|network|registry/i.test(out);
+      const hasDepErr = /node|not found|missing|permission denied|failed/i.test(out);
+      const ok = checkRes.ok && !hasDepErr;
+      setDeployPrecheck({
+        network: checkRes.ok ? (hasNpmErr ? 'fail' : 'ok') : 'fail',
+        deps: ok ? 'ok' : 'fail',
+        npm: hasNpmErr ? 'fail' : 'ok',
+        overall: ok && !hasNpmErr ? 'ok' : (ok ? 'warn' : 'fail'),
+        detail: String(data?.output || data?.error || '').slice(-300),
+      });
+      if (ok) {
+        addToast?.(tRef.current('oc.deploy.precheck.ok', '预检完成：设备可安装 OpenClaw'), 'success');
+      } else {
+        addToast?.(tRef.current('oc.deploy.precheck.warn', '预检发现风险，建议先修复后再安装'), 'warning');
+      }
+    } catch (e: any) {
+      setDeployPrecheck({ network: 'fail', deps: 'fail', npm: 'fail', overall: 'fail', detail: e?.message || '' });
+      addToast?.(tRef.current('oc.deploy.precheck.fail', '预检失败，请检查设备连接后重试'), 'error');
+    }
   };
   const beginDeployPolling = (jobId: string) => {
     if (!currentDevice) return;
@@ -623,6 +907,34 @@ export default function OpenClaw() {
       }
     }
   }, [currentDevice, activeTab, dashboardTab]);
+
+  useEffect(() => {
+    if (!modelHealthStorageKey) {
+      setModelHealthSnapshot(null);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(modelHealthStorageKey);
+      if (!raw) {
+        setModelHealthSnapshot(null);
+        return;
+      }
+      const parsed = JSON.parse(raw) as ModelHealthSnapshot;
+      setModelHealthSnapshot(parsed && typeof parsed.signature === 'string' ? parsed : null);
+    } catch {
+      setModelHealthSnapshot(null);
+    }
+  }, [modelHealthStorageKey, currentBoardModelHealthSignature]);
+
+  /** Derive model readiness from prerequisites + cached real outcomes; avoid active probes that consume tokens */
+  useEffect(() => {
+    if (!currentDevice || activeTab !== 'openclaw') return;
+    if (!status?.running || statusLoading) { setModelApiReachable('unknown'); return; }
+    if (!hasBoardModelSelection()) { setModelApiReachable('unknown'); return; }
+    if (deviceNetUp === false) { setModelApiReachable('fail'); return; }
+    if (!hasBoardModelCredentials()) { setModelApiReachable('unknown'); return; }
+    setModelApiReachable(hasHardModelFailureForCurrentConfig ? 'fail' : 'ok');
+  }, [currentDevice?.id, activeTab, status?.running, statusLoading, config?.modelGateway?.modelId, config?.primaryModel, config?.runtimeModel?.apiKey, deviceNetUp, hasHardModelFailureForCurrentConfig]);
 
   useEffect(() => {
     if (!currentDevice || activeTab !== 'openclaw') return;
@@ -789,6 +1101,7 @@ export default function OpenClaw() {
       }
       setChatConnected(false);
       setChatStreaming(false);
+      setChatPhase('disconnected');
       return;
     }
 
@@ -797,11 +1110,16 @@ export default function OpenClaw() {
 
     socket.on('connect', () => {
       setChatConnected(false);
+      setChatPhase('connecting');
       socket.emit('openclaw:start', { deviceId: currentDevice.id });
     });
     socket.on('openclaw:ready', () => {
       setChatConnected(true);
+      setChatPhase('ready');
       void loadStatus();
+    });
+    socket.on('openclaw:phase', (data: { phase?: OpenClawChatPhase }) => {
+      if (data?.phase) setChatPhase(data.phase);
     });
     socket.on('openclaw:data', (data: { chunk: string }) => {
       setChatMessages((prev) => {
@@ -814,16 +1132,24 @@ export default function OpenClaw() {
     });
     socket.on('openclaw:complete', () => {
       setChatStreaming(false);
+      setChatPhase('completed');
+      let completedWithUsefulAssistantText = false;
       setChatMessages((prev) => {
         const last = prev[prev.length - 1];
+        completedWithUsefulAssistantText = !!(last && last.role === 'assistant' && last.text.trim() && !last.text.startsWith(tRef.current('oc.chat.errorPrefix', '**错误：**')));
         if (last && last.role === 'assistant' && !last.text.trim()) {
           return [...prev.slice(0, -1), { ...last, text: tRef.current('oc.chat.emptyResponse', 'OpenClaw 未返回有效内容，请检查网关状态或设备密码。') }];
         }
         return prev;
       });
+      if (completedWithUsefulAssistantText) {
+        markModelHealthy('chat');
+      }
     });
     socket.on('openclaw:error', (data: { error: string }) => {
       setChatStreaming(false);
+      setChatPhase('error');
+      markModelFailure('chat');
       setChatMessages((prev) => [...prev, {
         id: nextChatMessageId(),
         role: 'assistant',
@@ -831,9 +1157,9 @@ export default function OpenClaw() {
       }]);
       addToast?.(data.error || tRef.current('oc.toast.chatErr', 'OpenClaw 对话异常'), 'error');
     });
-    socket.on('openclaw:disconnected', () => { setChatConnected(false); setChatStreaming(false); });
-    socket.on('disconnect', () => { setChatConnected(false); setChatStreaming(false); });
-    socket.on('connect_error', () => { setChatConnected(false); setChatStreaming(false); });
+    socket.on('openclaw:disconnected', () => { setChatConnected(false); setChatStreaming(false); setChatPhase('disconnected'); });
+    socket.on('disconnect', () => { setChatConnected(false); setChatStreaming(false); setChatPhase('disconnected'); });
+    socket.on('connect_error', () => { setChatConnected(false); setChatStreaming(false); setChatPhase('error'); });
 
     return () => {
       socket.emit('openclaw:stop', { deviceId: currentDevice.id });
@@ -904,7 +1230,6 @@ export default function OpenClaw() {
       setConfig(data);
       if (data.modelGateway) {
         setModelConfig(data.modelGateway);
-        setSelectedPreset(inferPresetFromGateway(data.modelGateway));
       }
       if (data.agentDefaults) {
         setAgentDefaults({
@@ -953,7 +1278,6 @@ export default function OpenClaw() {
       api,
       modelName: (entry.label || '').trim() || modelId,
     });
-    setSelectedPreset(inferPresetFromGateway({ baseUrl, modelId }));
   };
 
   /**
@@ -1019,29 +1343,13 @@ export default function OpenClaw() {
       })
       .join('\n');
     setDeployOutput(out);
-    const formatDeployChat = (raw: string) => {
-      const body = raw.trim() || tRef.current('oc.run.running', '执行中...');
-      return `\`>>> deploy\`\n\n\`\`\`\n${body}\n\`\`\``;
-    };
-    const syncDeployToChat = (raw: string) => {
-      const text = formatDeployChat(raw);
-      if (!deployLogBubbleInitializedRef.current) {
-        appendSystemMessage(text);
-        deployLogBubbleInitializedRef.current = true;
-      } else {
-        updateLastAssistant(text);
-      }
-    };
-
     if (job.status === 'running') {
       setDeployLastError('');
       setDeploySteps(stepOrder.map((name) => job.steps?.[name] || 'pending'));
       setDeployRunning(true);
-      syncDeployToChat(out);
       return;
     }
 
-    syncDeployToChat(out);
     deployLogBubbleInitializedRef.current = false;
 
     setDeployRunning(false);
@@ -1055,12 +1363,11 @@ export default function OpenClaw() {
     if (job.status === 'done') {
       setDeployLastError('');
       setDeploySteps([]);
-      appendSystemMessage(tRef.current('oc.deploy.done', '**部署完成！** 模型配置已写入，Gateway 正在重启...'));
+      addToast?.(tRef.current('oc.deploy.doneToast', '部署完成，网关正在重启'), 'success');
       setTimeout(async () => {
         await loadConfig();
         await loadStatus();
         if (deployFeishuAppId.trim() && deployFeishuAppSecret.trim()) {
-          appendSystemMessage(tRef.current('oc.deploy.feishuWriting', '正在写入飞书配置...'));
           try {
             await fetchApi(`/api/devices/${currentDevice?.id}/openclaw/config`, {
               method: 'POST',
@@ -1077,11 +1384,10 @@ export default function OpenClaw() {
                 },
               }),
             });
-            appendSystemMessage(tRef.current('oc.deploy.feishuDone', '**飞书配置已写入！** Gateway 已重启。'));
             addToast?.(tRef.current('oc.toast.feishuSaved', '飞书配置已保存'), 'success');
             setTimeout(() => { loadConfig(); loadStatus(); }, 1500);
           } catch {
-            appendSystemMessage(tRef.current('oc.deploy.feishuFail', '飞书配置写入失败，请在控制面板中手动配置。'));
+            addToast?.(tRef.current('oc.deploy.feishuFail', '飞书配置写入失败，请在控制面板中手动配置。'), 'warning');
           }
         }
         setShowSetupGuide(true);
@@ -1099,7 +1405,7 @@ export default function OpenClaw() {
         : job.error || tRef.current('oc.deploy.fail', '部署失败，请查看日志输出');
     setDeployLastError(err);
     setDeploySteps(normalizeDeployStepsFromJob(job));
-    appendSystemMessage(fillTemplate(tRef.current('oc.deploy.failMsg', '**部署失败：** {{detail}}'), { detail: err }));
+    addToast?.(fillTemplate(tRef.current('oc.deploy.failMsg', '部署失败：{{detail}}'), { detail: err }), 'error');
   };
 
   applyDeployJobRef.current = applyDeployJob;
@@ -1197,6 +1503,7 @@ export default function OpenClaw() {
       { id: nextChatMessageId(), role: 'assistant', text: '' },
     ]);
     setChatStreaming(true);
+    setChatPhase('thinking');
     socketRef.current.emit('openclaw:send', { deviceId: currentDevice.id, message: userText });
   }, [currentDevice, openclawAgentReady, chatStreaming, nextChatMessageId]);
 
@@ -1300,25 +1607,19 @@ export default function OpenClaw() {
     }
   };
 
-  const handleProviderPresetChange = (key: string) => {
-    setSelectedPreset(key);
-    if (key && PROVIDER_PRESETS[key]) {
-      const preset = PROVIDER_PRESETS[key];
-      setModelConfig((prev) => ({
-        ...prev,
-        baseUrl: preset.baseUrl,
-        api: preset.api,
-        modelId: preset.models[0] || prev.modelId,
-        modelName: providerDisplayLabel(key, preset),
-      }));
-    }
-  };
-
   const testVendorApiConnection = async () => {
     if (!modelConfig.baseUrl.trim() || !modelConfig.apiKey.trim() || !modelConfig.modelId.trim()) {
       addToast?.(t('oc.test.vendorMissing', '请填写 Base URL、模型 ID 与 API Key'), 'warning');
       return;
     }
+    const fingerprint = getVendorProbeFingerprint(modelConfig);
+    const healthSignature = getModelHealthSignature({
+      baseUrl: modelConfig.baseUrl,
+      modelId: modelConfig.modelId,
+      api: modelConfig.api,
+      primaryModel: config?.primaryModel,
+      runtimeProvider: config?.runtimeModel?.provider,
+    });
     setVendorApiTest('testing');
     try {
       const res = await fetchApi('/api/openclaw/vendor-model-ping', {
@@ -1334,6 +1635,9 @@ export default function OpenClaw() {
       const data = await res.json();
       const passed = !!data?.ok;
       setVendorApiTest(passed ? 'ok' : 'fail');
+      setVendorApiProbe({ status: passed ? 'ok' : 'fail', fingerprint });
+      if (passed) markModelHealthy('manual', healthSignature);
+      else markModelFailure('manual', healthSignature, true);
       if (passed) {
         const ms = typeof data?.latencyMs === 'number' ? data.latencyMs : null;
         addToast?.(
@@ -1348,6 +1652,8 @@ export default function OpenClaw() {
       }
     } catch {
       setVendorApiTest('fail');
+      setVendorApiProbe({ status: 'fail', fingerprint });
+      markModelFailure('manual', healthSignature, true);
       addToast?.(t('oc.test.vendorFailNet', '厂商 API 测试失败（网络或服务异常）'), 'error');
     }
     setTimeout(() => setVendorApiTest('idle'), 5000);
@@ -1386,6 +1692,7 @@ export default function OpenClaw() {
           apiKey: deployApiKey.trim() || undefined,
           modelId: deployModelId.trim(),
           api,
+          npmRegistry: deployNpmRegistry.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -1595,6 +1902,32 @@ export default function OpenClaw() {
               >
                 {t('oc.deploy.retryDeploy', '重新部署')}
               </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void runAction('doctor')}
+                disabled={!!activeOp || boardDeployBusy}
+                title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}
+              >
+                {t('oc.deploy.quickRepair', '一键诊断修复')}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {deployRunning ? (
+          <div className="oc-deploy-main-hint" role="status" style={{ marginBottom: 8 }}>
+            <span className="material-symbols-outlined oc-deploy-main-hint-icon" aria-hidden>
+              schedule
+            </span>
+            <div className="oc-deploy-main-hint-body">
+              <strong>{t('oc.deploy.eta.title', '安装进度提示')}</strong>
+              <p>
+                {deployStepEtaSec
+                  ? (deployStepElapsedSec > deployStepEtaSec
+                      ? tf('oc.deploy.eta.exceeded', '当前步骤已运行 {{elapsed}}s（超出预估 {{eta}}s），仍在执行中，请耐心等待…', { elapsed: deployStepElapsedSec, eta: deployStepEtaSec })
+                      : tf('oc.deploy.eta.running', '当前步骤已运行 {{elapsed}}s，预计约 {{eta}}s（网络波动会影响耗时）', { elapsed: deployStepElapsedSec, eta: deployStepEtaSec }))
+                  : tf('oc.deploy.eta.fallback', '当前步骤已运行 {{elapsed}}s', { elapsed: deployStepElapsedSec })}
+              </p>
             </div>
           </div>
         ) : null}
@@ -1615,6 +1948,14 @@ export default function OpenClaw() {
     if (config.modelGateway?.modelId?.trim()) return config.modelGateway.modelId.trim();
     return t('oc.summary.notConfigured', '未配置');
   };
+
+  function hasBoardModelSelection() {
+    return !!(config?.primaryModel?.trim() || config?.modelGateway?.modelId?.trim());
+  }
+
+  function hasBoardModelCredentials() {
+    return !!(config?.modelGateway?.apiKey?.trim() || config?.runtimeModel?.apiKey?.trim());
+  }
 
   const getCurrentModel = () => getBoardModelNameForDisplay();
 
@@ -1650,6 +1991,27 @@ export default function OpenClaw() {
     );
   };
 
+  const getModelStatusTitle = () => {
+    if (modelApiReachable === 'ok') {
+      return t('oc.status.modelApiOk', '模型 API 连通正常');
+    }
+    if (modelApiReachable === 'fail') {
+      if (localVendorApiVerifiedForCurrentConfig) {
+        return t('oc.status.modelReachabilityBoardFailAfterVendorOk', '本机直连厂商 API 已通过，但板端实际链路仍不可达；请检查是否已保存到板端、网关信任、板端网络或运行时密钥。');
+      }
+      return t('oc.status.modelReachabilityFail', '模型连通检查失败 — 请检查 API Key、Base URL、网关信任或网络。');
+    }
+    if (modelApiReachable === 'checking') {
+      return t('oc.status.modelApiChecking', '正在检测模型 API 连通性…');
+    }
+    if (hasBoardModelSelection()) {
+      return hasBoardModelCredentials()
+        ? t('oc.status.modelConfiguredPending', '模型已配置；将在条件满足时继续检测连通性。')
+        : t('oc.status.modelCredentialsMissing', '已选择模型，但未检测到可用凭据；请在本页保存 API Key，或确认运行时 provider 已配置密钥。');
+    }
+    return getStatusBarModelTitle();
+  };
+
   const getConfigSummary = () => {
     const na = t('oc.summary.notConfigured', '未配置');
     const ok = t('oc.summary.configured', '已配置');
@@ -1666,7 +2028,7 @@ export default function OpenClaw() {
 
   const getSetupStatus = (): SetupStatus => {
     const installed = !!(status?.installed ?? status?.version?.trim());
-    const modelOk = !!(config?.modelGateway?.baseUrl && config?.modelGateway?.apiKey);
+    const modelOk = hasBoardModelSelection() && hasBoardModelCredentials();
     const feishuOk = !!(config?.feishu?.appId && config?.feishu?.appSecret);
     return {
       gateway: installed ? 'ok' : (status === null ? 'warn' : 'error'),
@@ -1686,9 +2048,29 @@ export default function OpenClaw() {
 
   const needsSetup = () => {
     const installed = !!(status?.installed ?? status?.version?.trim());
-    const modelOk = !!(config?.modelGateway?.baseUrl && config?.modelGateway?.apiKey);
+    const modelOk = hasBoardModelSelection() && hasBoardModelCredentials();
     return !installed || !modelOk;
   };
+
+  const modelStatusDotClass =
+    modelApiReachable === 'ok'
+      ? 'online'
+      : modelApiReachable === 'fail'
+        ? (localVendorApiVerifiedForCurrentConfig ? 'warn' : 'offline')
+        : hasBoardModelSelection()
+          ? 'warn'
+          : '';
+
+  const modelStatusBadgeText =
+    modelApiReachable === 'fail'
+      ? (localVendorApiVerifiedForCurrentConfig
+        ? t('oc.status.modelBoardOnlyFailShort', '板端不可达')
+        : t('oc.status.modelApiFailShort', 'API 不可达'))
+      : '';
+
+  const modelStatusBadgeColor = localVendorApiVerifiedForCurrentConfig
+    ? 'var(--warning)'
+    : 'var(--danger)';
 
   const MI = (name: string, cls?: string) => (
     <span className={`material-symbols-outlined ${cls || ''}`}>{name}</span>
@@ -1774,11 +2156,15 @@ export default function OpenClaw() {
         label: t('oc.setup.openclaw', 'OpenClaw'),
         status:
           setupStatus.gateway === 'ok'
-            ? (status?.running ? t('oc.setup.ocWithGw', '已安装 · 网关运行中') : t('oc.setup.ocInstalledOnly', '已安装'))
+            ? (status?.running
+                ? (deviceNetUp === false ? t('oc.setup.ocRunningNoNet', '运行中 · 未联网') : t('oc.setup.ocWithGw', '已安装 · 网关运行中'))
+                : t('oc.setup.ocInstalledOnly', '已安装'))
             : setupStatus.gateway === 'warn'
               ? t('oc.status.checking', '检测中...')
               : t('oc.status.notInstalled', '未安装'),
-        statusClass: setupStatus.gateway === 'ok' ? 'badge-ok' : setupStatus.gateway === 'warn' ? 'badge-accent' : 'badge-danger',
+        statusClass: setupStatus.gateway === 'ok'
+          ? (status?.running && deviceNetUp === false ? 'badge-accent' : 'badge-ok')
+          : setupStatus.gateway === 'warn' ? 'badge-accent' : 'badge-danger',
         action: () => {
           setPanelOpen(true);
           setDashboardTab('gateway');
@@ -1792,8 +2178,12 @@ export default function OpenClaw() {
         key: 'model',
         icon: 'psychology',
         label: t('oc.setup.model', '模型'),
-        status: setupStatus.model === 'ok' ? getCurrentModel() : t('oc.summary.notConfigured', '未配置'),
-        statusClass: setupStatus.model === 'ok' ? 'badge-ok' : 'badge-muted',
+        status: setupStatus.model === 'ok'
+          ? getCurrentModel()
+          : hasBoardModelSelection()
+            ? t('oc.setup.modelNeedsCredential', '已选模型，待补凭据')
+            : t('oc.summary.notConfigured', '未配置'),
+        statusClass: setupStatus.model === 'ok' ? 'badge-ok' : hasBoardModelSelection() ? 'badge-accent' : 'badge-muted',
         action: () => {
           setPanelOpen(true);
           setConfigTab('model');
@@ -1851,6 +2241,11 @@ export default function OpenClaw() {
             </div>
           ))}
         </div>
+        {deviceNetUp === false && setupStatus.gateway === 'ok' && (
+          <div className="oc-setup-guide-hint" style={{ borderColor: 'var(--color-accent, #e67e22)' }}>
+            {t('oc.setup.hint.networkOffline', '开发板当前未联网，网关虽在运行但无法访问云端模型。请先通过右上角 WiFi 图标为开发板配网。')}
+          </div>
+        )}
         {showSetupGuide && needsSetup() && (
           <div className="oc-setup-guide-hint">
             {setupStatus.gateway !== 'ok'
@@ -1898,29 +2293,27 @@ export default function OpenClaw() {
           <h2 id="oc-deploy-model-heading" className="oc-setup-wizard-section-title">
             {t('oc.setup.header', '配置大模型 (可选，部署后可改)')}
           </h2>
-          <p className="oc-setup-wizard-micro">{t('oc.deploy.quickPick', '快速选择（自动填充，填充后可手动修改）')}</p>
-          {deployHasStudioKey && !deployApiKey.trim() && (
-            <p className="oc-setup-wizard-studio-sync">{t('oc.deploy.syncedWithStudio', '模型与 Base URL 已与 RDKClaw 设置中的当前模型对齐；API Key 使用工作室已保存的凭据（无需重复填写）。')}</p>
-          )}
-          <div className="oc-deploy-provider-grid">
-            {Object.entries(PROVIDER_PRESETS).map(([k, p]) => (
+          <div className="oc-setup-wizard-precheck" role="status" aria-live="polite">
+            <div className="oc-setup-wizard-precheck-head">
+              <strong>{t('oc.deploy.precheck.title', '安装前预检')}</strong>
               <button
-                key={k}
                 type="button"
-                className={`oc-deploy-provider-chip chip ${deployProvider === k ? 'active' : ''}`}
-                disabled={deployRunning}
-                title={deployRunning ? t('oc.setup.actionDisabledDeploying', '部署进行中，请稍候') : undefined}
-                onClick={() => {
-                  setDeployProvider(k);
-                  setDeployBaseUrl(p.baseUrl);
-                  setDeployModelId(p.models[0]);
-                  setDeployApi(p.api);
-                }}
+                className="btn btn-ghost btn-sm"
+                onClick={() => void runDeployPrecheck()}
+                disabled={deployRunning || deployPrecheck.overall === 'checking'}
               >
-                {providerDisplayLabel(k, p)}
+                {deployPrecheck.overall === 'checking' ? t('oc.deploy.precheck.running', '预检中...') : t('oc.deploy.precheck.run', '运行预检')}
               </button>
-            ))}
+            </div>
+            <div className="oc-setup-wizard-precheck-items">
+              <span className={`badge ${deployPrecheck.network === 'ok' ? 'badge-ok' : deployPrecheck.network === 'fail' ? 'badge-danger' : 'badge-muted'}`}>{t('oc.deploy.precheck.network', '网络')}:{deployPrecheck.network}</span>
+              <span className={`badge ${deployPrecheck.deps === 'ok' ? 'badge-ok' : deployPrecheck.deps === 'fail' ? 'badge-danger' : 'badge-muted'}`}>{t('oc.deploy.precheck.deps', '依赖')}:{deployPrecheck.deps}</span>
+              <span className={`badge ${deployPrecheck.npm === 'ok' ? 'badge-ok' : deployPrecheck.npm === 'fail' ? 'badge-danger' : 'badge-muted'}`}>npm:{deployPrecheck.npm}</span>
+            </div>
+            {deployPrecheck.detail ? <p className="oc-setup-wizard-precheck-detail">{deployPrecheck.detail}</p> : null}
           </div>
+          <p className="oc-setup-wizard-micro">{t('oc.deploy.defaultConfigHint', '默认沿用 RDKClaw 当前模型配置；你也可以在下方手动覆盖。')}</p>
+          <p className="oc-setup-wizard-studio-sync">{t('oc.deploy.syncedWithStudio', '模型与 Base URL 默认与 RDKClaw 设置中的当前模型对齐；若已保存 API Key，可直接部署无需重复填写。')}</p>
 
           <div className="oc-setup-wizard-fields">
             <div className="oc-form-row">
@@ -1944,6 +2337,19 @@ export default function OpenClaw() {
                 placeholder="doubao-1.5-pro-256k / deepseek-chat"
                 disabled={deployRunning}
               />
+            </div>
+            <div className="oc-form-row">
+              <span className="oc-form-label">{t('oc.deploy.npmRegistry', 'npm 源 (可选)')}</span>
+              <select
+                className="select"
+                value={deployNpmRegistry}
+                onChange={(e) => setDeployNpmRegistry(e.target.value)}
+                disabled={deployRunning}
+              >
+                <option value="">{t('oc.deploy.npmRegistry.auto', '自动 (默认)')}</option>
+                <option value="https://registry.npmmirror.com">npmmirror.com</option>
+                <option value="https://registry.npmjs.org">registry.npmjs.org</option>
+              </select>
             </div>
             <OcApiKeyRow
               value={deployApiKey}
@@ -2086,67 +2492,14 @@ export default function OpenClaw() {
         {dashboardTab === 'model' && (
           <div className="oc-tab-content">
             <span className="oc-section-title">{t('oc.setup.model', '大模型 API 配置')}</span>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>{t('oc.model.quickPick', '快速选择（自动填充下方字段，填充后仍可手动修改）')}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginBottom: 8 }}>
-              {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'china').map(([key, preset]) => (
-                <button key={key} type="button" className={`chip ${selectedPreset === key ? 'active' : ''}`} onClick={() => handleProviderPresetChange(key)} style={{ fontSize: '0.75rem', padding: '3px 8px' }} disabled={configBusy || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{providerDisplayLabel(key, preset)}</button>
-              ))}
-              {Object.entries(PROVIDER_PRESETS).filter(([, p]) => p.group === 'international').map(([key, preset]) => (
-                <button key={key} type="button" className={`chip ${selectedPreset === key ? 'active' : ''}`} onClick={() => handleProviderPresetChange(key)} style={{ fontSize: '0.75rem', padding: '3px 8px' }} disabled={configBusy || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{providerDisplayLabel(key, preset)}</button>
-              ))}
-            </div>
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.baseUrl', 'Base URL')}</span>
-              <input
-                className="input"
-                type="text"
-                value={modelConfig.baseUrl}
-                onChange={(e) => { setModelConfig({ ...modelConfig, baseUrl: e.target.value }); setSelectedPreset(''); }}
-                placeholder="https://ark.cn-beijing.volces.com/api/v3"
-                disabled={configBusy || boardDeployBusy}
-              />
-            </div>
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
-              <input
-                className="input"
-                type="text"
-                value={modelConfig.modelId}
-                onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })}
-                placeholder="doubao-1.5-pro-256k / deepseek-chat / gpt-4o"
-                disabled={configBusy || boardDeployBusy}
-              />
-            </div>
-            <OcApiKeyRow
-              value={modelConfig.apiKey}
-              onChange={(apiKey) => setModelConfig({ ...modelConfig, apiKey })}
-              placeholder={selectedPreset && PROVIDER_PRESETS[selectedPreset]?.keyHint || 'sk-...'}
-              visible={modelGatewayApiKeyVisible}
-              onToggleVisible={() => setModelGatewayApiKeyVisible((v) => !v)}
-              disabled={configBusy || boardDeployBusy}
-            />
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.protocol', '协议')}</span>
-              <select
-                className="select"
-                value={modelConfig.api}
-                onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })}
-                aria-label={t('oc.aria.apiProtocol', 'API 协议')}
-                disabled={configBusy || boardDeployBusy}
-              >
-                {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-            <div className="divider oc-divider-spaced" />
-            <span className="oc-section-title">{t('oc.boardDelegate.section', '板端委派：Studio 模型')}</span>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8 }}>
               {t(
-                'oc.boardDelegate.hint',
-                '选择预选后会自动填充上方大模型表单（与在「设置 → AI 模型」中保存的条目一致）。请核对后点击「保存」，配置将写入板端并重启网关；同时会记住该预选供 RDKClaw 委派使用。',
+                'oc.boardDelegate.hint.compact',
+                '默认使用 RDKClaw 当前模型。你可在此选择一个已保存条目并自动填充下方字段，再保存写入板端。',
               )}
             </div>
             <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.boardDelegate.preset', '预选模型')}</span>
+              <span className="oc-form-label">{t('oc.boardDelegate.preset', '默认模型')}</span>
               <select
                 className="select"
                 value={delegateEntryId}
@@ -2184,14 +2537,56 @@ export default function OpenClaw() {
                     .finally(() => setDelegatePresetSaving(false));
                 }}
                 disabled={delegatePresetSaving || boardDeployBusy}
-                aria-label={t('oc.boardDelegate.preset', '预选模型')}
+                aria-label={t('oc.boardDelegate.preset', '默认模型')}
               >
-                <option value="">{t('oc.boardDelegate.followDock', '与深度思考主模型相同（默认）')}</option>
+                <option value="">{t('oc.boardDelegate.followDock', '与 RDKClaw 当前模型保持一致（默认）')}</option>
                 {studioDelegateModels.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label} — {m.model}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div className="oc-form-row">
+              <span className="oc-form-label">{t('oc.form.baseUrl', 'Base URL')}</span>
+              <input
+                className="input"
+                type="text"
+                value={modelConfig.baseUrl}
+                onChange={(e) => { setModelConfig({ ...modelConfig, baseUrl: e.target.value }); }}
+                placeholder="https://ark.cn-beijing.volces.com/api/v3"
+                disabled={configBusy || boardDeployBusy}
+              />
+            </div>
+            <div className="oc-form-row">
+              <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
+              <input
+                className="input"
+                type="text"
+                value={modelConfig.modelId}
+                onChange={(e) => setModelConfig({ ...modelConfig, modelId: e.target.value })}
+                placeholder="doubao-1.5-pro-256k / deepseek-chat / gpt-4o"
+                disabled={configBusy || boardDeployBusy}
+              />
+            </div>
+            <OcApiKeyRow
+              value={modelConfig.apiKey}
+              onChange={(apiKey) => setModelConfig({ ...modelConfig, apiKey })}
+              placeholder={'sk-...'}
+              visible={modelGatewayApiKeyVisible}
+              onToggleVisible={() => setModelGatewayApiKeyVisible((v) => !v)}
+              disabled={configBusy || boardDeployBusy}
+            />
+            <div className="oc-form-row">
+              <span className="oc-form-label">{t('oc.form.protocol', '协议')}</span>
+              <select
+                className="select"
+                value={modelConfig.api}
+                onChange={(e) => setModelConfig({ ...modelConfig, api: e.target.value })}
+                aria-label={t('oc.aria.apiProtocol', 'API 协议')}
+                disabled={configBusy || boardDeployBusy}
+              >
+                {API_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
             <div className="divider oc-divider-spaced" />
@@ -2210,7 +2605,7 @@ export default function OpenClaw() {
             <div className="oc-form-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
               <button type="button" className="btn btn-primary btn-sm" onClick={() => saveConfig('model')} disabled={configBusy || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{configBusy ? t('oc.test.testing', '...') : t('oc.save', '保存')}</button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={testVendorApiConnection} disabled={vendorApiTest === 'testing' || configBusy || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>
-                {vendorApiTest === 'testing' ? t('oc.test.testing', '...') : vendorApiTest === 'ok' ? t('oc.test.vendorOkLabel', 'API 正常') : t('oc.test.vendorRun', '测试 API')}
+                {vendorApiTest === 'testing' ? t('oc.test.testing', '...') : vendorApiTest === 'ok' ? t('oc.test.vendorOkLabel', '厂商 API 正常') : t('oc.test.vendorRun', '测试厂商 API')}
               </button>
             </div>
           </div>
@@ -2262,7 +2657,7 @@ export default function OpenClaw() {
      Render - Main Dual View
      ═══════════════════════════════════════════ */
 
-  const ocLayoutWizardOnly = !ocInstalled && !deployRunning && !deployJobId;
+  const ocLayoutWizardOnly = !ocInstalled || deployRunning || !!deployJobId;
 
   return (
     <div
@@ -2283,13 +2678,26 @@ export default function OpenClaw() {
                 <span className="oc-status-value">{statusLoading ? t('oc.test.testing', '...') : status?.running ? t('oc.status.running', '运行中') : t('oc.ops.hint.stop', '停止')}</span>
               </div>
               <div className="oc-status-item">
+                <span className={`status-dot ${deviceNetUp === null ? '' : deviceNetUp ? 'online' : 'offline'}`} />
+                <span className="oc-status-label">{t('oc.status.network', '网络')}</span>
+                <span className="oc-status-value">
+                  {deviceNetUp === null ? '...' : deviceNetUp ? t('oc.status.networkUp', '已联网') : t('oc.status.networkDown', '未联网')}
+                </span>
+              </div>
+              <div className="oc-status-item">
+                <span className={`status-dot ${modelStatusDotClass}`} />
                 <span className="oc-status-label">{t('oc.status.model', '模型')}</span>
                 <span
                   className="oc-status-value"
                   style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  title={getStatusBarModelTitle()}
+                  title={getModelStatusTitle()}
                 >
                   {getStatusBarModelDisplay()}
+                  {modelStatusBadgeText && (
+                    <span style={{ color: modelStatusBadgeColor, fontSize: '0.7rem', marginLeft: 4 }}>
+                      {modelStatusBadgeText}
+                    </span>
+                  )}
                 </span>
               </div>
               <div className="oc-status-bar-actions">
@@ -2299,7 +2707,10 @@ export default function OpenClaw() {
             </div>
 
             <div className="oc-chat-header">
-              <span className="oc-chat-header-label">{t('oc.chat.columnTitle', '对话')}</span>
+              <div className="oc-chat-header-meta">
+                <span className="oc-chat-header-label">{t('oc.chat.columnTitle', '对话')}</span>
+                <span className={`oc-chat-phase ${chatPhaseToneClass}`}>{getChatPhaseLabel(chatPhase)}</span>
+              </div>
               <div className="oc-status-bar-actions">
                 <button type="button" className="btn btn-ghost btn-sm oc-toolbar-btn" onClick={() => { setChatMessages([]); setChatStreaming(false); }} disabled={chatMessages.length === 0} title={chatMessages.length === 0 ? t('oc.chat.clearDisabled', '暂无对话可清空') : t('oc.chat.clear', '清空')}>{t('oc.chat.clear', '清空')}</button>
               </div>
@@ -2322,7 +2733,40 @@ export default function OpenClaw() {
               {!deployRunning && chatMessages.length === 0 && (
                 <div className="oc-chat-empty">
                   <div className="oc-chat-empty-icon">{MI('hub')}</div>
-                  <strong>{t('oc.chat.readyTitle', '可以开始对话')}</strong>
+                  <strong>
+                    {deviceNetUp === false
+                      ? t('oc.chat.emptyOffline', '开发板未联网，暂时无法对话')
+                      : !status?.running
+                        ? t('oc.chat.emptyGwDown', '网关未运行')
+                        : !hasBoardModelSelection()
+                          ? t('oc.chat.emptyModelMissing', '尚未配置模型')
+                          : !hasBoardModelCredentials()
+                            ? t('oc.chat.emptyModelCredentialMissing', '模型凭据未就绪')
+                        : modelApiReachable === 'fail'
+                          ? (localVendorApiVerifiedForCurrentConfig
+                            ? t('oc.chat.emptyBoardModelFail', '板端模型链路不可达')
+                            : t('oc.chat.emptyModelFail', '模型 API 不可达'))
+                          : t('oc.chat.readyTitle', '可以开始对话')}
+                  </strong>
+                  {deviceNetUp === false && (
+                    <p className="oc-chat-empty-sub">{t('oc.chat.emptyOfflineSub', '对话需要通过网络访问云端大模型。请先点击右上角 WiFi 图标为开发板配网。')}</p>
+                  )}
+                  {deviceNetUp !== false && !status?.running && ocInstalled && (
+                    <p className="oc-chat-empty-sub">{t('oc.chat.emptyGwDownSub', '请点击上方「重启网关」恢复后再试。')}</p>
+                  )}
+                  {deviceNetUp !== false && status?.running && !hasBoardModelSelection() && (
+                    <p className="oc-chat-empty-sub">{t('oc.chat.emptyModelMissingSub', '请先在右侧面板填写并保存模型配置，再开始对话。')}</p>
+                  )}
+                  {deviceNetUp !== false && status?.running && hasBoardModelSelection() && !hasBoardModelCredentials() && (
+                    <p className="oc-chat-empty-sub">{t('oc.chat.emptyModelCredentialMissingSub', '模型已选择，但当前未检测到可用 API Key。请在右侧面板补全凭据，或确认运行时 provider 已保存密钥。')}</p>
+                  )}
+                  {deviceNetUp !== false && status?.running && modelApiReachable === 'fail' && (
+                    <p className="oc-chat-empty-sub">{
+                      localVendorApiVerifiedForCurrentConfig
+                        ? t('oc.chat.emptyBoardModelFailSub', '厂商 API 已通过；当前问题在板端链路。请检查是否已保存到板端、网关信任、板端网络或运行时密钥。')
+                        : t('oc.chat.emptyModelFailSub', '请在右侧面板检查模型 API Key、Base URL、网关信任状态，或点击「测试厂商 API」排查。')
+                    }</p>
+                  )}
                 </div>
               )}
               <div ref={chatEndRef} />

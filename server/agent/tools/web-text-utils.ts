@@ -42,3 +42,21 @@ export function normalizeUrl(raw: string) {
   const url = new URL(value);
   return url.toString();
 }
+
+/**
+ * 从整段 Markdown / 纯文本中抽取 http(s) 链接（去重，顺序保留）。
+ * 用于用户粘贴类似 rdk-doc-url-index 的目录或链接列表。
+ */
+export function extractHttpsUrlsFromText(text: string): string[] {
+  const re = /https?:\/\/[^\s\]\)>'"]+/gi;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of text.matchAll(re)) {
+    let u = m[0];
+    u = u.replace(/[.,;)}'」]+$/, "");
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}

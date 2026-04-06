@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { isDesktop as checkIsDesktop } from '../utils/env';
 import { useFlashCapabilities } from '../hooks/useFlashCapabilities';
-import { FLASHER_MENTION_SESSION_KEY, type FlasherMentionContext } from '../constants/dock-mention-capabilities';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 
@@ -72,8 +71,8 @@ interface WifiConfig {
    Device & Image Data  (aligned with rdkstudio-front-main)
    ═══════════════════════════════════════════════════════════ */
 const DEVICE_LIST: DeviceItem[] = [
-  { key: 'x3', name: 'RDK X3/ X3 Module', infoUrl: 'https://developer.d-robotics.cc/rdkx3' },
-  { key: 'x5', name: 'RDK X5', infoUrl: 'https://developer.d-robotics.cc/rdkx5' },
+  { key: 'x3', name: 'RDK X3 / X3 Module', infoUrl: 'https://developer.d-robotics.cc/rdkx3' },
+  { key: 'x5', name: 'RDK X5 / X5 Module', infoUrl: 'https://developer.d-robotics.cc/rdkx5' },
   {
     key: 's100',
     name: 'RDK S100(P)',
@@ -337,7 +336,7 @@ export default function Flasher() {
       case 'verifying':
         return t('flasher.phase.verifying', '写后校验中...');
       case 'done':
-        return t('flasher.phase.done', '烧录完成');
+        return t('flasher.phase.done', '烧录完成 — 请弹出介质并上电验证启动');
       case 'error':
         return t('flasher.phase.error', '烧录失败');
       default:
@@ -415,40 +414,6 @@ export default function Flasher() {
       // ignore
     }
   }, []);
-
-  /** AI Dock @烧写：带上下文切换到本页时应用一次 */
-  useEffect(() => {
-    if (activeTab !== 'flasher') return;
-    let raw: string | null = null;
-    try {
-      raw = sessionStorage.getItem(FLASHER_MENTION_SESSION_KEY);
-      if (!raw) return;
-      sessionStorage.removeItem(FLASHER_MENTION_SESSION_KEY);
-    } catch {
-      return;
-    }
-    let ctx: FlasherMentionContext;
-    try {
-      ctx = JSON.parse(raw) as FlasherMentionContext;
-    } catch {
-      return;
-    }
-    if (!ctx.deviceKey || !DEVICE_LIST.some((d) => d.key === ctx.deviceKey)) return;
-    const dev = DEVICE_LIST.find((d) => d.key === ctx.deviceKey);
-    if (dev?.disabled) return;
-
-    setSelectedDeviceKey(ctx.deviceKey);
-    const list = IMAGE_LIST[resolveImageKey(ctx.deviceKey)] ?? [];
-    if (ctx.deviceKey === 's100') {
-      setSelectedImageKey('');
-    } else if (list[0]) {
-      setSelectedImageKey(list[0].key);
-    }
-    setUseLocalImage(Boolean(ctx.preferLocalImage));
-    setLocalImagePath('');
-    setStep(1);
-    addToast(t('dock.mention.flash.applied', '已应用来自输入框 @烧写 的选择'), 'info');
-  }, [activeTab, addToast, t]);
 
   /* ── device selection ── */
   const chooseDevice = (key: string) => {

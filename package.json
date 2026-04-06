@@ -57,6 +57,10 @@
     "verify:desktop:reference:update:mac": "node scripts/release-reference-sync.mjs mac update",
     "verify:desktop:reference:update:win": "node scripts/release-reference-sync.mjs win update",
     "verify:modules": "node scripts/verify-real-modules.mjs",
+    "e2e": "playwright test",
+    "e2e:win": "playwright test --project=windows",
+    "e2e:mac": "playwright test --project=macos",
+    "e2e:report": "playwright show-report e2e-report",
     "playwright:install": "playwright install chromium",
     "preview": "vite preview",
     "start": "node dist-server/server/index.js",
@@ -183,7 +187,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.577.0",
     "mammoth": "^1.12.0",
-    "playwright": "^1.58.2",
+    "playwright": "^1.59.1",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -203,6 +207,7 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tencent-weixin/openclaw-weixin": "^2.0.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",

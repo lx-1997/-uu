@@ -1577,8 +1577,8 @@ export default function SettingsPanel() {
                           {thinkingVendorTest === 'testing'
                             ? '...'
                             : thinkingVendorTest === 'ok'
-                              ? t('oc.test.vendorOkLabel', 'API 正常')
-                              : t('oc.test.vendorRun', '测试 API')}
+                              ? t('oc.test.vendorOkLabel', '厂商 API 正常')
+                              : t('oc.test.vendorRun', '测试厂商 API')}
                         </button>
                       </div>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.35, maxWidth: 420 }}>
@@ -1884,8 +1884,8 @@ export default function SettingsPanel() {
                           {quickVendorTest === 'testing'
                             ? '...'
                             : quickVendorTest === 'ok'
-                              ? t('oc.test.vendorOkLabel', 'API 正常')
-                              : t('oc.test.vendorRun', '测试 API')}
+                              ? t('oc.test.vendorOkLabel', '厂商 API 正常')
+                              : t('oc.test.vendorRun', '测试厂商 API')}
                         </button>
                       </div>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.35, maxWidth: 420 }}>

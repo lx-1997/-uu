@@ -7,6 +7,12 @@ import type { Tab } from '../app-types';
 export const STUDIO_SHOW_LOCAL_OLLAMA_NAV = false;
 
 /**
+ * 「机器人中心」暂缓上线：侧栏与 `App` 路由已关闭；下版恢复时请同时：
+ * `Tab` 联合类型、`IconRail` NAV 项、`App.tsx` standardViews + `BotCenterPage` 引入、`main.tsx` 引入 `bot-center.css`。
+ */
+export const STUDIO_SHOW_BOT_CENTER_NAV = false;
+
+/**
  * 关闭时隐藏 AI 对话 Hub、底部 RDKClaw Dock，并禁止展开对话（含副屏 popout）。
  * 需要恢复「RDKClaw 对话」时改为 true。
  */
@@ -22,6 +28,7 @@ export const STUDIO_ENABLE_VOICE_TO_TEXT = false;
 export const STUDIO_ENABLE_DOCK_TTS = false;
 
 export function normalizeTabForFeatures(tab: Tab): Tab {
+  if (!STUDIO_SHOW_BOT_CENTER_NAV && (tab as string) === 'bot-center') return 'dashboard';
   if (!STUDIO_SHOW_LOCAL_OLLAMA_NAV && tab === 'local-models') return 'dashboard';
   /** 独立「AI 对话」页已移除；入口为 Dock / 轨道「会话」 */
   if (tab === 'ai-chat-hub') return 'dashboard';

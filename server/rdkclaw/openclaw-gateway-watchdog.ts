@@ -33,6 +33,14 @@ type WatchReason =
   | 'still_down_after_repair'
   | 'ok';
 
+function studioDeviceLabel(device: StudioDevice, fallbackId: string): string {
+  const model = String(device.boardModel || '').trim();
+  if (model) return model;
+  const host = String(device.host || '').trim();
+  if (host) return host;
+  return fallbackId;
+}
+
 function healthPromise(
   mgr: OpenClawDeploymentManager,
   device: Device,
@@ -95,6 +103,7 @@ export function startOpenClawGatewayWatchdog(opts: OpenClawGatewayWatchdogOption
     for (const sd of devices) {
       const id = String(sd.id || '').trim();
       if (!id) continue;
+      const label = studioDeviceLabel(sd, id);
 
       const ocDev = opts.toOpenClawDevice(sd);
       let h: OpenClawHealthStatus;
@@ -118,7 +127,7 @@ export function startOpenClawGatewayWatchdog(opts: OpenClawGatewayWatchdogOption
           opts.notificationHub.publish({
             type: 'openclaw_gateway_watchdog',
             title: 'OpenClaw 状态不可达',
-            message: `设备 ${sd.name || id}：无法通过 SSH 完成健康检测（可能为本机与设备网络不通或 SSH 异常）。请检查网络与 SSH，而非板上网关进程本身。`,
+            message: `设备 ${label}：无法通过 SSH 完成健康检测（可能为本机与设备网络不通或 SSH 异常）。请检查网络与 SSH，而非板上网关进程本身。`,
             level: 'warning',
             ts: now,
             payload: { deviceId: id, reason: 'ssh_unavailable' },
@@ -158,7 +167,7 @@ export function startOpenClawGatewayWatchdog(opts: OpenClawGatewayWatchdogOption
           opts.notificationHub.publish({
             type: 'openclaw_gateway_watchdog',
             title: 'OpenClaw 网关已恢复',
-            message: `设备 ${sd.name || id}：后台已自动拉起网关（127.0.0.1:18789）。`,
+            message: `设备 ${label}：后台已自动拉起网关（127.0.0.1:18789）。`,
             level: 'success',
             ts: Date.now(),
             payload: { deviceId: id, reason: 'repaired' as WatchReason },
@@ -180,7 +189,7 @@ export function startOpenClawGatewayWatchdog(opts: OpenClawGatewayWatchdogOption
         opts.notificationHub.publish({
           type: 'openclaw_gateway_watchdog',
           title: 'OpenClaw 网关仍异常',
-          message: `设备 ${sd.name || id}：${detail}`,
+          message: `设备 ${label}：${detail}`,
           level: n >= 3 ? 'error' : 'warning',
           ts: Date.now(),
           payload: {

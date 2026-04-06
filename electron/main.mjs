@@ -1617,6 +1617,18 @@ ipcMain.on('rdk:set-embed-float', (_event, { url, floating, title }) => {
   }
 });
 
+// IDE/VNC：将已浮出的窗口置顶（切 Tab 回来时防止被主窗口遮挡）
+ipcMain.on('rdk:focus-embed-float', (_event, { url }) => {
+  const u = String(url || '').trim();
+  if (!u || !embedDetachedUrls.has(u)) return;
+  const fw = embedFloatWins[u];
+  if (fw && !fw.isDestroyed()) {
+    if (fw.isMinimized()) fw.restore();
+    fw.show();
+    fw.focus();
+  }
+});
+
 /** 在 app.ready 后注册，避免个别环境下 IPC 未绑定；与悬浮窗抓取共用 */
 function registerBrowserCaptureHandlers() {
   const CAPTURE_PAGE_TEXT_SCRIPT = [

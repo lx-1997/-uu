@@ -79,6 +79,15 @@ export interface DocIndexEntry {
   keywords: string[];
 }
 
+export interface RdkDocLocalSearchHit {
+  title: string;
+  url: string;
+  urlPath: string;
+  score: number;
+  section?: string;
+  snippet?: string;
+}
+
 interface DocIndex {
   builtAt: number;
   entries: DocIndexEntry[];
@@ -554,6 +563,103 @@ export function searchDocIndex(query: string, limit = 10): DocIndexEntry[] {
 
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).map((s) => s.entry);
+}
+
+function stripMarkdownForSnippet(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!?\[([^\]]*)\]\(([^)]+)\)/g, '$1 $2')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/[>*_~|-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractDocSnippet(content: string, terms: string[]): { section?: string; snippet?: string } {
+  const lines = content.split(/\r?\n/);
+  let currentHeading: string | undefined;
+  let matchedHeading: string | undefined;
+  let matchedLine = '';
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      currentHeading = headingMatch[2].trim();
+      continue;
+    }
+    if (!trimmed) continue;
+    const lower = trimmed.toLowerCase();
+    if (terms.some((term) => lower.includes(term))) {
+      matchedHeading = currentHeading;
+      matchedLine = trimmed;
+      break;
+    }
+    if (!matchedLine && !matchedHeading && currentHeading && trimmed.length >= 24) {
+      matchedHeading = currentHeading;
+      matchedLine = trimmed;
+    }
+  }
+
+  const fallback = stripMarkdownForSnippet(content).slice(0, 240);
+  const snippet = matchedLine ? stripMarkdownForSnippet(matchedLine).slice(0, 240) : fallback;
+  return {
+    section: matchedHeading,
+    snippet: snippet || undefined,
+  };
+}
+
+/**
+ * 在本地 rdk_doc 缓存中搜索标题、路径与正文，返回可直接交给 Agent 使用的 URL/章节/摘要。
+ */
+export function searchRdkDocLocal(query: string, limit = 5): RdkDocLocalSearchHit[] {
+  if (!memIndex) return [];
+  const terms = query.toLowerCase().split(/[\s_\-./]+/).filter((t) => t.length >= 2);
+  if (terms.length === 0) return [];
+
+  const candidates = searchDocIndex(query, Math.max(limit * 4, 12));
+  const hits: RdkDocLocalSearchHit[] = [];
+
+  for (const entry of candidates) {
+    const url = `${RDK_DOC_URL_PREFIX}${entry.urlPath.replace(/^\//, '')}`;
+    const body = readCachedDoc(url);
+    let score = 0;
+    let section: string | undefined;
+    let snippet: string | undefined;
+
+    for (const term of terms) {
+      if (entry.title.toLowerCase().includes(term)) score += 4;
+      if (entry.urlPath.toLowerCase().includes(term)) score += 3;
+      if (entry.keywords.some((keyword) => keyword.includes(term))) score += 2;
+    }
+
+    if (body) {
+      const lower = body.toLowerCase();
+      for (const term of terms) {
+        if (lower.includes(term)) score += 5;
+      }
+      const excerpt = extractDocSnippet(body, terms);
+      section = excerpt.section;
+      snippet = excerpt.snippet;
+      if (section) score += 2;
+      if (snippet) score += 1;
+    }
+
+    if (score > 0) {
+      hits.push({
+        title: entry.title || entry.urlPath,
+        url,
+        urlPath: entry.urlPath,
+        score,
+        section,
+        snippet,
+      });
+    }
+  }
+
+  hits.sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
+  return hits.slice(0, limit);
 }
 
 /** 获取缓存状态（诊断用） */

@@ -21,13 +21,6 @@ import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-m
 import { buildThreadSummaryLine } from '../utils/chat-history-thread-label';
 import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
 import ChatSessionsPanel from './ChatSessionsPanel';
-import { DockFlashMentionWizard } from './DockFlashMentionWizard';
-import {
-  DOCK_MENTION_CAPABILITIES,
-  filterMentionCapabilities,
-  parseTrailingAtMention,
-  type DockMentionCapabilityId,
-} from '../constants/dock-mention-capabilities';
 import io from 'socket.io-client';
 import {
   Archive,
@@ -52,15 +45,6 @@ import userAvatarUrl from '../assets/chat/user-avatar.png';
 
 /* ─── Inline SVG icons (avoid emoji / “AI 火花”装饰，保持工具型视觉) ─── */
 const Icon = {
-  /** 通用 @ 能力占位（非烧写类能力扩展时） */
-  mentionDefault: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-    </svg>
-  ),
   send: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
@@ -87,12 +71,6 @@ const Icon = {
   stopAll: (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
       <rect x="5" y="5" width="14" height="14" rx="2" />
-    </svg>
-  ),
-  flash: (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 2h8l4 4v16a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2z"/>
-      <path d="M10 10h4M10 14h4"/>
     </svg>
   ),
 };
@@ -1514,10 +1492,8 @@ export default function AIDock() {
   cmdRef.current = cmd;
   const { defaultHostNode } = useHubDockAnchor();
   const { t, isEn } = useI18n();
-  const [dockFlashWizardOpen, setDockFlashWizardOpen] = useState(false);
   const [responseModeMenuOpen, setResponseModeMenuOpen] = useState(false);
   const responseModeMenuRef = useRef<HTMLDivElement | null>(null);
-  const [mentionHighlightIdx, setMentionHighlightIdx] = useState(0);
   const [unsatisfiedModal, setUnsatisfiedModal] = useState<{ msgId: number; preview: string } | null>(null);
   const [unsatisfiedNote, setUnsatisfiedNote] = useState('');
   const sessionsBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -1649,35 +1625,6 @@ export default function AIDock() {
     };
   }, [responseModeMenuOpen]);
 
-  const mentionParse = useMemo(() => parseTrailingAtMention(cmd), [cmd]);
-  const filteredMentionCaps = useMemo(() => {
-    if (!mentionParse) return [];
-    return filterMentionCapabilities(DOCK_MENTION_CAPABILITIES, mentionParse.query, isEn);
-  }, [mentionParse, isEn]);
-  const mentionMenuActive = Boolean(mentionParse);
-
-  useLayoutEffect(() => {
-    if (!mentionMenuActive) return;
-    setMentionHighlightIdx((i) => {
-      const n = filteredMentionCaps.length;
-      if (n <= 0) return 0;
-      return Math.min(i, n - 1);
-    });
-  }, [mentionMenuActive, filteredMentionCaps.length]);
-
-  const pickMentionCapability = useCallback(
-    (id: DockMentionCapabilityId) => {
-      if (!mentionParse) return;
-      const prefix = cmd.slice(0, mentionParse.atIndex).trimEnd();
-      setCmd(prefix);
-      setShowSuggestions(false);
-      if (id === 'flash') {
-        setDockFlashWizardOpen(true);
-      }
-    },
-    [cmd, mentionParse, setCmd, setShowSuggestions],
-  );
-
   const tfDock = useCallback(
     (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars),
     [t],
@@ -1741,9 +1688,15 @@ export default function AIDock() {
   const [dockOcMode, setDockOcMode] = useState(true);
   const [hideDockInSubpage, setHideDockInSubpage] = useState<boolean>(() => {
     try {
+      /**
+       * 子页面默认隐藏 Dock，避免与 OpenClaw/IDE/VNC 等页面自身输入区互相遮挡。
+       * 仅当用户主动切换过该开关后，才读取并尊重历史偏好值。
+       */
+      const userSet = localStorage.getItem('rdk:dock:hide-subpage:user-set') === '1';
+      if (!userSet) return true;
       return localStorage.getItem('rdk:dock:hide-subpage') === '1';
     } catch {
-      return false;
+      return true;
     }
   });
   /** 产品固定：完整展示 + 单列顺行；顶栏不再展示模式标签 */
@@ -2615,6 +2568,11 @@ export default function AIDock() {
 
   const toggleSubpageDockVisibility = () => {
     if (!isSubpageTab) return;
+    try {
+      localStorage.setItem('rdk:dock:hide-subpage:user-set', '1');
+    } catch {
+      // ignore localStorage errors
+    }
     setHideDockInSubpage((prev) => {
       const next = !prev;
       if (next) {
@@ -2625,6 +2583,12 @@ export default function AIDock() {
       return next;
     });
   };
+
+  useEffect(() => {
+    if (!isSubpageTab || !hideDockInSubpage) return;
+    if (chatExpanded) setChatExpanded(false);
+    if (workspaceMode) setWorkspaceMode(false);
+  }, [isSubpageTab, hideDockInSubpage, chatExpanded, workspaceMode, setChatExpanded]);
 
   const renderDockStreamMessageBubble = (
     msg: ChatMessage,
@@ -2943,10 +2907,20 @@ export default function AIDock() {
                 </span>
               </div>
               <div className="dock-header-badges">
-                <span className={`badge ${agentExecution.lastError ? 'badge-danger' : 'badge-accent'}`}>
+                <span
+                  className={`badge ${agentExecution.lastError ? 'badge-danger' : 'badge-accent'}`}
+                  title={agentExecution.lastError
+                    ? t('dock.badge.agentError', '上一次执行出错，可重试或查看日志')
+                    : t('dock.badge.agentOk', 'RDKClaw 智能体就绪')}
+                >
                   {agentExecution.lastError ? 'Error' : 'ON'}
                 </span>
-                <span className={`badge ${openclawConnected ? 'badge-ok' : 'badge-muted'}`}>
+                <span
+                  className={`badge ${openclawConnected ? 'badge-ok' : 'badge-muted'}`}
+                  title={openclawConnected
+                    ? t('dock.badge.ocConnected', '已连接开发板上的 OpenClaw 网关')
+                    : t('dock.badge.ocOffline', 'OpenClaw 未连接 — 请确认网关已运行且开发板已联网')}
+                >
                   {openclawConnected ? 'OpenClaw' : 'Offline'}
                 </span>
               </div>
@@ -3147,7 +3121,7 @@ export default function AIDock() {
       )}
 
       {/* Suggestions (idle) */}
-      {showSuggestions && !chatExpanded && !mentionMenuActive && filteredSuggestions.length > 0 && (
+      {showSuggestions && !chatExpanded && filteredSuggestions.length > 0 && (
         <div className="dock-suggestions" style={{ position: 'relative' }}>
           {filteredSuggestions.slice(0, 3).map((s, i) => (
             <div key={i} className="dock-suggestion-item" onMouseDown={() => { setCmd(s.text); setShowSuggestions(false); }}>
@@ -3165,31 +3139,6 @@ export default function AIDock() {
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
       >
-        {mentionMenuActive && (
-          <div className="dock-mention-menu" role="listbox" aria-label={t('dock.mention.aria', '调用能力')}>
-            {filteredMentionCaps.length === 0 ? (
-              <div className="dock-mention-empty">{t('dock.mention.empty', '无匹配能力')}</div>
-            ) : (
-              filteredMentionCaps.map((cap, i) => (
-                <div
-                  key={cap.id}
-                  role="option"
-                  aria-selected={i === mentionHighlightIdx}
-                  className={`dock-mention-item ${i === mentionHighlightIdx ? 'active' : ''}`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pickMentionCapability(cap.id);
-                  }}
-                  onMouseEnter={() => setMentionHighlightIdx(i)}
-                >
-                  <span className="dock-mention-icon">{cap.id === 'flash' ? Icon.flash : Icon.mentionDefault}</span>
-                  <span className="dock-mention-label">{isEn ? cap.labelEn : cap.labelZh}</span>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
         {pendingAttachments.length > 0 && (
           <div className="dock-attachments">
             {pendingAttachments.map(att => (
@@ -3293,36 +3242,13 @@ export default function AIDock() {
             }}
             onFocus={() => {
               setInputFocused(true);
-              if (!chatExpanded && !parseTrailingAtMention(cmd)) setShowSuggestions(true);
+              if (!chatExpanded) setShowSuggestions(true);
             }}
             onBlur={() => { setInputFocused(false); window.setTimeout(() => setShowSuggestions(false), 200); }}
             onKeyDown={(e) => {
               if (e.key === 'Escape' && chatExpanded) {
                 closeDock();
                 e.preventDefault();
-                return;
-              }
-              if (mentionMenuActive && filteredMentionCaps.length > 0) {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  setMentionHighlightIdx((h) => (h + 1) % filteredMentionCaps.length);
-                  return;
-                }
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setMentionHighlightIdx((h) => (h - 1 + filteredMentionCaps.length) % filteredMentionCaps.length);
-                  return;
-                }
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  const cap = filteredMentionCaps[mentionHighlightIdx];
-                  if (cap) pickMentionCapability(cap.id);
-                  return;
-                }
-              }
-              if (mentionMenuActive && e.key === 'Escape') {
-                e.preventDefault();
-                if (mentionParse) setCmd(cmd.slice(0, mentionParse.atIndex));
               }
             }}
           />
@@ -3380,13 +3306,20 @@ export default function AIDock() {
             style={{ left: inputContextMenu.x, top: inputContextMenu.y }}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={() => { void executeInputCommand('cut'); setInputContextMenu(null); }}>{t('dock.ctx.cut', '剪切')}</button>
-            <button type="button" onClick={() => { void executeInputCommand('copy'); setInputContextMenu(null); }}>{t('dock.ctx.copy', '复制')}</button>
-            <button type="button" onClick={() => { void executeInputCommand('paste'); setInputContextMenu(null); }}>{t('dock.ctx.paste', '粘贴')}</button>
-            <button type="button" onClick={() => { void executeInputCommand('selectAll'); setInputContextMenu(null); }}>{t('dock.ctx.selectAll', '全选')}</button>
+            <button type="button" onClick={() => { void executeInputCommand('cut'); setInputContextMenu(null); }}>
+              {t('dock.ctx.cut', '剪切')}
+            </button>
+            <button type="button" onClick={() => { void executeInputCommand('copy'); setInputContextMenu(null); }}>
+              {t('dock.ctx.copy', '复制')}
+            </button>
+            <button type="button" onClick={() => { void executeInputCommand('paste'); setInputContextMenu(null); }}>
+              {t('dock.ctx.paste', '粘贴')}
+            </button>
+            <button type="button" onClick={() => { void executeInputCommand('selectAll'); setInputContextMenu(null); }}>
+              {t('dock.ctx.selectAll', '全选')}
+            </button>
           </div>
         )}
-
         {(devices.length > 1 || channelStats.feishuTotal > 0 || channelStats.weixinTotal > 0) && (
           <div className="dock-status-strip">
             {devices.length > 1 && (
@@ -3675,14 +3608,6 @@ export default function AIDock() {
         </div>
       </div>
     ) : null}
-    <DockFlashMentionWizard
-      open={dockFlashWizardOpen}
-      onClose={() => setDockFlashWizardOpen(false)}
-      setActiveTab={setActiveTab}
-      addToast={addToast}
-      t={t}
-      isEn={isEn}
-    />
     </>
   );
 }

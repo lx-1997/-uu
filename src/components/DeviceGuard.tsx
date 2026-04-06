@@ -21,8 +21,8 @@ export default function DeviceGuard({ children, feature }: { children?: React.Re
         </div>
         <h3 className="device-guard-title">
           {feature
-            ? tf('deviceGuard.titleFeature', '{{feature}} 需要连接设备', { feature })
-            : t('deviceGuard.title', '请先连接设备')}
+            ? tf('deviceGuard.titleFeature', '{{feature}} 需要连接开发板', { feature })
+            : t('deviceGuard.title', '请先连接开发板')}
         </h3>
         <p className="device-guard-desc">
           {feature

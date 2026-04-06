@@ -596,6 +596,10 @@ export interface StreamAgentChatOptions {
   studioResponseMode?: StudioResponseMode;
   /** 与 Dock「重试」对齐：服务端截断尾部 assistant 并复用同一条 user */
   studioRegenerate?: boolean;
+  /** 当前激活的 RoboBot ID */
+  activeBotId?: string;
+  /** 追加的知识空间 ID 列表 */
+  activeKnowledgeSpaceIds?: string[];
 }
 
 /** 等待 HTTP 响应头（含网关排队） */
@@ -667,6 +671,8 @@ export function streamAgentChat(
           attachments,
           ...(studioRegenerate ? { studioRegenerate: true } : {}),
           ...(studioUiHints ? { studioUiHints } : {}),
+          ...(options?.activeBotId ? { activeBotId: options.activeBotId } : {}),
+          ...(options?.activeKnowledgeSpaceIds?.length ? { activeKnowledgeSpaceIds: options.activeKnowledgeSpaceIds } : {}),
         }),
         signal: controller.signal,
         credentials: 'include',
@@ -1565,4 +1571,213 @@ export function downloadDeviceFile(deviceId: string, path: string, password?: st
   return request<DeviceFileOpResult>(`/api/devices/${deviceId}/files/download?${qp}`, {
     headers: password ? { 'x-device-password': password } : undefined,
   });
+}
+
+// ---------------------------------------------------------------------------
+//  RoboBot 应用中心 — Bot & Knowledge Space API
+// ---------------------------------------------------------------------------
+
+import type { RoboBotSummary, KnowledgeSpaceSummary, DocPriority } from '../shared/bot-types.js';
+
+export interface RoboBotDetail extends RoboBotSummary {
+  createdAt: number;
+  updatedAt: number;
+  knowledgeSpaceIds: string[];
+  skillIds: string[];
+  persona: {
+    systemPromptOverride?: string;
+    extraInstructions: string;
+    delegationBias?: string;
+    autonomyLevel?: string;
+    riskLevel?: string;
+  };
+}
+
+export interface KnowledgeSourceItem {
+  id: string;
+  type: string;
+  title?: string;
+  url?: string;
+  filePath?: string;
+}
+
+export interface KnowledgeSpaceDetail extends KnowledgeSpaceSummary {
+  description: string;
+  createdAt?: number;
+  updatedAt?: number;
+  sources?: KnowledgeSourceItem[];
+}
+
+type RawBotPayload = RoboBotDetail;
+type RawSpacePayload = KnowledgeSpaceDetail;
+
+function toBotSummary(bot: RawBotPayload): RoboBotSummary {
+  return {
+    id: bot.id,
+    name: bot.name,
+    icon: bot.icon,
+    description: bot.description,
+    tags: bot.tags ?? [],
+    knowledgeSpaceCount: bot.knowledgeSpaceCount ?? bot.knowledgeSpaceIds?.length ?? 0,
+    skillCount: bot.skillCount ?? bot.skillIds?.length ?? 0,
+    knowledgeSpaceIds: bot.knowledgeSpaceIds ?? [],
+    includeRdkOfficialDocs: bot.includeRdkOfficialDocs,
+    docPriority: bot.docPriority,
+  };
+}
+
+function toBotDetail(bot: RawBotPayload): RoboBotDetail {
+  return {
+    ...toBotSummary(bot),
+    createdAt: bot.createdAt,
+    updatedAt: bot.updatedAt,
+    knowledgeSpaceIds: bot.knowledgeSpaceIds ?? [],
+    skillIds: bot.skillIds ?? [],
+    persona: {
+      extraInstructions: bot.persona?.extraInstructions ?? '',
+      systemPromptOverride: bot.persona?.systemPromptOverride,
+      delegationBias: bot.persona?.delegationBias,
+      autonomyLevel: bot.persona?.autonomyLevel,
+      riskLevel: bot.persona?.riskLevel,
+    },
+  };
+}
+
+function toKnowledgeSpaceDetail(space: RawSpacePayload): KnowledgeSpaceDetail {
+  return {
+    ...space,
+    sourceCount: space.sourceCount ?? space.sources?.length ?? 0,
+    sources: space.sources ?? [],
+  };
+}
+
+export function fetchBots() {
+  return request<{ bots: RawBotPayload[]; activeBotId?: string }>('/api/bots').then((payload) => ({
+    ok: true,
+    bots: (payload.bots ?? []).map(toBotSummary),
+    activeBotId: payload.activeBotId,
+  }));
+}
+
+export function fetchBotDetail(id: string) {
+  return request<RawBotPayload>(`/api/bots/${encodeURIComponent(id)}`).then((payload) => ({
+    ok: true,
+    bot: toBotDetail(payload),
+  }));
+}
+
+export function createBot(data: {
+  name: string;
+  description: string;
+  icon?: string;
+  extraInstructions?: string;
+  persona?: {
+    extraInstructions?: string;
+    systemPromptOverride?: string;
+  };
+  knowledgeSpaceIds?: string[];
+  includeRdkOfficialDocs?: boolean;
+  docPriority?: DocPriority;
+}) {
+  const persona = data.persona ?? {
+    extraInstructions: data.extraInstructions ?? '',
+  };
+  return request<RawBotPayload>('/api/bots', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: data.name,
+      description: data.description,
+      icon: data.icon,
+      knowledgeSpaceIds: data.knowledgeSpaceIds ?? [],
+      includeRdkOfficialDocs: data.includeRdkOfficialDocs,
+      docPriority: data.docPriority,
+      persona,
+    }),
+  }).then((payload) => ({ ok: true, bot: toBotDetail(payload) }));
+}
+
+export function updateBot(id: string, patch: Record<string, unknown>) {
+  return request<RawBotPayload>(`/api/bots/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  }).then((payload) => ({ ok: true, bot: toBotDetail(payload) }));
+}
+
+export function deleteBot(id: string) {
+  return request<{ deleted: boolean }>(`/api/bots/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }).then((payload) => ({ ok: Boolean(payload.deleted) }));
+}
+
+export function activateBot(botId?: string) {
+  return request<{ activeBotId: string | null }>('/api/bots/activate', {
+    method: 'POST',
+    body: JSON.stringify({ botId }),
+  }).then((payload) => ({ ok: true, activeBotId: payload.activeBotId ?? undefined }));
+}
+
+export function fetchKnowledgeSpaces() {
+  return request<{ spaces: RawSpacePayload[] }>('/api/knowledge-spaces').then((payload) => ({
+    ok: true,
+    spaces: (payload.spaces ?? []).map(toKnowledgeSpaceDetail),
+  }));
+}
+
+export function createKnowledgeSpace(data: { name: string; description?: string }) {
+  return request<RawSpacePayload>('/api/knowledge-spaces', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }).then((payload) => ({ ok: true, space: toKnowledgeSpaceDetail(payload) }));
+}
+
+export function deleteKnowledgeSpace(id: string) {
+  return request<{ deleted: boolean }>(`/api/knowledge-spaces/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }).then((payload) => ({ ok: Boolean(payload.deleted) }));
+}
+
+export function indexKnowledgeText(
+  spaceId: string,
+  textOrPayload: string | { title?: string; content: string; url?: string },
+  sourceLabel?: string,
+) {
+  const payload = typeof textOrPayload === 'string'
+    ? { title: sourceLabel, content: textOrPayload }
+    : textOrPayload;
+  return request<{ indexed: number; totalChunks: number }>(`/api/knowledge-spaces/${encodeURIComponent(spaceId)}/index-text`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((result) => ({ ok: true, indexed: result.indexed, totalChunks: result.totalChunks }));
+}
+
+export function indexKnowledgeUrl(spaceId: string, payload: { url: string; title?: string }) {
+  return request<{ indexed: number; totalChunks: number }>(`/api/knowledge-spaces/${encodeURIComponent(spaceId)}/index-url`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((result) => ({ ok: true, indexed: result.indexed, totalChunks: result.totalChunks }));
+}
+
+export function indexKnowledgeUrlsBulk(spaceId: string, payload: { urls?: string[]; urlsText?: string }) {
+  return request<{
+    results: Array<{ url: string; ok: boolean; indexed?: number; error?: string }>;
+    totalChunks: number;
+    indexedUrls: number;
+    addedChunksThisRun: number;
+  }>(`/api/knowledge-spaces/${encodeURIComponent(spaceId)}/index-urls-bulk`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).then((result) => ({
+    ok: true,
+    results: result.results,
+    totalChunks: result.totalChunks,
+    indexedUrls: result.indexedUrls,
+    addedChunksThisRun: result.addedChunksThisRun ?? 0,
+  }));
+}
+
+export function searchKnowledgeSpace(spaceId: string, query: string, limit = 5) {
+  return request<{ results: Array<{ content: string; score: number; metadata?: Record<string, unknown>; spaceName?: string }> }>(
+    `/api/knowledge-spaces/${encodeURIComponent(spaceId)}/search`,
+    { method: 'POST', body: JSON.stringify({ query, topK: limit }) },
+  ).then((payload) => ({ ok: true, results: payload.results ?? [] }));
 }

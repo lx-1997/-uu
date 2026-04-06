@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { PassThrough, type Duplex } from 'node:stream';
 import type { Client } from 'ssh2';
 import { forwardOutRemoteTcp } from './ssh.js';
 
@@ -14,12 +15,18 @@ export class SshTunnelHttpAgent extends http.Agent {
   }
 
   override createConnection(
-    options: unknown,
-    cb: (err: Error | null, stream?: NodeJS.ReadWriteStream) => void,
-  ): void {
+    _options: http.ClientRequestArgs,
+    cb?: (err: Error | null, stream: Duplex) => void,
+  ): Duplex | null | undefined {
     void this.getClient()
       .then((client) => forwardOutRemoteTcp(client, '127.0.0.1', this.remotePort))
-      .then((stream) => cb(null, stream))
-      .catch((e) => cb(e instanceof Error ? e : new Error(String(e))));
+      .then((stream) => cb?.(null, stream))
+      .catch((e) => {
+        const err = e instanceof Error ? e : new Error(String(e));
+        const stream = new PassThrough();
+        stream.destroy(err);
+        cb?.(err, stream);
+      });
+    return undefined;
   }
 }

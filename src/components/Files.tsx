@@ -10,6 +10,7 @@ import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { useDeviceStore } from '../hooks/useDeviceStore';
 import { useToastStore } from '../hooks/useToastStore';
+import { isDeviceShownOnline } from '../utils/device-connection';
 import DeviceGuard from './DeviceGuard';
 
 export default function Files() {
@@ -55,7 +56,7 @@ export default function Files() {
         runDownloadRef.current?.(target.name, target.isDir);
       } else {
         if (!deviceRef.current) {
-          addToast(t('files.connectFirst', '请先连接设备获取文件'), 'warning');
+          addToast(t('files.connectFirst', '请先连接开发板获取文件'), 'warning');
           return;
         }
         addToast(tf('files.searchDeep', '当前目录未找到，正在全盘深入搜索 {{name}}...', { name: fileName }), 'info');
@@ -95,7 +96,7 @@ export default function Files() {
 
   const ensureDevice = () => {
     if (!currentDevice) {
-      addToast(t('files.needDevice', '请先连接真实设备'), 'warning');
+      addToast(t('files.needDevice', '请先连接开发板'), 'warning');
       return false;
     }
     return true;
@@ -449,6 +450,19 @@ export default function Files() {
         <div className="tool-bar files-page-toolbar">
           <div className="tool-bar-left">
             <span className="tool-bar-title">{t('files.title', '资源管理器')}</span>
+            {currentDevice && (
+              <span
+                className="immersive-bar-status"
+                title={isDeviceShownOnline(currentDevice)
+                  ? t('files.status.connected', '已通过 SSH 连接到开发板')
+                  : t('files.status.offline', '开发板连接已断开，文件操作可能失败')}
+              >
+                <span className={`status-dot ${isDeviceShownOnline(currentDevice) ? 'online' : 'warn'}`} />
+                {isDeviceShownOnline(currentDevice)
+                  ? currentDevice.name
+                  : t('files.status.offlineShort', '连接断开')}
+              </span>
+            )}
           </div>
           <div className="tool-bar-right files-page-toolbar__actions">
             <button
@@ -723,7 +737,18 @@ export default function Files() {
                   {visibleEntries.length === 0 && !running && (
                     <tr data-file="__empty__">
                       <td colSpan={4} className="td" style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 15 }}>
-                        {searchText.trim() ? t('files.empty.search', '未找到匹配文件，请调整搜索关键词') : t('files.empty.folder', '此文件夹为空，您可以拖拽文件到此处上传')}
+                        {searchText.trim()
+                          ? t('files.empty.search', '未找到匹配文件，请调整搜索关键词')
+                          : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                              <span>{t('files.empty.folder', '此文件夹为空')}</span>
+                              <button type="button" className="btn btn-primary btn-sm" onClick={() => fileInputRef.current?.click()}>
+                                <Upload size={14} strokeWidth={2} style={{ marginRight: 4 }} />
+                                {t('files.empty.uploadCta', '上传文件到此目录')}
+                              </button>
+                              <span style={{ fontSize: 12, color: '#64748b' }}>{t('files.empty.dragHint', '也可以直接拖拽文件到页面上传')}</span>
+                            </div>
+                          )}
                       </td>
                     </tr>
                   )}

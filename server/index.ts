@@ -131,6 +131,7 @@ import {
 } from './studio-browser-capture.js';
 import { registerSocketIoHandlers } from './socket-io-handlers.js';
 import { registerFrpRoutes } from './frp-routes.js';
+import { createBotApiRoutes, createKnowledgeSpaceApiRoutes } from './api/bot-routes.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -1942,6 +1943,10 @@ app.use('/api/agent/upload-attachment', uploadLimiter);
 registerSSORoutes(app);
 registerAnalyticsRoutes(app);
 registerClawhubRoutes(app);
+
+// RoboBot 应用中心 & 知识空间 API
+app.use('/api/bots', createBotApiRoutes());
+app.use('/api/knowledge-spaces', createKnowledgeSpaceApiRoutes());
 
 /** Studio 桌面端：用户在内嵌浏览器提交页面正文，完成 Agent 工具 studio_embedded_browser_capture */
 app.post('/api/studio/browser-capture/submit', (req, res) => {
@@ -4422,14 +4427,14 @@ app.get('/api/devices/:id/state-snapshot', async (request, response) => {
   const pwdHeader = request.header('x-device-password') ?? '';
   const ping = await runDevicePingProbe(id, device, pwdHeader);
 
-  let diagnostics: { ok: boolean; output?: string; cached?: boolean };
+  let diagnostics: { ok: boolean; output?: string; cached?: boolean } | undefined;
   if (!freshDiag) {
     const cachedOut = getDiagnosticsCache(id);
     if (cachedOut !== null) {
       diagnostics = { ok: true, output: cachedOut, cached: true };
     }
   }
-  if (diagnostics === undefined) {
+  if (!diagnostics) {
     const executed = await runOnDevice(request, response, id, DIAGNOSTIC_COMMANDS, {
       joinWith: ';',
       rejectOnNonZeroExit: false,
@@ -7180,6 +7185,31 @@ app.post('/api/chat', async (request, response) => {
     });
   }
 });
+
+const distDir = path.join(process.cwd(), 'dist');
+const distIndexFile = path.join(distDir, 'index.html');
+
+if (existsSync(distIndexFile)) {
+  app.use(express.static(distDir, { index: false }));
+  app.get('*', (request, response, next) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      next();
+      return;
+    }
+    if (
+      request.path.startsWith('/api/')
+      || request.path === '/quick-connect'
+      || request.path === '/vnc'
+      || request.path.startsWith('/vnc/')
+    ) {
+      next();
+      return;
+    }
+    response.sendFile(distIndexFile);
+  });
+} else {
+  console.warn(`[server] 前端静态资源缺失：未找到 ${distIndexFile}`);
+}
 
 async function startServer() {
   ensureAgentMediaDownloadDir();

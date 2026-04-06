@@ -38,6 +38,15 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       host: '0.0.0.0',
+      /** Playwright 报告/trace 写入仓库根目录，勿监听以免触发整页 reload */
+      watch: {
+        ignored: [
+          '**/e2e-report/**',
+          '**/e2e-results/**',
+          '**/playwright-report/**',
+          '**/test-results/**',
+        ],
+      },
       proxy: {
         '/api': {
           target: apiTarget,

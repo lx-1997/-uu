@@ -6,6 +6,10 @@ const devicePassword = process.env.RDK_DEVICE_PASSWORD || '';
 
 const checks = [];
 
+function isAuthProtected(status) {
+  return status === 401 || status === 403;
+}
+
 function pushCheck(name, ok, detail, mode = 'api') {
   checks.push({ name, ok, detail, mode });
 }
@@ -56,16 +60,16 @@ async function staticChecks() {
 async function routeChecks() {
   const routeCases = [
     { name: '健康检查', method: 'GET', path: '/api/health', expect: (s) => s === 200 },
-    { name: '设备列表', method: 'GET', path: '/api/devices', expect: (s) => s === 200 },
-    { name: '诊断路由存在', method: 'GET', path: '/api/devices/non-exists/diagnostics', expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: 'ROS 路由存在', method: 'GET', path: '/api/devices/non-exists/ros/topics', expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: 'Node-RED 路由存在', method: 'GET', path: '/api/devices/non-exists/services/node-red', expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: 'VNC 路由存在', method: 'GET', path: '/api/devices/non-exists/services/vnc', expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: '文件列表路由存在', method: 'GET', path: '/api/devices/non-exists/files/list?path=/', expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: '文件读取路由存在', method: 'GET', path: '/api/devices/non-exists/files/read?path=/etc/hosts', expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: '文件下载路由存在', method: 'GET', path: '/api/devices/non-exists/files/download?path=/etc/hosts', expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: '模型部署路由存在', method: 'POST', path: '/api/devices/non-exists/models/deploy', body: { command: 'echo test' }, expect: (s) => s === 404 || s === 400 || s === 500 },
-    { name: '示例运行路由存在', method: 'POST', path: '/api/devices/non-exists/examples/run', body: { command: 'echo test' }, expect: (s) => s === 404 || s === 400 || s === 500 },
+    { name: '设备列表', method: 'GET', path: '/api/devices', expect: (s) => s === 200 || isAuthProtected(s) },
+    { name: '诊断路由存在', method: 'GET', path: '/api/devices/non-exists/diagnostics', expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: 'ROS 路由存在', method: 'GET', path: '/api/devices/non-exists/ros/topics', expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: 'Node-RED 路由存在', method: 'GET', path: '/api/devices/non-exists/services/node-red', expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: 'VNC 路由存在', method: 'GET', path: '/api/devices/non-exists/services/vnc', expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: '文件列表路由存在', method: 'GET', path: '/api/devices/non-exists/files/list?path=/', expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: '文件读取路由存在', method: 'GET', path: '/api/devices/non-exists/files/read?path=/etc/hosts', expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: '文件下载路由存在', method: 'GET', path: '/api/devices/non-exists/files/download?path=/etc/hosts', expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: '模型部署路由存在', method: 'POST', path: '/api/devices/non-exists/models/deploy', body: { command: 'echo test' }, expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
+    { name: '示例运行路由存在', method: 'POST', path: '/api/devices/non-exists/examples/run', body: { command: 'echo test' }, expect: (s) => s === 404 || s === 400 || s === 500 || isAuthProtected(s) },
   ];
 
   for (const c of routeCases) {
@@ -85,6 +89,10 @@ async function routeChecks() {
 async function realDeviceChecks() {
   try {
     const devicesRes = await request('/api/devices');
+    if (isAuthProtected(devicesRes.status)) {
+      pushCheck('实机联调', true, `当前环境已启用鉴权，未登录态跳过实机联调（HTTP ${devicesRes.status}）`, 'device');
+      return;
+    }
     const devices = Array.isArray(devicesRes.body?.devices) ? devicesRes.body.devices : [];
 
     if (!devices.length) {

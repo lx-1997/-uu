@@ -30,6 +30,7 @@ export default function Vnc() {
   const [latency, setLatency] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeLoadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // VNC URL 版本号，用于强制刷新 iframe
   const [urlVersion, setUrlVersion] = useState(0);
@@ -46,6 +47,7 @@ export default function Vnc() {
       if (activeTab === 'vnc') {
         if (embedFloating) {
           rdk.hideUrl?.(url);
+          rdk.focusEmbedFloat?.(url);
         } else {
           rdk.setActiveUrl?.(url);
         }
@@ -102,6 +104,18 @@ export default function Vnc() {
     });
     return () => setVncEmbedToolbar(null);
   }, [showIframe, embedFloating, toggleEmbedFloat, setVncEmbedToolbar]);
+
+  // iframe 加载超时检测（非桌面端）
+  useEffect(() => {
+    clearTimeout(iframeLoadTimerRef.current);
+    if (!showIframe || isDesktop()) return;
+    iframeLoadTimerRef.current = setTimeout(() => {
+      if (!loadError) {
+        setLoadError(t('vnc.err.iframeTimeout', '远程桌面加载超时，请检查网络或重试'));
+      }
+    }, 12000);
+    return () => clearTimeout(iframeLoadTimerRef.current);
+  }, [showIframe, loadError, t]);
 
   // 监听 WebContentsView 加载事件
   useEffect(() => {
@@ -198,7 +212,7 @@ export default function Vnc() {
   // ── 启动 VNC 并连接 ──
   const handleConnect = () => {
     if (!currentDevice) {
-      addToast(t('vnc.toast.connectDevice', '请先连接设备'), 'warning');
+      addToast(t('vnc.toast.connectDevice', '请先连接开发板'), 'warning');
       return;
     }
     if (phase === 'connecting') {
@@ -235,7 +249,7 @@ export default function Vnc() {
         const vncUrl = getVncUrl();
         setPhase('connected');
         setShowIframe(true);
-        addToast(t('vnc.toast.ok', 'VNC 连接成功'), 'success');
+        addToast(t('vnc.toast.started', 'VNC 服务已启动，正在加载远程桌面…'), 'info');
         startVncSession();
         /** 默认贴入当前远程桌面页；对话「打开 VNC」由 useAppState.tryFloatWhenReady / runRemoteConnectIntent 再浮出 */
         setEmbedFloating(false);
@@ -249,7 +263,7 @@ export default function Vnc() {
       } else {
         setPhase('error');
         setStatusText(t('vnc.err.port', '端口 5900 未就绪'));
-        addToast(t('vnc.toast.port', 'VNC 端口未就绪，请检查设备配置'), 'warning');
+        addToast(t('vnc.toast.port', 'VNC 端口未就绪。请尝试：(1) 在终端运行 sudo systemctl restart x11vnc，(2) 确认开发板已安装桌面环境'), 'warning');
       }
     }).catch(err => {
       setPhase('error');
@@ -353,9 +367,11 @@ export default function Vnc() {
         <div className="immersive-bar-center">
           {showIframe && (
             <>
-              <span className={`immersive-bar-status ${phase === 'connected' ? 'live' : ''}`}>
-                <span className="status-dot" />
-                {phase === 'connected' ? t('vnc.status.connected', '已连接') : t('vnc.status.disconnected', '未连接')}
+              <span className={`immersive-bar-status ${phase === 'connected' && !loadError ? 'live' : ''}`}>
+                <span className={`status-dot ${loadError ? 'warn' : phase === 'connected' ? 'online' : ''}`} />
+                {loadError
+                  ? t('vnc.status.loadError', '加载异常')
+                  : phase === 'connected' ? t('vnc.status.connected', '已连接') : t('vnc.status.disconnected', '未连接')}
               </span>
               {latency !== null && (
                 <span className="immersive-bar-meta">{latency}ms</span>
@@ -507,6 +523,11 @@ export default function Vnc() {
                   className="vnc-iframe"
                   title="VNC Remote Desktop"
                   allow="clipboard-read; clipboard-write"
+                  onLoad={() => {
+                    clearTimeout(iframeLoadTimerRef.current);
+                    setLoadError(null);
+                    addToast(t('vnc.toast.iframeOk', '远程桌面已加载'), 'success');
+                  }}
                 />
               </FloatingEmbedPanel>
             )}
@@ -547,7 +568,7 @@ export default function Vnc() {
 
             <h2 className="immersive-welcome-title">{t('vnc.welcome.title', 'Web 远程桌面')}</h2>
             <p className="immersive-welcome-desc">
-              {t('vnc.welcome.desc', '通过 WebSocket 代理直连设备桌面，零安装、低延迟')}
+              {t('vnc.welcome.desc', '通过 WebSocket 代理直连开发板桌面，零安装、低延迟')}
             </p>
 
             {phase === 'checking' && (
@@ -574,6 +595,9 @@ export default function Vnc() {
                   </svg>
                   <span>{statusText}</span>
                 </span>
+                <p style={{ fontSize: '0.8125rem', color: '#94a3b8', maxWidth: 360, lineHeight: 1.55, margin: '4px 0 8px' }}>
+                  {t('vnc.err.troubleshoot', '排查建议：(1) 确认开发板已安装桌面环境, (2) 在终端运行 sudo systemctl status x11vnc 查看服务状态, (3) 检查端口 5900 是否被占用')}
+                </p>
                 <button className="btn btn-ghost" onClick={handleConnect}>{t('vnc.retry', '重试')}</button>
               </div>
             )}
@@ -592,7 +616,7 @@ export default function Vnc() {
             )}
 
             {!currentDevice && (
-              <p className="vnc-no-device">{t('vnc.pickDeviceLeft', '请先在左侧选择一个设备')}</p>
+              <p className="vnc-no-device">{t('vnc.pickDeviceLeft', '请先在左侧选择一个开发板')}</p>
             )}
 
             <div className="immersive-feature-hints">

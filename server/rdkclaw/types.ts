@@ -46,6 +46,10 @@ export interface RDKClawChatRequest {
    * 仅应在 channel=studio 且用户显式重试时置 true。
    */
   studioRegenerate?: boolean;
+  /** 当前激活的 RoboBot ID（由 @bot 指令或 Bot 面板切换设置） */
+  activeBotId?: string;
+  /** 当前激活的知识空间 ID 列表（由 @docs 指令追加） */
+  activeKnowledgeSpaceIds?: string[];
   /** 服务端内部字段：本次请求头 `x-device-password`（用于在线探测候选凭据） */
   requestHeaderPassword?: string;
   // 服务端内部字段：用于在 SSE 断连时中止当前 run
@@ -150,6 +154,7 @@ export interface ExecutorSelection {
 export interface PersonaProfile {
   name: string;
   extraInstructions: string;
+  systemPromptOverride?: string;
   riskLevel: "conservative" | "balanced" | "aggressive";
   delegationBias: "local-first" | "balanced" | "board-first";
   autonomyLevel: "manual" | "assisted" | "autonomous";

@@ -743,6 +743,33 @@
   background: color-mix(in srgb, var(--accent) 6%, var(--bg-secondary));
   border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border));
 }
+.oc-setup-wizard-precheck {
+  text-align: left;
+  margin: 0 0 12px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--bg-primary));
+  border: 1px solid var(--border);
+}
+.oc-setup-wizard-precheck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.oc-setup-wizard-precheck-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.oc-setup-wizard-precheck-detail {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
 
 .oc-deploy-provider-grid {
   display: flex;
@@ -883,12 +910,51 @@
   background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-secondary));
 }
 
+.oc-chat-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oc-space-2);
+  min-width: 0;
+}
+
 .oc-chat-header-label {
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+.oc-chat-phase {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.oc-chat-phase.is-ok {
+  border-color: color-mix(in srgb, var(--ok) 42%, var(--border));
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  color: color-mix(in srgb, var(--ok) 78%, var(--text-primary));
+}
+
+.oc-chat-phase.is-warn {
+  border-color: color-mix(in srgb, var(--warn) 44%, var(--border));
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: color-mix(in srgb, var(--warn) 82%, var(--text-primary));
+}
+
+.oc-chat-phase.is-error {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: color-mix(in srgb, var(--danger) 80%, var(--text-primary));
 }
 
 .oc-chat-body {
@@ -948,6 +1014,14 @@
   font-weight: 650;
   letter-spacing: -0.02em;
   color: var(--text-primary);
+}
+
+.oc-chat-empty-sub {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  max-width: 320px;
+  line-height: 1.55;
+  margin: 0;
 }
 
 .oc-chat-empty::after {
@@ -1061,6 +1135,10 @@
   flex-direction: column;
   gap: 8px;
   max-width: 100%;
+.oc-deploy-main-hint-body button {
+  margin-top: 4px;
+  margin-right: 6px;
+}
   box-sizing: border-box;
 }
 

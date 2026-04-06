@@ -131,11 +131,15 @@ export function registerAnalyticsRoutes(app: Express): void {
       return;
     }
     if (!result.persisted) {
-      res.json({
-        ok: true,
-        persisted: false,
-        reason: result.reason,
-      });
+      if (result.reason === 'unavailable') {
+        res.json({ ok: true, persisted: false });
+      } else {
+        res.json({
+          ok: true,
+          persisted: false,
+          reason: result.reason,
+        });
+      }
       return;
     }
     res.json({

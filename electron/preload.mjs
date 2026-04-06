@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   /** IDE/VNC：拆到独立原生窗口或贴回主窗口 */
   setEmbedFloatMode: (url, floating, title) =>
     ipcRenderer.send('rdk:set-embed-float', { url, floating, title }),
+  /** 将已浮出的 IDE/VNC 窗口置顶（切 Tab 回来时避免被主窗口遮挡） */
+  focusEmbedFloat: (url) => ipcRenderer.send('rdk:focus-embed-float', { url }),
   onEmbedFloatDocked: (cb) => {
     const h = (_e, payload) => cb(payload);
     ipcRenderer.on('rdk:embed-float-docked', h);

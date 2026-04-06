@@ -41,6 +41,7 @@ import { buildDelegationRuntimePrompt } from "./delegation.js";
 export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
   "open_web_route",
   "rdk_doc_route",
+  "knowledge_context",
   "delegation_runtime",
   "device_connectivity",
   "studio_ui_hints",
@@ -59,6 +60,7 @@ export type SystemPromptLayerId =
   | "board_plugins"
   | "open_web_route"
   | "rdk_doc_route"
+  | "knowledge_context"
   | "delegation_runtime"
   | "device_connectivity"
   | "studio_ui_hints"
@@ -114,6 +116,8 @@ export interface SystemPromptLayerBuildInput {
     detail: string;
     publicNetworkReady?: boolean | null;
   };
+  /** 由 KnowledgeRouter 预构建的知识上下文块（@bot / @docs / @url） */
+  knowledgeContextBlock?: string;
 }
 
 function appendOpenWebRouteDynamic(
@@ -169,7 +173,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   );
   pushStable(
     "memory_hint",
-    "偏好与结论可用 memory_save；需要时用 memory_search。",
+    "偏好与结论以 memory_save / memory_search 的结构化记忆为准；daily memory 是轨迹，MEMORY.generated.md 是投影。",
   );
   pushStable("persona", buildPersonaPrompt(input.persona));
   pushStable("product_ecosystem", buildProductEcosystemPromptQuick());
@@ -204,6 +208,11 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
 
   appendOpenWebRouteDynamic(input, pushDynamic);
   appendRdkDocFirstDynamic(input, pushDynamic);
+
+  // 知识上下文注入（快速模式同样支持）
+  if (input.knowledgeContextBlock?.trim()) {
+    pushDynamic("knowledge_context", input.knowledgeContextBlock);
+  }
 
   if (input.deviceId && input.delegateDecision) {
     const dr = buildDelegationRuntimePrompt(input.delegateDecision, input.boardSnapshot.skills.length);
@@ -306,8 +315,8 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   pushStable(
     "memory_hint",
     input.modelTier === "small"
-      ? "记住：发现用户偏好→memory_save；重复场景→创建技能。"
-      : "## 用户理解\n对话中注意捕捉用户偏好和习惯，用 memory_save 保存重要信息，用 memory_search 回顾历史。发现反复出现的操作模式时主动创建技能。",
+      ? "记住：长期结论进 memory_save；daily memory 只是轨迹，MEMORY.generated.md 只是投影；重复场景→创建技能。"
+      : "## 用户理解\n对话中注意捕捉用户偏好和习惯，用 memory_save 保存重要信息，用 memory_search 回顾历史。daily memory 只记录会话轨迹，MEMORY.generated.md 只是结构化记忆投影。发现反复出现的操作模式时主动创建技能。",
   );
 
   pushStable("persona", buildPersonaPrompt(input.persona));
@@ -343,7 +352,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
       "device_research_ros",
       [
         "## 资料与命令来源（无本地生态注册表）",
-        "需要官方安装步骤、示例或硬件说明时：用 web_search / web_fetch，优先 D-Robotics 文档与 GitHub（developer.d-robotics.cc/rdk_doc、github.com/D-Robotics），可检索 rdk_dock 等关键词。",
+        "需要官方安装步骤、示例或硬件说明时：先 `rdk_doc_search_local` 查本地 RDK 文档缓存；命中后对返回 URL 用 `web_fetch`。只有本地未命中、或需 GitHub/社区最新信息时，再 `web_search` / `forum_drobotics_*`。",
         input.platform
           ? "当前板型已识别，建议 web_fetch 入口：" + getResearchSeeds(input.platform).join(" | ")
           : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。",
@@ -378,6 +387,11 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
 
   appendOpenWebRouteDynamic(input, pushDynamic);
   appendRdkDocFirstDynamic(input, pushDynamic);
+
+  // 知识上下文注入（@bot / @docs / @url 由 KnowledgeRouter 预构建）
+  if (input.knowledgeContextBlock?.trim()) {
+    pushDynamic("knowledge_context", input.knowledgeContextBlock);
+  }
 
   if (input.deviceId && input.delegateDecision) {
     pushDynamic(

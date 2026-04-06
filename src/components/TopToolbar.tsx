@@ -363,12 +363,12 @@ export default function TopToolbar() {
 
       <button
         type="button"
-        className={`btn-icon topbar-wifi-btn${wifiLink === 'up' ? ' topbar-wifi-btn--up' : ''}${wifiLink === 'down' ? ' topbar-wifi-btn--down' : ''}`}
+        className={`btn-icon topbar-wifi-btn${wifiLink === 'up' ? ' topbar-wifi-btn--up' : ''}${wifiLink === 'down' ? ' topbar-wifi-btn--down topbar-wifi-btn--alert' : ''}`}
         title={
           wifiLink === 'up'
             ? t('topbar.wifi.titleConnected', 'WiFi 已连接（点击配置）')
             : wifiLink === 'down'
-              ? t('topbar.wifi.titleDisconnected', 'WiFi 未连接（点击配置）')
+              ? t('topbar.wifi.titleDisconnected', '⚠ 开发板未联网 — AI 对话等功能不可用，点击配置 WiFi')
               : t('topbar.wifi.title', '配置 WiFi')
         }
         onClick={() => setShowWifiModal(true)}

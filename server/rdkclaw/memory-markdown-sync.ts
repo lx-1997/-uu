@@ -29,19 +29,6 @@ async function collectMemoryMarkdownFiles(workspaceDir: string): Promise<string[
     }
   }
 
-  const memoryDir = path.join(workspaceDir, "memory");
-  try {
-    const entries = await fs.readdir(memoryDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (!entry.name.toLowerCase().endsWith(".md")) continue;
-      if (entry.name.toLowerCase().includes("generated")) continue;
-      files.push(path.join(memoryDir, entry.name));
-    }
-  } catch {
-    // optional
-  }
-
   return files;
 }
 
@@ -70,7 +57,8 @@ export async function syncWorkspaceMarkdownMemory(opts: {
     "# MEMORY.generated.md",
     "",
     "本文件由系统自动生成（结构化长期记忆投影），请勿手动编辑。",
-    "如需新增长期偏好，请编辑 USER.md 或在对话中让 Agent 记住。",
+    "长期记忆真源为 memory_search / memory_save 对应的结构化索引；MEMORY.md 仅作为人工摘要输入。",
+    "daily memory 保留会话轨迹，不再作为长期检索真源反复回灌。",
     "",
   ];
 
