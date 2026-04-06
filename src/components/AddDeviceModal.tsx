@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { verifyDeviceConnection, fetchTypecInterfaces, configureTypecInterface, fetchDeviceWifiList, type NetworkInterface } from '../api';
-import { fetchApi } from '../utils/apiBase';
 import { fetchWifiLinkState } from '../utils/wifi-link-probe';
+import { postDeviceWifiConnect } from '../utils/wifi-connect';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
 import { isDesktopMac } from '../utils/env';
@@ -316,12 +316,7 @@ export default function AddDeviceModal() {
     setWifiConnecting(true);
     setWifiConnectLog('');
     try {
-      const res = await fetchApi(`/api/devices/${wifiDeviceId}/openclaw/wifi-connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wifiName: wifiSsid, wifiPassword: wifiPass }),
-      });
-      const data = await res.json() as { ok: boolean; output?: string; error?: string };
+      const data = await postDeviceWifiConnect(wifiDeviceId, wifiSsid, wifiPass);
       if (data.output) setWifiConnectLog(data.output);
       if (data.ok) {
         addToast(tf('wifiModal.toast.connected', '已连接到 {{ssid}}', { ssid: wifiSsid }), 'success');

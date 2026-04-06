@@ -509,6 +509,19 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      /* 设备 API 返回 5xx 且为 SSH/TCP 不可达（ETIMEDOUT 等）：后台会高频轮询，勿反复 Toast；侧栏离线状态已足够 */
+      const urlForDevice = String(detail.url || '');
+      if (/\/api\/devices\/[^/]+/.test(urlForDevice) && status >= 500) {
+        const sig = rawMessage;
+        if (
+          /ETIMEDOUT|ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|read\s+ETIMEDOUT|connect\s+ETIMEDOUT|socket\s+hang\s+up|read\s+ECONNRESET|getaddrinfo\s+ENOTFOUND/i.test(
+            sig,
+          )
+        ) {
+          return;
+        }
+      }
+
       if (code === 'SSH_CONNECT_TIMEOUT') {
         toast.addToast(
           t(

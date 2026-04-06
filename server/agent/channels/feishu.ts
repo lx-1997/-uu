@@ -8,6 +8,7 @@ import type { FeishuRuntimeConfig } from "../../rdkclaw/feishu-config-store.js";
 import type { NotificationHub } from "../../rdkclaw/notification-hub.js";
 import { readDevices } from "../../storage.js";
 import { matchTextApproval } from "../../rdkclaw/channel-safety.js";
+import { collectMediaPathsFromAssistantReply } from "./weixin.js";
 
 type FeishuChannelOptions = {
   rdkclaw: RDKClawApp;
@@ -938,6 +939,12 @@ export class FeishuWebSocketChannel {
                   localPath: parsed.localPath as string,
                   fileName: String(parsed.fileName || "image"),
                 });
+              } else if (parsed.__type === "studio_local_preview" && typeof parsed.path === "string") {
+                const abs = String(parsed.path);
+                pendingImages.push({
+                  localPath: abs,
+                  fileName: nodePath.basename(abs),
+                });
               } else if (parsed.__type === "video_download" && typeof parsed.localPath === "string") {
                 pendingFiles.push({
                   localPath: parsed.localPath as string,
@@ -972,6 +979,21 @@ export class FeishuWebSocketChannel {
 
     const streamed = chunks.join("").trim();
     const replyRaw = (finalText || streamed).trim() || "我已经执行完成，但未提取到可显示的文本结果。请让我重试并返回详细过程。";
+    const imgSeen = new Set(pendingImages.map((p) => p.localPath.toLowerCase()));
+    const fileSeen = new Set(pendingFiles.map((p) => p.localPath.toLowerCase()));
+    for (const mp of collectMediaPathsFromAssistantReply(replyRaw, [
+      ...pendingImages.map((p) => ({ path: p.localPath, kind: "image" as const })),
+      ...pendingFiles.map((p) => ({ path: p.localPath, kind: "document" as const })),
+    ])) {
+      const low = mp.path.toLowerCase();
+      if (mp.kind === "image" && !imgSeen.has(low)) {
+        pendingImages.push({ localPath: mp.path, fileName: nodePath.basename(mp.path) });
+        imgSeen.add(low);
+      } else if (mp.kind !== "image" && !fileSeen.has(low)) {
+        pendingFiles.push({ localPath: mp.path, fileName: nodePath.basename(mp.path) });
+        fileSeen.add(low);
+      }
+    }
     const reply = normalizeForFeishu(replyRaw);
     await this.sendText(chatId, reply);
 

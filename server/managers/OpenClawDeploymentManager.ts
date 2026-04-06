@@ -24,12 +24,12 @@ import {
   syncBuiltinStudioSkillsOverSftp,
 } from './board-openclaw-builtin-skills-sync.js';
 
-/** 套件端一键安装/升级 SSH 超时（毫秒）。默认 30 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式 npm 全局装包常超过 10 分钟。 */
+/** 套件端一键安装/升级 SSH 超时（毫秒）。默认 45 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式弱网下 npm 全局装包可能显著超过 30 分钟。 */
 export const OPENCLAW_INSTALL_TIMEOUT_MS = (() => {
   const raw = process.env.OPENCLAW_INSTALL_TIMEOUT_MS;
   const n = raw ? Number(raw) : NaN;
   if (Number.isFinite(n) && n >= 120000) return Math.floor(n);
-  return 1_800_000;
+  return 2_700_000;
 })();
 
 /**
@@ -725,6 +725,20 @@ const ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART = [
     '; fi; fi',
 ].join(' && ');
 
+const ENSURE_GATEWAY_READY_AND_TRUST = [
+  ENSURE_GATEWAY_AUTH_TOKEN,
+  RESTART_GATEWAY_FALLBACK,
+  'echo "[OpenClaw] Gateway 重启命令已执行，等待端口就绪..."',
+  `ok=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
+  `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${GATEWAY_SSH_USER_SYSTEMD_ENV} && ${START_GATEWAY_FALLBACK}; fi`,
+  `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
+  `if [ "$ok" != "1" ]; then echo "[OpenClaw] 仍无监听，尝试 nohup gateway run（SSH 无 user systemd 时）..."; ${NOHUP_GATEWAY_RUN_FALLBACK}; fi`,
+  `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
+  `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; ` +
+    `if [ -n "$OPENCLAW_CMD" ]; then export RDK_OC_PAIR_LENIENT=1; echo "[OpenClaw] 建立 CLI↔Gateway 信任（devices approve / pair）..."; ${RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL} || true; else true; fi; ` +
+    `else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
+].join(' && ');
+
 const GATEWAY_RESTART_CMD =
   `${BOARD_ENV_EXPORT} && ${RESOLVE_OPENCLAW_CMD} && ${RESTART_GATEWAY_FALLBACK} && ${ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART} && echo "[OpenClaw] Gateway 已重启"`;
 
@@ -747,7 +761,7 @@ const BOARD_FIND_SKILLS_INSTALL =
         'if [ -n "$CLAWHUB_CMD" ]; then "$CLAWHUB_CMD" install find-skills 2>&1 || echo "[OpenClaw] find-skills 跳过（已存在或安装失败）" >&2; else echo "[OpenClaw] 无 clawhub，跳过 find-skills" >&2; fi',
       ].join(' && ');
 
-const NPM_INSTALL_CMD = [
+export const NPM_INSTALL_CMD = [
   STUDIO_DEPLOY_LOG_DIV,
   'echo "[Studio] 安装 OpenClaw（npm / ClawHub / 网关）"',
   STUDIO_DEPLOY_LOG_DIV,
@@ -771,7 +785,7 @@ const NPM_INSTALL_CMD = [
 ].join(' && ');
 
 /** 与 runPrepare() 相同；单独 API 与一键部署合并路径共用 */
-const OPENCLAW_PREPARE_CMD = [
+export const OPENCLAW_PREPARE_CMD = [
   [BOARD_ENV_EXPORT, OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET, OPENCLAW_ENSURE_NPM_SNIPPET, RESOLVE_OPENCLAW_CMD].join(' && '),
   STUDIO_DEPLOY_LOG_DIV,
   'echo "[Studio] 环境准备（Node / npm / 目录）"',
@@ -788,7 +802,7 @@ const OPENCLAW_PREPARE_CMD = [
 ].join(' ; ');
 
 /** 仍需单次 SSH 合并时：准备子 shell 成功后衔接 NPM_INSTALL_CMD（安装段首已有分割线） */
-const OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD = `( ${OPENCLAW_PREPARE_CMD} ) && ${NPM_INSTALL_CMD}`;
+export const OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD = `( ${OPENCLAW_PREPARE_CMD} ) && ${NPM_INSTALL_CMD}`;
 
 export function buildBoardOpenClawGatewayPairRemoteShell(mode: 'force' | 'full'): string {
   const pairForce = [
@@ -1278,6 +1292,28 @@ export class OpenClawDeploymentManager {
       'echo "=== 诊断完成 ==="',
     ].join(' ; ');
     return this.execCommand(device, cmd, onOutput, onComplete, { timeout: 60000 });
+  }
+
+  runCheckLight(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
+    const cmd = [
+      BOARD_ENV_EXPORT,
+      RESOLVE_OPENCLAW_CMD,
+      'echo "=== OpenClaw 快速检查 ==="',
+      'echo "--- 版本 ---"',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo "openclaw 未安装"; fi)',
+      'echo ""',
+      'echo "--- Gateway 端口 ---"',
+      `${GATEWAY_PORT_CHECK} 2>/dev/null || echo "CLOSED"`,
+      'echo ""',
+      'echo "--- 状态 ---"',
+      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" status --all 2>&1 || "$OPENCLAW_CMD" status 2>&1 || echo "status 不可用"; else echo "status 不可用"; fi)',
+      'echo ""',
+      'echo "--- Node/NPM ---"',
+      'node --version 2>&1 || echo "node 未安装"',
+      'npm --version 2>&1 || echo "npm 未安装"',
+      'echo "=== 快速检查完成 ==="',
+    ].join(' ; ');
+    return this.execCommand(device, cmd, onOutput, onComplete, { timeout: 25000 });
   }
 
   runPrepare(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
@@ -1809,11 +1845,10 @@ print(json.dumps(result,ensure_ascii=False))`;
         RESOLVE_OPENCLAW_CMD,
         `( echo '${OPENCLAW_MERGE_PY_B64}' | base64 -d > /tmp/oc_merge.py && python3 /tmp/oc_merge.py '${patchB64}' '${flag}' ) 2>&1 || echo "[OpenClaw] oc_merge 失败（已跳过写入，可稍后重试保存配置）" >&2`,
         ENSURE_GATEWAY_LOCAL_MODE,
-        RESTART_GATEWAY_FALLBACK,
-        ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
+        ENSURE_GATEWAY_READY_AND_TRUST,
         'echo "[OpenClaw] 保存与 Gateway 重启流程已结束（若曾提示 oc_merge 失败请稍后在设置中重试保存）"',
       ].join(' && ');
-      mergeHandle = this.execCommand(device, cmd, onOutput, onComplete, { timeout: 120000 });
+      mergeHandle = this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000 });
     };
 
     let versionOutput = '';
@@ -1854,18 +1889,7 @@ print(json.dumps(result,ensure_ascii=False))`;
       'export PATH="$HOME/.npm-global/bin:$PATH"',
       RESOLVE_OPENCLAW_CMD,
       ENSURE_GATEWAY_LOCAL_MODE,
-      ENSURE_GATEWAY_AUTH_TOKEN,
-      RESTART_GATEWAY_FALLBACK,
-      'echo "[OpenClaw] Gateway 重启命令已执行，等待端口就绪..."',
-      `ok=0; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done`,
-      `if [ "$ok" != "1" ]; then echo "[OpenClaw] 端口仍未就绪，尝试主动启动..."; ${GATEWAY_SSH_USER_SYSTEMD_ENV} && ${START_GATEWAY_FALLBACK}; fi`,
-      `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
-      `if [ "$ok" != "1" ]; then echo "[OpenClaw] 仍无监听，尝试 nohup gateway run（SSH 无 user systemd 时）..."; ${NOHUP_GATEWAY_RUN_FALLBACK}; fi`,
-      `if [ "$ok" != "1" ]; then for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do st="$(${GATEWAY_PORT_CHECK} 2>/dev/null | tr -d '\\r\\n')"; if [ "$st" = "OPEN" ]; then ok=1; break; fi; sleep 1; done; fi`,
-      `if [ "$ok" = "1" ]; then echo "[OpenClaw] Gateway 已就绪并监听 127.0.0.1:18789"; ` +
-        // 配对失败不得让整段 SSH 以非零退出：否则 Studio 显示「重启失败」而网关实际已起来
-        `if [ -n "$OPENCLAW_CMD" ]; then export RDK_OC_PAIR_LENIENT=1; echo "[OpenClaw] 建立 CLI↔Gateway 信任（devices approve / pair）..."; ${RDK_OC_GATEWAY_PAIR_APPROVE_SUBSHELL} || true; else true; fi; ` +
-        `else echo "[OpenClaw] Gateway 端口未就绪（127.0.0.1:18789）"; ${GATEWAY_DIAG_LOGS}; exit 1; fi`,
+      ENSURE_GATEWAY_READY_AND_TRUST,
     ].join(' && ');
     this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000 });
   }
@@ -2039,32 +2063,40 @@ print(json.dumps(result,ensure_ascii=False))`;
     const nameB64 = Buffer.from(wifiName || '').toString('base64');
     const pwdB64 = Buffer.from(wifiPassword || '').toString('base64');
 
-    // WIFI_SSID / WIFI_KEY avoid clashing with bash built-in $PWD
-    // 用 printf 解码 base64，避免 echo 附加换行导致 WIFI_KEY 为空。
-    // 无 TTY 时 nmcli 不能用 --ask；man nmcli「connection up」规定 passwd-file 每行格式为
-    //   setting_name.property_name:密码（冒号分隔，不是 =），见 nmcli(1) passwd-file 说明。
-    // 竞品/无头场景常见做法：profile 写入 PSK + activation 时 passwd-file 再喂一次密钥，避免仅 add 时未落盘导致激活缺 secret。
+    // WIFI_SSID / WIFI_KEY：printf+base64 解码。必须用分号单行串联远程命令，勿用 bash -c "$(JSON 多行)"：
+    // 经 SSH exec 时引号/反斜杠会被剥坏，导致 awk 报错、变量为空（用户见 \\n 字面量与空 SSID）。
+    // 连接策略：已连目标 SSID 直接成功 -> 直连重试 -> 复用 profile -> 最后重建 profile。
     const script = [
+      `set +e`,
       `WIFI_SSID=$(printf '%s' '${nameB64}' | base64 -d)`,
       `WIFI_KEY=$(printf '%s' '${pwdB64}' | base64 -d)`,
-      `WIFI_IF=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" { print $1; exit }')`,
+      `if [ -z "$WIFI_SSID" ]; then echo "[WiFi] FAIL"; exit 2; fi`,
+      `nmcmd(){ nmcli "$@" 2>&1 || sudo -n nmcli "$@" 2>&1; }`,
+      `WIFI_IF=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | grep ':wifi$' | head -n1 | cut -d: -f1)`,
       `[ -z "$WIFI_IF" ] && WIFI_IF=wlan0`,
-      `echo "[WiFi] 清理所有同名旧连接..."`,
-      `while sudo nmcli con delete "$WIFI_SSID" 2>/dev/null; do true; done`,
-      `echo "[WiFi] 扫描网络..."`,
-      `sudo nmcli device wifi rescan 2>/dev/null; sleep 2`,
-      `echo "[WiFi] 正在连接 $WIFI_SSID (iface=$WIFI_IF) ..."`,
-      `if [ -n "$WIFI_KEY" ]; then sudo nmcli connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" 802-11-wireless-security.key-mgmt wpa-psk 802-11-wireless-security.psk "$WIFI_KEY" ipv4.method auto ipv6.method auto 2>&1; else sudo nmcli connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" 802-11-wireless-security.key-mgmt none ipv4.method auto ipv6.method auto 2>&1; fi`,
-      `if [ -n "$WIFI_KEY" ]; then NM_PWFILE=$(mktemp /tmp/nm-wifi-XXXXXX.pass); chmod 600 "$NM_PWFILE"; printf '802-11-wireless-security.psk:%s\\n' "$WIFI_KEY" > "$NM_PWFILE"; sudo nmcli connection up "$WIFI_SSID" ifname "$WIFI_IF" passwd-file "$NM_PWFILE" 2>&1; rm -f "$NM_PWFILE"; else sudo nmcli connection up "$WIFI_SSID" ifname "$WIFI_IF" 2>&1; fi`,
-      `sleep 3`,
-      `NEW_IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)`,
-      `if [ -n "$NEW_IP" ]; then echo "[WiFi] OK IP=$NEW_IP"; else echo "[WiFi] FAIL"; fi`,
+      `echo "[WiFi] 目标网络: $WIFI_SSID 接口: $WIFI_IF"`,
+      `ACTIVE_CONN=$(nmcmd -t -f GENERAL.CONNECTION device show "$WIFI_IF" | sed -n 's/^GENERAL.CONNECTION://p' | head -n1)`,
+      `if [ "$ACTIVE_CONN" = "$WIFI_SSID" ]; then CUR_IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1); if [ -n "$CUR_IP" ]; then echo "[WiFi] 已连接目标网络，跳过重连"; echo "[WiFi] OK IP=$CUR_IP"; exit 0; fi; fi`,
+      `nmcmd radio wifi on >/dev/null || true`,
+      `nmcmd device wifi rescan ifname "$WIFI_IF" >/dev/null || nmcmd device wifi rescan >/dev/null || true`,
+      `sleep 2`,
+      `OK=0`,
+      `for i in 1 2 3; do echo "[WiFi] 直连尝试 $i/3..."; if [ -n "$WIFI_KEY" ]; then nmcmd device wifi connect "$WIFI_SSID" password "$WIFI_KEY" ifname "$WIFI_IF" && OK=1 && break; else nmcmd device wifi connect "$WIFI_SSID" ifname "$WIFI_IF" && OK=1 && break; fi; ACTIVE_CONN=$(nmcmd -t -f GENERAL.CONNECTION device show "$WIFI_IF" | sed -n 's/^GENERAL.CONNECTION://p' | head -n1); if [ "$ACTIVE_CONN" = "$WIFI_SSID" ]; then OK=1; break; fi; nmcmd device wifi rescan ifname "$WIFI_IF" >/dev/null || nmcmd device wifi rescan >/dev/null || true; sleep 2; done`,
+      `if [ "$OK" != "1" ]; then echo "[WiFi] 直连未成功，尝试复用已有连接..."; if nmcmd -t -f NAME connection show | grep -Fx -- "$WIFI_SSID" >/dev/null; then if [ -n "$WIFI_KEY" ]; then nmcmd connection modify "$WIFI_SSID" 802-11-wireless-security.key-mgmt wpa-psk 802-11-wireless-security.psk "$WIFI_KEY" >/dev/null || true; NM_PWFILE=$(mktemp /tmp/nm-wifi-XXXXXX.pass); chmod 600 "$NM_PWFILE"; printf '802-11-wireless-security.psk:%s\\n' "$WIFI_KEY" > "$NM_PWFILE"; nmcmd connection up "$WIFI_SSID" ifname "$WIFI_IF" passwd-file "$NM_PWFILE" && OK=1; rm -f "$NM_PWFILE"; else nmcmd connection up "$WIFI_SSID" ifname "$WIFI_IF" && OK=1; fi; fi; fi`,
+      `if [ "$OK" != "1" ]; then echo "[WiFi] 复用失败，重建连接配置..."; nmcmd connection delete "$WIFI_SSID" >/dev/null || true; if [ -n "$WIFI_KEY" ]; then nmcmd connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" 802-11-wireless-security.key-mgmt wpa-psk 802-11-wireless-security.psk "$WIFI_KEY" ipv4.method auto ipv6.method auto >/dev/null || true; NM_PWFILE=$(mktemp /tmp/nm-wifi-XXXXXX.pass); chmod 600 "$NM_PWFILE"; printf '802-11-wireless-security.psk:%s\\n' "$WIFI_KEY" > "$NM_PWFILE"; nmcmd connection up "$WIFI_SSID" ifname "$WIFI_IF" passwd-file "$NM_PWFILE" && OK=1; rm -f "$NM_PWFILE"; else nmcmd connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" ipv4.method auto ipv6.method auto >/dev/null || true; nmcmd connection modify "$WIFI_SSID" 802-11-wireless-security.key-mgmt none >/dev/null || true; nmcmd connection up "$WIFI_SSID" ifname "$WIFI_IF" && OK=1; fi; fi`,
+      `NEW_IP=""`,
+      `for i in 1 2 3 4 5 6; do NEW_IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1); [ -n "$NEW_IP" ] && break; sleep 1; done`,
+      `if [ "$OK" = "1" ] && [ -n "$NEW_IP" ]; then echo "[WiFi] OK IP=$NEW_IP"; else echo "[WiFi] FAIL"; fi`,
     ].join(' ; ');
 
     let output = '';
     const collectOutput = (chunk: string) => { output += chunk; onOutput(chunk); };
-    const wrapComplete = () => { onComplete(/\[WiFi\] OK IP=/.test(output)); };
-    this.execCommand(device, script, collectOutput, wrapComplete, { timeout: 90000 });
+    /** exec 的 exit code 与 nmcli 成败对齐；再要求输出中含 [WiFi] OK IP= 以免误判 */
+    const wrapComplete = (sshOk: boolean) => {
+      const lineOk = /\[WiFi\] OK IP=/.test(output);
+      onComplete(Boolean(sshOk && lineOk));
+    };
+    this.execCommand(device, script, collectOutput, wrapComplete, { timeout: 170000 });
   }
 
   // OpenClaw 对话方法（仅建立 SSH 客户端；成功与否应与套件端 openclaw/status 结合展示，勿单独当作「Agent 已连接」）

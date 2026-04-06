@@ -45,7 +45,7 @@ const VIDEO_EXT_SET = new Set(["mp4", "webm", "avi", "mov", "mkv"]);
 const DOC_EXT_SET = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "csv", "txt", "md", "zip", "rar", "7z"]);
 
 type FileKind = "image" | "video" | "document";
-interface MediaPath { path: string; kind: FileKind }
+export interface MediaPath { path: string; kind: FileKind }
 
 function extractMediaPathsFromResult(raw: string): MediaPath[] {
   const out: MediaPath[] = [];
@@ -55,6 +55,10 @@ function extractMediaPathsFromResult(raw: string): MediaPath[] {
       out.push({ path: String(obj.localPath), kind: "image" });
     } else if (obj?.__type === "video_download" && obj.localPath) {
       out.push({ path: String(obj.localPath), kind: "video" });
+    } else if (obj?.__type === "studio_local_preview" && obj.path) {
+      const p = String(obj.path);
+      const kind = classifyExt(p) || "image";
+      out.push({ path: p, kind });
     } else if (obj?.localPath) {
       const kind = classifyExt(String(obj.localPath));
       if (kind) out.push({ path: String(obj.localPath), kind });
@@ -68,6 +72,36 @@ function extractMediaPathsFromResult(raw: string): MediaPath[] {
     }
   }
   return out;
+}
+
+/**
+ * 从助手最终文本里收集可转发的本地媒体路径（Markdown /api/local-files、绝对路径等），供微信/飞书出站合并。
+ */
+export function collectMediaPathsFromAssistantReply(replyRaw: string, already: MediaPath[]): MediaPath[] {
+  const seen = new Set(already.map((mp) => mp.path.toLowerCase()));
+  const extra: MediaPath[] = [];
+  for (const re of [MD_MEDIA_RE, LOCAL_PATH_RE]) {
+    re.lastIndex = 0;
+    for (const m of replyRaw.matchAll(re)) {
+      let p = m[1];
+      if (p.startsWith("/api/local-files/")) {
+        const basename = path.basename(decodeURIComponent(p.replace("/api/local-files/", "")));
+        const workDir = process.env.RDK_WORKSPACE_DIR || process.cwd();
+        const candidates = [
+          path.join(getAgentMediaDownloadDir(), basename),
+          path.join(workDir, "workspace", "downloads", basename),
+          path.join(workDir, "downloads", basename),
+        ];
+        p = candidates.find((c) => fs.existsSync(c)) || p;
+      }
+      if (!seen.has(p.toLowerCase()) && fs.existsSync(p)) {
+        const kind = classifyExt(p) || "image";
+        extra.push({ path: p, kind });
+        seen.add(p.toLowerCase());
+      }
+    }
+  }
+  return extra;
 }
 
 function classifyExt(filePath: string): FileKind | null {
@@ -578,27 +612,8 @@ export class WeixinPollingChannel {
     const replyRaw = (finalText || streamed).trim();
 
     // Also scan the text reply for markdown images and local paths
-    const seen = new Set(mediaPaths.map(mp => mp.path.toLowerCase()));
-    for (const re of [MD_MEDIA_RE, LOCAL_PATH_RE]) {
-      re.lastIndex = 0;
-      for (const m of replyRaw.matchAll(re)) {
-        let p = m[1];
-        if (p.startsWith("/api/local-files/")) {
-          const basename = path.basename(decodeURIComponent(p.replace("/api/local-files/", "")));
-          const workDir = process.env.RDK_WORKSPACE_DIR || process.cwd();
-          const candidates = [
-            path.join(getAgentMediaDownloadDir(), basename),
-            path.join(workDir, "workspace", "downloads", basename),
-            path.join(workDir, "downloads", basename),
-          ];
-          p = candidates.find(c => fs.existsSync(c)) || p;
-        }
-        if (!seen.has(p.toLowerCase()) && fs.existsSync(p)) {
-          const kind = classifyExt(p) || "image";
-          mediaPaths.push({ path: p, kind });
-          seen.add(p.toLowerCase());
-        }
-      }
+    for (const mp of collectMediaPathsFromAssistantReply(replyRaw, mediaPaths)) {
+      mediaPaths.push(mp);
     }
 
     // Send media/documents via CDN

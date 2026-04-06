@@ -2249,7 +2249,9 @@ export default function OpenClaw() {
         {showSetupGuide && needsSetup() && (
           <div className="oc-setup-guide-hint">
             {setupStatus.gateway !== 'ok'
-              ? t('oc.setup.hint.needInstall', '请先安装 OpenClaw：使用「一键部署」或展开下方面板按步骤安装')
+              ? (ocInstalled
+                ? t('oc.setup.hint.recoverGateway', 'OpenClaw 已安装，但网关还没有恢复起来。请点击上方「重启网关」，或在右侧面板保存一次配置以触发修复。')
+                : t('oc.setup.hint.needInstall', '请先安装 OpenClaw：使用「一键部署」或展开下方面板按步骤安装'))
               : setupStatus.model !== 'ok'
               ? t('oc.setup.hint.model', 'OpenClaw 已安装，请配置模型以启用对话')
               : t('oc.setup.hint.feishu', '基础配置已完成！可选配置飞书以接入消息渠道')}
@@ -2657,7 +2659,7 @@ export default function OpenClaw() {
      Render - Main Dual View
      ═══════════════════════════════════════════ */
 
-  const ocLayoutWizardOnly = !ocInstalled || deployRunning || !!deployJobId;
+  const ocLayoutWizardOnly = !ocInstalled;
 
   return (
     <div

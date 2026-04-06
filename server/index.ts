@@ -313,6 +313,7 @@ const OPENCLAW_DEPLOY_STEP_TITLE: Record<OpenClawDeployStepName, string> = {
   install: '安装',
   config: '配置',
 };
+const OPENCLAW_DEPLOY_INTERRUPTED_ERROR = '服务重启后任务中断，请重新发起部署';
 type OpenClawDeployJob = {
   id: string;
   deviceId: string;
@@ -1007,7 +1008,7 @@ async function restoreRuntimeJobsState() {
         ...item,
         status: item.status === 'running' ? 'error' : item.status,
         error: item.status === 'running'
-          ? '服务重启后任务中断，请重新发起部署'
+          ? OPENCLAW_DEPLOY_INTERRUPTED_ERROR
           : item.error,
         finishedAt: item.status === 'running' ? now : item.finishedAt,
       };
@@ -3464,6 +3465,21 @@ async function executeOpenClawDeployJob(
   const readHealthStatus = () => new Promise<import('./managers/OpenClawDeploymentManager.js').OpenClawHealthStatus>((resolve) => {
     openClawManager.getHealthStatus(deviceObj, (status) => resolve(status));
   });
+  const preflightHealthStatus = await readHealthStatus();
+  const skipInstallBecausePresent = !!preflightHealthStatus.installed;
+
+  const markStepDoneWithNote = (step: OpenClawDeployStepName, note: string) => {
+    job.steps[step] = 'running';
+    schedulePersistRuntimeJobs();
+    broadcastDeployJobToSse(job);
+    appendDeployOutput(
+      job,
+      `\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n ${OPENCLAW_DEPLOY_STEP_TITLE[step]}\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n${note}\n`,
+    );
+    job.steps[step] = 'done';
+    schedulePersistRuntimeJobs();
+    broadcastDeployJobToSse(job);
+  };
 
   const runStep = async (
     step: OpenClawDeployStepName,
@@ -3495,7 +3511,9 @@ async function executeOpenClawDeployJob(
   try {
     await runStep('check', async () => {
       const diagnostic = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
-        openClawManager.runCheck(deviceObj, onOutput, onComplete),
+        skipInstallBecausePresent
+          ? openClawManager.runCheckLight(deviceObj, onOutput, onComplete)
+          : openClawManager.runCheck(deviceObj, onOutput, onComplete),
       );
       const network = await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
         openClawManager.runNetworkCheck(deviceObj, onOutput, onComplete),
@@ -3505,6 +3523,12 @@ async function executeOpenClawDeployJob(
         output: `${diagnostic.output || ''}\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n · 网络连通性\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n${network.output || ''}`,
       };
     }, true);
+    if (skipInstallBecausePresent) {
+      appendDeployOutput(
+        job,
+        `\n[Studio] 检测到套件端已安装 OpenClaw（${preflightHealthStatus.version || '版本已存在'}）：本次一键部署将跳过 Node/npm 依赖准备与 npm 重装，只执行配置写入、网关修复与内置 skills 同步。若你需要升级版本，请使用单独的「升级 OpenClaw」。\n`,
+      );
+    }
     const deployLongRunHeartbeat = () => {
       const heartbeatMs = 120_000;
       return {
@@ -3512,34 +3536,51 @@ async function executeOpenClawDeployJob(
           setInterval(() => {
             appendDeployOutput(
               job,
-              '\n[Studio] 约 2 分钟无新终端输出：apt/下载大包时套件端可能长时间不刷行（属常见）。npm 安装已用 --loglevel info，正常应陆续有解析/下载日志；若仍仅有本提示，请检查套件端网络与磁盘。超时请在「启动 Studio 后端」的环境变量中增大 OPENCLAW_INSTALL_TIMEOUT_MS（毫秒，默认 1800000≈30 分钟）。\n',
+              '\n[Studio] 约 2 分钟无新终端输出：apt/下载大包时套件端可能长时间不刷行（属常见）。当前 npm 安装会定期输出阶段心跳，并在单路镜像超时后自动切到备用源；若仍仅有本提示，请检查套件端网络与磁盘。超时请在「启动 Studio 后端」的环境变量中增大 OPENCLAW_INSTALL_TIMEOUT_MS（毫秒，默认 2700000≈45 分钟）。\n',
             );
           }, heartbeatMs),
         stop: (h: ReturnType<typeof setInterval>) => clearInterval(h),
       };
     };
-    await runStep('prepare', async () => {
-      const hb = deployLongRunHeartbeat();
-      const t = hb.start();
-      try {
-        return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
-          openClawManager.runPrepare(deviceObj, onOutput, onComplete),
+    if (skipInstallBecausePresent) {
+      markStepDoneWithNote('prepare', '[Studio] 已安装 OpenClaw，跳过依赖准备。');
+      await runStep('install', async () => {
+        appendDeployOutput(job, '[Studio] 已安装 OpenClaw，跳过 npm 重装，改为同步内置 skills 与工作区资源。\n');
+        const syncOk = await openClawManager.syncBuiltinStudioSkillsToBoard(
+          deviceObj,
+          (chunk) => appendDeployOutput(job, chunk),
         );
-      } finally {
-        hb.stop(t);
-      }
-    }, true);
-    await runStep('install', async () => {
-      const hb = deployLongRunHeartbeat();
-      const t = hb.start();
-      try {
-        return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
-          openClawManager.runInstall(deviceObj, onOutput, onComplete),
-        );
-      } finally {
-        hb.stop(t);
-      }
-    }, true);
+        return {
+          ok: true,
+          output: syncOk
+            ? '[Studio] 内置 skills 同步完成。'
+            : '[Studio] 内置 skills 同步未完全成功，已保留现有 OpenClaw 安装并继续后续配置。',
+        };
+      }, true);
+    } else {
+      await runStep('prepare', async () => {
+        const hb = deployLongRunHeartbeat();
+        const t = hb.start();
+        try {
+          return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
+            openClawManager.runPrepare(deviceObj, onOutput, onComplete),
+          );
+        } finally {
+          hb.stop(t);
+        }
+      }, true);
+      await runStep('install', async () => {
+        const hb = deployLongRunHeartbeat();
+        const t = hb.start();
+        try {
+          return await runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
+            openClawManager.runInstall(deviceObj, onOutput, onComplete),
+          );
+        } finally {
+          hb.stop(t);
+        }
+      }, true);
+    }
     await runStep('config', () => runOpenClawManagerStepForDeploy(job, (onOutput, onComplete) =>
       openClawManager.updateConfig(
         deviceObj,
@@ -3585,6 +3626,42 @@ async function executeOpenClawDeployJob(
   } finally {
     deployJobActiveAbort.delete(job.id);
   }
+}
+
+async function tryReconcileInterruptedOpenClawDeployJob(
+  job: OpenClawDeployJob,
+  deviceObj: ReturnType<typeof toOpenClawDevice>,
+): Promise<boolean> {
+  if (job.status !== 'error' || job.error !== OPENCLAW_DEPLOY_INTERRUPTED_ERROR) {
+    return false;
+  }
+
+  const healthStatus = await new Promise<import('./managers/OpenClawDeploymentManager.js').OpenClawHealthStatus>((resolve) => {
+    openClawManager.getHealthStatus(deviceObj, (status) => resolve(status));
+  });
+
+  // 服务重启后若板端已安装且网关运行，视为部署已达成关键目标，避免前端长期显示“安装失败”。
+  if (!healthStatus.installed || !healthStatus.gatewayRunning) {
+    return false;
+  }
+
+  const now = Date.now();
+  job.status = 'done';
+  job.error = undefined;
+  job.finishedAt = job.finishedAt || now;
+  job.steps.check = 'done';
+  job.steps.prepare = 'done';
+  if (job.steps.install === 'error' || job.steps.install === 'pending') job.steps.install = 'done';
+  if (job.steps.config === 'pending') job.steps.config = healthStatus.aiReady ? 'done' : 'pending';
+  if (!job.output.includes('[Studio] 服务重启后任务恢复检查：')) {
+    appendDeployOutput(
+      job,
+      `\n[Studio] 服务重启后任务恢复检查：检测到 OpenClaw 已安装且网关运行，已自动将中断任务状态修正为已完成。当前健康摘要：${healthStatus.summary || 'OpenClaw 网关可用'}\n`,
+    );
+  }
+  schedulePersistRuntimeJobs();
+  broadcastDeployJobToSse(job);
+  return true;
 }
 
 // OpenClaw 部署 API
@@ -3724,11 +3801,26 @@ app.get('/api/devices/:id/openclaw/deploy/status', async (request, response) => 
     sendApiError(response, 404, 'OPENCLAW_DEPLOY_JOB_NOT_FOUND', '部署任务不存在', { retryable: false });
     return;
   }
+  if (job.status === 'error' && job.error === OPENCLAW_DEPLOY_INTERRUPTED_ERROR) {
+    try {
+      const devices = await readDevices();
+      const device = devices.find((d) => d.id === id);
+      if (device) {
+        const pwd = resolvePrimarySshPassword(device, {
+          requestHeaderPassword: String(request.headers['x-device-password'] ?? ''),
+        });
+        const deviceObj = toOpenClawDevice(device, pwd);
+        await tryReconcileInterruptedOpenClawDeployJob(job, deviceObj);
+      }
+    } catch {
+      // 纠偏失败不阻断状态查询，仍返回原任务状态
+    }
+  }
   response.json({ ok: true, job });
 });
 
 /** 一键部署日志实时推送（SSE）；与轮询并行，前端以本通道为主 */
-app.get('/api/devices/:id/openclaw/deploy/stream', (request, response) => {
+app.get('/api/devices/:id/openclaw/deploy/stream', async (request, response) => {
   const { id } = request.params;
   const jobId = String(request.query.jobId || '').trim();
   if (!jobId) {
@@ -3740,6 +3832,21 @@ app.get('/api/devices/:id/openclaw/deploy/stream', (request, response) => {
   if (!job || job.deviceId !== id) {
     sendApiError(response, 404, 'OPENCLAW_DEPLOY_JOB_NOT_FOUND', '部署任务不存在', { retryable: false });
     return;
+  }
+  if (job.status === 'error' && job.error === OPENCLAW_DEPLOY_INTERRUPTED_ERROR) {
+    try {
+      const devices = await readDevices();
+      const device = devices.find((d) => d.id === id);
+      if (device) {
+        const pwd = resolvePrimarySshPassword(device, {
+          requestHeaderPassword: String(request.headers['x-device-password'] ?? ''),
+        });
+        const deviceObj = toOpenClawDevice(device, pwd);
+        await tryReconcileInterruptedOpenClawDeployJob(job, deviceObj);
+      }
+    } catch {
+      // 纠偏失败不阻断流式订阅
+    }
   }
   response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   response.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -4326,7 +4433,21 @@ app.post('/api/devices/:id/openclaw/wifi-connect', async (request, response) => 
   const { password } = resolvePassword(request, device);
   const deviceObj = toOpenClawDevice(device, password);
   let output = '';
+  let responded = false;
+  const safetyTimer = setTimeout(() => {
+    if (responded) return;
+    responded = true;
+    response.status(504).json({
+      ok: false,
+      output,
+      error:
+        'WiFi 配置等待超时（保护性上限）。若设备在切换网络，请稍后重试或确认 SSH 仍可达。',
+    });
+  }, 175_000);
   openClawManager.setWifiConnection(deviceObj, wifiName, wifiPassword || '', (chunk) => { output += chunk; }, (success) => {
+    if (responded) return;
+    responded = true;
+    clearTimeout(safetyTimer);
     if (success) {
       invalidateDeviceDerivedCaches(id);
     }

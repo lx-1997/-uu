@@ -1399,6 +1399,7 @@ export class RDKClawApp {
       latestUserMessage: userMessageForPrompt,
       delegateDecision: decision,
       knowledgeContextBlock: knowledgeResult.knowledgeContextBlock || undefined,
+      messagingChannel: req.channel === "weixin" || req.channel === "feishu" ? req.channel : undefined,
       deviceConnectivity: req.deviceId
         ? {
             reachable: deviceConnectivity.reachable,
@@ -1741,8 +1742,11 @@ export class RDKClawApp {
     let progressTick = 0;
     let lastToolProgressNudgeAt = 0;
     const TOOL_START_NUDGE_MIN_GAP_MS = 6_000;
+    /** 微信/飞书会话内勿推送「约每 12s」长任务心跳（会刷屏）；Studio 仍保留 */
+    const suppressChannelProgress = traceChannel === "weixin" || traceChannel === "feishu";
 
     const pushRunProgress = (reason: "interval" | "tool_start", activeToolName?: string) => {
+      if (suppressChannelProgress) return;
       if (finished) return;
       const now = Date.now();
       if (reason === "tool_start") {
@@ -1793,10 +1797,11 @@ export class RDKClawApp {
       }
     };
     const resumeProgressPollingForLongTools = () => {
+      if (suppressChannelProgress) return;
       if (studioQuick || finished || progressTimer) return;
       progressTimer = setInterval(() => pushRunProgress("interval"), runProgressIntervalMs);
     };
-    if (!studioQuick) {
+    if (!studioQuick && !suppressChannelProgress) {
       progressTimer = setInterval(() => pushRunProgress("interval"), runProgressIntervalMs);
       firstProgressHandle = setTimeout(() => pushRunProgress("interval"), 5_000);
     }

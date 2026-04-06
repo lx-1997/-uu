@@ -7,6 +7,10 @@
 export const OPENCLAW_BOARD_NPM_SPEC =
   process.env.OPENCLAW_NPM_VERSION?.trim() || 'latest';
 
+function joinShellLines(lines: string[]): string {
+  return lines.join('\n');
+}
+
 /**
  * npm 并发连接（默认 32，大依赖树时更易吃满带宽）。
  * 环境变量（均在 **Studio 服务端进程** 上设置，下发到套件端脚本前已展开）：
@@ -14,6 +18,8 @@ export const OPENCLAW_BOARD_NPM_SPEC =
  * - `OPENCLAW_REGISTRY_PRIORITY=china`：跳过 npmmirror 探测，固定先国内源再官方源（国内网络推荐）。
  */
 const OPENCLAW_NPM_MAXSOCKETS = process.env.OPENCLAW_NPM_MAXSOCKETS?.trim() || '32';
+/** 单次 npm -g openclaw 尝试的超时时间（秒），超时后会自动切到备用源继续。 */
+const OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC = process.env.OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC?.trim() || '900';
 
 /**
  * 套件端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
@@ -31,7 +37,7 @@ const OPENCLAW_NPM_MAXSOCKETS = process.env.OPENCLAW_NPM_MAXSOCKETS?.trim() || '
  * 避免「探测偶发失败 → 先连 registry.npmjs.org」在国内极慢。
  */
 const OPENCLAW_FAST_REGISTRY_SNIPPET_AUTO =
-  'if curl -fsS --connect-timeout 2 --max-time 5 https://registry.npmmirror.com/-/ping >/dev/null 2>&1; then NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org; else NPM_FAST_REG=https://registry.npmjs.org; ALT_REG=https://registry.npmmirror.com; fi';
+  'if curl -fsS --connect-timeout 2 --max-time 5 https://registry.npmmirror.com/-/ping >/dev/null 2>&1 && curl -fsS --connect-timeout 3 --max-time 8 https://cdn.npmmirror.com >/dev/null 2>&1; then NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org; else NPM_FAST_REG=https://registry.npmjs.org; ALT_REG=https://registry.npmmirror.com; fi';
 
 const OPENCLAW_FAST_REGISTRY_SNIPPET_CN =
   'NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org';
@@ -42,9 +48,10 @@ export const OPENCLAW_FAST_REGISTRY_SNIPPET =
     : OPENCLAW_FAST_REGISTRY_SNIPPET_AUTO;
 
 /**
- * 让官方 install.sh 及其内部的 npm 优先走上面探测到的源（子进程继承）。不用引号包裹变量，避免嵌入 bash -lc 时转义复杂。
+ * 让官方 install.sh 及其内部的 npm 优先走上面探测到的源（子进程继承）。
+ * 旧版 sharp 镜像 env 在 npm 11 下会报 unknown env config，且 sharp 0.34+ 已不依赖旧的 libvips 镜像变量，这里不再注入。
  */
-export const OPENCLAW_EXPORT_NPM_REGISTRY = 'export NPM_CONFIG_REGISTRY=$NPM_FAST_REG && export npm_config_sharp_binary_host=https://npmmirror.com/mirrors/sharp && export npm_config_sharp_libvips_binary_host=https://npmmirror.com/mirrors/sharp-libvips';
+export const OPENCLAW_EXPORT_NPM_REGISTRY = 'export NPM_CONFIG_REGISTRY=$NPM_FAST_REG';
 
 /**
  * 若 npmmirror 的 Node 索引可访问，为 nvm/部分安装脚本设置国内 Node 二进制镜像，减轻 NodeSource 直连卡顿。
@@ -67,30 +74,43 @@ export const OPENCLAW_BOARD_INSTALL_ENV_PRELUDE =
  * 官方 install.sh 失败后的 npm 回退：子 shell 内先补默认 registry，再用 "${NPM_FAST_REG}" 避免 $NPM 等前缀被误拆。
  * 整段为单条 bash 子 shell `( ... )`，供外层 `( echo ... && ... )` 拼接。
  */
-export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = [
+export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = joinShellLines([
   '(',
   'NPM_FAST_REG="${NPM_FAST_REG:-https://registry.npmjs.org}";',
   'ALT_REG="${ALT_REG:-https://registry.npmmirror.com}";',
+  'oc_npm_install_once(){',
+  'oc_reg="$1"; oc_try="$2"; oc_lane="$3";',
+  'echo "[OpenClaw] npm 安装尝试 ${oc_try}/3 (${oc_lane}) registry=${oc_reg}" 1>&2;',
+  'oc_hb_file="$(mktemp /tmp/oc-npm-heartbeat-XXXXXX 2>/dev/null || echo /tmp/oc-npm-heartbeat.$$)";',
+  ': > "$oc_hb_file" 2>/dev/null || true;',
+  '( while [ -f "$oc_hb_file" ]; do sleep 25; [ -f "$oc_hb_file" ] && echo "[OpenClaw] 仍在安装依赖（${oc_lane}），中国网络下首次安装可能需要 5-20 分钟；若当前源持续很慢，将自动切换备用源。" 1>&2; done ) &',
+  'oc_hb_pid=$!;',
+  'if command -v timeout >/dev/null 2>&1; then',
+  'CI= timeout --signal=TERM --kill-after=20s ' + OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC + 's npm install -g openclaw@' +
+    OPENCLAW_BOARD_NPM_SPEC +
+    ' --no-audit --no-fund --loglevel notice --progress=false --registry="${oc_reg}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=20000 --maxsockets=' +
+    OPENCLAW_NPM_MAXSOCKETS +
+    ' 2>&1; oc_rc=$?; rm -f "$oc_hb_file" 2>/dev/null || true; kill "$oc_hb_pid" 2>/dev/null || true; wait "$oc_hb_pid" 2>/dev/null || true; [ "$oc_rc" -eq 124 ] && echo "[OpenClaw] 当前源安装超时，准备切换下一路镜像重试..." 1>&2; return "$oc_rc";',
+  'fi;',
+  'CI= npm install -g openclaw@' +
+    OPENCLAW_BOARD_NPM_SPEC +
+    ' --no-audit --no-fund --loglevel notice --progress=false --registry="${oc_reg}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=20000 --maxsockets=' +
+    OPENCLAW_NPM_MAXSOCKETS +
+    ' 2>&1; oc_rc=$?; rm -f "$oc_hb_file" 2>/dev/null || true; kill "$oc_hb_pid" 2>/dev/null || true; wait "$oc_hb_pid" 2>/dev/null || true; return "$oc_rc";',
+  '};',
   'for i in 1 2 3; do',
-  // 勿用 --loglevel error：成功路径近乎静默，前端只能看到 Studio 心跳误以为无日志。info 会输出解析/下载/解压等进度（体积仍可控）。
+  // 勿用 --loglevel error：成功路径近乎静默，前端只能看到 Studio 心跳误以为无日志。
+  // notice + progress=false：保留关键输出、去掉超长旋转动画与海量 fetch 明细，降低日志压力。
   // CI= 清空 CI：避免 npm 在 CI=1 时关闭 progress 且进一步减少输出。
   // prefer-offline=true：本地已有缓存时优先用缓存，重试/升级场景明显提速；无缓存时仍会走网络。
   // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认 latest；可 OPENCLAW_NPM_VERSION 钉版本）。
-  'if CI= npm install -g openclaw@' +
-    OPENCLAW_BOARD_NPM_SPEC +
-    ' --no-audit --no-fund --loglevel info --registry="${NPM_FAST_REG}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=' +
-    OPENCLAW_NPM_MAXSOCKETS +
-    ' 2>&1; then break; fi;',
-  'if CI= npm install -g openclaw@' +
-    OPENCLAW_BOARD_NPM_SPEC +
-    ' --no-audit --no-fund --loglevel info --registry="${ALT_REG}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=15000 --maxsockets=' +
-    OPENCLAW_NPM_MAXSOCKETS +
-    ' 2>&1; then break; fi;',
+  'if oc_npm_install_once "${NPM_FAST_REG}" "$i" "primary"; then break; fi;',
+  'if oc_npm_install_once "${ALT_REG}" "$i" "fallback"; then break; fi;',
   '[ "${i}" = 3 ] && exit 1;',
   'sleep 2;',
   'done',
   ')',
-].join(' ');
+]);
 
 /**
  * 环境准备阶段：在已有 npm 时写入 registry / 并发。
@@ -116,6 +136,63 @@ export const OPENCLAW_BOARD_NODE_MIN_MAJOR = 24;
 
 /** NodeSource 安装脚本路径段，须与主版本一致，例如 setup_24.x */
 export const OPENCLAW_NODESOURCE_SETUP = `setup_${OPENCLAW_BOARD_NODE_MIN_MAJOR}.x`;
+
+/**
+ * 在 apt-get / NodeSource 脚本前执行：等待 `/var/lib/apt/lists/lock` 与 dpkg 锁释放。
+ * 常见场景：unattended-upgrades、另一路 apt、用户手动 apt 与 Studio 安装并发 → 无此等待则 apt update/install 全失败。
+ * 120s 仍未释放时，不直接中止整个安装链，而是设置 `_oc_lock_wait_ok=0`，让后续走非 apt 兜底。
+ */
+export const OPENCLAW_WAIT_APT_LOCK_SNIPPET = joinShellLines([
+  '_oc_ai=0',
+  '_oc_lock_wait_ok=1',
+  'while [ "$_oc_ai" -lt 120 ]; do',
+  '_oc_ab=0',
+  'if command -v fuser >/dev/null 2>&1; then fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && _oc_ab=1; fuser /var/lib/dpkg/lock >/dev/null 2>&1 && _oc_ab=1; fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && _oc_ab=1; else pgrep -x apt-get >/dev/null 2>&1 && _oc_ab=1; pgrep -x apt >/dev/null 2>&1 && _oc_ab=1; pgrep -x dpkg >/dev/null 2>&1 && _oc_ab=1; fi',
+  'if [ "$_oc_ab" = 0 ]; then break; fi',
+  '_oc_ai=$((_oc_ai+1))',
+  'echo "[OpenClaw] 等待 apt/dpkg 锁释放（其他 apt 可能正在运行）... ($_oc_ai/120)" 1>&2',
+  'sleep 1',
+  'done',
+  'if [ "$_oc_ai" -ge 120 ]; then echo "[OpenClaw] 警告: apt 锁 120s 内未释放，跳过 apt 路径并尝试非 apt 兜底。可稍后重试，或先: sudo fuser -v /var/lib/apt/lists/lock /var/lib/dpkg/lock" 1>&2; _oc_lock_wait_ok=0; fi',
+]);
+
+export const OPENCLAW_NODE_DIST_FALLBACK_SNIPPET = joinShellLines([
+  'echo "[OpenClaw] 尝试 Node 二进制包兜底安装..." 1>&2',
+  'OC_NODE_ARCH_RAW="$(uname -m 2>/dev/null || echo unknown)"',
+  'case "$OC_NODE_ARCH_RAW" in',
+  '  x86_64|amd64) OC_NODE_ARCH="linux-x64" ;;',
+  '  aarch64|arm64) OC_NODE_ARCH="linux-arm64" ;;',
+  '  armv7l|armv7*) OC_NODE_ARCH="linux-armv7l" ;;',
+  '  *) echo "[OpenClaw] Node 二进制兜底跳过：不支持架构 $OC_NODE_ARCH_RAW" 1>&2; exit 11 ;;',
+  'esac',
+  'if ! command -v curl >/dev/null 2>&1; then echo "[OpenClaw] Node 二进制兜底跳过：缺少 curl" 1>&2; exit 12; fi',
+  'if ! command -v tar >/dev/null 2>&1; then echo "[OpenClaw] Node 二进制兜底跳过：缺少 tar" 1>&2; exit 13; fi',
+  'OC_NODE_TMP="$(mktemp -d /tmp/oc-node-dist-XXXXXX)"',
+  'OC_NODE_DONE=0',
+  'for OC_NODE_BASE in ${OPENCLAW_NODE_DIST_BASES:-${NODEJS_ORG_MIRROR:-https://nodejs.org/dist} https://npmmirror.com/mirrors/node}; do',
+  '  OC_NODE_SUMS="$OC_NODE_TMP/SHASUMS256.txt"',
+  '  OC_NODE_RELEASE_URL="${OC_NODE_BASE%/}/latest-v${OPENCLAW_MIN_NODE_MAJOR}.x/SHASUMS256.txt"',
+  '  if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 20 --max-time 180 "$OC_NODE_RELEASE_URL" -o "$OC_NODE_SUMS"; then echo "[OpenClaw] Node 二进制兜底：获取索引失败 $OC_NODE_RELEASE_URL" 1>&2; continue; fi',
+  '  OC_NODE_FILE="$(grep -E " node-v[0-9.]+-${OC_NODE_ARCH}\\.tar\\.xz$" "$OC_NODE_SUMS" | head -n1 | tr -s " " | cut -d" " -f2)"',
+  '  if [ -z "$OC_NODE_FILE" ]; then echo "[OpenClaw] Node 二进制兜底：索引中无 ${OC_NODE_ARCH} 包" 1>&2; continue; fi',
+  '  OC_NODE_URL="${OC_NODE_BASE%/}/latest-v${OPENCLAW_MIN_NODE_MAJOR}.x/$OC_NODE_FILE"',
+  '  if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 480 "$OC_NODE_URL" -o "$OC_NODE_TMP/$OC_NODE_FILE"; then echo "[OpenClaw] Node 二进制兜底：下载失败 $OC_NODE_URL" 1>&2; continue; fi',
+  '  mkdir -p "$HOME/.local/lib" "$HOME/.npm-global/bin"',
+  '  OC_NODE_DIR="${OC_NODE_FILE%.tar.xz}"',
+  '  rm -rf "$HOME/.local/lib/$OC_NODE_DIR" 2>/dev/null || true',
+  '  if ! tar -xf "$OC_NODE_TMP/$OC_NODE_FILE" -C "$HOME/.local/lib" 2>/dev/null && ! tar -xJf "$OC_NODE_TMP/$OC_NODE_FILE" -C "$HOME/.local/lib" 2>/dev/null; then echo "[OpenClaw] Node 二进制兜底：解压失败 $OC_NODE_FILE" 1>&2; continue; fi',
+  '  if [ ! -x "$HOME/.local/lib/$OC_NODE_DIR/bin/node" ]; then echo "[OpenClaw] Node 二进制兜底：未找到 node 可执行文件" 1>&2; continue; fi',
+  '  ln -sf "$HOME/.local/lib/$OC_NODE_DIR/bin/node" "$HOME/.npm-global/bin/node"',
+  '  [ -x "$HOME/.local/lib/$OC_NODE_DIR/bin/npm" ] && ln -sf "$HOME/.local/lib/$OC_NODE_DIR/bin/npm" "$HOME/.npm-global/bin/npm" || true',
+  '  [ -x "$HOME/.local/lib/$OC_NODE_DIR/bin/npx" ] && ln -sf "$HOME/.local/lib/$OC_NODE_DIR/bin/npx" "$HOME/.npm-global/bin/npx" || true',
+  '  [ -x "$HOME/.local/lib/$OC_NODE_DIR/bin/corepack" ] && ln -sf "$HOME/.local/lib/$OC_NODE_DIR/bin/corepack" "$HOME/.npm-global/bin/corepack" || true',
+  '  export PATH="$HOME/.npm-global/bin:$HOME/.local/lib/$OC_NODE_DIR/bin:$PATH"',
+  '  hash -r 2>/dev/null || true',
+  '  if command -v node >/dev/null 2>&1; then OC_NODE_DONE=1; echo "[OpenClaw] Node 二进制兜底成功: $(node -v 2>/dev/null || echo unknown)" 1>&2; break; fi',
+  'done',
+  'rm -rf "$OC_NODE_TMP" 2>/dev/null || true',
+  'if [ "$OC_NODE_DONE" != "1" ]; then echo "[OpenClaw] Node 二进制兜底失败" 1>&2; exit 14; fi',
+]);
 
 /**
  * 解析 openclaw 可执行路径。避免 npm prefix -g 为空时拼成 /bin/openclaw；command -v 若指向不可执行文件则清空。
@@ -149,7 +226,7 @@ const OPENCLAW_ENSURE_SHELL_PATH_INNER = [
 export const OPENCLAW_ENSURE_SHELL_PATH_SNIPPET =
   '( ' + OPENCLAW_ENSURE_SHELL_PATH_INNER + ' )';
 
-export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = [
+export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = joinShellLines([
   '(',
   `OPENCLAW_MIN_NODE_MAJOR="\${OPENCLAW_MIN_NODE_MAJOR:-${OPENCLAW_BOARD_NODE_MIN_MAJOR}}";`,
   'if command -v node >/dev/null 2>&1; then',
@@ -165,8 +242,10 @@ export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = [
   'if [ "${_NODE_MAJ:-0}" -ge "$OPENCLAW_MIN_NODE_MAJOR" ]; then exit 0; fi;',
   'if [ "${_NODE_MAJ:-0}" -gt 0 ]; then echo "[OpenClaw] Node 已过时 ${_NODE_V}，需要 >= ${OPENCLAW_MIN_NODE_MAJOR}" 1>&2; fi;',
   'if [ "${OPENCLAW_SKIP_NODE_UPGRADE:-0}" = "1" ]; then echo "[OpenClaw] 错误: 已设置 OPENCLAW_SKIP_NODE_UPGRADE=1，跳过自动升级。请手动安装 Node.js ${OPENCLAW_MIN_NODE_MAJOR}+ 后重试。" 1>&2; exit 1; fi;',
+  'OC_NODE_BOOTSTRAP_OK=0',
   'if command -v apt-get >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then',
-  'if [ "$(id -u)" -eq 0 ]; then',
+  OPENCLAW_WAIT_APT_LOCK_SNIPPET,
+  'if [ "${_oc_lock_wait_ok:-1}" = "1" ] && [ "$(id -u)" -eq 0 ]; then',
   'DEBIAN_FRONTEND=noninteractive apt-get update -qq || true;',
   `echo "[OpenClaw] 升级 Node ${OPENCLAW_BOARD_NODE_MIN_MAJOR} LTS（预清理 apt 冲突包）" 1>&2;`,
   'DEBIAN_FRONTEND=noninteractive apt-get remove -y libnode-dev nodejs 2>&1 || true;',
@@ -175,12 +254,8 @@ export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = [
   'rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true;',
   `OC_NS_URL="\${OPENCLAW_NODESOURCE_BASE:-https://deb.nodesource.com}/${OPENCLAW_NODESOURCE_SETUP}";`,
   'OC_NS_SH="/tmp/oc_nodesource_setup.sh";',
-  'if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 错误: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动）。可重试或 export OPENCLAW_NODESOURCE_BASE=镜像源" 1>&2; rm -f "$OC_NS_SH"; exit 1; fi;',
-  'if ! bash "$OC_NS_SH"; then echo "[OpenClaw] 错误: NodeSource 脚本执行失败（见上方输出）" 1>&2; rm -f "$OC_NS_SH"; exit 1; fi;',
-  'rm -f "$OC_NS_SH";',
-  'DEBIAN_FRONTEND=noninteractive apt-get update -qq || true;',
-  'DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs;',
-  'elif command -v sudo >/dev/null 2>&1; then',
+  'if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else if ! bash "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本执行失败（见上方输出），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else rm -f "$OC_NS_SH"; DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs && OC_NODE_BOOTSTRAP_OK=1 || true; fi; fi;',
+  'elif [ "${_oc_lock_wait_ok:-1}" = "1" ] && command -v sudo >/dev/null 2>&1; then',
   'sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true;',
   `echo "[OpenClaw] 升级 Node ${OPENCLAW_BOARD_NODE_MIN_MAJOR} LTS（预清理 apt 冲突包）" 1>&2;`,
   'sudo env DEBIAN_FRONTEND=noninteractive apt-get remove -y libnode-dev nodejs 2>&1 || true;',
@@ -189,34 +264,34 @@ export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = [
   'sudo rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true;',
   `OC_NS_URL="\${OPENCLAW_NODESOURCE_BASE:-https://deb.nodesource.com}/${OPENCLAW_NODESOURCE_SETUP}";`,
   'OC_NS_SH="/tmp/oc_nodesource_setup.sh";',
-  'if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 错误: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动）。可重试或 export OPENCLAW_NODESOURCE_BASE=镜像源" 1>&2; rm -f "$OC_NS_SH"; exit 1; fi;',
-  'if ! sudo -E bash "$OC_NS_SH"; then echo "[OpenClaw] 错误: NodeSource 脚本执行失败（见上方输出）" 1>&2; sudo rm -f "$OC_NS_SH"; exit 1; fi;',
-  'sudo rm -f "$OC_NS_SH";',
-  'sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true;',
-  'sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs;',
+  'if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else if ! sudo -E bash "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本执行失败（见上方输出），改用二进制兜底" 1>&2; sudo rm -f "$OC_NS_SH"; else sudo rm -f "$OC_NS_SH"; sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs && OC_NODE_BOOTSTRAP_OK=1 || true; fi; fi;',
   'else',
-  `echo "[OpenClaw] 错误: 升级 Node 需要 root 或 sudo。请手动执行: curl -fsSL https://deb.nodesource.com/${OPENCLAW_NODESOURCE_SETUP} -o /tmp/ns.sh && sudo bash /tmp/ns.sh && sudo apt-get install -y nodejs" 1>&2;`,
-  'exit 1;',
+  `echo "[OpenClaw] 提示: 无法走 NodeSource apt（缺少 root/sudo 或 apt 锁繁忙），改用二进制兜底。若要手动安装，可执行: curl -fsSL https://deb.nodesource.com/${OPENCLAW_NODESOURCE_SETUP} -o /tmp/ns.sh && sudo bash /tmp/ns.sh && sudo apt-get install -y nodejs" 1>&2;`,
   'fi;',
-  'else',
-  'echo "[OpenClaw] 错误: 当前环境无法自动升级 Node（需要 apt-get + curl）。请手动安装 Node.js ${OPENCLAW_MIN_NODE_MAJOR}+（推荐 nvm/fnm 或官方便携包）后重试安装。" 1>&2;',
-  'exit 1;',
+  'fi',
+  'if ! command -v node >/dev/null 2>&1; then _NODE_V="v0"; _NODE_MAJ=0; fi',
+  '_NODE_V="$(node -v 2>/dev/null || echo v0)";',
+  '_NODE_MAJ="${_NODE_V#v}";',
+  '_NODE_MAJ="${_NODE_MAJ%%.*}";',
+  ': "${_NODE_MAJ:=0}";',
+  'if ! [ "${_NODE_MAJ:-0}" -ge "$OPENCLAW_MIN_NODE_MAJOR" ]; then',
+  OPENCLAW_NODE_DIST_FALLBACK_SNIPPET,
   'fi;',
   'hash -r 2>/dev/null || true;',
   '_NODE_V="$(node -v 2>/dev/null || echo v0)";',
   '_NODE_MAJ="${_NODE_V#v}";',
   '_NODE_MAJ="${_NODE_MAJ%%.*}";',
   ': "${_NODE_MAJ:=0}";',
-  'if ! [ "${_NODE_MAJ:-0}" -ge "$OPENCLAW_MIN_NODE_MAJOR" ]; then echo "[OpenClaw] 错误: 升级后 Node 仍为 ${_NODE_V}（需要 >= ${OPENCLAW_MIN_NODE_MAJOR}）。若刚装上的仍是 18，多为 NodeSource 脚本未成功或 apt 源仍为旧 nodesource；已删除旧 list 并重试下载脚本。可本机执行: apt-cache policy nodejs" 1>&2; exit 1; fi;',
+  'if ! [ "${_NODE_MAJ:-0}" -ge "$OPENCLAW_MIN_NODE_MAJOR" ]; then echo "[OpenClaw] 错误: 升级后 Node 仍为 ${_NODE_V}（需要 >= ${OPENCLAW_MIN_NODE_MAJOR}）。已尝试 NodeSource 与二进制兜底；若日志曾有 Could not get lock / apt 锁，请先结束其他 apt 再重试。也可手动安装后重试。" 1>&2; exit 1; fi;',
   'echo "[OpenClaw] Node $(node -v) / npm $(npm --version 2>/dev/null || echo "?")";',
   ')',
-].join(' ');
+]);
 
 /**
  * 若 PATH 上已有 npm 则跳过；否则依次尝试 corepack、apt/opkg/apk/dnf/yum。
  * **Debian/Ubuntu 上 apt install npm 仅在已存在 `node` 时尝试**（无 node 时应先走 NodeSource，`npm` 元包依赖链易 broken）。
  */
-export const OPENCLAW_ENSURE_NPM_SNIPPET = [
+export const OPENCLAW_ENSURE_NPM_SNIPPET = joinShellLines([
   '(',
   'if command -v npm >/dev/null 2>&1; then true;',
   'else',
@@ -224,8 +299,9 @@ export const OPENCLAW_ENSURE_NPM_SNIPPET = [
   'if command -v corepack >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then (corepack enable 2>/dev/null || true) && CI=1 corepack prepare npm@latest --activate 2>&1 || true;',
   'fi;',
   'if ! command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then ',
-  'if [ "$(id -u)" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
-  'elif command -v sudo >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
+  OPENCLAW_WAIT_APT_LOCK_SNIPPET,
+  'if [ "${_oc_lock_wait_ok:-1}" = "1" ] && [ "$(id -u)" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
+  'elif [ "${_oc_lock_wait_ok:-1}" = "1" ] && command -v sudo >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
   'else true; fi;',
   'fi;',
   'if ! command -v npm >/dev/null 2>&1 && command -v opkg >/dev/null 2>&1; then opkg update || true; (opkg install npm || opkg install nodejs-npm || true); fi;',
@@ -247,7 +323,7 @@ export const OPENCLAW_ENSURE_NPM_SNIPPET = [
   'if ! command -v npm >/dev/null 2>&1; then echo "[OpenClaw] 错误: 无法自动安装 npm，请手动安装后重试" 1>&2; exit 1; fi;',
   'fi',
   ')',
-].join(' ');
+]);
 
 /** 官方 install.sh 管道 + npm 回退（与历史行为一致）。 */
 export const OPENCLAW_OFFICIAL_INSTALL_FALLBACK =

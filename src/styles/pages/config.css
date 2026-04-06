@@ -615,7 +615,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: clamp(20px, 4vh, 40px) clamp(16px, 3vw, 28px) 32px;
+  padding: clamp(20px, 4vh, 40px) clamp(16px, 5vw, 56px) 32px;
   box-sizing: border-box;
   background: linear-gradient(
     165deg,
@@ -627,9 +627,9 @@
 
 .oc-setup-wizard-card {
   width: 100%;
-  max-width: 560px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 2rem 1.75rem 2.25rem;
+  padding: 2rem clamp(1rem, 2.2vw, 2rem) 2.25rem;
   background: color-mix(in srgb, var(--bg-elevated) 97%, var(--bg-secondary));
   border: 1px solid color-mix(in srgb, var(--border) 92%, var(--accent) 8%);
   border-radius: calc(var(--radius-lg) + 2px);
@@ -715,7 +715,7 @@
 }
 
 .oc-setup-wizard-section {
-  text-align: center;
+  text-align: left;
 }
 
 .oc-setup-wizard-section-title {
@@ -775,8 +775,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: center;
-  margin: 0 auto 1rem;
+  justify-content: flex-start;
+  margin: 0 0 1rem;
   max-width: 100%;
 }
 
@@ -788,7 +788,7 @@
 
 .oc-setup-wizard-fields {
   text-align: left;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border);
 }
@@ -796,11 +796,11 @@
 .oc-setup-wizard-cta {
   margin-top: 1.5rem;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .oc-setup-wizard-submit.btn-primary {
-  min-width: min(100%, 300px);
+  min-width: min(100%, 340px);
   padding: 10px 1.5rem;
   font-weight: 600;
 }
@@ -2426,6 +2426,32 @@
 
   .oc-tab-btn {
     flex-shrink: 0;
+  }
+
+  .oc-setup-wizard {
+    padding: 16px 12px 24px;
+  }
+
+  .oc-setup-wizard-card {
+    max-width: none;
+    padding: 1.25rem 0.9rem 1.4rem;
+  }
+
+  .oc-setup-wizard-hero {
+    margin-bottom: 1.1rem;
+  }
+
+  .oc-setup-wizard-title {
+    font-size: 1.1rem;
+  }
+
+  .oc-setup-wizard-cta {
+    justify-content: center;
+  }
+
+  .oc-setup-wizard-submit.btn-primary {
+    width: 100%;
+    min-width: 0;
   }
 }
 

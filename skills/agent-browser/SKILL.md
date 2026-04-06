@@ -18,7 +18,7 @@ metadata: {"clawdbot":{"emoji":"🌐","requires":{"commands":["agent-browser"]},
 
 Fast browser automation using accessibility tree snapshots with refs for deterministic element selection.
 
-**内置说明**：随仓库 `skills/agent-browser/` 发布；技能工坊与 `/api/skills` 以目录名 `agent-browser` 索引；板端「同步内置技能包」会部署本 SKILL.md。若你本机曾有 root 安装的 `skills/agent-browser-clawdbot/`，可手动删除以免重复扫描。
+**内置说明**：随仓库 `skills/agent-browser/` 发布；技能工坊与 `/api/skills` 以目录名 `agent-browser` 索引；板端「同步内置技能包」会部署本 SKILL.md。
 
 ## Why Use This Over Built-in Browser Tool
 

@@ -23,6 +23,7 @@ import {
   buildWebSearchTriggerPrompt,
   buildCollaborationPrompt,
   buildStudioUiHintsPrompt,
+  buildExternalMessagingChannelPrompt,
   type BoardSnapshot,
   type ModelTier,
 } from "./system-prompt-builder.js";
@@ -41,6 +42,7 @@ import { buildDelegationRuntimePrompt } from "./delegation.js";
 export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
   "open_web_route",
   "rdk_doc_route",
+  "messaging_channel",
   "knowledge_context",
   "delegation_runtime",
   "device_connectivity",
@@ -60,6 +62,7 @@ export type SystemPromptLayerId =
   | "board_plugins"
   | "open_web_route"
   | "rdk_doc_route"
+  | "messaging_channel"
   | "knowledge_context"
   | "delegation_runtime"
   | "device_connectivity"
@@ -118,6 +121,8 @@ export interface SystemPromptLayerBuildInput {
   };
   /** 由 KnowledgeRouter 预构建的知识上下文块（@bot / @docs / @url） */
   knowledgeContextBlock?: string;
+  /** 微信/飞书会话：注入渠道专用约束（发图、勿误配绑定等） */
+  messagingChannel?: "weixin" | "feishu";
 }
 
 function appendOpenWebRouteDynamic(
@@ -387,6 +392,10 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
 
   appendOpenWebRouteDynamic(input, pushDynamic);
   appendRdkDocFirstDynamic(input, pushDynamic);
+
+  if (input.messagingChannel === "weixin" || input.messagingChannel === "feishu") {
+    pushDynamic("messaging_channel", buildExternalMessagingChannelPrompt(input.messagingChannel));
+  }
 
   // 知识上下文注入（@bot / @docs / @url 由 KnowledgeRouter 预构建）
   if (input.knowledgeContextBlock?.trim()) {

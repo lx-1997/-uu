@@ -488,6 +488,7 @@ export function buildSpawnAndVerificationPrompt(
     "",
     "### 子代理报告的验收摘要（主线程转发给用户前）",
     "- 若本趟为 `verify`：检查报告中是否**每条关键结论**都附有「命令 + 原始输出摘录」；末行是否为 **`VERDICT: PASS` / `FAIL` / `PARTIAL`** 之一（一字不差）。",
+    "- 转发或收束前，主线程必须补齐**交接级总结**：目标与现状、已验证证据、关键决策、阻塞点、下一步可执行动作（含命令/路径），标准是让未读过本项目的人可直接继续推进。",
     "- 若不符合合同：主线程应视情况重开 `verify` 或自行补跑关键命令，**不要**把缺证据的 PASS 当完成。",
     "",
     deviceHint,
@@ -593,4 +594,17 @@ export function buildRdkclawDynamicSystemSections(args: {
       : "",
     hasDevice ? buildCollaborationPrompt(boardSnapshot, modelTier, delegationBias) : "",
   ].filter(Boolean).join("\n");
+}
+
+/** 微信/飞书会话：避免误配板端登录、强调媒体由渠道自动转发 */
+export function buildExternalMessagingChannelPrompt(channel: "weixin" | "feishu"): string {
+  const label = channel === "weixin" ? "微信" : "飞书";
+  return [
+    `## 当前消息渠道：${label}（必读）`,
+    `- 用户**正在 ${label} 内**与机器人对话；你的文字回复会经 ${label} 送达。`,
+    `- **图片/视频/文件**：把已保存到本机的媒体用 Markdown 写出 \`![](/api/local-files/文件名.png)\`（仅 basename），或让 \`device_file_download*\` / \`image_download\` 等工具返回本地路径；**服务端会把这些路径自动转为 ${label} 的媒体消息**发给用户。`,
+    `- **不要**仅调用 **studio_open_local_preview**「在电脑上系统看图」来代替把图发到 ${label}；用户要在聊天里看图时，应优先 Markdown 或下载类工具的可读路径，而不是只打开本地预览。`,
+    `- **不要**仅因用户说「发到微信/发图」就引导去板端执行 \`openclaw channels login\` 或盲目调用 **board_openclaw_weixin_config**——那是**套件端插件**配置，与 RDK Studio 侧已扫码的微信渠道不同；除非用户明确要配板端微信插件，否则不要混为一谈。`,
+    `- 回复保持简洁，**不要**在正文里复述「每 12 秒进度」式内部工单状态；直接给结论与可验证结果。`,
+  ].join("\n");
 }

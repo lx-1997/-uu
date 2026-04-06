@@ -27,7 +27,7 @@ const SKILLS_ROOT = 'skills';
 const RDKX5_SKILLS_ROOT = 'rdkx5_skills';
 
 /** 全板型通用：RDK 文档库与算法部署指引（SKILL 在本仓 skills/ 下） */
-const BUNDLE_SHARED_DOCS_AND_ROBOT: string[] = ['rdk-doc', 'rdk-doc-optimized', 'rdk-robot-dev'];
+const BUNDLE_SHARED_DOCS_AND_ROBOT: string[] = ['rdk-doc-optimized', 'rdk-robot-dev'];
 
 /** 全板型通用：Studio 仓库内置工具类技能（目录在 skills/） */
 const BUNDLE_UNIVERSAL_STUDIO: string[] = ['agent-browser'];
