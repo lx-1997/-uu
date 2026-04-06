@@ -938,6 +938,26 @@ function normalizeOpenClawApi(raw: unknown): string {
   return 'openai-completions';
 }
 
+function extractOpenClawVersionFromOutput(raw: string): string {
+  const text = stripAnsi(String(raw || ''));
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (/未安装|not\s+installed|command\s+not\s+found/i.test(line)) {
+      continue;
+    }
+    const calendar = line.match(/\b\d{4}\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/);
+    if (calendar) return calendar[0];
+    const semver = line.match(/\b\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/);
+    if (semver) return semver[0];
+  }
+
+  return '';
+}
+
 function cleanupOpenClawDeployJobs(now = Date.now()) {
   let changed = false;
   for (const [jobId, job] of openClawDeployJobs.entries()) {
@@ -3466,7 +3486,7 @@ async function executeOpenClawDeployJob(
     openClawManager.getHealthStatus(deviceObj, (status) => resolve(status));
   });
   const preflightHealthStatus = await readHealthStatus();
-  const skipInstallBecausePresent = !!preflightHealthStatus.installed;
+  const skipInstallBecausePresent = !!(preflightHealthStatus.installed || preflightHealthStatus.gatewayRunning);
 
   const markStepDoneWithNote = (step: OpenClawDeployStepName, note: string) => {
     job.steps[step] = 'running';
@@ -3526,7 +3546,7 @@ async function executeOpenClawDeployJob(
     if (skipInstallBecausePresent) {
       appendDeployOutput(
         job,
-        `\n[Studio] 检测到套件端已安装 OpenClaw（${preflightHealthStatus.version || '版本已存在'}）：本次一键部署将跳过 Node/npm 依赖准备与 npm 重装，只执行配置写入、网关修复与内置 skills 同步。若你需要升级版本，请使用单独的「升级 OpenClaw」。\n`,
+        `\n[Studio] 检测到套件端 OpenClaw 已可用（${preflightHealthStatus.version || (preflightHealthStatus.gatewayRunning ? '网关已运行' : '版本已存在')}）：本次一键部署将跳过 Node/npm 依赖准备与 npm 重装，只执行配置写入、网关修复与内置 skills 同步。若你需要升级版本，请使用单独的「升级 OpenClaw」。\n`,
       );
     }
     const deployLongRunHeartbeat = () => {
@@ -4002,7 +4022,35 @@ app.get('/api/devices/:id/openclaw/status', async (request, response) => {
   const { password } = resolvePassword(request, device);
   const deviceObj = toOpenClawDevice(device, password);
   openClawManager.getGatewayStatus(deviceObj, (status) => {
-    response.json(status);
+    const versionInStatus = String(status?.version || '').trim();
+    if (status.installed || versionInStatus || status.running) {
+      response.json({
+        ...status,
+        installed: status.installed || !!versionInStatus || !!status.running,
+      });
+      return;
+    }
+
+    let versionRaw = '';
+    openClawManager.runGetVersion(
+      deviceObj,
+      (chunk) => {
+        versionRaw += chunk;
+      },
+      () => {
+        if (response.writableEnded) return;
+        const detectedVersion = extractOpenClawVersionFromOutput(versionRaw);
+        if (detectedVersion) {
+          response.json({
+            ...status,
+            installed: true,
+            version: detectedVersion,
+          });
+          return;
+        }
+        response.json(status);
+      },
+    );
   });
 });
 

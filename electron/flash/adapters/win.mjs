@@ -29,6 +29,12 @@ import {
 
 let activeOp = null;
 
+/** 扫盘为高频入口：短缓存 + 并发复用可减少重复 PowerShell 启动开销 */
+const DRIVE_SCAN_CACHE_MS = 3500;
+const DRIVE_SCAN_PS_TIMEOUT_MS = 8000;
+let driveScanCache = { at: 0, drives: /** @type {Array<any>} */ ([])};
+let driveScanInFlight = null;
+
 /** Win CreateProcess 命令行约 8191 字符；-EncodedCommand 的 Base64 单独控制长度，避免超长退回 -File */
 const ENCODED_COMMAND_B64_MAX = 7000;
 
@@ -141,6 +147,46 @@ function runPowerShell(script) {
     child.stderr.on('data', (d) => { stderr += d.toString(); });
     child.on('error', reject);
     child.on('close', (code) => {
+      if (code === 0) resolve(stdout.trim());
+      else reject(new Error((stderr || stdout || `powershell exit ${code}`).trim()));
+    });
+  });
+}
+
+/**
+ * 仅用于盘符枚举：避免 PowerShell 在系统繁忙/策略拦截时长时间挂起导致 UI 一直转圈。
+ * 超时后主动 kill 子进程，交由上层重试或回退最近成功结果。
+ */
+function runPowerShellWithTimeout(script, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(getPowerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try {
+        child.kill();
+      } catch {
+        /* ignore */
+      }
+      reject(new Error(`PowerShell 扫盘超时（>${timeoutMs}ms）`));
+    }, timeoutMs);
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', (e) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       if (code === 0) resolve(stdout.trim());
       else reject(new Error((stderr || stdout || `powershell exit ${code}`).trim()));
     });
@@ -485,7 +531,7 @@ async function listDrivesPowerShell() {
   $fn = if ($null -eq $_.FriendlyName) { '' } else { [string]$_.FriendlyName -replace '\r?\n', ' ' }
   "$($_.Number)###$fn###$($_.BusType)###$($_.Size)###$($_.OperationalStatus)"
 }`;
-  const output = await runPowerShell(script);
+  const output = await runPowerShellWithTimeout(script, DRIVE_SCAN_PS_TIMEOUT_MS);
   if (!output) return [];
   const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const rows = [];
@@ -516,6 +562,19 @@ async function listDrivesPowerShell() {
   return rows;
 }
 
+function cloneDrives(drives) {
+  return Array.isArray(drives) ? drives.map((d) => ({ ...d })) : [];
+}
+
+async function listDrivesWithRetry() {
+  try {
+    return await listDrivesPowerShell();
+  } catch {
+    await new Promise((r) => setTimeout(r, 450));
+    return listDrivesPowerShell();
+  }
+}
+
 /**
  * 有烧录捆绑时：以 Get-Disk 为权威列表（容量、总线、可移动），保证每次都能列出盘。
  * `/dev/sd*` 由 PhysicalDrive 序号推导（与 MSYS/dd 一致）。
@@ -525,47 +584,72 @@ async function listDrivesPowerShell() {
  * RDK_FLASH_LS_ENRICH=1（会变慢）。
  */
 export async function listDrives() {
-  const ps = await listDrivesPowerShell();
-  if (!hasFrontendFlashBundle()) {
-    return ps;
+  const now = Date.now();
+  if (driveScanCache.drives.length > 0 && now - driveScanCache.at < DRIVE_SCAN_CACHE_MS) {
+    return cloneDrives(driveScanCache.drives);
+  }
+  if (driveScanInFlight) {
+    return driveScanInFlight;
   }
 
-  /** @type {Map<string, { device: string, name: string }>} */
-  const byPhys = new Map();
-  const enrichLs = String(process.env.RDK_FLASH_LS_ENRICH || '').trim() === '1';
-  if (enrichLs) {
+  driveScanInFlight = (async () => {
     try {
-      const pairs = listUsbDevicesViaLs();
-      for (const p of pairs) {
-        const phys = msysDeviceToPhysicalDrive(p.device);
-        if (!phys) {
-          continue;
-        }
-        const key = normalizeWinPhysicalDrivePath(phys);
-        if (!byPhys.has(key)) {
-          byPhys.set(key, { device: p.device, name: p.name });
+      const ps = await listDrivesWithRetry();
+      if (!hasFrontendFlashBundle()) {
+        driveScanCache = { at: Date.now(), drives: cloneDrives(ps) };
+        return ps;
+      }
+
+      /** @type {Map<string, { device: string, name: string }>} */
+      const byPhys = new Map();
+      const enrichLs = String(process.env.RDK_FLASH_LS_ENRICH || '').trim() === '1';
+      if (enrichLs) {
+        try {
+          const pairs = listUsbDevicesViaLs();
+          for (const p of pairs) {
+            const phys = msysDeviceToPhysicalDrive(p.device);
+            if (!phys) {
+              continue;
+            }
+            const key = normalizeWinPhysicalDrivePath(phys);
+            if (!byPhys.has(key)) {
+              byPhys.set(key, { device: p.device, name: p.name });
+            }
+          }
+        } catch (e) {
+          console.warn('[win flash] listUsbDevicesViaLs failed (ignored, using Get-Disk + msys path):', e);
         }
       }
-    } catch (e) {
-      console.warn('[win flash] listUsbDevicesViaLs failed (ignored, using Get-Disk + msys path):', e);
-    }
-  }
 
-  return ps.map((d) => {
-    const phys = normalizeWinPhysicalDrivePath(d.path);
-    const fromLs = byPhys.get(phys);
-    const msysFallback = physicalDriveToMsysOf(phys);
-    return {
-      id: String(d.id),
-      path: fromLs?.device ?? msysFallback ?? phys,
-      label: fromLs?.name ?? d.label,
-      size: d.size,
-      sizeBytes: d.sizeBytes,
-      bus: d.bus,
-      mediaType: d.mediaType,
-      removable: d.removable,
-    };
-  });
+      const merged = ps.map((d) => {
+        const phys = normalizeWinPhysicalDrivePath(d.path);
+        const fromLs = byPhys.get(phys);
+        const msysFallback = physicalDriveToMsysOf(phys);
+        return {
+          id: String(d.id),
+          path: fromLs?.device ?? msysFallback ?? phys,
+          label: fromLs?.name ?? d.label,
+          size: d.size,
+          sizeBytes: d.sizeBytes,
+          bus: d.bus,
+          mediaType: d.mediaType,
+          removable: d.removable,
+        };
+      });
+      driveScanCache = { at: Date.now(), drives: cloneDrives(merged) };
+      return merged;
+    } catch (e) {
+      if (driveScanCache.drives.length > 0) {
+        console.warn('[win flash] listDrives failed, fallback to stale cache:', e);
+        return cloneDrives(driveScanCache.drives);
+      }
+      throw e;
+    } finally {
+      driveScanInFlight = null;
+    }
+  })();
+
+  return driveScanInFlight;
 }
 
 /**

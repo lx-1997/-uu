@@ -21,6 +21,8 @@ import { DEVICE_DIAGNOSTICS_POLL_MS, DEVICE_POLL_PHASE_OPENCLAW_WIFI_TICK_MS } f
 import io from 'socket.io-client';
 /** sessionStorage：用户取消部署后阻止 Wi‑Fi 触发的自动安装，直至关闭并重新打开工作室（会话级） */
 const openclawWifiAutoUserBlockKey = (deviceId: string) => `oc-wifi-auto-user-block-${deviceId}`;
+/** sessionStorage：自动安装前需要连续多次确认“未安装”，防止状态抖动误触发 */
+const openclawWifiAutoMissingInstallCountKey = (deviceId: string) => `oc-wifi-auto-missing-install-count-${deviceId}`;
 
 /* ═══════════════════════════════════════════
    Types
@@ -33,6 +35,10 @@ interface GatewayStatus {
   installed?: boolean;
   feishuConnected: boolean;
   weixinConnected?: boolean;
+}
+
+function isOpenClawInstalled(status: GatewayStatus | null | undefined): boolean {
+  return !!(status?.installed || status?.version?.trim() || status?.running);
 }
 
 interface ConfigData {
@@ -445,7 +451,7 @@ export default function OpenClaw() {
   const [statusLoading, setStatusLoading] = useState(false);
 
   const ocInstalled = useMemo(
-    () => !!(status?.installed ?? status?.version?.trim()),
+    () => isOpenClawInstalled(status),
     [status],
   );
 
@@ -737,6 +743,7 @@ export default function OpenClaw() {
   /** 与 `>>> uninstall` 等同一条助手消息流：首轮 append，后续 updateLastAssistant */
   const deployLogBubbleInitializedRef = useRef(false);
   const deployStepStartedAtRef = useRef<number>(0);
+  const deployRunningStepIndexRef = useRef<number>(-1);
   useEffect(() => {
     deployRunningRef.current = deployRunning;
   }, [deployRunning]);
@@ -746,16 +753,26 @@ export default function OpenClaw() {
       setDeployStepEtaSec(null);
       setDeployStepElapsedSec(0);
       deployStepStartedAtRef.current = 0;
+      deployRunningStepIndexRef.current = -1;
       return;
     }
     const idx = deploySteps.findIndex((s) => s === 'running');
     if (idx < 0) return;
+
+    const isNewStep = deployRunningStepIndexRef.current !== idx;
+    deployRunningStepIndexRef.current = idx;
+
     const order: DeployStepName[] = ['check', 'prepare', 'install', 'config'];
     const step = order[idx];
     const eta = DEPLOY_STEP_ETA_SECONDS[step] || null;
-    setDeployStepEtaSec(eta);
-    deployStepStartedAtRef.current = Date.now();
-    setDeployStepElapsedSec(0);
+    if (isNewStep) {
+      setDeployStepEtaSec(eta);
+      deployStepStartedAtRef.current = Date.now();
+      setDeployStepElapsedSec(0);
+    } else if (deployStepStartedAtRef.current <= 0) {
+      deployStepStartedAtRef.current = Date.now();
+    }
+
     const iv = setInterval(() => {
       const elapsed = Math.round((Date.now() - deployStepStartedAtRef.current) / 1000);
       setDeployStepElapsedSec(elapsed);
@@ -908,6 +925,26 @@ export default function OpenClaw() {
     }
   }, [currentDevice, activeTab, dashboardTab]);
 
+  /**
+   * 历史部署任务可能在服务重启后残留为失败；
+   * 若当前实时状态已确认 OpenClaw 可用（已安装且网关运行），则前端不再展示旧失败条。
+   */
+  useEffect(() => {
+    if (!ocInstalled || !status?.running || deployRunning) return;
+    const hasFailedStrip = deploySteps.some((s) => s === 'error') || !!deployLastError.trim();
+    if (!hasFailedStrip) return;
+    stopDeployPolling();
+    if (ocDeployLsKey) {
+      try {
+        localStorage.removeItem(ocDeployLsKey);
+      } catch {
+        /* ignore */
+      }
+    }
+    setDeploySteps([]);
+    setDeployLastError('');
+  }, [ocInstalled, status?.running, deployRunning, deploySteps, deployLastError, ocDeployLsKey]);
+
   useEffect(() => {
     if (!modelHealthStorageKey) {
       setModelHealthSnapshot(null);
@@ -939,7 +976,7 @@ export default function OpenClaw() {
   useEffect(() => {
     if (!currentDevice || activeTab !== 'openclaw') return;
     if (statusLoading) return;
-    const installed = !!(status?.installed ?? status?.version?.trim());
+    const installed = isOpenClawInstalled(status);
     if (installed) {
       if (ocDeployPanelHintKey) {
         try {
@@ -975,6 +1012,8 @@ export default function OpenClaw() {
     const id = currentDevice.id;
     const pendingKey = `oc-wifi-auto-pending-${id}`;
     const skipCfgKey = `oc-wifi-auto-skip-nocfg-${id}`;
+    const missingInstallCountKey = openclawWifiAutoMissingInstallCountKey(id);
+    const missingInstallConfirmThreshold = 2;
     let cancelled = false;
     let inFlight = false;
 
@@ -995,11 +1034,29 @@ export default function OpenClaw() {
         const res = await fetchApi(`/api/devices/${id}/openclaw/status`);
         if (!res.ok) return;
         const data = (await res.json()) as GatewayStatus;
-        installed = !!(data?.installed ?? data?.version?.trim());
+        installed = isOpenClawInstalled(data);
       } catch {
         return;
       }
-      if (cancelled || installed) return;
+      if (cancelled) return;
+      if (installed) {
+        try {
+          sessionStorage.setItem(missingInstallCountKey, '0');
+        } catch { /* ignore */ }
+        return;
+      }
+
+      let missingInstallCount = 0;
+      try {
+        const prev = Number(sessionStorage.getItem(missingInstallCountKey) || '0');
+        missingInstallCount = Number.isFinite(prev) ? prev + 1 : 1;
+        sessionStorage.setItem(missingInstallCountKey, String(missingInstallCount));
+      } catch {
+        missingInstallCount = 1;
+      }
+      if (missingInstallCount < missingInstallConfirmThreshold) {
+        return;
+      }
       if (deployRunningRef.current) return;
 
       inFlight = true;
@@ -1031,6 +1088,9 @@ export default function OpenClaw() {
           }
           return;
         }
+        try {
+          sessionStorage.setItem(missingInstallCountKey, '0');
+        } catch { /* ignore */ }
         setDeployLastError('');
         setDeployRunning(true);
         setDeploySteps(['running', 'pending', 'pending', 'pending']);
@@ -1064,7 +1124,7 @@ export default function OpenClaw() {
   useEffect(() => {
     if (status !== null && config !== null && needsSetup()) {
       setShowSetupGuide(true);
-      const installed = !!(status?.installed ?? status?.version?.trim());
+      const installed = isOpenClawInstalled(status);
       if (!installed) {
         setSetupStep('gateway');
       } else if (!config.modelGateway?.baseUrl || !config.modelGateway?.apiKey) {
@@ -1195,7 +1255,7 @@ export default function OpenClaw() {
       persistGatewayStatusSnapshot(currentDevice.id, {
         running: !!st.running,
         version: typeof st.version === 'string' ? st.version : '',
-        installed: !!(st.installed ?? st.version?.trim()),
+        installed: isOpenClawInstalled(st),
         feishuConnected: !!st.feishuConnected,
       });
       return data;
@@ -2027,7 +2087,7 @@ export default function OpenClaw() {
   };
 
   const getSetupStatus = (): SetupStatus => {
-    const installed = !!(status?.installed ?? status?.version?.trim());
+    const installed = isOpenClawInstalled(status);
     const modelOk = hasBoardModelSelection() && hasBoardModelCredentials();
     const feishuOk = !!(config?.feishu?.appId && config?.feishu?.appSecret);
     return {
@@ -2047,7 +2107,7 @@ export default function OpenClaw() {
   };
 
   const needsSetup = () => {
-    const installed = !!(status?.installed ?? status?.version?.trim());
+    const installed = isOpenClawInstalled(status);
     const modelOk = hasBoardModelSelection() && hasBoardModelCredentials();
     return !installed || !modelOk;
   };

@@ -173,7 +173,9 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
       "**默认禁止**再用 `read`/`list` 打开上述同名路径或 `memory/` 下文件（系统已注入，重复拉取浪费一整轮推理）。",
       "仅当用户**明确**要查看磁盘上未展示的片段、或你要改工作区文件时，再 `read`/`write`。",
       "普通问答与闲聊：**零工具**，直接答。",
+      "用户一句话要\"开发机器人应用\"时：先拆成最小闭环 5 段（输入/感知 -> 推理/控制 -> 执行节点 -> 可观测验证 -> 交付脚本），优先给可直接运行的最短路径。",
       "涉及设备执行时，先给 2-4 步短计划；再尽量合并为一次 `device_exec` 在同一 SSH 终端连续执行，避免碎片化多次试探。",
+      "ROS2/Linux/上板任务首轮尽量并行取证（rdk_doc_search_local 或 web_fetch + device 探测 + 可选 assess），减少回合数。",
     ].join("\n"),
   );
   pushStable(
@@ -332,6 +334,8 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
       "## 执行编排纪律",
       "涉及设备命令时先给计划再执行：先列 2-4 步可验证计划，再开始落命令。",
       "默认优先单次 `device_exec`（同一持久 SSH 终端）连续完成相关命令，避免无计划地分散成多轮小命令。",
+      "若用户仅一句话提出机器人应用目标：先生成\"可运行最小骨架\"（节点/launch/配置/验收命令），再增量完善能力，避免一开始过度设计。",
+      "ROS2/Linux/部署类任务第一轮优先并行取证并尽快收敛到可执行命令；不要把检索、探测、评估拆成多轮串行。",
       "执行结束必须给出验收结论（成功/失败、下一步）。",
     ].join("\n"),
   );

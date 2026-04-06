@@ -18,6 +18,24 @@ function isDeveloperDocsTask(message: string): boolean {
   return docsIntent && !boardExecutionIntent;
 }
 
+function isRoboticsExecutionTask(message: string): boolean {
+  const text = String(message || "").trim();
+  if (!text) return false;
+  return /(ros2|tros|launch|topic|node|rviz|slam|nav2|moveit|camera|相机|检测|识别|部署|上板|板端|device_exec|ssh|openclaw|编译|colcon|模型|推理|机器人|机械臂|巡线|避障)/i.test(text);
+}
+
+function isBoardConsultativeTask(message: string): boolean {
+  const text = String(message || "").trim();
+  if (!text) return false;
+  return /(方案|思路|架构|可行性|评估|trade[- ]?off|讨论|对齐|review|审查|先聊|先评估|assess|咨询|建议|排障思路|板端资源|网关状态|技能清单|运行态|现场状态)/i.test(text);
+}
+
+function isLongRunningBoardTask(message: string): boolean {
+  const text = String(message || "").trim();
+  if (!text) return false;
+  return /(长程|长期|持续|后台常驻|7x24|守护|watchdog|daemon|service|systemd|持续推理|持续采集|长时间监控|巡检|压测|soak|burn[- ]?in|连续运行|闭环运行)/i.test(text);
+}
+
 export function resolveDelegationModeText(decision: DelegateDecision) {
   if (decision.path === "board_primary") return "套件端主执行（本地兜底）";
   if (decision.path === "collaborative") return "本地 + 套件端协同";
@@ -142,26 +160,54 @@ export function selectDelegateDecision(
   const hasBoardSkills = boardSnapshot.skills.length > 0;
 
   if (delegationBias === "local-first") {
-    /** Studio 优先 ≠ 禁用 OpenClaw：套件端有技能时仍标为可协同，避免模型与元数据「完全不需要套件端」 */
-    if (hasBoardSkills) {
+    const consultative = isBoardConsultativeTask(req.message);
+    const longRunning = isLongRunningBoardTask(req.message);
+    const roboticsExecution = isRoboticsExecutionTask(req.message);
+
+    if (consultative) {
       return {
         path: "collaborative",
         canLocalComplete: true,
         needsBoardCollaboration: true,
-        source: "persona",
+        source: "task_analysis",
         reason:
-          "委派倾向为 Studio 优先：单条/原子操作用 device_*；多步、技能链、或预计需多轮试错的套件端任务应 assess→delegate，由套件端 OpenClaw 迭代，避免主会话被长串 shell 淹没",
-        confidence: 0.88,
+          "识别为方案探讨/评估类请求：RDKClaw 负责主编排，OpenClaw 作为板端协作伙伴提供现场信息与可行性判断，再决定是否执行",
+        confidence: 0.9,
       };
     }
+
+    if (longRunning) {
+      return {
+        path: "collaborative",
+        canLocalComplete: true,
+        needsBoardCollaboration: true,
+        source: "task_analysis",
+        reason:
+          "识别为长程/持续运行任务：需板端会话保持与过程可见性，建议与 OpenClaw 协作以承接长时执行与状态回传",
+        confidence: 0.9,
+      };
+    }
+
+    if (hasBoardSkills && roboticsExecution) {
+      return {
+        path: "collaborative",
+        canLocalComplete: true,
+        needsBoardCollaboration: true,
+        source: "task_analysis",
+        reason:
+          "识别为机器人执行任务且套件端已有可用技能：先由 RDKClaw 快速落地，遇到多步试错或技能链时及时并线 OpenClaw",
+        confidence: 0.83,
+      };
+    }
+
     return {
       path: "local_only",
       canLocalComplete: true,
       needsBoardCollaboration: false,
       source: "persona",
       reason:
-        "委派倾向为 Studio 优先且套件端暂无已登记技能：默认 SSH/本地完成；装技能后或任务明显需套件端 Agent 时再 assess",
-      confidence: 0.88,
+        "委派倾向为 Studio 优先：默认由 RDKClaw 本地/SSH 闭环执行；仅在方案探讨、板端资源协作、长程任务或明确技能链需求时再并线 OpenClaw",
+      confidence: 0.9,
     };
   }
 

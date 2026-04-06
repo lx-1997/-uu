@@ -233,6 +233,32 @@ function hasBoardAlignmentSection(text: string): boolean {
   return /\[(?:板端|套件端)[·.]?对齐\]/i.test(String(text || ""));
 }
 
+function analyzeBoardExecutionVisibility(text: string): {
+  hasProgress: boolean;
+  hasResult: boolean;
+  hasReplayEvidence: boolean;
+} {
+  const body = String(text || "");
+  return {
+    hasProgress: /\[(?:板端|套件端)[·.]?(?:进行|过程|执行)\]/i.test(body),
+    hasResult: /\[(?:板端|套件端)[·.]?结果\]/i.test(body),
+    hasReplayEvidence: /(exit\s*code|验收|topic|端口|launch|日志|log|success|failed|失败|成功)/i.test(body),
+  };
+}
+
+function buildBoardVisibilityFollowupHint(text: string): string {
+  const v = analyzeBoardExecutionVisibility(text);
+  if (v.hasProgress && v.hasResult && v.hasReplayEvidence) return "";
+  return [
+    "\n\n---",
+    "[RDKClaw·可见性提醒] 当前套件端回包的过程/结果证据不足，先不要直接判定任务完成。",
+    "下一步请立即执行：",
+    "1) 调用 board_openclaw_chat 追问：按 [套件端·进行] / [套件端·过程] / [套件端·结果] 重发关键步骤、命令与验收证据（exit code/topic/端口/日志）。",
+    "2) 若是长程任务或后台任务，再调用 board_openclaw_logs 拉最近关键日志并回传给用户。",
+    "3) 回答用户时给可复现验收命令，不要只给笼统结论。",
+  ].join("\n");
+}
+
 async function ensureBoardGatewayReady(
   manager: OpenClawDeploymentManager,
   device: SharedDevice,
@@ -581,7 +607,7 @@ export function boardOpenClawDelegateTool(
               "如果它用了好的技能或方案，记在记忆中以备推荐；" +
               "如果有可改进之处，下次委派时在 guidance 中补充。" +
               "如果发现可复用的套件端经验，建议创建为 OpenClaw 技能。]";
-          return body + suffix;
+          return body + suffix + buildBoardVisibilityFollowupHint(body);
         }
         lastOutput = output;
         if (
@@ -616,7 +642,7 @@ export function boardOpenClawDelegateTool(
             phase: "delegate",
             toolCallId: ctx.toolCallId,
           });
-          return need.text;
+          return need.text + buildBoardVisibilityFollowupHint(need.text);
         }
         if (attempt < DELEGATE_MAX_RETRIES && isRetryableOpenClawBoardSendFailure(output)) {
           console.warn(`[board-delegate] retryable failure on attempt ${attempt + 1}, retrying in ${DELEGATE_RETRY_DELAY_MS}ms`);
@@ -634,7 +660,7 @@ export function boardOpenClawDelegateTool(
           phase: "delegate",
           toolCallId: ctx.toolCallId,
         });
-        return need.text;
+        return need.text + buildBoardVisibilityFollowupHint(need.text);
       }
       if (deviceId) {
         if (

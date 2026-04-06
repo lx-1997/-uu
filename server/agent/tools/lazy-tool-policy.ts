@@ -57,6 +57,6 @@ export function shouldPreloadDeferrableWithStudioDevice(name: string): boolean {
   if (name.startsWith("board_openclaw_")) return true;
   if (name.startsWith("fleet_board_")) return true;
   /** 已选板卡时几乎必查 rdk_doc / 联网；预载避免首轮「load_tools → 同回合 web_fetch」仍报未知工具 */
-  if (name === "web_fetch" || name === "web_search") return true;
+  if (name === "web_fetch" || name === "web_search" || name === "rdk_doc_search_local") return true;
   return false;
 }
