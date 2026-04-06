@@ -236,6 +236,8 @@ function detachEmbedToFloat(url, title) {
   }
   floatWin.contentView.addChildView(view);
   syncEmbedViewBoundsForFloat(floatWin, view);
+  // 从其它 Tab 浮出时该 view 可能被 hideUrl 设为不可见；不恢复会出现“浮窗白屏”。
+  view.setVisible(true);
   embedFloatWins[url] = floatWin;
   embedDetachedUrls.add(url);
   floatWin.on('resize', () => syncEmbedViewBoundsForFloat(floatWin, view));
@@ -1636,6 +1638,7 @@ ipcMain.on('rdk:set-embed-float', (_event, { url, floating, title }) => {
   if (!u || !viewsMap[u]) return;
   if (floating) {
     if (embedDetachedUrls.has(u)) {
+      viewsMap[u].setVisible(true);
       embedFloatWins[u]?.focus();
       return;
     }
@@ -1649,6 +1652,9 @@ ipcMain.on('rdk:set-embed-float', (_event, { url, floating, title }) => {
 ipcMain.on('rdk:focus-embed-float', (_event, { url }) => {
   const u = String(url || '').trim();
   if (!u || !embedDetachedUrls.has(u)) return;
+  if (viewsMap[u] && !viewsMap[u].webContents.isDestroyed()) {
+    viewsMap[u].setVisible(true);
+  }
   const fw = embedFloatWins[u];
   if (fw && !fw.isDestroyed()) {
     if (fw.isMinimized()) fw.restore();

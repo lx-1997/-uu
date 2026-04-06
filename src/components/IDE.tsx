@@ -196,8 +196,8 @@ export default function IDE() {
       return;
     }
 
-    /** 对话「打开 IDE」：consumeIdeConnectPreferFloat 为 true 时直接浮出；页面内点「连接」默认贴入 */
-    const preferFloatFromIntent = consumeIdeConnectPreferFloat();
+    /** 非 IDE 页触发时默认浮窗，避免嵌入态被主区隐藏后出现空白 */
+    const preferFloatFromIntent = consumeIdeConnectPreferFloat() || activeTab !== 'ide';
     setEmbedFloating(preferFloatFromIntent);
     if (isDesktop()) {
       activeUrlRef.current = url;
@@ -273,7 +273,12 @@ export default function IDE() {
           rdk.setActiveUrl?.(url);
         }
       } else {
-        rdk.hideUrl?.(url);
+        // 非 IDE 标签下：若是浮窗态，保持浮窗可见，避免“打开后白屏/消失”
+        if (embedFloating) {
+          rdk.focusEmbedFloat?.(url);
+        } else {
+          rdk.hideUrl?.(url);
+        }
       }
     };
     run();

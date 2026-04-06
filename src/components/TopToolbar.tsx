@@ -245,23 +245,33 @@ export default function TopToolbar() {
       return;
     }
     let cancelled = false;
+    let inFlight = false;
     const run = () => {
-      void fetchWifiLinkState(currentDevice.id).then((r) => {
-        if (!cancelled) {
-          setWifiLink(r.state);
-          setWifiConnectedSsid(r.connectedSsid);
-        }
-      });
+      if (inFlight) return;
+      inFlight = true;
+      void fetchWifiLinkState(currentDevice.id)
+        .then((r) => {
+          if (cancelled) return;
+          // 顶栏只负责“是否在线”颜色：null 也按 down 处理，避免断网后长期灰色不变。
+          setWifiLink(r.state === 'up' ? 'up' : 'down');
+          setWifiConnectedSsid(r.state === 'up' ? r.connectedSsid : undefined);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setWifiLink('down');
+          setWifiConnectedSsid(undefined);
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     };
-    let kick: number | null = null;
+    // 顶栏网络状态需要高频刷新：优先 3s 级别，且首次立即探测。
+    const pollMs = Math.min(TOPBAR_WIFI_LINK_POLL_MS, 3000);
     let id: number | null = null;
-    kick = window.setTimeout(() => {
-      run();
-      id = window.setInterval(run, TOPBAR_WIFI_LINK_POLL_MS);
-    }, DEVICE_POLL_PHASE_TOPBAR_WIFI_MS);
+    run();
+    id = window.setInterval(run, pollMs);
     return () => {
       cancelled = true;
-      if (kick) window.clearTimeout(kick);
       if (id) window.clearInterval(id);
     };
   }, [currentDevice?.id, currentDevice?.status, currentDevice?.sshSessionVerified]);
@@ -488,8 +498,8 @@ export default function TopToolbar() {
           onConnected={() => {
             if (currentDevice) {
               void fetchWifiLinkState(currentDevice.id).then((r) => {
-                setWifiLink(r.state);
-                setWifiConnectedSsid(r.connectedSsid);
+                setWifiLink(r.state === 'up' ? 'up' : 'down');
+                setWifiConnectedSsid(r.state === 'up' ? r.connectedSsid : undefined);
               });
             }
           }}

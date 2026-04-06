@@ -72,6 +72,7 @@ import {
 import type { RdkPlatform } from '../shared/board-types.js';
 import { shellEscape, isSafeName } from './utils/shell-escape.js';
 import { stripAnsi } from './utils/strip-ansi.js';
+import { buildVncStartRemoteExec, buildVncStatusRemoteExec } from './vnc-remote-script.js';
 import {
   DEFAULT_SSH_PASSWORD,
   DEFAULT_VNC_PORT,
@@ -809,6 +810,20 @@ function resolvePassword(request: express.Request, device: Device) {
 
 function resolveStoredDevicePassword(device: Device) {
   return resolvePrimarySshPassword(device);
+}
+
+async function resolveLatestUiDeviceId(inputDeviceId?: string): Promise<string> {
+  const requestedId = String(inputDeviceId || '').trim();
+  const devices = await readDevices();
+  if (requestedId) {
+    const exact = devices.find((item) => item.id === requestedId);
+    if (exact) return requestedId;
+  }
+  const connected = devices
+    .filter((item) => item.status === 'connected')
+    .sort((a, b) => Number(b.lastCheckedAt || 0) - Number(a.lastCheckedAt || 0));
+  if (connected[0]?.id) return connected[0].id;
+  return devices[0]?.id || '';
 }
 
 function purgeDeviceSoftwareState(device: Device) {
@@ -3640,11 +3655,22 @@ async function executeOpenClawDeployJob(
     schedulePersistRuntimeJobs();
     deploySseSendFinalAndClose(job);
   } catch (error) {
+    const isUserCancelled = openClawDeployUserCancelled.has(job.id);
     job.status = 'error';
-    job.error = openClawDeployUserCancelled.has(job.id)
+    job.error = isUserCancelled
       ? '用户已取消部署'
       : (error instanceof Error ? error.message : '部署失败');
     openClawDeployUserCancelled.delete(job.id);
+    if (!isUserCancelled) {
+      try {
+        await tryReconcileFailedOpenClawDeployJob(job, deviceObj, {
+          fromErrorLabel: '部署异常后即时纠偏',
+          minReadyLevel: 'installed',
+        });
+      } catch {
+        // 纠偏失败时保留 error 状态
+      }
+    }
     job.finishedAt = Date.now();
     schedulePersistRuntimeJobs();
     deploySseSendFinalAndClose(job);
@@ -3653,35 +3679,49 @@ async function executeOpenClawDeployJob(
   }
 }
 
-async function tryReconcileInterruptedOpenClawDeployJob(
+async function tryReconcileFailedOpenClawDeployJob(
   job: OpenClawDeployJob,
   deviceObj: ReturnType<typeof toOpenClawDevice>,
+  options?: { fromErrorLabel?: string; minReadyLevel?: 'installed' | 'gateway' },
 ): Promise<boolean> {
-  if (job.status !== 'error' || job.error !== OPENCLAW_DEPLOY_INTERRUPTED_ERROR) {
+  if (job.status !== 'error') {
     return false;
   }
+  const minReadyLevel = options?.minReadyLevel || 'gateway';
 
   const healthStatus = await new Promise<import('./managers/OpenClawDeploymentManager.js').OpenClawHealthStatus>((resolve) => {
     openClawManager.getHealthStatus(deviceObj, (status) => resolve(status));
   });
 
-  // 服务重启后若板端已安装且网关运行，视为部署已达成关键目标，避免前端长期显示“安装失败”。
-  if (!healthStatus.installed || !healthStatus.gatewayRunning) {
+  const reachesReadyLevel =
+    minReadyLevel === 'installed'
+      ? healthStatus.installed
+      : (healthStatus.installed && (healthStatus.gatewayRunning || healthStatus.aiReady));
+  // 若板端已达到关键就绪级别，视为部署可用，避免页面长时间显示“失败”。
+  if (!reachesReadyLevel) {
     return false;
   }
 
   const now = Date.now();
+  const prevError = String(job.error || '').trim();
+  const fromErrorLabel = options?.fromErrorLabel?.trim()
+    || (prevError === OPENCLAW_DEPLOY_INTERRUPTED_ERROR ? '服务重启后任务恢复检查' : '部署失败后健康纠偏');
   job.status = 'done';
   job.error = undefined;
   job.finishedAt = job.finishedAt || now;
   job.steps.check = 'done';
   job.steps.prepare = 'done';
   if (job.steps.install === 'error' || job.steps.install === 'pending') job.steps.install = 'done';
-  if (job.steps.config === 'pending') job.steps.config = healthStatus.aiReady ? 'done' : 'pending';
-  if (!job.output.includes('[Studio] 服务重启后任务恢复检查：')) {
+  if (job.steps.config === 'error') {
+    job.steps.config = healthStatus.aiReady ? 'done' : 'pending';
+  } else if (job.steps.config === 'pending') {
+    job.steps.config = healthStatus.aiReady ? 'done' : 'pending';
+  }
+  if (!job.output.includes(`[Studio] ${fromErrorLabel}：`)) {
     appendDeployOutput(
       job,
-      `\n[Studio] 服务重启后任务恢复检查：检测到 OpenClaw 已安装且网关运行，已自动将中断任务状态修正为已完成。当前健康摘要：${healthStatus.summary || 'OpenClaw 网关可用'}\n`,
+      `\n[Studio] ${fromErrorLabel}：检测到 OpenClaw 已达到可用状态（installed=${healthStatus.installed ? 'yes' : 'no'}, gateway=${healthStatus.gatewayRunning ? 'up' : 'down'}, aiReady=${healthStatus.aiReady ? 'yes' : 'no'}），已自动将失败任务修正为已完成。` +
+      `${prevError ? `原失败原因：${prevError}。` : ''}当前健康摘要：${healthStatus.summary || 'OpenClaw 网关可用'}\n`,
     );
   }
   schedulePersistRuntimeJobs();
@@ -3826,7 +3866,7 @@ app.get('/api/devices/:id/openclaw/deploy/status', async (request, response) => 
     sendApiError(response, 404, 'OPENCLAW_DEPLOY_JOB_NOT_FOUND', '部署任务不存在', { retryable: false });
     return;
   }
-  if (job.status === 'error' && job.error === OPENCLAW_DEPLOY_INTERRUPTED_ERROR) {
+  if (job.status === 'error') {
     try {
       const devices = await readDevices();
       const device = devices.find((d) => d.id === id);
@@ -3835,7 +3875,10 @@ app.get('/api/devices/:id/openclaw/deploy/status', async (request, response) => 
           requestHeaderPassword: String(request.headers['x-device-password'] ?? ''),
         });
         const deviceObj = toOpenClawDevice(device, pwd);
-        await tryReconcileInterruptedOpenClawDeployJob(job, deviceObj);
+        await tryReconcileFailedOpenClawDeployJob(job, deviceObj, {
+          fromErrorLabel: job.error === OPENCLAW_DEPLOY_INTERRUPTED_ERROR ? '服务重启后任务恢复检查' : '状态查询纠偏',
+          minReadyLevel: 'installed',
+        });
       }
     } catch {
       // 纠偏失败不阻断状态查询，仍返回原任务状态
@@ -3858,7 +3901,7 @@ app.get('/api/devices/:id/openclaw/deploy/stream', async (request, response) => 
     sendApiError(response, 404, 'OPENCLAW_DEPLOY_JOB_NOT_FOUND', '部署任务不存在', { retryable: false });
     return;
   }
-  if (job.status === 'error' && job.error === OPENCLAW_DEPLOY_INTERRUPTED_ERROR) {
+  if (job.status === 'error') {
     try {
       const devices = await readDevices();
       const device = devices.find((d) => d.id === id);
@@ -3867,7 +3910,10 @@ app.get('/api/devices/:id/openclaw/deploy/stream', async (request, response) => 
           requestHeaderPassword: String(request.headers['x-device-password'] ?? ''),
         });
         const deviceObj = toOpenClawDevice(device, pwd);
-        await tryReconcileInterruptedOpenClawDeployJob(job, deviceObj);
+        await tryReconcileFailedOpenClawDeployJob(job, deviceObj, {
+          fromErrorLabel: job.error === OPENCLAW_DEPLOY_INTERRUPTED_ERROR ? '服务重启后任务恢复检查' : '流式订阅纠偏',
+          minReadyLevel: 'installed',
+        });
       }
     } catch {
       // 纠偏失败不阻断流式订阅
@@ -5198,12 +5244,7 @@ app.get('/api/devices/:id/services/node-red', async (request, response) => {
 
 app.get('/api/devices/:id/services/vnc', async (request, response) => {
   const { id } = request.params;
-  const executed = await runOnDevice(
-    request,
-    response,
-    id,
-    ['bash -lc "_ss=\"$(ss -lntp 2>/dev/null || true)\"; _ns=\"$(netstat -lnt 2>/dev/null || true)\"; _ps=\"$(pgrep -af \'x11vnc|Xtigervnc|vncserver\' 2>/dev/null || true)\"; if (echo \"$_ss\" | grep -q \":5900\\|:5901\") || (echo \"$_ns\" | grep -q \":5900\\|:5901\") || [ -n \"$_ps\" ]; then echo VNC_ACTIVE; else echo VNC_INACTIVE; fi; systemctl is-active x11vnc 2>/dev/null || true; systemctl is-active vncserver 2>/dev/null || true; echo \"$_ps\""'],
-  );
+  const executed = await runOnDevice(request, response, id, [buildVncStatusRemoteExec()]);
   if (!executed) return;
 
   const active = /\bVNC_ACTIVE\b/.test(executed.output);
@@ -5214,9 +5255,13 @@ app.get('/api/devices/:id/services/vnc', async (request, response) => {
 
 app.post('/api/devices/:id/services/vnc/start', async (request, response) => {
   const { id } = request.params;
-  const executed = await runOnDevice(request, response, id, [
-    'bash -lc "probe_port(){ for p in 5900 5901; do if ss -lnt 2>/dev/null | grep -q \":$p\"; then echo $p; return 0; fi; if netstat -lnt 2>/dev/null | grep -q \":$p\"; then echo $p; return 0; fi; done; return 1; }; PORT=\"$(probe_port || true)\"; if [ -z \"$PORT\" ] && command -v x11vnc >/dev/null 2>&1; then for d in \"${DISPLAY:-:0}\" :0 :1 :2; do nohup x11vnc -display \"$d\" -rfbport 5900 -passwd 88888888 -shared -forever -bg >/tmp/x11vnc.log 2>&1 || true; sleep 1; PORT=\"$(probe_port || true)\"; [ -n \"$PORT\" ] && break; done; fi; if [ -z \"$PORT\" ] && command -v vncserver >/dev/null 2>&1; then (vncserver :0 >/tmp/vncserver.log 2>&1 || vncserver :1 >/tmp/vncserver.log 2>&1 || true); sleep 1; PORT=\"$(probe_port || true)\"; fi; if [ -n \"$PORT\" ]; then echo VNC_STARTED; echo VNC_PORT=$PORT; else echo VNC_START_FAILED; fi"',
-  ]);
+  const executed = await runOnDevice(
+    request,
+    response,
+    id,
+    [buildVncStartRemoteExec()],
+    { timeoutMs: 180_000, rejectOnNonZeroExit: false },
+  );
   if (!executed) return;
   const started = /\bVNC_STARTED\b/.test(executed.output);
   response.json({ ok: started, output: executed.output });
@@ -6412,15 +6457,26 @@ app.post('/api/rdkclaw/session/active', (request, response) => {
   response.json({ ok: true, sessionId });
 });
 
-app.post('/api/rdkclaw/device/active', (request, response) => {
-  const deviceId = String(request.body?.deviceId || '').trim();
-  if (!deviceId) {
+app.post('/api/rdkclaw/device/active', async (request, response) => {
+  const requestedDeviceId = String(request.body?.deviceId || '').trim();
+  if (!requestedDeviceId) {
     response.status(400).json({ error: '缺少 deviceId' });
     return;
   }
+  const deviceId = await resolveLatestUiDeviceId(requestedDeviceId);
+  if (!deviceId) {
+    response.status(404).json({ error: '当前没有可用设备，无法设置活跃设备' });
+    return;
+  }
   feishuAuth.setLatestUiDevice(deviceId);
-  console.log(`[RDKClaw] latest-ui-device updated: ${auditKey(deviceId)}`);
-  response.json({ ok: true, deviceId });
+  if (deviceId !== requestedDeviceId) {
+    console.warn(
+      `[RDKClaw] latest-ui-device corrected: requested=${auditKey(requestedDeviceId)} -> resolved=${auditKey(deviceId)}`,
+    );
+  } else {
+    console.log(`[RDKClaw] latest-ui-device updated: ${auditKey(deviceId)}`);
+  }
+  response.json({ ok: true, deviceId, requestedDeviceId, corrected: deviceId !== requestedDeviceId });
 });
 
 app.post('/api/rdkclaw/feishu/auth/bind', (request, response) => {
@@ -7323,8 +7379,21 @@ app.post('/api/agent/chat', async (request, response) => {
   if (sessionId?.trim()) {
     feishuAuth.setLatestUiSession(sessionId.trim());
   }
+  let syncedDeviceId = String(deviceId || '').trim() || undefined;
   if (deviceId?.trim()) {
-    feishuAuth.setLatestUiDevice(deviceId.trim());
+    const requestedDeviceId = deviceId.trim();
+    const resolvedDeviceId = await resolveLatestUiDeviceId(requestedDeviceId);
+    if (resolvedDeviceId) {
+      syncedDeviceId = resolvedDeviceId;
+      feishuAuth.setLatestUiDevice(resolvedDeviceId);
+      if (resolvedDeviceId !== requestedDeviceId) {
+        console.warn(
+          `[RDKClaw] agent-chat device corrected: requested=${auditKey(requestedDeviceId)} -> resolved=${auditKey(resolvedDeviceId)}`,
+        );
+      }
+    } else {
+      syncedDeviceId = undefined;
+    }
   }
 
   try {
@@ -7378,7 +7447,7 @@ app.post('/api/agent/chat', async (request, response) => {
 
       for await (const event of rdkclaw.streamChat({
         message: String(message || '').trim(),
-        deviceId,
+        deviceId: syncedDeviceId,
         sessionId,
         userId,
         ssoUserName,

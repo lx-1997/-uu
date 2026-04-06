@@ -24,6 +24,40 @@ const openclawWifiAutoUserBlockKey = (deviceId: string) => `oc-wifi-auto-user-bl
 /** sessionStorage：自动安装前需要连续多次确认“未安装”，防止状态抖动误触发 */
 const openclawWifiAutoMissingInstallCountKey = (deviceId: string) => `oc-wifi-auto-missing-install-count-${deviceId}`;
 
+/**
+ * OpenClaw 偶发会把「命中能力/模型/推理过程」等内部遥测吐到正文。
+ * 这里在展示前做一次兜底净化：保留最终答复，丢弃元信息与推理链。
+ */
+function sanitizeOpenClawAssistantVisibleText(input: string): string {
+  const text = String(input || '').replace(/\r\n/g, '\n');
+  if (!text) return '';
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let inReasoningSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const lower = trimmed.toLowerCase();
+
+    if (
+      /^(推理过程|思维链|思考过程|reasoning process|thought process|chain of thought)\s*[:：]?\s*$/i.test(trimmed)
+      || /^(推理过程|思维链|思考过程)\s*[:：]\s*/.test(trimmed)
+      || /^reasoning\s*[:：]\s*/i.test(trimmed)
+    ) {
+      inReasoningSection = true;
+      continue;
+    }
+    if (inReasoningSection) continue;
+
+    if (/^(命中能力|能力命中|模型)\s*[:：]\s*/.test(trimmed)) continue;
+    if (/^(capabilities hit|hit capabilities|model)\s*:\s*/i.test(lower)) continue;
+
+    out.push(line);
+  }
+
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 /* ═══════════════════════════════════════════
    Types
    ═══════════════════════════════════════════ */
@@ -557,6 +591,7 @@ export default function OpenClaw() {
   });
   const [deployStepEtaSec, setDeployStepEtaSec] = useState<number | null>(null);
   const [deployStepElapsedSec, setDeployStepElapsedSec] = useState<number>(0);
+  const [deployInlineLogOpen, setDeployInlineLogOpen] = useState(true);
   /** 一键部署或取消部署请求进行中：与套件端 SSH/安装冲突，需锁定网关类操作 */
   const boardDeployBusy = deployRunning || deployCancelLoading;
 
@@ -727,7 +762,6 @@ export default function OpenClaw() {
   const [mobilePanel, setMobilePanel] = useState(false);
   const [configTab, setConfigTab] = useState<ConfigTab>('model');
   const [modelGatewayApiKeyVisible, setModelGatewayApiKeyVisible] = useState(false);
-  const [deployApiKeyVisible, setDeployApiKeyVisible] = useState(false);
   /** Studio agent-config 中的模型条目，供套件端委派预选 */
   const [studioDelegateModels, setStudioDelegateModels] = useState<Array<{ id: string; label: string; model: string }>>([]);
   const [delegateEntryId, setDelegateEntryId] = useState('');
@@ -747,6 +781,10 @@ export default function OpenClaw() {
   const deployRunningStepIndexRef = useRef<number>(-1);
   useEffect(() => {
     deployRunningRef.current = deployRunning;
+  }, [deployRunning]);
+
+  useEffect(() => {
+    if (deployRunning) setDeployInlineLogOpen(true);
   }, [deployRunning]);
 
   useEffect(() => {
@@ -941,10 +979,11 @@ export default function OpenClaw() {
 
   /**
    * 历史部署任务可能在服务重启后残留为失败；
-   * 若当前实时状态已确认 OpenClaw 可用（已安装且网关运行），则前端不再展示旧失败条。
+   * 一旦实时状态确认「已安装」（无论网关是否正在运行），前端应清理旧失败条与步骤态，
+   * 以避免与右侧状态面板出现“已安装 vs 安装失败”的冲突结论。
    */
   useEffect(() => {
-    if (!ocInstalled || !status?.running || deployRunning) return;
+    if (!ocInstalled || deployRunning) return;
     const hasFailedStrip = deploySteps.some((s) => s === 'error') || !!deployLastError.trim();
     if (!hasFailedStrip) return;
     stopDeployPolling();
@@ -1199,7 +1238,8 @@ export default function OpenClaw() {
       setChatMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last && last.role === 'assistant') {
-          return [...prev.slice(0, -1), { ...last, text: `${last.text}${data.chunk}` }];
+          const merged = sanitizeOpenClawAssistantVisibleText(`${last.text}${data.chunk}`);
+          return [...prev.slice(0, -1), { ...last, text: merged }];
         }
         return prev;
       });
@@ -1210,9 +1250,18 @@ export default function OpenClaw() {
       let completedWithUsefulAssistantText = false;
       setChatMessages((prev) => {
         const last = prev[prev.length - 1];
-        completedWithUsefulAssistantText = !!(last && last.role === 'assistant' && last.text.trim() && !last.text.startsWith(tRef.current('oc.chat.errorPrefix', '**错误：**')));
-        if (last && last.role === 'assistant' && !last.text.trim()) {
-          return [...prev.slice(0, -1), { ...last, text: tRef.current('oc.chat.emptyResponse', 'OpenClaw 未返回有效内容，请检查网关状态或设备密码。') }];
+        if (last && last.role === 'assistant') {
+          const cleaned = sanitizeOpenClawAssistantVisibleText(last.text);
+          completedWithUsefulAssistantText = !!(
+            cleaned &&
+            !cleaned.startsWith(tRef.current('oc.chat.errorPrefix', '**错误：**'))
+          );
+          if (!cleaned.trim()) {
+            return [...prev.slice(0, -1), { ...last, text: tRef.current('oc.chat.emptyResponse', 'OpenClaw 未返回有效内容，请检查网关状态或设备密码。') }];
+          }
+          if (cleaned !== last.text) {
+            return [...prev.slice(0, -1), { ...last, text: cleaned }];
+          }
         }
         return prev;
       });
@@ -1408,6 +1457,12 @@ export default function OpenClaw() {
   /** 一键部署轮询：日志写入对话区，格式与 `>>> uninstall` 一致 */
   const applyDeployJob = (job: DeployJob) => {
     const stepOrder: DeployStepName[] = ['check', 'prepare', 'install', 'config'];
+    const stepLabelMap: Record<DeployStepName, string> = {
+      check: tRef.current('oc.deploy.step.check', '诊断'),
+      prepare: tRef.current('oc.deploy.step.deps', '依赖'),
+      install: tRef.current('oc.deploy.step.install', '安装'),
+      config: tRef.current('oc.deploy.step.config', '配置'),
+    };
     const out = (job.output || '')
       .split('\n')
       .map((l) => {
@@ -1416,11 +1471,27 @@ export default function OpenClaw() {
         return sanitizeDeployLogLine(last);
       })
       .join('\n');
+    const outLines = out
+      .split('\n')
+      .map((x) => x.trimEnd())
+      .filter((x) => x.length > 0);
+    const outTail = outLines.slice(-40).join('\n');
     setDeployOutput(out);
     if (job.status === 'running') {
       setDeployLastError('');
       setDeploySteps(stepOrder.map((name) => job.steps?.[name] || 'pending'));
       setDeployRunning(true);
+      const runningStep = stepOrder.find((name) => job.steps?.[name] === 'running');
+      const runningStepLabel = runningStep ? stepLabelMap[runningStep] : tRef.current('oc.deploy.mainStripRunning', '一键部署进行中');
+      const message = outTail
+        ? `**${tRef.current('oc.deploy.mainStripRunning', '一键部署进行中')}**\n\n${tRef.current('oc.deploy.currentStep', '当前步骤')}：${runningStepLabel}\n\n\`\`\`\n${outTail}\n\`\`\``
+        : `**${tRef.current('oc.deploy.mainStripRunning', '一键部署进行中')}**\n\n${tRef.current('oc.deploy.currentStep', '当前步骤')}：${runningStepLabel}\n\n${tRef.current('oc.deploy.waitingLogs', '等待输出…')}`;
+      if (!deployLogBubbleInitializedRef.current) {
+        appendSystemMessage(message);
+        deployLogBubbleInitializedRef.current = true;
+      } else {
+        updateLastAssistant(message);
+      }
       return;
     }
 
@@ -1437,6 +1508,9 @@ export default function OpenClaw() {
     if (job.status === 'done') {
       setDeployLastError('');
       setDeploySteps([]);
+      const doneMsg = `**${tRef.current('oc.deploy.doneToast', '部署完成，网关正在重启')}**\n\n${tRef.current('oc.deploy.logInChatHint', '完整过程日志已保留在对话区。')}`;
+      if (deployLogBubbleInitializedRef.current) updateLastAssistant(doneMsg);
+      else appendSystemMessage(doneMsg);
       addToast?.(tRef.current('oc.deploy.doneToast', '部署完成，网关正在重启'), 'success');
       setTimeout(async () => {
         await loadConfig();
@@ -1479,7 +1553,26 @@ export default function OpenClaw() {
         : job.error || tRef.current('oc.deploy.fail', '部署失败，请查看日志输出');
     setDeployLastError(err);
     setDeploySteps(normalizeDeployStepsFromJob(job));
+    const failMsg = outTail
+      ? `**${tRef.current('oc.deploy.mainStripFailed', '部署失败')}**\n\n${err}\n\n\`\`\`\n${outTail}\n\`\`\``
+      : `**${tRef.current('oc.deploy.mainStripFailed', '部署失败')}**\n\n${err}`;
+    if (deployLogBubbleInitializedRef.current) updateLastAssistant(failMsg);
+    else appendSystemMessage(failMsg);
     addToast?.(fillTemplate(tRef.current('oc.deploy.failMsg', '部署失败：{{detail}}'), { detail: err }), 'error');
+    // 兜底：若任务报错但板端已安装，则立即切换到配置引导，避免“已安装/失败”冲突结论长期并存。
+    void (async () => {
+      const st = await loadStatus();
+      if (!isOpenClawInstalled(st)) return;
+      setDeployLastError('');
+      setDeploySteps([]);
+      const recoveredMsg = `**${tRef.current('oc.setup.ocInstalledOnly', '已安装')}**\n\n${tRef.current('oc.deploy.recoveredToConfig', '检测到 OpenClaw 已安装，已自动切换到后续配置引导（模型/网关）。')}`;
+      updateLastAssistant(recoveredMsg);
+      addToast?.(tRef.current('oc.deploy.recoveredToast', '检测到 OpenClaw 已安装：已切换到配置引导'), 'info');
+      await loadConfig();
+      setShowSetupGuide(true);
+      setSetupStep('model');
+      setPanelOpen(true);
+    })();
   };
 
   applyDeployJobRef.current = applyDeployJob;
@@ -1737,21 +1830,7 @@ export default function OpenClaw() {
 
   const handleOneClickInstall = async () => {
     if (!currentDevice || deployRunning) return;
-    if (!deployModelId.trim()) {
-      addToast?.(t('oc.deploy.needModelId', '请填写模型 ID，或先在 RDKClaw 设置中保存当前模型'), 'warning');
-      return;
-    }
-    if (!deployApiKey.trim() && !deployHasStudioKey) {
-      addToast?.(
-        t('oc.deploy.needKeyOrStudio', '请填写 API Key，或先在 RDKClaw 设置中保存模型与密钥'),
-        'warning',
-      );
-      return;
-    }
     try {
-      const preset = PROVIDER_PRESETS[deployProvider];
-      const baseUrl = deployBaseUrl || preset?.baseUrl || '';
-      const api = deployApi || preset?.api || 'openai-completions';
       setDeployLastError('');
       setDeployRunning(true);
       setDeploySteps(['running', 'pending', 'pending', 'pending']);
@@ -1761,12 +1840,13 @@ export default function OpenClaw() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: deployProvider || 'custom',
-          baseUrl,
+          provider: deployProvider || undefined,
+          baseUrl: deployBaseUrl.trim() || undefined,
           apiKey: deployApiKey.trim() || undefined,
-          modelId: deployModelId.trim(),
-          api,
+          modelId: deployModelId.trim() || undefined,
+          api: deployApi || undefined,
           npmRegistry: deployNpmRegistry.trim() || undefined,
+          useStudioSavedKey: deployHasStudioKey || undefined,
         }),
       });
       const data = await res.json();
@@ -1920,9 +2000,9 @@ export default function OpenClaw() {
 
   /** 一键部署：四步进度条 + 取消部署（进行中中断；已失败/结束时关闭进度条） */
   const renderDeployMainStrip = () => {
+    if (ocInstalled && !deployRunning) return null;
     if (!deployRunning && deploySteps.length === 0) return null;
     const deployFailed = !deployRunning && deploySteps.some((s) => s === 'error');
-    const canRetryDeploy = deployModelId.trim() && (deployApiKey.trim() || deployHasStudioKey);
     return (
       <div className={`oc-deploy-main-strip${deployFailed ? ' oc-deploy-main-strip--failed' : ''}`}>
         <div className="oc-deploy-main-strip-head">
@@ -1967,12 +2047,7 @@ export default function OpenClaw() {
                 type="button"
                 className="btn btn-primary btn-sm"
                 onClick={() => void handleOneClickInstall()}
-                disabled={deployRunning || !canRetryDeploy}
-                title={
-                  !canRetryDeploy
-                    ? t('oc.deploy.retryNeedModel', '请先填写模型 ID，并在 RDKClaw 设置中保存密钥或在此填写 API Key')
-                    : undefined
-                }
+                  disabled={deployRunning}
               >
                 {t('oc.deploy.retryDeploy', '重新部署')}
               </button>
@@ -2231,6 +2306,15 @@ export default function OpenClaw() {
   const setupDone = getSetupCompletionCount();
 
   const renderSetupChecklist = () => {
+    const ocVersionRaw = String(status?.version || '').trim();
+    const ocVersionDisplay = (() => {
+      if (!ocVersionRaw) return '';
+      const semverLike = ocVersionRaw.match(/v?(\d+(?:\.\d+){1,3}(?:-[0-9A-Za-z.-]+)?)/);
+      if (semverLike?.[1]) return semverLike[1];
+      return ocVersionRaw.replace(/^v/i, '').split(/\s|\(/)[0].trim();
+    })();
+    const withOpenClawVersion = (label: string) =>
+      ocVersionDisplay ? `${label} · v${ocVersionDisplay}` : label;
     const items: { key: SetupStep; icon: string; label: string; status: string; statusClass: string; action: () => void; actionLabel: string }[] = [
       {
         key: 'gateway',
@@ -2241,8 +2325,10 @@ export default function OpenClaw() {
             ? t('oc.setup.ocDeploying', '一键部署中…')
             : setupStatus.gateway === 'ok'
               ? (status?.running
-                  ? (deviceNetUp === false ? t('oc.setup.ocRunningNoNet', '运行中 · 未联网') : t('oc.setup.ocWithGw', '已安装 · 网关运行中'))
-                  : t('oc.setup.ocInstalledOnly', '已安装'))
+                  ? (deviceNetUp === false
+                    ? withOpenClawVersion(t('oc.setup.ocRunningNoNet', '运行中 · 未联网'))
+                    : withOpenClawVersion(t('oc.setup.ocWithGw', '已安装 · 网关运行中')))
+                  : withOpenClawVersion(t('oc.setup.ocInstalledOnly', '已安装')))
               : setupStatus.gateway === 'warn'
                 ? t('oc.status.checking', '检测中...')
                 : t('oc.status.notInstalled', '未安装'),
@@ -2383,126 +2469,69 @@ export default function OpenClaw() {
   const renderSetupWizard = () => (
     <div className="oc-setup-wizard">
       <div className="oc-setup-wizard-card">
-        <header className="oc-setup-wizard-hero">
-          <div className="oc-setup-wizard-icon-wrap" aria-hidden>
-            {MI('rocket_launch')}
+        <div className="oc-setup-inline-head">
+          <div className="oc-setup-inline-head-main">
+            <strong>{t('oc.deploy.quickStart', '安装与部署')}</strong>
+            <span>{t('oc.deploy.inlineHint', '安装完成后自动切换到对话模式')}</span>
           </div>
-          <h1 className="oc-setup-wizard-title">{t('oc.deploy.title', '一键部署 OpenClaw')}</h1>
-          <p className="oc-setup-wizard-lead">
-            {t('oc.chat.needInstall', '尚未检测到 OpenClaw CLI。请使用「一键部署」安装运行时与依赖，再在套件端配置模型。')}
-          </p>
-        </header>
-
-        {deployWifiPrereqNotice}
-
-        <section className="oc-setup-wizard-section" aria-labelledby="oc-deploy-model-heading">
-          <h2 id="oc-deploy-model-heading" className="oc-setup-wizard-section-title">
-            {t('oc.setup.header', '配置大模型 (可选，部署后可改)')}
-          </h2>
-          <div className="oc-setup-wizard-precheck" role="status" aria-live="polite">
-            <div className="oc-setup-wizard-precheck-head">
-              <strong>{t('oc.deploy.precheck.title', '安装前预检')}</strong>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => void runDeployPrecheck()}
-                disabled={deployRunning || deployPrecheck.overall === 'checking'}
-              >
-                {deployPrecheck.overall === 'checking' ? t('oc.deploy.precheck.running', '预检中...') : t('oc.deploy.precheck.run', '运行预检')}
-              </button>
-            </div>
-            <div className="oc-setup-wizard-precheck-items">
-              <span className={`badge ${deployPrecheck.network === 'ok' ? 'badge-ok' : deployPrecheck.network === 'fail' ? 'badge-danger' : 'badge-muted'}`}>{t('oc.deploy.precheck.network', '网络')}:{deployPrecheck.network}</span>
-              <span className={`badge ${deployPrecheck.deps === 'ok' ? 'badge-ok' : deployPrecheck.deps === 'fail' ? 'badge-danger' : 'badge-muted'}`}>{t('oc.deploy.precheck.deps', '依赖')}:{deployPrecheck.deps}</span>
-              <span className={`badge ${deployPrecheck.npm === 'ok' ? 'badge-ok' : deployPrecheck.npm === 'fail' ? 'badge-danger' : 'badge-muted'}`}>npm:{deployPrecheck.npm}</span>
-            </div>
-            {deployPrecheck.detail ? <p className="oc-setup-wizard-precheck-detail">{deployPrecheck.detail}</p> : null}
-            <p className="oc-setup-wizard-micro">
-              {t(
-                'oc.deploy.precheck.notBlocking',
-                '预检仅作参考，不会禁用「开始部署」。尚未安装 OpenClaw 时，诊断里网关未运行、openclaw 未安装属预期。',
-              )}
-            </p>
-          </div>
-          <p className="oc-setup-wizard-micro">{t('oc.deploy.defaultConfigHint', '默认沿用 RDKClaw 当前模型配置；你也可以在下方手动覆盖。')}</p>
-          <p className="oc-setup-wizard-studio-sync">{t('oc.deploy.syncedWithStudio', '模型与 Base URL 默认与 RDKClaw 设置中的当前模型对齐；若已保存 API Key，可直接部署无需重复填写。')}</p>
-
-          <div className="oc-setup-wizard-fields">
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.baseUrl', 'Base URL')}</span>
-              <input
-                className="input"
-                type="text"
-                value={deployBaseUrl}
-                onChange={(e) => { setDeployBaseUrl(e.target.value); setDeployProvider(''); }}
-                placeholder="https://ark.cn-beijing.volces.com/api/v3"
-                disabled={deployRunning}
-              />
-            </div>
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.form.modelId', '模型 ID')}</span>
-              <input
-                className="input"
-                type="text"
-                value={deployModelId}
-                onChange={(e) => setDeployModelId(e.target.value)}
-                placeholder="doubao-1.5-pro-256k / deepseek-chat"
-                disabled={deployRunning}
-              />
-            </div>
-            <div className="oc-form-row">
-              <span className="oc-form-label">{t('oc.deploy.npmRegistry', 'npm 源 (可选)')}</span>
-              <select
-                className="select"
-                value={deployNpmRegistry}
-                onChange={(e) => setDeployNpmRegistry(e.target.value)}
-                disabled={deployRunning}
-              >
-                <option value="">{t('oc.deploy.npmRegistry.auto', '自动 (默认)')}</option>
-                <option value="https://registry.npmmirror.com">npmmirror.com</option>
-                <option value="https://registry.npmjs.org">registry.npmjs.org</option>
-              </select>
-            </div>
-            <OcApiKeyRow
-              value={deployApiKey}
-              onChange={setDeployApiKey}
-              placeholder={deployProvider && PROVIDER_PRESETS[deployProvider]?.keyHint || 'sk-...'}
-              visible={deployApiKeyVisible}
-              onToggleVisible={() => setDeployApiKeyVisible((v) => !v)}
-              disabled={deployRunning}
-            />
-          </div>
-
-          <div className="oc-setup-wizard-cta">
+          <div className="oc-setup-inline-head-actions">
             <button
               type="button"
-              className="btn btn-primary oc-setup-wizard-submit"
+              className="btn btn-ghost btn-sm"
+              onClick={() => void runDeployPrecheck()}
+              disabled={deployRunning || deployPrecheck.overall === 'checking'}
+            >
+              {deployPrecheck.overall === 'checking'
+                ? t('oc.deploy.precheck.running', '预检中...')
+                : t('oc.deploy.precheck.run', '运行预检')}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm oc-setup-wizard-submit"
               onClick={() => void handleOneClickInstall()}
-              disabled={deployRunning || !deployModelId.trim() || (!deployApiKey.trim() && !deployHasStudioKey)}
+              disabled={deployRunning}
             >
               {deployRunning ? t('oc.deploy.runningShort', '部署中...') : t('oc.deploy.startBtn', '开始部署')}
             </button>
           </div>
-        </section>
+        </div>
+        <div className="oc-setup-inline-precheck">
+          <span className={`badge ${deployPrecheck.network === 'ok' ? 'badge-ok' : deployPrecheck.network === 'fail' ? 'badge-danger' : 'badge-muted'}`}>{t('oc.deploy.precheck.network', '网络')}:{deployPrecheck.network}</span>
+          <span className={`badge ${deployPrecheck.deps === 'ok' ? 'badge-ok' : deployPrecheck.deps === 'fail' ? 'badge-danger' : 'badge-muted'}`}>{t('oc.deploy.precheck.deps', '依赖')}:{deployPrecheck.deps}</span>
+          <span className={`badge ${deployPrecheck.npm === 'ok' ? 'badge-ok' : deployPrecheck.npm === 'fail' ? 'badge-danger' : 'badge-muted'}`}>npm:{deployPrecheck.npm}</span>
+          {deployPrecheck.detail ? (
+            <span className="oc-setup-inline-precheck-detail">{deployPrecheck.detail}</span>
+          ) : null}
+        </div>
 
-        {(deployRunning || deployOutput.trim() || deploySteps.length > 0) && (
+        {(deployRunning || (!ocInstalled && (deployOutput.trim() || deploySteps.length > 0))) && (
           <div className="oc-setup-deploy-block">
             {renderDeployMainStrip()}
-            <OcDeployLogPanel
-              text={deployOutput}
-              deployRunning={deployRunning}
-              waitingLabel={t('oc.deploy.waitingLogs', '等待输出…')}
-              addToast={addToast}
-              copyOk={t('oc.deploy.copyOk', '日志已复制到剪贴板')}
-              copyFail={t('oc.deploy.copyFail', '复制失败，请手动选择日志')}
-              title={t('oc.deploy.logPanelTitle', '套件端安装日志')}
-              subtitle={t('oc.deploy.logPanelSubtitle', 'SSH 实时输出 · npm 下载与安装可能持续数分钟')}
-              truncatedHint={tf('oc.deploy.logTruncated', '日志过长，仅显示最后 {{n}} 行', { n: DEPLOY_LOG_MAX_LINES })}
-              copyLabel={t('oc.deploy.copyLog', '复制全部')}
-              copyEmptyHint={t('oc.deploy.copyEmptyHint', '暂无可复制的日志')}
-              liveLabel={t('oc.deploy.badgeLive', '实时')}
-            />
             <div className="oc-setup-deploy-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setDeployInlineLogOpen((v) => !v)}
+              >
+                {deployInlineLogOpen ? t('oc.deploy.hideLog', '收起日志') : t('oc.deploy.showLog', '查看日志')}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  const text = deployOutput.trim();
+                  if (!text) {
+                    addToast?.(t('oc.deploy.copyEmptyHint', '暂无可复制的日志'), 'info');
+                    return;
+                  }
+                  navigator.clipboard
+                    .writeText(text)
+                    .then(() => addToast?.(t('oc.deploy.copyOk', '日志已复制到剪贴板'), 'success'))
+                    .catch(() => addToast?.(t('oc.deploy.copyFail', '复制失败，请手动选择日志'), 'error'));
+                }}
+              >
+                {t('oc.deploy.copyLog', '复制日志')}
+              </button>
               {deployCancelLoading ? (
                 <button type="button" className="btn btn-ghost btn-sm" disabled>{t('oc.test.testing', '...')}</button>
               ) : deployRunning ? (
@@ -2530,11 +2559,26 @@ export default function OpenClaw() {
                 </button>
               )}
             </div>
+            <p className="oc-setup-wizard-micro" style={{ margin: 0 }}>
+              {t('oc.deploy.logInChatHint', '部署日志已同步到对话区，界面仅保留关键进度与操作。')}
+            </p>
+            {deployInlineLogOpen && (
+              <div className="oc-deploy-inline-log">
+                <div className="oc-deploy-inline-log-title">{t('oc.deploy.logPanelTitle', '套件端安装日志')} · {t('oc.deploy.tailHint', '最近输出')}</div>
+                <pre>
+                  {deployOutput.trim()
+                    ? deployOutput.split('\n').slice(-80).join('\n')
+                    : t('oc.deploy.waitingLogs', '等待输出…')}
+                </pre>
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
   );
+
+  const inSetupMode = !ocInstalled || deployRunning || deployCancelLoading || (!ocInstalled && deploySteps.length > 0);
 
   const renderDashboardTabs = () => (
     <div className="oc-panel-body">
@@ -2557,47 +2601,55 @@ export default function OpenClaw() {
         {dashboardTab === 'gateway' && (
           <div className="oc-tab-content">
             <div style={{ marginBottom: 20 }}>{renderSetupChecklist()}</div>
-            <span className="oc-section-title">{t('oc.ops.gateway', 'Gateway 网关')}</span>
-            <div className="oc-actions-grid">
-              <button type="button" className={`chip ${activeOp === 'check' ? 'active' : ''}`} onClick={() => runAction('check')} disabled={activeOp === 'check' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.check', '诊断检查')}</button>
-              <button type="button" className={`chip ${activeOp === 'doctor' ? 'active' : ''}`} onClick={() => runAction('doctor')} disabled={activeOp === 'doctor' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.doctor', '诊断并修复')}</button>
-              <button type="button" className={`chip ${activeOp === 'restart-gateway' ? 'active' : ''}`} onClick={() => runAction('restart-gateway')} disabled={activeOp === 'restart-gateway' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.restartGw', '重启网关')}</button>
-              <button type="button" className={`chip ${activeOp === 'logs' ? 'active' : ''}`} onClick={() => runAction('logs', { limit: 300 })} disabled={activeOp === 'logs' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.logs', '查看日志')}</button>
-            </div>
-            
-            <div className="divider oc-divider-spaced" />
-            <span className="oc-section-title">{t('oc.ops.prepare', '升级管线')}</span>
-            <div className="oc-actions-grid">
-              <button type="button" className={`chip ${activeOp === 'prepare' ? 'active' : ''}`} onClick={() => runAction('prepare')} disabled={activeOp === 'prepare' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.prepare', '环境准备')}</button>
-              <button type="button" className={`chip ${activeOp === 'upgrade' ? 'active' : ''}`} onClick={() => runAction('upgrade')} disabled={activeOp === 'upgrade' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.upgrade', '升级')}</button>
-              <button
-                type="button"
-                className="chip oc-chip-danger"
-                onClick={() => setConfirmAction({ action: 'uninstall', label: t('oc.ops.uninstall', '卸载 OpenClaw') })}
-                disabled={!!activeOp || boardDeployBusy}
-                title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}
-              >
-                {t('oc.uninstall', '卸载')}
-              </button>
-            </div>
-            
-            <div className="divider oc-divider-spaced" />
-            <span className="oc-section-title">{t('oc.deploy.title', '重新部署 / 修复')}</span>
-            <p className="oc-section-lead">{t('oc.deploy.panelRedeployLead', '直接在这里修改配置可再次下发全局部署。')}</p>
-            <div className="oc-deploy-inline-actions">
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => void handleOneClickInstall()} disabled={deployRunning} title={deployRunning ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.deploy.startBtn', '开始部署')}</button>
-              {deployRunning && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => void handleCancelDeploy()}
-                  disabled={deployCancelLoading}
-                  title={deployCancelLoading ? t('oc.ops.cancelBusy', '正在请求取消…') : t('oc.deploy.cancelBtn', '取消部署')}
-                >
-                  {t('oc.deploy.cancelBtn', '取消部署')}
-                </button>
-              )}
-            </div>
+            {inSetupMode ? (
+              <div className="oc-setup-guide-hint" style={{ marginTop: -6, fontSize: '0.7rem' }}>
+                {t('oc.deploy.panelSimplifiedHint', '向导模式已启用：部署与取消操作集中在左侧主区域，避免重复入口。')}
+              </div>
+            ) : (
+              <>
+                <span className="oc-section-title">{t('oc.ops.gateway', 'Gateway 网关')}</span>
+                <div className="oc-actions-grid">
+                  <button type="button" className={`chip ${activeOp === 'check' ? 'active' : ''}`} onClick={() => runAction('check')} disabled={activeOp === 'check' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.check', '诊断检查')}</button>
+                  <button type="button" className={`chip ${activeOp === 'doctor' ? 'active' : ''}`} onClick={() => runAction('doctor')} disabled={activeOp === 'doctor' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.doctor', '诊断并修复')}</button>
+                  <button type="button" className={`chip ${activeOp === 'restart-gateway' ? 'active' : ''}`} onClick={() => runAction('restart-gateway')} disabled={activeOp === 'restart-gateway' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.restartGw', '重启网关')}</button>
+                  <button type="button" className={`chip ${activeOp === 'logs' ? 'active' : ''}`} onClick={() => runAction('logs', { limit: 300 })} disabled={activeOp === 'logs' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.logs', '查看日志')}</button>
+                </div>
+                
+                <div className="divider oc-divider-spaced" />
+                <span className="oc-section-title">{t('oc.ops.prepare', '升级管线')}</span>
+                <div className="oc-actions-grid">
+                  <button type="button" className={`chip ${activeOp === 'prepare' ? 'active' : ''}`} onClick={() => runAction('prepare')} disabled={activeOp === 'prepare' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.prepare', '环境准备')}</button>
+                  <button type="button" className={`chip ${activeOp === 'upgrade' ? 'active' : ''}`} onClick={() => runAction('upgrade')} disabled={activeOp === 'upgrade' || boardDeployBusy} title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.ops.upgrade', '升级')}</button>
+                  <button
+                    type="button"
+                    className="chip oc-chip-danger"
+                    onClick={() => setConfirmAction({ action: 'uninstall', label: t('oc.ops.uninstall', '卸载 OpenClaw') })}
+                    disabled={!!activeOp || boardDeployBusy}
+                    title={boardDeployBusy ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}
+                  >
+                    {t('oc.uninstall', '卸载')}
+                  </button>
+                </div>
+                
+                <div className="divider oc-divider-spaced" />
+                <span className="oc-section-title">{t('oc.deploy.title', '重新部署 / 修复')}</span>
+                <p className="oc-section-lead">{t('oc.deploy.panelRedeployLead', '直接在这里修改配置可再次下发全局部署。')}</p>
+                <div className="oc-deploy-inline-actions">
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => void handleOneClickInstall()} disabled={deployRunning} title={deployRunning ? t('oc.ops.disabledDuringDeploy', '部署进行中，请稍候再操作') : undefined}>{t('oc.deploy.startBtn', '开始部署')}</button>
+                  {deployRunning && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => void handleCancelDeploy()}
+                      disabled={deployCancelLoading}
+                      title={deployCancelLoading ? t('oc.ops.cancelBusy', '正在请求取消…') : t('oc.deploy.cancelBtn', '取消部署')}
+                    >
+                      {t('oc.deploy.cancelBtn', '取消部署')}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -2769,22 +2821,22 @@ export default function OpenClaw() {
      Render - Main Dual View
      ═══════════════════════════════════════════ */
 
-  /** 部署中或仍有步骤/日志时保持向导布局。否则 status 一旦显示「已安装」会切到主布局，向导内的安装日志整块被卸掉（切换标签回来时像「消失」）。 */
+  /** 仅在未安装或部署进行中保持向导布局；已安装时优先展示主视图，避免陈旧步骤条造成误导。 */
   const ocLayoutDeployActive =
-    deployRunning || deployCancelLoading || deploySteps.length > 0;
+    deployRunning || deployCancelLoading || (!ocInstalled && deploySteps.length > 0);
   const ocLayoutWizardOnly = !ocInstalled || ocLayoutDeployActive;
 
   return (
     <div
-      className={`oc-layout ${ocLayoutWizardOnly ? 'oc-layout--wizard' : ''} ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''} ${ocLayoutDeployActive ? 'oc-layout--deploying' : ''}`}
+      className={`oc-layout ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''} ${ocLayoutDeployActive ? 'oc-layout--deploying' : ''}`}
       aria-busy={deployRunning || deployCancelLoading}
     >
-      {ocLayoutWizardOnly ? (
-        renderSetupWizard()
-      ) : (
-        <>
-          {/* ════════════ Left: Chat ════════════ */}
-          <div className="oc-main">
+      {/* ════════════ Left: Setup/Chat ════════════ */}
+      <div className="oc-main">
+        {ocLayoutWizardOnly ? (
+          renderSetupWizard()
+        ) : (
+          <>
             {/* Status bar */}
             <div className="oc-status-bar">
               <div className="oc-status-item">
@@ -2928,18 +2980,18 @@ export default function OpenClaw() {
                 </div>
               </div>
             )}
-          </div>
+          </>
+        )}
+      </div>
 
-          {/* ════════════ Right: Dashboard Tabs ════════════ */}
-          {panelOpen && (
-            <div className="oc-panel">
-              <div className="oc-panel-header">
-                <strong>{t('oc.panel.title', '控制面板')}</strong>
-              </div>
-              {renderDashboardTabs()}
-            </div>
-          )}
-        </>
+      {/* ════════════ Right: Dashboard Tabs ════════════ */}
+      {panelOpen && (
+        <div className="oc-panel">
+          <div className="oc-panel-header">
+            <strong>{t('oc.panel.title', '控制面板')}</strong>
+          </div>
+          {renderDashboardTabs()}
+        </div>
       )}
 
       {/* ── Confirm Dialog ── */}

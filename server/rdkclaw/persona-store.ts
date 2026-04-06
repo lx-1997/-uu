@@ -12,8 +12,8 @@ const DEFAULT_PERSONA: PersonaProfile = {
   name: "小地瓜",
   extraInstructions: "",
   riskLevel: "balanced",
-  /** 默认均衡：RDKClaw 编排 + 套件端 OpenClaw 在合适任务中参与；需纯 SSH 可在设置改「Studio 优先」 */
-  delegationBias: "balanced",
+  /** 默认 Studio 优先：先由 RDKClaw 本地/SSH 收敛，确有必要再协同套件端 OpenClaw */
+  delegationBias: "local-first",
   autonomyLevel: "assisted",
 };
 

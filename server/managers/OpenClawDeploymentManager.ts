@@ -665,6 +665,13 @@ wsOnClose = () => { if (!done) { clearTimeout(timer); finish(false, 'websocket c
 const STUDIO_DEPLOY_LOG_DIV = 'echo "────────────────────────────────────────────────────────"';
 
 const GATEWAY_PORT_CHECK = `python3 -c 'import socket; s=socket.socket(socket.AF_INET,socket.SOCK_STREAM); s.settimeout(1.0); ok=(s.connect_ex(("127.0.0.1",18789))==0); s.close(); print("OPEN" if ok else "CLOSED")'`;
+/** 网络连通性预检超时（毫秒）。默认 45s，避免弱网下被 25s 误伤。 */
+const OPENCLAW_NETWORK_CHECK_TIMEOUT_MS = (() => {
+  const raw = process.env.OPENCLAW_NETWORK_CHECK_TIMEOUT_MS;
+  const n = raw ? Number(raw) : NaN;
+  if (Number.isFinite(n) && n >= 15000) return Math.floor(n);
+  return 45_000;
+})();
 const GATEWAY_DIAG_LOGS = [
   'echo "--- openclaw logs ---"',
   '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" logs --limit 200 2>&1 || true; else echo "openclaw CLI 未找到，跳过 openclaw logs"; fi)',
@@ -1354,11 +1361,20 @@ export class OpenClawDeploymentManager {
       'echo "=== 网络连通性检查 ==="',
       '(ip route 2>/dev/null | head -n 5 || true)',
       'net_ok=0',
-      'if ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then net_ok=1; fi',
-      'if [ "$net_ok" != "1" ]; then if curl -sI --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1 || wget -q --spider --timeout=6 https://registry.npmjs.org >/dev/null 2>&1; then net_ok=1; fi; fi',
+      // 记录镜像连通性：可用于在失败日志中快速定位“国外源不可达但国内镜像可达”的情况。
+      'npmjs_ok=0',
+      'npmmirror_ok=0',
+      'if (command -v ping >/dev/null 2>&1) && (ping -c 1 -W 2 223.5.5.5 >/dev/null 2>&1 || ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1); then net_ok=1; fi',
+      'if (command -v curl >/dev/null 2>&1) && curl -sI --connect-timeout 3 --max-time 6 https://registry.npmjs.org >/dev/null 2>&1; then npmjs_ok=1; fi',
+      'if (command -v curl >/dev/null 2>&1) && curl -sI --connect-timeout 3 --max-time 6 https://registry.npmmirror.com >/dev/null 2>&1; then npmmirror_ok=1; fi',
+      // wget 默认会重试多次（常导致整段预检 >25s）；显式限制为 1 次，避免误触发 SSH 层超时。
+      'if [ "$npmjs_ok" != "1" ] && (command -v wget >/dev/null 2>&1) && wget -q --spider --tries=1 --timeout=6 https://registry.npmjs.org >/dev/null 2>&1; then npmjs_ok=1; fi',
+      'if [ "$npmmirror_ok" != "1" ] && (command -v wget >/dev/null 2>&1) && wget -q --spider --tries=1 --timeout=6 https://registry.npmmirror.com >/dev/null 2>&1; then npmmirror_ok=1; fi',
+      'if [ "$npmjs_ok" = "1" ] || [ "$npmmirror_ok" = "1" ]; then net_ok=1; fi',
+      'echo "npmjs=$npmjs_ok npmmirror=$npmmirror_ok"',
       'if [ "$net_ok" = "1" ]; then echo "NETWORK_READY"; else echo "NETWORK_OFFLINE"; exit 1; fi',
     ].join(' ; ');
-    return this.execCommand(device, cmd, onOutput, onComplete, { timeout: 25000 });
+    return this.execCommand(device, cmd, onOutput, onComplete, { timeout: OPENCLAW_NETWORK_CHECK_TIMEOUT_MS });
   }
 
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
@@ -1922,8 +1938,27 @@ print(json.dumps(result,ensure_ascii=False))`;
   }
 
   runDoctor(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
-    const cmd = `export PATH="$HOME/.npm-global/bin:$PATH" && ${RESOLVE_OPENCLAW_CMD} && ${ENSURE_GATEWAY_LOCAL_MODE} && (if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 命令不可用，可能未安装"; else echo "[OpenClaw] doctor 命令不可用，可能未安装"; fi)`;
-    this.execCommand(device, cmd, onOutput, onComplete, { timeout: 180000 });
+    const cmd = [
+      BOARD_ENV_EXPORT,
+      OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
+      OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
+      OPENCLAW_ENSURE_NPM_SNIPPET,
+      RESOLVE_OPENCLAW_CMD,
+      ENSURE_GATEWAY_LOCAL_MODE,
+      'echo "[OpenClaw] doctor: 开始执行诊断修复..."',
+      '_oc_doctor_need_repair=0',
+      'if [ -z "$OPENCLAW_CMD" ]; then _oc_doctor_need_repair=1; echo "[OpenClaw] doctor: 未找到 openclaw CLI，准备先修复安装。" >&2; fi',
+      'if [ "$_oc_doctor_need_repair" = "0" ]; then _oc_doctor_out="$("$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || true)"; echo "$_oc_doctor_out"; ' +
+        'if echo "$_oc_doctor_out" | grep -Eiq "Cannot find module|MODULE_NOT_FOUND|Failed to start CLI|doctor 命令不可用|doctor 不可用|openclaw CLI 未找到"; then _oc_doctor_need_repair=1; fi; fi',
+      'if [ "$_oc_doctor_need_repair" = "1" ]; then echo "[OpenClaw] doctor: 检测到 CLI 可能损坏，开始自动重装并二次诊断..." >&2; fi',
+      '(if [ "$_oc_doctor_need_repair" != "1" ]; then true; else ' + OPENCLAW_INSTALL_OPENCLAW_STEP + '; fi)',
+      '(if [ "$_oc_doctor_need_repair" != "1" ]; then true; else ' + OPENCLAW_ENSURE_SHELL_PATH_SNIPPET + '; fi)',
+      '(if [ "$_oc_doctor_need_repair" != "1" ]; then true; else ' + RESOLVE_OPENCLAW_CMD + '; fi)',
+      '(if [ "$_oc_doctor_need_repair" != "1" ]; then true; else ' + OPENCLAW_VERIFY_CLI_RUNS_SNIPPET + '; fi)',
+      '(if [ "$_oc_doctor_need_repair" != "1" ]; then true; else "$OPENCLAW_CMD" doctor --fix --yes 2>&1 || "$OPENCLAW_CMD" doctor --fix 2>&1 || "$OPENCLAW_CMD" doctor 2>&1 || echo "[OpenClaw] doctor 二次执行失败"; fi)',
+      'echo "[OpenClaw] doctor: 诊断流程结束"',
+    ].join(' && ');
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
   }
 
   runModelTest(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
@@ -2110,7 +2145,13 @@ print(json.dumps(result,ensure_ascii=False))`;
       `if [ "$OK" != "1" ]; then echo "[WiFi] 复用失败，重建连接配置..."; nmcmd connection delete "$WIFI_SSID" >/dev/null || true; if [ -n "$WIFI_KEY" ]; then nmcmd connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" 802-11-wireless-security.key-mgmt wpa-psk 802-11-wireless-security.psk "$WIFI_KEY" ipv4.method auto ipv6.method auto >/dev/null || true; NM_PWFILE=$(mktemp /tmp/nm-wifi-XXXXXX.pass); chmod 600 "$NM_PWFILE"; printf '802-11-wireless-security.psk:%s\\n' "$WIFI_KEY" > "$NM_PWFILE"; nmcmd connection up "$WIFI_SSID" ifname "$WIFI_IF" passwd-file "$NM_PWFILE" && OK=1; rm -f "$NM_PWFILE"; else nmcmd connection add type wifi con-name "$WIFI_SSID" ifname "$WIFI_IF" ssid "$WIFI_SSID" ipv4.method auto ipv6.method auto >/dev/null || true; nmcmd connection modify "$WIFI_SSID" 802-11-wireless-security.key-mgmt none >/dev/null || true; nmcmd connection up "$WIFI_SSID" ifname "$WIFI_IF" && OK=1; fi; fi`,
       `NEW_IP=""`,
       `for i in 1 2 3 4 5 6; do NEW_IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1); [ -n "$NEW_IP" ] && break; sleep 1; done`,
-      `if [ "$OK" = "1" ] && [ -n "$NEW_IP" ]; then echo "[WiFi] OK IP=$NEW_IP"; else echo "[WiFi] FAIL"; fi`,
+      // 最终验收必须包含：目标 SSID 已生效 + WiFi 链路已连接 + IPv4 就绪。仅有历史 IP（如 linkdown 残留）不算成功。
+      `FINAL_CONN=$(nmcmd -t -f GENERAL.CONNECTION device show "$WIFI_IF" | sed -n 's/^GENERAL.CONNECTION://p' | head -n1)`,
+      `FINAL_NM_STATE=$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: -v ifn="$WIFI_IF" '$1==ifn && $2=="wifi"{print $3; exit}')`,
+      `FINAL_LINK_UP=0`,
+      `if [ -r "/sys/class/net/$WIFI_IF/carrier" ] && [ "$(cat /sys/class/net/$WIFI_IF/carrier 2>/dev/null)" = "1" ]; then FINAL_LINK_UP=1; fi`,
+      `if [ "$FINAL_LINK_UP" != "1" ] && ip -o link show "$WIFI_IF" 2>/dev/null | grep -q 'LOWER_UP'; then FINAL_LINK_UP=1; fi`,
+      `if [ "$OK" = "1" ] && [ "$FINAL_CONN" = "$WIFI_SSID" ] && [ "$FINAL_LINK_UP" = "1" ] && [ -n "$NEW_IP" ]; then echo "[WiFi] OK IP=$NEW_IP"; else echo "[WiFi] FAIL"; echo "[WiFi] state conn=$FINAL_CONN nm=$FINAL_NM_STATE link=$FINAL_LINK_UP ip=$NEW_IP"; fi`,
     ].join(' ; ');
 
     let output = '';

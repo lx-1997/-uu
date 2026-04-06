@@ -2496,8 +2496,8 @@ export default function AIDock() {
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
   const isDashboardTab = activeTab === 'dashboard';
-  const shouldHideDock =
-    (isSubpageTab && hideDockInSubpage) || (isDashboardTab && hideDockInDashboard);
+  // 产品约束：工作台（dashboard）不允许隐藏 Dock，仅子页面允许隐藏
+  const shouldHideDock = isSubpageTab && hideDockInSubpage;
   const useAgentColumnFlow = agentTurnLayout;
   const useSubpageCompact = chatExpanded && isSubpageTab && !workspaceMode;
 
@@ -2586,52 +2586,34 @@ export default function AIDock() {
     setShowAllMessages(false);
   };
 
-  const toggleDockVisibility = () => {
-    if (isDashboardTab) {
-      try {
-        localStorage.setItem('rdk:dock:hide-dashboard:user-set', '1');
-      } catch {
-        // ignore localStorage errors
-      }
-      setHideDockInDashboard((prev) => {
-        const next = !prev;
-        if (next) {
-          setChatExpanded(false);
-          setWorkspaceMode(false);
-          setShowSuggestions(false);
-        }
-        return next;
-      });
+  const hideDockFromInputBar = () => {
+    if (rdkEmbedPanel) {
+      window.close();
       return;
     }
-    if (!isSubpageTab) return;
+    if (isDashboardTab) {
+      addToast(t('dock.hide.dashboardBlocked', '工作台页面不支持隐藏对话区'), 'info');
+      return;
+    }
     try {
       localStorage.setItem('rdk:dock:hide-subpage:user-set', '1');
+      setHideDockInSubpage(true);
     } catch {
-      // ignore localStorage errors
+      setHideDockInSubpage(true);
     }
-    setHideDockInSubpage((prev) => {
-      const next = !prev;
-      if (next) {
-        setChatExpanded(false);
-        setWorkspaceMode(false);
-        setShowSuggestions(false);
-      }
-      return next;
-    });
+    setChatExpanded(false);
+    setWorkspaceMode(false);
+    setShowAllMessages(false);
   };
 
   useEffect(() => {
     const hideSub = isSubpageTab && hideDockInSubpage;
-    const hideDash = isDashboardTab && hideDockInDashboard;
-    if (!hideSub && !hideDash) return;
+    if (!hideSub) return;
     if (chatExpanded) setChatExpanded(false);
     if (workspaceMode) setWorkspaceMode(false);
   }, [
     isSubpageTab,
     hideDockInSubpage,
-    isDashboardTab,
-    hideDockInDashboard,
     chatExpanded,
     workspaceMode,
     setChatExpanded,
@@ -3031,22 +3013,6 @@ export default function AIDock() {
                       <span className="dock-header-toolbtn-label">{t('dock.header.popoutShort', '弹窗')}</span>
                     </button>
                   )}
-                  {(isSubpageTab || isDashboardTab) && (
-                    <button
-                      type="button"
-                      className="dock-header-toolbtn"
-                      onClick={toggleDockVisibility}
-                      title={t('dock.tt.hideDock', '隐藏对话栏')}
-                      aria-label={t('dock.header.hideDock', '隐藏对话区')}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32" />
-                        <path d="M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.89 11 8a11.8 11.8 0 01-4.17 5.94" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </svg>
-                      <span className="dock-header-toolbtn-label">{t('dock.header.hideShort', '隐藏')}</span>
-                    </button>
-                  )}
                 </div>
 
                 <button
@@ -3333,18 +3299,15 @@ export default function AIDock() {
               {Icon.expand}
             </button>
           )}
-          {(isSubpageTab || isDashboardTab) && (
+          {!chatExpanded && !isDashboardTab && (
             <button
               type="button"
               className="dock-action-btn"
-              onClick={toggleDockVisibility}
-              title={t('dock.tt.hideDock', '隐藏对话栏')}
+              onClick={hideDockFromInputBar}
+              title={t('dock.tt.hideDock', '隐藏对话区')}
+              aria-label={t('dock.tt.hideDock', '隐藏对话区')}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17.94 17.94A10.94 10.94 0 0112 20C7 20 2.73 16.11 1 12c.67-1.6 1.76-3.07 3.06-4.32"/>
-                <path d="M9.9 4.24A10.94 10.94 0 0112 4c5 0 9.27 3.89 11 8a11.8 11.8 0 01-4.17 5.94"/>
-                <line x1="1" y1="1" x2="23" y2="23"/>
-              </svg>
+              {Icon.collapse}
             </button>
           )}
           <button type="submit" className={`dock-send-btn ${cmd.trim() || pendingAttachments.length > 0 ? 'ready' : ''}`} disabled={!cmd.trim() && pendingAttachments.length === 0 && !aiTyping} title={t('dock.tt.send', '发送')}>

@@ -836,8 +836,18 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         }
       });
   };
+  const resolveReportableDeviceId = (explicitDeviceId?: string) => {
+    const requested = String(explicitDeviceId || '').trim();
+    const current = String(currentDevice?.id || '').trim();
+    const known = new Set(devices.map((item) => item.id));
+    if (requested && known.has(requested)) return requested;
+    if (current && known.has(current)) return current;
+    const online = devices.find((item) => item.status === 'online')?.id;
+    if (online) return online;
+    return devices[0]?.id || '';
+  };
   const reportActiveDevice = (reason: string, explicitDeviceId?: string) => {
-    const deviceId = String(explicitDeviceId || currentDevice?.id || '').trim();
+    const deviceId = resolveReportableDeviceId(explicitDeviceId);
     if (!deviceId) return;
     setActiveRdkclawDevice(deviceId)
       .then(() => {
@@ -1805,7 +1815,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
 
         const { done, abort } = streamAgentChat(
           requestMessage,
-          currentDevice?.id,
+          resolveReportableDeviceId(),
           sessionIdRef.current,
           userIdRef.current,
           {

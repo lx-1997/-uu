@@ -74,7 +74,11 @@ export function buildDelegationRuntimePrompt(decision: DelegateDecision, boardSk
           "若走 delegate：guidance 仍是**共享上下文包**（用户目标、已执行命令与结果、失败模式、验收标准、限制条件），方便双方对齐与换道，而非单方面派活。",
           skillHint,
         ].join("\n")
-    : "**套件端 OpenClaw 参与**：本回合以 SSH/本地工具为主；若任务明显需要套件端多步或技能，仍应主动 assess，勿机械回避。";
+    : [
+        "**套件端 OpenClaw 参与**：本回合为本地优先（RDKClaw 先自证可完成）。",
+        "在未出现明确触发条件前（本地受阻/需板端技能链/用户明确要求）**不得**首轮调用 `board_openclaw_assess` 或 `board_openclaw_delegate`。",
+        "若后续确需委派，必须先汇总已知上下文（目标、已执行命令与结果、失败模式、约束、验收标准）再进入 assess→delegate，并在 strict 门禁下通过 `board_openclaw_chat` 完成对齐放行。",
+      ].join("\n");
 
   return [
     "## 本轮编排期望（系统自动计算 · 须对齐）",
@@ -158,12 +162,11 @@ export function selectDelegateDecision(
   }
 
   const hasBoardSkills = boardSnapshot.skills.length > 0;
+  const consultative = isBoardConsultativeTask(req.message);
+  const longRunning = isLongRunningBoardTask(req.message);
+  const roboticsExecution = isRoboticsExecutionTask(req.message);
 
   if (delegationBias === "local-first") {
-    const consultative = isBoardConsultativeTask(req.message);
-    const longRunning = isLongRunningBoardTask(req.message);
-    const roboticsExecution = isRoboticsExecutionTask(req.message);
-
     if (consultative) {
       return {
         path: "collaborative",
@@ -222,14 +225,29 @@ export function selectDelegateDecision(
     };
   }
 
+  if (consultative || longRunning || (hasBoardSkills && roboticsExecution)) {
+    return {
+      path: "collaborative",
+      canLocalComplete: true,
+      needsBoardCollaboration: true,
+      source: "task_analysis",
+      reason: consultative
+        ? "识别为方案评估类请求：先由 RDKClaw 组织文档/上下文，再按需与 OpenClaw 协同"
+        : longRunning
+          ? "识别为长程任务：建议让套件端会话参与持续执行与状态回传"
+          : "识别为机器人执行任务且套件端有技能：先本地快收敛，必要时并线 OpenClaw",
+      confidence: consultative || longRunning ? 0.86 : 0.8,
+    };
+  }
+
   return {
-    path: "collaborative",
+    path: "local_only",
     canLocalComplete: true,
-    needsBoardCollaboration: true,
+    needsBoardCollaboration: false,
     source: "default",
     reason: hasBoardSkills
-      ? `设备已连接，套件端有 ${boardSnapshot.skills.length} 个技能可用，Agent 根据能力分布自主决策`
-      : "设备已连接但套件端无已安装技能，Agent 自主决策执行路径",
-    confidence: hasBoardSkills ? 0.85 : 0.75,
+      ? `默认先由 RDKClaw 本地/SSH 闭环，若出现多步试错或技能链需求再协同套件端（当前可用技能数：${boardSnapshot.skills.length}）`
+      : "默认先由 RDKClaw 本地/SSH 闭环，暂无明确套件端协同触发条件",
+    confidence: hasBoardSkills ? 0.82 : 0.88,
   };
 }

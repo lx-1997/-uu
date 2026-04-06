@@ -715,7 +715,10 @@ export default function AddDeviceModal() {
         {step === 'wifi' && wifiDeviceId && (
           <div className="modal-body add-device-wifi-step">
             <p className="add-device-typec-lead">
-              {t('addDevice.wifi.lead', '请连接设备 WiFi')}
+              {t('addDevice.wifi.lead', '为设备配置 WiFi（可选）')}
+            </p>
+            <p className="add-device-wifi-note">
+              {t('addDevice.wifi.note', '建议先连接网络，再点击完成。若暂不配置，可直接跳过。')}
             </p>
             <div
               className="add-device-wifi-status-banner"
@@ -815,15 +818,13 @@ export default function AddDeviceModal() {
 
             <div className="wifi-hint" style={{ marginBottom: 12 }}>{t('wifiModal.hint', '连接时可能短暂断开当前 SSH 连接，请耐心等待设备重连。')}</div>
 
-            <div className="modal-footer" style={{ padding: 0, borderTop: 'none', justifyContent: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-primary" onClick={handleWifiConnect} disabled={!wifiSsid.trim() || wifiConnecting}>
-                {wifiConnecting ? t('wifiModal.connecting', '连接中...') : t('wifiModal.connect', '连接网络')}
-              </button>
-            </div>
-
-            <div className="modal-footer">
-              <button type="button" className="btn btn-ghost" onClick={finishAddDeviceFlow}>{t('addDevice.wifi.skipLater', '跳过，稍后配置')}</button>
-              <button type="button" className="btn btn-primary" onClick={finishAddDeviceFlow}>{t('addDevice.wifi.done', '完成')}</button>
+            <div className="modal-footer add-device-wifi-actions">
+              <div className="add-device-wifi-actions-right">
+                <button type="button" className="btn btn-ghost" onClick={finishAddDeviceFlow} disabled={wifiConnecting}>{t('addDevice.wifi.skipLater', '跳过，稍后配置')}</button>
+                <button type="button" className="btn btn-primary" onClick={handleWifiConnect} disabled={!wifiSsid.trim() || wifiConnecting}>
+                  {wifiConnecting ? t('wifiModal.connecting', '连接中...') : t('wifiModal.connect', '连接网络')}
+                </button>
+              </div>
             </div>
           </div>
         )}

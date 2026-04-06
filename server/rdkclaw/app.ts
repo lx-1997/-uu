@@ -236,7 +236,8 @@ function resolveRuntimePersona(
     ...base,
     systemPromptOverride: override.systemPromptOverride?.trim() || base.systemPromptOverride,
     extraInstructions: [base.extraInstructions, override.extraInstructions].filter(Boolean).join("\n"),
-    delegationBias: override.delegationBias || base.delegationBias,
+    // 统一以用户在设置中的委派倾向为准，避免 Bot 层配置悄悄覆盖导致执行路径突变。
+    delegationBias: base.delegationBias,
     autonomyLevel: override.autonomyLevel || base.autonomyLevel,
     riskLevel: override.riskLevel || base.riskLevel,
   };

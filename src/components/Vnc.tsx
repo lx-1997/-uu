@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import type { Device } from '../app-types';
-import { executeDeviceCommand, fetchVncStatus } from '../api';
+import { fetchVncStatus, startVncService } from '../api';
 import { useAppState } from '../hooks/useAppState';
 import { fillTemplate } from '../i18n/en-extras';
 import { useI18n } from '../i18n/use-i18n';
@@ -37,6 +37,7 @@ export default function Vnc() {
   /** 桌面：独立原生窗口；浏览器：FloatingEmbedPanel */
   const [embedFloating, setEmbedFloating] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
+  const [vncPort, setVncPort] = useState<number>(5900);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const iframeLoadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -63,7 +64,12 @@ export default function Vnc() {
           rdk.setActiveUrl?.(url);
         }
       } else {
-        rdk.hideUrl?.(url);
+        // 非 VNC 标签下：若是浮窗态，保持浮窗可见，避免“打开后白屏/消失”
+        if (embedFloating) {
+          rdk.focusEmbedFloat?.(url);
+        } else {
+          rdk.hideUrl?.(url);
+        }
       }
     };
     run();
@@ -211,7 +217,7 @@ export default function Vnc() {
   }, []);
 
   // ── 构建 VNC URL ──
-  const getVncUrl = useCallback(() => {
+  const getVncUrl = useCallback((portOverride?: number) => {
     if (!currentDevice) return '';
     const isDesktopMode = !!(window as any).rdkDesktop?.isDesktop;
     /**
@@ -224,13 +230,16 @@ export default function Vnc() {
       ? 'http://localhost:8787'
       : (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://localhost:8787');
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
+    const selectedPort = Number.isFinite(portOverride as number) && (portOverride as number) > 0
+      ? Number(portOverride)
+      : vncPort;
     const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;
     const wsPath = shouldUseSshTunnelForDevice(currentDevice)
-      ? `websockify?deviceId=${encodeURIComponent(currentDevice.id)}&remotePort=5900`
-      : `websockify?target=${hostOrIp}:5900`;
+      ? `websockify?deviceId=${encodeURIComponent(currentDevice.id)}&remotePort=${encodeURIComponent(String(selectedPort))}`
+      : `websockify?target=${hostOrIp}:${encodeURIComponent(String(selectedPort))}`;
     const resizeParam = resizeMode === 'remote' ? 'remote' : 'scale';
     return `${base}/vnc/vnc.html?autoconnect=true&resize=${resizeParam}&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
-  }, [currentDevice, quality, urlVersion, resizeMode]);
+  }, [currentDevice, quality, urlVersion, resizeMode, vncPort]);
 
   const handleResizeModeChange = (mode: 'remote' | 'scale') => {
     if (mode === resizeMode) return;
@@ -315,28 +324,34 @@ export default function Vnc() {
     }
     setPhase('connecting');
     addToast(t('vnc.toast.starting', '正在检查并启动 VNC 服务...'), 'info');
-
-    executeDeviceCommand(
-      currentDevice.id,
-      `bash -lc "mkdir -p ~/.vnc && (echo -e '88888888\\n88888888' | vncpasswd -f > ~/.vnc/passwd 2>/dev/null || true); sudo mkdir -p /etc/.vnc && sudo cp -f ~/.vnc/passwd /etc/.vnc/passwd 2>/dev/null || true; (systemctl is-active x11vnc >/dev/null 2>&1 && sudo systemctl restart x11vnc || sudo systemctl start x11vnc || sudo systemctl restart vncserver || sudo systemctl start vncserver || true); sleep 4; echo VNC_READY"`
-    ).then(res => {
+    startVncService(currentDevice.id).then(res => {
       const output = res.output || '';
       setLogLines(prev => [...prev, ...output.split(/\r?\n/).filter(Boolean)]);
+      const portMatch = output.match(/VNC_PORT=(\d{2,5})/);
+      let resolvedPort = vncPort;
+      if (portMatch) {
+        const parsed = Number(portMatch[1]);
+        if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 65535) {
+          resolvedPort = parsed;
+          setVncPort(parsed);
+        }
+      }
 
-      if (output.includes('VNC_READY')) {
-        const vncUrl = getVncUrl();
+      if (res.ok && /VNC_STARTED|VNC_READY/.test(output)) {
+        const vncUrl = getVncUrl(resolvedPort);
+        // 从其它页面触发连接时，桌面端默认浮窗，避免嵌入视图被隐藏后出现白屏体验
+        const openAsFloat = isDesktop() && activeTab !== 'vnc';
         setPhase('connected');
         setShowIframe(true);
         addToast(t('vnc.toast.started', 'VNC 服务已启动，正在加载远程桌面…'), 'info');
         startVncSession();
-        /** 默认贴入当前远程桌面页；对话「打开 VNC」由 useAppState.tryFloatWhenReady / runRemoteConnectIntent 再浮出 */
-        setEmbedFloating(false);
+        setEmbedFloating(openAsFloat);
         if (isDesktop()) {
           activeUrlRef.current = vncUrl;
           setLoadError(null);
           const rdk = (window as any).rdkDesktop;
           rdk.openUrl(vncUrl);
-          rdk.setEmbedFloatMode?.(vncUrl, false, t('vnc.title', '远程桌面'));
+          rdk.setEmbedFloatMode?.(vncUrl, openAsFloat, t('vnc.title', '远程桌面'));
         }
       } else {
         setPhase('error');

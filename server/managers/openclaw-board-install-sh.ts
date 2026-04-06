@@ -1,11 +1,12 @@
 /**
  * 套件端 `npm install -g openclaw@...` 的版本。
- * 默认 `latest`（每次安装/回退重装取 registry 当前最新）；需要固定版本做验收或回滚时设环境变量 `OPENCLAW_NPM_VERSION`（如 `2026.4.1`）。
+ * 默认固定为 `2026.3.28`（降低 upstream 最新版波动对安装稳定性的影响）；
+ * 需要临时切换版本做验收或回滚时设环境变量 `OPENCLAW_NPM_VERSION`（如 `2026.4.1`）。
  * 注意：npm 包使用日历版本（2026.x.y），勿误用旧约定如 `3.24`（registry 上不存在）。
  * 套件端安装即标准：`CI= npm install -g openclaw@<本常量> ...`（无额外魔法）。
  */
 export const OPENCLAW_BOARD_NPM_SPEC =
-  process.env.OPENCLAW_NPM_VERSION?.trim() || 'latest';
+  process.env.OPENCLAW_NPM_VERSION?.trim() || '2026.3.28';
 
 function joinShellLines(lines: string[]): string {
   return lines.join('\n');

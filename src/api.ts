@@ -1548,6 +1548,14 @@ export function fetchVncStatus(deviceId: string, password?: string) {
   });
 }
 
+export function startVncService(deviceId: string, password?: string) {
+  return request<DeviceServiceStatusResult>(`/api/devices/${deviceId}/services/vnc/start`, {
+    method: 'POST',
+    headers: password ? { 'x-device-password': password } : undefined,
+    body: JSON.stringify({}),
+  });
+}
+
 export function listDeviceFiles(deviceId: string, path: string, password?: string) {
   const qp = new URLSearchParams({ path }).toString();
   return request<DeviceFileOpResult>(`/api/devices/${deviceId}/files/list?${qp}`, {

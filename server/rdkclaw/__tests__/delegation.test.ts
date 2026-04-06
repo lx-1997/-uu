@@ -71,6 +71,23 @@ describe("selectDelegateDecision", () => {
     expect(d.needsBoardCollaboration).toBe(true);
     expect(d.source).toBe("task_analysis");
   });
+
+  it("balanced + generic request → local_only", () => {
+    const req = { deviceId: "dev-1", message: "帮我看下这个问题" } as RDKClawChatRequest;
+    const d = selectDelegateDecision(req, [], boardWithSkills, "balanced");
+    expect(d.path).toBe("local_only");
+    expect(d.needsBoardCollaboration).toBe(false);
+  });
+
+  it("balanced + robotics execution + board skills → collaborative", () => {
+    const req = {
+      deviceId: "dev-1",
+      message: "请在板端跑 ros2 launch 做相机目标检测",
+    } as RDKClawChatRequest;
+    const d = selectDelegateDecision(req, [], boardWithSkills, "balanced");
+    expect(d.path).toBe("collaborative");
+    expect(d.needsBoardCollaboration).toBe(true);
+  });
 });
 
 describe("buildDelegationRuntimePrompt", () => {
