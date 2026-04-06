@@ -291,6 +291,18 @@
   opacity: 0.92;
 }
 
+.immersive-welcome-desc--s100 {
+  margin-top: 8px;
+  max-width: 440px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
 /* ── Error ── */
 .immersive-error {
   display: flex;

@@ -1,8 +1,8 @@
 ---
 name: RDK Board Knowledge
 description: RDK 硬件与板端协作框架；含 TROS（TogetheROS.Bot，ROS2 兼容，勿与 Tuya IoT 混淆）与环境探测要点。适用于设备操作、AI 推理、摄像头、GPIO、模型部署、ROS2/节点/话题、板端能力。
-version: 1.1.0
-trigger: 设备,能力,推理,摄像头,GPIO,模型,BPU,检测,分割,跟踪,语音,TTS,SLAM,导航,板端,硬件,X3,X5,S100,ROS,ROS2,TROS,ros2,节点,话题,导航节点
+version: 1.1.1
+trigger: 设备,能力,推理,摄像头,GPIO,模型,BPU,检测,分割,跟踪,语音,TTS,SLAM,导航,板端,硬件,X3,X5,S100,ROS,ROS2,TROS,ros2,节点,话题,导航节点,nomachine,NoMachine,远程桌面,外接显示器
 risk: low
 permissions: none
 delegate_preference: collaborative
@@ -173,6 +173,8 @@ source /opt/tros/humble/setup.bash
 |------|----------|----------------|
 | YOLOv5s 等 | ~30 fps 量级 | ~120 fps 量级 |
 | DOSOD | ~12 fps | ~45 fps |
+
+- **远程桌面 / 外接显示（已知案例，NoMachine，仅 RDK S100）**：该现象**仅见于 S100**（勿与 X3/X5/Ultra 混用排障）。在部分 **系统版本 4.0.2-beta** 上，曾出现 **NoMachine 远程桌面无画面，但可控制鼠标键盘**；外接显示器涉及红米 27 寸（1080P）、lecoo、三星、Dell 4K 等多型号。已通过 **同时升级** 以下两个 deb 解决（需成对升级，勿只升其一）：`linux-image-rdk-s100`、`hobot-firmware`。若 **仅当** 设备确认为 S100 且现象一致，再建议按官方渠道升级到含上述修复的版本。
 
 - **文档**：S100 硬件与算法应用见 developer.d-robotics.cc → rdk_s；Model Zoo 可参考 `rdk_model_zoo_s`
 

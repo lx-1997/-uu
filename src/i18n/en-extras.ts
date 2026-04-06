@@ -1253,6 +1253,12 @@ export const EN_EXTRAS: Record<string, string> = {
   'vnc.welcome.desc': 'Connect to the board desktop over WebSocket — no install, low latency',
   'vnc.welcome.needDesktop':
     'x11vnc mirrors an existing X11 desktop — if no graphical session is running on the board, connect may fail or show code 1005.',
+  'vnc.welcome.s100Firmware':
+    '[RDK S100 only] If NoMachine or external monitors show no picture but input works, some OS builds require upgrading both linux-image-rdk-s100 and hobot-firmware together (see release notes).',
+  'vnc.err.troubleshootS100':
+    '[S100 only] If the screen stays blank, check kernel and hobot-firmware: some versions need both linux-image-rdk-s100 and hobot-firmware deb packages upgraded together.',
+  'vnc.hint.s100Firmware1005':
+    '[S100 only] If the same behavior occurred with NoMachine (no picture but input works), some 4.0.2-beta images require upgrading both linux-image-rdk-s100 and hobot-firmware together.',
   'vnc.phase.checking': 'Checking VNC service…',
   'vnc.phase.connecting': 'Starting and connecting…',
   'vnc.retry': 'Retry',

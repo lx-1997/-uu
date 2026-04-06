@@ -542,6 +542,12 @@ export const EN: Record<string, string> = {
     'Troubleshooting: (1) A graphical session must exist (Xorg / DISPLAY); without a desktop, x11vnc has nothing to show and may disconnect with 1005. (2) Confirm a desktop environment is installed. (3) Run sudo systemctl status x11vnc. (4) Check if port 5900 is in use.',
   'vnc.welcome.needDesktop':
     'x11vnc mirrors an existing X11 desktop — if no graphical session is running on the board, connect may fail or show code 1005.',
+  'vnc.welcome.s100Firmware':
+    '[RDK S100 only] If NoMachine or external monitors show no picture but input works, some OS builds require upgrading both linux-image-rdk-s100 and hobot-firmware together (see release notes).',
+  'vnc.err.troubleshootS100':
+    '[S100 only] If the screen stays blank, check kernel and hobot-firmware: some versions need both linux-image-rdk-s100 and hobot-firmware deb packages upgraded together.',
+  'vnc.hint.s100Firmware1005':
+    '[S100 only] If the same behavior occurred with NoMachine (no picture but input works), some 4.0.2-beta images require upgrading both linux-image-rdk-s100 and hobot-firmware together.',
 
   // Files empty state
   'files.empty.folder': 'This folder is empty',

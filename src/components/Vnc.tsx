@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import type { Device } from '../app-types';
 import { executeDeviceCommand, fetchVncStatus } from '../api';
 import { useAppState } from '../hooks/useAppState';
 import { fillTemplate } from '../i18n/en-extras';
@@ -9,12 +10,19 @@ import DeviceGuard from './DeviceGuard';
 import FloatingEmbedPanel from './FloatingEmbedPanel';
 import { registerVncRemoteConnect } from '../utils/studio-embed-connect-bridge';
 import { augmentVncDisconnectDetail } from '../utils/vnc-ws-hints';
+import { isS100BoardModel } from '../utils/diagnostics';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
   const { currentDevice, vncConnected, startVncSession, addToast, setVncEmbedToolbar } = useAppState();
   const { t } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
+
+  /** 仅 RDK S100：用于远程桌面页展示固件/内核相关说明（与其它板型无关） */
+  const deviceIsS100 = useMemo(
+    () => !!currentDevice && isS100BoardModel((currentDevice as Device).boardModel, (currentDevice as Device).boardPlatform),
+    [currentDevice],
+  );
 
   const [phase, setPhase] = useState<'idle' | 'checking' | 'connecting' | 'connected' | 'error'>('idle');
   const [statusText, setStatusText] = useState('');
@@ -141,7 +149,16 @@ export default function Vnc() {
       if (security) {
         text = raw || t('vnc.err.securityRejected', 'VNC 安全握手被拒绝');
       } else if (raw) {
-        const detail = augmentVncDisconnectDetail(raw, t);
+        let detail = augmentVncDisconnectDetail(raw, t);
+        const isS100 = currentDevice
+          ? isS100BoardModel((currentDevice as Device).boardModel, (currentDevice as Device).boardPlatform)
+          : false;
+        if (isS100 && /\b1005\b/.test(raw)) {
+          detail = `${detail}\n\n${t(
+            'vnc.hint.s100Firmware1005',
+            '【仅 S100】若曾使用 NoMachine 等远程桌面出现「无画面但可操控」或与本页 1005 类似现象，部分 4.0.2-beta 镜像需同时升级 linux-image-rdk-s100 与 hobot-firmware 两个 deb（成对升级）。',
+          )}`;
+        }
         text = wasConnected
           ? tf('vnc.err.wsDroppedDetail', '连接已断开：{{detail}}', { detail })
           : tf('vnc.err.wsFailedDetail', '无法连接远程桌面：{{detail}}', { detail });
@@ -170,7 +187,7 @@ export default function Vnc() {
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [showIframe, addToast, t, tf]);
+  }, [showIframe, addToast, t, tf, currentDevice]);
 
   // 监听 WebContentsView 加载事件
   useEffect(() => {
@@ -637,6 +654,14 @@ export default function Vnc() {
                 'x11vnc 需要已有图形会话（X11 / DISPLAY）；若板卡未启动桌面，服务可能在跑但无法出画，连接易断开（如 1005）。',
               )}
             </p>
+            {deviceIsS100 && (
+              <p className="immersive-welcome-desc immersive-welcome-desc--s100">
+                {t(
+                  'vnc.welcome.s100Firmware',
+                  '【RDK S100】若 NoMachine 等远程桌面无画面但可操控，或外接显示器异常，部分系统版本需同时升级 linux-image-rdk-s100 与 hobot-firmware（详见文档/发行说明）。',
+                )}
+              </p>
+            )}
 
             {phase === 'checking' && (
               <div className="immersive-loading">
@@ -668,6 +693,14 @@ export default function Vnc() {
                     '排查建议：(1) 必须先有图形会话（Xorg / 可用 DISPLAY），无桌面时 x11vnc 无画面，易出现 1005；(2) 确认已安装桌面环境；(3) 终端执行 sudo systemctl status x11vnc；(4) 检查 5900 是否被占用。',
                   )}
                 </p>
+                {deviceIsS100 && (
+                  <p style={{ fontSize: '0.8125rem', color: '#a8b4c8', maxWidth: 420, lineHeight: 1.55, margin: '0 0 8px' }}>
+                    {t(
+                      'vnc.err.troubleshootS100',
+                      '【仅 S100】若仍无画面且曾遇 NoMachine/外接显示异常，请核对内核与 hobot-firmware：部分版本需同时升级 linux-image-rdk-s100 与 hobot-firmware 两个 deb。',
+                    )}
+                  </p>
+                )}
                 <button className="btn btn-ghost" onClick={handleConnect}>{t('vnc.retry', '重试')}</button>
               </div>
             )}
