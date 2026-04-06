@@ -1179,6 +1179,25 @@ ipcMain.on('rdk:open-url', (event, payload) => {
 
   if (!mainWin || !url) return;
 
+  /**
+   * did-finish-load / did-fail-load 晚于 IPC 返回；若主界面已热重载/导航，闭包里的 event.sender 可能已销毁（与 a172f9ff 直接用 event.sender.send 同栈 1259 行报错）。
+   * preload 里 onUrlLoaded/onUrlLoadFailed 挂在主窗口，故优先 mainWin.webContents.send，与旧版「发给谁」一致且避免陈旧 sender。
+   */
+  const ipcSender = event.sender;
+  const safeSendToRenderer = (channel, data) => {
+    try {
+      if (mainWin && !mainWin.isDestroyed() && mainWin.webContents && !mainWin.webContents.isDestroyed()) {
+        mainWin.webContents.send(channel, data);
+        return;
+      }
+      if (ipcSender && !ipcSender.isDestroyed()) {
+        ipcSender.send(channel, data);
+      }
+    } catch (err) {
+      console.warn(`[rdk:open-url] ${channel} skipped:`, err?.message || err);
+    }
+  };
+
   const run = async () => {
     const focusMainForEmbed = () => {
       try {
@@ -1251,12 +1270,12 @@ ipcMain.on('rdk:open-url', (event, payload) => {
 
     view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
       console.error(`[rdk:open-url] did-fail-load ${failUrlKey}: ${errorCode} ${errorDescription}`);
-      event.sender.send('rdk:url-load-failed', { url: failUrlKey, errorCode, errorDescription });
+      safeSendToRenderer('rdk:url-load-failed', { url: failUrlKey, errorCode, errorDescription });
     });
 
     view.webContents.on('did-finish-load', () => {
       console.log(`[rdk:open-url] did-finish-load ${failUrlKey}`);
-      event.sender.send('rdk:url-loaded', { url: failUrlKey });
+      safeSendToRenderer('rdk:url-loaded', { url: failUrlKey });
     });
 
     view.webContents.setWindowOpenHandler(({ url: sub }) => {

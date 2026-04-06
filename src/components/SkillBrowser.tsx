@@ -354,9 +354,21 @@ export default function SkillBrowser() {
       const res = await fetchApi(
         `/api/devices/${currentDevice.id}/openclaw/skill-content?skillId=${encodeURIComponent(skillId)}`,
       );
-      const data = await res.json() as { ok?: boolean; content?: string; path?: string; error?: string };
+      const data = await res.json() as {
+        ok?: boolean;
+        content?: string;
+        path?: string;
+        error?: string;
+        message?: string;
+        code?: string;
+      };
       if (!res.ok || !data.ok) {
-        setSkillContent(data.error || tf('skillBrowser.err.readHttp', '无法读取该技能内容（HTTP {{status}}）', { status: res.status }));
+        const apiMsg = typeof data.message === 'string' ? data.message : '';
+        setSkillContent(
+          apiMsg ||
+            data.error ||
+            tf('skillBrowser.err.readHttp', '无法读取该技能内容（HTTP {{status}}）', { status: res.status }),
+        );
       } else {
         setSkillContent(data.content || t('skillBrowser.err.emptyBody', '(空内容)'));
         setSkillContentPath(data.path || '');

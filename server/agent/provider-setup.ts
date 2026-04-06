@@ -821,8 +821,8 @@ export function setOpenclawDelegateProviderConfig(id: string | null | undefined)
 
 /** 安装包内置的「深度思考」与「快速回答」默认条目元信息（无文件或无条目时返回 null） */
 export function getBootstrapStudioDefaultPresetsMeta(): {
-  thinking: { id: string; label: string };
-  quick: { id: string; label: string } | null;
+  thinking: { id: string; label: string; model: string; provider: string };
+  quick: { id: string; label: string; model: string; provider: string } | null;
 } | null {
   const bootstrap = loadBootstrapProviderRegistry();
   if (!bootstrap || bootstrap.entries.length === 0) return null;
@@ -837,9 +837,59 @@ export function getBootstrapStudioDefaultPresetsMeta(): {
       ? bootstrap.entries.find((e) => e.id === qid)!
       : null;
   return {
-    thinking: { id: thinkingEntry.id, label: thinkingEntry.label },
-    quick: quickEntry ? { id: quickEntry.id, label: quickEntry.label } : null,
+    thinking: {
+      id: thinkingEntry.id,
+      label: thinkingEntry.label,
+      model: thinkingEntry.model,
+      provider: thinkingEntry.provider,
+    },
+    quick: quickEntry
+      ? {
+          id: quickEntry.id,
+          label: quickEntry.label,
+          model: quickEntry.model,
+          provider: quickEntry.provider,
+        }
+      : null,
   };
+}
+
+/**
+ * 将 bootstrap 中的内置预设写回 registry：同 id 以安装包为准刷新（保留用户已保存的 apiKey）；缺失的预设追加入库。
+ */
+export function syncBootstrapPresetEntriesIntoRegistry(registry: ProviderConfigRegistry): ProviderConfigRegistry {
+  const bootstrap = loadBootstrapProviderRegistry();
+  if (!bootstrap || bootstrap.entries.length === 0) return registry;
+  const bootById = new Map(bootstrap.entries.map((e) => [e.id, e]));
+  const mergedEntries: ProviderConfigEntry[] = registry.entries.map((e) => {
+    const b = bootById.get(e.id);
+    if (!b) return e;
+    const keepKey = e.apiKey?.trim();
+    return {
+      ...b,
+      apiKey: keepKey || b.apiKey,
+      createdAt: e.createdAt,
+      updatedAt: Date.now(),
+    };
+  });
+  const have = new Set(mergedEntries.map((e) => e.id));
+  for (const b of bootstrap.entries) {
+    if (!have.has(b.id)) {
+      mergedEntries.push({ ...b });
+      have.add(b.id);
+    }
+  }
+  return { ...registry, entries: mergedEntries };
+}
+
+/** 若 entryId 对应安装包内置预设，则从 bootstrap 文件刷新该条（及同批预设），再落盘 */
+export function resyncBootstrapPresetEntryIfNeeded(entryId: string): void {
+  const id = entryId?.trim();
+  if (!id) return;
+  const bootstrap = loadBootstrapProviderRegistry();
+  if (!bootstrap?.entries.some((e) => e.id === id)) return;
+  const next = syncBootstrapPresetEntriesIntoRegistry(loadProviderRegistry());
+  saveProviderRegistry(next);
 }
 
 /** 仅返回深度思考内置条目的 id/label（兼容旧调用方） */
@@ -857,19 +907,8 @@ export function restoreStudioDefaultPresetFromBootstrap(): { ok: boolean; error?
   if (!bootstrap || bootstrap.entries.length === 0) {
     return { ok: false, error: '未找到内置模型配置（bootstrap 文件缺失）' };
   }
-  let registry = loadProviderRegistry();
-  const ids = new Set(registry.entries.map((e) => e.id));
-  let merged = [...registry.entries];
-  for (const entry of bootstrap.entries) {
-    if (!ids.has(entry.id)) {
-      merged.push({ ...entry });
-      ids.add(entry.id);
-    }
-  }
-  if (merged.length !== registry.entries.length) {
-    saveProviderRegistry({ ...registry, entries: merged });
-    registry = loadProviderRegistry();
-  }
+  let registry = syncBootstrapPresetEntriesIntoRegistry(loadProviderRegistry());
+  saveProviderRegistry(registry);
   const targetId =
     bootstrap.activeId && registry.entries.some((e) => e.id === bootstrap.activeId)
       ? bootstrap.activeId

@@ -14,12 +14,24 @@ function joinShellLines(lines: string[]): string {
 /**
  * npm 并发连接（默认 32，大依赖树时更易吃满带宽）。
  * 环境变量（均在 **Studio 服务端进程** 上设置，下发到套件端脚本前已展开）：
+ * - `OPENCLAW_NPM_SKIP_UNSAFE_PERM=1`：不在 `npm install -g openclaw` 上加 `--unsafe-perm`（默认会加，避免 root 全局装时 lifecycle 权限问题）。
  * - `OPENCLAW_NPM_MAXSOCKETS`：覆盖默认 maxsockets。
- * - `OPENCLAW_REGISTRY_PRIORITY=china`：跳过 npmmirror 探测，固定先国内源再官方源（国内网络推荐）。
+ * - **默认**：`registry.npmmirror.com` 为主、`registry.npmjs.org` 为备（国内网络优先，避免先连国外再 ECONNRESET）。
+ * - `OPENCLAW_REGISTRY_PRIORITY=china` | `npmmirror`：与默认相同（显式声明）。
+ * - `OPENCLAW_REGISTRY_PRIORITY=global` | `npmjs` | `official`：官方源优先，国内镜像备用（海外/部分 CI）。
  */
 const OPENCLAW_NPM_MAXSOCKETS = process.env.OPENCLAW_NPM_MAXSOCKETS?.trim() || '32';
 /** 单次 npm -g openclaw 尝试的超时时间（秒），超时后会自动切到备用源继续。 */
 const OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC = process.env.OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC?.trim() || '900';
+/**
+ * 追加到 `npm install -g openclaw@...` 的尾部参数（无前导空格）。
+ * 默认含 `--unsafe-perm`：root 全局安装时减少 lifecycle 脚本权限问题；套件端 ENOENT/不完整树时与手工修复一致。
+ * 设 `OPENCLAW_NPM_SKIP_UNSAFE_PERM=1` 可关闭。
+ */
+const OPENCLAW_NPM_INSTALL_TAIL =
+  process.env.OPENCLAW_NPM_SKIP_UNSAFE_PERM === '1' || process.env.OPENCLAW_NPM_SKIP_UNSAFE_PERM === 'true'
+    ? ''
+    : ' --unsafe-perm';
 
 /**
  * 套件端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
@@ -30,22 +42,23 @@ const OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC = process.env.OPENCLAW_NPM_ATTEMPT_TIMEOU
  */
 
 /**
- * 探测 npmmirror 是否可达，设置 NPM_FAST_REG / ALT_REG（优先国内源）。
- * 末尾不要带 `;`：在 OpenClawDeploymentManager 里与其它片段用 ` && ` 拼接，避免出现非法的 `; &&`（bash 会报 syntax error near `&&`）。
+ * 设置 NPM_FAST_REG（主）/ ALT_REG（备）。末尾不要带多余 `;`：与其它片段用 ` && ` 拼接时避免出现 `; &&`。
  *
- * 提速：若 Studio 进程设 `OPENCLAW_REGISTRY_PRIORITY=china`（或 `npmmirror`），**跳过 ping**，固定先走 npmmirror 再回退官方源，
- * 避免「探测偶发失败 → 先连 registry.npmjs.org」在国内极慢。
+ * 旧版曾用 curl 探测 npmmirror，**失败则改为先国外后国内**，在国内网络下会放大 ECONNRESET；现改为默认始终国内优先，
+ * 仅当 `OPENCLAW_REGISTRY_PRIORITY=global|npmjs|official` 时交换顺序。
  */
-const OPENCLAW_FAST_REGISTRY_SNIPPET_AUTO =
-  'if curl -fsS --connect-timeout 2 --max-time 5 https://registry.npmmirror.com/-/ping >/dev/null 2>&1 && curl -fsS --connect-timeout 3 --max-time 8 https://cdn.npmmirror.com >/dev/null 2>&1; then NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org; else NPM_FAST_REG=https://registry.npmjs.org; ALT_REG=https://registry.npmmirror.com; fi';
-
-const OPENCLAW_FAST_REGISTRY_SNIPPET_CN =
+const OPENCLAW_FAST_REGISTRY_SNIPPET_CN_FIRST =
   'NPM_FAST_REG=https://registry.npmmirror.com; ALT_REG=https://registry.npmjs.org';
 
+const OPENCLAW_FAST_REGISTRY_SNIPPET_GLOBAL_FIRST =
+  'NPM_FAST_REG=https://registry.npmjs.org; ALT_REG=https://registry.npmmirror.com';
+
 export const OPENCLAW_FAST_REGISTRY_SNIPPET =
-  process.env.OPENCLAW_REGISTRY_PRIORITY === 'china' || process.env.OPENCLAW_REGISTRY_PRIORITY === 'npmmirror'
-    ? OPENCLAW_FAST_REGISTRY_SNIPPET_CN
-    : OPENCLAW_FAST_REGISTRY_SNIPPET_AUTO;
+  process.env.OPENCLAW_REGISTRY_PRIORITY === 'global' ||
+  process.env.OPENCLAW_REGISTRY_PRIORITY === 'npmjs' ||
+  process.env.OPENCLAW_REGISTRY_PRIORITY === 'official'
+    ? OPENCLAW_FAST_REGISTRY_SNIPPET_GLOBAL_FIRST
+    : OPENCLAW_FAST_REGISTRY_SNIPPET_CN_FIRST;
 
 /**
  * 让官方 install.sh 及其内部的 npm 优先走上面探测到的源（子进程继承）。
@@ -76,8 +89,18 @@ export const OPENCLAW_BOARD_INSTALL_ENV_PRELUDE =
  */
 export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = joinShellLines([
   '(',
-  'NPM_FAST_REG="${NPM_FAST_REG:-https://registry.npmjs.org}";',
-  'ALT_REG="${ALT_REG:-https://registry.npmmirror.com}";',
+  'NPM_FAST_REG="${NPM_FAST_REG:-https://registry.npmmirror.com}";',
+  'ALT_REG="${ALT_REG:-https://registry.npmjs.org}";',
+  'oc_npm_repair_after_fail(){',
+  'echo "[OpenClaw] 安装失败：清理 npm 缓存并移除可能损坏的全局 openclaw（ENOENT/解压不完整时常见）..." 1>&2;',
+  'npm uninstall -g openclaw 2>/dev/null || true;',
+  '_gp="$(npm prefix -g 2>/dev/null || true)";',
+  'if [ -n "$_gp" ]; then rm -rf "$_gp/lib/node_modules/openclaw" 2>/dev/null || true; fi;',
+  'rm -rf "${HOME}/.npm-global/lib/node_modules/openclaw" 2>/dev/null || true;',
+  'npm cache clean --force 2>&1 || true;',
+  '};',
+  'echo "[OpenClaw] 预清理可能残留的 openclaw 全局包..." 1>&2;',
+  'npm uninstall -g openclaw 2>/dev/null || true;',
   'oc_npm_install_once(){',
   'oc_reg="$1"; oc_try="$2"; oc_lane="$3";',
   'echo "[OpenClaw] npm 安装尝试 ${oc_try}/3 (${oc_lane}) registry=${oc_reg}" 1>&2;',
@@ -90,12 +113,14 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = joinShellLines([
     OPENCLAW_BOARD_NPM_SPEC +
     ' --no-audit --no-fund --loglevel notice --progress=false --registry="${oc_reg}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=20000 --maxsockets=' +
     OPENCLAW_NPM_MAXSOCKETS +
+    OPENCLAW_NPM_INSTALL_TAIL +
     ' 2>&1; oc_rc=$?; rm -f "$oc_hb_file" 2>/dev/null || true; kill "$oc_hb_pid" 2>/dev/null || true; wait "$oc_hb_pid" 2>/dev/null || true; [ "$oc_rc" -eq 124 ] && echo "[OpenClaw] 当前源安装超时，准备切换下一路镜像重试..." 1>&2; return "$oc_rc";',
   'fi;',
   'CI= npm install -g openclaw@' +
     OPENCLAW_BOARD_NPM_SPEC +
     ' --no-audit --no-fund --loglevel notice --progress=false --registry="${oc_reg}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=20000 --maxsockets=' +
     OPENCLAW_NPM_MAXSOCKETS +
+    OPENCLAW_NPM_INSTALL_TAIL +
     ' 2>&1; oc_rc=$?; rm -f "$oc_hb_file" 2>/dev/null || true; kill "$oc_hb_pid" 2>/dev/null || true; wait "$oc_hb_pid" 2>/dev/null || true; return "$oc_rc";',
   '};',
   'for i in 1 2 3; do',
@@ -106,6 +131,7 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = joinShellLines([
   // 版本与 OPENCLAW_BOARD_NPM_SPEC 一致（默认 latest；可 OPENCLAW_NPM_VERSION 钉版本）。
   'if oc_npm_install_once "${NPM_FAST_REG}" "$i" "primary"; then break; fi;',
   'if oc_npm_install_once "${ALT_REG}" "$i" "fallback"; then break; fi;',
+  'if [ "${i}" -lt 3 ]; then oc_npm_repair_after_fail; fi;',
   '[ "${i}" = 3 ] && exit 1;',
   'sleep 2;',
   'done',
@@ -205,6 +231,16 @@ export const OPENCLAW_RESOLVE_CLI_SNIPPET = [
   'if [ -z "$OPENCLAW_CMD" ] && command -v npm >/dev/null 2>&1; then _OC_NPM_PF="$(npm prefix -g 2>/dev/null)"; if [ -n "$_OC_NPM_PF" ] && [ -x "$_OC_NPM_PF/bin/openclaw" ]; then OPENCLAW_CMD="$_OC_NPM_PF/bin/openclaw"; fi; fi',
   'if [ -n "$OPENCLAW_CMD" ] && [ ! -x "$OPENCLAW_CMD" ]; then OPENCLAW_CMD=""; fi',
 ].join(' && ');
+
+/**
+ * npm 装包成功后强制验收：`command -v` 能找到文件不等于 Node 能执行 CLI（旧 Node 会先过 ensure 再因竞态/多版本失效）。
+ * 失败则 exit 1，避免日志出现「安装完成」但健康检查报未安装。
+ */
+export const OPENCLAW_VERIFY_CLI_RUNS_SNIPPET = [
+  'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] 错误: 未找到 openclaw 可执行文件（请检查 npm prefix -g 与 PATH）" >&2; exit 1; fi;',
+  // 末行禁止 `fi;`：NPM_INSTALL_CMD 用 ` && ` 衔接下一段时会出现 `fi; &&` → bash syntax error near `&&`
+  `if ! "$OPENCLAW_CMD" --version 2>&1; then echo "[OpenClaw] 错误: openclaw --version 失败（常见: Node 需 ${OPENCLAW_BOARD_NODE_MIN_MAJOR}+，或全局包损坏）" >&2; exit 1; fi`,
+].join(' ');
 
 /**
  * 安装/升级后写入 ~/.bashrc：把 npm 全局 bin、~/.npm-global/bin、~/.local/bin prepend 到 PATH，

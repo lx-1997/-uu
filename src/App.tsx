@@ -601,6 +601,11 @@ export default function App() {
     void import('./components/Dashboard');
   }, []);
 
+  /** 移除 index.html 中与 #root 同级的启动层，避免 bundle 加载前后闪白 */
+  useEffect(() => {
+    document.getElementById('rdk-boot-splash')?.remove();
+  }, []);
+
   return (
     <ErrorBoundary>
       <SSOGate>

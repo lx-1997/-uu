@@ -89,6 +89,8 @@ export interface RunRemoteCommandOptions {
   rejectOnNonZeroExit?: boolean;
   /** 默认 `&&`：前一条失败则后续不执行。批量诊断等场景可用 `;` 保证各段独立跑完。 */
   joinWith?: RemoteCommandJoiner;
+  /** 单条 exec 的 stdout 截断上限（字符数）；技能全文等场景需大于默认 512k */
+  stdoutCharLimit?: number;
 }
 
 export interface VerifySshConnectionOptions {
@@ -154,6 +156,7 @@ export function runRemoteCommands(
     /** ssh2 exec channel，abort 时尽早 close，缩短「停止」体感延迟 */
     let execStream: { close?: () => void } | null = null;
     const timeoutMs = Math.max(5_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
+    const stdoutCap = Math.max(8_192, Number(options.stdoutCharLimit ?? DEFAULT_STREAM_OUTPUT_CHAR_LIMIT));
     let settled = false;
 
     const safeResolve = (output: string) => {
@@ -266,7 +269,7 @@ export function runRemoteCommands(
                   /* ignore progress callback errors */
                 }
               }
-              const r = appendUtf8WithTailCap(stdout, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT);
+              const r = appendUtf8WithTailCap(stdout, chunk, stdoutCap);
               stdout = r.value;
               if (r.truncated) stdoutTrunc = true;
             });

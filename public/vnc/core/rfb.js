@@ -124,6 +124,8 @@ export default class RFB extends EventTargetMixin {
         this._rfbInitState = '';
         this._rfbAuthScheme = -1;
         this._rfbCleanDisconnect = true;
+        /** 最后一次 _fail() 的说明，随 disconnect 事件带给 UI（中英混排，来自协议栈原文） */
+        this._disconnectReason = "";
         this._rfbRSAAESAuthenticationState = null;
 
         // Server capabilities
@@ -545,6 +547,7 @@ export default class RFB extends EventTargetMixin {
 
     _connect() {
         Log.Debug(">> RFB.connect");
+        this._disconnectReason = "";
 
         if (this._url) {
             Log.Info(`connecting to ${this._url}`);
@@ -919,7 +922,8 @@ export default class RFB extends EventTargetMixin {
             case 'disconnected':
                 this.dispatchEvent(new CustomEvent(
                     "disconnect", { detail:
-                                    { clean: this._rfbCleanDisconnect } }));
+                                    { clean: this._rfbCleanDisconnect,
+                                      reason: this._rfbCleanDisconnect ? "" : this._disconnectReason } }));
                 break;
         }
     }
@@ -945,6 +949,7 @@ export default class RFB extends EventTargetMixin {
                 break;
         }
         this._rfbCleanDisconnect = false; //This is sent to the UI
+        this._disconnectReason = String(details);
 
         // Transition to disconnected without waiting for socket to close
         this._updateConnectionState('disconnecting');

@@ -32,9 +32,13 @@ export const DEVICE_DIAGNOSTICS_CACHE_TTL_MS = 15_000;
  * 执行时由 `runOnDevice(..., { joinWith: ';' })` 串联。
  */
 export const DIAGNOSTIC_COMMANDS = [
+  /** 板型输出常无尾换行，须补 `echo` 否则下一节 `###UPTIME###` 会粘在同行 */
+  'echo "###BOARD###"; (cat /sys/class/socinfo/board_id 2>/dev/null || cat /proc/device-tree/model 2>/dev/null || echo unknown); echo',
   'echo "###UPTIME###"; uptime',
   'echo "###TEMP###"; cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo "N/A"',
   'echo "###MEM###"; free -h',
+  /** S100 等：Linux 可见 MemTotal 不含硬件预留；物理总量见 dmesg `Memory: …/…K` 中 `/` 后数值 */
+  'echo "###DMEM###"; (dmesg 2>/dev/null || sudo -n dmesg 2>/dev/null) | grep "Memory:" | head -1 || true',
   'echo "###DISK###"; df -h',
   'echo "###IP###"; ip -o -4 addr show 2>/dev/null || echo "N/A"',
   'echo "###TOP###"; (top -bn1 2>/dev/null || busybox top -bn1 2>/dev/null || echo "") | head -20',

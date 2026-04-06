@@ -47,4 +47,10 @@ describe('openclaw-board-install shell generation', () => {
     expectBashSyntaxOk(OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET);
     expectBashSyntaxOk(OPENCLAW_ENSURE_NPM_SNIPPET);
   });
+
+  it('npm fast install includes cache repair path after failed attempts', () => {
+    expect(OPENCLAW_NPM_FAST_INSTALL_SNIPPET).toContain('npm cache clean --force');
+    expect(OPENCLAW_NPM_FAST_INSTALL_SNIPPET).toContain('oc_npm_repair_after_fail');
+    expect(OPENCLAW_NPM_FAST_INSTALL_SNIPPET).toContain('--unsafe-perm');
+  });
 });

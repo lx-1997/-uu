@@ -8,8 +8,11 @@
       body { background: #f1f5f9; }
       #root { min-height: 100vh; background: #fafbfd; }
       @keyframes rdk-boot-spin { to { transform: rotate(360deg); } }
+      /* 置于 #root 之外，避免 React createRoot 首帧清空子节点时整页闪白；首帧后由 App 移除 */
       #rdk-boot-splash {
-        min-height: 100vh;
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -38,12 +41,11 @@
     <script type="module" src="/src/main.tsx"></script>
   </head>
   <body>
-    <div id="root">
-      <!-- React 挂载前即显示，减少「整页纯白」等待感；首帧后由应用替换 -->
-      <div id="rdk-boot-splash" aria-busy="true" aria-live="polite">
-        <div class="rdk-boot-spinner" aria-hidden="true"></div>
-        <span class="rdk-boot-title">RDK Studio</span>
-      </div>
+    <div id="root"></div>
+    <!-- 与 #root 同级：不被 React 替换；JS 就绪后由 App 移除 -->
+    <div id="rdk-boot-splash" aria-busy="true" aria-live="polite">
+      <div class="rdk-boot-spinner" aria-hidden="true"></div>
+      <span class="rdk-boot-title">RDK Studio</span>
     </div>
   </body>
   </html>

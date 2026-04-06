@@ -269,11 +269,31 @@
   filter: drop-shadow(0 0 20px var(--accent-glow));
 }
 
-.lp-device-ip {
-  font-size: 0.9375rem;
+.lp-device-model {
+  margin: 10px 0 0;
+  font-size: 0.875rem;
   color: var(--text-muted);
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.35em 0.5em;
+  line-height: 1.35;
+  max-width: min(92vw, 520px);
+  text-align: center;
+}
+
+.lp-device-model-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.lp-device-model-value {
   font-family: var(--font-mono);
-  letter-spacing: 0.03em;
+  font-size: 0.9em;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
 }
 
 /* ── Metrics strip ── */
@@ -893,6 +913,7 @@ button.ob-connect-card--disabled:hover {
   max-height: 320px;
   min-height: 120px;
   overflow-y: auto;
+  overflow-x: auto;
   padding: 12px 14px;
   margin: 0;
   font-size: 0.6875rem;
@@ -901,6 +922,10 @@ button.ob-connect-card--disabled:hover {
   color: #c8d6e5;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  text-align: left;
+  direction: ltr;
+  box-sizing: border-box;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }

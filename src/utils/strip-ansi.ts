@@ -8,7 +8,11 @@ const ANSI_CSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u009b\[[0-?]*[ -/]*[@-~]/g;
 const ANSI_OSC = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_OSC, '').replace(ANSI_CSI, '');
+  return text
+    .replace(ANSI_OSC, '')
+    .replace(ANSI_CSI, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
 }
 
 /**

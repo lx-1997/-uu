@@ -222,6 +222,13 @@ export default function SsoLoginScreen() {
   const showBrowserIframe = !desktopCapable && phase === 'ready' && !embedLoadFailed && !!loginFrameUrl;
   /** 桌面环回 token 与参考工程一致，不依赖服务端 OAuth 客户端；横幅仅提示纯浏览器内嵌时的限制 */
   const showConfigBanner = !!configBannerText && showBrowserIframe;
+  /** ready 但尚未渲染 webview/iframe 时的竞态兜底，避免仅露浅色底像「白屏」 */
+  const showReadyEmbedGap =
+    phase === 'ready'
+    && !showErrorLayer
+    && !showPreparingLayer
+    && !showDesktopWebview
+    && !showBrowserIframe;
 
   useEffect(() => {
     if (!showDesktopWebview) return;
@@ -251,7 +258,13 @@ export default function SsoLoginScreen() {
   }, [showDesktopWebview, desktopSsoUrl]);
 
   return (
-    <div className="sso-login-root">
+    <div
+      className="sso-login-root"
+      style={{
+        minHeight: '100vh',
+        background: '#fafbfd',
+      }}
+    >
       {showConfigBanner && (
         <p className="sso-login-config-banner" role="status">
           {configBannerText}
@@ -275,6 +288,16 @@ export default function SsoLoginScreen() {
               {st('sso.openSsoInWindow', '独立窗口登录')}
             </button>
           </div>
+        </div>
+      )}
+
+      {showReadyEmbedGap && (
+        <div className="sso-login-state">
+          <div className="sso-login-spinner" aria-hidden />
+          <p className="sso-login-state-text">{st('sso.embedPreparing', '正在加载统一登录页…')}</p>
+          <button type="button" className="sso-login-btn-primary" onClick={() => { void retryEmbedded(); }}>
+            {st('sso.retryEmbed', '重试内嵌')}
+          </button>
         </div>
       )}
 

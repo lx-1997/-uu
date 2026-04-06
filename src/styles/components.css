@@ -107,6 +107,40 @@
   height: 18px;
 }
 
+/* 顶栏 WiFi：放在 .btn-icon 之后并提高优先级，避免默认灰/悬停覆盖绿、红 */
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--up,
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--up svg {
+  color: var(--ok);
+  stroke: currentColor;
+}
+
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--up:hover:not(:disabled) {
+  color: var(--ok);
+  background: var(--ok-subtle);
+}
+
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--down,
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--down svg {
+  color: var(--danger);
+  stroke: currentColor;
+}
+
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--down:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--unknown,
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--unknown svg {
+  color: var(--warn);
+  stroke: currentColor;
+}
+
+button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--unknown:hover:not(:disabled) {
+  color: var(--warn);
+  background: var(--warn-subtle);
+}
+
 /* ══════════════════════════
    Inputs
    ══════════════════════════ */

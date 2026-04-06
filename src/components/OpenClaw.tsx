@@ -112,7 +112,8 @@ type ConfigTab = 'model' | 'feishu';
 
 type SetupStep = 'gateway' | 'model' | 'feishu';
 interface SetupStatus {
-  gateway: 'ok' | 'warn' | 'error';
+  /** 一键部署进行中：优先于「已安装」，避免与主区进度条同时显示矛盾文案 */
+  gateway: 'ok' | 'warn' | 'error' | 'deploying';
   model: 'ok' | 'warn' | 'unconfigured';
   feishu: 'ok' | 'warn' | 'unconfigured';
 }
@@ -776,6 +777,19 @@ export default function OpenClaw() {
     stopOpenClawDeployPoll();
   };
 
+  /** 预检 SSH 输出中的「依赖」失败：只认明确缺 node/npm 或 command not found，避免把「--- Node/NPM ---」、systemd「could not be found」等正常诊断文案误判 */
+  const openclawDepPrecheckLooksFailed = (outLower: string) => {
+    if (/\bnode 未安装\b/.test(outLower)) return true;
+    if (/\bnpm 未安装\b/.test(outLower)) return true;
+    if (/\bnode:\s*command not found\b/.test(outLower)) return true;
+    if (/\bnpm:\s*command not found\b/.test(outLower)) return true;
+    if (/command not found.*\bnode\b/.test(outLower)) return true;
+    if (/command not found.*\bnpm\b/.test(outLower)) return true;
+    if (/\bsh:\s*1?:\s*node:\s*not found\b/.test(outLower)) return true;
+    if (/\bsh:\s*1?:\s*npm:\s*not found\b/.test(outLower)) return true;
+    return false;
+  };
+
   const runDeployPrecheck = async () => {
     if (!currentDevice || deployRunning) return;
     setDeployPrecheck({ network: 'checking', deps: 'checking', npm: 'checking', overall: 'checking', detail: '' });
@@ -791,8 +805,8 @@ export default function OpenClaw() {
       });
       const data = await checkRes.json().catch(() => ({} as { output?: string; error?: string }));
       const out = String(data?.output || data?.error || '').toLowerCase();
-      const hasNpmErr = /npm err|eai_again|etimedout|network|registry/i.test(out);
-      const hasDepErr = /node|not found|missing|permission denied|failed/i.test(out);
+      const hasNpmErr = /npm err!|npm err|eai_again|etimedout|enetunreach|econnrefused|fetch.*failed|registry.*(?:timeout|timed out|reset)/i.test(out);
+      const hasDepErr = openclawDepPrecheckLooksFailed(out);
       const ok = checkRes.ok && !hasDepErr;
       setDeployPrecheck({
         network: checkRes.ok ? (hasNpmErr ? 'fail' : 'ok') : 'fail',
@@ -2030,6 +2044,13 @@ export default function OpenClaw() {
     const installed = !!(status?.installed ?? status?.version?.trim());
     const modelOk = hasBoardModelSelection() && hasBoardModelCredentials();
     const feishuOk = !!(config?.feishu?.appId && config?.feishu?.appSecret);
+    if (deployRunning || deployCancelLoading) {
+      return {
+        gateway: 'deploying',
+        model: modelOk ? 'ok' : 'unconfigured',
+        feishu: feishuOk ? 'ok' : 'unconfigured',
+      };
+    }
     return {
       gateway: installed ? 'ok' : (status === null ? 'warn' : 'error'),
       model: modelOk ? 'ok' : 'unconfigured',
@@ -2041,6 +2062,7 @@ export default function OpenClaw() {
     const s = getSetupStatus();
     let done = 0;
     if (s.gateway === 'ok') done++;
+    // deploying 阶段不把网关计为已完成，避免 3/3 与「安装中」并存
     if (s.model === 'ok') done++;
     if (s.feishu === 'ok') done++;
     return done;
@@ -2155,24 +2177,31 @@ export default function OpenClaw() {
         icon: 'dns',
         label: t('oc.setup.openclaw', 'OpenClaw'),
         status:
-          setupStatus.gateway === 'ok'
-            ? (status?.running
-                ? (deviceNetUp === false ? t('oc.setup.ocRunningNoNet', '运行中 · 未联网') : t('oc.setup.ocWithGw', '已安装 · 网关运行中'))
-                : t('oc.setup.ocInstalledOnly', '已安装'))
-            : setupStatus.gateway === 'warn'
-              ? t('oc.status.checking', '检测中...')
-              : t('oc.status.notInstalled', '未安装'),
-        statusClass: setupStatus.gateway === 'ok'
-          ? (status?.running && deviceNetUp === false ? 'badge-accent' : 'badge-ok')
-          : setupStatus.gateway === 'warn' ? 'badge-accent' : 'badge-danger',
+          setupStatus.gateway === 'deploying'
+            ? t('oc.setup.ocDeploying', '一键部署中…')
+            : setupStatus.gateway === 'ok'
+              ? (status?.running
+                  ? (deviceNetUp === false ? t('oc.setup.ocRunningNoNet', '运行中 · 未联网') : t('oc.setup.ocWithGw', '已安装 · 网关运行中'))
+                  : t('oc.setup.ocInstalledOnly', '已安装'))
+              : setupStatus.gateway === 'warn'
+                ? t('oc.status.checking', '检测中...')
+                : t('oc.status.notInstalled', '未安装'),
+        statusClass:
+          setupStatus.gateway === 'deploying'
+            ? 'badge-accent'
+            : setupStatus.gateway === 'ok'
+              ? (status?.running && deviceNetUp === false ? 'badge-accent' : 'badge-ok')
+              : setupStatus.gateway === 'warn' ? 'badge-accent' : 'badge-danger',
         action: () => {
           setPanelOpen(true);
           setDashboardTab('gateway');
         },
         actionLabel:
-          setupStatus.gateway === 'ok'
-            ? t('oc.action.view', '查看')
-            : t('oc.action.deploy', '一键部署 OpenClaw'),
+          setupStatus.gateway === 'deploying'
+            ? t('oc.action.viewProgress', '查看进度')
+            : setupStatus.gateway === 'ok'
+              ? t('oc.action.view', '查看')
+              : t('oc.action.deploy', '一键部署 OpenClaw'),
       },
       {
         key: 'model',
@@ -2228,10 +2257,23 @@ export default function OpenClaw() {
                 className="btn btn-ghost btn-sm oc-setup-item-action"
                 onClick={item.action}
                 style={{ fontSize: '0.75rem', padding: '2px 8px', flexShrink: 0 }}
-                disabled={boardDeployBusy && item.key === 'gateway' && setupStatus.gateway !== 'ok'}
-                aria-busy={boardDeployBusy && item.key === 'gateway' && setupStatus.gateway !== 'ok'}
+                disabled={
+                  boardDeployBusy &&
+                  item.key === 'gateway' &&
+                  setupStatus.gateway !== 'ok' &&
+                  setupStatus.gateway !== 'deploying'
+                }
+                aria-busy={
+                  boardDeployBusy &&
+                  item.key === 'gateway' &&
+                  setupStatus.gateway !== 'ok' &&
+                  setupStatus.gateway !== 'deploying'
+                }
                 title={
-                  boardDeployBusy && item.key === 'gateway' && setupStatus.gateway !== 'ok'
+                  boardDeployBusy &&
+                  item.key === 'gateway' &&
+                  setupStatus.gateway !== 'ok' &&
+                  setupStatus.gateway !== 'deploying'
                     ? t('oc.setup.actionDisabledDeploying', '部署进行中，请稍候')
                     : undefined
                 }
@@ -2248,11 +2290,13 @@ export default function OpenClaw() {
         )}
         {showSetupGuide && needsSetup() && (
           <div className="oc-setup-guide-hint">
-            {setupStatus.gateway !== 'ok'
-              ? (ocInstalled
-                ? t('oc.setup.hint.recoverGateway', 'OpenClaw 已安装，但网关还没有恢复起来。请点击上方「重启网关」，或在右侧面板保存一次配置以触发修复。')
-                : t('oc.setup.hint.needInstall', '请先安装 OpenClaw：使用「一键部署」或展开下方面板按步骤安装'))
-              : setupStatus.model !== 'ok'
+            {(deployRunning || deployCancelLoading)
+              ? t('oc.setup.hint.deploying', '正在执行一键部署，请稍候完成安装与配置写入。')
+              : setupStatus.gateway !== 'ok'
+                ? (ocInstalled
+                  ? t('oc.setup.hint.recoverGateway', 'OpenClaw 已安装，但网关还没有恢复起来。请点击上方「重启网关」，或在右侧面板保存一次配置以触发修复。')
+                  : t('oc.setup.hint.needInstall', '请先安装 OpenClaw：使用「一键部署」或展开下方面板按步骤安装'))
+                : setupStatus.model !== 'ok'
               ? t('oc.setup.hint.model', 'OpenClaw 已安装，请配置模型以启用对话')
               : t('oc.setup.hint.feishu', '基础配置已完成！可选配置飞书以接入消息渠道')}
             <button className="btn btn-ghost btn-sm" onClick={() => setShowSetupGuide(false)} style={{ fontSize: '0.75rem', marginLeft: 'auto' }}>{t('oc.setup.dismiss', '关闭引导')}</button>
@@ -2313,6 +2357,12 @@ export default function OpenClaw() {
               <span className={`badge ${deployPrecheck.npm === 'ok' ? 'badge-ok' : deployPrecheck.npm === 'fail' ? 'badge-danger' : 'badge-muted'}`}>npm:{deployPrecheck.npm}</span>
             </div>
             {deployPrecheck.detail ? <p className="oc-setup-wizard-precheck-detail">{deployPrecheck.detail}</p> : null}
+            <p className="oc-setup-wizard-micro">
+              {t(
+                'oc.deploy.precheck.notBlocking',
+                '预检仅作参考，不会禁用「开始部署」。尚未安装 OpenClaw 时，诊断里网关未运行、openclaw 未安装属预期。',
+              )}
+            </p>
           </div>
           <p className="oc-setup-wizard-micro">{t('oc.deploy.defaultConfigHint', '默认沿用 RDKClaw 当前模型配置；你也可以在下方手动覆盖。')}</p>
           <p className="oc-setup-wizard-studio-sync">{t('oc.deploy.syncedWithStudio', '模型与 Base URL 默认与 RDKClaw 设置中的当前模型对齐；若已保存 API Key，可直接部署无需重复填写。')}</p>
@@ -2659,12 +2709,15 @@ export default function OpenClaw() {
      Render - Main Dual View
      ═══════════════════════════════════════════ */
 
-  const ocLayoutWizardOnly = !ocInstalled;
+  /** 部署中或仍有步骤/日志时保持向导布局。否则 status 一旦显示「已安装」会切到主布局，向导内的安装日志整块被卸掉（切换标签回来时像「消失」）。 */
+  const ocLayoutDeployActive =
+    deployRunning || deployCancelLoading || deploySteps.length > 0;
+  const ocLayoutWizardOnly = !ocInstalled || ocLayoutDeployActive;
 
   return (
     <div
-      className={`oc-layout ${ocLayoutWizardOnly ? 'oc-layout--wizard' : ''} ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''} ${deployRunning ? 'oc-layout--deploying' : ''}`}
-      aria-busy={deployRunning}
+      className={`oc-layout ${ocLayoutWizardOnly ? 'oc-layout--wizard' : ''} ${!panelOpen ? 'panel-collapsed' : ''} ${mobilePanel ? 'panel-open-mobile' : ''} ${ocLayoutDeployActive ? 'oc-layout--deploying' : ''}`}
+      aria-busy={deployRunning || deployCancelLoading}
     >
       {ocLayoutWizardOnly ? (
         renderSetupWizard()

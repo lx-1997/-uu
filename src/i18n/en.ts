@@ -220,8 +220,8 @@ export const EN: Record<string, string> = {
   'settings.ai.quickLaneHint':
     'Quick mode uses a saved profile. Prefer the bundled system default (quick) or duplicate from depth; merge bundled presets first if options are missing. Edit key/model below and save.',
   'settings.ai.pickQuickModel': 'Choose a profile for quick replies',
-  'settings.ai.systemDefaultThinking': 'System default (deep)',
-  'settings.ai.systemDefaultQuick': 'System default (quick)',
+  'settings.ai.systemDefaultThinking': 'Bundled preset · Deep',
+  'settings.ai.systemDefaultQuick': 'Bundled preset · Quick',
   'settings.ai.systemDefaultRestoreHint':
     'If “system default” options are missing, use “Restore bundled default” below to merge presets into your saved list.',
   'settings.ai.quickDuplicateFromActive': 'Duplicate active profile for quick',
@@ -417,6 +417,7 @@ export const EN: Record<string, string> = {
   'dashboard.restartOnboarding': 'Restart onboarding',
   'dashboard.deviceOnline': 'Device online',
   'dashboard.deviceOffline': 'Device offline',
+  'dashboard.deviceModel': 'Model',
   'dashboard.devicePillHint':
     '"Online" means the backend successfully authenticated over SSH with the saved credentials for this device. Without a stored password or if auth fails, it shows offline—reconnect the device to save credentials.',
   'dashboard.rdkclaw.ok': 'RDKClaw service is running normally',
@@ -497,6 +498,18 @@ export const EN: Record<string, string> = {
 
   // VNC iframe load timeout
   'vnc.err.iframeTimeout': 'Remote desktop timed out — check network or retry',
+  'vnc.err.wsFailedDetail': 'Remote desktop failed to connect: {{detail}}',
+  'vnc.err.wsDroppedDetail': 'Remote desktop disconnected: {{detail}}',
+  'vnc.err.wsFailedUnknown':
+    'Remote desktop failed to connect (no detail). Check HTTPS/WebSocket, Studio backend, device IP, and port 5900.',
+  'vnc.err.wsDroppedUnknown': 'Remote desktop closed unexpectedly.',
+  'vnc.err.securityRejected': 'VNC security handshake rejected.',
+  'vnc.err.hintWs1005':
+    'Note: code 1005 means the WebSocket closed without a close frame (often network blip, proxy not forwarding WS, or TCP to VNC port reset). Check: VNC on 5900, LAN reachability, SSH tunnel + device online, reverse proxy WebSocket upgrade for /websockify.',
+  'vnc.err.hintWs1005NoX':
+    'If x11vnc is running but there is no X11 desktop session (no Xorg / no usable DISPLAY such as :0), there is nothing to mirror and the session may drop immediately with 1005. Verify a graphical session (Xorg or display manager) or start the desktop per your image docs (e.g. display-manager service, startx).',
+  'vnc.err.hintWs1006':
+    'Note: code 1006 is abnormal closure — often network drop or peer reset. Retry and check firewall / x11vnc on the device.',
 
   // Files status
   'files.status.connected': 'Connected to board via SSH',
@@ -525,7 +538,10 @@ export const EN: Record<string, string> = {
 
   // VNC enhanced toasts & error guidance
   'vnc.toast.port': 'VNC port not ready. Try: (1) Run sudo systemctl restart x11vnc in the terminal, (2) Confirm a desktop environment is installed on the board.',
-  'vnc.err.troubleshoot': 'Troubleshooting: (1) Confirm a desktop environment is installed, (2) Run sudo systemctl status x11vnc in the terminal, (3) Check if port 5900 is already in use.',
+  'vnc.err.troubleshoot':
+    'Troubleshooting: (1) A graphical session must exist (Xorg / DISPLAY); without a desktop, x11vnc has nothing to show and may disconnect with 1005. (2) Confirm a desktop environment is installed. (3) Run sudo systemctl status x11vnc. (4) Check if port 5900 is in use.',
+  'vnc.welcome.needDesktop':
+    'x11vnc mirrors an existing X11 desktop — if no graphical session is running on the board, connect may fail or show code 1005.',
 
   // Files empty state
   'files.empty.folder': 'This folder is empty',

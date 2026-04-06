@@ -2,7 +2,7 @@
  * Parse structured diagnostic output from the device into typed metrics.
  *
  * The diagnostic command emits sections delimited by markers like
- * ###TEMP###, ###MEM###, ###BPU###, ###SOMSTATUS###, ###UPTIME###, ###DISK###, ###TOP###.
+ * ###BOARD###, ###TEMP###, ###MEM###, ###DMEM### (dmesg 物理内存总量), ###BPU###, ###SOMSTATUS###, ###UPTIME###, ###DISK###, ###TOP###.
  */
 
 export interface DeviceMetrics {
@@ -31,6 +31,131 @@ export interface DeviceMetrics {
   swapPercent: number;
   /** 首页 AVAIL 格展示（含 swap 占用提示） */
   memAvailDisplay: string;
+  /**
+   * `dmesg` 中 `Memory: availK/totalK` 的板载物理总内存（`/totalK`），与 `free` 的 Mem total 可能不同（如 S100 大量 reserved）。
+   * 供首页 MEM 分母展示；未解析到时为 null。
+   */
+  memPhysicalTotalDisplay: string | null;
+  /** `board_id` 或设备树 model 行，未知或缺失为空串 */
+  boardModelFromProbe: string;
+}
+
+/** 解析诊断输出时传入板型，用于 S100 磁盘行选取等特殊逻辑 */
+export interface ParseMetricsOptions {
+  boardModel?: string | null;
+  boardPlatform?: string | null;
+}
+
+/** 与 `free -h` 风格接近：KiB（内核 dmesg）→ `12Gi` / `12.0Gi` */
+function formatKibToGiDisplay(kib: number): string {
+  if (!Number.isFinite(kib) || kib <= 0) return '--';
+  const gib = kib / 1024 / 1024;
+  if (gib >= 1024) return `${(gib / 1024).toFixed(1)}Ti`;
+  const rounded = Math.round(gib * 10) / 10;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return `${Math.round(rounded)}Gi`;
+  return `${rounded.toFixed(1)}Gi`;
+}
+
+/**
+ * 设备树 / 板型字段是否指向 S100（用于首页 MEM 分母用 dmesg 物理总量）。
+ */
+export function isS100BoardModel(
+  model: string | null | undefined,
+  boardPlatform?: string | null,
+): boolean {
+  if (String(boardPlatform || '').trim() === 'rdk-s100') return true;
+  const s = String(model || '').trim();
+  if (!s) return false;
+  if (/\bS100\b/i.test(s)) return true;
+  return /rdk[_-]?s100/i.test(s);
+}
+
+/**
+ * 已识别为 X3/X5/Ultra 等时，首页 MEM 分母应信 `free` 的 Mem total，勿用 dmesg 物理量覆盖。
+ */
+function isKnownNonS100RdkBoard(
+  model: string | null | undefined,
+  platform: string | null | undefined,
+): boolean {
+  const p = String(platform || '').trim().toLowerCase();
+  if (p === 'rdk-x5' || p === 'rdk-x3' || p === 'rdk-ultra') return true;
+  const s = String(model || '').trim();
+  if (!s || /\bS100\b/i.test(s)) return false;
+  if (/\bX5\b/i.test(s)) return true;
+  if (/\bX3\b/i.test(s)) return true;
+  if (/\bUltra\b/i.test(s)) return true;
+  return false;
+}
+
+/**
+ * dmesg 物理总量与 `free` 的 Mem total 明显不一致时（如 S100 大量 reserved），
+ * 即使未在设备列表里写入板型也应展示物理总量。
+ */
+function dmesgPhysicalExceedsFreeMemTotal(
+  physicalDisplay: string | null,
+  freeTotalDisplay: string,
+): boolean {
+  if (!physicalDisplay) return false;
+  const p = parseMemToMB(physicalDisplay);
+  const v = parseMemToMB(freeTotalDisplay);
+  if (p <= 0 || v <= 0) return false;
+  return p > v * 1.02;
+}
+
+/** 首页 MEM 格：`已用/总量`；S100 或 dmesg 物理量大于可见 Mem 时，分母为板载物理内存 */
+export function formatDashboardMemoryDisplay(
+  m: DeviceMetrics,
+  boardModel?: string | null,
+  boardPlatform?: string | null,
+): string {
+  if (m.memUsed === '--' || m.memTotal === '--') return '--';
+  const physical = m.memPhysicalTotalDisplay;
+  const usePhysical =
+    !!physical &&
+    (isS100BoardModel(boardModel, boardPlatform) ||
+      (!isKnownNonS100RdkBoard(boardModel, boardPlatform) &&
+        dmesgPhysicalExceedsFreeMemTotal(physical, m.memTotal)));
+  const total = usePhysical ? physical : m.memTotal;
+  return `${m.memUsed}/${total}`;
+}
+
+function normalizeBoardProbeLine(raw: string): string {
+  let s = String(raw || '').replace(/\0/g, '').trim();
+  if (!s || /^unknown$/i.test(s) || /^unknown-board$/i.test(s)) return '';
+  /** 与下一诊断段粘在同一行时截断，如 `…V1P0###UPTIME###` */
+  const hashIdx = s.indexOf('###');
+  if (hashIdx >= 0) s = s.slice(0, hashIdx).trim();
+  return s;
+}
+
+/**
+ * 仪表盘设备型号：统一为「RDK S100」「RDK X5」等短名；无法识别则返回空串。
+ */
+export function formatDashboardBoardModelDisplay(raw: string): string {
+  let s = normalizeBoardProbeLine(raw);
+  if (!s) return '';
+  s = s.replace(/^D[- ]?Robotics\s*/i, '').trim();
+  /** 硬件版本尾缀，如 V1P0、V01 */
+  s = s.replace(/\s+V\d+P\d+$/i, '').trim();
+  s = s.replace(/\s+V\d+$/i, '').trim();
+
+  if (/rdk[-_]?s100\b/i.test(s) || /\bS100\b/i.test(s)) return 'RDK S100';
+  if (/rdk[-_]?x5\b/i.test(s) || /\bX5\b/i.test(s)) return 'RDK X5';
+  if (/rdk[-_]?x3\b/i.test(s) || /\bX3\b/i.test(s)) return 'RDK X3';
+  if (/rdk[-_]?ultra\b/i.test(s) || /\bUltra\b/i.test(s)) return 'RDK Ultra';
+
+  const m = s.match(/\bRDK\s+([A-Za-z0-9]+)\b/i);
+  if (m) {
+    const key = m[1].toLowerCase();
+    const map: Record<string, string> = {
+      s100: 'RDK S100',
+      x5: 'RDK X5',
+      x3: 'RDK X3',
+      ultra: 'RDK Ultra',
+    };
+    if (map[key]) return map[key];
+  }
+  return '';
 }
 
 function parseMemToMB(str: string): number {
@@ -48,25 +173,20 @@ function swapUsedIsNonTrivial(used: string, total: string): boolean {
   return t > 0 && u >= 8;
 }
 
-/** `df -h` 数据行：优先挂载点 /userdata，其次 /（根分区） */
-function pickDfDiskLine(lines: string[], diskIdx: number): string | null {
-  const data: string[] = [];
-  for (let i = diskIdx + 1; i < lines.length; i += 1) {
-    const l = lines[i];
-    if (!l || l.startsWith('###')) break;
-    if (/^Filesystem\b/i.test(l)) continue;
-    if (!/\d+%/.test(l)) continue;
-    data.push(l);
-  }
-  const mnt = (row: string) => {
-    const p = row.trim().split(/\s+/);
-    return p.length ? p[p.length - 1] : '';
-  };
-  const userdata = data.find((row) => mnt(row) === '/userdata');
-  if (userdata) return userdata;
-  const root = data.find((row) => mnt(row) === '/');
-  if (root) return root;
-  return data[0] ?? null;
+/** 解析 `df -h` 的 Size/Used 列（如 `2.0G`、`28K`）为字节，无法识别时 NaN */
+function parseDfHumanSizeToBytes(s: string): number {
+  const m = s.trim().match(/^([\d.]+)\s*([KMGT])i?B?$/i);
+  if (!m) return NaN;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n) || n < 0) return NaN;
+  const u = m[2].toUpperCase();
+  const mult =
+    u === 'T' ? 1024 ** 4
+      : u === 'G' ? 1024 ** 3
+        : u === 'M' ? 1024 ** 2
+          : u === 'K' ? 1024
+            : NaN;
+  return n * mult;
 }
 
 /** 标准 `df -h`：… Size Used Avail Use% Mounted（挂载点为最后一列） */
@@ -80,6 +200,66 @@ function parseDfHLine(row: string): { total: string; used: string; pct: number }
   const total = parts[parts.length - 5];
   const used = parts[parts.length - 4];
   return { total, used, pct };
+}
+
+/**
+ * 无板型信息时的兜底：S100 等镜像上 `/userdata` 常为独立小分区（数 Gi），根 `/` 大得多；
+ * 若仍按「优先 userdata」会显示成 `28K/2.0G」类误导。满足下列条时改优先根分区：
+ * - `/userdata` 分区总容量 ≤ 8Gi
+ * - 根分区总容量 ≥ `/userdata` 的 6 倍
+ */
+function diskLayoutSuggestsPreferRootOverUserdata(
+  userdataRow: string,
+  rootRow: string,
+): boolean {
+  const u = parseDfHLine(userdataRow);
+  const r = parseDfHLine(rootRow);
+  if (!u || !r) return false;
+  const bu = parseDfHumanSizeToBytes(u.total);
+  const br = parseDfHumanSizeToBytes(r.total);
+  if (!Number.isFinite(bu) || !Number.isFinite(br) || bu <= 0 || br <= 0) return false;
+  const maxUserdataBytes = 8 * 1024 ** 3;
+  if (bu > maxUserdataBytes) return false;
+  if (br < bu * 6) return false;
+  return true;
+}
+
+/**
+ * `df -h` 数据行选取：
+ * - 默认：优先 `/userdata`，其次 `/`（根分区）
+ * - 已知 S100 板型：优先 `/`
+ * - 未知板型：`diskLayoutSuggestsPreferRootOverUserdata` 命中时优先 `/`（解决快捷连接未写入 boardModel 的情况）
+ */
+function pickDfDiskLine(
+  lines: string[],
+  diskIdx: number,
+  preferRootOverUserdata: boolean,
+): string | null {
+  const data: string[] = [];
+  for (let i = diskIdx + 1; i < lines.length; i += 1) {
+    const l = lines[i];
+    if (!l || l.startsWith('###')) break;
+    if (/^Filesystem\b/i.test(l)) continue;
+    if (!/\d+%/.test(l)) continue;
+    data.push(l);
+  }
+  const mnt = (row: string) => {
+    const p = row.trim().split(/\s+/);
+    return p.length ? p[p.length - 1] : '';
+  };
+  const userdata = data.find((row) => mnt(row) === '/userdata');
+  const root = data.find((row) => mnt(row) === '/');
+  const preferRoot =
+    preferRootOverUserdata
+    || Boolean(userdata && root && diskLayoutSuggestsPreferRootOverUserdata(userdata, root));
+  if (preferRoot) {
+    if (root) return root;
+    if (userdata) return userdata;
+  } else {
+    if (userdata) return userdata;
+    if (root) return root;
+  }
+  return data[0] ?? null;
 }
 
 /**
@@ -112,11 +292,25 @@ function parseTopCpuUsage(lines: string[]): { display: string; val: number } {
   return { display: '--', val: -1 };
 }
 
-export function parseMetrics(output: string): DeviceMetrics {
+export function parseMetrics(output: string, opts?: ParseMetricsOptions): DeviceMetrics {
   const rawLines = output.split(/\r?\n/).map((l) => l.trim());
   /** SSH 非零退出时尾部可能带 `[stderr]` / `[exit code: …]`，避免污染 somstatus/top 解析 */
   const cutIdx = rawLines.findIndex((l) => /^\[(stderr|exit code:)/i.test(l));
   const lines = cutIdx >= 0 ? rawLines.slice(0, cutIdx) : rawLines;
+
+  let boardModelFromProbe = '';
+  const boardIdx = lines.findIndex((l) => l === '###BOARD###');
+  if (boardIdx >= 0) {
+    for (let i = boardIdx + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (!line || line.startsWith('###')) break;
+      const n = normalizeBoardProbeLine(line);
+      if (n) {
+        boardModelFromProbe = n;
+        break;
+      }
+    }
+  }
 
   const findAfter = (marker: string) => {
     const idx = lines.findIndex(l => l === marker);
@@ -179,6 +373,26 @@ export function parseMetrics(output: string): DeviceMetrics {
   let memAvailDisplay = memAvailable;
   if (memAvailDisplay !== '--' && swapUsedIsNonTrivial(swapUsed, swapTotal)) {
     memAvailDisplay = `${memAvailable} · ${swapUsed} sw`;
+  }
+
+  // ── dmesg 板载物理总内存（`Memory: availK/totalK` 中 `/` 后为片上物理总量，可与 `free` 的 Mem 行 total 不同）──
+  const dmemIdx = lines.findIndex((l) => l === '###DMEM###');
+  let memPhysicalTotalDisplay: string | null = null;
+  if (dmemIdx >= 0) {
+    for (let i = dmemIdx + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.startsWith('###')) break;
+      if (!line) continue;
+      const phy = line.match(/Memory:\s*\d+K\/(\d+)K/i);
+      if (phy) {
+        const k = parseInt(phy[1], 10);
+        if (k > 0) {
+          const disp = formatKibToGiDisplay(k);
+          memPhysicalTotalDisplay = disp === '--' ? null : disp;
+        }
+        break;
+      }
+    }
   }
 
   // ── BPU (prefer SOMSTATUS, fallback to hrut_smi / bputop) ──
@@ -278,11 +492,13 @@ export function parseMetrics(output: string): DeviceMetrics {
 
   const { display: cpuUsage, val: cpuUsageVal } = parseTopCpuUsage(lines);
 
-  // ── Disk (`df -h`，优先 /userdata) ──
+  // ── Disk (`df -h`；默认优先 /userdata；S100 优先 /) ──
   const diskIdx = lines.findIndex(l => l === '###DISK###');
   let diskUsed = '--', diskTotal = '--', diskPercent = -1;
   if (diskIdx >= 0) {
-    const diskLine = pickDfDiskLine(lines, diskIdx);
+    const preferRootDisk =
+      isS100BoardModel(opts?.boardModel, opts?.boardPlatform);
+    const diskLine = pickDfDiskLine(lines, diskIdx, preferRootDisk);
     if (diskLine) {
       const parsed = parseDfHLine(diskLine);
       if (parsed) {
@@ -314,6 +530,8 @@ export function parseMetrics(output: string): DeviceMetrics {
     swapTotal,
     swapPercent,
     memAvailDisplay,
+    memPhysicalTotalDisplay,
+    boardModelFromProbe,
   };
 }
 

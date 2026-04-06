@@ -838,15 +838,25 @@ export default function Flasher() {
         /* 同上：不自动进入完成页，等待用户确认 */
       } else {
         const msg = result.error || t('flasher.err.xburnFlashFail', 'xburn 烧录失败');
-        setError(msg);
+        const xburnHint = t(
+          'flasher.hint.s100FlashFailUseXburn',
+          '可按指示使用 xburn（已自动安装）进行烧录；也可点击左侧「启动 xburn」按图形界面操作。',
+        );
+        setError(`${msg}\n\n${xburnHint}`);
         setPhase('error');
         if (result.logTail) appendLog(result.logTail);
+        appendLog(xburnHint);
         addToast(msg, 'error');
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      const xburnHint = t(
+        'flasher.hint.s100FlashFailUseXburn',
+        '可按指示使用 xburn（已自动安装）进行烧录；也可点击左侧「启动 xburn」按图形界面操作。',
+      );
+      setError(`${msg}\n\n${xburnHint}`);
       setPhase('error');
+      appendLog(xburnHint);
       addToast(msg, 'error');
     } finally {
       setLoading(false);

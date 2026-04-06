@@ -1,6 +1,9 @@
 #!/bin/bash
-# OpenClaw 完整安装脚本
-# 用于 RDK 开发板
+# OpenClaw 完整安装脚本（独立历史方案：@openclaw/gateway + systemd system + 默认 8080）
+#
+# RDK Studio 一键部署请以仓库内 server/managers/openclaw-board-install-sh.ts 为准：
+# npm 包 `openclaw`、网关 127.0.0.1:18789、loopback/local，与 UI 健康检查一致。
+# 请勿将与 Studio 混用同一板子时假定本脚本与面板行为等价。
 
 set -e  # 遇到错误立即退出
 
@@ -15,6 +18,9 @@ echo "=========================================="
 # 步骤 1: 检查 node 和 npm 版本
 echo ""
 echo "=== 步骤 1: 检查 Node.js 和 NPM 版本 ==="
+# NodeSource/apt 安装的 node 在 /usr/bin；若存在 /usr/local/bin/node 等旧版本，需让 apt 版本优先
+export PATH="/usr/bin:$PATH"
+hash -r 2>/dev/null || true
 if command -v node &> /dev/null; then
     NODE_VERSION=$(node --version)
     echo "Node.js 版本: $NODE_VERSION"
@@ -28,6 +34,8 @@ else
     elif command -v apt &> /dev/null; then
         curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
         apt-get install -y nodejs
+        export PATH="/usr/bin:$PATH"
+        hash -r 2>/dev/null || true
     else
         echo "无法自动安装 Node.js，请手动安装"
         exit 1

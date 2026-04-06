@@ -96,6 +96,8 @@ import {
   getBootstrapStudioDefaultPresetsMeta,
   getActiveProviderEntry,
   restoreStudioDefaultPresetFromBootstrap,
+  resyncBootstrapPresetEntryIfNeeded,
+  syncBootstrapPresetEntriesIntoRegistry,
   effectiveSamplingTemperature,
   effectiveSamplingTopP,
   type ProviderConfigRegistry,
@@ -480,8 +482,9 @@ const openClawManager = new OpenClawDeploymentManager(resourcesPath);
       clearIdle();
       ws.close();
     });
-    tcp.on('error', () => {
+    tcp.on('error', (err) => {
       clearIdle();
+      console.warn('[noVNC] tcp upstream error:', err instanceof Error ? err.message : err);
       ws.close();
     });
     ws.on('close', () => {
@@ -1757,6 +1760,8 @@ async function runOnDevice(
     joinWith?: RemoteCommandJoiner;
     /** 非零退出时仍返回 stdout（并可能含 stderr 摘要），供仪表盘解析部分指标 */
     rejectOnNonZeroExit?: boolean;
+    /** 技能全文等场景放大 SSH stdout 截断上限，避免 JSON 被截断导致解析失败 */
+    stdoutCharLimit?: number;
   },
 ) {
   invalidateDevicesReadCache();
@@ -1781,6 +1786,7 @@ async function runOnDevice(
   const timeoutMs = Math.max(5_000, Number(options?.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
   const joinWith = options?.joinWith;
   const rejectOnNonZeroExit = options?.rejectOnNonZeroExit;
+  const stdoutCharLimit = options?.stdoutCharLimit;
   let lastError: unknown = null;
   const output = await runInDeviceLane(device.id, async () => {
     for (const pwd of candidates) {
@@ -1794,7 +1800,7 @@ async function runOnDevice(
               password: pwd,
             },
             commands,
-            { timeoutMs, joinWith, rejectOnNonZeroExit },
+            { timeoutMs, joinWith, rejectOnNonZeroExit, ...(stdoutCharLimit ? { stdoutCharLimit } : {}) },
           );
           setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
           return result;
@@ -1952,7 +1958,6 @@ const uploadLimiter = rateLimit({
   message: { error: '上传请求过于频繁' },
 });
 app.use('/api/', apiLimiter);
-app.use('/api/devices/connect', authLimiter);
 app.use('/api/sso/', authLimiter);
 app.use('/api/agent/upload-attachment', uploadLimiter);
 
@@ -2106,7 +2111,7 @@ function triggerBackgroundProvision(deviceId: string, values: Record<string, str
   if (!codeInstalled && !active.has('code-server')) {
     tasks.push({
       key: 'code-server',
-      cmd: 'bash -lc \'test -f /tmp/.rdkstudio-bg-codeserver && exit 0; touch /tmp/.rdkstudio-bg-codeserver; nohup bash -c "curl -fsSL https://code-server.dev/install.sh | sh 2>&1; rm -f /tmp/.rdkstudio-bg-codeserver" > /tmp/.rdkstudio-bg-codeserver.log 2>&1 &\'',
+      cmd: 'bash -lc \'test -f /tmp/.rdkstudio-bg-codeserver && exit 0; touch /tmp/.rdkstudio-bg-codeserver; nohup bash -c "if command -v curl >/dev/null 2>&1; then curl -fsSL https://code-server.dev/install.sh | sh; elif command -v wget >/dev/null 2>&1; then wget -qO- https://code-server.dev/install.sh | sh; else echo curl/wget missing; fi; rm -f /tmp/.rdkstudio-bg-codeserver" > /tmp/.rdkstudio-bg-codeserver.log 2>&1 &\'',
     });
   }
 
@@ -3235,7 +3240,7 @@ app.post('/api/openclaw/agent-action', async (request, response) => {
   }
   const safeModel = shellEscape(targetModel);
   const commandMap: Record<'start' | 'status' | 'switch' | 'install' | 'logs', string> = {
-    install: `bash -lc '(command -v npm >/dev/null 2>&1 && CI= npm install -g openclaw@${OPENCLAW_BOARD_NPM_SPEC} --no-audit --no-fund) || (curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard || curl -fsSL https://code-server.dev/install.sh | sh || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
+    install: `bash -lc '(command -v npm >/dev/null 2>&1 && CI= npm install -g openclaw@${OPENCLAW_BOARD_NPM_SPEC} --no-audit --no-fund) || ((command -v curl >/dev/null 2>&1 && curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard) || (command -v wget >/dev/null 2>&1 && wget -qO- https://openclaw.ai/install.sh | bash -s -- --no-onboard) || (command -v curl >/dev/null 2>&1 && curl -fsSL https://code-server.dev/install.sh | sh) || (command -v wget >/dev/null 2>&1 && wget -qO- https://code-server.dev/install.sh | sh) || true); (openclaw --version || clawctl --version || echo "openclaw install command finished")'`,
     start: `bash -lc '(openclaw gateway start --port ${OPENCLAW_GATEWAY_PORT} || openclaw start || clawctl start || true); (openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     status: `bash -lc '(openclaw status || clawctl status || ps -ef | grep -E "openclaw|claw" | grep -v grep || true)'`,
     switch: `bash -lc '(openclaw model use ${safeModel} || clawctl model use ${safeModel} || echo "switch command unavailable"); (openclaw status || clawctl status || true)'`,
@@ -3491,7 +3496,7 @@ async function executeOpenClawDeployJob(
     broadcastDeployJobToSse(job);
     appendDeployOutput(
       job,
-      `\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n ${OPENCLAW_DEPLOY_STEP_TITLE[step]}\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n`,
+      `\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n${OPENCLAW_DEPLOY_STEP_TITLE[step]}\n${OPENCLAW_DEPLOY_LOG_DIVIDER}\n`,
     );
     const result = await runner();
     if (!result.ok) {
@@ -4193,6 +4198,56 @@ app.get('/api/devices/:id/openclaw/skills', async (request, response) => {
   });
 });
 
+/** 解析套件端 skill 读取脚本的 stdout：兼容 motd 等多余行、旧版纯 JSON 正文、以及 content_b64 */
+function parseBoardSkillRemoteStdout(raw: string): {
+  ok: boolean;
+  path?: string;
+  content?: string;
+  err?: string;
+} | null {
+  const text = String(raw || '').trim();
+  const tryParse = (s: string): Record<string, unknown> | null => {
+    try {
+      return JSON.parse(s) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  };
+  let row = tryParse(text);
+  if (!row) {
+    for (const line of text.split('\n').reverse()) {
+      const t = line.trim();
+      if (t.startsWith('{')) {
+        row = tryParse(t);
+        if (row) break;
+      }
+    }
+  }
+  if (!row) {
+    const m = text.match(/\{[\s\S]*\}/);
+    if (m) row = tryParse(m[0]);
+  }
+  if (!row) return null;
+
+  if (row.err === 'no_python') {
+    return { ok: false, err: '套件端未安装 python3/python，无法读取技能文件' };
+  }
+
+  const path = typeof row.path === 'string' ? row.path : '';
+  const ok = row.ok === true;
+  let content = '';
+  if (typeof row.content_b64 === 'string' && row.content_b64.length > 0) {
+    try {
+      content = Buffer.from(row.content_b64, 'base64').toString('utf-8');
+    } catch {
+      content = '';
+    }
+  } else if (typeof row.content === 'string') {
+    content = row.content;
+  }
+  return { ok, path, content };
+}
+
 app.get('/api/devices/:id/openclaw/skill-content', async (request, response) => {
   const { id } = request.params;
   const skillIdRaw = String(request.query.skillId || '').trim();
@@ -4201,25 +4256,35 @@ app.get('/api/devices/:id/openclaw/skill-content', async (request, response) => 
     return;
   }
 
-  const run = await runOnDevice(request, response, id, [
-    `bash -lc "python3 -c \\"import base64,sys,os,json;raw=base64.b64decode(sys.argv[1]).decode('utf-8','ignore').strip();_b=['/opt/openclaw/skills',os.path.expanduser('~/.openclaw/workspace/skills'),os.path.expanduser('~/skills'),'/root/.openclaw/workspace/skills','/root/skills'];bases=[];[bases.append(x) for x in _b if x not in bases];c=[raw,raw.split()[0] if raw else '',raw.replace('openclaw.','',1), (raw.split()[0] if raw else '').replace('openclaw.','',1)];cand=[];[cand.append(x) for x in c if x and x not in cand];found='';\nfor base in bases:\n  if not os.path.isdir(base):\n    continue\n  paths=[]\n  [paths.extend([f'{base}/{x}/SKILL.md',f'{base}/{x}/skill.md']) for x in cand]\n  for p in paths:\n    if os.path.isfile(p):\n      found=p\n      break\n  if found:\n    break\n  dirs=sorted(os.listdir(base))\n  for x in cand:\n    m=''\n    for d in dirs:\n      if d==x or d.startswith(x):\n        m=d\n        break\n    if m:\n      for p in (f'{base}/{m}/SKILL.md',f'{base}/{m}/skill.md'):\n        if os.path.isfile(p):\n          found=p\n          break\n    if found:\n      break\n  if found:\n    break\ncontent=''\nif found:\n  try:\n    content=open(found,'r',encoding='utf-8',errors='ignore').read()\n  except Exception:\n    content=''\nprint(json.dumps({'ok':bool(found),'path':found,'content':content}, ensure_ascii=False))\\" '${Buffer.from(skillIdRaw).toString('base64')}'"`,
-  ]);
+  const run = await runOnDevice(
+    request,
+    response,
+    id,
+    [
+      `bash -lc "python3 -c \\"import base64,sys,os,json;raw=base64.b64decode(sys.argv[1]).decode('utf-8','ignore').strip();_b=['/opt/openclaw/skills',os.path.expanduser('~/.openclaw/workspace/skills'),os.path.expanduser('~/skills'),'/root/.openclaw/workspace/skills','/root/skills'];bases=[];[bases.append(x) for x in _b if x not in bases];c=[raw,raw.split()[0] if raw else '',raw.replace('openclaw.','',1), (raw.split()[0] if raw else '').replace('openclaw.','',1)];cand=[];[cand.append(x) for x in c if x and x not in cand];found='';\nfor base in bases:\n  if not os.path.isdir(base):\n    continue\n  paths=[]\n  [paths.extend([f'{base}/{x}/SKILL.md',f'{base}/{x}/skill.md']) for x in cand]\n  for p in paths:\n    if os.path.isfile(p):\n      found=p\n      break\n  if found:\n    break\n  dirs=sorted(os.listdir(base))\n  for x in cand:\n    m=''\n    for d in dirs:\n      if d==x or d.startswith(x):\n        m=d\n        break\n    if m:\n      for p in (f'{base}/{m}/SKILL.md',f'{base}/{m}/skill.md'):\n        if os.path.isfile(p):\n          found=p\n          break\n    if found:\n      break\n  if found:\n    break\ncontent_b64=''\nif found:\n  try:\n    content_b64=base64.b64encode(open(found,'rb').read()).decode('ascii')\n  except Exception:\n    content_b64=''\nprint(json.dumps({'ok':bool(found),'path':found,'content_b64':content_b64}, ensure_ascii=False))\\" '${Buffer.from(skillIdRaw).toString('base64')}'"`,
+    ],
+    { stdoutCharLimit: 2_000_000 },
+  );
   if (!run) return;
 
   const text = String(run.output || '').trim();
-  try {
-    const parsed = JSON.parse(text) as { ok?: boolean; path?: string; content?: string };
-    if (!parsed.ok) {
-      sendApiError(response, 404, 'SKILL_CONTENT_NOT_FOUND', `未找到 skill 内容: ${skillIdRaw}`, { retryable: false });
-      return;
-    }
-    response.json({ ok: true, path: parsed.path || '', content: parsed.content || '' });
-  } catch {
-    sendApiError(response, 500, 'SKILL_CONTENT_PARSE_FAILED', 'skill 内容解析失败', {
+  const parsed = parseBoardSkillRemoteStdout(text);
+  if (!parsed) {
+    sendApiError(response, 500, 'SKILL_CONTENT_PARSE_FAILED', 'skill 内容解析失败（远端输出非 JSON 或已被截断）', {
       retryable: true,
-      details: { raw: text },
+      details: { rawHead: text.slice(0, 2_000) },
     });
+    return;
   }
+  if (parsed.err) {
+    sendApiError(response, 500, 'SKILL_READ_NO_PYTHON', parsed.err, { retryable: false });
+    return;
+  }
+  if (!parsed.ok) {
+    sendApiError(response, 404, 'SKILL_CONTENT_NOT_FOUND', `未找到 skill 内容: ${skillIdRaw}`, { retryable: false });
+    return;
+  }
+  response.json({ ok: true, path: parsed.path || '', content: parsed.content || '' });
 });
 
 app.post('/api/devices/:id/openclaw/skill-write', async (request, response) => {
@@ -5562,6 +5627,8 @@ app.get('/api/agent/config', (_request, response) => {
     ? {
         id: bootstrapPresets.thinking.id,
         label: bootstrapPresets.thinking.label,
+        model: bootstrapPresets.thinking.model,
+        provider: bootstrapPresets.thinking.provider,
         inRegistry: registry.entries.some((e) => e.id === bootstrapPresets.thinking.id),
         isActive: registry.activeId === bootstrapPresets.thinking.id,
       }
@@ -5571,6 +5638,8 @@ app.get('/api/agent/config', (_request, response) => {
     ? {
         id: quickBootstrap.id,
         label: quickBootstrap.label,
+        model: quickBootstrap.model,
+        provider: quickBootstrap.provider,
         inRegistry: registry.entries.some((e) => e.id === quickBootstrap.id),
         isQuickLane: (registry.quickActiveId?.trim() || null) === quickBootstrap.id,
       }
@@ -5717,7 +5786,15 @@ app.post('/api/agent/config/vendor-ping', async (request, response) => {
 
 app.post('/api/agent/config', (request, response) => {
   const body = (request.body ?? {}) as {
-    action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset' | 'set_openclaw_delegate';
+    action?:
+      | 'upsert'
+      | 'switch'
+      | 'switch_quick'
+      | 'duplicate_for_quick'
+      | 'delete'
+      | 'restore_bootstrap_preset'
+      | 'sync_bootstrap_preset_rows'
+      | 'set_openclaw_delegate';
     /** duplicate_for_quick：源条目 id，缺省为当前 active */
     sourceId?: string;
     id?: string;
@@ -5734,6 +5811,13 @@ app.post('/api/agent/config', (request, response) => {
   };
 
   const action = body.action || 'upsert';
+  if (action === 'sync_bootstrap_preset_rows') {
+    const reg = loadProviderRegistry();
+    const next = syncBootstrapPresetEntriesIntoRegistry(reg);
+    saveProviderRegistry(next);
+    response.json({ ok: true });
+    return;
+  }
   if (action === 'restore_bootstrap_preset') {
     const result = restoreStudioDefaultPresetFromBootstrap();
     if (!result.ok) {
@@ -5763,6 +5847,7 @@ app.post('/api/agent/config', (request, response) => {
       response.status(400).json({ error: '缺少模型 ID' });
       return;
     }
+    resyncBootstrapPresetEntryIfNeeded(id);
     const registry = loadProviderRegistry();
     const entry = registry.entries.find((item) => item.id === id);
     if (!entry) {
@@ -5814,7 +5899,7 @@ app.post('/api/agent/config', (request, response) => {
   if (action === 'switch_quick') {
     const rawId = body.id !== undefined && body.id !== null ? String(body.id).trim() : '';
     let id = rawId;
-    const registry = loadProviderRegistry();
+    let registry = loadProviderRegistry();
     if (!id) {
       const presets = getBootstrapStudioDefaultPresetsMeta();
       const bid = presets?.quick?.id?.trim();
@@ -5835,6 +5920,18 @@ app.post('/api/agent/config', (request, response) => {
         response.status(400).json({ error: '目标模型未配置 API Key' });
         return;
       }
+    }
+    resyncBootstrapPresetEntryIfNeeded(id);
+    registry = loadProviderRegistry();
+    if (!registry.entries.some((e) => e.id === id)) {
+      response.status(404).json({ error: '模型不存在' });
+      return;
+    }
+    const quickEnt = registry.entries.find((e) => e.id === id)!;
+    const quickKey = quickEnt.apiKey?.trim() || String(process.env.OPENAI_API_KEY || '').trim();
+    if (!quickKey) {
+      response.status(400).json({ error: '目标模型未配置 API Key' });
+      return;
     }
     if (!switchQuickActiveProviderConfig(id)) {
       response.status(404).json({ error: '快速回答模型设置失败' });

@@ -283,6 +283,14 @@
   line-height: 1.45;
 }
 
+.immersive-welcome-desc--note {
+  margin-top: 6px;
+  max-width: 420px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  opacity: 0.92;
+}
+
 /* ── Error ── */
 .immersive-error {
   display: flex;

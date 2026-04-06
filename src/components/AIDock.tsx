@@ -1699,6 +1699,16 @@ export default function AIDock() {
       return true;
     }
   });
+  /** 工作台首页：默认显示 Dock；用户点过「隐藏」后持久化偏好 */
+  const [hideDockInDashboard, setHideDockInDashboard] = useState<boolean>(() => {
+    try {
+      const userSet = localStorage.getItem('rdk:dock:hide-dashboard:user-set') === '1';
+      if (!userSet) return false;
+      return localStorage.getItem('rdk:dock:hide-dashboard') === '1';
+    } catch {
+      return false;
+    }
+  });
   /** 产品固定：完整展示 + 单列顺行；顶栏不再展示模式标签 */
   const minimalResultMode = false;
   const agentTurnLayout = true;
@@ -2275,6 +2285,14 @@ export default function AIDock() {
     }
   }, [hideDockInSubpage]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('rdk:dock:hide-dashboard', hideDockInDashboard ? '1' : '0');
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [hideDockInDashboard]);
+
   const streamScrollNearBottom = useCallback((el: HTMLElement, thresholdPx = 72) => {
     const gap = el.scrollHeight - el.clientHeight - el.scrollTop;
     return gap <= thresholdPx;
@@ -2477,7 +2495,9 @@ export default function AIDock() {
 
   const isFlasherTab = activeTab === 'flasher';
   const isSubpageTab = activeTab !== 'dashboard';
-  const shouldHideDock = isSubpageTab && hideDockInSubpage;
+  const isDashboardTab = activeTab === 'dashboard';
+  const shouldHideDock =
+    (isSubpageTab && hideDockInSubpage) || (isDashboardTab && hideDockInDashboard);
   const useAgentColumnFlow = agentTurnLayout;
   const useSubpageCompact = chatExpanded && isSubpageTab && !workspaceMode;
 
@@ -2566,7 +2586,24 @@ export default function AIDock() {
     setShowAllMessages(false);
   };
 
-  const toggleSubpageDockVisibility = () => {
+  const toggleDockVisibility = () => {
+    if (isDashboardTab) {
+      try {
+        localStorage.setItem('rdk:dock:hide-dashboard:user-set', '1');
+      } catch {
+        // ignore localStorage errors
+      }
+      setHideDockInDashboard((prev) => {
+        const next = !prev;
+        if (next) {
+          setChatExpanded(false);
+          setWorkspaceMode(false);
+          setShowSuggestions(false);
+        }
+        return next;
+      });
+      return;
+    }
     if (!isSubpageTab) return;
     try {
       localStorage.setItem('rdk:dock:hide-subpage:user-set', '1');
@@ -2585,10 +2622,20 @@ export default function AIDock() {
   };
 
   useEffect(() => {
-    if (!isSubpageTab || !hideDockInSubpage) return;
+    const hideSub = isSubpageTab && hideDockInSubpage;
+    const hideDash = isDashboardTab && hideDockInDashboard;
+    if (!hideSub && !hideDash) return;
     if (chatExpanded) setChatExpanded(false);
     if (workspaceMode) setWorkspaceMode(false);
-  }, [isSubpageTab, hideDockInSubpage, chatExpanded, workspaceMode, setChatExpanded]);
+  }, [
+    isSubpageTab,
+    hideDockInSubpage,
+    isDashboardTab,
+    hideDockInDashboard,
+    chatExpanded,
+    workspaceMode,
+    setChatExpanded,
+  ]);
 
   const renderDockStreamMessageBubble = (
     msg: ChatMessage,
@@ -2876,7 +2923,10 @@ export default function AIDock() {
         type="button"
         className="dock-restore-btn"
         title={t('dock.tt.restoreDock', '显示对话栏')}
-        onClick={() => setHideDockInSubpage(false)}
+        onClick={() => {
+          if (isDashboardTab) setHideDockInDashboard(false);
+          else setHideDockInSubpage(false);
+        }}
       >
         {t('dock.restore', '显示对话区')}
       </button>
@@ -2981,11 +3031,11 @@ export default function AIDock() {
                       <span className="dock-header-toolbtn-label">{t('dock.header.popoutShort', '弹窗')}</span>
                     </button>
                   )}
-                  {isSubpageTab && (
+                  {(isSubpageTab || isDashboardTab) && (
                     <button
                       type="button"
                       className="dock-header-toolbtn"
-                      onClick={toggleSubpageDockVisibility}
+                      onClick={toggleDockVisibility}
                       title={t('dock.tt.hideDock', '隐藏对话栏')}
                       aria-label={t('dock.header.hideDock', '隐藏对话区')}
                     >
@@ -3283,11 +3333,11 @@ export default function AIDock() {
               {Icon.expand}
             </button>
           )}
-          {isSubpageTab && (
+          {(isSubpageTab || isDashboardTab) && (
             <button
               type="button"
               className="dock-action-btn"
-              onClick={toggleSubpageDockVisibility}
+              onClick={toggleDockVisibility}
               title={t('dock.tt.hideDock', '隐藏对话栏')}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

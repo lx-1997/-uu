@@ -16,11 +16,21 @@ import {
 /* ── code-server 默认端口（设备侧） ── */
 const CODE_SERVER_PORT = 9888;
 
-/* ── 安装 code-server 的远程命令（与旧版 operate_vscode_server.json 一致） ── */
+/* ── 安装 code-server：优先 curl，无则用 wget；均无且存在 apt/sudo 时再尝试安装 curl（精简镜像常见无 curl） ── */
+const DOWNLOAD_CODE_SERVER_DEB =
+  'CS_DEB="$HOME/.cache/code-server/code-server_arm64.deb" && CS_URL=\'https://rdkstudio.bj.bcebos.com/appspace/codeserver/code-server_4.96.2_arm64.deb\' && ' +
+  'if command -v curl >/dev/null 2>&1; then curl -#fL -o "$CS_DEB" -C - "$CS_URL"; ' +
+  'elif command -v wget >/dev/null 2>&1; then wget -c -O "$CS_DEB" "$CS_URL"; ' +
+  'elif command -v apt-get >/dev/null 2>&1 && { [ "$(id -u)" -eq 0 ] || command -v sudo >/dev/null 2>&1; }; then ' +
+  'if [ "$(id -u)" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y curl; ' +
+  'else sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y curl; fi && ' +
+  'curl -#fL -o "$CS_DEB" -C - "$CS_URL"; ' +
+  'else echo "curl or wget required"; exit 127; fi';
+
 const INSTALL_CMD = [
   "echo 'Installing code-server...'",
   'mkdir -p ~/.cache/code-server',
-  'curl -#fL -o ~/.cache/code-server/code-server_arm64.deb -C - https://rdkstudio.bj.bcebos.com/appspace/codeserver/code-server_4.96.2_arm64.deb',
+  DOWNLOAD_CODE_SERVER_DEB,
   'sudo dpkg -i ~/.cache/code-server/code-server*.deb',
   'rm -f ~/.cache/code-server/code-server*.deb',
   'code-server --version',

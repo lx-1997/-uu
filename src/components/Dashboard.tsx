@@ -24,7 +24,7 @@ import {
   DEVICE_POLL_PHASE_DIAGNOSTICS_MS,
   DEVICE_POLL_PHASE_STUDIO_BACKEND_MS,
 } from '../constants';
-import { parseMetrics } from '../utils/diagnostics';
+import { formatDashboardBoardModelDisplay, formatDashboardMemoryDisplay, parseMetrics } from '../utils/diagnostics';
 import { isDeviceShownOnline } from '../utils/device-connection';
 import { fetchWifiLinkState } from '../utils/wifi-link-probe';
 import {
@@ -253,6 +253,8 @@ export default function Dashboard() {
     cpuVal: -1,
     bpuVal: -1,
     diskPct: -1,
+    /** 诊断 SSH 采集的板型字符串；与设备列表已保存的 boardModel 二选一展示 */
+    boardModelProbe: '',
   });
   const [wsHealth, setWsHealth] = useState<Record<string, WorkspaceModule> | null>(null);
   const [deviceNetUp, setDeviceNetUp] = useState<boolean | null>(null);
@@ -304,6 +306,7 @@ export default function Dashboard() {
       cpuVal: -1,
       bpuVal: -1,
       diskPct: -1,
+      boardModelProbe: '',
     });
   }, [effectiveDevice?.id, effectiveDevice?.status, effectiveDevice?.sshSessionVerified]);
 
@@ -332,6 +335,7 @@ export default function Dashboard() {
             cpuVal: -1,
             bpuVal: -1,
             diskPct: -1,
+            boardModelProbe: '',
           });
         }
         return;
@@ -339,9 +343,15 @@ export default function Dashboard() {
       fetchDeviceDiagnostics(deviceId, { fresh })
         .then((r) => {
           if (cancelled) return;
-          const m = parseMetrics(r.output);
-          const memory =
-            m.memUsed !== '--' && m.memTotal !== '--' ? `${m.memUsed}/${m.memTotal}` : '--';
+          const m = parseMetrics(r.output, {
+            boardModel: effectiveDevice.boardModel,
+            boardPlatform: effectiveDevice.boardPlatform,
+          });
+          const memory = formatDashboardMemoryDisplay(
+            m,
+            effectiveDevice.boardModel,
+            effectiveDevice.boardPlatform,
+          );
           const disk =
             m.diskUsed !== '--' && m.diskTotal !== '--' ? `${m.diskUsed}/${m.diskTotal}` : '--';
           setMetrics({
@@ -356,6 +366,7 @@ export default function Dashboard() {
             cpuVal: m.cpuUsageVal,
             bpuVal: m.bpuValue,
             diskPct: m.diskPercent,
+            boardModelProbe: m.boardModelFromProbe,
           });
         })
         .catch(() => {
@@ -372,6 +383,7 @@ export default function Dashboard() {
               cpuVal: -1,
               bpuVal: -1,
               diskPct: -1,
+              boardModelProbe: '',
             });
           }
         });
@@ -540,6 +552,10 @@ export default function Dashboard() {
     );
   }
 
+  const boardModelDisplay = formatDashboardBoardModelDisplay(
+    String(effectiveDevice.boardModel || '').trim() || metrics.boardModelProbe.trim(),
+  );
+
   const stats = [
     { key: 'mem', val: metrics.memory, label: t('dashboard.metric.mem', 'MEM'), warn: metrics.memPct >= 90 },
     { key: 'temp', val: metrics.temp, label: t('dashboard.metric.temp', 'TEMP'), warn: metrics.tempC >= 85 },
@@ -613,7 +629,12 @@ export default function Dashboard() {
           </span>
         </div>
         <h1 className="lp-device-name">{effectiveDevice.name}</h1>
-        <p className="lp-device-ip">{effectiveDevice.ip}</p>
+        {boardModelDisplay && (
+          <p className="lp-device-model" title={boardModelDisplay}>
+            <span className="lp-device-model-label">{t('dashboard.deviceModel', '设备型号')}</span>
+            <span className="lp-device-model-value">{boardModelDisplay}</span>
+          </p>
+        )}
         {deviceNetUp === false && deviceChannelOk && (
           <p className="lp-network-warn" style={{ color: 'var(--color-accent, #e67e22)', fontSize: '0.82rem', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>

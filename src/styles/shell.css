@@ -924,24 +924,7 @@
   height: 18px;
 }
 
-/* 顶栏 WiFi：已连接绿 / 未连红（与状态探测一致） */
-.btn-icon.topbar-wifi-btn--up {
-  color: var(--ok);
-}
-
-.btn-icon.topbar-wifi-btn--up:hover {
-  color: var(--ok);
-  background: var(--ok-subtle);
-}
-
-.btn-icon.topbar-wifi-btn--down {
-  color: var(--danger);
-}
-
-.btn-icon.topbar-wifi-btn--down:hover {
-  color: var(--danger);
-  background: var(--danger-subtle);
-}
+/* 顶栏 WiFi 颜色见 components.css（须在 .btn-icon 之后，保证覆盖） */
 
 .btn-icon.topbar-wifi-btn--alert {
   animation: wifi-alert-pulse 2s ease-in-out infinite;

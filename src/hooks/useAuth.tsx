@@ -111,7 +111,7 @@ interface AuthState {
   ssoConfigured: boolean;
   user: SSOUser | null;
   loginUrl: string | null;
-  refresh: () => Promise<void>;
+  refresh: (opts?: { signal?: AbortSignal }) => Promise<void>;
   /** 桌面环回 /api/sso/bootstrap 成功后立即写入，避免紧随其后的 refresh 因 Cookie/镜像时序误清会话 */
   adoptBootstrapSession: (user: SSOUser, sessionId: string) => void;
   logout: () => Promise<void>;
@@ -155,6 +155,22 @@ function clearUserSnapshot(): void {
   }
 }
 
+/** 合并 AbortSignal：任一 abort 则返回的 signal 触发 abort（Chromium 有 AbortSignal.any 时优先使用） */
+function mergeAbortSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
+  if (typeof AbortSignal !== 'undefined' && typeof (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any === 'function') {
+    return (AbortSignal as unknown as { any: (s: AbortSignal[]) => AbortSignal }).any([a, b]);
+  }
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  if (a.aborted || b.aborted) {
+    ctrl.abort();
+    return ctrl.signal;
+  }
+  a.addEventListener('abort', onAbort, { once: true });
+  b.addEventListener('abort', onAbort, { once: true });
+  return ctrl.signal;
+}
+
 /**
  * 必须在 App 根部包裹，使 SSOGate 与 SsoLoginScreen 共享同一套 user；
  * 否则登录页内 refresh() 只更新本组件 state，门禁一直认为未登录。
@@ -169,8 +185,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [logoutUiPhase, setLogoutUiPhase] = useState<LogoutUiPhase>(null);
   /** 上次由 /api/sso/me 确认的用户；用于避免瞬时网络/丢 Cookie 导致误清登录态（内存 + 冷启动时从 snapshot 回补） */
   const lastConfirmedUserRef = useRef<SSOUser | null>(null);
+  /**
+   * 并发/超时取消：每次新 refresh 或 adoptBootstrapSession 会递增；过期的 refresh 不再 setState，
+   * 避免首屏 boot 超时后仍把界面写回「已登录」或卡在验证态。
+   */
+  const refreshGenRef = useRef(0);
 
   const adoptBootstrapSession = useCallback((nextUser: SSOUser, sessionId: string) => {
+    refreshGenRef.current += 1;
     lastConfirmedUserRef.current = nextUser;
     writeUserSnapshot(nextUser);
     setSsoSessionMirror(sessionId);
@@ -179,23 +201,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSsoRequired(true);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { signal?: AbortSignal }) => {
+    const gen = (refreshGenRef.current += 1);
+    const stale = () => gen !== refreshGenRef.current;
+    const bootSignal = opts?.signal;
+
     if (!lastConfirmedUserRef.current) {
       const snap = readUserSnapshotIfMirrored();
       if (snap) lastConfirmedUserRef.current = snap;
     }
 
-    const SSO_FETCH_MS = 12_000;
+    /** 单次请求上限；首屏另传 bootSignal，总时长由 boot 的 AbortController 截断 */
+    const SSO_FETCH_MS = 10_000;
     const PAIR_RETRIES = 3;
     const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
     const fetchSso = (path: string) => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), SSO_FETCH_MS);
-      return fetchApi(path, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+      const signal = bootSignal ? mergeAbortSignals(ctrl.signal, bootSignal) : ctrl.signal;
+      return fetchApi(path, { signal }).finally(() => clearTimeout(timer));
     };
 
     const parseMeLoginPair = async () => {
+      if (stale()) throw new Error('SSO refresh superseded');
       const [meRes, loginRes] = await Promise.all([fetchSso('/api/sso/me'), fetchSso('/api/sso/login')]);
       const meData = (await meRes.json()) as {
         enabled?: boolean;
@@ -218,13 +247,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         pair = await parseMeLoginPair();
         break;
-      } catch {
+      } catch (err) {
+        if (stale()) return;
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw err;
+        }
         if (attempt < PAIR_RETRIES - 1) {
           await wait(350 * (attempt + 1));
           continue;
         }
         if (lastConfirmedUserRef.current) {
-          setUser((prev) => prev ?? lastConfirmedUserRef.current);
+          if (!stale()) setUser((prev) => prev ?? lastConfirmedUserRef.current);
           return;
         }
         const mirrorOnly = !!getSsoSessionMirrorId();
@@ -237,10 +270,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               configured?: boolean;
               loginUrl?: string;
             };
-            setSsoEnabled(!!loginData.enabled);
-            setSsoRequired(!!loginData.required);
-            setSsoConfigured(!!loginData.configured);
-            setLoginUrl(loginData.loginUrl ?? null);
+            if (!stale()) {
+              setSsoEnabled(!!loginData.enabled);
+              setSsoRequired(!!loginData.required);
+              setSsoConfigured(!!loginData.configured);
+              setLoginUrl(loginData.loginUrl ?? null);
+            }
           } catch {
             /* keep prior flags */
           }
@@ -251,6 +286,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!pair) return;
+    if (stale()) return;
 
     const { meData, loginData } = pair;
     const enabled = !!(meData.enabled || loginData.enabled);
@@ -259,17 +295,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const fetchedLoginUrl = loginData.loginUrl ?? null;
     let fetchedUser = meData.user ?? null;
 
-    setSsoEnabled(enabled);
-    setSsoRequired(required);
-    setSsoConfigured(configured);
-    setLoginUrl(fetchedLoginUrl);
+    if (!stale()) {
+      setSsoEnabled(enabled);
+      setSsoRequired(required);
+      setSsoConfigured(configured);
+      setLoginUrl(fetchedLoginUrl);
+    }
 
     if (fetchedUser) {
       lastConfirmedUserRef.current = fetchedUser;
       writeUserSnapshot(fetchedUser);
-      setUser(fetchedUser);
-      if (meData.sessionId) {
-        setSsoSessionMirror(meData.sessionId);
+      if (!stale()) {
+        setUser(fetchedUser);
+        if (meData.sessionId) {
+          setSsoSessionMirror(meData.sessionId);
+        }
       }
       return;
     }
@@ -282,6 +322,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       /** 首次与 /api/sso/me 并发返回空常见（Cookie 刚写入）；先立即重试，避免固定 320ms 起步等待 */
       const stickyDelaysMs = [0, 120, 280, 450];
       for (let i = 0; i < stickyDelaysMs.length; i++) {
+        if (stale()) return;
         if (stickyDelaysMs[i] > 0) await wait(stickyDelaysMs[i]);
         try {
           const meRes = await fetchSso('/api/sso/me');
@@ -293,13 +334,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             fetchedUser = md.user;
             lastConfirmedUserRef.current = fetchedUser;
             writeUserSnapshot(fetchedUser);
-            setUser(fetchedUser);
-            if (md.sessionId) {
-              setSsoSessionMirror(md.sessionId);
+            if (!stale()) {
+              setUser(fetchedUser);
+              if (md.sessionId) {
+                setSsoSessionMirror(md.sessionId);
+              }
             }
             return;
           }
-        } catch {
+        } catch (err) {
+          if (err instanceof Error && err.name === 'AbortError') {
+            throw err;
+          }
           /* next retry */
         }
       }
@@ -307,21 +353,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (lastConfirmedUserRef.current) {
       writeUserSnapshot(lastConfirmedUserRef.current);
-      setUser(lastConfirmedUserRef.current);
+      if (!stale()) setUser(lastConfirmedUserRef.current);
       return;
     }
 
     lastConfirmedUserRef.current = null;
     clearUserSnapshot();
-    setUser(null);
-    setSsoSessionMirror(null);
+    if (!stale()) {
+      setUser(null);
+      setSsoSessionMirror(null);
+    }
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    /** 首屏总超时：中止所有 SSO fetch，避免挂起导致永远「正在验证身份…」 */
+    const bootRefreshMs = 28_000;
+    const bootAbort = new AbortController();
+    const bootTimer = setTimeout(() => bootAbort.abort(), bootRefreshMs);
     (async () => {
       try {
-        await refresh();
+        await refresh({ signal: bootAbort.signal });
       } catch {
         if (!cancelled) {
           setSsoEnabled(false);
@@ -332,11 +384,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoginUrl(null);
         }
       } finally {
+        clearTimeout(bootTimer);
         if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
+      bootAbort.abort();
+      refreshGenRef.current += 1;
     };
   }, [refresh]);
 

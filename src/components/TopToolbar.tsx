@@ -300,6 +300,10 @@ export default function TopToolbar() {
   };
 
   const studioIp = currentDevice?.ip?.trim() ?? '';
+  const wifiStatusUnknown =
+    wifiLink === null &&
+    !!currentDevice &&
+    isDeviceShownOnline(currentDevice);
 
   return (
     <>
@@ -368,7 +372,7 @@ export default function TopToolbar() {
 
       <button
         type="button"
-        className={`btn-icon topbar-wifi-btn${wifiLink === 'up' ? ' topbar-wifi-btn--up' : ''}${wifiLink === 'down' ? ' topbar-wifi-btn--down topbar-wifi-btn--alert' : ''}`}
+        className={`btn-icon topbar-wifi-btn${wifiLink === 'up' ? ' topbar-wifi-btn--up' : ''}${wifiLink === 'down' ? ' topbar-wifi-btn--down topbar-wifi-btn--alert' : ''}${wifiStatusUnknown ? ' topbar-wifi-btn--unknown' : ''}`}
         title={
           wifiLink === 'up'
             ? (wifiConnectedSsid
@@ -376,7 +380,9 @@ export default function TopToolbar() {
                 : t('topbar.wifi.titleConnected', 'WiFi 已连接（点击配置）'))
             : wifiLink === 'down'
               ? t('topbar.wifi.titleDisconnected', '⚠ 开发者套件未联网 — AI 对话等功能不可用，点击配置 WiFi')
-              : t('topbar.wifi.title', '配置 WiFi')
+              : wifiStatusUnknown
+                ? t('topbar.wifi.titleUnknown', '无法判断 WiFi 是否已连接（点击配置或重试探测）')
+                : t('topbar.wifi.title', '配置 WiFi')
         }
         onClick={() => setShowWifiModal(true)}
         disabled={!currentDevice}

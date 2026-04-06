@@ -206,12 +206,16 @@ export default function SettingsPanel() {
   const [studioDefaultPreset, setStudioDefaultPreset] = useState<{
     id: string;
     label: string;
+    model?: string;
+    provider?: string;
     inRegistry: boolean;
     isActive: boolean;
   } | null>(null);
   const [studioQuickDefaultPreset, setStudioQuickDefaultPreset] = useState<{
     id: string;
     label: string;
+    model?: string;
+    provider?: string;
     inRegistry: boolean;
     isQuickLane: boolean;
   } | null>(null);
@@ -248,6 +252,11 @@ export default function SettingsPanel() {
   };
 
   const refreshAiConfig = async () => {
+    try {
+      await saveAgentConfig({ action: 'sync_bootstrap_preset_rows' });
+    } catch {
+      /* fetch 仍继续，避免离线时设置页无法加载 */
+    }
     const cfg = await fetchAgentConfig();
     const models = cfg.models || [];
     setAiSavedModels(models);
@@ -1451,10 +1460,11 @@ export default function SettingsPanel() {
                       >
                         <option value="">{t('settings.ai.newProfile', '+ 新建配置')}</option>
                         {studioDefaultPreset?.inRegistry ? (
-                          <option value={studioDefaultPreset.id}>
+                          <option value={studioDefaultPreset.id} title={studioDefaultPreset.label}>
                             {t('settings.ai.systemDefaultThinking', '系统默认（深度思考）')}
-                            {' — '}
-                            {studioDefaultPreset.label}
+                            {studioDefaultPreset.model
+                              ? ` · ${studioDefaultPreset.model}`
+                              : ` — ${studioDefaultPreset.label}`}
                           </option>
                         ) : null}
                         {aiSavedModels
@@ -1754,10 +1764,11 @@ export default function SettingsPanel() {
                         ) : null}
                         <option value="">{t('settings.ai.newProfile', '+ 新建配置')}</option>
                         {studioQuickDefaultPreset?.inRegistry ? (
-                          <option value={studioQuickDefaultPreset.id}>
-                            {t('settings.ai.systemDefaultQuick', '系统默认（快速回答）')}
-                            {' — '}
-                            {studioQuickDefaultPreset.label}
+                          <option value={studioQuickDefaultPreset.id} title={studioQuickDefaultPreset.label}>
+                            {t('settings.ai.systemDefaultQuick', '内置预设 · 快速')}
+                            {studioQuickDefaultPreset.model
+                              ? ` · ${studioQuickDefaultPreset.model}`
+                              : ` — ${studioQuickDefaultPreset.label}`}
                           </option>
                         ) : null}
                         {aiSavedModels

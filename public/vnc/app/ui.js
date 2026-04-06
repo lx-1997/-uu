@@ -1114,12 +1114,19 @@ const UI = {
         UI.showStatus(msg);
         UI.updateVisualState('connected');
 
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: "rdk-novnc-connect" }, "*");
+            }
+        } catch (err) { /* ignore */ }
+
         // Do this last because it can only be used on rendered elements
         UI.rfb.focus();
     },
 
     disconnectFinished(e) {
         const wasConnected = UI.connected;
+        const reason = (e.detail && typeof e.detail.reason === "string") ? e.detail.reason.trim() : "";
 
         // This variable is ideally set when disconnection starts, but
         // when the disconnection isn't clean or if it is initiated by
@@ -1132,11 +1139,28 @@ const UI = {
         if (!e.detail.clean) {
             UI.updateVisualState('disconnected');
             if (wasConnected) {
-                UI.showStatus(_("Something went wrong, connection is closed"),
-                              'error');
+                UI.showStatus(
+                    reason
+                        ? (_("Something went wrong, connection is closed") + ": " + reason)
+                        : _("Something went wrong, connection is closed"),
+                    'error');
             } else {
-                UI.showStatus(_("Failed to connect to server"), 'error');
+                UI.showStatus(
+                    reason
+                        ? (_("Failed to connect to server") + ": " + reason)
+                        : _("Failed to connect to server"),
+                    'error');
             }
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: "rdk-novnc-disconnect",
+                        clean: false,
+                        wasConnected: !!wasConnected,
+                        reason: reason,
+                    }, "*");
+                }
+            } catch (err) { /* ignore */ }
         }
         // If reconnecting is allowed process it now
         if (UI.getSetting('reconnect', false) === true && !UI.inhibitReconnect) {
@@ -1168,6 +1192,17 @@ const UI = {
             msg = _("New connection has been rejected");
         }
         UI.showStatus(msg, 'error');
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: "rdk-novnc-disconnect",
+                    clean: false,
+                    wasConnected: false,
+                    reason: ('reason' in e.detail) ? String(e.detail.reason) : msg,
+                    security: true,
+                }, "*");
+            }
+        } catch (err) { /* ignore */ }
     },
 
 /* ------^-------

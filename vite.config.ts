@@ -61,6 +61,17 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           ws: true,
         },
+        /** noVNC 静态页 + WebSocket /websockify 与主站同 origin，避免开发态写死 :8787 与 Vite :5173 不一致 */
+        '/vnc': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
+        },
+        '/websockify': {
+          target: apiTarget,
+          changeOrigin: true,
+          ws: true,
+        },
       },
     },
     build: {

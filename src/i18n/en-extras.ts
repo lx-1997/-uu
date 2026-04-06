@@ -815,6 +815,7 @@ export const EN_EXTRAS: Record<string, string> = {
   'topbar.wifi.titleConnected': 'Wi‑Fi connected (click to configure)',
   'topbar.wifi.titleConnectedSsid': 'Wi‑Fi connected: {{ssid}} (click to configure)',
   'topbar.wifi.titleDisconnected': '⚠ Board is offline — AI chat and other features unavailable. Click to configure WiFi',
+  'topbar.wifi.titleUnknown': 'Wi‑Fi status unclear (click to configure or retry probe)',
   'topbar.user.logout': 'Log out',
   'topbar.user.accountTitle': 'Account',
   'topbar.user.ssoDisabledHint':
@@ -1041,6 +1042,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.err.xburnLaunchFail': 'Failed to start xburn',
   'flasher.err.s100CliUnsupported': 'S100 CLI flash is not available; use “Launch xburn” or update the desktop app.',
   'flasher.err.xburnFlashFail': 'xburn flash failed',
+  'flasher.hint.s100FlashFailUseXburn':
+    'Follow the on-page instructions to flash with xburn (installed automatically when missing). You can also use “Launch xburn” on the left.',
   'flasher.btn.s100OneClick': 'One-click CLI flash',
   'flasher.log.s100CliDone':
     'xburn CLI exited successfully (code 0); the board may still be rebooting—verify on device shortly',
@@ -1248,6 +1251,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'vnc.desktop.loaded': 'noVNC is open in a separate view',
   'vnc.welcome.title': 'Web remote desktop',
   'vnc.welcome.desc': 'Connect to the board desktop over WebSocket — no install, low latency',
+  'vnc.welcome.needDesktop':
+    'x11vnc mirrors an existing X11 desktop — if no graphical session is running on the board, connect may fail or show code 1005.',
   'vnc.phase.checking': 'Checking VNC service…',
   'vnc.phase.connecting': 'Starting and connecting…',
   'vnc.retry': 'Retry',
@@ -1260,6 +1265,18 @@ export const EN_EXTRAS: Record<string, string> = {
   'vnc.backRetry': 'Back and retry',
   'vnc.err.connect': 'Connection failed',
   'vnc.err.novncLoad': 'noVNC failed to load: {{desc}}',
+  'vnc.err.wsFailedDetail': 'Remote desktop failed to connect: {{detail}}',
+  'vnc.err.wsDroppedDetail': 'Remote desktop disconnected: {{detail}}',
+  'vnc.err.wsFailedUnknown':
+    'Remote desktop failed to connect (no detail). Check HTTPS/WebSocket, Studio backend, device IP, and port 5900.',
+  'vnc.err.wsDroppedUnknown': 'Remote desktop closed unexpectedly.',
+  'vnc.err.securityRejected': 'VNC security handshake rejected.',
+  'vnc.err.hintWs1005':
+    'Note: code 1005 means the WebSocket closed without a close frame (often network blip, proxy not forwarding WS, or TCP to VNC port reset). Check: VNC on 5900, LAN reachability, SSH tunnel + device online, reverse proxy WebSocket upgrade for /websockify.',
+  'vnc.err.hintWs1005NoX':
+    'If x11vnc is running but there is no X11 desktop session (no Xorg / no usable DISPLAY such as :0), there is nothing to mirror and the session may drop immediately with 1005. Verify a graphical session (Xorg or display manager) or start the desktop per your image docs (e.g. display-manager service, startx).',
+  'vnc.err.hintWs1006':
+    'Note: code 1006 is abnormal closure — often network drop or peer reset. Retry and check firewall / x11vnc on the device.',
   'vnc.toast.quality': 'Quality: {{q}}',
   'vnc.quality.toast.auto': 'Auto',
   'vnc.quality.toast.high': 'High',

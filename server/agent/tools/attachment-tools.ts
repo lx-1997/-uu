@@ -125,13 +125,30 @@ const VISION_HINT_PATTERNS = /vision|vl|4v|4o|grok-2|gemini|claude|glm-4v|doubao
 
 const visionCapabilityCache = new Map<string, boolean>();
 
+/** Groq 等兼容网关常用；OpenAI 官服需用 gpt-4o-mini-transcribe / whisper-1 */
+const ASR_WHISPER_LARGE_V3_TURBO = "whisper-large-v3-turbo";
+const ASR_OPENAI_OFFICIAL = "gpt-4o-mini-transcribe";
+
 const AUDIO_MODEL_BY_PROVIDER: Record<string, string> = {
-  openai: "gpt-4o-mini-transcribe",
-  "openai-compatible": "gpt-4o-mini-transcribe",
-  groq: "whisper-large-v3-turbo",
+  /** OpenAI 兼容：默认同 Groq 文档，首选 large v3 turbo */
+  "openai-compatible": ASR_WHISPER_LARGE_V3_TURBO,
+  groq: ASR_WHISPER_LARGE_V3_TURBO,
   qwen: "qwen3-asr-flash",
   bailian: "qwen3-asr-flash",
 };
+
+function resolveTranscriptionModel(cfg: ProviderConfig): string | undefined {
+  if (cfg.provider === "openai") {
+    try {
+      const base = getBaseUrl(cfg).toLowerCase();
+      if (base.includes("groq.com")) return ASR_WHISPER_LARGE_V3_TURBO;
+    } catch {
+      /* ignore */
+    }
+    return ASR_OPENAI_OFFICIAL;
+  }
+  return AUDIO_MODEL_BY_PROVIDER[cfg.provider];
+}
 
 /** 当前 Studio Provider 是否具备可用的云端语音转写链路（避免盲目请求 /audio/transcriptions 得到 404） */
 export function isStudioProviderAsrSupported(cfg: ProviderConfig | null | undefined): boolean {
@@ -146,7 +163,7 @@ export function isStudioProviderAsrSupported(cfg: ProviderConfig | null | undefi
   } catch {
     /* ignore */
   }
-  return Boolean(AUDIO_MODEL_BY_PROVIDER[cfg.provider]);
+  return Boolean(resolveTranscriptionModel(cfg as ProviderConfig));
 }
 
 function asrUpstreamErrorMessage(status: number, fallbackDetail: string): string {
@@ -577,7 +594,7 @@ async function transcribeAudioViaProvider(
     return text;
   }
 
-  const model = AUDIO_MODEL_BY_PROVIDER[providerConfig.provider];
+  const model = resolveTranscriptionModel(providerConfig);
   if (!model) {
     throw new Error("当前 Provider 未配置可用的语音转写模型");
   }

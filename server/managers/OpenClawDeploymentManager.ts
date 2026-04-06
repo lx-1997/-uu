@@ -18,6 +18,7 @@ import {
   OPENCLAW_PREPARE_NPM_SPEED,
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   OPENCLAW_RESOLVE_CLI_SNIPPET,
+  OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
 } from './openclaw-board-install-sh.js';
 import {
   boardOpenclawRemoteSkillsDir,
@@ -772,6 +773,7 @@ export const NPM_INSTALL_CMD = [
   OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
   RESOLVE_OPENCLAW_CMD,
+  OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
   CLAWHUB_AUTO_LOGIN_CMD,
   BOARD_FIND_SKILLS_INSTALL,
   ENSURE_GATEWAY_LOCAL_MODE,
@@ -781,7 +783,8 @@ export const NPM_INSTALL_CMD = [
   RESTART_GATEWAY_FALLBACK,
   ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
   RUN_HEALTH,
-  'echo "[OpenClaw] 安装完成"',
+  // 仅在整段 `&&` 链全部成功时才会执行到本行（上游任一步失败则不会打印）
+  'echo "[OpenClaw] 套件端安装成功（Node / openclaw CLI / 网关相关步骤已执行）"',
 ].join(' && ');
 
 /** 与 runPrepare() 相同；单独 API 与一键部署合并路径共用 */
@@ -847,6 +850,8 @@ const NPM_UPGRADE_CMD = [
     OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
     ')',
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
+  RESOLVE_OPENCLAW_CMD,
+  OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
   BOARD_FIND_SKILLS_INSTALL,
   ENSURE_GATEWAY_LOCAL_MODE,
   ENSURE_GATEWAY_AUTH_TOKEN,
@@ -1480,10 +1485,12 @@ except:
 try:
     env = os.environ.copy()
     env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + os.path.expanduser("~/.local/bin") + ":" + env.get("PATH", "")
-    out = subprocess.check_output(["openclaw", "--version"], env=env, stderr=subprocess.DEVNULL, timeout=5).decode().strip()
-    result["version"] = out
-    result["installed"] = bool(out)
-except:
+    cp = subprocess.run(["openclaw", "--version"], env=env, capture_output=True, text=True, timeout=5)
+    out = (cp.stdout or "").strip()
+    if cp.returncode == 0 and out:
+        result["version"] = out
+        result["installed"] = True
+except Exception:
     pass
 try:
     p = os.path.expanduser("~/.openclaw/openclaw.json")
@@ -1516,7 +1523,7 @@ print(json.dumps(result))`;
   }
 
   getHealthStatus(device: Device, onResult: (status: OpenClawHealthStatus) => void): void {
-    const pyScript = `import json, os, socket, subprocess, urllib.request, urllib.error
+    const pyScript = `import json, os, socket, subprocess, shutil, urllib.request, urllib.error
 result = {
   "installed": False,
   "gatewayRunning": False,
@@ -1535,14 +1542,24 @@ def check_port(host, port):
   finally:
     s.close()
 
+def is_node_runtime_reject(msg):
+  t = (msg or "").lower()
+  return ("node.js" in t or "node js" in t) and ("required" in t or "current:" in t or "current v" in t)
+
+_oc_probe_err = ""
+env = os.environ.copy()
+env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + os.path.expanduser("~/.local/bin") + ":" + env.get("PATH", "")
 try:
-  env = os.environ.copy()
-  env["PATH"] = os.path.expanduser("~/.npm-global/bin") + ":" + os.path.expanduser("~/.local/bin") + ":" + env.get("PATH", "")
-  out = subprocess.check_output(["openclaw", "--version"], env=env, stderr=subprocess.DEVNULL, timeout=6).decode().strip()
-  result["installed"] = True
-  result["version"] = out
-except Exception:
-  pass
+  cp = subprocess.run(["openclaw", "--version"], env=env, capture_output=True, text=True, timeout=6)
+  out = (cp.stdout or "").strip()
+  err = (cp.stderr or "").strip()
+  if cp.returncode == 0 and out:
+    result["installed"] = True
+    result["version"] = out
+  else:
+    _oc_probe_err = (out + "\\n" + err).strip()
+except Exception as ex:
+  _oc_probe_err = str(ex)
 
 result["gatewayRunning"] = check_port("127.0.0.1", 18789)
 
@@ -1581,7 +1598,12 @@ else:
 result["aiReady"] = bool(result["installed"] and result["gatewayRunning"] and result["tokenStatus"] == "ok")
 
 if not result["installed"]:
-  result["summary"] = "未安装 OpenClaw"
+  if is_node_runtime_reject(_oc_probe_err):
+    result["summary"] = "OpenClaw CLI 无法运行：Node 版本过低（需 v22.12+）。请在板端升级 Node 或在 Studio 重试一键部署。"
+  elif shutil.which("openclaw", path=env.get("PATH") or ""):
+    result["summary"] = "OpenClaw CLI 已找到但无法启动，请在板端执行 openclaw --version 查看报错"
+  else:
+    result["summary"] = "未安装 OpenClaw"
 elif not result["gatewayRunning"]:
   result["summary"] = "OpenClaw 已安装，但网关未运行"
 elif result["tokenStatus"] == "missing":
@@ -1916,6 +1938,8 @@ print(json.dumps(result,ensure_ascii=False))`;
       OPENCLAW_ENSURE_NPM_SNIPPET,
       OPENCLAW_INSTALL_OPENCLAW_STEP,
       OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
+      RESOLVE_OPENCLAW_CMD,
+      OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
       BOARD_FIND_SKILLS_INSTALL,
       'echo "[RDK Studio] 套件端默认关闭 memorySearch（避免未配置 embedding 时失败）"',
       OPENCLAW_MERGE_EMPTY_LENIENT_SHELL,
@@ -2031,7 +2055,7 @@ print(json.dumps(result,ensure_ascii=False))`;
     const cmd =
       'bash --noprofile --norc -c ' +
       JSON.stringify(
-        'LANG=C LC_ALL=C; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 3; ' +
+        'LANG=C LC_ALL=C; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 1; ' +
           'nmcli device wifi list 2>/dev/null || sudo -n nmcli device wifi list 2>/dev/null',
       );
     let output = '';

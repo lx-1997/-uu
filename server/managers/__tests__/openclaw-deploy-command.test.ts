@@ -36,7 +36,7 @@ describe('OpenClaw prepare/install command audit', () => {
   it('contains the expected major phases', () => {
     expect(OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD).toContain('[Studio] 环境准备（Node / npm / 目录）');
     expect(OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD).toContain('[Studio] 安装 OpenClaw（npm / ClawHub / 网关）');
-    expect(OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD).toContain('[OpenClaw] 安装完成');
+    expect(OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD).toContain('[OpenClaw] 套件端安装成功');
   });
 
   itWithBash('parses end-to-end in bash -n', () => {

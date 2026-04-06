@@ -8,6 +8,7 @@ import { shouldUseSshTunnelForDevice } from '../utils/device-tunnel';
 import DeviceGuard from './DeviceGuard';
 import FloatingEmbedPanel from './FloatingEmbedPanel';
 import { registerVncRemoteConnect } from '../utils/studio-embed-connect-bridge';
+import { augmentVncDisconnectDetail } from '../utils/vnc-ws-hints';
 
 /* ── VNC 全屏沉浸式远程桌面 ── */
 export default function Vnc() {
@@ -31,6 +32,8 @@ export default function Vnc() {
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const iframeLoadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** 避免 noVNC 自动重连时同一错误连弹 Toast */
+  const lastNovncPostRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
 
   // VNC URL 版本号，用于强制刷新 iframe
   const [urlVersion, setUrlVersion] = useState(0);
@@ -117,6 +120,58 @@ export default function Vnc() {
     return () => clearTimeout(iframeLoadTimerRef.current);
   }, [showIframe, loadError, t]);
 
+  /** iframe 内 noVNC 通过 postMessage 上报断开原因（见 public/vnc/app/ui.js + core/rfb.js） */
+  useEffect(() => {
+    if (!showIframe || isDesktop()) return;
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.data?.type === 'rdk-novnc-connect') {
+        if (typeof ev.origin === 'string' && ev.origin !== window.location.origin) return;
+        setLoadError(null);
+        setPhase('connected');
+        return;
+      }
+      if (ev.data?.type !== 'rdk-novnc-disconnect') return;
+      if (typeof ev.origin === 'string' && ev.origin !== window.location.origin) return;
+
+      const raw = typeof ev.data.reason === 'string' ? ev.data.reason.trim() : '';
+      const wasConnected = !!ev.data.wasConnected;
+      const security = !!ev.data.security;
+
+      let text: string;
+      if (security) {
+        text = raw || t('vnc.err.securityRejected', 'VNC 安全握手被拒绝');
+      } else if (raw) {
+        const detail = augmentVncDisconnectDetail(raw, t);
+        text = wasConnected
+          ? tf('vnc.err.wsDroppedDetail', '连接已断开：{{detail}}', { detail })
+          : tf('vnc.err.wsFailedDetail', '无法连接远程桌面：{{detail}}', { detail });
+      } else {
+        text = wasConnected
+          ? t('vnc.err.wsDroppedUnknown', '连接已异常断开')
+          : t(
+              'vnc.err.wsFailedUnknown',
+              '无法连接远程桌面（无详细原因，请检查 HTTPS/WebSocket、Studio 后端与端口 5900）',
+            );
+      }
+
+      setLoadError(text);
+      setPhase('error');
+      setStatusText(text);
+      setLogLines((prev) => [...prev, `[noVNC] ${text}`]);
+
+      const now = Date.now();
+      if (
+        text !== lastNovncPostRef.current.text ||
+        now - lastNovncPostRef.current.at > 2000
+      ) {
+        lastNovncPostRef.current = { text, at: now };
+        addToast(text, 'error');
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [showIframe, addToast, t, tf]);
+
   // 监听 WebContentsView 加载事件
   useEffect(() => {
     if (!isDesktop()) return;
@@ -142,16 +197,22 @@ export default function Vnc() {
   const getVncUrl = useCallback(() => {
     if (!currentDevice) return '';
     const isDesktopMode = !!(window as any).rdkDesktop?.isDesktop;
-    // file:// 协议下 window.location.hostname 为空，桌面端直接用 localhost
-    const host = isDesktopMode ? 'localhost' : (window.location.hostname || 'localhost');
-    const backendPort = isDesktopMode ? 8787 : ((import.meta as any).env?.DEV ? 8787 : (Number(window.location.port) || 80));
+    /**
+     * 浏览器内必须与当前页同协议/主机/端口，否则：
+     * - https 页面嵌 http iframe → 混合内容被拦截；
+     * - `port` 为空时误用 :80，而 https 默认 :443 → noVNC 报「无法连接到服务器」。
+     * 桌面壳仍直连本机后端 8787；开发态由 Vite 将 /vnc、/websockify 代理到同一端口。
+     */
+    const base = isDesktopMode
+      ? 'http://localhost:8787'
+      : (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://localhost:8787');
     const qualityParam = quality === 'high' ? '&quality=9&compression=0' : quality === 'low' ? '&quality=3&compression=9' : '&quality=6';
     const hostOrIp = (currentDevice as any).host || (currentDevice as any).ip;
     const wsPath = shouldUseSshTunnelForDevice(currentDevice)
       ? `websockify?deviceId=${encodeURIComponent(currentDevice.id)}&remotePort=5900`
       : `websockify?target=${hostOrIp}:5900`;
     const resizeParam = resizeMode === 'remote' ? 'remote' : 'scale';
-    return `http://${host}:${backendPort}/vnc/vnc.html?autoconnect=true&resize=${resizeParam}&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
+    return `${base}/vnc/vnc.html?autoconnect=true&resize=${resizeParam}&reconnect=true&reconnect_delay=2000&password=88888888&path=${encodeURIComponent(wsPath)}${qualityParam}&v=${urlVersion}`;
   }, [currentDevice, quality, urlVersion, resizeMode]);
 
   const handleResizeModeChange = (mode: 'remote' | 'scale') => {
@@ -570,6 +631,12 @@ export default function Vnc() {
             <p className="immersive-welcome-desc">
               {t('vnc.welcome.desc', '通过 WebSocket 代理直连开发者套件桌面，零安装、低延迟')}
             </p>
+            <p className="immersive-welcome-desc immersive-welcome-desc--note">
+              {t(
+                'vnc.welcome.needDesktop',
+                'x11vnc 需要已有图形会话（X11 / DISPLAY）；若板卡未启动桌面，服务可能在跑但无法出画，连接易断开（如 1005）。',
+              )}
+            </p>
 
             {phase === 'checking' && (
               <div className="immersive-loading">
@@ -595,8 +662,11 @@ export default function Vnc() {
                   </svg>
                   <span>{statusText}</span>
                 </span>
-                <p style={{ fontSize: '0.8125rem', color: '#94a3b8', maxWidth: 360, lineHeight: 1.55, margin: '4px 0 8px' }}>
-                  {t('vnc.err.troubleshoot', '排查建议：(1) 确认开发者套件已安装桌面环境, (2) 在终端运行 sudo systemctl status x11vnc 查看服务状态, (3) 检查端口 5900 是否被占用')}
+                <p style={{ fontSize: '0.8125rem', color: '#94a3b8', maxWidth: 420, lineHeight: 1.55, margin: '4px 0 8px' }}>
+                  {t(
+                    'vnc.err.troubleshoot',
+                    '排查建议：(1) 必须先有图形会话（Xorg / 可用 DISPLAY），无桌面时 x11vnc 无画面，易出现 1005；(2) 确认已安装桌面环境；(3) 终端执行 sudo systemctl status x11vnc；(4) 检查 5900 是否被占用。',
+                  )}
                 </p>
                 <button className="btn btn-ghost" onClick={handleConnect}>{t('vnc.retry', '重试')}</button>
               </div>

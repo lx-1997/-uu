@@ -856,6 +856,8 @@ export function fetchAgentConfig() {
     studioDefaultPreset?: {
       id: string;
       label: string;
+      model?: string;
+      provider?: string;
       inRegistry: boolean;
       isActive: boolean;
     } | null;
@@ -863,6 +865,8 @@ export function fetchAgentConfig() {
     studioQuickDefaultPreset?: {
       id: string;
       label: string;
+      model?: string;
+      provider?: string;
       inRegistry: boolean;
       isQuickLane: boolean;
     } | null;
@@ -1174,7 +1178,15 @@ export function restartWeixinChannel() {
 }
 
 export function saveAgentConfig(config: {
-  action?: 'upsert' | 'switch' | 'switch_quick' | 'duplicate_for_quick' | 'delete' | 'restore_bootstrap_preset' | 'set_openclaw_delegate';
+  action?:
+    | 'upsert'
+    | 'switch'
+    | 'switch_quick'
+    | 'duplicate_for_quick'
+    | 'delete'
+    | 'restore_bootstrap_preset'
+    | 'sync_bootstrap_preset_rows'
+    | 'set_openclaw_delegate';
   /** duplicate_for_quick：源配置 id，省略则用当前深度思考 active */
   sourceId?: string;
   id?: string;
