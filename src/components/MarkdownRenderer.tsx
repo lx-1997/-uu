@@ -306,8 +306,14 @@ function renderInlineMarkdown(text: string, keyOffset: number, streaming?: boole
     }
     flushList();
 
+    /* 须先匹配更长前缀，否则 #### 会落入普通行（字面量 ####） */
+    if (trimmed.startsWith('#### ')) {
+      result.push(<h4 key={`h-${keyOffset}-${i}`} className="md-h4 md-h4--atx4">{renderInlineWithBr(trimmed.slice(5), streaming)}</h4>);
+      i += 1;
+      continue;
+    }
     if (trimmed.startsWith('### ')) {
-      result.push(<h4 key={`h-${keyOffset}-${i}`} className="md-h4">{renderInlineWithBr(trimmed.slice(4), streaming)}</h4>);
+      result.push(<h4 key={`h-${keyOffset}-${i}`} className="md-h4 md-h4--atx3">{renderInlineWithBr(trimmed.slice(4), streaming)}</h4>);
       i += 1;
       continue;
     }
@@ -322,8 +328,13 @@ function renderInlineMarkdown(text: string, keyOffset: number, streaming?: boole
       continue;
     }
     if (!trimmed) {
-      result.push(<br key={`br-${keyOffset}-${i}`} />);
-      i += 1;
+      const gapKey = i;
+      while (i < lines.length && !lines[i].trim()) {
+        i += 1;
+      }
+      if (result.length > 0) {
+        result.push(<div key={`gap-${keyOffset}-${gapKey}`} className="md-paragraph-gap" aria-hidden />);
+      }
       continue;
     }
     result.push(

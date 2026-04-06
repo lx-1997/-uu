@@ -8,7 +8,7 @@ export const STUDIO_SHOW_LOCAL_OLLAMA_NAV = false;
 
 /**
  * 「机器人中心」暂缓上线：侧栏与 `App` 路由已关闭；下版恢复时请同时：
- * `Tab` 联合类型、`IconRail` NAV 项、`App.tsx` standardViews + `BotCenterPage` 引入、`main.tsx` 引入 `bot-center.css`。
+ * `Tab` 联合类型、`IconRail` NAV 项、`App.tsx` standardViews + `BotCenterPage` 引入；样式见 `styles/index.css` 已 `@import` 的 `bot-center.css`。
  */
 export const STUDIO_SHOW_BOT_CENTER_NAV = false;
 

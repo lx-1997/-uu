@@ -249,9 +249,22 @@
 
 .bot-center-topbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* 长说明与标题同条时允许换行，避免窄屏/英文下挤出视口 */
+.bot-center-topbar .tool-bar-left {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 12px;
+}
+
+.bot-center-topbar .tool-bar-count {
+  white-space: normal;
+  line-height: 1.45;
+  max-width: min(72ch, 100%);
 }
 
 .bot-center-topbar__stats {

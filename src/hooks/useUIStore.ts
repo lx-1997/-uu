@@ -228,6 +228,14 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
           rdk.openUrl({ url: mapUrl, loadUrl, token });
           setDrAuthenticatedPortal({ mapUrl, loadUrl, token, kind });
           setActiveTabState('dr-embed');
+          /** 主进程 rdk:open-url 在首个 await 之后才把视图加入 viewsMap；微任务后再 setActiveUrl，确保与主进程注册顺序一致 */
+          queueMicrotask(() => {
+            try {
+              rdk.setActiveUrl?.(mapUrl);
+            } catch {
+              /* ignore */
+            }
+          });
         } catch {
           addToast(t('drPortal.err.open', '打开失败'), 'error');
         }

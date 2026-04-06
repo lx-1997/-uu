@@ -16,6 +16,7 @@
 @import './tab-atmosphere.css';
 @import './pages/config.css';
 @import './pages/tools.css';
+@import './pages/bot-center.css';
 @import './pages/sso-login.css';
 
 /* Material Symbols：woff2 由上一行 fontsource 打入 dist，桌面端离线可用 */

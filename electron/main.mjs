@@ -1268,6 +1268,10 @@ ipcMain.on('rdk:open-url', (event, payload) => {
     });
 
     viewsMap[url] = view;
+    /** 论坛 / RoboGo：注册进 viewsMap 后立即同步可见性，避免渲染层 effect 早于主进程注册而误隐藏 */
+    if (isDrPortal) {
+      applySetActiveUrlToViewsMap(url);
+    }
 
     try {
       await view.webContents.loadURL(loadUrl);
@@ -1533,22 +1537,21 @@ ipcMain.handle('rdk:open-local-preview', async (_event, payload) => {
   return { ok: true };
 });
 
-// ── IPC: Tab 切换时同步 WebContentsView 可见性 ──
-// 渲染层切换 tab 时发送当前活跃的 url（或 null 表示无嵌入视图）
-ipcMain.on('rdk:set-active-url', (_event, { url }) => {
+// ── WebContentsView 可见性与叠放（论坛 / RoboGo / IDE / VNC 等共用）──
+function applySetActiveUrlToViewsMap(activeUrl) {
+  const target = activeUrl == null || activeUrl === '' ? null : String(activeUrl).trim();
   for (const u in viewsMap) {
     const view = viewsMap[u];
     if (!view || view.webContents.isDestroyed()) continue;
     if (embedDetachedUrls.has(u)) {
-      if (u === url) {
+      if (target && u === target) {
         embedFloatWins[u]?.show();
         embedFloatWins[u]?.focus();
       }
       continue;
     }
-    if (u === url) {
+    if (target && u === target) {
       view.setVisible(true);
-      // 确保在最顶层
       mainWin?.contentView.removeChildView(view);
       mainWin?.contentView.addChildView(view);
       if (mainWin) view.setBounds(getViewBounds(mainWin));
@@ -1556,6 +1559,12 @@ ipcMain.on('rdk:set-active-url', (_event, { url }) => {
       view.setVisible(false);
     }
   }
+}
+
+// ── IPC: Tab 切换时同步 WebContentsView 可见性 ──
+// 渲染层切换 tab 时发送当前活跃的 url（或 null 表示无嵌入视图）
+ipcMain.on('rdk:set-active-url', (_event, { url }) => {
+  applySetActiveUrlToViewsMap(url);
 });
 
 // ── IPC: 渲染层上报 canvas-viewport 的真实像素边界（用于精确贴合 WebContentsView） ──

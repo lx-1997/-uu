@@ -27,6 +27,7 @@ import { HubDockAnchorProvider } from './contexts/HubDockAnchorContext';
 import SkillBrowser from './components/SkillBrowser';
 import { isStudioLoginRequired } from './utils/studio-auth-gate';
 import LazyRouteFallback from './components/LazyRouteFallback';
+import DroboticsEmbed from './components/DroboticsEmbed';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const Flasher = lazy(() => import('./components/Flasher'));
@@ -35,7 +36,6 @@ const Files = lazy(() => import('./components/Files'));
 const Vnc = lazy(() => import('./components/Vnc'));
 const IDE = lazy(() => import('./components/IDE'));
 const OpenClaw = lazy(() => import('./components/OpenClaw'));
-const DroboticsEmbed = lazy(() => import('./components/DroboticsEmbed'));
 /**
  * lazy() 子组件（含 Flasher）必须由 Suspense 包裹，否则懒加载解析时可能异常。
  */
@@ -93,9 +93,7 @@ function MainContent() {
         </Suspense>
       </div>
       <div className={`persistent-pane ${activeTab === 'dr-embed' ? 'is-active' : 'is-hidden'}`}>
-        <Suspense fallback={<LazyRouteFallback />}>
-          <DroboticsEmbed />
-        </Suspense>
+        <DroboticsEmbed />
       </div>
     </>
   );
@@ -109,8 +107,11 @@ function useDesktopTabSync(
   useEffect(() => {
     const rdk = (window as any).rdkDesktop;
     if (!rdk?.setActiveUrl) return;
-    if (activeTab === 'dr-embed' && drPortalMapUrl) {
-      rdk.setActiveUrl(drPortalMapUrl);
+    /** 地瓜生态 tab：无 portal 时不要 setActiveUrl(null)，否则会与 rdk:open-url 异步竞态，把刚创建的 WebContentsView 全部隐藏 */
+    if (activeTab === 'dr-embed') {
+      if (drPortalMapUrl) {
+        rdk.setActiveUrl(drPortalMapUrl);
+      }
       return;
     }
     if (activeTab === 'vnc' || activeTab === 'ide') {

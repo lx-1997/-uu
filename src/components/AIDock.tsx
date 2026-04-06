@@ -2893,7 +2893,27 @@ export default function AIDock() {
           <div className="dock-header">
             <div className="dock-header-left">
               <div className="dock-header-title-wrap">
-                <span className="dock-header-title">RDKClaw</span>
+                <div className="dock-header-title-row">
+                  <span className="dock-header-title">RDKClaw</span>
+                  <div className="dock-header-badges">
+                    <span
+                      className={`badge ${agentExecution.lastError ? 'badge-danger' : 'badge-accent'}`}
+                      title={agentExecution.lastError
+                        ? t('dock.badge.agentError', '上一次执行出错，可重试或查看日志')
+                        : t('dock.badge.agentOk', 'RDKClaw 智能体就绪')}
+                    >
+                      {agentExecution.lastError ? 'Error' : 'ON'}
+                    </span>
+                    <span
+                      className={`badge ${openclawConnected ? 'badge-ok' : 'badge-muted'}`}
+                      title={openclawConnected
+                        ? t('dock.badge.ocConnected', '已连接开发板上的 OpenClaw 网关')
+                        : t('dock.badge.ocOffline', 'OpenClaw 未连接 — 请确认网关已运行且开发板已联网')}
+                    >
+                      {openclawConnected ? 'OpenClaw' : 'Offline'}
+                    </span>
+                  </div>
+                </div>
                 <span className="dock-header-tagline" title={t('dock.tagline', '编排助手 · 贯穿 Studio、设备与 OpenClaw 协同')}>
                   {t('dock.tagline', '编排助手 · 贯穿 Studio、设备与 OpenClaw 协同')}
                 </span>
@@ -2904,24 +2924,6 @@ export default function AIDock() {
                 ) : null}
                 <span className="dock-header-subtitle" title={activeRdkclawDeviceLabel}>
                   {t('dock.device.current', '当前设备')}: {activeRdkclawDeviceLabel}
-                </span>
-              </div>
-              <div className="dock-header-badges">
-                <span
-                  className={`badge ${agentExecution.lastError ? 'badge-danger' : 'badge-accent'}`}
-                  title={agentExecution.lastError
-                    ? t('dock.badge.agentError', '上一次执行出错，可重试或查看日志')
-                    : t('dock.badge.agentOk', 'RDKClaw 智能体就绪')}
-                >
-                  {agentExecution.lastError ? 'Error' : 'ON'}
-                </span>
-                <span
-                  className={`badge ${openclawConnected ? 'badge-ok' : 'badge-muted'}`}
-                  title={openclawConnected
-                    ? t('dock.badge.ocConnected', '已连接开发板上的 OpenClaw 网关')
-                    : t('dock.badge.ocOffline', 'OpenClaw 未连接 — 请确认网关已运行且开发板已联网')}
-                >
-                  {openclawConnected ? 'OpenClaw' : 'Offline'}
                 </span>
               </div>
             </div>

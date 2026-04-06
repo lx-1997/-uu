@@ -36,6 +36,8 @@
   height: 100%;
   max-height: 100%;
   transform: translateX(-50%);
+  /* 盖住下方工作台/页面，避免 Dashboard 等从透明消息区透出（非 modal，但须不透明） */
+  background: var(--bg-primary);
 }
 
 .dock.expanded.subpage-compact {
@@ -56,6 +58,7 @@
   transform: none;
   left: 0;
   border-radius: 0;
+  background: var(--bg-primary);
 }
 
 /* AI 对话页右栏：嵌入布局流，与左侧列表同一视窗（竞品式单栏对话） */
@@ -80,6 +83,178 @@
   width: 100%;
   margin-left: 0;
   height: 100%;
+  max-height: none;
+  transform: none;
+  left: auto;
+}
+
+.dock.dock--hub-embedded .dock-chat {
+  min-height: 0;
+}
+
+/* AI 对话 Hub：与侧栏统一为偏「文档 / IDE」调性，减少大块橙色与重复主按钮 */
+.dock.dock--hub-embedded .dock-chat {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  background: var(--bg-primary);
+  border-color: var(--border);
+}
+
+.dock.dock--hub-embedded .dock-header {
+  padding: 8px 12px;
+  background: var(--bg-primary);
+}
+
+.dock.dock--hub-embedded .dock-header-badges .badge-accent {
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.dock.dock--hub-embedded .dock-header-badges .badge-ok {
+  border: 1px solid color-mix(in srgb, var(--ok) 28%, var(--border));
+}
+
+.dock.dock--hub-embedded .dock-header-seg.is-active {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+
+.dock.dock--hub-embedded .dock-msg.user .dock-bubble {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.dock.dock--hub-embedded .dock-msg.user .dock-bubble-copy {
+  border-color: var(--border);
+  background: var(--bg-primary);
+  color: var(--text-muted);
+}
+
+.dock.dock--hub-embedded .dock-msg.user .dock-bubble-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.dock.dock--hub-embedded .dock-msg.ai .dock-avatar {
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+}
+
+.dock.dock--hub-embedded .dock-response-mode-trigger.is-thinking,
+.dock.dock--hub-embedded .dock-response-mode-trigger.is-quick {
+  color: var(--text-primary);
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
+  background-image: none;
+}
+
+.dock.dock--hub-embedded .dock-response-mode-trigger.is-thinking .dock-response-mode-desc,
+.dock.dock--hub-embedded .dock-response-mode-trigger.is-quick .dock-response-mode-desc {
+  color: var(--text-secondary);
+}
+
+.dock.dock--hub-embedded .dock-response-mode-trigger.is-thinking:hover,
+.dock.dock--hub-embedded .dock-response-mode-trigger.is-quick:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elevated));
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.dock.dock--hub-embedded .dock-stream {
+  padding: 10px 12px;
+}
+
+/* ── Chat panel (expanded) ── */
+.dock-chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--dock-bg);
+  -webkit-backdrop-filter: var(--glass);
+  backdrop-filter: var(--glass);
+  border: 1px solid var(--dock-border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--dock-shadow);
+  /* 顶栏工具需能叠在内容之上，不能用 overflow:hidden 裁掉整块（会吃掉向上展开的菜单） */
+  overflow: visible;
+}
+
+.dock.workspace .dock-chat {
+  border-radius: 0;
+}
+
+.dock.subpage-compact .dock-chat {
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+}
+
+/* ── 工作台全屏聊天：单画布（竞品式对话页），去掉消息区与输入区之间的缝与「顶部分割线」感 ── */
+.dock.workspace.expanded {
+  gap: 0;
+  background: var(--bg-primary);
+  --dock-workspace-read: min(52rem, 100%);
+}
+
+.dock.workspace.expanded .dock-chat {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-primary);
+}
+
+.dock.workspace.expanded .dock-header {
+  border-bottom: none;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.05);
+  background: var(--dock-bg);
+  background: color-mix(in srgb, var(--dock-bg) 50%, var(--bg-primary));
+}
+
+.dock.workspace.expanded .dock-timeline {
+  border-bottom: none;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.dock.workspace.expanded .dock-tasks {
+  border-bottom: none;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.dock.workspace.expanded .dock-stream {
+  padding: 20px max(1rem, calc((100% - var(--dock-workspace-read)) / 2)) 28px;
+  background:
+    radial-gradient(ellipse 72% 48% at 50% -12%, rgba(255, 107, 0, 0.04), transparent 58%),
+    var(--bg-primary);
+}
+
+.dock.workspace.expanded .dock-empty-hint {
+  margin: auto;
+  max-width: 22rem;
+  padding: 1.25rem 1.35rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.dock.workspace.expanded .dock-input-area {
+  margin-top: 0;
+  padding: 12px max(1rem, calc((100% - var(--dock-workspace-read)) / 2)) 16px;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 90%, var(--bg-primary));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .dock.workspace.expanded .dock-input-area.dock-input-drag-over {
@@ -110,15 +285,33 @@
 
 .dock-header-left {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
+  flex: 1;
 }
 
 .dock-header-title-wrap {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
+}
+
+/* 首行：标题与状态徽章同一行，避免徽章贴在多行摘要中段 */
+.dock-header-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dock-header-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .dock-header-title {
@@ -139,10 +332,33 @@
   background: var(--bg-elevated);
   cursor: pointer;
   flex-shrink: 0;
+  max-width: min(420px, 70vw);
   transition:
     background var(--duration-fast) var(--ease-out),
     color var(--duration-fast) var(--ease-out),
     border-color var(--duration-fast) var(--ease-out);
+}
+
+.dock-header-threadline {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(360px, 46vw);
+}
+
+.dock-header-subtitle {
+  margin-top: 1px;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
 }
 
 .dock-header-export:hover {
@@ -195,8 +411,72 @@
   gap: 1px;
 }
 
+/* 右侧：工具条与关闭同一行（此前缺 flex，导致关闭钮掉到「新对话」下方） */
+.dock-header-right {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dock-header-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.dock-header-toolbar--chatlike {
+  row-gap: 4px;
+}
+
+.dock-header-tool-cluster {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-header-toolbtn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  line-height: 1.1;
+}
+
+.dock-header-toolbtn:hover {
+  background: var(--bg-inset);
+  color: var(--text-primary);
+}
+
+.dock-header-toolbtn.is-active {
+  color: var(--accent);
+}
+
+.dock-header-toolbtn-label {
+  font-size: 0.625rem;
+  font-weight: 500;
+  max-width: 3.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dock-header-close {
   flex-shrink: 0;
+  align-self: center;
 }
 
 /* Messages stream */
@@ -621,7 +901,7 @@
 
 /* Markdown 围栏代码块：与 Dock 卡片头风格一致，复制为图标 */
 .dock-bubble .msg-text .md-code-block {
-  margin: 10px 0;
+  margin: 6px 0;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
   background: color-mix(in srgb, var(--bg-elevated) 82%, #f8fafc);
@@ -770,9 +1050,45 @@
   display: block;
   font-size: 1.0625rem;
   font-weight: 700;
-  margin: 12px 0 8px;
+  margin: 10px 0 6px;
   line-height: 1.45;
   color: var(--text-primary);
+}
+
+.dock-bubble .msg-text .md-h3 {
+  display: block;
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 8px 0 5px;
+  line-height: 1.42;
+  color: var(--text-primary);
+}
+
+/* ATX ### / ####：与历史线程一致用 h4，四级标题略小一档 */
+.dock-bubble .msg-text .md-h4 {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 6px 0 4px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.dock-bubble .msg-text .md-h4.md-h4--atx3 {
+  font-size: 0.92rem;
+  margin-top: 8px;
+}
+
+.dock-bubble .msg-text .md-h4.md-h4--atx4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+/* 连续空行合并为一段间距，避免模型输出多空行时「巨缝」 */
+.dock-bubble .msg-text .md-paragraph-gap {
+  height: 0.45em;
+  min-height: 0.45em;
 }
 
 .dock-bubble .msg-text p { margin: 0 0 10px; }
