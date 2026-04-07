@@ -44,14 +44,16 @@
 
 ### 1.2 当前痛点
 
-| 痛点 | 现状 | 影响 |
-|------|------|------|
-| **文档知识固定** | 仅内置 RDK 官方开发者文档索引（`rdk-doc-url-index.md`） | 无法支持第三方硬件/SDK/传感器文档 |
-| **额外指令太简陋** | `extraInstructions` 为纯文本 textarea，2 行 | 无法承载结构化知识、多文档引用 |
-| **知识导入缺乏入口** | 仅支持当前对话附件（图片/文件） | 无法持久化自定义知识、无法跨会话复用 |
-| **无机器人概念** | 所有对话共享同一 Agent 人格 | 不同场景（X5 开发、TROS 调试、传感器集成）混用 |
-| **Skill 创建门槛高** | 需要手写 SKILL.md + YAML frontmatter | 普通开发者难以快速上手 |
-| **竞品差距** | 主流 AI 平台（Coze/Dify/GPTs）已有 Bot 商店 + 知识库 | 差异化不足 |
+
+| 痛点              | 现状                                        | 影响                          |
+| --------------- | ----------------------------------------- | --------------------------- |
+| **文档知识固定**      | 仅内置 RDK 官方开发者文档索引（`rdk-doc-url-index.md`） | 无法支持第三方硬件/SDK/传感器文档         |
+| **额外指令太简陋**     | `extraInstructions` 为纯文本 textarea，2 行     | 无法承载结构化知识、多文档引用             |
+| **知识导入缺乏入口**    | 仅支持当前对话附件（图片/文件）                          | 无法持久化自定义知识、无法跨会话复用          |
+| **无机器人概念**      | 所有对话共享同一 Agent 人格                         | 不同场景（X5 开发、TROS 调试、传感器集成）混用 |
+| **Skill 创建门槛高** | 需要手写 SKILL.md + YAML frontmatter          | 普通开发者难以快速上手                 |
+| **竞品差距**        | 主流 AI 平台（Coze/Dify/GPTs）已有 Bot 商店 + 知识库   | 差异化不足                       |
+
 
 ---
 
@@ -59,13 +61,15 @@
 
 ### 2.1 各竞品知识导入方式对比
 
-| 平台 | 知识来源 | 接入方式 | 冲突策略 | 特色 |
-|------|---------|---------|---------|------|
-| **OpenAI GPTs** | 上传文件（PDF/TXT/MD）+ 网址 | 上传 → Retrieval API 索引 | 每个 GPT 独立知识库，互不干扰 | 简洁，但粒度粗 |
-| **Coze (字节)** | 文件 + URL + 手动文本 + API 数据源 | 上传/爬取 → 向量化 → 知识库 | 可绑定多个知识库到单个 Bot | 多数据源，但需手动管理切片 |
-| **Dify** | 文件 + URL + Notion + 自定义 API | 上传 → 自动切片 → 向量数据库 | 应用级知识库绑定 | 开源、灵活，支持自定义切片策略 |
-| **Claude Projects** | 上传文件（.txt .pdf .csv 等） | 项目级上传 → 上下文注入 | 项目隔离 | 最简洁，但无向量搜索 |
-| **Cursor** | @docs + @file + @web | 指令前缀引用 | 不冲突，用户主动选择 `@docs` 加载 | **最贴近开发者工作流** |
+
+| 平台                  | 知识来源                        | 接入方式                  | 冲突策略                  | 特色              |
+| ------------------- | --------------------------- | --------------------- | --------------------- | --------------- |
+| **OpenAI GPTs**     | 上传文件（PDF/TXT/MD）+ 网址        | 上传 → Retrieval API 索引 | 每个 GPT 独立知识库，互不干扰     | 简洁，但粒度粗         |
+| **Coze (字节)**       | 文件 + URL + 手动文本 + API 数据源   | 上传/爬取 → 向量化 → 知识库     | 可绑定多个知识库到单个 Bot       | 多数据源，但需手动管理切片   |
+| **Dify**            | 文件 + URL + Notion + 自定义 API | 上传 → 自动切片 → 向量数据库     | 应用级知识库绑定              | 开源、灵活，支持自定义切片策略 |
+| **Claude Projects** | 上传文件（.txt .pdf .csv 等）      | 项目级上传 → 上下文注入         | 项目隔离                  | 最简洁，但无向量搜索      |
+| **Cursor**          | @docs + @file + @web        | 指令前缀引用                | 不冲突，用户主动选择 `@docs` 加载 | **最贴近开发者工作流**   |
+
 
 ### 2.2 最佳实践提炼
 
@@ -222,11 +226,13 @@ interface KnowledgeChunk {
 **核心原则：按需激活 > 全量注入**
 
 全量注入问题：
+
 - 自定义文档 + RDK 官方文档 = 轻易超过 context window
 - LLM 对无关上下文有"注意力稀释"，影响回答质量
 - 用户未必每次都需要自定义知识
 
 @引用方式的优势：
+
 - **零冲突**：不用时 = 不存在，不影响默认 RDK 文档行为
 - **精准导入**：用户明确指定需要的知识范围
 - **可组合**：`@bot TROS助手` + `@docs 激光雷达` 自由搭配
@@ -279,13 +285,15 @@ interface KnowledgeChunk {
 
 ### 4.4 Bot 切换 vs 知识追加的区别
 
-| 操作 | `@bot TROS助手` | `@docs 激光雷达SDK` |
-|------|-----------------|---------------------|
-| 改变 persona？ | ✅ 加载 Bot 专属人格 | ❌ 保持当前 persona |
-| 改变 knowledge？ | ✅ 加载 Bot 绑定的知识空间 | ✅ 追加知识空间到当前会话 |
-| 改变 skills？ | ✅ 加载 Bot 绑定的 skills | ❌ 不变 |
-| 保持 RDK 文档？ | 取决于 Bot 的 `includeRdkOfficialDocs` | ✅ 始终保留 |
-| 生命周期 | 直到 `@bot` 切换或 `@reset` | 直到 `[✕]` 移除或会话结束 |
+
+| 操作            | `@bot TROS助手`                      | `@docs 激光雷达SDK`  |
+| ------------- | ---------------------------------- | ---------------- |
+| 改变 persona？   | ✅ 加载 Bot 专属人格                      | ❌ 保持当前 persona   |
+| 改变 knowledge？ | ✅ 加载 Bot 绑定的知识空间                   | ✅ 追加知识空间到当前会话    |
+| 改变 skills？    | ✅ 加载 Bot 绑定的 skills                | ❌ 不变             |
+| 保持 RDK 文档？    | 取决于 Bot 的 `includeRdkOfficialDocs` | ✅ 始终保留           |
+| 生命周期          | 直到 `@bot` 切换或 `@reset`             | 直到 `[✕]` 移除或会话结束 |
+
 
 ---
 
@@ -382,14 +390,16 @@ interface KnowledgeRouterOutput {
 
 ### 6.1 支持的导入源
 
-| 来源类型 | 说明 | 处理方式 | 刷新策略 |
-|---------|------|---------|---------|
-| **在线链接** | 文档网站 URL | `web_fetch` / `web_browser_fetch` 抓取 → 提取正文 → 切片 | 手动刷新 / 定时（可选） |
-| **本地文件** | PDF/MD/TXT/DOCX/XLSX | 已有 attachment 解析能力（unpdf/mammoth/JSZip）复用 | 手动更新 |
-| **粘贴文本** | 直接粘贴内容 | 直接存储 + 切片 | 手动编辑 |
-| **GitHub 仓库** | repo + path 指定 | GitHub API + raw content 抓取 | 手动刷新 / webhook |
-| **Notion 页面** | Notion page ID + token | Notion API 获取 blocks → 转 Markdown → 切片 | 手动刷新 |
-| **RDK Skill 包** | 标准 SKILL.md | 直接作为知识注入（不切片） | 随 Skill 更新 |
+
+| 来源类型            | 说明                     | 处理方式                                             | 刷新策略           |
+| --------------- | ---------------------- | ------------------------------------------------ | -------------- |
+| **在线链接**        | 文档网站 URL               | `web_fetch` / `web_browser_fetch` 抓取 → 提取正文 → 切片 | 手动刷新 / 定时（可选）  |
+| **本地文件**        | PDF/MD/TXT/DOCX/XLSX   | 已有 attachment 解析能力（unpdf/mammoth/JSZip）复用        | 手动更新           |
+| **粘贴文本**        | 直接粘贴内容                 | 直接存储 + 切片                                        | 手动编辑           |
+| **GitHub 仓库**   | repo + path 指定         | GitHub API + raw content 抓取                      | 手动刷新 / webhook |
+| **Notion 页面**   | Notion page ID + token | Notion API 获取 blocks → 转 Markdown → 切片           | 手动刷新           |
+| **RDK Skill 包** | 标准 SKILL.md            | 直接作为知识注入（不切片）                                    | 随 Skill 更新     |
+
 
 ### 6.2 文档处理流水线
 
@@ -659,13 +669,15 @@ function buildKnowledgeContextLayer(input: {
 
 ### 9.1 新增工具
 
-| 工具名 | 功能 | 类型 |
-|--------|------|------|
-| `knowledge_search` | 在激活的知识空间中搜索 | Studio Tool |
-| `knowledge_import_url` | 即时导入 URL 到临时知识 | Studio Tool |
-| `knowledge_list_spaces` | 列出可用知识空间 | Studio Tool |
-| `bot_switch` | 切换当前机器人 | Studio Tool |
-| `bot_list` | 列出可用机器人 | Studio Tool |
+
+| 工具名                     | 功能             | 类型          |
+| ----------------------- | -------------- | ----------- |
+| `knowledge_search`      | 在激活的知识空间中搜索    | Studio Tool |
+| `knowledge_import_url`  | 即时导入 URL 到临时知识 | Studio Tool |
+| `knowledge_list_spaces` | 列出可用知识空间       | Studio Tool |
+| `bot_switch`            | 切换当前机器人        | Studio Tool |
+| `bot_list`              | 列出可用机器人        | Studio Tool |
+
 
 ### 9.2 `knowledge_search` 工具定义
 
@@ -687,34 +699,40 @@ function buildKnowledgeContextLayer(input: {
 
 ### Phase 1: 基础能力（MVP，2-3 周）
 
-| 优先级 | 功能 | 说明 |
-|--------|------|------|
-| P0 | **@url 即时引用** | 最小成本实现最大价值；复用现有 `web_fetch`；零配置 |
-| P0 | **知识空间基础** | 本地文件存储 + BM25 切片索引 + 简单搜索 |
-| P0 | **knowledge_context layer** | system-prompt-layers 新增 dynamic layer |
-| P1 | **输入框 @ 引用菜单** | 输入 `@` 弹出智能菜单 |
-| P1 | **知识空间管理 UI** | 新建/编辑/删除 知识空间 |
+
+| 优先级 | 功能                          | 说明                                    |
+| --- | --------------------------- | ------------------------------------- |
+| P0  | **@url 即时引用**               | 最小成本实现最大价值；复用现有 `web_fetch`；零配置       |
+| P0  | **知识空间基础**                  | 本地文件存储 + BM25 切片索引 + 简单搜索             |
+| P0  | **knowledge_context layer** | system-prompt-layers 新增 dynamic layer |
+| P1  | **输入框 @ 引用菜单**              | 输入 `@` 弹出智能菜单                         |
+| P1  | **知识空间管理 UI**               | 新建/编辑/删除 知识空间                         |
+
 
 ### Phase 2: 机器人中心（3-4 周）
 
-| 优先级 | 功能 | 说明 |
-|--------|------|------|
-| P0 | **RoboBot 数据模型** | bot.json + registry 存储 |
-| P0 | **Bot 创建/编辑 UI** | 人格 + 知识绑定 + Skills 绑定 |
-| P0 | **@bot 切换逻辑** | persona-store 扩展 + prompt layer 动态切换 |
-| P1 | **Bot 列表页** | 展示 + 搜索 + 标签筛选 |
-| P1 | **AI 生成系统提示词** | 根据描述自动生成 Bot persona |
+
+| 优先级 | 功能               | 说明                                   |
+| --- | ---------------- | ------------------------------------ |
+| P0  | **RoboBot 数据模型** | bot.json + registry 存储               |
+| P0  | **Bot 创建/编辑 UI** | 人格 + 知识绑定 + Skills 绑定                |
+| P0  | **@bot 切换逻辑**    | persona-store 扩展 + prompt layer 动态切换 |
+| P1  | **Bot 列表页**      | 展示 + 搜索 + 标签筛选                       |
+| P1  | **AI 生成系统提示词**   | 根据描述自动生成 Bot persona                 |
+
 
 ### Phase 3: 深度增强（4-6 周）
 
-| 优先级 | 功能 | 说明 |
-|--------|------|------|
-| P1 | **多来源导入** | GitHub / Notion / API 数据源 |
-| P1 | **向量搜索** | embedding + ANN 索引（提升搜索质量） |
-| P2 | **Bot 分享/导入** | 导出为 JSON/YAML → 其他用户一键导入 |
-| P2 | **知识空间自动刷新** | 定时爬取 URL 更新 |
-| P2 | **Bot 商店（社区）** | 用户发布 Bot 到 ClawhHub |
-| P3 | **多 Bot 协作** | 一次对话可引用多个 Bot 的能力 |
+
+| 优先级 | 功能             | 说明                         |
+| --- | -------------- | -------------------------- |
+| P1  | **多来源导入**      | GitHub / Notion / API 数据源  |
+| P1  | **向量搜索**       | embedding + ANN 索引（提升搜索质量） |
+| P2  | **Bot 分享/导入**  | 导出为 JSON/YAML → 其他用户一键导入   |
+| P2  | **知识空间自动刷新**   | 定时爬取 URL 更新                |
+| P2  | **Bot 商店（社区）** | 用户发布 Bot 到 ClawhHub        |
+| P3  | **多 Bot 协作**   | 一次对话可引用多个 Bot 的能力          |
+
 
 ---
 
@@ -722,13 +740,15 @@ function buildKnowledgeContextLayer(input: {
 
 ### 11.1 核心原则：**向后兼容，渐进增强**
 
-| 保证项 | 说明 |
-|--------|------|
-| **默认行为不变** | 不创建任何 Bot / 知识空间时，体验与当前完全一致 |
-| **RDK 文档不降级** | 官方文档始终作为 "系统知识空间" 存在，即使切换 Bot 也默认可用 |
-| **extraInstructions 保留** | 现有 `extraInstructions` 机制保留，作为 "默认 Bot" 的额外指令 |
-| **现有 Skill 体系兼容** | Bot 的 `skillIds` 只是过滤器，不替换 find_skills 机制 |
-| **文件结构无冲突** | 新增 `bots/` 和 `knowledge-spaces/` 目录，不影响现有 `rdkclaw-persona.json` |
+
+| 保证项                      | 说明                                                               |
+| ------------------------ | ---------------------------------------------------------------- |
+| **默认行为不变**               | 不创建任何 Bot / 知识空间时，体验与当前完全一致                                      |
+| **RDK 文档不降级**            | 官方文档始终作为 "系统知识空间" 存在，即使切换 Bot 也默认可用                              |
+| **extraInstructions 保留** | 现有 `extraInstructions` 机制保留，作为 "默认 Bot" 的额外指令                    |
+| **现有 Skill 体系兼容**        | Bot 的 `skillIds` 只是过滤器，不替换 find_skills 机制                        |
+| **文件结构无冲突**              | 新增 `bots/` 和 `knowledge-spaces/` 目录，不影响现有 `rdkclaw-persona.json` |
+
 
 ### 11.2 额外指令的演进路径
 
@@ -818,14 +838,16 @@ PersonaStore (现有)
 
 ### 为什么这不是另一个 GPTs / Coze？
 
-| 维度 | GPTs / Coze | RDKClaw RoboBot |
-|------|-------------|-----------------|
-| **领域** | 通用对话 | **嵌入式开发 + 硬件操控** |
-| **执行力** | 只能对话 | **SSH 执行 + 板端 Agent 协作** |
-| **知识验证** | 无法验证知识正确性 | **可以直接在板端执行验证** |
-| **Skill 联动** | 无 Skill 概念 | **Bot 绑定 Skill → 板端自动化** |
-| **双 Agent** | 无 | **RDKClaw + OpenClaw 协作** |
-| **场景** | 聊天 | **开发者文档 → 代码 → 部署 → 调试 全链路** |
+
+| 维度           | GPTs / Coze | RDKClaw RoboBot              |
+| ------------ | ----------- | ---------------------------- |
+| **领域**       | 通用对话        | **嵌入式开发 + 硬件操控**             |
+| **执行力**      | 只能对话        | **SSH 执行 + 板端 Agent 协作**     |
+| **知识验证**     | 无法验证知识正确性   | **可以直接在板端执行验证**              |
+| **Skill 联动** | 无 Skill 概念  | **Bot 绑定 Skill → 板端自动化**     |
+| **双 Agent**  | 无           | **RDKClaw + OpenClaw 协作**    |
+| **场景**       | 聊天          | **开发者文档 → 代码 → 部署 → 调试 全链路** |
+
 
 **核心差异化场景：**
 
@@ -853,18 +875,21 @@ PersonaStore (现有)
 
 ## 附录 A：相关文件参考
 
-| 文件 | 关联 |
-|------|------|
-| [server/rdkclaw/app.ts](server/rdkclaw/app.ts) | 主编排器，工具注册 |
-| [server/rdkclaw/system-prompt-layers.ts](server/rdkclaw/system-prompt-layers.ts) | Prompt 层组合 |
-| [server/rdkclaw/system-prompt-builder.ts](server/rdkclaw/system-prompt-builder.ts) | 各层内容构建 |
-| [server/rdkclaw/persona-store.ts](server/rdkclaw/persona-store.ts) | Persona 存储 |
-| [server/rdkclaw/rdk-doc-url-index.ts](server/rdkclaw/rdk-doc-url-index.ts) | RDK 文档索引 |
-| [server/rdkclaw/rdk-doc-first-intent.ts](server/rdkclaw/rdk-doc-first-intent.ts) | 文档优先意图检测 |
-| [server/rdkclaw/board-dual-agent-orchestration.ts](server/rdkclaw/board-dual-agent-orchestration.ts) | 双 Agent 协调 |
-| [server/rdkclaw/skills/registry.ts](server/rdkclaw/skills/registry.ts) | Skill 注册中心 |
-| [openclaw-mini-main/src/memory.ts](openclaw-mini-main/src/memory.ts) | BM25 内存搜索（可复用） |
-| [openclaw-mini-main/src/skills.ts](openclaw-mini-main/src/skills.ts) | Skill 加载机制 |
-| [src/components/AiChatHubPage.tsx](src/components/AiChatHubPage.tsx) | Chat Hub UI 入口 |
-| [src/components/SettingsPanel.tsx](src/components/SettingsPanel.tsx) | 设置面板 |
-| [skills/rdk-skill-authoring-guide/SKILL.md](skills/rdk-skill-authoring-guide/SKILL.md) | Skill 创建指南 |
+
+| 文件                                                                                                   | 关联             |
+| ---------------------------------------------------------------------------------------------------- | -------------- |
+| [server/rdkclaw/app.ts](server/rdkclaw/app.ts)                                                       | 主编排器，工具注册      |
+| [server/rdkclaw/system-prompt-layers.ts](server/rdkclaw/system-prompt-layers.ts)                     | Prompt 层组合     |
+| [server/rdkclaw/system-prompt-builder.ts](server/rdkclaw/system-prompt-builder.ts)                   | 各层内容构建         |
+| [server/rdkclaw/persona-store.ts](server/rdkclaw/persona-store.ts)                                   | Persona 存储     |
+| [server/rdkclaw/rdk-doc-url-index.ts](server/rdkclaw/rdk-doc-url-index.ts)                           | RDK 文档索引       |
+| [server/rdkclaw/rdk-doc-first-intent.ts](server/rdkclaw/rdk-doc-first-intent.ts)                     | 文档优先意图检测       |
+| [server/rdkclaw/board-dual-agent-orchestration.ts](server/rdkclaw/board-dual-agent-orchestration.ts) | 双 Agent 协调     |
+| [server/rdkclaw/skills/registry.ts](server/rdkclaw/skills/registry.ts)                               | Skill 注册中心     |
+| [openclaw-mini-main/src/memory.ts](openclaw-mini-main/src/memory.ts)                                 | BM25 内存搜索（可复用） |
+| [openclaw-mini-main/src/skills.ts](openclaw-mini-main/src/skills.ts)                                 | Skill 加载机制     |
+| [src/components/AiChatHubPage.tsx](src/components/AiChatHubPage.tsx)                                 | Chat Hub UI 入口 |
+| [src/components/SettingsPanel.tsx](src/components/SettingsPanel.tsx)                                 | 设置面板           |
+| [skills/rdk-skill-authoring-guide/SKILL.md](skills/rdk-skill-authoring-guide/SKILL.md)               | Skill 创建指南     |
+
+
