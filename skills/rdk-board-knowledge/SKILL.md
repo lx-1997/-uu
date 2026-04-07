@@ -158,6 +158,7 @@ source /opt/tros/setup.bash   # Foxy
 本段仅在 **boardPlatform 为 rdk-s100 / rdk-ultra** 或探测为 S100 系时使用。
 
 - **算力**：约 80T（S100）/ 128T（S100P），BPU **Nash-e**；默认用户常为 **root**
+- **TROS 与账号**：若 **root** 下始终像「没有 TROS」（未 source 时 `which ros2` 为空），先执行 `source /opt/tros/humble/setup.bash` 再判；仍异常时换 **sunrise** 用户查看 `~/.bashrc` / `~/.profile` 是否已写入 tros.b（`# 配置tros.b环境` + source）；部分镜像只在普通用户里配好交互环境。
 - **系统**：Ubuntu 22.04 + **Humble**，TROS：`source /opt/tros/humble/setup.bash`
 - **接口**：多 USB3、双 MIPI CSI、千兆网、PCIe 等（以硬件文档为准）
 - **BPU / 温度**（多 zone / 多核）：

@@ -460,7 +460,7 @@ function summarizeLines(lines: string[], maxChars = 52): string {
 }
 
 function composeCollapsedSummary(base: string, preview: string, open: boolean): string {
-  const b = summarizeInline(base, 40) || base;
+  const b = summarizeInline(base, 120) || base;
   if (open || !preview) return b;
   return `${b} | ${preview}`;
 }
@@ -523,7 +523,7 @@ function StatusCollapsible({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const summaryText = block.summary || block.title || block.items[0]?.label || t('dock.status.fallback', '详情');
-  const preview = summarizeInline(block.items.map((item) => `${item.label}: ${item.value}`).join(' | '), 64);
+  const preview = summarizeInline(block.items.map((item) => `${item.label}: ${item.value}`).join(' | '), 160);
   const collapsedSummary = composeCollapsedSummary(summaryText, preview, open);
   return (
     <div

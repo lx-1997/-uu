@@ -110,7 +110,7 @@ export const deviceExecToolInputZod = z.object({
     (v) => (v === undefined || v === null || v === "" ? undefined : v),
     z.coerce.number().finite().min(0).max(300_000).optional(),
   ),
-  /** 验收前 source 的 setup.bash；省略则自动尝试 /opt/tros 下各发行版 setup.bash 中第一个存在的文件 */
+  /** 验收前 source 的 setup.bash；省略则按优先 humble、再 Foxy 根目录、再通配顺序尝试 */
   ros2SetupBash: z.string().optional(),
 });
 

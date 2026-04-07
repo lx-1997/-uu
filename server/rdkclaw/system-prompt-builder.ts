@@ -27,6 +27,12 @@ export function buildPersonaPrompt(persona: PersonaProfile) {
       "**开发者文档任务补充**：若用户目标是开发者文档/API/官方示例的检索、对照、解释或步骤整理，默认由 RDKClaw 本地完成（web_search/web_fetch/read）；除非用户明确要求在套件端实际执行，否则不要为文档任务委派 OpenClaw。",
       "**无套件端 OpenClaw 或刻意快路径时**：与 delegate **同一套目标**——先文档与并行探测、短步骤链、每步读输出再推进、`background`/日志与 topic 验收；持久 shell 可延续 `source`。**不能**用纯 SSH 冒充 SkillHub 技能链；缺技能时要么装 OpenClaw，要么按 rdk_doc 手搓等价命令。**对用户说明**须与委派 guidance 一样写清阶段与验收，勿只贴 shell。",
     );
+  } else if (persona.delegationBias === "balanced") {
+    lines.push(
+      "**均衡（运行契约）**：双伙伴共探——**谁更快收敛谁牵头**；不默认只信 SSH 或只信委派。",
+      "**SSH 不稳定时**：Studio↔板 若出现抖动、超时、反复断开，**优先** `board_openclaw_assess`→`board_openclaw_delegate`，让 OpenClaw 在板内执行等价步骤，避免同一轮死磕 `device_exec` 重试。",
+      "**板卡 shell**：多步、技能链、预计多轮试错时**尽量**让套件端 OpenClaw 执行；单条原子只读探测仍可 `device_exec`。OpenClaw 不可用时再短重试 SSH 或说明网络问题。",
+    );
   } else if (persona.delegationBias === "board-first") {
     lines.push(
       "**套件端优先（运行契约）**：复杂/多步套件端任务在 assess 可行时优先 `board_openclaw_delegate`，由套件端迭代；Studio 侧负责联网、文档与验收核对。",
@@ -61,14 +67,24 @@ export function buildReasoningGuidancePrompt(
           "- **仅 SSH 多步时**：对用户回复的结构化程度须与 delegate guidance **同级**（编号计划、阶段归纳、验收命令），勿只堆工具输出。",
           "- **不要**：无目的地首轮堆 assess；也**不要**：该并线到套件端 Agent 时却用十几条 `device_exec` 硬顶。",
         ].join("\n")
-      : [
-          "### 与套件端 OpenClaw 协作",
-          "你是 RDKClaw，OpenClaw 是套件端伙伴——**一起摸路**，不是主从流水线：",
-          "- 你常强在：联网、RDK 文档、工作区、编排与验收。",
-          "- OpenClaw 常强在：套件端现场、硬件与本地服务、技能链与板内多轮迭代。",
-          "每轮比较的是**谁更快把事办成**，不是谁先写「计划书」。把任务边界、已验证证据、失败模式、验收标准写入 guidance/context，便于双方对齐与换道；仅在套件端明显更能收敛时再 assess→delegate。",
-          "已连接设备时：复杂任务可在一轮内并行「检索 + 套件端评估」（见「双 Agent 协作」），合并结果再选牵头方。",
-        ].join("\n");
+      : delegationBias === "balanced"
+        ? [
+            "### 与套件端 OpenClaw 协作（均衡）",
+            "你是 RDKClaw，OpenClaw 是套件端伙伴——**一起摸路**，不是主从流水线：",
+            "- 你常强在：联网、RDK 文档、工作区、编排与验收。",
+            "- OpenClaw 常强在：套件端现场、硬件与本地服务、技能链与板内多轮迭代（**不经 Studio↔板 SSH 长链路**）。",
+            "- **SSH 抖动/超时/同一命令反复失败**：**优先换道** assess→delegate，让 OpenClaw 在板内执行，勿堆 `device_exec` 重试耗尽轮次。",
+            "- **要在板卡上跑的 shell**：多步、技能链、预计多轮试错时**尽量**让 OpenClaw 执行；单条原子只读探测仍可 `device_exec`。",
+            "每轮比较的是**谁更快把事办成**。把任务边界、已验证证据、失败模式、验收标准写入 guidance/context；已连接设备时复杂任务可一轮内并行「检索 + board_openclaw_assess」。",
+          ].join("\n")
+        : [
+            "### 与套件端 OpenClaw 协作",
+            "你是 RDKClaw，OpenClaw 是套件端伙伴——**一起摸路**，不是主从流水线：",
+            "- 你常强在：联网、RDK 文档、工作区、编排与验收。",
+            "- OpenClaw 常强在：套件端现场、硬件与本地服务、技能链与板内多轮迭代。",
+            "每轮比较的是**谁更快把事办成**，不是谁先写「计划书」。把任务边界、已验证证据、失败模式、验收标准写入 guidance/context，便于双方对齐与换道；仅在套件端明显更能收敛时再 assess→delegate。",
+            "已连接设备时：复杂任务可在一轮内并行「检索 + 套件端评估」（见「双 Agent 协作」），合并结果再选牵头方。",
+          ].join("\n");
 
   if (tier === "small") {
     const smallBase = [
@@ -81,9 +97,7 @@ export function buildReasoningGuidancePrompt(
       "若推断**现有手段做不下去**：先 `find_skills`，再 `read` 或安装。**任务真成功后**再用 `skill_mark_validated`（SkillHub 填 slug）落到 `skills/` 并记记忆；搜过不等于内化。",
       "对用户：结论先行，命令与步骤短而可执行。",
     ];
-    if (delegationBias === "local-first") {
-      smallBase.push("", openClawCollaborationSection);
-    }
+    smallBase.push("", openClawCollaborationSection);
     return smallBase.join("\n");
   }
   return [
@@ -347,9 +361,19 @@ export function buildCollaborationPrompt(
           "",
         ]
       : [];
+  const balancedLead =
+    delegationBias === "balanced"
+      ? [
+          "### 均衡：SSH 与套件端执行",
+          "**SSH 不稳**（超时、断开、同令反复失败）→ **优先** assess→delegate，由 OpenClaw 在板内跑 shell，勿死磕 Studio 侧 `device_exec` 重试。",
+          "要在板卡上执行的命令：**多步 / 技能链 / 多轮试错** 时**尽量**交给 OpenClaw；**单条原子只读**探测仍可直接 `device_exec`。",
+          "",
+        ]
+      : [];
   if (tier === 'small') {
     return [
       ...boardFirstLead,
+      ...balancedLead,
       "## 协作（简版）",
       "（三条链与工具边界见 **工具契约总纲**。）",
       "你与套件端 OpenClaw 是协作双引擎：**一起摸路**，谁快谁牵头；你常握编排与外部信息，套件端常握现场与会话迭代。",
@@ -367,6 +391,7 @@ export function buildCollaborationPrompt(
   }
   return [
     ...boardFirstLead,
+    ...balancedLead,
     "## 双 Agent 协作",
     "（SSH 与 OpenClaw 的分工、依赖与典型顺序见系统提示中 **工具契约总纲**；本节细化 chat/assess/delegate 与并行模式。）",
     "",
@@ -381,8 +406,14 @@ export function buildCollaborationPrompt(
     "- **`alignment_gate: bypassed`**：你已在 guidance 写明可对齐完成或已确认命令；套件端仍须先**简短** [套件端·对齐] 复述，再执行。",
     "",
     "### SSH 与 OpenClaw 分流（谁快谁牵头 · 避免一方硬顶）",
-    "- **常先 SSH**：单条或少量 `&&`、无技能链依赖、不需要套件端 Agent 多轮迭代。**重要**：若你已通过 `web_fetch` + `device_exec` 确认了完整可执行命令（如含参的 `ros2 launch`），直接 `device_exec` 往往比 delegate 省大量等待——这是**选快道**，不是否定 OpenClaw。",
-    "- **认真考虑让 OpenClaw 牵头**：多步装依赖/编译/运行/根据报错再改；依赖 clawhub 已装技能；网关/插件/配对；或你已预见要 **>3 次** 试探性 `device_exec`——**assess→delegate**，让套件端在其会话里迭代，避免主会话被 shell 日志淹没。",
+    ...(delegationBias === "balanced"
+      ? [
+          "- **均衡下板卡命令**：多步、技能链、预计多轮试错 → **优先**让 OpenClaw 在板内执行（assess→delegate）；**单条原子**只读/探测仍可 `device_exec`。",
+          "- **SSH 已在抖**：同一 `device_exec` 连续失败或连接超时 → **换道** assess→delegate，勿同一模式反复 SSH。",
+        ]
+      : []),
+    "- **常先 SSH**：单条或少量 `&&`、无技能链依赖、不需要套件端 Agent 多轮迭代、且链路稳定。**重要**：若你已通过 `web_fetch` + `device_exec` 确认了完整可执行命令（如含参的 `ros2 launch`），直接 `device_exec` 往往比 delegate 省大量等待——这是**选快道**，不是否定 OpenClaw。",
+    "- **认真考虑让 OpenClaw 牵头**：多步装依赖/编译/运行/根据报错再改；依赖 clawhub 已装技能；网关/插件/配对；或你已预见要 **>3 次** 试探性 `device_exec`；或 **SSH 已不稳定**——**assess→delegate**，让套件端在其会话里迭代，避免主会话被 shell 日志淹没。",
     "- **并行**：复杂任务首轮即可 `web_search` + `web_fetch` + `board_openclaw_assess` 同发，不要串行做完本地再评估套件端。",
     "",
     "### 委派行为规则（IMPORTANT）",
@@ -569,11 +600,16 @@ export function buildRdkclawDynamicSystemSections(args: {
             : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。",
           "## RDK 套件端 ROS 环境（易误判）",
           "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
-          "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
+          deviceProfile
+            ? `本板设备画像：TROS 根路径为 \`${deviceProfile.trosPath}\`，先 \`source ${deviceProfile.trosPath}/setup.bash\`（RDK S100 等与官方 Humble 镜像为 \`/opt/tros/humble\`，勿仅因缺少旧版 Foxy 的 \`/opt/tros/setup.bash\` 误判未安装）。`
+            : "",
+          "判断是否有 ROS2 工作区前：应用 device_exec 查看 `test -f /opt/tros/humble/setup.bash` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
           "ROS/节点/话题类任务可 `read` 工作区 skills 中的 RDK ROS（rdk-ros）与 RDK Board Knowledge（rdk-board-knowledge）的 SKILL.md。",
           "**launch 与可视化**：`ros2 launch` 等长驻、阻塞式进程请用 **device_exec + background:true**；若 launch 或节点会起 Web 可视化（常见端口或文档中的 URL），在可行时 **studio_open_url** 打开给用户。",
           deviceRosTail,
-        ].join("\n")
+        ]
+          .filter(Boolean)
+          .join("\n")
       : "",
     hasDevice
       ? ""

@@ -10,6 +10,9 @@ import * as path from 'path';
 import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transport.js';
 import {
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
+  OPENCLAW_CLI_GATEWAY_STOP_CMD,
+  OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD,
+  OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD,
   OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
   OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_FAST_REGISTRY_SNIPPET,
@@ -17,7 +20,13 @@ import {
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
   OPENCLAW_PREPARE_NPM_SPEED,
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
+  OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET,
   OPENCLAW_RESOLVE_CLI_SNIPPET,
+  OPENCLAW_SYSTEMD_USER_DAEMON_RELOAD_CMD,
+  OPENCLAW_SYSTEMD_USER_GATEWAY_DISABLE_CMD,
+  OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD,
+  OPENCLAW_UNINSTALL_PKILL_SNIPPET,
+  OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,
   OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
 } from './openclaw-board-install-sh.js';
 import {
@@ -805,7 +814,7 @@ export const OPENCLAW_PREPARE_CMD = [
   'mkdir -p "$HOME/.openclaw" "$HOME/.npm-global"',
   'npm config set prefix "$HOME/.npm-global" 2>/dev/null ; npm config set fund false 2>/dev/null ; npm config set update-notifier false 2>/dev/null',
   OPENCLAW_PREPARE_NPM_SPEED,
-  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" --version 2>&1; else echo "openclaw: 未安装"; fi)',
+  '(if [ -n "$OPENCLAW_CMD" ]; then if command -v timeout >/dev/null 2>&1; then timeout 15s "$OPENCLAW_CMD" --version 2>&1 || echo "[OpenClaw] --version 超时" 1>&2; else echo "[OpenClaw] openclaw 已安装（跳过版本检测，无 timeout）" 1>&2; fi; else echo "openclaw: 未安装"; fi)',
   ENSURE_GATEWAY_LOCAL_MODE,
   ENSURE_GATEWAY_AUTH_TOKEN,
   'command -v npm >/dev/null 2>&1',
@@ -826,8 +835,8 @@ export function buildBoardOpenClawGatewayPairRemoteShell(mode: 'force' | 'full')
     RESOLVE_OPENCLAW_CMD,
     'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] gateway pair 失败：未找到 openclaw CLI"; exit 1; fi',
     'echo "[OpenClaw] 停止 Gateway..."',
-    '"$OPENCLAW_CMD" gateway stop 2>/dev/null || true',
-    `(${GATEWAY_SSH_USER_SYSTEMD_ENV}; systemctl --user stop openclaw-gateway 2>/dev/null || true)`,
+    OPENCLAW_CLI_GATEWAY_STOP_CMD,
+    '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD + ')',
     'echo "[OpenClaw] 清理待处理设备配对请求..."',
     '("$OPENCLAW_CMD" devices clear --yes --pending 2>&1) || true',
     'echo "[OpenClaw] 旧版 CLI: pair --reset（若不存在则跳过）..."',
@@ -853,7 +862,7 @@ const NPM_UPGRADE_CMD = [
   OPENCLAW_ENSURE_NPM_SNIPPET,
   RESOLVE_OPENCLAW_CMD,
   // 优先 CLI update，失败回退 npm 双源重试
-  '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" update --no-restart 2>&1 || "$OPENCLAW_CMD" update 2>&1; else false; fi) || (echo "[OpenClaw] update 失败，改 npm" >&2 && ' +
+  '(if [ -n "$OPENCLAW_CMD" ]; then if command -v timeout >/dev/null 2>&1; then timeout 600s "$OPENCLAW_CMD" update --no-restart </dev/null 2>&1 || timeout 600s "$OPENCLAW_CMD" update </dev/null 2>&1; else "$OPENCLAW_CMD" update --no-restart </dev/null 2>&1 || "$OPENCLAW_CMD" update </dev/null 2>&1; fi; else false; fi) || (echo "[OpenClaw] update 失败，改 npm" >&2 && ' +
     OPENCLAW_NPM_FAST_INSTALL_SNIPPET +
     ')',
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
@@ -1455,35 +1464,40 @@ export class OpenClawDeploymentManager {
       RESOLVE_OPENCLAW_CMD,
       'echo "[OpenClaw] 开始卸载..."',
 
-      'echo "[1/6] 停止 gateway 服务..."',
-      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway stop 2>/dev/null || true; fi)',
-      '(systemctl --user stop openclaw-gateway 2>/dev/null || true)',
+      'echo "[1/6] 官方：gateway stop → uninstall；此处先释放 18789 再限时 systemctl，再限时 gateway stop（避免裸跑 CLI 在依赖损坏时挂死）..."',
+      OPENCLAW_UNINSTALL_PKILL_SNIPPET,
+      '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD + ')',
+      '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_STOP_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 gateway stop"; fi)',
 
-      'echo "[2/6] 执行官方卸载..."',
-      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" uninstall --all --yes --non-interactive 2>&1 || true; else echo "[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续执行兜底清理）"; fi)',
+      'echo "[2/6] 执行官方卸载 openclaw uninstall --all --yes --non-interactive（限时；失败则 npm/rm 兜底）..."',
+      '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续执行兜底清理）"; fi)',
 
       'echo "[3/6] 卸载 systemd 服务..."',
-      '(if [ -n "$OPENCLAW_CMD" ]; then "$OPENCLAW_CMD" gateway uninstall 2>/dev/null || true; fi)',
-      '(systemctl --user disable openclaw-gateway 2>/dev/null || true)',
+      '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD + '; fi)',
+      '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_DISABLE_CMD + ')',
       '(rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true)',
-      '(systemctl --user daemon-reload 2>/dev/null || true)',
+      '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_DAEMON_RELOAD_CMD + ')',
 
       'echo "[4/6] 清除 ClawHub 登录态..."',
-      '(clawhub logout 2>/dev/null || true)',
+      '(if command -v clawhub >/dev/null 2>&1; then if command -v timeout >/dev/null 2>&1; then timeout 30s clawhub logout </dev/null 2>/dev/null || true; else clawhub logout </dev/null 2>/dev/null || true; fi; fi)',
 
-      'echo "[5/6] 清理配置、日志和临时文件..."',
+      'echo "[5/6] 清理配置、日志、缓存与 shell PATH 注入..."',
       '(rm -rf ~/.openclaw 2>/dev/null || true)',
       '(rm -rf /tmp/openclaw-* /tmp/clawhub-* 2>/dev/null || true)',
       '(rm -rf ~/.cache/openclaw 2>/dev/null || true)',
       '(rm -rf ~/.local/share/openclaw 2>/dev/null || true)',
+      OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET,
 
-      'echo "[6/6] 移除全局 npm 包..."',
+      'echo "[6/6] 移除全局 npm 包与残留目录..."',
       '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true)',
       '(npm rm -g clawhub 2>/dev/null || true)',
+      '(npm rm -g clawctl 2>/dev/null || true)',
+      OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,
 
       'echo "[OpenClaw] 卸载完成，已彻底清理"',
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: 300000 });
+    // 非 PTY；[1/6] 先端口/systemd 再限时 gateway stop（与官方顺序等价，禁止裸跑 CLI）
+    this.execCommand(device, cmd, onOutput, onComplete, { pty: false, timeout: 300000 });
   }
 
   getGatewayStatus(device: Device, onResult: (status: GatewayStatus) => void, onOutput?: (chunk: string) => void): void {

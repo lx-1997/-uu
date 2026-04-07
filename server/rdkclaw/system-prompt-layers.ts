@@ -333,7 +333,9 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
     [
       "## 执行编排纪律",
       "涉及设备命令时先给计划再执行：先列 2-4 步可验证计划，再开始落命令。",
-      "默认优先单次 `device_exec`（同一持久 SSH 终端）连续完成相关命令，避免无计划地分散成多轮小命令。",
+      input.persona.delegationBias === "balanced"
+        ? "单条原子命令可用同一持久 SSH（`device_exec`）；多步/技能链或 **SSH 不稳** 时优先 `board_openclaw_assess` → `delegate`，由套件端在板内执行，避免无计划地拆成多轮却仍硬顶 SSH。"
+        : "默认优先单次 `device_exec`（同一持久 SSH 终端）连续完成相关命令，避免无计划地分散成多轮小命令。",
       "若用户仅一句话提出机器人应用目标：先生成\"可运行最小骨架\"（节点/launch/配置/验收命令），再增量完善能力，避免一开始过度设计。",
       "ROS2/Linux/部署类任务第一轮优先并行取证并尽快收敛到可执行命令；不要把检索、探测、评估拆成多轮串行。",
       "执行结束必须给出验收结论（成功/失败、下一步）。",
@@ -356,7 +358,9 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
     const deviceRosCloseLine =
       input.persona.delegationBias === "local-first"
         ? "确认命令后再 device_exec；**Studio 优先**：原子问题用 SSH；多步/技能/多轮试错应收束到 `board_openclaw_assess` → `delegate`，勿长串 shell 包办。"
-        : "确认命令后再 device_exec；套件端多步编排用 board_openclaw_assess / delegate。";
+        : input.persona.delegationBias === "balanced"
+          ? "确认命令后再 device_exec；**均衡**：单条原子只读/探测可 SSH；多步/技能链或 **SSH 抖动、超时、同令反复失败** 时优先 `board_openclaw_assess` → `delegate`，由套件端 OpenClaw 在板内迭代，勿同一模式死磕 SSH。"
+          : "确认命令后再 device_exec；**套件端优先**：复杂多步在 assess 可行时尽早 `board_openclaw_assess` / `board_openclaw_delegate`；单条原子命令仍可直接 device_exec。";
     pushStable(
       "device_research_ros",
       [
@@ -367,7 +371,10 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
           : "若尚未识别板型：请先 device_diagnose 或让用户执行 POST /api/devices/:id/board/detect?persist=1。",
         "## RDK 套件端 ROS 环境（易误判）",
         "TROS 指 TogetheROS.Bot（通常在 /opt/tros/<发行版>/），与 ROS2 CLI 兼容；**不要**把缩写理解成 Tuya/涂鸦 IoT 的 TuyaROS2。",
-        "判断是否有 ROS2 工作区前：应用 device_exec 查看 `ls /opt/tros` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
+        input.deviceProfile
+          ? `本板设备画像：TROS 根路径为 \`${input.deviceProfile.trosPath}\`，先 \`source ${input.deviceProfile.trosPath}/setup.bash\`（RDK S100 等与官方 Humble 镜像为 \`/opt/tros/humble\`，勿仅因缺少旧版 Foxy 的 \`/opt/tros/setup.bash\` 误判未安装）。`
+          : "",
+        "判断是否有 ROS2 工作区前：应用 device_exec 查看 `test -f /opt/tros/humble/setup.bash` 或 `ls /opt/tros/*/setup.bash`，必要时 `source` 后再运行 ros2；**禁止**仅因未 source 时 `which ros2` 为空就声称「未安装 ROS2」。",
         "## ROS2 工程习惯（主动读盘 · 路径怀疑）",
         "套件端文件系统**区分大小写**；`package.xml`、launch 文件名、`share/<pkg>/` 路径须以 **`ls` / `find` / `ros2 pkg prefix <pkg>`** 实测为准，勿凭记忆拼写。",
         "在改 launch、设 remap、指模型路径**之前**：优先 `device_file_read` 或 `grep` 看现有内容；断言「包不存在」前应先 `ros2 pkg list` / `dpkg -l | grep` 交叉验证。",
@@ -376,7 +383,9 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
         "陷入重复错误时：换假设（依赖、权限、设备占用、模型版本），并把本轮**已证实**的事实写进回复或记忆，减少无意义重试。",
         "ROS/节点/话题类任务可 `read` 工作区 skills 中的 RDK ROS（rdk-ros）与 RDK Board Knowledge（rdk-board-knowledge）的 SKILL.md。",
         deviceRosCloseLine,
-      ].join("\n"),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
   } else {
     pushStable(

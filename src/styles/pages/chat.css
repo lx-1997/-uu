@@ -2870,7 +2870,11 @@ body:has(.content-area[data-studio-tab='flasher']) .dock-restore-btn:hover {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
 .dock-bubble .status-collapsible-toggle {

@@ -82,6 +82,10 @@ export type ExecOnDeviceOptions = {
    * 失败时自动回退为单次 `exec`。
    */
   persistentShell?: boolean;
+  /**
+   * 仅持久 shell：超过此时间无新 PTY 数据则中止（见 device-persistent-shell `maxIdleOutputMs`）。
+   */
+  maxIdleOutputMs?: number;
 };
 
 export async function getDevice(deviceId: string): Promise<Device | null> {
@@ -115,12 +119,14 @@ export async function execOnDevice(
     options?.timeoutMs != null ||
     options?.onStreamChunk ||
     options?.abortSignal ||
-    options?.rejectOnNonZeroExit === false
+    options?.rejectOnNonZeroExit === false ||
+    options?.maxIdleOutputMs != null
       ? {
           ...(options.timeoutMs != null ? { timeoutMs: options.timeoutMs } : {}),
           ...(options.onStreamChunk ? { onStreamChunk: options.onStreamChunk } : {}),
           ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
           ...(options.rejectOnNonZeroExit === false ? { rejectOnNonZeroExit: false as const } : {}),
+          ...(options.maxIdleOutputMs != null ? { maxIdleOutputMs: options.maxIdleOutputMs } : {}),
         }
       : undefined;
 
@@ -134,6 +140,7 @@ export async function execOnDevice(
         onStreamChunk: options?.onStreamChunk,
         abortSignal: options?.abortSignal,
         rejectOnNonZeroExit: options?.rejectOnNonZeroExit,
+        maxIdleOutputMs: options?.maxIdleOutputMs,
       });
       return sanitizePersistentShellOutputForDisplay(raw);
     } catch (err) {

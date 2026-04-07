@@ -29,6 +29,7 @@ category: DevOps
 不同板型的系统路径和命令可能不同。执行操作前注意：
 - X3：默认用户 `sunrise`（非 root），Ubuntu 20.04，TROS Foxy
 - X5/S100：默认用户 `root`，Ubuntu 22.04，TROS Humble
+- S100：`root` 会话里若像没有 TROS（未 source 时无 `ros2`），除手动 `source /opt/tros/humble/setup.bash` 外，可换 **sunrise** 用户看 `~/.bashrc` 是否已配 tros.b（部分镜像仅普通用户写好）
 - 文件路径、包管理命令、ROS source 命令因板型而异
 
 1. **确认设备连接**：通过 `device_diagnose` 或上下文信息确认目标设备在线且 SSH 可达

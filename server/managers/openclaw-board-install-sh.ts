@@ -234,13 +234,96 @@ export const OPENCLAW_RESOLVE_CLI_SNIPPET = [
 ].join(' && ');
 
 /**
+ * SSH 非登录会话补全 user systemd/dbus（与 `OpenClawDeploymentManager` 中 `GATEWAY_SSH_USER_SYSTEMD_ENV` 保持一致）。
+ */
+export const OPENCLAW_SSH_USER_SYSTEMD_ENV_SNIPPET = [
+  'if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then export XDG_RUNTIME_DIR="/run/user/$(id -u)"; fi',
+  'if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "${XDG_RUNTIME_DIR}/bus" ]; then export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"; fi',
+].join(' && ');
+
+/**
+ * 官方文档第一步：`openclaw gateway stop`。须关闭 stdin；**禁止**无 `timeout`/python 时裸跑（依赖损坏时 CLI 会在 require 阶段挂死）。
+ * 需已设置 OPENCLAW_CMD。
+ */
+export const OPENCLAW_CLI_GATEWAY_STOP_CMD = joinShellLines([
+  'if command -v timeout >/dev/null 2>&1; then',
+  'timeout 120s "$OPENCLAW_CMD" gateway stop </dev/null 2>&1 || true',
+  'elif command -v python3 >/dev/null 2>&1; then',
+  'python3 -c \'import subprocess,sys; subprocess.run([sys.argv[1],"gateway","stop"],stdin=subprocess.DEVNULL,timeout=130)\' "$OPENCLAW_CMD" 2>/dev/null || true',
+  'else',
+  'echo "[OpenClaw] WARN: 无 timeout/python3，跳过 gateway stop（已执行端口释放/systemd）" 1>&2',
+  'fi',
+]);
+
+/**
+ * 卸载 [3/6]：`systemctl --user disable` / `daemon-reload` 在 dbus 异常时也可能阻塞，与 stop 同策略。
+ */
+export const OPENCLAW_SYSTEMD_USER_GATEWAY_DISABLE_CMD = joinShellLines([
+  'if command -v timeout >/dev/null 2>&1; then',
+  'timeout 45s systemctl --user disable openclaw-gateway 2>/dev/null || true',
+  'elif command -v python3 >/dev/null 2>&1; then',
+  "python3 -c \"import subprocess; subprocess.run(['systemctl','--user','disable','openclaw-gateway'],timeout=50,stderr=subprocess.DEVNULL,stdout=subprocess.DEVNULL)\" 2>/dev/null || true",
+  'else',
+  'echo "[OpenClaw] WARN: 无 timeout/python3，跳过 systemctl --user disable" 1>&2',
+  'fi',
+]);
+
+export const OPENCLAW_SYSTEMD_USER_DAEMON_RELOAD_CMD = joinShellLines([
+  'if command -v timeout >/dev/null 2>&1; then',
+  'timeout 45s systemctl --user daemon-reload 2>/dev/null || true',
+  'elif command -v python3 >/dev/null 2>&1; then',
+  "python3 -c \"import subprocess; subprocess.run(['systemctl','--user','daemon-reload'],timeout=50,stderr=subprocess.DEVNULL,stdout=subprocess.DEVNULL)\" 2>/dev/null || true",
+  'else',
+  'echo "[OpenClaw] WARN: 无 timeout/python3，跳过 systemctl --user daemon-reload" 1>&2',
+  'fi',
+]);
+
+/**
+ * `systemctl --user` 在 SSH 无 dbus / 异常时常**无限阻塞**；无 `timeout` 时**禁止**裸跑 systemctl。
+ * 次选：`python3 subprocess.run(..., timeout=)`；再无则跳过（依赖同轮端口释放）。
+ */
+export const OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD = joinShellLines([
+  'if command -v timeout >/dev/null 2>&1; then',
+  'timeout 60s systemctl --user stop openclaw-gateway 2>/dev/null || true',
+  'elif command -v python3 >/dev/null 2>&1; then',
+  "python3 -c \"import subprocess; subprocess.run(['systemctl','--user','stop','openclaw-gateway'],timeout=65,stderr=subprocess.DEVNULL,stdout=subprocess.DEVNULL)\" 2>/dev/null || true",
+  'else',
+  'echo "[OpenClaw] WARN: 无 timeout/python3，跳过 systemctl --user stop（已先释放 18789）" 1>&2',
+  'fi',
+]);
+
+/**
+ * 官方 `openclaw uninstall`：无 timeout 时用 python3 限时；再无则跳过（避免裸跑挂死，靠 npm rm 兜底）。
+ */
+export const OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD = joinShellLines([
+  'if command -v timeout >/dev/null 2>&1; then',
+  'timeout 300s "$OPENCLAW_CMD" uninstall --all --yes --non-interactive </dev/null 2>&1 || true',
+  'elif command -v python3 >/dev/null 2>&1; then',
+  'python3 -c \'import subprocess,sys; subprocess.run([sys.argv[1],"uninstall","--all","--yes","--non-interactive"],stdin=subprocess.DEVNULL,timeout=320)\' "$OPENCLAW_CMD" 2>/dev/null || true',
+  'else',
+  'echo "[OpenClaw] WARN: 无 timeout/python3，跳过 openclaw uninstall（将由 npm rm 兜底）" 1>&2',
+  'fi',
+]);
+
+/** `openclaw gateway uninstall`：同上。 */
+export const OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD = joinShellLines([
+  'if command -v timeout >/dev/null 2>&1; then',
+  'timeout 120s "$OPENCLAW_CMD" gateway uninstall </dev/null 2>&1 || true',
+  'elif command -v python3 >/dev/null 2>&1; then',
+  'python3 -c \'import subprocess,sys; subprocess.run([sys.argv[1],"gateway","uninstall"],stdin=subprocess.DEVNULL,timeout=130)\' "$OPENCLAW_CMD" 2>/dev/null || true',
+  'else',
+  'echo "[OpenClaw] WARN: 无 timeout/python3，跳过 gateway uninstall（继续清理单元文件）" 1>&2',
+  'fi',
+]);
+
+/**
  * npm 装包成功后强制验收：`command -v` 能找到文件不等于 Node 能执行 CLI（旧 Node 会先过 ensure 再因竞态/多版本失效）。
  * 失败则 exit 1，避免日志出现「安装完成」但健康检查报未安装。
  */
 export const OPENCLAW_VERIFY_CLI_RUNS_SNIPPET = [
   'if [ -z "$OPENCLAW_CMD" ]; then echo "[OpenClaw] 错误: 未找到 openclaw 可执行文件（请检查 npm prefix -g 与 PATH）" >&2; exit 1; fi;',
   // 末行禁止 `fi;`：NPM_INSTALL_CMD 用 ` && ` 衔接下一段时会出现 `fi; &&` → bash syntax error near `&&`
-  `if ! "$OPENCLAW_CMD" --version 2>&1; then echo "[OpenClaw] 错误: openclaw --version 失败（常见: Node 需 ${OPENCLAW_BOARD_NODE_MIN_MAJOR}+，或全局包损坏）" >&2; exit 1; fi`,
+  `if command -v timeout >/dev/null 2>&1; then if ! timeout 30s "$OPENCLAW_CMD" --version 2>&1; then echo "[OpenClaw] 错误: openclaw --version 超时或失败（常见: Node 需 ${OPENCLAW_BOARD_NODE_MIN_MAJOR}+，或全局包损坏）" >&2; exit 1; fi; else if ! "$OPENCLAW_CMD" --version 2>&1; then echo "[OpenClaw] 错误: openclaw --version 失败（常见: Node 需 ${OPENCLAW_BOARD_NODE_MIN_MAJOR}+，或全局包损坏）" >&2; exit 1; fi; fi`,
 ].join(' ');
 
 /**
@@ -262,6 +345,59 @@ const OPENCLAW_ENSURE_SHELL_PATH_INNER = [
 ].join('; ');
 export const OPENCLAW_ENSURE_SHELL_PATH_SNIPPET =
   '( ' + OPENCLAW_ENSURE_SHELL_PATH_INNER + ' )';
+
+/**
+ * 释放 Gateway 端口并清理典型 nohup 进程。
+ *
+ * 关键：pkill -f 扫描 /proc/星/cmdline，SSH exec 的 bash -c 进程的 cmdline
+ * 包含完整脚本文本。若脚本文本包含 "openclaw gateway run"（哪怕只是 pkill 的参数），
+ * pkill -f 就会匹配到正在跑脚本的 bash 自身并将其杀掉，
+ * 表现为「卡在 [1/6]」（实际是进程已被自杀）。
+ *
+ * 修法：经典 bracket trick —— "[o]penclaw" 作为 regex 匹配 "openclaw"（[o] = o），
+ * 但脚本文本里写的是 "[o]penclaw"（含方括号），不会被 regex 自匹配。
+ */
+export const OPENCLAW_GATEWAY_ORPHAN_CLEAN_INNER = joinShellLines([
+  '_ocgw=18789',
+  'if command -v fuser >/dev/null 2>&1; then',
+  'if command -v timeout >/dev/null 2>&1; then timeout 25s fuser -k "${_ocgw}/tcp" 2>/dev/null || true; else fuser -k "${_ocgw}/tcp" 2>/dev/null || true; fi',
+  'fi',
+  'if command -v lsof >/dev/null 2>&1; then',
+  'if command -v timeout >/dev/null 2>&1; then _oc_ls="$(timeout 20s lsof -t -iTCP:"${_ocgw}" -sTCP:LISTEN 2>/dev/null || true)"; else _oc_ls="$(lsof -t -iTCP:"${_ocgw}" -sTCP:LISTEN 2>/dev/null || true)"; fi',
+  'if [ -n "$_oc_ls" ]; then kill $_oc_ls 2>/dev/null || true; fi',
+  'fi',
+  'pkill -f "[o]penclaw gateway run" 2>/dev/null || true',
+  'sleep 1',
+]);
+
+/** 卸载 / 安装前：停服后执行 {@link OPENCLAW_GATEWAY_ORPHAN_CLEAN_INNER}（子 shell 包裹） */
+export const OPENCLAW_UNINSTALL_PKILL_SNIPPET = '( ' + OPENCLAW_GATEWAY_ORPHAN_CLEAN_INNER + ' )';
+
+/**
+ * 覆盖/重装全局包前：**不调用** `openclaw gateway stop`（依赖/config 损坏时 CLI 可能在 require 阶段挂死）。
+ * **先**释放 18789（不依赖 dbus），**再**限时 systemctl（与卸载 [1/6] 一致）。
+ * 套件端可设 `OPENCLAW_SKIP_PREINSTALL_GATEWAY_STOP=1` 跳过（极少用）。
+ */
+export const OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET = joinShellLines([
+  '(',
+  'if [ "${OPENCLAW_SKIP_PREINSTALL_GATEWAY_STOP:-0}" = "1" ] || [ "${OPENCLAW_SKIP_PREINSTALL_GATEWAY_STOP:-0}" = "true" ]; then echo "[OpenClaw] OPENCLAW_SKIP_PREINSTALL_GATEWAY_STOP 已设置，跳过安装前停网关" 1>&2; exit 0; fi',
+  'echo "[OpenClaw] 安装前：先释放 18789，再限时 systemctl（不调用 openclaw CLI）..." 1>&2',
+  OPENCLAW_UNINSTALL_PKILL_SNIPPET,
+  '(' + OPENCLAW_SSH_USER_SYSTEMD_ENV_SNIPPET + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD + ')',
+  'exit 0',
+  ')',
+]);
+
+/**
+ * 卸载：`npm rm -g` 后仍可能残留半套 `node_modules`，与安装侧 repair 对称。
+ * 含 clawhub / clawctl（若曾全局安装）。
+ */
+export const OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET =
+  '( _gp="$(npm prefix -g 2>/dev/null || true)"; if [ -n "$_gp" ]; then rm -rf "$_gp/lib/node_modules/openclaw" "$_gp/lib/node_modules/clawhub" "$_gp/lib/node_modules/clawctl" 2>/dev/null || true; fi; rm -rf "${HOME}/.npm-global/lib/node_modules/openclaw" "${HOME}/.npm-global/lib/node_modules/clawhub" "${HOME}/.npm-global/lib/node_modules/clawctl" 2>/dev/null || true )';
+
+/** 卸载：从 ~/.bashrc 删除与 OPENCLAW_ENSURE_SHELL_PATH_SNIPPET 对应的 PATH 块 */
+export const OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET =
+  '( command -v sed >/dev/null 2>&1 && _OC_RC="$HOME/.bashrc" && sed -i "/# >>> rdk-studio-openclaw-path >>>/,/# <<< rdk-studio-openclaw-path <<</d" "$_OC_RC" 2>/dev/null || true )';
 
 export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = joinShellLines([
   '(',
@@ -370,11 +506,39 @@ export const OPENCLAW_OFFICIAL_INSTALL_FALLBACK =
   '))';
 
 /**
+ * 安装 npm 包之前：检测全局 openclaw 是否损坏或 npm 树异常；**仅当异常时**执行与「干净重装」等价的深度清理
+ *（停 gateway、释放 18789 / nohup 残留、卸全局包、清 npm 缓存、删 ~/.openclaw 等），避免健康环境每次安装都删配置。
+ * 套件端可设 `OPENCLAW_SKIP_PREINSTALL_DEEP_CLEAN=1` 跳过本段（调试用）。
+ */
+const OPENCLAW_PREINSTALL_DEEP_CLEAN_PARTS = [
+  'if [ "${OPENCLAW_SKIP_PREINSTALL_DEEP_CLEAN:-0}" = "1" ] || [ "${OPENCLAW_SKIP_PREINSTALL_DEEP_CLEAN:-0}" = "true" ]; then echo "[OpenClaw] OPENCLAW_SKIP_PREINSTALL_DEEP_CLEAN 已设置，跳过安装前检测" 1>&2; exit 0; fi',
+  OPENCLAW_RESOLVE_CLI_SNIPPET,
+  'oc_need_deep_clean=0',
+  'if [ -n "$OPENCLAW_CMD" ]; then _oc_ver_ok=0; if command -v timeout >/dev/null 2>&1; then timeout 15s "$OPENCLAW_CMD" --version >/dev/null 2>&1 && _oc_ver_ok=1; elif command -v python3 >/dev/null 2>&1; then python3 -c \'import subprocess,sys; subprocess.run([sys.argv[1],"--version"],timeout=20,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)\' "$OPENCLAW_CMD" 2>/dev/null && _oc_ver_ok=1; fi; if [ "$_oc_ver_ok" != "1" ]; then oc_need_deep_clean=1; fi; fi',
+  'if command -v npm >/dev/null 2>&1; then _oc_ls="$(npm ls -g --depth=0 openclaw 2>&1 || true)"; if echo "$_oc_ls" | grep -qE "UNMET|missing|invalid|extraneous|ERR!"; then oc_need_deep_clean=1; fi; fi',
+  'if [ "$oc_need_deep_clean" = "1" ]; then echo "[OpenClaw] 检测到全局 openclaw 异常或损坏，执行深度清理后重装..." 1>&2; ' +
+    OPENCLAW_GATEWAY_ORPHAN_CLEAN_INNER +
+    '; (' +
+    OPENCLAW_SSH_USER_SYSTEMD_ENV_SNIPPET +
+    '; ' +
+    OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD +
+    '); npm uninstall -g openclaw 2>/dev/null || true; _gp="$(npm prefix -g 2>/dev/null || true)"; if [ -n "$_gp" ]; then rm -rf "$_gp/lib/node_modules/openclaw" 2>/dev/null || true; fi; rm -rf "${HOME}/.npm-global/lib/node_modules/openclaw" 2>/dev/null || true; npm cache clean --force 2>&1 || true; rm -rf "$HOME/.openclaw" /tmp/openclaw-* /tmp/clawhub-* "$HOME/.cache/openclaw" "$HOME/.local/share/openclaw" 2>/dev/null || true; mkdir -p "$HOME/.openclaw" "$HOME/.npm-global"; else echo "[OpenClaw] 安装前检测：未触发深度清理" 1>&2; fi',
+  'exit 0',
+];
+
+export const OPENCLAW_CONDITIONAL_PREINSTALL_DEEP_CLEAN_SNIPPET =
+  '( ' + OPENCLAW_PREINSTALL_DEEP_CLEAN_PARTS.join(' && ') + ' )';
+
+/**
  * 安装 OpenClaw 本体：默认仅 npm -g `openclaw@${OPENCLAW_BOARD_NPM_SPEC}`（与 OPENCLAW_NPM_FAST_INSTALL_SNIPPET 一致）。
  * OpenClawDeploymentManager / board_openclaw_install 在本段之前已跑 Node/npm ensure，不再默认走 install.sh（与 npm 路径统一为同一规格）。
  * 设置环境变量 OPENCLAW_FORCE_OFFICIAL_INSTALL_SH=1 可强制走官方 install.sh + npm 回退。
  */
 export const OPENCLAW_INSTALL_OPENCLAW_STEP =
-  process.env.OPENCLAW_FORCE_OFFICIAL_INSTALL_SH === '1'
+  OPENCLAW_CONDITIONAL_PREINSTALL_DEEP_CLEAN_SNIPPET +
+  ' && ' +
+  OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET +
+  ' && ' +
+  (process.env.OPENCLAW_FORCE_OFFICIAL_INSTALL_SH === '1'
     ? OPENCLAW_OFFICIAL_INSTALL_FALLBACK
-    : OPENCLAW_NPM_FAST_INSTALL_SNIPPET;
+    : OPENCLAW_NPM_FAST_INSTALL_SNIPPET);

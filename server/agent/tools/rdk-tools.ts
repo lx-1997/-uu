@@ -36,8 +36,17 @@ import {
   OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_INSTALL_OPENCLAW_STEP,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
+  OPENCLAW_CLI_GATEWAY_STOP_CMD,
+  OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD,
+  OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD,
   OPENCLAW_ENSURE_SHELL_PATH_SNIPPET,
+  OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET,
   OPENCLAW_RESOLVE_CLI_SNIPPET,
+  OPENCLAW_SYSTEMD_USER_DAEMON_RELOAD_CMD,
+  OPENCLAW_SYSTEMD_USER_GATEWAY_DISABLE_CMD,
+  OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD,
+  OPENCLAW_UNINSTALL_PKILL_SNIPPET,
+  OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,
   OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
 } from '../../managers/openclaw-board-install-sh.js';
 import {
@@ -53,6 +62,7 @@ import { buildCodeChangeJson } from './code-change-result.js';
 import { abortAwareDelay } from '../../rdkclaw/openclaw-bridge-meta.js';
 import { isPersistentShellEnabled } from '../../device-persistent-shell.js';
 import { emitDeviceDashboardUrlsFromText, formatDeviceDashboardAutoOpenNote } from '../../device-dashboard-auto-open.js';
+import { buildTrosSourceLoopBash } from '../../board/device-profiles.js';
 
 export interface RdkToolsCallbacks {
   onMediaDownloaded?: (info: { localPath: string; fileName: string; bytes?: number; mediaType: 'image' | 'video' }) => void;
@@ -193,6 +203,31 @@ const DEVICE_EXEC_DETACHED_SSH_WAIT_MS = 60_000;
 
 function isSshExecTimeoutMessage(msg: string): boolean {
   return msg.includes('SSH 命令执行超时（') && msg.includes('ms）');
+}
+
+/** 持久 shell：120s 内 PTY 无新字节时中止 */
+function isSshExecIdleTimeoutMessage(msg: string): boolean {
+  return msg.includes('SSH 命令长时间无输出') && msg.includes('内无新数据');
+}
+
+/** 前台 device_exec：超过此时长无新输出则中止 SSH（持久 shell），避免卡住占满总超时 */
+const DEVICE_EXEC_MAX_IDLE_OUTPUT_MS = 120_000;
+
+/** Studio↔板 SSH 超时或会话死掉时，提示编排模型下一回合用套件端 OpenClaw 在板内执行，避免再堆 device_exec */
+function appendDeviceExecOpenClawHandoffHint(base: string): string {
+  return (
+    `${base}\n\n---\n` +
+    '**[Studio · SSH 阻塞/超时/断连 → 转套件端 OpenClaw]**\n' +
+    '若套件端 **OpenClaw 可用**，**下一回合请优先** `board_openclaw_assess`（可与 `web_search` / `web_fetch` 同轮）→ `board_openclaw_delegate`，在板内会话执行**等价**的 shell/诊断（不经 Studio SSH 长链路）；`guidance` 写明原意图、已失败命令与验收标准。\n' +
+    '**勿**在同一回合再堆多条 `device_exec` 重试同一探测。\n' +
+    '若确认任务只适合加长单次 SSH（且不宜委派），可再试 `device_exec` 并**省略** `timeoutMs` 或显式增大；长驻进程须 `background` / `runDetached`。'
+  );
+}
+
+function isSshTransportOrSessionDeadMessage(msg: string): boolean {
+  return /ping probe failed|persistent shell dead|SSH 连接已断开|connection likely dead|SSH persistent shell ping/i.test(
+    msg,
+  );
 }
 
 /**
@@ -467,9 +502,7 @@ const ROS2_VERIFY_AFTER_BG_LAUNCH_MS = 600;
 
 /** 在已 source 的环境中，对每个 topic 用短超时 `ros2 topic echo | head -1` 判断是否已有数据 */
 function buildRos2TopicVerifyCommand(topics: string[], ros2SetupBash?: string): string {
-  const setup =
-    ros2SetupBash?.trim() ||
-    'for f in /opt/tros/*/setup.bash; do [ -f "$f" ] && . "$f" && break; done';
+  const setup = ros2SetupBash?.trim() || buildTrosSourceLoopBash().replace(/; true$/, '');
   const to = ROS2_TOPIC_VERIFY_ECHO_TIMEOUT_SEC;
   const checks = topics.map((t) => {
     const q = shEscapeUnix(t);
@@ -541,13 +574,15 @@ function deviceExecTool(
       '选用时机：运行命令、安装包、编译、查状态；**非**整块写文件（用 device_file_write）。\n\n' +
       '规则：\n' +
       '- **默认（未设置环境变量 RDK_DEVICE_EXEC_PERSISTENT_SHELL=0）**：同一设备的多次 `device_exec` 在**同一 SSH 交互 shell** 中执行，`cd` / `export` / `source` **可跨调用保留**。若关闭持久 shell 或持久通道失败回退，则行为与旧版一致（每次独立 exec）。\n' +
+      '- **前台 + 持久 shell**：若 **120 秒**内 PTY **无任何新数据**，Studio 会**中止**本条 SSH 并返回失败（含下方「转 OpenClaw」编排块）；以 **`source` / `.`** 开头的命令**不**施加该空闲上限（避免长 source 被误杀）。\n' +
       '- **常驻进程（推流、WebSocket 服务、长驻 ROS2 节点等）**：传 **runDetached: true**。Studio 会以 nohup 在套件端后台启动并**立即**返回 `RDK_DETACHED_PID` 与 `RDK_DETACHED_LOG`；**勿**在未 detached 时跑无限循环命令（会占满 SSH 通道与同设备队列）。可选 **detachedLogPath** 指定日志绝对路径（须可写，如 /tmp、/userdata）\n' +
       '- **摄像头 / 传感器**：先 `ls /dev/video* 2>/dev/null || true`；无 MIPI 时不要假定能跑仅适配 MIPI 的脚本\n' +
-      '- **TROS/ROS2**：source 前用 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径，勿死记 `/opt/tros/setup.bash`。持久 shell 开启时可在**前一次** `device_exec` 中 `source`，后续 `background`/`runDetached` 的 `ros2 launch` **会继承**该环境（包装层使用非登录 `bash -c`，避免 `bash -lc` 重读 profile 冲掉已 source 的变量）；若关闭持久 shell，须在**同一条**内写 `source ... && ros2 ...`。**勿**在未 source 时单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `ros2 node list` / `topic list` 或 `tail` 日志验证；可选 `ros2VerifyTopics` 在延迟后自动做 topic 收数验收（`ros2 topic echo` 短超时）。**主命令 stdout/stderr 中含可放行 `http(s)://` 时，Studio 会在 topic 验收与长延迟之前尽早代开浏览器**，便于页面先加载、验收后再刷新即可\n' +
+      '- **TROS/ROS2**：source 前用 `test -f /opt/tros/humble/setup.bash` 或 `ls /opt/tros/*/setup.bash 2>/dev/null` 等确认真实路径（S100/X5 等为 `/opt/tros/humble`，勿只假定 `/opt/tros/setup.bash`）。持久 shell 开启时可在**前一次** `device_exec` 中 `source`，后续 `background`/`runDetached` 的 `ros2 launch` **会继承**该环境（包装层使用非登录 `bash -c`，避免 `bash -lc` 重读 profile 冲掉已 source 的变量）；若关闭持久 shell，须在**同一条**内写 `source ... && ros2 ...`。**勿**在未 source 时单独执行裸 `ros2`（否则常见 exit 127）。后台 `ros2 launch` / `ros2 run` 后须 `ros2 node list` / `topic list` 或 `tail` 日志验证；可选 `ros2VerifyTopics` 在延迟后自动做 topic 收数验收（`ros2 topic echo` 短超时）。**主命令 stdout/stderr 中含可放行 `http(s)://` 时，Studio 会在 topic 验收与长延迟之前尽早代开浏览器**，便于页面先加载、验收后再刷新即可\n' +
       '- **可写路径**：落盘、日志优先 `/userdata`、`/tmp`、用户家目录；勿假设 `/app` 等业务目录可写\n' +
       '- **timeoutMs**（毫秒，5000～7200000）：不确定耗时请**省略**（与 SSH 默认一致 30 分钟）。勿习惯性填 60000/90000/120000——在套件端常被 apt/IO 拖满；若确需 ≤2 分钟，传非常规值（如 45000）。**短日志验收**（如 `tail … | grep`、`sleep … && tail -n`）与**进程查看/清理**（如 `pkill`、`ps … | grep`、`pgrep`）：未传 timeoutMs 时 Studio 可能对这类命令**自动**约 **60 秒** SSH 上限，避免误占满 30 分钟；仍可在命令前加 `timeout 20s …` 或显式 timeoutMs。**runDetached 时** timeoutMs 不约束后台进程，仅影响启动脚手架等待（Studio 侧另有限额）\n' +
       '- **apt 弱网/无输出**：先 `grep -rE "d-robotics|horizon|hobot|sunrise" /etc/apt/sources.list /etc/apt/sources.list.d/` 核对地平线官方源；再 `sudo apt-get -o Acquire::Retries=4 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update`，然后 install（Studio SSH 已设 `DEBIAN_FRONTEND=noninteractive`）\n' +
       '- NEVER 使用交互式命令（vim、top、htop、less）——它们会挂起 SSH 连接\n' +
+      '- **若工具返回末尾含 `[Studio · SSH 阻塞/超时/断连 → 转套件端 OpenClaw]`**：说明 Studio SSH 已超时或会话异常——**下一回合优先** `board_openclaw_assess`→`board_openclaw_delegate` 在板内执行等价命令，**勿**再堆多条 `device_exec` 硬重试\n' +
       '- ALWAYS 检查命令输出确认是否成功，不要假设执行成功；套件端失败见末尾 `[exit code: n]`（n≠0）或 stderr；本机 `exec` 见 `[EXIT CODE]`。须**再调用**工具继续排查，勿仅输出错误就结束回合\n' +
       '- 复杂多步操作用 && 串联，确保前一步成功后再执行下一步；**自行拼 nohup 时**注意 `&&` 与 `&` 的 shell 优先级，不确定时优先用 **runDetached** 或 **background:true**\n' +
       '- 读取设备文件用 device_file_read 而不是 cat\n' +
@@ -587,7 +622,7 @@ function deviceExecTool(
           type: 'array',
           items: { type: 'string' },
           description:
-            '可选。主命令结束后（常用于 background/runDetached 启动节点后）延迟再验收：这些 ROS2 topic 是否能在短超时内收到至少一行数据。须与 `ros2SetupBash` 或板上默认的 `/opt/tros/*/setup.bash` 一致。',
+            '可选。主命令结束后（常用于 background/runDetached 启动节点后）延迟再验收：这些 ROS2 topic 是否能在短超时内收到至少一行数据。须与 `ros2SetupBash` 或板上默认 TROS source 顺序（优先 humble）一致。',
         },
         ros2VerifyTopicsDelayMs: {
           type: 'number',
@@ -596,7 +631,7 @@ function deviceExecTool(
         },
         ros2SetupBash: {
           type: 'string',
-          description: '验收前 `source` 的 setup.bash 绝对路径；省略则自动尝试 /opt/tros/*/setup.bash',
+          description: '验收前 `source` 的 setup.bash 绝对路径；省略则按设备画像优先 humble 再兼容其他发行版',
         },
       },
       required: ['command'],
@@ -617,6 +652,8 @@ function deviceExecTool(
         let commandToExecute = normalizedCommand;
         /** 与持久 SSH shell 同时开启时，后台包装改用 bash -c，便于继承上一条 source */
         const inheritRosEnvFromSession = isPersistentShellEnabled();
+        /** `source` 可能长时间无输出；不施加 PTY 空闲上限，避免误杀 */
+        const skipIdleNoOutputCap = /^\s*(?:sleep\s+\d+\s*&&\s*)?(?:\.|source)\s+/i.test(normalizedCommand);
 
         let execOpts: {
           timeoutMs?: number;
@@ -683,9 +720,15 @@ function deviceExecTool(
             const total = Date.now() - startAt;
             const silent = Date.now() - lastChunkAt;
             if (total < DEVICE_EXEC_HEARTBEAT_AFTER_MS || silent < DEVICE_EXEC_HEARTBEAT_SILENT_MS) return;
-            const hint = isSourceCommand
-              ? '正在加载 ROS/TROS 环境，source 无输出属正常'
-              : '暂无新输出';
+            let hint: string;
+            if (isSourceCommand) {
+              hint = '正在加载 ROS/TROS 环境，source 无输出属正常';
+            } else if (silent > 120_000) {
+              hint =
+                '长时间无输出；持久 shell 约 120s 无新 PTY 数据将自动中止，返回中含「转套件端 OpenClaw」';
+            } else {
+              hint = '暂无新输出';
+            }
             const line = `\n· ${Math.floor(total / 1000)}s · 命令仍在运行（${hint}）…\n`;
             lastChunkAt = Date.now();
             flushProgress(true);
@@ -699,6 +742,8 @@ function deviceExecTool(
           ...execOpts,
           rejectOnNonZeroExit: false,
           persistentShell: true,
+          maxIdleOutputMs:
+            !runDetached && !runBackground && !skipIdleNoOutputCap ? DEVICE_EXEC_MAX_IDLE_OUTPUT_MS : undefined,
         });
         flushProgress(true);
 
@@ -800,16 +845,23 @@ function deviceExecTool(
             `勿因本条切换设备；先修连接。`
           );
         }
-        if (isSshExecTimeoutMessage(msg)) {
+        if (isSshExecTimeoutMessage(msg) || isSshExecIdleTimeoutMessage(msg)) {
           const rosHint =
             ROS_LONG_RUN_BLOCK_RE.test(input.command) && !runBackground && !runDetached
               ? `\n\n若命令含 \`ros2 launch\` / \`ros2 run\` 等**长驻进程**，应使用 **device_exec** 且 **\`background: true\`** 或 **\`runDetached: true\`**（或命令中含 nohup / ros2 launch / ros2 run 时 Studio 会自动按后台执行），再用 \`tail\`/\`ros2 topic\` 验收；前台阻塞易触发工具/网关超时。`
               : '';
-          return (
+          const explainBody = isSshExecIdleTimeoutMessage(msg)
+            ? `这是 **120 秒内 PTY 无新数据**（命令可能卡住或链路无输出），Studio 已主动中止 SSH。\n` +
+              `**不要**只靠加长超时——**优先按下方转 OpenClaw**。\n`
+            : `这是 **等待超时**（时限内命令未结束），与设备是否在线无必然关系。\n` +
+              `若命令**确实需要更长时间**（如大包安装），可**省略 timeoutMs** 或传入更大毫秒数；若已出现**长时间无输出**或疑似 SSH 卡住，**不要**只靠加长超时——**优先按下方转 OpenClaw**。\n` +
+              `可拆分命令或重试，不要切换设备。\n`;
+          return appendDeviceExecOpenClawHandoffHint(`[命令执行失败] ${msg}\n\n` + explainBody + rosHint);
+        }
+        if (isSshTransportOrSessionDeadMessage(msg)) {
+          return appendDeviceExecOpenClawHandoffHint(
             `[命令执行失败] ${msg}\n\n` +
-            `这是 **等待超时**（时限内命令未结束），与设备是否在线无必然关系。\n` +
-            `请**省略 timeoutMs**（默认 30 分钟）或对长任务传入更大毫秒数（最高 7200000）；可拆分命令或重试，不要切换设备。` +
-            rosHint
+              '这是 **Studio↔板 SSH 会话或链路异常**（非认证阶段）。可稍后重试短 `device_exec`；若仍失败，**优先按下方转 OpenClaw** 在板内执行。',
           );
         }
         // 关键：明确告诉 LLM 命令失败≠设备离线，防止误判后切换设备
@@ -1066,21 +1118,38 @@ function boardOpenClawUpgradeTool(deviceId: string): Tool<Record<string, never>>
 function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never>> {
   return {
     name: 'board_openclaw_uninstall',
-    description: '彻底卸载套件端 OpenClaw：停止服务 → 官方卸载 → 清理 systemd → 清除 ClawHub 登录态 → 删除配置/日志/缓存/临时文件 → 移除 npm 包。高风险操作，建议先确认。',
+    description:
+      '彻底卸载套件端 OpenClaw：先端口释放与限时 systemctl，再限时 gateway stop（与官方一致、避免裸跑挂死）→ 官方 uninstall（限时）→ gateway uninstall + 限时 disable/daemon-reload → ClawHub logout → 删配置/缓存/tmp → 移除 ~/.bashrc PATH 注入 → npm 卸包并删全局 node_modules 残留。高风险，建议先确认。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
-      const steps = [
-        'export NPM_CONFIG_PREFIX=\\"$HOME/.npm-global\\"; export PATH=\\"$HOME/.npm-global/bin:$PATH\\"',
-        'OPENCLAW_CMD=\\"$(command -v openclaw 2>/dev/null || true)\\"; if [ -n \\\"$OPENCLAW_CMD\\\" ] && [ ! -x \\\"$OPENCLAW_CMD\\\" ]; then OPENCLAW_CMD=\\\"\\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.npm-global/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.npm-global/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && [ -x \\\"$HOME/.local/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\"$HOME/.local/bin/openclaw\\"; fi; if [ -z \\\"$OPENCLAW_CMD\\\" ] && command -v npm >/dev/null 2>&1; then _UU=\\\"$(npm prefix -g 2>/dev/null)\\\"; if [ -n \\\"$_UU\\\" ] && [ -x \\\"$_UU/bin/openclaw\\\" ]; then OPENCLAW_CMD=\\\"$_UU/bin/openclaw\\\"; fi; fi; if [ -n \\\"$OPENCLAW_CMD\\\" ] && [ ! -x \\\"$OPENCLAW_CMD\\\" ]; then OPENCLAW_CMD=\\\"\\\"; fi',
-        `echo \\"[1/6] 停止 gateway...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway stop 2>/dev/null || true; fi); (${GATEWAY_SSH_USER_SYSTEMD_ENV}; systemctl --user stop openclaw-gateway 2>/dev/null || true)`,
-        'echo \\"[2/6] 官方卸载...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" uninstall --all --yes --non-interactive 2>&1 || true; else echo \\\"[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续兜底清理）\\\"; fi)',
-        'echo \\"[3/6] 清理 systemd...\\"; (if [ -n \\\"$OPENCLAW_CMD\\\" ]; then \\\"$OPENCLAW_CMD\\\" gateway uninstall 2>/dev/null || true; fi); (systemctl --user disable openclaw-gateway 2>/dev/null || true); (rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true); (systemctl --user daemon-reload 2>/dev/null || true)',
-        'echo \\"[4/6] 清除 ClawHub 登录态...\\"; (clawhub logout 2>/dev/null || true)',
-        'echo \\"[5/6] 清理配置/日志/缓存...\\"; (rm -rf ~/.openclaw /tmp/openclaw-* /tmp/clawhub-* ~/.cache/openclaw ~/.local/share/openclaw 2>/dev/null || true)',
-        'echo \\"[6/6] 移除 npm 包...\\"; (npm rm -g openclaw 2>/dev/null || true); (npm rm -g clawhub 2>/dev/null || true)',
-        'echo \\"[OpenClaw] 卸载完成，已彻底清理\\"',
-      ];
-      const cmd = `bash -lc "${steps.join(' && ')}"`;
+      const uninstallScript = [
+        'export NPM_CONFIG_PREFIX="$HOME/.npm-global"; export PATH="$HOME/.npm-global/bin:$PATH"',
+        OPENCLAW_RESOLVE_CLI_SNIPPET,
+        'echo "[OpenClaw] 开始卸载..."',
+        'echo "[1/6] 官方：gateway stop → uninstall；此处先释放 18789 再限时 systemctl，再限时 gateway stop（避免裸跑 CLI 挂死）..."',
+        OPENCLAW_UNINSTALL_PKILL_SNIPPET,
+        '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD + ')',
+        '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_STOP_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 gateway stop"; fi)',
+        'echo "[2/6] 执行官方卸载 openclaw uninstall --all --yes --non-interactive（限时；失败则 npm/rm 兜底）..."',
+        '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续兜底清理）"; fi)',
+        'echo "[3/6] 卸载 systemd 服务..."',
+        '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD + '; fi)',
+        '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_DISABLE_CMD + ')',
+        '(rm -f ~/.config/systemd/user/openclaw-gateway.service 2>/dev/null || true)',
+        '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_DAEMON_RELOAD_CMD + ')',
+        'echo "[4/6] 清除 ClawHub 登录态..."',
+        '(if command -v clawhub >/dev/null 2>&1; then if command -v timeout >/dev/null 2>&1; then timeout 30s clawhub logout </dev/null 2>/dev/null || true; else clawhub logout </dev/null 2>/dev/null || true; fi; fi)',
+        'echo "[5/6] 清理配置、日志、缓存与 shell PATH 注入..."',
+        '(rm -rf ~/.openclaw /tmp/openclaw-* /tmp/clawhub-* ~/.cache/openclaw ~/.local/share/openclaw 2>/dev/null || true)',
+        OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET,
+        'echo "[6/6] 移除全局 npm 包与残留目录..."',
+        '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true)',
+        '(npm rm -g clawhub 2>/dev/null || true)',
+        '(npm rm -g clawctl 2>/dev/null || true)',
+        OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,
+        'echo "[OpenClaw] 卸载完成，已彻底清理"',
+      ].join(' && ');
+      const cmd = `bash -lc ${JSON.stringify(uninstallScript)}`;
       return execOnDevice(deviceId, [cmd]);
     },
   };

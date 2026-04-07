@@ -398,7 +398,7 @@ function shortDisplayPath(p: string, max = 56): string {
   return `…${t.slice(-(max - 1))}`;
 }
 
-function shortCommand(cmd: string, max = 72): string {
+function shortCommand(cmd: string, max = 160): string {
   const t = cmd.replace(/\s+/g, ' ').trim();
   if (!t) return '';
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
@@ -456,11 +456,11 @@ export function formatToolFootprintTitle(toolName: string, args: Record<string, 
     return 'Grepped';
   }
   if (n === 'exec') {
-    const cmd = typeof a.command === 'string' ? shortCommand(a.command, 80) : '';
+    const cmd = typeof a.command === 'string' ? shortCommand(a.command, 200) : '';
     return cmd ? `Ran ${cmd}` : 'Ran command';
   }
   if (n === 'device_exec' || n === 'device_shell' || n === 'ssh_exec') {
-    const cmd = typeof a.command === 'string' ? shortCommand(a.command, 80) : '';
+    const cmd = typeof a.command === 'string' ? shortCommand(a.command, 200) : '';
     return cmd ? `Ran on device · ${cmd}` : 'Ran on device';
   }
   if (n === 'device_file_read') {

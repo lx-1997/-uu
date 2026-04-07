@@ -144,6 +144,7 @@ export const DEVICE_PROFILES: Record<RdkPlatform, DeviceProfile> = {
       'DOSOD 开放词汇检测 ~45fps，可运行 LLM/VLM/DeepSeek/InternVL2',
       '12GB LPDDR5 (S100P=24GB)，GMSL+MIPI 多路相机，双千兆网口',
       '适用场景：具身智能、人形机器人、大模型推理、高级视觉应用',
+      'TROS 排障：root 下若无 ros2，先 source /opt/tros/humble/setup.bash；仍不对时换 sunrise 用户看 ~/.bashrc 是否已配 tros.b（部分镜像仅普通用户写入 source）',
     ],
   },
 };
@@ -170,6 +171,17 @@ const WORKSPACE_HEALTH_BPU_IMPORTLIB_SPECS = [
 export function buildWorkspaceHealthBpuReadyPythonInline(): string {
   const tuple = WORKSPACE_HEALTH_BPU_IMPORTLIB_SPECS.join("','");
   return `import importlib.util; mods=('${tuple}'); print(1 if any(importlib.util.find_spec(name) is not None for name in mods) else 0)`;
+}
+
+/**
+ * 套件端 SSH 脚本里一键 `source` TROS。
+ *
+ * 与官方文档一致：配置 tros.b 环境 → `source /opt/tros/humble/setup.bash`（RDK S100 / X5 / Ultra 等 Humble 镜像）。
+ * 本函数**优先**该路径；再兼容旧版 Foxy（`/opt/tros/setup.bash` 等）与各发行版子目录通配（见下行 return 中的 shell glob，注释内避免写星号+斜杠以免截断块注释）。
+ * 单行、无换行，可嵌入 bash -lc 的单引号参数字符串。
+ */
+export function buildTrosSourceLoopBash(): string {
+  return 'for _tros_setup in /opt/tros/humble/setup.bash /opt/tros/setup.bash /opt/tros/foxy/setup.bash /opt/tros/*/setup.bash; do [ -f "$_tros_setup" ] && . "$_tros_setup" 2>/dev/null && break; done; true';
 }
 
 export function getResearchSeeds(platform: RdkPlatform | null): string[] {

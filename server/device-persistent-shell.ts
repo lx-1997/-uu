@@ -20,8 +20,15 @@ import { setDevicePasswordCache } from './device-password-cache.js';
 import type { Device } from '../shared/types.js';
 
 const READY_TOKEN = '__RDK_SHELL_READY__';
+const PING_TOKEN = '__RDK_PING__';
 const MAX_SESSION_AGE_MS = 2 * 60 * 60 * 1000;
 const IDLE_CLOSE_MS = 45 * 60 * 1000;
+/** 复用持久 shell 前 ping 探测超时；过长会拖慢首条命令，过短网络抖动会误判 */
+const PING_PROBE_TIMEOUT_MS = 6_000;
+/** 持久 shell 瞬时抖动重建重试次数 */
+const PERSISTENT_SHELL_TRANSIENT_RETRIES = 2;
+/** 重试间隔（递增） */
+const PERSISTENT_SHELL_RETRY_DELAY_MS = 1_200;
 const EXIT_TOKEN_LINE_RE = /__RDK_EXIT__[a-f0-9]{16,}__(?:\d+)?/i;
 const WRAPPER_EVAL_LINE_RE = /(?:stty\s+-echo\b.*base64\s+-d|eval\s+"\$\(printf\b.*base64\s+-d|printf\s+'\\n__RDK_EXIT__)/i;
 
@@ -56,7 +63,8 @@ function isTransientSshError(error: unknown): boolean {
   return (
     /timed out|timeout|handshake|econnreset|econnrefused|socket closed|connection reset|connect failed|broken pipe|network|epipe/.test(msg) ||
     /channel closed|connection lost|disconnect|not connected|write econnreset|write epipe|read econnreset|unexpected packet|no response|ssh_exchange/.test(msg) ||
-    /connection closed|closed by remote|kex_exchange|mac error|bad packet/.test(msg)
+    /connection closed|closed by remote|kex_exchange|mac error|bad packet/.test(msg) ||
+    /mutex.*排队超时|persistent shell.*dead|ping probe failed/.test(msg)
   );
 }
 
@@ -71,12 +79,36 @@ async function getDeviceFresh(deviceId: string): Promise<Device | null> {
   return devices.find((d) => d.id === deviceId) ?? null;
 }
 
+/** 排队等待获取 mutex 的最长时间；超时则放弃持久 shell，让上层回退到一次性 exec */
+const MUTEX_ACQUIRE_TIMEOUT_MS = 15_000;
+
 class AsyncMutex {
   private tail = Promise.resolve();
-  run<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.tail.then(() => fn());
+  private pending = 0;
+
+  run<T>(fn: () => Promise<T>, acquireTimeoutMs = MUTEX_ACQUIRE_TIMEOUT_MS): Promise<T> {
+    this.pending++;
+    const acquired = { value: false };
+    const next = this.tail.then(() => {
+      acquired.value = true;
+      this.pending--;
+      return fn();
+    });
     this.tail = next.catch(() => {}).then(() => {});
-    return next;
+
+    if (acquireTimeoutMs <= 0 || this.pending <= 1) return next;
+
+    return Promise.race([
+      next,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          if (!acquired.value) {
+            this.pending--;
+            reject(new Error(`SSH persistent shell mutex 排队超时（${acquireTimeoutMs}ms，前方 ${this.pending} 个任务）`));
+          }
+        }, acquireTimeoutMs);
+      }),
+    ]);
   }
 }
 
@@ -103,6 +135,8 @@ type SessionState = {
   password: string;
   createdAt: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** 底层 SSH client error/close/end 时置 true，避免向已死连接写命令 */
+  dead: boolean;
 };
 
 const sessions = new Map<string, SessionState>();
@@ -141,7 +175,29 @@ function destroySession(deviceId: string) {
 function shouldRecycleSession(s: SessionState, device: Device): boolean {
   if (s.host !== device.host || s.port !== (device.port ?? 22) || s.username !== device.username) return true;
   if (Date.now() - s.createdAt > MAX_SESSION_AGE_MS) return true;
+  if (s.dead) return true;
   return false;
+}
+
+/**
+ * 复用持久 shell 前快速 echo 探测：往 stream 写一个 ping token 并等待回显，
+ * 超时说明底层连接已死，调用方应销毁并重建。
+ */
+async function probeSessionAlive(s: SessionState): Promise<boolean> {
+  if (s.dead) return false;
+  const id = randomBytes(4).toString('hex');
+  const token = `${PING_TOKEN}${id}`;
+  try {
+    s.stream.write(`echo ${token}\n`);
+    await waitForSubstringInBuffer(() => s.buffer, token, PING_PROBE_TIMEOUT_MS);
+    const idx = s.buffer.indexOf(token);
+    if (idx >= 0) {
+      s.buffer = s.buffer.slice(idx + token.length);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 在 buffer 上等待子串（由调用方追加 data） */
@@ -171,6 +227,11 @@ export type RunPersistentShellOptions = {
   onStreamChunk?: (text: string, stream: 'stdout' | 'stderr') => void;
   abortSignal?: AbortSignal;
   rejectOnNonZeroExit?: boolean;
+  /**
+   * 若设置：超过此时间 **PTY 缓冲区无新字节** 则中止（与总 `timeoutMs` 独立）。
+   * 用于 device_exec 防止命令/链路卡住却占满总超时。
+   */
+  maxIdleOutputMs?: number;
 };
 
 /**
@@ -199,17 +260,29 @@ async function runPersistentShellCommandLocked(
   }
 
   let lastError: unknown = null;
-  for (const pwd of pwdList) {
-    try {
-      const out = await runWithPassword(device, pwd, command, options);
-      setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
-      return out;
-    } catch (err) {
-      lastError = err;
-      if (isSshAuthError(err)) break;
-      destroySession(deviceId);
-      if (!isTransientSshError(err)) throw err;
+  for (let retry = 0; retry <= PERSISTENT_SHELL_TRANSIENT_RETRIES; retry++) {
+    for (const pwd of pwdList) {
+      try {
+        const out = await runWithPassword(device, pwd, command, options);
+        setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
+        return out;
+      } catch (err) {
+        lastError = err;
+        if (isSshAuthError(err)) break;
+        destroySession(deviceId);
+        if (!isTransientSshError(err)) throw err;
+      }
     }
+    if (isSshAuthError(lastError)) break;
+    if (retry < PERSISTENT_SHELL_TRANSIENT_RETRIES && isTransientSshError(lastError)) {
+      const delay = PERSISTENT_SHELL_RETRY_DELAY_MS * (retry + 1);
+      console.warn(
+        `[SSH] persistent shell transient error on ${device.host}, retry ${retry + 1}/${PERSISTENT_SHELL_TRANSIENT_RETRIES} after ${delay}ms: ${lastError instanceof Error ? lastError.message : lastError}`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
+    }
+    break;
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'SSH 持久 shell 失败'));
 }
@@ -267,8 +340,20 @@ async function runWithPassword(
       password,
       createdAt: Date.now(),
       idleTimer: null,
+      dead: false,
     };
     sessions.set(deviceId, s);
+
+    const markDead = () => {
+      const cur = sessions.get(deviceId);
+      if (cur && cur === s && !cur.dead) {
+        cur.dead = true;
+        console.warn(`[SSH] persistent shell for ${device.host} marked dead (client error/close/end)`);
+      }
+    };
+    client.on('error', markDead);
+    client.on('close', markDead);
+    client.on('end', markDead);
 
     stream.on('data', (chunk: Buffer) => {
       const r = appendUtf8WithTailCap(s!.buffer, chunk, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT * 2);
@@ -286,6 +371,14 @@ async function runWithPassword(
     await waitForSubstringInBuffer(() => s!.buffer, READY_TOKEN, 15_000);
     const idx = s.buffer.indexOf(READY_TOKEN);
     s.buffer = idx >= 0 ? s.buffer.slice(idx + READY_TOKEN.length) : '';
+  } else {
+    // 复用已有会话前 ping 探测，检测僵尸连接
+    const alive = await probeSessionAlive(s);
+    if (!alive) {
+      console.warn(`[SSH] persistent shell for ${device.host} failed ping probe, destroying`);
+      destroySession(deviceId);
+      throw new Error('SSH persistent shell ping probe failed (connection likely dead)');
+    }
   }
 
   clearIdleTimer(s);
@@ -313,6 +406,8 @@ async function collectUntilExitMarker(
 ): Promise<string> {
   const marker = `__RDK_EXIT__${exitId}__`;
   const start = Date.now();
+  let lastLen = s.buffer.length;
+  let lastActivityAt = Date.now();
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -391,6 +486,27 @@ async function collectUntilExitMarker(
 
     const iv = setInterval(() => {
       if (Date.now() - start > timeoutMs) return;
+      if (s.dead) {
+        finish(() => {
+          destroySession(s.deviceId);
+          reject(new Error('SSH 连接已断开（persistent shell dead）'));
+        });
+        return;
+      }
+      const idleCap = options.maxIdleOutputMs;
+      if (idleCap != null && idleCap > 0) {
+        const len = s.buffer.length;
+        if (len !== lastLen) {
+          lastLen = len;
+          lastActivityAt = Date.now();
+        } else if (Date.now() - lastActivityAt > idleCap) {
+          finish(() => {
+            destroySession(s.deviceId);
+            reject(new Error(`SSH 命令长时间无输出（${idleCap}ms 内无新数据），已中止`));
+          });
+          return;
+        }
+      }
       try {
         onCheck();
       } catch (e) {

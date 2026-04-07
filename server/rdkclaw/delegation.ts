@@ -71,6 +71,7 @@ export function buildDelegationRuntimePrompt(decision: DelegateDecision, boardSk
         ].join("\n")
       : [
           "**套件端 OpenClaw 参与**：本回合是**双伙伴共探**。**assess 通过不等于必须 delegate**——比较的是「谁更快把事办成」，不是谁有排程权。RDKClaw 已握有可直跑证据时可先 SSH；套件端在技能链/现场迭代上更快时再 delegate。",
+          "**SSH 抖动/超时/反复失败**时优先换道 assess→delegate，由 OpenClaw 在板内执行，勿堆 `device_exec` 重试。",
           "若走 delegate：guidance 仍是**共享上下文包**（用户目标、已执行命令与结果、失败模式、验收标准、限制条件），方便双方对齐与换道，而非单方面派活。",
           skillHint,
         ].join("\n")
@@ -246,8 +247,8 @@ export function selectDelegateDecision(
     needsBoardCollaboration: false,
     source: "default",
     reason: hasBoardSkills
-      ? `默认先由 RDKClaw 本地/SSH 闭环，若出现多步试错或技能链需求再协同套件端（当前可用技能数：${boardSnapshot.skills.length}）`
-      : "默认先由 RDKClaw 本地/SSH 闭环，暂无明确套件端协同触发条件",
-    confidence: hasBoardSkills ? 0.82 : 0.88,
+      ? `设备已连接，套件端有 ${boardSnapshot.skills.length} 个技能可用；均衡模式下板卡多步或 SSH 不稳时优先与 OpenClaw 对齐并由套件端执行`
+      : "设备已连接但套件端无已安装技能；SSH 不稳时优先 assess→delegate 让 OpenClaw 在板内执行，否则自主决策",
+    confidence: hasBoardSkills ? 0.85 : 0.75,
   };
 }

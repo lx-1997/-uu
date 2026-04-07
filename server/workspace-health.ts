@@ -1,4 +1,4 @@
-import { buildWorkspaceHealthBpuReadyPythonInline } from './board/device-profiles.js';
+import { buildTrosSourceLoopBash, buildWorkspaceHealthBpuReadyPythonInline } from './board/device-profiles.js';
 import { shellEscape } from './utils/shell-escape.js';
 
 export type WorkspaceModuleHealth = {
@@ -28,7 +28,7 @@ const WORKSPACE_HEALTH_SCRIPT = [
   '_dpkg=$(dpkg -l 2>/dev/null | awk "/^ii/{print \\$2}")',
   '_ss=$(ss -lntp 2>/dev/null)',
   '_ps=$(ps -eo args --no-headers 2>/dev/null)',
-  'for _tros_setup in /opt/tros/*/setup.bash; do [ -f "$_tros_setup" ] && . "$_tros_setup" 2>/dev/null && break; done; true',
+  buildTrosSourceLoopBash(),
   'python_ready=$(command -v python3 >/dev/null 2>&1 && echo 1 || echo 0)',
   'git_ready=$(command -v git >/dev/null 2>&1 && echo 1 || echo 0)',
   'node_ready=$(command -v node >/dev/null 2>&1 && echo 1 || echo 0)',
@@ -41,7 +41,7 @@ const WORKSPACE_HEALTH_SCRIPT = [
   'rosbridge_installed=$(echo "$_dpkg" | grep -q "rosbridge" && echo 1 || echo 0)',
   'rosbridge_running=$( (echo "$_ss" | grep -q ":9090" || echo "$_ps" | grep -qE "rosbridge_websocket|rosbridge_server") && echo 1 || echo 0 )',
   'tros_count=$(echo "$_dpkg" | grep -Ec "^(tros-|hobot)" || true)',
-  'ros_distro=$(printenv ROS_DISTRO 2>/dev/null || ls -1 /opt/tros/ 2>/dev/null | head -1 || ls -1 /opt/ros/ 2>/dev/null | head -1 || echo humble)',
+  'ros_distro=$(printenv ROS_DISTRO 2>/dev/null || ([ -d /opt/tros/humble ] && echo humble) || ls -1 /opt/tros/ 2>/dev/null | head -1 || ls -1 /opt/ros/ 2>/dev/null | head -1 || echo humble)',
   'modelzoo_dir=$(test -d /opt/rdk_model_zoo && echo 1 || echo 0)',
   'hrt_ready=$(command -v hrt_model_exec >/dev/null 2>&1 && echo 1 || echo 0)',
   `bpu_ready=$(if [ "$python_ready" = "1" ]; then python3 -c "${buildWorkspaceHealthBpuReadyPythonInline()}" 2>/dev/null || echo 0; else echo 0; fi)`,
