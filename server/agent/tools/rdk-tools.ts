@@ -1032,7 +1032,7 @@ function boardOpenClawInstallTool(deviceId: string, callbacks?: RdkToolsCallback
   return {
     name: 'board_openclaw_install',
     description:
-      '一键安装套件端 OpenClaw（npm 安装 openclaw@与 Studio 默认规格一致，含 doctor + 网关重启 + health）。成功后若本机可访问 Studio 仓库 skills 目录，会将内置 skills 同步到套件端 ~/.openclaw/workspace/skills/（与 UI 安装一致）。',
+      '一键安装套件端 OpenClaw（npm 安装 openclaw@与 Studio 默认规格一致，含 doctor + 网关重启 + health）。内置 skills 的 SFTP 默认关闭；仅当设置环境变量 RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC=1 时会在成功后尝试将本机仓库 skills/ 同步到套件端 ~/.openclaw/workspace/skills/。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
       const cmd = [

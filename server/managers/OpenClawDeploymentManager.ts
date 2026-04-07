@@ -34,6 +34,7 @@ import {
 } from './openclaw-board-install-sh.js';
 import {
   boardOpenclawRemoteSkillsDir,
+  shouldRunBuiltinStudioSkillsSftp,
   syncBuiltinStudioSkillsOverSftp,
 } from './board-openclaw-builtin-skills-sync.js';
 
@@ -841,7 +842,7 @@ const GATEWAY_RESTART_CMD =
  * ClawHub CLI：`clawhub install <技能短名>`（文档示例：`clawhub install summarize`）；与 `clawhub clone owner/skill` 不同。
  * `RDK_SKIP_BOARD_FIND_SKILLS=1` 可跳过。
  *
- * 安装完成后由 TypeScript 侧将 Studio 仓库 `skills/` + `rdkx5_skills/` SFTP 到套件端 `~/.openclaw/workspace/skills/`（见 syncBuiltinStudioSkills / RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC）。
+ * 内置 skills 的 SFTP 默认关闭；需同步时设 `RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC=1`（见 syncBuiltinStudioSkillsToBoard）。
  */
 const BOARD_FIND_SKILLS_INSTALL =
   process.env.RDK_SKIP_BOARD_FIND_SKILLS === '1' || process.env.RDK_SKIP_BOARD_FIND_SKILLS === 'true'
@@ -1771,7 +1772,7 @@ export class OpenClawDeploymentManager {
     return this.runInstallCommandWithStudioTarball(device, onOutput, onComplete, OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD, {
       pty: true,
       timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
-    }, () => this.runBuiltinSkillsSyncAfterInstall(device, onOutput));
+    });
   }
 
   runNetworkCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
@@ -1801,17 +1802,18 @@ export class OpenClawDeploymentManager {
     return this.runInstallCommandWithStudioTarball(device, onOutput, onComplete, NPM_INSTALL_CMD, {
       pty: true,
       timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
-    }, () => this.runBuiltinSkillsSyncAfterInstall(device, onOutput));
+    });
   }
 
   /**
    * 将 Studio 当前工作目录下内置的 `skills/`、`rdkx5_skills/` 同步到套件端 OpenClaw workspace（SFTP）。
-   * 安装流程结束后会自动调用；亦可被 Agent `board_openclaw_install` 或手工补救使用。
-   * 设 `RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC=1` 可跳过。
+   * 默认不执行；设 `RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC=1` 后可供部署「已安装」分支、Agent 工具等显式调用。
    */
   async syncBuiltinStudioSkillsToBoard(device: Device, onOutput: (chunk: string) => void): Promise<boolean> {
-    if (process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === '1' || process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === 'true') {
-      onOutput('[Studio] RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC 已设置，跳过内置 skill 同步\n');
+    if (!shouldRunBuiltinStudioSkillsSftp()) {
+      onOutput(
+        '[Studio] 内置 skills SFTP 未启用（默认关闭；需要时请设置环境变量 RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC=1）\n',
+      );
       return true;
     }
     try {
@@ -1832,33 +1834,6 @@ export class OpenClawDeploymentManager {
     } catch (e) {
       onOutput(`[Studio] WARN 内置 skill 同步异常: ${e instanceof Error ? e.message : String(e)}\n`);
       return false;
-    }
-  }
-
-  private async runBuiltinSkillsSyncAfterInstall(device: Device, onOutput: (chunk: string) => void): Promise<void> {
-    if (process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === '1' || process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === 'true') {
-      onOutput('[Studio] RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC 已设置，跳过内置 skill 同步\n');
-      return;
-    }
-    try {
-      const client = await this.getClient(device);
-      const remote = boardOpenclawRemoteSkillsDir(device.userName);
-      const includeRdkx5Skills = isBoardRdkX5(device);
-      onOutput(
-        `[Studio] 板型判定：${
-          includeRdkx5Skills
-            ? 'RDK X5（同步 rdkx5_skills 全量）'
-            : '非 X5（不同步 rdkx5_skills；S100/Ultra/X3 走文档类 skills，套件端能力包见 ensure-board-skill-bundle）'
-        }\n`,
-      );
-      await syncBuiltinStudioSkillsOverSftp(client, remote, process.cwd(), onOutput, {
-        includeRdkx5Skills,
-      });
-    } catch (e) {
-      onOutput(
-        `[Studio] WARN 内置 skill 同步失败（OpenClaw 已安装，可稍后重试或调 API ensure-board-skill-bundle）: ` +
-          `${e instanceof Error ? e.message : String(e)}\n`,
-      );
     }
   }
 

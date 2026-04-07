@@ -50,12 +50,14 @@ export default function Vnc() {
   const activeUrlRef = useRef<string>('');
 
   // 桌面端：tab + 浮窗态 同步 WebContentsView；浮窗关闭时若当前不在「远程桌面」Tab，必须再次 hide，否则会嵌到工作台等页面
-  const { activeTab } = useAppState();
+  const { activeTab, showSettings } = useAppState();
   useEffect(() => {
     if (!isDesktop() || !activeUrlRef.current) return;
     const rdk = (window as any).rdkDesktop;
     const url = activeUrlRef.current;
     const run = () => {
+      /** 与 App useDesktopTabSync 一致：设置打开时由主流程 hide WebContentsView，此处勿再贴回 */
+      if (showSettings) return;
       if (activeTab === 'vnc') {
         if (embedFloating) {
           rdk.hideUrl?.(url);
@@ -81,7 +83,7 @@ export default function Vnc() {
     return () => {
       if (t !== undefined) window.clearTimeout(t);
     };
-  }, [activeTab, embedFloating]);
+  }, [activeTab, embedFloating, showSettings]);
 
   useEffect(() => {
     if (!isDesktop()) return;

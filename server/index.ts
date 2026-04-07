@@ -3596,7 +3596,10 @@ async function executeOpenClawDeployJob(
     if (skipInstallBecausePresent) {
       markStepDoneWithNote('prepare', '[Studio] 已安装 OpenClaw，跳过依赖准备。');
       await runStep('install', async () => {
-        appendDeployOutput(job, '[Studio] 已安装 OpenClaw，跳过 npm 重装，改为同步内置 skills 与工作区资源。\n');
+        appendDeployOutput(
+          job,
+          '[Studio] 已安装 OpenClaw，跳过 npm 重装。内置 skills 默认不再 SFTP 至套件端；仅当环境变量 RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC=1 时本步会执行同步。\n',
+        );
         const syncOk = await openClawManager.syncBuiltinStudioSkillsToBoard(
           deviceObj,
           (chunk) => appendDeployOutput(job, chunk),
@@ -3604,7 +3607,7 @@ async function executeOpenClawDeployJob(
         return {
           ok: true,
           output: syncOk
-            ? '[Studio] 内置 skills 同步完成。'
+            ? '[Studio] 安装步骤完成（若已启用 SFTP 则已尝试同步内置 skills）。'
             : '[Studio] 内置 skills 同步未完全成功，已保留现有 OpenClaw 安装并继续后续配置。',
         };
       }, true);

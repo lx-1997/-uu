@@ -9,6 +9,18 @@ import * as path from 'node:path';
 const SKIP_DIR = new Set(['node_modules', '.git', '__pycache__', '.clawhub']);
 const MAX_FILE_BYTES = 2_500_000;
 
+/**
+ * 是否将 Studio 仓库 `skills/`（及板型允许时的 `rdkx5_skills/`）SFTP 到套件端 workspace。
+ * 默认关闭（目录多时耗时长）；需同步时设置 `RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC=1`。
+ * `RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC=1` 仍为显式关闭。
+ */
+export function shouldRunBuiltinStudioSkillsSftp(): boolean {
+  if (process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === '1' || process.env.RDK_SKIP_BOARD_BUILTIN_SKILLS_SYNC === 'true') {
+    return false;
+  }
+  return process.env.RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC === '1' || process.env.RDK_ENABLE_BOARD_BUILTIN_SKILLS_SYNC === 'true';
+}
+
 export function boardOpenclawRemoteSkillsDir(userName: string): string {
   const u = String(userName || 'root').trim() || 'root';
   if (u === 'root') return '/root/.openclaw/workspace/skills';

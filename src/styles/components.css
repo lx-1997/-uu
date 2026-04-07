@@ -426,20 +426,20 @@ button.btn-icon.topbar-wifi-btn.topbar-wifi-btn--unknown:hover:not(:disabled) {
   box-sizing: border-box;
 }
 
-/* 高于 SSO 全屏登录层（10000），用于条款/隐私/关于等全屏遮罩 */
+/* 高于基础 modal（条款/隐私/关于等嵌套遮罩），仍低于 Toast */
 .modal-overlay--stack {
-  z-index: 10160;
+  z-index: calc(var(--z-modal) + 60);
 }
 
 .modal-overlay--stack-elevated {
-  z-index: 10200;
+  z-index: calc(var(--z-modal) + 100);
 }
 
 /**
  * 微信扫码：挂到 body 的全屏遮罩，高于设置抽屉（--z-modal），低于 Toast（--z-toast）
  */
 .modal-overlay--weixin-qr {
-  z-index: 350;
+  z-index: calc(var(--z-modal) + 40);
   background: rgba(15, 23, 42, 0.58);
 }
 

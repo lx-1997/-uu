@@ -103,10 +103,19 @@ function useDesktopTabSync(
   activeTab: string,
   drPortalMapUrl: string | null,
   agentWebPreviewUrl: string | null,
+  showSettings: boolean,
 ) {
   useEffect(() => {
     const rdk = (window as any).rdkDesktop;
     if (!rdk?.setActiveUrl) return;
+    /**
+     * 设置抽屉为 HTML 全屏遮罩；地瓜生态 / Agent 内嵌页等由 WebContentsView 绘制在网页之上，z-index 无法压住。
+     * 打开设置时隐藏原生嵌入层，关闭后由本 effect 与 VNC/IDE 内 effect 再恢复。
+     */
+    if (showSettings) {
+      rdk.setActiveUrl(null);
+      return;
+    }
     /** 地瓜生态 tab：无 portal 时不要 setActiveUrl(null)，否则会与 rdk:open-url 异步竞态，把刚创建的 WebContentsView 全部隐藏 */
     if (activeTab === 'dr-embed') {
       if (drPortalMapUrl) {
@@ -122,7 +131,7 @@ function useDesktopTabSync(
       return;
     }
     rdk.setActiveUrl(null);
-  }, [activeTab, drPortalMapUrl, agentWebPreviewUrl]);
+  }, [activeTab, drPortalMapUrl, agentWebPreviewUrl, showSettings]);
 }
 
 function useDesktopViewBounds(activeTab: string, railExpanded: boolean) {
@@ -177,6 +186,7 @@ function AppShell() {
     ideEmbedToolbar,
     chatSessionsOpen,
     chatExpanded,
+    showSettings,
   } = useAppState();
   const { t } = useI18n();
   const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
@@ -223,7 +233,7 @@ function AppShell() {
   }, []);
 
   useStudioPresence(activeTab);
-  useDesktopTabSync(activeTab, drAuthenticatedPortal?.mapUrl ?? null, agentWebPreviewUrl);
+  useDesktopTabSync(activeTab, drAuthenticatedPortal?.mapUrl ?? null, agentWebPreviewUrl, showSettings);
   useDesktopViewBounds(activeTab, railExpanded);
   useThemeSync();
 
@@ -392,7 +402,7 @@ function AppShell() {
 /** 副屏：无侧栏，避免重复挂载 IDE/VNC 嵌入层；仅 OpenClaw 全页 + Dock 或纯对话工作区 */
 function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
   const {
-    currentDevice, theme, setChatExpanded, setActiveTab,
+    currentDevice, theme, setChatExpanded, setActiveTab, showSettings,
   } = useAppState();
   const { t } = useI18n();
   const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
@@ -446,9 +456,14 @@ function EmbedAppShell({ panel }: { panel: RdkEmbedPanel }) {
 
   useEffect(() => {
     const rdk = (window as any).rdkDesktop;
-    if (!rdk?.setActiveUrl || !agentWebPreviewUrl) return;
+    if (!rdk?.setActiveUrl) return;
+    if (showSettings) {
+      rdk.setActiveUrl(null);
+      return;
+    }
+    if (!agentWebPreviewUrl) return;
     rdk.setActiveUrl(agentWebPreviewUrl);
-  }, [agentWebPreviewUrl]);
+  }, [agentWebPreviewUrl, showSettings]);
 
   useEffect(() => {
     setChatExpanded(true);

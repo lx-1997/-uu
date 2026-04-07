@@ -56,7 +56,7 @@ const buildLaunchCmd = (port: number) =>
   `'`;
 
 export default function IDE() {
-  const { currentDevice, addToast, activeTab, setIdeEmbedToolbar } = useAppState();
+  const { currentDevice, addToast, activeTab, setIdeEmbedToolbar, showSettings } = useAppState();
   const { t, isEn } = useI18n();
   const tf = (key: string, zh: string, vars: Record<string, string | number>) => fillTemplate(t(key, zh), vars);
   const vscodeWebUrl = isEn ? 'https://vscode.dev/?vscode-lang=en' : 'https://vscode.dev/?vscode-lang=zh-cn';
@@ -265,6 +265,7 @@ export default function IDE() {
     const rdk = (window as any).rdkDesktop;
     const url = activeUrlRef.current;
     const run = () => {
+      if (showSettings) return;
       if (activeTab === 'ide') {
         if (embedFloating) {
           rdk.hideUrl?.(url);
@@ -289,7 +290,7 @@ export default function IDE() {
     return () => {
       if (t !== undefined) window.clearTimeout(t);
     };
-  }, [activeTab, embedFloating]);
+  }, [activeTab, embedFloating, showSettings]);
 
   useEffect(() => {
     if (!isDesktop()) return;

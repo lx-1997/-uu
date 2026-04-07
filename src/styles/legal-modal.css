@@ -2,7 +2,7 @@
 .legal-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10100;
+  z-index: calc(var(--z-modal) + 20);
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
@@ -12,7 +12,7 @@
 }
 
 .legal-modal-overlay--elevated {
-  z-index: 10150;
+  z-index: calc(var(--z-modal) + 50);
 }
 
 .legal-modal-card {
