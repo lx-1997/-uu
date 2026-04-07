@@ -15,8 +15,6 @@ import {
   ONE_SHOT_DEV_WORKFLOW_PROMPT_EN,
   DASHBOARD_HEALTH_CHECK_PROMPT_ZH,
   DASHBOARD_HEALTH_CHECK_PROMPT_EN,
-  DASHBOARD_CHAT_INTRO_PROMPT_ZH,
-  DASHBOARD_CHAT_INTRO_PROMPT_EN,
 } from '../i18n/prompts';
 import {
   DEVICE_DIAGNOSTICS_POLL_MS,
@@ -540,7 +538,7 @@ export default function Dashboard() {
             {t('dashboard.addDevice', '添加设备')}
           </button>
           <div className="dash-nodevice-actions dash-enter dash-enter-d3">
-            <button className="btn btn-ghost" onClick={() => prompt(isEn ? DASHBOARD_CHAT_INTRO_PROMPT_EN : DASHBOARD_CHAT_INTRO_PROMPT_ZH)}>
+            <button className="btn btn-ghost" onClick={() => prompt('', false)}>
               {t('dashboard.chatFirst', '打开对话')}
             </button>
             <button className="btn btn-ghost" onClick={() => setObStep('board')}>

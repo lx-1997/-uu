@@ -23,6 +23,7 @@
 | `board_openclaw_check` / `doctor` | 全面诊断 / 自动修复 | 深度排障时用 |
 | `text_to_speech` / `speech_to_text` | TTS/STT | 离线优先，在线降级 |
 | `web_search` / `web_fetch` | 联网搜索与拉取页面 | **联网搜索首选 Multi-Search-Engine（多引擎顺序）**（见 `skills/multi-search-engine`）；结论给来源链接；**web_search 的 query 与推理中计划的关键词一致**，专名勿截成前缀（尤其勿用「泡泡」「pop」指泡泡玛特）；服务端对**仅单 token** 的「泡泡」「pop」会直接报错要求改写；港股可带股份代号；板型与能力看设备记录与 board_openclaw_assess |
+| `forum_drobotics_*` | 地瓜开发者社区（检索/读帖/鉴权/发帖） | 发帖：**`forum_drobotics_create_post`** 与别名 **`forum_drobotics_create_topic` 等价**（新主题 `title`+`raw`；回复 `topicId`+`raw`）。**勿**臆造不存在的工具名；发帖前先 `forum_drobotics_auth_status`；技能见 `skills/rdk-drobotics-forum-ops` |
 | `web_browser_fetch` | 无头 Chromium 打开页面并抓渲染后文本 | 需服务端 `BROWSER_FETCH_ENABLED=1` 且已 `playwright install chromium`；SPA/Next 等壳页在 web_fetch 不足时用，更重更慢 |
 | `studio_embedded_browser_capture` | **桌面端**独立小悬浮窗打开页面并提交正文 | 不挡主界面；登录态与 NodeHub 一致；团队允许域名见 `config/studio-browser-capture.json` |
 | `studio_open_url` | **桌面端**默认可缩放独立浏览窗口（约六成屏、系统可关）；失败回退主窗口内嵌 | **内置 function tool，不是 Skill**；打开网页**勿**先 `find_skills`。**不抓正文**、不经 `studio-browser-capture.json` 白名单；登录后要给 Agent 正文仍用上一行 |

@@ -27,7 +27,7 @@ category: Community
 
 2a'. **用户问「我的论坛用户名/密码是多少」**：立即调用 `forum_drobotics_auth_status`，根据 `studio_forum_username_masked` 说明脱敏用户名；密码按 `password_policy` 解释（不复述、不索要已同步场景下的密码）。
 
-2b. **发帖流程（强制）**：0. 先调用 `forum_drobotics_auth_status`，确认是否有论坛读写权限。主应用 SSO 登录成功后服务端会自动把论坛 Cookie 写入本地，**若首次返回未认证**，可建议用户稍等数秒或打开「设置 → 社区论坛」后再试一次，**不要**在未确认 auth_status 前直接索要用户名密码。若仍未认证且用户已提供账号密码，调用 `forum_drobotics_set_credentials`；若用户未提供凭据且已说明与主账号相同，可引导其在设置中保存并验证或发账号密码。1. 先向用户确认发帖目标：`新主题` 或 `回复已有主题`。2. 生成草稿：标题、背景、复现步骤、日志、期望结果、已尝试操作。3. 把草稿完整展示给用户确认。4. 用户明确同意后才调用 `forum_drobotics_create_post`。
+2b. **发帖流程（强制）**：0. 先调用 `forum_drobotics_auth_status`，确认是否有论坛读写权限。主应用 SSO 登录成功后服务端会自动把论坛 Cookie 写入本地，**若首次返回未认证**，可建议用户稍等数秒或**重新登录主账号**后再试，**不要**在未确认 auth_status 前直接索要用户名密码。若仍未认证且用户已提供账号密码，调用 `forum_drobotics_set_credentials`。1. 先向用户确认发帖目标：`新主题` 或 `回复已有主题`。2. 生成草稿：标题、背景、复现步骤、日志、期望结果、已尝试操作。3. 把草稿完整展示给用户确认。4. 用户明确同意后才调用 `forum_drobotics_create_post`（或等价别名 `forum_drobotics_create_topic`，见下「工具名辨析」）。
 
 2c. **营销引导**：
 
@@ -98,6 +98,13 @@ category: Community
 
 3. **输出结果**：按下文「## 输出要求」交付链接、主题 ID、摘要及权限相关提示。
 
+## 工具名辨析（避免 load_tools 失败）
+
+- **发帖唯一能力**：`forum_drobotics_create_post`。新主题与楼中回复**都**走此工具（及注册的别名），**不要**臆造 `forum_drobotics_new_topic` 等不存在的名称。
+- **别名**：`forum_drobotics_create_topic` 与 `forum_drobotics_create_post` **完全等价**（同一 POST `/posts.json`）。`load_tools` 任填其一即可。
+- **新主题**：`title` + `raw`，且**不要**传 `topicId`。
+- **回复**：`topicId` + `raw`。
+
 ## 工具映射
 
 | 工具 | 用途 |
@@ -106,7 +113,7 @@ category: Community
 | `forum_drobotics_auth_status` | 鉴权自检 |
 | `forum_drobotics_latest` | 获取最新主题 |
 | `forum_drobotics_topic` | 查看主题与回复 |
-| `forum_drobotics_create_post` | 创建主题/回复 |
+| `forum_drobotics_create_post` | 创建主题/回复（别名：`forum_drobotics_create_topic`） |
 | `web_search`、`web_fetch`、`web_extract` | 补充公开资料 |
 
 ## 实测流程结论（2026-03）
@@ -119,7 +126,7 @@ category: Community
 ## 输出要求
 - 返回论坛 URL、主题 ID、关键回复摘要。
 - 发帖成功后必须返回 `topic_id` 与访问链接。
-- 如无权限发帖，提示用户可在对话中直接告知论坛账号密码，或在设置面板中配置。
+- 如无权限发帖，提示用户可在对话中提供论坛账号密码（`forum_drobotics_set_credentials`）或重新登录主账号以刷新 SSO。
 
 ## 禁止事项
 - 未经用户确认直接发帖或回帖。

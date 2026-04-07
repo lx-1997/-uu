@@ -394,19 +394,18 @@ function authHint(base: string, detail = "") {
     "当前论坛访问需要登录认证（实测匿名 latest/about/topic 均会 403）。",
     "该论坛开启了 SSO，/u/login 会跳转到 /session/sso，不能直接用用户名密码调用 /session 登录。",
     "可用方式：",
-    "0) 已用主账号登录 Studio 时，论坛可能已自动同步；可重试 forum_drobotics_auth_status 或让用户重新打开设置刷新状态",
+    "0) 已用主账号登录 Studio 时，论坛可能已自动同步；可重试 forum_drobotics_auth_status",
     "1) 在对话中告诉我你的论坛用户名和密码，我会调用 forum_drobotics_set_credentials 自动配置",
-    "2) 在 RDK Studio 设置面板中配置论坛账号",
-    "3) 配置 API 凭据（FORUM_DROBOTICS_API_KEY + FORUM_DROBOTICS_API_USERNAME）",
-    "4) 浏览器登录后导出 Cookie 到 FORUM_DROBOTICS_COOKIE",
+    "2) 配置 API 凭据（FORUM_DROBOTICS_API_KEY + FORUM_DROBOTICS_API_USERNAME）",
+    "3) 浏览器登录后导出 Cookie 到 FORUM_DROBOTICS_COOKIE",
   ].filter(Boolean).join("\n");
 }
 
-/** 供 auth_status 返回：与设置页同源，避免模型谎称「查不到」 */
+/** 供 auth_status 返回：与本机 forum-auth 同源，避免模型谎称「查不到」 */
 function formatStudioForumConfigAudit(): string {
   const v = new ForumAuthStore().getView();
   return [
-    "--- studio_forum_config (本机 forum-auth，与「设置 → 社区论坛」一致) ---",
+    "--- studio_forum_config (本机 ~/.rdkstudio/forum-auth) ---",
     `studio_forum_username_masked: ${v.username || "未配置"}`,
     `studio_linked_from_app_sso: ${v.linkedFromAppSso ? "yes" : "no"}`,
     `studio_has_password_saved_locally: ${v.hasPassword ? "yes" : "no"}`,
@@ -676,7 +675,7 @@ function forumTopicTool(options: ForumToolOptions): Tool<{ topicId: number; maxP
   };
 }
 
-function forumCreatePostTool(options: ForumToolOptions): Tool<{
+function forumCreatePostTool(options: ForumToolOptions, variant: "canonical" | "create_topic_alias" = "canonical"): Tool<{
   title?: string;
   raw: string;
   topicId?: number;
@@ -684,9 +683,15 @@ function forumCreatePostTool(options: ForumToolOptions): Tool<{
   category?: number;
 }> {
   const timeoutMs = Math.max(3000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const toolName =
+    variant === "canonical" ? "forum_drobotics_create_post" : "forum_drobotics_create_topic";
+  const toolDescription =
+    variant === "canonical"
+      ? "在地瓜机器人论坛创建新主题或回复（API Key 或 Cookie/SSO）。**新主题**：`title`+`raw`（勿传 `topicId`）；**回复**：`topicId`+`raw`。另注册有同名别名 `forum_drobotics_create_topic`，行为一致。"
+      : "**与 `forum_drobotics_create_post` 完全等价**（Discourse 统一 POST `/posts.json`）。新主题：`title`+`raw`；回复：`topicId`+`raw`。若误记为 create_topic，用本工具即可。";
   return {
-    name: "forum_drobotics_create_post",
-    description: "在地瓜机器人论坛创建新主题或回复（支持 API Key，或使用用户名密码 SSO 会话 Cookie + CSRF）。",
+    name: toolName,
+    description: toolDescription,
     inputSchema: {
       type: "object",
       properties: {
@@ -968,6 +973,7 @@ export function createForumTools(options: ForumToolOptions = {}): Tool[] {
     forumSearchTool(options),
     forumLatestTool(options),
     forumTopicTool(options),
-    forumCreatePostTool(options),
+    forumCreatePostTool(options, "canonical"),
+    forumCreatePostTool(options, "create_topic_alias"),
   ];
 }

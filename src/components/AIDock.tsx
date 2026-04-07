@@ -2881,9 +2881,6 @@ export default function AIDock() {
                           <span className="typing-dot" />
                         </div>
                       ) : null}
-                      <button type="button" className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>
-                        {t('dock.exec.moveBackground', '转后台')}
-                      </button>
                       <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
                         {t('dock.typing.stopCurrent', '结束当前')}
                       </button>
@@ -2960,9 +2957,6 @@ export default function AIDock() {
                           <span className="typing-dot" />
                         </div>
                       ) : null}
-                      <button type="button" className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>
-                        {t('dock.exec.moveBackground', '转后台')}
-                      </button>
                       <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
                         {t('dock.typing.stopCurrent', '结束当前')}
                       </button>
@@ -3254,7 +3248,6 @@ export default function AIDock() {
                 <div className="dock-bubble ai">
                   <div className="dock-typing">
                     <div className="typing-dots"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
-                    <button type="button" className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>{t('dock.exec.moveBackground', '转后台')}</button>
                     <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>{t('dock.typing.stopCurrent', '结束当前')}</button>
                     <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>{t('dock.typing.stopAll', '全部停止')}</button>
                   </div>

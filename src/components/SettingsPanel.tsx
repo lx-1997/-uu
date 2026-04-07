@@ -19,10 +19,6 @@ import {
   rejectFeishuPairing,
   startFeishuRuntime,
   stopFeishuRuntime,
-  fetchRDKClawForumAuth,
-  saveRDKClawForumCredential,
-  clearRDKClawForumAuth,
-  type ForumAuthView,
   fetchWeixinAccounts,
   removeWeixinAccount,
   restartWeixinChannel,
@@ -76,8 +72,7 @@ type SectionId =
   | 'ai-engine'
   | 'feishu'
   | 'weixin'
-  | 'connection'
-  | 'forum';
+  | 'connection';
 
 /* ═══════════════════════════════════════════
    Component
@@ -111,7 +106,6 @@ export default function SettingsPanel() {
     { id: 'feishu' as const, label: t('settings.sec.feishu', '飞书') },
     { id: 'weixin' as const, label: t('settings.sec.weixin', '微信') },
     { id: 'connection' as const, label: t('settings.sec.connection', '设备连接') },
-    { id: 'forum' as const, label: t('settings.sec.forum', '社区论坛') },
   ], [t, showAccountSection]);
 
   /* ── Active nav section (IntersectionObserver) ── */
@@ -327,16 +321,6 @@ export default function SettingsPanel() {
     expireAt: number; createdAt: number;
   }>>([]);
 
-  /* ── Forum State ── */
-  const [forumAuth, setForumAuth] = useState<ForumAuthView>({
-    username: '', hasPassword: false, hasCookie: false, hasAppSsoAccessTokenSaved: false, linkedFromAppSso: false,
-    hasApiKey: false, hasApiUsername: false,
-    lastVerified: null, lastVerifyResult: null,
-  });
-  const [forumUsernameInput, setForumUsernameInput] = useState('');
-  const [forumPasswordInput, setForumPasswordInput] = useState('');
-  const [forumSaving, setForumSaving] = useState(false);
-  const [forumVerifyMsg, setForumVerifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [floatingBallEnabled, setFloatingBallEnabled] = useState(true);
 
   /** 桌面端启动即同步主进程 prefs（默认开启），不依赖是否打开设置面板 */
@@ -383,11 +367,6 @@ export default function SettingsPanel() {
      Data Loading
      ═══════════════════════════════════════════ */
 
-  const refreshForumAuth = async () => {
-    const forumAuthRes = await fetchRDKClawForumAuth();
-    setForumAuth(forumAuthRes.auth);
-  };
-
   const refreshFeishuData = async () => {
     const [statusRes, boundRes, cfgRes, pairingRes] = await Promise.all([
       fetchFeishuRuntimeStatus(), fetchFeishuBoundUsers(),
@@ -424,7 +403,6 @@ export default function SettingsPanel() {
     if (!showSettings) return;
     Promise.all([
       refreshAiConfig(),
-      refreshForumAuth(),
       refreshFeishuData().then(() => setFeishuLoading(false)),
       loadWeixinData(),
     ])
@@ -434,43 +412,6 @@ export default function SettingsPanel() {
   /* ═══════════════════════════════════════════
      Handlers
      ═══════════════════════════════════════════ */
-
-  const handleSaveForumCredential = async () => {
-    const username = forumUsernameInput.trim();
-    const password = forumPasswordInput.trim();
-    if (!username || !password) { addToast(t('toast.forumNeedCreds', '请填写论坛用户名和密码'), 'warning'); return; }
-    setForumSaving(true);
-    setForumVerifyMsg(null);
-    try {
-      const res = await saveRDKClawForumCredential({ username, password });
-      setForumPasswordInput('');
-      setForumAuth(res.auth);
-      setForumVerifyMsg({
-        ok: res.verified,
-        text: res.verified
-          ? t('settings.forum.verifyOk', '凭据已保存，SSO 验证通过')
-          : tf('settings.forum.verifyFailDetail', '凭据已保存，但验证未通过: {{detail}}', { detail: res.verifyDetail }),
-      });
-      addToast(
-        res.verified ? t('toast.forumSavedOk', '论坛凭据验证成功') : t('toast.forumSavedWarn', '凭据已保存，SSO 验证未通过'),
-        res.verified ? 'success' : 'warning',
-      );
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toast.forumSaveFail', '保存失败'), 'error');
-    } finally { setForumSaving(false); }
-  };
-
-  const handleClearForumAuth = async () => {
-    setForumSaving(true);
-    try {
-      const res = await clearRDKClawForumAuth();
-      setForumUsernameInput(''); setForumPasswordInput('');
-      await refreshForumAuth();
-      addToast(res.message || t('toast.forumCleared', '论坛认证已清空'), 'success');
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toast.forumClearFail', '清空论坛认证失败'), 'error');
-    } finally { setForumSaving(false); }
-  };
 
   const handleSaveFeishu = async () => {
     setFeishuSaving(true);
@@ -2263,64 +2204,6 @@ export default function SettingsPanel() {
                       </div>
                     </div>
                   )}
-                </div>
-              </section>
-
-              <hr className="settings-section-divider" />
-
-              {/* ══ 6. 社区论坛 ══ */}
-              <section id="forum" className="settings-section" ref={registerSectionRef('forum')}>
-                <H
-                  title={t('settings.forum.title', '社区论坛')}
-                  desc={t(
-                    'settings.forum.desc',
-                    '与主应用账号一致时通常自动同步；若失败，在此保存论坛用户名与密码并验证。',
-                  )}
-                />
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.forum.user', '论坛用户')}</span>
-                    <div className="settings-row-value settings-row-value--stretch settings-row-value--stack settings-row-value--forum-user">
-                      <span className="settings-row-static">{forumAuth.username || t('settings.forum.notSet', '未配置')}</span>
-                      {forumAuth.linkedFromAppSso ? (
-                        <span className="settings-status-badge ok">{t('settings.forum.linkedSso', '已与主账号同步')}</span>
-                      ) : forumAuth.lastVerifyResult === 'ok' ? (
-                        <span className="settings-status-badge ok">{t('settings.forum.ssoOk', 'SSO 验证通过')}</span>
-                      ) : null}
-                      {forumAuth.lastVerifyResult === 'failed' && <span className="settings-status-badge error">{t('settings.forum.ssoFail', '验证失败')}</span>}
-                    </div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.forum.username', '用户名')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><input type="text" className="input" title={t('settings.forum.username', '用户名')} aria-label={t('settings.forum.username', '用户名')} placeholder={t('settings.forum.username.ph', '论坛用户名')} value={forumUsernameInput} onChange={e => setForumUsernameInput(e.target.value)} /></div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.forum.password', '密码')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><input type="password" className="input" title={t('settings.forum.password', '密码')} aria-label={t('settings.forum.password', '密码')} placeholder={t('settings.forum.password.ph', '论坛密码')} value={forumPasswordInput} onChange={e => setForumPasswordInput(e.target.value)} /></div>
-                  </div>
-                  {forumVerifyMsg && (
-                    <div className={`settings-status-badge ${forumVerifyMsg.ok ? 'ok' : 'error'}`}>
-                      {forumVerifyMsg.text}
-                    </div>
-                  )}
-                  <div className="settings-actions">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSaveForumCredential} disabled={forumSaving}>{forumSaving ? t('settings.forum.verify', '验证中...') : t('settings.forum.saveVerify', '保存并验证')}</button>
-                    <button type="button" className="btn btn-danger btn-sm" onClick={handleClearForumAuth} disabled={forumSaving}>{t('settings.forum.clear', '清空')}</button>
-                  </div>
-                  {forumAuth.hasAppSsoAccessTokenSaved && !forumAuth.hasCookie ? (
-                    <span className="settings-hint" style={{ display: 'block', marginBottom: '0.5rem' }}>
-                      {t(
-                        'settings.forum.tokenHeldNoCookie',
-                        '若无法发帖，请使用「保存并验证」提交论坛密码，或重新登录主账号后再试。',
-                      )}
-                    </span>
-                  ) : null}
-                  <span className="settings-hint">
-                    {t(
-                      'settings.forum.hint',
-                      '退出主账号会清除自动同步的论坛会话；手动保存的凭据保留在本地直至清空。',
-                    )}
-                  </span>
                 </div>
               </section>
 
