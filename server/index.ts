@@ -539,8 +539,7 @@ const openClawManager = new OpenClawDeploymentManager(resourcesPath);
       const deviceObj = toOpenClawDevice(device, pwd);
       let stream: NodeJS.ReadWriteStream;
       try {
-        const client = await openClawManager.getSshClientForDevice(deviceObj);
-        stream = await forwardOutRemoteTcp(client, '127.0.0.1', remotePort);
+        stream = await openClawManager.forwardOutBoardLocalTcp(deviceObj, remotePort);
       } catch (e) {
         console.warn('[noVNC] ssh tunnel failed:', e instanceof Error ? e.message : e);
         ws.close();
@@ -645,8 +644,7 @@ function registerCodeServerProxyUpgradeHandler() {
             requestHeaderPassword: String(request.headers['x-device-password'] ?? ''),
           });
           const deviceObj = toOpenClawDevice(device, pwd);
-          const client = await openClawManager.getSshClientForDevice(deviceObj);
-          const stream = await forwardOutRemoteTcp(client, '127.0.0.1', CODE_SERVER_HTTP_PORT);
+          const stream = await openClawManager.forwardOutBoardLocalTcp(deviceObj, CODE_SERVER_HTTP_PORT);
           const upstreamPath = `${matched.remainder}${u.search}`;
           const raw = buildRawHttpRequestForCodeServerUpstream(request, upstreamPath);
           const headBuf = head && head.length > 0 ? head : Buffer.alloc(0);
@@ -3351,6 +3349,8 @@ app.delete('/api/devices/:id', async (request, response) => {
   const { id } = request.params;
   try {
     await serializedWriteDevices(async () => {
+      /** 避免 TTL 缓存与并发读-改-写竞态下读到未剔除该项的旧列表 */
+      invalidateDevicesReadCache();
       const devices = await readDevices();
       const target = devices.find((device) => device.id === id);
 
@@ -3365,6 +3365,11 @@ app.delete('/api/devices/:id', async (request, response) => {
       invalidateDeviceDerivedCaches(id);
       await writeDevices(devices.filter((device) => device.id !== id));
       const cleanup = purgeDeviceSoftwareState(target);
+      try {
+        openClawManager.destroyConnection(sshEndpointKey({ ip: target.host, port: target.port ?? 22 }));
+      } catch {
+        /* ignore */
+      }
       if (!response.headersSent) {
         response.json({ removedId: id, cleanup });
       }

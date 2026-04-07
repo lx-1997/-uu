@@ -401,7 +401,28 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       })();
     };
 
-    removeDeviceApi(id)
+    const runDeleteWithRetry = async () => {
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await removeDeviceApi(id);
+          return;
+        } catch (e) {
+          lastErr = e;
+          const msg = e instanceof Error ? e.message : String(e);
+          const transient =
+            /network|failed to fetch|timeout|econnreset|connection reset|load failed/i.test(msg);
+          if (attempt === 0 && transient) {
+            await new Promise((r) => setTimeout(r, 400));
+            continue;
+          }
+          throw e;
+        }
+      }
+      throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+    };
+
+    void runDeleteWithRetry()
       .then(() => {
         forgetDevicePassword(id);
         delete pingFailStreakRef.current[id];

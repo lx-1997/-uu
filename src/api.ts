@@ -105,8 +105,11 @@ export function getRememberedDevicePassword(deviceId: string) {
 
 function extractDeviceId(input: RequestInfo) {
   const url = typeof input === 'string' ? input : input.url;
-  const match = url.match(/\/api\/devices\/([^/]+)\//);
-  return match?.[1] ?? '';
+  const withSlash = url.match(/\/api\/devices\/([^/]+)\//);
+  if (withSlash?.[1]) return withSlash[1];
+  /** DELETE /api/devices/:id 等无尾部斜杠；否则无法为请求附带 x-device-password */
+  const endPath = url.match(/\/api\/devices\/([^/?#]+)(?:[?#]|$)/);
+  return endPath?.[1] ?? '';
 }
 
 /* 桌面端（file:// 协议）下相对路径失效，需拼接绝对 URL */

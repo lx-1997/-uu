@@ -4,7 +4,12 @@
  */
 import { Client } from 'ssh2';
 import { createHash } from 'crypto';
-import { SSH_READY_TIMEOUT_MS, SSH_KEEPALIVE_INTERVAL_MS, SSH_KEEPALIVE_COUNT_MAX } from '../ssh.js';
+import {
+  SSH_READY_TIMEOUT_MS,
+  SSH_KEEPALIVE_INTERVAL_MS,
+  SSH_KEEPALIVE_COUNT_MAX,
+  forwardOutRemoteTcp,
+} from '../ssh.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transport.js';
@@ -442,12 +447,12 @@ except Exception:
 g = d.get("gateway") if isinstance(d.get("gateway"), dict) else {}
 g["mode"] = "local"
 g["bind"] = "loopback"
-# Studio 探活固定 18789；仅修正缺省/空/历史模板 8080，保留用户显式其它端口
+# Studio 探活固定 18789；修正缺省/8080；若误配为 5900/5901 则与 x11vnc RFB 冲突，一并拉回
 try:
     _p = int(g.get("port")) if g.get("port") not in (None, "") else None
 except (TypeError, ValueError):
     _p = None
-if _p is None or _p == 8080:
+if _p is None or _p == 8080 or _p in (5900, 5901):
     g["port"] = 18789
 d["gateway"] = g
 
@@ -1187,6 +1192,25 @@ export class OpenClawDeploymentManager {
   /** noVNC / IDE 等经 SSH 隧道访问套件端服务时复用与 OpenClaw 相同的连接池与端口配置 */
   getSshClientForDevice(device: Device): Promise<Client> {
     return this.getClient(device);
+  }
+
+  /**
+   * 经池化 SSH 在套件端做 direct-tcpip（noVNC→5900、code-server 等）。
+   * OpenClaw 长时安装或 oc-bridge 占用后，偶发 half-open，首次 forwardOut 失败则丢弃池连接并重试一次。
+   */
+  async forwardOutBoardLocalTcp(device: Device, destPort: number): Promise<import('node:stream').Duplex> {
+    try {
+      const client = await this.getClient(device);
+      return await forwardOutRemoteTcp(client, '127.0.0.1', destPort);
+    } catch (firstErr) {
+      const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+      console.warn(
+        `[OpenClawDeploymentManager] forwardOut 127.0.0.1:${destPort} failed, resetting SSH pool: ${msg}`,
+      );
+      this.destroyConnection(sshEndpointKey(device));
+      const client = await this.getClient(device);
+      return await forwardOutRemoteTcp(client, '127.0.0.1', destPort);
+    }
   }
 
   private async ensureStudioOpenClawTarball(onOutput: (chunk: string) => void): Promise<{ localPath: string; fileName: string } | null> {
