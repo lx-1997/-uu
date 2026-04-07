@@ -2472,10 +2472,10 @@ export default function AIDock() {
     return () => ro.disconnect();
   }, [chatExpanded]);
 
-  /* OpenClaw Socket.IO connection */
+  /* Socket.IO connection — needed for rdkclaw:notify (always when chat is open) and OpenClaw handshake (when device connected) */
   useEffect(() => {
-    const shouldConnectOpenclawSocket = Boolean(currentDevice && (chatExpanded || (activeTab === 'openclaw' && dockOcMode)));
-    if (!shouldConnectOpenclawSocket) {
+    const needSocket = Boolean(chatExpanded || (currentDevice && activeTab === 'openclaw' && dockOcMode));
+    if (!needSocket) {
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -2484,14 +2484,15 @@ export default function AIDock() {
       return;
     }
     const connectedDeviceId = currentDevice?.id;
-    if (!connectedDeviceId) return;
 
     const socket = io(resolveSocketUrl(), socketIoClientOptions);
     socketRef.current = socket;
 
     socket.on('connect', () => {
       setOpenclawConnected(false);
-      socket.emit('openclaw:start', { deviceId: connectedDeviceId });
+      if (connectedDeviceId) {
+        socket.emit('openclaw:start', { deviceId: connectedDeviceId });
+      }
     });
 
     socket.on('openclaw:ready', () => {
@@ -2502,7 +2503,7 @@ export default function AIDock() {
     socket.on('openclaw:data', () => {});
     socket.on('openclaw:complete', () => {});
     socket.on('openclaw:error', (data: { error: string }) => {
-      if (/not connected/i.test(data.error || '')) {
+      if (connectedDeviceId && /not connected/i.test(data.error || '')) {
         socket.emit('openclaw:start', { deviceId: connectedDeviceId });
       }
     });

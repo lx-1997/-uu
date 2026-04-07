@@ -50,6 +50,7 @@ export class NotificationHub {
     const isHighPriority =
       notification.level === 'error' ||
       notification.level === 'success' ||
+      notification.type === 'autonomy_start' ||
       notification.type === 'autonomy_error' ||
       notification.type === 'openclaw_gateway_watchdog';
 

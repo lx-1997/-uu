@@ -81,6 +81,7 @@ import type {
 } from "./types.js";
 import {
   getExternalChannelPolicy,
+  isExternalImChannel,
   validateExecCommand,
 } from "./channel-safety.js";
 import { getAgentMediaDownloadDir } from "../local-files-roots.js";
@@ -729,7 +730,7 @@ export class RDKClawApp {
           throw new Error("联网工具已禁用，请在策略面板中开启网络能力。");
         }
 
-        const isExternal = channel !== "studio";
+        const isExternal = isExternalImChannel(channel);
 
         if (isExternal) {
           const chanPolicy = getExternalChannelPolicy(tool.name);

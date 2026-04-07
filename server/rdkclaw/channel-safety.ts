@@ -105,8 +105,16 @@ export function getExternalChannelPolicy(toolName: string): "block" | "force_app
   return "allow";
 }
 
+/**
+ * 仅微信/飞书走「外部 IM」额外工具/exec 约束；Studio 与 autonomy（服务端定时任务）同属本机可信上下文。
+ * 历史上用 `channel !== "studio"` 会把 autonomy 误判为外部通道，与 Dock 行为不一致。
+ */
+export function isExternalImChannel(channel: ChannelSource): boolean {
+  return channel === "weixin" || channel === "feishu";
+}
+
 export function validateExecCommand(command: string, channel: ChannelSource): ChannelSafetyResult {
-  if (channel === "studio") return { blocked: false };
+  if (channel === "studio" || channel === "autonomy") return { blocked: false };
 
   const check = isCommandDangerous(command);
   if (check.blocked) return check;

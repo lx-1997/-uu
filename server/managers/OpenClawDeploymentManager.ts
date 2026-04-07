@@ -963,6 +963,25 @@ const NPM_UPGRADE_CMD = [
 ].join(' && ');
 
 /**
+ * exec 将 stderr 与 stdout 合并；板端读 `.bashrc` 失败、sudo 提示等会混入输出，
+ * terse 解析会把这些行误当成 SSID。解析前剔除。
+ */
+function sanitizeWifiScanOutput(raw: string): string {
+  return (raw || '')
+    .split(/\r?\n/)
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return false;
+      if (/^(bash|sh|dash|zsh):\s/i.test(t)) return false;
+      if (/Input\/output error/i.test(t)) return false;
+      if (/^sudo:\s/i.test(t)) return false;
+      if (/^\[(?:SSH Error|ERROR|TIMEOUT)\]/i.test(t)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
+/**
  * 解析 `nmcli -t -f SSID device wifi list`：每行一个 SSID，或 `SSID:名称`。
  * 排除表头、隐藏网占位「--」。
  */
@@ -1009,7 +1028,7 @@ function parseWifiSsidsFromNmcliTable(output: string): string[] {
  * 含 IN-USE/BSSID/SSID 表头时必须先走表格解析；若先走 terse 会把整行误当成 SSID。
  */
 function parseWifiSsidsFromNmcliOutput(output: string): string[] {
-  const text = output || '';
+  const text = sanitizeWifiScanOutput(output || '');
   if (/\bSSID\b/.test(text) && /\bBSSID\b/.test(text)) {
     return parseWifiSsidsFromNmcliTable(text);
   }
@@ -2510,16 +2529,17 @@ print(json.dumps(result,ensure_ascii=False))`;
   ): void {
     /**
      * 与用户在终端执行的一致：`nmcli device wifi list`（LANG=C 保证表头为 SSID/BSSID，便于解析）。
-     * 不用 awk 管道；优先当前用户 nmcli，失败再 `sudo -n`。
+     * 使用 `/bin/sh -c`（非交互 sh 不读 `.bashrc`），避免板端存储异常时 bash 启动噪声进入合并输出。
      */
     const cmd =
-      'bash --noprofile --norc -c ' +
+      '/bin/sh -c ' +
       JSON.stringify(
         'LANG=C LC_ALL=C; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 1; ' +
           'nmcli device wifi list 2>/dev/null || sudo -n nmcli device wifi list 2>/dev/null',
       );
     let output = '';
     this.execCommand(device, cmd, (chunk) => { output += chunk; }, (success) => {
+      const ioErr = /\binput\/output error\b/i.test(output);
       const names = parseWifiSsidsFromNmcliOutput(output);
       if (names.length > 0) {
         onResult(names, true);
@@ -2529,8 +2549,18 @@ print(json.dumps(result,ensure_ascii=False))`;
         const sshAuthFail = /SSH Error|\[ERROR\]|All configured authentication methods failed/i.test(output);
         const hint = sshAuthFail
           ? `SSH 未连上套件端（当前使用端口 ${device.port ?? 22}）。经 frp 时请确认设备档案里 SSH 端口为映射端口（如 6000），并已重启 Studio 后端使修复生效。`
-          : '套件端 WiFi 扫描失败：请确认已安装 NetworkManager、当前 SSH 用户可执行 nmcli（或已配置免密 sudo），并可在板上手动执行 nmcli device wifi list 对比。';
+          : ioErr
+            ? '套件端读系统文件时出现 I/O 错误（多为 SD 卡或根分区异常）。请检查存储、重启设备后再试；若仍失败请在板上终端执行 nmcli device wifi list 排查。'
+            : '套件端 WiFi 扫描失败：请确认已安装 NetworkManager、当前 SSH 用户可执行 nmcli（或已配置免密 sudo），并可在板上手动执行 nmcli device wifi list 对比。';
         onResult([], false, hint);
+        return;
+      }
+      if (ioErr) {
+        onResult(
+          [],
+          false,
+          '套件端读系统文件时出现 I/O 错误（多为 SD 卡或根分区异常）。请检查存储、重启设备后再试；若仍失败请在板上终端执行 nmcli device wifi list 排查。',
+        );
         return;
       }
       onResult([], true);

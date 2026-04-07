@@ -314,13 +314,34 @@ function emitFlashProgress(payload) {
   safeSendToMainRenderer('rdk:flash:progress', payload);
 }
 
-function downloadFile(url, destPath) {
-  const client = url.startsWith('https://') ? https : http;
+/** 与 flash/service 写盘取消独立：中止当前主进程 HTTP 镜像下载 */
+let cancelFlashHttpDownload = null;
+
+function invokeCancelFlashHttpDownload() {
+  const fn = cancelFlashHttpDownload;
+  cancelFlashHttpDownload = null;
+  if (typeof fn === 'function') {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * @param {string} url
+ * @param {string} destPath
+ * @param {(teardown: () => void) => void} setTeardown 注册当前阶段可销毁的 socket/文件流（用于 Abort）
+ */
+function downloadFileWithTeardown(url, destPath, setTeardown) {
   return new Promise((resolve, reject) => {
+    const client = url.startsWith('https:') ? https : http;
     const req = client.get(url, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const next = new URL(res.headers.location, url).href;
         res.resume();
-        resolve(downloadFile(res.headers.location, destPath));
+        downloadFileWithTeardown(next, destPath, setTeardown).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
@@ -333,6 +354,24 @@ function downloadFile(url, destPath) {
       let lastPercent = -1;
       let lastEmitAt = 0;
       const writer = fs.createWriteStream(destPath);
+      setTeardown(() => {
+        try {
+          req.destroy();
+        } catch {
+          /* ignore */
+        }
+        try {
+          res.destroy();
+        } catch {
+          /* ignore */
+        }
+        try {
+          writer.destroy();
+        } catch {
+          /* ignore */
+        }
+        void fs.promises.unlink(destPath).catch(() => {});
+      });
       res.on('data', (chunk) => {
         done += chunk.length;
         if (total > 0) {
@@ -342,7 +381,11 @@ function downloadFile(url, destPath) {
           if (shouldEmit) {
             lastPercent = percent;
             lastEmitAt = now;
-            emitFlashProgress({ stage: 'downloading', message: `下载 ${(done / 1024 / 1024).toFixed(1)}MB / ${(total / 1024 / 1024).toFixed(1)}MB`, percent });
+            emitFlashProgress({
+              stage: 'downloading',
+              message: `下载 ${(done / 1024 / 1024).toFixed(1)}MB / ${(total / 1024 / 1024).toFixed(1)}MB`,
+              percent,
+            });
           }
         }
       });
@@ -369,6 +412,15 @@ function downloadFile(url, destPath) {
         });
       });
       writer.on('error', reject);
+      res.on('error', reject);
+    });
+    setTeardown(() => {
+      try {
+        req.destroy();
+      } catch {
+        /* ignore */
+      }
+      void fs.promises.unlink(destPath).catch(() => {});
     });
     req.on('error', reject);
   });
@@ -378,15 +430,42 @@ ipcMain.handle('rdk:flash:download-image', async (_event, payload) => {
   const url = String(payload?.url || '').trim();
   const destDir = String(payload?.destDir || path.join(os.homedir(), 'Downloads')).trim();
   if (!url) return { ok: false, error: '缺少下载地址 url' };
+  const controller = new AbortController();
+  const op = { teardown: () => {} };
+  const onAbort = () => {
+    try {
+      op.teardown();
+    } catch {
+      /* ignore */
+    }
+  };
+  controller.signal.addEventListener('abort', onAbort);
+  cancelFlashHttpDownload = () => {
+    controller.abort();
+  };
+
   try {
     fs.mkdirSync(destDir, { recursive: true });
     const fileName = path.basename(new URL(url).pathname || `rdk-${Date.now()}.img`);
     const destPath = path.join(destDir, fileName);
-    await downloadFile(url, destPath);
+    await downloadFileWithTeardown(url, destPath, (fn) => {
+      op.teardown = fn;
+    });
+    if (controller.signal.aborted) {
+      emitFlashProgress({ stage: 'downloading', message: '下载已取消', percent: 0 });
+      return { ok: false, error: '用户取消下载', canceled: true };
+    }
     emitFlashProgress({ stage: 'downloading', message: '下载完成', percent: 100 });
     return { ok: true, path: destPath };
   } catch (error) {
+    if (controller.signal.aborted) {
+      emitFlashProgress({ stage: 'downloading', message: '下载已取消', percent: 0 });
+      return { ok: false, error: '用户取消下载', canceled: true };
+    }
     return { ok: false, error: error instanceof Error ? error.message : '下载失败' };
+  } finally {
+    controller.signal.removeEventListener('abort', onAbort);
+    cancelFlashHttpDownload = null;
   }
 });
 
@@ -2027,6 +2106,7 @@ ipcMain.handle('rdk:flash:backup-local', async (_event, payload) => {
 });
 
 ipcMain.handle('rdk:flash:cancel', async () => {
+  invokeCancelFlashHttpDownload();
   return flashService.cancelActiveOp();
 });
 

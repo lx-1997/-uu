@@ -3,6 +3,7 @@ import {
   isCommandDangerous,
   isPathProtected,
   getExternalChannelPolicy,
+  isExternalImChannel,
   validateExecCommand,
   matchTextApproval,
   classifyFileKind,
@@ -119,9 +120,22 @@ describe('getExternalChannelPolicy', () => {
   });
 });
 
+describe('isExternalImChannel', () => {
+  it('is true only for weixin and feishu', () => {
+    expect(isExternalImChannel('weixin')).toBe(true);
+    expect(isExternalImChannel('feishu')).toBe(true);
+    expect(isExternalImChannel('studio')).toBe(false);
+    expect(isExternalImChannel('autonomy')).toBe(false);
+  });
+});
+
 describe('validateExecCommand', () => {
   it('allows all commands from studio channel', () => {
     expect(validateExecCommand('rm -rf /', 'studio').blocked).toBe(false);
+  });
+
+  it('allows all commands from autonomy channel (same trust domain as studio)', () => {
+    expect(validateExecCommand('rm -rf /', 'autonomy').blocked).toBe(false);
   });
 
   it('blocks dangerous commands from feishu', () => {

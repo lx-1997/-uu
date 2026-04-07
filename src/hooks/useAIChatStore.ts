@@ -4008,10 +4008,11 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
         }
       }
       setChatExpanded(true);
+      const uniqueId = ts + Math.random();
       setChatMessages((prev) => [
         ...prev,
         {
-          id: ts,
+          id: uniqueId,
           role: 'ai',
           text: '',
           source: 'studio',

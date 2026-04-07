@@ -138,7 +138,13 @@ declare global {
       flashBackupLocal?: (payload: { drivePath: string; destPath?: string }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string }>;
       flashCancelLocal?: () => Promise<{ ok: boolean; error?: string }>;
       flashGetActiveOperation?: () => Promise<FlashActiveOperationSnapshot>;
-      flashDownloadImage?: (payload: { url: string; destDir: string }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      flashDownloadImage?: (payload: { url: string; destDir: string }) => Promise<{
+        ok: boolean;
+        path?: string;
+        error?: string;
+        /** 主进程已中止 HTTP 下载 */
+        canceled?: boolean;
+      }>;
       flashDecompressImage?: (payload: { filePath: string }) => Promise<{ ok: boolean; outputPath?: string; error?: string }>;
       launchXburn?: (payload?: { exePath?: string; imagePath?: string }) => Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>;
       /** 读取已缓存的 S100 xburn-gui 路径（存在且文件仍在则返回） */

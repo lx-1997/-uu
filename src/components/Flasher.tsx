@@ -558,6 +558,13 @@ export default function Flasher() {
       try {
         const result = await window.rdkDesktop.flashDownloadImage({ url, destDir: '' });
         if (!result.ok) {
+          if (result.canceled) {
+            setError('');
+            setPhase('error');
+            appendLog(t('flasher.log.downloadCancelled', '下载已由用户取消'));
+            addToast(t('flasher.toast.downloadCancelled', '下载已取消'), 'info');
+            return null;
+          }
           setError(result.error || t('flasher.err.downloadFail', '下载失败'));
           setPhase('error');
           return null;
@@ -930,7 +937,9 @@ export default function Flasher() {
           'flasher.toast.cancelRequestedS100',
           '已请求取消：正在中断下载/安装与 xburn（若卡在 UAC 请先关闭系统提权窗口）…',
         )
-        : t('flasher.toast.cancelRequested', '已请求取消，正在停止写盘…'),
+        : phase === 'downloading'
+          ? t('flasher.toast.cancelRequestedDownload', '已请求取消，正在停止下载…')
+          : t('flasher.toast.cancelRequested', '已请求取消，正在停止写盘…'),
       'info',
     );
   };

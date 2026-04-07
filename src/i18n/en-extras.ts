@@ -1013,6 +1013,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'flasher.err.onlineImageNoInAppDownload':
     'In-app download is not available. A browser tab was opened; after the download finishes, go back to “Choose image”, select the file under “Local image file”, then start the write again.',
   'flasher.log.downloadDone': 'Download finished',
+  'flasher.log.downloadCancelled': 'Download cancelled by user',
+  'flasher.toast.downloadCancelled': 'Download cancelled',
   'flasher.log.decompressUnsupported': 'Auto-decompress not available; extract manually and choose a .img file.',
   'flasher.err.decompressManual': 'Extract the image to .img and select it again.',
   'flasher.log.decompressStart': 'Decompressing image…',
@@ -1078,6 +1080,7 @@ export const EN_EXTRAS: Record<string, string> = {
     'xburn program path saved; one-click will skip this prompt unless the file moves.',
   'flasher.err.cancelSendFail': 'Failed to send cancel',
   'flasher.toast.cancelRequested': 'Cancel requested; stopping write…',
+  'flasher.toast.cancelRequestedDownload': 'Cancel requested; stopping download…',
   'flasher.header.badge': 'RDK image flash',
   'flasher.title': 'Image flash wizard',
   'flasher.subtitle': 'RDK X3 / X5 / S100 image flashing.',
