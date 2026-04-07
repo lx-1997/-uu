@@ -6,7 +6,7 @@ import { ssoTranslate as st } from '../i18n/sso-translate';
 import LegalDocumentModal, { type LegalDocKind } from './LegalDocumentModal';
 import { fetchApi, setSsoSessionMirror } from '../utils/apiBase';
 
-type Phase = 'preparing' | 'ready' | 'error';
+type Phase = 'preparing' | 'ready' | 'error' | 'finalizing';
 
 /** 内嵌页就绪前的极短过渡，过长会拖慢「可点登录」的体感 */
 const READY_DELAY_MS = 80;
@@ -27,6 +27,7 @@ export default function SsoLoginScreen() {
   const [prepareBump, setPrepareBump] = useState(0);
   const [authStatus, setAuthStatus] = useState<'idle' | 'checking' | 'failed'>('idle');
   const [desktopSsoUrl, setDesktopSsoUrl] = useState('');
+  const [phaseMessage, setPhaseMessage] = useState('');
   const readyTimerRef = useRef(0);
   const webviewRef = useRef<HTMLElement | null>(null);
 
@@ -43,6 +44,7 @@ export default function SsoLoginScreen() {
 
   const scheduleReady = useCallback(() => {
     window.clearTimeout(readyTimerRef.current);
+    setPhaseMessage('');
     setPhase('preparing');
     readyTimerRef.current = window.setTimeout(() => {
       setPhase('ready');
@@ -71,6 +73,7 @@ export default function SsoLoginScreen() {
     if (!desktopCapable) return;
     let cancelled = false;
     setPhase('preparing');
+    setPhaseMessage('');
     setLoadError('');
     setEmbedLoadFailed(false);
     setDesktopSsoUrl('');
@@ -125,6 +128,8 @@ export default function SsoLoginScreen() {
       const token = payload?.token;
       if (!token) return;
       try {
+        setPhase('finalizing');
+        setPhaseMessage(st('sso.finalizing', '登录已完成，正在建立应用会话…'));
         const r = await fetchApi('/api/sso/bootstrap', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -138,7 +143,16 @@ export default function SsoLoginScreen() {
           user?: SSOUser;
         };
         if (!r.ok || !data?.ok) {
+          void window.rdkDesktop?.stopSsoEmbedded?.();
+          setDesktopSsoUrl('');
+          setPhase('error');
           if (data?.code === 'SSO_CLIENT_NOT_CONFIGURED') {
+            setLoadError(
+              st(
+                'sso.bootstrapNeedConfig',
+                '您已在 SSO 登录成功，但本应用尚未在服务端完成 OAuth 对接。请联系管理员配置 SSO_CLIENT_ID 与 SSO_CLIENT_SECRET。',
+              ),
+            );
             addToast(
               st(
                 'sso.bootstrapNeedConfig',
@@ -147,6 +161,7 @@ export default function SsoLoginScreen() {
               'error',
             );
           } else {
+            setLoadError(data?.error || st('sso.bootstrapFail', '会话建立失败'));
             addToast(data?.error || st('sso.bootstrapFail', '会话建立失败'), 'error');
           }
           return;
@@ -162,6 +177,10 @@ export default function SsoLoginScreen() {
         /** adoptBootstrapSession 已写入 user；勿 await refresh，避免与 /api/sso/me 粘滞重试叠加阻塞首帧进入主界面 */
         void refresh();
       } catch {
+        void window.rdkDesktop?.stopSsoEmbedded?.();
+        setDesktopSsoUrl('');
+        setPhase('error');
+        setLoadError(st('sso.bootstrapFail', '会话建立失败'));
         addToast(st('sso.bootstrapFail', '会话建立失败'), 'error');
       }
     });
@@ -216,7 +235,7 @@ export default function SsoLoginScreen() {
     : '';
 
   const showErrorLayer = phase === 'error' || embedLoadFailed;
-  const showPreparingLayer = phase === 'preparing' && !showErrorLayer;
+  const showPreparingLayer = (phase === 'preparing' || phase === 'finalizing') && !showErrorLayer;
 
   const showDesktopWebview = desktopCapable && phase === 'ready' && !embedLoadFailed && !!desktopSsoUrl;
   const showBrowserIframe = !desktopCapable && phase === 'ready' && !embedLoadFailed && !!loginFrameUrl;
@@ -273,7 +292,7 @@ export default function SsoLoginScreen() {
       {showPreparingLayer && (
         <div className="sso-login-state">
           <div className="sso-login-spinner" aria-hidden />
-          <p className="sso-login-state-text">{st('sso.embedPreparing', '正在加载统一登录页…')}</p>
+          <p className="sso-login-state-text">{phaseMessage || st('sso.embedPreparing', '正在加载统一登录页…')}</p>
         </div>
       )}
 

@@ -7,11 +7,17 @@ const rootDir = process.cwd();
 const releaseDir = path.join(rootDir, 'release');
 const runtimeCheckEnabled = String(process.env.RDK_DESKTOP_SMOKE_RUNTIME || '').trim() === '1';
 const RUNTIME_HEALTH_RETRIES = Number.parseInt(String(process.env.RDK_DESKTOP_SMOKE_HEALTH_RETRIES || '40'), 10) || 40;
+const DESKTOP_SERVER_PORT = 8787;
+const DESKTOP_SERVER_PORT_FALLBACK_SPAN = 10;
 const smokeLogFile = String(process.env.RDK_DESKTOP_SMOKE_LOG_FILE || '').trim();
 const buildStartedAt = Number.parseInt(String(process.env.RDK_DESKTOP_BUILD_STARTED_AT || '0'), 10) || 0;
 const winDirMode = String(process.env.RDK_DESKTOP_WIN_DIR_MODE || '').trim() === '1';
 const winZipMode = String(process.env.RDK_DESKTOP_WIN_ZIP_MODE || '').trim() === '1';
 const processOutputLines = [];
+
+function getCandidatePorts() {
+  return Array.from({ length: DESKTOP_SERVER_PORT_FALLBACK_SPAN + 1 }, (_v, index) => DESKTOP_SERVER_PORT + index);
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -149,6 +155,33 @@ async function probeHealth(url, retries = 30, intervalMs = 1_000) {
   return false;
 }
 
+function healthUrlForPort(port) {
+  return `http://127.0.0.1:${port}/api/health`;
+}
+
+async function detectHealthyPorts(ports) {
+  const healthy = new Set();
+  for (const port of ports) {
+    if (await probeHealth(healthUrlForPort(port), 1, 50)) {
+      healthy.add(port);
+    }
+  }
+  return healthy;
+}
+
+async function waitForNewHealthyPort(ports, occupiedBefore, retries, intervalMs) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    for (const port of ports) {
+      if (occupiedBefore.has(port)) continue;
+      if (await probeHealth(healthUrlForPort(port), 1, 50)) {
+        return port;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return 0;
+}
+
 async function runRuntimeSmoke() {
   if (!runtimeCheckEnabled) {
     logInfo('Runtime smoke skipped (set RDK_DESKTOP_SMOKE_RUNTIME=1 to enable).');
@@ -165,12 +198,12 @@ async function runRuntimeSmoke() {
     throw new Error('Runtime smoke for linux target must run on Linux');
   }
 
-  const healthUrl = 'http://127.0.0.1:8787/api/health';
-  logInfo(`Runtime smoke enabled, checking health endpoint: ${healthUrl}`);
-  const preOccupied = await probeHealth(healthUrl, 1, 50);
-  if (preOccupied) {
-    const owners = getPortOwners(8787);
-    throw new Error(`端口 8787 已有服务响应，无法执行可靠 runtime smoke（请先关闭现有实例）${owners ? `\n${owners}` : ''}`);
+  const candidatePorts = getCandidatePorts();
+  const occupiedBefore = await detectHealthyPorts(candidatePorts);
+  if (occupiedBefore.size > 0) {
+    logInfo(`Runtime smoke 检测到已有健康端口：${Array.from(occupiedBefore).join(', ')}；将验证新实例是否自动回退到其它端口。`);
+  } else {
+    logInfo(`Runtime smoke enabled, checking health endpoints: ${candidatePorts.join(', ')}`);
   }
 
   const execPath = resolveRuntimeExecutable();
@@ -226,22 +259,22 @@ async function runRuntimeSmoke() {
     });
   };
 
-  const ready = await probeHealth(healthUrl, RUNTIME_HEALTH_RETRIES, 1_000);
-  logInfo(`Runtime health probe finished: ${ready ? 'ready' : 'not ready'}`);
+  const startedPort = await waitForNewHealthyPort(candidatePorts, occupiedBefore, RUNTIME_HEALTH_RETRIES, 1_000);
+  logInfo(`Runtime health probe finished: ${startedPort ? `ready on ${startedPort}` : 'not ready'}`);
   await cleanup();
-  if (!ready) {
+  if (!startedPort) {
     if (exited) {
       throw new Error(`Runtime smoke 失败：桌面进程提前退出（code=${exitCode ?? 'null'} signal=${exitSignal ?? 'null'}）`);
     }
-    throw new Error('Runtime smoke 失败：应用启动后 /api/health 未在预期时间内就绪');
+    throw new Error(`Runtime smoke 失败：应用启动后未在 ${candidatePorts[0]}-${candidatePorts[candidatePorts.length - 1]} 范围内发现新的健康端口`);
   }
-  // Ensure service process is actually torn down after cleanup.
-  const released = !(await probeHealth(healthUrl, 6, 300));
+  // Ensure the port claimed by this runtime smoke is actually torn down after cleanup.
+  const released = !(await probeHealth(healthUrlForPort(startedPort), 6, 300));
   if (!released) {
-    const owners = getPortOwners(8787);
-    throw new Error(`Runtime smoke 收尾失败：退出后端口 8787 仍在监听${owners ? `\n${owners}` : ''}`);
+    const owners = getPortOwners(startedPort);
+    throw new Error(`Runtime smoke 收尾失败：退出后端口 ${startedPort} 仍在监听${owners ? `\n${owners}` : ''}`);
   }
-  logInfo('Runtime smoke cleanup finished, port 8787 released.');
+  logInfo(`Runtime smoke cleanup finished, port ${startedPort} released.`);
 }
 
 function waitForChildExit(child, timeoutMs) {

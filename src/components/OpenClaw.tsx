@@ -112,6 +112,46 @@ interface ConfigData {
   };
 }
 
+interface StudioModelEntry {
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+  label?: string;
+}
+
+function getOpenClawApiForStudioProvider(provider: string): string {
+  const prov = String(provider || '').trim();
+  return prov === 'anthropic' || prov === 'anthropic-compatible' ? 'anthropic-messages' : 'openai-completions';
+}
+
+function buildBoardModelGatewayFromStudioEntry(entry: StudioModelEntry): NonNullable<ConfigData['modelGateway']> {
+  const modelId = String(entry.model || '').trim();
+  return {
+    baseUrl: String(entry.baseUrl || '').trim(),
+    modelId,
+    apiKey: String(entry.apiKey || ''),
+    api: getOpenClawApiForStudioProvider(entry.provider),
+    modelName: String(entry.label || '').trim() || modelId,
+  };
+}
+
+function isBoardModelGatewayAlignedWithStudioEntry(config: ConfigData | null | undefined, entry: StudioModelEntry): boolean {
+  if (!config) return false;
+  const expected = buildBoardModelGatewayFromStudioEntry(entry);
+  const board = config.modelGateway;
+  const primaryModel = String(config.primaryModel || '').trim().toLowerCase();
+  const expectedPrimaryModel = `custom-gateway/${expected.modelId}`.toLowerCase();
+  if (!board) return false;
+  return (
+    primaryModel === expectedPrimaryModel &&
+    String(board.baseUrl || '').trim() === expected.baseUrl &&
+    String(board.apiKey || '') === expected.apiKey &&
+    String(board.modelId || '').trim() === expected.modelId &&
+    String(board.api || '').trim() === expected.api
+  );
+}
+
 interface ModelHealthSnapshot {
   signature: string;
   lastSuccessAt: number;
@@ -140,8 +180,10 @@ type OpenClawChatPhase =
 
 type DeployStepState = 'pending' | 'running' | 'done' | 'error';
 type DeployStepName = 'check' | 'prepare' | 'install' | 'config';
+
 interface DeployJob {
   id: string;
+  deviceId?: string;
   status: 'running' | 'done' | 'error';
   steps: Record<DeployStepName, DeployStepState>;
   output?: string;
@@ -151,8 +193,8 @@ interface DeployJob {
 type ConfigTab = 'model' | 'feishu';
 
 type SetupStep = 'gateway' | 'model' | 'feishu';
+
 interface SetupStatus {
-  /** 一键部署进行中：优先于「已安装」，避免与主区进度条同时显示矛盾文案 */
   gateway: 'ok' | 'warn' | 'error' | 'deploying';
   model: 'ok' | 'warn' | 'unconfigured';
   feishu: 'ok' | 'warn' | 'unconfigured';
@@ -170,7 +212,7 @@ interface DeployPrecheck {
    Constants
    ═══════════════════════════════════════════ */
 
-/** 与 AIDock `Icon.send` 一致 */
+/** 与 AIDock `Icon.send` 保持一致 */
 function OcComposerSendIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1381,26 +1423,75 @@ export default function OpenClaw() {
   };
 
   /** 将 Studio agent-config 中某条目的字段写入本页大模型表单（用于「预选模型」） */
-  const applyStudioEntryToModelForm = (entry: {
-    provider: string;
-    model: string;
-    baseUrl?: string;
-    apiKey?: string;
-    label?: string;
-  }) => {
-    const prov = String(entry.provider || '').trim();
-    const api =
-      prov === 'anthropic' || prov === 'anthropic-compatible' ? 'anthropic-messages' : 'openai-completions';
-    const baseUrl = (entry.baseUrl || '').trim();
-    const modelId = (entry.model || '').trim();
-    const key = String(entry.apiKey || '');
+  const applyStudioEntryToModelForm = (entry: StudioModelEntry) => {
+    const gateway = buildBoardModelGatewayFromStudioEntry(entry);
     setModelConfig({
-      baseUrl,
-      modelId,
-      apiKey: key,
-      api,
-      modelName: (entry.label || '').trim() || modelId,
+      baseUrl: gateway.baseUrl,
+      modelId: gateway.modelId,
+      apiKey: gateway.apiKey,
+      api: gateway.api,
+      modelName: gateway.modelName,
     });
+  };
+
+  const fetchStudioModelEntry = async (entryId: string): Promise<StudioModelEntry | null> => {
+    const resolvedId = String(entryId || '').trim();
+    if (!resolvedId) return null;
+    const res = await fetchApi(`/api/agent/config/entry/${encodeURIComponent(resolvedId)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.entry) {
+      throw new Error(String(data?.message || data?.error || res.status));
+    }
+    return data.entry as StudioModelEntry;
+  };
+
+  const pushStudioModelToBoard = async (
+    entry: StudioModelEntry,
+    options: {
+      boardConfigSnapshot?: ConfigData | null;
+      persistPresetId?: string | null;
+      forcePersistPreset?: boolean;
+      successMessage?: string;
+    } = {},
+  ) => {
+    if (!currentDevice) return false;
+    const gateway = buildBoardModelGatewayFromStudioEntry(entry);
+    const shouldWriteGateway = !isBoardModelGatewayAlignedWithStudioEntry(options.boardConfigSnapshot ?? config, entry);
+    if (!shouldWriteGateway && !options.forcePersistPreset) return false;
+
+    const requestBody: {
+      config: { modelGateway?: NonNullable<ConfigData['modelGateway']> };
+      persistOpenclawDelegatePreset?: string | null;
+    } = { config: {} };
+    if (shouldWriteGateway) requestBody.config.modelGateway = gateway;
+    if (Object.prototype.hasOwnProperty.call(options, 'persistPresetId')) {
+      requestBody.persistOpenclawDelegatePreset = options.persistPresetId ?? null;
+    }
+
+    setConfigBusy(true);
+    try {
+      const res = await fetchApi(`/api/devices/${currentDevice.id}/openclaw/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result.ok === false) {
+        throw new Error(String(result.output || result.error || t('common.unknownError', '未知错误')));
+      }
+      if (shouldWriteGateway) {
+        setConfig((prev) => ({
+          ...(prev || {}),
+          modelGateway: gateway,
+          primaryModel: `custom-gateway/${gateway.modelId}`,
+        }));
+      }
+      if (options.successMessage) addToast?.(options.successMessage, 'success');
+      setTimeout(() => { loadConfig(); loadStatus(); }, 1200);
+      return true;
+    } finally {
+      setConfigBusy(false);
+    }
   };
 
   /**
@@ -1414,19 +1505,26 @@ export default function OpenClaw() {
       if (cancelled || !cfg) return;
       const models = cfg.models ?? [];
       setStudioDelegateModels(models.map((m) => ({ id: m.id, label: m.label, model: m.model })));
-      const presetId = cfg.openclawDelegateProviderId?.trim() || '';
-      setDelegateEntryId(presetId);
+      const persistedPresetId = cfg.openclawDelegateProviderId?.trim() || '';
+      const fallbackActiveId = cfg.activeModelId?.trim() || '';
+      const effectiveEntryId = persistedPresetId || fallbackActiveId;
+      setDelegateEntryId(persistedPresetId);
 
-      await loadConfig();
+      const boardConfig = await loadConfig();
       if (cancelled) return;
 
-      if (presetId) {
+      if (effectiveEntryId) {
         try {
-          const res = await fetchApi(`/api/agent/config/entry/${encodeURIComponent(presetId)}`);
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || cancelled) return;
-          if (data?.entry) {
-            applyStudioEntryToModelForm(data.entry);
+          const entry = await fetchStudioModelEntry(effectiveEntryId);
+          if (!entry || cancelled) return;
+          applyStudioEntryToModelForm(entry);
+          if (isOpenClawInstalled(status) && !isBoardModelGatewayAlignedWithStudioEntry(boardConfig, entry)) {
+            await pushStudioModelToBoard(entry, {
+              boardConfigSnapshot: boardConfig,
+              successMessage: persistedPresetId
+                ? t('oc.boardDelegate.syncedPreset', '已将 OpenClaw 默认模型同步到板端')
+                : t('oc.boardDelegate.syncedDock', '已将 OpenClaw 自动同步为 RDKClaw 当前模型'),
+            });
           }
         } catch {
           /* 预拉失败不拦截；用户仍可手动选预选 */
@@ -1712,10 +1810,7 @@ export default function OpenClaw() {
       const hasAgentPatch = Object.keys(adPartial).length > 0;
       const hasModelGateway = !!(modelConfig.baseUrl.trim() && modelConfig.apiKey.trim());
       if (!hasModelGateway && !hasAgentPatch) {
-        addToast?.(
-          t('oc.save.needUrlKeyOrAgent', '请填写 Base URL 与 API Key，或至少选择一项思考档位 / 推理可见性'),
-          'warning',
-        );
+        addToast?.(t('oc.save.needUrlKeyOrAgent', '请填写 Base URL 与 API Key，或至少选择一项思考档位 / 推理可见性'), 'warning');
         return;
       }
     }
@@ -2135,7 +2230,7 @@ export default function OpenClaw() {
     }
     return tf(
       'oc.status.modelTitleDelegate',
-      '套件端当前：{{board}}。委派预检将写入 Studio 条目「{{label}}」（{{model}}）。若希望套件端对话也使用该模型，请在本页「大模型」保存相同配置并重启网关。',
+      '套件端默认跟随 Studio 条目「{{label}}」（{{model}}）。进入本页或切换默认模型时，工作室会自动把该模型同步到板端 OpenClaw。当前板端显示：{{board}}。',
       { board, label: entry.label, model: entry.model },
     );
   };
@@ -2659,7 +2754,7 @@ export default function OpenClaw() {
             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8 }}>
               {t(
                 'oc.boardDelegate.hint.compact',
-                '默认使用 RDKClaw 当前模型。你可在此选择一个已保存条目并自动填充下方字段，再保存写入套件端。',
+                          '默认跟随 RDKClaw 当前模型。切换这里会立即同步到板端，同时自动填充下方字段。',
               )}
             </div>
             <div className="oc-form-row">
@@ -2670,35 +2765,43 @@ export default function OpenClaw() {
                 onChange={(e) => {
                   const v = e.target.value;
                   setDelegateEntryId(v);
-                  if (!v) {
-                    void loadConfig();
-                    return;
-                  }
                   setDelegatePresetSaving(true);
-                  void fetchApi(`/api/agent/config/entry/${encodeURIComponent(v)}`)
-                    .then(async (res) => {
-                      const data = await res.json().catch(() => ({}));
-                      if (!res.ok) {
-                        addToast?.(
-                          tf('oc.boardDelegate.loadEntryFail', '无法加载该模型条目: {{msg}}', {
-                            msg: String(data?.message || data?.error || res.status),
-                          }),
-                          'error',
-                        );
+                  void (async () => {
+                    try {
+                      let resolvedEntryId = v;
+                      let persistPresetId: string | null = v || null;
+                      if (!resolvedEntryId) {
+                        const cfg = await fetchAgentConfig();
+                        resolvedEntryId = cfg.activeModelId?.trim() || '';
+                        persistPresetId = null;
+                      }
+                      if (!resolvedEntryId) {
+                        await loadConfig();
+                        addToast?.(t('oc.boardDelegate.noDockModel', '当前没有可同步的 RDKClaw 模型条目'), 'warning');
                         return;
                       }
-                      const ent = data?.entry;
-                      if (ent) applyStudioEntryToModelForm(ent);
-                    })
-                    .catch((err: unknown) => {
+                      const ent = await fetchStudioModelEntry(resolvedEntryId);
+                      if (!ent) return;
+                      applyStudioEntryToModelForm(ent);
+                      await pushStudioModelToBoard(ent, {
+                        boardConfigSnapshot: config,
+                        persistPresetId,
+                        forcePersistPreset: true,
+                        successMessage: persistPresetId
+                          ? t('oc.boardDelegate.changedPreset', '默认模型已切换，并已同步到板端')
+                          : t('oc.boardDelegate.followDockApplied', 'OpenClaw 已恢复为跟随 RDKClaw 当前模型'),
+                      });
+                    } catch (err: unknown) {
                       addToast?.(
                         tf('oc.boardDelegate.loadEntryFail', '无法加载该模型条目: {{msg}}', {
                           msg: err instanceof Error ? err.message : String(err),
                         }),
                         'error',
                       );
-                    })
-                    .finally(() => setDelegatePresetSaving(false));
+                    } finally {
+                      setDelegatePresetSaving(false);
+                    }
+                  })();
                 }}
                 disabled={delegatePresetSaving || boardDeployBusy}
                 aria-label={t('oc.boardDelegate.preset', '默认模型')}

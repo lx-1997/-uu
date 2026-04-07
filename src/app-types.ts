@@ -126,7 +126,20 @@ export type ChatBlock =
   | { type: 'image'; src: string; caption?: string }
   | { type: 'video'; src: string; caption?: string }
   | { type: 'file'; src: string; fileName: string; caption?: string }
-  | { type: 'terminal'; lines: string[]; label?: string; collapsible?: boolean; previewLines?: number }
+  | {
+      type: 'terminal';
+      lines: string[];
+      label?: string;
+      collapsible?: boolean;
+      previewLines?: number;
+      toolName?: string;
+      executor?: string;
+      status?: 'running' | 'success' | 'error';
+      startedAt?: number;
+      endedAt?: number;
+      canMoveBackground?: boolean;
+      canStop?: boolean;
+    }
   /** RDKClaw ↔ 套件端 OpenClaw 协作：区分双方输出；outbound=发给套件端，hint=结果中的 RDKClaw 说明 */
   | { type: 'collab'; side: 'openclaw' | 'rdkclaw'; collabRole?: 'outbound' | 'hint' | 'reverse' | 'wait_hint'; title?: string; subtitle?: string; lines: string[]; collapsible?: boolean; previewLines?: number }
   | { type: 'status'; items: Array<{ label: string; value: string; ok: boolean }>; title?: string; collapsible?: boolean; defaultCollapsed?: boolean; summary?: string }

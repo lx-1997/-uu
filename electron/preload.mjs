@@ -2,11 +2,22 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 const RDK_SSO_TOKEN = 'rdk:sso:token';
 
+function getDesktopApiBase() {
+  const argvMatch = process.argv.find((arg) => /^--rdk-api-base=/i.test(arg));
+  if (argvMatch) {
+    const value = argvMatch.replace(/^--rdk-api-base=/i, '').trim();
+    if (value) return value.replace(/\/$/, '');
+  }
+  const envValue = String(process.env.RDK_DESKTOP_API_BASE || '').trim();
+  if (envValue) return envValue.replace(/\/$/, '');
+  return 'http://127.0.0.1:8787';
+}
+
 contextBridge.exposeInMainWorld('rdkDesktop', {
   isDesktop: true,
   platform: process.platform,
   // 打包后前端通过此字段拼接 API base URL（file:// 协议下相对路径失效）
-  apiBase: 'http://localhost:8787',
+  apiBase: getDesktopApiBase(),
 
   /** 论坛 / RoboGo 免登录：独立窗口种 token Cookie + Bearer（payload 来自 /api/sso/external-browser-bundle） */
   openDroboticsAuthBrowser: (payload) => ipcRenderer.invoke('rdk:open-drobotics-auth-browser', payload),

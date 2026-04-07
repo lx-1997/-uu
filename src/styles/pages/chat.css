@@ -2346,6 +2346,34 @@ body:has(.content-area[data-studio-tab='flasher']) .dock-restore-btn:hover {
   text-decoration: underline;
 }
 
+.dock-bubble .dock-card-aux-btn--solid {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, white);
+  color: var(--accent);
+}
+
+.dock-bubble .dock-card-aux-btn--solid:hover,
+.dock-bubble .dock-card-aux-btn--solid:focus-visible {
+  background: color-mix(in srgb, var(--accent) 16%, white);
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.dock-bubble .dock-card-aux-btn--danger {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #dc2626 10%, white);
+  color: #b91c1c;
+}
+
+.dock-bubble .dock-card-aux-btn--danger:hover,
+.dock-bubble .dock-card-aux-btn--danger:focus-visible {
+  background: color-mix(in srgb, #dc2626 14%, white);
+  color: #991b1b;
+  text-decoration: none;
+}
+
 /* 连续工具卡：略收紧垂直节奏 */
 .dock-bubble .msg-block.dock-agent-card + .msg-block.dock-agent-card {
   margin-top: 10px;
@@ -2371,6 +2399,86 @@ body:has(.content-area[data-studio-tab='flasher']) .dock-restore-btn:hover {
   max-height: min(300px, 44vh);
   overflow-x: auto;
   overflow-y: auto;
+}
+
+.dock-bubble .dock-agent-card--terminal {
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 7%, transparent), transparent 38%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 96%, white), var(--bg-primary));
+}
+
+.dock-bubble .dock-agent-card--terminal .dock-agent-card-head {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.dock-bubble .dock-tool-card-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dock-bubble .dock-tool-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dock-bubble .dock-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.dock-bubble .dock-tool-chip--running {
+  background: color-mix(in srgb, #d97706 10%, white);
+  color: #b45309;
+}
+
+.dock-bubble .dock-tool-chip--success {
+  background: color-mix(in srgb, #16a34a 10%, white);
+  color: #15803d;
+}
+
+.dock-bubble .dock-tool-chip--error {
+  background: color-mix(in srgb, #dc2626 10%, white);
+  color: #b91c1c;
+}
+
+.dock-bubble .dock-tool-chip--plain,
+.dock-bubble .dock-tool-chip--time {
+  background: color-mix(in srgb, var(--bg-elevated) 92%, white);
+  color: var(--text-secondary);
+}
+
+.dock-bubble .dock-tool-card-title {
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.dock-bubble .dock-tool-card-submeta {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.dock-bubble .dock-tool-card-subtitle {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: break-word;
 }
 
 .dock-bubble .dock-agent-shell--sanitized {

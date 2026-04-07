@@ -6,6 +6,8 @@ import {
   OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET,
   OPENCLAW_ENSURE_NPM_SNIPPET,
   OPENCLAW_INSTALL_OPENCLAW_STEP,
+  OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET,
+  OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET,
   OPENCLAW_NPM_FAST_INSTALL_SNIPPET,
   OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET,
   OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET,
@@ -39,6 +41,8 @@ describe('openclaw-board-install shell generation', () => {
     expectNoBrokenShellTokens(OPENCLAW_WAIT_APT_LOCK_SNIPPET);
     expectNoBrokenShellTokens(OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET);
     expectNoBrokenShellTokens(OPENCLAW_ENSURE_NPM_SNIPPET);
+    expectNoBrokenShellTokens(OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET);
+    expectNoBrokenShellTokens(OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET);
     expectNoBrokenShellTokens(OPENCLAW_NPM_FAST_INSTALL_SNIPPET);
     expectNoBrokenShellTokens(OPENCLAW_CONDITIONAL_PREINSTALL_DEEP_CLEAN_SNIPPET);
     expectNoBrokenShellTokens(OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET);
@@ -55,6 +59,8 @@ describe('openclaw-board-install shell generation', () => {
 
   itWithBash('parses in bash -n', () => {
     expectBashSyntaxOk(OPENCLAW_WAIT_APT_LOCK_SNIPPET);
+    expectBashSyntaxOk(OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET);
+    expectBashSyntaxOk(OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET);
     expectBashSyntaxOk(OPENCLAW_NPM_FAST_INSTALL_SNIPPET);
     expectBashSyntaxOk(OPENCLAW_CONDITIONAL_PREINSTALL_DEEP_CLEAN_SNIPPET);
     expectBashSyntaxOk(OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET);
@@ -85,6 +91,18 @@ describe('openclaw-board-install shell generation', () => {
   it('npm fast install includes cache repair path after failed attempts', () => {
     expect(OPENCLAW_NPM_FAST_INSTALL_SNIPPET).toContain('npm cache clean --force');
     expect(OPENCLAW_NPM_FAST_INSTALL_SNIPPET).toContain('oc_npm_repair_after_fail');
-    expect(OPENCLAW_NPM_FAST_INSTALL_SNIPPET).toContain('--unsafe-perm');
+    expect(OPENCLAW_NPM_FAST_INSTALL_SNIPPET).toContain('npm install -g openclaw@');
+  });
+
+  it('prefers Studio-uploaded local tarball before network install', () => {
+    expect(OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET).toContain('OPENCLAW_LOCAL_TARBALL');
+    expect(OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET).toContain('npm install -g "${OPENCLAW_LOCAL_TARBALL}"');
+    expect(OPENCLAW_INSTALL_OPENCLAW_STEP).toContain('本地 tarball 快装未命中或失败');
+  });
+
+  it('prefers Studio-uploaded local Node runtime before NodeSource or network fallback', () => {
+    expect(OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET).toContain('OPENCLAW_LOCAL_NODE_DIST');
+    expect(OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET).toContain('Studio Node 快装成功');
+    expect(OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET).toContain('OPENCLAW_LOCAL_NODE_DIST');
   });
 });

@@ -82,6 +82,7 @@
       "dist/**",
       "dist-server/**",
       "electron/**",
+      "openclaw-*.tgz",
       "public/**",
       "config/**",
       "data/**",
@@ -102,6 +103,7 @@
       }
     ],
     "win": {
+      "icon": "build-resources/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         {
@@ -142,6 +144,7 @@
       "entitlementsInherit": "build-resources/entitlements.mac.plist"
     },
     "linux": {
+      "icon": "build-resources/icon.png",
       "target": [
         {
           "target": "AppImage",
@@ -163,6 +166,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "installerIcon": "build-resources/icon.ico",
+      "uninstallerIcon": "build-resources/icon.ico",
+      "installerHeaderIcon": "build-resources/icon.ico",
       "shortcutName": "RDK Studio"
     },
     "directories": {

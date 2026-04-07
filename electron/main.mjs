@@ -23,6 +23,7 @@ if (!app.isPackaged) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_PORT = 8787;
+const SERVER_PORT_FALLBACK_SPAN = 10;
 const SERVER_BOOT_TIMEOUT_MS = 15_000;
 const SERVER_SHUTDOWN_GRACE_MS = 2_500;
 
@@ -92,14 +93,38 @@ let floatingBallLastCursor = null;
 /** 用户选择「隐藏直到下次启动」后，本会话内不再创建悬浮球，直至设置重新启用或进程重启 */
 let floatingBallSkipForSession = false;
 
+function appendEarlyStartupLog(message) {
+  try {
+    const stamp = new Date().toISOString();
+    const file = path.join(os.tmpdir(), 'rdk-studio-early-startup.log');
+    fs.appendFileSync(file, `[${stamp}] ${message}\n`, 'utf8');
+  } catch {
+    /* ignore */
+  }
+}
+
+function appendStartupLog(message) {
+  if (!isPacked && String(process.env.RDK_STUDIO_SMOKE_MODE || '').trim() !== '1') return;
+  try {
+    const stamp = new Date().toISOString();
+    const file = path.join(app.getPath('userData'), 'desktop-startup.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `[${stamp}] ${message}\n`, 'utf8');
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * 再次双击图标/快捷方式时不启动第二进程，而是聚焦已有主窗口（与悬浮球并存；仅首实例继续执行后续逻辑）。
  * macOS 亦注册，避免从部分启动器重复拉起。
  */
 if (!app.requestSingleInstanceLock()) {
+  appendEarlyStartupLog('single-instance-lock denied');
   app.quit();
   process.exit(0);
 }
+appendEarlyStartupLog('single-instance-lock acquired');
 app.on('second-instance', () => {
   if (mainWin && !mainWin.isDestroyed()) {
     if (mainWin.isMinimized()) mainWin.restore();
@@ -158,6 +183,7 @@ function ensureFloatingBallPrefsDefault() {
 
 registerSsoLoginIpc({ getMainWindow: () => mainWin });
 let serverProcess = null;
+let currentServerPort = SERVER_PORT;
 // url -> WebContentsView 映射
 const viewsMap = {};
 /** IDE/VNC 从主窗口拆出到独立 BrowserWindow（可拖到副屏与 AI Dock 并排） */
@@ -941,37 +967,41 @@ function stopEmbeddedServer() {
   });
 }
 
-function startEmbeddedServer() {
-  if (!isPacked) return Promise.resolve(SERVER_PORT);
+function getServerBaseUrl(port = currentServerPort) {
+  return `http://127.0.0.1:${port}`;
+}
 
-  return new Promise((resolve, reject) => {
-    (async () => {
-      if (await probeReusablePackagedDesktopApi(SERVER_PORT)) {
-        console.log('[server] 端口', SERVER_PORT, '上已有可复用的内置 API，跳过再拉起子进程');
-        resolve(SERVER_PORT);
-        return;
-      }
+function isPortInUseStartupError(message) {
+  return /EADDRINUSE|已被占用/i.test(String(message || ''));
+}
 
-    // asar: false 时 app.getAppPath() 指向 resources/app/ (真实目录)
-    // tsconfig.server.json 的 rootDir 是项目根，所以 server/index.ts 编译到 dist-server/server/index.js
-    const serverPath = path.join(getAppRoot(), 'dist-server', 'server', 'index.js');
-    const envDataDir = String(process.env.RDK_DATA_DIR || '').trim();
-    const dataPath = envDataDir || path.join(app.getPath('userData'), 'data');
-    fs.mkdirSync(dataPath, { recursive: true });
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-    const appRoot = getAppRoot();
-    const bootstrapDefaults = path.join(appRoot, 'config', 'rdkclaw-provider.defaults.json');
+async function launchEmbeddedServerOnPort(port) {
+  // asar: false 时 app.getAppPath() 指向 resources/app/ (真实目录)
+  // tsconfig.server.json 的 rootDir 是项目根，所以 server/index.ts 编译到 dist-server/server/index.js
+  const serverPath = path.join(getAppRoot(), 'dist-server', 'server', 'index.js');
+  const envDataDir = String(process.env.RDK_DATA_DIR || '').trim();
+  const dataPath = envDataDir || path.join(app.getPath('userData'), 'data');
+  fs.mkdirSync(dataPath, { recursive: true });
 
-    console.log('[server] starting embedded server:', serverPath);
-    console.log('[server] data path:', dataPath);
+  const appRoot = getAppRoot();
+  const bootstrapDefaults = path.join(appRoot, 'config', 'rdkclaw-provider.defaults.json');
 
+  console.log('[server] starting embedded server:', serverPath, 'port=', port);
+  console.log('[server] data path:', dataPath);
+  appendStartupLog(`startEmbeddedServer try port=${port}`);
+
+  return await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [serverPath], {
       cwd: appRoot,
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         RDK_PACKAGED_DESKTOP: '1',
-        PORT: String(SERVER_PORT),
+        PORT: String(port),
         NODE_ENV: 'production',
         RDK_DATA_DIR: dataPath,
         ...(fs.existsSync(bootstrapDefaults) ? { RDK_PROVIDER_BOOTSTRAP_FILE: bootstrapDefaults } : {}),
@@ -995,6 +1025,7 @@ function startEmbeddedServer() {
       if (settled) return;
       settled = true;
       clearTimeout(bootTimer);
+      clearInterval(healthTimer);
       fn(value);
     };
 
@@ -1003,17 +1034,24 @@ function startEmbeddedServer() {
       settle(
         reject,
         new Error(
-          `内置服务启动超时（>${SERVER_BOOT_TIMEOUT_MS}ms）${hint ? `\n\n最近日志:\n${hint.slice(-2000)}` : ''}`,
+          `内置服务启动超时（>${SERVER_BOOT_TIMEOUT_MS}ms，端口 ${port}）${hint ? `\n\n最近日志:\n${hint.slice(-2000)}` : ''}`,
         ),
       );
     }, SERVER_BOOT_TIMEOUT_MS);
 
+    const healthTimer = setInterval(() => {
+      void probeReusablePackagedDesktopApi(port).then((ready) => {
+        if (ready) {
+          currentServerPort = port;
+          appendStartupLog(`startEmbeddedServer ready port=${port}`);
+          settle(resolve, port);
+        }
+      });
+    }, 350);
+
     child.stdout?.on('data', (data) => {
       const msg = data.toString();
       console.log('[server]', msg.trim());
-      if (msg.includes('running on')) {
-        settle(resolve, SERVER_PORT);
-      }
     });
 
     child.stderr?.on('data', (data) => {
@@ -1024,22 +1062,60 @@ function startEmbeddedServer() {
 
     child.on('error', (err) => {
       console.error('[server] failed to start:', err);
+      appendStartupLog(`startEmbeddedServer child error port=${port} message=${err instanceof Error ? err.message : String(err)}`);
       settle(reject, err);
     });
 
     child.on('exit', (code, signal) => {
-      console.error('[server] exited:', { code, signal });
+      if (serverProcess === child) {
+        serverProcess = null;
+      }
+      console.error('[server] exited:', { code, signal, port });
       if (!settled) {
         const tail = stderrTail.join('').trim();
-        settle(
-          reject,
-          new Error(
-            `内置服务启动失败，进程已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`
-            + (tail ? `\n\n最近 stderr:\n${tail.slice(-2500)}` : ''),
-          ),
-        );
+        const message =
+          `内置服务启动失败，进程已退出（code=${code ?? 'null'} signal=${signal ?? 'null'}，port=${port}）`
+          + (tail ? `\n\n最近 stderr:\n${tail.slice(-2500)}` : '');
+        appendStartupLog(`startEmbeddedServer exit port=${port} code=${code ?? 'null'} signal=${signal ?? 'null'} tail=${tail.slice(-600)}`);
+        const error = new Error(message);
+        if (isPortInUseStartupError(message)) {
+          error.code = 'EADDRINUSE';
+        }
+        settle(reject, error);
       }
     });
+  });
+}
+
+function startEmbeddedServer() {
+  if (!isPacked) return Promise.resolve(SERVER_PORT);
+
+  return new Promise((resolve, reject) => {
+    (async () => {
+      for (let offset = 0; offset <= SERVER_PORT_FALLBACK_SPAN; offset += 1) {
+        const port = SERVER_PORT + offset;
+        if (await probeReusablePackagedDesktopApi(port)) {
+          currentServerPort = port;
+          console.log('[server] 端口', port, '上已有可复用的内置 API，跳过再拉起子进程');
+          resolve(port);
+          return;
+        }
+        try {
+          const startedPort = await launchEmbeddedServerOnPort(port);
+          resolve(startedPort);
+          return;
+        } catch (err) {
+          if (err?.code === 'EADDRINUSE' && offset < SERVER_PORT_FALLBACK_SPAN) {
+            console.warn('[server] port', port, 'in use, retrying next port');
+            appendStartupLog(`startEmbeddedServer port in use port=${port}, retry next`);
+            await wait(120);
+            continue;
+          }
+          appendStartupLog(`startEmbeddedServer failed port=${port} message=${err instanceof Error ? err.message : String(err)}`);
+          throw err;
+        }
+      }
+      throw new Error(`内置服务未能在 ${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN} 之间找到可用端口`);
     })().catch(reject);
   });
 }
@@ -1089,6 +1165,7 @@ function calcViewBounds(win) {
 }
 
 async function createMainWindow() {
+  appendStartupLog(`createMainWindow apiBase=${getServerBaseUrl()}`);
   mainWin = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -1103,6 +1180,7 @@ async function createMainWindow() {
       nodeIntegration: false,
       sandbox: false,
       webviewTag: true,
+      additionalArguments: [`--rdk-api-base=${getServerBaseUrl()}`],
     },
   });
 
@@ -2040,18 +2118,19 @@ app.whenReady().then(async () => {
   // 生产模式：先启动内嵌服务器
   if (isPacked) {
     try {
-      await startEmbeddedServer();
-      const ready = await waitForServer(SERVER_PORT);
+      const port = await startEmbeddedServer();
+      const ready = await waitForServer(port, 3);
       if (!ready) {
-        throw new Error(`内置服务健康检查失败（端口 ${SERVER_PORT}）`);
+        throw new Error(`内置服务健康检查失败（端口 ${port}）`);
       }
     } catch (err) {
       console.error('[main] server startup failed:', err);
+      appendStartupLog(`app.whenReady startup failed message=${err instanceof Error ? err.message : String(err)}`);
       const listenHint = await formatPortListenHint(SERVER_PORT);
       const hintBlock = listenHint ? `\n\n当前端口占用情况（仅供参考）：\n${listenHint}` : '';
       dialog.showErrorBox(
         'RDK Studio 启动失败',
-        `内置服务未能正常启动。常见原因：已打开另一份 RDK Studio、或本机正在跑「npm run dev」占用了 ${SERVER_PORT}。\n请先退出多余实例或关闭开发服务，也可设置环境变量 PORT 换端口（需与前端约定一致）。${hintBlock}\n\n${err instanceof Error ? err.message : String(err)}`,
+        `内置服务未能正常启动。应用已优先尝试默认端口 ${SERVER_PORT}，并在需要时自动回退到后续端口。\n若仍失败，常见原因是本机已有异常残留进程、端口被其它程序持续占用，或子进程启动即退出。${hintBlock}\n\n${err instanceof Error ? err.message : String(err)}`,
       );
       await stopEmbeddedServer();
       app.quit();

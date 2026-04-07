@@ -9,6 +9,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { startOcBridgeRemote, type OcBridgeTransport } from './oc-bridge-transport.js';
 import {
+  OPENCLAW_BOARD_NODE_MIN_MAJOR,
+  OPENCLAW_BOARD_NPM_SPEC,
   OPENCLAW_BOARD_INSTALL_ENV_PRELUDE,
   OPENCLAW_CLI_GATEWAY_STOP_CMD,
   OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD,
@@ -52,6 +54,80 @@ export const OC_BRIDGE_IDLE_TEARDOWN_MS = (() => {
   if (Number.isFinite(n) && n >= 5000) return Math.floor(n);
   return 60_000;
 })();
+
+const OPENCLAW_TARBALL_FAST_PATH_ENABLED = !['0', 'false'].includes(
+  String(process.env.RDK_OPENCLAW_LOCAL_TARBALL_FAST_PATH ?? '1').trim().toLowerCase(),
+);
+const OPENCLAW_STUDIO_TARBALL_CACHE_DIR = path.join(process.cwd(), 'downloads', 'openclaw-cache');
+const OPENCLAW_STUDIO_NODE_DIST_CACHE_DIR = path.join(OPENCLAW_STUDIO_TARBALL_CACHE_DIR, 'node-dist');
+
+function shellSingleQuote(raw: string): string {
+  return `'${String(raw).replace(/'/g, `'"'"'`)}'`;
+}
+
+function boardOpenclawRemoteCacheDir(userName: string): string {
+  const u = String(userName || 'root').trim() || 'root';
+  if (u === 'root') return '/root/.cache/rdk-studio/openclaw';
+  return `/home/${u}/.cache/rdk-studio/openclaw`;
+}
+
+function mapRemoteArchToNodeDistArch(raw: string): string | null {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'x86_64' || value === 'amd64') return 'linux-x64';
+  if (value === 'aarch64' || value === 'arm64') return 'linux-arm64';
+  if (value === 'armv7l' || value.startsWith('armv7')) return 'linux-armv7l';
+  return null;
+}
+
+function isUsableFile(filePath: string): boolean {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+function sftpMkdirQuiet(sftp: any, dirPath: string): Promise<void> {
+  return new Promise((resolve) => {
+    sftp.mkdir(dirPath, (err: Error | undefined | null) => {
+      if (!err) {
+        resolve();
+        return;
+      }
+      sftp.stat(dirPath, (e2: Error | undefined | null, st: { isDirectory?: () => boolean } | undefined) => {
+        if (!e2 && st?.isDirectory?.()) resolve();
+        else resolve();
+      });
+    });
+  });
+}
+
+async function sftpMkdirp(sftp: any, absolutePosixPath: string): Promise<void> {
+  const norm = path.posix.normalize(absolutePosixPath.replace(/\\/g, '/'));
+  const parts = norm.split('/').filter(Boolean);
+  if (parts.length === 0) return;
+  const isAbs = norm.startsWith('/');
+  for (let i = 0; i < parts.length; i += 1) {
+    const cur = isAbs ? `/${parts.slice(0, i + 1).join('/')}` : parts.slice(0, i + 1).join('/');
+    await sftpMkdirQuiet(sftp, cur);
+  }
+}
+
+function sftpStat(sftp: any, remotePath: string): Promise<{ size?: number } | null> {
+  return new Promise((resolve) => {
+    sftp.stat(remotePath, (err: Error | undefined | null, st: { size?: number } | undefined) => {
+      if (err || !st) resolve(null);
+      else resolve(st);
+    });
+  });
+}
+
+function sftpFastPut(sftp: any, localPath: string, remotePath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    sftp.fastPut(localPath, remotePath, (err: Error | undefined | null) => (err ? reject(err) : resolve()));
+  });
+}
 
 export interface Device {
   ip: string;
@@ -1111,6 +1187,346 @@ export class OpenClawDeploymentManager {
     return this.getClient(device);
   }
 
+  private async ensureStudioOpenClawTarball(onOutput: (chunk: string) => void): Promise<{ localPath: string; fileName: string } | null> {
+    if (!OPENCLAW_TARBALL_FAST_PATH_ENABLED) return null;
+    const fileName = `openclaw-${OPENCLAW_BOARD_NPM_SPEC}.tgz`;
+    const repoLocalPath = path.join(process.cwd(), fileName);
+    const bundledCandidates = [
+      path.join(process.cwd(), fileName),
+      path.join(process.cwd(), 'openclaw', fileName),
+      path.join(this.resourcesPath, 'openclaw', fileName),
+    ];
+    for (const candidate of bundledCandidates) {
+      if (isUsableFile(candidate)) {
+        onOutput(`[Studio] 使用本地 OpenClaw 安装包直传：${path.basename(candidate)}\n`);
+        return { localPath: candidate, fileName };
+      }
+    }
+    const localPath = path.join(OPENCLAW_STUDIO_TARBALL_CACHE_DIR, fileName);
+    if (isUsableFile(localPath)) {
+      onOutput(`[Studio] OpenClaw 安装包缓存命中：${fileName}\n`);
+      return { localPath, fileName };
+    }
+    fs.mkdirSync(OPENCLAW_STUDIO_TARBALL_CACHE_DIR, { recursive: true });
+    const tempPath = `${localPath}.tmp-${process.pid}-${Date.now()}`;
+    const sources = [
+      `https://registry.npmmirror.com/openclaw/-/${fileName}`,
+      `https://registry.npmjs.org/openclaw/-/${fileName}`,
+    ];
+    for (const source of sources) {
+      try {
+        onOutput(`[Studio] 预取 OpenClaw 安装包：${source}\n`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120_000);
+        const response = await fetch(source, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (!response.ok) {
+          onOutput(`[Studio] 安装包预取失败：HTTP ${response.status} ${response.statusText}\n`);
+          continue;
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        fs.writeFileSync(tempPath, buffer);
+        fs.renameSync(tempPath, localPath);
+        onOutput(`[Studio] 已缓存 OpenClaw 安装包：${fileName}（${Math.round(buffer.length / 1024)} KB）\n`);
+        return { localPath, fileName };
+      } catch (error) {
+        onOutput(`[Studio] 安装包预取失败：${error instanceof Error ? error.message : String(error)}\n`);
+      } finally {
+        try {
+          if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    onOutput('[Studio] OpenClaw 安装包预取未成功，继续使用板端联网安装。\n');
+    return null;
+  }
+
+  private async resolveRemoteMachineArch(device: Device, onOutput: (chunk: string) => void): Promise<string | null> {
+    try {
+      const client = await this.getClient(device);
+      return await new Promise<string | null>((resolve, reject) => {
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        const finish = (value: string | null, error?: Error) => {
+          if (settled) return;
+          settled = true;
+          if (error) reject(error);
+          else resolve(value);
+        };
+        const timer = setTimeout(() => finish(null, new Error('获取板端架构超时')), 10_000);
+        client.exec('uname -m 2>/dev/null || echo unknown', { pty: false }, (err, stream) => {
+          if (err) {
+            clearTimeout(timer);
+            finish(null, err);
+            return;
+          }
+          stream.on('data', (data: Buffer) => {
+            stdout += data.toString();
+          });
+          stream.stderr?.on('data', (data: Buffer) => {
+            stderr += data.toString();
+          });
+          stream.on('close', () => {
+            clearTimeout(timer);
+            const value = stdout.trim().split(/\s+/)[0] || stderr.trim().split(/\s+/)[0] || '';
+            finish(value || null);
+          });
+        });
+      });
+    } catch (error) {
+      onOutput(`[Studio] 获取板端 CPU 架构失败：${error instanceof Error ? error.message : String(error)}\n`);
+      return null;
+    }
+  }
+
+  private async ensureStudioNodeDistForArch(
+    nodeArch: string,
+    onOutput: (chunk: string) => void,
+  ): Promise<{ localPath: string; fileName: string } | null> {
+    if (!OPENCLAW_TARBALL_FAST_PATH_ENABLED) return null;
+    fs.mkdirSync(OPENCLAW_STUDIO_NODE_DIST_CACHE_DIR, { recursive: true });
+    const releaseTag = `latest-v${OPENCLAW_BOARD_NODE_MIN_MAJOR}.x`;
+    const bases = ['https://npmmirror.com/mirrors/node', 'https://nodejs.org/dist'];
+    for (const base of bases) {
+      try {
+        const sumsUrl = `${base}/${releaseTag}/SHASUMS256.txt`;
+        onOutput(`[Studio] 查询 Node 运行时索引：${sumsUrl}\n`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60_000);
+        const response = await fetch(sumsUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (!response.ok) {
+          onOutput(`[Studio] Node 索引获取失败：HTTP ${response.status} ${response.statusText}\n`);
+          continue;
+        }
+        const text = await response.text();
+        const match = text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find((line) => new RegExp(` node-v[0-9.]+-${nodeArch}\\.tar\\.xz$`).test(` ${line}`));
+        if (!match) {
+          onOutput(`[Studio] Node 索引中未找到 ${nodeArch} 包，尝试下一个源。\n`);
+          continue;
+        }
+        const fileName = match.split(/\s+/).pop() || '';
+        if (!fileName) continue;
+        const localPath = path.join(OPENCLAW_STUDIO_NODE_DIST_CACHE_DIR, fileName);
+        if (isUsableFile(localPath)) {
+          onOutput(`[Studio] Node 运行时缓存命中：${fileName}\n`);
+          return { localPath, fileName };
+        }
+        const archiveUrl = `${base}/${releaseTag}/${fileName}`;
+        onOutput(`[Studio] 预取 Node 运行时：${archiveUrl}\n`);
+        const archiveController = new AbortController();
+        const archiveTimeout = setTimeout(() => archiveController.abort(), 180_000);
+        const archiveResponse = await fetch(archiveUrl, { signal: archiveController.signal });
+        clearTimeout(archiveTimeout);
+        if (!archiveResponse.ok) {
+          onOutput(`[Studio] Node 运行时下载失败：HTTP ${archiveResponse.status} ${archiveResponse.statusText}\n`);
+          continue;
+        }
+        const tempPath = `${localPath}.tmp-${process.pid}-${Date.now()}`;
+        try {
+          const buffer = Buffer.from(await archiveResponse.arrayBuffer());
+          fs.writeFileSync(tempPath, buffer);
+          fs.renameSync(tempPath, localPath);
+          onOutput(`[Studio] 已缓存 Node 运行时：${fileName}（${Math.round(buffer.length / 1024 / 1024)} MB）\n`);
+          return { localPath, fileName };
+        } finally {
+          try {
+            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (error) {
+        onOutput(`[Studio] Node 运行时预取失败：${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    }
+    onOutput('[Studio] Node 运行时预取未成功，继续使用板端 NodeSource/在线兜底。\n');
+    return null;
+  }
+
+  private async uploadStudioOpenClawTarball(device: Device, onOutput: (chunk: string) => void): Promise<string | null> {
+    const tarball = await this.ensureStudioOpenClawTarball(onOutput);
+    if (!tarball) return null;
+    const remoteDir = boardOpenclawRemoteCacheDir(device.userName);
+    const remotePath = path.posix.join(remoteDir, tarball.fileName);
+    const localSize = fs.statSync(tarball.localPath).size;
+    const client = await this.getClient(device);
+    await new Promise<void>((resolve, reject) => {
+      client.sftp((err, sftp) => {
+        if (err || !sftp) {
+          reject(err ?? new Error('SFTP 不可用'));
+          return;
+        }
+        void (async () => {
+          try {
+            await sftpMkdirp(sftp, remoteDir);
+            const remoteStat = await sftpStat(sftp, remotePath);
+            if (remoteStat?.size === localSize) {
+              onOutput(`[Studio] 板端安装包已存在，跳过上传：${remotePath}\n`);
+            } else {
+              onOutput(`[Studio] 正在上传 OpenClaw 安装包到板端：${remotePath}\n`);
+              await sftpFastPut(sftp, tarball.localPath, remotePath);
+              onOutput(`[Studio] OpenClaw 安装包上传完成：${tarball.fileName}\n`);
+            }
+            try {
+              sftp.end();
+            } catch {
+              /* ignore */
+            }
+            resolve();
+          } catch (error) {
+            try {
+              sftp.end();
+            } catch {
+              /* ignore */
+            }
+            reject(error);
+          }
+        })();
+      });
+    });
+    return remotePath;
+  }
+
+  private async uploadStudioNodeDist(device: Device, onOutput: (chunk: string) => void): Promise<string | null> {
+    if (!OPENCLAW_TARBALL_FAST_PATH_ENABLED) return null;
+    const remoteArchRaw = await this.resolveRemoteMachineArch(device, onOutput);
+    if (!remoteArchRaw) return null;
+    const nodeArch = mapRemoteArchToNodeDistArch(remoteArchRaw);
+    if (!nodeArch) {
+      onOutput(`[Studio] 当前板端架构 ${remoteArchRaw} 暂无预置 Node 包快路径，继续使用在线引导。\n`);
+      return null;
+    }
+    const nodeDist = await this.ensureStudioNodeDistForArch(nodeArch, onOutput);
+    if (!nodeDist) return null;
+    const remoteDir = boardOpenclawRemoteCacheDir(device.userName);
+    const remotePath = path.posix.join(remoteDir, nodeDist.fileName);
+    const localSize = fs.statSync(nodeDist.localPath).size;
+    const client = await this.getClient(device);
+    await new Promise<void>((resolve, reject) => {
+      client.sftp((err, sftp) => {
+        if (err || !sftp) {
+          reject(err ?? new Error('SFTP 不可用'));
+          return;
+        }
+        void (async () => {
+          try {
+            await sftpMkdirp(sftp, remoteDir);
+            const remoteStat = await sftpStat(sftp, remotePath);
+            if (remoteStat?.size === localSize) {
+              onOutput(`[Studio] 板端 Node 运行时已存在，跳过上传：${remotePath}\n`);
+            } else {
+              onOutput(`[Studio] 正在上传 Node 运行时到板端：${remotePath}\n`);
+              await sftpFastPut(sftp, nodeDist.localPath, remotePath);
+              onOutput(`[Studio] Node 运行时上传完成：${nodeDist.fileName}\n`);
+            }
+            try {
+              sftp.end();
+            } catch {
+              /* ignore */
+            }
+            resolve();
+          } catch (error) {
+            try {
+              sftp.end();
+            } catch {
+              /* ignore */
+            }
+            reject(error);
+          }
+        })();
+      });
+    });
+    return remotePath;
+  }
+
+  private async buildInstallCommandWithStudioTarball(
+    device: Device,
+    onOutput: (chunk: string) => void,
+    command: string,
+  ): Promise<string> {
+    if (!OPENCLAW_TARBALL_FAST_PATH_ENABLED) return command;
+    const exports: string[] = [];
+    try {
+      const remoteNodeDistPath = await this.uploadStudioNodeDist(device, onOutput);
+      if (remoteNodeDistPath) {
+        exports.push(`export OPENCLAW_LOCAL_NODE_DIST=${shellSingleQuote(remoteNodeDistPath)}`);
+      }
+    } catch (error) {
+      onOutput(`[Studio] Node 快装包上传失败，回退板端在线引导：${error instanceof Error ? error.message : String(error)}\n`);
+    }
+    try {
+      const remoteTarballPath = await this.uploadStudioOpenClawTarball(device, onOutput);
+      if (remoteTarballPath) {
+        exports.push(`export OPENCLAW_LOCAL_TARBALL=${shellSingleQuote(remoteTarballPath)}`);
+      }
+    } catch (error) {
+      onOutput(`[Studio] OpenClaw 快装包上传失败，回退常规安装：${error instanceof Error ? error.message : String(error)}\n`);
+    }
+    if (exports.length === 0) return command;
+    return `${exports.join(' && ')} && ${command}`;
+  }
+
+  private runInstallCommandWithStudioTarball(
+    device: Device,
+    onOutput: (chunk: string) => void,
+    onComplete: (success: boolean) => void,
+    command: string,
+    execOpts: { pty?: boolean | any; timeout?: number },
+    afterSuccess?: () => Promise<void>,
+  ): { abort: () => void } {
+    let finished = false;
+    let aborted = false;
+    let activeHandle: { abort: () => void } | null = null;
+    const finish = (success: boolean) => {
+      if (finished) return;
+      finished = true;
+      onComplete(success);
+    };
+
+    void this.buildInstallCommandWithStudioTarball(device, onOutput, command)
+      .then((resolvedCommand) => {
+        if (aborted) {
+          finish(false);
+          return;
+        }
+        activeHandle = this.execCommand(device, resolvedCommand, onOutput, (success) => {
+          if (!success || !afterSuccess) {
+            finish(success);
+            return;
+          }
+          void afterSuccess()
+            .then(() => finish(true))
+            .catch((error) => {
+              onOutput(`[Studio] 安装后同步步骤失败：${error instanceof Error ? error.message : String(error)}\n`);
+              finish(true);
+            });
+        }, execOpts);
+      })
+      .catch((error) => {
+        onOutput(`[Studio] OpenClaw 快装准备失败，继续常规安装：${error instanceof Error ? error.message : String(error)}\n`);
+        if (aborted) {
+          finish(false);
+          return;
+        }
+        activeHandle = this.execCommand(device, command, onOutput, (success) => finish(success), execOpts);
+      });
+
+    return {
+      abort: () => {
+        aborted = true;
+        if (activeHandle) activeHandle.abort();
+        else finish(false);
+      },
+    };
+  }
+
   private async getClient(device: Device): Promise<Client> {
     const key = sshEndpointKey(device);
     const sshPort =
@@ -1351,16 +1767,10 @@ export class OpenClawDeploymentManager {
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean) => void,
   ): { abort: () => void } {
-    return this.execCommand(device, OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD, onOutput, (success) => {
-      if (!success) {
-        onComplete(false);
-        return;
-      }
-      void this.runBuiltinSkillsSyncAfterInstall(device, onOutput).finally(() => onComplete(true));
-    }, {
+    return this.runInstallCommandWithStudioTarball(device, onOutput, onComplete, OPENCLAW_DEPLOY_PREPARE_AND_INSTALL_CMD, {
       pty: true,
       timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
-    });
+    }, () => this.runBuiltinSkillsSyncAfterInstall(device, onOutput));
   }
 
   runNetworkCheck(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
@@ -1387,13 +1797,10 @@ export class OpenClawDeploymentManager {
   }
 
   runInstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): { abort: () => void } {
-    return this.execCommand(device, NPM_INSTALL_CMD, onOutput, (success) => {
-      if (!success) {
-        onComplete(false);
-        return;
-      }
-      void this.runBuiltinSkillsSyncAfterInstall(device, onOutput).finally(() => onComplete(true));
-    }, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
+    return this.runInstallCommandWithStudioTarball(device, onOutput, onComplete, NPM_INSTALL_CMD, {
+      pty: true,
+      timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
+    }, () => this.runBuiltinSkillsSyncAfterInstall(device, onOutput));
   }
 
   /**
@@ -1996,7 +2403,10 @@ print(json.dumps(result,ensure_ascii=False))`;
       RESTART_GATEWAY_FALLBACK,
       ENSURE_GATEWAY_CLI_TRUST_AFTER_RESTART,
     ].join(' && ');
-    this.execCommand(device, cmd, onOutput, onComplete, { pty: true, timeout: OPENCLAW_INSTALL_TIMEOUT_MS });
+    this.runInstallCommandWithStudioTarball(device, onOutput, onComplete, cmd, {
+      pty: true,
+      timeout: OPENCLAW_INSTALL_TIMEOUT_MS,
+    });
   }
 
   runLogs(

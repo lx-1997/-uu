@@ -361,6 +361,25 @@ function streamCoversFinalTerminalBlock(streamedLines: string[], rawResult: stri
   return true;
 }
 
+function isExecutionShellTool(toolName: string): boolean {
+  return toolName === 'device_exec' || toolName === 'exec';
+}
+
+function resolveExecutionTerminalLabel(
+  toolName: string,
+  args: Record<string, unknown>,
+  argDetail: string,
+  cardTitle: string,
+): string {
+  const rawCommand = String(args.command ?? args.cmd ?? '').trim();
+  if (rawCommand) {
+    return rawCommand.length > 140 ? `${rawCommand.slice(0, 137)}...` : rawCommand;
+  }
+  const hint = toolShellCmdHintForLabel(argDetail);
+  if (hint) return hint;
+  return cardTitle || toolName;
+}
+
 function sanitizeReasoningDisplayText(input: string): string {
   return sanitizeCipherLikeText(stripRdkShellProtocolNoise(input));
 }
@@ -2094,31 +2113,50 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                 const phase = resolvePhase(event.data.phase);
                 const argStr = summarizeToolArgs(args);
                 const cardTitle = formatToolStatusTitle(toolName, args);
+                const executionTool = isExecutionShellTool(toolName);
+                const executionLabel = resolveExecutionTerminalLabel(toolName, args, argStr, cardTitle);
                 /** 整文件写入等场景参数极长，用可折叠卡片默认收起，避免占满对话区 */
                 const contentArg = args?.content;
                 const hasLargeContentArg =
                   typeof contentArg === 'string' && contentArg.length > 200;
                 const toolArgsHeavy =
                   argStr.length > 420 || argStr.split(/\n/).length > 6 || hasLargeContentArg;
-                const statusIndex = aiBlocks.length;
-                pushAiBlock({
-                  type: 'status',
-                  title: cardTitle,
-                  ...(toolArgsHeavy
-                    ? {
-                        collapsible: true,
-                        defaultCollapsed: true,
-                        summary: cardTitle,
-                      }
-                    : {}),
-                  items: [
-                    {
-                      label: executorLabel(executor),
-                      value: `${phase} · ${argStr}`,
-                      ok: true,
-                    },
-                  ],
-                });
+                const statusIndex = executionTool ? -1 : aiBlocks.length;
+                const executionRawIndex = executionTool ? aiBlocks.length : undefined;
+                if (executionTool) {
+                  pushAiBlock({
+                    type: 'terminal',
+                    label: executionLabel,
+                    toolName,
+                    executor: executorLabel(executor),
+                    status: 'running',
+                    startedAt: Date.now(),
+                    canMoveBackground: toolName === 'device_exec',
+                    canStop: true,
+                    lines: [],
+                    collapsible: true,
+                    previewLines: 10,
+                  });
+                } else {
+                  pushAiBlock({
+                    type: 'status',
+                    title: cardTitle,
+                    ...(toolArgsHeavy
+                      ? {
+                          collapsible: true,
+                          defaultCollapsed: true,
+                          summary: cardTitle,
+                        }
+                      : {}),
+                    items: [
+                      {
+                        label: executorLabel(executor),
+                        value: `${phase} · ${argStr}`,
+                        ok: true,
+                      },
+                    ],
+                  });
+                }
                 const toolCallId = resolveToolId(event.data) || `${toolName}-${Date.now()}`;
                 latestAnyToolCallIdRef.current = toolCallId;
                 toolTimelineRef.current[toolCallId] = {
@@ -2126,6 +2164,7 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                   executor,
                   startedAt: Date.now(),
                   statusIndex,
+                  ...(executionRawIndex != null ? { rawIndex: executionRawIndex } : {}),
                   argDetail: argStr,
                   cardTitle,
                   ...(isBoardOpenClawCollabTool(toolName) ? { openclawStreamBuf: '' } : {}),
@@ -2322,12 +2361,20 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                     if (rawBlock?.type === 'terminal') {
                       const merged = mergeStickyTerminalLines(rawBlock.lines, progressLines);
                       rawBlock.lines = collapseTerminalLinesIfDuplicateHalf(merged).slice(-240);
+                      rawBlock.status = 'running';
+                      rawBlock.canStop = true;
                     }
                   } else {
                     state.rawIndex = aiBlocks.length;
                     const cmdHint = toolShellCmdHintForLabel(state.argDetail);
                     pushAiBlock({
                       type: 'terminal',
+                      toolName: state.toolName,
+                      executor: executorLabel(state.executor),
+                      status: 'running',
+                      startedAt: state.startedAt,
+                      canMoveBackground: state.toolName === 'device_exec',
+                      canStop: true,
                       label: cmdHint
                         ? tf('chat.tool.shellStreamingLabel', '{{tool}} · {{cmd}} · 运行中', {
                             tool: state.toolName,
@@ -2678,6 +2725,45 @@ export function AIChatProvider({ children }: { children: React.ReactNode }) {
                       } else {
                         appendMarkdownParagraph(rSafe);
                       }
+                    }
+                  } else if (state && isExecutionShellTool(state.toolName)) {
+                    const finalLines = collapseTerminalLinesIfDuplicateHalf(
+                      normalizeToolTerminalLinesFromRaw(result).slice(0, 60),
+                    );
+                    const cmdHint = toolShellCmdHintForLabel(state.argDetail);
+                    const executionLabel = cmdHint || state.cardTitle || state.toolName;
+                    const rawBlock = typeof state.rawIndex === 'number' ? aiBlocks[state.rawIndex] : undefined;
+                    if (rawBlock?.type === 'terminal') {
+                      rawBlock.label = executionLabel;
+                      rawBlock.toolName = state.toolName;
+                      rawBlock.executor = executorLabel(state.executor);
+                      rawBlock.status = isError ? 'error' : 'success';
+                      rawBlock.startedAt = state.startedAt;
+                      rawBlock.endedAt = Date.now();
+                      rawBlock.canMoveBackground = false;
+                      rawBlock.canStop = false;
+                      if (finalLines.length > 0) {
+                        rawBlock.lines = streamCoversFinalTerminalBlock(rawBlock.lines, result)
+                          ? finalLines
+                          : collapseTerminalLinesIfDuplicateHalf(
+                              mergeTerminalProgressLines(rawBlock.lines, finalLines),
+                            ).slice(-240);
+                      }
+                    } else {
+                      pushAiBlock({
+                        type: 'terminal',
+                        label: executionLabel,
+                        toolName: state.toolName,
+                        executor: executorLabel(state.executor),
+                        status: isError ? 'error' : 'success',
+                        startedAt: state.startedAt,
+                        endedAt: Date.now(),
+                        canMoveBackground: false,
+                        canStop: false,
+                        lines: finalLines,
+                        collapsible: true,
+                        previewLines: 10,
+                      });
                     }
                   } else if (displayResult.includes('\n') || displayResult.length > 100) {
                     const finalLines = collapseTerminalLinesIfDuplicateHalf(

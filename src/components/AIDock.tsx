@@ -465,6 +465,49 @@ function composeCollapsedSummary(base: string, preview: string, open: boolean): 
   return `${b} | ${preview}`;
 }
 
+function formatTerminalElapsed(ms?: number): string {
+  if (!Number.isFinite(ms) || !ms || ms <= 0) return '';
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function getTerminalExecutionHint(
+  block: Extract<ChatBlock, { type: 'terminal' }>,
+  elapsedMs: number | undefined,
+  t: (key: string, zh: string) => string,
+): string {
+  if (block.status === 'success') {
+    return block.lines.length > 0
+      ? t('dock.exec.hint.successWithOutput', '命令已完成，可展开查看最终输出')
+      : t('dock.exec.hint.successNoOutput', '命令已完成，没有额外终端输出');
+  }
+  if (block.status === 'error') {
+    return block.lines.length > 0
+      ? t('dock.exec.hint.errorWithOutput', '命令执行失败，建议展开查看最后几行输出')
+      : t('dock.exec.hint.errorNoOutput', '命令执行失败，但没有返回额外终端输出');
+  }
+  const elapsed = Number(elapsedMs || 0);
+  if (elapsed < 10_000) {
+    return t('dock.exec.hint.connecting', '正在连接设备并等待首个输出');
+  }
+  if (elapsed < 30_000) {
+    return block.lines.length > 0
+      ? t('dock.exec.hint.runningWithLogs', '命令已经在设备上执行，新的输出会持续追加')
+      : t('dock.exec.hint.waitingFirstPacket', '命令已下发到设备，正在等待返回内容');
+  }
+  if (elapsed < 90_000) {
+    return block.canMoveBackground
+      ? t('dock.exec.hint.offerBackground', '执行时间偏长，可转到后台继续运行')
+      : t('dock.exec.hint.longRunning', '执行时间偏长，可继续等待或展开查看原始输出');
+  }
+  return block.canMoveBackground
+    ? t('dock.exec.hint.veryLongBackground', '仍在运行，建议转后台并继续处理其他问题')
+    : t('dock.exec.hint.veryLong', '仍在运行，建议展开查看原始输出并确认是否卡住');
+}
+
 function ReasoningCollapsible({
   block,
   presentation = 'default',
@@ -689,6 +732,8 @@ function BlockRenderer({
   onConfirm,
   onDismiss,
   onCancelTask,
+  onBackgroundCurrentRun,
+  onStopCurrentRun,
   onApprovalAction,
   onRecommendationChoice,
   onSoulUpdateDecision,
@@ -699,6 +744,8 @@ function BlockRenderer({
   onConfirm?: (id: string) => void;
   onDismiss?: (id: string) => void;
   onCancelTask?: (taskId: string) => void;
+  onBackgroundCurrentRun?: () => void;
+  onStopCurrentRun?: () => void;
   onApprovalAction?: (approvalId: string, action: 'allow_once' | 'allow_session_auto' | 'allow_global_auto' | 'deny' | 'cancel_run', runId?: string) => void;
   onRecommendationChoice?: (recommendationId: string, choiceId: string, autoExecute: boolean) => void;
   onSoulUpdateDecision?: (proposalId: string, accepted: boolean) => void;
@@ -715,6 +762,7 @@ function BlockRenderer({
   const [codeOpen, setCodeOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(false);
   const [resultOpen, setResultOpen] = useState(false);
+  const [terminalNow, setTerminalNow] = useState(() => Date.now());
 
   const needsRosAnimation = block.type === 'image' && !block.src;
   useEffect(() => {
@@ -723,10 +771,33 @@ function BlockRenderer({
     return () => window.clearInterval(timer);
   }, [needsRosAnimation]);
 
+  useEffect(() => {
+    if (block.type !== 'terminal' || block.status !== 'running' || !block.startedAt) return;
+    const timer = window.setInterval(() => setTerminalNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [block]);
+
   if (block.type === 'terminal') {
     const hasLines = block.lines.length > 0;
-    const terminalPreview = hasLines ? summarizeLines(block.lines, 56) : '';
-    const terminalTitle = composeCollapsedSummary(block.label || t('dock.agent.shell', '终端输出'), terminalPreview, terminalOpen);
+    const isExecutionCard = Boolean(block.status || block.toolName || block.executor);
+    const terminalPreview = hasLines ? summarizeLines(block.lines, isExecutionCard ? 92 : 56) : '';
+    const terminalTitleBase = summarizeInline(block.label || block.toolName || t('dock.agent.shell', '终端输出'), 132);
+    const terminalTitle = isExecutionCard
+      ? terminalTitleBase
+      : composeCollapsedSummary(terminalTitleBase, terminalPreview, terminalOpen);
+    const elapsedMs = block.startedAt ? Math.max(0, (block.endedAt ?? terminalNow) - block.startedAt) : undefined;
+    const elapsedText = formatTerminalElapsed(elapsedMs);
+    const phaseText = block.status === 'success'
+      ? t('dock.exec.phase.success', '已完成')
+      : block.status === 'error'
+        ? t('dock.exec.phase.error', '失败')
+        : block.status === 'running'
+          ? t('dock.exec.phase.running', '执行中')
+          : '';
+    const executionHint = isExecutionCard ? getTerminalExecutionHint(block, elapsedMs, t) : '';
+    const executionMeta = [block.executor, phaseText, elapsedText].filter(Boolean).join(' · ');
+    const collapsedTail = !terminalOpen && terminalPreview ? terminalPreview : '';
+    const executionSubline = [executionHint, collapsedTail].filter(Boolean).join(' · ');
     return (
       <div
         className={`msg-block terminal-block dock-agent-card dock-agent-card--terminal${
@@ -746,8 +817,23 @@ function BlockRenderer({
             }
           } : undefined}
         >
-          <span className="dock-agent-card-icon" aria-hidden>▸</span>
-          <span className="dock-agent-card-title">{renderSummaryWithEmphasis(terminalTitle)}</span>
+          {isExecutionCard ? (
+            <div className="dock-tool-card-copy">
+              <div className="dock-tool-card-meta">
+                {phaseText ? <span className={`dock-tool-chip dock-tool-chip--${block.status || 'idle'}`}>{phaseText}</span> : null}
+                {block.executor ? <span className="dock-tool-chip dock-tool-chip--plain">{block.executor}</span> : null}
+                {elapsedText ? <span className="dock-tool-chip dock-tool-chip--time">{elapsedText}</span> : null}
+              </div>
+              <div className="dock-tool-card-title">{renderSummaryWithEmphasis(terminalTitle)}</div>
+              {executionMeta ? <div className="dock-tool-card-submeta">{executionMeta}</div> : null}
+              {executionSubline ? <div className="dock-tool-card-subtitle">{executionSubline}</div> : null}
+            </div>
+          ) : (
+            <>
+              <span className="dock-agent-card-icon" aria-hidden>▸</span>
+              <span className="dock-agent-card-title">{renderSummaryWithEmphasis(terminalTitle)}</span>
+            </>
+          )}
           <div className="dock-agent-card-actions">
             <DockCopyIconButton
               label={t('dock.terminal.copyOut', '复制输出')}
@@ -755,6 +841,34 @@ function BlockRenderer({
                 void copyDockPlainText(block.lines.map((ln) => sanitizeTerminalLineForDisplay(ln)).join('\n'));
               }}
             />
+            {block.status === 'running' && block.canMoveBackground && onBackgroundCurrentRun ? (
+              <button
+                type="button"
+                className="dock-card-aux-btn dock-card-aux-btn--solid"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onBackgroundCurrentRun();
+                }}
+                title={t('dock.exec.moveBackgroundTitle', '将当前任务转到后台继续运行')}
+              >
+                {t('dock.exec.moveBackground', '转后台')}
+              </button>
+            ) : null}
+            {block.status === 'running' && block.canStop && onStopCurrentRun ? (
+              <button
+                type="button"
+                className="dock-card-aux-btn dock-card-aux-btn--danger"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onStopCurrentRun();
+                }}
+                title={t('dock.exec.stopTitle', '结束当前运行中的任务')}
+              >
+                {t('dock.exec.stop', '结束')}
+              </button>
+            ) : null}
             {hasLines ? (
               <button
                 type="button"
@@ -1476,7 +1590,7 @@ export default function AIDock() {
     executeConfirm, dismissConfirm, clearChatHistory,
     agentExecution,
     taskHistory, backgroundRuns, showTaskPanel, setShowTaskPanel, cancelRunningTask,
-    handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns,
+    handleApprovalAction, handleRecommendationChoice, handleSoulUpdateDecision, stopCurrentRun, stopAllRuns, backgroundCurrentRun,
     openclawConnected, setOpenclawConnected,
     openclawSendMessage,
     currentDevice, addToast, language, setLanguage,
@@ -2715,6 +2829,8 @@ export default function AIDock() {
                       onConfirm: executeConfirm,
                       onDismiss: dismissConfirm,
                       onCancelTask: cancelRunningTask,
+                      onBackgroundCurrentRun: backgroundCurrentRun,
+                      onStopCurrentRun: stopCurrentRun,
                       onApprovalAction: handleApprovalAction,
                       onRecommendationChoice: handleRecommendationChoice,
                       onSoulUpdateDecision: handleSoulUpdateDecision,
@@ -2765,6 +2881,9 @@ export default function AIDock() {
                           <span className="typing-dot" />
                         </div>
                       ) : null}
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>
+                        {t('dock.exec.moveBackground', '转后台')}
+                      </button>
                       <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
                         {t('dock.typing.stopCurrent', '结束当前')}
                       </button>
@@ -2787,6 +2906,8 @@ export default function AIDock() {
                       onConfirm={executeConfirm}
                       onDismiss={dismissConfirm}
                       onCancelTask={cancelRunningTask}
+                      onBackgroundCurrentRun={backgroundCurrentRun}
+                      onStopCurrentRun={stopCurrentRun}
                       onApprovalAction={handleApprovalAction}
                       onRecommendationChoice={handleRecommendationChoice}
                       onSoulUpdateDecision={handleSoulUpdateDecision}
@@ -2814,6 +2935,8 @@ export default function AIDock() {
                             onConfirm={executeConfirm}
                             onDismiss={dismissConfirm}
                             onCancelTask={cancelRunningTask}
+                            onBackgroundCurrentRun={backgroundCurrentRun}
+                            onStopCurrentRun={stopCurrentRun}
                             onApprovalAction={handleApprovalAction}
                             onRecommendationChoice={handleRecommendationChoice}
                             onSoulUpdateDecision={handleSoulUpdateDecision}
@@ -2837,6 +2960,9 @@ export default function AIDock() {
                           <span className="typing-dot" />
                         </div>
                       ) : null}
+                      <button type="button" className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>
+                        {t('dock.exec.moveBackground', '转后台')}
+                      </button>
                       <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>
                         {t('dock.typing.stopCurrent', '结束当前')}
                       </button>
@@ -3128,6 +3254,7 @@ export default function AIDock() {
                 <div className="dock-bubble ai">
                   <div className="dock-typing">
                     <div className="typing-dots"><span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" /></div>
+                    <button type="button" className="btn btn-sm btn-ghost" onClick={backgroundCurrentRun}>{t('dock.exec.moveBackground', '转后台')}</button>
                     <button type="button" className="btn btn-sm btn-ghost" onClick={stopCurrentRun}>{t('dock.typing.stopCurrent', '结束当前')}</button>
                     <button type="button" className="btn btn-sm btn-ghost btn-danger-ghost" onClick={stopAllRuns}>{t('dock.typing.stopAll', '全部停止')}</button>
                   </div>

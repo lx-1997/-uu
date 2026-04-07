@@ -15,7 +15,7 @@ function joinShellLines(lines: string[]): string {
 /**
  * npm 并发连接（默认 32，大依赖树时更易吃满带宽）。
  * 环境变量（均在 **Studio 服务端进程** 上设置，下发到套件端脚本前已展开）：
- * - `OPENCLAW_NPM_SKIP_UNSAFE_PERM=1`：不在 `npm install -g openclaw` 上加 `--unsafe-perm`（默认会加，避免 root 全局装时 lifecycle 权限问题）。
+ * - `OPENCLAW_NPM_FORCE_UNSAFE_PERM=1`：显式在 `npm install -g openclaw` 上加 `--unsafe-perm`（仅兼容极少数旧环境）。
  * - `OPENCLAW_NPM_MAXSOCKETS`：覆盖默认 maxsockets。
  * - **默认**：`registry.npmmirror.com` 为主、`registry.npmjs.org` 为备（国内网络优先，避免先连国外再 ECONNRESET）。
  * - `OPENCLAW_REGISTRY_PRIORITY=china` | `npmmirror`：与默认相同（显式声明）。
@@ -26,13 +26,13 @@ const OPENCLAW_NPM_MAXSOCKETS = process.env.OPENCLAW_NPM_MAXSOCKETS?.trim() || '
 const OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC = process.env.OPENCLAW_NPM_ATTEMPT_TIMEOUT_SEC?.trim() || '900';
 /**
  * 追加到 `npm install -g openclaw@...` 的尾部参数（无前导空格）。
- * 默认含 `--unsafe-perm`：root 全局安装时减少 lifecycle 脚本权限问题；套件端 ENOENT/不完整树时与手工修复一致。
- * 设 `OPENCLAW_NPM_SKIP_UNSAFE_PERM=1` 可关闭。
+ * npm 11 已不再识别 `--unsafe-perm`，默认不再传，避免产生噪音并影响未来兼容性。
+ * 如遇极少数旧环境需要该参数，可设 `OPENCLAW_NPM_FORCE_UNSAFE_PERM=1` 显式开启。
  */
 const OPENCLAW_NPM_INSTALL_TAIL =
-  process.env.OPENCLAW_NPM_SKIP_UNSAFE_PERM === '1' || process.env.OPENCLAW_NPM_SKIP_UNSAFE_PERM === 'true'
-    ? ''
-    : ' --unsafe-perm';
+  process.env.OPENCLAW_NPM_FORCE_UNSAFE_PERM === '1' || process.env.OPENCLAW_NPM_FORCE_UNSAFE_PERM === 'true'
+    ? ' --unsafe-perm'
+    : '';
 
 /**
  * 套件端 OpenClaw 安装：npm registry / Node 二进制镜像 / npm install 的 Bash 片段。
@@ -140,6 +140,22 @@ export const OPENCLAW_NPM_FAST_INSTALL_SNIPPET = joinShellLines([
 ]);
 
 /**
+ * 若 Studio 预先把 openclaw tgz 上传到板端，则优先走本地 tarball 安装。
+ * 说明：这只能跳过主包下载，依赖仍由 npm 按当前 registry / cache 解析；
+ * 失败时必须无缝回退到现有联网安装，避免破坏现有稳定路径。
+ */
+export const OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET = joinShellLines([
+  '(',
+  'if [ -z "${OPENCLAW_LOCAL_TARBALL:-}" ] || [ ! -f "${OPENCLAW_LOCAL_TARBALL}" ]; then exit 1; fi',
+  'echo "[OpenClaw] 检测到 Studio 预上传安装包，优先本地安装: ${OPENCLAW_LOCAL_TARBALL}" 1>&2',
+  'CI= npm install -g "${OPENCLAW_LOCAL_TARBALL}" --no-audit --no-fund --loglevel notice --progress=false --registry="${NPM_FAST_REG:-https://registry.npmmirror.com}" --prefer-offline=true --fetch-timeout=600000 --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=20000 --maxsockets=' +
+    OPENCLAW_NPM_MAXSOCKETS +
+    OPENCLAW_NPM_INSTALL_TAIL +
+    ' 2>&1',
+  ')',
+]);
+
+/**
  * 环境准备阶段：在已有 npm 时写入 registry / 并发。
  * 注意：不能用「then ; if」拼接——bash 在 then 后不能紧跟单独的 `;`，会报 syntax error near `;`。
  */
@@ -219,6 +235,28 @@ export const OPENCLAW_NODE_DIST_FALLBACK_SNIPPET = joinShellLines([
   'done',
   'rm -rf "$OC_NODE_TMP" 2>/dev/null || true',
   'if [ "$OC_NODE_DONE" != "1" ]; then echo "[OpenClaw] Node 二进制兜底失败" 1>&2; exit 14; fi',
+]);
+
+/**
+ * 若 Studio 已预上传匹配架构的 Node 二进制包，则优先本地解压安装，避开板端 apt/NodeSource/公网波动。
+ */
+export const OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET = joinShellLines([
+  'echo "[OpenClaw] 检测到 Studio 预上传 Node 运行时，优先本地安装: ${OPENCLAW_LOCAL_NODE_DIST}" 1>&2',
+  'if [ -z "${OPENCLAW_LOCAL_NODE_DIST:-}" ] || [ ! -f "${OPENCLAW_LOCAL_NODE_DIST}" ]; then echo "[OpenClaw] 本地 Node 包不存在，跳过 Studio 快装" 1>&2; exit 21; fi',
+  'if ! command -v tar >/dev/null 2>&1; then echo "[OpenClaw] 本地 Node 快装跳过：缺少 tar" 1>&2; exit 22; fi',
+  'mkdir -p "$HOME/.local/lib" "$HOME/.npm-global/bin"',
+  'OC_NODE_LOCAL_FILE="$(basename "${OPENCLAW_LOCAL_NODE_DIST}")"',
+  'OC_NODE_LOCAL_DIR="${OC_NODE_LOCAL_FILE%.tar.xz}"',
+  'rm -rf "$HOME/.local/lib/$OC_NODE_LOCAL_DIR" 2>/dev/null || true',
+  'if ! tar -xf "${OPENCLAW_LOCAL_NODE_DIST}" -C "$HOME/.local/lib" 2>/dev/null && ! tar -xJf "${OPENCLAW_LOCAL_NODE_DIST}" -C "$HOME/.local/lib" 2>/dev/null; then echo "[OpenClaw] 本地 Node 快装解压失败: ${OPENCLAW_LOCAL_NODE_DIST}" 1>&2; exit 23; fi',
+  'if [ ! -x "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/node" ]; then echo "[OpenClaw] 本地 Node 快装失败：未找到 node 可执行文件" 1>&2; exit 24; fi',
+  'ln -sf "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/node" "$HOME/.npm-global/bin/node"',
+  '[ -x "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/npm" ] && ln -sf "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/npm" "$HOME/.npm-global/bin/npm" || true',
+  '[ -x "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/npx" ] && ln -sf "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/npx" "$HOME/.npm-global/bin/npx" || true',
+  '[ -x "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/corepack" ] && ln -sf "$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin/corepack" "$HOME/.npm-global/bin/corepack" || true',
+  'export PATH="$HOME/.npm-global/bin:$HOME/.local/lib/$OC_NODE_LOCAL_DIR/bin:$PATH"',
+  'hash -r 2>/dev/null || true',
+  'echo "[OpenClaw] Studio Node 快装成功: $(node -v 2>/dev/null || echo unknown)" 1>&2',
 ]);
 
 /**
@@ -413,6 +451,14 @@ export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = joinShellLines([
   '_NODE_MAJ=0;',
   'fi;',
   'if [ "${_NODE_MAJ:-0}" -ge "$OPENCLAW_MIN_NODE_MAJOR" ]; then exit 0; fi;',
+  'if [ -n "${OPENCLAW_LOCAL_NODE_DIST:-}" ]; then',
+  OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET,
+  '_NODE_V="$(node -v 2>/dev/null || echo v0)";',
+  '_NODE_MAJ="${_NODE_V#v}";',
+  '_NODE_MAJ="${_NODE_MAJ%%.*}";',
+  ': "${_NODE_MAJ:=0}";',
+  'if [ "${_NODE_MAJ:-0}" -ge "$OPENCLAW_MIN_NODE_MAJOR" ]; then exit 0; fi;',
+  'fi;',
   'if [ "${_NODE_MAJ:-0}" -gt 0 ]; then echo "[OpenClaw] Node 已过时 ${_NODE_V}，需要 >= ${OPENCLAW_MIN_NODE_MAJOR}" 1>&2; fi;',
   'if [ "${OPENCLAW_SKIP_NODE_UPGRADE:-0}" = "1" ]; then echo "[OpenClaw] 错误: 已设置 OPENCLAW_SKIP_NODE_UPGRADE=1，跳过自动升级。请手动安装 Node.js ${OPENCLAW_MIN_NODE_MAJOR}+ 后重试。" 1>&2; exit 1; fi;',
   'OC_NODE_BOOTSTRAP_OK=0',
@@ -541,4 +587,4 @@ export const OPENCLAW_INSTALL_OPENCLAW_STEP =
   ' && ' +
   (process.env.OPENCLAW_FORCE_OFFICIAL_INSTALL_SH === '1'
     ? OPENCLAW_OFFICIAL_INSTALL_FALLBACK
-    : OPENCLAW_NPM_FAST_INSTALL_SNIPPET);
+    : '(' + OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET + ' || (echo "[OpenClaw] 本地 tarball 快装未命中或失败，回退网络安装" 1>&2 && ' + OPENCLAW_NPM_FAST_INSTALL_SNIPPET + '))');

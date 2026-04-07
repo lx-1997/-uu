@@ -3576,16 +3576,21 @@ async function executeOpenClawDeployJob(
       );
     }
     const deployLongRunHeartbeat = () => {
+      const enabled = ['1', 'true'].includes(String(process.env.RDK_OPENCLAW_DEPLOY_HEARTBEAT || '').trim().toLowerCase());
       const heartbeatMs = 120_000;
       return {
         start: () =>
-          setInterval(() => {
-            appendDeployOutput(
-              job,
-              '\n[Studio] 约 2 分钟无新终端输出：apt/下载大包时套件端可能长时间不刷行（属常见）。当前 npm 安装会定期输出阶段心跳，并在单路镜像超时后自动切到备用源；若仍仅有本提示，请检查套件端网络与磁盘。超时请在「启动 Studio 后端」的环境变量中增大 OPENCLAW_INSTALL_TIMEOUT_MS（毫秒，默认 2700000≈45 分钟）。\n',
-            );
-          }, heartbeatMs),
-        stop: (h: ReturnType<typeof setInterval>) => clearInterval(h),
+          enabled
+            ? setInterval(() => {
+                appendDeployOutput(
+                  job,
+                  '\n[Studio] 安装仍在进行中，当前阶段可能处于大包上传或 npm 依赖解析。\n',
+                );
+              }, heartbeatMs)
+            : null,
+        stop: (h: ReturnType<typeof setInterval> | null) => {
+          if (h) clearInterval(h);
+        },
       };
     };
     if (skipInstallBecausePresent) {
