@@ -855,7 +855,8 @@ export function getBootstrapStudioDefaultPresetsMeta(): {
 }
 
 /**
- * 将 bootstrap 中的内置预设写回 registry：同 id 以安装包为准刷新（保留用户已保存的 apiKey）；缺失的预设追加入库。
+ * 将 bootstrap 中的内置预设写回 registry：同 id 先铺安装包缺省字段，再以用户 registry 覆盖（保留用户改的模型/采样/推理等）；
+ * apiKey 仍以用户已保存的为准；缺失的预设追加入库。
  */
 export function syncBootstrapPresetEntriesIntoRegistry(registry: ProviderConfigRegistry): ProviderConfigRegistry {
   const bootstrap = loadBootstrapProviderRegistry();
@@ -867,6 +868,7 @@ export function syncBootstrapPresetEntriesIntoRegistry(registry: ProviderConfigR
     const keepKey = e.apiKey?.trim();
     return {
       ...b,
+      ...e,
       apiKey: keepKey || b.apiKey,
       createdAt: e.createdAt,
       updatedAt: Date.now(),

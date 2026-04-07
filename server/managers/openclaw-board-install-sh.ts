@@ -412,6 +412,18 @@ export const OPENCLAW_GATEWAY_ORPHAN_CLEAN_INNER = joinShellLines([
 export const OPENCLAW_UNINSTALL_PKILL_SNIPPET = '( ' + OPENCLAW_GATEWAY_ORPHAN_CLEAN_INNER + ' )';
 
 /**
+ * 非登录 SSH exec 的 PATH 极度精简，常找不到 npm / openclaw。
+ * 此片段在设置 NPM_CONFIG_PREFIX 之前：
+ * 1. 通过 `bash -l -c 'echo $PATH'` 获取登录 shell 完整 PATH（比直接 source .profile 安全）。
+ * 2. 保存系统默认 npm prefix 到 `_SYS_NPM_PF`，供卸载时在系统 prefix 也尝试移除。
+ */
+export const OPENCLAW_UNINSTALL_ENV_PROBE = [
+  '(_oc_lpath="$(bash -l -c \'echo \"$PATH\"\' 2>/dev/null || true)"; if [ -n "$_oc_lpath" ]; then export PATH="$_oc_lpath:$PATH"; fi)',
+  '_SYS_NPM_PF="$(npm prefix -g 2>/dev/null || true)"',
+  'if [ -n "$_SYS_NPM_PF" ] && [ -d "$_SYS_NPM_PF/bin" ]; then case ":$PATH:" in *":$_SYS_NPM_PF/bin:"*) ;; *) export PATH="$_SYS_NPM_PF/bin:$PATH" ;; esac; fi',
+].join(' && ');
+
+/**
  * 覆盖/重装全局包前：**不调用** `openclaw gateway stop`（依赖/config 损坏时 CLI 可能在 require 阶段挂死）。
  * **先**释放 18789（不依赖 dbus），**再**限时 systemctl（与卸载 [1/6] 一致）。
  * 套件端可设 `OPENCLAW_SKIP_PREINSTALL_GATEWAY_STOP=1` 跳过（极少用）。
@@ -431,7 +443,7 @@ export const OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET = joinShellLines([
  * 含 clawhub / clawctl（若曾全局安装）。
  */
 export const OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET =
-  '( _gp="$(npm prefix -g 2>/dev/null || true)"; if [ -n "$_gp" ]; then rm -rf "$_gp/lib/node_modules/openclaw" "$_gp/lib/node_modules/clawhub" "$_gp/lib/node_modules/clawctl" 2>/dev/null || true; fi; rm -rf "${HOME}/.npm-global/lib/node_modules/openclaw" "${HOME}/.npm-global/lib/node_modules/clawhub" "${HOME}/.npm-global/lib/node_modules/clawctl" 2>/dev/null || true )';
+  '( _gp="$(npm prefix -g 2>/dev/null || true)"; if [ -n "$_gp" ]; then rm -rf "$_gp/lib/node_modules/openclaw" "$_gp/lib/node_modules/clawhub" "$_gp/lib/node_modules/clawctl" 2>/dev/null || true; fi; rm -rf "${HOME}/.npm-global/lib/node_modules/openclaw" "${HOME}/.npm-global/lib/node_modules/clawhub" "${HOME}/.npm-global/lib/node_modules/clawctl" 2>/dev/null || true; if [ -n "${_SYS_NPM_PF:-}" ] && [ "$_SYS_NPM_PF" != "${HOME}/.npm-global" ] && [ -n "$(ls -d "$_SYS_NPM_PF/lib/node_modules/openclaw" 2>/dev/null || true)" ]; then rm -rf "$_SYS_NPM_PF/lib/node_modules/openclaw" "$_SYS_NPM_PF/lib/node_modules/clawhub" "$_SYS_NPM_PF/lib/node_modules/clawctl" 2>/dev/null || true; fi )';
 
 /** 卸载：从 ~/.bashrc 删除与 OPENCLAW_ENSURE_SHELL_PATH_SNIPPET 对应的 PATH 块 */
 export const OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET =

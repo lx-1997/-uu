@@ -37,6 +37,7 @@ import {
   memorySearchToolInputZod,
   memoryGetToolInputZod,
   memorySaveToolInputZod,
+  memoryDeleteToolInputZod,
   sessionsSpawnToolInputZod,
 } from "./tool-zod-schemas.js";
 import { assertSandboxPath } from "../sandbox-paths.js";
@@ -778,6 +779,74 @@ export const memorySaveTool: Tool<{
   },
 };
 
+// ============== 记忆删除工具 ==============
+
+/**
+ * 记忆删除工具
+ *
+ * 从 JSON 索引中移除指定记忆条目，并尝试清理 daily memory 中对应的行。
+ * 用户说「忘记 X」「撤销那条记忆」时使用。
+ */
+export const memoryDeleteTool: Tool<{ id: string }> = {
+  name: "memory_delete",
+  description:
+    "按 ID 删除一条长期记忆，并尝试清理 daily memory 对应行。\n\n" +
+    "使用规则：\n" +
+    "- 用户明确要求「忘记」「撤销」「删除」某条记忆时使用\n" +
+    "- 先用 memory_search 找到 ID，再用此工具删除\n" +
+    "- 删除仅影响索引和 daily memory 文件，不影响 MEMORY.md",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "记忆 ID（来自 memory_search）" },
+    },
+    required: ["id"],
+  },
+  inputZodSchema: memoryDeleteToolInputZod,
+  async execute(input, ctx) {
+    const memory = ctx.memory;
+    if (!memory) {
+      return "记忆系统未启用";
+    }
+
+    // 先获取内容用于清理 daily memory
+    const entry = await memory.getById(input.id);
+    if (!entry) {
+      return `未找到记忆: ${input.id}`;
+    }
+
+    const deleted = await memory.delete(input.id);
+    if (!deleted) {
+      return `删除失败: ${input.id}`;
+    }
+
+    // 尝试清理 daily memory 文件中的对应行
+    let dailyCleanup = "";
+    try {
+      const root = await resolveMemoryRoot(ctx);
+      const memoryDir = path.join(root, "memory");
+      const files = await fs.readdir(memoryDir).catch(() => [] as string[]);
+      const contentNormalized = entry.content.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
+      for (const file of files) {
+        if (!file.endsWith(".md")) continue;
+        const filePath = path.join(memoryDir, file);
+        const text = await fs.readFile(filePath, "utf-8");
+        if (text.includes(contentNormalized)) {
+          const lines = text.split("\n");
+          const cleaned = lines.filter((line) => !line.includes(contentNormalized)).join("\n");
+          await fs.writeFile(filePath, cleaned, "utf-8");
+          dailyCleanup = `\n已清理 daily memory: ${file}`;
+          break;
+        }
+      }
+    } catch {
+      // daily memory 清理失败不影响主操作
+    }
+
+    return `已删除记忆: ${input.id}${dailyCleanup}`;
+  },
+};
+
 // ============== 子代理工具 ==============
 
 /**
@@ -842,10 +911,10 @@ export const sessionsSpawnTool: Tool<{
 /**
  * 所有内置工具
  *
- * 这 10 个工具覆盖了 Agent 的核心能力:
+ * 这 11 个工具覆盖了 Agent 的核心能力:
  * - 感知: read, list, grep
  * - 行动: write, edit, exec
- * - 记忆: memory_search, memory_get, memory_save
+ * - 记忆: memory_search, memory_get, memory_save, memory_delete
  * - 编排: sessions_spawn
  *
  * OpenClaw 有 50+ 工具，包括:
@@ -867,5 +936,6 @@ export const builtinTools: Tool[] = [
   memorySearchTool,
   memoryGetTool,
   memorySaveTool,
+  memoryDeleteTool,
   sessionsSpawnTool,
 ];

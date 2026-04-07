@@ -631,7 +631,7 @@ export class Agent {
 
     if (!this.enableMemory) {
       tools = tools.filter(
-        (tool) => tool.name !== "memory_search" && tool.name !== "memory_get" && tool.name !== "memory_save",
+        (tool) => tool.name !== "memory_search" && tool.name !== "memory_get" && tool.name !== "memory_save" && tool.name !== "memory_delete",
       );
     }
 
@@ -819,7 +819,7 @@ export class Agent {
     }
 
     if (this.enableMemory && (availableTools.has("memory_search") || availableTools.has("memory_save"))) {
-      prompt += `\n\n## 记忆\n- 回答涉及历史、偏好、决定时：先用 memory_search 查找，再用 memory_get 拉取细节\n- 遇到值得长期保存的信息（用户偏好、关键决策、重要事实）：用 memory_save 写入\n- 不要保存日常闲聊或一次性查询`;
+      prompt += `\n\n## 记忆\n- 回答涉及历史、偏好、决定时：先用 memory_search 查找，再用 memory_get 拉取细节\n- 遇到值得长期保存的信息（用户偏好、关键决策、重要事实）：用 memory_save 写入\n- 用户明确要求「忘记」「撤销」「删除」某条记忆时：先 memory_search 找到 ID，再用 memory_delete 删除\n- 不要保存日常闲聊或一次性查询`;
     }
 
     if (this.sandbox?.enabled) {

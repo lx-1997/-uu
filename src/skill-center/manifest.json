@@ -1,19 +1,24 @@
 {
-  "version": 1,
+  "version": 2,
   "categories": [
-    { "id": "meta", "label": "技能发现 / Meta" },
-    { "id": "browser", "label": "浏览器自动化" }
+    { "id": "meta", "label": "技能发现 / Skill Discovery" },
+    { "id": "protocol", "label": "协作协议 / Collaboration Protocol" },
+    { "id": "ai-capability", "label": "AI 能力 / AI Capabilities" },
+    { "id": "app-dev", "label": "应用开发 / App Development" },
+    { "id": "knowledge", "label": "知识与生态 / Knowledge & Ecosystem" }
   ],
   "items": [
-    {
-      "folder": "rdk-skillhub-discovery",
-      "category": "meta",
-      "title": "SkillHub 技能发现（find_skills）"
-    },
-    {
-      "folder": "agent-browser",
-      "category": "browser",
-      "title": "Agent Browser（无头 CLI）"
-    }
+    { "folder": "rdk-skillhub-discovery", "category": "meta", "title": "SkillHub 技能发现（find_skills）" },
+    { "folder": "rdk-board-delegate", "category": "protocol", "title": "板端任务委派协议" },
+    { "folder": "rdk-board-progress-reporter", "category": "protocol", "title": "板端进度报告协议" },
+    { "folder": "rdk-rdkclaw-partner-advisory", "category": "protocol", "title": "RDKClaw 咨询协议" },
+    { "folder": "rdk-reverse-consultation", "category": "protocol", "title": "反向求助协议（OpenClaw → RDKClaw）" },
+    { "folder": "rdk-openclaw-bridge", "category": "protocol", "title": "Studio ↔ OpenClaw 协作桥接" },
+    { "folder": "rdk-robot-dev", "category": "ai-capability", "title": "AI 算法部署与体验" },
+    { "folder": "rdk-tts", "category": "ai-capability", "title": "文字转语音（TTS）" },
+    { "folder": "rdk-stt", "category": "ai-capability", "title": "语音转文字（STT）" },
+    { "folder": "rdk-app-development", "category": "app-dev", "title": "机器人应用开发工作流" },
+    { "folder": "rdk-board-knowledge", "category": "knowledge", "title": "RDK 硬件与 TROS 知识库" },
+    { "folder": "rdk-ecosystem", "category": "knowledge", "title": "生态方案发现（NodeHub / ModelZoo / TROS）" }
   ]
 }

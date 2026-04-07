@@ -12,7 +12,7 @@ const DEFAULT_PERSONA: PersonaProfile = {
   name: "小地瓜",
   extraInstructions: "",
   riskLevel: "balanced",
-  /** 默认 Studio 优先：先由 RDKClaw 本地/SSH 收敛，确有必要再协同套件端 OpenClaw */
+  /** @deprecated Kept for backward compat with persisted config; no longer affects prompt routing */
   delegationBias: "local-first",
   autonomyLevel: "assisted",
 };

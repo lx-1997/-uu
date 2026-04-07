@@ -245,6 +245,46 @@ try {
   }
   if (skipNpmBuild) {
     console.log('[build:desktop] RDK_DESKTOP_SKIP_NPM_BUILD=1, skipping npm run build');
+    // Freshness guard: warn if any server/ source file is newer than dist-server/
+    const distServerDir = path.join(rootDir, 'dist-server');
+    const serverDir = path.join(rootDir, 'server');
+    if (fs.existsSync(distServerDir) && fs.existsSync(serverDir)) {
+      let distMtime = 0;
+      try {
+        const walk = (dir) => {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) { walk(full); } else {
+              const mt = fs.statSync(full).mtimeMs;
+              if (mt > distMtime) distMtime = mt;
+            }
+          }
+        };
+        walk(distServerDir);
+      } catch { /* best-effort */ }
+      let srcNewerCount = 0;
+      try {
+        const checkSrc = (dir) => {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) { checkSrc(full); } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+              if (fs.statSync(full).mtimeMs > distMtime) srcNewerCount++;
+            }
+          }
+        };
+        checkSrc(serverDir);
+      } catch { /* best-effort */ }
+      if (srcNewerCount > 0) {
+        console.warn(
+          `\x1b[33m[build:desktop] WARNING: ${srcNewerCount} server/ source file(s) are newer than dist-server/. ` +
+          `The packaged build may contain stale server code. Run 'npm run build' first or remove RDK_DESKTOP_SKIP_NPM_BUILD.\x1b[0m`,
+        );
+      }
+    } else if (!fs.existsSync(distServerDir)) {
+      console.error('[build:desktop] ERROR: dist-server/ does not exist. Cannot skip build.');
+      process.exit(1);
+    }
   } else {
     await run(npmCmd, ['run', 'build']);
   }

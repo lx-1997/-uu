@@ -65,7 +65,7 @@
     "playwright:install": "playwright install chromium",
     "preview": "vite preview",
     "start": "node dist-server/server/index.js",
-    "build:server": "tsc -p tsconfig.server.json"
+    "build:server": "tsc -p tsconfig.server.json && node -e \"const fs=require('fs'),p=require('path');['rdk-doc-url-index.md'].forEach(f=>{const s=p.join('server','rdkclaw',f),d=p.join('dist-server','server','rdkclaw',f);if(fs.existsSync(s)){fs.mkdirSync(p.dirname(d),{recursive:true});fs.copyFileSync(s,d);console.log('[build:server] copied',f,'→ dist-server')}})\""
   },
   "build": {
     "appId": "com.rdk.studio",
@@ -104,7 +104,6 @@
     ],
     "win": {
       "icon": "build-resources/icon.ico",
-      "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",

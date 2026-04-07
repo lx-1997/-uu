@@ -17,8 +17,6 @@ const skillCenterManifest = skillCenterManifestJson as SkillCenterManifest;
 let studioSkillsApiCache: { at: number; rows: StudioApiSkillRow[] } | null = null;
 const STUDIO_SKILLS_LIST_TTL_MS = 120_000;
 
-/** 未在 manifest.json 单独分类的 skills/ 条目归入此类（筛选下拉中展示） */
-const STUDIO_BUNDLED_CATEGORY_ID = 'studio-bundled';
 
 interface OpenClawSkillsPayload {
   ok?: boolean;
@@ -426,42 +424,19 @@ export default function SkillBrowser() {
     return boardSkills.filter((s) => s.toLowerCase().includes(q));
   }, [boardSkills, deferredSearch]);
 
-  const manifestByFolder = useMemo(
-    () => new Map(skillCenterManifest.items.map((it) => [it.folder, it])),
-    [],
-  );
-
   const centerCatalogItems: SkillCenterItem[] = useMemo(() => {
+    // Only show skills curated in manifest (board-deployable OpenClaw skills).
+    // RDKClaw-only skills are auto-loaded and should not appear here.
     if (studioApiSkills === null) {
       return skillCenterManifest.items;
     }
-    if (studioApiSkills.length === 0) {
-      return [];
-    }
-    const rows: SkillCenterItem[] = [];
-    for (const s of studioApiSkills) {
-      const folder = String(s.folder || '').trim();
-      if (!folder) continue;
-      const m = manifestByFolder.get(folder);
-      rows.push({
-        folder,
-        category: m?.category ?? STUDIO_BUNDLED_CATEGORY_ID,
-        title: m?.title ?? String(s.name || folder),
-      });
-    }
-    rows.sort((a, b) => a.folder.localeCompare(b.folder));
-    return rows;
-  }, [studioApiSkills, manifestByFolder]);
+    const apiSet = new Set(studioApiSkills.map((s) => String(s.folder || '').trim()).filter(Boolean));
+    return skillCenterManifest.items.filter((it) => apiSet.has(it.folder));
+  }, [studioApiSkills]);
 
   const centerCategoryOptions = useMemo(() => {
-    const bundledLabel = t('skillBrowser.center.catBundled', 'Studio 内置技能包');
-    const hasBundled = centerCatalogItems.some((i) => i.category === STUDIO_BUNDLED_CATEGORY_ID);
-    const base = skillCenterManifest.categories.map((c) => ({ ...c }));
-    if (hasBundled && !base.some((c) => c.id === STUDIO_BUNDLED_CATEGORY_ID)) {
-      base.push({ id: STUDIO_BUNDLED_CATEGORY_ID, label: bundledLabel });
-    }
-    return base;
-  }, [centerCatalogItems, t]);
+    return skillCenterManifest.categories.map((c) => ({ ...c }));
+  }, []);
 
   const filteredCenterItems = useMemo(() => {
     const q = deferredCenterSearch.trim().toLowerCase();
@@ -817,49 +792,6 @@ export default function SkillBrowser() {
     [currentDevice, addToast, loadBoardSkills, t, tf],
   );
 
-  const runBatchWriteLocalCenterFolders = useCallback(
-    async (folders: string[]) => {
-      if (folders.length === 0) return;
-      const uid = readStudioUserId();
-      setLocalRdkclawWriteLoading(true);
-      let ok = 0;
-      const fails: string[] = [];
-      try {
-        for (const folder of folders) {
-          const r = await fetchCenterMdText(folder);
-          if (!r.ok) {
-            fails.push(`${folder}: ${r.message}`);
-            continue;
-          }
-          if (!r.text.trim()) {
-            fails.push(`${folder}: empty`);
-            continue;
-          }
-          const data = await postLocalRdkclawSkill(uid, folder, r.text);
-          if (data.ok) ok++;
-          else fails.push(`${folder}: ${data.message || 'fail'}`);
-        }
-        if (fails.length === 0) {
-          addToast?.(tf('skillBrowser.batch.localAllOk', '已全部写入本地 RDKClaw（{{n}} 项）', { n: ok }), 'success');
-        } else {
-          addToast?.(
-            tf('skillBrowser.batch.localPartial', '本地写入：成功 {{ok}} 项，失败 {{fail}} 项。示例：{{first}}', {
-              ok,
-              fail: fails.length,
-              first: fails[0] || '',
-            }),
-            ok > 0 ? 'warning' : 'error',
-          );
-        }
-      } catch (e: unknown) {
-        addToast?.(e instanceof Error ? e.message : t('api.err.default', '网络错误'), 'error');
-      } finally {
-        setLocalRdkclawWriteLoading(false);
-      }
-    },
-    [addToast, t, tf],
-  );
-
   const runBatchDeployClawhubSlugs = useCallback(
     async (slugs: string[]) => {
       if (!currentDevice || slugs.length === 0) return;
@@ -1001,27 +933,6 @@ export default function SkillBrowser() {
       onConfirm: () => {
         setConfirmAction(null);
         void runBatchDeployCenterFolders(folders);
-      },
-    });
-  };
-
-  const handleBatchWriteLocalCenterClick = () => {
-    const folders = [...centerBatchSelected].sort();
-    if (folders.length === 0) {
-      addToast?.(t('skillBrowser.batch.noneSelected', '请先在左侧勾选技能'), 'warning');
-      return;
-    }
-    setConfirmAction({
-      title: tf('skillBrowser.batch.confirmLocalCenterTitle', '批量将 {{n}} 项写入本地 RDKClaw？', { n: folders.length }),
-      detail: tf(
-        'skillBrowser.batch.confirmLocalCenterDetail',
-        '将逐项拉取 SKILL.md 并写入本机 ~/.rdkstudio/rdkclaw-workspaces/…/skills/。包含：{{preview}}',
-        { preview: previewIdList(folders) },
-      ),
-      confirmLabel: t('skillBrowser.clawhub.localWriteConfirm', '确认写入'),
-      onConfirm: () => {
-        setConfirmAction(null);
-        void runBatchWriteLocalCenterFolders(folders);
       },
     });
   };
@@ -1221,7 +1132,7 @@ export default function SkillBrowser() {
           )}
           {hubMode === 'center' && (
             <span className="badge badge-muted">
-              {tf('skillBrowser.center.badge', '内置 {{n}} 条', { n: centerCatalogItems.length })}
+              {tf('skillBrowser.center.badge', '板端可部署 {{n}} 项', { n: centerCatalogItems.length })}
             </span>
           )}
           {openclawHealth && hubMode === 'board' && (
@@ -1332,7 +1243,7 @@ export default function SkillBrowser() {
                   style={{ flex: 1, fontSize: '0.75rem' }}
                   onClick={() => setCenterSub('catalog')}
                 >
-                  {t('skillBrowser.center.catalogTab', '本地清单')}
+                  {t('skillBrowser.center.catalogTab', '板端技能')}
                 </button>
               </div>
               {centerSub === 'catalog' ? (
@@ -1587,10 +1498,13 @@ export default function SkillBrowser() {
               {centerSub === 'catalog' ? (
                 <>
                   <div>
-                    <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.center.title', '内置技能预览')}</strong>
+                    <strong style={{ fontSize: '0.875rem' }}>{t('skillBrowser.center.title', '板端 OpenClaw 可部署技能')}</strong>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '4px 0 0', lineHeight: 1.35 }}>
+                      {t('skillBrowser.center.desc', '以下技能可部署到板端 OpenClaw，为其提供协作协议、AI 能力和知识库。RDKClaw 侧的技能已自动加载，无需手动安装。')}
+                    </p>
                   </div>
                   {!selectedCenterFolder ? (
-                    <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{t('skillBrowser.center.pick', '请在左侧选择一条内置技能。')}</p>
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{t('skillBrowser.center.pick', '请在左侧选择一个板端可部署技能查看内容。')}</p>
                   ) : (
                     <>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
@@ -1620,14 +1534,7 @@ export default function SkillBrowser() {
                           >
                             {tf('skillBrowser.batch.deployBoardN', '批量部署到套件端 ({{n}})', { n: centerBatchSelected.size })}
                           </button>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={handleBatchWriteLocalCenterClick}
-                            disabled={batchActionBusy}
-                          >
-                            {tf('skillBrowser.batch.writeLocalN', '批量写入本地 RDKClaw ({{n}})', { n: centerBatchSelected.size })}
-                          </button>
+
                         </div>
                       )}
                       {!currentDevice && (

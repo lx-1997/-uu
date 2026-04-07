@@ -55,8 +55,9 @@ function resolveRdkclawRunProgressIntervalMs(): number {
 }
 
 import { estimateTextTokens, recordTokenUsage } from "../monitoring/token-usage.js";
-import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js";
+import { boardOpenClawAssessTool } from "./tools/board-openclaw-assess.js"; // kept for type ref, no longer auto-registered
 import { boardOpenClawChatTool } from "./tools/board-openclaw-chat.js";
+import { createSoulUpdateTool } from "./tools/soul-update.js";
 import { boardOpenClawDelegateTool } from "./tools/board-openclaw-delegate.js";
 import { fleetBoardListTool, fleetBoardDelegateTool, fleetBoardBroadcastTool } from "./tools/fleet-dispatch.js";
 import { planTools } from "../agent/tools/plan-tool.js";
@@ -110,6 +111,7 @@ import {
   resolveDelegationExpectationText,
   type DelegateDecision,
 } from "./delegation.js";
+// NOTE: buildDelegationRuntimePrompt removed — LLM decides tool usage naturally
 import { appendSecurityAuditLog, listSecurityAuditLogs } from "./security-audit-store.js";
 import { buildStudioAgentSessionKey, createRdkclawDebugExportZip } from "./session-debug-export.js";
 import { appendUtf8WithTailCap, DEFAULT_STREAM_OUTPUT_CHAR_LIMIT } from "../utils/stream-output-limit.js";
@@ -236,8 +238,6 @@ function resolveRuntimePersona(
     ...base,
     systemPromptOverride: override.systemPromptOverride?.trim() || base.systemPromptOverride,
     extraInstructions: [base.extraInstructions, override.extraInstructions].filter(Boolean).join("\n"),
-    // 统一以用户在设置中的委派倾向为准，避免 Bot 层配置悄悄覆盖导致执行路径突变。
-    delegationBias: base.delegationBias,
     autonomyLevel: override.autonomyLevel || base.autonomyLevel,
     riskLevel: override.riskLevel || base.riskLevel,
   };
@@ -873,22 +873,7 @@ export class RDKClawApp {
         path: s.path,
         description: s.description,
       }));
-      tools.push(
-        boardOpenClawAssessTool(req.deviceId, this.openClawManager, base.sessionId, skillsForBoard, (chunk, toolCallId) => {
-          emitEvent({
-            type: "tool_progress",
-            data: {
-              ...base,
-              toolName: "board_openclaw_assess",
-              name: "board_openclaw_assess",
-              toolCallId: toolCallId ?? "",
-              phase: "running",
-              executor: "board_openclaw",
-              chunk,
-            },
-          });
-        }),
-      );
+      // board_openclaw_assess removed — LLM directly decides when to delegate
       tools.push(
         boardOpenClawChatTool(req.deviceId, this.openClawManager, base.sessionId, (chunk, toolCallId, meta) => {
           emitEvent({
@@ -954,6 +939,7 @@ export class RDKClawApp {
       }
     }
     tools.push(...planTools);
+    tools.push(createSoulUpdateTool(emitEvent, base));
 
     if (safeMode) {
       const blockPatterns = [
@@ -1381,7 +1367,7 @@ export class RDKClawApp {
       )
       .slice(0, 5);
     const setupElapsedMs = Date.now() - runStartedAt;
-    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot, runtimePersona.delegationBias);
+    const decision = selectDelegateDecision(req, matchedSkills, boardSnapshot);
     const detectedPlatform = (req as { platform?: RdkPlatform }).platform as RdkPlatform | undefined;
     const deviceProfile = detectedPlatform ? getDeviceProfile(detectedPlatform) : null;
     const modelCaps = lookupModelCapabilities(providerConfig.provider, providerConfig.model);

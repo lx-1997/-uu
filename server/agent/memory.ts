@@ -309,6 +309,20 @@ export class MemoryManager {
   }
 
   /**
+   * 按 ID 删除一条记忆
+   *
+   * 从 JSON 索引中移除，返回是否成功
+   */
+  async delete(id: string): Promise<boolean> {
+    await this.load();
+    const idx = this.entries.findIndex((e) => e.id === id);
+    if (idx === -1) return false;
+    this.entries.splice(idx, 1);
+    await this.save();
+    return true;
+  }
+
+  /**
    * 获取所有记忆 (调试用)
    */
   async getAll(): Promise<MemoryEntry[]> {

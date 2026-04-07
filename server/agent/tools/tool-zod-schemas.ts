@@ -63,6 +63,10 @@ export const memorySaveToolInputZod = z.object({
   content: z.string(),
 });
 
+export const memoryDeleteToolInputZod = z.object({
+  id: z.string(),
+});
+
 const spawnScopeZod = z.enum([
   "read-only",
   "device-read",

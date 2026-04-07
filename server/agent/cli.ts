@@ -393,6 +393,7 @@ function formatToolCompact(name: string, args: unknown): string {
     case "memory_search": return `memory_search("${(a.query || "").slice(0, 30)}")`;
     case "memory_get": return `memory_get(${a.id || ""})`;
     case "memory_save": return `memory_save(${(a.content || "").slice(0, 30)}...)`;
+    case "memory_delete": return `memory_delete(${a.id || ""})`;
     case "subagent": return `subagent("${(a.task || "").slice(0, 40)}")`;
     default: return name;
   }

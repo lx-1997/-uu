@@ -1,12 +1,22 @@
 /**
  * 从 rdk-doc-url-index.md 加载 developer.d-robotics.cc/rdk_doc 章节 URL，避免在 TS 中硬编码。
  */
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-const INDEX_FILE = join(MODULE_DIR, 'rdk-doc-url-index.md');
+/**
+ * 编译后 dist-server/server/rdkclaw/ 下可能缺失 .md 资源。
+ * 优先找编译输出旁的副本；若不存在则回退到源码 server/rdkclaw/。
+ */
+const INDEX_FILE = (() => {
+  const primary = join(MODULE_DIR, 'rdk-doc-url-index.md');
+  if (existsSync(primary)) return primary;
+  const fallback = resolve(MODULE_DIR, '..', '..', '..', 'server', 'rdkclaw', 'rdk-doc-url-index.md');
+  if (existsSync(fallback)) return fallback;
+  return primary; // 让后续 readFileSync 抛出明确错误
+})();
 
 export type RdkDocUrlEntry = {
   /** 最近一条 ## 标题 */

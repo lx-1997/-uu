@@ -76,7 +76,26 @@ const SENSITIVE_READ_PATTERNS = [
   '/oauth',
 ];
 
-const SYSTEM_MANAGED_FILENAMES = [
+/**
+ * 系统隐藏文件：Agent 工作区人格/配置文件，对用户不可见。
+ * 这些文件已通过 ContextLoader 注入系统上下文，Agent 无需通过 read 工具读取。
+ * 用户不应通过 Agent 的工具调用获取到这些文件的内容。
+ */
+const SYSTEM_HIDDEN_FILENAMES = [
+  'soul.md',
+  'agents.md',
+  'bootstrap.md',
+  'heartbeat.md',
+  'identity.md',
+  'memory.md',
+  'tools.md',
+  'user.md',
+];
+
+/**
+ * 系统写入保护文件：必须通过专用工具（如 propose_soul_update）修改，不允许 write/edit 直接改。
+ */
+const SYSTEM_WRITE_LOCKED_FILENAMES = [
   'soul.md',
 ];
 
@@ -202,7 +221,13 @@ function tryResolveSandboxTarget(filePath: string, sandbox: SandboxGuardContext)
 function isSystemManagedPath(targetPath: string): boolean {
   const normalized = normalizePathLike(targetPath).toLowerCase();
   const baseName = path.posix.basename(normalized);
-  return SYSTEM_MANAGED_FILENAMES.includes(baseName);
+  return SYSTEM_HIDDEN_FILENAMES.includes(baseName);
+}
+
+function isSystemWriteLockedPath(targetPath: string): boolean {
+  const normalized = normalizePathLike(targetPath).toLowerCase();
+  const baseName = path.posix.basename(normalized);
+  return SYSTEM_WRITE_LOCKED_FILENAMES.includes(baseName);
 }
 
 function normalizeDevicePath(devicePath: string): string {
@@ -293,8 +318,8 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
           };
         }
         if (resolvedTarget) {
-          if (isSystemManagedPath(targetPath)) {
-            return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
+          if (isSystemWriteLockedPath(targetPath)) {
+            return { blocked: true, reason: '该文件为系统托管文件，请使用 propose_soul_update 工具修改', risk: 'high' };
           }
           if (resolvedPathHasProtectedSegment(resolvedTarget)) {
             return {
@@ -305,8 +330,8 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
           }
         }
       } else if (relaxedPackagedApp) {
-        if (isSystemManagedPath(targetPath)) {
-          return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
+        if (isSystemWriteLockedPath(targetPath)) {
+          return { blocked: true, reason: '该文件为系统托管文件，请使用 propose_soul_update 工具修改', risk: 'high' };
         }
         if (isProtectedLocalPath(targetPath, workspaceDir)) {
           return {
@@ -316,8 +341,8 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
           };
         }
       } else {
-        if (isSystemManagedPath(targetPath)) {
-          return { blocked: true, reason: 'SOUL.md 为系统托管文件，禁止直接修改', risk: 'high' };
+        if (isSystemWriteLockedPath(targetPath)) {
+          return { blocked: true, reason: '该文件为系统托管文件，请使用 propose_soul_update 工具修改', risk: 'high' };
         }
         if (isProtectedLocalPath(targetPath, workspaceDir)) {
           return { blocked: true, reason: '禁止改写受保护的本地目录（.git/.cursor/node_modules/.env 等）', risk: 'high' };
@@ -349,7 +374,7 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
         }
         if (resolvedTarget) {
           if (isSystemManagedPath(targetPath)) {
-            return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
+            return { blocked: true, reason: '该文件为系统托管文件，对用户不可见', risk: 'high' };
           }
           if (resolvedPathHasSensitiveReadSegment(resolvedTarget)) {
             return {
@@ -361,14 +386,14 @@ export function evaluatePermissionGuard(input: GuardInput): PermissionGuardResul
         }
       } else if (relaxedPackagedApp) {
         if (isSystemManagedPath(targetPath)) {
-          return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
+          return { blocked: true, reason: '该文件为系统托管文件，对用户不可见', risk: 'high' };
         }
         if (isSensitiveReadPath(targetPath, workspaceDir)) {
           return { blocked: true, reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）', risk: 'high' };
         }
       } else {
         if (isSystemManagedPath(targetPath)) {
-          return { blocked: true, reason: 'SOUL.md 为系统托管文件，对用户不可见', risk: 'high' };
+          return { blocked: true, reason: '该文件为系统托管文件，对用户不可见', risk: 'high' };
         }
         if (isSensitiveReadPath(targetPath, workspaceDir)) {
           return { blocked: true, reason: '禁止读取含敏感凭据的文件（.env/credentials/token 等）', risk: 'high' };

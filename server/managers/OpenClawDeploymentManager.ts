@@ -27,6 +27,7 @@ import {
   OPENCLAW_SYSTEMD_USER_DAEMON_RELOAD_CMD,
   OPENCLAW_SYSTEMD_USER_GATEWAY_DISABLE_CMD,
   OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD,
+  OPENCLAW_UNINSTALL_ENV_PROBE,
   OPENCLAW_UNINSTALL_PKILL_SNIPPET,
   OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,
   OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
@@ -1867,17 +1868,19 @@ export class OpenClawDeploymentManager {
 
   runUninstall(device: Device, onOutput: (chunk: string) => void, onComplete: (success: boolean) => void): void {
     const cmd = [
+      // 非登录 SSH exec PATH 可能极度精简；先通过登录 shell 探测补全 PATH，并保存系统默认 npm prefix
+      OPENCLAW_UNINSTALL_ENV_PROBE,
       BOARD_ENV_EXPORT,
       RESOLVE_OPENCLAW_CMD,
       'echo "[OpenClaw] 开始卸载..."',
 
-      'echo "[1/6] 官方：gateway stop → uninstall；此处先释放 18789 再限时 systemctl，再限时 gateway stop（避免裸跑 CLI 在依赖损坏时挂死）..."',
+      'echo "[1/6] 停止 gateway 服务（释放 18789 → systemctl → gateway stop）..."',
       OPENCLAW_UNINSTALL_PKILL_SNIPPET,
       '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD + ')',
       '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_STOP_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 gateway stop"; fi)',
 
-      'echo "[2/6] 执行官方卸载 openclaw uninstall --all --yes --non-interactive（限时；失败则 npm/rm 兜底）..."',
-      '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续执行兜底清理）"; fi)',
+      'echo "[2/6] 执行官方卸载（限时；失败则 npm/rm 兜底）..."',
+      '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续兜底清理）"; fi)',
 
       'echo "[3/6] 卸载 systemd 服务..."',
       '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD + '; fi)',
@@ -1889,14 +1892,13 @@ export class OpenClawDeploymentManager {
       '(if command -v clawhub >/dev/null 2>&1; then if command -v timeout >/dev/null 2>&1; then timeout 30s clawhub logout </dev/null 2>/dev/null || true; else clawhub logout </dev/null 2>/dev/null || true; fi; fi)',
 
       'echo "[5/6] 清理配置、日志、缓存与 shell PATH 注入..."',
-      '(rm -rf ~/.openclaw 2>/dev/null || true)',
-      '(rm -rf /tmp/openclaw-* /tmp/clawhub-* 2>/dev/null || true)',
-      '(rm -rf ~/.cache/openclaw 2>/dev/null || true)',
-      '(rm -rf ~/.local/share/openclaw 2>/dev/null || true)',
+      '(rm -rf ~/.openclaw /tmp/openclaw-* /tmp/clawhub-* ~/.cache/openclaw ~/.local/share/openclaw 2>/dev/null || true)',
       OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET,
 
       'echo "[6/6] 移除全局 npm 包与残留目录..."',
       '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true)',
+      // 若系统默认 npm prefix 与 ~/.npm-global 不同，也尝试从系统 prefix 移除
+      '(if [ -n "${_SYS_NPM_PF:-}" ] && [ "$_SYS_NPM_PF" != "$HOME/.npm-global" ]; then NPM_CONFIG_PREFIX="$_SYS_NPM_PF" npm rm -g openclaw 2>/dev/null || true; fi)',
       '(npm rm -g clawhub 2>/dev/null || true)',
       '(npm rm -g clawctl 2>/dev/null || true)',
       OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,

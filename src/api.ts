@@ -891,7 +891,8 @@ export interface PersonaProfile {
   name: string;
   extraInstructions: string;
   riskLevel: 'conservative' | 'balanced' | 'aggressive';
-  delegationBias: 'local-first' | 'balanced' | 'board-first';
+  /** @deprecated No longer used for prompt routing */
+  delegationBias?: 'local-first' | 'balanced' | 'board-first';
   autonomyLevel: 'manual' | 'assisted' | 'autonomous';
 }
 

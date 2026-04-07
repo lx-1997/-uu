@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import fs from 'node:fs';
 import os from 'node:os';
+import net from 'node:net';
 import http from 'node:http';
 import https from 'node:https';
 import * as flashService from './flash/index.mjs';
@@ -608,16 +609,19 @@ function getAppRoot() {
   return path.join(__dirname, '..');
 }
 
-/** 开发态 Windows/Linux 任务栏图标（与 build-resources / branding 一致） */
+/** 开发态 / 打包态 Windows/Linux 任务栏图标（与 build-resources / branding 一致） */
 function resolveWindowIcon() {
   if (process.platform === 'darwin') return undefined;
   const root = path.join(__dirname, '..');
   const ico = path.join(root, 'build-resources', 'icon.ico');
   const png = path.join(root, 'build-resources', 'icon.png');
-  const branding = path.join(root, 'public', 'branding', 'icon.png');
+  const brandingIco = path.join(root, 'public', 'branding', 'icon.ico');
+  const brandingPng = path.join(root, 'public', 'branding', 'icon.png');
   if (fs.existsSync(ico)) return ico;
   if (fs.existsSync(png)) return png;
-  if (fs.existsSync(branding)) return branding;
+  // 打包后 build-resources 不在 files 列表中，回退到 public/branding（随包分发）
+  if (process.platform === 'win32' && fs.existsSync(brandingIco)) return brandingIco;
+  if (fs.existsSync(brandingPng)) return brandingPng;
   return undefined;
 }
 
@@ -979,6 +983,17 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 快速 TCP 探测端口是否空闲（避免 spawn 子进程再发现占用的开销和竞态） */
+function isPortAvailable(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.listen(port, host, () => {
+      srv.close(() => resolve(true));
+    });
+  });
+}
+
 async function launchEmbeddedServerOnPort(port) {
   // asar: false 时 app.getAppPath() 指向 resources/app/ (真实目录)
   // tsconfig.server.json 的 rootDir 是项目根，所以 server/index.ts 编译到 dist-server/server/index.js
@@ -1011,9 +1026,14 @@ async function launchEmbeddedServerOnPort(port) {
     serverProcess = child;
 
     let settled = false;
+    let detectedPortInUse = false;
     const stderrTail = [];
     const pushStderr = (chunk) => {
       stderrTail.push(chunk);
+      // 从 stderr 流实时检测 EADDRINUSE（避免 exit 先于 data 的竞态）
+      if (!detectedPortInUse && isPortInUseStartupError(chunk)) {
+        detectedPortInUse = true;
+      }
       const joined = stderrTail.join('');
       if (joined.length > 6000) {
         stderrTail.length = 0;
@@ -1078,7 +1098,7 @@ async function launchEmbeddedServerOnPort(port) {
           + (tail ? `\n\n最近 stderr:\n${tail.slice(-2500)}` : '');
         appendStartupLog(`startEmbeddedServer exit port=${port} code=${code ?? 'null'} signal=${signal ?? 'null'} tail=${tail.slice(-600)}`);
         const error = new Error(message);
-        if (isPortInUseStartupError(message)) {
+        if (detectedPortInUse || isPortInUseStartupError(message)) {
           error.code = 'EADDRINUSE';
         }
         settle(reject, error);
@@ -1099,6 +1119,13 @@ function startEmbeddedServer() {
           console.log('[server] 端口', port, '上已有可复用的内置 API，跳过再拉起子进程');
           resolve(port);
           return;
+        }
+        // 先用 TCP 探测端口是否空闲，避免 spawn 子进程后才发现占用
+        if (!(await isPortAvailable(port))) {
+          console.warn('[server] port', port, 'occupied (TCP pre-check), skipping');
+          appendStartupLog(`startEmbeddedServer port pre-check occupied port=${port}`);
+          if (offset < SERVER_PORT_FALLBACK_SPAN) continue;
+          throw new Error(`内置服务未能在 ${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN} 之间找到可用端口（所有端口均已被占用）`);
         }
         try {
           const startedPort = await launchEmbeddedServerOnPort(port);

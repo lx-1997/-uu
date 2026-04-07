@@ -19,9 +19,6 @@ import {
   rejectFeishuPairing,
   startFeishuRuntime,
   stopFeishuRuntime,
-  fetchRDKClawPersona,
-  saveRDKClawPersona,
-  type PersonaProfile,
   fetchRDKClawForumAuth,
   saveRDKClawForumCredential,
   clearRDKClawForumAuth,
@@ -77,7 +74,6 @@ const AI_PROVIDER_OPTIONS = Object.entries(AI_PROVIDER_DEFAULTS).map(([value, it
 type SectionId =
   | 'account'
   | 'ai-engine'
-  | 'persona'
   | 'feishu'
   | 'weixin'
   | 'connection'
@@ -112,7 +108,6 @@ export default function SettingsPanel() {
       ? [{ id: 'account' as const, label: t('settings.sec.account', '账户与安全') }]
       : []),
     { id: 'ai-engine' as const, label: t('settings.sec.ai', 'AI 引擎') },
-    { id: 'persona' as const, label: t('settings.sec.persona', '人格与行为') },
     { id: 'feishu' as const, label: t('settings.sec.feishu', '飞书') },
     { id: 'weixin' as const, label: t('settings.sec.weixin', '微信') },
     { id: 'connection' as const, label: t('settings.sec.connection', '设备连接') },
@@ -332,14 +327,6 @@ export default function SettingsPanel() {
     expireAt: number; createdAt: number;
   }>>([]);
 
-  /* ── RDKClaw Persona（执行策略由服务端默认托管，不在设置中展示）── */
-  const [persona, setPersona] = useState<PersonaProfile>({
-    name: '小地瓜', extraInstructions: '', riskLevel: 'balanced',
-    delegationBias: 'balanced', autonomyLevel: 'assisted',
-  });
-  const [rdkclawLoading, setRdkclawLoading] = useState(false);
-  const [rdkclawSaving, setRdkclawSaving] = useState(false);
-
   /* ── Forum State ── */
   const [forumAuth, setForumAuth] = useState<ForumAuthView>({
     username: '', hasPassword: false, hasCookie: false, hasAppSsoAccessTokenSaved: false, linkedFromAppSso: false,
@@ -396,9 +383,8 @@ export default function SettingsPanel() {
      Data Loading
      ═══════════════════════════════════════════ */
 
-  const refreshRdkclawData = async () => {
-    const [personaRes, forumAuthRes] = await Promise.all([fetchRDKClawPersona(), fetchRDKClawForumAuth()]);
-    setPersona(personaRes.persona);
+  const refreshForumAuth = async () => {
+    const forumAuthRes = await fetchRDKClawForumAuth();
     setForumAuth(forumAuthRes.auth);
   };
 
@@ -436,39 +422,18 @@ export default function SettingsPanel() {
 
   useEffect(() => {
     if (!showSettings) return;
-    setRdkclawLoading(true);
     Promise.all([
       refreshAiConfig(),
-      refreshRdkclawData(),
+      refreshForumAuth(),
       refreshFeishuData().then(() => setFeishuLoading(false)),
       loadWeixinData(),
     ])
-      .catch(() => addToast(t('toast.readConfigFail', '读取配置失败'), 'error'))
-      .finally(() => setRdkclawLoading(false));
+      .catch(() => addToast(t('toast.readConfigFail', '读取配置失败'), 'error'));
   }, [showSettings, t]);
 
   /* ═══════════════════════════════════════════
      Handlers
      ═══════════════════════════════════════════ */
-
-  const handleSavePersona = async () => {
-    setRdkclawSaving(true);
-    try {
-      const res = await saveRDKClawPersona(persona);
-      setPersona(res.persona);
-      addToast(t('toast.personaSaved', '人格设定已保存'), 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      const timedOut = (e as { name?: string }).name === 'TimeoutError' || /abort|timeout/i.test(msg);
-      addToast(
-        timedOut
-          ? t('toast.personaSaveTimeout', '保存超时：请确认本机后端已启动且桌面端能连上 API（可重试）')
-          : t('toast.personaSaveFail', '保存人格设定失败'),
-        'error',
-      );
-    }
-    finally { setRdkclawSaving(false); }
-  };
 
   const handleSaveForumCredential = async () => {
     const username = forumUsernameInput.trim();
@@ -500,7 +465,7 @@ export default function SettingsPanel() {
     try {
       const res = await clearRDKClawForumAuth();
       setForumUsernameInput(''); setForumPasswordInput('');
-      await refreshRdkclawData();
+      await refreshForumAuth();
       addToast(res.message || t('toast.forumCleared', '论坛认证已清空'), 'success');
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toast.forumClearFail', '清空论坛认证失败'), 'error');
@@ -2051,39 +2016,7 @@ export default function SettingsPanel() {
 
               <hr className="settings-section-divider" />
 
-              {/* ══ 2. 人格与行为 ══ */}
-              <section id="persona" className="settings-section" ref={registerSectionRef('persona')}>
-                <H title={t('settings.persona.title', '人格与行为')} desc={t('settings.persona.desc', '核心人格由系统层托管（非用户可编辑文件），这里调整运行偏好和自治程度。')} />
-                <div className="settings-card">
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.persona.name', '名称')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><input className="input" title={t('settings.persona.name', '名称')} aria-label={t('settings.persona.name', '名称')} value={persona.name} onChange={e => setPersona(p => ({ ...p, name: e.target.value }))} /></div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.persona.extra', '额外指令')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><textarea className="input" title={t('settings.persona.extra', '额外指令')} aria-label={t('settings.persona.extra', '额外指令')} rows={2} value={persona.extraInstructions} onChange={e => setPersona(p => ({ ...p, extraInstructions: e.target.value }))} placeholder={t('settings.persona.extra.ph', '如「本次优先用英文回复」')} /></div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.persona.risk', '风险偏好')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><select className="select" title={t('settings.persona.risk', '风险偏好')} aria-label={t('settings.persona.risk', '风险偏好')} value={persona.riskLevel} onChange={e => setPersona(p => ({ ...p, riskLevel: e.target.value as PersonaProfile['riskLevel'] }))}><option value="conservative">{t('settings.persona.risk.conservative', '保守')}</option><option value="balanced">{t('settings.persona.risk.balanced', '均衡')}</option><option value="aggressive">{t('settings.persona.risk.aggressive', '激进')}</option></select></div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.persona.autonomy', '自治等级')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><select className="select" title={t('settings.persona.autonomy', '自治等级')} aria-label={t('settings.persona.autonomy', '自治等级')} value={persona.autonomyLevel} onChange={e => setPersona(p => ({ ...p, autonomyLevel: e.target.value as PersonaProfile['autonomyLevel'] }))}><option value="manual">{t('settings.persona.autonomy.manual', '手动')}</option><option value="assisted">{t('settings.persona.autonomy.assisted', '辅助')}</option><option value="autonomous">{t('settings.persona.autonomy.autonomous', '自主')}</option></select></div>
-                  </div>
-                  <div className="settings-row">
-                    <span className="settings-row-label">{t('settings.persona.delegation', '委派倾向')}</span>
-                    <div className="settings-row-value settings-row-value--stretch"><select className="select" title={t('settings.persona.delegation', '委派倾向')} aria-label={t('settings.persona.delegation.hint', '委派倾向：均衡为默认，RDKClaw 与套件端 OpenClaw 协同；Studio 优先偏重 SSH，套件端优先偏重 assess→delegate')} value={persona.delegationBias} onChange={e => setPersona(p => ({ ...p, delegationBias: e.target.value as PersonaProfile['delegationBias'] }))}><option value="balanced">{t('settings.persona.delegation.balancedRec', '均衡（推荐）')}</option><option value="local-first">{t('settings.persona.delegation.studio', 'Studio 优先')}</option><option value="board-first">{t('settings.persona.delegation.board', '套件端优先')}</option></select></div>
-                  </div>
-                  <div className="settings-policy-footer">
-                    <button type="button" className="btn btn-primary btn-sm" onClick={handleSavePersona} disabled={rdkclawSaving}>{rdkclawSaving ? '...' : t('settings.persona.save', '保存')}</button>
-                  </div>
-                </div>
-              </section>
-
-              <hr className="settings-section-divider" />
-
-              {/* ══ 3. 飞书 ══ */}
+              {/* ══ 飞书 ══ */}
               <section id="feishu" className="settings-section" ref={registerSectionRef('feishu')}>
                 <H title={t('settings.feishu.title', '消息渠道 · 飞书')} desc={t('settings.feishu.desc', '通过飞书机器人收发消息，让 RDKClaw 成为你的飞书助手。')} />
                 <div className="settings-card">

@@ -36,7 +36,7 @@ import {
 import { buildOpenWebRouteHintBlock, detectOpenWebUserIntent } from "./open-web-intent.js";
 import { buildRdkDocFirstUserMessageHintBlock, detectRdkDocFirstIntent } from "./rdk-doc-first-intent.js";
 import type { DelegateDecision } from "./delegation.js";
-import { buildDelegationRuntimePrompt } from "./delegation.js";
+// buildDelegationRuntimePrompt removed — no longer injecting per-turn delegation hints
 
 /** 动态段 layer id（勿并入 stable；修改此列表需谨慎） */
 export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
@@ -44,7 +44,6 @@ export const SYSTEM_PROMPT_DYNAMIC_LAYER_IDS: readonly SystemPromptLayerId[] = [
   "rdk_doc_route",
   "messaging_channel",
   "knowledge_context",
-  "delegation_runtime",
   "device_connectivity",
   "studio_ui_hints",
   "attachments",
@@ -64,7 +63,6 @@ export type SystemPromptLayerId =
   | "rdk_doc_route"
   | "messaging_channel"
   | "knowledge_context"
-  | "delegation_runtime"
   | "device_connectivity"
   | "studio_ui_hints"
   | "attachments"
@@ -175,7 +173,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
       "普通问答与闲聊：**零工具**，直接答。",
       "用户一句话要\"开发机器人应用\"时：先拆成最小闭环 5 段（输入/感知 -> 推理/控制 -> 执行节点 -> 可观测验证 -> 交付脚本），优先给可直接运行的最短路径。",
       "涉及设备执行时，先给 2-4 步短计划；再尽量合并为一次 `device_exec` 在同一 SSH 终端连续执行，避免碎片化多次试探。",
-      "ROS2/Linux/上板任务首轮尽量并行取证（rdk_doc_search_local 或 web_fetch + device 探测 + 可选 assess），减少回合数。",
+      "ROS2/Linux/上板任务首轮尽量并行取证（rdk_doc_search_local 或 web_fetch + device 探测），减少回合数。",
     ].join("\n"),
   );
   pushStable(
@@ -221,10 +219,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
     pushDynamic("knowledge_context", input.knowledgeContextBlock);
   }
 
-  if (input.deviceId && input.delegateDecision) {
-    const dr = buildDelegationRuntimePrompt(input.delegateDecision, input.boardSnapshot.skills.length);
-    pushDynamic("delegation_runtime", dr.length > 1600 ? `${dr.slice(0, 1600)}\n\n…(速览已截断)` : dr);
-  }
+  // delegation_runtime layer removed — LLM decides tool usage naturally
 
   if (input.deviceId && input.deviceConnectivity) {
     const c = input.deviceConnectivity;
@@ -240,7 +235,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
   }
 
   if (input.deviceId) {
-    const hintsBlock = buildStudioUiHintsPrompt(input.studioUiHints, input.persona.delegationBias);
+    const hintsBlock = buildStudioUiHintsPrompt(input.studioUiHints);
     if (hintsBlock) {
       const cap = 1400;
       pushDynamic(
@@ -266,7 +261,7 @@ function buildRdkclawSystemPromptBundleQuick(input: SystemPromptLayerBuildInput)
       names.length > 0
         ? `套件端技能(最多列24): ${names.join(", ")}`
         : "套件端技能快照空（快速模式未 SSH 拉取时可忽略）。";
-    pushDynamic("collaboration", `## 协作（速览）\n${skillLine}\nOpenClaw 多步再 assess→delegate；否则 SSH。`);
+    pushDynamic("collaboration", `## 协作（速览）\n${skillLine}\n多步任务用 board_openclaw_delegate 交给套件端 OpenClaw；单条命令用 device_exec。`);
   }
 
   const stablePrefix = stableLayers.map((l) => l.content).join("\n\n");
@@ -327,15 +322,13 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   );
 
   pushStable("persona", buildPersonaPrompt(input.persona));
-  pushStable("reasoning", buildReasoningGuidancePrompt(input.modelTier, input.persona.delegationBias));
+  pushStable("reasoning", buildReasoningGuidancePrompt(input.modelTier));
   pushStable(
     "quick_session_policy",
     [
       "## 执行编排纪律",
       "涉及设备命令时先给计划再执行：先列 2-4 步可验证计划，再开始落命令。",
-      input.persona.delegationBias === "balanced"
-        ? "单条原子命令可用同一持久 SSH（`device_exec`）；多步/技能链或 **SSH 不稳** 时优先 `board_openclaw_assess` → `delegate`，由套件端在板内执行，避免无计划地拆成多轮却仍硬顶 SSH。"
-        : "默认优先单次 `device_exec`（同一持久 SSH 终端）连续完成相关命令，避免无计划地分散成多轮小命令。",
+      "单条原子命令可用 `device_exec`；多步/技能链任务优先 `board_openclaw_delegate` 让套件端 OpenClaw 在板内执行。SSH 不稳时果断切到 delegate。",
       "若用户仅一句话提出机器人应用目标：先生成\"可运行最小骨架\"（节点/launch/配置/验收命令），再增量完善能力，避免一开始过度设计。",
       "ROS2/Linux/部署类任务第一轮优先并行取证并尽快收敛到可执行命令；不要把检索、探测、评估拆成多轮串行。",
       "执行结束必须给出验收结论（成功/失败、下一步）。",
@@ -343,7 +336,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   );
   pushStable(
     "web_search_triggers",
-    buildWebSearchTriggerPrompt(input.policy.network.enabled, input.persona.delegationBias),
+    buildWebSearchTriggerPrompt(input.policy.network.enabled),
   );
 
   if (input.deviceProfile) {
@@ -356,11 +349,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
 
   if (input.deviceId) {
     const deviceRosCloseLine =
-      input.persona.delegationBias === "local-first"
-        ? "确认命令后再 device_exec；**Studio 优先**：原子问题用 SSH；多步/技能/多轮试错应收束到 `board_openclaw_assess` → `delegate`，勿长串 shell 包办。"
-        : input.persona.delegationBias === "balanced"
-          ? "确认命令后再 device_exec；**均衡**：单条原子只读/探测可 SSH；多步/技能链或 **SSH 抖动、超时、同令反复失败** 时优先 `board_openclaw_assess` → `delegate`，由套件端 OpenClaw 在板内迭代，勿同一模式死磕 SSH。"
-          : "确认命令后再 device_exec；**套件端优先**：复杂多步在 assess 可行时尽早 `board_openclaw_assess` / `board_openclaw_delegate`；单条原子命令仍可直接 device_exec。";
+      "确认命令后再 device_exec；单条原子只读可 SSH；多步/技能链/SSH 不稳时优先 `board_openclaw_delegate`，由套件端 OpenClaw 在板内迭代。";
     pushStable(
       "device_research_ros",
       [
@@ -415,12 +404,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
     pushDynamic("knowledge_context", input.knowledgeContextBlock);
   }
 
-  if (input.deviceId && input.delegateDecision) {
-    pushDynamic(
-      "delegation_runtime",
-      buildDelegationRuntimePrompt(input.delegateDecision, input.boardSnapshot.skills.length),
-    );
-  }
+  // delegation_runtime layer removed in full bundle too
 
   if (input.deviceId && input.deviceConnectivity) {
     const c = input.deviceConnectivity;
@@ -438,7 +422,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   if (input.deviceId) {
     pushDynamic(
       "studio_ui_hints",
-      buildStudioUiHintsPrompt(input.studioUiHints, input.persona.delegationBias),
+      buildStudioUiHintsPrompt(input.studioUiHints),
     );
   }
 
@@ -455,7 +439,7 @@ export function buildRdkclawSystemPromptBundle(input: SystemPromptLayerBuildInpu
   if (input.deviceId) {
     pushDynamic(
       "collaboration",
-      buildCollaborationPrompt(input.boardSnapshot, input.modelTier, input.persona.delegationBias),
+      buildCollaborationPrompt(input.boardSnapshot, input.modelTier),
     );
   }
 

@@ -2908,7 +2908,11 @@
   min-width: 0;
   font-size: 0.75rem;
   font-weight: 500;
-  color: var(--text-secondary);
+}
+
+/* 标签用主色，避免与禁用态（:disabled）视觉混淆 */
+.settings-ai-advanced-field > span {
+  color: var(--text-primary);
 }
 
 .settings-ai-advanced-field .select,

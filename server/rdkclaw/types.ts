@@ -156,7 +156,8 @@ export interface PersonaProfile {
   extraInstructions: string;
   systemPromptOverride?: string;
   riskLevel: "conservative" | "balanced" | "aggressive";
-  delegationBias: "local-first" | "balanced" | "board-first";
+  /** @deprecated No longer used for prompt routing — kept for backward compat with persisted config */
+  delegationBias?: "local-first" | "balanced" | "board-first";
   autonomyLevel: "manual" | "assisted" | "autonomous";
 }
 

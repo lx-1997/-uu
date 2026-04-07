@@ -45,6 +45,7 @@ import {
   OPENCLAW_SYSTEMD_USER_DAEMON_RELOAD_CMD,
   OPENCLAW_SYSTEMD_USER_GATEWAY_DISABLE_CMD,
   OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD,
+  OPENCLAW_UNINSTALL_ENV_PROBE,
   OPENCLAW_UNINSTALL_PKILL_SNIPPET,
   OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,
   OPENCLAW_VERIFY_CLI_RUNS_SNIPPET,
@@ -1122,15 +1123,18 @@ function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never
       '彻底卸载套件端 OpenClaw：先端口释放与限时 systemctl，再限时 gateway stop（与官方一致、避免裸跑挂死）→ 官方 uninstall（限时）→ gateway uninstall + 限时 disable/daemon-reload → ClawHub logout → 删配置/缓存/tmp → 移除 ~/.bashrc PATH 注入 → npm 卸包并删全局 node_modules 残留。高风险，建议先确认。',
     inputSchema: { type: 'object', properties: {} },
     async execute() {
-      const uninstallScript = [
+      // 不使用 bash -lc "..." 包裹（外层 shell 会拓展 $OPENCLAW_CMD 为空）；
+      // 用 OPENCLAW_UNINSTALL_ENV_PROBE 在命令链开头探测登录 PATH + 系统 npm prefix。
+      return execOnDevice(deviceId, [
+        OPENCLAW_UNINSTALL_ENV_PROBE,
         'export NPM_CONFIG_PREFIX="$HOME/.npm-global"; export PATH="$HOME/.npm-global/bin:$PATH"',
         OPENCLAW_RESOLVE_CLI_SNIPPET,
         'echo "[OpenClaw] 开始卸载..."',
-        'echo "[1/6] 官方：gateway stop → uninstall；此处先释放 18789 再限时 systemctl，再限时 gateway stop（避免裸跑 CLI 挂死）..."',
+        'echo "[1/6] 停止 gateway 服务（释放 18789 → systemctl → gateway stop）..."',
         OPENCLAW_UNINSTALL_PKILL_SNIPPET,
         '(' + GATEWAY_SSH_USER_SYSTEMD_ENV + '; ' + OPENCLAW_SYSTEMD_USER_GATEWAY_STOP_CMD + ')',
         '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_STOP_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过 gateway stop"; fi)',
-        'echo "[2/6] 执行官方卸载 openclaw uninstall --all --yes --non-interactive（限时；失败则 npm/rm 兜底）..."',
+        'echo "[2/6] 执行官方卸载（限时；失败则 npm/rm 兜底）..."',
         '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_UNINSTALL_OFFICIAL_CMD + '; else echo "[OpenClaw] 未找到 openclaw CLI，跳过官方卸载（继续兜底清理）"; fi)',
         'echo "[3/6] 卸载 systemd 服务..."',
         '(if [ -n "$OPENCLAW_CMD" ]; then ' + OPENCLAW_CLI_GATEWAY_UNINSTALL_CMD + '; fi)',
@@ -1144,13 +1148,12 @@ function boardOpenClawUninstallTool(deviceId: string): Tool<Record<string, never
         OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET,
         'echo "[6/6] 移除全局 npm 包与残留目录..."',
         '(npm rm -g openclaw 2>/dev/null || npm uninstall -g openclaw 2>/dev/null || true)',
+        '(if [ -n "${_SYS_NPM_PF:-}" ] && [ "$_SYS_NPM_PF" != "$HOME/.npm-global" ]; then NPM_CONFIG_PREFIX="$_SYS_NPM_PF" npm rm -g openclaw 2>/dev/null || true; fi)',
         '(npm rm -g clawhub 2>/dev/null || true)',
         '(npm rm -g clawctl 2>/dev/null || true)',
         OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET,
         'echo "[OpenClaw] 卸载完成，已彻底清理"',
-      ].join(' && ');
-      const cmd = `bash -lc ${JSON.stringify(uninstallScript)}`;
-      return execOnDevice(deviceId, [cmd]);
+      ]);
     },
   };
 }

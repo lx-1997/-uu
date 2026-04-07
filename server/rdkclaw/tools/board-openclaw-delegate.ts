@@ -71,18 +71,15 @@ const BOARD_LEARNING_CONTRACT = [
   "- 在有写权限且路径可用时，将复盘摘要落盘到 `~/.openclaw/workspace/memory/`（可按日期追加到 daily 文件）；若无法写入，需在结果中明确说明原因。",
 ].join("\n");
 
-/** 注入协作优先契约：先对齐 → 待 RDKClaw 回应 → 再执行（见下方 alignment_gate） */
+/** 协作契约已简化：RDKClaw 是师傅，OpenClaw 是徒弟，直接执行无需对齐门禁 */
 const BOARD_COLLAB_CONTRACT = [
   "---",
   "board_collaboration_contract (mandatory, zh):",
-  "0) **执行门禁（硬）**：OpenClaw **必须先**输出 **[套件端·对齐]**（目标/约束/验收理解、主要风险、拟定步骤或缺口）。在 **收到 RDKClaw 侧明确回应之前**，**禁止**执行会改变套件端状态的操作：`apt`/`pip`、写文件或配置、`ros2 launch`、编译、后台常驻等。",
-  "1) **对齐闭环**：请同时阅读本消息中的 **`alignment_gate`** 行：",
-  "   - **`strict`**：本回合在**破坏性操作**前**仅**完成 [套件端·对齐]（及必要的 [NEED_RDKCLAW]）；**须待 RDKClaw 通过 `board_openclaw_chat` 发来「同意执行 / 补充 / 修订」** 后，在**后续会话轮**再进入 **[套件端·执行]**。不要把 delegate 当成「收到就一口气跑完」。",
-  "   - **`bypassed`**：`rdkclaw_guidance` 已含「对齐完成·可直接执行」或「已由 RDKClaw 确认」的可直跑命令时，仍须**先**写简短 [套件端·对齐] 复述「理解一致」，**然后**可在**同一回复**中进入执行。",
-  "2) **只读例外（仅 strict 时）**：为完成对齐所必需的 **只读** 探测（`ls`、`ros2 pkg list`、`topic echo` 等）允许；**不得**借机安装、写盘或启动长驻服务。",
-  "3) 信息不足时：在 [套件端·对齐] 点名缺口；需文档/联网/策略时用 [NEED_RDKCLAW]。",
-  "4) 若判断 RDKClaw 本地更快闭环，在 [套件端·对齐] 中明确建议回切，勿闷头执行。",
-  "5) 执行阶段（门禁放行后）保持可见：每步「做什么→得到什么→下一步为什么」。",
+  "0) **角色**：你是 RDKClaw 的套件端徒弟（OpenClaw），RDKClaw 是师傅。师傅负责决策和指导，你负责在板端执行并学习。",
+  "1) **直接执行**：收到委派后按 guidance 直接执行，不需要等待确认。若 guidance 已给出具体命令，优先按命令执行。",
+  "2) **主动反馈**：执行中遇到问题、发现预期外情况、或需要师傅帮忙查资料时，用 [NEED_RDKCLAW] 求助。",
+  "3) **复盘学习**：任务完成后输出 [套件端·复盘]，把关键经验沉淀到 memory，下次遇到同类问题可直接处理。",
+  "4) 若判断任务不适合在套件端执行（缺资源、缺网络等），简要说明原因并建议师傅用 device_exec 本地完成。",
 ].join("\n");
 
 const DELEGATE_STALL_CHECK_MS = 10_000;
@@ -365,22 +362,18 @@ export function boardOpenClawDelegateTool(
   return {
     name: "board_openclaw_delegate",
     description:
-      "读者=编排模型。把**一段套件端责任**交给套件端 OpenClaw 在其会话里执行（多步推理、技能链、迭代排障），不是「多调几次 SSH」的别名。\n" +
-      "将任务交给套件端 OpenClaw 与 RDKClaw 协同推进。不是把 OpenClaw 当纯执行器，而是共享上下文并共同决策路径。\n" +
-      "**Studio 可见性**：套件端流式输出经 **tool_progress** 推到对话里的「套件端 OpenClaw」协作块；请展开该块查看实时日志。委派消息会附带 **board_visibility_contract**，要求套件端用「[套件端] 阶段 · …」分段说明；技能 **RDK Board Progress Reporter**（仓库 `skills/rdk-board-progress-reporter`）可装到套件端强化可见性。若只见「完成」而无过程，检查折叠区或套件端是否按契约输出。\n\n" +
+      "读者=编排模型。把**一段套件端责任**交给套件端 OpenClaw 在板端执行（多步推理、技能链、迭代排障）。\n" +
+      "RDKClaw 是师傅，OpenClaw 是徒弟：师傅编排决策并提供 guidance，徒弟在板端执行并学习成长。\n" +
+      "**Studio 可见性**：套件端流式输出经 **tool_progress** 推到对话里的「套件端 OpenClaw」协作块。\n\n" +
       "规则：\n" +
-      "- **前置条件（缺一可能无法工作）**：① Studio 能 **SSH 到板**（与 device_exec 同源）；② 套件端 **OpenClaw Gateway 已运行**（本工具会预检；若套件端**未配置**大模型网关，会按 OpenClaw 页「套件端委派预选」的 Studio 模型条目（未选时与 Dock 深度思考一致）写入 `custom-gateway` 并合并/网关重启；预检会**轮询等待**就绪，避免刚重启就失败）；③ 若任务需 **apt/clawhub/云端模型 API** 等，开发者套件还须 **能访问外网**；纯离线本地推理时③可不要求\n" +
-      "- **避免预检反复动网关**：若你希望委派前**不要**自动下发 Studio 模型（减少重启），可在工作室服务端环境变量设 `RDK_DELEGATE_SKIP_STUDIO_MODEL_SYNC=1`，改在 OpenClaw 页手动保存大模型后再委派。\n" +
-      "- ALWAYS 在消息里提供协作上下文包（目标、约束、已验证证据、失败模式、验收标准），让双方先对齐再推进（共探，不是单方面派活）\n" +
-      "- assess 通过不等于必须 delegate：比较的是**谁更快办成**——你已确认可直跑时常先 SSH；套件端在技能链/现场迭代上更快时再委派；本地进入多轮试错时倾向并线到套件端会话\n" +
-      "- **对齐门禁**：套件端会收到 `alignment_gate`。`strict` 时 OpenClaw **先只出 [套件端·对齐]**，须 **你**用 `board_openclaw_chat` 明确回应（同意/补充/修订）后它才应执行破坏性步骤；若 delegate **首次返回**仅有对齐而无执行，**下一轮必须** `board_openclaw_chat` 放行。已在 guidance 写清「对齐完成·可直接执行」或「已由 RDKClaw 确认」命令时走 `bypassed`，仍须先简短对齐复述。\n" +
-      "- ALWAYS 在 guidance 中注入你的分析和建议——OpenClaw 只了解套件端本地状态，你的全局知识（RDK 文档、联网检索结果）对它至关重要\n" +
-      "- ALWAYS 在 guidance/context 中写明：验收标准、已执行命令与关键输出、失败模式、约束条件（网络/权限/板型）\n" +
-      "- ALWAYS 要求 OpenClaw 在完成后输出可复用复盘（命令链/失败信号/验收）并尽量落盘到套件端 memory，帮助后续同类任务提速\n" +
-      "- 若任务可能超出套件端当前技能，在 guidance 中提示：可先用 find-skills（SkillHub）检索/安装再执行\n" +
-      "- 委派后 ALWAYS 评估返回结果的质量，失败时用本地工具兜底\n" +
-      "- 若 OpenClaw 回复含 [NEED_RDKCLAW] 块，提取 type/query/reason 后用你的工具获取信息，再通过 board_openclaw_chat 发回\n" +
-      "- 同一对话内自动复用会话，套件端保留上下文\n" +
+      "- **前置条件**：① Studio 能 SSH 到板；② 套件端 OpenClaw Gateway 已运行（本工具会预检并自动同步模型）；③ 若任务需联网则开发者套件须能访问外网\n" +
+      "- ALWAYS 在 guidance 中提供高质量上下文包（目标、约束、已验证证据、失败模式、验收标准），这是师傅给徒弟最重要的教学材料\n" +
+      "- 若 RDKClaw 已确认完整命令，在 guidance 中直接给出并标注「已由 RDKClaw 确认」，徒弟无需重复探测\n" +
+      "- ALWAYS 要求 OpenClaw 在完成后输出复盘（命令链/失败信号/验收），帮助徒弟积累经验\n" +
+      "- 若任务可能超出当前技能，在 guidance 中提示可用 find-skills 检索\n" +
+      "- 委派后 ALWAYS 评估返回结果质量，失败时用本地工具兜底\n" +
+      "- 若 OpenClaw 回复含 [NEED_RDKCLAW] 块，用你的工具获取信息后通过 board_openclaw_chat 发回\n" +
+      "- NEVER 把单条可完成的 device_exec 任务委派给 OpenClaw\n" +
       "- NEVER 在未连接设备时调用此工具",
     inputSchema: {
       type: "object",
@@ -391,7 +384,7 @@ export function boardOpenClawDelegateTool(
         guidance: {
           type: "string",
           description:
-            "RDKClaw 对 OpenClaw 的建议与上下文。若本回合在 Studio 侧**已完成对齐**、可让套件端同轮执行，须含 **「对齐完成·可直接执行」**（或「已由 RDKClaw 确认」的可直跑命令）；否则留空或不含上述短语时套件端为 **strict** 门禁，须待你用 board_openclaw_chat 回应后再执行。",
+            "RDKClaw 对 OpenClaw 的指导与上下文（师傅给徒弟的教学材料）。应包含：目标、约束、建议方案、已确认命令（如有）、验收标准。若已确认命令可标注「已由 RDKClaw 确认」。",
         },
         encourageSkills: { type: "boolean", description: "是否鼓励 OpenClaw 优先使用自身已安装的技能来完成任务（默认 true）" },
         sessionId: { type: "string", description: "可选会话ID，用于连续对话" },
@@ -405,17 +398,6 @@ export function boardOpenClawDelegateTool(
 
       const boardDevice = toBoardDevice(device);
       await ensureBoardGatewayReady(manager, device, (chunk) => onProgress?.(chunk, ctx.toolCallId), ctx.abortSignal);
-      const health = await getBoardHealth(manager, boardDevice);
-      const net = await probeBoardConnectivity(manager, boardDevice);
-      const strictAlignmentGate = Boolean(health.aiReady && net.wifiConnected);
-      if (!strictAlignmentGate) {
-        const reason = !health.aiReady
-          ? "OpenClaw 网关未稳定就绪"
-          : !net.wifiConnected
-            ? "套件端 WiFi 未连接"
-            : "网络状态未满足";
-        onProgress?.(`\n[协作门槛降级] ${reason}：本轮不强制 [套件端·对齐] 成功门槛，避免任务卡死。\n`, ctx.toolCallId);
-      }
       const useSkills = input.encourageSkills !== false;
       const assessInject = formatAssessInjectBlock(ctx.sessionKey, deviceId);
       logDualAgentEvent({
@@ -431,7 +413,7 @@ export function boardOpenClawDelegateTool(
         `task: ${input.task}`,
       ];
       msgParts.push(
-        "\ncollaboration_mode: RDKClaw 与 OpenClaw 双伙伴共探（先对齐再推进；谁快谁牵头；必要时换道/回切本地快路径）",
+        "\ncollaboration_mode: RDKClaw（师傅）→ OpenClaw（徒弟）：师傅编排决策，徒弟在板端执行并学习成长",
       );
       if (assessInject) {
         msgParts.push(`\n${assessInject}`);
@@ -445,23 +427,7 @@ export function boardOpenClawDelegateTool(
             : `\nrdkclaw_guidance: ${g}`,
         );
       }
-      {
-        const g = input.guidance?.trim() ?? "";
-        const hasConfirmedCmd = /RDKClaw\s*已确认|已由\s*RDKClaw\s*确认|已确认.*可直接执行/i.test(g);
-        const alignmentCompleted =
-          /对齐完成[·•]?\s*可直接执行|ALIGNMENT_COMPLETE|对齐\s*[:：]\s*完成/i.test(g);
-        const bypassAlignmentGate = hasConfirmedCmd || alignmentCompleted;
-        msgParts.push(
-          bypassAlignmentGate
-            ? "\nalignment_gate: bypassed（guidance 已含「对齐完成」或「已确认命令」；须先简短 [套件端·对齐] 复述一致，再在同一回复中执行）"
-            : "\nalignment_gate: strict（须先仅输出 [套件端·对齐]；待 RDKClaw 经 board_openclaw_chat 明确回应后再执行 apt/写盘/launch/长驻等）",
-        );
-        if (!strictAlignmentGate) {
-          msgParts.push(
-            "\nalignment_gate_relaxed: 网关/网络门槛未满足时已放宽「须先 chat」的硬性（避免卡死）；仍应先 [套件端·对齐] 并尽量与 RDKClaw 同步后再动破坏性步骤。",
-          );
-        }
-      }
+      // alignment_gate removed — 徒弟直接执行，无需等待师傅逐步确认
       if (boardSkills && boardSkills.length > 0) {
         const installed = boardSkills.map((s) =>
           `  - ${s.name}: ${s.description || "无描述"} [${s.path}]`
@@ -575,21 +541,7 @@ export function boardOpenClawDelegateTool(
         const { output, success } = await runOnce();
         if (success) {
           let result = output.trim() || "套件端 OpenClaw 执行完成（无文本输出）";
-          if (strictAlignmentGate && !hasBoardAlignmentSection(result)) {
-            onProgress?.("\n[协作门槛] 未收到 [套件端·对齐]，正在要求套件端先补齐对齐信息...\n", ctx.toolCallId);
-            const alignPrompt = [
-              "请先补齐 [套件端·对齐] 段后再继续：",
-              "1) 你对目标/约束/验收的理解；",
-              "2) 主要风险与备选路径；",
-              "3) 当前建议：继续套件端执行，还是回切 RDKClaw 本地快路径（给理由）。",
-            ].join("\n");
-            const alignTry = await runOnce(alignPrompt);
-            const merged = [result, String(alignTry.output || "").trim()].filter(Boolean).join("\n\n");
-            if (!(alignTry.success && hasBoardAlignmentSection(merged))) {
-              throw new Error("未收到 [套件端·对齐]，本轮不判定成功。请先确认 OpenClaw 在线且套件端 WiFi 已连接后重试。");
-            }
-            result = merged;
-          }
+          // alignment_gate check removed — 徒弟直接执行，不再要求先输出对齐段
           const need = applyNeedStreakPolicy(ctx.sessionKey, deviceId, result, {
             phase: "delegate",
             toolCallId: ctx.toolCallId,

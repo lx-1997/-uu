@@ -7608,9 +7608,15 @@ async function startServer() {
   await restoreRuntimeJobsState();
   httpServer.once('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(
-        `[server] 端口 ${port} 已被占用（EADDRINUSE）。请关闭占用该端口的程序（例如另一份 RDK Studio、或开发环境的 npm run dev），或设置环境变量 PORT 使用其它端口。`,
-      );
+      const isPackagedDesktop = process.env.RDK_PACKAGED_DESKTOP === '1';
+      if (isPackagedDesktop) {
+        // 桌面端由 electron 主进程自动尝试下一个端口，此处仅简短输出供日志追踪
+        console.error(`[server] 端口 ${port} 已被占用（EADDRINUSE），桌面端将自动尝试下一端口。`);
+      } else {
+        console.error(
+          `[server] 端口 ${port} 已被占用（EADDRINUSE）。请关闭占用该端口的程序（例如另一份 RDK Studio、或开发环境的 npm run dev），或设置环境变量 PORT 使用其它端口。`,
+        );
+      }
     } else {
       console.error('[server] httpServer 监听失败:', err.message);
     }
