@@ -23,6 +23,23 @@ describe('buildSupabaseConversationRow', () => {
     expect(row.error_detail).toBeNull();
   });
 
+  it('preserves full message bodies without truncation', () => {
+    const long = 'x'.repeat(150_000);
+    const row = buildSupabaseConversationRow({
+      schema: CONVERSATION_SCHEMA,
+      recordedAt: Date.now(),
+      userMessage: long,
+      assistantMessage: long,
+      toolsUsed: ['a'],
+      channel: 'studio',
+      outcome: 'completed',
+      errorDetail: 'e'.repeat(20_000),
+    });
+    expect(row.user_message.length).toBe(150_000);
+    expect(row.assistant_message.length).toBe(150_000);
+    expect(row.error_detail?.length).toBe(20_000);
+  });
+
   it('uses finite recordedAt fallback when invalid', () => {
     const before = Date.now();
     const row = buildSupabaseConversationRow({

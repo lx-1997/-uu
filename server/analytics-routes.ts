@@ -127,25 +127,11 @@ export function registerAnalyticsRoutes(app: Express): void {
     }
     const result = await performDailyActiveInsert(usageKey, appVersion);
     if (!result.ok) {
-      res.status(500).json({ ok: false, error: result.error });
+      res.status(500).json({ ok: false, error: 'server_error' });
       return;
     }
-    if (!result.persisted) {
-      if (result.reason === 'unavailable') {
-        res.json({ ok: true, persisted: false });
-      } else {
-        res.json({
-          ok: true,
-          persisted: false,
-          reason: result.reason,
-        });
-      }
-      return;
-    }
-    res.json({
-      ok: true,
-      persisted: true,
-    });
+    /** 不向客户端暴露是否落库或后端存储细节（含 Supabase） */
+    res.json({ ok: true });
   });
 }
 

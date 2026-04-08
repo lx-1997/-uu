@@ -32,13 +32,13 @@ export interface UIStoreState {
   openDrAuthenticatedPortal: (kind: DrAuthenticatedPortalKind, baseUrl: string) => Promise<void>;
   closeDrAuthenticatedPortal: () => void;
 
-  // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done') => void;
+  // Onboarding（模型与 OpenClaw 部署在侧栏「OpenClaw」页后台进行，不占用引导步骤）
+  obStep: 'board' | 'flash' | 'connect' | 'rdkclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'rdkclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
-  obReturnStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null;
-  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null) => void;
+  obReturnStep: 'board' | 'flash' | 'connect' | 'rdkclaw' | null;
+  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'rdkclaw' | null) => void;
 
   // Loading
   isLoading: boolean;
@@ -279,9 +279,18 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
   }, [activeTab]);
 
   // ── Onboarding (persisted) ──
-  const [obStep, setObStepRaw] = useState<'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done'>(() => {
+  const [obStep, setObStepRaw] = useState<'board' | 'flash' | 'connect' | 'rdkclaw' | 'done'>(() => {
     const saved = localStorage.getItem('rdk-onboarding-step');
-    if (saved && ['board', 'flash', 'connect', 'model', 'openclaw', 'rdkclaw', 'done'].includes(saved)) return saved as any;
+    const allowed = ['board', 'flash', 'connect', 'rdkclaw', 'done'] as const;
+    if (saved === 'model' || saved === 'openclaw') {
+      try {
+        localStorage.setItem('rdk-onboarding-step', 'rdkclaw');
+      } catch {
+        /* ignore */
+      }
+      return 'rdkclaw';
+    }
+    if (saved && (allowed as readonly string[]).includes(saved)) return saved as (typeof allowed)[number];
     return 'board';
   });
   const setObStep = (v: typeof obStep) => {
@@ -302,7 +311,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
       /* ignore storage failures */
     }
   };
-  const [obReturnStep, setObReturnStep] = useState<'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null>(null);
+  const [obReturnStep, setObReturnStep] = useState<'board' | 'flash' | 'connect' | 'rdkclaw' | null>(null);
 
   // ── Loading ──
   const [isLoading, setIsLoading] = useState(false);

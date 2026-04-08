@@ -174,8 +174,10 @@ export default function SsoLoginScreen() {
         }
         addToast(st('sso.loginSuccess', '登录成功'), 'success');
         void window.rdkDesktop?.stopSsoEmbedded?.();
-        /** adoptBootstrapSession 已写入 user；勿 await refresh，避免与 /api/sso/me 粘滞重试叠加阻塞首帧进入主界面 */
-        void refresh();
+        /** 略延迟再 refresh：与 localStorage 镜像头、HttpOnly Cookie 对齐，避免紧随其后的 /api/sso/me 竞态清空会话 */
+        window.setTimeout(() => {
+          void refresh();
+        }, 400);
       } catch {
         void window.rdkDesktop?.stopSsoEmbedded?.();
         setDesktopSsoUrl('');

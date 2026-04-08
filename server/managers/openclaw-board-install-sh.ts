@@ -181,22 +181,31 @@ export const OPENCLAW_BOARD_NODE_MIN_MAJOR = 24;
 export const OPENCLAW_NODESOURCE_SETUP = `setup_${OPENCLAW_BOARD_NODE_MIN_MAJOR}.x`;
 
 /**
- * 在 apt-get / NodeSource 脚本前执行：等待 `/var/lib/apt/lists/lock` 与 dpkg 锁释放。
+ * apt 2.1+：持锁时让 apt-get 自身阻塞等待 dpkg 前端锁（与 shell 轮询互补），减少首装「Could not get lock」需二次部署的情况。
+ */
+export const OPENCLAW_APT_DPKG_LOCK_WAIT_OPT = '-o Dpkg::Lock::Timeout=180';
+
+/** 外层轮询：最多约 ITER_MAX×2 秒；嵌入式 unattended-upgrades 可能较慢 */
+export const OPENCLAW_WAIT_APT_LOCK_ITER_MAX = 300;
+
+/**
+ * 在 apt-get / NodeSource 脚本前执行：等待 lists/archives/dpkg 锁释放，并探测 apt/dpkg/unattended 进程。
  * 常见场景：unattended-upgrades、另一路 apt、用户手动 apt 与 Studio 安装并发 → 无此等待则 apt update/install 全失败。
- * 120s 仍未释放时，不直接中止整个安装链，而是设置 `_oc_lock_wait_ok=0`，让后续走非 apt 兜底。
+ * 达上限仍未释放时，不直接中止整个安装链，而是设置 `_oc_lock_wait_ok=0`，让后续走非 apt 兜底。
  */
 export const OPENCLAW_WAIT_APT_LOCK_SNIPPET = joinShellLines([
   '_oc_ai=0',
   '_oc_lock_wait_ok=1',
-  'while [ "$_oc_ai" -lt 120 ]; do',
+  `_oc_lock_max=${OPENCLAW_WAIT_APT_LOCK_ITER_MAX}`,
+  'while [ "$_oc_ai" -lt "$_oc_lock_max" ]; do',
   '_oc_ab=0',
-  'if command -v fuser >/dev/null 2>&1; then fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && _oc_ab=1; fuser /var/lib/dpkg/lock >/dev/null 2>&1 && _oc_ab=1; fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && _oc_ab=1; else pgrep -x apt-get >/dev/null 2>&1 && _oc_ab=1; pgrep -x apt >/dev/null 2>&1 && _oc_ab=1; pgrep -x dpkg >/dev/null 2>&1 && _oc_ab=1; fi',
+  'if command -v fuser >/dev/null 2>&1; then fuser /var/lib/apt/lists/lock >/dev/null 2>&1 && _oc_ab=1; fuser /var/cache/apt/archives/lock >/dev/null 2>&1 && _oc_ab=1; fuser /var/lib/dpkg/lock >/dev/null 2>&1 && _oc_ab=1; fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 && _oc_ab=1; else pgrep -x apt-get >/dev/null 2>&1 && _oc_ab=1; pgrep -x apt >/dev/null 2>&1 && _oc_ab=1; pgrep -x dpkg >/dev/null 2>&1 && _oc_ab=1; pgrep -f unattended >/dev/null 2>&1 && _oc_ab=1; fi',
   'if [ "$_oc_ab" = 0 ]; then break; fi',
   '_oc_ai=$((_oc_ai+1))',
-  'echo "[OpenClaw] 等待 apt/dpkg 锁释放（其他 apt 可能正在运行）... ($_oc_ai/120)" 1>&2',
-  'sleep 1',
+  'echo "[OpenClaw] 等待 apt/dpkg 锁释放（其他 apt 可能正在运行）... ($_oc_ai/${_oc_lock_max})" 1>&2',
+  'sleep 2',
   'done',
-  'if [ "$_oc_ai" -ge 120 ]; then echo "[OpenClaw] 警告: apt 锁 120s 内未释放，跳过 apt 路径并尝试非 apt 兜底。可稍后重试，或先: sudo fuser -v /var/lib/apt/lists/lock /var/lib/dpkg/lock" 1>&2; _oc_lock_wait_ok=0; fi',
+  'if [ "$_oc_ai" -ge "$_oc_lock_max" ]; then echo "[OpenClaw] 警告: apt 锁等待达上限（约 $((_oc_lock_max*2))s）仍未释放，跳过 apt 路径并尝试非 apt 兜底。可稍后重试，或先: sudo fuser -v /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock" 1>&2; _oc_lock_wait_ok=0; fi',
 ]);
 
 export const OPENCLAW_NODE_DIST_FALLBACK_SNIPPET = joinShellLines([
@@ -477,27 +486,27 @@ export const OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET = joinShellLines([
   'if command -v apt-get >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then',
   OPENCLAW_WAIT_APT_LOCK_SNIPPET,
   'if [ "${_oc_lock_wait_ok:-1}" = "1" ] && [ "$(id -u)" -eq 0 ]; then',
-  'DEBIAN_FRONTEND=noninteractive apt-get update -qq || true;',
+  `DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} update -qq || true;`,
   `echo "[OpenClaw] 升级 Node ${OPENCLAW_BOARD_NODE_MIN_MAJOR} LTS（预清理 apt 冲突包）" 1>&2;`,
-  'DEBIAN_FRONTEND=noninteractive apt-get remove -y libnode-dev nodejs 2>&1 || true;',
-  'DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>&1 || true;',
-  'DEBIAN_FRONTEND=noninteractive apt-get -f install -y 2>&1 || true;',
+  `DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} remove -y libnode-dev nodejs 2>&1 || true;`,
+  `DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} autoremove -y 2>&1 || true;`,
+  `DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} -f install -y 2>&1 || true;`,
   'rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true;',
   `OC_NS_URL="\${OPENCLAW_NODESOURCE_BASE:-https://deb.nodesource.com}/${OPENCLAW_NODESOURCE_SETUP}";`,
   'OC_NS_SH="/tmp/oc_nodesource_setup.sh";',
-  'if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else if ! bash "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本执行失败（见上方输出），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else rm -f "$OC_NS_SH"; DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs && OC_NODE_BOOTSTRAP_OK=1 || true; fi; fi;',
+  `if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else if ! bash "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本执行失败（见上方输出），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else rm -f "$OC_NS_SH"; DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} install -y nodejs && OC_NODE_BOOTSTRAP_OK=1 || true; fi; fi;`,
   'elif [ "${_oc_lock_wait_ok:-1}" = "1" ] && command -v sudo >/dev/null 2>&1; then',
-  'sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true;',
+  `sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} update -qq || true;`,
   `echo "[OpenClaw] 升级 Node ${OPENCLAW_BOARD_NODE_MIN_MAJOR} LTS（预清理 apt 冲突包）" 1>&2;`,
-  'sudo env DEBIAN_FRONTEND=noninteractive apt-get remove -y libnode-dev nodejs 2>&1 || true;',
-  'sudo env DEBIAN_FRONTEND=noninteractive apt-get autoremove -y 2>&1 || true;',
-  'sudo env DEBIAN_FRONTEND=noninteractive apt-get -f install -y 2>&1 || true;',
+  `sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} remove -y libnode-dev nodejs 2>&1 || true;`,
+  `sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} autoremove -y 2>&1 || true;`,
+  `sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} -f install -y 2>&1 || true;`,
   'sudo rm -f /etc/apt/sources.list.d/nodesource.list 2>/dev/null || true;',
   `OC_NS_URL="\${OPENCLAW_NODESOURCE_BASE:-https://deb.nodesource.com}/${OPENCLAW_NODESOURCE_SETUP}";`,
   'OC_NS_SH="/tmp/oc_nodesource_setup.sh";',
-  'if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else if ! sudo -E bash "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本执行失败（见上方输出），改用二进制兜底" 1>&2; sudo rm -f "$OC_NS_SH"; else sudo rm -f "$OC_NS_SH"; sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs && OC_NODE_BOOTSTRAP_OK=1 || true; fi; fi;',
+  `if ! curl -fsSL --retry 4 --retry-delay 4 --connect-timeout 25 --max-time 320 "$OC_NS_URL" -o "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本下载失败（常见: SSL_read reset/网络抖动），改用二进制兜底" 1>&2; rm -f "$OC_NS_SH"; else if ! sudo -E bash "$OC_NS_SH"; then echo "[OpenClaw] 警告: NodeSource 脚本执行失败（见上方输出），改用二进制兜底" 1>&2; sudo rm -f "$OC_NS_SH"; else sudo rm -f "$OC_NS_SH"; sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} install -y nodejs && OC_NODE_BOOTSTRAP_OK=1 || true; fi; fi;`,
   'else',
-  `echo "[OpenClaw] 提示: 无法走 NodeSource apt（缺少 root/sudo 或 apt 锁繁忙），改用二进制兜底。若要手动安装，可执行: curl -fsSL https://deb.nodesource.com/${OPENCLAW_NODESOURCE_SETUP} -o /tmp/ns.sh && sudo bash /tmp/ns.sh && sudo apt-get install -y nodejs" 1>&2;`,
+  `echo "[OpenClaw] 提示: 无法走 NodeSource apt（缺少 root/sudo 或 apt 锁繁忙），改用二进制兜底。若要手动安装，可执行: curl -fsSL https://deb.nodesource.com/${OPENCLAW_NODESOURCE_SETUP} -o /tmp/ns.sh && sudo bash /tmp/ns.sh && sudo apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} install -y nodejs" 1>&2;`,
   'fi;',
   'fi',
   'if ! command -v node >/dev/null 2>&1; then _NODE_V="v0"; _NODE_MAJ=0; fi',
@@ -531,8 +540,8 @@ export const OPENCLAW_ENSURE_NPM_SNIPPET = joinShellLines([
   'fi;',
   'if ! command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then ',
   OPENCLAW_WAIT_APT_LOCK_SNIPPET,
-  'if [ "${_oc_lock_wait_ok:-1}" = "1" ] && [ "$(id -u)" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
-  'elif [ "${_oc_lock_wait_ok:-1}" = "1" ] && command -v sudo >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true;',
+  `if [ "\${_oc_lock_wait_ok:-1}" = "1" ] && [ "$(id -u)" -eq 0 ]; then DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} update -qq || true; DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} install -y npm || true;`,
+  `elif [ "\${_oc_lock_wait_ok:-1}" = "1" ] && command -v sudo >/dev/null 2>&1; then sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} update -qq || true; sudo env DEBIAN_FRONTEND=noninteractive apt-get ${OPENCLAW_APT_DPKG_LOCK_WAIT_OPT} install -y npm || true;`,
   'else true; fi;',
   'fi;',
   'if ! command -v npm >/dev/null 2>&1 && command -v opkg >/dev/null 2>&1; then opkg update || true; (opkg install npm || opkg install nodejs-npm || true); fi;',

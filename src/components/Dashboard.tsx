@@ -506,10 +506,11 @@ export default function Dashboard() {
 
   const parallax = useParallax();
 
-  const onboardingInProgress = obStep !== 'done';
-  const postConnectSteps = obStep === 'model' || obStep === 'openclaw' || obStep === 'rdkclaw';
-  const connectJustCompleted = obStep === 'connect' && !!effectiveDevice;
-  const showOnboarding = onboardingInProgress && (!currentDevice || postConnectSteps || connectJustCompleted);
+  /**
+   * 新手引导须在未标记 done 时始终可进入，**不能**用「已有设备」隐藏：
+   * 否则 obStep 仍为 board/flash/connect 时用户只会看到空工作台，烧录与引导步骤被静默跳过（用户反馈集中区）。
+   */
+  const showOnboarding = obStep !== 'done';
 
   if (showOnboarding) {
     return (

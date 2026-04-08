@@ -190,9 +190,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * 避免首屏 boot 超时后仍把界面写回「已登录」或卡在验证态。
    */
   const refreshGenRef = useRef(0);
+  /** 桌面环回 /api/sso/bootstrap 成功时刻，供 refresh 宽限期判断 */
+  const lastBootstrapAtRef = useRef(0);
 
   const adoptBootstrapSession = useCallback((nextUser: SSOUser, sessionId: string) => {
     refreshGenRef.current += 1;
+    lastBootstrapAtRef.current = Date.now();
     lastConfirmedUserRef.current = nextUser;
     writeUserSnapshot(nextUser);
     setSsoSessionMirror(sessionId);
@@ -355,7 +358,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
      * 禁止在此处用 lastConfirmedUserRef「补回」界面用户：
      * 服务端已明确返回无 user（会话过期、鉴权失败）时，若仍写回快照，会出现 Toast/接口 401
      * 与「仍显示已登录并进入主界面」不一致。粘滞重试仅用于 Cookie/镜像尚未生效的前几秒。
+     *
+     * 例外：刚完成桌面环回 bootstrap 后，紧随其后的 refresh 可能与 Cookie/镜像头竞态，/api/sso/me 偶发空；
+     * 此时勿秒清会话，否则表现「登录成功却进不了主界面」。
      */
+    const bootstrapGraceMs = 12_000;
+    if (
+      lastBootstrapAtRef.current > 0
+      && Date.now() - lastBootstrapAtRef.current < bootstrapGraceMs
+      && lastConfirmedUserRef.current
+      && getSsoSessionMirrorId()
+    ) {
+      if (!stale()) {
+        setUser(lastConfirmedUserRef.current);
+      }
+      return;
+    }
+
     lastConfirmedUserRef.current = null;
     clearUserSnapshot();
     if (!stale()) {

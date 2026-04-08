@@ -39,13 +39,13 @@ async function postDailyActive(body: Record<string, string>): Promise<boolean> {
       body: JSON.stringify(body),
     });
     if (!res.ok) return false;
-    let data: { persisted?: boolean } = {};
+    let data: { ok?: boolean } = {};
     try {
-      data = (await res.json()) as { persisted?: boolean };
+      data = (await res.json()) as { ok?: boolean };
     } catch {
       return false;
     }
-    return data.persisted !== false;
+    return data.ok !== false;
   } catch {
     return false;
   }

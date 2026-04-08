@@ -11,7 +11,15 @@
     'Segoe UI',
     Roboto,
     'PingFang SC',
+    'Hiragino Sans GB',
     'Microsoft YaHei',
+    'Noto Sans SC',
+    'Noto Sans CJK SC',
+    'Yu Gothic UI',
+    'Malgun Gothic',
+    'Segoe UI Emoji',
+    'Apple Color Emoji',
+    'Noto Color Emoji',
     sans-serif;
   background: radial-gradient(120% 80% at 50% 0%, #1a237e22 0%, transparent 55%),
     linear-gradient(165deg, #070b12 0%, #0d111a 45%, #0a0e16 100%);

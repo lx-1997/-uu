@@ -25,7 +25,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_PORT = 8787;
 const SERVER_PORT_FALLBACK_SPAN = 10;
-const SERVER_BOOT_TIMEOUT_MS = 15_000;
+/** 弱磁盘/杀毒首次扫 Node 子进程时易超过 15s，略放宽以减少「启动不了」误报 */
+const SERVER_BOOT_TIMEOUT_MS = 28_000;
 const SERVER_SHUTDOWN_GRACE_MS = 2_500;
 
 // 与 src/styles/tokens.css --rail-width（56）及 shell 网格一致；勿用旧版 260，否则回退 bounds 时左侧整段仍显示 React「前页」
@@ -2309,7 +2310,8 @@ app.whenReady().then(async () => {
   if (isPacked) {
     try {
       const port = await startEmbeddedServer();
-      const ready = await waitForServer(port, 3);
+      /** launchEmbeddedServer 已轮询 probe，此处再留足重试以应对慢盘/首启 JIT 较慢的机器 */
+      const ready = await waitForServer(port, 24);
       if (!ready) {
         throw new Error(`内置服务健康检查失败（端口 ${port}）`);
       }

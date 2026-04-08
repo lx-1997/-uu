@@ -59,12 +59,12 @@ export interface AppState {
   closeDrAuthenticatedPortal: () => void;
 
   // Onboarding
-  obStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done';
-  setObStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | 'done') => void;
+  obStep: 'board' | 'flash' | 'connect' | 'rdkclaw' | 'done';
+  setObStep: (v: 'board' | 'flash' | 'connect' | 'rdkclaw' | 'done') => void;
   selectedBoard: string | null;
   setSelectedBoard: (v: string | null) => void;
-  obReturnStep: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null;
-  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null) => void;
+  obReturnStep: 'board' | 'flash' | 'connect' | 'rdkclaw' | null;
+  setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'rdkclaw' | null) => void;
 
   // Loading
   isLoading: boolean;

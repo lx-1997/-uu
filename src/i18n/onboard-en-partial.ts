@@ -55,6 +55,8 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.connect.next': 'Next',
   'onboard.connect.sidebarHint': 'You can also connect later from Device in the left rail.',
   'onboard.toast.skipConnect': 'Skipped device connection — try AI now and connect later',
+  'onboard.toast.connectHasDevice':
+    'Device connected. Configure the model and deploy OpenClaw from the OpenClaw tab — they run in the background.',
 
   'onboard.model.descDone': 'Model is configured. Update below if needed, or continue.',
   'onboard.model.descNeed': 'Configure the model (required) before OpenClaw one-click deploy. Used as default gateway on the board.',
@@ -124,7 +126,7 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.rdk.ocCardTitle': 'OpenClaw & model (recommended)',
   'onboard.rdk.ocCardBadge': 'Smarter with a configured model',
   'onboard.rdk.ocCardDesc':
-    'OpenClaw installs in the background; set up the model on the OpenClaw page for full on-device AI and stable tasks.',
+    'Use the OpenClaw page to configure the model and one-click deploy — install and logs continue in the background without blocking the wizard.',
   'onboard.rdk.goOc': 'Open OpenClaw page',
   'onboard.rdk.hint':
     'In the dock, describe a problem or goal anytime — RDKClaw breaks it into steps and uses tools and the board when needed to get it done.',

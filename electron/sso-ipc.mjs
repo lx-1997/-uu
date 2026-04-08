@@ -145,7 +145,7 @@ export function registerSsoLoginIpc(opts) {
   });
 
   ipcMain.handle(RDK_OPEN_SSO_LOGIN, () => {
-    stopEmbedded();
+    /** 勿调用 stopEmbedded()：主窗口内嵌 webview 仍依赖 prepare-embedded 起的环回端口；停掉会导致内嵌登录无法跳回 */
     const base = getSsoBaseUrl();
     const parent = getMainWindow();
     const loginWin = new BrowserWindow({

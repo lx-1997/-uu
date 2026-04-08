@@ -2,6 +2,7 @@
  * 匿名日活写入 Supabase（与 conversation_turns 共用 Supabase 客户端与凭证，表名默认 studio_daily_usage）。
  * 需在库中执行 supabase/studio_daily_usage.sql。
  * 默认：已解析到 Supabase URL 与密钥时即写入；仅当 SUPABASE_DAILY_USAGE_ENABLED=0|false 时关闭。
+ * 不向控制台输出任何与 Supabase 相关的日志（静默失败与重试）。
  */
 import {
   getResolvedSupabaseKey,
@@ -96,7 +97,6 @@ export async function performDailyActiveInsert(
 
   const usageDate = resolveUsageDateString(new Date());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(usageDate)) {
-    console.warn('[supabase-daily-usage] invalid usage_date, skip insert:', usageDate);
     return { ok: true, persisted: false, reason: 'unavailable' };
   }
   const aid = usageKey.trim().slice(0, 256);
@@ -105,23 +105,33 @@ export async function performDailyActiveInsert(
     return { ok: false, error: 'usage_key empty' };
   }
 
-  try {
-    /** 列名与 supabase/studio_daily_usage.sql 一致：usage_date / anonymous_id / app_version */
-    const { error } = await sb.from(table).insert({
-      usage_date: usageDate,
-      anonymous_id: aid,
-      app_version: ver || null,
-    });
-    if (!error) {
-      return { ok: true, persisted: true };
+  const row = {
+    usage_date: usageDate,
+    anonymous_id: aid,
+    app_version: ver || null,
+  };
+
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const retryDelaysMs = [0, 600, 1800];
+
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
+    if (attempt > 0) {
+      await sleep(retryDelaysMs[attempt]!);
     }
-    const msg = error.message || '';
-    const code = (error as { code?: string }).code || '';
-    if (code === '23505' || /duplicate|unique constraint/i.test(msg)) {
-      return { ok: true, persisted: true };
+    try {
+      /** 列名与 supabase/studio_daily_usage.sql 一致：usage_date / anonymous_id / app_version */
+      const { error } = await sb.from(table).insert(row);
+      if (!error) {
+        return { ok: true, persisted: true };
+      }
+      const msg = error.message || '';
+      const code = (error as { code?: string }).code || '';
+      if (code === '23505' || /duplicate|unique constraint/i.test(msg)) {
+        return { ok: true, persisted: true };
+      }
+    } catch {
+      /* 静默重试 */
     }
-    return { ok: true, persisted: false, reason: 'unavailable' };
-  } catch {
-    return { ok: true, persisted: false, reason: 'unavailable' };
   }
+  return { ok: true, persisted: false, reason: 'unavailable' };
 }

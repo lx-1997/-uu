@@ -3,6 +3,7 @@
  * 移植自 rdkstudio_frontend-master
  */
 import { Client } from 'ssh2';
+import { StringDecoder } from 'node:string_decoder';
 import { createHash } from 'crypto';
 import {
   SSH_READY_TIMEOUT_MS,
@@ -42,6 +43,8 @@ import {
   shouldRunBuiltinStudioSkillsSftp,
   syncBuiltinStudioSkillsOverSftp,
 } from './board-openclaw-builtin-skills-sync.js';
+import { parseWifiSsidsFromNmcliOutput } from '../wifi-nmcli-parse.js';
+import { decodeRemoteStreamBytes } from '../utils/remote-text-decode.js';
 
 /** 套件端一键安装/升级 SSH 超时（毫秒）。默认 45 分钟；环境变量 OPENCLAW_INSTALL_TIMEOUT_MS 覆盖（≥120000）。嵌入式弱网下 npm 全局装包可能显著超过 30 分钟。 */
 export const OPENCLAW_INSTALL_TIMEOUT_MS = (() => {
@@ -962,79 +965,6 @@ const NPM_UPGRADE_CMD = [
   'echo "[OpenClaw] 升级完成"',
 ].join(' && ');
 
-/**
- * exec 将 stderr 与 stdout 合并；板端读 `.bashrc` 失败、sudo 提示等会混入输出，
- * terse 解析会把这些行误当成 SSID。解析前剔除。
- */
-function sanitizeWifiScanOutput(raw: string): string {
-  return (raw || '')
-    .split(/\r?\n/)
-    .filter((line) => {
-      const t = line.trim();
-      if (!t) return false;
-      if (/^(bash|sh|dash|zsh):\s/i.test(t)) return false;
-      if (/Input\/output error/i.test(t)) return false;
-      if (/^sudo:\s/i.test(t)) return false;
-      if (/^\[(?:SSH Error|ERROR|TIMEOUT)\]/i.test(t)) return false;
-      return true;
-    })
-    .join('\n');
-}
-
-/**
- * 解析 `nmcli -t -f SSID device wifi list`：每行一个 SSID，或 `SSID:名称`。
- * 排除表头、隐藏网占位「--」。
- */
-function parseWifiSsidsTerse(output: string): string[] {
-  const names = (output || '')
-    .split(/\r?\n/)
-    .map((s) => {
-      let t = s.trim();
-      if (t.startsWith('SSID:')) t = t.slice(5).trim();
-      return t;
-    })
-    .filter((s) => s && s !== 'SSID' && s !== '--');
-  return [...new Set(names)];
-}
-
-/** 匹配 BSSID（MAC），用于在表格行中定位 SSID 列（避免 IN-USE 为空时按列分割错位） */
-const NMCLI_WIFI_MAC_RE = /\b([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b/;
-
-/**
- * 解析 `nmcli device wifi list` 表格（与终端一致）：在 BSSID 之后、MODE 等之前取 SSID。
- */
-function parseWifiSsidsFromNmcliTable(output: string): string[] {
-  const lines = (output || '').split(/\r?\n/).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''));
-  const names: string[] = [];
-  let sawHeader = false;
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    if (/\bSSID\b/.test(line) && /\bBSSID\b/.test(line)) {
-      sawHeader = true;
-      continue;
-    }
-    if (!sawHeader) continue;
-    const m = line.match(NMCLI_WIFI_MAC_RE);
-    if (!m || m.index === undefined) continue;
-    const afterMac = line.slice(m.index + m[0].length).trim();
-    const parts = afterMac.split(/\s{2,}/);
-    const ssid = parts[0]?.trim();
-    if (ssid && ssid !== '--') names.push(ssid);
-  }
-  return [...new Set(names)];
-}
-
-/**
- * 含 IN-USE/BSSID/SSID 表头时必须先走表格解析；若先走 terse 会把整行误当成 SSID。
- */
-function parseWifiSsidsFromNmcliOutput(output: string): string[] {
-  const text = sanitizeWifiScanOutput(output || '');
-  if (/\bSSID\b/.test(text) && /\bBSSID\b/.test(text)) {
-    return parseWifiSsidsFromNmcliTable(text);
-  }
-  return parseWifiSsidsTerse(text);
-}
-
 export class OpenClawDeploymentManager {
   /** oc-bridge 可安全重试一轮（仅在无 assistant/tool 输出时由 Studio 再建桥重试一次） */
   private static readonly OC_BRIDGE_TRANSIENT_CODES = new Set([
@@ -1670,7 +1600,7 @@ export class OpenClawDeploymentManager {
     command: string,
     onOutput: (chunk: string) => void,
     onComplete: (success: boolean, code?: number) => void,
-    execOpts: { pty?: boolean | any; timeout?: number } = {}
+    execOpts: { pty?: boolean | any; timeout?: number; stdoutRawSink?: Buffer[] } = {}
   ): { abort: () => void } {
     let finished = false;
     let activeStream: any = null;
@@ -1708,7 +1638,11 @@ export class OpenClawDeploymentManager {
       },
     };
 
-    const opts = { ...execOpts };
+    const { stdoutRawSink, ...sshExecOpts } = execOpts;
+    const opts = { ...sshExecOpts } as {
+      pty?: boolean | { cols: number; rows: number; term: string };
+      timeout?: number;
+    };
     if (opts.pty === true) {
       opts.pty = { cols: 120, rows: 30, term: 'xterm-256color' };
     }
@@ -1730,9 +1664,23 @@ export class OpenClawDeploymentManager {
             return;
           }
           activeStream = stream;
-          stream.on('data', (data: Buffer) => { if (!finished) onOutput(data.toString()); });
-          stream.stderr?.on('data', (data: Buffer) => { if (!finished) onOutput(data.toString()); });
-          stream.on('close', (code: number) => finish(code === 0, code));
+          const outDec = new StringDecoder('utf8');
+          const errDec = new StringDecoder('utf8');
+          const rawSink = stdoutRawSink;
+          stream.on('data', (data: Buffer) => {
+            rawSink?.push(Buffer.from(data));
+            if (!finished) onOutput(outDec.write(data));
+          });
+          stream.stderr?.on('data', (data: Buffer) => {
+            if (!finished) onOutput(errDec.write(data));
+          });
+          stream.on('close', (code: number) => {
+            const t1 = outDec.end();
+            const t2 = errDec.end();
+            if (t1 && !finished) onOutput(t1);
+            if (t2 && !finished) onOutput(t2);
+            finish(code === 0, code);
+          });
         });
       }).catch((err: any) => {
         this.destroyConnection(sshEndpointKey(device));
@@ -2528,25 +2476,33 @@ print(json.dumps(result,ensure_ascii=False))`;
     onResult: (wifiNames: string[], success: boolean, errorHint?: string) => void,
   ): void {
     /**
-     * 与用户在终端执行的一致：`nmcli device wifi list`（LANG=C 保证表头为 SSID/BSSID，便于解析）。
+     * 使用 `nmcli -t -f SSID` 机器可读输出 + UTF-8 locale（勿用 LANG=C：会损坏中文等非 ASCII 的 SSID）。
      * 使用 `/bin/sh -c`（非交互 sh 不读 `.bashrc`），避免板端存储异常时 bash 启动噪声进入合并输出。
      */
     const cmd =
       '/bin/sh -c ' +
       JSON.stringify(
-        'LANG=C LC_ALL=C; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 1; ' +
-          'nmcli device wifi list 2>/dev/null || sudo -n nmcli device wifi list 2>/dev/null',
+        'LC_ALL=C.UTF-8 LANG=C.UTF-8; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 1; ' +
+          'nmcli -t -f SSID device wifi list 2>/dev/null || sudo -n nmcli -t -f SSID device wifi list 2>/dev/null',
       );
+    const rawStdout: Buffer[] = [];
     let output = '';
-    this.execCommand(device, cmd, (chunk) => { output += chunk; }, (success) => {
-      const ioErr = /\binput\/output error\b/i.test(output);
-      const names = parseWifiSsidsFromNmcliOutput(output);
+    this.execCommand(
+      device,
+      cmd,
+      (chunk) => {
+        output += chunk;
+      },
+      (success) => {
+        const text = rawStdout.length > 0 ? decodeRemoteStreamBytes(Buffer.concat(rawStdout)) : output;
+        const ioErr = /\binput\/output error\b/i.test(text);
+        const names = parseWifiSsidsFromNmcliOutput(text);
       if (names.length > 0) {
         onResult(names, true);
         return;
       }
       if (!success) {
-        const sshAuthFail = /SSH Error|\[ERROR\]|All configured authentication methods failed/i.test(output);
+        const sshAuthFail = /SSH Error|\[ERROR\]|All configured authentication methods failed/i.test(text);
         const hint = sshAuthFail
           ? `SSH 未连上套件端（当前使用端口 ${device.port ?? 22}）。经 frp 时请确认设备档案里 SSH 端口为映射端口（如 6000），并已重启 Studio 后端使修复生效。`
           : ioErr
@@ -2564,7 +2520,9 @@ print(json.dumps(result,ensure_ascii=False))`;
         return;
       }
       onResult([], true);
-    }, { timeout: 30000 });
+    },
+      { timeout: 30000, stdoutRawSink: rawStdout },
+    );
   }
 
   setWifiConnection(

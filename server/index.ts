@@ -1670,12 +1670,22 @@ function buildWorkspaceHealth(output: string): DeviceWorkspaceHealth {
     nodeReady ? '' : 'Node.js',
     npmReady ? '' : 'npm',
   ].filter(Boolean);
-  const developmentReady = developmentMissing.length === 0;
+  /** 工作台「开发环境」徽章：以远程 shell 探测成功为准（终端可用即亮），与工具链是否齐全解耦 */
+  const terminalEffective =
+    readHealthInt(values, 'checked_at') > 0 || values.python_ready !== undefined;
   const development = buildWorkspaceModuleStatus(
-    developmentReady,
-    developmentReady,
-    developmentReady ? 'Python / Git / Node / npm 已就绪' : `缺少 ${developmentMissing.join(' / ')}`,
-    developmentReady ? '可以直接开始一句话开发' : '让 RDKClaw 先补齐缺失开发环境',
+    terminalEffective,
+    terminalEffective,
+    !terminalEffective
+      ? '远程终端探测异常'
+      : developmentMissing.length === 0
+        ? '远程终端可用；Python / Git / Node / npm 已就绪'
+        : `远程终端可用；可选工具链未齐：${developmentMissing.join(' / ')}`,
+    !terminalEffective
+      ? '请检查 SSH 与设备状态'
+      : developmentMissing.length === 0
+        ? '可以直接开始一句话开发'
+        : '终端已可用；需要完整工具链时可安装：' + developmentMissing.join('、'),
     developmentMissing,
   );
 

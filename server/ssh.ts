@@ -1,10 +1,12 @@
 import { Client, type ConnectConfig } from 'ssh2';
 import type { Duplex } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import {
   appendUtf8WithTailCap,
   DEFAULT_STREAM_OUTPUT_CHAR_LIMIT,
   STDERR_STREAM_CHAR_LIMIT,
 } from './utils/stream-output-limit.js';
+import { decodeRemoteStreamBytes } from './utils/remote-text-decode.js';
 
 /** ssh2 在 TCP 连通后等待 SSH 握手完成的最长时间。写盘等高 I/O 场景下 8s 易触发「Timed out while waiting for handshake」。 */
 export const SSH_READY_TIMEOUT_MS = 30_000;
@@ -219,8 +221,9 @@ export function runRemoteCommands(
           env: {
             TERM: 'xterm',
             DEBIAN_FRONTEND: 'noninteractive',
-            LANG: 'C',
-            LC_ALL: 'C',
+            /** C locale 会破坏 UTF-8（中文 SSID、路径名等）；C.UTF-8 保留英文习惯类别 + UTF-8 */
+            LANG: 'C.UTF-8',
+            LC_ALL: 'C.UTF-8',
           },
         }, (error, stream) => {
           if (error) {
@@ -231,14 +234,51 @@ export function runRemoteCommands(
 
           execStream = stream;
 
-          let stdout = '';
-          let stderr = '';
+          const decOut = new StringDecoder('utf8');
+          const decErr = new StringDecoder('utf8');
+          const rawOut: Buffer[] = [];
+          const rawErr: Buffer[] = [];
+          let rawOutBytes = 0;
+          let rawErrBytes = 0;
+          const maxRawOut = Math.min(stdoutCap * 4, 4_000_000);
+          const maxRawErr = Math.min(STDERR_STREAM_CHAR_LIMIT * 4, 1_000_000);
+
           let stdoutTrunc = false;
           let stderrTrunc = false;
 
           stream
             .on('close', (code: number | null) => {
               client.end();
+              const tailO = decOut.end();
+              const tailE = decErr.end();
+              if (onStreamChunk) {
+                if (tailO) {
+                  try {
+                    onStreamChunk(tailO, 'stdout');
+                  } catch {
+                    /* ignore */
+                  }
+                }
+                if (tailE) {
+                  try {
+                    onStreamChunk(tailE, 'stderr');
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              }
+
+              let stdout = decodeRemoteStreamBytes(Buffer.concat(rawOut));
+              if (stdout.length > stdoutCap) {
+                stdout = stdout.slice(stdout.length - stdoutCap);
+                stdoutTrunc = true;
+              }
+              let stderr = decodeRemoteStreamBytes(Buffer.concat(rawErr));
+              if (stderr.length > STDERR_STREAM_CHAR_LIMIT) {
+                stderr = stderr.slice(stderr.length - STDERR_STREAM_CHAR_LIMIT);
+                stderrTrunc = true;
+              }
+
               const truncNote =
                 (stdoutTrunc || stderrTrunc)
                   ? '\n[OUTPUT TRUNCATED: stdout/stderr exceeded safe limit; tail retained]'
@@ -262,29 +302,37 @@ export function runRemoteCommands(
               safeResolve(stdout + (stdoutTrunc || stderrTrunc ? truncNote : ''));
             })
             .on('data', (chunk: Buffer) => {
-              if (onStreamChunk && chunk.length) {
+              rawOut.push(chunk);
+              rawOutBytes += chunk.length;
+              while (rawOutBytes > maxRawOut && rawOut.length > 1) {
+                const first = rawOut.shift()!;
+                rawOutBytes -= first.length;
+              }
+              const piece = decOut.write(chunk);
+              if (onStreamChunk && piece.length) {
                 try {
-                  onStreamChunk(chunk.toString('utf8'), 'stdout');
+                  onStreamChunk(piece, 'stdout');
                 } catch {
                   /* ignore progress callback errors */
                 }
               }
-              const r = appendUtf8WithTailCap(stdout, chunk, stdoutCap);
-              stdout = r.value;
-              if (r.truncated) stdoutTrunc = true;
             });
 
           stream.stderr.on('data', (chunk: Buffer) => {
-            if (onStreamChunk && chunk.length) {
+            rawErr.push(chunk);
+            rawErrBytes += chunk.length;
+            while (rawErrBytes > maxRawErr && rawErr.length > 1) {
+              const first = rawErr.shift()!;
+              rawErrBytes -= first.length;
+            }
+            const piece = decErr.write(chunk);
+            if (onStreamChunk && piece.length) {
               try {
-                onStreamChunk(chunk.toString('utf8'), 'stderr');
+                onStreamChunk(piece, 'stderr');
               } catch {
                 /* ignore */
               }
             }
-            const r = appendUtf8WithTailCap(stderr, chunk, STDERR_STREAM_CHAR_LIMIT);
-            stderr = r.value;
-            if (r.truncated) stderrTrunc = true;
           });
         });
       })

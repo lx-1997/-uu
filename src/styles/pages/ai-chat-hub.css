@@ -1,7 +1,7 @@
 /* AI Chat Hub v2: premium operator console style */
 
 .ai-chat-hub-page--v2 {
-  --hub-font: "Avenir Next", "Segoe UI Variable", "PingFang SC", "Noto Sans SC", sans-serif;
+  --hub-font: "Avenir Next", "Segoe UI Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", "Yu Gothic UI", "Malgun Gothic", "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
   --hub-serif: "Iowan Old Style", "Source Han Serif SC", Georgia, serif;
   --hub-side-grad-a: color-mix(in srgb, var(--bg-elevated) 90%, #d1fae5 10%);
   --hub-side-grad-b: color-mix(in srgb, var(--bg-secondary) 88%, #bfdbfe 12%);
@@ -671,7 +671,7 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-muted);
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
 }
 
 .ai-chat-hub-v2-section:first-child .ai-chat-hub-v2-section-label {
@@ -927,7 +927,7 @@
   font-size: 0.9375rem;
   font-weight: 650;
   letter-spacing: -0.03em;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
 }
 
 .ai-chat-hub-v2-sidebar--dock {

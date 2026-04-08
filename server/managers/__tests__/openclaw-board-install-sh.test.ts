@@ -53,24 +53,30 @@ describe('openclaw-board-install shell generation', () => {
   });
 
   it('keeps multiline control flow in apt lock wait snippet', () => {
-    expect(OPENCLAW_WAIT_APT_LOCK_SNIPPET).toContain('while [ "$_oc_ai" -lt 120 ]; do\n');
+    expect(OPENCLAW_WAIT_APT_LOCK_SNIPPET).toContain('while [ "$_oc_ai" -lt "$_oc_lock_max" ]; do\n');
+    expect(OPENCLAW_WAIT_APT_LOCK_SNIPPET).toContain('/var/cache/apt/archives/lock');
     expect(OPENCLAW_WAIT_APT_LOCK_SNIPPET).toContain('\ndone\n');
+    expect(OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET).toContain('Dpkg::Lock::Timeout=180');
   });
 
-  itWithBash('parses in bash -n', () => {
-    expectBashSyntaxOk(OPENCLAW_WAIT_APT_LOCK_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_NPM_FAST_INSTALL_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_CONDITIONAL_PREINSTALL_DEEP_CLEAN_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_INSTALL_OPENCLAW_STEP);
-    expectBashSyntaxOk(OPENCLAW_UNINSTALL_PKILL_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET);
-    expectBashSyntaxOk(OPENCLAW_ENSURE_NPM_SNIPPET);
-  });
+  itWithBash(
+    'parses in bash -n',
+    () => {
+      expectBashSyntaxOk(OPENCLAW_WAIT_APT_LOCK_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_LOCAL_NODE_DIST_INSTALL_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_LOCAL_TARBALL_INSTALL_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_NPM_FAST_INSTALL_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_CONDITIONAL_PREINSTALL_DEEP_CLEAN_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_PREINSTALL_GATEWAY_STOP_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_INSTALL_OPENCLAW_STEP);
+      expectBashSyntaxOk(OPENCLAW_UNINSTALL_PKILL_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_UNINSTALL_RM_GLOBAL_NODE_MODULES_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_REMOVE_SHELL_PATH_BASHRC_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_ENSURE_NODE_MIN_VERSION_SNIPPET);
+      expectBashSyntaxOk(OPENCLAW_ENSURE_NPM_SNIPPET);
+    },
+    120_000,
+  );
 
   it('conditional preinstall deep clean runs only when probes suggest broken install', () => {
     expect(OPENCLAW_CONDITIONAL_PREINSTALL_DEEP_CLEAN_SNIPPET).toContain('oc_need_deep_clean');
