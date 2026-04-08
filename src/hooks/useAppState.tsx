@@ -29,6 +29,8 @@ import { AIChatProvider, useAIChatStore, type RdkClawTimelineEntry } from './use
 import { getRdkEmbedPanel } from '../utils/embed-mode';
 import type { EmbedToolbarApi } from './useUIStore';
 import { persistStudioNavigationUiHints } from '../studio-ui-hints';
+import { useAuth } from './useAuth';
+import { isStudioLoginRequired } from '../utils/studio-auth-gate';
 import {
   requestIdeRemoteConnect,
   requestVncRemoteConnect,
@@ -301,6 +303,7 @@ export function useAppState(): AppState {
  */
 function AppStateComposer({ children }: { children: React.ReactNode }) {
   const toast = useToastStore();
+  const { ssoRequired } = useAuth();
   const device = useDeviceStore();
   const ui = useUIStore();
   const terminal = useTerminalStore();
@@ -476,6 +479,28 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
       apiErrorSeenRef.current[key] = now;
       pruneApiErrorSeenIfNeeded();
 
+      /**
+       * 统一登录开启时：任意受保护 API 返回 401 + unauthorized，说明 Cookie/镜像会话已失效，
+       * 须立即清前端登录态并回到 SSOGate；否则会出现右下角「unauthorized」与仍可操作主界面的割裂。
+       */
+      if (status === 401 && isStudioLoginRequired(ssoRequired)) {
+        const msgLower = rawMessage.toLowerCase();
+        const looksUnauthorized =
+          code.toLowerCase() === 'unauthorized'
+          || msgLower.includes('unauthorized')
+          || rawMessage.trim().toLowerCase() === 'unauthorized';
+        const path = String(detail.url || '');
+        const skipPath = /\/api\/sso\/(?:login|callback)(?:\?|$)/.test(path);
+        if (looksUnauthorized && !skipPath) {
+          window.dispatchEvent(new CustomEvent('rdk-sso-session-lost'));
+          toast.addToast(
+            t('api.err.ssoSessionExpired', '登录已失效，请重新登录'),
+            'warning',
+          );
+          return;
+        }
+      }
+
       if (code === 'DEVICE_AUTH_REQUIRED') {
         toast.addToast(t('api.err.deviceAuth', '设备认证失效，请重新填写账号密码'), 'warning');
         device.setShowAddDevice(true);
@@ -575,7 +600,7 @@ function AppStateComposer({ children }: { children: React.ReactNode }) {
 
     window.addEventListener('rdk-api-error', onApiError as EventListener);
     return () => window.removeEventListener('rdk-api-error', onApiError as EventListener);
-  }, [device, toast, ui.language]);
+  }, [device, toast, ui.language, ssoRequired]);
 
   const value = useMemo<AppState>(
     () => ({

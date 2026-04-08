@@ -351,12 +351,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    if (lastConfirmedUserRef.current) {
-      writeUserSnapshot(lastConfirmedUserRef.current);
-      if (!stale()) setUser(lastConfirmedUserRef.current);
-      return;
-    }
-
+    /**
+     * 禁止在此处用 lastConfirmedUserRef「补回」界面用户：
+     * 服务端已明确返回无 user（会话过期、鉴权失败）时，若仍写回快照，会出现 Toast/接口 401
+     * 与「仍显示已登录并进入主界面」不一致。粘滞重试仅用于 Cookie/镜像尚未生效的前几秒。
+     */
     lastConfirmedUserRef.current = null;
     clearUserSnapshot();
     if (!stale()) {
@@ -394,6 +393,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       refreshGenRef.current += 1;
     };
   }, [refresh]);
+
+  /** 业务 API 返回 401 unauthorized 时与界面「仍显示已登录」对齐：清会话并回到登录门禁 */
+  useEffect(() => {
+    const onSessionLost = () => {
+      refreshGenRef.current += 1;
+      lastConfirmedUserRef.current = null;
+      clearUserSnapshot();
+      setSsoSessionMirror(null);
+      setUser(null);
+    };
+    window.addEventListener('rdk-sso-session-lost', onSessionLost);
+    return () => window.removeEventListener('rdk-sso-session-lost', onSessionLost);
+  }, []);
 
   const logout = useCallback(async () => {
     lastConfirmedUserRef.current = null;
