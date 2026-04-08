@@ -197,6 +197,20 @@ export async function readDeviceFile(deviceId: string, filePath: string): Promis
 }
 
 /**
+ * 若文件存在则读取全文，不存在则返回空字符串（不抛错）。
+ * 单次 SSH exec，供 device_file_write 取「改前」快照，避免先 cat 失败再试的额外往返与异常路径。
+ */
+export async function readDeviceFileIfExists(deviceId: string, filePath: string): Promise<string> {
+  const p = String(filePath || '').trim();
+  if (!p.startsWith('/')) {
+    throw new Error(`远端路径必须是绝对路径：${filePath}`);
+  }
+  return execOnDevice(deviceId, [
+    `bash -lc "if [ -f ${shEscape(p)} ]; then cat ${shEscape(p)}; fi"`,
+  ]);
+}
+
+/**
  * 写入文件到设备
  */
 export async function writeDeviceFile(deviceId: string, filePath: string, content: string): Promise<void> {

@@ -67,8 +67,10 @@ export default function OnboardingWizard() {
   const {
     obStep, setObStep, selectedBoard, setSelectedBoard,
     setActiveTab, setShowAddDevice, setAddDeviceInitialMethod, currentDevice,
-    setChatExpanded, setCmd, addToast,
+    addToast,
     setObReturnStep,
+    setPendingOnboardingChatSend,
+    setChatExpanded,
   } = useAppState();
 
   const { t, language } = useI18n();
@@ -94,12 +96,16 @@ export default function OnboardingWizard() {
   };
 
   const handleTryRDKClaw = () => {
-    addToast(t('onboard.toast.trySent', '已发送到 AI 对话区，你可以继续在这里点击“完成”结束引导'), 'success');
+    /** 与 onboard.rdk.tryQuote 示例一致，去掉引号作为实际发送正文 */
+    const body = t('onboard.rdk.trySendBody', '你好，RDKClaw！');
+    setPendingOnboardingChatSend(body);
+    setObStep('done');
+    setActiveTab('dashboard');
     setChatExpanded(true);
-    setCmd(t('onboard.cmd.health', '你好，RDKClaw！'));
-    setTimeout(() => {
-      (document.querySelector('.dock-input') as HTMLFormElement | null)?.requestSubmit();
-    }, 500);
+    addToast(
+      t('onboard.toast.trySending', '正在打开工作台并发送问候…'),
+      'success',
+    );
   };
 
   const finish = () => {
@@ -356,7 +362,7 @@ export default function OnboardingWizard() {
           <p className="ob-desc ob-try-hint">
             {t(
               'onboard.rdk.hint',
-              '底部对话框里随时描述问题或目标即可，RDKClaw 会拆解步骤并在需要时调用工具与套件端能力，帮你把事办完。',
+              '完成引导后，在工作台底部对话框描述问题或目标即可，RDKClaw 会拆解步骤并在需要时调用工具与套件端能力，帮你把事办完。',
             )}
           </p>
           <div className="ob-actions">

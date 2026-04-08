@@ -39,6 +39,12 @@ export interface UIStoreState {
   setSelectedBoard: (v: string | null) => void;
   obReturnStep: 'board' | 'flash' | 'connect' | 'rdkclaw' | null;
   setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'rdkclaw' | null) => void;
+  /**
+   * 新手引导第 4 步「打个招呼 → 发送」：完成引导并挂载 AIDock 后由 Dock 消费并 `submitQuickPrompt`。
+   * 引导期间不挂载 Dock（见 App.tsx），故需队列而非当场发消息。
+   */
+  pendingOnboardingChatSend: string | null;
+  setPendingOnboardingChatSend: (v: string | null) => void;
 
   // Loading
   isLoading: boolean;
@@ -312,6 +318,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     }
   };
   const [obReturnStep, setObReturnStep] = useState<'board' | 'flash' | 'connect' | 'rdkclaw' | null>(null);
+  const [pendingOnboardingChatSend, setPendingOnboardingChatSend] = useState<string | null>(null);
 
   // ── Loading ──
   const [isLoading, setIsLoading] = useState(false);
@@ -528,6 +535,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     openDrAuthenticatedPortal,
     closeDrAuthenticatedPortal,
     obStep, setObStep, selectedBoard, setSelectedBoard, obReturnStep, setObReturnStep,
+    pendingOnboardingChatSend, setPendingOnboardingChatSend,
     isLoading, loadingMsg, openWorkspace,
     flashImage, setFlashImage, flashTarget, setFlashTarget,
     flashMode, setFlashMode, flashVerify, setFlashVerify,

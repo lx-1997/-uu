@@ -369,6 +369,8 @@ async function runParallelSafeToolCall(
     toolCtx: ToolContext;
     sessionKey: string;
     toolHooks?: ToolHookRegistry;
+    /** 用户「全部停止」等：与工具内 abort 叠加，避免 await 卡在未响应的 Promise 上导致 run 长期占用 runAgents */
+    abortSignal: AbortSignal;
   },
 ): Promise<{ text: string; errFlag: boolean }> {
   const tool = deps.toolsForRun.find((t) => t.name === call.name);
@@ -402,7 +404,10 @@ async function runParallelSafeToolCall(
   let reachedExecute = false;
   try {
     reachedExecute = true;
-    text = await tool.execute(call.input, { ...deps.toolCtx, toolCallId: call.id });
+    text = await abortable(
+      tool.execute(call.input, { ...deps.toolCtx, toolCallId: call.id }),
+      deps.abortSignal,
+    );
   } catch (err) {
     text = `执行错误: ${(err as Error).message}`;
     errFlag = true;
@@ -885,6 +890,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                               toolCtx,
                               sessionKey,
                               toolHooks: params.toolHooks,
+                              abortSignal,
                             }),
                           );
                         }
@@ -1195,6 +1201,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                     toolCtx,
                     sessionKey,
                     toolHooks: params.toolHooks,
+                    abortSignal,
                   });
                 }),
               );
@@ -1331,7 +1338,10 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                       reachedExecute = true;
                       try {
                         result = await Promise.race([
-                          tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
+                          abortable(
+                            tool.execute(call.input, { ...toolCtx, toolCallId: call.id }),
+                            abortSignal,
+                          ),
                           toolTimeoutPromise,
                         ]);
                       } finally {

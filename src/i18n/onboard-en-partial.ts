@@ -122,6 +122,8 @@ export const ONBOARD_EN: Record<string, string> = {
     'RDKClaw is the through-line of Studio: orchestration across chat, your board, and OpenClaw — it understands your board, reads docs, runs commands, and turns goals into concrete steps. Next step',
   'onboard.rdk.tryTitle': 'Say hello',
   'onboard.rdk.tryQuote': '“Hello, RDKClaw!”',
+  /** 实际发往 RDKClaw 的正文（无引号） */
+  'onboard.rdk.trySendBody': 'Hello, RDKClaw!',
   'onboard.rdk.send': 'Send',
   'onboard.rdk.ocCardTitle': 'OpenClaw & model (recommended)',
   'onboard.rdk.ocCardBadge': 'Smarter with a configured model',
@@ -129,7 +131,7 @@ export const ONBOARD_EN: Record<string, string> = {
     'Use the OpenClaw page to configure the model and one-click deploy — install and logs continue in the background without blocking the wizard.',
   'onboard.rdk.goOc': 'Open OpenClaw page',
   'onboard.rdk.hint':
-    'In the dock, describe a problem or goal anytime — RDKClaw breaks it into steps and uses tools and the board when needed to get it done.',
+    'After you finish onboarding, use the dock at the bottom of the workspace — RDKClaw breaks goals into steps and uses tools and the board when needed.',
   'onboard.rdk.finish': 'Finish',
 
   'onboard.toast.ocReadySkip': 'OpenClaw ready — skipped deploy step',
@@ -174,7 +176,9 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.toast.installBg': 'OpenClaw still installing — check OpenClaw page when done',
   'onboard.toast.logCopied': 'Log copied',
   'onboard.toast.copyFail': 'Copy failed',
-  'onboard.toast.trySent': 'Sent to AI chat — you can tap Finish to exit',
+  'onboard.toast.trySent':
+    'After onboarding, chat with RDKClaw from the dock — tap Finish to enter the workspace.',
+  'onboard.toast.trySending': 'Opening the workspace and sending your hello…',
   'onboard.toast.done': 'Onboarding complete — enjoy RDK Studio!',
   'onboard.cmd.health': 'Hello, RDKClaw!',
 };

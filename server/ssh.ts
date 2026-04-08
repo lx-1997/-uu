@@ -403,9 +403,13 @@ export function uploadFileSftp(
     validateRemotePath(remotePath);
   }
 
-  // Stream base64 over SSH stdin to avoid ARG_MAX limits.
-  // Keep command non-interactive to avoid sudo password prompts hanging the stream.
+  /**
+   * 默认走 SFTP 子系统 `writeFile`：同一条 TCP 连接内先 mkdir 再写盘，避免 base64 膨胀与远端解码。
+   * 少数 dropbear/裁剪固件无 SFTP 时自动回退为 stdin 管道 base64（与历史行为一致）。
+   * 强制旧路径：环境变量 `RDK_DEVICE_UPLOAD_SFTP=0`。
+   */
   const uploadTimeoutMs = Math.max(15_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
+  const forceLegacyBase64 = String(process.env.RDK_DEVICE_UPLOAD_SFTP ?? '').trim() === '0';
 
   return new Promise<void>((resolve, reject) => {
     const client = new Client();
@@ -414,7 +418,7 @@ export function uploadFileSftp(
       doReject(new Error(`文件上传超时（${uploadTimeoutMs}ms，SSH 通道无响应或解码过慢）`));
     }, uploadTimeoutMs);
 
-    const doResolve = (output?: string) => {
+    const doResolve = () => {
       if (!resolved) {
         resolved = true;
         clearTimeout(timeout);
@@ -432,38 +436,84 @@ export function uploadFileSftp(
       }
     };
 
-    client
-      .on('ready', () => {
-        // shEscape function logic inline
-        const safePath = `'${remotePath.replace(/'/g, `'"'"'`)}'`;
-        
-        // Prefer direct write; create parent dir first.
-        // Do NOT use interactive sudo here, otherwise it may block waiting for password.
-        // 非登录 shell，避免与板上其它 SSH 会话并发时 `bash -lc` 读 profile 变慢或占资源
-        client.exec(`bash -c "mkdir -p \\$(dirname ${safePath}) && base64 -d > ${safePath}"`, { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } }, (err, stream) => {
+    const safePathForShell = `'${remotePath.replace(/'/g, `'"'"'`)}'`;
+
+    const execBase64UploadOnReadyClient = () => {
+      client.exec(
+        `bash -c "mkdir -p \\$(dirname ${safePathForShell}) && base64 -d > ${safePathForShell}"`,
+        { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } },
+        (err, stream) => {
           if (err) return doReject(err);
-          
+
           let stderr = '';
           let stderrTrunc = false;
           stream.on('close', (code: number | null) => {
             if (code && code !== 0) {
-               const note = stderrTrunc ? ' [stderr truncated]' : '';
-               doReject(new Error((stderr + note) || `Upload command failed with code ${code}`));
+              const note = stderrTrunc ? ' [stderr truncated]' : '';
+              doReject(new Error((stderr + note) || `Upload command failed with code ${code}`));
             } else {
-               doResolve();
+              doResolve();
             }
           });
-          
+
           stream.stderr.on('data', (chunk) => {
             const r = appendUtf8WithTailCap(stderr, chunk, STDERR_STREAM_CHAR_LIMIT);
             stderr = r.value;
             if (r.truncated) stderrTrunc = true;
           });
-          
-          // Write the base64 encoded buffer straight into the process's standard input
+
           stream.write(buffer.toString('base64'));
           stream.end();
-        });
+        },
+      );
+    };
+
+    const trySftpSubsystem = () => {
+      client.exec(
+        `bash -c "mkdir -p \\$(dirname ${safePathForShell})"`,
+        { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } },
+        (err, stream) => {
+          if (err) return execBase64UploadOnReadyClient();
+
+          let stderr = '';
+          let stderrTrunc = false;
+          stream.stderr.on('data', (chunk) => {
+            const r = appendUtf8WithTailCap(stderr, chunk, STDERR_STREAM_CHAR_LIMIT);
+            stderr = r.value;
+            if (r.truncated) stderrTrunc = true;
+          });
+
+          stream.on('close', (code: number | null) => {
+            if (code && code !== 0) {
+              const note = stderrTrunc ? ' [stderr truncated]' : '';
+              return execBase64UploadOnReadyClient();
+            }
+            client.sftp((sftpErr, sftp) => {
+              if (sftpErr || !sftp) {
+                return execBase64UploadOnReadyClient();
+              }
+              sftp.writeFile(remotePath, buffer, (wfErr) => {
+                if (wfErr) {
+                  doReject(
+                    wfErr instanceof Error ? wfErr : new Error(String(wfErr)),
+                  );
+                } else {
+                  doResolve();
+                }
+              });
+            });
+          });
+        },
+      );
+    };
+
+    client
+      .on('ready', () => {
+        if (forceLegacyBase64) {
+          execBase64UploadOnReadyClient();
+        } else {
+          trySftpSubsystem();
+        }
       })
       .on('error', (err: Error) => doReject(err))
       .connect(buildSshConnectConfig(credentials));

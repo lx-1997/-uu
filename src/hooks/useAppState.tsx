@@ -65,6 +65,8 @@ export interface AppState {
   setSelectedBoard: (v: string | null) => void;
   obReturnStep: 'board' | 'flash' | 'connect' | 'rdkclaw' | null;
   setObReturnStep: (v: 'board' | 'flash' | 'connect' | 'rdkclaw' | null) => void;
+  pendingOnboardingChatSend: string | null;
+  setPendingOnboardingChatSend: (v: string | null) => void;
 
   // Loading
   isLoading: boolean;

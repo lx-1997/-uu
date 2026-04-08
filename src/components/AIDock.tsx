@@ -1601,6 +1601,8 @@ export default function AIDock() {
     setObStep,
     chatSessionsOpen,
     setChatSessionsOpen,
+    pendingOnboardingChatSend,
+    setPendingOnboardingChatSend,
   } = useAppState();
   const cmdRef = useRef(cmd);
   cmdRef.current = cmd;
@@ -2639,6 +2641,16 @@ export default function AIDock() {
       form?.requestSubmit();
     });
   };
+
+  /** 新手引导「发送」：引导页不挂载 Dock，完成引导后在此消费队列并真正发出首条 RDKClaw 消息 */
+  useEffect(() => {
+    if (!pendingOnboardingChatSend?.trim()) return;
+    const msg = pendingOnboardingChatSend.trim();
+    setPendingOnboardingChatSend(null);
+    requestAnimationFrame(() => submitQuickPrompt(msg, undefined, true));
+    // submitQuickPrompt 每轮新建；仅依赖队列内容，避免多余触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOnboardingChatSend, setPendingOnboardingChatSend]);
 
   // 说明：用户输入统一走 RDK Studio Claw 主链路（/api/agent/chat）
   // 套件端 OpenClaw 仅作为 RDK Studio Claw 在服务端可调用的能力，不在前端直连对话

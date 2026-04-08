@@ -187,6 +187,7 @@ function AppShell() {
     chatSessionsOpen,
     chatExpanded,
     showSettings,
+    obStep,
   } = useAppState();
   const { t } = useI18n();
   const [agentWebPreviewUrl, setAgentWebPreviewUrl] = useState<string | null>(null);
@@ -382,8 +383,7 @@ function AppShell() {
             <ErrorBoundary>
               <MainContent />
             </ErrorBoundary>
-            {/* 引导期间也需挂载：第 5 步「发送」会展开 Dock 并提交表单；若此处不渲染则 .dock-input 不存在 */}
-            <AIDock />
+            {obStep === 'done' && <AIDock />}
           </HubDockAnchorProvider>
         </main>
 

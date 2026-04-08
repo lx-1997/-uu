@@ -719,9 +719,31 @@ export function upsertProviderConfigEntry(input: {
   };
   const entries = [next, ...registry.entries.filter((entry) => entry.id !== id)];
   const activeId = input.setActive === false ? (registry.activeId || next.id) : next.id;
+
+  const prevActiveId = registry.activeId?.trim() || null;
+  const prevQuickId = registry.quickActiveId?.trim() || null;
+  let quickActiveId = prevQuickId;
+  /**
+   * 保存并启用「深度思考」主模型时，若「快速回答」仍指向内置预设或与原主模型一致，则同步为同一条目。
+   * 避免设置里已换成 A，但 Dock 仍为「快速」且 quickActiveId 留在安装包默认 Qwen 等，导致对话与错误提示（sk-/qwen）与设置不一致。
+   * 若用户曾显式把快速绑定到另一条目（quick ≠ 原 active），则不改写。
+   */
+  if (input.setActive !== false) {
+    const presets = getBootstrapStudioDefaultPresetsMeta();
+    const bootstrapQuickId = presets?.quick?.id?.trim() || '';
+    const quickStillDefaultOrFollowsMain =
+      !prevQuickId ||
+      (prevActiveId !== null && prevQuickId === prevActiveId) ||
+      (bootstrapQuickId !== '' && prevQuickId === bootstrapQuickId);
+    if (quickStillDefaultOrFollowsMain) {
+      quickActiveId = activeId;
+    }
+  }
+
   saveProviderRegistry({
     ...registry,
     activeId,
+    quickActiveId,
     entries,
   });
   return next;
