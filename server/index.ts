@@ -74,6 +74,10 @@ import {
 import type { RdkPlatform } from '../shared/board-types.js';
 import { shellEscape, isSafeName } from './utils/shell-escape.js';
 import { stripAnsi } from './utils/strip-ansi.js';
+import {
+  decodeDeviceFileBuffer,
+  isLikelyBinaryBuffer,
+} from './utils/device-file-text-encoding.js';
 import { buildVncStartRemoteExec, buildVncStatusRemoteExec } from './vnc-remote-script.js';
 import {
   DEFAULT_SSH_PASSWORD,
@@ -912,6 +916,61 @@ function isSshTimeoutError(error: unknown) {
 function isSshAuthError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return /all configured authentication methods failed|permission denied|authentication failure|auth fail/.test(message);
+}
+
+/**
+ * 仅当失败像「SSH 口令不对」时再试下一候选；勿用宽泛的 permission denied，
+ * 以免远端文件只读等误触发多口令重试。
+ */
+function shouldTryNextPasswordForSftp(error: unknown): boolean {
+  const m = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (m.includes('all configured authentication methods failed')) return true;
+  if (m.includes('password authentication failed')) return true;
+  if (m.includes('unable to authenticate')) return true;
+  // OpenSSH: Permission denied (publickey,password).
+  if (/\bpermission denied\s*\([^)]*password[^)]*\)/.test(m)) return true;
+  return false;
+}
+
+/**
+ * 与 `runOnDevice` 一致：按候选口令依次尝试 SFTP，避免仅 `resolvePrimarySshPassword` 首项错误时
+ * 「能 ls/cat（已用后续候选连上）却无法上传/保存（仍用错误首项）」。
+ */
+async function uploadFileSftpWithPasswordCandidates(
+  device: Device,
+  request: Request,
+  remotePath: string,
+  buffer: Buffer,
+): Promise<void> {
+  const candidates = buildSshPasswordCandidatesForDevice(device, {
+    requestHeaderPassword: request.header('x-device-password') ?? '',
+  });
+  if (candidates.length === 0) {
+    throw new Error('NO_SSH_PASSWORD_CANDIDATES');
+  }
+  const credBase = {
+    host: device.host,
+    port: device.port ?? 22,
+    username: device.username,
+  };
+  let lastError: unknown = null;
+  for (const pwd of candidates) {
+    try {
+      await uploadFileSftp(
+        { ...credBase, password: pwd },
+        remotePath,
+        buffer,
+        { skipRemotePathValidation: true },
+      );
+      setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (shouldTryNextPasswordForSftp(error)) continue;
+      throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('SFTP 上传失败');
 }
 
 type ApiErrorPayload = {
@@ -1812,6 +1871,8 @@ async function runOnDevice(
     rejectOnNonZeroExit?: boolean;
     /** 技能全文等场景放大 SSH stdout 截断上限，避免 JSON 被截断导致解析失败 */
     stdoutCharLimit?: number;
+    /** 与 ssh.runRemoteCommands fullStdoutCapture 一致：设备文件 base64 全量回传 */
+    fullStdoutCapture?: boolean;
   },
 ) {
   invalidateDevicesReadCache();
@@ -1837,6 +1898,7 @@ async function runOnDevice(
   const joinWith = options?.joinWith;
   const rejectOnNonZeroExit = options?.rejectOnNonZeroExit;
   const stdoutCharLimit = options?.stdoutCharLimit;
+  const fullStdoutCapture = options?.fullStdoutCapture;
   let lastError: unknown = null;
   const output = await runInDeviceLane(device.id, async () => {
     for (const pwd of candidates) {
@@ -1850,7 +1912,13 @@ async function runOnDevice(
               password: pwd,
             },
             commands,
-            { timeoutMs, joinWith, rejectOnNonZeroExit, ...(stdoutCharLimit ? { stdoutCharLimit } : {}) },
+            {
+              timeoutMs,
+              joinWith,
+              rejectOnNonZeroExit,
+              ...(stdoutCharLimit ? { stdoutCharLimit } : {}),
+              ...(fullStdoutCapture ? { fullStdoutCapture: true } : {}),
+            },
           );
           setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
           return result;
@@ -1982,8 +2050,8 @@ app.use('/api/devices/:deviceId/code-server-proxy', (req, res, next) => {
     }
   })();
 });
-/** 全局 JSON 不宜过大，避免并发大请求 OOM；大文件请走专用上传路由 */
-app.use(express.json({ limit: '10mb' }));
+/** 含设备文件管理 JSON 上传/保存；超大文件仍受本机内存与 SSH 单次缓冲约束 */
+app.use(express.json({ limit: '1024mb' }));
 
 const apiLimiter = rateLimit({
   windowMs: 60_000,
@@ -5408,34 +5476,54 @@ app.get('/api/devices/:id/files/list', async (request, response) => {
   response.json({ ok: true, output: executed.output, path: targetPath });
 });
 
+/** 设备文件整段 base64 经 SSH stdout 回传时的字符上限（与 fullStdoutCapture 配合；极大文件仍受 Node 堆内存限制） */
+const DEVICE_FILE_READ_STDOUT_CHAR_CAP = 1_000_000_000;
+
 app.get('/api/devices/:id/files/read', async (request, response) => {
   const { id } = request.params;
   const targetPath = String(request.query.path ?? '');
-  const lines = Number(request.query.lines ?? 200);
 
   if (!targetPath.trim()) {
     sendApiError(response, 400, 'INVALID_PATH', 'path 不能为空', { retryable: false });
     return;
   }
 
-  // Use base64 to avoid JSON encoding issues with weird characters
+  const p = shEscape(targetPath);
   const executed = await runOnDevice(
     request,
     response,
     id,
-    [`sudo bash -lc "if [ -f ${shEscape(targetPath)} ]; then head -n ${Number.isFinite(lines) && lines > 0 ? Math.min(lines, 2000) : 200} ${shEscape(targetPath)} 2>/dev/null | base64 | tr -d '\\n'; else echo 'NOT_A_FILE'; fi || true"`],
-    { timeoutMs: 180_000 },
+    [`sudo bash -lc "if [ ! -f ${p} ]; then echo NOT_A_FILE; else base64 -w0 ${p} 2>/dev/null | tr -d '\\n'; fi"`],
+    {
+      timeoutMs: 120 * 60 * 1000,
+      stdoutCharLimit: DEVICE_FILE_READ_STDOUT_CHAR_CAP,
+      fullStdoutCapture: true,
+    },
   );
   if (!executed) return;
-  
-  if (executed.output.trim() === 'NOT_A_FILE') {
+
+  const rawOut = executed.output.trim();
+  if (rawOut === 'NOT_A_FILE') {
     response.json({ ok: true, output: 'NOT_A_FILE', path: targetPath });
     return;
   }
 
-  const base64Str = executed.output.trim();
-  const decoded = Buffer.from(base64Str, 'base64').toString('utf-8');
-  response.json({ ok: true, output: decoded, contentBase64: base64Str, path: targetPath });
+  if (rawOut === '') {
+    response.json({ ok: true, path: targetPath, binary: false, sizeBytes: 0, output: '' });
+    return;
+  }
+
+  const buf = Buffer.from(rawOut, 'base64');
+  const text = decodeDeviceFileBuffer(buf);
+  /** 仅作前端提示，不阻止打开（与 VS Code 可强制以文本打开一致） */
+  const binary = isLikelyBinaryBuffer(buf);
+  response.json({
+    ok: true,
+    output: text,
+    path: targetPath,
+    binary,
+    sizeBytes: buf.length,
+  });
 });
 
 app.post('/api/devices/:id/files/write', async (request, response) => {
@@ -5451,8 +5539,10 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
   if (!append) {
     const device = await resolveDevice(request, response, id);
     if (!device) return;
-    const { password } = resolvePassword(request, device);
-    if (!password) {
+    const candidates = buildSshPasswordCandidatesForDevice(device, {
+      requestHeaderPassword: request.header('x-device-password') ?? '',
+    });
+    if (candidates.length === 0) {
       sendApiError(
         response,
         400,
@@ -5462,19 +5552,14 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
       );
       return;
     }
-    const pwd = password;
     try {
       await runInDeviceLane(device.id, async () => {
-        await runRemoteCommands(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-          [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
-          { timeoutMs: 30_000 },
-        );
-        await uploadFileSftp(
-          { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
+        // uploadFileSftp 内已 mkdir -p；口令与 runOnDevice 一致按候选尝试
+        await uploadFileSftpWithPasswordCandidates(
+          device,
+          request,
           targetPath,
           Buffer.from(content ?? '', 'utf-8'),
-          { skipRemotePathValidation: true },
         );
       });
       response.json({ ok: true, output: '写入完成', path: targetPath });
@@ -5509,8 +5594,10 @@ app.post('/api/devices/:id/files/upload', async (request, response) => {
   const device = await resolveDevice(request, response, id);
   if (!device) return;
 
-  const { password } = resolvePassword(request, device);
-  if (!password) {
+  const candidates = buildSshPasswordCandidatesForDevice(device, {
+    requestHeaderPassword: request.header('x-device-password') ?? '',
+  });
+  if (candidates.length === 0) {
     sendApiError(
       response,
       400,
@@ -5520,26 +5607,15 @@ app.post('/api/devices/:id/files/upload', async (request, response) => {
     );
     return;
   }
-  const pwd = password;
   try {
+    const buffer = Buffer.from(contentBase64, 'base64');
     await runInDeviceLane(device.id, async () => {
-      await runRemoteCommands(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-        [`mkdir -p $(dirname ${shEscape(targetPath)}) || true`],
-        { timeoutMs: 30_000 },
-      );
-      const buffer = Buffer.from(contentBase64, 'base64');
-      await uploadFileSftp(
-        { host: device.host, port: device.port ?? 22, username: device.username, password: pwd },
-        targetPath,
-        buffer,
-        { skipRemotePathValidation: true },
-      );
+      await uploadFileSftpWithPasswordCandidates(device, request, targetPath, buffer);
     });
     response.json({ ok: true, path: targetPath });
   } catch (e) {
     response.status(500).json({
-      error: e instanceof Error ? `长传失败: ${e.message}` : '文件上传失败',
+      error: e instanceof Error ? `上传失败: ${e.message}` : '文件上传失败',
     });
   }
 });
@@ -5559,7 +5635,11 @@ app.get('/api/devices/:id/files/download', async (request, response) => {
     response,
     id,
     [`sudo bash -lc "if [ -d ${shEscape(targetPath)} ]; then echo '__TYPE__:dir'; tar czf - ${shEscape(targetPath)} 2>/dev/null | base64 | tr -d '\\n'; elif [ -f ${shEscape(targetPath)} ]; then echo '__TYPE__:file'; base64 ${shEscape(targetPath)} | tr -d '\\n'; else echo 'NOT_FOUND'; fi || true"`],
-    { timeoutMs: 10 * 60 * 1000 },
+    {
+      timeoutMs: 120 * 60 * 1000,
+      stdoutCharLimit: DEVICE_FILE_READ_STDOUT_CHAR_CAP,
+      fullStdoutCapture: true,
+    },
   );
   
   if (!executed) return;

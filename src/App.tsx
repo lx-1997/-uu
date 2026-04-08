@@ -28,8 +28,9 @@ import SkillBrowser from './components/SkillBrowser';
 import { isStudioLoginRequired } from './utils/studio-auth-gate';
 import LazyRouteFallback from './components/LazyRouteFallback';
 import DroboticsEmbed from './components/DroboticsEmbed';
+/** 工作台为默认 Tab，静态导入避免 dev/HMR 下 lazy chunk 偶发「Failed to fetch dynamically imported module」 */
+import Dashboard from './components/Dashboard';
 
-const Dashboard = lazy(() => import('./components/Dashboard'));
 const Flasher = lazy(() => import('./components/Flasher'));
 const Terminal = lazy(() => import('./components/Terminal'));
 const Files = lazy(() => import('./components/Files'));
@@ -612,8 +613,6 @@ export default function App() {
 
   useEffect(() => {
     initAnalyticsFlushListeners();
-    /* 默认工作台分包预热，缩短首进工作台的等待 */
-    void import('./components/Dashboard');
   }, []);
 
   /** 移除 index.html 中与 #root 同级的启动层，避免 bundle 加载前后闪白 */

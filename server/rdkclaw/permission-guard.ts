@@ -103,6 +103,11 @@ const DEVICE_ALLOWED_WRITE_PREFIXES = [
   '/userdata',
   '/tmp',
   '/home',
+  /**
+   * root 家目录下用户脚本/配置（如 /root/ws2812b.py）。
+   * 敏感子路径仍由 DEVICE_BLOCKED_PREFIXES 拦截（如 /root/.ssh）。
+   */
+  '/root',
   '/root/openclaw',
   '/root/.openclaw',
   /** ROS/colcon 常见工作区（此前仅放行 /root/.openclaw，导致 /root/ros2_ws 等写入被误拦） */

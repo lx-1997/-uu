@@ -28,6 +28,9 @@ export interface DeviceFileOpResult {
   output?: string;
   path?: string;
   contentBase64?: string;
+  /** 服务端启发式判定，仅提示 */
+  binary?: boolean;
+  sizeBytes?: number;
 }
 
 export interface OneShotGeneratedAppResult {
@@ -1594,10 +1597,10 @@ export function listDeviceFiles(deviceId: string, path: string, password?: strin
   });
 }
 
-export function readDeviceFile(deviceId: string, path: string, lines = 200, password?: string) {
-  const qp = new URLSearchParams({ path, lines: String(lines) }).toString();
+export function readDeviceFile(deviceId: string, path: string, options?: { password?: string }) {
+  const qp = new URLSearchParams({ path }).toString();
   return request<DeviceFileOpResult>(`/api/devices/${deviceId}/files/read?${qp}`, {
-    headers: password ? { 'x-device-password': password } : undefined,
+    headers: options?.password ? { 'x-device-password': options.password } : undefined,
   });
 }
 

@@ -22,7 +22,14 @@ export default function Files() {
   const [currentPath, setCurrentPath] = useState('/root');
   const [entries, setEntries] = useState<Array<{ name: string; isDir: boolean; size?: string; date?: string }>>([]);
   const [running, setRunning] = useState(false);
-  const [editorFile, setEditorFile] = useState<{ path: string; content: string } | null>(null);
+  /** 仅「保存到设备」占用，避免与列表刷新/上传共用 running 导致保存按钮长时间卡在「保存中」 */
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [editorFile, setEditorFile] = useState<{
+    path: string;
+    content: string;
+    /** 服务端启发式判定，不阻止编辑，仅提示 */
+    binaryHint?: boolean;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [searchMatches, setSearchMatches] = useState<Array<{path: string; isDir: boolean}>>([]);
@@ -189,17 +196,15 @@ export default function Files() {
     setRunning(true);
     readDeviceFile(currentDevice.id, filePath)
       .then((res) => {
-         let text = res.output || '';
-         if (res.contentBase64) {
-           try {
-             // Safely decode UTF-8 from Base64
-             const binary = atob(res.contentBase64);
-             const bytes = new Uint8Array(binary.length);
-             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-             text = new TextDecoder('utf-8').decode(bytes);
-           } catch(e) { console.warn('Base64 decode failed', e); }
-         }
-         setEditorFile({ path: filePath, content: text });
+        if (res.output === 'NOT_A_FILE') {
+          addToast(t('files.notAFile', '不是普通文件或不存在。'), 'warning');
+          return;
+        }
+        setEditorFile({
+          path: filePath,
+          content: res.output ?? '',
+          binaryHint: Boolean(res.binary),
+        });
       })
       .catch((err) => addToast(err instanceof Error ? err.message : t('files.readFail', '读取文件失败'), 'error'))
       .finally(() => setRunning(false));
@@ -207,7 +212,7 @@ export default function Files() {
 
   const runSaveEdit = () => {
     if (!ensureDevice() || !currentDevice || !editorFile) return;
-    setRunning(true);
+    setSaveBusy(true);
     writeDeviceFile(currentDevice.id, editorFile.path, editorFile.content)
       .then(() => {
         addToast(t('files.saved', '文件已保存'), 'success');
@@ -215,7 +220,7 @@ export default function Files() {
         refreshList();
       })
       .catch((err) => addToast(err instanceof Error ? err.message : t('files.saveFail', '保存文件失败'), 'error'))
-      .finally(() => setRunning(false));
+      .finally(() => setSaveBusy(false));
   };
 
   const toBase64 = (file: File) => new Promise<string>((resolve, reject) => {
@@ -501,6 +506,27 @@ export default function Files() {
                 <span>{editorFile.path.substring(editorFile.path.lastIndexOf('/') + 1)}</span>
               </div>
             </div>
+            {editorFile.binaryHint && (
+              <div
+                role="status"
+                style={{
+                  marginBottom: 8,
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                  color: 'var(--text-muted)',
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  flexShrink: 0,
+                }}
+              >
+                {t(
+                  'files.binaryHintInline',
+                  '已按文本打开：若为压缩包或二进制，内容可能无意义；需要完整副本请用「下载」。',
+                )}
+              </div>
+            )}
             <div className="file-editor-body" style={{ flex: 1, border: '1px solid var(--border)', borderRadius: '0 0 8px 8px', overflow: 'hidden' }}>
               <Editor
                 height="100%"
@@ -527,8 +553,8 @@ export default function Files() {
             </div>
             <div className="tool-bar" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
               <div className="tool-bar-right">
-                <button className="btn btn-primary btn-sm" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: 'var(--accent)', color: 'var(--text-on-accent)', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={running}>
-                  {running ? (
+                <button className="btn btn-primary btn-sm" style={{ minWidth: 120, padding: '10px 24px', fontSize: 14, background: 'var(--accent)', color: 'var(--text-on-accent)', border: 'none', borderRadius: 8 }} onClick={runSaveEdit} disabled={saveBusy}>
+                  {saveBusy ? (
                     t('files.saving', '保存中...')
                   ) : (
                     <>

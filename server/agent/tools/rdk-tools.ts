@@ -912,7 +912,7 @@ function deviceFileWriteTool(deviceId: string): Tool<{ path: string; content: st
       '规则：\n' +
       '- IMPORTANT: 写入已存在的文件前，ALWAYS 先用 device_file_read 读取当前内容\n' +
       '- 此工具会完全覆盖目标文件，不是追加\n' +
-      '- 典型允许路径：/userdata、/tmp、/home/...、/root/ros2_ws/...、/root/.openclaw/...（勿写到未允许的系统路径）\n' +
+      '- 典型允许路径：/userdata、/tmp、/home/...、**/root/**（root 家目录脚本如 /root/ws2812b.py；/root/.ssh 等仍禁止）、/root/ros2_ws/...、/root/.openclaw/...（勿写到未允许的系统路径）\n' +
       '- 父目录不存在时上传流程会尝试 mkdir -p；若仍失败再用 device_exec 建目录\n' +
       '- 上传默认走 **SFTP 直写**（无 base64 膨胀）；仅当板端无 SFTP 子系统时自动回退管道写入。若需强制旧路径：`RDK_DEVICE_UPLOAD_SFTP=0`。\n' +
       '- **若仍长时间卡在「执行中」**（与同一设备**持久 SSH shell** 并发时，第二条 SSH 可能慢）：可改用**单条** `device_exec` 把小脚本落到 `/tmp`，或设 `RDK_DEVICE_EXEC_PERSISTENT_SHELL=0` 后再试；大文件仍优先本工具\n' +

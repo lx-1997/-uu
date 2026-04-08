@@ -192,6 +192,11 @@ describe('device path boundary', () => {
     expect(result.blocked).toBe(false);
   });
 
+  it('allows writing user scripts directly under /root (e.g. ws2812b.py)', () => {
+    const result = guard('device_file_write', { path: '/root/ws2812b.py' });
+    expect(result.blocked).toBe(false);
+  });
+
   it('blocks writing to non-allowed path like /usr/bin', () => {
     const result = guard('device_file_write', { path: '/usr/bin/my-script' });
     expect(result.blocked).toBe(true);

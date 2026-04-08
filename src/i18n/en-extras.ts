@@ -77,6 +77,10 @@ export const EN_EXTRAS: Record<string, string> = {
   'files.noContent': 'No file content returned',
   'files.downloadFail': 'Download failed',
   'files.readFail': 'Failed to read file',
+  'files.binaryHint': 'This looks like binary or a compressed file; use Download instead of text edit.',
+  'files.binaryHintInline':
+    'Opened as text; if this is binary or an archive, the view may be meaningless — use Download for an exact copy.',
+  'files.notAFile': 'Not a regular file or it does not exist.',
   'files.saved': 'File saved',
   'files.saveFail': 'Save failed',
   'files.uploading': 'Uploading {{name}}…',

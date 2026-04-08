@@ -41,7 +41,11 @@ export function HubDockAnchorProvider({ children }: { children: ReactNode }) {
         放在 children 之后，使占位层叠在主内容之上（与原先 AIDock 在 MainContent 后一致），
         避免全屏 fixed Dock 被页面挡住。
       */}
-      <div ref={onDefaultHostRef} className="dock-portal-default-host" aria-hidden />
+      {/*
+        勿对容器设 aria-hidden：AIDock 通过 createPortal 挂在此节点内，含可聚焦控件；
+        aria-hidden 会导致「焦点在隐藏子树内」的 a11y 报错（Chrome）。
+      */}
+      <div ref={onDefaultHostRef} className="dock-portal-default-host" />
     </HubDockAnchorContext.Provider>
   );
 }

@@ -93,6 +93,11 @@ export interface RunRemoteCommandOptions {
   joinWith?: RemoteCommandJoiner;
   /** 单条 exec 的 stdout 截断上限（字符数）；技能全文等场景需大于默认 512k */
   stdoutCharLimit?: number;
+  /**
+   * 默认 stdout 原始字节有 min(stdoutCap*4, 4MB) 环形上限，大文件 base64 会丢头部导致整段损坏。
+   * 设备文件读/下载等需完整回传时设为 true，并配合足够大的 `stdoutCharLimit`。
+   */
+  fullStdoutCapture?: boolean;
 }
 
 export interface VerifySshConnectionOptions {
@@ -159,6 +164,7 @@ export function runRemoteCommands(
     let execStream: { close?: () => void } | null = null;
     const timeoutMs = Math.max(5_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
     const stdoutCap = Math.max(8_192, Number(options.stdoutCharLimit ?? DEFAULT_STREAM_OUTPUT_CHAR_LIMIT));
+    const fullCapture = Boolean(options.fullStdoutCapture);
     let settled = false;
 
     const safeResolve = (output: string) => {
@@ -240,7 +246,9 @@ export function runRemoteCommands(
           const rawErr: Buffer[] = [];
           let rawOutBytes = 0;
           let rawErrBytes = 0;
-          const maxRawOut = Math.min(stdoutCap * 4, 4_000_000);
+          const maxRawOut = fullCapture
+            ? Number.MAX_SAFE_INTEGER
+            : Math.min(stdoutCap * 4, 4_000_000);
           const maxRawErr = Math.min(STDERR_STREAM_CHAR_LIMIT * 4, 1_000_000);
 
           let stdoutTrunc = false;
@@ -269,7 +277,7 @@ export function runRemoteCommands(
               }
 
               let stdout = decodeRemoteStreamBytes(Buffer.concat(rawOut));
-              if (stdout.length > stdoutCap) {
+              if (!fullCapture && stdout.length > stdoutCap) {
                 stdout = stdout.slice(stdout.length - stdoutCap);
                 stdoutTrunc = true;
               }
