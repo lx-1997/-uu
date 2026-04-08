@@ -18,13 +18,13 @@ type EmbeddedJson = {
 };
 
 /**
- * 发版凭证（写死即可）：在此填入 Supabase 项目 URL 与 secret（推荐 Dashboard → API → service_role）。
- * 填一次后正常 `npm run build` / 桌面打包即带上，无需再维护 `config/supabase-conversation.embedded.json`。
- * 本地若需指向别的库，可用 .env 的 SUPABASE_URL / SUPABASE_SECRET_KEY 覆盖（优先级更高）。
+ * 发版默认仅可写 **项目 URL**；**service_role / secret 禁止提交到 Git**（见 .env.example）。
+ * 密钥通过 CI/本机 `SUPABASE_SECRET_KEY` 或 `config/supabase-conversation.embedded.json`（勿入库）注入。
+ * 本地可用 .env 的 SUPABASE_URL / SUPABASE_SECRET_KEY 覆盖（优先级高于下列默认值）。
  */
 const SUPABASE_SHIPPING_DEFAULTS = {
   url: 'https://pbqmhihtdwhsjaavhzqs.supabase.co',
-  secretKey: 'sb_secret_iWKfgP3zhSRcHvZ655z9VQ__3pvBBLJ',
+  secretKey: '',
   table: '',
 } as const;
 
