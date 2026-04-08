@@ -1637,7 +1637,8 @@ export const EN_EXTRAS: Record<string, string> = {
   'addDevice.typec.busy': 'Configuring…',
   'addDevice.typec.configuring': 'Configuring NIC IP…',
   'addDevice.typec.connectFail': 'Quick connect failed — check the Type-C cable',
-  'addDevice.typec.ipNotVerified': 'IP not applied — verify the selected NIC',
+  'addDevice.typec.ipNotVerified':
+    'PC IP not detected yet. Confirm the correct NIC; approve the system prompt if shown. Web mode needs server privileges — desktop app is recommended.',
   'addDevice.typec.ipScheme': 'IP scheme:',
   'addDevice.typec.lead':
     'Use a USB Type-C cable between your PC and RDK X5 to create a virtual Ethernet link, auto-assign IP, and SSH in.',

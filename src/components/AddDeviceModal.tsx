@@ -159,7 +159,13 @@ export default function AddDeviceModal() {
         if (session !== typecSessionRef.current) return;
         if (!res.verified) {
           appendStudioLog('warn', '[TypeC] 本机 IP 校验未通过（verified=false），请确认网卡是否选对');
-          addToast(t('addDevice.typec.ipNotVerified', 'IP 配置未生效，请检查网卡选择是否正确'), 'warning');
+          addToast(
+            t(
+              'addDevice.typec.ipNotVerified',
+              '本机 IP 仍未检测到。请确认已选对网卡；若弹出系统授权请点「允许」；推荐用桌面客户端。',
+            ),
+            'warning',
+          );
           setTypecConfiguring(false);
           setTypecStep('select-nic');
           return;

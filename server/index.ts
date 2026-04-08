@@ -63,6 +63,7 @@ import { pingVendorModel } from './openclaw-vendor-model-ping.js';
 import * as path from 'path';
 import { ensureAgentMediaDownloadDir, getLocalFilesServeDirs } from './local-files-roots.js';
 import { configureDarwinTypecNic } from './typec-configure-darwin.js';
+import { verifyTypecIpOnInterface } from './typec-verify-ip.js';
 import {
   buildBoardDetectionCommand,
   buildTrosSourceLoopBash,
@@ -3133,17 +3134,7 @@ app.post('/api/typec/configure', async (request, response) => {
       result = await configureLinuxTypecNic(interfaceName, pcIp, mask);
     }
 
-    // 轮询验证 IP 是否生效（最多 5 次，每次 500ms）
-    let verified = false;
-    for (let i = 0; i < 5; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      const ifaces = os.networkInterfaces();
-      const target = ifaces[interfaceName];
-      if (target?.some(a => a.family === 'IPv4' && a.address === pcIp)) {
-        verified = true;
-        break;
-      }
-    }
+    const verified = await verifyTypecIpOnInterface(interfaceName, pcIp);
 
     response.json({ ok: true, verified, output: result });
   } catch (error) {
@@ -3152,6 +3143,43 @@ app.post('/api/typec/configure', async (request, response) => {
       500,
       'TYPEC_CONFIGURE_FAILED',
       error instanceof Error ? `网卡配置失败: ${error.message}` : '网卡配置失败',
+      { retryable: true },
+    );
+  }
+});
+
+/**
+ * 仅检测本机网卡是否已出现目标 IPv4（不修改配置；与主进程 verifyTypecNicIp 语义一致）。
+ */
+app.post('/api/typec/verify-ip', async (request, response) => {
+  const { interfaceName, pcIp } = request.body as { interfaceName?: string; pcIp?: string };
+  if (!interfaceName || !pcIp) {
+    sendApiError(response, 400, 'INVALID_PARAMS', '请提供 interfaceName 和 pcIp');
+    return;
+  }
+  if (!isIpv4DottedQuad(pcIp)) {
+    sendApiError(response, 400, 'INVALID_PARAMS', 'pcIp 须为点分 IPv4');
+    return;
+  }
+  const platform = os.platform();
+  if (platform === 'win32') {
+    if (interfaceName.length > 128 || /[";|&<>]/.test(interfaceName)) {
+      sendApiError(response, 400, 'INVALID_PARAMS', 'interfaceName 格式非法');
+      return;
+    }
+  } else if (!isValidTypecInterfaceName(interfaceName)) {
+    sendApiError(response, 400, 'INVALID_PARAMS', 'interfaceName 格式非法');
+    return;
+  }
+  try {
+    const verified = await verifyTypecIpOnInterface(interfaceName, pcIp);
+    response.json({ ok: true, verified });
+  } catch (error) {
+    sendApiError(
+      response,
+      500,
+      'TYPEC_VERIFY_FAILED',
+      error instanceof Error ? error.message : '校验失败',
       { retryable: true },
     );
   }

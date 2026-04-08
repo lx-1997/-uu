@@ -21,6 +21,12 @@ export const SSH_KEEPALIVE_COUNT_MAX = 3;
  */
 export const SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * 套件端 SSH exec 默认 locale。勿用 LANG=C：nmcli、iwgetid 等会把 UTF-8 的 SSID（含中文）打成问号。
+ * 与 `OpenClawDeploymentManager.getWifiList`、wifi-link-probe 等处策略一致。
+ */
+export const SSH_REMOTE_UTF8_LOCALE_PREFIX = 'LANG=C.UTF-8 LC_ALL=C.UTF-8';
+
 /** 仅保留产品默认 root；其它常见口令请用 RDK_DEFAULT_PASSWORDS（逗号分隔），避免自动误试锁账户 */
 const BUILTIN_DEFAULT_PASSWORDS = ['root'];
 

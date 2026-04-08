@@ -233,6 +233,12 @@ declare global {
         error?: string;
       }>;
 
+      /** 仅轮询检测本机网卡是否已有目标 IPv4（不执行提权配网） */
+      verifyTypecNicIp?: (payload: { interfaceName: string; pcIp: string }) => Promise<{
+        verified: boolean;
+        error?: string;
+      }>;
+
       mirrorStudioLogLine?: (line: { id: number; ts: number; level: string; text: string }) => void;
       notifyStudioLogClear?: () => void;
       /** 独立原生窗口展示控制台日志（非系统浏览器） */

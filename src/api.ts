@@ -308,6 +308,42 @@ export async function fetchTypecInterfaces() {
   }
 }
 
+async function verifyTypecIpPresent(interfaceName: string, pcIp: string): Promise<boolean> {
+  if (isDesktop() && typeof window !== 'undefined') {
+    const fn = window.rdkDesktop?.verifyTypecNicIp;
+    if (typeof fn === 'function') {
+      const raw = await fn({ interfaceName, pcIp });
+      return !!raw?.verified;
+    }
+  }
+  try {
+    const sub = await request<{ ok: boolean; verified: boolean }>('/api/typec/verify-ip', {
+      method: 'POST',
+      body: JSON.stringify({ interfaceName, pcIp }),
+    });
+    return !!sub.verified;
+  } catch {
+    return false;
+  }
+}
+
+/** 写盘后少数系统上 os.networkInterfaces() 晚于首轮校验；再等 3s 做一次完整轮询。 */
+async function finalizeTypecConfigureResult(
+  interfaceName: string,
+  pcIp: string,
+  r: { ok: true; verified: boolean; output: string },
+): Promise<{ ok: true; verified: boolean; output: string }> {
+  if (!r.verified) {
+    appendStudioLog('warn', '[TypeC] 首次校验未通过，3s 后再检测本机 IP…');
+    await new Promise((z) => setTimeout(z, 3000));
+    if (await verifyTypecIpPresent(interfaceName, pcIp)) {
+      appendStudioLog('info', '[TypeC] 延迟二次检测通过');
+      return { ...r, verified: true };
+    }
+  }
+  return r;
+}
+
 export async function configureTypecInterface(interfaceName: string, pcIp: string, netmask?: string) {
   const mask = netmask || '255.255.255.0';
   appendStudioLog(
@@ -337,7 +373,7 @@ export async function configureTypecInterface(interfaceName: string, pcIp: strin
           r.verified ? 'info' : 'warn',
           `[TypeC] 配置完成 verified=${String(r.verified)}${out ? ` · ${out}` : ''}`,
         );
-        return r;
+        return finalizeTypecConfigureResult(interfaceName, pcIp, r);
       }
     }
     appendStudioLog('info', '[TypeC] POST /api/typec/configure');
@@ -350,7 +386,11 @@ export async function configureTypecInterface(interfaceName: string, pcIp: strin
       r.verified ? 'info' : 'warn',
       `[TypeC] 配置完成 verified=${String(r.verified)}${out ? ` · ${out}` : ''}`,
     );
-    return r;
+    return finalizeTypecConfigureResult(interfaceName, pcIp, {
+      ok: true,
+      verified: !!r.verified,
+      output: String(r.output ?? ''),
+    });
   } catch (e) {
     appendStudioLog(
       'error',

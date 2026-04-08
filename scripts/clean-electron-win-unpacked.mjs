@@ -7,7 +7,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const target = path.join(__dirname, '..', 'release', 'win-unpacked');
+const releaseRoot = path.join(__dirname, '..', 'release');
+const fromEnv = String(process.env.RDK_DESKTOP_WIN_UNPACKED_PATH || '').trim();
+/** 分段输出：release/desktop/win-x64/win-unpacked；未分段时为 release/win-unpacked */
+const target = fromEnv
+  ? path.resolve(fromEnv)
+  : fs.existsSync(path.join(releaseRoot, 'desktop', 'win-x64', 'win-unpacked'))
+    ? path.join(releaseRoot, 'desktop', 'win-x64', 'win-unpacked')
+    : path.join(releaseRoot, 'win-unpacked');
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));

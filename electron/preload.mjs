@@ -163,6 +163,8 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   configureTypecNicDesktop: (payload) => ipcRenderer.invoke('rdk:typec:configure-nic-desktop', payload),
   /** @deprecated 请使用 configureTypecNicDesktop */
   configureTypecNicDarwin: (payload) => ipcRenderer.invoke('rdk:typec:configure-nic-desktop', payload),
+  /** 仅检测本机网卡是否已出现目标 IPv4（不修改配置） */
+  verifyTypecNicIp: (payload) => ipcRenderer.invoke('rdk:typec:verify-ip-desktop', payload),
 
   /** 将主窗口一行日志镜像到主进程缓冲（供独立控制台窗口） */
   mirrorStudioLogLine: (line) => ipcRenderer.send('rdk:studio-log-mirror', line),

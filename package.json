@@ -79,6 +79,7 @@
     "productName": "RDK Studio",
     "copyright": "Copyright © 2025 RDK",
     "npmRebuild": false,
+    "afterPack": "./scripts/electron-after-pack.mjs",
     "asar": false,
     "asarUnpack": [
       "node_modules/ssh2/**",

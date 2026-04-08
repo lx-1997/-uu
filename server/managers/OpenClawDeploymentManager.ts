@@ -9,6 +9,7 @@ import {
   SSH_READY_TIMEOUT_MS,
   SSH_KEEPALIVE_INTERVAL_MS,
   SSH_KEEPALIVE_COUNT_MAX,
+  SSH_REMOTE_UTF8_LOCALE_PREFIX,
   forwardOutRemoteTcp,
 } from '../ssh.js';
 import * as fs from 'fs';
@@ -2482,7 +2483,7 @@ print(json.dumps(result,ensure_ascii=False))`;
     const cmd =
       '/bin/sh -c ' +
       JSON.stringify(
-        'LC_ALL=C.UTF-8 LANG=C.UTF-8; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 1; ' +
+        `${SSH_REMOTE_UTF8_LOCALE_PREFIX}; (nmcli device wifi rescan 2>/dev/null || sudo -n nmcli device wifi rescan 2>/dev/null || true); sleep 1; ` +
           'nmcli -t -f SSID device wifi list 2>/dev/null || sudo -n nmcli -t -f SSID device wifi list 2>/dev/null',
       );
     const rawStdout: Buffer[] = [];

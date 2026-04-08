@@ -32,6 +32,43 @@ if (!supportedTargets.has(target)) {
 const macLocalSign = target === 'mac' && mode === 'local';
 const macArm64 = target === 'mac' && mode === 'arm64';
 const macX64 = target === 'mac' && (mode === 'x64' || mode === 'intel');
+/**
+ * 默认：产物写入 release/desktop/<variant>/（与 stuido0.3.16 中 Forge maker-zip 的 zip/darwin/arm64 分层类似），
+ * 并在该目录生成 RELEASES.json（Electron Forge 兼容：currentRelease + releases + 本地 artifacts 列表）。
+ * 恢复旧扁平布局（全部在 release/ 根目录）：RDK_DESKTOP_RELEASE_FLAT=1
+ *
+ * 命令 → variant 目录（package.json build.* 目标见下文）：
+ * - node scripts/build-desktop.mjs win              → win-x64（nsis + portable + zip，arch x64）
+ * - node scripts/build-desktop.mjs win zip|dir      → win-x64
+ * - node scripts/build-desktop.mjs mac              → darwin-arm64（package.json 仅 dmg arm64）
+ * - node scripts/build-desktop.mjs mac arm64        → darwin-arm64
+ * - node scripts/build-desktop.mjs mac x64|intel    → darwin-x64
+ * - node scripts/build-desktop.mjs linux            → linux-x64（AppImage + deb）
+ */
+const releaseFlat = String(process.env.RDK_DESKTOP_RELEASE_FLAT || '').trim() === '1';
+
+function computeDesktopVariant() {
+  if (target === 'win') return 'win-x64';
+  if (target === 'linux') return 'linux-x64';
+  if (target === 'mac') {
+    if (macArm64) return 'darwin-arm64';
+    if (macX64) return 'darwin-x64';
+    return 'darwin-arm64';
+  }
+  return 'unknown';
+}
+
+function variantMeta(variant) {
+  const [os, arch] = variant.split('-');
+  const platform =
+    os === 'darwin' ? 'darwin' : os === 'win' ? 'win32' : os === 'linux' ? 'linux' : '';
+  return { platform, arch: arch || '' };
+}
+
+const desktopVariant = computeDesktopVariant();
+const segmentedReleaseDir = path.join(releaseDir, 'desktop', desktopVariant);
+const electronBuilderOutputDir = releaseFlat ? releaseDir : segmentedReleaseDir;
+
 /** 默认 ad-hoc；对外 Developer ID 分发时设 RDK_DESKTOP_MAC_USE_DEVELOPER_ID=1 */
 const macUseDeveloperId =
   target === 'mac' &&
@@ -246,11 +283,17 @@ try {
   }
   validateBuildResources();
   validateBuildConfig();
+  const cleanTargetDir = releaseFlat ? releaseDir : segmentedReleaseDir;
   if (cleanReleaseDir) {
-    await cleanReleaseDirWithRetry(releaseDir);
+    if (releaseFlat) {
+      console.log('[build:desktop] 清空整个 release/（RDK_DESKTOP_RELEASE_FLAT=1）');
+    } else {
+      console.log(`[build:desktop] 清空本 variant 输出目录: release/desktop/${desktopVariant}/`);
+    }
+    await cleanReleaseDirWithRetry(cleanTargetDir);
   } else {
     console.log(
-      '[build:desktop] RDK_DESKTOP_CLEAN_RELEASE=0：保留 release/ 中已有文件。',
+      '[build:desktop] RDK_DESKTOP_CLEAN_RELEASE=0：保留已有输出目录中的文件。',
     );
     console.log(
       '[build:desktop] 同名产物（同版本）仍会被 electron-builder 覆盖；若需每次生成新文件名，请设 RDK_DESKTOP_ARTIFACT_STAMP=1。',
@@ -302,7 +345,14 @@ try {
     await run(npmCmd, ['run', 'build']);
   }
   if (target === 'win') {
+    process.env.RDK_DESKTOP_WIN_UNPACKED_PATH = path.join(electronBuilderOutputDir, 'win-unpacked');
     await run(npmCmd, ['run', 'clean:win-unpacked']);
+    delete process.env.RDK_DESKTOP_WIN_UNPACKED_PATH;
+  }
+  if (!releaseFlat) {
+    console.log(`[build:desktop] electron-builder directories.output → ${electronBuilderOutputDir}`);
+  } else {
+    console.log('[build:desktop] electron-builder 输出目录: release/（根目录，RDK_DESKTOP_RELEASE_FLAT=1）');
   }
   const builderBaseArgs =
     target === 'win' && mode === 'dir'
@@ -339,12 +389,22 @@ try {
     ];
     console.log(`[build:desktop] RDK_DESKTOP_ARTIFACT_STAMP=1：dmg 将带时间戳后缀（${stamp}）。`);
   }
+  if (!releaseFlat) {
+    /** 勿用单独的 -o（与 electron-builder 的 --mac 短选项冲突）；使用 -c.directories.output= */
+    builderArgs = [...builderArgs, `-c.directories.output=${electronBuilderOutputDir}`];
+  }
   await run(builderBin, builderArgs);
+  const { writeDesktopReleasesJson } = await import('./write-desktop-releases.mjs');
+  writeDesktopReleasesJson(electronBuilderOutputDir, rootDir, {
+    variant: desktopVariant,
+    ...variantMeta(desktopVariant),
+  });
   await runWithEnv(
     process.execPath,
     ['scripts/desktop-smoke-check.mjs', target],
     {
       RDK_DESKTOP_BUILD_STARTED_AT: String(buildStartedAt),
+      RDK_DESKTOP_RELEASE_OUT: electronBuilderOutputDir,
       ...(target === 'win' && mode === 'dir' ? { RDK_DESKTOP_WIN_DIR_MODE: '1' } : {}),
       ...(target === 'win' && mode === 'zip' ? { RDK_DESKTOP_WIN_ZIP_MODE: '1' } : {}),
     },
