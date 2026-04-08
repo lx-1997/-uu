@@ -552,6 +552,7 @@ export default function OnboardingWizard() {
   const finish = () => {
     setObStep('done');
     addToast(t('onboard.toast.done', '新手引导已完成，尽情使用 RDK Studio 吧！'), 'success');
+    setActiveTab('dashboard');
   };
 
   const stepIdx = obSteps.findIndex((s) => s.key === obStep);

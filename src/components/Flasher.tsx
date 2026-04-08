@@ -171,7 +171,27 @@ function isSafeFlashTargetDrive(drive: FlashDrive): boolean {
   const devicePathLikely = /\/dev\/disk|\/dev\/sd[a-z]|physicaldrive/.test(path);
   if (!devicePathLikely) return false;
   if (denyByKeyword && !allowByBus) return false;
-  return allowByBus || allowByKeyword;
+  if (allowByBus || allowByKeyword) return true;
+
+  /**
+   * macOS：多数 USB 读卡器在 diskutil 里为 BusProtocol=USB（不是 sd/mmc），卷名损坏/乱码时 keyword 也不匹配，
+   * 会被误过滤；Rufus 等工具仍按物理盘列出。此处对「整盘 /dev/diskN + 可移动 + USB + 非内置」且未命中否认词的目标放行，
+   * 并限制容量上限，降低误把大块移动硬盘当 TF 目标的风险。
+   */
+  const rawPath = String(drive.path || '').trim();
+  const isMacWholeDisk = /^\/dev\/disk\d+$/i.test(rawPath);
+  const internal = drive.internal === true;
+  const looksUsb = /\busb\b/.test(bus);
+  const maxTfLikeBytes = 512 * 1024 * 1024 * 1024;
+  const n = drive.sizeBytes;
+  const sizeOk =
+    n == null
+    || (Number.isFinite(n) && n > 0 && n <= maxTfLikeBytes);
+  if (isMacWholeDisk && looksUsb && !internal && sizeOk) {
+    return true;
+  }
+
+  return false;
 }
 
 function flashImageTagLabel(tag: string, t: (key: string, zh: string) => string): string {

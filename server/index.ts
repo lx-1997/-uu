@@ -62,6 +62,7 @@ import { OPENCLAW_BOARD_NPM_SPEC } from './managers/openclaw-board-install-sh.js
 import { pingVendorModel } from './openclaw-vendor-model-ping.js';
 import * as path from 'path';
 import { ensureAgentMediaDownloadDir, getLocalFilesServeDirs } from './local-files-roots.js';
+import { configureDarwinTypecNic } from './typec-configure-darwin.js';
 import {
   buildBoardDetectionCommand,
   buildTrosSourceLoopBash,
@@ -2946,48 +2947,6 @@ async function execFileWithTimeout(
     });
     child.on('close', (code) => done({ code, stdout, stderr }));
   });
-}
-
-/**
- * macOS：`ifconfig up` 需 root。先直接调用 /sbin/ifconfig，若遇 permission denied，
- * 再用 osascript 弹出系统密码框提权（与桌面端常见做法一致）。
- *
- * 与 Windows netsh 逻辑对齐：若 pcIp 已挂在**其它**网卡上（例如先前选过 en9 再改选 en10），
- * 会先从那些接口 `inet <addr> delete`，再在所选接口上设置 IP。否则本机可能把去往 192.168.128.0/24
- * 的流量从未接开发者套件的接口发出，导致 ping / SSH 全失败。
- */
-async function configureDarwinTypecNic(
-  interfaceName: string,
-  pcIp: string,
-  mask: string,
-): Promise<string> {
-  const ifaces = os.networkInterfaces();
-  const deleteParts: string[] = [];
-  for (const [name, addrs] of Object.entries(ifaces)) {
-    if (name === interfaceName) continue;
-    if (!addrs?.some(a => a.family === 'IPv4' && a.address === pcIp)) continue;
-    deleteParts.push(`/sbin/ifconfig ${name} inet ${pcIp} delete`);
-  }
-  const setPart = `/sbin/ifconfig ${interfaceName} ${pcIp} netmask ${mask} up`;
-  const shellCmd = [...deleteParts, setPart].join('; ');
-
-  const first = await execFileWithTimeout('sh', ['-c', shellCmd], 25000);
-  if (first.code === 0) return [first.stdout, first.stderr].filter(Boolean).join('\n').trim();
-  // ifconfig 在部分系统/语言环境下把错误打在 stdout，仅用 stderr 会误判为「非权限问题」从而跳过 osascript，用户看不到系统密码框
-  const firstCombined = `${first.stderr}\n${first.stdout}`.trim();
-  const errLine = firstCombined || `exit code ${first.code}`;
-  if (!isIfconfigPermissionDenied(firstCombined)) {
-    throw new Error(errLine);
-  }
-  const escaped = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const appleScript = `do shell script "${escaped}" with administrator privileges`;
-  const second = await execFileWithTimeout('osascript', ['-e', appleScript], 120000);
-  if (second.code === 0) return second.stdout;
-  const combined = `${second.stderr}\n${second.stdout}`.trim();
-  if (/user canceled|用户已取消|-128|错误代码：-128/i.test(combined)) {
-    throw new Error('已取消管理员授权，无法为本机网卡设置 IP');
-  }
-  throw new Error(combined || `osascript exit ${second.code}`);
 }
 
 /**

@@ -8,7 +8,11 @@ const mode = String(process.argv[3] || '').trim().toLowerCase();
 const platform = process.platform;
 const rootDir = process.cwd();
 const releaseDir = path.join(rootDir, 'release');
+/** 默认清空 release/；设 RDK_DESKTOP_CLEAN_RELEASE=0 则保留已有文件（新增/覆盖并存，见下方 ARTIFACT_STAMP）。 */
 const cleanReleaseDir = String(process.env.RDK_DESKTOP_CLEAN_RELEASE || '1').trim() !== '0';
+/** 设 RDK_DESKTOP_ARTIFACT_STAMP=1 时为本次构建的 mac dmg 追加时间戳文件名，避免与 release/ 内旧版同名冲突。 */
+const artifactStampRaw = String(process.env.RDK_DESKTOP_ARTIFACT_STAMP || '').trim();
+const artifactStamp = artifactStampRaw === '1' || artifactStampRaw.toLowerCase() === 'true';
 const skipNpmBuild = String(process.env.RDK_DESKTOP_SKIP_NPM_BUILD || '').trim() === '1';
 const explicitCrossPackaging = String(process.env.RDK_DESKTOP_ALLOW_CROSS_PACKAGING || '').trim() === '1';
 /** 仅 zip/dir 时 electron-builder 不传 NSIS，跨平台构建通常可行，故默认放行。 */
@@ -21,12 +25,13 @@ const supportedTargets = new Set(['win', 'mac', 'linux']);
 if (!supportedTargets.has(target)) {
   console.error(`[build:desktop] Invalid target: ${target || '<empty>'}`);
   console.error(
-    '[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir|zip|local|arm64]',
+    '[build:desktop] Usage: node scripts/build-desktop.mjs <win|mac|linux> [dir|zip|local|arm64|x64|intel]',
   );
   process.exit(1);
 }
 const macLocalSign = target === 'mac' && mode === 'local';
 const macArm64 = target === 'mac' && mode === 'arm64';
+const macX64 = target === 'mac' && (mode === 'x64' || mode === 'intel');
 /** 默认 ad-hoc；对外 Developer ID 分发时设 RDK_DESKTOP_MAC_USE_DEVELOPER_ID=1 */
 const macUseDeveloperId =
   target === 'mac' &&
@@ -35,7 +40,8 @@ if (
   mode &&
   !(target === 'win' && (mode === 'dir' || mode === 'zip')) &&
   !macLocalSign &&
-  !macArm64
+  !macArm64 &&
+  !macX64
 ) {
   console.error(`[build:desktop] Unsupported mode "${mode}" for target "${target}"`);
   process.exit(1);
@@ -242,6 +248,13 @@ try {
   validateBuildConfig();
   if (cleanReleaseDir) {
     await cleanReleaseDirWithRetry(releaseDir);
+  } else {
+    console.log(
+      '[build:desktop] RDK_DESKTOP_CLEAN_RELEASE=0：保留 release/ 中已有文件。',
+    );
+    console.log(
+      '[build:desktop] 同名产物（同版本）仍会被 electron-builder 覆盖；若需每次生成新文件名，请设 RDK_DESKTOP_ARTIFACT_STAMP=1。',
+    );
   }
   if (skipNpmBuild) {
     console.log('[build:desktop] RDK_DESKTOP_SKIP_NPM_BUILD=1, skipping npm run build');
@@ -302,6 +315,9 @@ try {
   if (macArm64) {
     builderArgs = [...builderArgs, '--arm64'];
   }
+  if (macX64) {
+    builderArgs = [...builderArgs, '--x64'];
+  }
   if (target === 'mac' && !macUseDeveloperId) {
     console.warn(
       '[build:desktop] mac：ad-hoc 签名（-c.mac.identity=-），公证已关闭；对外分发若需 Developer ID 请设 RDK_DESKTOP_MAC_USE_DEVELOPER_ID=1。',
@@ -314,6 +330,14 @@ try {
       '-c.mac.identity=-',
       '-c.mac.notarize=false',
     ];
+  }
+  if (artifactStamp && target === 'mac') {
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'z');
+    builderArgs = [
+      ...builderArgs,
+      `-c.mac.artifactName=\${productName}-\${version}-\${arch}-${stamp}.dmg`,
+    ];
+    console.log(`[build:desktop] RDK_DESKTOP_ARTIFACT_STAMP=1：dmg 将带时间戳后缀（${stamp}）。`);
   }
   await run(builderBin, builderArgs);
   await runWithEnv(

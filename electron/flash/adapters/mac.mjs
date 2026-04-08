@@ -103,8 +103,14 @@ export function getCapabilities() {
   };
 }
 
+/**
+ * 使用 `physical` 而非仅 `external physical`：
+ * - 内置 SD 卡槽常被标为 Internal，不会出现在 external 列表中；
+ * - 少数 USB 读卡器在 diskutil 里分类异常时也可能被漏掉。
+ * 写盘前仍用 diskutil info 的 Removable/Ejectable 与 writeImage 内的 removable 校验防误写内置 SSD。
+ */
 export async function listDrives() {
-  const out = await exec('diskutil', ['list', '-plist', 'external', 'physical']);
+  const out = await exec('diskutil', ['list', '-plist', 'physical']);
   const diskIds = [];
   const re = /<string>(disk\d+)<\/string>/g;
   let m;
@@ -114,7 +120,9 @@ export async function listDrives() {
 
   /** 串行 diskutil info 在多块外接盘时累加明显延迟，改为并行 */
   const infos = await Promise.all(diskIds.map((id) => getDiskInfo(id)));
-  return infos.filter(Boolean);
+  return infos
+    .filter(Boolean)
+    .filter((d) => !(d.internal === true && d.removable === false));
 }
 
 function checkIsRoot() {

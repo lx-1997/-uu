@@ -284,9 +284,24 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
     if (saved && ['board', 'flash', 'connect', 'model', 'openclaw', 'rdkclaw', 'done'].includes(saved)) return saved as any;
     return 'board';
   });
-  const setObStep = (v: typeof obStep) => { setObStepRaw(v); localStorage.setItem('rdk-onboarding-step', v); };
+  const setObStep = (v: typeof obStep) => {
+    setObStepRaw(v);
+    try {
+      localStorage.setItem('rdk-onboarding-step', v);
+    } catch {
+      /* ignore storage failures */
+    }
+  };
   const [selectedBoard, setSelectedBoardRaw] = useState<string | null>(() => localStorage.getItem('rdk-onboarding-board'));
-  const setSelectedBoard = (v: string | null) => { setSelectedBoardRaw(v); if (v) localStorage.setItem('rdk-onboarding-board', v); else localStorage.removeItem('rdk-onboarding-board'); };
+  const setSelectedBoard = (v: string | null) => {
+    setSelectedBoardRaw(v);
+    try {
+      if (v) localStorage.setItem('rdk-onboarding-board', v);
+      else localStorage.removeItem('rdk-onboarding-board');
+    } catch {
+      /* ignore storage failures */
+    }
+  };
   const [obReturnStep, setObReturnStep] = useState<'board' | 'flash' | 'connect' | 'model' | 'openclaw' | 'rdkclaw' | null>(null);
 
   // ── Loading ──

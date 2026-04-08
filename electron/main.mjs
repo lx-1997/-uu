@@ -184,7 +184,11 @@ function ensureFloatingBallPrefsDefault() {
 
 registerSsoLoginIpc({ getMainWindow: () => mainWin });
 let serverProcess = null;
+/** 内嵌 node 子进程 PID，供 process/will-quit 兜底强杀，避免 before-quit 异步未跑完时孤儿进程 */
+let embeddedServerPid = 0;
 let currentServerPort = SERVER_PORT;
+/** 防止 before-quit 里 preventDefault + app.quit() 形成无限循环 */
+let quitCleanupPass = false;
 // url -> WebContentsView 映射
 const viewsMap = {};
 /** IDE/VNC 从主窗口拆出到独立 BrowserWindow（可拖到副屏与 AI Dock 并排） */
@@ -503,6 +507,83 @@ ipcMain.handle('rdk:save-text-file', async (_event, payload) => {
     return { ok: true, path: result.filePath };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+function isValidDarwinLinuxTypecInterfaceName(name) {
+  return name.length > 0 && name.length <= 32 && /^[a-zA-Z][a-zA-Z0-9._@-]*$/.test(name);
+}
+
+function isValidWindowsTypecInterfaceName(name) {
+  return name.length > 0 && name.length <= 128 && !/[";|&<>]/.test(name);
+}
+
+function isIpv4DottedQuadTypec(s) {
+  const parts = String(s || '').split('.');
+  if (parts.length !== 4) return false;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p)) return false;
+    const n = Number(p);
+    if (n < 0 || n > 255) return false;
+  }
+  return true;
+}
+
+/**
+ * 桌面端 Type-C 配本机 IP：在「主进程」提权，避免内置 API（ELECTRON_RUN_AS_NODE）子进程
+ * 无法稳定弹出 UAC/osascript/pkexec。
+ *
+ * - darwin：osascript
+ * - win32：Start-Process -Verb RunAs + netsh
+ * - linux：pkexec + bash（ip/ifconfig）
+ */
+ipcMain.handle('rdk:typec:configure-nic-desktop', async (_e, payload) => {
+  const interfaceName = typeof payload?.interfaceName === 'string' ? payload.interfaceName.trim() : '';
+  const pcIp = typeof payload?.pcIp === 'string' ? payload.pcIp.trim() : '';
+  const netmask = typeof payload?.netmask === 'string' ? payload.netmask.trim() : '';
+  const mask = netmask || '255.255.255.0';
+  if (!interfaceName || !pcIp) {
+    return { ok: false, verified: false, output: '', error: '缺少 interfaceName 或 pcIp' };
+  }
+  if (!isIpv4DottedQuadTypec(pcIp) || !isIpv4DottedQuadTypec(mask)) {
+    return { ok: false, verified: false, output: '', error: 'pcIp / netmask 须为点分 IPv4' };
+  }
+
+  const platform = process.platform;
+  if (platform === 'win32') {
+    if (!isValidWindowsTypecInterfaceName(interfaceName)) {
+      return { ok: false, verified: false, output: '', error: 'interfaceName 格式非法' };
+    }
+  } else if (platform === 'darwin' || platform === 'linux') {
+    if (!isValidDarwinLinuxTypecInterfaceName(interfaceName)) {
+      return { ok: false, verified: false, output: '', error: 'interfaceName 格式非法' };
+    }
+  } else {
+    return { ok: false, verified: false, output: '', error: '当前系统不支持桌面端闪连' };
+  }
+
+  try {
+    const { verifyTypecIpOnInterface } = await import('./typec-verify-ip.mjs');
+    if (platform === 'darwin') {
+      const { configureDarwinTypecNic } = await import('./typec-configure-darwin.mjs');
+      const output = String(await configureDarwinTypecNic(interfaceName, pcIp, mask) ?? '').trim();
+      const verified = await verifyTypecIpOnInterface(interfaceName, pcIp);
+      return { ok: true, verified, output, error: '' };
+    }
+    if (platform === 'win32') {
+      const { configureWindowsTypecNic } = await import('./typec-configure-win.mjs');
+      const r = await configureWindowsTypecNic(interfaceName, pcIp, mask);
+      const output = String(r.output ?? '');
+      const verified = await verifyTypecIpOnInterface(interfaceName, pcIp);
+      return { ok: true, verified, output, error: '' };
+    }
+    const { configureLinuxTypecPkexec } = await import('./typec-configure-linux.mjs');
+    const output = String(await configureLinuxTypecPkexec(interfaceName, pcIp, mask));
+    const verified = await verifyTypecIpOnInterface(interfaceName, pcIp);
+    return { ok: true, verified, output, error: '' };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, verified: false, output: '', error: msg };
   }
 });
 
@@ -1103,6 +1184,7 @@ async function launchEmbeddedServerOnPort(port) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     serverProcess = child;
+    embeddedServerPid = typeof child.pid === 'number' && child.pid > 0 ? child.pid : 0;
 
     let settled = false;
     let detectedPortInUse = false;
@@ -1166,6 +1248,7 @@ async function launchEmbeddedServerOnPort(port) {
     });
 
     child.on('exit', (code, signal) => {
+      if (embeddedServerPid === child.pid) embeddedServerPid = 0;
       if (serverProcess === child) {
         serverProcess = null;
       }
@@ -2263,21 +2346,59 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', async () => {
-  await stopEmbeddedServer();
+app.on('window-all-closed', () => {
+  /** 与 before-quit 相同：Electron 不等待 async，这里用 void；真正退出时由 will-quit 兜底杀子进程 */
+  void stopEmbeddedServer();
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-app.on('before-quit', async () => {
-  if (consoleLogWin && !consoleLogWin.isDestroyed()) {
-    consoleLogWin.close();
-    consoleLogWin = null;
+app.on('before-quit', (event) => {
+  if (quitCleanupPass) return;
+  event.preventDefault();
+  void (async () => {
+    try {
+      if (consoleLogWin && !consoleLogWin.isDestroyed()) {
+        consoleLogWin.close();
+        consoleLogWin = null;
+      }
+      if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+        floatingBallWin.close();
+        floatingBallWin = null;
+      }
+      await flashService.cancelActiveOp();
+      await stopEmbeddedServer();
+    } catch (err) {
+      console.error('[main] before-quit cleanup failed:', err);
+    } finally {
+      quitCleanupPass = true;
+      app.quit();
+    }
+  })();
+});
+
+/** Electron 实际退出前同步兜底，避免内嵌 API 子进程（ELECTRON_RUN_AS_NODE）残留 */
+app.on('will-quit', () => {
+  try {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill('SIGKILL');
+    } else if (embeddedServerPid > 0) {
+      process.kill(embeddedServerPid, 'SIGKILL');
+    }
+  } catch {
+    /* ignore */
   }
-  if (floatingBallWin && !floatingBallWin.isDestroyed()) {
-    floatingBallWin.close();
-    floatingBallWin = null;
+  embeddedServerPid = 0;
+  serverProcess = null;
+});
+
+process.on('exit', () => {
+  if (embeddedServerPid > 0) {
+    try {
+      process.kill(embeddedServerPid, 'SIGKILL');
+    } catch {
+      /* ignore */
+    }
   }
-  await stopEmbeddedServer();
 });

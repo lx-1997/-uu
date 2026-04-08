@@ -10,6 +10,8 @@ declare global {
     bus: string;
     mediaType?: string;
     removable?: boolean;
+    /** macOS diskutil：内置盘为 true；USB 读卡器一般为 false */
+    internal?: boolean;
   }
 
   interface FlashCapabilities {
@@ -206,6 +208,30 @@ declare global {
 
       /** 打开主窗口 Chromium DevTools（Electron） */
       openDevTools?: () => Promise<{ ok: boolean }>;
+
+      /** 桌面端（macOS/Windows/Linux）：主进程提权配置 Type-C 本机 IP（与 POST /api/typec/configure 等价） */
+      configureTypecNicDesktop?: (payload: {
+        interfaceName: string;
+        pcIp: string;
+        netmask?: string;
+      }) => Promise<{
+        ok: boolean;
+        verified?: boolean;
+        output?: string;
+        error?: string;
+      }>;
+
+      /** @deprecated 使用 configureTypecNicDesktop */
+      configureTypecNicDarwin?: (payload: {
+        interfaceName: string;
+        pcIp: string;
+        netmask?: string;
+      }) => Promise<{
+        ok: boolean;
+        verified?: boolean;
+        output?: string;
+        error?: string;
+      }>;
 
       mirrorStudioLogLine?: (line: { id: number; ts: number; level: string; text: string }) => void;
       notifyStudioLogClear?: () => void;

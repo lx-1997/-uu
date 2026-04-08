@@ -3,6 +3,7 @@ import type { AgentPlan } from './app-types';
 import { readStudioUiHintsForDevice } from './studio-ui-hints';
 import { applySsoMirrorToHeaders, fetchApi, resolveApiUrl } from './utils/apiBase';
 import { appendStudioLog } from './utils/console-log-capture';
+import { isDesktop } from './utils/env';
 
 export interface DeviceExecResult {
   ok: boolean;
@@ -311,9 +312,35 @@ export async function configureTypecInterface(interfaceName: string, pcIp: strin
   const mask = netmask || '255.255.255.0';
   appendStudioLog(
     'info',
-    `[TypeC] 配置网卡 POST /api/typec/configure iface=${interfaceName} pcIp=${pcIp} netmask=${mask}`,
+    `[TypeC] 配置网卡 iface=${interfaceName} pcIp=${pcIp} netmask=${mask}`,
   );
   try {
+    if (isDesktop() && typeof window !== 'undefined') {
+      const rdk = window.rdkDesktop;
+      const desktopFn = rdk?.configureTypecNicDesktop ?? rdk?.configureTypecNicDarwin;
+      if (typeof desktopFn === 'function') {
+        appendStudioLog(
+          'info',
+          '[TypeC] 桌面版：主进程 IPC 配置网卡（UAC/osascript/pkexec，避免内置 API 子进程提权失败）',
+        );
+        const raw = await desktopFn({ interfaceName, pcIp, netmask: mask });
+        if (!raw?.ok) {
+          throw new Error(raw?.error?.trim() || '网卡配置失败');
+        }
+        const r = {
+          ok: true as const,
+          verified: !!raw.verified,
+          output: String(raw.output ?? ''),
+        };
+        const out = (r.output ?? '').trim().slice(0, 800);
+        appendStudioLog(
+          r.verified ? 'info' : 'warn',
+          `[TypeC] 配置完成 verified=${String(r.verified)}${out ? ` · ${out}` : ''}`,
+        );
+        return r;
+      }
+    }
+    appendStudioLog('info', '[TypeC] POST /api/typec/configure');
     const r = await request<{ ok: boolean; verified: boolean; output: string }>('/api/typec/configure', {
       method: 'POST',
       body: JSON.stringify({ interfaceName, pcIp, netmask: mask }),
