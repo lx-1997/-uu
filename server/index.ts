@@ -402,7 +402,8 @@ const WORKSPACE_HEALTH_SCRIPT = [
   'node_ready=$(command -v node >/dev/null 2>&1 && echo 1 || echo 0)',
   'npm_ready=$(command -v npm >/dev/null 2>&1 && echo 1 || echo 0)',
   'code_installed=$(command -v code-server >/dev/null 2>&1 && echo 1 || echo 0)',
-  'code_running=$( (echo "$_ss" | grep -q ":13337" || echo "$_ps" | grep -q "code-server.*13337") && echo 1 || echo 0 )',
+  `code_running=$( (echo "$_ss" | grep -qE ":${CODE_SERVER_HTTP_PORT}|:13337" || echo "$_ps" | grep -qE "code-server") && echo 1 || echo 0 )`,
+  '[ "$code_running" = "1" ] && code_installed=1 || true',
   'vnc_installed=$( (command -v x11vnc >/dev/null 2>&1 || command -v vncserver >/dev/null 2>&1) && echo 1 || echo 0 )',
   'vnc_running=$( (echo "$_ss" | grep -q ":5900" || echo "$_ps" | grep -qE "x11vnc|Xtigervnc|vncserver") && echo 1 || echo 0 )',
   'ros2_ready=$(command -v ros2 >/dev/null 2>&1 && echo 1 || echo 0)',
@@ -1692,7 +1693,11 @@ function buildWorkspaceHealth(output: string): DeviceWorkspaceHealth {
   const codeServer = buildWorkspaceModuleStatus(
     codeInstalled && codeRunning,
     codeInstalled,
-    !codeInstalled ? '未安装 code-server' : codeRunning ? 'code-server 已安装并正在监听 13337 端口' : 'code-server 已安装，但当前未启动',
+    !codeInstalled
+      ? '未安装 code-server'
+      : codeRunning
+        ? `code-server 已安装并正在监听端口（默认 ${CODE_SERVER_HTTP_PORT}，兼容 13337）`
+        : 'code-server 已安装，但当前未启动',
     !codeInstalled ? '前往 IDE 页安装 code-server' : codeRunning ? '打开 IDE 继续开发' : '前往 IDE 页启动 code-server',
     !codeInstalled ? ['code-server'] : [],
     codeRunning,
