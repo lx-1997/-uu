@@ -4,7 +4,12 @@ import { execSync, spawn } from 'node:child_process';
 
 const target = String(process.argv[2] || '').trim();
 const rootDir = process.cwd();
-const releaseDir = path.join(rootDir, 'release');
+/** 与 build-desktop 分段输出一致：默认检查 release/desktop/<variant>/；未设置时回退 release/ 根目录 */
+const rawReleaseOut = String(process.env.RDK_DESKTOP_RELEASE_OUT || '').trim();
+const releaseDir = rawReleaseOut ? path.resolve(rawReleaseOut) : path.join(rootDir, 'release');
+if (rawReleaseOut) {
+  console.log(`[desktop:smoke] 检查产物目录（分段）: ${releaseDir}`);
+}
 const runtimeCheckEnabled = String(process.env.RDK_DESKTOP_SMOKE_RUNTIME || '').trim() === '1';
 const RUNTIME_HEALTH_RETRIES = Number.parseInt(String(process.env.RDK_DESKTOP_SMOKE_HEALTH_RETRIES || '40'), 10) || 40;
 const DESKTOP_SERVER_PORT = 8787;

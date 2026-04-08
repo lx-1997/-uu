@@ -35,20 +35,27 @@ export function buildWindowsTypecNetshArgvList(interfaceName, pcIp, mask) {
   return { skip: false, argvList };
 }
 
-function generateNetshWorkPs1(argvList) {
+function generateNetshWorkPs1(argvList, netshLogPath) {
   const deletes = argvList.slice(0, -1);
   const setCmd = argvList[argvList.length - 1];
+  const logLit = psEscapeSingle(netshLogPath);
+  // 删除类命令勿用「| Out-Null」管道：在 Windows PowerShell 5.1 下可能干扰 $LASTEXITCODE
   let ps = '$ErrorActionPreference = "Continue"\n';
   for (const args of deletes) {
     const parts = args.map(psEscapeSingle).join(',');
     ps += `$a = @(${parts})\n`;
-    ps += '& netsh.exe @a | Out-Null\n';
+    ps += '$null = & netsh.exe @a 2>&1\n';
   }
   if (setCmd) {
     const parts = setCmd.map(psEscapeSingle).join(',');
     ps += `$a = @(${parts})\n`;
-    ps += '& netsh.exe @a\n';
-    ps += 'exit $LASTEXITCODE\n';
+    ps += `$raw = & netsh.exe @a 2>&1\n`;
+    ps += `$code = $LASTEXITCODE\n`;
+    ps += `if ($null -eq $code) { $code = 1 }\n`;
+    ps += `$text = if ($null -ne $raw) { ($raw | Out-String).Trim() } else { '' }\n`;
+    ps += `Set-Content -Path ${logLit} -Value $text -Encoding UTF8\n`;
+    ps += `if ($code -ne 0 -and $text) { [Console]::Error.WriteLine($text) }\n`;
+    ps += `exit [int]$code\n`;
   } else {
     ps += 'exit 0\n';
   }
@@ -63,7 +70,7 @@ function getPowerShellExe() {
 /**
  * 非管理员进程内：用 Start-Process -Verb RunAs 拉起提升后的 PowerShell 执行 work.ps1。
  */
-export async function runElevatedWorkPs1(workPs1Content) {
+export async function runElevatedWorkPs1(workPs1Content, netshLogPath) {
   const ps = getPowerShellExe();
   const id = randomUUID();
   const workPath = path.join(os.tmpdir(), `rdk-typec-w-${id}.ps1`);
@@ -91,12 +98,31 @@ exit [int]$c
       });
       child.on('error', reject);
       child.on('close', (code) => {
+        const readNetshDetail = () => {
+          try {
+            if (netshLogPath && fs.existsSync(netshLogPath)) {
+              const t = fs.readFileSync(netshLogPath, 'utf8').trim();
+              return t || '';
+            }
+          } catch {
+            /* noop */
+          }
+          return '';
+        };
         if (code === 3) {
           reject(new Error('已取消管理员授权或 UAC 未通过，无法配置网卡'));
           return;
         }
         if (code !== 0) {
-          reject(new Error(stderr.trim() || `提权执行 netsh 失败（退出码 ${code}）`));
+          const detail = readNetshDetail();
+          const hint =
+            /对象已存在|already exists|object already exists/i.test(detail)
+              ? '（常见原因：该 IP 仍被其它网卡占用，或本机路由/策略冲突；可在「网络连接」里暂时禁用其它网卡或改掉冲突 IP 后再试）'
+              : /找不到|cannot find|specified file|系统找不到/i.test(detail)
+                ? '（常见原因：网卡名称与系统不一致，请点「刷新」后重选「以太网」类接口）'
+                : '';
+          const main = stderr.trim() || detail || `提权执行 netsh 失败（退出码 ${code}）`;
+          reject(new Error(main + hint));
           return;
         }
         resolve(0);
@@ -114,6 +140,11 @@ exit [int]$c
     } catch {
       /* noop */
     }
+    try {
+      if (netshLogPath) fs.unlinkSync(netshLogPath);
+    } catch {
+      /* noop */
+    }
   }
 }
 
@@ -122,7 +153,8 @@ export async function configureWindowsTypecNic(interfaceName, pcIp, mask) {
   if (plan.skip) {
     return { output: plan.message };
   }
-  const workPs1 = generateNetshWorkPs1(plan.argvList);
-  await runElevatedWorkPs1(workPs1);
+  const netshLogPath = path.join(os.tmpdir(), `rdk-typec-netsh-${randomUUID()}.log`);
+  const workPs1 = generateNetshWorkPs1(plan.argvList, netshLogPath);
+  await runElevatedWorkPs1(workPs1, netshLogPath);
   return { output: 'netsh 已在提升会话中执行' };
 }

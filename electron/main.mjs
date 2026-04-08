@@ -588,6 +588,38 @@ ipcMain.handle('rdk:typec:configure-nic-desktop', async (_e, payload) => {
   }
 });
 
+/** 仅轮询本机网卡是否已出现目标 IPv4（不执行 netsh/ifconfig），供配置后二次确认。 */
+ipcMain.handle('rdk:typec:verify-ip-desktop', async (_e, payload) => {
+  const interfaceName = typeof payload?.interfaceName === 'string' ? payload.interfaceName.trim() : '';
+  const pcIp = typeof payload?.pcIp === 'string' ? payload.pcIp.trim() : '';
+  if (!interfaceName || !pcIp) {
+    return { verified: false, error: '缺少 interfaceName 或 pcIp' };
+  }
+  if (!isIpv4DottedQuadTypec(pcIp)) {
+    return { verified: false, error: 'pcIp 须为点分 IPv4' };
+  }
+  const platform = process.platform;
+  if (platform === 'win32') {
+    if (!isValidWindowsTypecInterfaceName(interfaceName)) {
+      return { verified: false, error: 'interfaceName 格式非法' };
+    }
+  } else if (platform === 'darwin' || platform === 'linux') {
+    if (!isValidDarwinLinuxTypecInterfaceName(interfaceName)) {
+      return { verified: false, error: 'interfaceName 格式非法' };
+    }
+  } else {
+    return { verified: false, error: '当前系统不支持桌面端闪连' };
+  }
+  try {
+    const { verifyTypecIpOnInterface } = await import('./typec-verify-ip.mjs');
+    const verified = await verifyTypecIpOnInterface(interfaceName, pcIp);
+    return { verified, error: '' };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { verified: false, error: msg };
+  }
+});
+
 /* ── 判断是否打包模式 ── */
 const isPacked = app.isPackaged;
 

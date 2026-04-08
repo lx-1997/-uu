@@ -15,9 +15,9 @@ export const WIFI_LINK_STATE_CMD =
   'ip -4 route show default 2>/dev/null | grep -qE \'dev (wlan[0-9]+|wlp[0-9]+s[0-9]+|wlx[0-9a-fA-F]+)\\b\' && echo UP && exit 0; ' +
   'echo DOWN"';
 
-/** 取当前 SSID：iwgetid 优先，否则 nmcli show 首行并去 SSID: 前缀 */
+/** 取当前 SSID：iwgetid 优先，否则 nmcli show 首行并去 SSID: 前缀（须 UTF-8 locale，勿用 LANG=C） */
 const WIFI_LINK_SSID_INNER =
-  "iwgetid -r 2>/dev/null || nmcli -t -f SSID dev wifi show 2>/dev/null | head -1 | sed -e 's/^SSID://'";
+  "export LANG=C.UTF-8 LC_ALL=C.UTF-8; iwgetid -r 2>/dev/null || nmcli -t -f SSID dev wifi show 2>/dev/null | head -1 | sed -e 's/^SSID://'";
 
 export const WIFI_LINK_SSID_CMD = `bash -c ${JSON.stringify(WIFI_LINK_SSID_INNER)}`;
 
