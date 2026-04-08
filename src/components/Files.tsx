@@ -3,7 +3,7 @@ import Editor, { loader } from '@monaco-editor/react';
 import { Loader2, RefreshCw, Upload, ArrowLeft, Home, Search, Folder, FileText, FolderOpen, Save } from 'lucide-react';
 
 // 使用国内极速镜像源，避免因为 unpkg 无法连接导致「代码编辑」模块卡白屏加载不到一直启动不了的问题
-loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' } });
+loader.config({ paths: { vs: 'https://fastly.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs' } });
 
 import { downloadDeviceFile, listDeviceFiles, readDeviceFile, writeDeviceFile, uploadDeviceFile, executeDeviceCommand } from '../api';
 import { fillTemplate } from '../i18n/en-extras';
@@ -219,7 +219,15 @@ export default function Files() {
         setEditorFile(null);
         refreshList();
       })
-      .catch((err) => addToast(err instanceof Error ? err.message : t('files.saveFail', '保存文件失败'), 'error'))
+      .catch((err) => {
+        const aborted = err instanceof Error && (err.name === 'AbortError' || /aborted|signal/i.test(err.message));
+        addToast(
+          aborted
+            ? t('files.saveTimeout', '保存超时：请检查与套件的 SSH 或稍后重试（若长期如此请查看 Studio 后端日志）')
+            : (err instanceof Error ? err.message : t('files.saveFail', '保存文件失败')),
+          'error',
+        );
+      })
       .finally(() => setSaveBusy(false));
   };
 
@@ -245,7 +253,13 @@ export default function Files() {
       addToast(t('files.uploadOk', '上传成功'), 'success');
       refreshList();
     } catch (err: any) {
-      addToast(err.message || t('files.uploadFail', '上传失败'), 'error');
+      const aborted = err?.name === 'AbortError' || /aborted|signal/i.test(String(err?.message ?? ''));
+      addToast(
+        aborted
+          ? t('files.uploadTimeout', '上传超时：请检查网络与 SSH，或稍后重试')
+          : (err.message || t('files.uploadFail', '上传失败')),
+        'error',
+      );
     } finally {
       setRunning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -422,8 +436,15 @@ export default function Files() {
   );
 
   useEffect(() => {
-    if (editorFile) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      // Ctrl+S: 编辑器模式下保存文件
+      if (event.ctrlKey && event.key.toLowerCase() === 's' && editorFile) {
+        event.preventDefault();
+        runSaveEdit();
+        return;
+      }
+      // 以下快捷键仅在文件列表视图生效
+      if (editorFile) return;
       if (event.ctrlKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         searchInputRef.current?.focus();
@@ -480,16 +501,30 @@ export default function Files() {
             >
               {running ? <Loader2 size={16} className="spinner" /> : <RefreshCw size={16} strokeWidth={2} />}
             </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm files-page-toolbar__upload"
-              onClick={() => fileInputRef.current?.click()}
+            {/*
+              勿用 display:none 隐藏 file input：Chromium/Electron 下对不可见 input 程序化 click 可能无法弹出系统选文件对话框。
+              sr-only（与 AIDock 附件一致）+ label/htmlFor 保证桌面端可点选。
+            */}
+            <input
+              id="rdk-files-panel-upload"
+              type="file"
+              ref={fileInputRef}
+              className="sr-only"
               disabled={running}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleUpload(f);
+              }}
+            />
+            <label
+              htmlFor="rdk-files-panel-upload"
+              className="btn btn-primary btn-sm files-page-toolbar__upload"
+              aria-disabled={running}
+              style={running ? { pointerEvents: 'none', opacity: 0.75 } : undefined}
             >
               {running ? <Loader2 size={16} className="spinner" /> : <Upload size={16} strokeWidth={2} />}
               <span>{t('files.upload', '上传文件')}</span>
-            </button>
-            <input type="file" ref={fileInputRef} style={{ display: 'none' }} onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+            </label>
           </div>
         </div>
         
@@ -547,8 +582,9 @@ export default function Files() {
                 })()}
                 theme="vs-light"
                 value={editorFile.content}
-                onChange={(val) => setEditorFile({ ...editorFile, content: val || '' })}
+                onChange={(val) => setEditorFile((prev) => prev ? { ...prev, content: val ?? '' } : prev)}
                 options={{ minimap: { enabled: false }, fontSize: 14, wordWrap: 'on' }}
+                loading={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', gap: 8 }}><Loader2 size={18} className="spinner" />{t('files.editorLoading', '正在加载编辑器...')}</div>}
               />
             </div>
             <div className="tool-bar" style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
@@ -768,10 +804,10 @@ export default function Files() {
                           : (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
                               <span>{t('files.empty.folder', '此文件夹为空')}</span>
-                              <button type="button" className="btn btn-primary btn-sm" onClick={() => fileInputRef.current?.click()}>
+                              <label htmlFor="rdk-files-panel-upload" className="btn btn-primary btn-sm" style={{ cursor: 'pointer' }}>
                                 <Upload size={14} strokeWidth={2} style={{ marginRight: 4 }} />
                                 {t('files.empty.uploadCta', '上传文件到此目录')}
-                              </button>
+                              </label>
                               <span style={{ fontSize: 12, color: '#64748b' }}>{t('files.empty.dragHint', '也可以直接拖拽文件到页面上传')}</span>
                             </div>
                           )}

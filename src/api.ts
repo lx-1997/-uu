@@ -135,6 +135,20 @@ function isTransientRequestError(error: unknown) {
   );
 }
 
+/** 设备文件保存/上传：板端或 SSH 卡住时避免界面永久停在「保存中」 */
+const DEVICE_FILE_MUTATION_TIMEOUT_MS = 600_000;
+
+function deviceFileMutationAbortSignal(): AbortSignal | undefined {
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof (AbortSignal as { timeout?: (n: number) => AbortSignal }).timeout === 'function') {
+      return AbortSignal.timeout(DEVICE_FILE_MUTATION_TIMEOUT_MS);
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
 /** 防止「后端不可达」时 fetch 长期挂起、界面一直转圈 */
 function apiTimeoutSignal(ms: number): AbortSignal | undefined {
   try {
@@ -1649,6 +1663,7 @@ export function writeDeviceFile(deviceId: string, path: string, content: string,
     method: 'POST',
     headers: password ? { 'x-device-password': password } : undefined,
     body: JSON.stringify({ path, content, append }),
+    signal: deviceFileMutationAbortSignal(),
   });
 }
 
@@ -1657,6 +1672,7 @@ export function uploadDeviceFile(deviceId: string, path: string, contentBase64: 
     method: 'POST',
     headers: password ? { 'x-device-password': password } : undefined,
     body: JSON.stringify({ path, contentBase64 }),
+    signal: deviceFileMutationAbortSignal(),
   });
 }
 

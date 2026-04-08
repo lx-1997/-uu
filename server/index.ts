@@ -162,13 +162,16 @@ import { createBotApiRoutes, createKnowledgeSpaceApiRoutes } from './api/bot-rou
 const app = express();
 const httpServer = http.createServer(app);
 
+/** 与下方 `const port = Number(process.env.PORT ?? 8787)` 保持一致，否则默认 8787 监听时 CORS/Socket.IO 仍放行 3000，会导致以 http://localhost:8787 打开时握手失败 */
+const DEFAULT_STUDIO_HTTP_PORT = 8787;
+
 function resolveAllowedOrigins(): cors.CorsOptions['origin'] {
   const envOrigins = process.env.RDK_STUDIO_CORS_ORIGINS?.trim();
   if (envOrigins === '*') return true;
   if (envOrigins) {
     return envOrigins.split(',').map((o) => o.trim()).filter(Boolean);
   }
-  const p = Number(process.env.PORT) || 3000;
+  const p = Number(process.env.PORT ?? DEFAULT_STUDIO_HTTP_PORT) || DEFAULT_STUDIO_HTTP_PORT;
   return [
     `http://localhost:${p}`,
     `http://127.0.0.1:${p}`,
@@ -176,6 +179,7 @@ function resolveAllowedOrigins(): cors.CorsOptions['origin'] {
     `http://127.0.0.1:5173`,
     'tauri://localhost',
     'file://',
+    'null', // Electron file:// 页面的跨域请求 Origin 为字符串 "null"
   ];
 }
 const allowedOrigins = resolveAllowedOrigins();
@@ -291,7 +295,7 @@ httpServer.prependListener('upgrade', (request, socket, head) => {
 
 /** noVNC websockify：在 openClawManager 初始化后注册（见下方 registerNovncWebsockify） */
 
-const port = Number(process.env.PORT ?? 8787);
+const port = Number(process.env.PORT ?? DEFAULT_STUDIO_HTTP_PORT);
 /** 与仓库 `config/rdkclaw-provider.defaults.json` 对齐；RDKClaw 主链路以 ~/.rdkstudio/agent-config.json 为准 */
 const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
@@ -934,8 +938,9 @@ function shouldTryNextPasswordForSftp(error: unknown): boolean {
 }
 
 /**
- * 与 `runOnDevice` 一致：按候选口令依次尝试 SFTP，避免仅 `resolvePrimarySshPassword` 首项错误时
+ * 与 `runOnDevice` 一致：按候选口令依次尝试写盘，避免仅 `resolvePrimarySshPassword` 首项错误时
  * 「能 ls/cat（已用后续候选连上）却无法上传/保存（仍用错误首项）」。
+ * 默认优先 `sudo` 管道写入（与 list/read/download 对齐）；需先走 SFTP 减轻负载时设 `RDK_DEVICE_FILES_SUDO_PIPE=0`。
  */
 async function uploadFileSftpWithPasswordCandidates(
   device: Device,
@@ -949,6 +954,9 @@ async function uploadFileSftpWithPasswordCandidates(
   if (candidates.length === 0) {
     throw new Error('NO_SSH_PASSWORD_CANDIDATES');
   }
+  const preferSudoExec = String(process.env.RDK_DEVICE_FILES_SUDO_PIPE ?? '1').trim() !== '0';
+  /** 与前端 `deviceFileMutationAbortSignal` 同量级，避免 SSH 挂起时长时间无响应 */
+  const panelUploadTimeoutMs = 600_000;
   const credBase = {
     host: device.host,
     port: device.port ?? 22,
@@ -961,7 +969,7 @@ async function uploadFileSftpWithPasswordCandidates(
         { ...credBase, password: pwd },
         remotePath,
         buffer,
-        { skipRemotePathValidation: true },
+        { skipRemotePathValidation: true, preferSudoExec, timeoutMs: panelUploadTimeoutMs },
       );
       setDevicePasswordCache(device.host, device.username, device.port ?? 22, pwd);
       return;
@@ -971,7 +979,7 @@ async function uploadFileSftpWithPasswordCandidates(
       throw error;
     }
   }
-  throw lastError instanceof Error ? lastError : new Error('SFTP 上传失败');
+  throw lastError instanceof Error ? lastError : new Error('设备文件上传失败');
 }
 
 type ApiErrorPayload = {
@@ -5603,7 +5611,7 @@ app.post('/api/devices/:id/files/write', async (request, response) => {
     request,
     response,
     id,
-    [`bash -lc "mkdir -p $(dirname ${shEscape(targetPath)}); echo ${shEscape(base64Content)} | base64 -d ${redirect} ${shEscape(targetPath)}"`],
+    [`sudo bash -lc "mkdir -p $(dirname ${shEscape(targetPath)}); echo ${shEscape(base64Content)} | base64 -d ${redirect} ${shEscape(targetPath)}"`],
     { timeoutMs: 180_000 },
   );
   if (!executed) return;

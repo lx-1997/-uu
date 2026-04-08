@@ -83,9 +83,12 @@ export const EN_EXTRAS: Record<string, string> = {
   'files.notAFile': 'Not a regular file or it does not exist.',
   'files.saved': 'File saved',
   'files.saveFail': 'Save failed',
+  'files.saveTimeout':
+    'Save timed out — check SSH to the device or try again (see Studio backend logs if this persists).',
   'files.uploading': 'Uploading {{name}}…',
   'files.uploadOk': 'Upload complete',
   'files.uploadFail': 'Upload failed',
+  'files.uploadTimeout': 'Upload timed out — check network/SSH or try again.',
   'files.promptFolder': 'New folder name',
   'files.folderOk': 'Folder created',
   'files.folderFail': 'Failed to create folder',

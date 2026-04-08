@@ -366,6 +366,13 @@ export interface UploadFileSftpOptions {
    * 用于 Studio 内「设备文件管理」面板直连写盘；Agent 的 `device_file_write` 仍走白名单与权限守卫。
    */
   skipRemotePathValidation?: boolean;
+  /**
+   * Studio「设备文件管理」上传/保存：与 list/read/download 一致走 `sudo` + exec 管道写入，
+   * 避免 SFTP 以非 root 登录时无法写 `/root` 等目录、或板端无 SFTP 子系统时表现为「能列能下不能传」。
+   * 设为 true 时跳过 SFTP，直接走 base64 管道（与 `RDK_DEVICE_UPLOAD_SFTP=0` 同路径）。
+   * 若需恢复「先 SFTP」以减轻大文件负载，可设环境变量 `RDK_DEVICE_FILES_SUDO_PIPE=0`。
+   */
+  preferSudoExec?: boolean;
 }
 
 const SFTP_UPLOAD_ALLOWED_PREFIXES = [
@@ -424,6 +431,7 @@ export function uploadFileSftp(
    */
   const uploadTimeoutMs = Math.max(15_000, Number(options.timeoutMs ?? SSH_DEFAULT_REMOTE_COMMAND_TIMEOUT_MS));
   const forceLegacyBase64 = String(process.env.RDK_DEVICE_UPLOAD_SFTP ?? '').trim() === '0';
+  const useSudoPipe = forceLegacyBase64 || options.preferSudoExec === true;
 
   return new Promise<void>((resolve, reject) => {
     const client = new Client();
@@ -451,13 +459,23 @@ export function uploadFileSftp(
     };
 
     const safePathForShell = `'${remotePath.replace(/'/g, `'"'"'`)}'`;
+    /** 已以 root SSH 登录时避免再套 `sudo`：部分裁剪固件上 sudo 会阻塞或不可用，导致保存/上传一直挂起 */
+    const useSudo = String(credentials.username || '').toLowerCase() !== 'root';
+    const uploadInner = `mkdir -p \\$(dirname ${safePathForShell}) && base64 -d > ${safePathForShell}`;
+    const uploadCmd = useSudo ? `sudo bash -c "${uploadInner}"` : `bash -c "${uploadInner}"`;
+    const mkdirOnlyCmd = useSudo
+      ? `sudo bash -c "mkdir -p \\$(dirname ${safePathForShell})"`
+      : `bash -c "mkdir -p \\$(dirname ${safePathForShell})"`;
 
     const execBase64UploadOnReadyClient = () => {
       client.exec(
-        `bash -c "mkdir -p \\$(dirname ${safePathForShell}) && base64 -d > ${safePathForShell}"`,
+        uploadCmd,
         { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } },
         (err, stream) => {
           if (err) return doReject(err);
+
+          /** 必须消费 exec 的 stdout，否则 ssh2 缓冲区塞满后远端进程可能永不结束（表现为「保存中」卡死） */
+          stream.on('data', () => {});
 
           let stderr = '';
           let stderrTrunc = false;
@@ -476,18 +494,39 @@ export function uploadFileSftp(
             if (r.truncated) stderrTrunc = true;
           });
 
-          stream.write(buffer.toString('base64'));
-          stream.end();
+          /** 大文件 base64 字符串需按背压分块写入，否则可能丢数据导致远端解码不完整 */
+          const payload = buffer.toString('base64');
+          const CHUNK = 64 * 1024;
+          let offset = 0;
+          const pump = () => {
+            try {
+              while (offset < payload.length) {
+                const piece = payload.slice(offset, Math.min(offset + CHUNK, payload.length));
+                offset += piece.length;
+                const ok = stream.write(piece);
+                if (!ok) {
+                  stream.once('drain', pump);
+                  return;
+                }
+              }
+              stream.end();
+            } catch (e) {
+              doReject(e instanceof Error ? e : new Error(String(e)));
+            }
+          };
+          pump();
         },
       );
     };
 
     const trySftpSubsystem = () => {
       client.exec(
-        `bash -c "mkdir -p \\$(dirname ${safePathForShell})"`,
+        mkdirOnlyCmd,
         { env: { TERM: 'xterm', DEBIAN_FRONTEND: 'noninteractive' } },
         (err, stream) => {
           if (err) return execBase64UploadOnReadyClient();
+
+          stream.on('data', () => {});
 
           let stderr = '';
           let stderrTrunc = false;
@@ -508,9 +547,8 @@ export function uploadFileSftp(
               }
               sftp.writeFile(remotePath, buffer, (wfErr) => {
                 if (wfErr) {
-                  doReject(
-                    wfErr instanceof Error ? wfErr : new Error(String(wfErr)),
-                  );
+                  // SFTP write failed (e.g. permission denied); fall back to sudo base64 pipe
+                  execBase64UploadOnReadyClient();
                 } else {
                   doResolve();
                 }
@@ -523,7 +561,7 @@ export function uploadFileSftp(
 
     client
       .on('ready', () => {
-        if (forceLegacyBase64) {
+        if (useSudoPipe) {
           execBase64UploadOnReadyClient();
         } else {
           trySftpSubsystem();
