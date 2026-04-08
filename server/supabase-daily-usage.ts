@@ -95,6 +95,10 @@ export async function performDailyActiveInsert(
   }
 
   const usageDate = resolveUsageDateString(new Date());
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(usageDate)) {
+    console.warn('[supabase-daily-usage] invalid usage_date, skip insert:', usageDate);
+    return { ok: true, persisted: false, reason: 'unavailable' };
+  }
   const aid = usageKey.trim().slice(0, 256);
   const ver = appVersion.trim().slice(0, 48);
   if (!aid) {
@@ -102,6 +106,7 @@ export async function performDailyActiveInsert(
   }
 
   try {
+    /** 列名与 supabase/studio_daily_usage.sql 一致：usage_date / anonymous_id / app_version */
     const { error } = await sb.from(table).insert({
       usage_date: usageDate,
       anonymous_id: aid,

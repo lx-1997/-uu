@@ -40,6 +40,65 @@ function getClient(): SupabaseClient | null {
   return getSharedSupabaseClient();
 }
 
+/** 与 scripts/supabase-conversation-test.mjs 及 DB text 列对齐；超限截断避免单轮超大回复导致 insert 失败 */
+const MAX_MESSAGE_CHARS = 1_048_576;
+const MAX_ERROR_DETAIL_CHARS = 32_768;
+const MAX_SSO_USER_NAME_CHARS = 512;
+const MAX_CHANNEL_CHARS = 32;
+const MAX_OUTCOME_CHARS = 32;
+const MAX_TOOL_NAME_CHARS = 128;
+const MAX_TOOLS = 200;
+
+function truncateForSupabaseField(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n\n[truncated for Supabase]`;
+}
+
+function sanitizeToolsUsedForSupabase(names: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const t = String(raw ?? '').trim().slice(0, MAX_TOOL_NAME_CHARS);
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= MAX_TOOLS) break;
+  }
+  return out;
+}
+
+/** 供测试：与 `.insert()` 使用同一套清洗规则 */
+export function buildSupabaseConversationRow(record: ConversationTurnRecord): {
+  recorded_at: string;
+  sso_user_name: string | null;
+  user_message: string;
+  assistant_message: string;
+  tools_used: string[];
+  channel: string;
+  outcome: string;
+  error_detail: string | null;
+} {
+  const recordedAtMs = Number(record.recordedAt);
+  const safeTime = Number.isFinite(recordedAtMs) ? recordedAtMs : Date.now();
+  const ch = String(record.channel ?? 'studio').trim().slice(0, MAX_CHANNEL_CHARS) || 'studio';
+  const oc = String(record.outcome ?? 'completed').trim().slice(0, MAX_OUTCOME_CHARS) || 'completed';
+  return {
+    recorded_at: new Date(safeTime).toISOString(),
+    sso_user_name: record.ssoUserName != null && String(record.ssoUserName).trim()
+      ? truncateForSupabaseField(String(record.ssoUserName).trim(), MAX_SSO_USER_NAME_CHARS)
+      : null,
+    user_message: truncateForSupabaseField(String(record.userMessage ?? ''), MAX_MESSAGE_CHARS),
+    assistant_message: truncateForSupabaseField(String(record.assistantMessage ?? ''), MAX_MESSAGE_CHARS),
+    tools_used: sanitizeToolsUsedForSupabase(record.toolsUsed ?? []),
+    channel: ch,
+    outcome: oc,
+    error_detail:
+      record.errorDetail != null && String(record.errorDetail).trim()
+        ? truncateForSupabaseField(String(record.errorDetail), MAX_ERROR_DETAIL_CHARS)
+        : null,
+  };
+}
+
 export function scheduleSupabaseConversationInsert(record: ConversationTurnRecord): void {
   const table = getResolvedSupabaseTable().trim() || 'conversation_turns';
   const sb = getClient();
@@ -47,16 +106,7 @@ export function scheduleSupabaseConversationInsert(record: ConversationTurnRecor
 
   void (async () => {
     try {
-      const { error } = await sb.from(table).insert({
-        recorded_at: new Date(record.recordedAt).toISOString(),
-        sso_user_name: record.ssoUserName ?? null,
-        user_message: record.userMessage,
-        assistant_message: record.assistantMessage,
-        tools_used: record.toolsUsed.length > 0 ? record.toolsUsed : [],
-        channel: record.channel ?? 'studio',
-        outcome: record.outcome ?? 'completed',
-        error_detail: record.errorDetail ?? null,
-      });
+      const { error } = await sb.from(table).insert(buildSupabaseConversationRow(record));
       if (error) {
         console.warn('[conversation-log] supabase:', error.message);
       }

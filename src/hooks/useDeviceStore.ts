@@ -487,8 +487,13 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
           return next[0]?.id ?? '';
         });
         setDeviceListRevision((n) => n + 1);
-      } catch {
+      } catch (e) {
         if (cancelled || devicesListFetchGenRef.current !== fetchGen) return;
+        /** 401 时全局会清会话并回登录页；勿再提示「检查后端」，避免与 unauthorized Toast 重复误导 */
+        const errMsg = e instanceof Error ? e.message : String(e ?? '');
+        if (loginGate && /\b401\b/.test(errMsg)) {
+          return;
+        }
         const cached = loadDevicesFromCache();
         if (cached?.devices.length) {
           const verifiedIds = loadVerifiedIdSet();
@@ -519,7 +524,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authReady, user?.id, addToast]);
+  }, [authReady, user?.id, addToast, loginGate]);
 
   useEffect(() => {
     saveDevicesToCache(devices, activeDevice);

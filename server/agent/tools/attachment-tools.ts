@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import iconv from "iconv-lite";
 import { getApiKey, getBaseUrl, type ProviderConfig } from "../provider-setup.js";
 import { transcribeLocalWhisperFromFile } from "../../local-whisper-stt.js";
 import type { Tool } from "./types.js";
@@ -337,10 +338,76 @@ function isOfficeDocAttachment(name: string, mimeType?: string): boolean {
   return isDocxAttachment(name, mimeType) || isPptxAttachment(name, mimeType) || isXlsxAttachment(name, mimeType);
 }
 
+/** 粗略统计中日韩统一表意文字与 CJK 标点，用于 UTF-8 vs GB18030 择优 */
+function cjkTextScore(s: string): number {
+  let score = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0x4e00 && c <= 0x9fff) score += 3;
+    else if (c >= 0x3400 && c <= 0x4dbf) score += 2;
+    else if ((c >= 0xf900 && c <= 0xfaff) || (c >= 0x3000 && c <= 0x303f)) score += 1;
+  }
+  return score;
+}
+
+/**
+ * 纯文本字节 → 字符串：支持 UTF-8（含 BOM）、UTF-16 LE/BE（含 BOM）、GB18030（兼容 Windows 记事本「ANSI」/GBK 保存的中文 .txt）。
+ * 仅用于文本类附件；乱码多因误用 UTF-8 解码 GBK 字节。
+ */
+export function decodePlainTextAttachmentBuffer(buffer: Buffer): string {
+  if (buffer.length === 0) return "";
+
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return pickUtf8OrGb18030(buffer.subarray(3));
+  }
+
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return buffer.subarray(2).toString("utf16le");
+  }
+
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    const b = buffer.subarray(2);
+    const evenLen = b.length & ~1;
+    const swapped = Buffer.alloc(evenLen);
+    for (let i = 0; i < evenLen; i += 2) {
+      swapped[i] = b[i + 1]!;
+      swapped[i + 1] = b[i]!;
+    }
+    return swapped.toString("utf16le");
+  }
+
+  return pickUtf8OrGb18030(buffer);
+}
+
+function pickUtf8OrGb18030(body: Buffer): string {
+  const utf8 = body.toString("utf8");
+  const replacementCount = utf8.split("\uFFFD").length - 1;
+  let gb: string;
+  try {
+    gb = iconv.decode(body, "gb18030");
+  } catch {
+    return utf8;
+  }
+  const su = cjkTextScore(utf8);
+  const sg = cjkTextScore(gb);
+
+  if (replacementCount > 0) {
+    return sg >= su ? gb : utf8;
+  }
+
+  if (su >= 24 && su >= sg) {
+    return utf8;
+  }
+  if (sg > su + 8 && sg >= 12) {
+    return gb;
+  }
+  return utf8;
+}
+
 function readTextFromBuffer(buffer: Buffer, name: string, mimeType?: string): string {
   if (!isTextLikeAttachment(name, mimeType) || buffer.length > MAX_TEXT_ATTACHMENT_BYTES) return "";
   try {
-    return truncateText(normalizeText(buffer.toString("utf-8")));
+    return truncateText(normalizeText(decodePlainTextAttachmentBuffer(buffer)));
   } catch {
     return "";
   }
@@ -893,7 +960,8 @@ export function createAttachmentTools(
 
   const readTool: Tool<{ attachmentId: string; maxChars?: number }> = {
     name: "attachment_read",
-    description: "读取文本类附件或已转写的语音内容。适合代码、日志、配置、Markdown、CSV 等文本附件。",
+    description:
+      "读取文本类附件或已转写的语音内容。适合代码、日志、配置、Markdown、CSV 等文本附件。服务端会自动识别 UTF-8（含 BOM）/UTF-16/GB18030（兼容 Windows 记事本 GBK 保存的中文 txt），避免乱码。",
     inputSchema: {
       type: "object",
       properties: {

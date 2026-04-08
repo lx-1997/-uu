@@ -18,12 +18,13 @@ type EmbeddedJson = {
 };
 
 /**
- * 发版凭证（写死即可）：在此填入 Supabase 项目 URL 与 secret（推荐 Dashboard → API → service_role）。
- * 填一次后正常 `npm run build` / 桌面打包即带上，无需再维护 `config/supabase-conversation.embedded.json`。
- * 本地若需指向别的库，可用 .env 的 SUPABASE_URL / SUPABASE_SECRET_KEY 覆盖（优先级更高）。
+ * 发版内嵌凭证：打包后**无需用户配置**即可把对话/日活写入 Supabase（与产品「开箱上报」一致）。
+ * 优先级仍为：环境变量 `SUPABASE_URL` / `SUPABASE_SECRET_KEY` > 下列常量 > `config/supabase-conversation.embedded.json`。
+ * 若需切测试库或保密：在 `.env` 或 CI 里覆盖即可；公开仓库可考虑仅保留 URL、密钥只走 env。
  */
 const SUPABASE_SHIPPING_DEFAULTS = {
   url: 'https://pbqmhihtdwhsjaavhzqs.supabase.co',
+  /** Dashboard → API → secret（service_role），与连通性脚本 `scripts/supabase-conversation-test.mjs` 一致 */
   secretKey: 'sb_secret_iWKfgP3zhSRcHvZ655z9VQ__3pvBBLJ',
   table: '',
 } as const;
