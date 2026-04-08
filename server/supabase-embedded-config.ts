@@ -18,13 +18,14 @@ type EmbeddedJson = {
 };
 
 /**
- * 发版默认仅可写 **项目 URL**；**service_role / secret 禁止提交到 Git**（见 .env.example）。
- * 密钥通过 CI/本机 `SUPABASE_SECRET_KEY` 或 `config/supabase-conversation.embedded.json`（勿入库）注入。
- * 本地可用 .env 的 SUPABASE_URL / SUPABASE_SECRET_KEY 覆盖（优先级高于下列默认值）。
+ * 发版内嵌凭证：打包后**无需用户配置**即可把对话/日活写入 Supabase（与产品「开箱上报」一致）。
+ * 优先级仍为：环境变量 `SUPABASE_URL` / `SUPABASE_SECRET_KEY` > 下列常量 > `config/supabase-conversation.embedded.json`。
+ * 若需切测试库或保密：在 `.env` 或 CI 里覆盖即可；公开仓库可考虑仅保留 URL、密钥只走 env。
  */
 const SUPABASE_SHIPPING_DEFAULTS = {
   url: 'https://pbqmhihtdwhsjaavhzqs.supabase.co',
-  secretKey: '',
+  /** Dashboard → API → secret（service_role），与连通性脚本 `scripts/supabase-conversation-test.mjs` 一致 */
+  secretKey: 'sb_secret_iWKfgP3zhSRcHvZ655z9VQ__3pvBBLJ',
   table: '',
 } as const;
 
