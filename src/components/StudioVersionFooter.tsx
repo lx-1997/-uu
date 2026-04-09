@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { getAppVersionShort, RELEASE_NOTES_EN, RELEASE_NOTES_ZH } from '../release-notes';
+import { getAppVersionShort, UPDATE_NOTES_EN, UPDATE_NOTES_ZH } from '../release-notes';
 import { useI18n } from '../i18n/use-i18n';
 
 /** 与 WiFi 配置等一致：遮罩 + 居中 modal-content，Portal 到 body，避免受侧栏布局影响 */
@@ -19,7 +19,7 @@ export default function StudioVersionFooter({ railExpanded }: { railExpanded: bo
               <div id="version-modal-title" className="modal-title">
                 {t('version.modal.title', '关于 RDK Studio')}
               </div>
-              <div className="modal-subtitle">{t('version.modal.subtitle', '版本与产品说明')}</div>
+              <div className="modal-subtitle">{t('version.modal.subtitle', '版本与更新说明')}</div>
             </div>
             <button type="button" className="btn-icon" onClick={() => setOpen(false)} aria-label="Close">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -29,9 +29,9 @@ export default function StudioVersionFooter({ railExpanded }: { railExpanded: bo
             </button>
           </div>
           <div className="modal-body">
-            <p className="version-modal-sub">{t('version.modal.features', '产品功能')}</p>
+            <p className="version-modal-sub">{t('version.modal.updates', '本版本更新')}</p>
             <ul className="version-modal-list">
-              {(isEn ? RELEASE_NOTES_EN : RELEASE_NOTES_ZH).map((line) => (
+              {(isEn ? UPDATE_NOTES_EN : UPDATE_NOTES_ZH).map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>

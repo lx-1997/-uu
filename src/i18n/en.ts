@@ -141,7 +141,8 @@ export const EN: Record<string, string> = {
   'route.fallbackLoading': 'Loading page…',
 
   'version.modal.title': 'About RDK Studio',
-  'version.modal.subtitle': 'Version & product',
+  'version.modal.subtitle': 'Version & update notes',
+  'version.modal.updates': 'What\'s new in this version',
   'version.modal.features': 'Features',
   'version.modal.sub': 'Features',
 

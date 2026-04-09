@@ -589,12 +589,12 @@ function buildConnectParams(nonce, ts) {
   const params = {
     minProtocol: 3,
     maxProtocol: 3,
-    client: { id: CLIENT_ID, version: '1.0.2', platform: os.platform(), mode: CLIENT_MODE },
+    client: { id: CLIENT_ID, version: '1.0.3', platform: os.platform(), mode: CLIENT_MODE },
     role: ROLE,
     scopes: SCOPES,
     device: signChallenge(nonce, ts),
     locale: 'zh-CN',
-    userAgent: 'rdkstudio/1.0.2',
+    userAgent: 'rdkstudio/1.0.3',
     caps: ['agent-events', 'tool-events'],
   };
   if (token) params.auth = { token };

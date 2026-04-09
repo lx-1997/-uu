@@ -2,7 +2,7 @@
   "name": "rdk-studio",
   "main": "electron/main.mjs",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "engines": {
     "node": ">=22.16.0"
