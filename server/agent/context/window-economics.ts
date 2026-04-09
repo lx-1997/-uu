@@ -3,6 +3,10 @@
  *
  * - 有效窗口 = 模型上下文窗 − min(max_output, 摘要输出上限)，避免把「留给模型输出」的额度算进可用历史
  * - 自动压缩触发线 = 有效窗口 − buffer（默认 13k），在「满之前」主动压历史
+ *
+ * 产品侧可参考（思路一致，非实现绑定）：
+ * - VS Code Copilot：用量指示 + 将满时自动 compact + 用户 `/compact` 与「Compact Conversation」
+ * - Kiro CLI：溢出时自动 compact、`/context show` 可观测、大上下文用 Knowledge Base 按需检索而非整段塞窗
  */
 
 /** 摘要/compact 调用预留输出上限（与 claude-code MAX_OUTPUT_TOKENS_FOR_SUMMARY 同量级） */

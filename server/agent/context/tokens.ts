@@ -88,3 +88,43 @@ export function estimateMessageTokens(message: Message): number {
 export function estimateMessagesTokens(messages: Message[]): number {
   return messages.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
 }
+
+/**
+ * 每「上下文窗口单位」对应多少字符用于与厂商「输入长度」对齐。
+ * 默认 4（与 CHARS_PER_TOKEN_ESTIMATE 一致）。
+ * 设为 1 时：按「原始字符数 ≈ 窗口上限」计量（如部分网关 max length 与 context 同阶）。
+ */
+export function resolveContextCharsPerTokenUnit(): number {
+  const raw = process.env.RDKCLAW_CONTEXT_CHARS_PER_TOKEN_UNIT;
+  if (!raw || !String(raw).trim()) return CHARS_PER_TOKEN_ESTIMATE;
+  const n = Number.parseFloat(String(raw).trim());
+  if (!Number.isFinite(n)) return CHARS_PER_TOKEN_ESTIMATE;
+  return Math.min(8, Math.max(1, n));
+}
+
+/**
+ * 与窗口经济学比较用的「等效占用」：取 tokenizer 估算与 字符/单位 换算的较大值，
+ * 避免英文偏多时低估、或厂商按字符计数时漏触发主动压缩。
+ *
+ * 当传入 effectiveContextWindowTokens 且 原始字符数已占有效窗口比例很高时，再与 rawChars 取 max，
+ * 对齐「Input length 148911 exceeds maximum 131072」类按字符计的上限（无需用户改 unit 也能提前 compact）。
+ */
+export function estimatePromptUnitsForContextWindow(params: {
+  messages: Message[];
+  systemPrompt: string;
+  charsPerTokenUnit: number;
+  effectiveContextWindowTokens?: number;
+}): number {
+  const estTokens =
+    estimateMessagesTokens(params.messages) + estimateTokensForText(params.systemPrompt);
+  const rawChars =
+    estimateMessagesChars(params.messages) + (params.systemPrompt?.length ?? 0);
+  const unit = Math.max(1, params.charsPerTokenUnit);
+  const fromChars = rawChars / unit;
+  let score = Math.max(estTokens, fromChars);
+  const cap = params.effectiveContextWindowTokens;
+  if (cap !== undefined && cap > 0 && rawChars / cap >= 0.85) {
+    score = Math.max(score, rawChars);
+  }
+  return score;
+}

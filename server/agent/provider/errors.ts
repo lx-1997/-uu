@@ -128,6 +128,11 @@ const CONTEXT_OVERFLOW_PATTERNS = [
   "prompt is too long",
   "exceeds model context window",
   "context overflow",
+  /** 豆包 / 部分 OpenAI 兼容网关：长度上限（字符或 token 计量） */
+  "exceeds the maximum length",
+  "maximum input length",
+  "token limit exceeded",
+  "context window is full",
 ];
 
 function matchesAny(message: string, patterns: string[]): boolean {
@@ -145,9 +150,16 @@ function matchesAny(message: string, patterns: string[]): boolean {
 export function isContextOverflowError(message?: string): boolean {
   if (!message) return false;
   if (matchesAny(message, CONTEXT_OVERFLOW_PATTERNS)) return true;
-  // 413 + "too large" 组合
   const lower = message.toLowerCase();
+  // 413 + "too large" 组合
   if (lower.includes("413") && lower.includes("too large")) return true;
+  // 400 + 明确长度越界（避免把泛化的 400 都当成 overflow）
+  if (
+    /\b400\b/.test(lower) &&
+    (lower.includes("maximum length") || lower.includes("input length") || lower.includes("context length"))
+  ) {
+    return true;
+  }
   return false;
 }
 

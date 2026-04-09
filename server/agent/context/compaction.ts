@@ -2,6 +2,7 @@ import { createCompactionSummaryMessage, type Message } from "../session.js";
 import {
   estimateMessageTokens,
   estimateMessagesTokens,
+  estimatePromptUnitsForContextWindow,
   CHARS_PER_TOKEN_ESTIMATE,
 } from "./tokens.js";
 import {
@@ -532,13 +533,23 @@ export function shouldTriggerCompaction(params: {
   messages: Message[];
   contextWindowTokens: number;
   settings?: Partial<CompactionSettings>;
+  /** 与窗口对齐：传入后与 systemPrompt 一起用 max(token, chars/unit) 估算 */
+  systemPrompt?: string;
+  charsPerTokenUnit?: number;
 }): boolean {
   const settings = {
     ...DEFAULT_COMPACTION_SETTINGS,
     ...params.settings,
   };
   if (!settings.enabled) return false;
-  const totalTokens = estimateMessagesTokens(params.messages);
+  const totalTokens =
+    params.systemPrompt !== undefined && params.charsPerTokenUnit !== undefined
+      ? estimatePromptUnitsForContextWindow({
+          messages: params.messages,
+          systemPrompt: params.systemPrompt,
+          charsPerTokenUnit: params.charsPerTokenUnit,
+        })
+      : estimateMessagesTokens(params.messages);
   return totalTokens > params.contextWindowTokens - settings.reserveTokens;
 }
 
@@ -631,6 +642,11 @@ export async function compactHistoryIfNeeded(params: {
   maxTokens?: number;
   /** 连续压缩失败熔断：仅做 prune 切片，不调用 LLM 摘要（对齐 claude-code autoCompact circuit breaker） */
   skipLlmCompaction?: boolean;
+  /**
+   * 用户显式 `/compact`：绕过保守的 shouldTriggerCompaction，尽量进入摘要并 appendCompaction 落盘，
+   * 使下一轮 load 时 buildSessionContext 用「检查点摘要 + 保留尾部」替换前缀（而非仅多一轮对话）。
+   */
+  forceCompaction?: boolean;
 }): Promise<{
   summary?: string;
   summaryMessage?: Message;
@@ -642,11 +658,13 @@ export async function compactHistoryIfNeeded(params: {
     settings: params.pruningSettings,
   });
 
-  const shouldCompact = shouldTriggerCompaction({
-    messages: params.messages,
-    contextWindowTokens: params.contextWindowTokens,
-    settings: params.compactionSettings,
-  });
+  const shouldCompact =
+    Boolean(params.forceCompaction) ||
+    shouldTriggerCompaction({
+      messages: params.messages,
+      contextWindowTokens: params.contextWindowTokens,
+      settings: params.compactionSettings,
+    });
 
   if (!shouldCompact) {
     return { pruneResult };

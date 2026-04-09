@@ -448,12 +448,15 @@ export function pruneContextMessages(params: {
   messages: Message[];
   contextWindowTokens: number;
   systemPromptTokens?: number;
+  /** 与 estimatePromptUnitsForContextWindow / RDKCLAW_CONTEXT_CHARS_PER_TOKEN_UNIT 对齐，默认 4 */
+  charsPerTokenUnit?: number;
   settings?: Partial<ContextPruningSettings>;
 }): PruneResult {
   const settings = resolvePruningSettings(params.settings);
   const systemTokens = Math.max(0, params.systemPromptTokens ?? 0);
   const contextTokens = Math.max(1, Math.floor(params.contextWindowTokens - systemTokens));
-  const charWindow = contextTokens * CHARS_PER_TOKEN_ESTIMATE;
+  const charsPerUnit = Math.max(1, params.charsPerTokenUnit ?? CHARS_PER_TOKEN_ESTIMATE);
+  const charWindow = contextTokens * charsPerUnit;
   const budgetChars = Math.max(1, Math.floor(charWindow * settings.maxHistoryShare));
   const isPrunable = makeToolPrunablePredicate(settings.tools);
 

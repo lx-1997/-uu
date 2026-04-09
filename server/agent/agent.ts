@@ -44,7 +44,7 @@ import {
 } from "./context-window-guard.js";
 import { compactSubagentSummaryForParent } from "./context/subagent-summary-compact.js";
 import { getEffectiveContextWindowTokens } from "./context/window-economics.js";
-import type { CompactHookRegistry } from "./compact-hooks.js";
+import type { CompactHookRegistry, CompactReason } from "./compact-hooks.js";
 import { SkillManager, type SkillMatch } from "./skills.js";
 import { HeartbeatManager, type HeartbeatResult } from "./heartbeat.js";
 import {
@@ -566,21 +566,27 @@ export class Agent {
     messages: Message[];
     sessionKey: string;
     runId: string;
+    /** 用户 `/compact`：强制尝试摘要并落盘 compaction 检查点 */
+    forceCompaction?: boolean;
+    compactionReason?: CompactReason;
   }): Promise<{
     pruned: PruneResult;
     summary?: string;
     summaryMessage?: Message;
   }> {
     const effW = getEffectiveContextWindowTokens(this.contextTokens, this.modelDef.maxTokens ?? 8192);
+    const compactReason: CompactReason = params.compactionReason ?? "run_start";
     await this.compactHooks?.runPreHooks({
       sessionKey: params.sessionKey,
       runId: params.runId,
       messages: params.messages,
-      reason: "run_start",
+      reason: compactReason,
     });
 
     const streak = this.compactionFailStreakBySession.get(params.sessionKey) ?? 0;
-    const skipLlm = streak >= Agent.MAX_COMPACTION_FAILURE_STREAK;
+    /** 显式 `/compact` 时仍尝试 LLM 摘要，不因熔断跳过（用户主动要压上下文） */
+    const skipLlm =
+      !params.forceCompaction && streak >= Agent.MAX_COMPACTION_FAILURE_STREAK;
 
     const compacted = await compactHistoryIfNeeded({
       summarize: this.createSummarizeFn(),
@@ -588,6 +594,7 @@ export class Agent {
       contextWindowTokens: effW,
       pruningSettings: this.runtimePolicy.pruning,
       skipLlmCompaction: skipLlm,
+      forceCompaction: params.forceCompaction,
     });
 
     if (compacted.summary?.includes("Summary unavailable due to size limits")) {
@@ -604,7 +611,7 @@ export class Agent {
       runId: params.runId,
       summaryChars: compacted.summary?.length ?? 0,
       droppedMessages: compacted.pruneResult.droppedMessages.length,
-      reason: "run_start",
+      reason: compactReason,
       success: Boolean(compacted.summary && compacted.summaryMessage),
     });
 
@@ -900,12 +907,16 @@ export class Agent {
 
           const studioRegenerate = Boolean(options?.studioRegenerate);
 
+          /** 对齐 VS Code / Kiro：用户显式「压缩上下文」，优先于技能改写 */
+          const manualCompact =
+            !studioRegenerate && /^\s*\/compact(?:\s|$)/i.test(userMessage.trim());
+
           let processedMessage = userMessage;
           let skillTriggered: string | undefined;
 
           // 技能匹配（对应 OpenClaw: auto-reply/skill-commands.ts → model dispatch 路径）
           // /command args → 改写消息，引导模型读取对应 SKILL.md
-          if (this.enableSkills) {
+          if (!manualCompact && this.enableSkills) {
             const match = await this.skills.match(userMessage);
             if (match) {
               skillTriggered = match.command.skillName;
@@ -982,11 +993,17 @@ export class Agent {
 
           const currentMessages = skipAppendUser ? history : [...history, userMsg];
 
+          /** 手动 /compact：不把该条用户指令本身纳入摘要输入（避免污染摘要） */
+          const messagesForCompaction = manualCompact ? currentMessages.slice(0, -1) : currentMessages;
+
           // Compaction: run 开始前做一次
           const prep = await this.prepareMessagesForRun({
-            messages: currentMessages,
+            messages: messagesForCompaction,
             sessionKey,
             runId,
+            ...(manualCompact
+              ? { forceCompaction: true, compactionReason: "manual_compact" as const }
+              : {}),
           });
           let compactionSummary = prep.summaryMessage;
           if (prep.summary) {
@@ -1009,6 +1026,32 @@ export class Agent {
             } else {
               console.warn("无法定位 compaction 的 firstKeptEntryId，已跳过记录。");
             }
+          }
+
+          // 仅压缩、不进入主模型循环（对齐 Copilot / Kiro 的 `/compact`）
+          // 有摘要时 appendCompaction 已执行：下次 load 会通过 buildSessionContext 用摘要替换较早前缀，不是「新开一轮空会话」。
+          if (manualCompact) {
+            const reply = prep.summary
+              ? `已手动压缩对话上下文（摘要约 ${prep.summary.length} 字已写入会话检查点；下一轮起模型将基于摘要+保留的尾部继续）。`
+              : "当前历史未达到触发摘要的阈值，未写入新检查点；若上下文仍偏长，可检查模型窗口配置或新开会话。";
+            const asstMsg: Message = {
+              role: "assistant",
+              content: reply,
+              timestamp: Date.now(),
+            };
+            await this.sessions.append(sessionKey, asstMsg);
+            this.emit({ type: "message_start", message: asstMsg });
+            this.emit({ type: "message_delta", delta: reply });
+            this.emit({ type: "message_end", message: asstMsg, text: reply });
+            this.emit({ type: "agent_end", runId, messages: this.sessions.get(sessionKey) });
+            return {
+              runId,
+              text: reply,
+              turns: 0,
+              toolCalls: 0,
+              skillTriggered,
+              memoriesUsed: 0,
+            };
           }
 
           // 构建系统提示

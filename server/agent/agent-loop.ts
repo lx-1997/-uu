@@ -47,6 +47,9 @@ import {
   pruneContextMessages,
   invalidateStaleReadToolResults,
   snipTailOversizedToolResults,
+  estimatePromptUnitsForContextWindow,
+  resolveContextCharsPerTokenUnit,
+  estimateMessagesChars,
 } from "./context/index.js";
 import { microcompact, type MicroCompactConfig } from "./context/microcompact.js";
 import { createMiniAgentStream, type MiniAgentEvent, type MiniAgentResult } from "./agent-events.js";
@@ -64,7 +67,6 @@ import {
   getContextWarningThreshold,
   shouldProactiveCompactByWindowEconomics,
 } from "./context/window-economics.js";
-import { estimateMessagesTokens, estimateTokensForText } from "./context/tokens.js";
 import { shouldTriggerCompaction } from "./context/index.js";
 import {
   runPreToolHookChain,
@@ -514,6 +516,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
     const toolCallsByName: Record<string, number> = {};
 
     try {
+      /** 与厂商「输入长度」计量对齐：默认同 CHARS_PER_TOKEN_ESTIMATE；网关按字符计可设 RDKCLAW_CONTEXT_CHARS_PER_TOKEN_UNIT=1 */
+      const charsPerUnit = resolveContextCharsPerTokenUnit();
       // 对应 OpenClaw: 循环开始前检查 steering（用户可能在等待期间输入）
       let pendingMessages = await getSteeringMessages();
 
@@ -562,8 +566,12 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
 
           const maxOut = maxOutputTokensParam ?? modelDef.maxTokens ?? 8192;
           const effectiveContextTokens = getEffectiveContextWindowTokens(contextTokens, maxOut);
-          const estPromptTokens =
-            estimateMessagesTokens(currentMessages) + estimateTokensForText(systemPrompt);
+          const estPromptTokens = estimatePromptUnitsForContextWindow({
+            messages: currentMessages,
+            systemPrompt,
+            charsPerTokenUnit: charsPerUnit,
+            effectiveContextWindowTokens: effectiveContextTokens,
+          });
           const proactiveLine = getProactiveCompactThreshold(effectiveContextTokens);
           const warnLine = getContextWarningThreshold(effectiveContextTokens);
 
@@ -612,19 +620,40 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
             }
           }
 
+          const promptUnitsForWindow = estimatePromptUnitsForContextWindow({
+            messages: currentMessages,
+            systemPrompt,
+            charsPerTokenUnit: charsPerUnit,
+            effectiveContextWindowTokens: effectiveContextTokens,
+          });
+          const rawTotalChars =
+            estimateMessagesChars(currentMessages) + systemPrompt.length;
+          /** 原始字符数已顶满有效窗口时，prune 按「字符≈窗口单位」收紧，避免仍按 ×4 虚高预算 */
+          const pruneCharsPerUnit =
+            rawTotalChars / effectiveContextTokens >= 0.85 ? 1 : charsPerUnit;
+          const systemPromptUnitsForPrune = Math.ceil(
+            estimatePromptUnitsForContextWindow({
+              messages: [],
+              systemPrompt,
+              charsPerTokenUnit: pruneCharsPerUnit,
+              effectiveContextWindowTokens: effectiveContextTokens,
+            }),
+          );
+
           // ===== 主动压缩（窗口经济学）：在 API 报 overflow 前触发 LLM 摘要 =====
           if (
             !proactiveCompactionAttempted &&
             turns >= 2 &&
             !abortSignal.aborted &&
             shouldProactiveCompactByWindowEconomics({
-              estimatedPromptTokens:
-                estimateMessagesTokens(currentMessages) + estimateTokensForText(systemPrompt),
+              estimatedPromptTokens: promptUnitsForWindow,
               effectiveContextWindowTokens: effectiveContextTokens,
             }) &&
             shouldTriggerCompaction({
               messages: currentMessages,
               contextWindowTokens: effectiveContextTokens,
+              systemPrompt,
+              charsPerTokenUnit: charsPerUnit,
             })
           ) {
             proactiveCompactionAttempted = true;
@@ -653,8 +682,7 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
                 contextCompactions++;
                 stream.push({
                   type: "proactive_compaction",
-                  estimatedTokens:
-                    estimateMessagesTokens(currentMessages) + estimateTokensForText(systemPrompt),
+                  estimatedTokens: promptUnitsForWindow,
                   threshold: getProactiveCompactThreshold(effectiveContextTokens),
                   effectiveContextTokens,
                 });
@@ -670,6 +698,8 @@ export function runAgentLoop(params: AgentLoopParams): EventStream<MiniAgentEven
           const pruneResult = pruneContextMessages({
             messages: currentMessages,
             contextWindowTokens: effectiveContextTokens,
+            systemPromptTokens: systemPromptUnitsForPrune,
+            charsPerTokenUnit: pruneCharsPerUnit,
           });
           let messagesForModel = pruneResult.messages;
           if (compactionSummary) {

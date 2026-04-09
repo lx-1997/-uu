@@ -4,7 +4,7 @@
 
 import type { Message } from "./session.js";
 
-export type CompactReason = "run_start" | "overflow" | "proactive";
+export type CompactReason = "run_start" | "overflow" | "proactive" | "manual_compact";
 
 export interface PreCompactContext {
   sessionKey: string;

@@ -45,6 +45,8 @@ export {
   estimateMessagesChars,
   estimateMessagesTokens,
   estimateTokensForText,
+  estimatePromptUnitsForContextWindow,
+  resolveContextCharsPerTokenUnit,
 } from "./tokens.js";
 export {
   microcompact,
