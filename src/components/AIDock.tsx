@@ -17,6 +17,7 @@ import { isDeviceShownOnline } from '../utils/device-connection';
 import { DASHBOARD_CHAT_INTRO_PROMPT_EN, DASHBOARD_CHAT_INTRO_PROMPT_ZH } from '../i18n/prompts';
 import { findAdjustedStreamingFadeSplitIndex } from '../utils/streaming-markdown-split';
 import { renderMarkdown } from './MarkdownRenderer';
+import { ChatImageWithFallback } from './ChatImageWithFallback';
 import { chatMessageToPlainText, chatMessageRetryExcerpt } from '../utils/chat-message-plain';
 import { buildThreadSummaryLine } from '../utils/chat-history-thread-label';
 import { confirmAndBeginNewChat } from '../utils/studio-new-chat';
@@ -1073,12 +1074,16 @@ function BlockRenderer({
       const imgUrl = resolveMediaUrl(block.src);
       return (
         <div className="msg-block image-block">
-          <img
+          <ChatImageWithFallback
             className="image-block-real"
+            wrapClassName="image-block-fallback-wrap"
             src={imgUrl}
             alt={block.caption || t('dock.image.alt', '设备图片')}
-            loading="lazy"
-            onClick={() => window.open(imgUrl, '_blank', 'noopener,noreferrer')}
+            failedHint={t(
+              'dock.image.loadFailed',
+              '无法加载图片（可能不是图片直链或站点禁止嵌入）',
+            )}
+            openLinkLabel={t('dock.image.openLink', '在新标签打开链接')}
           />
           {block.caption && <div className="image-block-caption">{block.caption}</div>}
         </div>
@@ -1451,11 +1456,16 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
     return (
       <div className="chat-attachment chat-attachment-image">
         {resolvedSrc ? (
-          <img
+          <ChatImageWithFallback
+            className="chat-attachment-img"
+            wrapClassName="chat-attachment-img-wrap"
             src={resolvedSrc}
             alt={attachment.name}
-            loading="lazy"
-            onClick={() => window.open(resolvedSrc, '_blank', 'noopener,noreferrer')}
+            failedHint={t(
+              'dock.image.loadFailed',
+              '无法加载图片（可能不是图片直链或站点禁止嵌入）',
+            )}
+            openLinkLabel={t('dock.image.openLink', '在新标签打开链接')}
           />
         ) : (
           <div className="file-attachment-info">
@@ -1477,11 +1487,16 @@ function AttachmentRenderer({ attachment }: { attachment: ChatAttachment }) {
   ) {
     return (
       <div className="chat-attachment chat-attachment-image">
-        <img
+        <ChatImageWithFallback
+          className="chat-attachment-img"
+          wrapClassName="chat-attachment-img-wrap"
           src={resolvedSrc}
           alt={attachment.name}
-          loading="lazy"
-          onClick={() => window.open(resolvedSrc, '_blank', 'noopener,noreferrer')}
+          failedHint={t(
+            'dock.image.loadFailed',
+            '无法加载图片（可能不是图片直链或站点禁止嵌入）',
+          )}
+          openLinkLabel={t('dock.image.openLink', '在新标签打开链接')}
         />
         {attachment.name ? <div className="image-block-caption">{attachment.name}</div> : null}
       </div>

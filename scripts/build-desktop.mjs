@@ -40,7 +40,7 @@ const macX64 = target === 'mac' && (mode === 'x64' || mode === 'intel');
  * 命令 → variant 目录（package.json build.* 目标见下文）：
  * - node scripts/build-desktop.mjs win              → win-x64（nsis + portable + zip，arch x64）
  * - node scripts/build-desktop.mjs win zip|dir      → win-x64
- * - node scripts/build-desktop.mjs mac              → darwin-arm64（package.json 仅 dmg arm64）
+ * - node scripts/build-desktop.mjs mac              → darwin-arm64（package.json：dmg + zip，zip 供 electron-updater）
  * - node scripts/build-desktop.mjs mac arm64        → darwin-arm64
  * - node scripts/build-desktop.mjs mac x64|intel    → darwin-x64
  * - node scripts/build-desktop.mjs linux            → linux-x64（AppImage + deb）
@@ -183,6 +183,9 @@ function validateBuildConfig() {
   if (target === 'mac') {
     if (!hasTarget(build?.mac, 'dmg')) {
       throw new Error('build.mac.target 缺少 dmg');
+    }
+    if (!hasTarget(build?.mac, 'zip')) {
+      throw new Error('build.mac.target 缺少 zip（electron-updater 在 macOS 上需 zip 才能自动更新）');
     }
   }
   if (target === 'win') {

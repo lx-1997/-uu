@@ -187,7 +187,7 @@ export default function SettingsPanel() {
   const [quickAiSamplingTopP, setQuickAiSamplingTopP] = useState('1');
   const [selectedAiModelId, setSelectedAiModelId] = useState('');
   /** AI 引擎卡片内：同一位置切换深度 / 快速，表单状态仍各自独立 */
-  const [aiEngineLaneTab, setAiEngineLaneTab] = useState<'thinking' | 'quick'>('thinking');
+  const [aiEngineLaneTab, setAiEngineLaneTab] = useState<'thinking' | 'quick'>('quick');
   const [aiSaving, setAiSaving] = useState(false);
   const [thinkingVendorTest, setThinkingVendorTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [quickVendorTest, setQuickVendorTest] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');

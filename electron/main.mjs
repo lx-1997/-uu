@@ -15,6 +15,7 @@ import { validateS100ImagePick } from './flash/xburn-s100.mjs';
 import { registerSsoLoginIpc } from './sso-ipc.mjs';
 import { listWindowsSerialPorts } from './list-windows-serial-ports.mjs';
 import { registerSerialPortPickerHandlers } from './serial-port-picker.mjs';
+import { setupDesktopAutoUpdate } from './auto-update.mjs';
 
 /* 开发态加载 Vite，CSP 需含 unsafe-eval（HMR）；Electron 会刷 CSP 警告，与业务漏洞无直接关系 */
 if (!app.isPackaged) {
@@ -188,6 +189,8 @@ let serverProcess = null;
 /** 内嵌 node 子进程 PID，供 process/will-quit 兜底强杀，避免 before-quit 异步未跑完时孤儿进程 */
 let embeddedServerPid = 0;
 let currentServerPort = SERVER_PORT;
+/** 内嵌服务启动失败时弹窗与 lsof 提示用，避免永远写死 8787 */
+let lastEmbeddedStartupHintPort = SERVER_PORT;
 /** 防止 before-quit 里 preventDefault + app.quit() 形成无限循环 */
 let quitCleanupPass = false;
 // url -> WebContentsView 映射
@@ -534,7 +537,7 @@ function isIpv4DottedQuadTypec(s) {
  * 桌面端 Type-C 配本机 IP：在「主进程」提权，避免内置 API（ELECTRON_RUN_AS_NODE）子进程
  * 无法稳定弹出 UAC/osascript/pkexec。
  *
- * - darwin：osascript
+ * - darwin：sudo --askpass + JXA（与烧录一致；可选启动预授权见 RDK_STUDIO_MAC_PREFLIGHT_SUDO_V）
  * - win32：Start-Process -Verb RunAs + netsh
  * - linux：pkexec + bash（ip/ifconfig）
  */
@@ -1176,13 +1179,132 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 快速 TCP 探测端口是否空闲（避免 spawn 子进程再发现占用的开销和竞态） */
+/** 本机 :port 上是否为开发态 API（npm run dev），若是则不可强杀，应换端口或提示用户 */
+async function isDevRdkApiListeningOnPort(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return false;
+    const body = await res.json().catch(() => null);
+    return !!(body && body.ok === true && body.rdkStudioApi === true && body.packagedDesktop === false);
+  } catch {
+    return false;
+  }
+}
+
+/** 查询正在 LISTEN 该 TCP 端口的 PID（用于释放残留 node/旧版 Studio） */
+async function getListenPidsOnPort(port) {
+  const p = Number(port);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) return [];
+  if (process.platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          `(Get-NetTCPConnection -LocalPort ${p} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) -join ' '`,
+        ],
+        { windowsHide: true },
+      );
+      return String(stdout || '')
+        .trim()
+        .split(/\s+/)
+        .filter((x) => /^\d+$/.test(x) && x !== '0');
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const { stdout } = await execFileAsync('lsof', ['-tiTCP:' + String(p), '-sTCP:LISTEN'], { windowsHide: true });
+    return [...new Set(String(stdout || '').trim().split(/\n/).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 桌面包启动内嵌服务前：若端口被非开发态进程占用（常见为上次未退出的内置子进程），尝试结束监听方以释放端口。
+ * 若检测到开发态 npm API 则不动，由上层换端口。
+ */
+async function tryReleasePortByKillingListeners(port) {
+  const pids = await getListenPidsOnPort(port);
+  if (pids.length === 0) return;
+  if (await isDevRdkApiListeningOnPort(port)) {
+    console.warn('[server] port', port, '上为开发态 API（npm run dev），不自动结束进程；将尝试其它端口');
+    appendStartupLog(`tryReleasePort skip dev api port=${port}`);
+    return;
+  }
+  console.warn('[server] 端口', port, '已被占用，尝试结束监听进程 PID:', pids.join(', '));
+  appendStartupLog(`tryReleasePort pidKill port=${port} pids=${pids.join(',')}`);
+  if (process.platform === 'win32') {
+    for (const pid of pids) {
+      try {
+        await execFileAsync('taskkill', ['/PID', pid, '/F', '/T'], { windowsHide: true });
+      } catch {
+        /* 进程可能已退出 */
+      }
+    }
+    await wait(350);
+    return;
+  }
+  for (const pidStr of pids) {
+    const pid = Number(pidStr);
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      /* ESRCH */
+    }
+  }
+  await wait(180);
+  for (const pidStr of pids) {
+    const pid = Number(pidStr);
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    try {
+      process.kill(pid, 0);
+      process.kill(pid, 'SIGKILL');
+    } catch (e) {
+      if (e && typeof e === 'object' && 'code' in e && e.code === 'ESRCH') continue;
+    }
+  }
+  await wait(280);
+}
+
+/** 快速 TCP 探测端口是否空闲（避免 spawn 子进程后才发现占用） */
 function isPortAvailable(port, host = '127.0.0.1') {
   return new Promise((resolve) => {
+    let settled = false;
     const srv = net.createServer();
-    srv.once('error', () => resolve(false));
+    const done = (val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(val);
+    };
+    const timer = setTimeout(() => {
+      try {
+        srv.close();
+      } catch {
+        /* ignore */
+      }
+      console.warn(
+        '[server] isPortAvailable 探测超时（3s），将视为不可用。若本机并未监听该端口，可能是系统/安全软件阻塞或异常；端口=',
+        port,
+        'host=',
+        host,
+      );
+      appendStartupLog(`isPortAvailable timeout port=${port} host=${host}`);
+      done(false);
+    }, 3000);
+    srv.once('error', (err) => {
+      const code = err && typeof err === 'object' && 'code' in err ? err.code : '';
+      const msg = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);
+      console.warn('[server] isPortAvailable 探测失败', { port, host, code, message: msg });
+      appendStartupLog(`isPortAvailable error port=${port} code=${code} msg=${msg.slice(0, 200)}`);
+      done(false);
+    });
     srv.listen(port, host, () => {
-      srv.close(() => resolve(true));
+      srv.close(() => done(true));
     });
   });
 }
@@ -1309,14 +1431,24 @@ function startEmbeddedServer() {
     (async () => {
       for (let offset = 0; offset <= SERVER_PORT_FALLBACK_SPAN; offset += 1) {
         const port = SERVER_PORT + offset;
+        lastEmbeddedStartupHintPort = port;
         if (await probeReusablePackagedDesktopApi(port)) {
           currentServerPort = port;
           console.log('[server] 端口', port, '上已有可复用的内置 API，跳过再拉起子进程');
           resolve(port);
           return;
         }
-        // 先用 TCP 探测端口是否空闲，避免 spawn 子进程后才发现占用
+        // 先用 TCP 探测端口是否空闲；若被残留进程占用则尝试释放（避免上次未退出的内置 node 导致「永远 8787 被占」）
         if (!(await isPortAvailable(port))) {
+          await tryReleasePortByKillingListeners(port);
+        }
+        if (!(await isPortAvailable(port))) {
+          if (await isDevRdkApiListeningOnPort(port)) {
+            console.warn('[server] port', port, '被本机开发服务器占用（npm run dev），跳过该端口');
+            appendStartupLog(`startEmbeddedServer port blocked by dev api port=${port}`);
+            if (offset < SERVER_PORT_FALLBACK_SPAN) continue;
+            throw new Error(`内置服务未能在 ${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN} 之间找到可用端口（含与 npm run dev 冲突）`);
+          }
           console.warn('[server] port', port, 'occupied (TCP pre-check), skipping');
           appendStartupLog(`startEmbeddedServer port pre-check occupied port=${port}`);
           if (offset < SERVER_PORT_FALLBACK_SPAN) continue;
@@ -2342,6 +2474,7 @@ app.whenReady().then(async () => {
   if (isPacked) {
     try {
       const port = await startEmbeddedServer();
+      lastEmbeddedStartupHintPort = port;
       /** launchEmbeddedServer 已轮询 probe，此处再留足重试以应对慢盘/首启 JIT 较慢的机器 */
       const ready = await waitForServer(port, 24);
       if (!ready) {
@@ -2350,11 +2483,15 @@ app.whenReady().then(async () => {
     } catch (err) {
       console.error('[main] server startup failed:', err);
       appendStartupLog(`app.whenReady startup failed message=${err instanceof Error ? err.message : String(err)}`);
-      const listenHint = await formatPortListenHint(SERVER_PORT);
-      const hintBlock = listenHint ? `\n\n当前端口占用情况（仅供参考）：\n${listenHint}` : '';
+      const hintPort = lastEmbeddedStartupHintPort;
+      const listenHint = await formatPortListenHint(hintPort);
+      const rangeHint = `${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN}`;
+      const hintBlock = listenHint
+        ? `\n\n以下为本机对端口 ${hintPort} 的监听情况（供排查；失败端口可能在该范围内任一端口号）：\n${listenHint}`
+        : '';
       dialog.showErrorBox(
         'RDK Studio 启动失败',
-        `内置服务未能正常启动。应用已优先尝试默认端口 ${SERVER_PORT}，并在需要时自动回退到后续端口。\n若仍失败，常见原因是本机已有异常残留进程、端口被其它程序持续占用，或子进程启动即退出。${hintBlock}\n\n${err instanceof Error ? err.message : String(err)}`,
+        `内置服务未能正常启动。应用会优先尝试 ${rangeHint} 范围内的端口。\n重启后仍失败时，除「残留进程」外，也可能是其它软件占用该端口，或 Windows「排除端口范围」含该端口（可在管理员终端执行 netsh interface ipv4 show excludedportrange protocol=tcp 查看）。${hintBlock}\n\n${err instanceof Error ? err.message : String(err)}`,
       );
       await stopEmbeddedServer();
       app.quit();
@@ -2363,6 +2500,14 @@ app.whenReady().then(async () => {
   }
 
   await createMainWindow();
+  if (isPacked) {
+    setupDesktopAutoUpdate(() => mainWin);
+  } else {
+    ipcMain.handle('rdk:check-for-updates', async () => ({
+      ok: false,
+      error: '开发模式不检查安装包更新（请使用打包后的安装版验证）',
+    }));
+  }
   ensureFloatingBallPrefsDefault();
   createFloatingBallWindow();
 
@@ -2370,6 +2515,17 @@ app.whenReady().then(async () => {
     platform: process.platform,
     webContentsSend: (...args) => safeSendToMainRenderer(...args),
   });
+
+  if (process.platform === 'darwin' && String(process.env.RDK_STUDIO_MAC_PREFLIGHT_SUDO_V || '').trim() === '1') {
+    void (async () => {
+      try {
+        const { runMacDesktopSudoPreflight } = await import('./mac-sudo-preflight.mjs');
+        await runMacDesktopSudoPreflight();
+      } catch (e) {
+        console.warn('[main] mac sudo preflight skipped:', e);
+      }
+    })();
+  }
 
   app.on('activate', async () => {
     if (!mainWin || mainWin.isDestroyed()) {
@@ -2381,8 +2537,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  /** 与 before-quit 相同：Electron 不等待 async，这里用 void；真正退出时由 will-quit 兜底杀子进程 */
-  void stopEmbeddedServer();
+  /**
+   * 不在此关停内嵌服务：macOS 关闭全部窗口后进程仍常驻（直到 Cmd+Q），若此处杀子进程，
+   * Dock/activate 再打开主界面时 API 已死。Win/Linux 走 app.quit() → before-quit 里 await stopEmbeddedServer。
+   */
   if (process.platform !== 'darwin') {
     app.quit();
   }

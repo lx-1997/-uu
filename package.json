@@ -143,6 +143,12 @@
           "arch": [
             "arm64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.developer-tools",
@@ -181,6 +187,10 @@
     "directories": {
       "output": "release",
       "buildResources": "build-resources"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://rdkstudio.bj.bcebos.com/rdkstudio/desktop"
     }
   },
   "dependencies": {
@@ -195,6 +205,7 @@
     "@xterm/xterm": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "electron-updater": "^6.8.3",
     "express": "^4.21.2",
     "express-rate-limit": "^8.3.2",
     "iconv-lite": "^0.6.3",

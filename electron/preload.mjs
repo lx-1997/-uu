@@ -159,6 +159,9 @@ contextBridge.exposeInMainWorld('rdkDesktop', {
   /** 打开主窗口 Chromium DevTools（开发排查；亦可通过菜单「视图 → 切换开发者工具」） */
   openDevTools: () => ipcRenderer.invoke('rdk:open-devtools'),
 
+  /** 桌面端：手动检查更新（与启动后延迟自动检查并行；需打包且配置了 publish / 环境变量） */
+  checkForUpdates: () => ipcRenderer.invoke('rdk:check-for-updates'),
+
   /** 桌面端：主进程提权配置 Type-C 本机 IP（macOS/Windows/Linux；内置 API 子进程易提权失败） */
   configureTypecNicDesktop: (payload) => ipcRenderer.invoke('rdk:typec:configure-nic-desktop', payload),
   /** @deprecated 请使用 configureTypecNicDesktop */

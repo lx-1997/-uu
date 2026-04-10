@@ -116,7 +116,7 @@ export default function OnboardingWizard() {
 
   const stepIdx = obSteps.findIndex((s) => s.key === obStep);
 
-  /** 仅 RDK X5 / S100 支持 Type-C 闪联（与添加设备里 typec 一致） */
+  /** 仅 RDK X5 / S100 支持 Type-C 闪连（与添加设备里 typec 一致） */
   const supportsFlashLink = selectedBoard === 'x5' || selectedBoard === 's100';
 
   const boardsI18n = useMemo(
@@ -226,7 +226,7 @@ export default function OnboardingWizard() {
           {supportsFlashLink ? (
             <p className="ob-desc">{t(
               'onboard.connect.flashLinkIntro',
-              '若开发者套件暂时无法接入局域网，可使用「闪联」通过 USB Type-C 线连接电脑与开发者套件。',
+              '若开发者套件暂时无法接入局域网，可使用「闪连」通过 USB Type-C 线连接电脑与开发者套件。',
             )}</p>
           ) : null}
           <div className="ob-connect-methods">
@@ -263,7 +263,7 @@ export default function OnboardingWizard() {
                   <circle cx="14" cy="17" r="0.5" fill="var(--accent)" />
                 </svg>
                 <div>
-                  <strong>{t('onboard.connect.flashLinkTitle', '闪联')}</strong>
+                  <strong>{t('onboard.connect.flashLinkTitle', '闪连')}</strong>
                   <span>{t('onboard.connect.flashLinkSub', 'Type-C 连接电脑，经 SSH 访问套件端')}</span>
                 </div>
               </button>

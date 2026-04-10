@@ -361,6 +361,9 @@ export const EN_EXTRAS: Record<string, string> = {
   'dock.reasoning.summaryEmpty': 'Thinking',
   'dock.reasoning.copy': 'Copy thinking',
   'dock.image.alt': 'Device image',
+  'dock.image.loadFailed':
+    'Could not load image (link may not be a direct image URL, or the site blocks embedding)',
+  'dock.image.openLink': 'Open link in new tab',
   'dock.video.loading': 'Loading video…',
   'dock.video.download': 'Download video',
   'dock.audio.loading': 'Loading audio…',

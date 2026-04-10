@@ -7705,6 +7705,7 @@ async function startServer() {
   await restoreSsoSessionsFromDisk();
   await restoreRuntimeJobsState();
   httpServer.once('error', (err: NodeJS.ErrnoException) => {
+    const code = err.code || 'UNKNOWN';
     if (err.code === 'EADDRINUSE') {
       const isPackagedDesktop = process.env.RDK_PACKAGED_DESKTOP === '1';
       if (isPackagedDesktop) {
@@ -7716,7 +7717,12 @@ async function startServer() {
         );
       }
     } else {
-      console.error('[server] httpServer 监听失败:', err.message);
+      const bindPreview = process.env.RDK_STUDIO_BIND_HOST?.trim() || '127.0.0.1';
+      console.error(
+        `[server] httpServer 监听失败 code=${code} host=${bindPreview} port=${port}:`,
+        err.message,
+        '（若非 EADDRINUSE，可能与「端口被占」无关，例如 Windows 保留端口区间、权限等）',
+      );
     }
     process.exit(1);
   });

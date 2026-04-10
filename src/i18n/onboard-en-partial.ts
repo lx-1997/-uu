@@ -43,8 +43,8 @@ export const ONBOARD_EN: Record<string, string> = {
   'onboard.connect.desc':
     'Power the board, join the same LAN as this PC over Ethernet or Wi‑Fi, then pick a method below to add the device.',
   'onboard.connect.flashLinkIntro':
-    'If the board is not on a LAN yet, use Flash Link with a USB Type‑C cable between the PC and the board.',
-  'onboard.connect.flashLinkTitle': 'Flash Link',
+    'If the board is not on a LAN yet, use Flash Connect with a USB Type‑C cable between the PC and the board.',
+  'onboard.connect.flashLinkTitle': 'Flash Connect',
   'onboard.connect.flashLinkSub': 'Type‑C to PC, then SSH to the board',
   'onboard.connect.sshTitle': 'SSH over network',
   'onboard.connect.sshSub': 'Enter device IP and sign in over SSH',

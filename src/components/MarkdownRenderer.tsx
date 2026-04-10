@@ -1,6 +1,7 @@
 import React from 'react';
 import { Copy } from 'lucide-react';
 import { resolveMediaUrl } from '../utils/apiBase';
+import { ChatImageWithFallback } from './ChatImageWithFallback';
 
 /** 行内链接：图片扩展名则渲染为 <img>（含 /api/local-files/xxx.jpg） */
 function isMarkdownImageHref(href: string): boolean {
@@ -361,13 +362,12 @@ function renderPlainTokens(s: string, keyBase: number, wrapStrong: boolean): Rea
       const url = resolveMediaUrl(imgMatch[2]);
       const alt = imgMatch[1] || '';
       return (
-        <img
+        <ChatImageWithFallback
           key={`pt-${keyBase}-img-${i}`}
           className="md-inline-img"
+          wrapClassName="md-inline-img-wrap"
           src={url}
           alt={alt}
-          loading="lazy"
-          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
         />
       );
     }
@@ -378,13 +378,12 @@ function renderPlainTokens(s: string, keyBase: number, wrapStrong: boolean): Rea
         const url = resolveMediaUrl(hrefRaw);
         const label = linkMatch[1] || '';
         return (
-          <img
+          <ChatImageWithFallback
             key={`pt-${keyBase}-imglnk-${i}`}
             className="md-inline-img"
+            wrapClassName="md-inline-img-wrap"
             src={url}
             alt={label}
-            loading="lazy"
-            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
           />
         );
       }
@@ -441,13 +440,12 @@ function renderInline(text: string, streaming?: boolean): React.ReactNode {
       const url = resolveMediaUrl(imgMatch[2]);
       const alt = imgMatch[1] || '';
       return (
-        <img
+        <ChatImageWithFallback
           key={i}
           className="md-inline-img"
+          wrapClassName="md-inline-img-wrap"
           src={url}
           alt={alt}
-          loading="lazy"
-          onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
         />
       );
     }
@@ -458,13 +456,12 @@ function renderInline(text: string, streaming?: boolean): React.ReactNode {
         const url = resolveMediaUrl(hrefRaw);
         const label = linkMatch[1] || '';
         return (
-          <img
+          <ChatImageWithFallback
             key={i}
             className="md-inline-img"
+            wrapClassName="md-inline-img-wrap"
             src={url}
             alt={label}
-            loading="lazy"
-            onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
           />
         );
       }

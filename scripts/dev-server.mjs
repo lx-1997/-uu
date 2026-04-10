@@ -82,24 +82,35 @@ function killPort(port) {
   }
 }
 
-killPort(API_PORT);
+async function main() {
+  /** 结束旧监听后略等再拉起，减少 macOS 上偶发的 EADDRINUSE（端口尚未从内核表释放） */
+  killPort(API_PORT);
+  await new Promise((r) => setTimeout(r, 220));
+  killPort(API_PORT);
+  await new Promise((r) => setTimeout(r, 120));
 
-const tsxBin = process.platform === 'win32' ? 'node_modules\\.bin\\tsx.cmd' : 'node_modules/.bin/tsx';
+  const tsxBin = process.platform === 'win32' ? 'node_modules\\.bin\\tsx.cmd' : 'node_modules/.bin/tsx';
 
-const bootstrapDefaults = path.join(repoRoot, 'config', 'rdkclaw-provider.defaults.json');
-const childEnv = {
-  ...process.env,
-  PORT: String(API_PORT),
-  ...(fs.existsSync(bootstrapDefaults) ? { RDK_PROVIDER_BOOTSTRAP_FILE: bootstrapDefaults } : {}),
-};
+  const bootstrapDefaults = path.join(repoRoot, 'config', 'rdkclaw-provider.defaults.json');
+  const childEnv = {
+    ...process.env,
+    PORT: String(API_PORT),
+    ...(fs.existsSync(bootstrapDefaults) ? { RDK_PROVIDER_BOOTSTRAP_FILE: bootstrapDefaults } : {}),
+  };
 
-const child = spawn(tsxBin, ['watch', 'server/index.ts'], {
-  stdio: 'inherit',
-  cwd: repoRoot,
-  env: childEnv,
-  shell: process.platform === 'win32',
-});
+  const child = spawn(tsxBin, ['watch', 'server/index.ts'], {
+    stdio: 'inherit',
+    cwd: repoRoot,
+    env: childEnv,
+    shell: process.platform === 'win32',
+  });
 
-child.on('exit', (code) => {
-  process.exit(code ?? 0);
+  child.on('exit', (code) => {
+    process.exit(code ?? 0);
+  });
+}
+
+main().catch((err) => {
+  console.error('[dev:server]', err);
+  process.exit(1);
 });

@@ -442,11 +442,12 @@ function stripVisibleAssistantDuplicateOfReasoning(visible: string, reasoningChu
 function parseStoredStudioResponseMode(): StudioResponseMode {
   try {
     const v = localStorage.getItem(STUDIO_RESPONSE_MODE_LS)?.trim();
+    if (v === 'thinking') return 'thinking';
     if (v === 'quick') return 'quick';
   } catch {
     /* ignore */
   }
-  return 'thinking';
+  return 'quick';
 }
 
 function chatDraftStorageKey(deviceId: string) {

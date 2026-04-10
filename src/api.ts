@@ -374,7 +374,7 @@ export async function configureTypecInterface(interfaceName: string, pcIp: strin
       if (typeof desktopFn === 'function') {
         appendStudioLog(
           'info',
-          '[TypeC] 桌面版：主进程 IPC 配置网卡（UAC/osascript/pkexec，避免内置 API 子进程提权失败）',
+          '[TypeC] 桌面版：主进程 IPC 配置网卡（macOS 与烧录同为 sudo--askpass；Win UAC；Linux pkexec）',
         );
         const raw = await desktopFn({ interfaceName, pcIp, netmask: mask });
         if (!raw?.ok) {

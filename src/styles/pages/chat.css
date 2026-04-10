@@ -3393,6 +3393,70 @@ body:has(.content-area[data-studio-tab='flasher']) .dock-restore-btn:hover {
   background: var(--bg-inset);
 }
 
+/* Markdown 内嵌图裂图占位（与 .md-inline-img 同宽） */
+.dock-bubble .md-inline-img-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 6px 0;
+}
+
+.config-chat-msg .md-inline-img-wrap,
+.oc-chat-body .md-inline-img-wrap {
+  margin: 6px 0;
+}
+
+.chat-img-fallback {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-img-fallback-inner {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.12));
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.chat-img-fallback-icon {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  opacity: 0.9;
+}
+
+.chat-img-fallback-hint {
+  margin: 0 0 6px;
+  color: var(--text-muted);
+}
+
+.chat-img-fallback-alt {
+  margin: 0 0 8px;
+  font-size: 0.6875rem;
+  word-break: break-word;
+  color: var(--text-secondary);
+}
+
+.chat-img-fallback-link {
+  display: inline-block;
+  color: #67e8f9;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.chat-img-fallback-link:hover {
+  text-decoration: underline;
+}
+
+.dock-bubble .image-block-fallback-wrap {
+  width: 100%;
+}
+
 .dock-bubble .image-block-real:hover {
   transform: scale(1.02);
 }
@@ -3494,13 +3558,23 @@ body:has(.content-area[data-studio-tab='flasher']) .dock-restore-btn:hover {
   max-width: 320px;
 }
 
-.chat-attachment-image img {
+.chat-attachment-image img,
+.chat-attachment-image .chat-attachment-img {
   max-width: 280px;
   max-height: 200px;
   border-radius: var(--radius-sm, 8px);
   object-fit: contain;
   cursor: pointer;
   display: block;
+}
+
+.chat-attachment-image .chat-attachment-img-wrap {
+  max-width: 280px;
+}
+
+.chat-attachment-image .chat-attachment-img-wrap .chat-img-fallback-inner {
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .chat-attachment-video video {

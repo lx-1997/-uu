@@ -1,10 +1,12 @@
 /**
  * macOS Type-C 闪连（Electron 主进程 IPC 使用）。
  * 与 server/typec-configure-darwin.ts 保持逻辑一致（修改时请同步）。
+ * 提权与烧录一致：`sudo --askpass` + 打包 JXA，可与启动预授权共用 sudo 时间戳。
  */
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import { verifyTypecIpOnInterface } from './typec-verify-ip.mjs';
+import { runDarwinSudoAskpassShell } from './flash/darwin-sudo-shell.mjs';
 
 function isIfconfigPermissionDenied(msg) {
   const m = (msg || '').trim();
@@ -45,8 +47,8 @@ function execFileWithTimeout(file, args, timeoutMs) {
   });
 }
 
-const DARWIN_TYPEC_ADMIN_PROMPT =
-  'RDK Studio 需要为本机 Type-C 虚拟网卡设置静态 IP，请输入管理员密码。';
+const DARWIN_TYPEC_MSG =
+  'RDK Studio 需要为本机 Type-C 虚拟网卡设置静态 IP，将使用与烧录相同的 sudo 密码框。';
 
 export async function configureDarwinTypecNic(interfaceName, pcIp, mask) {
   const ifaces = os.networkInterfaces();
@@ -66,16 +68,20 @@ export async function configureDarwinTypecNic(interfaceName, pcIp, mask) {
   if (!isIfconfigPermissionDenied(firstCombined)) {
     throw new Error(errLine);
   }
-  const escaped = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const escapedPrompt = DARWIN_TYPEC_ADMIN_PROMPT.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const appleScript = `do shell script "${escaped}" with administrator privileges with prompt "${escapedPrompt}"`;
-  const second = await execFileWithTimeout('osascript', ['-e', appleScript], 120000);
-  if (second.code === 0) return second.stdout;
-  const combined = `${second.stderr}\n${second.stdout}`.trim();
-  if (/user canceled|用户已取消|-128|错误代码：-128/i.test(combined)) {
-    throw new Error('已取消管理员授权，无法为本机网卡设置 IP');
+
+  try {
+    return await runDarwinSudoAskpassShell(shellCmd, {
+      title: '需要管理员权限',
+      message: DARWIN_TYPEC_MSG,
+      timeoutMs: 120000,
+    });
+  } catch (sudoErr) {
+    const msg = sudoErr instanceof Error ? sudoErr.message : String(sudoErr);
+    if (/sudo 认证失败|已取消|取消/i.test(msg)) {
+      throw new Error('已取消管理员授权或 sudo 未通过，无法为本机网卡设置 IP');
+    }
+    throw sudoErr instanceof Error ? sudoErr : new Error(msg);
   }
-  throw new Error(combined || `osascript exit ${second.code}`);
 }
 
 export { verifyTypecIpOnInterface as verifyDarwinTypecIp };

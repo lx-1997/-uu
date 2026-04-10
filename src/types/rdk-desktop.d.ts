@@ -209,6 +209,14 @@ declare global {
       /** 打开主窗口 Chromium DevTools（Electron） */
       openDevTools?: () => Promise<{ ok: boolean }>;
 
+      /** 手动触发检查更新（仅打包版；Windows / macOS） */
+      checkForUpdates?: () => Promise<{
+        ok: boolean;
+        version?: string | null;
+        releaseNotes?: string | null;
+        error?: string;
+      }>;
+
       /** 桌面端（macOS/Windows/Linux）：主进程提权配置 Type-C 本机 IP（与 POST /api/typec/configure 等价） */
       configureTypecNicDesktop?: (payload: {
         interfaceName: string;
