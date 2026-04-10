@@ -7704,6 +7704,7 @@ async function startServer() {
   ensureAgentMediaDownloadDir();
   await restoreSsoSessionsFromDisk();
   await restoreRuntimeJobsState();
+  const bindHost = process.env.RDK_STUDIO_BIND_HOST?.trim() || '127.0.0.1';
   httpServer.once('error', (err: NodeJS.ErrnoException) => {
     const code = err.code || 'UNKNOWN';
     if (err.code === 'EADDRINUSE') {
@@ -7717,16 +7718,14 @@ async function startServer() {
         );
       }
     } else {
-      const bindPreview = process.env.RDK_STUDIO_BIND_HOST?.trim() || '127.0.0.1';
       console.error(
-        `[server] httpServer 监听失败 code=${code} host=${bindPreview} port=${port}:`,
+        `[server] httpServer 监听失败 code=${code} host=${bindHost} port=${port}:`,
         err.message,
         '（若非 EADDRINUSE，可能与「端口被占」无关，例如 Windows 保留端口区间、权限等）',
       );
     }
     process.exit(1);
   });
-  const bindHost = process.env.RDK_STUDIO_BIND_HOST?.trim() || '127.0.0.1';
   httpServer.listen(port, bindHost, () => {
     console.log(`RDK Studio server running on http://${bindHost}:${port}`);
     if (bindHost === '0.0.0.0') {

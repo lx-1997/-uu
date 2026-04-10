@@ -26,6 +26,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_PORT = 8787;
 const SERVER_PORT_FALLBACK_SPAN = 10;
+
+function embeddedListenPortRangeLabel() {
+  return `${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN}`;
+}
 /** 弱磁盘/杀毒首次扫 Node 子进程时易超过 15s，略放宽以减少「启动不了」误报 */
 const SERVER_BOOT_TIMEOUT_MS = 28_000;
 const SERVER_SHUTDOWN_GRACE_MS = 2_500;
@@ -1115,16 +1119,21 @@ async function formatPortListenHint(port) {
   }
 }
 
+/** 本机 :port 上 /api/health JSON；失败返回 null（与 probe / 开发态检测共用，避免重复 fetch） */
+async function fetchLocalStudioHealth(port, timeoutMs) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
 /** 桌面包专用：仅当 :port 上已是「带 RDK_PACKAGED_DESKTOP 的内置 API」时才返回 true，避免误用开发态 npm run dev。 */
 async function probeReusablePackagedDesktopApi(port) {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
-    if (!res.ok) return false;
-    const body = await res.json().catch(() => null);
-    return !!(body && body.ok === true && body.rdkStudioApi === true && body.packagedDesktop === true);
-  } catch {
-    return false;
-  }
+  const body = await fetchLocalStudioHealth(port, 2000);
+  return !!(body && body.ok === true && body.rdkStudioApi === true && body.packagedDesktop === true);
 }
 
 function stopEmbeddedServer() {
@@ -1181,14 +1190,25 @@ function wait(ms) {
 
 /** 本机 :port 上是否为开发态 API（npm run dev），若是则不可强杀，应换端口或提示用户 */
 async function isDevRdkApiListeningOnPort(port) {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
-    if (!res.ok) return false;
-    const body = await res.json().catch(() => null);
-    return !!(body && body.ok === true && body.rdkStudioApi === true && body.packagedDesktop === false);
-  } catch {
-    return false;
+  const body = await fetchLocalStudioHealth(port, 1500);
+  return !!(body && body.ok === true && body.rdkStudioApi === true && body.packagedDesktop === false);
+}
+
+/**
+ * 为内嵌服务准备端口：先探测 → 必要时杀监听 → 再探测；返回是否可 spawn 子进程。
+ * @returns {'available' | 'blocked-by-dev' | 'busy'}
+ */
+async function preparePortForEmbeddedAttempt(port) {
+  if (!(await isPortAvailable(port))) {
+    await tryReleasePortByKillingListeners(port);
   }
+  if (await isPortAvailable(port)) {
+    return 'available';
+  }
+  if (await isDevRdkApiListeningOnPort(port)) {
+    return 'blocked-by-dev';
+  }
+  return 'busy';
 }
 
 /** 查询正在 LISTEN 该 TCP 端口的 PID（用于释放残留 node/旧版 Studio） */
@@ -1288,14 +1308,14 @@ function isPortAvailable(port, host = '127.0.0.1') {
         /* ignore */
       }
       console.warn(
-        '[server] isPortAvailable 探测超时（3s），将视为不可用。若本机并未监听该端口，可能是系统/安全软件阻塞或异常；端口=',
+        '[server] isPortAvailable 探测超时（2.5s），将视为不可用。若本机并未监听该端口，可能是系统/安全软件阻塞或异常；端口=',
         port,
         'host=',
         host,
       );
       appendStartupLog(`isPortAvailable timeout port=${port} host=${host}`);
       done(false);
-    }, 3000);
+    }, 2500);
     srv.once('error', (err) => {
       const code = err && typeof err === 'object' && 'code' in err ? err.code : '';
       const msg = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);
@@ -1438,21 +1458,18 @@ function startEmbeddedServer() {
           resolve(port);
           return;
         }
-        // 先用 TCP 探测端口是否空闲；若被残留进程占用则尝试释放（避免上次未退出的内置 node 导致「永远 8787 被占」）
-        if (!(await isPortAvailable(port))) {
-          await tryReleasePortByKillingListeners(port);
+        const prep = await preparePortForEmbeddedAttempt(port);
+        if (prep === 'blocked-by-dev') {
+          console.warn('[server] port', port, '被本机开发服务器占用（npm run dev），跳过该端口');
+          appendStartupLog(`startEmbeddedServer port blocked by dev api port=${port}`);
+          if (offset < SERVER_PORT_FALLBACK_SPAN) continue;
+          throw new Error(`内置服务未能在 ${embeddedListenPortRangeLabel()} 范围内找到可用端口（含与 npm run dev 冲突）`);
         }
-        if (!(await isPortAvailable(port))) {
-          if (await isDevRdkApiListeningOnPort(port)) {
-            console.warn('[server] port', port, '被本机开发服务器占用（npm run dev），跳过该端口');
-            appendStartupLog(`startEmbeddedServer port blocked by dev api port=${port}`);
-            if (offset < SERVER_PORT_FALLBACK_SPAN) continue;
-            throw new Error(`内置服务未能在 ${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN} 之间找到可用端口（含与 npm run dev 冲突）`);
-          }
+        if (prep === 'busy') {
           console.warn('[server] port', port, 'occupied (TCP pre-check), skipping');
           appendStartupLog(`startEmbeddedServer port pre-check occupied port=${port}`);
           if (offset < SERVER_PORT_FALLBACK_SPAN) continue;
-          throw new Error(`内置服务未能在 ${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN} 之间找到可用端口（所有端口均已被占用）`);
+          throw new Error(`内置服务未能在 ${embeddedListenPortRangeLabel()} 范围内找到可用端口（所有端口均已被占用）`);
         }
         try {
           const startedPort = await launchEmbeddedServerOnPort(port);
@@ -1469,7 +1486,7 @@ function startEmbeddedServer() {
           throw err;
         }
       }
-      throw new Error(`内置服务未能在 ${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN} 之间找到可用端口`);
+      throw new Error(`内置服务未能在 ${embeddedListenPortRangeLabel()} 范围内找到可用端口`);
     })().catch(reject);
   });
 }
@@ -2485,7 +2502,7 @@ app.whenReady().then(async () => {
       appendStartupLog(`app.whenReady startup failed message=${err instanceof Error ? err.message : String(err)}`);
       const hintPort = lastEmbeddedStartupHintPort;
       const listenHint = await formatPortListenHint(hintPort);
-      const rangeHint = `${SERVER_PORT}-${SERVER_PORT + SERVER_PORT_FALLBACK_SPAN}`;
+      const rangeHint = embeddedListenPortRangeLabel();
       const hintBlock = listenHint
         ? `\n\n以下为本机对端口 ${hintPort} 的监听情况（供排查；失败端口可能在该范围内任一端口号）：\n${listenHint}`
         : '';

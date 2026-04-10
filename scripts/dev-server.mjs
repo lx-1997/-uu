@@ -13,8 +13,9 @@ const API_PORT = Number.isFinite(DEFAULT_API_PORT) && DEFAULT_API_PORT > 0 ? DEF
 
 function getWindowsPidsOnPort(port) {
   try {
+    /** 仅 LISTEN，与桌面包释放端口逻辑一致，避免误匹配非监听连接 */
     const output = execSync(
-      `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) -join ' '"`,
+      `powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) -join ' '"`,
       { encoding: 'utf8' },
     );
     return String(output)
